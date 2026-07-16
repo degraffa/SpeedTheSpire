@@ -1,6 +1,8 @@
-# StockfishTheSpire
+# SpeedTheSpire
 
-Headless, high-performance Slay the Spire simulator + training program. See
+Headless, high-performance Slay the Spire simulator. This repo is the
+simulator only — no rendering, no UI, no agent/training code; the training
+program that will eventually run on top of it lives in a separate repo. See
 [InitialPlan.md](InitialPlan.md) for the full design and rationale; this file
 only covers building and running what exists so far.
 
