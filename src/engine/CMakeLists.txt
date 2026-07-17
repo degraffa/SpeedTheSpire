@@ -4,6 +4,7 @@ add_library(sts_engine
     action_queue.cpp
     monster_jaw_worm.cpp
     interp.cpp
+    piles.cpp
 )
 
 target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)

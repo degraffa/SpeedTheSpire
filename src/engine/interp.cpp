@@ -13,6 +13,7 @@
 
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/piles.hpp"   // A4.2: draw_cards / shuffle_discard_into_draw / exhaust_card
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -193,49 +194,9 @@ void op_apply_power(CombatState& s, uint8_t tgt, PowerId id, int amount) noexcep
     ++*count;
 }
 
-// DRAW: player draws `amount` cards, top of draw pile (the array's end) -> hand.
-// Minimal A4.1 slice: the simple non-empty, non-overflow case only. An empty
-// draw pile stops (A4.2 owns reshuffle-on-empty via shuffle_rng + JDK shuffle);
-// a full hand stops (A4.2 owns the hand-size-10 overflow rule: drawn card ->
-// discard). Documented here so A4.2 extends without surprises.
-void op_draw(CombatState& s, int amount) noexcept {
-    for (int i = 0; i < amount; ++i) {
-        if (s.draw_count == 0) {
-            return;  // A4.2: reshuffle discard -> draw here, then continue
-        }
-        if (s.hand_count >= kHandCap) {
-            return;  // A4.2: overflow -> discard the drawn card here
-        }
-        const CardPoolIndex top = s.draw[s.draw_count - 1];  // draw from the top
-        --s.draw_count;
-        s.hand[s.hand_count] = top;
-        ++s.hand_count;
-    }
-}
-
-// EXHAUST: move the card whose pool index == `pool_index` from hand to the
-// exhaust pile. Not-in-hand is a documented no-op (later stages may route from
-// other piles). None of the 5 skeleton cards exhausts by default, so this is
-// exercised directly by tests rather than by real card play at M1.
-void op_exhaust(CombatState& s, int pool_index) noexcept {
-    if (pool_index < 0 || pool_index > 0xFF) {
-        return;
-    }
-    const CardPoolIndex idx = static_cast<CardPoolIndex>(pool_index);
-    for (uint8_t i = 0; i < s.hand_count; ++i) {
-        if (s.hand[i] == idx) {
-            for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.hand_count; ++j) {
-                s.hand[j - 1] = s.hand[j];
-            }
-            --s.hand_count;
-            if (s.exhaust_count < kExhaustCap) {
-                s.exhaust[s.exhaust_count] = idx;
-                ++s.exhaust_count;
-            }
-            return;
-        }
-    }
-}
+// DRAW and EXHAUST (and SHUFFLE_IN) are implemented in piles.cpp (A4.2:
+// draw_cards / exhaust_card / shuffle_discard_into_draw); the dispatch below
+// delegates to them. A4.1's op_draw/op_exhaust stubs were superseded and removed.
 
 }  // namespace
 
@@ -307,7 +268,7 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                            item.amount);
             return;
         case Opcode::DRAW:
-            op_draw(s, item.amount);
+            (void)draw_cards(s, item.amount);  // A4.2 (piles.cpp): cap + reshuffle
             return;
         case Opcode::GAIN_ENERGY:
             // player_energy += amount; no max-energy field to clamp against
@@ -315,9 +276,10 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             s.player_energy = static_cast<int16_t>(s.player_energy + item.amount);
             return;
         case Opcode::SHUFFLE_IN:
-            return;  // A4.2 stub: reshuffle discard -> draw (shuffle_rng + JDK)
+            shuffle_discard_into_draw(s);  // A4.2 (piles.cpp): shuffle_rng + JDK LCG
+            return;
         case Opcode::EXHAUST:
-            op_exhaust(s, item.amount);
+            exhaust_card(s, item.amount);  // A4.2 (piles.cpp)
             return;
         case Opcode::ROLL_MOVE:
             return;  // A3.2-owned stub: Jaw Worm rolls inside its MonsterTurnFn

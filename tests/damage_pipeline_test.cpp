@@ -266,9 +266,11 @@ TEST(InterpOpcode, ExhaustMovesCardFromHandToExhaust) {
     EXPECT_EQ(s.exhaust_count, 1);
 }
 
-// --- SHUFFLE_IN / ROLL_MOVE are stubbed no-ops (scope-boundary decisions) ----
+// --- ROLL_MOVE is a stubbed no-op (scope-boundary decision) -----------------
+// (SHUFFLE_IN was an A4.1 stub too, but A4.2 implemented it -- its behavior is
+// now covered by piles_test; only ROLL_MOVE remains a documented no-op here.)
 
-TEST(InterpStub, ShuffleInAndRollMoveDoNotMutateState) {
+TEST(InterpStub, RollMoveDoesNotMutateState) {
     CombatState s = make_combat();
     // Give the state some non-trivial content to detect any stray write.
     s.player_block = 4;
@@ -283,11 +285,10 @@ TEST(InterpStub, ShuffleInAndRollMoveDoNotMutateState) {
     CombatState before;
     std::memcpy(&before, &s, sizeof(CombatState));
 
-    execute_opcode(s, op(Opcode::SHUFFLE_IN, kActorPlayer, kActorPlayer, 0));
     execute_opcode(s, op(Opcode::ROLL_MOVE, 0, 0, 0));
 
     EXPECT_EQ(std::memcmp(&before, &s, sizeof(CombatState)), 0)
-        << "SHUFFLE_IN/ROLL_MOVE stubs must not mutate state";
+        << "ROLL_MOVE stub must not mutate state";
 }
 
 TEST(InterpStub, NopAndUnrecognizedOpcodeAreNoOps) {

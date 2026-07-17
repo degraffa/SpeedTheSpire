@@ -480,3 +480,16 @@ decompiled Java > this design doc > the task ledger).
   the player's turn" so A4.3 card-play pumps never spuriously fire step 4. Not a
   frozen-mechanics change (the observable ordering — player turn, then one
   monster turn per round — is preserved).
+
+- **A4.2 — hand-size-cap rule (task-ledger prose correction).** The Stage A
+  task ledger's A4.2 deliverable line described the hand-size-10 overflow as
+  "drawn card goes to discard". `DrawCardAction.update()`
+  (DrawCardAction.java:92-97) does NOT draw-then-discard: before drawing any
+  card it caps the amount once via `if (amount + hand.size() > 10) amount += 10 -
+  (amount + hand.size())`, i.e. `amount = min(amount, 10 - hand.size())`, so
+  overflowing cards are never drawn (and `AbstractPlayer.draw()`, :1657-1665,
+  refuses outright when `hand.size() == 10`). A4.2 (`piles.cpp::draw_cards`)
+  implements the cap-before-draw rule. This design doc's §9 skeleton scope never
+  stated the wrong rule — only the ledger's deliverable prose did — so this is a
+  ledger-prose correction recorded here for durability; no frozen mechanics
+  change. Java (§1 precedence) outranks the ledger.

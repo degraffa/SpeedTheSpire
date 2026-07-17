@@ -143,3 +143,18 @@ sts_set_warnings(damage_pipeline_test)
 sts_enable_sanitizers(damage_pipeline_test)
 
 gtest_discover_tests(damage_pipeline_test)
+
+# A4.2: pile operations -- draw (with up-front hand-size cap + empty-pile
+# reshuffle), reshuffle (shuffle_rng -> JDK LCG Fisher-Yates), exhaust, energy
+# gain/spend (design doc §3.3, §9, §10 trap 2). The reshuffle permutation is
+# checked against the golden-tested JdkRandom/jdk_shuffle primitives (A1.2/A1.3)
+# as an independent oracle. Links sts_engine (piles.cpp).
+add_executable(piles_test
+    piles_test.cpp
+)
+
+target_link_libraries(piles_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(piles_test)
+sts_enable_sanitizers(piles_test)
+
+gtest_discover_tests(piles_test)

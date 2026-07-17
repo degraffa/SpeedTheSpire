@@ -28,10 +28,10 @@
 // -------------------------------------------------------------------------
 // SCOPE-BOUNDARY DECISIONS (documented per the A4.1 task brief):
 //
-// (1) SHUFFLE_IN is a documented no-op stub. Its body -- discard-pile-into-draw
-//     reshuffle via shuffle_rng + the JDK LCG (rng_jdk.hpp) -- is A4.2's
-//     deliverable ("reshuffle permutation matches golden JDK shuffle"). A4.1
-//     only reserves the dispatch slot so the opcode set is complete.
+// (1) SHUFFLE_IN was an A4.1 no-op stub; A4.2 implemented its body -- the
+//     discard-pile-into-draw reshuffle via shuffle_rng + the JDK LCG -- in
+//     piles.cpp (shuffle_discard_into_draw), and the dispatch now delegates
+//     there ("reshuffle permutation matches golden JDK shuffle").
 //
 // (2) ROLL_MOVE is a documented no-op stub. A3.2 already rolls Jaw Worm's next
 //     move DIRECTLY inside jaw_worm_take_turn (the MonsterTurnFn callback), not
@@ -64,8 +64,12 @@
 //   * GAIN_ENERGY: always the player; `amount` is added to player_energy (no
 //     max-energy field in CombatState -- Ironclad's base 3 is a constant, and
 //     the skeleton has no relic/potion that stores a raised max, so no clamp).
+//     SPENDING energy is the SAME opcode with a negative `amount` (player_energy
+//     += negative) -- no separate opcode/field is needed, so A4.3's card-play
+//     cost deduction reuses GAIN_ENERGY directly.
 //   * DRAW: `amount` is the number of cards to draw (the start-of-turn
-//     DrawCardAction(gameHandSize) carries 5). Player only.
+//     DrawCardAction(gameHandSize) carries 5). Player only. A4.2's draw_cards
+//     (piles.cpp) applies the up-front hand-size cap and empty-pile reshuffle.
 //   * EXHAUST: `amount` carries the card-POOL index to exhaust (chosen over src
 //     because src/tgt are actor lanes; a pool index 0..159 fits i32 trivially).
 //     The card is located in `hand` and moved to the `exhaust` pile.
