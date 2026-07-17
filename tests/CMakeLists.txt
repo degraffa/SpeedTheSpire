@@ -78,3 +78,15 @@ sts_set_warnings(types_test)
 sts_enable_sanitizers(types_test)
 
 gtest_discover_tests(types_test)
+
+# A2.2: CombatState/RunState layout + state-hash/snapshot suite. Links
+# sts_engine, which now carries state_hash.cpp (and its private xxhash dep).
+add_executable(state_test
+    state_test.cpp
+)
+
+target_link_libraries(state_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(state_test)
+sts_enable_sanitizers(state_test)
+
+gtest_discover_tests(state_test)

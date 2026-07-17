@@ -17,6 +17,21 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 
+# xxHash (A2.2): header-only XXH3 for state content hashing (design doc §4.1).
+# Pre-approved as A2.2's sole new dependency by the Stage A working agreements.
+# The repo's top-level has no CMakeLists, so FetchContent only populates the
+# source tree; we expose it as an INTERFACE (include-only) target and let
+# state_hash.cpp compile it with XXH_INLINE_ALL. No sub-build, no link step.
+include(FetchContent)
+FetchContent_Declare(
+    xxhash
+    GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
+    GIT_TAG v0.8.2
+)
+FetchContent_MakeAvailable(xxhash)
+add_library(xxhash INTERFACE)
+target_include_directories(xxhash INTERFACE ${xxhash_SOURCE_DIR})
+
 add_subdirectory(src/engine)
 
 if(STS_BUILD_TESTS)
