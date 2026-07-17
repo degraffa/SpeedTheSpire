@@ -36,25 +36,42 @@ layer.
 
 ## Current state
 
-Stage A in progress, tracked in [docs/stage-a-tasks.md](docs/stage-a-tasks.md)
-against the frozen [docs/stage-a-design.md](docs/stage-a-design.md). **Gate G1
-passed** (tag `g1-rng-green`): the tier-1 RNG trio is bit-exact and golden-
-tested — `include/sts/engine/rng_xs128.hpp` (libGDX xorshift128+),
-`rng_jdk.hpp` (JDK LCG + `Collections.shuffle`), `rng_stream.hpp` (the game's
-`Random` wrapper: inclusive-bound draws, counter-restore semantics,
-floor/act stream derivation), `seed_string.hpp` (base-35 seed codec). Golden
-vectors captured via `tools/golden_capture/` (Windows-host JVM harness
-against `sts-classes.jar`) live under `tests/golden/`. 18/18 gtest cases
-green in both `debug` and `asan` presets; CI (`.github/workflows/ci.yml`)
-runs both as a matrix on every push/PR.
+**Stage A / milestone M1 complete** (tag `m1-walking-skeleton`; gate `G3`
+passed in [docs/stage-a-tasks.md](docs/stage-a-tasks.md), tracked against
+the frozen [docs/stage-a-design.md](docs/stage-a-design.md)). The walking
+skeleton is a fully playable, bit-exact Ironclad-vs-Jaw-Worm combat:
 
-No state structs, action queue, cards, or batch API yet — that's Phase 2+.
+- RNG trio bit-exact and golden-tested (gate `G1`, tag `g1-rng-green`):
+  `rng_xs128.hpp`, `rng_jdk.hpp`, `rng_stream.hpp`, `seed_string.hpp`.
+- `CombatState`/`RunState` (POD, memcpy-snapshot, xxh3-hashed) —
+  `combat_state.hpp`, `run_state.hpp`, `state_hash.hpp`.
+- Action-queue pump (`action_queue.hpp/.cpp`) implementing the game's
+  `getNextAction` priority order, wired to an effect interpreter
+  (`interp.hpp/.cpp`: DAMAGE/BLOCK/APPLY_POWER/etc, the float damage
+  pipeline with Strength/Vulnerable/Weak) and pile ops (`piles.hpp/.cpp`:
+  draw/discard/reshuffle, JDK-shuffle-exact).
+- Jaw Worm AI (`monster_jaw_worm.hpp/.cpp`) — bit-exact move selection and
+  real combat effects (Chomp/Bellow/Thrash).
+- The five skeleton cards + card-play flow (`cards.hpp`, `card_play.hpp/.cpp`).
+- The batch API (`advance.hpp/.cpp`): `advance()`, `legal_actions()`,
+  `combat_begin()` — the only public entry point, per InitialPlan D0.1.
+- Observation encoding (`observation.hpp`) and a diff/trace harness
+  (`tools/diff_harness/`) verified against 20 independently-derived
+  scripted-fight fixtures (`tools/fixture_gen/`,
+  `tests/golden/combat_fixtures/`) with zero diffs.
+
+131/131 gtest cases green in `debug`, `asan`, and `release` presets; all 11
+design-doc §10 bit-exactness traps have a named passing test; CI
+(`.github/workflows/ci.yml`) runs debug+asan as a matrix on every push/PR.
+
+No run layer yet (map/events/shops/relics/potions) — that's Stage B, per
+InitialPlan §B.1 (oracle bridge first).
 
 ## Immediate next step
 
-Phase 2 of docs/stage-a-tasks.md: `CombatState`/`RunState` structs (A2.1,
-A2.2), building on the now-frozen RNG layer. Then Phase 3 (action-queue
-pump + Jaw Worm AI), Phase 4 (effect interpreter + five skeleton cards),
-Phase 5 (batch `advance()` + observation encoder), Phase 6 (diff harness +
-M1 acceptance at gate G3). See docs/stage-a-tasks.md's parallelism map for
-what can run concurrently.
+Stage B planning: the CommunicationMod oracle bridge (InitialPlan §B.1) is
+the first deliverable — it's what every later differential test rides on.
+See InitialPlan.md Part 1 Stage B for the four verification tiers and
+`docs/stage-a-design.md` §11 for what was deliberately deferred out of the
+M1 skeleton (event/shop/relic mechanics, map generation, A20 modifier
+table, potion identity).

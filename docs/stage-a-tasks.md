@@ -889,18 +889,37 @@ pump-driven case gives the player 30000 HP so the now-real damage doesn't cut th
 (incl. `cards_test`, `jaw_worm_test`, `advance_test`, `differ_test`) still green
 after the engine change. No ASan/UBSan findings.
 
-### G3 `[ ]` **Gate: M1 exit**
+### G3 `[x]` **Gate: M1 exit**
 **Deps:** G1, A6.2, A5.1
 Checklist (all must hold, evidence linked in Log):
-- [ ] Tier-1 RNG suite green across seed battery (CI-gated since G1).
-- [ ] All fixture fights zero-diff through the harness.
-- [ ] Batch `advance()` determinism test green in debug, release, asan.
-- [ ] Benchmark number recorded in this file (baseline, no target).
-- [ ] Design doc §10 trap list: every trap has a named, passing test
+- [x] Tier-1 RNG suite green across seed battery (CI-gated since G1).
+- [x] All fixture fights zero-diff through the harness.
+- [x] Batch `advance()` determinism test green in debug, release, asan.
+- [x] Benchmark number recorded in this file (baseline, no target).
+- [x] Design doc §10 trap list: every trap has a named, passing test
       (grep test names ↔ trap numbers).
 Then: tag `m1-walking-skeleton`, update CLAUDE.md "Current state", and open
 Stage B planning (oracle bridge first, per InitialPlan §B.1).
-**Log:** —
+**Log:** Verified by running, not inferred (WSL Ubuntu-2404, `cmake --preset
+{debug,asan,release}` → build → `ctest`): all three presets `100% tests
+passed, 0 tests failed out of 131`. Tier-1 RNG suite (`rng_xs128_test`,
+`rng_jdk_test`, `rng_stream_test`, `seed_string_test`) green and CI-gated
+since G1. `FixtureOracle.AllFixturesReplayWithZeroDiffs` confirms all 20
+A6.2 fixtures zero-diff. `advance_test`'s batch-independence and
+same-batch-twice-identical-hashes cases are part of the 131 green in all
+three presets, satisfying the debug/release/asan determinism requirement.
+Benchmark baseline already recorded in this file (A5.1's Log, §5: ≈20.7 M
+steps/s, release, 12-core 3.6 GHz, 10k-state batch, no target at M1).
+Trap coverage: traps 1-7 and 9-11 already had named tests from their
+originating tasks (grep `TEST(.*Trap` across `tests/*.cpp` confirms one
+per trap); trap 8 (relic acquisition order) had none, since the skeleton
+has no relic behavior to trigger (`RelicId` is sentinel-only) — added
+`RunStateTrap.RelicsPreserveAcquisitionOrder`, pinning the claim at the
+level that's actually testable now (the storage array preserves insertion
+order by construction; no sort/reorder path exists). All 11 traps now
+covered. Tagged `m1-walking-skeleton`; CLAUDE.md "Current state" updated
+in the same commit. Stage B planning (oracle bridge, InitialPlan §B.1) is
+a fresh planning exercise for a future session, not opened here.
 
 ---
 
