@@ -1,21 +1,19 @@
-// A6.2 acceptance: the ~20 scripted Jaw Worm fights, replayed through the real
-// engine and diffed against the INDEPENDENT reference-simulator fixtures (design
-// doc §9). This is the M1 milestone's core verification deliverable.
+// The ~20 scripted Jaw Worm fights, replayed through the real engine and diffed
+// against the INDEPENDENT reference-simulator fixtures (design doc §9).
 //
 // For each checked-in fixture trace (tests/golden/combat_fixtures/*.trace, written
 // by tools/fixture_gen/gen_combat_fixtures.cpp -- a from-scratch reimplementation
 // of the frozen spec, NOT the production engine):
 //   1. read_trace -> (run_seed, expected states[0..N], the N actions).
-//   2. replay the SAME (run_seed, actions) through the real engine via A6.1's
-//      replay_skeleton (combat_begin + advance()).
+//   2. replay the SAME (run_seed, actions) through the real engine via the
+//      replay_skeleton driver (combat_begin + advance()).
 //   3. diff_states the expected vs the live-replayed state after EVERY action
 //      (initial + after each of the N actions); assert an EMPTY DiffReport at
 //      every step. On any diff, print the named field diffs + the action index so
 //      a human sees exactly what diverged.
 //
 // The reference simulator and the engine are two independent implementations of
-// the same spec, so a zero-diff across all fixtures is real differential evidence
-// (per the ledger: "diff harness runs all fixtures with zero diffs").
+// the same spec, so a zero-diff across all fixtures is real differential evidence.
 //
 // STS_COMBAT_FIXTURE_DIR is injected by tests/CMakeLists.txt (absolute path to
 // tests/golden/combat_fixtures) so the binary finds the fixtures regardless of
@@ -76,7 +74,7 @@ void CheckFixture(const std::string& path) {
         actions.push_back(a);
     }
 
-    // Live replay through combat_begin + advance() (A6.1 replay driver).
+    // Live replay through combat_begin + advance() (the replay_skeleton driver).
     std::vector<CombatState> actual;
     sts::diff::replay_skeleton(header.seed, std::span<const Action>(actions), actual);
 

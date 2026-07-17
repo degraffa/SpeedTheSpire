@@ -1,12 +1,11 @@
-// A4.2 acceptance suite: pile operations -- draw / reshuffle / exhaust / energy
-// (design doc §3.3, §9; §10 trap 2).
+// Pile operations -- draw / reshuffle / exhaust / energy (design doc §3.3, §9;
+// §10 trap 2).
 //
-// The reshuffle tests use A1.1-A1.3's ALREADY golden-vector-tested primitives
+// The reshuffle tests use the ALREADY golden-vector-tested primitives
 // (random_long over RngStream, JdkRandom, jdk_shuffle) as an independent oracle:
 // the engine's shuffle_discard_into_draw must reproduce, bit-for-bit, a hand-
 // wired "draw one random_long -> seed a JdkRandom -> Fisher-Yates the discard"
-// computed here from a COPY of the same starting stream. That is exactly what
-// "reshuffle permutation matches golden JDK shuffle" means -- no new JVM golden
+// computed here from a COPY of the same starting stream. No new JVM golden
 // vectors are needed because those primitives are already proven against the JVM.
 //
 // Provenance for the behaviors under test: AbstractPlayer.draw (AbstractPlayer.
@@ -305,8 +304,8 @@ TEST(PilesExhaust, NotInHandIsNoOp) {
 }
 
 // --- Energy (GAIN_ENERGY opcode, incl. negative "spend") --------------------
-// Spending energy is GAIN_ENERGY with a negative amount (no separate opcode); the
-// A4.1 no-clamp decision holds (no max-energy field, so it can go negative).
+// Spending energy is GAIN_ENERGY with a negative amount (no separate opcode);
+// there is no clamp (no max-energy field), so energy can go negative.
 
 TEST(PilesEnergy, GainAndSpendViaGainEnergyNoClamp) {
     CombatState s = make_combat();
@@ -319,7 +318,7 @@ TEST(PilesEnergy, GainAndSpendViaGainEnergyNoClamp) {
     EXPECT_EQ(s.player_energy, -2);
 }
 
-// --- Dispatch wiring (interp.cpp now delegates to piles.cpp) -----------------
+// --- Dispatch wiring (interp.cpp delegates to piles.cpp) --------------------
 
 TEST(PilesDispatch, DrawOpcodeDrawsThroughInterp) {
     CombatState s = make_combat();

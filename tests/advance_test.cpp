@@ -1,5 +1,4 @@
-// A5.1 acceptance suite: the batch API (advance / legal_actions / combat_begin;
-// design doc §7). Per the ledger's acceptance line:
+// The batch API: advance / legal_actions / combat_begin (design doc §7).
 //   * Batch independence: a batch of 128 states with mixed actions advances
 //     independently -- each state's post-advance hash equals the hash of the SAME
 //     single state run through its own isolated (batch-of-1) advance().

@@ -8,10 +8,9 @@
 
 #include <gtest/gtest.h>
 
-// Task A1.2 (docs/stage-a-tasks.md) -- byte-compares sts::engine::JdkRandom +
-// jdk_shuffle against the JVM-captured golden set 4
-// (docs stage-a-design.md §3.7 item 4; tools/golden_capture/README.md
-// "4. jdk_shuffle_<seed>_<n>.bin").
+// Byte-compares sts::engine::JdkRandom + jdk_shuffle against the JVM-captured
+// golden set 4 (docs/stage-a-design.md §3.7 item 4; tools/golden_capture/
+// README.md "4. jdk_shuffle_<seed>_<n>.bin").
 //
 // STS_GOLDEN_DIR is injected by tests/CMakeLists.txt as an absolute path to
 // tests/golden, so this binary resolves golden files regardless of the CWD
@@ -112,7 +111,7 @@ TEST(RngJdk, ShuffleMatchesGoldenSetFour) {
 
 // Trap 2 (docs/stage-a-design.md §10): "Shuffles route through
 // java.util.Random, not xorshift128+." sts::engine::JdkRandom is a distinct
-// type from RandomXS128 (A1.1) with its own 48-bit LCG state and its own
+// type from RandomXS128 with its own 48-bit LCG state and its own
 // nextInt(bound) algorithm -- jdk_shuffle only ever accepts a JdkRandom&, so
 // there is no code path by which a shuffle could be driven by the xorshift
 // engine (a structural/API-shape guarantee, checked at compile time by the

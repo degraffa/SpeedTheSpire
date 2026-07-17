@@ -1,4 +1,4 @@
-// A3.2 acceptance suite: Jaw Worm AI + monster turn (design doc §9).
+// Jaw Worm AI + monster turn (design doc §9).
 //
 // For each of 32 seeds x 20 turns, byte-compares the engine's Jaw Worm
 // (include/sts/engine/monster_jaw_worm.*) against an INDEPENDENT hand-derived
@@ -13,9 +13,9 @@
 // Two drivers exercise the same fixture:
 //   * a direct loop calling jaw_worm_take_turn (the unit-test path), for all 32
 //     seeds -- the primary acceptance check;
-//   * a pump()-driven path using real END_TURN sentinels through the A3.1 pump
-//     (the actual A3.1<->A3.2 integration point) for one seed, confirming the
-//     MonsterTurnFn wiring produces the identical sequence and counters.
+//   * a pump()-driven path using real END_TURN sentinels through the pump for
+//     one seed, confirming the MonsterTurnFn wiring produces the identical
+//     sequence and counters.
 //
 // STS_FIXTURE_DIR is injected by tests/CMakeLists.txt as an absolute path to
 // tests/fixtures so this binary resolves the fixture regardless of ctest's CWD.
@@ -206,7 +206,7 @@ TEST(JawWormFixture, DirectLoopMatchesFixture) {
     }
 }
 
-// Integration: drive the SAME sequence through the real A3.1 pump using END_TURN
+// Integration: drive the SAME sequence through the real pump using END_TURN
 // sentinels, with jaw_worm_take_turn wired in as pump's MonsterTurnFn. Each
 // end-turn sentinel drives exactly one monster turn (design doc §5.2), so this
 // must reproduce the fixture's move sequence and aiRng counters bit-for-bit.
@@ -217,16 +217,16 @@ TEST(JawWormPump, EndTurnDrivenMatchesFixture) {
 
     CombatState s = MakeState(c.seed);
     jaw_worm_init(s, 0);
-    // The production jaw_worm_take_turn now enqueues the move's real damage
-    // (A6.2 gap-fix), so an 80-HP player would die partway through these 20
-    // monster turns and the pump would halt at COMBAT_OVER before the sequence
-    // finishes. This test only cares about the MOVE sequence + ai_rng counters
-    // through the pump wiring, so give the player enough HP to survive all 20
-    // turns and keep landing on WAITING_ON_USER.
+    // The production jaw_worm_take_turn enqueues the move's real damage, so an
+    // 80-HP player would die partway through these 20 monster turns and the pump
+    // would halt at COMBAT_OVER before the sequence finishes. This test only
+    // cares about the MOVE sequence + ai_rng counters through the pump wiring, so
+    // give the player enough HP to survive all 20 turns and keep landing on
+    // WAITING_ON_USER.
     s.player_hp = 30000;
     s.player_max_hp = 30000;
     // Player-turn invariant the pump expects before the first end-turn
-    // (monster_attacks_queued stays true through the player's turn; A3.1).
+    // (monster_attacks_queued stays true through the player's turn).
     s.monster_attacks_queued = 1;
     s.turn_has_ended = 0;
     s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);

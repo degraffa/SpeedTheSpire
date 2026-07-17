@@ -1,9 +1,6 @@
-// Tier-1 scaffolding suite for task A2.1 (docs/stage-a-tasks.md): core id
-// enums and the small POD instance/action types from
+// Core id enums and the small POD instance/action types from
 // include/sts/engine/types.hpp. No golden-vector dependency -- pure C++ type
-// scaffolding, per the task's own scope note.
-//
-// Acceptance line: "static_assert sizes; smoke test constructs each."
+// scaffolding.
 
 #include "sts/engine/types.hpp"
 
@@ -12,7 +9,7 @@
 #include <gtest/gtest.h>
 
 // Regression guard duplicating the header's load-bearing asserts (design doc
-// §4.1/§4.2), following the same pattern as A1.3's rng_stream_test.cpp.
+// §4.1/§4.2).
 static_assert(std::is_trivially_copyable_v<sts::engine::CardInstance>);
 static_assert(sizeof(sts::engine::CardInstance) == 8);
 static_assert(std::is_trivially_copyable_v<sts::engine::PowerSlot>);

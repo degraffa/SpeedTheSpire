@@ -1,7 +1,6 @@
-// Smoke benchmark for the batch API (A5.1, design doc §7): advance() throughput
-// over a 10k-state batch under a random-legal policy. No perf target at M1 (the
-// ledger records the number as a baseline only). This is a smoke benchmark, not
-// a rigorous perf suite -- perf hardening is Stage C.
+// Smoke benchmark for the batch API (design doc §7): advance() throughput over a
+// 10k-state batch under a random-legal policy. No perf target here -- this is a
+// smoke benchmark, not a rigorous perf suite.
 //
 // The action-selection RNG here (std::mt19937) is BENCHMARK-HARNESS RNG only:
 // it picks which legal action to feed each state. It is NOT gameplay RNG (that

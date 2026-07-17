@@ -9,7 +9,7 @@ TEST(Smoke, VersionStringMatchesConstant) {
 }
 
 TEST(Smoke, VersionStructIsTriviallyCopyable) {
-    // State structs must be memcpy-able for snapshot/restore (InitialPlan.md A.3).
+    // State structs must be memcpy-able for snapshot/restore.
     static_assert(std::is_trivially_copyable_v<sts::engine::Version>);
     SUCCEED();
 }

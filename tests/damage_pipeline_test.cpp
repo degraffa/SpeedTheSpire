@@ -1,5 +1,4 @@
-// A4.1 acceptance suite: effect interpreter + DAMAGE pipeline
-// (design doc §5.5, §6, §10 trap 1).
+// Effect interpreter + DAMAGE pipeline (design doc §5.5, §6, §10 trap 1).
 //
 // The damage table checks Strength/Vulnerable/Weak stacking against values
 // HAND-COMPUTED from the cited Java (DamageInfo.applyPowers, StrengthPower/
@@ -7,8 +6,8 @@
 // the arithmetic for the tricky stacked cases is shown inline. The trap-1 test
 // pins the float-accumulation-floored-once rule with a case whose correct
 // (float) answer differs from the wrong (integer-per-step) answer. The rest are
-// per-opcode direct checks plus a pump() wiring regression proving A3.1's pop
-// step now actually applies effects.
+// per-opcode direct checks plus a pump() wiring regression proving the pop step
+// applies effects.
 //
 // Power-list order convention used throughout: on an attacker carrying both,
 // Strength is stored at index 0 and Weak at index 1, so atDamageGive applies
@@ -145,7 +144,7 @@ TEST(DamagePipeline, StrengthVulnerableWeakStackingMatchesHandComputed) {
 // --- Trap 1: float accumulation, floored ONCE, no integer shortcuts ---------
 
 TEST(DamagePipelineTrap, FloatAccumulationFlooredOnceNoIntegerShortcuts) {
-    // Part 1 -- the ledger's named case: base 7, Str 2, Vuln -> 13, not the
+    // Part 1 -- the trap's named case: base 7, Str 2, Vuln -> 13, not the
     // round-to-14 answer. (7 + 2) * 1.5 = 13.5, MathUtils.floor -> 13.
     {
         CombatState s = make_combat();
@@ -236,7 +235,7 @@ TEST(InterpOpcode, DrawMovesTopOfDrawPileToHand) {
     EXPECT_EQ(s.draw_count, 1);
     EXPECT_EQ(s.hand[0], 4);  // drew the top (draw[draw_count-1])
 
-    // Drawing more than remain stops at the empty pile (A4.2 owns reshuffle).
+    // Drawing more than remain stops at the empty pile (no discard to reshuffle here).
     execute_opcode(s, op(Opcode::DRAW, kActorPlayer, kActorPlayer, 5));
     EXPECT_EQ(s.hand_count, 2);
     EXPECT_EQ(s.draw_count, 0);
@@ -266,9 +265,9 @@ TEST(InterpOpcode, ExhaustMovesCardFromHandToExhaust) {
     EXPECT_EQ(s.exhaust_count, 1);
 }
 
-// --- ROLL_MOVE is a stubbed no-op (scope-boundary decision) -----------------
-// (SHUFFLE_IN was an A4.1 stub too, but A4.2 implemented it -- its behavior is
-// now covered by piles_test; only ROLL_MOVE remains a documented no-op here.)
+// --- ROLL_MOVE is a stubbed no-op -------------------------------------------
+// (SHUFFLE_IN's behavior is covered by piles_test; ROLL_MOVE remains a
+// documented no-op here.)
 
 TEST(InterpStub, RollMoveDoesNotMutateState) {
     CombatState s = make_combat();
@@ -306,12 +305,12 @@ TEST(InterpStub, NopAndUnrecognizedOpcodeAreNoOps) {
     EXPECT_EQ(std::memcmp(&before, &s, sizeof(CombatState)), 0);
 }
 
-// --- Regression: pump() now actually applies effects ------------------------
+// --- Regression: pump()'s pop step applies queued effects -------------------
 
 TEST(InterpPumpWiring, PumpAppliesQueuedDamageToTarget) {
     CombatState s = make_combat();
     s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
-    s.monster_attacks_queued = 1;  // player-turn invariant (A3.1)
+    s.monster_attacks_queued = 1;  // player-turn invariant
     s.turn_has_ended = 0;
 
     const int16_t hp_before = s.monsters[0].hp;  // 40
