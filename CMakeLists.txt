@@ -39,6 +39,10 @@ add_subdirectory(src/engine)
 # future CLI). Built whenever tests are, since that is its current consumer.
 if(STS_BUILD_TESTS)
     add_subdirectory(tools/diff_harness)
+    # A6.2: combat-fixture generator (independent reference simulator). Built with
+    # the tests since it links diff_harness (write_trace) + sts_engine and is run
+    # manually to regenerate tests/golden/combat_fixtures/*.trace.
+    add_subdirectory(tools/fixture_gen)
 endif()
 
 if(STS_BUILD_TESTS)

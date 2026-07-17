@@ -203,3 +203,21 @@ sts_set_warnings(differ_test)
 sts_enable_sanitizers(differ_test)
 
 gtest_discover_tests(differ_test)
+
+# A6.2: fixture oracle -- the ~20 scripted Jaw Worm fights (M1 acceptance). Each
+# checked-in trace (tests/golden/combat_fixtures/*.trace, written by the
+# independent reference simulator tools/fixture_gen/gen_combat_fixtures) is
+# replayed through the real engine (combat_begin + advance via A6.1's replay)
+# and diffed field-by-field after every action -- acceptance is zero diffs on
+# all fixtures. Links diff_harness (read_trace / replay_skeleton / diff_states).
+add_executable(fixture_oracle_test
+    fixture_oracle_test.cpp
+)
+
+target_link_libraries(fixture_oracle_test PRIVATE diff_harness GTest::gtest_main)
+target_compile_definitions(fixture_oracle_test PRIVATE
+    STS_COMBAT_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/golden/combat_fixtures")
+sts_set_warnings(fixture_oracle_test)
+sts_enable_sanitizers(fixture_oracle_test)
+
+gtest_discover_tests(fixture_oracle_test)

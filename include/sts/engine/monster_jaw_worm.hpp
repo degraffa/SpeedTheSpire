@@ -19,22 +19,25 @@
 //     (:469-491), setHp(min,max) == monsterHpRng.random(min,max) with
 //     currentHealth = maxHealth (:765-775).
 //
-// SCOPE (matches A3.1's established boundary -- queue mechanics only, no effect
-// interpreter until A4.1): jaw_worm_take_turn does NOT enqueue real
-// damage/block/power actions -- there is nothing to consume them yet, and the
-// A3.2 acceptance criteria check only the move sequence and the aiRng/
-// monsterHpRng draw counters. All of the interesting per-turn state (the
-// decided move id in move_history, the telegraphed intent) is set at DECISION
-// time, faithfully mirroring the game where setMove runs inside getMove. So
-// "executing" a turn here is a documented no-op followed by rolling the next
-// move. A4.x attaches the real DamageAction/GainBlockAction/ApplyPowerAction
-// enqueues using the stat constants below.
+// SCOPE: jaw_worm_take_turn now ENQUEUES the current move's real effects (Chomp
+// damage, Bellow Strength+block, Thrash damage+block) in JawWorm.takeTurn's
+// addToBottom order, then rolls the next move. A3.2 originally shipped this as a
+// no-op-execute stub (no effect interpreter existed yet) and its scope note
+// promised "A4.x attaches the real DamageAction/GainBlockAction/ApplyPowerAction
+// enqueues"; that hand-off was never taken -- A4.1 built the interpreter, A4.3
+// wired card effects, but the MONSTER's effects stayed unattached, so through
+// advance() a Jaw Worm dealt zero damage. A6.2 needs a monster that actually
+// fights (player-death fixtures, Bellow-Strength interacting with Vulnerable),
+// so it closes the gap here (design doc §12 change log; JawWorm.java:120-146).
+// The move to execute is the decided move in move_history[0]; effects are queued
+// (never applied inline) so they resolve through the pump exactly like a card's.
 //
 // DRAW-COUNTING CONVENTION (must match tests/fixtures/gen_jaw_worm_fixture.py to
 // the draw): jaw_worm_init performs decision #1 -- rollMove's forced-first-move
 // path, which STILL consumes one aiRng.random(99) draw (rollMove always draws)
 // but ignores its value and forces Chomp. Each jaw_worm_take_turn call executes
-// the currently-decided move (no-op, see SCOPE) then rolls the NEXT move:
+// the currently-decided move (enqueues its effects, see SCOPE) then rolls the
+// NEXT move:
 // always one aiRng.random(99) draw, plus on the tiebreak branches one
 // aiRng.randomBoolean draw -- so the aiRng counter advances by 1 or 2 per turn.
 // monsterHpRng is drawn exactly once, in jaw_worm_init.
@@ -84,9 +87,9 @@ void jaw_worm_init(CombatState& state, uint8_t monster_index) noexcept;
 
 // One monster turn (design doc §5.2 step 5; JawWorm.takeTurn). Signature is
 // MonsterTurnFn-compatible so it is passed directly as pump()'s take_turn hook.
-// "Executes" the currently-decided move (no-op stub, see SCOPE) then rolls the
-// next move via the getMove decision tree on ai_rng, updating move_history and
-// intent.
+// Executes the currently-decided move (enqueues its real effects, see SCOPE) then
+// rolls the next move via the getMove decision tree on ai_rng, updating
+// move_history and intent.
 void jaw_worm_take_turn(CombatState& state, uint8_t monster_index) noexcept;
 
 }  // namespace sts::engine

@@ -519,3 +519,33 @@ decompiled Java > this design doc > the task ledger).
   asan after the fix. No relic/power in the skeleton reaches EnergyManager's
   Ice Cream/Conserve branches, so the SET-to-constant simplification is exact
   for M1.
+
+- **A6.2 — Jaw Worm move effects never attached to the monster turn.** A3.2
+  shipped `jaw_worm_take_turn` (the pump's step-5 monster-turn hook) as a
+  no-op-EXECUTE stub — it rolled the next move but enqueued no
+  damage/block/power actions, because no effect interpreter existed yet. Its
+  scope note explicitly deferred the enqueues: "A4.x attaches the real
+  DamageAction/GainBlockAction/ApplyPowerAction enqueues." That hand-off was
+  never taken: A4.1 built the interpreter and A4.3 wired *card* effects, but the
+  *monster's* effects stayed unattached, so a Jaw Worm driven through
+  `advance()` dealt **zero** damage (the A4.3 integration test papered over this
+  with a test-local `JawWormTurnWithEffects` helper rather than the production
+  function). A6.2 needs a monster that actually fights — player-death fixtures,
+  and Bellow-Strength interacting with a Bash-applied Vulnerable — so it closes
+  the gap: `jaw_worm_take_turn` now enqueues the current move's effects in
+  `JawWorm.takeTurn`'s `addToBottom` order (JawWorm.java:120-146) — Chomp
+  `DamageAction(12)`; Bellow `ApplyPower(Strength +5)` then `GainBlock(9)`;
+  Thrash `DamageAction(7)` then `GainBlock(5)` — before the unconditional
+  `RollMoveAction`. Effects are QUEUED (via `add_to_bottom`), never applied
+  inline, so they resolve through the pump exactly like a card's, and the
+  monster's Strength is read by the DAMAGE pipeline at resolution (so a
+  Strength-buffed Chomp/Thrash is automatic). The roll (ai_rng / move_history /
+  intent) is unchanged, so A3.2's Jaw-Worm fixture still matches bit-for-bit.
+  Two dependent test updates in the same change: `cards_test`'s integration
+  fight now drives the monster with the production function directly (the local
+  helper is removed, same expected hash); `jaw_worm_test`'s pump-driven case
+  gives the player 30000 HP so the monster's now-real damage doesn't kill it
+  before the 20-turn move-sequence check completes. Not a frozen-mechanics
+  change — it makes the monster turn do what §9's walking skeleton always
+  specified; provenance is JawWorm.takeTurn, cited above. Verified: full suite
+  (130 tests) green in debug and asan.

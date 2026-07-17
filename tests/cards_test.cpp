@@ -286,56 +286,14 @@ TEST(CardPlayTrap, RandomTargetRollsAtDequeueNotEnqueue) {
 //   BELLOW -> +5 Strength to self, +9 block to self.
 //   THRASH -> 7 damage to the player, +5 block to self.
 //
-// The production jaw_worm_take_turn (A3.2) intentionally DEFERS the real
-// damage/block/power enqueues (its documented scope note: "A4.x attaches the
-// real DamageAction/GainBlockAction/ApplyPowerAction enqueues"), so this test
-// supplies them locally in JawWormTurnWithEffects, then REUSES jaw_worm_take_turn
-// for the move progression + aiRng draws -- keeping the move sequence and RNG
-// bit-identical to A3.2's golden fixture while making the monster actually fight.
+// The production jaw_worm_take_turn now enqueues the move's real
+// damage/block/power effects itself (A6.2 gap-fix; formerly a no-op-execute stub
+// whose scope note deferred these to "A4.x"). So this integration fight drives
+// the monster with the production function directly -- the move sequence, RNG,
+// and effects all come from the real engine, and the expected final state below
+// is still hand-traced independently.
 
 const int64_t kSeedR0 = -5025562857975149833LL;
-
-// Test-local Jaw Worm turn WITH real move effects (see the note above).
-void JawWormTurnWithEffects(CombatState& s, uint8_t mi) {
-    const uint8_t move = s.monsters[mi].move_history[0];  // the decided move
-    auto damage = [&](int amount) {
-        ActionQueueItem it{};
-        it.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
-        it.src = mi;
-        it.tgt = kActorPlayer;
-        it.amount = amount;
-        add_to_bottom(s, it);
-    };
-    auto block = [&](int amount) {
-        ActionQueueItem it{};
-        it.opcode = static_cast<uint16_t>(Opcode::BLOCK);
-        it.src = mi;
-        it.tgt = mi;
-        it.amount = amount;
-        add_to_bottom(s, it);
-    };
-    auto strength = [&](int amount) {
-        ActionQueueItem it{};
-        it.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-        it.src = mi;
-        it.tgt = mi;
-        it.amount = amount;
-        it.flags = make_apply_power_flags(PowerId::STRENGTH);
-        add_to_bottom(s, it);
-    };
-    if (move == kMoveChomp) {
-        damage(kJawWormChompDmg);            // 12
-    } else if (move == kMoveBellow) {
-        strength(kJawWormBellowStr);         // +5 Str
-        block(kJawWormBellowBlock);          // +9 block
-    } else if (move == kMoveThrash) {
-        damage(kJawWormThrashDmg);           // 7 (+ Strength via the pipeline)
-        block(kJawWormThrashBlock);          // +5 block
-    }
-    // Reuse the production roll: no-op execute + roll the next move (advances
-    // move_history and ai_rng exactly as the A3.2 fixture).
-    jaw_worm_take_turn(s, mi);
-}
 
 // The fixed 23-card pool shared by the actual run and the independent expected
 // state (an immutable input; card_pool never mutates during play). Indices:
@@ -417,28 +375,28 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
 
     // ---- Turn 1: Bash (monster), Strike (monster), end turn ----
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Bash -> DMG 8 (44->36), Vuln 2
-    pump(s, JawWormTurnWithEffects);
+    pump(s, jaw_worm_take_turn);
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike into Vuln -> 6*1.5=9 (36->27)
-    pump(s, JawWormTurnWithEffects);
+    pump(s, jaw_worm_take_turn);
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
-    pump(s, JawWormTurnWithEffects);          // monster CHOMP 12 (player 80->68), SoT2
+    pump(s, jaw_worm_take_turn);          // monster CHOMP 12 (player 80->68), SoT2
 
     // ---- Turn 2: Defend (self), Pommel (monster), end turn ----
     // (energy refill to 3 already happened for real inside the prior pump()
     // call's start-of-turn sequence -- see kIroncladBaseEnergy gap-fix)
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Defend -> block 5
-    pump(s, JawWormTurnWithEffects);
+    pump(s, jaw_worm_take_turn);
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Pommel into Vuln -> 9*1.5=13.5->13 (27->14), draw 1
-    pump(s, JawWormTurnWithEffects);
+    pump(s, jaw_worm_take_turn);
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
-    pump(s, JawWormTurnWithEffects);          // monster BELLOW (+5 Str,+9 blk), SoT3 (player block 5->0)
+    pump(s, jaw_worm_take_turn);          // monster BELLOW (+5 Str,+9 blk), SoT3 (player block 5->0)
 
     // ---- Turn 3: Shrug It Off (self), end turn ----
     // (energy already refilled to 3 for real by the prior pump()'s start-of-turn)
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Shrug -> block 8, draw 1
-    pump(s, JawWormTurnWithEffects);
+    pump(s, jaw_worm_take_turn);
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
-    pump(s, JawWormTurnWithEffects);          // monster THRASH 7+Str5=12 vs block 8 -> hp 68->64, SoT4
+    pump(s, jaw_worm_take_turn);          // monster THRASH 7+Str5=12 vs block 8 -> hp 68->64, SoT4
 
     // ---- Field-by-field checks (the hand trace, for debuggability) ----
     EXPECT_EQ(s.turn, 4);

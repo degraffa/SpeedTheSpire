@@ -217,6 +217,14 @@ TEST(JawWormPump, EndTurnDrivenMatchesFixture) {
 
     CombatState s = MakeState(c.seed);
     jaw_worm_init(s, 0);
+    // The production jaw_worm_take_turn now enqueues the move's real damage
+    // (A6.2 gap-fix), so an 80-HP player would die partway through these 20
+    // monster turns and the pump would halt at COMBAT_OVER before the sequence
+    // finishes. This test only cares about the MOVE sequence + ai_rng counters
+    // through the pump wiring, so give the player enough HP to survive all 20
+    // turns and keep landing on WAITING_ON_USER.
+    s.player_hp = 30000;
+    s.player_max_hp = 30000;
     // Player-turn invariant the pump expects before the first end-turn
     // (monster_attacks_queued stays true through the player's turn; A3.1).
     s.monster_attacks_queued = 1;

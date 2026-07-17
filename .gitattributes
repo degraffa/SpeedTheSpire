@@ -2,3 +2,6 @@
 
 # Golden verification vectors are opaque binary payloads
 tests/golden/** binary
+
+# ...but human-readable derivation notes checked in alongside them stay text
+tests/golden/**/*.md text diff

@@ -841,7 +841,7 @@ WSL Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest
 `-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`. No
 ASan/UBSan findings. SCHEMA_VERSION untouched (no struct edits).
 
-### A6.2 `[ ]` Fixture oracle: 20 scripted Jaw Worm fights
+### A6.2 `[x]` Fixture oracle: 20 scripted Jaw Worm fights
 **Deps:** A6.1, A4.3 · **Spec:** §9
 **Deliverables:** `tests/golden/combat_fixtures/` — ~20 scripted fights
 (varied seeds, all five cards exercised, ≥1 reshuffle, ≥1 player death,
@@ -849,7 +849,45 @@ ASan/UBSan findings. SCHEMA_VERSION untouched (no struct edits).
 state fields derived from the cited Java; generator/derivation notes checked
 in for re-review.
 **Acceptance:** diff harness runs all fixtures with **zero diffs**.
-**Log:** —
+**Log:** Built **20 fixtures** (`tests/golden/combat_fixtures/fixt01..20_*.trace`)
+via an INDEPENDENT reference simulator (`tools/fixture_gen/gen_combat_fixtures.cpp`
+— a from-scratch reimplementation of the §5.5 damage pipeline, the five cards'
+effect table, the pile mechanics, and Jaw Worm's move effects; it reuses ONLY
+the G1-golden tier-1 RNG primitives + the A3.2 Jaw-Worm fixture + `write_trace`,
+never the production gameplay engine). Each fixture's `run_seed = <rN seed> − 1`
+so `floor_stream(run_seed, 1) == from_seed(<rN seed>)` and the fight lands on the
+A3.2 fixture row rN (move sequence/HP/ai_rng consumed, not re-derived). New gtest
+`fixture_oracle_test` (14th `tests/CMakeLists.txt` block) reads every `*.trace`,
+replays the same `(seed, actions)` through the real engine via A6.1's
+`replay_skeleton` (`combat_begin` + `advance`), and `diff_states`-compares EVERY
+state (initial + after each action) — **acceptance met: zero `DiffReport` at every
+step across all 20** (183 total per-action state comparisons). Derivation notes
+(`tests/golden/combat_fixtures/derivation_notes.md`) narrate the turn-by-turn
+arithmetic for human re-check; the generator is checked in as the reviewable
+artifact. **Coverage confirmed:** all 5 cards (Strike/Defend/Bash/Shrug/Pommel)
+played; reshuffle — `shuffle_rng` draws a 2nd time — in fixt08/18/19; player death
+(fixt17, r4, dies to a Strength-boosted Chomp on turn 9); monster death (fixt16,
+r29, Strike killing blow); Bellow-Strength + Bash-Vulnerable concurrently live on
+the monster (fixt18, powers `[Vulnerable(2), Strength(5)]`, also fixt12/20).
+**Engine bug found + fixed (stop-the-line, design §12 change-log entry "A6.2"):**
+`jaw_worm_take_turn` was still A3.2's no-op-EXECUTE stub — it rolled the next move
+but never enqueued the move's damage/block/Strength, so a Jaw Worm driven through
+`advance()` dealt zero damage (A3.2's scope note deferred the enqueues to "A4.x";
+that hand-off was never taken). Without the monster fighting, player death and
+Bellow-Strength-vs-Vulnerable were unreachable. Fixed in `monster_jaw_worm.cpp`:
+enqueue the current move's effects in `JawWorm.takeTurn`'s `addToBottom` order
+(Chomp 12 dmg; Bellow +5 Str then +9 block; Thrash 7 dmg then +5 block;
+JawWorm.java:120-146) before the roll; effects resolve through the pump so the
+DAMAGE pipeline reads the monster's Strength automatically. Two dependent test
+updates: `cards_test` now drives the fight with the production function directly
+(removed the local `JawWormTurnWithEffects`, same expected hash); `jaw_worm_test`'s
+pump-driven case gives the player 30000 HP so the now-real damage doesn't cut the
+20-turn move check short. Verified by running (not inferred), WSL Ubuntu-2404,
+`cmake --preset {debug,asan}` → build → `ctest --output-on-failure` — both presets
+`100% tests passed, 0 failed out of 130` (128 pre-existing A6.1-era + 2 new
+`FixtureOracle.*`); no build warnings from the new code; all pre-existing binaries
+(incl. `cards_test`, `jaw_worm_test`, `advance_test`, `differ_test`) still green
+after the engine change. No ASan/UBSan findings.
 
 ### G3 `[ ]` **Gate: M1 exit**
 **Deps:** G1, A6.2, A5.1
@@ -893,6 +931,15 @@ G1 ──▶ A2.1 ─▶ A2.2 ─┬─▶ A3.1 ─┬─▶ A3.2 ────�
   §4.3's "8 run-scoped" reads as an imprecise count of that 7+mapRng set; left
   as-is (not a mechanics change), flagged here for a future design-doc v0.3
   wording fix.
+- 2026-07-17 — A6.2: engine gap-fix recorded in design-doc §12 change log
+  ("A6.2 — Jaw Worm move effects never attached to the monster turn"). A3.2's
+  `jaw_worm_take_turn` was a no-op-EXECUTE stub whose scope note deferred the real
+  damage/block/Strength enqueues to "A4.x"; that hand-off was never taken, so a
+  Jaw Worm dealt zero damage through `advance()`. A6.2 attaches the effects
+  (JawWorm.takeTurn order, JawWorm.java:120-146), enabling the player-death and
+  Bellow-Strength/Vulnerable coverage. Java (§1 precedence) is the source; not a
+  frozen-mechanics change (the walking skeleton §9 always specified a fighting
+  monster). `cards_test`/`jaw_worm_test` updated in the same commit.
 - 2026-07-17 — A4.2: ledger-prose correction (decompiled Java > this ledger).
   The A4.2 deliverable line read "hand-size-10 overflow rule (drawn card goes to
   discard)". `DrawCardAction.update()` (DrawCardAction.java:92-97) does NOT

@@ -7,6 +7,8 @@
 
 #include "sts/engine/monster_jaw_worm.hpp"
 
+#include "sts/engine/action_queue.hpp"  // add_to_bottom, ActionQueueItem, kActorPlayer
+#include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
 
@@ -89,6 +91,53 @@ void get_move(CombatState& state, MonsterState& m, int32_t num) noexcept {
     }
 }
 
+// Enqueue the CURRENT move's real effects, in JawWorm.takeTurn's addToBottom
+// order (JawWorm.java:120-146; A6.2 gap-fix -- see the header SCOPE note). The
+// move to execute is m.move_history[0] (decided at its roll time). Effects are
+// QUEUED (add_to_bottom), never applied inline, so they resolve through the pump
+// priority loop exactly like a card's effects -- the monster's Strength is read
+// by the DAMAGE pipeline (compute_damage) at resolution, so Chomp/Thrash pick up
+// any Strength from a prior Bellow automatically.
+//   * Chomp  (1): DamageAction(player, chompDmg=12)                (JawWorm.java:126)
+//   * Bellow (2): ApplyPower(Strength +5 self) then GainBlock(9 self) (:135-136)
+//   * Thrash (3): DamageAction(player, thrashDmg=7) then GainBlock(5 self) (:141-142)
+void queue_move_effects(CombatState& state, uint8_t mi, uint8_t move) noexcept {
+    const auto damage_player = [&](int amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        it.src = mi;
+        it.tgt = kActorPlayer;
+        it.amount = amount;
+        add_to_bottom(state, it);
+    };
+    const auto gain_block = [&](int amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+        it.src = mi;
+        it.tgt = mi;
+        it.amount = amount;
+        add_to_bottom(state, it);
+    };
+    const auto gain_strength = [&](int amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        it.src = mi;
+        it.tgt = mi;
+        it.amount = amount;
+        it.flags = make_apply_power_flags(PowerId::STRENGTH);
+        add_to_bottom(state, it);
+    };
+    if (move == kMoveChomp) {
+        damage_player(kJawWormChompDmg);          // 12
+    } else if (move == kMoveBellow) {
+        gain_strength(kJawWormBellowStr);         // +5 Strength (self)
+        gain_block(kJawWormBellowBlock);          // +9 block (self)
+    } else if (move == kMoveThrash) {
+        damage_player(kJawWormThrashDmg);         // 7 (+ Strength via the pipeline)
+        gain_block(kJawWormThrashBlock);          // +5 block (self)
+    }
+}
+
 }  // namespace
 
 void jaw_worm_init(CombatState& state, uint8_t monster_index) noexcept {
@@ -121,16 +170,21 @@ void jaw_worm_init(CombatState& state, uint8_t monster_index) noexcept {
 void jaw_worm_take_turn(CombatState& state, uint8_t monster_index) noexcept {
     MonsterState& m = state.monsters[monster_index];
 
-    // (a) Execute the currently-decided move: no-op in A3.2 (no effect
-    //     interpreter until A4.1). The move to execute is m.move_history[0] /
-    //     m.intent, both set at its decision time. JawWorm.takeTurn's real
-    //     DamageAction/GainBlockAction/ApplyPowerAction enqueues (JawWorm.java:
-    //     120-144) land in A4.x, using the kJawWorm* stat constants.
-    //
+    // (a) Execute the currently-decided move: QUEUE its real DamageAction/
+    //     GainBlockAction/ApplyPowerAction effects in JawWorm.takeTurn order
+    //     (JawWorm.java:120-146). A6.2 gap-fix -- the A3.2 scope note deferred
+    //     these enqueues to "A4.x"; they were never attached until now (see the
+    //     header SCOPE note and design doc §12 change log). The move to execute
+    //     is m.move_history[0], decided at its roll time.
+    queue_move_effects(state, monster_index, m.move_history[0]);
+
     // (b) Roll the NEXT move: JawWorm.takeTurn ends with an unconditional
     //     RollMoveAction (JawWorm.java:145) -> rollMove() -> getMove(aiRng
     //     .random(99)). One random(99) draw, then get_move may take one
-    //     randomBoolean tiebreak.
+    //     randomBoolean tiebreak. The roll runs here (synchronously) while the
+    //     effects above are still queued; since the roll only touches ai_rng /
+    //     move_history / intent and the effects only touch hp/block/powers, their
+    //     relative order does not change the resolved state.
     const int32_t num = random(state.ai_rng, 99);
     get_move(state, m, num);
 }
