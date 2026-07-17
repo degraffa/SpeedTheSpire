@@ -90,3 +90,15 @@ sts_set_warnings(state_test)
 sts_enable_sanitizers(state_test)
 
 gtest_discover_tests(state_test)
+
+# A3.1: action-queue pump + queue mechanics suite (design doc §5.1-§5.2, trap 9).
+# Links sts_engine, which now carries action_queue.cpp.
+add_executable(action_queue_test
+    action_queue_test.cpp
+)
+
+target_link_libraries(action_queue_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(action_queue_test)
+sts_enable_sanitizers(action_queue_test)
+
+gtest_discover_tests(action_queue_test)

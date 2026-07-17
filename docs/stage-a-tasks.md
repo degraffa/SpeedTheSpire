@@ -337,7 +337,7 @@ premise. No ASan/UBSan findings.
 
 ## Phase 3 — Action-queue pump (no cards yet)
 
-### A3.1 `[ ]` Queue structures + pump loop
+### A3.1 `[x]` Queue structures + pump loop
 **Deps:** A2.2 · **Spec:** §5.1–5.2 · **Provenance:** GameActionManager.java:185-367
 **Deliverables:** `src/engine/action_queue.cpp` + header: the four fixed
 rings, `add_to_top/bottom`, `add_to_turn_start`, card-queue index-1 insertion
@@ -347,7 +347,48 @@ order incl. the full start-of-turn sequence and block decay
 **Acceptance:** gtest `action_queue_test` — ordering unit tests: top-vs-bottom
 interleave, preTurn after actions, sentinel triggers end-of-turn path,
 turn counter increments; trap 9 named test.
-**Log:** —
+**Log:** `include/sts/engine/action_queue.hpp` + `src/engine/action_queue.cpp`
+(namespace `sts::engine`, added to the `sts_engine` library) implement the
+§5.1 queue primitives (`add_to_bottom`/`add_to_top` main ring,
+`add_to_turn_start` pre-turn ring, `add_card_to_queue_bottom`/`_top`,
+`make_end_turn_sentinel`/`is_end_turn_sentinel`, `pop_action_front`/
+`pop_pre_turn_front`) and the §5.2 `pump()` priority loop, factored as
+`pump_step()` returning a `PumpOutcome` so ordering is unit-testable without an
+effect interpreter (A4.1) — "execute" of an action item is a pop; a non-sentinel
+`card_queue` head is a documented pop-and-discard stub pending A4.3. End-turn
+sentinel = a `card_queue` item with `card_index == 255` (out of the 0..159 pool
+range, distinct from `CardId::NONE == 0` which is a valid slot); A4.3 builds it
+via `make_end_turn_sentinel()`. Start-of-turn queues a placeholder `DRAW` opcode
+(`kOpcodeDrawCard == 3`, matching §6's opcode-list order; A4.1 owns the real
+table) and runs the Barricade/Blur/Calipers block-decay branch STRUCTURE with
+only the default `player_block = 0` path live. **Monster-turn extension point
+(the A3.1↔A3.2 seam):** a plain function pointer `using MonsterTurnFn =
+void(*)(CombatState&, uint8_t monster_index)` passed to
+`pump(CombatState&, MonsterTurnFn = default_monster_turn)` — `default_monster_turn`
+is a no-op stub A3.1 tests use; A3.2 passes real Jaw Worm AI. No monster-specific
+behavior is hard-coded in the pump. **preTurnActions gap-fix (stop-the-line):**
+A2.2's `CombatState` had only 3 of §5.1's 4 queues; A3.1 added a
+`pre_turn_actions` ring (`kPreTurnActionQueueCap == 16`, same `ActionQueueItem`
+element type) + `pre_turn_head/tail/count` + a `turn_has_ended` flag, additively.
+`sizeof(CombatState)` 3312 → **3504** (≤ 4096; +192 B ring, bookkeeping bytes
+absorbed into former alignment padding); `static_assert` still passes and A2.2's
+`state_test` is undisturbed. **Second source-vs-recipe reconciliation
+(documented in code + design doc change log):** the decompiled
+`GameActionManager.java` sets `monsterAttacksQueued = true` but never `= false`
+anywhere in the tree (grep-confirmed), which taken literally would let monsters
+act at most once. The ledger's step-6 recipe put the reset in the start-of-turn
+sequence, but that leaves it false *during the player's turn*, mis-firing step 4
+on the first A4.3 card-play pump. Per precedence (Java/design-doc > this
+ledger's parenthetical) and design doc §5.2 step 6's actual enumeration
+(cardsPlayedThisTurn/turnHasEnded, NOT monsterAttacksQueued;
+GameActionManager.java:333,349-351), A3.1 clears the flag at the end-turn
+sentinel (step 3) and leaves it set through the whole next player turn; step 6
+does not touch it. Verified by running, not inferred: WSL Ubuntu-2404,
+`cmake --preset {debug,asan}` → build → `ctest --output-on-failure` — both
+presets `100% tests passed, 0 failed out of 40` (32 pre-existing + 8 new:
+`ActionQueueLayout.*`, `ActionQueueOrdering.*` ×2, `ActionQueueSentinel.*` ×2,
+`ActionQueueMonster.*` ×2, `ActionQueueTrap.CardQueueFrontInsertionIsIndexOneWhenBusy`).
+No ASan/UBSan findings.
 
 ### A3.2 `[ ]` Jaw Worm AI + monster turn
 **Deps:** A3.1 · **Spec:** §9 · **Provenance:** JawWorm.java:121-184,
