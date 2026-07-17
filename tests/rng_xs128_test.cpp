@@ -1,6 +1,5 @@
-// Tier-1 RNG suite for task A1.1 (docs/stage-a-tasks.md). Byte-compares
-// sts::engine::RandomXS128::next_long() against the JVM-captured golden
-// vectors (tests/golden/xs128_<label>.bin, see
+// Tier-1 RNG suite: byte-compares sts::engine::RandomXS128::next_long() against
+// the JVM-captured golden vectors (tests/golden/xs128_<label>.bin, see
 // tools/golden_capture/README.md for the binary format and
 // tests/golden/seed_battery.txt for the label -> seed mapping), plus one
 // named test per applicable docs/stage-a-design.md §10 trap (4, 5, 11).

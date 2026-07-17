@@ -142,9 +142,8 @@ TEST(SeedString, RoundTripRowsMatchGolden) {
         // Golden data invariant, not a fixture-quality issue: the JVM
         // capture recorded match=1 for every row (README §6). A 0 here
         // means the capture harness itself observed a real mismatch, which
-        // would be a stop-the-line bug in SeedHelper.java's own round-trip
-        // -- not something we expect to see, but we assert it rather than
-        // assume it.
+        // would be a bug in SeedHelper.java's own round-trip -- not something
+        // we expect to see, but we assert it rather than assume it.
         ASSERT_TRUE(row.match) << "golden capture itself recorded a mismatch";
 
         EXPECT_EQ(sts::engine::seed_to_string(row.original_long), row.seed_string)

@@ -1,7 +1,9 @@
-// A3.1 acceptance suite: action-queue mechanics + the getNextAction pump
-// (design doc §5.1-§5.2, §10 trap 9). Tests QUEUE ORDERING only -- there is no
-// effect interpreter yet (A4.1), so "execution" of an action item is a pop, and
-// card-play resolution beyond the end-turn sentinel is out of scope (A4.3).
+// Action-queue mechanics + the getNextAction pump (design doc §5.1-§5.2, §10
+// trap 9). These tests verify QUEUE ORDERING: the top/bottom insertion
+// interleave, the pre-turn-vs-action priority, the end-turn sentinel path, and
+// the monster-turn extension point. The action items here carry placeholder
+// (NOP) opcodes, so the pump's pop step is a no-op -- this isolates the ordering
+// mechanics from effect semantics (execute_opcode is exercised elsewhere).
 
 #include <cstdint>
 #include <vector>
@@ -66,10 +68,10 @@ void probe_monster_turn(CombatState& s, uint8_t mi) noexcept {
     s.monsters[mi].flags |= 0x1u;  // "acted" marker
 }
 
-// --- Layout / gap-fix guard -------------------------------------------------
+// --- Layout / size-budget guard ---------------------------------------------
 
 TEST(ActionQueueLayout, PreTurnRingPresentWithinBudget) {
-    // A3.1 added pre_turn_actions + turn_has_ended additively; budget holds.
+    // pre_turn_actions + turn_has_ended fit inside the CombatState size budget.
     static_assert(sizeof(CombatState) <= 4096,
                   "CombatState must stay within its 4 KB budget after the "
                   "preTurnActions gap-fix");
@@ -177,7 +179,7 @@ TEST(ActionQueueMonster, PumpCyclesLiveMonstersThroughExtensionPoint) {
     pump(s, probe_monster_turn);
 
     // Both queued monsters ran their turn via the seam, then the start-of-turn
-    // sequence completed -- all without any monster-AI knowledge in A3.1.
+    // sequence completed -- the pump needs no monster-AI knowledge to do this.
     EXPECT_EQ(g_monster_turns, 2);
     EXPECT_EQ(s.monsters[0].flags & 0x1u, 0x1u);
     EXPECT_EQ(s.monsters[1].flags & 0x1u, 0x1u);

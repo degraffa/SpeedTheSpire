@@ -1,6 +1,5 @@
-// Tier-1 RNG suite for task A1.3 (docs/stage-a-tasks.md). Byte-compares the
-// game's Random-wrapper re-expression in sts::engine (rng_stream.hpp) against
-// the JVM-captured golden vectors:
+// Tier-1 RNG suite: byte-compares the game's Random-wrapper re-expression in
+// sts::engine (rng_stream.hpp) against the JVM-captured golden vectors:
 //   - golden set 2: wrapper_<seed>.bin        (1000 draws per method/overload)
 //   - golden set 3: counter_restore_<seed>.bin (137-draw restore equivalence)
 //   - golden set 5: floor_derive_<seed>.bin    (floor/act stream derivation)
@@ -30,8 +29,7 @@
 #endif
 
 // Regression guard duplicating the header's load-bearing asserts (design doc
-// §3.6/§4.1; ledger acceptance line "static_assert trivially-copyable + size
-// 24").
+// §3.6/§4.1).
 static_assert(std::is_trivially_copyable_v<sts::engine::RngStream>);
 static_assert(sizeof(sts::engine::RngStream) == 24);
 

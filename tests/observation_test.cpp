@@ -1,16 +1,15 @@
-// A5.2 acceptance suite (Stage A ledger): observation encoder stub.
+// Observation encoder stub.
 //
 //   * Round-trip spot checks -- construct a CombatState with hand-picked
 //     non-default values, encode_observation(), assert the ObsBuffer fields
 //     match exactly (player, hand cards+costs, monster hp/intent/powers), plus
 //     the padding/sentinel behavior for unused hand and monster slots.
-//   * Zero allocation -- encode_observation() performs no heap allocation. The
-//     acceptance line ("asan + counting allocator in test") is met by a global
-//     operator new/delete override IN THIS TRANSLATION UNIT ONLY that increments
-//     a counter, snapshotted tightly around just the call under test. (asan
-//     alone does not fail on "an allocation happened" -- it only catches memory
-//     errors -- so the counting allocator is the real check; asan runs it too
-//     via the asan preset for memory-safety coverage.)
+//   * Zero allocation -- encode_observation() performs no heap allocation,
+//     checked by a global operator new/delete override IN THIS TRANSLATION UNIT
+//     ONLY that increments a counter, snapshotted tightly around just the call
+//     under test. (asan alone does not fail on "an allocation happened" -- it
+//     only catches memory errors -- so the counting allocator is the real check;
+//     asan runs it too via the asan preset for memory-safety coverage.)
 //
 // The allocation-counting overrides deliberately live here, not in any engine
 // header/library TU, so they never pollute code that links sts_engine.

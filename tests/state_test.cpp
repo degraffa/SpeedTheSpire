@@ -1,5 +1,5 @@
-// A2.2 acceptance suite (Stage A ledger): CombatState / RunState layout
-// guarantees + the state-hash / snapshot contract (design doc §4.1-§4.3).
+// CombatState / RunState layout guarantees + the state-hash / snapshot contract
+// (design doc §4.1-§4.3).
 //
 //   * is_trivially_copyable<CombatState> / <RunState>          -- §4.1
 //   * sizeof(CombatState) <= 4096, sizeof(RunState) <= 8192    -- §4.2/§4.3
@@ -7,7 +7,7 @@
 //   * two value-initialized states hash-equal (padding determinism, §4.1)
 //
 // The static_asserts live in the headers (source of truth); the ones here are
-// regression guards that also make the ledger's acceptance line executable.
+// regression guards.
 
 #include <cstring>
 #include <type_traits>

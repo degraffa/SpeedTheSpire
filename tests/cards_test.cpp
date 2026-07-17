@@ -1,7 +1,7 @@
-// A4.3 acceptance suite: the five skeleton cards + the card-play flow
-// (design doc §5.3, §9; §10 trap 10).
+// The five skeleton cards + the card-play flow (design doc §5.3, §9; §10 trap
+// 10).
 //
-// Structure (per the ledger's acceptance line):
+// Structure:
 //   * Per-card table tests (tier-2 pattern): construct a minimal CombatState with
 //     the card in hand, queue_card_play + pump to full resolution, assert the
 //     resulting fields. Every expected value is hand-computed from the design
@@ -275,7 +275,7 @@ TEST(CardPlayTrap, RandomTargetRollsAtDequeueNotEnqueue) {
 // --- Full-turn integration: scripted 3-turn Jaw Worm fight -------------------
 //
 // Fixed seed r0 (-5025562857975149833) drives the Jaw Worm deterministically.
-// From A3.2's golden fixture (tests/fixtures/jaw_worm_fixture.tsv, seed r0):
+// From the golden Jaw Worm fixture (tests/fixtures/jaw_worm_fixture.tsv, seed r0):
 //   HP roll = 44; monster_hp_rng end = {6100601359716733802, 2758559893557545682, 1}.
 //   Executed moves: turn1 CHOMP(1), turn2 BELLOW(2), turn3 THRASH(3); the turn-4
 //   move rolled at the end of turn 3 is THRASH(3). ai_rng end (after the turn-3
@@ -286,12 +286,11 @@ TEST(CardPlayTrap, RandomTargetRollsAtDequeueNotEnqueue) {
 //   BELLOW -> +5 Strength to self, +9 block to self.
 //   THRASH -> 7 damage to the player, +5 block to self.
 //
-// The production jaw_worm_take_turn now enqueues the move's real
-// damage/block/power effects itself (A6.2 gap-fix; formerly a no-op-execute stub
-// whose scope note deferred these to "A4.x"). So this integration fight drives
-// the monster with the production function directly -- the move sequence, RNG,
-// and effects all come from the real engine, and the expected final state below
-// is still hand-traced independently.
+// The production jaw_worm_take_turn enqueues the move's real damage/block/power
+// effects itself, so this integration fight drives the monster with the
+// production function directly -- the move sequence, RNG, and effects all come
+// from the real engine, and the expected final state below is still hand-traced
+// independently.
 
 const int64_t kSeedR0 = -5025562857975149833LL;
 
@@ -369,7 +368,7 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     ASSERT_EQ(s.monsters[0].hp, 44) << "seed r0 HP roll (A3.2 fixture)";
 
     // Player-turn invariant the pump expects (monster_attacks_queued true through
-    // the player's turn; A3.1).
+    // the player's turn).
     s.monster_attacks_queued = 1;
     s.turn_has_ended = 0;
 
@@ -383,7 +382,7 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
 
     // ---- Turn 2: Defend (self), Pommel (monster), end turn ----
     // (energy refill to 3 already happened for real inside the prior pump()
-    // call's start-of-turn sequence -- see kIroncladBaseEnergy gap-fix)
+    // call's start-of-turn sequence -- the unconditional kIroncladBaseEnergy refill)
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Defend -> block 5
     pump(s, jaw_worm_take_turn);
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Pommel into Vuln -> 9*1.5=13.5->13 (27->14), draw 1
@@ -404,8 +403,8 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     EXPECT_EQ(s.player_block, 0);
     // Turn 3 spends down to 2 (refill 3 - Shrug 1), but the same pump() call
     // that ends turn 3 also drains all the way through start-of-turn 4, which
-    // unconditionally refills energy again (kIroncladBaseEnergy gap-fix) --
-    // so the value observed here is turn 4's fresh 3, not turn 3's leftover 2.
+    // unconditionally refills energy again (kIroncladBaseEnergy) -- so the value
+    // observed here is turn 4's fresh 3, not turn 3's leftover 2.
     EXPECT_EQ(s.player_energy, 3);
     EXPECT_EQ(s.cards_played_this_turn, 0);   // reset by start-of-turn 4
     EXPECT_EQ(s.hand_count, 10);
@@ -421,7 +420,7 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
               static_cast<uint16_t>(PowerId::STRENGTH));
     EXPECT_EQ(s.monsters[0].powers[1].amount, 5);
 
-    // Queues fully drained (guards NormalizeTransientQueues -- no live state lost).
+    // Queues fully drained (guards NormalizeScratch -- no live state lost).
     ASSERT_EQ(s.action_count, 0);
     ASSERT_EQ(s.pre_turn_count, 0);
     ASSERT_EQ(s.card_queue_count, 0);
@@ -467,7 +466,7 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     exp.monster_attacks_queued = 1;  // set during the last end-turn's step 4
     exp.turn_has_ended = 0;          // cleared by start-of-turn 4
 
-    // RNG end states from the A3.2 golden fixture (independent oracle).
+    // RNG end states from the golden Jaw Worm fixture (independent oracle).
     exp.monster_hp_rng = RngStream{6100601359716733802ull,
                                    2758559893557545682ull, 1, 0};
     exp.ai_rng = RngStream{15546794197076016033ull, 8850432053244781472ull, 4, 0};

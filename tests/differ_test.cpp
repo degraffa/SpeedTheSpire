@@ -1,6 +1,5 @@
-// A6.1 acceptance suite: the diff harness (trace format + field-by-field differ
-// + reproducer emitter + fixture oracle; design doc §8, §9). Per the ledger's
-// acceptance line:
+// The diff harness: trace format + field-by-field differ + reproducer emitter +
+// fixture oracle (design doc §8, §9).
 //   * synthetic divergence in EACH field group is caught and named -- one test
 //     per group (header, player scalars, player powers, card pool, each pile,
 //     monster scalars, monster powers, each queue, each of the 5 RNG streams,
@@ -415,7 +414,7 @@ TEST(DifferGroupBookkeeping, Flags) {
 }
 
 // Each RNG stream individually, so an RNG divergence is attributable to the
-// specific stream (InitialPlan's verification philosophy).
+// specific stream.
 TEST(DifferGroupRng, EachStreamNamedSeparately) {
     struct Case {
         const char* name;
