@@ -118,7 +118,7 @@ dungeon constructors, not a single lookup table — numeric result unchanged
 
 ## Phase 1 — RNG trio (Gate G1)
 
-### A1.1 `[ ]` ∥ `RandomXS128` bit-exact
+### A1.1 `[x]` ∥ `RandomXS128` bit-exact
 **Deps:** A0.1 · **Spec:** §3.1 · **Provenance:** RandomXS128.java
 **Deliverables:** `include/sts/engine/rng_xs128.hpp` (header-only, constexpr-
 friendly): `nextLong`, `nextInt(n)` with rejection loop, `nextDouble`,
@@ -126,7 +126,26 @@ friendly): `nextLong`, `nextInt(n)` with rejection loop, `nextDouble`,
 with the seed-0→INT64_MIN rule, `setState/getState`.
 **Acceptance:** gtest `rng_xs128_test` — byte-compare against golden set 1;
 traps 4, 5, 11 from §10 each have a named test.
-**Log:** —
+**Log:** `tests/rng_xs128_test.cpp` (new target, gtest `rng_xs128_test`):
+`RngXs128Golden.NextLongMatchesGoldenSet1ForEverySeedInBattery` byte-compares
+first 10k `next_long()` draws against all 38 `tests/golden/xs128_<label>.bin`
+files (label→seed parsed at runtime from `seed_battery.txt`) — bit-exact.
+Trap 4 (`RejectionLoopNotSimplifiedToModulo`) forces the reject branch with
+`n = 2^62+1` (~50% reject rate vs. the ~1e-16 typical-bound rate) and proves
+the returned value differs from the single-draw modulo shortcut. Trap 5
+(`SeedZeroScramblesAsInt64Min`) proves seed 0 and seed `INT64_MIN` produce
+identical state and draw sequences. Trap 11 (`NextFloatNarrowsFromDouble`)
+checks `next_float()` against a double-multiply-then-narrow reference, plus a
+standalone (non-power-of-two-multiplier) demonstration that float-space and
+double-space multiplication are not generally interchangeable — note:
+`nextFloat()`'s own operand/constant (24-bit value × exact `2^-24`) makes the
+two techniques provably coincide always for that specific formula, since
+rounding commutes with exact power-of-two scaling, so no in-situ divergence
+is reachable; recorded here since it's a one-line proof but easy to miss.
+Verified, not inferred: `ctest --preset debug` and `ctest --preset asan`
+both 6/6 green (`Smoke.*` ×2 + `RngXs128Golden.*` + `RngXs128Trap.*` ×3),
+WSL Ubuntu-2404, `cmake --preset {debug,asan}` → `cmake --build` → `ctest
+--output-on-failure`.
 
 ### A1.2 `[ ]` ∥ JDK LCG + `Collections.shuffle`
 **Deps:** A0.1 · **Spec:** §3.3 · **Provenance:** CardGroup.java:561-567
