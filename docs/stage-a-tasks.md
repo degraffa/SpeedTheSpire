@@ -147,14 +147,23 @@ both 6/6 green (`Smoke.*` ×2 + `RngXs128Golden.*` + `RngXs128Trap.*` ×3),
 WSL Ubuntu-2404, `cmake --preset {debug,asan}` → `cmake --build` → `ctest
 --output-on-failure`.
 
-### A1.2 `[ ]` ∥ JDK LCG + `Collections.shuffle`
+### A1.2 `[x]` ∥ JDK LCG + `Collections.shuffle`
 **Deps:** A0.1 · **Spec:** §3.3 · **Provenance:** CardGroup.java:561-567
 **Deliverables:** `include/sts/engine/rng_jdk.hpp`: 48-bit LCG (`nextInt`,
 `nextInt(bound)` incl. power-of-two and rejection paths) + `jdk_shuffle(span)`
 exact Fisher–Yates.
 **Acceptance:** gtest `rng_jdk_test` — permutations match golden set 4
 element-exactly.
-**Log:** —
+**Log:** `include/sts/engine/rng_jdk.hpp` (header-only `JdkRandom` LCG +
+`jdk_shuffle<T>(span<T>, JdkRandom&)`) and `tests/rng_jdk_test.cpp` added;
+`tests/CMakeLists.txt` gained an additive `rng_jdk_test` executable block
+(`STS_GOLDEN_DIR` compile definition resolves `tests/golden` regardless of
+ctest's CWD). Verified, not inferred: `ctest --preset debug` and `ctest
+--preset asan` both 100% pass (4/4 tests) — `RngJdk.ShuffleMatchesGoldenSetFour`
+byte/element-compares all 38 seed-battery entries × `n ∈ {5,10,71,128}` (152
+files) against `tests/golden/jdk_shuffle_<label>_<n>.bin`, zero mismatches;
+`RngJdkTrap.ShufflesRouteThroughJdkLcgNotXorshift` (trap 2) passes. No ASan/
+UBSan findings.
 
 ### A1.3 `[ ]` Game `Random` wrapper (`RngStream`)
 **Deps:** A1.1 · **Spec:** §3.2, §3.6 · **Provenance:** Random.java

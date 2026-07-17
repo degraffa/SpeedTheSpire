@@ -31,3 +31,15 @@ sts_set_warnings(rng_xs128_test)
 sts_enable_sanitizers(rng_xs128_test)
 
 gtest_discover_tests(rng_xs128_test)
+
+# A1.2: JDK LCG + Collections.shuffle bit-exactness suite.
+add_executable(rng_jdk_test
+    rng_jdk_test.cpp
+)
+
+target_link_libraries(rng_jdk_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(rng_jdk_test PRIVATE STS_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+sts_set_warnings(rng_jdk_test)
+sts_enable_sanitizers(rng_jdk_test)
+
+gtest_discover_tests(rng_jdk_test)
