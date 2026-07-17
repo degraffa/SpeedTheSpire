@@ -424,8 +424,8 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     pump(s, JawWormTurnWithEffects);          // monster CHOMP 12 (player 80->68), SoT2
 
     // ---- Turn 2: Defend (self), Pommel (monster), end turn ----
-    s.player_energy = 3;  // energy refill at turn start (test-supplied; the pump's
-                          // start-of-turn does not yet emit the energy action)
+    // (energy refill to 3 already happened for real inside the prior pump()
+    // call's start-of-turn sequence -- see kIroncladBaseEnergy gap-fix)
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Defend -> block 5
     pump(s, JawWormTurnWithEffects);
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Pommel into Vuln -> 9*1.5=13.5->13 (27->14), draw 1
@@ -434,7 +434,7 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     pump(s, JawWormTurnWithEffects);          // monster BELLOW (+5 Str,+9 blk), SoT3 (player block 5->0)
 
     // ---- Turn 3: Shrug It Off (self), end turn ----
-    s.player_energy = 3;
+    // (energy already refilled to 3 for real by the prior pump()'s start-of-turn)
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Shrug -> block 8, draw 1
     pump(s, JawWormTurnWithEffects);
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
@@ -444,7 +444,11 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     EXPECT_EQ(s.turn, 4);
     EXPECT_EQ(s.player_hp, 64);
     EXPECT_EQ(s.player_block, 0);
-    EXPECT_EQ(s.player_energy, 2);            // turn-3 refill 3 - Shrug 1
+    // Turn 3 spends down to 2 (refill 3 - Shrug 1), but the same pump() call
+    // that ends turn 3 also drains all the way through start-of-turn 4, which
+    // unconditionally refills energy again (kIroncladBaseEnergy gap-fix) --
+    // so the value observed here is turn 4's fresh 3, not turn 3's leftover 2.
+    EXPECT_EQ(s.player_energy, 3);
     EXPECT_EQ(s.cards_played_this_turn, 0);   // reset by start-of-turn 4
     EXPECT_EQ(s.hand_count, 10);
     EXPECT_EQ(s.draw_count, 8);
@@ -473,7 +477,7 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     exp.player_hp = 64;
     exp.player_max_hp = 80;
     exp.player_block = 0;
-    exp.player_energy = 2;
+    exp.player_energy = 3;  // start-of-turn-4 refill, see the comment above
     exp.cards_played_this_turn = 0;
 
     // Final hand (bottom->top): [22,21,20,19,18,17,16,15,14,13].

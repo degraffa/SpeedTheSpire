@@ -77,6 +77,16 @@ inline constexpr uint8_t kActorPlayer = 0xFF;
 // queued DrawCard item's `amount`; interpreted by A4.1/A4.2, not here.
 inline constexpr int32_t kStartOfTurnDrawCount = 5;
 
+// Ironclad's base energy per turn (EnergyManager.java: energyMaster, prep()).
+// Energy is SET to this value every turn via EnergyManager.recharge() -- not
+// additive, and not modeled by the design doc §5.2 prose (that paraphrase
+// omits it; the actual game wires recharge() through a presentation-layer
+// PlayerTurnEffect queued alongside the start-of-turn DrawCardAction, which is
+// exactly the "presentation-adjacent but outcome-affecting" case InitialPlan
+// D0.2 says stays in scope). No relic/power in the skeleton changes this
+// (Ice Cream / Conserve branches in EnergyManager.recharge() are unreachable).
+inline constexpr int16_t kIroncladBaseEnergy = 3;
+
 // --- Monster-turn extension point (the A3.1<->A3.2 seam) --------------------
 
 // Step 5 of the pump (design doc §5.2) runs one monster's turn. A3.1 owns the

@@ -90,6 +90,13 @@ void start_of_turn(CombatState& s) noexcept {
     // orbsChanneledThisTurn.clear() -- no orbs.
     // applyStartOfTurnRelics / PreDrawCards / Cards / Powers / Orbs -- all stubs
     // (no relics/orbs; skeleton powers have no start-of-turn hook).
+
+    // Energy recharge (EnergyManager.recharge(), gap-fix: see kIroncladBaseEnergy
+    // in action_queue.hpp -- design doc §5.2's prose omits this step, but the
+    // real game performs it every turn via a presentation-coupled effect that
+    // still affects outcomes, so it stays in scope). SET, not additive: any
+    // unspent energy from the previous turn does not carry over.
+    s.player_energy = kIroncladBaseEnergy;
     // NOTE: monster_attacks_queued is deliberately NOT reset here -- it is
     // cleared at the end-turn sentinel instead (see action_queue.hpp note (2)).
     s.turn_has_ended = 0;                        // this.turnHasEnded = false

@@ -621,7 +621,7 @@ test supplies the A20 move effects locally and reuses `jaw_worm_take_turn` for
 the move/aiRng progression): T1 Bash (8→monster 44→36) + Vuln 2, Strike (6×1.5=9,
 36→27), CHOMP 12 → player 80→68; T2 Defend (block 5), Pommel (9×1.5=13, 27→14) +
 draw, BELLOW +5 Str/+9 block; T3 Shrug (block 8) + draw, THRASH 7+Str5=12 vs
-block 8 → player 68→64. Final: player hp 64/energy 2/block 0, monster hp
+block 8 → player 68→64. Final: player hp 64/energy 3/block 0, monster hp
 14/block 14/Vuln 2/Str 5, move_history [Thrash,Thrash,Bellow], hand 10/draw
 8/discard 5, turn 4. Expected `CombatState` built independently from those
 hand-traced values (RNG end states taken from the A3.2 fixture); hashes matched.
@@ -631,14 +631,22 @@ the queue rings) leave stale bytes beyond `count` on removal. Handled by a
 documented `NormalizeScratch` that zeroes the four drained queue rings AND the
 dead pile tails `[count, cap)` on BOTH states before hashing (asserting all queue
 counts are 0 first, so no live state is dropped); this is drained scratch, not
-gameplay state (rules only read `[0, count)`). One test-scaffolding note recorded
-in the test: the pump's start-of-turn does not yet emit the energy-refill action,
-so the test sets `player_energy = 3` at each turn start. Verified by running, not
-inferred: WSL Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest
---output-on-failure` — both presets `100% tests passed, 0 failed out of 90` (80
-pre-existing A4.2-era + 10 new: 8 `CardTable.*`, `CardPlayTrap.*`,
-`CardIntegration.*`); no build warnings; `action_queue_test`/`jaw_worm_test`/
-`damage_pipeline_test`/`piles_test` still green after the step-3 dispatch change.
+gameplay state (rules only read `[0, count)`). **Post-commit gap-fix:** the
+initial submission worked around a real missing engine feature by hand-scripting
+`player_energy = 3` at each turn start in the test, since `start_of_turn` never
+refilled energy (design doc §5.2's prose omits it — see the §12 change-log entry
+"A4.3 — energy recharge missing from the §5.2 start-of-turn sequence"). Fixed:
+`kIroncladBaseEnergy = 3` added to `action_queue.hpp`; `start_of_turn` now sets
+`player_energy = kIroncladBaseEnergy` unconditionally every turn; the test
+scaffolding was removed and the hand-traced expected final energy corrected
+2 → 3 (the same `pump()` call ending turn 3 also drains through start-of-turn 4,
+which refills again before the assertions run — not a new bug, a trace error
+exposed by removing the workaround). Verified by running, not inferred: WSL
+Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest --output-on-failure`
+— both presets `100% tests passed, 0 failed out of 90` (80 pre-existing A4.2-era
++ 10 new: 8 `CardTable.*`, `CardPlayTrap.*`, `CardIntegration.*`); no build
+warnings; `action_queue_test`/`jaw_worm_test`/`damage_pipeline_test`/`piles_test`
+still green after the step-3 dispatch change AND after the energy-refill fix.
 No ASan/UBSan findings.
 
 ---

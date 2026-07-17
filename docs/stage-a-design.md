@@ -493,3 +493,29 @@ decompiled Java > this design doc > the task ledger).
   stated the wrong rule — only the ledger's deliverable prose did — so this is a
   ledger-prose correction recorded here for durability; no frozen mechanics
   change. Java (§1 precedence) outranks the ledger.
+
+- **A4.3 — energy recharge missing from the §5.2 start-of-turn sequence.**
+  §5.2's start-of-turn enumeration (`applyStartOfTurnRelics` →
+  `applyStartOfTurnPreDrawCards`/`Cards`/`Powers`/`Orbs` → `turn++` → block
+  decay → queue `DrawCardAction` → `applyStartOfTurnPostDrawRelics`/`Powers`)
+  never mentions energy. The real game DOES refill energy every turn, via
+  `EnergyManager.recharge()` (`EnergyManager.java:25-38`, `SET` not additive:
+  `EnergyPanel.setEnergy(this.energy)` for the skeleton's relic/power-free
+  case) — but it's invoked from `PlayerTurnEffect.update()`
+  (`PlayerTurnEffect.java:46`), a presentation-layer VFX object queued
+  alongside the start-of-turn `DrawCardAction` (`endTurnDraw = true`), not from
+  `GameActionManager` directly. This is exactly the "presentation-adjacent but
+  outcome-affecting" case InitialPlan §D0.2 keeps in scope, so its absence from
+  §5.2's prose is a paraphrase gap, not an intentional omission. Found when
+  A4.3's 3-turn integration test needed to hand-script `player_energy = 3`
+  every turn as scaffolding because A3.1's `start_of_turn` never refilled it.
+  Fixed post-A4.3: `action_queue.hpp` gained `kIroncladBaseEnergy = 3`;
+  `action_queue.cpp::start_of_turn` now sets `player_energy = kIroncladBaseEnergy`
+  unconditionally each turn; the integration test's scaffolding was removed
+  (both manual `player_energy = 3` lines) and its hand-traced expected energy
+  corrected from 2 to 3 — the same `pump()` call that ends turn 3 also drains
+  through start-of-turn 4, which legitimately refills energy again before the
+  test's assertions run. Verified: full suite (90 tests) green in debug and
+  asan after the fix. No relic/power in the skeleton reaches EnergyManager's
+  Ice Cream/Conserve branches, so the SET-to-constant simplification is exact
+  for M1.
