@@ -6,10 +6,9 @@
 // (AbstractPlayer.java:1584) / CardGroup.initializeDeck (CardGroup.java:928-955)
 // / copy.shuffle(shuffleRng) == Collections.shuffle(group,
 // new java.util.Random(shuffleRng.randomLong())) (CardGroup.java:561-567). The
-// combat-start shuffle is byte-for-byte the same mechanism as A4.2's in-combat
+// combat-start shuffle is byte-for-byte the same mechanism as the in-combat
 // reshuffle (piles.cpp shuffle_discard_into_draw): one shuffle_rng.random_long()
-// seeds a JdkRandom whose LCG drives jdk_shuffle's Fisher-Yates. Verified by
-// reading the cited Java, not assumed.
+// seeds a JdkRandom whose LCG drives jdk_shuffle's Fisher-Yates.
 
 #include "sts/engine/advance.hpp"
 
@@ -56,8 +55,8 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
 
     // -- The five floor-scoped RNG streams (design doc §3.4 / §3.6). All five
     //    share the identical seed formula run_seed + floor at floor entry
-    //    (floor_stream), so they start IDENTICAL -- this is correct and
-    //    golden-vector-verified in A1.3, not a bug. --
+    //    (floor_stream), so they start IDENTICAL -- this is correct
+    //    (golden-vector-verified), not a bug. --
     state.monster_hp_rng = floor_stream(run_seed, floor);
     state.ai_rng = floor_stream(run_seed, floor);
     state.shuffle_rng = floor_stream(run_seed, floor);
@@ -69,7 +68,7 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    with shuffleRng, then addToTop's each card front-to-back onto the empty
     //    draw pile -- so the draw pile list becomes the shuffled copy in the SAME
     //    order, getTopCard (== last element) drawn first. Our draw[] convention
-    //    (draw[draw_count-1] == top) mirrors that list, identical to A4.2's
+    //    (draw[draw_count-1] == top) mirrors that list, identical to the in-combat
     //    reshuffle: build the pool-index order in deck order, draw ONE
     //    shuffle_rng.random_long(), seed a JdkRandom, jdk_shuffle in place, then
     //    the shuffled order IS the draw[] order. --
@@ -96,7 +95,7 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
 
     // -- Monster: one Jaw Worm (design doc §9). jaw_worm_init rolls HP from
     //    monster_hp_rng and performs decision #1 (forced-first-move Chomp,
-    //    consuming one ai_rng draw), A3.2. --
+    //    consuming one ai_rng draw). --
     state.monster_count = 1;
     jaw_worm_init(state, 0);
 
@@ -106,8 +105,8 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    shows the branch it lands on given empty queues depends on two flags:
     //      * monster_attacks_queued == 1  -> step 4 is skipped, so no monster
     //        turn is queued before the player has had turn 1 (this is exactly the
-    //        A3.1 invariant "monster_attacks_queued stays true through the
-    //        player's turn"; the flag is cleared only at the end-turn sentinel).
+    //        invariant "monster_attacks_queued stays true through the player's
+    //        turn"; the flag is cleared only at the end-turn sentinel).
     //      * turn_has_ended == 1          -> step 6 (start_of_turn) fires,
     //        running the opening-hand draw, energy refill, and ++turn (0 -> 1).
     //    With both set and every queue empty, one pump() call runs: step 6

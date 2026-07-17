@@ -1,12 +1,12 @@
 // Pile operations -- draw / reshuffle / exhaust. See piles.hpp for the full
-// provenance, the hand-size-cap correction (decompiled Java > ledger prose), and
-// the headless timing simplification rationale.
+// provenance, the hand-size-cap correction, and the headless timing
+// simplification rationale.
 //
 // Provenance: AbstractPlayer.draw(int/void) (AbstractPlayer.java:1632-1665),
 // DrawCardAction.update (DrawCardAction.java:63-127), EmptyDeckShuffleAction.
 // update (EmptyDeckShuffleAction.java:42-64), CardGroup.shuffle(Random)
-// (CardGroup.java:565-567), Soul.shuffle (Soul.java:90-102). Reuses A1.2's
-// golden-tested JdkRandom + jdk_shuffle and A1.3's random_long. Design doc §3.3,
+// (CardGroup.java:565-567), Soul.shuffle (Soul.java:90-102). Reuses the
+// golden-tested JdkRandom + jdk_shuffle and random_long. Design doc §3.3,
 // §9; §10 trap 2.
 
 #include "sts/engine/piles.hpp"
@@ -57,9 +57,9 @@ int draw_cards(CombatState& s, int amount) noexcept {
         return 0;
     }
 
-    // Hand-size cap, applied ONCE up front (DrawCardAction.java:92-97, corrected):
+    // Hand-size cap, applied ONCE up front (DrawCardAction.java:92-97):
     // amount = min(amount, kHandCap - hand_count). Overflowing cards are simply
-    // never drawn -- there is NO draw-then-discard. See piles.hpp's correction.
+    // never drawn -- there is NO draw-then-discard.
     const int capacity = kHandCap - s.hand_count;
     if (amount > capacity) {
         amount = capacity;
@@ -88,7 +88,6 @@ int draw_cards(CombatState& s, int amount) noexcept {
 }
 
 void exhaust_card(CombatState& s, int pool_index) noexcept {
-    // Relocated verbatim from A4.1's interp.cpp op_exhaust (behavior unchanged).
     if (pool_index < 0 || pool_index > 0xFF) {
         return;
     }

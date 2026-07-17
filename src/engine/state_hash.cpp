@@ -4,9 +4,8 @@
 //
 // xxHash is pulled in header-only: XXH_INLINE_ALL makes xxhash.h define every
 // symbol with internal linkage in this single translation unit, so there is no
-// separate library to build or link (the xxhash target is include-only). xxh3
-// was pre-approved as A2.2's one new dependency by the Stage A working
-// agreements; the FetchContent pin lives in the top-level CMakeLists.txt.
+// separate library to build or link (the xxhash target is include-only). The
+// FetchContent pin lives in the top-level CMakeLists.txt.
 
 #define XXH_INLINE_ALL
 #include "xxhash.h"

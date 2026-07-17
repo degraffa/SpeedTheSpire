@@ -1,5 +1,5 @@
-// Jaw Worm AI + monster turn (task A3.2). See monster_jaw_worm.hpp for the
-// full provenance, scope boundary, and draw-counting convention.
+// Jaw Worm AI + monster turn. See monster_jaw_worm.hpp for the full provenance,
+// scope boundary, and draw-counting convention.
 //
 // Provenance: JawWorm.getMove (JawWorm.java:148-184), JawWorm.takeTurn
 // (:120-146), AbstractMonster.rollMove/lastMove/lastTwoMoves/setMove/setHp
@@ -92,8 +92,8 @@ void get_move(CombatState& state, MonsterState& m, int32_t num) noexcept {
 }
 
 // Enqueue the CURRENT move's real effects, in JawWorm.takeTurn's addToBottom
-// order (JawWorm.java:120-146; A6.2 gap-fix -- see the header SCOPE note). The
-// move to execute is m.move_history[0] (decided at its roll time). Effects are
+// order (JawWorm.java:120-146). The move to execute is m.move_history[0]
+// (decided at its roll time). Effects are
 // QUEUED (add_to_bottom), never applied inline, so they resolve through the pump
 // priority loop exactly like a card's effects -- the monster's Strength is read
 // by the DAMAGE pipeline (compute_damage) at resolution, so Chomp/Thrash pick up
@@ -172,10 +172,8 @@ void jaw_worm_take_turn(CombatState& state, uint8_t monster_index) noexcept {
 
     // (a) Execute the currently-decided move: QUEUE its real DamageAction/
     //     GainBlockAction/ApplyPowerAction effects in JawWorm.takeTurn order
-    //     (JawWorm.java:120-146). A6.2 gap-fix -- the A3.2 scope note deferred
-    //     these enqueues to "A4.x"; they were never attached until now (see the
-    //     header SCOPE note and design doc §12 change log). The move to execute
-    //     is m.move_history[0], decided at its roll time.
+    //     (JawWorm.java:120-146). The move to execute is m.move_history[0],
+    //     decided at its roll time.
     queue_move_effects(state, monster_index, m.move_history[0]);
 
     // (b) Roll the NEXT move: JawWorm.takeTurn ends with an unconditional

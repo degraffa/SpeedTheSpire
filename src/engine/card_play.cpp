@@ -26,9 +26,9 @@ namespace {
 
 // The card-play hook fan-out (design doc §5.3; AbstractPlayer.useCard:1358-1372).
 // Every listener is a no-op in the M1 skeleton (zero relics/powers/blights/
-// stances with an onPlayCard body). Present as a documented stub so Stage B
-// attaches real listeners here without moving the call site -- and in the exact
-// acquisition/pile order the game triggers them.
+// stances with an onPlayCard body). Present as a documented stub so a future
+// stage attaches real listeners here without moving the call site -- and in the
+// exact acquisition/pile order the game triggers them.
 void trigger_on_play_card(CombatState& /*s*/, const CardDef& /*def*/,
                           uint8_t /*target*/) noexcept {
     // player powers onPlayCard -> each monster's powers onPlayCard -> relics

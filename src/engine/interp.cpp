@@ -13,7 +13,7 @@
 
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/piles.hpp"   // A4.2: draw_cards / shuffle_discard_into_draw / exhaust_card
+#include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -101,8 +101,8 @@ struct PowerView {
 
 // Player stance hooks. The skeleton is stanceless (design doc §4.2: stance
 // field is a "0 = None" placeholder), so both are documented identity stubs --
-// written as real call sites (matching A3.1's Barricade/Blur/Calipers pattern)
-// so a future stance system attaches here without touching the pipeline shape.
+// written as real call sites so a future stance system attaches here without
+// touching the pipeline shape.
 [[nodiscard]] float stance_at_damage_give(const CombatState& /*s*/, float dmg) noexcept {
     return dmg;  // AbstractStance.atDamageGive default (no stance active)
 }
@@ -114,8 +114,8 @@ struct PowerView {
 
 // DAMAGE: compute output via the pipeline, then land it on tgt -- block absorbs
 // first (decrementBlock: block soaks up to its value), remainder hits hp,
-// currentHealth clamped >= 0. (Death/onDeath handling is A4.x; the pump's
-// hp<=0 check drives the COMBAT_OVER transition.)
+// currentHealth clamped >= 0. (Death/onDeath handling is not yet modeled; the
+// pump's hp<=0 check drives the COMBAT_OVER transition.)
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base) noexcept {
     if (tgt != kActorPlayer && tgt >= kMonsterCap) {
         return;
@@ -163,7 +163,7 @@ void op_block(CombatState& s, uint8_t tgt, int amount) noexcept {
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
 // slot of the same id, else appends a new slot (hard cap kPowerCap -- overflow
 // is a silent no-op here rather than an assert, since a malformed item must not
-// crash; real card play A4.3 never overflows 24 skeleton powers).
+// crash; real card play never overflows 24 skeleton powers).
 void op_apply_power(CombatState& s, uint8_t tgt, PowerId id, int amount) noexcept {
     if (id == PowerId::NONE) {
         return;
@@ -194,9 +194,9 @@ void op_apply_power(CombatState& s, uint8_t tgt, PowerId id, int amount) noexcep
     ++*count;
 }
 
-// DRAW and EXHAUST (and SHUFFLE_IN) are implemented in piles.cpp (A4.2:
-// draw_cards / exhaust_card / shuffle_discard_into_draw); the dispatch below
-// delegates to them. A4.1's op_draw/op_exhaust stubs were superseded and removed.
+// DRAW and EXHAUST (and SHUFFLE_IN) are implemented in piles.cpp
+// (draw_cards / exhaust_card / shuffle_discard_into_draw); the dispatch below
+// delegates to them.
 
 }  // namespace
 
@@ -268,7 +268,7 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                            item.amount);
             return;
         case Opcode::DRAW:
-            (void)draw_cards(s, item.amount);  // A4.2 (piles.cpp): cap + reshuffle
+            (void)draw_cards(s, item.amount);  // piles.cpp: cap + reshuffle
             return;
         case Opcode::GAIN_ENERGY:
             // player_energy += amount; no max-energy field to clamp against
@@ -276,13 +276,13 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             s.player_energy = static_cast<int16_t>(s.player_energy + item.amount);
             return;
         case Opcode::SHUFFLE_IN:
-            shuffle_discard_into_draw(s);  // A4.2 (piles.cpp): shuffle_rng + JDK LCG
+            shuffle_discard_into_draw(s);  // piles.cpp: shuffle_rng + JDK LCG
             return;
         case Opcode::EXHAUST:
-            exhaust_card(s, item.amount);  // A4.2 (piles.cpp)
+            exhaust_card(s, item.amount);  // piles.cpp
             return;
         case Opcode::ROLL_MOVE:
-            return;  // A3.2-owned stub: Jaw Worm rolls inside its MonsterTurnFn
+            return;  // stub: Jaw Worm rolls inside its MonsterTurnFn
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }
