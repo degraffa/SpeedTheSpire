@@ -17,3 +17,14 @@ sts_enable_sanitizers(sts_engine_tests)
 
 include(GoogleTest)
 gtest_discover_tests(sts_engine_tests)
+
+add_executable(rng_jdk_test
+    rng_jdk_test.cpp
+)
+
+target_link_libraries(rng_jdk_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(rng_jdk_test PRIVATE STS_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden")
+sts_set_warnings(rng_jdk_test)
+sts_enable_sanitizers(rng_jdk_test)
+
+gtest_discover_tests(rng_jdk_test)
