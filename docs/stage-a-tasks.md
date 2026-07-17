@@ -176,13 +176,34 @@ UBSan findings.
 named tests; `static_assert` trivially-copyable + size 24.
 **Log:** —
 
-### A1.4 `[ ]` ∥ `SeedHelper` conversion
+### A1.4 `[x]` ∥ `SeedHelper` conversion
 **Deps:** A0.1 · **Spec:** §3.5 · **Provenance:** SeedHelper.java
 **Deliverables:** `include/sts/engine/seed_string.hpp` — base-35 both
 directions (unsigned out, wrapping in), O→0 sterilization.
 **Acceptance:** gtest `seed_string_test` — golden set 6 round-trips; trap 6
 named test.
-**Log:** —
+**Log:** Implemented `seed_to_string`/`seed_from_string`/`seed_valid_character`
+in `include/sts/engine/seed_string.hpp`, replicating `SeedHelper.getString`
+(unsigned base-35 encode via `uint64_t`, empty string for seed 0 since the
+encode loop is `while (leftover != 0)`), `getLong` (uppercase + inline O→0
+sterilization, `uint64_t`-accumulated signed-wrapping decode, `static_cast`
+to `int64_t` at the return — well-defined mod-2^64 reinterpretation per
+C++20), and `getValidCharacter` (O/o→0, else membership test, `kSeedInvalidChar`
+sentinel for no mapping). New gtest binary `tests/seed_string_test.cpp`
+appended to `tests/CMakeLists.txt` (additive block, existing
+`sts_engine_tests` target untouched) parses `tests/golden/seedhelper.txt`
+(`STS_GOLDEN_DIR` compile definition) at runtime: all 32 `RT` rows
+round-tripped both directions and cross-checked against the recorded `match`
+flag, the `OTEST` row's O-substituted string decodes to the same long, all 4
+`VALIDCHAR` rows match, plus a dedicated `SeedStringTrap.
+EncodeUnsignedDecodeSignedWrapping` test (INT64_MIN/-1 unsigned-encode
+round-trips + an independent-derivation overflow check for decode's
+signed-wrapping accumulation). Verified by running, not inferred: `cmake
+--preset debug && cmake --build --preset debug && ctest --preset debug` and
+the same for `asan` (WSL Ubuntu-2404) — both presets report `100% tests
+passed, 7 tests` (2 pre-existing smoke tests + 5 in `seed_string_test`,
+including the trap test), `ctest` discovering `seed_string_test` correctly
+via the golden-dir compile definition.
 
 ### G1 `[ ]` **Gate: tier-1 RNG suite green**
 **Deps:** A1.1–A1.4
