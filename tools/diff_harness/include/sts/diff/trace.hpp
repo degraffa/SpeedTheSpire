@@ -1,7 +1,7 @@
 #pragma once
 
-// Trajectory trace file format (design doc §8) -- the permanent Stage B
-// artifact half of the diff harness (A6.1). A trace is the on-disk form of
+// Trajectory trace file format (design doc §8) -- the permanent half of the
+// diff harness. A trace is the on-disk form of
 // "(seed, action[]) -> state snapshot after every action" (design doc §9): it
 // stores the whole trajectory of one fight so it can be replayed, diffed, or
 // used as a fixture oracle (see oracle.hpp).
@@ -17,23 +17,21 @@
 //     uint32_t state_size      = sizeof(CombatState)  (second safety check)
 //     uint32_t record_count                           (number of records)
 //     int64_t  seed                                   (the fight's run seed --
-//                                                      an extension of §8's
-//                                                      minimal container, needed
-//                                                      because §9 defines a trace
-//                                                      as "(seed, action[]) ->
-//                                                      ..."; without it a trace
-//                                                      is not self-replayable)
+//                                                      needed because §9 defines
+//                                                      a trace as "(seed,
+//                                                      action[]) -> ..."; without
+//                                                      it a trace is not
+//                                                      self-replayable)
 //
 //   record[record_count], each:
 //     CombatState state   (raw memcpy of sizeof(CombatState) bytes -- design
 //                          doc §8: "Serialization is memcpy")
 //     uint32_t    action  (the Action.bits that PRODUCED this state; 0 for the
 //                          initial record -- see the record convention below)
-//     uint32_t    aux     (bit 0 = terminal flag: the state's phase is
-//                          COMBAT_OVER; bits 1..31 reserved 0. Design doc §8
-//                          names "aux" without fixing contents; this is the
-//                          documented choice -- a cheap terminal marker so a
-//                          reader can find combat end without decoding the state)
+//     uint32_t    aux     (design doc §8's "aux" field. bit 0 = terminal flag:
+//                          the state's phase is COMBAT_OVER; bits 1..31 reserved
+//                          0 -- a cheap terminal marker so a reader can find
+//                          combat end without decoding the state)
 //
 // RECORD CONVENTION: records[0] is the INITIAL state (as returned by
 // combat_begin, before any action) with action == 0; records[k] (k >= 1) is the

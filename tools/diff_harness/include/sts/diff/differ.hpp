@@ -1,16 +1,16 @@
 #pragma once
 
 // Field-by-field CombatState differ (design doc §8: "states compared
-// field-by-field with named-field diff output"). The other permanent Stage B
-// artifact half of the diff harness (A6.1): the oracle adapter is provisional
-// (fixture now, CommunicationMod in Stage B), but the differ never changes.
+// field-by-field with named-field diff output"). The other permanent half of
+// the diff harness: the oracle adapter is provisional (fixture now,
+// CommunicationMod later), but the differ never changes.
 //
 // This is a DEBUGGING tool, not a hot-path routine: it returns human-readable
 // named diffs (`"monsters[0].powers[1].amount"`, `"ai_rng.counter"`) a person
 // can act on, not an opaque byte comparison. Strings and heap allocation are
 // fine here (offline, not the zero-alloc advance() loop).
 //
-// FAST PATH (design doc §4.1 / A2.2 value-init guarantee): if
+// FAST PATH (design doc §4.1 value-init guarantee): if
 // hash_state(expected) == hash_state(actual), the two states are byte-identical
 // (both value-initialized, padding-deterministic), so diff_states returns an
 // empty report immediately WITHOUT the expensive field walk. The full walk runs
