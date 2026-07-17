@@ -67,3 +67,14 @@ sts_set_warnings(rng_stream_test)
 sts_enable_sanitizers(rng_stream_test)
 
 gtest_discover_tests(rng_stream_test)
+
+# A2.1: core id enums + CardInstance/PowerSlot/Action scaffolding suite.
+add_executable(types_test
+    types_test.cpp
+)
+
+target_link_libraries(types_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(types_test)
+sts_enable_sanitizers(types_test)
+
+gtest_discover_tests(types_test)

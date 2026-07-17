@@ -253,14 +253,37 @@ binaries are already gated on every push/PR. Tagged `g1-rng-green`; CLAUDE.md
 
 ## Phase 2 — State structs
 
-### A2.1 `[ ]` Core ids and card instance types
+### A2.1 `[x]` Core ids and card instance types
 **Deps:** G1 · **Spec:** §4.2, §6
 **Deliverables:** `include/sts/engine/types.hpp` — `CardId/PowerId/MonsterId/
 RelicId` (u16 enums generated later; hand-written for skeleton set),
 `CardInstance {card_id, upgrade, cost_now, flags, misc}`, `PowerSlot
 {power_id, amount}`, `Action {u32}` verb encoding from §7.
 **Acceptance:** `static_assert` sizes; smoke test constructs each.
-**Log:** —
+**Log:** `include/sts/engine/types.hpp` (header-only, `sts::engine`):
+`CardId`/`PowerId`/`MonsterId`/`RelicId` u16 enums, each with `NONE = 0` as
+the empty-slot sentinel convention (real ids start at 1), hand-written for
+exactly the M1 skeleton set (§9) — `CardId` gets the five skeleton cards,
+`PowerId` gets Strength/Vulnerable/Weak, `MonsterId` gets Jaw Worm, `RelicId`
+is sentinel-only pending Stage B's registry. `CardInstance {card_id: u16,
+upgrade: u8, cost_now: u8, flags: u16, misc: u16}` = 8 bytes (`flags`/`misc`
+documented as reserved-for-future-use, unused by the skeleton set).
+`PowerSlot {power_id: u16, amount: i16}` = 4 bytes. `Action {bits: uint32_t}`
+= 4 bytes packing `verb:8 | arg0:8 | arg1:8 | arg2:8` low-byte-first (this
+file's concrete choice for §7's field order, documented inline), plus
+`ActionVerb` enum (`PLAY_CARD, END_TURN, USE_POTION, CHOOSE`) and
+`make_action`/`action_verb`/`action_arg0/1/2` helpers so no caller hand-rolls
+bit shifts. All three struct types carry in-header `static_assert`
+trivially-copyable + exact-size checks. New gtest binary
+`tests/types_test.cpp` (target `types_test`, additive `tests/CMakeLists.txt`
+block matching the existing per-task pattern) re-asserts the same size/
+copyability checks as a regression guard and smoke-constructs one of every
+type, including an `Action` round-trip test with distinct non-overlapping
+byte values in every arg lane to catch shift/mask mistakes. Verified by
+running, not inferred: WSL Ubuntu-2404, `cmake --preset {debug,asan}` →
+`cmake --build` → `ctest --output-on-failure` — both presets report `100%
+tests passed, 0 tests failed out of 25` (the 18 pre-existing Phase-0/1 cases
+plus 7 new `TypesSmoke.*` cases). No ASan/UBSan findings.
 
 ### A2.2 `[ ]` `CombatState` / `RunState`
 **Deps:** A2.1 · **Spec:** §4.2–4.4
