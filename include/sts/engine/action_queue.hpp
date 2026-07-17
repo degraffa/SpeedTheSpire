@@ -57,13 +57,15 @@ namespace sts::engine {
 // card reference at all". A4.3 constructs the sentinel via make_end_turn_sentinel().
 inline constexpr CardPoolIndex kEndTurnSentinel = 255;
 
-// Placeholder DRAW opcode for the start-of-turn DrawCardAction the pump queues
-// (design doc §5.2 step 6). A4.1 owns the real opcode table (design doc §6:
-// DAMAGE, BLOCK, APPLY_POWER, DRAW, GAIN_ENERGY, SHUFFLE_IN, EXHAUST,
-// ROLL_MOVE); this constant matches that list's ordering (DRAW == 3) so it
-// lines up conceptually and A4.1 can drop in the real enum without changing the
-// queued item's shape. Not interpreted by A3.1 -- the pump just pops it.
-inline constexpr uint16_t kOpcodeDrawCard = 3;
+// DRAW opcode value for the start-of-turn DrawCardAction the pump queues
+// (design doc §5.2 step 6). A4.1 landed the real opcode table (interp.hpp:
+// Opcode), which reserves NOP == 0 as a safe no-op for value-init'd/unrecognized
+// items and numbers §6's set from 1 -- so the real DRAW is 4, not the A3.1
+// placeholder's 3. This mirror constant is kept so action_queue.cpp needn't
+// include interp.hpp in its hot path; interp.hpp's value is authoritative and
+// action_queue.cpp static_asserts the two agree (kOpcodeDrawCard ==
+// (uint16_t)Opcode::DRAW).
+inline constexpr uint16_t kOpcodeDrawCard = 4;
 
 // Reserved actor index meaning "the player" in an ActionQueueItem's src/tgt
 // (combat_state.hpp: "player is a reserved sentinel, monsters are monster-array

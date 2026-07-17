@@ -129,3 +129,17 @@ sts_set_warnings(jaw_worm_test)
 sts_enable_sanitizers(jaw_worm_test)
 
 gtest_discover_tests(jaw_worm_test)
+
+# A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
+# Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
+# float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
+# no-op checks, and a pump() wiring regression. Links sts_engine (interp.cpp).
+add_executable(damage_pipeline_test
+    damage_pipeline_test.cpp
+)
+
+target_link_libraries(damage_pipeline_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(damage_pipeline_test)
+sts_enable_sanitizers(damage_pipeline_test)
+
+gtest_discover_tests(damage_pipeline_test)

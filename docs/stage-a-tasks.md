@@ -448,7 +448,7 @@ inferred: WSL Ubuntu-2404, `cmake --preset {debug,asan}` -> build -> `ctest
 
 ## Phase 4 — Effect interpreter + the five cards
 
-### A4.1 `[ ]` Opcode interpreter + damage pipeline
+### A4.1 `[x]` Opcode interpreter + damage pipeline
 **Deps:** A3.1 · **Spec:** §5.5, §6 · **Provenance:** DamageInfo.java:35-100
 **Deliverables:** `src/engine/interp.cpp`: opcodes `DAMAGE, BLOCK, APPLY_POWER,
 DRAW, GAIN_ENERGY, SHUFFLE_IN, EXHAUST, ROLL_MOVE`; damage in float, hook
@@ -458,7 +458,58 @@ sides), Weak (cheap to add, needed by tests).
 Strength/Vulnerable/Weak stacking checked against hand-computed values from
 the cited Java (incl. float-rounding edge case: base 7, Str 2, Vuln → 13 not
 13.5-rounded); trap 1 named test.
-**Log:** —
+**Log:** `include/sts/engine/interp.hpp` + `src/engine/interp.cpp` (added to the
+`sts_engine` lib): `enum class Opcode : uint16_t` and
+`execute_opcode(CombatState&, const ActionQueueItem&)` dispatch + a pure
+`compute_damage(state, src, tgt, base)` returning the floored/clamped output.
+Provenance re-read + confirmed before coding: DamageInfo.applyPowers
+(DamageInfo.java:35-100) — both ownership branches implemented exactly (monster-
+owned: owner `atDamageGive` → target `atDamageReceive` → player-stance
+`atDamageReceive` → `atDamageFinalGive`/`atDamageFinalReceive`; player-owned:
+owner `atDamageGive` → player-stance `atDamageGive` → target `atDamageReceive`
+→ finals), accumulated in a local `float`, floored ONCE at the end via a
+bit-faithful `mathutils_floor` (`(int)((double)v+16384.0)-16384`,
+MathUtils.java:217 — a floor, not round), clamped ≥0. Skeleton power hooks:
+Strength `+amount` (StrengthPower.java:96), Vulnerable `×1.5f`
+(VulnerablePower.java:70, the Odd Mushroom/Paper Frog relic branches
+unreachable), Weak `×0.75f` (WeakPower.java:67, Paper Crane branch
+unreachable); `atDamageFinal*` + player-stance are documented identity stubs
+(skeleton is stanceless, §4.2). BLOCK = straight `block += amount`
+(AbstractCreature.addBlock — no Str/Vuln/Weak/relic hook on block gain in this
+version; hook site commented). **Decisions (documented in interp.hpp):**
+(1) **Actor sentinel** — reused A3.1's existing `kActorPlayer == 0xFF` (monsters
+are slots 0..4); did NOT mint a new constant. (2) **APPLY_POWER encoding** —
+`flags` low-16 carry the `PowerId` (via `make_apply_power_flags`/
+`apply_power_id_from_flags`), `amount` is the stack count, `tgt` the recipient;
+A4.3 builds items this way. (3) **Opcode numbering** — reserved `NOP == 0` as a
+safe no-op because A3.1/A3.2 tests push value-initialized `ActionQueueItem`s
+(opcode 0) through `pump_step`; real opcodes are §6's set numbered 1..8, which
+shifts real `DRAW` to 4 — updated `action_queue.hpp`'s `kOpcodeDrawCard` 3→4 and
+added a `static_assert(kOpcodeDrawCard == (uint16_t)Opcode::DRAW)` in
+`action_queue.cpp` (design doc §6 assigns no numeric values, so this is an
+implementation choice, not a doc conflict). (4) **SHUFFLE_IN stub** — dispatch
+slot only; the discard→draw reshuffle (shuffle_rng + JDK shuffle) is A4.2's
+deliverable. (5) **ROLL_MOVE stub** — A3.2 already rolls Jaw Worm's move inside
+`jaw_worm_take_turn` (tested, 51/51); opcode reserved for future data-driven AI,
+`monster_jaw_worm.*` untouched. (6) **DRAW** — minimal non-empty/non-overflow
+slice (top of draw → hand); empty-pile reshuffle and hand-cap-10 overflow are
+documented A4.2 hand-offs. (7) **EXHAUST** — `amount` carries the card-pool
+index; card located in `hand`, moved to `exhaust`. **Wiring:** `pump_step`
+steps 1 & 2 now call `execute_opcode` on every popped action/pre-turn item
+(additive to `action_queue.cpp`, no rewrite); NOP/unrecognized-opcode no-op path
+keeps A3.1/A3.2's placeholder-item tests green. New gtest `damage_pipeline_test`
+(9th block in `tests/CMakeLists.txt`): 10-row hand-computed
+Strength/Vulnerable/Weak table (incl. the 7/Str2/Vuln→13 edge and a monster-
+owned branch), `DamagePipelineTrap.FloatAccumulationFlooredOnceNoIntegerShortcuts`
+(the 7/2/→13 case PLUS base-5 Weak+Vuln where float-once=5 diverges from
+integer-per-step=4), per-opcode direct checks (BLOCK/APPLY_POWER/GAIN_ENERGY/
+DRAW/EXHAUST), SHUFFLE_IN/ROLL_MOVE/NOP/unrecognized memcmp no-op checks, and two
+`pump()`-wiring regressions (queued DAMAGE lands on the target; pre-turn
+GAIN_ENERGY applies). Verified by running, not inferred: WSL Ubuntu-2404,
+`cmake --preset {debug,asan}` → build → `ctest --output-on-failure` — both
+presets `100% tests passed, 0 failed out of 62` (51 pre-existing + 11 new);
+`action_queue_test` and `jaw_worm_test` still green after the pump wiring. No
+ASan/UBSan findings.
 
 ### A4.2 `[ ]` Draw/discard/reshuffle + energy
 **Deps:** A4.1, A1.2 · **Spec:** §3.3, §9 · **Provenance:** CardGroup.java:561-567

@@ -3,6 +3,7 @@ add_library(sts_engine
     state_hash.cpp
     action_queue.cpp
     monster_jaw_worm.cpp
+    interp.cpp
 )
 
 target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)

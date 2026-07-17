@@ -11,8 +11,15 @@
 #include <cassert>
 
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/interp.hpp"  // A4.1: execute_opcode wired into pump_step
 
 namespace sts::engine {
+
+// A4.1 reconciliation: the start-of-turn DrawCardAction (start_of_turn below)
+// queues kOpcodeDrawCard, which must equal the interpreter's real DRAW opcode
+// so the queued item actually draws when popped. Kept in lockstep here.
+static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
+              "start-of-turn DrawCard opcode must match interp.hpp Opcode::DRAW");
 
 namespace {
 
@@ -227,17 +234,21 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     }
     s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
 
-    // 1. actions non-empty -> pop front, execute (execute == pop; A3.1 has no
-    //    effect interpreter -- A4.1).
+    // 1. actions non-empty -> pop front, execute. A4.1 wires the effect
+    //    interpreter in here: the popped item is dispatched via execute_opcode
+    //    (NOP/unrecognized opcodes are safe no-ops, so pre-A4.1 tests that
+    //    pushed value-init'd items still drain harmlessly).
     if (s.action_count > 0) {
         pop_action_front(s, r.executed);
+        execute_opcode(s, r.executed);
         r.outcome = PumpOutcome::RAN_ACTION;
         return r;
     }
 
-    // 2. else preTurnActions non-empty -> pop front, execute.
+    // 2. else preTurnActions non-empty -> pop front, execute (dispatched too).
     if (s.pre_turn_count > 0) {
         pop_pre_turn_front(s, r.executed);
+        execute_opcode(s, r.executed);
         r.outcome = PumpOutcome::RAN_PRE_TURN;
         return r;
     }
