@@ -1,6 +1,7 @@
 // Action-queue mechanics + getNextAction pump. See action_queue.hpp for the
-// design/provenance notes, including the two source-vs-recipe reconciliations
-// (preTurnActions storage gap; monster_attacks_queued reset placement).
+// design/provenance notes, including the two places our model diverges from a
+// naive reading of the source (preTurnActions storage gap; monster_attacks_queued
+// reset placement).
 //
 // Provenance: GameActionManager.getNextAction (GameActionManager.java:185-367),
 // addToBottom/addToTop/addToTurnStart (96-100, 139-149), addCardQueueItem
@@ -10,23 +11,23 @@
 
 #include <cassert>
 
-#include "sts/engine/card_play.hpp"  // A4.3: resolve_card_play wired into pump_step step 3
+#include "sts/engine/card_play.hpp"  // resolve_card_play wired into pump_step step 3
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/interp.hpp"  // A4.1: execute_opcode wired into pump_step
+#include "sts/engine/interp.hpp"  // execute_opcode wired into pump_step
 
 namespace sts::engine {
 
-// A4.1 reconciliation: the start-of-turn DrawCardAction (start_of_turn below)
-// queues kOpcodeDrawCard, which must equal the interpreter's real DRAW opcode
-// so the queued item actually draws when popped. Kept in lockstep here.
+// The start-of-turn DrawCardAction (start_of_turn below) queues kOpcodeDrawCard,
+// which must equal the interpreter's real DRAW opcode so the queued item
+// actually draws when popped. Kept in lockstep here.
 static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
               "start-of-turn DrawCard opcode must match interp.hpp Opcode::DRAW");
 
 namespace {
 
 // Any monster in a live slot (design doc §5.2 uses areMonstersBasicallyDead();
-// A3.1's proxy is hp > 0 -- MonsterState has no halfDead/escaped fields yet, so
-// the closest available liveness signal is positive HP. A3.2/A4.x may refine).
+// the proxy here is hp > 0 -- MonsterState has no halfDead/escaped fields, so
+// the closest available liveness signal is positive HP).
 [[nodiscard]] bool any_monster_alive(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
         if (s.monsters[i].hp > 0) {
@@ -38,7 +39,7 @@ namespace {
 
 // queueMonsters equivalent (GameActionManager.java:306 ->
 // MonsterGroup.queueMonsters): enqueue every live monster, in slot order. The
-// game skips dead/escaped monsters; the A3.1 proxy is hp > 0 (see above).
+// game skips dead/escaped monsters; the proxy here is hp > 0 (see above).
 void queue_monsters(CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
         if (s.monsters[i].hp > 0) {
@@ -74,8 +75,8 @@ void monster_queue_pop_front(CombatState& s) noexcept {
 // Every listener in the skeleton is a no-op: no relics, no orbs, and the three
 // skeleton powers (Strength/Vulnerable/Weak) have no end-of-turn hook; hand
 // cards' triggerOnEndOfTurnForPlayingCard (Burn/Regret/Decay) are not in scope.
-// The sequence's *structure* lives here as a documented stub so A4.x can attach
-// real listeners without moving the call site.
+// The sequence's *structure* lives here as a documented stub so future listeners
+// can attach without moving the call site.
 void call_end_of_turn_actions(CombatState& /*s*/) noexcept {
     // applyEndOfTurnRelics -> applyEndOfTurnPreCardPowers -> trigger end-of-turn
     // orbs -> hand cards triggerOnEndOfTurnForPlayingCard -> stance onEndOfTurn.
@@ -91,11 +92,11 @@ void start_of_turn(CombatState& s) noexcept {
     // applyStartOfTurnRelics / PreDrawCards / Cards / Powers / Orbs -- all stubs
     // (no relics/orbs; skeleton powers have no start-of-turn hook).
 
-    // Energy recharge (EnergyManager.recharge(), gap-fix: see kIroncladBaseEnergy
-    // in action_queue.hpp -- design doc §5.2's prose omits this step, but the
-    // real game performs it every turn via a presentation-coupled effect that
-    // still affects outcomes, so it stays in scope). SET, not additive: any
-    // unspent energy from the previous turn does not carry over.
+    // Energy recharge (EnergyManager.recharge(); see kIroncladBaseEnergy in
+    // action_queue.hpp). The real game performs this every turn via a
+    // presentation-coupled effect that still affects outcomes, so it is in scope.
+    // SET, not additive: any unspent energy from the previous turn does not carry
+    // over.
     s.player_energy = kIroncladBaseEnergy;
     // NOTE: monster_attacks_queued is deliberately NOT reset here -- it is
     // cleared at the end-turn sentinel instead (see action_queue.hpp note (2)).
@@ -117,8 +118,8 @@ void start_of_turn(CombatState& s) noexcept {
         }
     }
 
-    // Queue DrawCardAction(gameHandSize) (line 361). Interpreted by A4.1/A4.2;
-    // the pump only enqueues a well-formed item here.
+    // Queue DrawCardAction(gameHandSize) (line 361). The pump only enqueues a
+    // well-formed item here; the DRAW opcode does the drawing when it is popped.
     ActionQueueItem draw{};
     draw.opcode = kOpcodeDrawCard;
     draw.src = kActorPlayer;
@@ -137,7 +138,8 @@ void start_of_turn(CombatState& s) noexcept {
 
 void default_monster_turn(CombatState& /*state*/,
                           uint8_t /*monster_index*/) noexcept {
-    // No-op: A3.1 has no monster AI. A3.2 supplies the real Jaw Worm turn.
+    // No-op default monster turn (the extension point when no AI is supplied).
+    // jaw_worm_take_turn (monster_jaw_worm.cpp) provides the real Jaw Worm turn.
 }
 
 // --- Queue insertion primitives ---------------------------------------------
@@ -234,7 +236,8 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     PumpStepResult r{};
 
     // Minimal combat-over check (design doc §5.2 scope note: full death handling
-    // is A4.x; this just gives the phase transition so pump() cannot spin).
+    // is not yet modeled; this just gives the phase transition so pump() cannot
+    // spin).
     if (s.player_hp <= 0 || !any_monster_alive(s)) {
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         r.outcome = PumpOutcome::COMBAT_OVER;
@@ -242,10 +245,9 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     }
     s.phase = static_cast<uint8_t>(CombatPhase::RESOLVING);
 
-    // 1. actions non-empty -> pop front, execute. A4.1 wires the effect
-    //    interpreter in here: the popped item is dispatched via execute_opcode
-    //    (NOP/unrecognized opcodes are safe no-ops, so pre-A4.1 tests that
-    //    pushed value-init'd items still drain harmlessly).
+    // 1. actions non-empty -> pop front, execute. The popped item is dispatched
+    //    through the effect interpreter via execute_opcode (NOP/unrecognized
+    //    opcodes are safe no-ops, so a value-init'd item still drains harmlessly).
     if (s.action_count > 0) {
         pop_action_front(s, r.executed);
         execute_opcode(s, r.executed);
@@ -262,7 +264,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     }
 
     // 3. else cardQueue non-empty -> resolve head. Either the end-turn sentinel
-    //    (null-card) or a real card play (§5.3), now resolved by A4.3's
+    //    (null-card) or a real card play (§5.3), resolved by
     //    resolve_card_play (card_play.cpp): it runs the no-op hook stubs,
     //    ++cards_played_this_turn, the trap-10 target resolution, queues the
     //    card's effect actions via add_to_bottom (they resolve on later pump
@@ -279,7 +281,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             call_end_of_turn_actions(s);       // §5.4 stub sequence
             r.outcome = PumpOutcome::END_TURN_SENTINEL;
         } else {
-            resolve_card_play(s, head);        // A4.3 (§5.3): dequeue-resolve
+            resolve_card_play(s, head);        // (§5.3): dequeue-resolve
             r.outcome = PumpOutcome::RAN_CARD_QUEUE;
         }
         return r;
@@ -296,7 +298,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     }
 
     // 5. else monsterQueue non-empty -> pop head; if alive, take turn + apply
-    //    turn powers. take_turn is the A3.2 seam.
+    //    turn powers. take_turn is the monster-turn seam.
     if (s.monster_queue_count > 0) {
         const uint8_t mi = s.monster_queue[0].monster_index;
         monster_queue_pop_front(s);
