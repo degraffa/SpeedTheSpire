@@ -28,3 +28,9 @@ compile_commands.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Stray log output from running the desktop game jar (golden_capture classpath trick)
+sendToDevs/
+
+# Agent worktrees
+.claude/worktrees/
