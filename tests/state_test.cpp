@@ -145,5 +145,25 @@ TEST(StateHash, MutationChangesHash) {
     EXPECT_NE(hash_state(a), h0);
 }
 
+// --- Trap 8: relic trigger order is acquisition order (design doc §10) ------
+//
+// The skeleton has no relic behavior to actually trigger yet (RelicId is
+// sentinel-only), so this pins the claim at the level that's testable now:
+// RunState.relics is a plain insertion-ordered array with no sorting/reorder
+// path anywhere, so acquisition order IS list order IS (future) trigger order
+// by construction. Regresses if that ever stops being true.
+TEST(RunStateTrap, RelicsPreserveAcquisitionOrder) {
+    RunState s{};
+    // Acquire three relics in a specific order; nothing should reorder them.
+    s.relics[s.relic_count++] = RelicSlot{301, 0};
+    s.relics[s.relic_count++] = RelicSlot{104, 5};
+    s.relics[s.relic_count++] = RelicSlot{207, 1};
+
+    ASSERT_EQ(s.relic_count, 3);
+    EXPECT_EQ(s.relics[0].relic_id, 301);
+    EXPECT_EQ(s.relics[1].relic_id, 104);
+    EXPECT_EQ(s.relics[2].relic_id, 207);
+}
+
 }  // namespace
 }  // namespace sts::engine
