@@ -15,6 +15,7 @@
 // The allocation-counting overrides deliberately live here, not in any engine
 // header/library TU, so they never pollute code that links sts_engine.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <new>
@@ -33,7 +34,7 @@
 // freely); we snapshot before/after a TIGHT scope around encode_observation().
 
 namespace {
-volatile std::size_t g_alloc_count = 0;
+std::atomic<std::size_t> g_alloc_count{0};
 }
 
 // All replaceable global forms are overridden and routed through the SAME
