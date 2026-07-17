@@ -36,13 +36,25 @@ layer.
 
 ## Current state
 
-Walking-skeleton build scaffold only: one library target, one smoke test,
-one smoke benchmark. No game logic yet.
+Stage A in progress, tracked in [docs/stage-a-tasks.md](docs/stage-a-tasks.md)
+against the frozen [docs/stage-a-design.md](docs/stage-a-design.md). **Gate G1
+passed** (tag `g1-rng-green`): the tier-1 RNG trio is bit-exact and golden-
+tested — `include/sts/engine/rng_xs128.hpp` (libGDX xorshift128+),
+`rng_jdk.hpp` (JDK LCG + `Collections.shuffle`), `rng_stream.hpp` (the game's
+`Random` wrapper: inclusive-bound draws, counter-restore semantics,
+floor/act stream derivation), `seed_string.hpp` (base-35 seed codec). Golden
+vectors captured via `tools/golden_capture/` (Windows-host JVM harness
+against `sts-classes.jar`) live under `tests/golden/`. 18/18 gtest cases
+green in both `debug` and `asan` presets; CI (`.github/workflows/ci.yml`)
+runs both as a matrix on every push/PR.
+
+No state structs, action queue, cards, or batch API yet — that's Phase 2+.
 
 ## Immediate next step
 
-Stage A of InitialPlan.md: freeze the high-level design (RNG stream
-architecture, state struct layout, action-queue semantics) and build the
-walking skeleton — one enemy, five cards, full RNG plumbing, the batch
-`advance(states[], actions[])` API, and the diff harness wired end to end.
-This proves the architecture before mass card implementation begins.
+Phase 2 of docs/stage-a-tasks.md: `CombatState`/`RunState` structs (A2.1,
+A2.2), building on the now-frozen RNG layer. Then Phase 3 (action-queue
+pump + Jaw Worm AI), Phase 4 (effect interpreter + five skeleton cards),
+Phase 5 (batch `advance()` + observation encoder), Phase 6 (diff harness +
+M1 acceptance at gate G3). See docs/stage-a-tasks.md's parallelism map for
+what can run concurrently.

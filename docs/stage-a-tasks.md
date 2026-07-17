@@ -232,12 +232,22 @@ passed, 7 tests` (2 pre-existing smoke tests + 5 in `seed_string_test`,
 including the trap test), `ctest` discovering `seed_string_test` correctly
 via the golden-dir compile definition.
 
-### G1 `[ ]` **Gate: tier-1 RNG suite green**
+### G1 `[x]` **Gate: tier-1 RNG suite green**
 **Deps:** A1.1–A1.4
 All four RNG test binaries pass in debug **and** asan presets; suite wired
 into CI workflow so it gates every later commit. Nothing in Phase 2+ starts
 before this. Then: tag `g1-rng-green`, update CLAUDE.md "Current state".
-**Log:** —
+**Log:** Verified by running (not inferred), WSL Ubuntu-2404: `ctest --preset
+debug` and `ctest --preset asan` both `100% tests passed, 0 tests failed out
+of 18` — all four RNG binaries (`rng_xs128_test`, `rng_jdk_test`,
+`seed_string_test`, `rng_stream_test`) plus the pre-existing smoke test.
+Phase-1 trap coverage confirmed by grep: traps 2, 3, 4, 5, 6, 7, 11 each have
+a named passing test (traps 1, 8, 9, 10 belong to later phases, not yet due).
+`.github/workflows/ci.yml` already runs a `{sanitize: false, true}` matrix
+via `ctest --test-dir build`, which auto-discovers every `gtest_discover_tests`
+target via `add_subdirectory(tests)` — no CI changes needed, the four new
+binaries are already gated on every push/PR. Tagged `g1-rng-green`; CLAUDE.md
+"Current state" updated in the same commit.
 
 ---
 
