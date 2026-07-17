@@ -417,14 +417,41 @@ advances independently (per-state hash equals single-state reference run);
 determinism: same batch twice → identical hashes; asan clean.
 **Log:** —
 
-### A5.2 `[ ]` ∥ Observation encoder stub
+### A5.2 `[x]` ∥ Observation encoder stub
 **Deps:** A2.2 · **Spec:** §7 (D0.3)
 **Deliverables:** `encode_observation(const CombatState&, ObsBuffer&)` — flat
 fixed layout (hp/energy/block, hand card ids+costs, monster hp/intent/powers);
 layout documented in the header; version-stamped.
 **Acceptance:** gtest round-trip spot checks; zero allocation (asan +
 counting allocator in test).
-**Log:** —
+**Log:** `include/sts/engine/observation.hpp` (header-only, `inline`
+`encode_observation`, matching the `rng_stream.hpp` style). `ObsBuffer` =
+**188 bytes** POD, trivially-copyable (in-header `static_assert` on both):
+`schema_version:u32` (reuses the single engine `SCHEMA_VERSION`, stored as a
+real field per §8's version-stamped-record convention — documented rationale
+in the header), player `hp/max_hp/block/energy` (int16 ×4 matching
+`CombatState`'s own widths), `hand_count:u16` + fixed `hand_card_id[10]:u16` /
+`hand_cost[10]:i16` (unused slots padded with `kObsEmptyCardId`=0 /
+`kObsEmptyCost`=-1), `monster_count:u16` + `monsters[5]` of `ObsMonster`
+(26 B each = `{monster_id:u16, hp:i16, max_hp:i16, intent:u8, occupied:u8,
+power_count:u8, pad0, ObsPower powers[4]}`). Per-monster power cap chosen as
+**4** (not `CombatState`'s 24) — skeleton Jaw Worm carries ≤3 live powers
+(Str/Vuln/Weak, §9), so 4 gives headroom while keeping the stub compact;
+`power_count` still reports the true count so a consumer detects truncation.
+`encode_observation` is a single linear pass, no heap allocation, `noexcept`,
+fully overwrites `out`. New gtest binary `observation_test` (7th block in
+`tests/CMakeLists.txt`, links `sts_engine`). Zero-allocation check implemented
+as a **TU-local** global `operator new`/`operator delete` override (all forms
+incl. nothrow, routed through one malloc/free pair so asan sees no
+alloc-dealloc mismatch — the nothrow-form omission was the first-cut bug,
+fixed) that bumps a counter; the test snapshots the counter tightly around a
+single warmed `encode_observation` call and asserts no increase. Overrides are
+in the test TU only, never in engine headers/lib. Verified by running, not
+inferred: WSL Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest
+--output-on-failure` — both presets `100% tests passed, 0 failed out of 39`
+(32 pre-existing + 7 new: `Observation.*` — player/hand/monster round-trips,
+hand+monster sentinel padding, power truncation, and `EncodeDoesNotAllocate`).
+No ASan/UBSan findings.
 
 ---
 

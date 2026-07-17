@@ -90,3 +90,15 @@ sts_set_warnings(state_test)
 sts_enable_sanitizers(state_test)
 
 gtest_discover_tests(state_test)
+
+# A5.2: observation encoder stub (ObsBuffer + encode_observation) round-trip
+# spot checks + zero-allocation check (TU-local counting operator new/delete).
+add_executable(observation_test
+    observation_test.cpp
+)
+
+target_link_libraries(observation_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(observation_test)
+sts_enable_sanitizers(observation_test)
+
+gtest_discover_tests(observation_test)
