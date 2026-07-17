@@ -439,3 +439,44 @@ map-generation internals (mapRng consumption order), A20 modifier table
 numbers not restated here without a source read), potion identity rolls,
 CommunicationMod fork patch list (which hidden counters to expose: all 13
 stream counters + `cardBlizzRandomizer` + `blizzardPotionMod`).
+
+## 12. Change log
+
+Non-freezing amendments (additive storage fixes and source-vs-paraphrase
+corrections found during Stage A execution). None change frozen mechanics; each
+cites the provenance that outranks the losing document (§1 precedence:
+decompiled Java > this design doc > the task ledger).
+
+- **A2.2 — RunState stream count (§3.4 vs §4.3).** §4.3's prose "8 run-scoped
+  streams + mapRng" over-counts §3.4's authoritative 7-row run-scoped inventory
+  (monsterRng, eventRng, merchantRng, cardRng, treasureRng, relicRng,
+  potionRng). §3.4 wins: `RunState` carries 7 run-scoped `RngStream`s +
+  `map_rng` = 8 stream fields. §4.3's wording left as an imprecise count; not a
+  mechanics change.
+
+- **A3.1 — `preTurnActions` storage gap (§4.2 table vs §5.1).** §4.2's capacity
+  table lists only two queue rows ("action queue", "card/monster queues"),
+  under-specifying §5.1's FOUR-queue structure; A2.2 therefore allocated
+  `CombatState` storage for only `action_queue`, `card_queue`, `monster_queue`
+  and omitted `preTurnActions`. §5.1 wins: A3.1 added a `pre_turn_actions` ring
+  (capacity 16, same `ActionQueueItem` element type as the main ring) plus a
+  `turn_has_ended` bookkeeping flag. Additive only (new fields, no renames);
+  `sizeof(CombatState)` 3312 → 3504 B, still ≤ 4096. A future §4.2 table row
+  should list `preTurnActions` explicitly.
+
+- **A3.1 — `monsterAttacksQueued` reset placement (getNextAction).** The
+  decompiled `GameActionManager.java` initializes `monsterAttacksQueued = true`
+  and re-sets it `true` at line 304 but NEVER sets it `false` anywhere in the
+  reference tree (grep-confirmed: 3 occurrences, one file). Taken literally the
+  flag can never re-open getNextAction step 4, so monsters would be queued at
+  most once — not the game's observable per-turn behavior, so this decompiled
+  copy is missing the reset. The sim clears the flag when the turn *ends* (the
+  end-turn sentinel, §5.2 step 3), priming step 4 to queue monsters exactly once
+  and leaving it set through the whole next player turn; the §5.2-step-6
+  start-of-turn sequence does NOT touch it. This matches step 6's actual
+  enumeration in the Java (`cardsPlayedThisTurn`, `turnHasEnded`, discard/damage
+  counters cleared — not `monsterAttacksQueued`; GameActionManager.java:333,
+  349-351) and keeps the invariant "monster_attacks_queued is true throughout
+  the player's turn" so A4.3 card-play pumps never spuriously fire step 4. Not a
+  frozen-mechanics change (the observable ordering — player turn, then one
+  monster turn per round — is preserved).

@@ -25,6 +25,19 @@
 // open (the `flags` words, `misc`, monster `intent`/`move_history` encodings)
 // are minimal documented placeholders; their semantics are defined by later
 // tasks (A3.x AI/queue pump, A4.x effects), not invented here.
+//
+// A3.1 STOP-THE-LINE GAP-FIX (design-doc precedence, same class as A2.2's
+// stream-count fix): A2.2 allocated storage for only THREE of the FOUR queues
+// design doc §5.1 requires -- `action_queue` (the game's `actions` list),
+// `card_queue`, `monster_queue` -- omitting the `preTurnActions` list
+// (`addToTurnStart` prepends here; GameActionManager.java:59,145). The omission
+// traces to §4.2's capacity table listing only two queue rows ("action queue"
+// and "card/monster queues"), which under-specifies §5.1's four-queue
+// structure. A3.1 adds the missing `pre_turn_actions` ring (same
+// `ActionQueueItem` element type as the main queue) plus the `turn_has_ended`
+// bookkeeping flag the pump's §5.2-step-6 gate needs. Additive only (new
+// fields, no renames/removals) so A2.2's state_test is undisturbed; recorded in
+// the ledger Log and the design doc change log.
 
 #include <cstdint>
 #include <type_traits>
@@ -48,6 +61,13 @@ inline constexpr int kMonsterCap = 5;
 inline constexpr int kActionQueueCap = 64;
 inline constexpr int kCardQueueCap = 16;
 inline constexpr int kMonsterQueueCap = 5;
+// preTurnActions (design doc §5.1) -- A3.1 gap-fix; not in §4.2's capacity
+// table (see the STOP-THE-LINE note in this file's header). `addToTurnStart`
+// prepends only start-of-next-turn relic/power actions here, a handful per turn
+// in the skeleton's scope, so 16 is generous headroom (16 * 12 B = 192 B, well
+// inside CombatState's ~784 B of remaining 4 KB budget). Sized to match the
+// main action ring's element type/idiom rather than trimmed to a tight bound.
+inline constexpr int kPreTurnActionQueueCap = 16;
 
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
@@ -199,6 +219,20 @@ struct CombatState {
     uint8_t action_tail;
     uint8_t action_count;
     uint8_t pad_actionq;              // explicit padding
+
+    // -- pre-turn action queue (design doc §5.1: `preTurnActions`; A3.1 gap-fix,
+    //    see the header STOP-THE-LINE note). `addToTurnStart` prepends here
+    //    (GameActionManager.java:145); the pump drains it right after the main
+    //    action queue (§5.2 step 2). Same ring shape/cursors as `action_queue`.
+    //    --
+    ActionQueueItem pre_turn_actions[kPreTurnActionQueueCap];
+    uint8_t pre_turn_head;
+    uint8_t pre_turn_tail;
+    uint8_t pre_turn_count;
+    // Set by the end-turn sentinel (design doc §5.2 step 3 / §5.4), cleared by
+    // the start-of-turn sequence (§5.2 step 6); gates that step-6 branch. A3.1
+    // bookkeeping field (the game's `GameActionManager.turnHasEnded`).
+    uint8_t turn_has_ended;           // 0/1; fills what would be ring padding
 
     // -- card queue (design doc §5.1: pending card plays, cap 16) --
     CardQueueItem card_queue[kCardQueueCap];
