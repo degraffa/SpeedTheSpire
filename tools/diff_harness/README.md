@@ -1,11 +1,10 @@
-# diff_harness (A6.1)
+# diff_harness
 
 The differential-testing harness for the simulator: a **trace file format**, a
 **field-by-field `CombatState` differ**, a **reproducer emitter**, and an
-**oracle adapter interface** (design doc §8, §9). It is the permanent Stage B
-artifact that A6.2 (20 scripted Jaw Worm fixtures) and the eventual
-CommunicationMod live oracle build on — only the oracle *adapter* is
-provisional; the trace format and differ never change.
+**oracle adapter interface** (design doc §8, §9). The trace format and differ
+are permanent; the scripted Jaw Worm fixtures and the eventual CommunicationMod
+live oracle build on them — only the oracle *adapter* is provisional.
 
 Unlike `tools/golden_capture/` (a Windows-host JVM tool with no CMake wiring),
 this is a normal C++ target in the WSL/CMake build: a static library
@@ -20,7 +19,7 @@ this is a normal C++ target in the WSL/CMake build: a static library
 - **`reproducer.hpp` / `reproducer.cpp`** — `(seed, action-prefix)` save/load.
 - **`oracle.hpp` / `oracle.cpp`** — `OracleAdapter` interface +
   `FixtureFileOracleAdapter` (loads trace files as fixtures). The
-  CommunicationMod adapter is a documented Stage B stub, not implemented here.
+  CommunicationMod adapter is a documented stub, not implemented here.
 - **`replay.hpp` / `replay.cpp`** — drives `combat_begin` + `advance()` to
   produce the snapshot sequence a trace/fixture records or a reproducer replays.
 
@@ -35,8 +34,8 @@ TraceHeader (24 bytes, no padding):
   uint32_t schema_version  = SCHEMA_VERSION      (loaders REFUSE a mismatch)
   uint32_t state_size      = sizeof(CombatState) (second safety check)
   uint32_t record_count
-  int64_t  seed                                  (extension of §8's container;
-                                                  needed to make a trace replayable)
+  int64_t  seed                                  (the fight's run seed; needed
+                                                  to make a trace replayable)
 
 record[record_count], each:
   CombatState state   (raw memcpy of sizeof(CombatState) bytes)
@@ -82,14 +81,15 @@ this additively (a `deck …` line) behind a bumped version string.
 - **Named fields:** every reported field has a debuggable name — `player.hp`,
   `monsters[0].powers[1].amount`, `hand[3]`, `ai_rng.counter` — and enum values
   render by name (`VULNERABLE(2)`). RNG streams are named individually so a
-  divergence is attributable to the specific stream (InitialPlan's "RNG
-  divergence anywhere is a stop-the-line bug").
+  divergence is attributable to the specific stream (any RNG divergence is a
+  bug).
 
 ## Fixture oracle
 
-The fixture file format **is** the trace format: A6.2 produces fixtures with
-`write_trace`, and `FixtureFileOracleAdapter::load_fixture` consumes them via
-`read_trace`. `query(seed, prefix)` finds the fixture whose seed matches, checks
+The fixture file format **is** the trace format: the fixture generator produces
+fixtures with `write_trace`, and `FixtureFileOracleAdapter::load_fixture`
+consumes them via `read_trace`. `query(seed, prefix)` finds the fixture whose
+seed matches, checks
 `prefix` is a prefix of the fixture's recorded actions, and returns the recorded
 state after that prefix (`false` on unknown seed / divergent / too-long prefix).
 

@@ -1,10 +1,10 @@
-# A6.2: combat-fixture generator -- the INDEPENDENT reference simulator that
+# combat-fixture generator -- the INDEPENDENT reference simulator that
 # writes the expected per-action state traces (tests/golden/combat_fixtures/*.trace)
 # for the ~20 scripted Jaw Worm fights. It re-derives every state from first
-# principles (design-doc formulas + the A3.2 Jaw Worm fixture + tier-1 RNG
+# principles (design-doc formulas + the Jaw Worm fixture + tier-1 RNG
 # oracles), never from the production gameplay engine -- see the file header for
-# the independence contract. Checked in for re-review alongside the derivation
-# notes; run manually to regenerate the traces (like tools/golden_capture).
+# the independence contract. Checked in alongside the derivation notes; run
+# manually to regenerate the traces (like tools/golden_capture).
 add_executable(gen_combat_fixtures
     gen_combat_fixtures.cpp
 )

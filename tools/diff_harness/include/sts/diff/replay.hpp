@@ -2,9 +2,9 @@
 
 // Fight-replay driver: (seed, deck, action[]) -> the sequence of CombatState
 // snapshots after each action, produced by combat_begin + repeated advance()
-// (the A5.1 batch API, driven batch-of-1). This is the glue that both A6.2's
-// fixture generator (to capture expected states) and the reproducer flow (to
-// re-drive a saved (seed, action[]) to the same diff) run on top of.
+// (the batch API, driven batch-of-1). This is the glue that both the fixture
+// generator (to capture expected states) and the reproducer flow (to re-drive a
+// saved (seed, action[]) to the same diff) run on top of.
 //
 // The output convention matches trace.hpp's records: out[0] is the INITIAL
 // state from combat_begin (before any action); out[k] (k >= 1) is the state
@@ -23,7 +23,7 @@ namespace sts::diff {
 // The skeleton fight's fixed floor (design doc §9: one combat, no run layer).
 // Reproducers/fixtures store only (seed, action[]); the deck and floor are the
 // skeleton constants below. Value is arbitrary-but-fixed: floor-scoped RNG
-// streams derive as floor_stream(seed, floor) (A1.3), so this must stay stable
+// streams derive as floor_stream(seed, floor), so this must stay stable
 // for a reproducer to reproduce.
 inline constexpr int32_t kSkeletonFloor = 1;
 

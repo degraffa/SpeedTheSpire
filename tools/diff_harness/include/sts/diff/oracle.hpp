@@ -1,7 +1,7 @@
 #pragma once
 
-// Oracle adapter interface (design doc §8 / ledger A6.1: "oracle adapter
-// interface -- fixture-file impl now, CommunicationMod impl in Stage B"). The
+// Oracle adapter interface (design doc §8): fixture-file impl now,
+// CommunicationMod impl later. The
 // oracle is the ONE provisional piece of the diff harness: it supplies the
 // "expected" CombatState the differ compares the engine's "actual" against. In
 // M1 that comes from checked-in fixture files (hand-derived / captured expected
@@ -42,8 +42,9 @@ public:
 };
 
 // Fixture-file oracle: answers query() from checked-in trace files (the fixture
-// file format IS the trace format, trace.hpp -- so A6.2 produces fixtures with
-// write_trace and this consumes them; no separate format to maintain). Load one
+// file format IS the trace format, trace.hpp -- so the fixture generator produces
+// fixtures with write_trace and this consumes them; no separate format to
+// maintain). Load one
 // trace per scripted fight; each provides the expected state at every prefix
 // length of its own action sequence.
 class FixtureFileOracleAdapter final : public OracleAdapter {
@@ -72,9 +73,8 @@ private:
     std::vector<Fixture> fixtures_;
 };
 
-// STAGE B EXTENSION POINT (out of scope for A6.1 -- documented seam only, like
-// A4.1's SHUFFLE_IN/ROLL_MOVE stubs). A live oracle plugs in here as another
-// OracleAdapter subclass without changing the differ or trace format:
+// STAGE B EXTENSION POINT (documented seam only). A live oracle plugs in here as
+// another OracleAdapter subclass without changing the differ or trace format:
 //
 //   class CommunicationModOracleAdapter final : public OracleAdapter {
 //       // query() drives a running Slay the Spire + CommunicationMod process
@@ -83,6 +83,6 @@ private:
 //                  engine::CombatState&) const override;
 //   };
 //
-// It is NOT implemented in A6.1 (Stage B, tools/oracle_bridge/).
+// It is NOT implemented here (Stage B, tools/oracle_bridge/).
 
 }  // namespace sts::diff

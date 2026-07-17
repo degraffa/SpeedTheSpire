@@ -221,7 +221,7 @@ DiffReport diff_states(const CombatState& e, const CombatState& a) {
     DiffReport r;
 
     // Fast path: equal content hashes => byte-identical value-initialized states
-    // (design doc §4.1 / A2.2), so there is nothing to walk.
+    // (design doc §4.1), so there is nothing to walk.
     if (hash_state(e) == hash_state(a)) {
         return r;
     }
@@ -330,7 +330,7 @@ DiffReport diff_states(const CombatState& e, const CombatState& a) {
           a.monster_attacks_queued);
 
     // -- RNG streams (each named individually so a divergence is attributable to
-    //    the specific stream, per InitialPlan's verification philosophy) --
+    //    the specific stream) --
     cmp_stream(r, "monster_hp_rng", e.monster_hp_rng, a.monster_hp_rng);
     cmp_stream(r, "ai_rng", e.ai_rng, a.ai_rng);
     cmp_stream(r, "shuffle_rng", e.shuffle_rng, a.shuffle_rng);

@@ -1,32 +1,32 @@
-// A6.2 combat-fixture generator -- the INDEPENDENT reference simulator that
+// Combat-fixture generator -- the INDEPENDENT reference simulator that
 // produces the expected per-action state traces for the ~20 scripted Jaw Worm
-// fights (design doc §9; ledger A6.2). This is the reviewable artifact the
-// derivation notes (tests/golden/combat_fixtures/derivation_notes.md) narrate:
+// fights (design doc §9). The derivation notes
+// (tests/golden/combat_fixtures/derivation_notes.md) narrate the arithmetic:
 // it re-derives every expected CombatState from FIRST PRINCIPLES (the design-doc
 // §5.5 damage pipeline, the five cards' effect table, the pile mechanics, and
 // Jaw Worm's move effects), NOT by calling the production engine's gameplay
 // code. It is a second, from-scratch implementation of the same frozen spec, so
 // when fixture_oracle_test replays the same (seed, actions) through the real
 // engine and diffs, an engine/spec divergence shows up as a diff rather than the
-// two silently agreeing (the same differential-testing discipline as A3.2's
-// Python Jaw Worm oracle and A4.3's hand-traced integration state).
+// two silently agreeing (the same differential-testing discipline as the Python
+// Jaw Worm oracle and the hand-traced integration state).
 //
-// INDEPENDENCE (ledger A6.2 "CRITICAL: independence constraint"): this file does
+// INDEPENDENCE CONSTRAINT: this file does
 // NOT call combat_begin / advance / pump / queue_card_play / resolve_card_play /
 // execute_opcode / compute_damage / draw_cards / jaw_worm_take_turn or any other
 // production GAMEPLAY function to decide what a state "should" be. The only
 // engine code it reuses is:
 //   * the tier-1 RNG primitives (from_seed / floor_stream / random / random_long
-//     / JdkRandom / jdk_shuffle) -- the G1-gated, JVM-golden-tested oracle layer
-//     (A1.x). Using them to compute the deck shuffle / reshuffle permutations is
-//     exactly what piles_test does as its "independent oracle"; they are not the
-//     code under test.
-//   * the A3.2 Jaw Worm fixture (tests/fixtures/jaw_worm_fixture.tsv) -- the
-//     already-reviewed, independently-derived oracle for the monster's move
-//     sequence + HP roll + ai_rng/monster_hp_rng progression. Consuming it (not
-//     re-deriving the RNG decision tree) is the sanctioned exception.
+//     / JdkRandom / jdk_shuffle) -- the JVM-golden-tested oracle layer. Using
+//     them to compute the deck shuffle / reshuffle permutations is exactly what
+//     piles_test does as its "independent oracle"; they are not the code under
+//     test.
+//   * the Jaw Worm fixture (tests/fixtures/jaw_worm_fixture.tsv) -- the
+//     independently-derived oracle for the monster's move sequence + HP roll +
+//     ai_rng/monster_hp_rng progression. Consuming it (not re-deriving the RNG
+//     decision tree) is the sanctioned exception.
 //   * the CombatState struct + write_trace (the data type and the fixture-file
-//     writer, A6.1) -- storage, not gameplay logic.
+//     writer) -- storage, not gameplay logic.
 //
 // SPEC re-derived here from first principles (cited inline):
 //   * Cards (cards.hpp / Strike_Red/Defend_Red/Bash/ShrugItOff/PommelStrike.java):
@@ -60,7 +60,7 @@
 //
 // SEED CONVENTION: each fight's run_seed is chosen as (fixture_seed - kFloor) so
 // that floor_stream(run_seed, kFloor) == from_seed(fixture_seed) -- i.e. the
-// combat's ai_rng / monster_hp_rng land exactly on the A3.2 fixture's rN stream,
+// combat's ai_rng / monster_hp_rng land exactly on the fixture's rN stream,
 // letting us reuse that fixture's move sequence + rng end-states directly.
 //
 // USAGE (regen; run from the build, paths injected as compile definitions):
@@ -126,7 +126,7 @@ constexpr int kThrashDmg = 7, kThrashBlock = 5;
 constexpr int kBellowStr = 5, kBellowBlock = 9;
 constexpr uint8_t kMoveChomp = 1, kMoveBellow = 2, kMoveThrash = 3;
 
-// --- A3.2 fixture (jaw_worm_fixture.tsv) parsing ----------------------------
+// --- Jaw Worm fixture (jaw_worm_fixture.tsv) parsing ------------------------
 
 struct TurnRow {
     uint8_t move = 0;
@@ -135,7 +135,7 @@ struct TurnRow {
 };
 struct SeedData {
     std::string label;
-    int64_t seed = 0;   // this is the A3.2 fixture seed (== from_seed arg)
+    int64_t seed = 0;   // this is the Jaw Worm fixture seed (== from_seed arg)
     int hp = 0;
     uint64_t hp_s0 = 0, hp_s1 = 0;
     int32_t hp_counter = 0;
@@ -256,7 +256,7 @@ struct RefSim {
 
     // reshuffle: one shuffle_rng.random_long() seeds a JDK Fisher-Yates over the
     // discard, then the shuffled discard is appended onto the (empty) draw pile
-    // in the SAME order -> draw.back() stays the top (piles.cpp / A4.2).
+    // in the SAME order -> draw.back() stays the top (piles.cpp).
     void reshuffle() {
         if (discard.empty()) return;
         const int64_t seed = random_long(shuffle_rng);
