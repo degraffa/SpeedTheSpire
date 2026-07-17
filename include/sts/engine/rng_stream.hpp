@@ -5,13 +5,11 @@
 // shuffleRng, mapRng, ...) is one of these; every gameplay roll goes through a
 // wrapper method on it. This header re-expresses each of those methods as a
 // free function over a 24-byte POD RngStream, building directly on
-// rng_xs128.hpp (A1.1).
+// rng_xs128.hpp.
 //
 // Provenance: com.megacrit.cardcrawl.random.Random (Random.java, whole file),
 // read from D:\STS_BG_Mod\SlayTheSpireDecompiled. Each wrapper below cites the
-// Java method it re-expresses; on any conflict between this file and
-// docs/stage-a-design.md §3.2/§3.6, the Java (re-read) wins per the Stage A
-// ledger's precedence rule.
+// Java method it re-expresses.
 //
 // The one-draw invariant (design doc §3.2): EVERY wrapper method increments
 // `counter` by exactly 1 and consumes exactly one `next_long()` from the

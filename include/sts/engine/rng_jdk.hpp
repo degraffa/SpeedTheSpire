@@ -13,7 +13,7 @@
 // docs/stage-a-design.md §3.3 (trap list §10 item 2: shuffles route through
 // this LCG, not xorshift128+ / RandomXS128).
 //
-// This header is dependency-free (no gtest, no game headers) per task A1.2.
+// This header is dependency-free (no gtest, no game headers).
 
 #include <cstddef>
 #include <cstdint>
@@ -56,8 +56,8 @@ public:
     // java.util.Random.nextInt(int bound): exact classic algorithm --
     // power-of-two fast path plus the general rejection-loop path. This has
     // been stable JDK spec (not merely implementation) since Java 1.2;
-    // implemented exactly per docs/stage-a-design.md §3.3 / task A1.2, no
-    // "simplification" to e.g. plain modulo.
+    // implemented exactly per docs/stage-a-design.md §3.3, no "simplification"
+    // to e.g. plain modulo.
     int32_t next_int(int32_t bound) {
         if ((bound & -bound) == bound) {
             // bound is a power of 2.

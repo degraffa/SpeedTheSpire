@@ -8,10 +8,10 @@
 // encode_observation() is a single linear pass that writes directly into the
 // caller-owned `out` buffer -- no heap allocation of any kind.
 //
-// SCOPE: this is the "observation stub" of task A5.2 -- it lands the flat,
-// fixed layout the batch API needs (hp/energy/block, hand card ids+costs,
-// monster hp/intent/powers), NOT the quantization / int8-fp16 tensor-dtype
-// machinery D0.3 mentions for later. Values are copied out at their native
+// SCOPE: this is the observation stub -- it lands the flat, fixed layout the
+// batch API needs (hp/energy/block, hand card ids+costs, monster
+// hp/intent/powers), NOT the quantization / int8-fp16 tensor-dtype machinery
+// D0.3 mentions for later. Values are copied out at their native
 // CombatState widths (mostly int16); a downstream encoder normalizes/quantizes.
 //
 // VERSIONING: ObsBuffer reuses the single engine SCHEMA_VERSION constant
@@ -83,7 +83,7 @@ struct ObsMonster {
     uint16_t monster_id;  // MonsterId; NONE (0) == empty slot
     int16_t hp;
     int16_t max_hp;
-    uint8_t intent;       // telegraphed next-move id (opaque; A3.2 defines it)
+    uint8_t intent;       // telegraphed next-move id (opaque)
     uint8_t occupied;     // 1 = live monster in this slot, 0 = empty
     uint8_t power_count;  // true CombatState power count (pre-truncation)
     uint8_t pad0;         // explicit padding, kept deterministic

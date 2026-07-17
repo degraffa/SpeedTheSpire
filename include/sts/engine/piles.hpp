@@ -1,26 +1,24 @@
 #pragma once
 
 // Pile operations on CombatState -- draw / reshuffle / exhaust (design doc §3.3,
-// §9). This is A4.2: the layer A4.1 deferred. A4.1's DRAW opcode was a minimal
-// non-empty/non-overflow slice and its SHUFFLE_IN was a bare stub; this module
-// implements the real composite behaviors and interp.cpp's dispatch now delegates
-// DRAW/SHUFFLE_IN/EXHAUST here.
+// §9). This module implements the composite draw/reshuffle/exhaust behaviors;
+// interp.cpp's dispatch delegates the DRAW/SHUFFLE_IN/EXHAUST opcodes here.
 //
-// Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled, verified for A4.2):
+// Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled):
 //   * AbstractPlayer.draw(int) (AbstractPlayer.java:1632-1655) -- move the top
 //     card of drawPile to hand, `numCards` times; the empty-drawPile branch only
 //     logs (the caller guarantees non-empty). AbstractPlayer.draw()
 //     (:1657-1665) refuses entirely when hand.size() == 10.
 //   * DrawCardAction.update() (DrawCardAction.java:63-127) -- the composite that
 //     drives draw(): the ONE-TIME up-front hand-cap and the deck-exhaustion
-//     reshuffle re-queue. See the hand-cap correction note below.
+//     reshuffle re-queue. See the hand-cap note below.
 //   * EmptyDeckShuffleAction.update() (EmptyDeckShuffleAction.java:42-64) --
 //     `discardPile.shuffle(shuffleRng)` then walk the shuffled discard
 //     front-to-back moving each card to the draw pile via Soul.shuffle.
 //   * CardGroup.shuffle(Random) (CardGroup.java:565-567) --
 //     `Collections.shuffle(group, new java.util.Random(rng.randomLong()))`:
 //     EXACTLY one shuffleRng.randomLong() draw, then a JDK-LCG-seeded Fisher-Yates
-//     over the discard list. Reuses A1.2's already-golden-tested JdkRandom +
+//     over the discard list. Reuses the already-golden-tested JdkRandom +
 //     jdk_shuffle (rng_jdk.hpp), not a reimplementation. Trap 2 (§10): the
 //     shuffle routes through java.util.Random's LCG, NOT xorshift128+.
 //   * Soul.shuffle(card, isInvisible) (Soul.java:90-102) -- `this.group =
@@ -28,18 +26,15 @@
 //     pile list (CardGroup.addToTop == group.add, :455-457).
 //
 // -------------------------------------------------------------------------
-// HAND-SIZE-CAP CORRECTION (stop-the-line; decompiled Java > the ledger's A4.2
-// deliverable prose, per the working-agreements precedence rule). The ledger's
-// A4.2 line reads "hand-size-10 overflow rule (drawn card goes to discard)".
-// That is NOT what the game does. DrawCardAction.update() computes, ONCE up front
-// (the `!shuffleCheck` branch, :92-97), before any card is drawn:
+// HAND-SIZE CAP (non-obvious rule). There is no draw-then-discard on hand
+// overflow. DrawCardAction.update() computes, ONCE up front (the `!shuffleCheck`
+// branch, DrawCardAction.java:92-97), before any card is drawn:
 //     if (amount + hand.size() > 10) { amount += 10 - (amount + hand.size()); }
 // which is algebraically `amount = 10 - hand.size()` -- i.e. the draw amount is
-// CAPPED so overflowing cards are simply never drawn. There is no draw-then-
-// discard. (And AbstractPlayer.draw() refuses outright when hand.size()==10, a
-// degenerate case of the same formula.) So the real rule is:
+// CAPPED so overflowing cards are simply never drawn. (And AbstractPlayer.draw()
+// refuses outright when hand.size()==10, a degenerate case of the same formula.)
+// So the real rule is:
 //     amount = min(amount, kHandCap - hand_count), applied once, before drawing.
-// Recorded in the ledger Log and the design-doc change log.
 //
 // TIMING/ARCHITECTURE SIMPLIFICATION (justified). The real game spreads the
 // reshuffle-then-continue-drawing across several animated AbstractGameActions:
@@ -75,7 +70,7 @@ void shuffle_discard_into_draw(CombatState& state) noexcept;
 //   (1) if hand is already full (hand_count == kHandCap) draw nothing, return 0
 //       (AbstractPlayer.draw() early-out);
 //   (2) cap amount = min(amount, kHandCap - hand_count) ONCE, up front (the
-//       corrected hand-size rule above -- overflow cards are never drawn);
+//       hand-size rule above -- overflow cards are never drawn);
 //   (3) draw one card at a time; if the draw pile is empty, reshuffle the discard
 //       in and continue, but if BOTH piles are empty stop early (the game's
 //       deckSize+discardSize==0 guard).
@@ -84,8 +79,8 @@ void shuffle_discard_into_draw(CombatState& state) noexcept;
 int draw_cards(CombatState& state, int amount) noexcept;
 
 // Move the card whose pool index == `pool_index` from hand to the exhaust pile
-// (relocated verbatim from A4.1's interp.cpp op_exhaust so all pile mutations
-// live in one module). Not-in-hand is a documented no-op. Out-of-range index
+// (all pile mutations live in this one module). Not-in-hand is a documented
+// no-op. Out-of-range index
 // (< 0 or > 0xFF) is a no-op. None of the five skeleton cards exhausts by
 // default, so this is exercised directly by tests rather than by card play at M1.
 void exhaust_card(CombatState& state, int pool_index) noexcept;

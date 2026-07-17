@@ -1,11 +1,11 @@
 #pragma once
 
 // Card-play flow -- the PLAY_CARD action -> cardQueue -> dequeue-resolution path
-// (design doc §5.3). This is A4.3: it ties the effect interpreter (A4.1), the
-// pile ops (A4.2), and the action-queue pump (A3.1) together into an actually-
-// playable card game.
+// (design doc §5.3). Ties the effect interpreter (interp.hpp), the pile ops
+// (piles.hpp), and the action-queue pump (action_queue.hpp) together into an
+// actually-playable card game.
 //
-// Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled, verified for A4.3):
+// Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled):
 //   * GameActionManager.getNextAction, cardQueue branch (GameActionManager.java
 //     :193-280) -- a queued card is DEQUEUED and resolved here, not when the
 //     player chose it.
@@ -19,8 +19,8 @@
 //   * getRandomMonster(cardRandomRng) (AbstractDungeon / MonsterGroup) -- the
 //     TRAP 10 random-target roll, evaluated at DEQUEUE time.
 //
-// HOOK-ORDER COLLAPSE (documented decision, consistent with A4.2's precedent).
-// The real game splits card resolution across TWO pump cycles purely for
+// HOOK-ORDER COLLAPSE (documented decision). The real game splits card
+// resolution across TWO pump cycles purely for
 // animation pacing: useCard() runs the onPlayCard fan-out + ++cardsPlayedThisTurn
 // + c.use() (which QUEUES the card's effect actions via addToBot) + energy.use();
 // then a SEPARATELY queued UseCardAction later runs onUseCard/onAfterUseCard and
@@ -33,11 +33,11 @@
 // against the source: the only cross-cycle interaction would be a listener with
 // a real body, of which the skeleton has none). The hook sites are present as
 // documented no-op stubs so Stage B attaches real listeners without moving the
-// call sites (the §5.5-style extension-point convention A3.1/A4.1 established).
+// call sites (the §5.5-style extension-point convention).
 //
 // KEY TIMING FACTS preserved (matching the Java, not simplified away):
 //   * A card's use() does NOT apply its effects inline -- it QUEUES them via
-//     add_to_bottom (A3.1) onto the action_queue; they resolve later through the
+//     add_to_bottom onto the action_queue; they resolve later through the
 //     normal pump priority order, exactly like AbstractCard.use()'s addToBot.
 //   * Energy is deducted AFTER the effects are queued (useCard order), not before.
 //   * The random-target roll (trap 10) happens at DEQUEUE (resolve), never at
@@ -56,9 +56,10 @@ namespace sts::engine {
 // path) -- it resolves nothing, matching the game's enqueue-now / dequeue-later
 // timing. Returns false (and enqueues nothing) if hand_index is out of range.
 //
-// A future A5.1 legality/affordability gate plugs in here; A4.3 assumes the
-// caller only requests legal plays and the actual cost check lives at resolution
-// time (the real canPlayCard gate is evaluated at dequeue).
+// The legality/affordability gate lives in legal_actions (advance.hpp); this
+// entry point assumes the caller only requests legal plays and the actual cost
+// check lives at resolution time (the real canPlayCard gate is evaluated at
+// dequeue).
 bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noexcept;
 
 // The dequeue-time random-target roll (TRAP 10): getRandomMonster(cardRandomRng).

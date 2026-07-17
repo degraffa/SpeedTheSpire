@@ -8,9 +8,7 @@
 //
 // Provenance: com.badlogic.gdx.math.RandomXS128 (RandomXS128.java, whole
 // file), read from D:\STS_BG_Mod\SlayTheSpireDecompiled. Every method below
-// cites the Java method it re-expresses; on any conflict between this file
-// and docs/stage-a-design.md §3.1, the Java (re-read) wins per the Stage A
-// ledger's precedence rule.
+// cites the Java method it re-expresses.
 //
 // Trap list entries this file exists to satisfy (docs/stage-a-design.md §10):
 //   4.  nextLong(n)'s rejection-sampling loop must be kept, not simplified
@@ -32,8 +30,8 @@ namespace sts::engine {
 //
 // State is the raw (s0, s1) pair from the Java class (there named seed0/
 // seed1); no other members. Trivially copyable by construction (two
-// uint64_t's, no pointers), which matters later when this gets embedded in
-// RngStream (A1.3) and the fixed-capacity state structs (A2.x).
+// uint64_t's, no pointers), which matters when this gets embedded in
+// RngStream and the fixed-capacity state structs.
 class RandomXS128 {
 public:
     // Deterministic default: equivalent to RandomXS128(0). (The Java class's
@@ -67,8 +65,8 @@ public:
     }
 
     // getState(int) (RandomXS128.java:104-106) returned one word selected by
-    // index; we just expose the pair directly (24-byte RngStream in A1.3
-    // wraps this the same way the game's counter wrapper does).
+    // index; we just expose the pair directly (the 24-byte RngStream wraps this
+    // the same way the game's counter wrapper does).
     [[nodiscard]] constexpr std::pair<uint64_t, uint64_t> get_state() const noexcept {
         return {s0_, s1_};
     }
@@ -76,8 +74,8 @@ public:
     [[nodiscard]] constexpr uint64_t state1() const noexcept { return s1_; }
 
     // nextLong() (RandomXS128.java:27-35). The core xorshift128+ step; every
-    // other draw in this class and in the game's Random wrapper (A1.3)
-    // bottoms out in exactly one call to this.
+    // other draw in this class and in the game's Random wrapper bottoms out in
+    // exactly one call to this.
     constexpr int64_t next_long() noexcept {
         uint64_t s1 = s0_;
         const uint64_t s0 = s1_;

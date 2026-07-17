@@ -6,7 +6,7 @@
 // type, a reordered group, a changed capacity) is a schema change and this
 // number goes up by one.
 //
-// The trajectory writer (A6.1) stamps this value into each trace file's header
+// The trajectory writer stamps this value into each trace file's header
 // (`{magic 'STS0', schema_version u32, state_size u32, record[]}`, design doc
 // §8); loaders refuse mismatched versions. Both CombatState and RunState expose
 // it as a `static constexpr uint32_t kSchemaVersion = SCHEMA_VERSION;` member so

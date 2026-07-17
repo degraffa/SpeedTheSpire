@@ -1,23 +1,23 @@
 #pragma once
 
 // Card registry -- the five M1 skeleton cards as a hand-coded constexpr table
-// (design doc §6 "rules-as-data"; §9 skeleton scope). This is A4.3's registry
-// deliverable. Stage B replaces this hand table with the codegen'd YAML-driven
-// constexpr tables (design doc §6); the SHAPE here (an array of {op, amount,
-// extra, target} steps per card) is deliberately the shape that codegen will
-// emit, so nothing downstream changes when the registry pipeline lands.
+// (design doc §6 "rules-as-data"; §9 skeleton scope). Stage B replaces this hand
+// table with the codegen'd YAML-driven constexpr tables (design doc §6); the
+// SHAPE here (an array of {op, amount, extra, target} steps per card) is
+// deliberately the shape that codegen will emit, so nothing downstream changes
+// when the registry pipeline lands.
 //
 // WHY A DATA TABLE (not a dispatch function per card): design doc §6 freezes
 // "effect programs are sequences of {op, target, amount, flags}". A constexpr
 // step table is the literal encoding of that decision, keeps all five cards'
 // behavior readable in one place next to their provenance, and is exactly what
-// the Stage B codegen produces -- so the interpreter (A4.1) and card-play
+// the Stage B codegen produces -- so the interpreter (interp.hpp) and card-play
 // resolver (card_play.cpp) stay effect-program-driven rather than growing a
 // switch per card. Header-only: the table is `constexpr`, no .cpp needed.
 //
 // Provenance (read in full from the decompiled tree under
-// D:/STS_BG_Mod/SlayTheSpireDecompiled/com/megacrit/cardcrawl/cards/red,
-// verified for A4.3 -- each card's use() and its addToBot(...) order):
+// D:/STS_BG_Mod/SlayTheSpireDecompiled/com/megacrit/cardcrawl/cards/red --
+// each card's use() and its addToBot(...) order):
 //   * Strike_Red.use  (Strike_Red.java)  -> DamageAction(6)                [1E, Attack]
 //   * Defend_Red.use  (Defend_Red.java)  -> GainBlockAction(5)             [1E, Skill]
 //   * Bash.use        (Bash.java)        -> DamageAction(8), then
@@ -29,7 +29,7 @@
 // Base (un-upgraded) stats only; the upgraded numbers are Stage B (the skeleton
 // deck is all base cards, design doc §9). Damage/block AMOUNTS are the card's
 // base values -- Strength/Vulnerable modifiers are applied by the DAMAGE opcode
-// pipeline (A4.1) at resolution time, never baked into the table.
+// pipeline (interp.hpp) at resolution time, never baked into the table.
 
 #include <array>
 #include <cstdint>

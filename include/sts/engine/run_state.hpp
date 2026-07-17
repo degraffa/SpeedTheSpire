@@ -2,10 +2,10 @@
 
 // RunState -- the whole-run game state (design doc §4.3), budget <= 8192 bytes.
 // CombatState is *derived* from RunState at combat start and folded back at
-// combat end; the two never alias (design doc §4.4). That derivation is Phase 5
-// (A5.1's combat_begin()); this task lands only the storage shape. Field naming
-// deliberately matches CombatState where the same conceptual data appears in
-// both (hp / max_hp), so the future fold is a plain field copy.
+// combat end; the two never alias (design doc §4.4). A full RunState->CombatState
+// derivation is not yet implemented; this struct is the storage shape. Field
+// naming deliberately matches CombatState where the same conceptual data appears
+// in both (hp / max_hp), so the future fold is a plain field copy.
 //
 // The M1 walking skeleton (design doc §9) has no run layer at all -- it is a
 // single combat. Every field here is therefore forward design per the §4.3
@@ -17,15 +17,9 @@
 // trivially copyable, pointer-free, fixed-capacity, plain aggregate so `{}`
 // value-init zero-fills including padding.
 //
-// STREAM COUNT NOTE (design doc §3.4 vs §4.3): §3.4's authoritative stream
-// inventory lists exactly SEVEN run-scoped streams -- monsterRng, eventRng,
-// merchantRng, cardRng, treasureRng, relicRng, potionRng -- plus the act-scoped
-// mapRng, which §3.6 says RunState also holds ("RunState holds all run-scoped
-// streams plus mapRng"). §4.3's prose "the 8 run-scoped streams + mapRng" is an
-// imprecise count of that same set (7 run-scoped + mapRng = 8 stream fields).
-// The §3.4 table is the provenance-cited source of truth, so RunState carries
-// those 8 RngStream instances and no more. Recorded in the A2.2 task Log and
-// the design change log.
+// STREAM COUNT (design doc §3.4 / §3.6): RunState carries the 7 run-scoped
+// streams (monsterRng, eventRng, merchantRng, cardRng, treasureRng, relicRng,
+// potionRng) plus the act-scoped mapRng.
 
 #include <cstdint>
 #include <type_traits>
@@ -50,7 +44,7 @@ inline constexpr int kBossIdCap = 4;   // placeholder: up to one boss id per act
 // One relic, stored in acquisition order (== trigger order, design doc §4.3 /
 // trap 8), so the array is simply insertion-ordered with a count -- no separate
 // ordering field. `counter` is the relic's per-instance counter (e.g. charge
-// state). The skeleton has zero relics (RelicId is sentinel-only, A2.1), so this
+// state). The skeleton has zero relics (RelicId is sentinel-only), so this
 // array starts empty.
 struct RelicSlot {
     uint16_t relic_id;   // RelicId; NONE == empty
@@ -128,7 +122,7 @@ struct RunState {
     int16_t blizzard_potion_mod;      // ±10% potion-drop ratchet
 
     // -- RNG: the 7 run-scoped streams (design doc §3.4) + the act-scoped mapRng
-    //    (design doc §3.6). See the STREAM COUNT NOTE at the top of this file.
+    //    (design doc §3.6). See the STREAM COUNT note at the top of this file.
     //    RngStream is 8-byte aligned, so RunState is 8-byte aligned; the
     //    compiler inserts (value-init-zeroed) padding ahead of this block. --
     RngStream monster_rng;            // encounter rolls

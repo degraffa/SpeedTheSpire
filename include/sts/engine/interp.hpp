@@ -1,12 +1,12 @@
 #pragma once
 
 // Effect interpreter -- opcode dispatch + the DAMAGE pipeline (design doc §5.5,
-// §6). This is A4.1: the layer A3.1 deferred. A3.1's pump() decides *which*
-// queued ActionQueueItem resolves next; this layer decides *what an item does*.
-// pump_step() now calls execute_opcode() on every action_queue / pre_turn item
-// it pops (the wiring lives in action_queue.cpp).
+// §6). The pump (action_queue.hpp) decides *which* queued ActionQueueItem
+// resolves next; this layer decides *what an item does*. pump_step() calls
+// execute_opcode() on every action_queue / pre_turn item it pops (the wiring
+// lives in action_queue.cpp).
 //
-// Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled, verified for A4.1):
+// Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled):
 //   * DamageInfo.applyPowers (DamageInfo.java:35-100) -- the exact hook order
 //     for both ownership branches, float accumulation, single floor at the end
 //     via MathUtils.floor, clamp >= 0.
@@ -26,31 +26,28 @@
 //     straight `block += amount` (hook site marked for later extension).
 //
 // -------------------------------------------------------------------------
-// SCOPE-BOUNDARY DECISIONS (documented per the A4.1 task brief):
+// SCOPE-BOUNDARY NOTES:
 //
-// (1) SHUFFLE_IN was an A4.1 no-op stub; A4.2 implemented its body -- the
-//     discard-pile-into-draw reshuffle via shuffle_rng + the JDK LCG -- in
-//     piles.cpp (shuffle_discard_into_draw), and the dispatch now delegates
-//     there ("reshuffle permutation matches golden JDK shuffle").
+// (1) SHUFFLE_IN's body -- the discard-pile-into-draw reshuffle via shuffle_rng
+//     + the JDK LCG -- lives in piles.cpp (shuffle_discard_into_draw); the
+//     dispatch delegates there.
 //
-// (2) ROLL_MOVE is a documented no-op stub. A3.2 already rolls Jaw Worm's next
-//     move DIRECTLY inside jaw_worm_take_turn (the MonsterTurnFn callback), not
-//     via a queued item -- a deliberate, tested design (51/51 green). A4.1 does
-//     NOT rearchitect that; the opcode exists only for future data-driven
-//     monster AI expressed through the registry (design doc §6).
+// (2) ROLL_MOVE is a no-op. Jaw Worm rolls its next move DIRECTLY inside
+//     jaw_worm_take_turn (the MonsterTurnFn callback), not via a queued item;
+//     the opcode exists only for future data-driven monster AI expressed
+//     through the registry (design doc §6).
 //
 // (3) Opcode NUMBERING: NOP == 0 is reserved as a safe no-op. This is required,
-//     not cosmetic: A3.1/A3.2 tests push value-initialized ActionQueueItems
-//     (opcode == 0) through pump_step, and any unrecognized/zero opcode must
-//     drain harmlessly rather than mis-fire a real effect. The real opcodes are
-//     therefore 1..8 (design doc §6's set, in its listed order), which shifts
-//     DRAW from the A3.1 placeholder's value 3 to 4; action_queue.hpp's
-//     kOpcodeDrawCard is updated to match and static_assert'd equal in
+//     not cosmetic: value-initialized ActionQueueItems (opcode == 0) are pushed
+//     through pump_step, and any unrecognized/zero opcode must drain harmlessly
+//     rather than mis-fire a real effect. The real opcodes are therefore 1..8
+//     (design doc §6's set, in its listed order); action_queue.hpp's
+//     kOpcodeDrawCard mirrors Opcode::DRAW and is static_assert'd equal in
 //     action_queue.cpp. Design doc §6 names the opcode SET but assigns no
-//     numeric values, so this is an implementation choice, not a doc conflict.
+//     numeric values, so the numbering is an implementation choice, not a doc
+//     conflict.
 //
-// FIELD-ENCODING CONVENTIONS (A4.3 constructs these items, so they are frozen
-// here):
+// FIELD-ENCODING CONVENTIONS:
 //   * Actor identity: src/tgt are actor indices -- monster slots 0..4, and the
 //     player is kActorPlayer (== 0xFF, reused from action_queue.hpp). DAMAGE
 //     reads src (attacker) to pick the ownership branch and iterate the
@@ -65,10 +62,10 @@
 //     max-energy field in CombatState -- Ironclad's base 3 is a constant, and
 //     the skeleton has no relic/potion that stores a raised max, so no clamp).
 //     SPENDING energy is the SAME opcode with a negative `amount` (player_energy
-//     += negative) -- no separate opcode/field is needed, so A4.3's card-play
+//     += negative) -- no separate opcode/field is needed, so the card-play
 //     cost deduction reuses GAIN_ENERGY directly.
 //   * DRAW: `amount` is the number of cards to draw (the start-of-turn
-//     DrawCardAction(gameHandSize) carries 5). Player only. A4.2's draw_cards
+//     DrawCardAction(gameHandSize) carries 5). Player only. draw_cards
 //     (piles.cpp) applies the up-front hand-size cap and empty-pile reshuffle.
 //   * EXHAUST: `amount` carries the card-POOL index to exhaust (chosen over src
 //     because src/tgt are actor lanes; a pool index 0..159 fits i32 trivially).
@@ -93,14 +90,14 @@ enum class Opcode : uint16_t {
     APPLY_POWER = 3,  // tgt gains PowerId(flags) x `amount` stacks
     DRAW = 4,         // player draws `amount` cards
     GAIN_ENERGY = 5,  // player_energy += `amount`
-    SHUFFLE_IN = 6,   // A4.2 stub (reshuffle discard -> draw)
+    SHUFFLE_IN = 6,   // reshuffle discard -> draw (implemented in piles.cpp)
     EXHAUST = 7,      // move card-pool-index `amount` from hand to exhaust
-    ROLL_MOVE = 8,    // A3.2-owned stub (Jaw Worm rolls inside its MonsterTurnFn)
+    ROLL_MOVE = 8,    // no-op: Jaw Worm rolls its own next move in its MonsterTurnFn
 };
 
 // --- APPLY_POWER field encoding ---------------------------------------------
 // `flags` low 16 bits hold the PowerId; `amount` holds the stack count. Use
-// these helpers so no caller hand-rolls the packing (A4.3 builds these items).
+// these helpers so no caller hand-rolls the packing.
 [[nodiscard]] constexpr uint32_t make_apply_power_flags(PowerId id) noexcept {
     return static_cast<uint32_t>(static_cast<uint16_t>(id));
 }

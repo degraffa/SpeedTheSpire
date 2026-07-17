@@ -1,19 +1,18 @@
 #pragma once
 
 // The batch API -- advance(), legal_actions(), and combat construction
-// (combat_begin). This is A5.1, the capstone integration of Phases 1-4:
-// per InitialPlan D0.1, advance() is "the only public API" of the whole
-// simulator (design doc §7), and every prior subsystem (RNG streams, the
-// action-queue pump, the effect interpreter, the five cards, the Jaw Worm AI,
-// the observation encoder) is exercised through it. This header's shapes are
-// what every future phase (Stage B onward) builds on, so they are chosen with
-// care and documented where the design doc left them implicit.
+// (combat_begin). advance() is the only public API of the whole simulator
+// (design doc §7), and every subsystem (RNG streams, the action-queue pump, the
+// effect interpreter, the five cards, the Jaw Worm AI, the observation encoder)
+// is exercised through it. This header's shapes are what every future phase
+// (Stage B onward) builds on, so they are chosen with care and documented where
+// the design doc left them implicit.
 //
 // SCOPE (design doc §9): the M1 walking skeleton is Ironclad vs. one Jaw Worm,
 // the five skeleton cards. advance() therefore hard-wires the monster-turn seam
-// to jaw_worm_take_turn (A3.2) -- Stage B generalizes the MonsterTurnFn per the
-// monster registry. Only PLAY_CARD and END_TURN are implemented; USE_POTION and
-// CHOOSE are documented no-ops (no potions or choice prompts exist in M1).
+// to jaw_worm_take_turn -- Stage B generalizes the MonsterTurnFn per the monster
+// registry. Only PLAY_CARD and END_TURN are implemented; USE_POTION and CHOOSE
+// are documented no-ops (no potions or choice prompts exist in M1).
 //
 // Provenance (combat construction): AbstractPlayer.preBattlePrep
 // (AbstractPlayer.java:1564-1595) -> drawPile.initializeDeck(masterDeck)
@@ -21,7 +20,7 @@
 // -> copy.shuffle(shuffleRng) -> Collections.shuffle(group,
 // new java.util.Random(shuffleRng.randomLong())) (CardGroup.java:565-567). The
 // combat-start deck shuffle is the SAME one-randomLong()->JDK-LCG->Fisher-Yates
-// mechanism as A4.2's in-combat reshuffle (piles.cpp shuffle_discard_into_draw);
+// mechanism as the in-combat reshuffle (piles.cpp shuffle_discard_into_draw);
 // see combat_begin's implementation note in advance.cpp.
 
 #include <cstddef>
@@ -106,8 +105,8 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept;
 // state. StepResult is thus a self-contained POD.
 //
 // REWARD (placeholder, NOT a frozen design). The real reward shaping is
-// training-loop scope (InitialPlan Part 2, E1+), wildly out of scope for M1.
-// This is a minimal, honest, non-crashing scheme for the batch smoke test:
+// training-loop scope, wildly out of scope for M1. This is a minimal, honest,
+// non-crashing scheme for the batch smoke test:
 //   +1.0f  win  -- the sole monster's hp reached 0 (and the player is alive)
 //   -1.0f  loss -- player_hp reached 0
 //    0.0f  otherwise (combat ongoing)
@@ -140,7 +139,7 @@ static_assert(std::is_trivially_copyable_v<StepResult>,
 // and encode_observation(states[i], results[i].obs).
 //
 // NO heap allocation anywhere in the loop -- the spans are iterated directly, no
-// std::vector / new. (encode_observation is itself allocation-free, A5.2.)
+// std::vector / new. (encode_observation is itself allocation-free.)
 void advance(std::span<CombatState> states, std::span<const Action> actions,
              std::span<StepResult> results) noexcept;
 
