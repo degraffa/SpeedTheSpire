@@ -114,3 +114,18 @@ sts_set_warnings(action_queue_test)
 sts_enable_sanitizers(action_queue_test)
 
 gtest_discover_tests(action_queue_test)
+
+# A3.2: Jaw Worm AI + monster turn. Compares the engine against the hand-derived
+# fixture (tests/fixtures/jaw_worm_fixture.tsv, gen by gen_jaw_worm_fixture.py).
+# STS_FIXTURE_DIR points at tests/fixtures (distinct from tests/golden, which
+# holds JVM-captured vectors -- this is a hand-derived oracle, not a golden file).
+add_executable(jaw_worm_test
+    jaw_worm_test.cpp
+)
+
+target_link_libraries(jaw_worm_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(jaw_worm_test PRIVATE STS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+sts_set_warnings(jaw_worm_test)
+sts_enable_sanitizers(jaw_worm_test)
+
+gtest_discover_tests(jaw_worm_test)
