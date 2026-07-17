@@ -17,3 +17,17 @@ sts_enable_sanitizers(sts_engine_tests)
 
 include(GoogleTest)
 gtest_discover_tests(sts_engine_tests)
+
+# A1.1: RandomXS128 (xorshift128+) bit-exactness suite. Separate executable
+# target per the Stage A task ledger's acceptance line (gtest
+# `rng_xs128_test`), not appended to sts_engine_tests.
+add_executable(rng_xs128_test
+    rng_xs128_test.cpp
+)
+
+target_link_libraries(rng_xs128_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(rng_xs128_test PRIVATE STS_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden")
+sts_set_warnings(rng_xs128_test)
+sts_enable_sanitizers(rng_xs128_test)
+
+gtest_discover_tests(rng_xs128_test)
