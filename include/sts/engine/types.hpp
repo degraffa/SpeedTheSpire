@@ -15,7 +15,7 @@
 //
 // All types here are fixed-width (<cstdint>), trivially copyable, pointer-
 // free, and header-only, matching the conventions established by
-// rng_stream.hpp (A1.3). Namespace sts::engine, per the existing headers.
+// rng_stream.hpp. Namespace sts::engine, per the existing headers.
 
 #include <cstdint>
 #include <type_traits>
@@ -73,10 +73,9 @@ enum class RelicId : uint16_t {
 // --- ActionVerb --------------------------------------------------------------
 
 // The batch API's action verb set (design doc §7): "one enum, all phases".
-// The skeleton (Phase 3-5) exercises PLAY_CARD and END_TURN; USE_POTION and
-// CHOOSE are listed now per §7's frozen encoding even though nothing in M1
-// scope emits them yet (no potions, no choice prompts in the 5-card
-// micro-game).
+// The skeleton exercises PLAY_CARD and END_TURN; USE_POTION and CHOOSE are
+// listed now per §7's frozen encoding even though nothing in M1 scope emits
+// them yet (no potions, no choice prompts in the 5-card micro-game).
 enum class ActionVerb : uint8_t {
     PLAY_CARD = 0,   // arg0 = hand index, arg1 = target monster slot
     END_TURN = 1,    // no args

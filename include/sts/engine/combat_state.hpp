@@ -4,13 +4,13 @@
 // <= 4096 bytes. This is the struct the batch API's advance() steps (design doc
 // §7) and the diff harness snapshots (design doc §8). It is derived from
 // RunState at combat start and folded back at combat end; the two never alias
-// (design doc §4.4). Deriving/folding is Phase 5 work (A5.1's combat_begin());
-// this task only lands the storage shape.
+// (design doc §4.4). A full RunState->CombatState derivation is not yet
+// implemented; this struct is the storage shape.
 //
 // Design doc §4.1 principles enforced here:
 //   * trivially copyable, no pointers, no heap -- snapshot is a memcpy;
 //   * fixed-capacity arrays with counts -- overflow is a hard assert in the
-//     rule code that fills them (A3.x+), not a reallocation;
+//     rule code that fills them, not a reallocation;
 //   * all cross-references are indices, never pointers (piles hold uint8_t
 //     indices into the card-instance pool, monster/card queues hold indices);
 //   * value-initialized before use so byte-hashing is padding-stable -- the
@@ -23,21 +23,15 @@
 // intentional forward design per the §4.2 table -- the skeleton exercises only
 // a small corner of them. Fields whose exact bit-layout the design doc leaves
 // open (the `flags` words, `misc`, monster `intent`/`move_history` encodings)
-// are minimal documented placeholders; their semantics are defined by later
-// tasks (A3.x AI/queue pump, A4.x effects), not invented here.
+// are minimal documented placeholders; their semantics are defined by the
+// action-queue pump, monster AI, and effect layers, not invented here.
 //
-// A3.1 STOP-THE-LINE GAP-FIX (design-doc precedence, same class as A2.2's
-// stream-count fix): A2.2 allocated storage for only THREE of the FOUR queues
-// design doc §5.1 requires -- `action_queue` (the game's `actions` list),
-// `card_queue`, `monster_queue` -- omitting the `preTurnActions` list
-// (`addToTurnStart` prepends here; GameActionManager.java:59,145). The omission
-// traces to §4.2's capacity table listing only two queue rows ("action queue"
-// and "card/monster queues"), which under-specifies §5.1's four-queue
-// structure. A3.1 adds the missing `pre_turn_actions` ring (same
-// `ActionQueueItem` element type as the main queue) plus the `turn_has_ended`
-// bookkeeping flag the pump's §5.2-step-6 gate needs. Additive only (new
-// fields, no renames/removals) so A2.2's state_test is undisturbed; recorded in
-// the ledger Log and the design doc change log.
+// The four action queues (design doc §5.1) are `action_queue` (the game's
+// `actions` list), `pre_turn_actions` (the game's `preTurnActions` list;
+// `addToTurnStart` prepends here, GameActionManager.java:59,145), `card_queue`,
+// and `monster_queue`. `pre_turn_actions` uses the same `ActionQueueItem`
+// element type as the main queue, and `turn_has_ended` is the bookkeeping flag
+// the pump's §5.2-step-6 gate reads.
 
 #include <cstdint>
 #include <type_traits>
@@ -61,12 +55,11 @@ inline constexpr int kMonsterCap = 5;
 inline constexpr int kActionQueueCap = 64;
 inline constexpr int kCardQueueCap = 16;
 inline constexpr int kMonsterQueueCap = 5;
-// preTurnActions (design doc §5.1) -- A3.1 gap-fix; not in §4.2's capacity
-// table (see the STOP-THE-LINE note in this file's header). `addToTurnStart`
-// prepends only start-of-next-turn relic/power actions here, a handful per turn
-// in the skeleton's scope, so 16 is generous headroom (16 * 12 B = 192 B, well
-// inside CombatState's ~784 B of remaining 4 KB budget). Sized to match the
-// main action ring's element type/idiom rather than trimmed to a tight bound.
+// preTurnActions capacity (design doc §5.1). `addToTurnStart` prepends only
+// start-of-next-turn relic/power actions here, a handful per turn in the
+// skeleton's scope, so 16 is generous headroom (16 * 12 B = 192 B, well inside
+// CombatState's ~784 B of remaining 4 KB budget). Sized to match the main
+// action ring's element type/idiom rather than trimmed to a tight bound.
 inline constexpr int kPreTurnActionQueueCap = 16;
 
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
@@ -78,8 +71,8 @@ static_assert(kCardPoolCap <= 256,
 // --- CombatPhase ------------------------------------------------------------
 
 // Coarse combat phase (design doc §4.2 header group). The action-queue pump
-// (A3.1) drives the fine-grained WAITING_ON_USER / resolving distinction via
-// the queues; this enum is the top-level state the batch API reports. Minimal
+// drives the fine-grained WAITING_ON_USER / resolving distinction via the
+// queues; this enum is the top-level state the batch API reports. Minimal
 // placeholder set for the skeleton -- extended as later phases need it.
 enum class CombatPhase : uint8_t {
     NONE = 0,          // uninitialized (value-init default)
@@ -90,9 +83,9 @@ enum class CombatPhase : uint8_t {
 
 // --- ActionQueueItem (design doc §5.1, §4.2) --------------------------------
 
-// One entry of the main action ring (`actions`). Storage only -- add_to_top/
-// add_to_bottom and the pump() priority loop are A3.1. `opcode` indexes the
-// effect-interpreter op set (design doc §5.5/§6: DAMAGE/BLOCK/APPLY_POWER/...);
+// One entry of the main action ring (`actions`). Storage only; the queue
+// mechanics live in action_queue.hpp. `opcode` indexes the effect-interpreter
+// op set (design doc §5.5/§6: DAMAGE/BLOCK/APPLY_POWER/...);
 // `src`/`tgt` are actor indices (player is a reserved sentinel, monsters are
 // monster-array indices); `amount` is the signed op argument; `flags` is a
 // reserved per-action bitfield. Field widths are exactly design doc §4.2's
@@ -114,10 +107,10 @@ static_assert(sizeof(ActionQueueItem) == 12,
 // --- CardQueueItem (design doc §5.1, §4.2) ----------------------------------
 
 // One pending card play. Storage only; the index-1 front-insertion rule and the
-// null-card end-turn sentinel (design doc §5.1, trap 9) are A3.1's pump
-// semantics. `card_index` references the shared card-instance pool; `target` is
-// a monster-array index (or a reserved sentinel for no/auto target). A3.1
-// chooses which reserved `card_index` value denotes the end-turn sentinel.
+// null-card end-turn sentinel (design doc §5.1, trap 9) live in the queue
+// mechanics (action_queue.hpp). `card_index` references the shared card-instance
+// pool; `target` is a monster-array index (or a reserved sentinel for no/auto
+// target).
 struct CardQueueItem {
     CardPoolIndex card_index;
     uint8_t target;
@@ -129,8 +122,9 @@ static_assert(sizeof(CardQueueItem) == 2);
 // --- MonsterQueueItem (design doc §5.1, §4.2) -------------------------------
 
 // One monster awaiting its turn. Storage only; queueMonsters / takeTurn
-// ordering is A3.1/A3.2. `monster_index` references the monster array; `flags`
-// is a reserved per-entry bitfield (e.g. a future "already acted" marker).
+// ordering lives in the pump (action_queue.hpp). `monster_index` references the
+// monster array; `flags` is a reserved per-entry bitfield (e.g. a future
+// "already acted" marker).
 struct MonsterQueueItem {
     uint8_t monster_index;
     uint8_t flags;
@@ -146,8 +140,8 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 // widths (A20 numbers are small; signed leaves headroom for transient negative
 // bookkeeping). `move_history` holds the last three move ids most-recent-first
 // -- Jaw Worm's AI needs last-move and last-two-moves (design doc §9); the move
-// id encoding is defined by the monster registry (A3.2), here it is an opaque
-// uint8_t. `intent` is the telegraphed next move id (A3.2). `flags` is a
+// id encoding is defined by the monster module (monster_jaw_worm.hpp), here it
+// is an opaque uint8_t. `intent` is the telegraphed next move id. `flags` is a
 // reserved per-monster bitfield. `power_count` is the live length of `powers`
 // (parallels the pile counts); empty slots also read PowerId::NONE.
 struct MonsterState {
@@ -212,26 +206,25 @@ struct CombatState {
     MonsterState monsters[kMonsterCap];
 
     // -- action queue: fixed ring + bookkeeping (design doc §5.1/§4.2). Storage
-    //    only; add_to_top/bottom and pump() are A3.1. head/tail/count are the
-    //    ring cursors the pump will maintain. --
+    //    only; the queue mechanics live in action_queue.hpp. head/tail/count are
+    //    the ring cursors the pump maintains. --
     ActionQueueItem action_queue[kActionQueueCap];
     uint8_t action_head;
     uint8_t action_tail;
     uint8_t action_count;
     uint8_t pad_actionq;              // explicit padding
 
-    // -- pre-turn action queue (design doc §5.1: `preTurnActions`; A3.1 gap-fix,
-    //    see the header STOP-THE-LINE note). `addToTurnStart` prepends here
-    //    (GameActionManager.java:145); the pump drains it right after the main
-    //    action queue (§5.2 step 2). Same ring shape/cursors as `action_queue`.
-    //    --
+    // -- pre-turn action queue (design doc §5.1: `preTurnActions`).
+    //    `addToTurnStart` prepends here (GameActionManager.java:145); the pump
+    //    drains it right after the main action queue (§5.2 step 2). Same ring
+    //    shape/cursors as `action_queue`. --
     ActionQueueItem pre_turn_actions[kPreTurnActionQueueCap];
     uint8_t pre_turn_head;
     uint8_t pre_turn_tail;
     uint8_t pre_turn_count;
     // Set by the end-turn sentinel (design doc §5.2 step 3 / §5.4), cleared by
-    // the start-of-turn sequence (§5.2 step 6); gates that step-6 branch. A3.1
-    // bookkeeping field (the game's `GameActionManager.turnHasEnded`).
+    // the start-of-turn sequence (§5.2 step 6); gates that step-6 branch. The
+    // game's `GameActionManager.turnHasEnded`.
     uint8_t turn_has_ended;           // 0/1; fills what would be ring padding
 
     // -- card queue (design doc §5.1: pending card plays, cap 16) --
@@ -245,8 +238,8 @@ struct CombatState {
     uint8_t monster_attacks_queued;   // design doc §5.2 step 4 flag (0/1)
 
     // -- RNG: the 5 floor-scoped streams (design doc §3.4 / §3.6). Named
-    //    exactly as the game's streams so A5.1's combat_begin() can derive each
-    //    via floor_stream(seed, floor) with an obvious 1:1 mapping. RngStream is
+    //    exactly as the game's streams so combat_begin() can derive each via
+    //    floor_stream(seed, floor) with an obvious 1:1 mapping. RngStream is
     //    8-byte aligned, so CombatState is 8-byte aligned and the compiler
     //    inserts (value-init-zeroed) padding ahead of this block. --
     RngStream monster_hp_rng;         // monster max-HP rolls

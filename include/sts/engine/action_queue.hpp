@@ -5,39 +5,29 @@
 // (GameActionManager.java, esp. getNextAction lines 185-367). This layer is
 // QUEUE ORDERING/MECHANICS only -- it decides *which* item resolves next and
 // maintains the four queues (design doc §5.1). It does NOT interpret opcodes or
-// resolve card plays: the effect interpreter is A4.1 and real card-play flow is
-// A4.3. Until those land, "executing" an action_queue / pre_turn item just means
-// consuming (popping) it, and a non-sentinel card_queue item is a documented
-// pop-and-discard no-op stub.
+// resolve card plays: opcode execution lives in the effect interpreter
+// (interp.hpp) and card-play resolution in card_play.hpp, both invoked by the
+// pump as it pops each item.
 //
 // -------------------------------------------------------------------------
-// TWO source-vs-recipe reconciliations recorded here (design-doc/Java win over
-// the ledger's step-6 parenthetical, per the working-agreements precedence
-// rule; both are documented in the ledger Log + design doc change log):
-//
-// (1) `preTurnActions` storage was missing from CombatState -- added by A3.1
-//     (see combat_state.hpp's STOP-THE-LINE header note).
-//
-// (2) monster_attacks_queued reset placement. The decompiled
-//     GameActionManager.java in the reference tree sets `monsterAttacksQueued`
-//     to `true` (declaration + line 304) but NEVER sets it back to false
-//     anywhere in the whole tree (grep-confirmed: 3 occurrences, one file, none
-//     `= false`). Taken literally that flag can never re-open step 4, so
-//     monsters would be queued at most once and never take a second turn -- not
-//     the game's observable behavior, so this decompiled copy is missing the
-//     reset. The ledger's A3.1 recipe put the reset in the start-of-turn
-//     sequence (step 6), but that leaves the flag false *during the player's
-//     turn*, so the first mid-turn pump (a card play under A4.3) would wrongly
-//     fire step 4 and run a spurious monster turn. The correct, Java-faithful
-//     placement -- and what design doc §5.2 step 6's generic "reset per-turn
-//     counters" actually enumerates (cardsPlayedThisTurn, turnHasEnded, ...,
-//     NOT monsterAttacksQueued; GameActionManager.java:333,349-351) -- is:
-//     clear the flag when the turn *ends* (the end-turn sentinel, step 3),
-//     priming step 4 to queue monsters exactly once, and leave it set through
-//     the whole next player turn. Start-of-turn (step 6) does NOT touch it,
-//     matching the Java. This keeps the invariant "monster_attacks_queued is
-//     true throughout the player's turn" so A4.3's card-play pumps never
-//     trip step 4.
+// monster_attacks_queued reset placement (non-obvious, Java-faithful). The
+// decompiled GameActionManager.java sets `monsterAttacksQueued` to `true`
+// (declaration + line 304) but NEVER sets it back to false anywhere in the
+// whole tree (grep-confirmed: 3 occurrences, one file, none `= false`). Taken
+// literally that flag can never re-open step 4, so monsters would be queued at
+// most once and never take a second turn -- not the game's observable behavior,
+// so this decompiled copy is missing the reset. Clearing it in the start-of-turn
+// sequence (step 6) would leave the flag false *during the player's turn*, so
+// the first mid-turn pump (a card play) would wrongly fire step 4 and run a
+// spurious monster turn. The correct placement -- and what design doc §5.2
+// step 6's generic "reset per-turn counters" actually enumerates
+// (cardsPlayedThisTurn, turnHasEnded, ..., NOT monsterAttacksQueued;
+// GameActionManager.java:333,349-351) -- is: clear the flag when the turn *ends*
+// (the end-turn sentinel, step 3), priming step 4 to queue monsters exactly
+// once, and leave it set through the whole next player turn. Start-of-turn
+// (step 6) does NOT touch it, matching the Java. This keeps the invariant
+// "monster_attacks_queued is true throughout the player's turn" so card-play
+// pumps never trip step 4.
 
 #include <cstdint>
 
@@ -54,53 +44,48 @@ namespace sts::engine {
 // permanently-out-of-range marker that can never collide with a real pool row.
 // It is deliberately distinct from CardId::NONE (== 0): index 0 is a *valid*
 // pool slot (that merely happens to hold an empty card), whereas 255 is "not a
-// card reference at all". A4.3 constructs the sentinel via make_end_turn_sentinel().
+// card reference at all". The sentinel is constructed via make_end_turn_sentinel().
 inline constexpr CardPoolIndex kEndTurnSentinel = 255;
 
 // DRAW opcode value for the start-of-turn DrawCardAction the pump queues
-// (design doc §5.2 step 6). A4.1 landed the real opcode table (interp.hpp:
-// Opcode), which reserves NOP == 0 as a safe no-op for value-init'd/unrecognized
-// items and numbers §6's set from 1 -- so the real DRAW is 4, not the A3.1
-// placeholder's 3. This mirror constant is kept so action_queue.cpp needn't
-// include interp.hpp in its hot path; interp.hpp's value is authoritative and
-// action_queue.cpp static_asserts the two agree (kOpcodeDrawCard ==
-// (uint16_t)Opcode::DRAW).
+// (design doc §5.2 step 6). Mirror of interp.hpp's Opcode::DRAW; interp.hpp's
+// value is authoritative and action_queue.cpp static_asserts the two agree
+// (kOpcodeDrawCard == (uint16_t)Opcode::DRAW).
 inline constexpr uint16_t kOpcodeDrawCard = 4;
 
 // Reserved actor index meaning "the player" in an ActionQueueItem's src/tgt
 // (combat_state.hpp: "player is a reserved sentinel, monsters are monster-array
-// indices"). 0xFF cannot alias a monster slot (0..4). A4.1 may formalize this.
+// indices"). 0xFF cannot alias a monster slot (0..4).
 inline constexpr uint8_t kActorPlayer = 0xFF;
 
 // Player draw count at start of turn (the game's DrawCardAction(gameHandSize);
 // gameHandSize is 5 for the Ironclad skeleton, design doc §9). Carried as the
-// queued DrawCard item's `amount`; interpreted by A4.1/A4.2, not here.
+// queued DrawCard item's `amount`; interpreted by the DRAW opcode, not here.
 inline constexpr int32_t kStartOfTurnDrawCount = 5;
 
 // Ironclad's base energy per turn (EnergyManager.java: energyMaster, prep()).
 // Energy is SET to this value every turn via EnergyManager.recharge() -- not
-// additive, and not modeled by the design doc §5.2 prose (that paraphrase
-// omits it; the actual game wires recharge() through a presentation-layer
-// PlayerTurnEffect queued alongside the start-of-turn DrawCardAction, which is
-// exactly the "presentation-adjacent but outcome-affecting" case InitialPlan
-// D0.2 says stays in scope). No relic/power in the skeleton changes this
-// (Ice Cream / Conserve branches in EnergyManager.recharge() are unreachable).
+// additive. The game wires recharge() through a presentation-layer
+// PlayerTurnEffect queued alongside the start-of-turn DrawCardAction; it is
+// presentation-adjacent but outcome-affecting, so it stays in scope. No
+// relic/power in the skeleton changes this (Ice Cream / Conserve branches in
+// EnergyManager.recharge() are unreachable).
 inline constexpr int16_t kIroncladBaseEnergy = 3;
 
-// --- Monster-turn extension point (the A3.1<->A3.2 seam) --------------------
+// --- Monster-turn extension point -------------------------------------------
 
-// Step 5 of the pump (design doc §5.2) runs one monster's turn. A3.1 owns the
-// QUEUE mechanics only and must not know any monster-specific behavior; A3.2
-// supplies the real Jaw Worm move-selection/turn logic. The seam is a plain
-// function pointer (this engine is data-oriented: no virtual dispatch, no heap)
-// invoked as `take_turn(state, monster_index)` for each live monster popped
-// from the monster queue. A3.2 passes its real AI function; A3.1's own tests
+// Step 5 of the pump (design doc §5.2) runs one monster's turn. The queue
+// mechanics here know no monster-specific behavior; the monster module supplies
+// the real move-selection/turn logic. The seam is a plain function pointer (this
+// engine is data-oriented: no virtual dispatch, no heap) invoked as
+// `take_turn(state, monster_index)` for each live monster popped from the
+// monster queue. Callers pass a real AI function (jaw_worm_take_turn); tests can
 // pass default_monster_turn (a no-op) or a lightweight probe.
 using MonsterTurnFn = void (*)(CombatState& state, uint8_t monster_index);
 
-// The default step-5 hook: the monster does nothing (no AI in A3.1). It exists
-// so pump()'s signature has a valid default and A3.1 is fully testable with
-// zero monster-AI knowledge.
+// The default step-5 hook: the monster does nothing. It exists so pump()'s
+// signature has a valid default and the queue mechanics are testable with zero
+// monster-AI knowledge.
 void default_monster_turn(CombatState& state, uint8_t monster_index) noexcept;
 
 // --- Queue insertion primitives (design doc §5.1) ---------------------------
@@ -145,7 +130,7 @@ enum class PumpOutcome : uint8_t {
     RAN_ACTION = 0,      // step 1: popped/executed an action_queue item
     RAN_PRE_TURN,        // step 2: popped/executed a pre_turn_actions item
     END_TURN_SENTINEL,   // step 3: head card_queue item was the end-turn sentinel
-    RAN_CARD_QUEUE,      // step 3: head was a non-sentinel card (A4.3 stub: discarded)
+    RAN_CARD_QUEUE,      // step 3: head was a non-sentinel card (resolved via card_play.hpp)
     QUEUED_MONSTERS,     // step 4: populated monster_queue from live monsters
     RAN_MONSTER,         // step 5: ran one monster's turn via the extension point
     STARTED_TURN,        // step 6: ran the start-of-turn sequence (turn++)
@@ -170,7 +155,7 @@ PumpStepResult pump_step(CombatState& state, MonsterTurnFn take_turn) noexcept;
 // the player (phase WAITING_ON_USER) or combat ends (phase COMBAT_OVER). This
 // is the "pump the loop after a player action" half of the engine step function
 // (design doc §5.2). `take_turn` is the step-5 monster-turn seam (default:
-// no-op); A3.2 passes real Jaw Worm AI.
+// no-op); callers pass real Jaw Worm AI (jaw_worm_take_turn).
 void pump(CombatState& state,
           MonsterTurnFn take_turn = default_monster_turn) noexcept;
 

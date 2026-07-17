@@ -2,10 +2,9 @@
 
 // Jaw Worm monster registry entry (design doc §9 walking skeleton). A hand-
 // coded module for the M1 skeleton's single enemy; Stage B replaces per-monster
-// hand code with the registry/YAML-driven table (design doc §6). This is the
-// A3.1<->A3.2 seam's consumer: jaw_worm_take_turn matches the pump's
-// MonsterTurnFn signature exactly (action_queue.hpp) and is passed straight to
-// pump() as its step-5 monster-turn hook.
+// hand code with the registry/YAML-driven table (design doc §6). jaw_worm_take_turn
+// matches the pump's MonsterTurnFn signature exactly (action_queue.hpp) and is
+// passed straight to pump() as its step-5 monster-turn hook.
 //
 // Provenance (read from D:\STS_BG_Mod\SlayTheSpireDecompiled):
 //   * com.megacrit.cardcrawl.monsters.exordium.JawWorm -- getMove decision tree
@@ -19,18 +18,11 @@
 //     (:469-491), setHp(min,max) == monsterHpRng.random(min,max) with
 //     currentHealth = maxHealth (:765-775).
 //
-// SCOPE: jaw_worm_take_turn now ENQUEUES the current move's real effects (Chomp
+// SCOPE: jaw_worm_take_turn ENQUEUES the current move's real effects (Chomp
 // damage, Bellow Strength+block, Thrash damage+block) in JawWorm.takeTurn's
-// addToBottom order, then rolls the next move. A3.2 originally shipped this as a
-// no-op-execute stub (no effect interpreter existed yet) and its scope note
-// promised "A4.x attaches the real DamageAction/GainBlockAction/ApplyPowerAction
-// enqueues"; that hand-off was never taken -- A4.1 built the interpreter, A4.3
-// wired card effects, but the MONSTER's effects stayed unattached, so through
-// advance() a Jaw Worm dealt zero damage. A6.2 needs a monster that actually
-// fights (player-death fixtures, Bellow-Strength interacting with Vulnerable),
-// so it closes the gap here (design doc §12 change log; JawWorm.java:120-146).
-// The move to execute is the decided move in move_history[0]; effects are queued
-// (never applied inline) so they resolve through the pump exactly like a card's.
+// addToBottom order (JawWorm.java:120-146), then rolls the next move. The move
+// to execute is the decided move in move_history[0]; effects are queued (never
+// applied inline) so they resolve through the pump exactly like a card's.
 //
 // DRAW-COUNTING CONVENTION (must match tests/fixtures/gen_jaw_worm_fixture.py to
 // the draw): jaw_worm_init performs decision #1 -- rollMove's forced-first-move
@@ -68,9 +60,9 @@ enum class MonsterIntent : uint8_t {
 };
 
 // Jaw Worm A20 stats -- JawWorm.java ascension>=17 branch (:86-91) plus the
-// ascension>=7 HP range setHp(42,46) (:81-82). Defined now (even though A3.2
-// applies no damage/block -- no interpreter yet) so A4.x references them without
-// re-deriving from the Java a second time.
+// ascension>=7 HP range setHp(42,46) (:81-82). Constants live here so the move
+// enqueues and any other consumer reference them without re-deriving from the
+// Java.
 inline constexpr int kJawWormHpMin = 42;       // A_2_HP_MIN (>=7 branch)
 inline constexpr int kJawWormHpMax = 46;       // A_2_HP_MAX
 inline constexpr int kJawWormChompDmg = 12;    // A_2_CHOMP_DMG
