@@ -158,3 +158,18 @@ sts_set_warnings(piles_test)
 sts_enable_sanitizers(piles_test)
 
 gtest_discover_tests(piles_test)
+
+# A4.3: five skeleton cards + card-play flow (design doc §5.3, §9, §10 trap 10).
+# Per-card table tests (constructed state -> queue_card_play + pump -> assert
+# fields), the trap-10 dequeue-vs-enqueue random-target test, and a scripted
+# 3-turn Jaw Worm fight whose hand-traced expected state is matched by hash.
+# Links sts_engine (card_play.cpp + the A3.2 Jaw Worm module it drives).
+add_executable(cards_test
+    cards_test.cpp
+)
+
+target_link_libraries(cards_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(cards_test)
+sts_enable_sanitizers(cards_test)
+
+gtest_discover_tests(cards_test)

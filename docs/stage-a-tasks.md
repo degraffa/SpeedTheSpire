@@ -569,7 +569,7 @@ Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest --output-on-fail
 — both presets `100% tests passed, 0 failed out of 80` (62 pre-existing A4.1-era
 + 18 new `Piles*`). No ASan/UBSan findings.
 
-### A4.3 `[ ]` Five skeleton cards + card-play flow
+### A4.3 `[x]` Five skeleton cards + card-play flow
 **Deps:** A4.1, A4.2 · **Spec:** §5.3, §9
 **Deliverables:** registry entries (hand-coded constexpr table for skeleton):
 Strike, Defend, Bash (+Vulnerable 2, 2-cost), Shrug It Off (block 8, draw 1),
@@ -579,7 +579,67 @@ dequeue present for trap 10 even though all five cards are fixed-target).
 **Acceptance:** gtest `cards_test` — per-card table tests (tier-2 pattern:
 constructed state → play → assert fields); full-turn integration: scripted
 3-turn fight reaches exact expected state hash.
-**Log:** —
+**Log:** `include/sts/engine/cards.hpp` (header-only `constexpr` registry) +
+`include/sts/engine/card_play.hpp` + `src/engine/card_play.cpp`. **Effect-program
+representation:** a data table (design doc §6 "effect programs are sequences of
+{op, target, amount, flags}") — each `CardDef` carries base cost, `CardType`
+(Attack/Skill), `needs_target`/`random_target` flags, and up to `kMaxCardSteps`
+(=2) `CardEffectStep{Opcode, amount, extra, StepTarget}` where `extra` packs the
+`PowerId` for APPLY_POWER via A4.1's `make_apply_power_flags` and `StepTarget`
+(SELF/CARD_TARGET) defers the concrete actor index to play time. Chosen over a
+per-card dispatch function because it is the literal encoding of §6's frozen
+decision and the exact shape Stage B codegen will emit, keeping the interpreter
+effect-program-driven. Each entry mirrors its `use()`'s `addToBot` order
+(provenance: Strike_Red/Defend_Red/Bash/ShrugItOff/PommelStrike `.java`, each
+read in full). `queue_card_play` (PLAY_CARD → cardQueue via
+`add_card_to_queue_bottom`, no resolution) and `resolve_card_play` (wired into
+`action_queue.cpp` `pump_step` step 3, replacing the A3.1 pop-and-discard stub):
+hook-order no-op stubs → `++cards_played_this_turn` → trap-10 target resolution →
+queue effect items via `add_to_bottom` (NOT applied inline — matches
+`AbstractCard.use()`'s addToBot) → move card hand→discard → deduct `cost_now`
+AFTER queueing (useCard order). **Hook-order-collapse decision** (documented in
+card_play.hpp, consistent with A4.2's precedent): the real game's two-cycle
+`useCard()`+queued `UseCardAction` split is animation-pacing only; the skeleton
+has zero relics/powers/blights/stances with a real onPlayCard/onUseCard body, so
+resolution collapses into ONE synchronous step at dequeue — verified against
+GameActionManager.getNextAction (:193-280) / AbstractPlayer.useCard (:1358-1384)
+/ UseCardAction that the only cross-cycle interaction would be a listener with a
+real body (none exist), so the observable end state and RNG draw sequence are
+identical. **Trap 10:** `random_target` flag + `roll_random_target`
+(getRandomMonster over live monsters via one `card_random_rng` draw) +
+`resolve_play_target` dispatch site; false for all five cards but reachable —
+`CardPlayTrap.RandomTargetRollsAtDequeueNotEnqueue` proves the roll is a
+dequeue-only op (enqueue and fixed-target cards never touch `card_random_rng`;
+the roll consumes exactly one draw and excludes dead monster slots). **Tests**
+(`tests/cards_test.cpp`, 11th `tests/CMakeLists.txt` block, gtest `cards_test`):
+8 per-card table tests (all 5 cards + Bash-damage-before-Vulnerable, Strike-into-
+Vulnerable ×1.5, out-of-range-hand-index reject), the trap-10 test, and the
+3-turn integration test. **Integration hand-trace** (seed r0, Jaw Worm HP 44,
+fixed moves CHOMP/BELLOW/THRASH from A3.2's golden fixture; the production
+`jaw_worm_take_turn` still defers real damage per its A3.2 scope note, so the
+test supplies the A20 move effects locally and reuses `jaw_worm_take_turn` for
+the move/aiRng progression): T1 Bash (8→monster 44→36) + Vuln 2, Strike (6×1.5=9,
+36→27), CHOMP 12 → player 80→68; T2 Defend (block 5), Pommel (9×1.5=13, 27→14) +
+draw, BELLOW +5 Str/+9 block; T3 Shrug (block 8) + draw, THRASH 7+Str5=12 vs
+block 8 → player 68→64. Final: player hp 64/energy 2/block 0, monster hp
+14/block 14/Vuln 2/Str 5, move_history [Thrash,Thrash,Bellow], hand 10/draw
+8/discard 5, turn 4. Expected `CombatState` built independently from those
+hand-traced values (RNG end states taken from the A3.2 fixture); hashes matched.
+**First run FAILED** (field checks green, hash mismatch): the byte diff exposed
+`draw[8..17]` holding the drawn-out indices 13..22 — the fixed-capacity piles (like
+the queue rings) leave stale bytes beyond `count` on removal. Handled by a
+documented `NormalizeScratch` that zeroes the four drained queue rings AND the
+dead pile tails `[count, cap)` on BOTH states before hashing (asserting all queue
+counts are 0 first, so no live state is dropped); this is drained scratch, not
+gameplay state (rules only read `[0, count)`). One test-scaffolding note recorded
+in the test: the pump's start-of-turn does not yet emit the energy-refill action,
+so the test sets `player_energy = 3` at each turn start. Verified by running, not
+inferred: WSL Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest
+--output-on-failure` — both presets `100% tests passed, 0 failed out of 90` (80
+pre-existing A4.2-era + 10 new: 8 `CardTable.*`, `CardPlayTrap.*`,
+`CardIntegration.*`); no build warnings; `action_queue_test`/`jaw_worm_test`/
+`damage_pipeline_test`/`piles_test` still green after the step-3 dispatch change.
+No ASan/UBSan findings.
 
 ---
 

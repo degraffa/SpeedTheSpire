@@ -1,0 +1,532 @@
+// A4.3 acceptance suite: the five skeleton cards + the card-play flow
+// (design doc §5.3, §9; §10 trap 10).
+//
+// Structure (per the ledger's acceptance line):
+//   * Per-card table tests (tier-2 pattern): construct a minimal CombatState with
+//     the card in hand, queue_card_play + pump to full resolution, assert the
+//     resulting fields. Every expected value is hand-computed from the design
+//     doc §9 / card-registry table, NOT read back from the implementation.
+//   * Trap 10: prove the random-target roll happens at DEQUEUE (resolve), never
+//     at ENQUEUE (queue_card_play), consuming exactly one card_random_rng draw
+//     and excluding dead monsters.
+//   * Full-turn integration: a scripted 3-turn Ironclad-vs-Jaw-Worm fight
+//     (fixed seed r0) driven through the real pump, whose hand-traced final state
+//     is built INDEPENDENTLY and compared by state hash.
+//
+// Card table (design doc §9, provenance in cards.hpp):
+//   Strike        1E Attack  DAMAGE 6
+//   Defend        1E Skill   BLOCK 5
+//   Bash          2E Attack  DAMAGE 8, then APPLY Vulnerable 2 (same target)
+//   Shrug It Off  1E Skill   BLOCK 8, then DRAW 1
+//   Pommel Strike 1E Attack  DAMAGE 9, then DRAW 1
+
+#include <array>
+#include <cstdint>
+
+#include "gtest/gtest.h"
+
+#include "sts/engine/action_queue.hpp"
+#include "sts/engine/card_play.hpp"
+#include "sts/engine/cards.hpp"
+#include "sts/engine/combat_state.hpp"
+#include "sts/engine/interp.hpp"
+#include "sts/engine/monster_jaw_worm.hpp"
+#include "sts/engine/rng_stream.hpp"
+#include "sts/engine/state_hash.hpp"
+#include "sts/engine/types.hpp"
+
+namespace sts::engine {
+namespace {
+
+// --- Per-card test scaffolding ----------------------------------------------
+
+// A minimal combat with `id` (cost `cost`) as the sole hand card (pool index 0),
+// one dummy target monster at 50 HP, and the player-turn invariant set so a
+// post-play pump resolves the card and returns to WAITING_ON_USER WITHOUT running
+// any monster turn (monster_attacks_queued stays true through the player's turn).
+CombatState MakeCardTestState(CardId id, uint8_t cost, int16_t energy = 3) {
+    CombatState s{};
+    s.card_pool[0].card_id = static_cast<uint16_t>(id);
+    s.card_pool[0].cost_now = cost;
+    s.hand[0] = 0;
+    s.hand_count = 1;
+    s.player_hp = 80;
+    s.player_max_hp = 80;
+    s.player_energy = energy;
+    s.monster_count = 1;
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[0].hp = 50;
+    s.monsters[0].max_hp = 50;
+    s.monster_attacks_queued = 1;
+    s.turn_has_ended = 0;
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    return s;
+}
+
+// --- Per-card table tests ---------------------------------------------------
+
+TEST(CardTable, StrikeDealsSixAndDiscards) {
+    CombatState s = MakeCardTestState(CardId::STRIKE, 1);
+
+    // Enqueue-then-dequeue timing: queue_card_play must NOT resolve anything.
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    EXPECT_EQ(s.card_queue_count, 1);          // queued, awaiting dequeue
+    EXPECT_EQ(s.monsters[0].hp, 50);           // not yet applied
+    EXPECT_EQ(s.hand_count, 1);                // card still in hand
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 6);       // DAMAGE 6
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.hand_count, 0);                // moved out of hand
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0);                // ...to discard
+    EXPECT_EQ(s.player_energy, 3 - 1);         // cost 1
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+}
+
+TEST(CardTable, DefendGainsFiveBlock) {
+    CombatState s = MakeCardTestState(CardId::DEFEND, 1);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.player_block, 5);              // BLOCK 5
+    EXPECT_EQ(s.monsters[0].hp, 50);           // no damage
+    EXPECT_EQ(s.hand_count, 0);
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0);
+    EXPECT_EQ(s.player_energy, 3 - 1);
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+}
+
+TEST(CardTable, BashDealsEightAndAppliesVulnerableTwo) {
+    CombatState s = MakeCardTestState(CardId::BASH, 2);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 8);       // DAMAGE 8 (before Vulnerable)
+    ASSERT_EQ(s.monsters[0].power_count, 1);
+    EXPECT_EQ(s.monsters[0].powers[0].power_id,
+              static_cast<uint16_t>(PowerId::VULNERABLE));
+    EXPECT_EQ(s.monsters[0].powers[0].amount, 2);  // APPLY Vulnerable 2
+    EXPECT_EQ(s.player_energy, 3 - 2);         // cost 2
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0);
+}
+
+TEST(CardTable, BashDamageIsBeforeVulnerableThenStrikeGetsBonus) {
+    // Bash's own DAMAGE lands BEFORE its Vulnerable (addToBot order), so Bash
+    // itself deals a flat 8; a Strike into the now-Vulnerable target gets x1.5.
+    CombatState s = MakeCardTestState(CardId::BASH, 2);
+    s.card_pool[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[1].cost_now = 1;
+    s.hand[1] = 1;
+    s.hand_count = 2;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));  // Bash
+    pump(s);
+    EXPECT_EQ(s.monsters[0].hp, 42);        // 50 - 8
+    EXPECT_EQ(s.monsters[0].powers[0].amount, 2);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));  // Strike (now at hand index 0)
+    pump(s);
+    // 6 * 1.5 (Vulnerable) = 9.0 -> floor 9.
+    EXPECT_EQ(s.monsters[0].hp, 42 - 9);
+}
+
+TEST(CardTable, StrikeIntoVulnerableTargetGetsBonus) {
+    CombatState s = MakeCardTestState(CardId::STRIKE, 1);
+    s.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::VULNERABLE);
+    s.monsters[0].powers[0].amount = 2;
+    s.monsters[0].power_count = 1;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.monsters[0].hp, 50 - 9);    // 6 * 1.5 = 9
+}
+
+TEST(CardTable, ShrugItOffGainsEightBlockAndDrawsOne) {
+    CombatState s = MakeCardTestState(CardId::SHRUG_IT_OFF, 1);
+    // One filler card in the draw pile so DRAW 1 has something to pull.
+    s.card_pool[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[1].cost_now = 1;
+    s.draw[0] = 1;
+    s.draw_count = 1;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.player_block, 8);           // BLOCK 8
+    ASSERT_EQ(s.hand_count, 1);             // DRAW 1 (Shrug left hand, filler entered)
+    EXPECT_EQ(s.hand[0], 1);
+    EXPECT_EQ(s.draw_count, 0);
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0);             // Shrug in discard
+    EXPECT_EQ(s.player_energy, 3 - 1);
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+}
+
+TEST(CardTable, PommelStrikeDealsNineAndDrawsOne) {
+    CombatState s = MakeCardTestState(CardId::POMMEL_STRIKE, 1);
+    s.card_pool[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[1].cost_now = 1;
+    s.draw[0] = 1;
+    s.draw_count = 1;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 9);    // DAMAGE 9
+    ASSERT_EQ(s.hand_count, 1);             // DRAW 1
+    EXPECT_EQ(s.hand[0], 1);
+    EXPECT_EQ(s.draw_count, 0);
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0);
+    EXPECT_EQ(s.player_energy, 3 - 1);
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+}
+
+TEST(CardTable, QueueCardPlayRejectsOutOfRangeHandIndex) {
+    CombatState s = MakeCardTestState(CardId::STRIKE, 1);
+    EXPECT_FALSE(queue_card_play(s, 5, 0));  // hand_count == 1
+    EXPECT_EQ(s.card_queue_count, 0);
+}
+
+// --- Trap 10: random target rolls at DEQUEUE, not ENQUEUE --------------------
+
+TEST(CardPlayTrap, RandomTargetRollsAtDequeueNotEnqueue) {
+    // (a) A normal (fixed-target) card never touches card_random_rng -- not at
+    //     enqueue, and not at dequeue either.
+    {
+        CombatState s = MakeCardTestState(CardId::STRIKE, 1);
+        s.card_random_rng = from_seed(123);
+        const int32_t before = s.card_random_rng.counter;
+
+        ASSERT_TRUE(queue_card_play(s, 0, 0));
+        EXPECT_EQ(s.card_random_rng.counter, before)
+            << "enqueue must not roll a random target";
+
+        pump(s);  // resolve the fixed-target Strike
+        EXPECT_EQ(s.card_random_rng.counter, before)
+            << "a fixed-target card must not roll cardRandomRng at dequeue either";
+    }
+
+    // (b) The dequeue-time target resolution (resolve_play_target) for a
+    //     random-target card consumes EXACTLY one card_random_rng draw and picks
+    //     only among LIVE monsters (dead slots excluded).
+    {
+        CombatState s{};
+        s.monster_count = 3;
+        s.monsters[0].hp = 10;   // alive
+        s.monsters[1].hp = 0;    // dead (excluded)
+        s.monsters[2].hp = 7;    // alive
+        s.card_random_rng = from_seed(555);
+
+        CardDef random_card = kStrike;    // synthetic random-target card
+        random_card.random_target = true;
+
+        int32_t counter = s.card_random_rng.counter;
+        for (int i = 0; i < 12; ++i) {
+            const uint8_t tgt = resolve_play_target(s, random_card, /*declared=*/1);
+            EXPECT_TRUE(tgt == 0 || tgt == 2)
+                << "random target must skip the dead middle monster; got "
+                << static_cast<int>(tgt);
+            EXPECT_EQ(s.card_random_rng.counter, counter + 1)
+                << "each dequeue roll consumes exactly one card_random_rng draw";
+            counter = s.card_random_rng.counter;
+        }
+    }
+
+    // (c) A single live monster is always chosen (roll still consumes one draw).
+    {
+        CombatState s{};
+        s.monster_count = 3;
+        s.monsters[0].hp = 0;    // dead
+        s.monsters[1].hp = 5;    // the only live one
+        s.monsters[2].hp = 0;    // dead
+        s.card_random_rng = from_seed(999);
+
+        CardDef random_card = kStrike;
+        random_card.random_target = true;
+        const int32_t before = s.card_random_rng.counter;
+
+        EXPECT_EQ(resolve_play_target(s, random_card, /*declared=*/0), 1);
+        EXPECT_EQ(s.card_random_rng.counter, before + 1);
+    }
+
+    // (d) resolve_play_target on a FIXED-target def returns the declared target
+    //     verbatim and never draws.
+    {
+        CombatState s{};
+        s.monster_count = 2;
+        s.monsters[0].hp = 5;
+        s.monsters[1].hp = 5;
+        s.card_random_rng = from_seed(42);
+        const int32_t before = s.card_random_rng.counter;
+
+        EXPECT_EQ(resolve_play_target(s, kStrike, /*declared=*/1), 1);
+        EXPECT_EQ(s.card_random_rng.counter, before);
+    }
+}
+
+// --- Full-turn integration: scripted 3-turn Jaw Worm fight -------------------
+//
+// Fixed seed r0 (-5025562857975149833) drives the Jaw Worm deterministically.
+// From A3.2's golden fixture (tests/fixtures/jaw_worm_fixture.tsv, seed r0):
+//   HP roll = 44; monster_hp_rng end = {6100601359716733802, 2758559893557545682, 1}.
+//   Executed moves: turn1 CHOMP(1), turn2 BELLOW(2), turn3 THRASH(3); the turn-4
+//   move rolled at the end of turn 3 is THRASH(3). ai_rng end (after the turn-3
+//   roll = fixture "turn 3" row) = {15546794197076016033, 8850432053244781472, 4}.
+//
+// A20 Jaw Worm effects (JawWorm.java, constants in monster_jaw_worm.hpp):
+//   CHOMP  -> 12 damage to the player.
+//   BELLOW -> +5 Strength to self, +9 block to self.
+//   THRASH -> 7 damage to the player, +5 block to self.
+//
+// The production jaw_worm_take_turn (A3.2) intentionally DEFERS the real
+// damage/block/power enqueues (its documented scope note: "A4.x attaches the
+// real DamageAction/GainBlockAction/ApplyPowerAction enqueues"), so this test
+// supplies them locally in JawWormTurnWithEffects, then REUSES jaw_worm_take_turn
+// for the move progression + aiRng draws -- keeping the move sequence and RNG
+// bit-identical to A3.2's golden fixture while making the monster actually fight.
+
+const int64_t kSeedR0 = -5025562857975149833LL;
+
+// Test-local Jaw Worm turn WITH real move effects (see the note above).
+void JawWormTurnWithEffects(CombatState& s, uint8_t mi) {
+    const uint8_t move = s.monsters[mi].move_history[0];  // the decided move
+    auto damage = [&](int amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        it.src = mi;
+        it.tgt = kActorPlayer;
+        it.amount = amount;
+        add_to_bottom(s, it);
+    };
+    auto block = [&](int amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+        it.src = mi;
+        it.tgt = mi;
+        it.amount = amount;
+        add_to_bottom(s, it);
+    };
+    auto strength = [&](int amount) {
+        ActionQueueItem it{};
+        it.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        it.src = mi;
+        it.tgt = mi;
+        it.amount = amount;
+        it.flags = make_apply_power_flags(PowerId::STRENGTH);
+        add_to_bottom(s, it);
+    };
+    if (move == kMoveChomp) {
+        damage(kJawWormChompDmg);            // 12
+    } else if (move == kMoveBellow) {
+        strength(kJawWormBellowStr);         // +5 Str
+        block(kJawWormBellowBlock);          // +9 block
+    } else if (move == kMoveThrash) {
+        damage(kJawWormThrashDmg);           // 7 (+ Strength via the pipeline)
+        block(kJawWormThrashBlock);          // +5 block
+    }
+    // Reuse the production roll: no-op execute + roll the next move (advances
+    // move_history and ai_rng exactly as the A3.2 fixture).
+    jaw_worm_take_turn(s, mi);
+}
+
+// The fixed 23-card pool shared by the actual run and the independent expected
+// state (an immutable input; card_pool never mutates during play). Indices:
+//   0 Bash, 1 Strike, 2 Defend, 3 Pommel Strike, 4 Shrug It Off, 5..22 Strike.
+void SetupPool(CombatState& s) {
+    auto set = [&](int idx, CardId id, uint8_t cost) {
+        s.card_pool[idx].card_id = static_cast<uint16_t>(id);
+        s.card_pool[idx].cost_now = cost;
+    };
+    set(0, CardId::BASH, 2);
+    set(1, CardId::STRIKE, 1);
+    set(2, CardId::DEFEND, 1);
+    set(3, CardId::POMMEL_STRIKE, 1);
+    set(4, CardId::SHRUG_IT_OFF, 1);
+    for (int i = 5; i <= 22; ++i) {
+        set(i, CardId::STRIKE, 1);
+    }
+}
+
+// Zero every drained-scratch region: the four queue rings AND the dead tails of
+// the piles. The fixed-capacity design advances counts/cursors and leaves the
+// vacated slots' bytes in place (a pop/remove/draw decrements the count without
+// clearing the slot), so after a fully-resolved turn the state still carries
+// scratch bytes: a stale end-turn sentinel in card_queue[0], stale
+// ActionQueueItems in the action ring with non-zero head/tail, and -- the one
+// this fight actually hits -- the drawn-out card indices lingering in draw[]
+// beyond draw_count. None of that is gameplay state (the rules only ever read
+// [0, count) of each pile and only [head, tail) of each ring). Normalizing it
+// out on BOTH the actual and the (already-clean) expected state lets the content
+// hash reflect gameplay only. The caller asserts every queue count is 0 before
+// this runs, so no live queue state is discarded; pile live regions [0, count)
+// are left untouched and still hashed.
+void NormalizeScratch(CombatState& s) {
+    for (auto& it : s.action_queue) it = ActionQueueItem{};
+    s.action_head = s.action_tail = s.action_count = 0;
+    for (auto& it : s.pre_turn_actions) it = ActionQueueItem{};
+    s.pre_turn_head = s.pre_turn_tail = s.pre_turn_count = 0;
+    for (auto& it : s.card_queue) it = CardQueueItem{};
+    s.card_queue_count = 0;
+    for (auto& it : s.monster_queue) it = MonsterQueueItem{};
+    s.monster_queue_count = 0;
+    // Dead pile tails [count, cap).
+    for (int i = s.hand_count; i < kHandCap; ++i) s.hand[i] = 0;
+    for (int i = s.draw_count; i < kDrawCap; ++i) s.draw[i] = 0;
+    for (int i = s.discard_count; i < kDiscardCap; ++i) s.discard[i] = 0;
+    for (int i = s.exhaust_count; i < kExhaustCap; ++i) s.exhaust[i] = 0;
+    for (int i = s.limbo_count; i < kLimboCap; ++i) s.limbo[i] = 0;
+}
+
+TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
+    // ---- Build the initial state: start of the player's turn 1 ----
+    CombatState s{};
+    SetupPool(s);
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.turn = 1;
+    s.player_hp = 80;
+    s.player_max_hp = 80;
+    s.player_energy = 3;
+
+    // Hand: Bash, Strike, Defend, Pommel, Shrug (a normal 5-card opening hand).
+    s.hand[0] = 0; s.hand[1] = 1; s.hand[2] = 2; s.hand[3] = 3; s.hand[4] = 4;
+    s.hand_count = 5;
+    // Draw pile: pool indices 5..22 (18 Strikes), draw[draw_count-1] drawn first.
+    for (int i = 0; i < 18; ++i) s.draw[i] = static_cast<uint8_t>(5 + i);
+    s.draw_count = 18;
+
+    // Jaw Worm (seed r0). init draws monster_hp_rng once + ai_rng once (forced
+    // first move CHOMP), leaving both counters at 1.
+    s.monster_count = 1;
+    s.monster_hp_rng = from_seed(kSeedR0);
+    s.ai_rng = from_seed(kSeedR0);
+    jaw_worm_init(s, 0);
+    ASSERT_EQ(s.monsters[0].hp, 44) << "seed r0 HP roll (A3.2 fixture)";
+
+    // Player-turn invariant the pump expects (monster_attacks_queued true through
+    // the player's turn; A3.1).
+    s.monster_attacks_queued = 1;
+    s.turn_has_ended = 0;
+
+    // ---- Turn 1: Bash (monster), Strike (monster), end turn ----
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Bash -> DMG 8 (44->36), Vuln 2
+    pump(s, JawWormTurnWithEffects);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike into Vuln -> 6*1.5=9 (36->27)
+    pump(s, JawWormTurnWithEffects);
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, JawWormTurnWithEffects);          // monster CHOMP 12 (player 80->68), SoT2
+
+    // ---- Turn 2: Defend (self), Pommel (monster), end turn ----
+    s.player_energy = 3;  // energy refill at turn start (test-supplied; the pump's
+                          // start-of-turn does not yet emit the energy action)
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Defend -> block 5
+    pump(s, JawWormTurnWithEffects);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Pommel into Vuln -> 9*1.5=13.5->13 (27->14), draw 1
+    pump(s, JawWormTurnWithEffects);
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, JawWormTurnWithEffects);          // monster BELLOW (+5 Str,+9 blk), SoT3 (player block 5->0)
+
+    // ---- Turn 3: Shrug It Off (self), end turn ----
+    s.player_energy = 3;
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Shrug -> block 8, draw 1
+    pump(s, JawWormTurnWithEffects);
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, JawWormTurnWithEffects);          // monster THRASH 7+Str5=12 vs block 8 -> hp 68->64, SoT4
+
+    // ---- Field-by-field checks (the hand trace, for debuggability) ----
+    EXPECT_EQ(s.turn, 4);
+    EXPECT_EQ(s.player_hp, 64);
+    EXPECT_EQ(s.player_block, 0);
+    EXPECT_EQ(s.player_energy, 2);            // turn-3 refill 3 - Shrug 1
+    EXPECT_EQ(s.cards_played_this_turn, 0);   // reset by start-of-turn 4
+    EXPECT_EQ(s.hand_count, 10);
+    EXPECT_EQ(s.draw_count, 8);
+    EXPECT_EQ(s.discard_count, 5);
+    EXPECT_EQ(s.monsters[0].hp, 14);
+    EXPECT_EQ(s.monsters[0].block, 14);       // Bellow 9 + Thrash 5
+    ASSERT_EQ(s.monsters[0].power_count, 2);
+    EXPECT_EQ(s.monsters[0].powers[0].power_id,
+              static_cast<uint16_t>(PowerId::VULNERABLE));
+    EXPECT_EQ(s.monsters[0].powers[0].amount, 2);
+    EXPECT_EQ(s.monsters[0].powers[1].power_id,
+              static_cast<uint16_t>(PowerId::STRENGTH));
+    EXPECT_EQ(s.monsters[0].powers[1].amount, 5);
+
+    // Queues fully drained (guards NormalizeTransientQueues -- no live state lost).
+    ASSERT_EQ(s.action_count, 0);
+    ASSERT_EQ(s.pre_turn_count, 0);
+    ASSERT_EQ(s.card_queue_count, 0);
+    ASSERT_EQ(s.monster_queue_count, 0);
+
+    // ---- Independently-constructed expected state (hand-traced values) ----
+    CombatState exp{};
+    SetupPool(exp);
+    exp.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    exp.turn = 4;
+    exp.player_hp = 64;
+    exp.player_max_hp = 80;
+    exp.player_block = 0;
+    exp.player_energy = 2;
+    exp.cards_played_this_turn = 0;
+
+    // Final hand (bottom->top): [22,21,20,19,18,17,16,15,14,13].
+    const std::array<uint8_t, 10> hand = {22, 21, 20, 19, 18, 17, 16, 15, 14, 13};
+    for (size_t i = 0; i < hand.size(); ++i) exp.hand[i] = hand[i];
+    exp.hand_count = 10;
+    // Final draw pile: [5,6,7,8,9,10,11,12].
+    for (int i = 0; i < 8; ++i) exp.draw[i] = static_cast<uint8_t>(5 + i);
+    exp.draw_count = 8;
+    // Discard (play order): Bash, Strike, Defend, Pommel, Shrug = [0,1,2,3,4].
+    for (int i = 0; i < 5; ++i) exp.discard[i] = static_cast<uint8_t>(i);
+    exp.discard_count = 5;
+
+    exp.monster_count = 1;
+    exp.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    exp.monsters[0].hp = 14;
+    exp.monsters[0].max_hp = 44;
+    exp.monsters[0].block = 14;
+    exp.monsters[0].move_history[0] = kMoveThrash;  // turn-4 decided move
+    exp.monsters[0].move_history[1] = kMoveThrash;   // turn 3 executed
+    exp.monsters[0].move_history[2] = kMoveBellow;   // turn 2 executed
+    exp.monsters[0].intent = static_cast<uint8_t>(MonsterIntent::ATTACK_DEFEND);
+    exp.monsters[0].power_count = 2;
+    exp.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::VULNERABLE);
+    exp.monsters[0].powers[0].amount = 2;
+    exp.monsters[0].powers[1].power_id = static_cast<uint16_t>(PowerId::STRENGTH);
+    exp.monsters[0].powers[1].amount = 5;
+
+    exp.monster_attacks_queued = 1;  // set during the last end-turn's step 4
+    exp.turn_has_ended = 0;          // cleared by start-of-turn 4
+
+    // RNG end states from the A3.2 golden fixture (independent oracle).
+    exp.monster_hp_rng = RngStream{6100601359716733802ull,
+                                   2758559893557545682ull, 1, 0};
+    exp.ai_rng = RngStream{15546794197076016033ull, 8850432053244781472ull, 4, 0};
+    // shuffle_rng / card_random_rng / misc_rng untouched (never drawn) -> zero,
+    // matching the actual run (left value-initialized). No reshuffle occurred.
+
+    // ---- Normalize drained scratch on both, then compare by hash ----
+    NormalizeScratch(s);
+    NormalizeScratch(exp);
+
+    // Sanity: the actual move history matches the fixture-derived expected one.
+    EXPECT_EQ(s.monsters[0].move_history[0], exp.monsters[0].move_history[0]);
+    EXPECT_EQ(s.monsters[0].move_history[1], exp.monsters[0].move_history[1]);
+    EXPECT_EQ(s.monsters[0].move_history[2], exp.monsters[0].move_history[2]);
+    EXPECT_EQ(s.ai_rng.s0, exp.ai_rng.s0);
+    EXPECT_EQ(s.ai_rng.s1, exp.ai_rng.s1);
+    EXPECT_EQ(s.ai_rng.counter, exp.ai_rng.counter);
+
+    EXPECT_EQ(hash_state(s), hash_state(exp))
+        << "scripted 3-turn fight did not reach the hand-traced expected state";
+}
+
+}  // namespace
+}  // namespace sts::engine

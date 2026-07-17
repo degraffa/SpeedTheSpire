@@ -10,6 +10,7 @@
 
 #include <cassert>
 
+#include "sts/engine/card_play.hpp"  // A4.3: resolve_card_play wired into pump_step step 3
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"  // A4.1: execute_opcode wired into pump_step
 
@@ -253,9 +254,15 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         return r;
     }
 
-    // 3. else cardQueue non-empty -> resolve head. A3.1 handles ONLY the
-    //    end-turn sentinel (null-card). Real card-play resolution (§5.3) is
-    //    A4.3; a non-sentinel head is a documented pop-and-discard no-op stub.
+    // 3. else cardQueue non-empty -> resolve head. Either the end-turn sentinel
+    //    (null-card) or a real card play (§5.3), now resolved by A4.3's
+    //    resolve_card_play (card_play.cpp): it runs the no-op hook stubs,
+    //    ++cards_played_this_turn, the trap-10 target resolution, queues the
+    //    card's effect actions via add_to_bottom (they resolve on later pump
+    //    iterations via step 1), moves the card hand->discard, and deducts energy.
+    //    The skeleton's cards never insert into the cardQueue during use(), so
+    //    popping the head before resolving is safe (trap 9's index-1 rule is
+    //    untouched -- no card re-enters the queue mid-resolution).
     if (s.card_queue_count > 0) {
         const CardQueueItem head = s.card_queue[0];
         card_queue_pop_front(s);
@@ -265,7 +272,8 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             call_end_of_turn_actions(s);       // §5.4 stub sequence
             r.outcome = PumpOutcome::END_TURN_SENTINEL;
         } else {
-            r.outcome = PumpOutcome::RAN_CARD_QUEUE;  // A4.3 stub: discarded
+            resolve_card_play(s, head);        // A4.3 (§5.3): dequeue-resolve
+            r.outcome = PumpOutcome::RAN_CARD_QUEUE;
         }
         return r;
     }
