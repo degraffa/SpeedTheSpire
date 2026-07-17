@@ -165,7 +165,7 @@ files) against `tests/golden/jdk_shuffle_<label>_<n>.bin`, zero mismatches;
 `RngJdkTrap.ShufflesRouteThroughJdkLcgNotXorshift` (trap 2) passes. No ASan/
 UBSan findings.
 
-### A1.3 `[ ]` Game `Random` wrapper (`RngStream`)
+### A1.3 `[x]` Game `Random` wrapper (`RngStream`)
 **Deps:** A1.1 · **Spec:** §3.2, §3.6 · **Provenance:** Random.java
 **Deliverables:** `include/sts/engine/rng_stream.hpp`: 24-byte POD
 `RngStream {s0, s1, counter, pad}`; free functions for every wrapper method
@@ -174,7 +174,34 @@ UBSan findings.
 (`floor_stream(seed, floor)`, `map_stream(seed, act)`).
 **Acceptance:** gtest `rng_stream_test` — golden sets 2, 3, 5; trap 3 and 7
 named tests; `static_assert` trivially-copyable + size 24.
-**Log:** —
+**Log:** `include/sts/engine/rng_stream.hpp` (header-only, builds on A1.1's
+`RandomXS128`): 24-byte POD `RngStream {s0,s1,counter,pad}` with in-header
+`static_assert` trivially-copyable + `sizeof==24`; a free function per
+`Random.java` wrapper (`random(int)`/`random(int,int)`/`random(long)`/
+`random(long,long)`/`random_long`/`random_boolean`/`random_boolean(float)`/
+`random()`/`random(float)`/`random(float,float)`), each a thin rehydrate→one
+`next_long`→commit(state+counter++) enforcing the §3.2 one-draw invariant;
+`from_seed`, `from_seed_counter` (137×`random(999)` replay, oracle-diff-only —
+copy is the real restore path, documented inline), `from_seed_set_counter`
+(137×`randomBoolean` consistency check), `floor_stream(seed, floor)` =
+`seed+floor` (trap 7, one helper covers all 5 floor streams), `map_stream(seed,
+act)` = `seed + act*mult[act]` giving offsets +1/+200/+600/+1200. New gtest
+binary `tests/rng_stream_test.cpp` (target `rng_stream_test`, additive
+`tests/CMakeLists.txt` block, `STS_GOLDEN_DIR` compile def). Verified by
+running, not inferred: `ctest --preset debug` and `ctest --preset asan` both
+`100% tests passed, 0 failed out of 18` (WSL Ubuntu-2404), including
+`rng_stream_test`'s 5 cases. Golden set 2 (`wrapper_<seed>.bin`): all 38 seeds
+× 10 method blocks × 1000 draws byte-match `(counter_after, result_bits)`
+(float results compared as zero-extended raw IEEE-754 bits). Golden set 3
+(`counter_restore_<seed>.bin`, N=137): all 3 blocks — direct mixed draws
+(ids 0..9 cycling `i%10`), `Random(seed,137)` ctor replay, `setCounter(137)`
+replay — match golden `(s0,s1,counter)` and each other bit-for-bit, confirming
+the one-draw-invariant replay-equivalence. Golden set 5
+(`floor_derive_<seed>.bin`): all 38 seeds × floors 1-55 × 5 (identical) stream
+slots + 4 mapRng acts match recorded pre-draw `(s0,s1)`. Trap 3
+(`RandomIntBoundsAreInclusive`) and trap 7
+(`FloorReseedUsesFloorNumberAfterIncrement`) are named passing tests. No
+ASan/UBSan findings.
 
 ### A1.4 `[x]` ∥ `SeedHelper` conversion
 **Deps:** A0.1 · **Spec:** §3.5 · **Provenance:** SeedHelper.java

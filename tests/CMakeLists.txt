@@ -55,3 +55,15 @@ sts_enable_sanitizers(seed_string_test)
 target_compile_definitions(seed_string_test PRIVATE STS_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden")
 
 gtest_discover_tests(seed_string_test)
+
+# A1.3: game Random wrapper (RngStream) bit-exactness suite -- golden sets 2, 3, 5.
+add_executable(rng_stream_test
+    rng_stream_test.cpp
+)
+
+target_link_libraries(rng_stream_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(rng_stream_test PRIVATE STS_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden")
+sts_set_warnings(rng_stream_test)
+sts_enable_sanitizers(rng_stream_test)
+
+gtest_discover_tests(rng_stream_test)
