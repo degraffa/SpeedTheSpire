@@ -34,6 +34,13 @@ target_include_directories(xxhash INTERFACE ${xxhash_SOURCE_DIR})
 
 add_subdirectory(src/engine)
 
+# A6.1: diff harness (trace format + differ + reproducer + fixture oracle). A
+# normal C++ static-library target linked by the differ_test gtest binary (and a
+# future CLI). Built whenever tests are, since that is its current consumer.
+if(STS_BUILD_TESTS)
+    add_subdirectory(tools/diff_harness)
+endif()
+
 if(STS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

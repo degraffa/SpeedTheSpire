@@ -1,0 +1,343 @@
+#include "sts/diff/differ.hpp"
+
+#include <algorithm>
+#include <sstream>
+#include <string>
+
+#include "sts/engine/combat_state.hpp"
+#include "sts/engine/rng_stream.hpp"
+#include "sts/engine/state_hash.hpp"
+#include "sts/engine/types.hpp"
+
+namespace sts::diff {
+
+using namespace sts::engine;
+
+// --- DiffReport helpers -----------------------------------------------------
+
+bool DiffReport::mentions(const std::string& substr) const {
+    for (const FieldDiff& d : diffs) {
+        if (d.field_name.find(substr) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::string DiffReport::to_string() const {
+    std::ostringstream os;
+    for (const FieldDiff& d : diffs) {
+        os << d.field_name << ": " << d.expected_repr << " -> " << d.actual_repr
+           << "\n";
+    }
+    return os.str();
+}
+
+namespace {
+
+// --- primitive push / compare ----------------------------------------------
+
+void push(DiffReport& r, std::string name, std::string e, std::string a) {
+    r.diffs.push_back(FieldDiff{std::move(name), std::move(e), std::move(a)});
+}
+
+void cmp_i(DiffReport& r, const std::string& name, long long e, long long a) {
+    if (e != a) push(r, name, std::to_string(e), std::to_string(a));
+}
+
+void cmp_u(DiffReport& r, const std::string& name, unsigned long long e,
+           unsigned long long a) {
+    if (e != a) push(r, name, std::to_string(e), std::to_string(a));
+}
+
+// --- enum reprs: "NAME(n)" when known, bare "n" otherwise -------------------
+
+std::string named(const char* name, unsigned long long v) {
+    if (name != nullptr) return std::string(name) + "(" + std::to_string(v) + ")";
+    return std::to_string(v);
+}
+
+std::string phase_repr(uint8_t v) {
+    const char* n = nullptr;
+    switch (static_cast<CombatPhase>(v)) {
+        case CombatPhase::NONE: n = "NONE"; break;
+        case CombatPhase::WAITING_ON_USER: n = "WAITING_ON_USER"; break;
+        case CombatPhase::RESOLVING: n = "RESOLVING"; break;
+        case CombatPhase::COMBAT_OVER: n = "COMBAT_OVER"; break;
+    }
+    return named(n, v);
+}
+
+std::string power_repr(uint16_t v) {
+    const char* n = nullptr;
+    switch (static_cast<PowerId>(v)) {
+        case PowerId::NONE: n = "NONE"; break;
+        case PowerId::STRENGTH: n = "STRENGTH"; break;
+        case PowerId::VULNERABLE: n = "VULNERABLE"; break;
+        case PowerId::WEAK: n = "WEAK"; break;
+    }
+    return named(n, v);
+}
+
+std::string card_repr(uint16_t v) {
+    const char* n = nullptr;
+    switch (static_cast<CardId>(v)) {
+        case CardId::NONE: n = "NONE"; break;
+        case CardId::STRIKE: n = "STRIKE"; break;
+        case CardId::DEFEND: n = "DEFEND"; break;
+        case CardId::BASH: n = "BASH"; break;
+        case CardId::SHRUG_IT_OFF: n = "SHRUG_IT_OFF"; break;
+        case CardId::POMMEL_STRIKE: n = "POMMEL_STRIKE"; break;
+    }
+    return named(n, v);
+}
+
+std::string monster_repr(uint16_t v) {
+    const char* n = nullptr;
+    switch (static_cast<MonsterId>(v)) {
+        case MonsterId::NONE: n = "NONE"; break;
+        case MonsterId::JAW_WORM: n = "JAW_WORM"; break;
+    }
+    return named(n, v);
+}
+
+void cmp_phase(DiffReport& r, const std::string& name, uint8_t e, uint8_t a) {
+    if (e != a) push(r, name, phase_repr(e), phase_repr(a));
+}
+
+void cmp_power_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a) {
+    if (e != a) push(r, name, power_repr(e), power_repr(a));
+}
+
+void cmp_card_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a) {
+    if (e != a) push(r, name, card_repr(e), card_repr(a));
+}
+
+void cmp_monster_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a) {
+    if (e != a) push(r, name, monster_repr(e), monster_repr(a));
+}
+
+// --- composite helpers ------------------------------------------------------
+
+void cmp_power_slot(DiffReport& r, const std::string& base, const PowerSlot& e,
+                    const PowerSlot& a) {
+    cmp_power_id(r, base + ".power_id", e.power_id, a.power_id);
+    cmp_i(r, base + ".amount", e.amount, a.amount);
+}
+
+void cmp_powers(DiffReport& r, const std::string& base, const PowerSlot* e,
+                const PowerSlot* a) {
+    for (int i = 0; i < kPowerCap; ++i) {
+        cmp_power_slot(r, base + "[" + std::to_string(i) + "]", e[i], a[i]);
+    }
+}
+
+// A pile is an index array + a count. Compare the count, then the live members
+// over [0, max(count)); a member present on only one side reads "(absent)".
+void cmp_pile(DiffReport& r, const char* name, const CardPoolIndex* e, uint8_t ec,
+              const CardPoolIndex* a, uint8_t ac) {
+    cmp_u(r, std::string(name) + "_count", ec, ac);
+    const int n = std::max<int>(ec, ac);
+    for (int i = 0; i < n; ++i) {
+        const bool ein = i < ec;
+        const bool ain = i < ac;
+        std::string ev = ein ? std::to_string(e[i]) : std::string("(absent)");
+        std::string av = ain ? std::to_string(a[i]) : std::string("(absent)");
+        if (ev != av) {
+            push(r, std::string(name) + "[" + std::to_string(i) + "]",
+                 std::move(ev), std::move(av));
+        }
+    }
+}
+
+std::string item_repr(const ActionQueueItem& it) {
+    std::ostringstream os;
+    os << "{op=" << it.opcode << ",src=" << static_cast<int>(it.src)
+       << ",tgt=" << static_cast<int>(it.tgt) << ",amt=" << it.amount
+       << ",flags=" << it.flags << "}";
+    return os.str();
+}
+
+void cmp_ring_item(DiffReport& r, const std::string& base,
+                   const ActionQueueItem* e, const ActionQueueItem* a) {
+    if (e == nullptr && a == nullptr) return;
+    if (e == nullptr || a == nullptr) {
+        push(r, base, e ? item_repr(*e) : std::string("(absent)"),
+             a ? item_repr(*a) : std::string("(absent)"));
+        return;
+    }
+    cmp_u(r, base + ".opcode", e->opcode, a->opcode);
+    cmp_u(r, base + ".src", e->src, a->src);
+    cmp_u(r, base + ".tgt", e->tgt, a->tgt);
+    cmp_i(r, base + ".amount", e->amount, a->amount);
+    cmp_u(r, base + ".flags", e->flags, a->flags);
+}
+
+// ActionQueueItem ring (main action queue / pre-turn queue): compare count and
+// the live items in logical order (walked via head), NOT the raw backing array
+// (stale scratch past count) nor head/tail cursors (internal rotation).
+void cmp_item_ring(DiffReport& r, const char* name, const ActionQueueItem* earr,
+                   uint8_t eh, uint8_t ec, const ActionQueueItem* aarr,
+                   uint8_t ah, uint8_t ac, int cap) {
+    cmp_u(r, std::string(name) + ".count", ec, ac);
+    const int n = std::max<int>(ec, ac);
+    for (int i = 0; i < n; ++i) {
+        const ActionQueueItem* ei = (i < ec) ? &earr[(eh + i) % cap] : nullptr;
+        const ActionQueueItem* ai = (i < ac) ? &aarr[(ah + i) % cap] : nullptr;
+        cmp_ring_item(r, std::string(name) + "[" + std::to_string(i) + "]", ei, ai);
+    }
+}
+
+void cmp_monster(DiffReport& r, int m, const MonsterState& e,
+                 const MonsterState& a) {
+    const std::string b = "monsters[" + std::to_string(m) + "]";
+    cmp_monster_id(r, b + ".monster_id", e.monster_id, a.monster_id);
+    cmp_i(r, b + ".hp", e.hp, a.hp);
+    cmp_i(r, b + ".max_hp", e.max_hp, a.max_hp);
+    cmp_i(r, b + ".block", e.block, a.block);
+    cmp_u(r, b + ".flags", e.flags, a.flags);
+    for (int k = 0; k < 3; ++k) {
+        cmp_u(r, b + ".move_history[" + std::to_string(k) + "]",
+              e.move_history[k], a.move_history[k]);
+    }
+    cmp_u(r, b + ".intent", e.intent, a.intent);
+    cmp_u(r, b + ".power_count", e.power_count, a.power_count);
+    cmp_powers(r, b + ".powers", e.powers, a.powers);
+}
+
+void cmp_stream(DiffReport& r, const char* name, const RngStream& e,
+                const RngStream& a) {
+    cmp_u(r, std::string(name) + ".s0", e.s0, a.s0);
+    cmp_u(r, std::string(name) + ".s1", e.s1, a.s1);
+    cmp_i(r, std::string(name) + ".counter", e.counter, a.counter);
+    // `pad` deliberately not compared (value-init-zeroed padding, not state).
+}
+
+}  // namespace
+
+// --- diff_states ------------------------------------------------------------
+
+DiffReport diff_states(const CombatState& e, const CombatState& a) {
+    DiffReport r;
+
+    // Fast path: equal content hashes => byte-identical value-initialized states
+    // (design doc §4.1 / A2.2), so there is nothing to walk.
+    if (hash_state(e) == hash_state(a)) {
+        return r;
+    }
+
+    // -- header --
+    cmp_phase(r, "phase", e.phase, a.phase);
+    cmp_u(r, "turn", e.turn, a.turn);
+    cmp_u(r, "flags", e.flags, a.flags);
+
+    // -- player scalars --
+    cmp_i(r, "player.hp", e.player_hp, a.player_hp);
+    cmp_i(r, "player.max_hp", e.player_max_hp, a.player_max_hp);
+    cmp_i(r, "player.block", e.player_block, a.player_block);
+    cmp_i(r, "player.energy", e.player_energy, a.player_energy);
+    cmp_u(r, "player.stance", e.stance, a.stance);
+    cmp_u(r, "player.cards_played_this_turn", e.cards_played_this_turn,
+          a.cards_played_this_turn);
+    cmp_u(r, "player.power_count", e.player_power_count, a.player_power_count);
+    cmp_powers(r, "player_powers", e.player_powers, a.player_powers);
+
+    // -- shared card pool (all rows; unused rows are value-init zeroed) --
+    for (int i = 0; i < kCardPoolCap; ++i) {
+        const CardInstance& ce = e.card_pool[i];
+        const CardInstance& ca = a.card_pool[i];
+        const std::string b = "card_pool[" + std::to_string(i) + "]";
+        cmp_card_id(r, b + ".card_id", ce.card_id, ca.card_id);
+        cmp_u(r, b + ".upgrade", ce.upgrade, ca.upgrade);
+        cmp_u(r, b + ".cost_now", ce.cost_now, ca.cost_now);
+        cmp_u(r, b + ".flags", ce.flags, ca.flags);
+        cmp_u(r, b + ".misc", ce.misc, ca.misc);
+    }
+
+    // -- piles --
+    cmp_pile(r, "hand", e.hand, e.hand_count, a.hand, a.hand_count);
+    cmp_pile(r, "draw", e.draw, e.draw_count, a.draw, a.draw_count);
+    cmp_pile(r, "discard", e.discard, e.discard_count, a.discard, a.discard_count);
+    cmp_pile(r, "exhaust", e.exhaust, e.exhaust_count, a.exhaust, a.exhaust_count);
+    cmp_pile(r, "limbo", e.limbo, e.limbo_count, a.limbo, a.limbo_count);
+
+    // -- monsters --
+    cmp_u(r, "monster_count", e.monster_count, a.monster_count);
+    for (int m = 0; m < kMonsterCap; ++m) {
+        cmp_monster(r, m, e.monsters[m], a.monsters[m]);
+    }
+
+    // -- queues (see cmp_item_ring: logical live items only) --
+    cmp_item_ring(r, "action_queue", e.action_queue, e.action_head, e.action_count,
+                  a.action_queue, a.action_head, a.action_count, kActionQueueCap);
+    cmp_item_ring(r, "pre_turn_actions", e.pre_turn_actions, e.pre_turn_head,
+                  e.pre_turn_count, a.pre_turn_actions, a.pre_turn_head,
+                  a.pre_turn_count, kPreTurnActionQueueCap);
+
+    // card queue: simple [0,count) array of CardQueueItem.
+    cmp_u(r, "card_queue.count", e.card_queue_count, a.card_queue_count);
+    {
+        const int n = std::max<int>(e.card_queue_count, a.card_queue_count);
+        for (int i = 0; i < n; ++i) {
+            const bool ein = i < e.card_queue_count;
+            const bool ain = i < a.card_queue_count;
+            const std::string b = "card_queue[" + std::to_string(i) + "]";
+            if (ein && ain) {
+                cmp_u(r, b + ".card_index", e.card_queue[i].card_index,
+                      a.card_queue[i].card_index);
+                cmp_u(r, b + ".target", e.card_queue[i].target,
+                      a.card_queue[i].target);
+            } else {
+                push(r, b,
+                     ein ? "{card_index=" + std::to_string(e.card_queue[i].card_index) +
+                               ",target=" + std::to_string(e.card_queue[i].target) + "}"
+                         : std::string("(absent)"),
+                     ain ? "{card_index=" + std::to_string(a.card_queue[i].card_index) +
+                               ",target=" + std::to_string(a.card_queue[i].target) + "}"
+                         : std::string("(absent)"));
+            }
+        }
+    }
+
+    // monster queue: simple [0,count) array of MonsterQueueItem.
+    cmp_u(r, "monster_queue.count", e.monster_queue_count, a.monster_queue_count);
+    {
+        const int n = std::max<int>(e.monster_queue_count, a.monster_queue_count);
+        for (int i = 0; i < n; ++i) {
+            const bool ein = i < e.monster_queue_count;
+            const bool ain = i < a.monster_queue_count;
+            const std::string b = "monster_queue[" + std::to_string(i) + "]";
+            if (ein && ain) {
+                cmp_u(r, b + ".monster_index", e.monster_queue[i].monster_index,
+                      a.monster_queue[i].monster_index);
+                cmp_u(r, b + ".flags", e.monster_queue[i].flags,
+                      a.monster_queue[i].flags);
+            } else {
+                push(r, b,
+                     ein ? "{monster_index=" +
+                               std::to_string(e.monster_queue[i].monster_index) + "}"
+                         : std::string("(absent)"),
+                     ain ? "{monster_index=" +
+                               std::to_string(a.monster_queue[i].monster_index) + "}"
+                         : std::string("(absent)"));
+            }
+        }
+    }
+
+    // -- bookkeeping flags (queue-adjacent) --
+    cmp_u(r, "turn_has_ended", e.turn_has_ended, a.turn_has_ended);
+    cmp_u(r, "monster_attacks_queued", e.monster_attacks_queued,
+          a.monster_attacks_queued);
+
+    // -- RNG streams (each named individually so a divergence is attributable to
+    //    the specific stream, per InitialPlan's verification philosophy) --
+    cmp_stream(r, "monster_hp_rng", e.monster_hp_rng, a.monster_hp_rng);
+    cmp_stream(r, "ai_rng", e.ai_rng, a.ai_rng);
+    cmp_stream(r, "shuffle_rng", e.shuffle_rng, a.shuffle_rng);
+    cmp_stream(r, "card_random_rng", e.card_random_rng, a.card_random_rng);
+    cmp_stream(r, "misc_rng", e.misc_rng, a.misc_rng);
+
+    return r;
+}
+
+}  // namespace sts::diff

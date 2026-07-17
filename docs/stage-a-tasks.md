@@ -764,7 +764,7 @@ No ASan/UBSan findings.
 
 ## Phase 6 — Diff harness + M1 acceptance (Gate G3)
 
-### A6.1 `[ ]` Trace format + differ
+### A6.1 `[x]` Trace format + differ
 **Deps:** A5.1 · **Spec:** §8, §9
 **Deliverables:** `tools/diff_harness/` (C++ target): trace writer
 (`{magic, schema_version, records}` per §8), field-by-field state differ with
@@ -773,7 +773,73 @@ adapter interface (`OracleAdapter` — fixture-file impl now, CommunicationMod
 impl in Stage B).
 **Acceptance:** gtest `differ_test` — synthetic divergence in each field group
 is caught and named; reproducer file replays to the same diff.
-**Log:** —
+**Log:** `tools/diff_harness/` — a normal CMake `add_library(diff_harness
+STATIC …)` target (PUBLIC-links `sts_engine`; `add_subdirectory(tools/
+diff_harness)` gated on `STS_BUILD_TESTS`), unlike `tools/golden_capture`'s
+Windows-host JVM tool. Public headers under `include/sts/diff/`, sources under
+`src/`, umbrella `diff_harness.hpp`; README documents every format decision.
+**Trace format** (design doc §8): `TraceHeader {char magic[4]='STS0';
+uint32 schema_version; uint32 state_size; uint32 record_count; int64 seed}`
+(24 B, field-ordered padding-free) + `record[]` each = raw `memcpy` of
+`sizeof(CombatState)` bytes then `uint32 action` (the `Action.bits` that
+produced the state; 0 for the initial record) then `uint32 aux` (bit 0 =
+terminal, i.e. `phase==COMBAT_OVER`; bits 1..31 reserved 0 — the documented
+choice for §8's unspecified "aux"). Two §8 extensions, both documented:
+`record_count` (already added by the task prose) and `seed` (needed because §9
+defines a trace as "(seed, action[])→…", so the container must carry it to be
+self-replayable). **Record convention:** `record[0]` = initial `combat_begin`
+state, `record[k≥1]` = state after `actions[k-1]`; `write_trace` requires
+`states.size()==actions.size()+1`. `read_trace` REFUSES (returns false, no
+garbage load) any mismatch of magic, `schema_version` (hard check per §8), or
+`state_size`. **Reproducer** (`reproducer.hpp`): plain-text `STSREPRO v1` /
+`seed <i64>` / `actions <n>` / one `Action.bits` per line (with an ignored
+`# decoded` trailer) — human-editable; deck+floor implicit (skeleton constants,
+`replay.hpp` `skeleton_deck()` @ `kSkeletonFloor=1`), Stage-B-extensible behind
+the version string. **Differ** (`differ.hpp` `diff_states(expected, actual)` →
+`DiffReport{vector<FieldDiff{field_name, expected_repr, actual_repr}>}`):
+fast-path returns empty when `hash_state`s match (A2.2 byte-identity), else
+walks every field group and emits only genuine divergences with debuggable
+names (`player.hp`, `monsters[0].powers[1].amount`, `hand[3]`,
+`ai_rng.counter`); enum values render by name (`VULNERABLE(2)`). SEMANTIC (not
+byte) diff: piles/queues compared over live `[0,count)` (rings walked via
+`head`), NOT stale scratch past `count`, and internal ring cursors
+(`action_tail`) / padding not compared — two logically-equal states with
+different rotation/scratch diff empty (raw hash stays the byte-exact oracle).
+The 5 RNG streams are compared individually so a divergence is attributable to
+the specific stream (InitialPlan "RNG divergence anywhere is stop-the-line").
+**`OracleAdapter`** (`oracle.hpp`): abstract base (offline scaffolding, so
+virtual dispatch is appropriate here unlike engine hot paths) with
+`bool query(seed, action_prefix, CombatState& out)`. `FixtureFileOracleAdapter`
+loads trace files AS fixtures (the fixture file format IS the trace format, so
+A6.2 emits fixtures with `write_trace` and this consumes them via `read_trace`)
+and answers `query` by seed-match + prefix-match → recorded state; false on
+unknown seed / divergent / too-long prefix. CommunicationMod adapter is a
+documented Stage-B stub only (commented seam in `oracle.hpp`, pattern of A4.1's
+SHUFFLE_IN/ROLL_MOVE stubs). `replay.hpp` (`replay`/`replay_skeleton`) drives
+`combat_begin`+`advance` to the N+1 snapshot sequence traces/fixtures record and
+reproducers replay. **`differ_test`** (13th `tests/CMakeLists.txt` block, links
+`diff_harness`): 38 cases. Field-group divergence coverage — one deliberate
+synthetic mutation per group, asserting non-empty + correct field-name substring
++ (for single-field mutations) exactly one diff: header (phase/turn/flags),
+player scalars (hp/block/energy/stance/cards_played_this_turn/power_count),
+`player_powers`, `card_pool` (card_id + cost_now), all five piles
+(hand/draw/discard/exhaust/limbo element + a hand_count+new-element case),
+monster scalars (hp/block/move_history/monster_count), `monsters[i].powers`,
+`action_queue`, `pre_turn_actions`, `card_queue`, `monster_queue`, bookkeeping
+(turn_has_ended/monster_attacks_queued), and each of the 5 RNG streams
+individually (counter AND s0). Hash fast-path (identical→empty; card_pool[7]
+change still caught when hashes differ). Trace round-trip (memcmp + `hash_state`
+per record, action pairing). Schema rejection (mutated `schema_version` @ offset
+4 AND corrupt magic both refused). Reproducer round-trip that REPLAYS to the
+same diff (write/read (seed,actions), re-drive `combat_begin`+`advance`, diff
+freshly-replayed vs the same corrupted target → byte-identical `DiffReport`
+field-by-field). Fixture oracle (prefix len 0/2/full → recorded state; unknown
+seed / too-long / divergent prefix → false). Verified by running, not inferred:
+WSL Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest
+--output-on-failure` — both presets `100% tests passed, 0 failed out of 128`
+(90 pre-existing A5.1-era + 38 new); no build warnings under
+`-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion`. No
+ASan/UBSan findings. SCHEMA_VERSION untouched (no struct edits).
 
 ### A6.2 `[ ]` Fixture oracle: 20 scripted Jaw Worm fights
 **Deps:** A6.1, A4.3 · **Spec:** §9

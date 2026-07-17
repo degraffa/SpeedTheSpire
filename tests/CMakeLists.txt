@@ -187,3 +187,19 @@ sts_set_warnings(advance_test)
 sts_enable_sanitizers(advance_test)
 
 gtest_discover_tests(advance_test)
+
+# A6.1: diff harness -- trace format + field-by-field differ + reproducer +
+# fixture oracle (design doc §8, §9). Links diff_harness (tools/diff_harness),
+# which PUBLIC-links sts_engine, so this test reaches both the harness API and
+# the engine. Acceptance: synthetic divergence in each field group is caught and
+# named; reproducer file replays to the same diff; trace round-trip + schema
+# rejection.
+add_executable(differ_test
+    differ_test.cpp
+)
+
+target_link_libraries(differ_test PRIVATE diff_harness GTest::gtest_main)
+sts_set_warnings(differ_test)
+sts_enable_sanitizers(differ_test)
+
+gtest_discover_tests(differ_test)
