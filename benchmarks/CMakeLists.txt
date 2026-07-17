@@ -15,3 +15,12 @@ add_executable(sts_engine_bench
 
 target_link_libraries(sts_engine_bench PRIVATE sts_engine benchmark::benchmark_main)
 sts_set_warnings(sts_engine_bench)
+
+# A5.1: batch advance() throughput smoke benchmark (10k-state batch, random-legal
+# policy). Own executable; bench_advance.cpp carries its own BENCHMARK_MAIN().
+add_executable(bench_advance
+    bench_advance.cpp
+)
+
+target_link_libraries(bench_advance PRIVATE sts_engine benchmark::benchmark)
+sts_set_warnings(bench_advance)

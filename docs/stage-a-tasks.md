@@ -653,7 +653,7 @@ No ASan/UBSan findings.
 
 ## Phase 5 — Batch API + observation stub
 
-### A5.1 `[ ]` `advance()` batch + legal-action mask
+### A5.1 `[x]` `advance()` batch + legal-action mask
 **Deps:** A4.3, A3.2 · **Spec:** §7
 **Deliverables:** `include/sts/engine/advance.hpp`, `src/engine/advance.cpp`:
 `advance(span<CombatState>, span<const Action>, span<StepResult>)` —
@@ -664,7 +664,65 @@ policy steps/sec (recorded, no target at M1).
 **Acceptance:** gtest `advance_test` — batch of 128 states with mixed actions
 advances independently (per-state hash equals single-state reference run);
 determinism: same batch twice → identical hashes; asan clean.
-**Log:** —
+**Log:** `include/sts/engine/advance.hpp` + `src/engine/advance.cpp` (added to
+the `sts_engine` lib). **`combat_begin(run_seed, floor, span<const CardId>)`**:
+value-inits the state, fills `card_pool` from the deck span (cost_now = registry
+base cost via `card_def`, general over any deck size — not hard-coded to the
+§9 12-card deck), derives all five floor-scoped streams via
+`floor_stream(run_seed, floor)` (all identical at floor entry, per A1.3), shuffles
+the deck into `draw[]`, inits the player (placeholder hp=max_hp=80, matching
+cards_test's convention; exact Ironclad A20 starting HP deferred to Stage B per
+design doc §11), and `jaw_worm_init`s one Jaw Worm. **Deck-shuffle provenance
+(found + verified, was unpinned in the task):** `AbstractPlayer.preBattlePrep`
+(AbstractPlayer.java:1564-1595) → `drawPile.initializeDeck(masterDeck)`
+(:1584) → `CardGroup.initializeDeck` (CardGroup.java:928-955) → `copy.shuffle(
+shuffleRng)` == `Collections.shuffle(group, new java.util.Random(
+shuffleRng.randomLong()))` (CardGroup.java:561-567) — **the SAME
+one-`randomLong()`→JDK-LCG→Fisher-Yates mechanism as A4.2's in-combat reshuffle**
+(`piles.cpp shuffle_discard_into_draw`), NOT a different primitive; `initializeDeck`
+then `addToTop`s the shuffled copy front-to-back onto the empty draw pile, so
+`draw[]` becomes the shuffled order with `draw[draw_count-1]` == top drawn first
+(mirrors the A4.2 convention exactly). Implemented as: build the pool-index order
+in deck order, draw one `random_long(shuffle_rng)`, seed `JdkRandom`, `jdk_shuffle`
+in place. **Turn-1 setup reuses the pump, not a hand-rolled path** (the trickiest
+part): `combat_begin` primes `turn=0`, `monster_attacks_queued=1` (blocks pump
+step 4 so no monster turn fires before the player's turn 1), `turn_has_ended=1`
+(makes step 6 fire), then calls `pump(state, jaw_worm_take_turn)` ONCE — which
+runs start_of_turn (draws the opening 5-card hand, refills energy to
+`kIroncladBaseEnergy`, `++turn`→1, block decay) and lands on WAITING_ON_USER via
+the identical machinery every later turn uses. **`ActionMask`** shape (design doc
+§7 left it unspecified): `{ bool can_play[kHandCap]; bool can_end_turn; }` — flat
+per-hand-slot playability (affordable AND phase==WAITING_ON_USER AND i<hand_count)
++ a single END_TURN flag; single-monster skeleton needs no (slot×target)
+cross-product (commented: Stage B multi-monster needs real target enumeration).
+**`StepResult`** shape: `{ bool terminal; float reward; ObsBuffer obs; }` — embeds
+the A5.2 `ObsBuffer` BY VALUE (the zero-alloc reading of §7's "observation view":
+no pointer back into the state). Reward is a documented **placeholder** (not frozen;
+real shaping is E1+/training-loop scope): +1 win (all monsters dead, player alive),
+−1 loss (player dead), 0 ongoing; `terminal = player_dead || all_monsters_dead`.
+**`advance`**: asserts equal-length spans, per-index verb dispatch (PLAY_CARD →
+`queue_card_play`+`pump`; END_TURN → sentinel+`pump`; USE_POTION/CHOOSE documented
+no-ops — none exist in M1), then fills each result from the post-pump state +
+`encode_observation`. Plain per-index loop, zero heap allocation. **Benchmark**
+`benchmarks/bench_advance.cpp` (own `bench_advance` target): 10k `combat_begin`
+states (seed varied per state), random-legal policy via `legal_actions` +
+`std::mt19937` (harness RNG only, not gameplay). **Recorded baseline (no target
+at M1):** release, 12-core 3.6 GHz — **≈20.7 M steps/s** (0.443 ms per 10k-state
+batch). New gtest binary `advance_test` (12th `tests/CMakeLists.txt` block):
+`AdvanceBatch.MixedActionsAdvanceIndependently` (128 states, verified-mixed
+PLAY_CARD/END_TURN, one batch call vs 128 isolated batch-of-1 runs from the same
+originals+actions, `hash_state` equal for all 128 — proves no aliasing),
+`AdvanceBatch.SameBatchTwiceIsIdentical` (same batch twice from fresh copies →
+identical hashes + rewards), `AdvanceBatch.IndependenceHoldsOverMultipleSteps`
+(6 steps deep), `CombatBegin.FreshCombatHasSaneInvariants` (deck size = hand+draw,
+hand=5, HP∈[42,46], phase WAITING_ON_USER, turn 1, energy 3, stream counters),
+`CombatBegin.IsDeterministicForTheSameSeed`, `LegalActions.AffordabilityAndPhaseGating`.
+Raw `hash_state` comparison (no NormalizeScratch) is valid here because every
+compared pair shares an identical deterministic byte history. Verified by running,
+not inferred: WSL Ubuntu-2404, `cmake --preset {debug,asan}` → build → `ctest
+--output-on-failure` — both presets `100% tests passed, 0 failed out of 96` (90
+pre-existing + 6 new); all pre-existing binaries still green. No ASan/UBSan
+findings.
 
 ### A5.2 `[x]` ∥ Observation encoder stub
 **Deps:** A2.2 · **Spec:** §7 (D0.3)

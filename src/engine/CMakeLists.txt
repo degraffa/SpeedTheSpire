@@ -6,6 +6,7 @@ add_library(sts_engine
     interp.cpp
     piles.cpp
     card_play.cpp
+    advance.cpp
 )
 
 target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)

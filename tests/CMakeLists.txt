@@ -173,3 +173,17 @@ sts_set_warnings(cards_test)
 sts_enable_sanitizers(cards_test)
 
 gtest_discover_tests(cards_test)
+
+# A5.1: batch API (advance / legal_actions / combat_begin, design doc §7).
+# Batch-of-128 independence (per-state hash == single-state reference run),
+# determinism (same batch twice -> identical hashes), combat_begin invariants,
+# and legal_actions affordability/phase gating. Links sts_engine (advance.cpp).
+add_executable(advance_test
+    advance_test.cpp
+)
+
+target_link_libraries(advance_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(advance_test)
+sts_enable_sanitizers(advance_test)
+
+gtest_discover_tests(advance_test)
