@@ -1,1 +1,4 @@
 * text=auto eol=lf
+
+# Golden verification vectors are opaque binary payloads
+tests/golden/** binary
