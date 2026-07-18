@@ -1,0 +1,15 @@
+# potions.yaml -- potion registry (rules-as-data, design doc B §4.2).
+#
+# Entry shape (frozen):
+#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
+#     name: <SYMBOL>       generated enum symbol (PotionId::<SYMBOL>)
+#     game_id: "<string>"  the game's potion id string -- translator/oracle join key
+#     rarity: COMMON|UNCOMMON|RARE
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#     effects:             OPTIONAL effect program (same {op, target, amount} shape)
+#     native: <bool>       OPTIONAL; true -> named native branch (default false).
+#
+# Empty in the skeleton (stage-a design §9: no potions). Populating this domain is a
+# later task; the file exists now so codegen produces the (NONE-only) PotionId enum
+# and a zero row-count manifest entry cleanly.
+[]

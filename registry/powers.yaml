@@ -1,0 +1,33 @@
+# powers.yaml -- power registry (rules-as-data, design doc B §4.2).
+#
+# Entry shape (frozen):
+#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
+#     name: <SYMBOL>       generated enum symbol (PowerId::<SYMBOL>)
+#     game_id: "<string>"  the game's POWER_ID string -- translator/oracle join key
+#     type: BUFF|DEBUFF
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#
+# Powers have no effect program of their own: their behaviour lives in the DAMAGE
+# pipeline hooks (interp.hpp). This domain generates the PowerId enum and the
+# game_id<->enum string table only.
+#
+# Skeleton content (stage-a design §9). Ids pinned STRENGTH=1, VULNERABLE=2, WEAK=3
+# and re-asserted in the generated header (design doc B §4.4).
+
+- id: 1
+  name: STRENGTH
+  game_id: "Strength"
+  type: BUFF
+  provenance: "StrengthPower.atDamageGive (StrengthPower.java:92-98) -- damage + amount; POWER_ID (StrengthPower.java:21)"
+
+- id: 2
+  name: VULNERABLE
+  game_id: "Vulnerable"
+  type: DEBUFF
+  provenance: "VulnerablePower.atDamageReceive (VulnerablePower.java:61-73) -- damage * 1.5f; POWER_ID (VulnerablePower.java:21)"
+
+- id: 3
+  name: WEAK
+  game_id: "Weakened"
+  type: DEBUFF
+  provenance: "WeakPower.atDamageGive (WeakPower.java:61-70) -- damage * 0.75f; POWER_ID (WeakPower.java:21)"

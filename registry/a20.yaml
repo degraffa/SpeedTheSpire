@@ -1,0 +1,18 @@
+# a20.yaml -- ascension modifier table (rules-as-data, design doc B §6).
+#
+# Entry shape (frozen, design doc B §6):
+#   - id: <int>            numeric id -- append-only, NEVER renumbered
+#     level: <int>         ascension level (1..20)
+#     scope: run-setup | monster | economy | event
+#     mechanic: "<short description>"
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#     notes: "<optional>"
+#
+# Numbers live here ONLY after the cited line has been read during that row's task
+# (stage-a §11 rule). This domain generates no enum; codegen validates entries and
+# reports the row count in the manifest only.
+#
+# Empty in the skeleton (stage-a design §9 / §11: the A20 modifier table is
+# deliberately deferred). Populating this domain is a later task; the file exists now
+# so codegen reports a zero row-count manifest entry cleanly.
+[]

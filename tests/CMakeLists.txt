@@ -221,3 +221,27 @@ sts_set_warnings(fixture_oracle_test)
 sts_enable_sanitizers(fixture_oracle_test)
 
 gtest_discover_tests(fixture_oracle_test)
+
+# B2.1: registry codegen acceptance -- determinism (generate twice -> byte-
+# identical), duplicate-id rejection (clear error + non-zero exit), and
+# equivalence of the generated tables to the hand-written engine tables
+# (types.hpp enums / cards.hpp CardDef) so the later migration is a zero-change
+# swap. registry_gen_standalone.cpp includes ONLY the generated headers, proving
+# they compile standalone; the main TU also links sts_engine as the oracle.
+add_executable(registry_gen_test
+    registry_gen_test.cpp
+    registry_gen_standalone.cpp
+)
+
+add_dependencies(registry_gen_test registry_gen_headers)
+target_link_libraries(registry_gen_test PRIVATE
+    sts_engine registry_generated GTest::gtest_main)
+target_compile_definitions(registry_gen_test PRIVATE
+    STS_PYTHON_EXECUTABLE="${STS_PYTHON_EXECUTABLE}"
+    STS_REGISTRY_GEN_PY="${STS_REGISTRY_GEN_PY}"
+    STS_REGISTRY_DIR="${STS_REGISTRY_DIR}"
+    STS_GEN_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/registry_gen_scratch")
+sts_set_warnings(registry_gen_test)
+sts_enable_sanitizers(registry_gen_test)
+
+gtest_discover_tests(registry_gen_test)

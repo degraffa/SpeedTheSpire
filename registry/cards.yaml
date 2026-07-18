@@ -1,0 +1,98 @@
+# cards.yaml -- card registry (rules-as-data, design doc B §4.2).
+#
+# Entry shape (frozen, design doc B §4.2):
+#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
+#     name: <SYMBOL>       generated enum symbol (CardId::<SYMBOL>)
+#     game_id: "<string>"  the game's cardID string -- translator/oracle join key
+#     color: RED|GREEN|BLUE|COLORLESS|CURSE
+#     rarity: BASIC|COMMON|UNCOMMON|RARE|SPECIAL|CURSE
+#     type: ATTACK|SKILL|POWER|STATUS|CURSE
+#     cost: <int>          base energy cost
+#     target: ENEMY|ALL_ENEMY|SELF|NONE|RANDOM_ENEMY|SELF_AND_ENEMY
+#     flags: [ ... ]       exhaust | ethereal | innate | unplayable | retain | ...
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#     effects:             base effect program, stage-a §6 {op, target, amount, flags}
+#       - {op: <OPCODE>, target: CARD_TARGET|SELF, amount: <int>[, power: <SYMBOL>]}
+#     upgraded:            OPTIONAL full upgraded program (not a delta). Absent here:
+#                          the skeleton deck is all base cards (stage-a design §9);
+#                          codegen emits base rows only until CardDef gains the
+#                          upgrade dimension (a later task).
+#     native: <bool>       OPTIONAL; true -> named native branch (default false).
+#
+# Step target: SELF = the player; CARD_TARGET = the monster the card was played on
+# (or the random roll). APPLY_POWER steps carry `power: <PowerId symbol>`; codegen
+# packs its numeric PowerId into the step's `extra` field (make_apply_power_flags).
+#
+# Skeleton content (stage-a design §9). Ids pinned STRIKE=1..POMMEL_STRIKE=5 and
+# re-asserted in the generated header (design doc B §4.4). Effect programs and base
+# amounts mirror cards.hpp exactly (each use()'s addToBot order, base stats only;
+# Strength/Vulnerable modifiers are applied by the DAMAGE pipeline at resolution,
+# never baked here).
+
+- id: 1
+  name: STRIKE
+  game_id: "Strike_R"
+  color: RED
+  rarity: BASIC
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "Strike_Red.use (Strike_Red.java) -> DamageAction(6); ID (Strike_Red.java:29)"
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 6}
+
+- id: 2
+  name: DEFEND
+  game_id: "Defend_R"
+  color: RED
+  rarity: BASIC
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Defend_Red.use (Defend_Red.java) -> GainBlockAction(5); ID (Defend_Red.java:24)"
+  effects:
+    - {op: BLOCK, target: SELF, amount: 5}
+
+- id: 3
+  name: BASH
+  game_id: "Bash"
+  color: RED
+  rarity: BASIC
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "Bash.use (Bash.java) -> DamageAction(8), ApplyPowerAction(Vulnerable,2); ID (Bash.java:30)"
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 8}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
+
+- id: 4
+  name: SHRUG_IT_OFF
+  game_id: "Shrug It Off"
+  color: RED
+  rarity: COMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "ShrugItOff.use (ShrugItOff.java) -> GainBlockAction(8), DrawCardAction(1); ID (ShrugItOff.java:23)"
+  effects:
+    - {op: BLOCK, target: SELF, amount: 8}
+    - {op: DRAW, target: SELF, amount: 1}
+
+- id: 5
+  name: POMMEL_STRIKE
+  game_id: "Pommel Strike"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "PommelStrike.use (PommelStrike.java) -> DamageAction(9), DrawCardAction(1); ID (PommelStrike.java:27)"
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 9}
+    - {op: DRAW, target: SELF, amount: 1}

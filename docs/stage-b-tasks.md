@@ -291,7 +291,7 @@ Then: update CLAUDE.md "Current state".
 
 ## Phase B2 — Registry system + skeleton migration (Gate G5) — ∥ with Phase B1
 
-### B2.1 `[ ]` ∥ Registry schema + codegen tool
+### B2.1 `[x]` ∥ Registry schema + codegen tool
 **Deps:** none (Stage A G3) · **Spec:** design §4.1-4.3
 **Deliverables:** `registry/` YAML schemas for all 8 domains (design §4.1)
 with the §4.2 entry shape; `tools/registry_gen/gen.py` (Python 3 + PyYAML)
@@ -303,7 +303,24 @@ timestamps).
 **Acceptance:** gtest `registry_gen_test`: running the generator twice
 produces byte-identical output; a YAML entry with a duplicate or reused id
 fails generation with a clear error; generated headers compile standalone.
-**Log:** —
+**Log:** Verified by running, not inferred: `cmake --preset {debug,asan} &&
+build && ctest` in WSL Ubuntu-2404 — **137/137 green in both presets** (Stage A
+baseline 131 + 6 new `registry_gen_test` cases:
+`RegistryGen.{DeterministicByteIdentical, DuplicateIdFailsWithClearError,
+EnumIdsMatchEngine, CardTableMatchesEngine, GameIdTablesRoundTrip,
+ManifestCounts}`). `registry/` seeded with all 8 domains (5 cards STRIKE=1..
+POMMEL_STRIKE=5, 3 powers STRENGTH=1..WEAK=3, Jaw Worm JAW_WORM=1; the other 5
+valid-but-empty); `tools/registry_gen/gen.py` (Python 3 + PyYAML) emits the
+id enums, the `CardDef`/step table in cards.hpp's exact shape, the
+`game_id`↔enum string tables, and the row-count manifest — deterministic
+(sorted, no timestamps, byte-identical across two runs) with append-only ids
+re-pinned by `static_assert`. CMake custom-command wiring emits headers under
+`<build>/generated/` (never committed; `.gitignore` extended). Non-breaking:
+the engine still uses its hand tables (`types.hpp`/`cards.hpp` untouched); the
+generated `sts::registry` tables are proven byte-equal to them by the test, so
+B2.2's swap is zero-change. Provenance: `Strike_Red`/`Defend_Red`/`Bash`/
+`ShrugItOff`/`PommelStrike`.use + ID; `StrengthPower`/`VulnerablePower`/
+`WeakPower` POWER_ID; `JawWorm` stat/getMove branches (all read in full).
 
 ### B2.2 `[ ]` Skeleton migration onto the registry
 **Deps:** B2.1 · **Spec:** design §3.2, §4.4 (the stop-the-line decision) ·

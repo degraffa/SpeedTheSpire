@@ -1,0 +1,15 @@
+# events.yaml -- event registry (rules-as-data, design doc B §4.2).
+#
+# Entry shape (frozen):
+#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
+#     name: <SYMBOL>       generated enum symbol (EventId::<SYMBOL>)
+#     game_id: "<string>"  the game's event id string -- translator/oracle join key
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#     native: <bool>       OPTIONAL; event logic is native code with registry
+#                          metadata (design doc B §4.1: dialog trees are irreducibly
+#                          bespoke). Default true in practice for events.
+#
+# Empty in the skeleton (stage-a design §9: no events). Populating this domain is a
+# later task; the file exists now so codegen produces the (NONE-only) EventId enum
+# and a zero row-count manifest entry cleanly.
+[]

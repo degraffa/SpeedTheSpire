@@ -1,0 +1,21 @@
+# encounters.yaml -- encounter registry (rules-as-data, design doc B §4.2, §5.2).
+#
+# An encounter is a monster-group definition (the actors that spawn together for a
+# combat), referencing monsters.yaml entries by name.
+#
+# Entry shape (frozen):
+#   - id: <int>            numeric id -- append-only, NEVER renumbered
+#     name: <SYMBOL>       symbolic encounter name
+#     game_id: "<string>"  the game's encounter/monster-group key -- join key
+#     act: <int>
+#     pool: WEAK|STRONG|ELITE|BOSS
+#     monsters: [ <MonsterId symbol>, ... ]   members (order = spawn order)
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#
+# This domain generates no enum (encounters are groupings, not content ids); codegen
+# validates entries and reports the row count in the manifest only.
+#
+# Empty in the skeleton (stage-a design §9: a single hand-wired Jaw Worm fight).
+# Populating this domain is a later task; the file exists now so codegen reports a
+# zero row-count manifest entry cleanly.
+[]

@@ -4,6 +4,10 @@ build-*/
 out/
 cmake-build-*/
 
+# Code-generated registry headers (tools/registry_gen/gen.py). Emitted under the
+# build tree; this defends against a stray run that targets the source root.
+generated/
+
 # CMake
 CMakeUserPresets.json
 compile_commands.json

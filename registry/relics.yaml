@@ -1,0 +1,14 @@
+# relics.yaml -- relic registry (rules-as-data, design doc B §4.2).
+#
+# Entry shape (frozen):
+#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
+#     name: <SYMBOL>       generated enum symbol (RelicId::<SYMBOL>)
+#     game_id: "<string>"  the game's relicId string -- translator/oracle join key
+#     tier: STARTER|COMMON|UNCOMMON|RARE|BOSS|SHOP|SPECIAL|EVENT
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#     native: <bool>       OPTIONAL; true -> named native branch (default false).
+#
+# Empty in the skeleton (stage-a design §9: zero relics). Populating this domain is
+# a later task; the file exists now so codegen produces the (NONE-only) RelicId enum
+# and a zero row-count manifest entry cleanly.
+[]

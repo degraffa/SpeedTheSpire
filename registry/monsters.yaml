@@ -1,0 +1,55 @@
+# monsters.yaml -- monster registry (rules-as-data, design doc B §4.2, §5.2).
+#
+# Entry shape (frozen):
+#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
+#     name: <SYMBOL>       generated enum symbol (MonsterId::<SYMBOL>)
+#     game_id: "<string>"  the game's monster ID string -- translator/oracle join key
+#     provenance: "<Class.method (File.java:line) -- read in full>"
+#     hp:                  per-ascension-tier HP range columns (min/max), each column
+#                          citing its branch (design doc B §4.2/§6)
+#       <tier>: {min: <int>, max: <int>}
+#     moves:               move list; each move an intent + effect program in
+#                          takeTurn addToBottom order (effects as data, §4.2)
+#       - {name: <SYMBOL>, move_id: <int>, intent: <SYMBOL>,
+#          effects: [ {op: ..., target: ..., amount: ...}, ... ]}
+#     ai: native | {table: ...}   move-selection rule; JawWorm's getMove is the
+#                          universal getMove(aiRng.random(99)) shape (stage-a §6).
+#
+# NOTE: B2.1 codegen emits the MonsterId enum + game_id string table + manifest
+# count from this file. The hp/moves/ai columns are seeded data consumed by a later
+# task (the skeleton migration onto the registry); they are carried here now, fully
+# provenance-cited, so this file is real input rather than a stub.
+#
+# Skeleton content (stage-a design §9). Id pinned JAW_WORM=1 and re-asserted in the
+# generated header (design doc B §4.4). Stat columns from JawWorm.java's ascension
+# branches; move effects from JawWorm.takeTurn's addToBottom order.
+
+- id: 1
+  name: JAW_WORM
+  game_id: "JawWorm"
+  provenance: "JawWorm ctor setHp/stat branches (JawWorm.java:79-104), takeTurn (JawWorm.java:120-146), getMove (JawWorm.java:148-184); ID (JawWorm.java:38)"
+  hp:
+    base: {min: 40, max: 44}   # JawWorm.java:83 (ascension < 7)
+    a7:   {min: 42, max: 46}   # JawWorm.java:81 (ascension >= 7)
+  moves:
+    - name: CHOMP
+      move_id: 1               # JawWorm.java:65
+      intent: ATTACK
+      effects:
+        - {op: DAMAGE, target: SELF_TARGET, amount: 12}   # chompDmg A2+ (JawWorm.java:90); base 11 (:98)
+    - name: BELLOW
+      move_id: 2               # JawWorm.java:66
+      intent: DEFEND_BUFF
+      effects:
+        - {op: APPLY_POWER, target: SELF, amount: 5, power: STRENGTH}  # bellowStr A17 (JawWorm.java:87); base 3 (:99)
+        - {op: BLOCK, target: SELF, amount: 9}                          # bellowBlock A17 (JawWorm.java:88); base 6 (:100)
+    - name: THRASH
+      move_id: 3               # JawWorm.java:67
+      intent: ATTACK_DEFEND
+      effects:
+        - {op: DAMAGE, target: SELF_TARGET, amount: 7}    # thrashDmg (JawWorm.java:91)
+        - {op: BLOCK, target: SELF, amount: 5}            # thrashBlock (JawWorm.java:92)
+  ai: native   # getMove decision tree (JawWorm.java:148-184): first move forced
+               # Chomp, then d100 on aiRng with lastMove/lastTwoMoves history and
+               # randomBoolean tiebreaks. Selection stays native (AbstractMonster
+               # move history); move *effects* above are data.

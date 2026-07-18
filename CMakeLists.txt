@@ -43,6 +43,10 @@ if(STS_BUILD_TESTS)
     # the tests since it links diff_harness (write_trace) + sts_engine and is run
     # manually to regenerate tests/golden/combat_fixtures/*.trace.
     add_subdirectory(tools/fixture_gen)
+    # B2.1: registry codegen. Runs gen.py at build time to emit constexpr headers
+    # under <build>/generated (never committed); consumed only by registry_gen_test
+    # (the engine is not migrated onto them here -- that is a later, breaking task).
+    add_subdirectory(tools/registry_gen)
 endif()
 
 if(STS_BUILD_TESTS)
