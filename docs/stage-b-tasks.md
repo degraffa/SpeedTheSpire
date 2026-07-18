@@ -117,7 +117,7 @@ the design doc's §11 / stage-a §12 when a design doc is the loser).
 
 ## Phase B0 — Bridge groundwork
 
-### B0.1 `[ ]` ∥ CommunicationMod source pin + protocol survey
+### B0.1 `[x]` ∥ CommunicationMod source pin + protocol survey
 **Deps:** none · **Spec:** design §2.3, §2.6-2.7 · **Provenance:** local jar
 (workshop 2131373661, v1.2.1); upstream `ForgottenArbiter/CommunicationMod`
 **Deliverables:** upstream source fetched and pinned at the commit matching
@@ -133,7 +133,25 @@ ignored-with-reason / oracle-block, per design §2.6's fail-loudly policy).
 `GameStateConverter` (checked against source, not samples); the two design-doc
 **[confirm at B0.1]** items are resolved and recorded in the design-doc change
 log; license verified.
-**Log:** —
+**Log:** Verified against source, not inferred: cloned upstream
+`ForgottenArbiter/CommunicationMod`, pinned at tag `v1.2.1` = commit
+`70ca84b1e8daff3eb4fe7f66775ce39926133c7f` (matches local workshop jar
+2131373661 `ModTheSpire.json` v1.2.1 / sts 11-30-2020, and source `pom.xml`
+v1.2.1). Vendored source-only to `tools/oracle_bridge/communicationmod-oracle/`
+with `LICENSE` intact — **MIT** ("MIT License", Copyright (c) 2019
+ForgottenArbiter); no jars/`.class`/build artifacts committed (only source +
+626 B `Icon.png` build-input resource). Wrote `tools/oracle_bridge/PROTOCOL.md`
+from source: framing (state JSON → child **stdin**, commands ← child **stdout**,
+`\n`/NUL-delimited — DataWriter.java:31-33, DataReader.java:28-34,
+CommunicationMod.java:222-227), `ready_for_command` = `waitingForCommand`
+(GameStateListener.java:235-237), full command grammar, and the complete
+`GameStateConverter` field-disposition catalogue. Both `[confirm at B0.1]`
+items resolved + recorded in design §11: (1) message framing/direction;
+(2) `start` seed = base-35 display string, **not** raw long
+(CommandExecutor.java:353-359). Coverage: 155 `.put` sites → 141 distinct
+(container,key) fields, every one has a table row + disposition; verified via
+`grep -noE '\.put\("[^"]+"'`. `GameStateConverter.java` is the sole game-state
+JSON emitter.
 
 ### B0.2 `[ ]` ∥ Stock-jar bridge bring-up + environment audit
 **Deps:** none · **Spec:** design §2.3, §1.1 · **Provenance:** config at

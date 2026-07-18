@@ -19,8 +19,9 @@ never silently overrides Stage A.
 Everything cited here was read from the actual game code or the actual local
 artifacts, not from memory or wikis. Line numbers refer to the decompiled
 reference tree described in stage-a §1. Where a fact could not be verified
-locally (a handful of CommunicationMod protocol details), it is marked
-**[confirm at B0.1]** rather than asserted.
+locally (a handful of CommunicationMod protocol details), it was marked
+**[confirm at B0.1]** rather than asserted; all such items are now resolved
+against the vendored upstream source (§11, and tools/oracle_bridge/PROTOCOL.md).
 
 ---
 
@@ -61,8 +62,10 @@ plus the Stage B additions:
 - **CommunicationMod v1.2.1** — local jar at Steam workshop item
   `2131373661\CommunicationMod.jar` (`ModTheSpire.json`: version 1.2.1,
   sts_version 11-30-2020, depends on basemod). Upstream source:
-  `ForgottenArbiter/CommunicationMod` on GitHub, to be pinned at the commit
-  matching v1.2.1 **[confirm at B0.1]**.
+  `ForgottenArbiter/CommunicationMod` on GitHub, pinned at tag `v1.2.1`
+  (commit `70ca84b1e8daff3eb4fe7f66775ce39926133c7f`), matching the local
+  workshop jar (`ModTheSpire.json` version 1.2.1, sts_version 11-30-2020) and
+  the source `pom.xml` (`<version>1.2.1</version>`). Resolved at B0.1 (§11).
 - **JDK 8** (`C:\Program Files\Java\jdk1.8.0_171`) for building the fork —
   the game runs Java 8; mods must target it. (Java 25 remains the
   golden-capture JVM, stage-a §3.7 — two different toolchains, two different
@@ -102,7 +105,7 @@ Five components, one direction of data flow:
 ```
 [1] Slay the Spire (Windows host, Steam install, ModTheSpire launch)
       + BaseMod + CommunicationMod-oracle (our fork, §2.3–2.5)
-        │  child-process stdin/stdout, line-delimited JSON [confirm at B0.1]
+        │  state JSON → child stdin, commands ← child stdout, \n-delimited (resolved B0.1, §11)
 [2] Campaign driver — Python 3, Windows host (tools/oracle_bridge/driver/)
       starts seeded runs, injects action scripts, records every state
         │  JSONL campaign artifacts (one file per run, version-stamped)
@@ -173,15 +176,20 @@ and the on-disk config:
   `communication_mod_errors.log`; a `ready_for_command` field appears in the
   state messages). Config lives at
   `C:\Users\Alex\AppData\Local\ModTheSpire\CommunicationMod\config.properties`
-  (present on this machine, `command=` currently empty). Message direction
-  (state JSON to child stdin, commands from child stdout, line-delimited) is
-  the documented upstream behavior **[confirm at B0.1]**.
+  (present on this machine, `command=` currently empty). Message direction is
+  confirmed against the vendored source: state JSON is written to the child's
+  **stdin** (`DataWriter` on `listener.getOutputStream()`, DataWriter.java:31-33)
+  and commands are read from the child's **stdout** (`DataReader` on
+  `listener.getInputStream()`, DataReader.java:28-34), each message
+  newline-terminated (the reader also accepts NUL). Resolved at B0.1 (§11).
 - **Command vocabulary** (string constants in `CommandExecutor.class`):
   `start`, `play`, `end`, `potion` (use/discard), `choose`, `proceed` /
   `confirm`, `return` / `leave` / `skip` / `cancel`, `key`, `click`, `wait`,
-  `state`. `start` takes a character and, per upstream docs, optional
-  ascension and seed **[confirm exact arg syntax at B0.1** — seed as base-35
-  display string vs. raw long matters, stage-a §3.5**]**.
+  `state`. `start <character> [ascension] [seed]`: the seed argument is the
+  game's **base-35 display string** (uppercased, validated `^[A-Z0-9]+$`,
+  converted to the internal long by `SeedHelper.getLong`), **not** a raw long
+  — matching stage-a §3.5 (CommandExecutor.java:353-359; trial seeds route to
+  `Settings.specialSeed`, :360-365). Resolved at B0.1 (§11).
 - **State dump:** `GameStateConverter` serializes the visible game state
   (screen type, combat state incl. hand/piles/monsters/powers, map, relics,
   potions, gold, available commands) after every stable state. It does
@@ -205,8 +213,9 @@ A separate companion mod could theoretically add the missing state, but
 CommunicationMod has no extension API for its JSON (`GameStateConverter` is
 static), so a sidecar would end up patching the patcher. **Decision:** fork
 CommunicationMod as `CommunicationMod-oracle`, source vendored under
-`tools/oracle_bridge/communicationmod-oracle/` (upstream is MIT-licensed
-**[confirm license file at B0.1]**), built with JDK 8 against
+`tools/oracle_bridge/communicationmod-oracle/` (upstream is MIT-licensed —
+`LICENSE` file verified at B0.1, "MIT License", Copyright (c) 2019
+ForgottenArbiter; §11), built with JDK 8 against
 `desktop-1.0.jar` + ModTheSpire + BaseMod from the local install. The jar is
 a build artifact, never committed. The fork carries three patch families:
 
@@ -822,3 +831,35 @@ Continuing stage-a §10's numbering:
   per §1.3 (live game above decompiled Java, with reproduction guard rails).
   Trap list extended 12–20 (§10). Environment assumption frozen:
   fully-unlocked profile (§1.1).
+- v0.1.1 (2026-07-17) — B0.1 protocol survey. Resolved the CommunicationMod
+  `[confirm at B0.1]` items against the vendored upstream source, pinned at
+  tag `v1.2.1` = commit `70ca84b1e8daff3eb4fe7f66775ce39926133c7f` (matches
+  the local workshop jar item 2131373661, `ModTheSpire.json` version 1.2.1,
+  and the source `pom.xml` `<version>1.2.1</version>`). Full command grammar
+  and the complete `GameStateConverter` field-disposition catalog are in
+  `tools/oracle_bridge/PROTOCOL.md`.
+  1. **Message framing / direction** (§2.1, §2.3). State JSON is written to
+     the child process's **stdin** and commands are read from its **stdout**,
+     each message terminated with a newline (`'\n'`); the reader additionally
+     treats NUL (`\0`) as a message delimiter. Settling source lines:
+     `DataWriter.run` writes each queued state message to the stream and
+     appends `'\n'` then flushes (DataWriter.java:31-33); `DataReader.run`
+     reads the stream char-by-char and breaks a message on `'\n'` or `0`
+     (DataReader.java:28-34); the two threads are wired to
+     `listener.getOutputStream()` / `listener.getInputStream()` respectively
+     in `CommunicationMod.startCommunicationThreads` (CommunicationMod.java:
+     222-227). `ready_for_command` is `GameStateListener.waitingForCommand`
+     (GameStateConverter.java:54; GameStateListener.java:235-237), set true
+     when a stable state change is detected and cleared on command execution.
+  2. **`start` seed argument** (§2.3, stage-a §3.5). The seed token is the
+     game's **base-35 display string**, **not** a raw long: it is uppercased,
+     validated against `^[A-Z0-9]+$`, and converted to the internal long via
+     `SeedHelper.getLong(seedString)`. Settling source lines:
+     CommandExecutor.java:353-359 (`start <character> [ascension] [seed]`
+     parsing); trial seeds are detected via `TrialHelper.isTrialSeed` and
+     routed to `Settings.specialSeed` with `seedSet=false` (:360-365). Note
+     `SeedHelper.generateUnoffensiveSeed` supplies a random seed when none is
+     given (:367-369).
+  Also confirmed at B0.1: the `LICENSE` file is MIT ("MIT License",
+  Copyright (c) 2019 ForgottenArbiter) — the one vendored source tree allowed
+  under the working rules, kept intact.
