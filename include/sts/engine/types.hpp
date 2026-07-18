@@ -3,15 +3,14 @@
 // Core id enums and small POD instance/action types shared by the state
 // structs (design doc §4.2) and the effect interpreter (design doc §6, §7).
 //
-// This header is hand-written scaffolding for the M1 walking skeleton only
-// (design doc §9: Ironclad vs. Jaw Worm, five cards, three powers, zero
-// relics). The `CardId`/`PowerId`/`MonsterId`/`RelicId` enums here list only
-// the skeleton's members plus a `NONE` sentinel each; the full game's id
-// tables are Stage B+ work, generated from the `registry/` YAML by the
-// codegen step described in design doc §6 (not built yet). Extending an enum
-// later is additive (new values appended before nothing needs to move,
-// existing values are stable) so nothing downstream breaks when the registry
-// pipeline lands.
+// The `CardId`/`PowerId`/`MonsterId`/`RelicId` enums are GENERATED from the
+// `registry/` YAML by tools/registry_gen/gen.py (Stage B design §4.3) and
+// re-exported into sts::engine here via using-aliases, so every existing
+// consumer keeps naming `sts::engine::CardId` etc. unchanged. The generated
+// header re-pins every id with a `static_assert` (Stage B design §4.4: ids
+// are append-only and load-bearing on disk -- fixtures/traces store the raw
+// u16 values). `Action`/`ActionVerb` and the POD instance/slot types below
+// stay hand-written: they are engine API, not registry content.
 //
 // All types here are fixed-width (<cstdint>), trivially copyable, pointer-
 // free, and header-only, matching the conventions established by
@@ -20,55 +19,40 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "sts/registry/ids.hpp"  // generated: the id enums (build tree)
+
 namespace sts::engine {
 
-// --- Id enums ---------------------------------------------------------------
+// --- Id enums (generated, re-exported) ---------------------------------------
 //
-// Convention (frozen for this file): every id enum reserves 0 as `NONE`, a
-// sentinel meaning "no id" / "empty slot" -- e.g. an unused card-instance-pool
-// row, a monster's absent relic-immune slot, or (for CardId) a null cardQueue
-// entry distinct from the end-turn sentinel (design doc §5.1, which is a
-// separate flag/opcode, not a CardId value). Real ids start at 1 so that a
-// value-initialized (zeroed) struct is trivially "empty" without needing an
-// extra `bool` flag -- consistent with design doc §4.1's value-initialization/
-// hash-stability principle.
+// Convention (frozen, enforced by the generator): every id enum reserves 0 as
+// `NONE`, a sentinel meaning "no id" / "empty slot" -- e.g. an unused
+// card-instance-pool row or a null cardQueue entry distinct from the end-turn
+// sentinel (design doc §5.1, which is a separate flag/opcode, not a CardId
+// value). Real ids start at 1 so that a value-initialized (zeroed) struct is
+// trivially "empty" without needing an extra `bool` flag -- consistent with
+// design doc §4.1's value-initialization/hash-stability principle.
+//
+// PotionId/EventId are also generated but not aliased here: nothing in the
+// engine consumes them yet (they are translator-facing until the run layer
+// lands); reach them as sts::registry::PotionId/EventId.
 
-// Skeleton card set (design doc §9). Backed by u16 per design doc §4.2's
-// card-instance-pool row (`card_id: u16`).
-enum class CardId : uint16_t {
-    NONE = 0,
-    STRIKE,
-    DEFEND,
-    BASH,
-    SHRUG_IT_OFF,
-    POMMEL_STRIKE,
-};
+// Card set (registry/cards.yaml). u16 per design doc §4.2's card-instance-pool
+// row (`card_id: u16`).
+using CardId = sts::registry::CardId;
 
-// Powers exercised by the skeleton (design doc §9: Strength, Vulnerable,
-// Weak). Backed by u16 per design doc §4.2's power-slot row.
-enum class PowerId : uint16_t {
-    NONE = 0,
-    STRENGTH,
-    VULNERABLE,
-    WEAK,
-};
+// Power set (registry/powers.yaml). u16 per design doc §4.2's power-slot row.
+using PowerId = sts::registry::PowerId;
 
-// The skeleton's one enemy (design doc §9: Jaw Worm). `NONE` doubles as "no
-// monster" for an empty monster slot; the player is never represented as a
-// MonsterId (player state lives in CombatState's dedicated player fields per
-// design doc §4.2, not the monster array).
-enum class MonsterId : uint16_t {
-    NONE = 0,
-    JAW_WORM,
-};
+// Monster set (registry/monsters.yaml). `NONE` doubles as "no monster" for an
+// empty monster slot; the player is never represented as a MonsterId (player
+// state lives in CombatState's dedicated player fields per design doc §4.2,
+// not the monster array).
+using MonsterId = sts::registry::MonsterId;
 
-// The skeleton has zero relics (design doc §9). This enum exists only so
-// RelicId is a real type other headers (e.g. a future RunState's relic list,
-// design doc §4.3) can name now; it is deliberately unpopulated beyond the
-// sentinel pending Stage B's registry-driven relic table.
-enum class RelicId : uint16_t {
-    NONE = 0,
-};
+// Relic set (registry/relics.yaml) -- currently `NONE`-only (the skeleton has
+// zero relics, design doc §9); rows land with Stage B's relic content tasks.
+using RelicId = sts::registry::RelicId;
 
 // --- ActionVerb --------------------------------------------------------------
 

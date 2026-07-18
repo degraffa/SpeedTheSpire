@@ -8,7 +8,10 @@ decompiled Java class/method it was derived from.
 `tools/registry_gen/gen.py` (Python 3 + PyYAML) code-generates `constexpr`
 headers from these files at build time, under the build tree
 (`<build>/generated/sts/registry/*.hpp`) — **generated code is never committed**,
-and the YAML is never parsed at runtime.
+and the YAML is never parsed at runtime. The engine consumes the generated
+headers directly: `types.hpp`/`cards.hpp`/`monster_jaw_worm.hpp` re-export the
+enums and tables into `sts::engine` (the B2.2 skeleton migration — no hand
+tables remain).
 
 ## Domains
 
@@ -16,7 +19,7 @@ and the YAML is never parsed at runtime.
 |---|---|---|
 | `cards.yaml` | `CardId` enum + `CardDef` effect-program table + game_id table | 5 skeleton cards |
 | `powers.yaml` | `PowerId` enum + game_id table | 3 skeleton powers |
-| `monsters.yaml` | `MonsterId` enum + game_id table | Jaw Worm (stats/moves seeded) |
+| `monsters.yaml` | `MonsterId` enum + `MonsterDef` stat/move table + game_id table | Jaw Worm (per-ascension-tier HP/amount columns; `ai: native`) |
 | `relics.yaml` | `RelicId` enum + game_id table | empty (skeleton has none) |
 | `potions.yaml` | `PotionId` enum + game_id table | empty |
 | `events.yaml` | `EventId` enum + game_id table | empty |

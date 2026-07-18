@@ -1,4 +1,6 @@
-// Jaw Worm AI + monster turn. See monster_jaw_worm.hpp for the full provenance,
+// Jaw Worm AI + monster turn. Move selection (getMove) is native code below;
+// stats and move-effect programs come from the generated monster table
+// (registry/monsters.yaml). See monster_jaw_worm.hpp for the full provenance,
 // scope boundary, and draw-counting convention.
 //
 // Provenance: JawWorm.getMove (JawWorm.java:148-184), JawWorm.takeTurn
@@ -8,7 +10,6 @@
 #include "sts/engine/monster_jaw_worm.hpp"
 
 #include "sts/engine/action_queue.hpp"  // add_to_bottom, ActionQueueItem, kActorPlayer
-#include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
 
@@ -91,50 +92,35 @@ void get_move(CombatState& state, MonsterState& m, int32_t num) noexcept {
     }
 }
 
-// Enqueue the CURRENT move's real effects, in JawWorm.takeTurn's addToBottom
-// order (JawWorm.java:120-146). The move to execute is m.move_history[0]
-// (decided at its roll time). Effects are
-// QUEUED (add_to_bottom), never applied inline, so they resolve through the pump
+// Enqueue the CURRENT move's effect program from the generated monster table,
+// in JawWorm.takeTurn's addToBottom order (JawWorm.java:120-146) -- the table
+// rows carry the steps in exactly that order, and the amounts are the
+// per-ascension columns resolved at the skeleton's fixed A20 (chompDmg 12,
+// bellowStr 5 / bellowBlock 9, thrashDmg 7 / thrashBlock 5; per-column
+// citations in registry/monsters.yaml). The move to execute is
+// m.move_history[0] (decided at its roll time). Effects are QUEUED
+// (add_to_bottom), never applied inline, so they resolve through the pump
 // priority loop exactly like a card's effects -- the monster's Strength is read
-// by the DAMAGE pipeline (compute_damage) at resolution, so Chomp/Thrash pick up
-// any Strength from a prior Bellow automatically.
-//   * Chomp  (1): DamageAction(player, chompDmg=12)                (JawWorm.java:126)
-//   * Bellow (2): ApplyPower(Strength +5 self) then GainBlock(9 self) (:135-136)
-//   * Thrash (3): DamageAction(player, thrashDmg=7) then GainBlock(5 self) (:141-142)
+// by the DAMAGE pipeline (compute_damage) at resolution, so Chomp/Thrash pick
+// up any Strength from a prior Bellow automatically.
 void queue_move_effects(CombatState& state, uint8_t mi, uint8_t move) noexcept {
-    const auto damage_player = [&](int amount) {
+    const sts::registry::MonsterMove* mv = sts::registry::kJawWorm.move(move);
+    if (mv == nullptr) {
+        return;  // unknown/empty move id: nothing decided yet (defensive)
+    }
+    for (uint8_t i = 0; i < mv->effect_count; ++i) {
+        const sts::registry::MonsterMoveEffect& e = mv->effects[i];
         ActionQueueItem it{};
-        it.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        // sts::registry::Opcode is pinned byte-equal to interp.hpp's Opcode
+        // (static_asserts in cards.hpp), so the raw cast dispatches correctly.
+        it.opcode = static_cast<uint16_t>(e.op);
         it.src = mi;
-        it.tgt = kActorPlayer;
-        it.amount = amount;
+        it.tgt = (e.target == sts::registry::MonsterMoveTarget::SELF)
+                     ? mi
+                     : kActorPlayer;
+        it.amount = e.amount.at(kSkeletonAscension);
+        it.flags = e.extra;  // APPLY_POWER: PowerId (make_apply_power_flags packing)
         add_to_bottom(state, it);
-    };
-    const auto gain_block = [&](int amount) {
-        ActionQueueItem it{};
-        it.opcode = static_cast<uint16_t>(Opcode::BLOCK);
-        it.src = mi;
-        it.tgt = mi;
-        it.amount = amount;
-        add_to_bottom(state, it);
-    };
-    const auto gain_strength = [&](int amount) {
-        ActionQueueItem it{};
-        it.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-        it.src = mi;
-        it.tgt = mi;
-        it.amount = amount;
-        it.flags = make_apply_power_flags(PowerId::STRENGTH);
-        add_to_bottom(state, it);
-    };
-    if (move == kMoveChomp) {
-        damage_player(kJawWormChompDmg);          // 12
-    } else if (move == kMoveBellow) {
-        gain_strength(kJawWormBellowStr);         // +5 Strength (self)
-        gain_block(kJawWormBellowBlock);          // +9 block (self)
-    } else if (move == kMoveThrash) {
-        damage_player(kJawWormThrashDmg);         // 7 (+ Strength via the pipeline)
-        gain_block(kJawWormThrashBlock);          // +5 block (self)
     }
 }
 
@@ -145,7 +131,8 @@ void jaw_worm_init(CombatState& state, uint8_t monster_index) noexcept {
     m.monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
 
     // setHp(42, 46): one inclusive monsterHpRng draw; currentHealth == maxHealth
-    // (AbstractMonster.java:765-775; JawWorm.java:81-82 for the A7+ range).
+    // (AbstractMonster.java:765-775). The range is the table's a7 column
+    // (JawWorm.java:81-82) resolved at the skeleton's fixed A20.
     const int32_t rolled =
         random(state.monster_hp_rng, kJawWormHpMin, kJawWormHpMax);
     m.hp = static_cast<int16_t>(rolled);

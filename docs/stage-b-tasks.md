@@ -322,7 +322,7 @@ B2.2's swap is zero-change. Provenance: `Strike_Red`/`Defend_Red`/`Bash`/
 `ShrugItOff`/`PommelStrike`.use + ID; `StrengthPower`/`VulnerablePower`/
 `WeakPower` POWER_ID; `JawWorm` stat/getMove branches (all read in full).
 
-### B2.2 `[ ]` Skeleton migration onto the registry
+### B2.2 `[x]` Skeleton migration onto the registry
 **Deps:** B2.1 · **Spec:** design §3.2, §4.4 (the stop-the-line decision) ·
 **Provenance:** types.hpp / cards.hpp / monster_jaw_worm.hpp as of
 `m1-walking-skeleton`
@@ -338,7 +338,34 @@ migrated id in the generated headers.
 pass in debug + asan with zero test-file edits and zero fixture
 regeneration** (design §4.4 acceptance, verbatim). `sizeof(CombatState)`
 unchanged; `SCHEMA_VERSION` unchanged.
-**Log:** —
+**Log:** Verified by running, not inferred: full clean rebuild in WSL
+Ubuntu-2404 (`rm -rf build && cmake --preset {debug,asan} && build && ctest`) —
+**140/140 green in both presets**: Stage A's 131 baseline tests (incl. all 20
+combat fixtures, `FixtureOracle.AllFixturesReplayWithZeroDiffs` /
+`FixtureCountIsAtLeastTwenty`) + B2.1's 6 registry_gen cases + 3 new
+`RegistryGen.{EngineReExportsGeneratedTables, MonsterTableMatchesJava,
+DuplicateMoveIdFailsWithClearError}` — with **zero test-file edits and zero
+fixture regeneration** (no Stage A test or `tests/golden/` byte changed; only
+the B2.1 registry-gen test TUs grew the new monster-table cases).
+`sizeof(CombatState)` = 3504 and `SCHEMA_VERSION` = 1, compile-probed identical
+before/after the swap. Migration shape: `types.hpp`'s
+CardId/PowerId/MonsterId/RelicId are now using-aliases of the generated
+`sts::registry` enums (ids re-pinned by generated `static_assert`s;
+Action/ActionVerb stay hand-written); `cards.hpp` re-exports the generated
+`CardDef` table (kStrike…kPommelStrike, `card_def`) with drift pins holding
+`sts::registry::Opcode` byte-equal to interp.hpp's; Jaw Worm's HP range and
+move-effect amounts are per-ascension-tier columns in `monsters.yaml`
+(base/a2/a7/a17, each citing its JawWorm.java:79-104 branch; move ids
+CHOMP=1/BELLOW=2/THRASH=3 per :65-67), emitted by gen.py's new
+`monster_table.hpp` (`MonsterDef` with constexpr last-matching-threshold tier
+lookups) and enqueued data-driven by `jaw_worm_take_turn` at the skeleton's
+fixed A20 — getMove *selection* stays native per design §4.2. No dual system:
+the hand enums/tables are deleted;
+`RegistryGen.EngineReExportsGeneratedTables` pins engine == registry
+entity-for-entity. Build: `tools/registry_gen` now precedes `src/engine`
+(unconditional); `sts_engine` links `registry_generated` PUBLIC with an
+explicit codegen dependency, so generated headers exist before any engine TU
+compiles.
 
 ### G5 `[ ]` **Gate: registry live** — tag `g5-registry-live`
 **Deps:** B2.2

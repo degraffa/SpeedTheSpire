@@ -32,6 +32,14 @@ FetchContent_MakeAvailable(xxhash)
 add_library(xxhash INTERFACE)
 target_include_directories(xxhash INTERFACE ${xxhash_SOURCE_DIR})
 
+# Registry codegen (B2.1/B2.2). Runs gen.py at build time to emit the constexpr
+# registry headers under <build>/generated (never committed). The engine's id
+# enums and card/monster tables ARE these generated headers (the skeleton
+# migration, Stage B design §4.4), so this must precede src/engine and is
+# unconditional: every build of sts_engine needs the generator (Python 3 +
+# PyYAML).
+add_subdirectory(tools/registry_gen)
+
 add_subdirectory(src/engine)
 
 # A6.1: diff harness (trace format + differ + reproducer + fixture oracle). A
@@ -43,10 +51,6 @@ if(STS_BUILD_TESTS)
     # the tests since it links diff_harness (write_trace) + sts_engine and is run
     # manually to regenerate tests/golden/combat_fixtures/*.trace.
     add_subdirectory(tools/fixture_gen)
-    # B2.1: registry codegen. Runs gen.py at build time to emit constexpr headers
-    # under <build>/generated (never committed); consumed only by registry_gen_test
-    # (the engine is not migrated onto them here -- that is a later, breaking task).
-    add_subdirectory(tools/registry_gen)
 endif()
 
 if(STS_BUILD_TESTS)

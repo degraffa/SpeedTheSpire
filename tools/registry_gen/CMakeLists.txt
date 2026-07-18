@@ -1,8 +1,10 @@
 # registry codegen (design doc B §4.3). Runs tools/registry_gen/gen.py at build
 # time to turn registry/*.yaml into constexpr headers under the build tree
-# (<build>/generated/sts/registry/*.hpp) -- NEVER committed. Only the
-# registry_gen_test consumes them today; the engine is NOT wired onto them here
-# (that is the skeleton-migration task) so this stays non-breaking.
+# (<build>/generated/sts/registry/*.hpp) -- NEVER committed. The engine consumes
+# them directly (types.hpp/cards.hpp/monster_jaw_worm.hpp re-export the
+# generated enums/tables into sts::engine -- the B2.2 skeleton migration), so
+# this directory is added before src/engine and sts_engine links
+# registry_generated.
 
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
@@ -30,6 +32,7 @@ set(REGISTRY_YAML
 set(GEN_HEADERS
     "${GEN_OUT_ROOT}/sts/registry/ids.hpp"
     "${GEN_OUT_ROOT}/sts/registry/card_table.hpp"
+    "${GEN_OUT_ROOT}/sts/registry/monster_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/game_ids.hpp"
     "${GEN_OUT_ROOT}/sts/registry/manifest.hpp")
 

@@ -7,24 +7,27 @@ single source of truth; nothing here is hand-maintained C++, and the generated
 headers are never committed.
 
 Emitted headers (namespace ``sts::registry``):
-  * ``ids.hpp``        -- CardId/PowerId/MonsterId/RelicId/PotionId/EventId enums,
-                          each re-pinning every id with a ``static_assert``.
-  * ``card_table.hpp`` -- the ``CardDef``/``CardEffectStep`` effect-program table
-                          in the exact shape of ``include/sts/engine/cards.hpp``.
-  * ``game_ids.hpp``   -- game_id<->enum string tables for the translator.
-  * ``manifest.hpp``   -- per-domain row counts.
+  * ``ids.hpp``           -- CardId/PowerId/MonsterId/RelicId/PotionId/EventId
+                             enums, each re-pinning every id with a
+                             ``static_assert``.
+  * ``card_table.hpp``    -- the ``CardDef``/``CardEffectStep`` effect-program
+                             table (the shape stage-a §6 froze).
+  * ``monster_table.hpp`` -- the ``MonsterDef`` stat/move tables: per-ascension-
+                             tier HP and amount columns (design doc §4.2) plus
+                             each move's intent and effect program.
+  * ``game_ids.hpp``      -- game_id<->enum string tables for the translator.
+  * ``manifest.hpp``      -- per-domain row counts.
 
 Determinism (design doc §4.3): entries are emitted sorted by id, domains in a
 fixed order, no timestamps -- the same YAML yields byte-identical output on every
 run. Any duplicate/reused id, or a missing mandatory field, fails generation with
 a clear ``error:`` message on stderr and a non-zero exit.
 
-The generated types deliberately mirror the hand-written engine shapes
-(``types.hpp`` enums, ``cards.hpp`` CardDef) so the skeleton migration can later
-swap the engine onto them with zero downstream change; the ``registry_gen_test``
-asserts the two are byte-for-byte equivalent. They live in ``sts::registry`` here
-(not ``sts::engine``) so B2.1 stays non-breaking: nothing includes both and
-collides.
+The generated tables ARE the engine's tables: ``types.hpp``/``cards.hpp``/
+``monster_jaw_worm.hpp`` re-export them into ``sts::engine`` via using-aliases
+(the skeleton migration, design doc §4.4 -- no hand copies remain). They live in
+``sts::registry`` so the headers compile standalone (registry_gen_standalone.cpp)
+and tools that never link the engine (the translator) can consume them directly.
 """
 
 from __future__ import annotations
@@ -63,6 +66,27 @@ CARD_TARGETING = {
     "RANDOM_ENEMY": (False, True),
     "SELF_AND_ENEMY": (True, False),
 }
+
+# Monster-move telegraphed intents (generated MonsterIntent). Values are pinned
+# here and append-only, exactly like the id enums (design doc §4.4): fixtures
+# store MonsterState.intent as a raw byte. NONE=0 is the value-init default.
+MONSTER_INTENTS = {
+    "NONE": 0,
+    "ATTACK": 1,
+    "DEFEND_BUFF": 2,
+    "ATTACK_DEFEND": 3,
+}
+# Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
+# monster itself; PLAYER = the player (the game's AbstractDungeon.player).
+MONSTER_MOVE_TARGETS = {"SELF": 0, "PLAYER": 1}
+
+_TIER_RE = re.compile(r"^(base|a[1-9][0-9]?)$")
+
+
+def _tier_threshold(key: str) -> int:
+    """'base' -> ascension 0; 'aN' -> ascension N."""
+    return 0 if key == "base" else int(key[1:])
+
 
 # Domains in fixed emission order. `enum` is the generated enum symbol (None ->
 # no enum, manifest count only); `underlying` its storage type (types.hpp uses
@@ -332,6 +356,317 @@ def _pascal(upper_snake: str) -> str:
     return "".join(part.capitalize() for part in upper_snake.split("_"))
 
 
+# --- Monster table -----------------------------------------------------------
+
+def _parse_tiers(owner: str, what: str, raw) -> list[tuple[int, dict]]:
+    """Parse a per-ascension-tier column mapping ({base: ..., aN: ...}) into a
+    list of (min_ascension, column) sorted ascending. 'base' (ascension 0) is
+    mandatory so every lookup has a floor value."""
+    if not isinstance(raw, dict) or not raw:
+        raise fail(f"{owner}: {what} must be a non-empty mapping of tier "
+                   f"columns (base/aN), got {raw!r}")
+    tiers: list[tuple[int, dict]] = []
+    for key, col in raw.items():
+        if not isinstance(key, str) or not _TIER_RE.match(key):
+            raise fail(f"{owner}: {what} has invalid tier key {key!r} "
+                       f"(expected 'base' or 'a<N>')")
+        tiers.append((_tier_threshold(key), col))
+    tiers.sort(key=lambda t: t[0])
+    thresholds = [t[0] for t in tiers]
+    if len(set(thresholds)) != len(thresholds):
+        raise fail(f"{owner}: {what} has duplicate tier thresholds")
+    if thresholds[0] != 0:
+        raise fail(f"{owner}: {what} must include the 'base' (ascension 0) tier")
+    return tiers
+
+
+def _parse_amount_tiers(owner: str, raw) -> list[tuple[int, int]]:
+    """An effect amount: either a flat int (all ascensions) or tier columns."""
+    if isinstance(raw, int) and not isinstance(raw, bool):
+        return [(0, raw)]
+    tiers = _parse_tiers(owner, "amount", raw)
+    out = []
+    for threshold, value in tiers:
+        if not isinstance(value, int) or isinstance(value, bool):
+            raise fail(f"{owner}: amount tier value must be an integer, "
+                       f"got {value!r}")
+        out.append((threshold, value))
+    return out
+
+
+def _parse_monster(entry: dict, powers: dict[str, int]) -> dict:
+    name = entry["name"]
+    owner = f"monsters.yaml: monster {name}"
+
+    hp_tiers = []
+    for threshold, col in _parse_tiers(owner, "hp", entry.get("hp")):
+        if (not isinstance(col, dict) or
+                not isinstance(col.get("min"), int) or
+                not isinstance(col.get("max"), int)):
+            raise fail(f"{owner}: hp tier must be {{min: <int>, max: <int>}}, "
+                       f"got {col!r}")
+        hp_tiers.append((threshold, col["min"], col["max"]))
+
+    raw_moves = entry.get("moves")
+    if not isinstance(raw_moves, list) or not raw_moves:
+        raise fail(f"{owner}: 'moves' must be a non-empty list")
+    moves = []
+    seen_move_ids: dict[int, str] = {}
+    seen_move_names: set[str] = set()
+    for mv in raw_moves:
+        mname = mv.get("name")
+        if not isinstance(mname, str) or not _IDENT_RE.match(mname):
+            raise fail(f"{owner}: move 'name' must be an UPPER_SNAKE symbol, "
+                       f"got {mname!r}")
+        if mname in seen_move_names:
+            raise fail(f"{owner}: duplicate move name '{mname}'")
+        seen_move_names.add(mname)
+        mid = mv.get("move_id")
+        if not isinstance(mid, int) or isinstance(mid, bool) or mid < 1:
+            raise fail(f"{owner}: move {mname} 'move_id' must be an integer "
+                       f">= 1 (0 is the move_history empty-slot sentinel), "
+                       f"got {mid!r}")
+        if mid in seen_move_ids:
+            raise fail(f"{owner}: duplicate move_id {mid} ('{mname}' collides "
+                       f"with '{seen_move_ids[mid]}') -- move ids are the "
+                       f"game's byte ids and must be unique per monster")
+        seen_move_ids[mid] = mname
+        intent = mv.get("intent")
+        if intent not in MONSTER_INTENTS:
+            raise fail(f"{owner}: move {mname} has unknown intent {intent!r} "
+                       f"(known: {sorted(MONSTER_INTENTS)})")
+
+        raw_effects = mv.get("effects")
+        if not isinstance(raw_effects, list) or not raw_effects:
+            raise fail(f"{owner}: move {mname} 'effects' must be a non-empty list")
+        effects = []
+        for step in raw_effects:
+            op = step.get("op")
+            if op not in OPCODES:
+                raise fail(f"{owner}: move {mname} uses unknown op {op!r}")
+            tgt = step.get("target")
+            if tgt not in MONSTER_MOVE_TARGETS:
+                raise fail(f"{owner}: move {mname} step has unknown target "
+                           f"{tgt!r} (known: {sorted(MONSTER_MOVE_TARGETS)})")
+            amount = _parse_amount_tiers(f"{owner}: move {mname}",
+                                         step.get("amount"))
+            extra = 0
+            if op == "APPLY_POWER":
+                pname = step.get("power")
+                if pname not in powers:
+                    raise fail(f"{owner}: move {mname} APPLY_POWER references "
+                               f"unknown power {pname!r}")
+                extra = powers[pname]
+            effects.append({"op": op, "target": tgt, "extra": extra,
+                            "amount": amount})
+        moves.append({"name": mname, "move_id": mid, "intent": intent,
+                      "effects": effects})
+
+    ai = entry.get("ai")
+    if ai != "native":
+        raise fail(f"{owner}: 'ai' must be 'native' (ai tables are a later "
+                   f"task), got {ai!r}")
+
+    return {"name": name, "hp": hp_tiers, "moves": moves, "ai_native": True}
+
+
+def emit_monster_table(domains: dict[str, list[dict]]) -> str:
+    monsters = [_parse_monster(e, _power_id_map(domains))
+                for e in domains["monsters"]]
+
+    # Array budgets, computed from the data (floor 1 so the header stays valid
+    # while a domain is empty).
+    max_stat_tiers = 1
+    max_hp_tiers = 1
+    max_moves = 1
+    max_effects = 1
+    for m in monsters:
+        max_hp_tiers = max(max_hp_tiers, len(m["hp"]))
+        max_moves = max(max_moves, len(m["moves"]))
+        for mv in m["moves"]:
+            max_effects = max(max_effects, len(mv["effects"]))
+            for e in mv["effects"]:
+                max_stat_tiers = max(max_stat_tiers, len(e["amount"]))
+
+    out: list[str] = [BANNER, "#pragma once\n",
+                      "#include <array>", "#include <cstdint>\n",
+                      '#include "sts/registry/card_table.hpp"',
+                      '#include "sts/registry/ids.hpp"\n',
+                      "// Monster stat/move tables (design doc §4.2): HP ranges "
+                      "and move-effect",
+                      "// amounts as per-ascension-tier columns, resolved by "
+                      "last-matching-threshold",
+                      "// lookup (tiers ascend; the highest tier <= the queried "
+                      "ascension wins --",
+                      "// mirroring the Java's descending ascensionLevel "
+                      "if/else-if branches). Move",
+                      "// *selection* for ai_native monsters stays in engine "
+                      "code; the effects here",
+                      "// are the data it enqueues.\n",
+                      "namespace sts::registry {\n"]
+
+    out.append("// Telegraphed intent (AbstractMonster.Intent, player-facing "
+               "telegraphing).")
+    out.append("// Values are pinned and append-only (fixtures store the raw "
+               "byte).")
+    out.append("enum class MonsterIntent : uint8_t {")
+    for iname, val in sorted(MONSTER_INTENTS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {iname} = {val},")
+    out.append("};")
+    for iname, val in sorted(MONSTER_INTENTS.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>(MonsterIntent::{iname}) "
+                   f"== {val}, \"MonsterIntent::{iname} is pinned to {val} "
+                   f"(append-only, never renumber)\");")
+    out.append("")
+    out.append("// Where a move-effect step lands: the acting monster itself, "
+               "or the player.")
+    out.append("enum class MonsterMoveTarget : uint8_t {")
+    for tname, val in sorted(MONSTER_MOVE_TARGETS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {tname} = {val},")
+    out.append("};\n")
+
+    out.append("// One per-ascension-tier column: value applies from "
+               "min_ascension upward")
+    out.append("// until a higher tier's threshold matches.")
+    out.append("struct AscensionTier {")
+    out.append("    int32_t min_ascension;")
+    out.append("    int32_t value;")
+    out.append("};\n")
+    out.append(f"inline constexpr int kMaxStatTiers = {max_stat_tiers};\n")
+    out.append("struct TieredStat {")
+    out.append("    uint8_t tier_count;")
+    out.append("    std::array<AscensionTier, kMaxStatTiers> tiers;  "
+               "// ascending; [0] is base (0)")
+    out.append("    [[nodiscard]] constexpr int32_t at(int32_t ascension) "
+               "const noexcept {")
+    out.append("        int32_t value = tiers[0].value;")
+    out.append("        for (uint8_t i = 1; i < tier_count; ++i) {")
+    out.append("            if (ascension >= tiers[i].min_ascension) {")
+    out.append("                value = tiers[i].value;")
+    out.append("            }")
+    out.append("        }")
+    out.append("        return value;")
+    out.append("    }")
+    out.append("};\n")
+    out.append("struct MonsterHpTier {")
+    out.append("    int32_t min_ascension;")
+    out.append("    int32_t hp_min;")
+    out.append("    int32_t hp_max;")
+    out.append("};\n")
+    out.append(f"inline constexpr int kMaxHpTiers = {max_hp_tiers};")
+    out.append(f"inline constexpr int kMaxMoveEffects = {max_effects};")
+    out.append(f"inline constexpr int kMaxMonsterMoves = {max_moves};\n")
+    out.append("struct MonsterMoveEffect {")
+    out.append("    Opcode op;")
+    out.append("    MonsterMoveTarget target;")
+    out.append("    uint32_t extra;      // APPLY_POWER: the PowerId "
+               "(make_apply_power_flags packing)")
+    out.append("    TieredStat amount;")
+    out.append("};\n")
+    out.append("struct MonsterMove {")
+    out.append("    uint8_t move_id;     // the game's byte move id; never 0")
+    out.append("    MonsterIntent intent;")
+    out.append("    uint8_t effect_count;")
+    out.append("    std::array<MonsterMoveEffect, kMaxMoveEffects> effects;  "
+               "// takeTurn addToBottom order")
+    out.append("};\n")
+    out.append("struct MonsterDef {")
+    out.append("    MonsterId id;")
+    out.append("    uint8_t hp_tier_count;")
+    out.append("    std::array<MonsterHpTier, kMaxHpTiers> hp;  "
+               "// ascending; [0] is base (0)")
+    out.append("    uint8_t move_count;")
+    out.append("    std::array<MonsterMove, kMaxMonsterMoves> moves;")
+    out.append("    bool ai_native;      // move selection lives in engine code")
+    out.append("    [[nodiscard]] constexpr int32_t hp_min(int32_t ascension) "
+               "const noexcept {")
+    out.append("        int32_t value = hp[0].hp_min;")
+    out.append("        for (uint8_t i = 1; i < hp_tier_count; ++i) {")
+    out.append("            if (ascension >= hp[i].min_ascension) {")
+    out.append("                value = hp[i].hp_min;")
+    out.append("            }")
+    out.append("        }")
+    out.append("        return value;")
+    out.append("    }")
+    out.append("    [[nodiscard]] constexpr int32_t hp_max(int32_t ascension) "
+               "const noexcept {")
+    out.append("        int32_t value = hp[0].hp_max;")
+    out.append("        for (uint8_t i = 1; i < hp_tier_count; ++i) {")
+    out.append("            if (ascension >= hp[i].min_ascension) {")
+    out.append("                value = hp[i].hp_max;")
+    out.append("            }")
+    out.append("        }")
+    out.append("        return value;")
+    out.append("    }")
+    out.append("    [[nodiscard]] constexpr const MonsterMove* "
+               "move(uint8_t move_id) const noexcept {")
+    out.append("        for (uint8_t i = 0; i < move_count; ++i) {")
+    out.append("            if (moves[i].move_id == move_id) {")
+    out.append("                return &moves[i];")
+    out.append("            }")
+    out.append("        }")
+    out.append("        return nullptr;")
+    out.append("    }")
+    out.append("};\n")
+
+    def tiered_literal(amount: list[tuple[int, int]]) -> str:
+        pairs = list(amount)
+        while len(pairs) < max_stat_tiers:
+            pairs.append((0, 0))
+        tiers_txt = ", ".join(f"{{{t}, {v}}}" for t, v in pairs)
+        return f"{{{len(amount)}, {{{{{tiers_txt}}}}}}}"
+
+    for m in monsters:
+        pname = _pascal(m["name"])
+        # Named per-move constants (the game's byte move ids), so engine code
+        # and tests reference moves symbolically.
+        for mv in m["moves"]:
+            out.append(f"inline constexpr uint8_t k{pname}Move"
+                       f"{_pascal(mv['name'])} = {mv['move_id']};")
+        out.append("")
+        out.append(f"inline constexpr MonsterDef k{pname}{{")
+        out.append(f"    MonsterId::{m['name']},")
+        hp_rows = list(m["hp"])
+        while len(hp_rows) < max_hp_tiers:
+            hp_rows.append((0, 0, 0))
+        hp_txt = ", ".join(f"{{{t}, {lo}, {hi}}}" for t, lo, hi in hp_rows)
+        out.append(f"    {len(m['hp'])}, {{{{{hp_txt}}}}},")
+        out.append(f"    {len(m['moves'])},")
+        out.append("    {{")
+        for mv in m["moves"]:
+            eff_rows = []
+            for e in mv["effects"]:
+                eff_rows.append(
+                    f"            {{Opcode::{e['op']}, "
+                    f"MonsterMoveTarget::{e['target']}, {e['extra']}, "
+                    f"{tiered_literal(e['amount'])}}},")
+            while len(eff_rows) < max_effects:
+                eff_rows.append(
+                    "            {Opcode::NOP, MonsterMoveTarget::SELF, 0, "
+                    + tiered_literal([(0, 0)]) + "},")
+            out.append(f"        {{k{pname}Move{_pascal(mv['name'])}, "
+                       f"MonsterIntent::{mv['intent']}, "
+                       f"{len(mv['effects'])},")
+            out.append("         {{")
+            out.extend(eff_rows)
+            out.append("         }}},")
+        out.append("    }},")
+        out.append(f"    {'true' if m['ai_native'] else 'false'}}};\n")
+
+    out.append("[[nodiscard]] inline const MonsterDef* "
+               "monster_def(MonsterId id) noexcept {")
+    out.append("    switch (id) {")
+    for m in monsters:
+        out.append(f"        case MonsterId::{m['name']}: "
+                   f"return &k{_pascal(m['name'])};")
+    out.append("        case MonsterId::NONE:")
+    out.append("        default: return nullptr;")
+    out.append("    }")
+    out.append("}\n")
+    out.append("}  // namespace sts::registry")
+    return "\n".join(out) + "\n"
+
+
 def _cpp_string(s: str) -> str:
     return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
@@ -406,6 +741,7 @@ def generate(registry_dir: Path, out_dir: Path) -> list[Path]:
     outputs = {
         "ids.hpp": emit_ids(domains),
         "card_table.hpp": emit_card_table(domains),
+        "monster_table.hpp": emit_monster_table(domains),
         "game_ids.hpp": emit_game_ids(domains),
         "manifest.hpp": emit_manifest(domains),
     }

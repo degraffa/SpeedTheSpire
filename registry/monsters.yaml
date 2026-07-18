@@ -5,50 +5,64 @@
 #     name: <SYMBOL>       generated enum symbol (MonsterId::<SYMBOL>)
 #     game_id: "<string>"  the game's monster ID string -- translator/oracle join key
 #     provenance: "<Class.method (File.java:line) -- read in full>"
-#     hp:                  per-ascension-tier HP range columns (min/max), each column
-#                          citing its branch (design doc B §4.2/§6)
-#       <tier>: {min: <int>, max: <int>}
+#     hp:                  per-ascension-tier HP range columns (design doc B §4.2/§6):
+#       base: {min: , max: }     ascension 0+ column (mandatory)
+#       a<N>: {min: , max: }     ascension >= N column(s), ascending
 #     moves:               move list; each move an intent + effect program in
 #                          takeTurn addToBottom order (effects as data, §4.2)
-#       - {name: <SYMBOL>, move_id: <int>, intent: <SYMBOL>,
-#          effects: [ {op: ..., target: ..., amount: ...}, ... ]}
-#     ai: native | {table: ...}   move-selection rule; JawWorm's getMove is the
-#                          universal getMove(aiRng.random(99)) shape (stage-a §6).
+#       - name: <SYMBOL>
+#         move_id: <int>         the game's byte move id -- unique per monster, never 0
+#                                (0 is the move_history empty-slot sentinel)
+#         intent: <SYMBOL>       telegraphed intent (generated MonsterIntent)
+#         effects:
+#           - {op: <OPCODE>, target: SELF|PLAYER, amount: <tier columns>[, power: <SYMBOL>]}
+#                                target SELF = the monster itself; PLAYER = the player.
+#                                amount is either a flat int (all ascensions) or
+#                                per-tier columns {base: , a<N>: , ...} like hp.
+#     ai: native | {table: ...}  move-selection rule; `native` keeps selection in
+#                          engine code (design doc B §4.2's honest budget: move
+#                          *effects* as data, *selection* native where the table
+#                          shape doesn't fit). ai tables are a later task.
 #
-# NOTE: B2.1 codegen emits the MonsterId enum + game_id string table + manifest
-# count from this file. The hp/moves/ai columns are seeded data consumed by a later
-# task (the skeleton migration onto the registry); they are carried here now, fully
-# provenance-cited, so this file is real input rather than a stub.
+# The generated monster_table.hpp resolves a tier column set at a concrete
+# ascension via last-matching-threshold lookup (base <= a2 <= a7 <= a17 ...),
+# mirroring the Java's descending if/else-if ascension branches exactly.
 #
 # Skeleton content (stage-a design §9). Id pinned JAW_WORM=1 and re-asserted in the
 # generated header (design doc B §4.4). Stat columns from JawWorm.java's ascension
-# branches; move effects from JawWorm.takeTurn's addToBottom order.
+# branches (all three read in full); move effects from JawWorm.takeTurn's
+# addToBottom order.
 
 - id: 1
   name: JAW_WORM
   game_id: "JawWorm"
   provenance: "JawWorm ctor setHp/stat branches (JawWorm.java:79-104), takeTurn (JawWorm.java:120-146), getMove (JawWorm.java:148-184); ID (JawWorm.java:38)"
   hp:
-    base: {min: 40, max: 44}   # JawWorm.java:83 (ascension < 7)
-    a7:   {min: 42, max: 46}   # JawWorm.java:81 (ascension >= 7)
+    base: {min: 40, max: 44}   # JawWorm.java:83-84 (ascension < 7)
+    a7:   {min: 42, max: 46}   # JawWorm.java:81-82 (ascension >= 7)
   moves:
     - name: CHOMP
       move_id: 1               # JawWorm.java:65
       intent: ATTACK
       effects:
-        - {op: DAMAGE, target: SELF_TARGET, amount: 12}   # chompDmg A2+ (JawWorm.java:90); base 11 (:98)
+        # chompDmg: base 11 (JawWorm.java:101), 12 from A2 (:95) and A17 (:89).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 11, a2: 12}}
     - name: BELLOW
       move_id: 2               # JawWorm.java:66
       intent: DEFEND_BUFF
       effects:
-        - {op: APPLY_POWER, target: SELF, amount: 5, power: STRENGTH}  # bellowStr A17 (JawWorm.java:87); base 3 (:99)
-        - {op: BLOCK, target: SELF, amount: 9}                          # bellowBlock A17 (JawWorm.java:88); base 6 (:100)
+        # bellowStr: base 3 (JawWorm.java:99), 4 from A2 (:93), 5 from A17 (:87).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a2: 4, a17: 5}, power: STRENGTH}
+        # bellowBlock: base 6 (JawWorm.java:100 and :94), 9 from A17 (:88).
+        - {op: BLOCK, target: SELF, amount: {base: 6, a17: 9}}
     - name: THRASH
       move_id: 3               # JawWorm.java:67
       intent: ATTACK_DEFEND
       effects:
-        - {op: DAMAGE, target: SELF_TARGET, amount: 7}    # thrashDmg (JawWorm.java:91)
-        - {op: BLOCK, target: SELF, amount: 5}            # thrashBlock (JawWorm.java:92)
+        # thrashDmg 7 / thrashBlock 5 in all three branches (JawWorm.java:90-91,
+        # :96-97, :102-103).
+        - {op: DAMAGE, target: PLAYER, amount: 7}
+        - {op: BLOCK, target: SELF, amount: 5}
   ai: native   # getMove decision tree (JawWorm.java:148-184): first move forced
                # Chomp, then d100 on aiRng with lastMove/lastTwoMoves history and
                # randomBoolean tiebreaks. Selection stays native (AbstractMonster

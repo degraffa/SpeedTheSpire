@@ -1,14 +1,18 @@
-// B2.1 acceptance suite for the registry codegen (tools/registry_gen/gen.py):
+// B2.1/B2.2 acceptance suite for the registry codegen (tools/registry_gen/gen.py):
 //
 //   1. Determinism   -- running the generator twice yields byte-identical output.
 //   2. DuplicateId   -- a YAML entry with a reused id fails generation with a
 //                        clear error and a non-zero exit.
-//   3. Equivalence   -- the generated tables match the hand-written engine tables
-//                        (types.hpp enums, cards.hpp CardDef) field-for-field, so
-//                        the later skeleton migration can swap the engine onto the
-//                        generated headers with zero downstream change.
+//   3. Equivalence   -- the tables the engine re-exports (types.hpp enums,
+//                        cards.hpp CardDef) are the generated ones, field-for-
+//                        field and (post-migration) entity-for-entity: sts::engine
+//                        aliases sts::registry, no hand copy exists.
 //   4. GameIds       -- the game_id<->enum string tables round-trip.
 //   5. Manifest      -- the row-count manifest matches the seeded content.
+//   6. MonsterTable  -- (B2.2) the generated Jaw Worm stat/move table matches the
+//                        hand-derived JawWorm.java ascension columns, including
+//                        tier-threshold resolution at the branch boundaries; a
+//                        duplicate move_id fails generation with a clear error.
 //
 // "Generated headers compile standalone" is proven by registry_gen_standalone.cpp
 // (this TU additionally includes the engine headers to run the equivalence checks).
@@ -22,6 +26,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -31,10 +36,14 @@
 #include "sts/registry/game_ids.hpp"
 #include "sts/registry/ids.hpp"
 #include "sts/registry/manifest.hpp"
+#include "sts/registry/monster_table.hpp"
 
-// Hand-written engine tables -- the equivalence oracle.
+// Engine headers -- post-migration these re-export the generated tables; the
+// equivalence tests double as the proof that the re-exports are the same
+// entities (no dual system).
 #include "sts/engine/cards.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/monster_jaw_worm.hpp"
 #include "sts/engine/types.hpp"
 
 namespace fs = std::filesystem;
@@ -68,9 +77,10 @@ std::string read_text(const fs::path& p) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-const std::array<const char*, 4> kGenFiles = {
+const std::array<const char*, 5> kGenFiles = {
     "sts/registry/ids.hpp", "sts/registry/card_table.hpp",
-    "sts/registry/game_ids.hpp", "sts/registry/manifest.hpp"};
+    "sts/registry/monster_table.hpp", "sts/registry/game_ids.hpp",
+    "sts/registry/manifest.hpp"};
 
 }  // namespace
 
@@ -237,4 +247,156 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEncountersCount, 0u);
     EXPECT_EQ(m::kA20Count, 0u);
     EXPECT_EQ(m::kTotalCount, 9u);
+}
+
+// --- 6. B2.2 skeleton migration: no dual system ------------------------------
+// The engine's re-exports are the SAME entities as the generated ones -- the
+// hand tables are gone (G5's "no dual system"), not merely value-equal.
+TEST(RegistryGen, EngineReExportsGeneratedTables) {
+    static_assert(std::is_same_v<sts::engine::CardId, sts::registry::CardId>);
+    static_assert(std::is_same_v<sts::engine::PowerId, sts::registry::PowerId>);
+    static_assert(
+        std::is_same_v<sts::engine::MonsterId, sts::registry::MonsterId>);
+    static_assert(std::is_same_v<sts::engine::RelicId, sts::registry::RelicId>);
+    static_assert(std::is_same_v<sts::engine::CardDef, sts::registry::CardDef>);
+
+    EXPECT_EQ(&sts::engine::kStrike, &sts::registry::kStrike);
+    EXPECT_EQ(&sts::engine::kBash, &sts::registry::kBash);
+    EXPECT_EQ(sts::engine::card_def(sts::engine::CardId::POMMEL_STRIKE),
+              sts::registry::card_def(sts::registry::CardId::POMMEL_STRIKE));
+
+    // The engine's Jaw Worm HP constants resolve from the generated table's a7
+    // column at the skeleton's fixed A20.
+    EXPECT_EQ(sts::engine::kJawWormHpMin,
+              sts::registry::kJawWorm.hp_min(sts::engine::kSkeletonAscension));
+    EXPECT_EQ(sts::engine::kJawWormHpMax,
+              sts::registry::kJawWorm.hp_max(sts::engine::kSkeletonAscension));
+}
+
+// --- 6b. B2.2 monster table vs. hand-derived JawWorm.java columns ------------
+// Every expected number below is hand-carried from the cited ascension branch,
+// NOT read back from the generator: HP setHp(40,44) base / setHp(42,46) A7+
+// (JawWorm.java:81-84); A17 branch bellowStr 5 / bellowBlock 9 / chompDmg 12
+// (:86-91); A2 branch bellowStr 4 / bellowBlock 6 / chompDmg 12 (:92-97); base
+// branch bellowStr 3 / bellowBlock 6 / chompDmg 11 (:98-103); thrashDmg 7 /
+// thrashBlock 5 in all branches; move ids CHOMP=1/BELLOW=2/THRASH=3 (:65-67).
+TEST(RegistryGen, MonsterTableMatchesJava) {
+    namespace r = sts::registry;
+    const r::MonsterDef& jw = r::kJawWorm;
+
+    EXPECT_EQ(static_cast<int>(jw.id), 1);
+    EXPECT_EQ(r::monster_def(r::MonsterId::JAW_WORM), &jw);
+    EXPECT_EQ(r::monster_def(r::MonsterId::NONE), nullptr);
+    EXPECT_TRUE(jw.ai_native);
+
+    // HP tiers: base 40-44, A7+ 42-46, resolved across the boundary.
+    EXPECT_EQ(jw.hp_min(0), 40);
+    EXPECT_EQ(jw.hp_max(0), 44);
+    EXPECT_EQ(jw.hp_min(6), 40);
+    EXPECT_EQ(jw.hp_max(6), 44);
+    EXPECT_EQ(jw.hp_min(7), 42);
+    EXPECT_EQ(jw.hp_max(7), 46);
+    EXPECT_EQ(jw.hp_min(20), 42);
+    EXPECT_EQ(jw.hp_max(20), 46);
+
+    // Moves are looked up by the game's byte move id, never 0.
+    ASSERT_EQ(jw.move_count, 3);
+    EXPECT_EQ(jw.move(0), nullptr);
+    EXPECT_EQ(jw.move(4), nullptr);
+
+    // CHOMP (1): one DAMAGE step on the player; 11 base, 12 from A2.
+    const r::MonsterMove* chomp = jw.move(r::kJawWormMoveChomp);
+    ASSERT_NE(chomp, nullptr);
+    EXPECT_EQ(chomp->move_id, 1);
+    EXPECT_EQ(chomp->intent, r::MonsterIntent::ATTACK);
+    ASSERT_EQ(chomp->effect_count, 1);
+    EXPECT_EQ(chomp->effects[0].op, r::Opcode::DAMAGE);
+    EXPECT_EQ(chomp->effects[0].target, r::MonsterMoveTarget::PLAYER);
+    EXPECT_EQ(chomp->effects[0].amount.at(0), 11);
+    EXPECT_EQ(chomp->effects[0].amount.at(1), 11);
+    EXPECT_EQ(chomp->effects[0].amount.at(2), 12);
+    EXPECT_EQ(chomp->effects[0].amount.at(20), 12);
+
+    // BELLOW (2): APPLY_POWER Strength then BLOCK, both on self (takeTurn
+    // addToBottom order, JawWorm.java:135-136). Strength 3/4@A2/5@A17;
+    // block 6 base, 9 from A17.
+    const r::MonsterMove* bellow = jw.move(r::kJawWormMoveBellow);
+    ASSERT_NE(bellow, nullptr);
+    EXPECT_EQ(bellow->move_id, 2);
+    EXPECT_EQ(bellow->intent, r::MonsterIntent::DEFEND_BUFF);
+    ASSERT_EQ(bellow->effect_count, 2);
+    EXPECT_EQ(bellow->effects[0].op, r::Opcode::APPLY_POWER);
+    EXPECT_EQ(bellow->effects[0].target, r::MonsterMoveTarget::SELF);
+    EXPECT_EQ(bellow->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::STRENGTH));
+    EXPECT_EQ(bellow->effects[0].amount.at(1), 3);
+    EXPECT_EQ(bellow->effects[0].amount.at(2), 4);
+    EXPECT_EQ(bellow->effects[0].amount.at(16), 4);
+    EXPECT_EQ(bellow->effects[0].amount.at(17), 5);
+    EXPECT_EQ(bellow->effects[1].op, r::Opcode::BLOCK);
+    EXPECT_EQ(bellow->effects[1].target, r::MonsterMoveTarget::SELF);
+    EXPECT_EQ(bellow->effects[1].amount.at(16), 6);
+    EXPECT_EQ(bellow->effects[1].amount.at(17), 9);
+
+    // THRASH (3): DAMAGE 7 on the player then BLOCK 5 on self (JawWorm.java:
+    // 141-142), ascension-flat.
+    const r::MonsterMove* thrash = jw.move(r::kJawWormMoveThrash);
+    ASSERT_NE(thrash, nullptr);
+    EXPECT_EQ(thrash->move_id, 3);
+    EXPECT_EQ(thrash->intent, r::MonsterIntent::ATTACK_DEFEND);
+    ASSERT_EQ(thrash->effect_count, 2);
+    EXPECT_EQ(thrash->effects[0].op, r::Opcode::DAMAGE);
+    EXPECT_EQ(thrash->effects[0].target, r::MonsterMoveTarget::PLAYER);
+    EXPECT_EQ(thrash->effects[0].amount.at(0), 7);
+    EXPECT_EQ(thrash->effects[0].amount.at(20), 7);
+    EXPECT_EQ(thrash->effects[1].op, r::Opcode::BLOCK);
+    EXPECT_EQ(thrash->effects[1].target, r::MonsterMoveTarget::SELF);
+    EXPECT_EQ(thrash->effects[1].amount.at(0), 5);
+    EXPECT_EQ(thrash->effects[1].amount.at(20), 5);
+
+    // The generated intent values match the engine's fixture-pinned bytes.
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::ATTACK), 1);
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::DEFEND_BUFF), 2);
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::ATTACK_DEFEND), 3);
+}
+
+// --- 6c. Duplicate move_id is rejected with a clear error --------------------
+TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = scratch / "bad_registry_moves";
+    fs::remove_all(bad_reg);
+    fs::create_directories(bad_reg);
+
+    // Copy the real registry, then append a monster whose two moves share a
+    // move_id.
+    for (const auto& e : fs::directory_iterator(kRegistryDir)) {
+        if (e.path().extension() == ".yaml") {
+            fs::copy_file(e.path(), bad_reg / e.path().filename(),
+                          fs::copy_options::overwrite_existing);
+        }
+    }
+    {
+        std::ofstream monsters(bad_reg / "monsters.yaml", std::ios::app);
+        monsters << "\n- id: 2\n  name: BAD_MOVES\n  game_id: \"BadMoves\"\n"
+                    "  provenance: \"synthetic duplicate-move_id negative test\"\n"
+                    "  hp:\n    base: {min: 10, max: 12}\n"
+                    "  moves:\n"
+                    "    - name: FIRST\n      move_id: 1\n      intent: ATTACK\n"
+                    "      effects:\n"
+                    "        - {op: DAMAGE, target: PLAYER, amount: 3}\n"
+                    "    - name: SECOND\n      move_id: 1\n      intent: ATTACK\n"
+                    "      effects:\n"
+                    "        - {op: DAMAGE, target: PLAYER, amount: 4}\n"
+                    "  ai: native\n";
+    }
+
+    const fs::path out = scratch / "bad_moves_out";
+    const fs::path err = scratch / "bad_moves_err.txt";
+    const int status = run_generator(bad_reg.string(), out.string(), err.string());
+    EXPECT_NE(status, 0) << "generator should fail on a duplicate move_id";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("duplicate move_id"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("BAD_MOVES"), std::string::npos) << msg;
 }
