@@ -36,10 +36,40 @@ layer.
 
 ## Current state
 
-**Stage A / milestone M1 complete** (tag `m1-walking-skeleton`; gate `G3`
+**Stage B in progress** — registry track complete through gate **G5**
+(tag `g5-registry-live`), tracked in
+[docs/stage-b-tasks.md](docs/stage-b-tasks.md) against the frozen
+[docs/stage-b-design.md](docs/stage-b-design.md). Landed so far:
+
+- **B0.1** — CommunicationMod v1.2.1 vendored source-only (MIT) under
+  `tools/oracle_bridge/communicationmod-oracle/`, with
+  `tools/oracle_bridge/PROTOCOL.md` cataloguing every `GameStateConverter`
+  field. (Bridge groundwork; the rest of the bridge track — B0.2, B1.x, gate
+  **G4** — is not yet done and **needs the live game** running on the Windows
+  host, so it can't run headless/unattended.)
+- **B2.1 + B2.2 + G5** — the registry is live and is now the single source of
+  truth for content ids/tables. `registry/*.yaml` (8 domains, currently the
+  5 skeleton cards + 3 powers + Jaw Worm; other 5 domains valid-but-empty) is
+  compiled by `tools/registry_gen/gen.py` (Python 3 + PyYAML) into constexpr
+  headers under the build tree (`<build>/generated/sts/registry/*.hpp`, never
+  committed). `types.hpp`/`cards.hpp`/`monster_jaw_worm.*` now **re-export**
+  the generated enums/tables into `sts::engine` (no hand tables left — no dual
+  system); ids are append-only and `static_assert`-pinned. CI installs
+  `python3-yaml` and runs the generator.
+
+All **140** gtest cases green in `debug`, `asan`, and `release` (Stage A's 131
++ 9 registry-gen cases); `SCHEMA_VERSION`=1 and `sizeof(CombatState)`=3504
+unchanged across the migration. **Next:** the oracle bridge track (B0.2 →
+B1.1–B1.6 → **G4**), which requires the live Slay the Spire game (JDK-8 fork
+build + interactive seeded runs); Phases B3/B4 (S1 content) are gated on
+**both** G4 and G5.
+
+---
+
+**Stage A / milestone M1** (tag `m1-walking-skeleton`; gate `G3`
 passed in [docs/stage-a-tasks.md](docs/stage-a-tasks.md), tracked against
-the frozen [docs/stage-a-design.md](docs/stage-a-design.md)). The walking
-skeleton is a fully playable, bit-exact Ironclad-vs-Jaw-Worm combat:
+the frozen [docs/stage-a-design.md](docs/stage-a-design.md)) — the walking
+skeleton: a fully playable, bit-exact Ironclad-vs-Jaw-Worm combat:
 
 - RNG trio bit-exact and golden-tested (gate `G1`, tag `g1-rng-green`):
   `rng_xs128.hpp`, `rng_jdk.hpp`, `rng_stream.hpp`, `seed_string.hpp`.
@@ -69,9 +99,11 @@ InitialPlan §B.1 (oracle bridge first).
 
 ## Immediate next step
 
-Stage B planning: the CommunicationMod oracle bridge (InitialPlan §B.1) is
-the first deliverable — it's what every later differential test rides on.
-See InitialPlan.md Part 1 Stage B for the four verification tiers and
-`docs/stage-a-design.md` §11 for what was deliberately deferred out of the
-M1 skeleton (event/shop/relic mechanics, map generation, A20 modifier
-table, potion identity).
+The oracle bridge track (Stage B Phase B0/B1 → gate **G4**). B0.1 (source pin
++ protocol survey) is done; **B0.2** is next: stock-jar bridge bring-up +
+environment audit. This and the rest of the bridge track (B1.1–B1.6, the
+JDK-8 fork build, campaign driver, translator) **require the live Slay the
+Spire game** running under ModTheSpire on the Windows host — they are not
+headless/WSL-CI work. See `docs/stage-b-tasks.md` Phase B0/B1 and
+`docs/stage-b-design.md` §2. Phases B3/B4 (S1 combat + run content) stay
+gated on **both** G4 and G5; G5 is done, so G4 is the blocker.

@@ -367,14 +367,33 @@ entity-for-entity. Build: `tools/registry_gen` now precedes `src/engine`
 explicit codegen dependency, so generated headers exist before any engine TU
 compiles.
 
-### G5 `[ ]` **Gate: registry live** — tag `g5-registry-live`
+### G5 `[x]` **Gate: registry live** — tag `g5-registry-live`
 **Deps:** B2.2
 All Stage A tests green through the generated path in debug, asan, release;
 hand tables deleted (no dual system); manifest reports exactly the skeleton
 row counts; CI runs the generator (PyYAML available in the CI image — extend
 the workflow in this commit). Nothing in Phases B3/B4 starts before G4 **and**
 G5 are both `[x]`. Then: update CLAUDE.md "Current state".
-**Log:** —
+**Log:** Verified by running, not inferred (orchestrator re-ran every check on
+integrated master `5180930`). **All 140 tests green through the generated path
+in debug, asan, AND release** (each a clean `rm -rf build` config→build→ctest;
+release run via `ctest --test-dir build/release` since there is no release
+test-preset — build/test both exit 0). **Hand tables deleted / no dual system:**
+`types.hpp` has no `enum class CardId/PowerId/MonsterId/RelicId` bodies left
+(all `using`-aliased to `sts::registry`), `cards.hpp`/`monster_jaw_worm.hpp`
+re-export the generated tables; `RegistryGen.EngineReExportsGeneratedTables`
+pins engine == registry entity-for-entity. **Manifest = exactly the skeleton
+counts:** cards=5, powers=3, monsters=1, relics/potions/events/encounters/a20=0
+(total 9), read from `build/release/generated/sts/registry/manifest.hpp`.
+**CI runs the generator:** `.github/workflows/ci.yml` install step gains
+`python3-yaml` (PyYAML for the system `python3` that CMake's
+`find_package(Python3)` selects); the literal CI flow was reproduced locally
+(`cmake -S . -B build/ci -G Ninja -DCMAKE_BUILD_TYPE=Debug` → build → ctest)
+— configure/build/test all exit 0, 140/140, and all five generated headers
+(`ids/card_table/monster_table/game_ids/manifest.hpp`) are emitted under the
+build tree (never committed). `SCHEMA_VERSION`=1 and `sizeof(CombatState)`=3504
+unchanged. **Note:** B3/B4 remain blocked — they require **both** G4 and G5,
+and G4 (oracle bridge) is not yet reached.
 
 ---
 
