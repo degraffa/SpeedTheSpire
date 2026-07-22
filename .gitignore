@@ -12,6 +12,10 @@ generated/
 CMakeUserPresets.json
 compile_commands.json
 
+# Python bytecode (tools/registry_gen, tools/oracle_bridge/driver)
+__pycache__/
+*.pyc
+
 # Compiled objects / binaries
 *.o
 *.obj

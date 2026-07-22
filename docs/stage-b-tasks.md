@@ -153,7 +153,7 @@ items resolved + recorded in design §11: (1) message framing/direction;
 `grep -noE '\.put\("[^"]+"'`. `GameStateConverter.java` is the sole game-state
 JSON emitter.
 
-### B0.2 `[ ]` ∥ Stock-jar bridge bring-up + environment audit
+### B0.2 `[x]` ∥ Stock-jar bridge bring-up + environment audit
 **Deps:** none · **Spec:** design §2.3, §1.1 · **Provenance:** config at
 `%LOCALAPPDATA%\ModTheSpire\CommunicationMod\config.properties`
 **Deliverables:** `tools/oracle_bridge/driver/echo_driver.py` — minimal child
@@ -169,7 +169,35 @@ Log.
 parsing; the same seed string typed into the game's own seeded-run UI and via
 `start` produce the same floor-1 state JSON; baseline throughput number
 recorded in this file.
-**Log:** —
+**Log:** Verified by running, not inferred (stock unstripped game, Windows
+host — excluded from WSL CI). Delivered `tools/oracle_bridge/driver/
+echo_driver.py` (minimal CommunicationMod child: logs each state JSON to JSONL,
+forwards operator commands from a side-channel file since the child's stdio
+belongs to the game; `--verify` re-parse mode) + `driver/README.md` (config
+.properties wiring + scriptable ModTheSpire launch `--skip-launcher --mods
+basemod,CommunicationMod` from the workshop paths, design §1.2). One complete
+manual seeded run captured — `start ironclad 20 STS12345` → Neow → floors 1-3
+(single Cultist, multi-monster combats, combat/card rewards, map nav), 205
+game-states. **(1)** Capture replays cleanly through `echo_driver.py --verify`:
+418 records, 205 recv, 205 parsed OK, 0 errors. **(2)** Seed cross-check:
+`start …STS12345` and the game's own seeded-run **UI** with `STS12345` both
+yield seed long **1790052133945** and a **byte-identical** normalized floor-0
+Neow state (11 cards, 56 map nodes; deck/relics/map/hp/gold all equal;
+per-instance `uuid`s dropped per PROTOCOL.md). Both paths share
+`SeedHelper.getLong`; `STS12345 ↔ 1790052133945` round-trips exactly. **(3)**
+Baseline throughput (stock, unstripped): **~0.36 states/s** (stepper-paced,
+dominated by unsuppressed combat animations — the ≥5/s floor is the
+strip-patched fork target, B1.3). **Profile unlock audit — PASS:** fully
+unlocked at the pool gate. All 60 unlock-gated cards/relics in
+`UnlockTracker.refresh()` have `STSUnlocks` flag=2, so `lockedCards`/
+`lockedRelics` are empty (`addCard`/`addRelic` lock only keys `!= 2`) →
+complete pools; every Act-1 boss beaten (`STSAchievements`); A20 launches. The
+`IRONCLADUnlockLevel=3` meta-counter does **not** gate run pools —
+`isCardLocked` reads per-card flags, not the level (source `CardLibrary.
+addRedCards`, `UnlockTracker.addCard`/`refresh`); profile left untouched (no
+save edit). Config.properties and all JSONL captures live under the §7.3 data
+root `D:\STS_BG_Mod\_oracle_data`, uncommitted; the stepper that drove the
+capture is a throwaway data-root helper, not the committed driver.
 
 ---
 
