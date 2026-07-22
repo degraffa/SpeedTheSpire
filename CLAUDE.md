@@ -31,22 +31,32 @@ layer.
   ```
 - **Layout**: `include/`+`src/engine/` (the simulator library), `tests/`
   (GoogleTest), `benchmarks/` (Google Benchmark), `registry/` (rules-as-data
-  YAML/CSV, currently empty), `tools/oracle_bridge/` (CommunicationMod
-  differential-testing harness, not yet built).
+  YAML — 8 domains, the codegen source), `tools/registry_gen/` (the PyYAML
+  codegen), `tools/oracle_bridge/` (CommunicationMod bridge: vendored fork
+  source, `PROTOCOL.md`, and the `driver/` bring-up child).
 
 ## Current state
 
 **Stage B in progress** — registry track complete through gate **G5**
-(tag `g5-registry-live`), tracked in
+(tag `g5-registry-live`) and bridge groundwork (Phase B0) done, tracked in
 [docs/stage-b-tasks.md](docs/stage-b-tasks.md) against the frozen
 [docs/stage-b-design.md](docs/stage-b-design.md). Landed so far:
 
 - **B0.1** — CommunicationMod v1.2.1 vendored source-only (MIT) under
   `tools/oracle_bridge/communicationmod-oracle/`, with
   `tools/oracle_bridge/PROTOCOL.md` cataloguing every `GameStateConverter`
-  field. (Bridge groundwork; the rest of the bridge track — B0.2, B1.x, gate
-  **G4** — is not yet done and **needs the live game** running on the Windows
-  host, so it can't run headless/unattended.)
+  field.
+- **B0.2** — stock-jar bridge bring-up. `tools/oracle_bridge/driver/
+  echo_driver.py` is the minimal CommunicationMod child (logs each state JSON
+  to JSONL; forwards operator commands from a side-channel file — the child's
+  own stdio belongs to the game); `driver/README.md` documents the
+  `config.properties` wiring + scriptable ModTheSpire launch. Verified against
+  the **live game**: a seeded A20 Ironclad run (Neow → floors 1-3) captured and
+  `--verify`-clean; `start` and the game's own seeded-run UI produce a
+  byte-identical floor-0 state for the same seed (both share
+  `SeedHelper.getLong`); stock throughput ~0.36 states/s; profile confirmed
+  fully unlocked (complete card/relic pools). **The bridge runs only against
+  the live game on the Windows host** (JDK-8 / ModTheSpire) — never in WSL/CI.
 - **B2.1 + B2.2 + G5** — the registry is live and is now the single source of
   truth for content ids/tables. `registry/*.yaml` (8 domains, currently the
   5 skeleton cards + 3 powers + Jaw Worm; other 5 domains valid-but-empty) is
@@ -59,10 +69,10 @@ layer.
 
 All **140** gtest cases green in `debug`, `asan`, and `release` (Stage A's 131
 + 9 registry-gen cases); `SCHEMA_VERSION`=1 and `sizeof(CombatState)`=3504
-unchanged across the migration. **Next:** the oracle bridge track (B0.2 →
-B1.1–B1.6 → **G4**), which requires the live Slay the Spire game (JDK-8 fork
-build + interactive seeded runs); Phases B3/B4 (S1 content) are gated on
-**both** G4 and G5.
+unchanged across the migration. **Next:** the oracle fork track (**B1.1** →
+B1.2–B1.6 → gate **G4**), which requires the live Slay the Spire game (JDK-8
+fork build + interactive seeded runs); Phases B3/B4 (S1 content) are gated on
+**both** G4 and G5 (G5 done, G4 is the blocker).
 
 ---
 
@@ -99,11 +109,53 @@ InitialPlan §B.1 (oracle bridge first).
 
 ## Immediate next step
 
-The oracle bridge track (Stage B Phase B0/B1 → gate **G4**). B0.1 (source pin
-+ protocol survey) is done; **B0.2** is next: stock-jar bridge bring-up +
-environment audit. This and the rest of the bridge track (B1.1–B1.6, the
-JDK-8 fork build, campaign driver, translator) **require the live Slay the
-Spire game** running under ModTheSpire on the Windows host — they are not
-headless/WSL-CI work. See `docs/stage-b-tasks.md` Phase B0/B1 and
-`docs/stage-b-design.md` §2. Phases B3/B4 (S1 combat + run content) stay
-gated on **both** G4 and G5; G5 is done, so G4 is the blocker.
+**B1.1 — oracle fork build pipeline** (Stage B Phase B1, toward gate **G4**).
+Deps B0.1 + B0.2 are done. Write a JDK-8 build script for the vendored fork
+(`tools/oracle_bridge/communicationmod-oracle/`) against the local
+`desktop-1.0.jar` + ModTheSpire + BaseMod; acceptance is the **unpatched** fork
+jar reproducing B0.2's capture byte-for-byte. This and all of B1.x → **G4**
+**require the live game** on the Windows host + brief interactive co-driving —
+not headless/WSL work. See `docs/stage-b-tasks.md` Phase B1 and
+`docs/stage-b-design.md` §2.4-2.7. Phases B3/B4 (S1 content) stay gated on
+**both** G4 and G5 (G5 done → G4 is the blocker).
+
+### Oracle bridge — operational state (read before touching B1.x)
+
+- The bridge is wired and working against the **stock** CommunicationMod jar.
+  Data root (uncommitted, design §7.3): **`D:\STS_BG_Mod\_oracle_data`** — holds
+  the live `config.properties` targets, `run_capture*.jsonl` captures,
+  `latest_state.json`, and bring-up helpers: `send.sh` (append one command +
+  print a state summary), `autopilot.py` (throwaway legal-move stepper that
+  drove the B0.2 capture — plays attacks, ends turns, takes rewards, walks the
+  map), `compare_neow.py` (normalized floor-0 diff, seed-matched). These stay
+  **uncommitted** on purpose; the committed driver is `echo_driver.py`.
+- CommunicationMod reads
+  `%LOCALAPPDATA%\ModTheSpire\CommunicationMod\config.properties` **only at
+  game launch**; `command=` currently points at `echo_driver.py`. Exact wiring
+  + the scriptable `--skip-launcher --mods basemod,CommunicationMod` launch are
+  in `tools/oracle_bridge/driver/README.md`. The **game is launched manually**;
+  the driver auto-attaches; drive it by appending commands to the command file,
+  and only send state-changing commands while `ready_for_command: true`. The
+  game runs on Windows Python (`C:/Python39/python.exe`), outside WSL.
+- **WSL-call gotcha (bit us repeatedly):** the harness's Git-Bash layer mangles
+  `$VAR` and bare `/mnt/...` args forwarded to `wsl`. Run multi-line WSL work
+  from a script file: `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash
+  /mnt/c/.../script.sh`. For engine builds/tests:
+  `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -lc 'cd
+  /mnt/d/STS_BG_Mod/SpeedTheSpire && cmake --preset debug && cmake --build
+  --preset debug && ctest --preset debug'` (also `asan`; the `release` preset
+  has no test-preset — it builds tests into `build/release`, run them with
+  `ctest --test-dir build/release`). A cold WSL start can fail with
+  `0x800705aa` under memory pressure — retry after freeing RAM.
+- Profile audit result (design §1.1): the save is **fully unlocked** at the
+  pool gate (all 60 `UnlockTracker.refresh()` gated keys have `STSUnlocks`
+  flag=2 → `lockedCards`/`lockedRelics` empty). The `IRONCLADUnlockLevel=3`
+  meta-counter is cosmetic and does **not** gate run pools — do not "fix" it.
+
+### How Stage B tasks have been executed (working pattern)
+
+Orchestrator dispatches one sub-agent per task with a self-contained brief;
+each works in its own git worktree under `D:\STS_BG_Mod\_wt\<task>`, runs the
+acceptance itself, then the orchestrator re-verifies, cherry-picks/merges to
+`master`, and updates the ledger — one task = one commit. Model choice:
+**Fable** for larger/ambiguous tasks, **Opus** for established boilerplate.
