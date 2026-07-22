@@ -203,7 +203,7 @@ capture is a throwaway data-root helper, not the committed driver.
 
 ## Phase B1 — The oracle fork, driver, translator (Gate G4 = M2)
 
-### B1.1 `[ ]` Fork build pipeline
+### B1.1 `[x]` Fork build pipeline
 **Deps:** B0.1, B0.2 · **Spec:** design §2.4
 **Deliverables:** JDK-8 build script (`tools/oracle_bridge/build_fork.ps1` or
 equivalent) compiling the vendored fork against `desktop-1.0.jar` +
@@ -213,7 +213,49 @@ location ModTheSpire picks up; fork modid distinct from upstream
 **Acceptance:** fork jar, with zero behavioral patches yet, reproduces B0.2's
 captured run byte-for-byte (same seed, same script → same JSONL states);
 build script is deterministic and documented in the fork README.
-**Log:** —
+*(Amended 2026-07-22 — the B0.2 capture is timing-contaminated and not
+cleanly reproducible; see the change log. Satisfied as: fork == stock
+byte-identical on the same derived script, with stock-determinism control and
+B0.2 anchors.)*
+**Log:** Verified by running, not inferred (Windows host — excluded from WSL
+CI). Delivered `tools/oracle_bridge/build_fork.ps1`, a no-Maven JDK-8
+pipeline: stages sources with the upstream pom's gson shade relocation applied
+textually (`com.google.gson`→`com.autoplay.gson`; vendored sources untouched),
+packages the already-relocated gson 2.8.5 classes **extracted from the stock
+workshop jar** (byte-identical gson bytecode to the B0.2 baseline, no new
+dependency), compiles with `javac -g` (**required** — ModTheSpire resolves
+`@SpirePatch` parameter names from the LocalVariableTable; without `-g`
+patching dies with "Illegal patch parameter: Cannot determine name"), and
+writes a **deterministic jar** (ordinal-sorted entries, pinned timestamps, no
+manifest): `-CheckDeterminism` runs the full pipeline twice → byte-identical,
+sha256 `6AB875C8EA374C9014643CB4BDC3FA6E93264D0C8DD3B7BD7C23DAAB2323FD16`.
+Fork identity: modid `CommunicationMod-oracle` (ModTheSpire.json made concrete
+— the maven `${…}` placeholders died with the maven build); `SpireConfig`
+name untouched so the B0.2 driver wiring works as-is; docs in
+`communicationmod-oracle/README-oracle.md` + layout map in
+`tools/oracle_bridge/README.md`. Deploys to `<game>\mods\` (jar never
+committed). Launch notes: `--skip-launcher --mods
+basemod,CommunicationMod-oracle` works; run MTS under the game's **bundled JRE
+8** (`<game>\jre\bin\java.exe`) — system Java 25 was being upgraded by a
+concurrent process mid-task, which killed the first launch's JVM.
+**Acceptance evidence:** B0.2's capture turned out timing-contaminated — its
+stepper re-sent `end` 7× during one slow monster-turn window (send seqs
+37-44); the game queued extras, so the recorded turn-3 state shows
+`times_damaged`=5 / HP 45 while the turn-2 decision state was never dumped.
+No clean state-paced replay can reproduce that. Controlled experiment on the
+**derived 205-command effective script** (8 noise sends dropped, the one
+invisible `end` re-inserted; replayer sends each command only on a fresh
+`ready_for_command` state): **(1)** stock determinism — two independent
+stock-jar game sessions → 206/206 normalized states byte-identical (uuid
+dropped per PROTOCOL.md, the only nondeterministic field); **(2)** **fork ==
+stock: 206/206 normalized states byte-identical** (seed STS12345, A20
+Ironclad, Neow → floor-3 reward); **(3)** anchors to the B0.2 capture:
+floor-0 Neow state byte-identical (seed long 1790052133945), first 18 states
+byte-identical (everything pre-contamination), and the whole-run floor/screen
+trajectory identical modulo the one extra turn-2 state. Fork capture parses
+clean (`echo_driver.py --verify`: 206 recv, 0 errors). Replay/compare helpers
+(`replay_b11.py`, `compare_b11.py`) are data-root throwaways per the B0.2
+stepper precedent. WSL suite untouched: 140/140 green in debug + asan.
 
 ### B1.2 `[ ]` Oracle state block
 **Deps:** B1.1 · **Spec:** design §2.5 (the frozen 10-row field inventory) ·
@@ -1079,6 +1121,18 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-22 — B1.1 acceptance amended (ledger is the losing document; fixed
+  in the same change per the working agreement). "Reproduces B0.2's captured
+  run byte-for-byte" is unsatisfiable as written: the B0.2 capture is
+  timing-contaminated (queued stepper `end`-resends produced a game history —
+  5 monster hits by "turn 3" — that no clean state-paced replay can recreate;
+  root cause in the B1.1 Log). Replaced with the controlled equivalent: two
+  stock-jar runs of the derived effective script must be byte-identical
+  (determinism control), the fork run must be byte-identical to stock on the
+  same script, and the run must anchor to the B0.2 capture (Neow floor-0
+  state, pre-contamination 18-state prefix, floor/screen trajectory). The
+  B1.3 strip-equivalence and G4 acceptance style (fork-vs-fork A/B on
+  identical scripts) is unaffected.
 - 2026-07-17 — v0.1 created from stage-b-design.md v0.1 (§2-§8 → phases
   B0-B5). Task counts: 57 tasks + 4 gates (G4-G7, continuing Stage A's gate
   numbering; G4=M2, G6=M3, G7=M4). Card/monster/relic batch enumerations

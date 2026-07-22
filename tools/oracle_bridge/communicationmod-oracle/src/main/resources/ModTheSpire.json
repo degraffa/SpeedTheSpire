@@ -1,10 +1,10 @@
 {
-  "modid": "${project.artifactId}",
-  "name": "${project.name}",
-  "author_list": ["Forgotten Arbiter"],
-  "description": "${project.description}",
-  "version": "${project.version}",
-  "sts_version": "${SlayTheSpire.version}",
-  "mts_version": "${ModTheSpire.version}",
+  "modid": "CommunicationMod-oracle",
+  "name": "Communication Mod (oracle)",
+  "author_list": ["Forgotten Arbiter", "SpeedTheSpire oracle fork"],
+  "description": "Oracle fork of Communication Mod for the SpeedTheSpire simulator bridge (upstream v1.2.1)",
+  "version": "1.2.1-oracle.0",
+  "sts_version": "11-30-2020",
+  "mts_version": "3.18.1",
   "dependencies": ["basemod"]
 }
