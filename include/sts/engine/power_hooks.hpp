@@ -97,6 +97,12 @@ struct HookContext {
                                          // (PowerSlot.amount) -- drives stack-scaled
                                          // effects (a hook step's `amount: 0` sentinel
                                          // substitutes this; native bodies read it).
+    uint8_t damage_type = 0;             // for on_attacked / was_hp_lost: the incoming
+                                         // DamageInfo.DamageType (interp.hpp DamageType;
+                                         // 0 == NORMAL). Plated Armor's wasHPLost reads
+                                         // it (no decrement on THORNS/HP_LOSS). Transient
+                                         // dispatch field -- NOT part of any serialized
+                                         // struct, so no fixture impact.
 };
 
 // --- Card-play fan-outs (distinct source orders) ----------------------------
@@ -143,11 +149,23 @@ void dispatch_at_start_of_turn_post_draw(CombatState& state) noexcept;
 void dispatch_on_gained_block(CombatState& state, uint8_t actor,
                               int32_t amount) noexcept;
 
+// onAttacked (AbstractPlayer.damage:1425-1426 / AbstractMonster.damage:667): the
+// VICTIM's powers fire when `victim` takes a NORMAL attack from a DISTINCT
+// `attacker`, AFTER block absorption and REGARDLESS of whether damage penetrated
+// (`amount` is the post-block damage). Thorns reflects THORNS damage to the
+// attacker here. op_damage dispatches this only for NORMAL src != tgt damage
+// (THORNS/HP_LOSS never trigger it -- no thorns-vs-thorns loop). No-op unless a
+// power binds ON_ATTACKED.
+void dispatch_on_attacked(CombatState& state, uint8_t victim, uint8_t attacker,
+                          int32_t amount) noexcept;
+
 // wasHPLost: the victim's powers, after an HP write of `amount` (>0). `source` is
 // the actor that caused the loss (self for LOSE_HP / a card; the attacker for
-// unblocked DAMAGE). Rupture's guard fires only when `source == victim`.
+// unblocked DAMAGE). `damage_type` is the incoming DamageInfo.DamageType (interp.hpp
+// DamageType; 0 == NORMAL, default). Rupture's guard fires only when `source ==
+// victim`; Plated Armor's fires only for a NORMAL attack from a distinct attacker.
 void dispatch_was_hp_lost(CombatState& state, uint8_t victim, uint8_t source,
-                          int32_t amount) noexcept;
+                          int32_t amount, uint8_t damage_type = 0) noexcept;
 
 // --- APPLY_POWER interception (opposite sides of the opcode) -----------------
 

@@ -62,6 +62,11 @@ void queue_hook_step(CombatState& s, uint8_t owner, const CardEffectStep& step,
     }
     item.amount = (step.amount == 0) ? ctx.power_amount : step.amount;
     item.flags = step.extra;  // APPLY_POWER: PowerId; else 0
+    if (step.op == static_cast<decltype(step.op)>(Opcode::BLOCK)) {  // registry mirror
+        // A power's block is a direct GainBlockAction (no card applyPowers), so it
+        // does NOT get Dexterity -- flag it so op_block skips the modifyBlock pass.
+        item.flags |= kBlockNoPowers;
+    }
     add_to_bottom(s, item);
 }
 
@@ -235,14 +240,25 @@ void dispatch_on_gained_block(CombatState& s, uint8_t actor,
     dispatch_actor_powers(s, actor, Hook::ON_GAINED_BLOCK, ctx);
 }
 
-void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
+void dispatch_on_attacked(CombatState& s, uint8_t victim, uint8_t attacker,
                           int32_t amount) noexcept {
+    HookContext ctx{};
+    ctx.source = attacker;
+    ctx.amount = amount;
+    // The victim's powers onAttacked (Thorns). op_damage has already gated this to
+    // NORMAL damage from a distinct attacker, so no THORNS/HP_LOSS re-entry.
+    dispatch_actor_powers(s, victim, Hook::ON_ATTACKED, ctx);
+}
+
+void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
+                          int32_t amount, uint8_t damage_type) noexcept {
     if (amount <= 0) {
         return;  // damage:1438 gates the wasHPLost block on damageAmount > 0
     }
     HookContext ctx{};
     ctx.source = source;
     ctx.amount = amount;
+    ctx.damage_type = damage_type;
     dispatch_actor_powers(s, victim, Hook::WAS_HP_LOST, ctx);
 }
 
@@ -368,6 +384,118 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
             rem.src = ctx.owner;
             rem.tgt = ctx.owner;
             rem.flags = make_apply_power_flags(PowerId::LOSE_STRENGTH);
+            add_to_bottom(s, rem);
+            return;
+        }
+        case PowerId::THORNS: {
+            // ThornsPower.onAttacked (ThornsPower.java:45-52): reflect `amount`
+            // THORNS damage back to the attacker. op_damage already gated this to a
+            // NORMAL attack from a distinct creature; the owner != attacker guard is
+            // re-checked. THORNS type -> the reflected DAMAGE skips all NORMAL-only
+            // power modifiers, so a Vulnerable attacker does NOT amplify it.
+            if (hook != Hook::ON_ATTACKED || ctx.source == ctx.owner) {
+                return;
+            }
+            ActionQueueItem dmg{};
+            dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+            dmg.src = ctx.owner;        // the thorns-haver owns the reflected damage
+            dmg.tgt = ctx.source;       // ... dealt to the attacker
+            dmg.amount = ctx.power_amount;
+            dmg.flags = make_damage_flags(DamageType::THORNS);
+            add_to_top(s, dmg);         // addToTop (ThornsPower.java:48)
+            return;
+        }
+        case PowerId::PLATED_ARMOR: {
+            if (hook == Hook::AT_END_OF_TURN_PRE_CARD) {
+                // GainBlockAction(owner, amount) at the §5.4 pre-card phase (the same
+                // slot as Metallicize). A direct GainBlockAction -> kBlockNoPowers, so
+                // Plated Armor block does NOT get Dexterity (PlatedArmorPower.java:72).
+                ActionQueueItem blk{};
+                blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+                blk.src = ctx.owner;
+                blk.tgt = ctx.owner;
+                blk.amount = ctx.power_amount;
+                blk.flags = kBlockNoPowers;
+                add_to_bottom(s, blk);  // addToBot (PlatedArmorPower.java:72)
+                return;
+            }
+            if (hook == Hook::WAS_HP_LOST) {
+                // Lose 1 stack on a real attack from a distinct creature; NOT on a
+                // THORNS / HP_LOSS / self loss (PlatedArmorPower.java:54-58). The
+                // ReducePowerAction removes the power at 0.
+                if (ctx.damage_type == static_cast<uint8_t>(DamageType::THORNS) ||
+                    ctx.damage_type == static_cast<uint8_t>(DamageType::HP_LOSS) ||
+                    ctx.source == ctx.owner || ctx.amount <= 0) {
+                    return;
+                }
+                PowerSlot* pa = find_power(s, ctx.owner, PowerId::PLATED_ARMOR);
+                if (pa != nullptr) {
+                    pa->amount = static_cast<int16_t>(pa->amount - 1);
+                    if (pa->amount <= 0) {
+                        pa->power_id = static_cast<uint16_t>(PowerId::NONE);
+                    }
+                }
+                return;
+            }
+            return;
+        }
+        case PowerId::REGEN: {
+            // RegenPower.atEndOfTurn -> RegenAction(owner, amount)
+            // (RegenPower.java:35-38, RegenAction.java:34-47): heal `amount` (clamped
+            // to max, only if currentHealth>0) then, for a PLAYER owner, decrement the
+            // stack by 1 (remove at 0). The heal is applied directly -- no HEAL opcode
+            // (the Blood Potion / Burning Blood precedent) and a heal has no queue
+            // interplay with other end-of-turn effects.
+            if (hook != Hook::AT_END_OF_TURN) {
+                return;
+            }
+            int16_t* hp = nullptr;
+            int16_t max_hp = 0;
+            if (ctx.owner == kActorPlayer) {
+                hp = &s.player_hp;
+                max_hp = s.player_max_hp;
+            } else if (ctx.owner < kMonsterCap) {
+                hp = &s.monsters[ctx.owner].hp;
+                max_hp = s.monsters[ctx.owner].max_hp;
+            }
+            if (hp != nullptr && *hp > 0) {
+                int32_t v = static_cast<int32_t>(*hp) + ctx.power_amount;
+                if (v > max_hp) {
+                    v = max_hp;
+                }
+                *hp = static_cast<int16_t>(v);
+            }
+            if (ctx.owner == kActorPlayer) {  // RegenAction decrement is isPlayer-gated
+                PowerSlot* rp = find_power(s, ctx.owner, PowerId::REGEN);
+                if (rp != nullptr) {
+                    rp->amount = static_cast<int16_t>(rp->amount - 1);
+                    if (rp->amount <= 0) {
+                        rp->power_id = static_cast<uint16_t>(PowerId::NONE);
+                    }
+                }
+            }
+            return;
+        }
+        case PowerId::LOSE_DEXTERITY: {
+            // LoseDexterityPower.atEndOfTurn (LoseDexterityPower.java:38-42): addToBot
+            // ApplyPower(Dexterity, -amount) then RemoveSpecificPower(self) -- the
+            // exact mirror of LoseStrength/Flex (id 13). Both queued (addToBot), so the
+            // Dexterity reduction + self-removal resolve on later pump iterations.
+            if (hook != Hook::AT_END_OF_TURN) {
+                return;
+            }
+            ActionQueueItem down{};
+            down.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+            down.src = ctx.owner;
+            down.tgt = ctx.owner;
+            down.amount = -ctx.power_amount;  // Dexterity -amount
+            down.flags = make_apply_power_flags(PowerId::DEXTERITY);
+            add_to_bottom(s, down);
+            ActionQueueItem rem{};
+            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+            rem.src = ctx.owner;
+            rem.tgt = ctx.owner;
+            rem.flags = make_apply_power_flags(PowerId::LOSE_DEXTERITY);
             add_to_bottom(s, rem);
             return;
         }

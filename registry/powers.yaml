@@ -158,3 +158,70 @@
   hooks:
     at_end_of_turn: []          # native: apply Strength -amount to owner, then self-remove
   provenance: "LoseStrengthPower.atEndOfTurn (LoseStrengthPower.java:40-44) -- addToBot ApplyPowerAction(owner, StrengthPower(owner,-amount)) then addToBot RemoveSpecificPowerAction(owner, \"Flex\"); constructor type DEBUFF, POWER_ID \"Flex\" (LoseStrengthPower.java:19,29). Native body (power_hooks.cpp): queues APPLY_POWER Strength -amount and REMOVE_POWER LoseStrength on the owner (both addToBot -> resolve after the power-list walk). The reversal makes Flex's +Strength last exactly one turn."
+
+# --- potion-support-powers follow-up (discharges the B3.23/B3.24 deferrals) ---
+# The power rows ~9 Ironclad potions and two common relics (Bronze Scales,
+# Oddly Smooth Stone) needed. Each read in full from the decompiled Java before
+# coding; ids append from 14 (B3.4 took 13). Consumers: Dexterity/Speed/Steroid/
+# Regen/Liquid Bronze/Essence of Steel/Cultist potions + the two relics.
+
+- id: 14
+  name: DEXTERITY
+  game_id: "Dexterity"
+  type: BUFF
+  # No hook bindings: like Strength/Vulnerable/Weak, Dexterity is a DAMAGE/BLOCK-
+  # pipeline modifier, not a queued hook. DexterityPower.modifyBlock(+amount) is a
+  # BLOCK-pipeline hook, applied natively in op_block (interp.cpp) to the OWNER's
+  # block gain -- but ONLY for card block (AbstractCard.applyPowers runs modifyBlock);
+  # power/relic/potion block calls GainBlockAction directly (no modifyBlock), so
+  # those BLOCK items carry kBlockNoPowers and op_block skips the Dexterity add.
+  # canGoNegative (a negative Dexterity reduces block, floored at 0); type flips to
+  # DEBUFF for display when negative but the registry type is the BUFF identity the
+  # Artifact/Sadistic interception reads.
+  provenance: "DexterityPower.modifyBlock (DexterityPower.java:106-111) -- blockAmount + amount, floor 0; stackPower additive (:44-56); canGoNegative (:31); POWER_ID \"Dexterity\" (:14). No atEndOfTurn/hook body."
+
+- id: 15
+  name: LOSE_DEXTERITY
+  game_id: "DexLoss"
+  type: DEBUFF
+  native: true
+  hooks:
+    at_end_of_turn: []          # native: apply Dexterity -amount to owner, then self-remove
+  provenance: "LoseDexterityPower.atEndOfTurn (LoseDexterityPower.java:38-42) -- addToBot ApplyPowerAction(owner, DexterityPower(owner,-amount)) then RemoveSpecificPowerAction(owner, \"DexLoss\"); constructor type DEBUFF, POWER_ID \"DexLoss\" (:20,29). The exact mirror of LoseStrengthPower/Flex (id 13); native body queues APPLY_POWER Dexterity -amount + REMOVE_POWER LoseDexterity (both addToBot). Speed Potion's one-turn Dexterity."
+
+- id: 16
+  name: THORNS
+  game_id: "Thorns"
+  type: BUFF
+  native: true
+  hooks:
+    on_attacked: []             # native: reflect `amount` THORNS damage to the attacker
+  provenance: "ThornsPower.onAttacked (ThornsPower.java:45-52) -- if info.type != THORNS && != HP_LOSS && info.owner != null && info.owner != owner: addToTop DamageAction(info.owner, DamageInfo(owner, amount, THORNS)); returns damageAmount unchanged. Fires in AbstractPlayer.damage (:1425-1426) AFTER decrementBlock and REGARDLESS of whether the attack was blocked (no damageAmount>0 gate). Native body queues a THORNS-typed DAMAGE (add_to_top) to ctx.source (the attacker); THORNS type (interp.hpp) skips the NORMAL-only power modifiers so a Vulnerable attacker does NOT amplify it (VulnerablePower.atDamageReceive NORMAL-only, :66-72). POWER_ID \"Thorns\" (:22), default type BUFF (AbstractPower.java:67)."
+
+- id: 17
+  name: PLATED_ARMOR
+  game_id: "Plated Armor"
+  type: BUFF
+  native: true
+  hooks:
+    at_end_of_turn_pre_card: [] # native: gain `amount` block (GainBlockAction, direct -- no Dexterity)
+    was_hp_lost: []             # native: lose 1 stack on a real attack (not THORNS/HP_LOSS/self)
+  provenance: "PlatedArmorPower.atEndOfTurnPreEndTurnCards (PlatedArmorPower.java:70-73) -- GainBlockAction(owner, amount), the §5.4 pre-card phase (same slot as Metallicize); wasHPLost (:54-59) -- if info.owner != null && info.owner != owner && type != HP_LOSS && type != THORNS && damage>0: addToBot ReducePowerAction(owner, \"Plated Armor\", 1). Native (both hooks): queues a kBlockNoPowers BLOCK(=amount) at pre-card; at wasHPLost decrements the slot by 1 (removes at 0) unless the loss was thorns/HP-loss/self. POWER_ID \"Plated Armor\" (:20)."
+
+- id: 18
+  name: REGEN
+  game_id: "Regeneration"
+  type: BUFF
+  native: true
+  hooks:
+    at_end_of_turn: []          # native: heal `amount`, then decrement the stack (remove at 0)
+  provenance: "RegenPower.atEndOfTurn (RegenPower.java:35-38) -- addToTop RegenAction(owner, amount); RegenAction.update (RegenAction.java:34-47) heals amount (heal() clamps to maxHP, only if currentHealth>0) THEN, for a player owner, --p.amount and remove at 0. The player variant \"Regeneration\" (RegenPotion applies this, not RegenerateMonsterPower). Native body heals the owner directly (no HEAL opcode; the Blood Potion / Burning Blood precedent) then decrements the Regen slot (player-only decrement per RegenAction). POWER_ID \"Regeneration\" (:16)."
+
+- id: 19
+  name: RITUAL
+  game_id: "Ritual"
+  type: BUFF
+  hooks:
+    at_end_of_turn:
+      - {op: APPLY_POWER, target: SELF, power: STRENGTH}   # Strength = power amount
+  provenance: "RitualPower.atEndOfTurn (RitualPower.java:37-42) -- if isPlayer: addToBot ApplyPowerAction(owner, StrengthPower(owner, amount)). Cultist Potion applies RitualPower(player, potency, playerControlled=TRUE) (CultistPotion.java:54), so onPlayer==true -> the atEndOfRound monster path (:44-53, skipFirst) does NOT fire and only the player-facing atEndOfTurn Strength gain applies -> a clean DATA hook. The monster-Cultist atEndOfRound variant lands with the Cultist monster (B3.12). POWER_ID \"Ritual\" (:16)."

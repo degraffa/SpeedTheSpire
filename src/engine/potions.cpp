@@ -51,6 +51,11 @@ void queue_use_step(CombatState& s, const CardEffectStep& step,
     }
     item.amount = step.amount;
     item.flags = step.extra;  // APPLY_POWER: PowerId flags; else 0
+    if (step.op == static_cast<decltype(step.op)>(Opcode::BLOCK)) {  // registry mirror
+        // A potion's block is a direct GainBlockAction (Block Potion), not card
+        // applyPowers, so it does NOT get Dexterity -- flag op_block to skip it.
+        item.flags |= kBlockNoPowers;
+    }
     add_to_bottom(s, item);
 }
 
@@ -92,14 +97,19 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             break;
         }
         // --- Deferred native bodies (land with their dependency; B3.23 Log) ---
-        // Potion-granted powers not yet in powers.yaml (B3.4): DEXTERITY_POTION,
-        // STEROID_POTION, SPEED_POTION, REGEN_POTION, LIQUID_BRONZE,
-        // ESSENCE_OF_STEEL, DUPLICATION_POTION, CULTIST_POTION.
+        // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
+        // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
+        // their powers were registered by the potion-support-powers follow-up
+        // (powers.yaml ids 14-19; Steroid reuses LoseStrength id 13) -- so they no
+        // longer route here (use_potion sends them through queue_use_step).
+        // Still native + DEFERRED, each on a verb owned elsewhere:
         // In-combat card CHOOSE (B3.4): ELIXIR, ATTACK/SKILL/POWER/COLORLESS_
         // POTION, GAMBLERS_BREW, LIQUID_MEMORIES, BLESSING_OF_THE_FORGE.
-        // Recursive play (a later opcode): DISTILLED_CHAOS. Cost randomization:
-        // SNECKO_OIL. Run-layer mutation (B4.x): FRUIT_JUICE, ENTROPIC_BREW.
-        // Combat escape (B3.15) / out-of-combat revive: SMOKE_BOMB, FAIRY_POTION.
+        // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
+        // (its DuplicationPower re-queues the played card -- the blocker is the
+        // opcode, NOT a missing power row). Cost randomization: SNECKO_OIL.
+        // Run-layer mutation (B4.x): FRUIT_JUICE, ENTROPIC_BREW. Combat escape
+        // (B3.15) / out-of-combat revive: SMOKE_BOMB, FAIRY_POTION.
         default:
             // No combat-state change until the dependency lands. Not reachable
             // for a data potion (use_potion routes those through queue_use_step).

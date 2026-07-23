@@ -355,12 +355,34 @@ TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {
     CombatState s = MakeState();
     Relics r;
     r.add(RelicId::WHETSTONE);        // equip-time, no combat hook
-    r.add(RelicId::BRONZE_SCALES);    // Thorns apply DEFERRED (power row is B3.4)
+    r.add(RelicId::AKABEKO);          // Vigor apply DEFERRED (Vigor power row is later)
     r.add(RelicId::BOOT);             // damage-pipeline DEFERRED
     dispatch_relics_at_battle_start(s, r.slots, r.count);
     dispatch_relics_on_victory(s, r.slots, r.count);
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_hp, 70) << "no accidental heal/state change";
+}
+
+// --- Un-deferred power-granting relics (now DATA at_battle_start APPLY_POWER) -
+
+TEST(RelicHooks, BronzeScalesAppliesThreeThorns) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::BRONZE_SCALES);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    drain(s);
+    const PowerSlot* thorns = player_power(s, PowerId::THORNS);
+    ASSERT_NE(thorns, nullptr);
+    EXPECT_EQ(thorns->amount, 3);
+}
+
+TEST(RelicHooks, OddlySmoothStoneAppliesOneDexterity) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::ODDLY_SMOOTH_STONE);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    drain(s);
+    const PowerSlot* dex = player_power(s, PowerId::DEXTERITY);
+    ASSERT_NE(dex, nullptr);
+    EXPECT_EQ(dex->amount, 1);
 }
 
 }  // namespace

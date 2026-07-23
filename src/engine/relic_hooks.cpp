@@ -50,6 +50,11 @@ void queue_relic_step(CombatState& s, const CardEffectStep& step) noexcept {
     }
     item.amount = step.amount;
     item.flags = step.extra;  // APPLY_POWER: PowerId; else 0
+    if (step.op == static_cast<decltype(step.op)>(Opcode::BLOCK)) {  // registry mirror
+        // A relic's block is a direct GainBlockAction (Anchor), not card applyPowers,
+        // so it does NOT get Dexterity -- flag op_block to skip the modifyBlock pass.
+        item.flags |= kBlockNoPowers;
+    }
     add_to_bottom(s, item);
 }
 
@@ -217,6 +222,7 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
                 blk.src = kActorPlayer;
                 blk.tgt = kActorPlayer;
                 blk.amount = 6;
+                blk.flags = kBlockNoPowers;  // direct GainBlockAction -- no Dexterity
                 add_to_top(s, blk);  // addToTop (Orichalcum.java:38)
             }
             return;
@@ -306,14 +312,14 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
         // Native relics whose combat body is DEFERRED (a cross-domain dependency
         // not yet available). Each is a documented no-op today; the relic still
         // dispatches (row + hook registered) so the accounting/wiring is in place.
-        //   BRONZE_SCALES / ODDLY_SMOOTH_STONE / AKABEKO -- apply Thorns / Dexterity
-        //     / Vigor at battle start; those power rows are B3.4's powers.yaml.
+        //   (BRONZE_SCALES / ODDLY_SMOOTH_STONE un-deferred by the potion-support-
+        //    powers follow-up: Thorns/Dexterity now registered, so both are DATA
+        //    at_battle_start APPLY_POWER relics -- they no longer route here.)
+        //   AKABEKO        -- apply Vigor at battle start; Vigor power row is later.
         //   BOOT           -- onAttack damage floor; a DAMAGE-pipeline modifier.
         //   ART_OF_WAR / ANCIENT_TEA_SET -- cross-turn/cross-room energy flags.
         //   PRESERVED_INSECT -- elite HP scaling (needs room context + HP-scale op).
         //   TOY_ORNITHOPTER  -- heal on potion use (potion trigger is B3.23).
-        case RelicId::BRONZE_SCALES:
-        case RelicId::ODDLY_SMOOTH_STONE:
         case RelicId::AKABEKO:
         case RelicId::BOOT:
         case RelicId::ART_OF_WAR:

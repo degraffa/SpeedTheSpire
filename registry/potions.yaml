@@ -28,16 +28,18 @@
 #
 # EFFECT PROGRAMS vs NATIVE (B3.2 convention). A potion is a DATA effect program
 # only where the frozen opcode set (interp.hpp) AND an already-registered power
-# suffice. The registered powers today (powers.yaml, owned by B3.4) are Strength,
-# Vulnerable, Weak, Artifact, Metallicize (+ the B3.2 framework powers). Potions
-# that grant powers NOT yet in the registry (Dexterity, Regen, Thorns, Plated
-# Armor, Ritual, StrengthDown/LoseDexterity, a Duplication/Double-Tap power), or
-# that need verbs owned by other tasks (in-combat card CHOOSE = B3.4; recursive
-# play = a later opcode; run-layer max-HP / potion-slot mutation = B4.x; combat
-# escape = B3.15; out-of-combat revive), are `native: true` with the body
-# DEFERRED to when that dependency lands (see the B3.23 Log). They still carry
-# their real potency/rarity/game_id here so the registry, translator join, and
-# identity roll are complete now.
+# suffice. As of the potion-support-powers follow-up the registry now also carries
+# Dexterity(14), LoseDexterity(15), Thorns(16), PlatedArmor(17), Regen(18) and
+# Ritual(19) -- so the potions that grant them (Dexterity, Speed, Steroid [via the
+# already-registered LoseStrength/Flex], Regen, Liquid Bronze, Essence of Steel,
+# Cultist) are now DATA APPLY_POWER programs, un-deferred here with their effect
+# tests. Potions still `native: true` and DEFERRED need a verb owned elsewhere:
+# in-combat card CHOOSE = B3.4 (Elixir, Attack/Skill/Power/Colorless, Gamblers Brew,
+# Liquid Memories, Blessing of the Forge); RECURSIVE PLAY = a later opcode
+# (Distilled Chaos, Duplication); cost randomization (Snecko Oil); run-layer max-HP
+# / potion-slot mutation = B4.x (Fruit Juice, Entropic Brew); combat escape = B3.15
+# (Smoke Bomb); out-of-combat revive (Fairy). Every row still carries its real
+# potency/rarity/game_id so the registry, translator join, and identity roll are complete.
 
 # --- Ironclad-specific (PotionHelper.java:92-96) ----------------------------
 
@@ -85,9 +87,11 @@
   game_id: "Dexterity Potion"
   rarity: COMMON
   potency: 2
-  # Grants DexterityPower -- not in the registry (powers.yaml, B3.4). Deferred native.
-  native: true
-  provenance: "DexterityPotion.use (DexterityPotion.java:45), getPotency (:52) -- ApplyPower DexterityPower(potency)"
+  # Grants DexterityPower(potency). Un-deferred: DEXTERITY registered (powers.yaml
+  # id 14) -> a DATA APPLY_POWER program (potion-support-powers follow-up).
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: DEXTERITY}
+  provenance: "DexterityPotion.use (DexterityPotion.java:45), getPotency (:52) -- ApplyPower DexterityPower(potency), COMBAT-gated"
 
 - id: 6
   name: ENERGY_POTION
@@ -194,20 +198,27 @@
   game_id: "SteroidPotion"
   rarity: COMMON
   potency: 5
-  # Gain Strength(potency) AND StrengthDown(potency) at end of turn -- StrengthDown
-  # is not registered (powers.yaml, B3.4). Whole effect deferred native (a partial
-  # Strength-only program would be WRONG: it must be temporary).
-  native: true
-  provenance: "SteroidPotion.use (SteroidPotion.java:45), getPotency (:54) -- ApplyPower StrengthPower + StrengthDown(potency)"
+  # Gain Strength(potency) + LoseStrength(potency) -- the "StrengthDown" the B3.23
+  # Log named is LoseStrengthPower (already registered, id 13 "Flex"), so NO new
+  # power was needed; un-deferred to a DATA program. The LoseStrength reverses the
+  # Strength at end of turn (temporary +Strength this turn only).
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: STRENGTH}
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: LOSE_STRENGTH}
+  provenance: "SteroidPotion.use (SteroidPotion.java:44-47), getPotency (:54) -- addToBot ApplyPower StrengthPower(potency) then LoseStrengthPower(potency), COMBAT-gated"
 
 - id: 18
   name: SPEED_POTION
   game_id: "SpeedPotion"
   rarity: COMMON
   potency: 5
-  # Gain Dexterity(potency) + LoseDexterity(potency) end of turn -- neither power registered. Deferred native.
-  native: true
-  provenance: "SpeedPotion.use (SpeedPotion.java:45), getPotency (:54) -- ApplyPower DexterityPower + LoseDexterityPower(potency)"
+  # Gain Dexterity(potency) + LoseDexterity(potency) -- both now registered
+  # (DEXTERITY id 14, LOSE_DEXTERITY id 15). Un-deferred to a DATA program; the
+  # LoseDexterity reverses the Dexterity at end of turn (temporary this turn only).
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: DEXTERITY}
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: LOSE_DEXTERITY}
+  provenance: "SpeedPotion.use (SpeedPotion.java:44-47), getPotency (:54) -- addToBot ApplyPower DexterityPower(potency) then LoseDexterityPower(potency), COMBAT-gated"
 
 - id: 19
   name: BLESSING_OF_THE_FORGE
@@ -223,9 +234,11 @@
   game_id: "Regen Potion"
   rarity: UNCOMMON
   potency: 5
-  # Grants RegenPower -- not registered (powers.yaml, B3.4). Deferred native.
-  native: true
-  provenance: "RegenPotion.use (RegenPotion.java:44), getPotency (:51) -- ApplyPower RegenPower(potency)"
+  # Grants RegenPower(potency). Un-deferred: REGEN registered (powers.yaml id 18)
+  # -> a DATA APPLY_POWER program. Heals `potency` at end of turn, decrementing.
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: REGEN}
+  provenance: "RegenPotion.use (RegenPotion.java:44), getPotency (:51) -- ApplyPower RegenPower(potency), COMBAT-gated"
 
 - id: 21
   name: ANCIENT_POTION
@@ -241,9 +254,11 @@
   game_id: "LiquidBronze"
   rarity: UNCOMMON
   potency: 3
-  # Grants ThornsPower -- not registered (powers.yaml, B3.4). Deferred native.
-  native: true
-  provenance: "LiquidBronze.use (LiquidBronze.java:45), getPotency (:53) -- ApplyPower ThornsPower(potency)"
+  # Grants ThornsPower(potency). Un-deferred: THORNS registered (powers.yaml id 16)
+  # -> a DATA APPLY_POWER program.
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: THORNS}
+  provenance: "LiquidBronze.use (LiquidBronze.java:45), getPotency (:53) -- ApplyPower ThornsPower(potency), COMBAT-gated"
 
 - id: 23
   name: GAMBLERS_BREW
@@ -259,16 +274,22 @@
   game_id: "EssenceOfSteel"
   rarity: UNCOMMON
   potency: 4
-  # Grants PlatedArmorPower -- not registered (powers.yaml, B3.4). Deferred native.
-  native: true
-  provenance: "EssenceOfSteel.use (EssenceOfSteel.java:42), getPotency (:50) -- ApplyPower PlatedArmorPower(potency)"
+  # Grants PlatedArmorPower(potency). Un-deferred: PLATED_ARMOR registered
+  # (powers.yaml id 17) -> a DATA APPLY_POWER program.
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 4, power: PLATED_ARMOR}
+  provenance: "EssenceOfSteel.use (EssenceOfSteel.java:42), getPotency (:50) -- ApplyPower PlatedArmorPower(potency), COMBAT-gated"
 
 - id: 25
   name: DUPLICATION_POTION
   game_id: "DuplicationPotion"
   rarity: UNCOMMON
   potency: 1
-  # Grants DuplicationPower (next N cards played twice) -- not registered; recursive-play semantics. Deferred native.
+  # Grants DuplicationPower (next N cards played twice). Still DEFERRED, but the
+  # blocker is the RECURSIVE-PLAY opcode (DuplicationPower.onUseCard re-queues a
+  # copy of the played card -- cf. Distilled Chaos / Double Tap), NOT a missing
+  # power row: registering a DuplicationPower row without that opcode would be an
+  # inert power. Un-defers with the recursive-play opcode, not the power follow-up.
   native: true
   provenance: "DuplicationPotion.use (DuplicationPotion.java:42), getPotency (:49) -- ApplyPower DuplicationPower(potency)"
 
@@ -295,9 +316,12 @@
   game_id: "CultistPotion"
   rarity: RARE
   potency: 1
-  # Grants RitualPower -- not registered (powers.yaml, B3.4). Deferred native.
-  native: true
-  provenance: "CultistPotion.use (CultistPotion.java:50), getPotency (:71) -- ApplyPower RitualPower(potency, false)"
+  # Grants RitualPower(potency, playerControlled=true). Un-deferred: RITUAL
+  # registered (powers.yaml id 19) -> a DATA APPLY_POWER program. playerControlled
+  # true selects the atEndOfTurn Strength path (not the monster atEndOfRound one).
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: RITUAL}
+  provenance: "CultistPotion.use (CultistPotion.java:54), getPotency (:71) -- ApplyPower RitualPower(player, potency, true), COMBAT-gated"
 
 - id: 29
   name: FRUIT_JUICE

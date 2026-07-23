@@ -230,6 +230,39 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
     return static_cast<PowerId>(static_cast<uint16_t>(flags & 0xFFFFu));
 }
 
+// --- DAMAGE damage-type encoding (discharges B3.2's deferred DAMAGE type item) -
+// DamageInfo.DamageType, carried in the DAMAGE opcode's `flags` low byte. The
+// skeleton damage pipeline's power hooks are ALL NORMAL-gated in the Java
+// (StrengthPower/WeakPower.atDamageGive, VulnerablePower.atDamageReceive each
+// `if (type == NORMAL)`), so a THORNS / HP_LOSS DAMAGE takes NO power modifiers:
+// a Vulnerable attacker does NOT amplify reflected Thorns damage, and player
+// Strength/Weak do not scale it. `flags == 0 == NORMAL` keeps every existing
+// DAMAGE item (card attacks, Explosive/Fire potions, Combust, Sadistic) byte-
+// identical -- only a power/relic that queues a typed DAMAGE (Thorns) sets it.
+// The value matches HookContext.damage_type (power_hooks.hpp) so a wasHPLost body
+// (Plated Armor) can read the same type; interp.cpp static_asserts the parity.
+enum class DamageType : uint8_t {
+    NORMAL = 0,   // an ordinary attack -- the full applyPowers pipeline runs
+    THORNS = 1,   // reflected/side damage -- skips the NORMAL-only power hooks
+    HP_LOSS = 2,  // direct HP loss (the LOSE_HP opcode's implied type)
+};
+[[nodiscard]] constexpr uint32_t make_damage_flags(DamageType t) noexcept {
+    return static_cast<uint32_t>(static_cast<uint8_t>(t));
+}
+[[nodiscard]] constexpr DamageType damage_type_from_flags(uint32_t flags) noexcept {
+    return static_cast<DamageType>(static_cast<uint8_t>(flags & 0xFFu));
+}
+
+// --- BLOCK opcode: skip the owner's block-modifier powers (Dexterity) --------
+// DexterityPower.modifyBlock (+amount, floor 0) is applied by AbstractCard.
+// applyPowers, so ONLY card block gets Dexterity; a power/relic/potion block calls
+// GainBlockAction directly (no modifyBlock). Those direct-block emitters set
+// kBlockNoPowers in the BLOCK item's `flags` and op_block skips the Dexterity add;
+// a card BLOCK step carries flags == 0 (no bit) and Dexterity applies. A BLOCK
+// item never otherwise uses `flags`, so bit 0 is free and flags == 0 (the
+// pre-existing card path) stays unchanged.
+inline constexpr uint32_t kBlockNoPowers = 1u << 0;
+
 // --- libGDX MathUtils.floor (MathUtils.java:217) ----------------------------
 // Replicated exactly so the DAMAGE floor matches the game bit-for-bit. A true
 // floor for |value| < 16384 (always true for skeleton damage); NOT round.

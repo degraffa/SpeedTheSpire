@@ -1389,6 +1389,12 @@ tier-2 test's condition). **gen.py note:** the potion-emission section
 sits between emit_power_table and the Monster table section. **Shared-file flag:**
 tests/registry_gen_test.cpp kTotalCount/kGenFiles-size are cross-agent sums --
 reconcile at serialize (my delta: +33 potions, +potion_table.hpp).
+**DISCHARGED (potion-support-powers follow-up):** deferral (1) is cleared --
+powers.yaml ids 14-19 (Dexterity/LoseDexterity/Thorns/PlatedArmor/Regen/Ritual)
+registered, and Dexterity/Speed/Steroid (Strength+LoseStrength id 13)/Regen/Liquid
+Bronze/Essence of Steel/Cultist re-authored as DATA APPLY_POWER programs with
+tier-2 effect tests. Duplication STAYS deferred, but on the recursive-play opcode
+(not powers.yaml). Fire Potion's applyEnemyPowersOnly typing remains its own item.
 
 ### B3.24 `[x]` ∥ Relics: starter + commons
 **Deps:** B3.2 · **Spec:** design §5.3 · **Provenance:** relics/ COMMON tier,
@@ -1457,6 +1463,11 @@ energy flags beyond `RelicSlot.counter`); **Preserved Insect** (elite-room HP
 scaling); **Toy Ornithopter** (potion-use trigger, B3.23). Each is a documented
 no-op native branch — the relic row + hook are registered so the accounting/wiring
 is already in place.
+**DISCHARGED (potion-support-powers follow-up):** Bronze Scales (Thorns 3) and
+Oddly Smooth Stone (Dexterity 1) un-deferred -- their power rows landed (powers.yaml
+ids 16/14), so both are now DATA at_battle_start APPLY_POWER relics (mirroring
+Vajra), dropped from the deferred native switch, with tier-2 battle-start tests.
+Akabeko (Vigor) / Pen Nib / Boot / the energy-flag + HP-scale relics stay deferred.
 
 ### B3.25 `[ ]` ∥ Relics: uncommons
 **Deps:** B3.24 · **Provenance:** relics/ UNCOMMON, Ironclad-obtainable

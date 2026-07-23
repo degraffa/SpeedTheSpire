@@ -210,6 +210,63 @@ TEST(Potions, BloodPotionHealClampsToMaxHp) {
     EXPECT_EQ(s.player_hp, 80);  // 70 + 16 = 86, clamped to 80
 }
 
+// --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
+// Powers registered by the potion-support-powers follow-up (Dexterity, Lose
+// Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
+
+TEST(Potions, DexterityPotionGrantsDexterity) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DEXTERITY_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DEXTERITY), 2);
+    EXPECT_EQ(potion_def(PotionId::DEXTERITY_POTION)->potency, 2);
+}
+
+TEST(Potions, SteroidPotionGrantsStrengthAndLoseStrength) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::STEROID_POTION, 0));
+    drain_actions(s);
+    // Strength + LoseStrength (temporary this turn); LoseStrength is id 13 (Flex).
+    EXPECT_EQ(player_power_stack(s, PowerId::STRENGTH), 5);
+    EXPECT_EQ(player_power_stack(s, PowerId::LOSE_STRENGTH), 5);
+}
+
+TEST(Potions, SpeedPotionGrantsDexterityAndLoseDexterity) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::SPEED_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DEXTERITY), 5);
+    EXPECT_EQ(player_power_stack(s, PowerId::LOSE_DEXTERITY), 5);
+}
+
+TEST(Potions, RegenPotionGrantsRegen) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::REGEN_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::REGEN), 5);
+}
+
+TEST(Potions, LiquidBronzeGrantsThorns) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_BRONZE, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::THORNS), 3);
+}
+
+TEST(Potions, EssenceOfSteelGrantsPlatedArmor) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::ESSENCE_OF_STEEL, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::PLATED_ARMOR), 4);
+}
+
+TEST(Potions, CultistPotionGrantsRitual) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::CULTIST_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::RITUAL), 1);
+}
+
 // --- Registry-level coverage of the DEFERRED native potions ------------------
 // Their runtime bodies land with their dependency (B3.4 powers / CHOOSE verb /
 // run layer); the registry row (rarity, potency, native flag) is complete now.
@@ -230,13 +287,16 @@ TEST(Potions, RarityAndPotencyTable) {
         {PotionId::BLOOD_POTION, PotionRarity::COMMON, 20, true},
         {PotionId::ELIXIR, PotionRarity::UNCOMMON, 0, true},
         {PotionId::HEART_OF_IRON, PotionRarity::RARE, 6, false},
-        {PotionId::DEXTERITY_POTION, PotionRarity::COMMON, 2, true},
-        {PotionId::STEROID_POTION, PotionRarity::COMMON, 5, true},
-        {PotionId::REGEN_POTION, PotionRarity::UNCOMMON, 5, true},
-        {PotionId::LIQUID_BRONZE, PotionRarity::UNCOMMON, 3, true},
-        {PotionId::ESSENCE_OF_STEEL, PotionRarity::UNCOMMON, 4, true},
+        // Un-deferred by the potion-support-powers follow-up -> DATA (native false).
+        {PotionId::DEXTERITY_POTION, PotionRarity::COMMON, 2, false},
+        {PotionId::STEROID_POTION, PotionRarity::COMMON, 5, false},
+        {PotionId::SPEED_POTION, PotionRarity::COMMON, 5, false},
+        {PotionId::REGEN_POTION, PotionRarity::UNCOMMON, 5, false},
+        {PotionId::LIQUID_BRONZE, PotionRarity::UNCOMMON, 3, false},
+        {PotionId::ESSENCE_OF_STEEL, PotionRarity::UNCOMMON, 4, false},
+        {PotionId::CULTIST_POTION, PotionRarity::RARE, 1, false},
+        // Still native + deferred (recursive-play opcode, not powers.yaml).
         {PotionId::DUPLICATION_POTION, PotionRarity::UNCOMMON, 1, true},
-        {PotionId::CULTIST_POTION, PotionRarity::RARE, 1, true},
         {PotionId::FRUIT_JUICE, PotionRarity::RARE, 5, true},
         {PotionId::FAIRY_POTION, PotionRarity::RARE, 30, true},
         {PotionId::SMOKE_BOMB, PotionRarity::RARE, 0, true},
@@ -252,11 +312,11 @@ TEST(Potions, RarityAndPotencyTable) {
 }
 
 TEST(Potions, DeferredNativePotionIsNoOpInCombat) {
-    // A deferred native potion (grants a not-yet-registered power) must not touch
-    // combat state until its dependency lands.
+    // A still-deferred native potion (Duplication -- blocked on the recursive-play
+    // opcode) must not touch combat state until its dependency lands.
     CombatState s = MakeCombat();
     const CombatState before = s;
-    ASSERT_TRUE(use_potion(s, PotionId::REGEN_POTION, 0));
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_power_count, before.player_power_count);
     EXPECT_EQ(s.player_hp, before.player_hp);

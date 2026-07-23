@@ -99,6 +99,22 @@ struct PowerView {
     }
 }
 
+// modifyBlock (block-gain hook, distinct from the damage hooks above):
+// DexterityPower.modifyBlock adds `amount` to the block gained, flooring the
+// running total at 0 (DexterityPower.java:106-111). The only skeleton block
+// modifier; iterated in power-list order over the block GAINER's powers. Applied
+// by op_block for CARD block only (power/relic/potion block sets kBlockNoPowers).
+[[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
+    switch (static_cast<PowerId>(p.power_id)) {
+        case PowerId::DEXTERITY: {
+            const float m = blk + static_cast<float>(p.amount);
+            return m < 0.0f ? 0.0f : m;                 // modifyBlock floors at 0
+        }
+        default:
+            return blk;
+    }
+}
+
 // atDamageFinalGive / atDamageFinalReceive: no skeleton power overrides these
 // (Strength/Vulnerable/Weak leave AbstractPower's identity default), so both
 // are pass-throughs. Kept as explicit call sites so a future power that hooks
@@ -128,11 +144,19 @@ struct PowerView {
 // currentHealth clamped >= 0. (Death/onDeath handling is not yet modeled; the
 // pump's hp<=0 check drives the COMBAT_OVER transition.)
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
-               int strength_mult = 1) noexcept {
+               int strength_mult = 1,
+               DamageType type = DamageType::NORMAL) noexcept {
     if (tgt != kActorPlayer && tgt >= kMonsterCap) {
         return;
     }
-    const int out = compute_damage(s, src, tgt, base, strength_mult);
+    // THORNS / HP_LOSS damage skips the NORMAL-only power pipeline (every skeleton
+    // applyPowers hook is `if (type == NORMAL)` in the Java): a Vulnerable attacker
+    // does NOT amplify reflected Thorns, and player Strength/Weak do not scale it.
+    // NORMAL damage runs the full DamageInfo.applyPowers pipeline, carrying the
+    // B3.3 strength multiplier (Heavy-Blade-style attacks).
+    const int out = (type == DamageType::NORMAL)
+                        ? compute_damage(s, src, tgt, base, strength_mult)
+                        : (base < 0 ? 0 : base);
     int16_t* hp = actor_hp(s, tgt);
     int16_t* blk = actor_block(s, tgt);
     if (hp == nullptr || blk == nullptr) {
@@ -148,6 +172,15 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         dmg = 0;
     }
     *blk = static_cast<int16_t>(block);
+    // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire on a
+    // NORMAL attack from a DISTINCT attacker -- AFTER decrementBlock and REGARDLESS
+    // of whether damage penetrated (Thorns reflects even a fully-blocked hit). A
+    // THORNS/HP_LOSS incoming does NOT trigger onAttacked (ThornsPower's own type
+    // guard), so it is dispatched only for NORMAL damage with src != tgt. No-op
+    // unless a power binds ON_ATTACKED, so skeleton/relic-free DAMAGE is unchanged.
+    if (type == DamageType::NORMAL && src != tgt) {
+        dispatch_on_attacked(s, tgt, src, dmg);
+    }
     const int old_hp = *hp;
     int new_hp = old_hp - dmg;
     if (new_hp < 0) {
@@ -157,9 +190,11 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // wasHPLost (AbstractPlayer.damage:1445-1447): fires on the VICTIM's powers
     // for the HP actually lost, with the ATTACKER as source. Rupture's guard
     // (source == victim) means unblocked enemy damage does NOT grant Strength --
-    // only self-inflicted (card) HP loss does. No-op without Rupture, so skeleton
-    // DAMAGE is unchanged.
-    dispatch_was_hp_lost(s, tgt, src, old_hp - new_hp);
+    // only self-inflicted (card) HP loss does; Plated Armor's guard also reads the
+    // damage `type` (it does not decrement on THORNS/HP_LOSS). No-op without those,
+    // so skeleton DAMAGE is unchanged.
+    dispatch_was_hp_lost(s, tgt, src, old_hp - new_hp,
+                         static_cast<uint8_t>(type));
 }
 
 // LOSE_HP: `tgt` loses `amount` HP directly, bypassing block (LoseHPAction /
@@ -179,28 +214,45 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         new_hp = 0;
     }
     *hp = static_cast<int16_t>(new_hp);
-    dispatch_was_hp_lost(s, tgt, tgt, old_hp - new_hp);  // source == victim (self)
+    // source == victim (self), HP_LOSS type (bypasses block; not a THORNS/NORMAL
+    // attack -- so it drives Rupture but not Thorns/Plated Armor's attack guards).
+    dispatch_was_hp_lost(s, tgt, tgt, old_hp - new_hp,
+                         static_cast<uint8_t>(DamageType::HP_LOSS));
 }
 
-// BLOCK: tgt gains `amount` block. Skeleton path is a straight add -- in the
-// base game relic onPlayerGainedBlock / power onGainedBlock would hook here, but
-// none of Strength/Vulnerable/Weak (and no relic) touches block gain in this
-// version, and the skeleton has no relics/Dexterity/Frail. (< 0 clamped so a
-// negative amount can't drive block below zero.)
-void op_block(CombatState& s, uint8_t tgt, int amount) noexcept {
+// BLOCK: tgt gains `amount` block. CARD block (flags & kBlockNoPowers == 0) runs
+// the gainer's modifyBlock hooks (Dexterity) with a single floor, mirroring
+// AbstractCard.applyPowers + GainBlockAction; power/relic/potion block sets
+// kBlockNoPowers (a direct GainBlockAction -- no modifyBlock) so it takes the
+// straight add. With no Dexterity present the modifyBlock pass is the identity and
+// gain == amount, so the 20 combat fixtures (no Dexterity) stay byte-identical.
+void op_block(CombatState& s, uint8_t tgt, int amount, uint32_t flags) noexcept {
     int16_t* blk = actor_block(s, tgt);
     if (blk == nullptr) {
         return;
     }
-    int nb = *blk + amount;
+    int gain = amount;
+    if ((flags & kBlockNoPowers) == 0u) {
+        float tmp = static_cast<float>(amount);
+        const PowerView pv = actor_powers(s, tgt);
+        for (uint8_t i = 0; i < pv.count; ++i) {
+            tmp = modify_block(tmp, pv.slots[i]);   // Dexterity: + amount, floor 0
+        }
+        if (tmp < 0.0f) {
+            tmp = 0.0f;                             // GainBlockAction post-clamp
+        }
+        gain = mathutils_floor(tmp);
+    }
+    int nb = *blk + gain;
     if (nb < 0) {
         nb = 0;
     }
     *blk = static_cast<int16_t>(nb);
     // onGainedBlock (Juggernaut): fires after the block gain, on the actor's own
-    // powers, only for a positive gain (AbstractCreature.addBlock:426-433). No-op
-    // unless a power binds ON_GAINED_BLOCK -- so the skeleton BLOCK is unchanged.
-    dispatch_on_gained_block(s, tgt, amount);
+    // powers, only for a positive gain (AbstractCreature.addBlock:426-433), with
+    // the ACTUAL block gained (post-Dexterity). No-op unless a power binds
+    // ON_GAINED_BLOCK -- so the skeleton BLOCK is unchanged.
+    dispatch_on_gained_block(s, tgt, gain);
 }
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
@@ -725,10 +777,13 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::NOP:
             return;  // reserved safe no-op (value-init / unrecognized item)
         case Opcode::DAMAGE:
-            op_damage(s, item.src, item.tgt, item.amount);
+            // Plain DAMAGE: strength_mult 1; `flags` carries the DamageType
+            // (0 == NORMAL for card attacks; THORNS for reflected damage).
+            op_damage(s, item.src, item.tgt, item.amount, /*strength_mult=*/1,
+                      damage_type_from_flags(item.flags));
             return;
         case Opcode::BLOCK:
-            op_block(s, item.tgt, item.amount);
+            op_block(s, item.tgt, item.amount, item.flags);
             return;
         case Opcode::APPLY_POWER:
             op_apply_power(s, item.src, item.tgt,

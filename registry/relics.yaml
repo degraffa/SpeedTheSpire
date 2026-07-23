@@ -92,10 +92,10 @@
   name: BRONZE_SCALES
   game_id: "Bronze Scales"
   tier: COMMON
-  native: true
   hooks:
-    at_battle_start: []       # apply Thorns 3 -- DEFERRED (Thorns power row is B3.4+/later)
-  provenance: "BronzeScales.atBattleStart (BronzeScales.java:30-33) -- addToTop ApplyPowerAction(ThornsPower 3). Thorns not yet in powers.yaml (B3.4 owns it); native body deferred until the Thorns row lands."
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 3, power: THORNS}
+  provenance: "BronzeScales.atBattleStart (BronzeScales.java:30-33) -- addToTop ApplyPowerAction(player, ThornsPower 3). Un-deferred: THORNS registered (powers.yaml id 16) -> a DATA APPLY_POWER at_battle_start (mirrors Vajra); potion-support-powers follow-up."
 
 - id: 7
   name: CENTENNIAL_PUZZLE
@@ -128,10 +128,10 @@
   name: ODDLY_SMOOTH_STONE
   game_id: "Oddly Smooth Stone"
   tier: COMMON
-  native: true
   hooks:
-    at_battle_start: []       # apply Dexterity 1 -- DEFERRED (Dexterity power row is B3.4+/later)
-  provenance: "OddlySmoothStone.atBattleStart (OddlySmoothStone.java:31-35) -- addToTop ApplyPowerAction(DexterityPower 1). Dexterity not yet in powers.yaml (B3.4 owns it); native body deferred until the Dexterity row lands."
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 1, power: DEXTERITY}
+  provenance: "OddlySmoothStone.atBattleStart (OddlySmoothStone.java:31-35) -- addToTop ApplyPowerAction(player, DexterityPower 1). Un-deferred: DEXTERITY registered (powers.yaml id 14) -> a DATA APPLY_POWER at_battle_start (mirrors Vajra); potion-support-powers follow-up."
 
 - id: 11
   name: ORICHALCUM
