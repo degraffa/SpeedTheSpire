@@ -314,3 +314,20 @@ sts_set_warnings(card_ext_test)
 sts_enable_sanitizers(card_ext_test)
 
 gtest_discover_tests(card_ext_test)
+
+# B4.2: map room-type assignment (generateRoomTypes quotas, trap-12 direct-XS128
+# Collections.shuffle, placement rules, fixed rows 0/8/14, setEmeraldElite draw)
+# vs the live-game oracle corpus (tests/golden/map_paths/oracle_maps.txt): room
+# symbol match per node + the full post-generateMap {counter,s0,s1} triple, all
+# 20 seeds. Header-only engine code (map_rooms.hpp), links sts_engine like the
+# other tier-2 suites.
+add_executable(map_rooms_test
+    map_rooms_test.cpp
+)
+
+target_link_libraries(map_rooms_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(map_rooms_test PRIVATE STS_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden")
+sts_set_warnings(map_rooms_test)
+sts_enable_sanitizers(map_rooms_test)
+
+gtest_discover_tests(map_rooms_test)

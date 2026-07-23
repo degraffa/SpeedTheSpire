@@ -1303,7 +1303,7 @@ the full {counter,s0,s1} oracle match; its counter target = path-gen + 0
 correction** — flagged for orchestrator sequencing (frozen shared doc not
 edited unilaterally mid-parallel-work).
 
-### B4.2 `[ ]` Room-type assignment
+### B4.2 `[x]` Room-type assignment
 **Deps:** B4.1 · **Spec:** design §5.6; §10 trap 12 · **Provenance:**
 AbstractDungeon.java:558-594, 571-573; RoomTypeAssigner.java:65-143
 **Deliverables:** quota computation (incl. A1 elite ×1.6), the trap-12
@@ -1313,7 +1313,69 @@ sibling exclusions, monster fill), fixed rows 0/8/14.
 trap-12 named test (counter unchanged across the shuffle; permutation matches
 golden category 7 from the A0.1 harness extension — extend the capture
 harness in this commit); quota table tested at A0 vs A20 (1.6× elites).
-**Log:** —
+*(Amended 2026-07-23 — trap-12 permutation verified against the live oracle
+instead: 20-seed room-symbol match + post-generateMap {counter,s0,s1} triple
+match jointly pin the shuffle permutation and draw count; strictly stronger
+than an isolated synthetic capture and WSL-CI-runnable, whereas the A0.1
+harness is Windows-host/CI-excluded. Standalone golden category 7 remains
+available as optional future work if shuffle debugging ever needs isolation.)*
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred. Delivered
+header-only `include/sts/engine/map_rooms.hpp` re-expressing the tail of
+`AbstractDungeon.generateMap` (everything after B4.1 path-gen) bit-for-bit, in
+GAME semantics (15 floors × 7 cols, row-major y-outer/x-inner exactly as the
+map ArrayList is iterated). Consumes a B4.1 `GeneratedMap` at its post-path
+`mapRng` state and produces the per-node `RoomType` grid + the end-of-generateMap
+`mapRng`. Pipeline: availableRoomCount (edge nodes, `y != map.size()-2`=13, H7) →
+generateRoomTypes quotas (shop .05 / rest .12 / treasure 0 / event .22 / elite
+.08, **elite ×1.6 at ascension≥1**; roomList `[Shop,Rest,Elite,Event]`) →
+fixed rows 14=Rest / 0=Monster / 8=Treasure → distributeRoomsAcrossMap
+(nodeCount incl. row 13, monster padding, **trap-12 shuffle**, row-major
+assignment via ruleAssignableToRow / ruleParentMatches / ruleSiblingMatches +
+row-0 override, lastMinuteNodeChecker monster fill) → **setEmeraldElite draw**.
+Provenance (each read in full): AbstractDungeon.java:510-540,558-594,542-556;
+RoomTypeAssigner.java:30-143; Exordium.java:95-99; MonsterRoom/EventRoom/
+MonsterRoomElite/RestRoom/ShopRoom/TreasureRoom/MonsterRoomBoss mapSymbols.
+**Hazards honoured — Trap 12** (`RoomTypeAssigner.java:135`): `xs128_room_shuffle`
+runs JDK `Collections.shuffle` Fisher-Yates (`for i=size..2: swap(i-1,
+nextInt(i))`) on the **raw RandomXS128** off `mapRng`'s (s0,s1) — raw state
+advances by exactly `size-1` next_long draws, wrapper `counter` does NOT advance;
+never routed through the JDK-LCG deck/pool path (`rng_jdk.hpp`). **H2**:
+`java_round_f` is a bit-exact **Java 8** `Math.round(float)` (significand-shift
+algorithm, not `(int)floor(a+0.5)`); quota multiply in float precision, left-assoc
+`((count*.08f)*1.6f)`. **H7**: quota base excludes row 13, padding does not.
+**setEmeraldElite** (design §11 **v0.1.3**; §1.1:43 corrected): on the fully-
+unlocked A20 profile the `isFinalActAvailable && !hasEmeraldKey` guard PASSES, so
+one `mapRng.random(0, eliteNodes.size()-1)` draw fires after assignment (+1
+wrapper draw). Modelled (the chosen elite's key flag is out of S1 scope; the DRAW
+and its s0/s1 effect are what the triple needs).
+**Acceptance — gtest `map_rooms_test`, 10 cases over the 20-seed A20-Ironclad
+live-oracle corpus** `tests/golden/map_paths/oracle_maps.txt` (the B4.1 golden;
+its header carries the post-generateMap `{counter,s0,s1}`, each node its room
+`symbol`): (1) **room symbols match the oracle NODE-FOR-NODE for all 20 seeds**
+(`RoomSymbolsMatchOracleAllSeeds`); (2) **full post-generateMap {counter,s0,s1}
+triple matches the live oracle for all 20 seeds** (`PostGenerateMapRngTripleMatchesOracle`)
+— jointly pins the trap-12 shuffle permutation/length AND the emerald draw;
+`TailCounterAdvanceIsExactlyEmeraldDraw` confirms the whole tail advances counter
+by exactly +1 (shuffle 0 + emerald 1) with ≥1 elite every seed; (3) **trap-12
+named test** (`Trap12ShuffleAdvancesRawStateNotCounter`): counter unchanged +
+raw (s0,s1) == an independent RandomXS128 stepped `size-1` times, sizes
+{2,5,17,42,105}; + determinism/multiset-preservation; (4) **quota A0 vs A20**
+(`QuotaTableA0VsA20`, count∈{50,62,40,10}: elite differs only by ×1.6, all else
+ascension-invariant) + `JavaRoundFloatHalfUp` (H2 half-up parity); (5) structural
+rules (fixed rows, no-rest 0-4/13, no-elite 0-4, treasure only row 8, no
+unassigned edge node) + RunState room_type encode round-trip. Full suite green
+all three presets: **debug 201/201, asan 201/201, release 201/201** (191 baseline
++ 10 new; header-only — no engine `.cpp` changed, `sizeof(RunState)` /
+`SCHEMA_VERSION` untouched). **B4.3/B4.4 need:** `RoomType {None=0,Monster=1,
+Event=2,Elite=3,Rest=4,Shop=5,Treasure=6,Boss=7}` written into
+`RunState.map[].room_type` via `encode_rooms_into_run_state`
+(game-oriented `run_state_map_index`, mirrors B4.1's edge encoding) — B4.3 owns
+final RunState population + schema-v2 reorientation, values append-only-friendly;
+`RoomAssignment.rng` is `mapRng` at the very END of generateMap (shuffle+emerald
+applied) so B4.4 run-advance must NOT re-consume the emerald draw. **Unmodeled**
+(out of S1 scope): the chosen elite's `hasEmeraldKey` flag (only the draw);
+`Boss` room-type reserved/unused (boss is not a grid node); fixed-row no-edge
+nodes the game also stamps (irrelevant to the traversable grid).
 
 ### B4.3 `[ ]` RunState population + additive fields (schema v2)
 **Deps:** B4.2 · **Spec:** design §2.6 (placeholder population; additive
