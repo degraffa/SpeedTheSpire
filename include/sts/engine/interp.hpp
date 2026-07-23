@@ -109,7 +109,55 @@ enum class Opcode : uint16_t {
     LOSE_HP = 11,     // tgt loses `amount` HP directly (bypasses block; HP_LOSS
                        // type). Fires wasHPLost with source == tgt (self). The
                        // firing site for the Rupture attribution (power_hooks).
+    // --- Stage B B3.4 additions (append-only from 12) ---
+    CHOOSE_CARD = 12, // player-selected (or random / forced) hand-card manipulation:
+                       // exhaust / put-on-draw-top / upgrade. `amount` = number of
+                       // cards to select; `flags` = the ChoiceKind + RANDOM bit
+                       // (make_choose_flags below). This is the CHOOSE-in-combat
+                       // "hand card select screen" verb -- the pump BLOCKS on it
+                       // (phase WAITING_ON_USER) when a real choice is needed
+                       // (choice_requires_user), and advance(CHOOSE, hand_slot)
+                       // resolves it. When the selection is FORCED (eligible <=
+                       // amount) or RANDOM it auto-resolves at execute time (no
+                       // block), matching ExhaustAction / PutOnDeckAction /
+                       // ArmamentsAction's "no screen" branches.
+    PLAY_TOP_DRAW = 13, // play the top card of the draw pile, then exhaust it
+                         // (Havoc / PlayTopCardAction.update). Rolls one
+                         // card_random_rng draw for the played card's random-monster
+                         // target (getRandomMonster), reshuffles an empty draw pile,
+                         // and plays the card free (cost 0) with exhaust-on-use.
+    REMOVE_POWER = 14, // remove PowerId(flags low16) from `tgt`'s power list
+                        // (RemoveSpecificPowerAction). Used by LoseStrengthPower's
+                        // end-of-turn self-removal (Flex).
 };
+
+// --- CHOOSE_CARD field encoding (Stage B B3.4) ------------------------------
+// The blocking hand-card select verb. `amount` carries how many cards to select;
+// `flags` (the step's `extra`) packs the manipulation kind and the RANDOM bit:
+//   * bits [0..1] -> ChoiceKind (what to do with each selected card).
+//   * bit  [2]    -> RANDOM: pick with card_random_rng instead of prompting the
+//                    player (ExhaustAction.isRandom -- True Grit base).
+// MIRRORED in tools/registry_gen/gen.py (CHOICE_KINDS + the bit layout) so a
+// CHOOSE_CARD effect step authored in cards.yaml packs an identical `extra`.
+enum class ChoiceKind : uint8_t {
+    EXHAUST = 0,         // move each selected hand card to the exhaust pile
+    PUT_ON_DRAW_TOP = 1, // move each selected hand card to the top of the draw pile
+    UPGRADE = 2,         // upgrade each selected hand card in place (upgrade++)
+};
+
+inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
+
+[[nodiscard]] constexpr uint32_t make_choose_flags(ChoiceKind kind,
+                                                   bool random) noexcept {
+    return static_cast<uint32_t>(static_cast<uint8_t>(kind)) |
+           (random ? kChoiceRandomBit : 0u);
+}
+[[nodiscard]] constexpr ChoiceKind choose_kind_from_flags(uint32_t flags) noexcept {
+    return static_cast<ChoiceKind>(static_cast<uint8_t>(flags & 0x3u));
+}
+[[nodiscard]] constexpr bool choose_is_random(uint32_t flags) noexcept {
+    return (flags & kChoiceRandomBit) != 0u;
+}
 
 // --- MAKE_CARD field encoding (Stage B B3.1) --------------------------------
 // Card creation into a pile (MakeTempCardInHand/Discard, ShuffleIntoDrawPile).
@@ -165,6 +213,31 @@ enum class CardPile : uint8_t {
 // is in float (trap 1: no integer shortcuts).
 [[nodiscard]] int compute_damage(const CombatState& state, uint8_t src_actor,
                                  uint8_t tgt_actor, int base_damage) noexcept;
+
+// --- CHOOSE_CARD queries (Stage B B3.4) -------------------------------------
+// Shared by the pump (block-or-auto decision), legal_actions (which hand slots
+// the player may CHOOSE), and advance (validating a CHOOSE action). Pure reads.
+
+// Is hand slot `slot` a legal selection for a CHOOSE_CARD of the given kind?
+// UPGRADE requires an un-upgraded card (AbstractCard.canUpgrade: !upgraded, and
+// non-CURSE/STATUS -- every card in scope is ATTACK/SKILL); EXHAUST /
+// PUT_ON_DRAW_TOP accept any hand card.
+[[nodiscard]] bool choice_slot_eligible(const CombatState& state, uint8_t slot,
+                                        ChoiceKind kind) noexcept;
+
+// Does the CHOOSE_CARD `item` (assumed at the front of the action queue) require
+// a real player prompt? True iff it selects fewer cards than are eligible AND it
+// is not RANDOM (a RANDOM or forced-all selection auto-resolves at execute time).
+// The pump BLOCKS (phase WAITING_ON_USER) exactly when this is true.
+[[nodiscard]] bool choice_requires_user(const CombatState& state,
+                                        const ActionQueueItem& item) noexcept;
+
+// Apply one player-selected CHOOSE_CARD manipulation to hand slot `slot`
+// (advance's CHOOSE dispatch). exhaust / put-on-draw-top / upgrade the card.
+// Precondition (checked by the caller): slot < hand_count and the slot is a
+// legal selection for `kind`.
+void apply_choice_selection(CombatState& state, uint8_t slot,
+                            ChoiceKind kind) noexcept;
 
 // --- Dispatch ----------------------------------------------------------------
 // Execute one popped ActionQueueItem against `state`. One case per Opcode;

@@ -85,6 +85,17 @@ struct ActionMask {
     // END_TURN is always legal while WAITING_ON_USER (the player may always
     // choose to end the turn), and illegal otherwise.
     bool can_end_turn;
+
+    // --- CHOOSE-in-combat (Stage B B3.4) ---
+    // When a CHOOSE_CARD is open at the head of the action queue and needs a real
+    // selection (choice_requires_user), the player is choosing a hand card, NOT
+    // playing/ending: `choice_pending` is true, `can_play`/`can_end_turn` are all
+    // false, and `can_choose[i]` is true for each hand slot that is a legal
+    // selection (the eligible cards on the hand-select screen). The CHOOSE action
+    // arg0 is the chosen hand slot. When no choice is pending, `choice_pending` is
+    // false and `can_choose` is all false.
+    bool choice_pending;
+    bool can_choose[kHandCap];
 };
 
 static_assert(std::is_trivially_copyable_v<ActionMask>,

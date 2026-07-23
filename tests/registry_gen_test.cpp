@@ -281,15 +281,15 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 5u);
-    EXPECT_EQ(m::kPowersCount, 12u);  // 3 skeleton + 9 B3.2 framework powers
+    EXPECT_EQ(m::kCardsCount, 10u);   // B3.4: 5 skeleton + 5 red common skills
+    EXPECT_EQ(m::kPowersCount, 13u);  // 3 skeleton + 9 B3.2 + 1 B3.4 (LoseStrength)
     EXPECT_EQ(m::kMonstersCount, 1u);
     EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 0u);
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 85u);  // 18 skeleton/B3.2 + 33 potions + 34 relics
+    EXPECT_EQ(m::kTotalCount, 91u);  // 18 skeleton/B3.2 + 33 potions + 34 relics + 6 B3.4
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -496,9 +496,10 @@ TEST(RegistryGen, UpgradedBlockAndFlagsEmitDistinctRow) {
         }
     }
     {
-        // id 6: X-cost + exhaust; base DAMAGE 7 (all enemies), upgraded DAMAGE 99.
+        // id 100: X-cost + exhaust; base DAMAGE 7 (all enemies), upgraded DAMAGE 99.
+        // (Past the real card ids 1-10 so it never collides -- B3.4 filled 6-10.)
         std::ofstream cards(reg / "cards.yaml", std::ios::app);
-        cards << "\n- id: 6\n  name: SYNTH_XCOST\n  game_id: \"SynthX\"\n"
+        cards << "\n- id: 100\n  name: SYNTH_XCOST\n  game_id: \"SynthX\"\n"
                  "  type: ATTACK\n  cost: -1\n  target: ALL_ENEMY\n"
                  "  flags: [exhaust]\n"
                  "  provenance: \"synthetic B3.1 upgrade/flags codegen test\"\n"

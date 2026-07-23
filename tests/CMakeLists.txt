@@ -373,3 +373,12 @@ sts_set_warnings(relic_hooks_test)
 sts_enable_sanitizers(relic_hooks_test)
 
 gtest_discover_tests(relic_hooks_test)
+
+# B3.4 red common skills + CHOOSE-in-combat plumbing.
+add_executable(card_skills_test
+    card_skills_test.cpp
+)
+target_link_libraries(card_skills_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(card_skills_test)
+sts_enable_sanitizers(card_skills_test)
+gtest_discover_tests(card_skills_test)

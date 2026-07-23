@@ -1027,7 +1027,7 @@ from the cited `use()`; trap-10 coverage for Sword Boomerang (dequeue-time
 rolls); directed script added.
 **Log:** —
 
-### B3.4 `[ ]` ∥ Red commons — skills
+### B3.4 `[x]` ∥ Red commons — skills
 **Deps:** B3.2 · **Spec:** design §5.1 · **Provenance:** cards/red COMMON
 skills (~6 beyond Shrug It Off)
 **Deliverables:** registry entries: Armaments (upgrade-in-combat, grid
@@ -1037,7 +1037,41 @@ Introduces the in-combat card-choice screen verb plumbing (CHOOSE in combat)
 where needed (Armaments+, True Grit+).
 **Acceptance:** tier-2 per card; CHOOSE-in-combat legal-action masking tested;
 directed script.
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred; every card /
+action / power read in full in the decompiled Java before coding. Landed the 5
+cards (cards.yaml ids 6-10, base+upgraded) + LoseStrength power (powers.yaml id
+13) with **zero CombatState/CardInstance/PowerSlot layout change** ->
+`SCHEMA_VERSION` stays 2, all combat fixtures load with zero regeneration
+(FixtureOracle green). **CHOOSE-in-combat lives IN the action queue** (new
+opcode CHOOSE_CARD=12), not a new state field: the pump peeks the queue front
+and BLOCKS (WAITING_ON_USER, item left at head) when a CHOOSE_CARD needs a real
+selection (`choice_requires_user`: non-random, eligible > amount);
+`legal_actions` exposes eligible slots via `ActionMask.can_choose[]` /
+`choice_pending`; `advance(CHOOSE, hand_slot)` applies one selection, decrements
+the queued amount, re-pumps. Forced (eligible<=amount) and RANDOM selections
+auto-resolve at execute time (ExhaustAction/PutOnDeckAction/ArmamentsAction
+no-screen branches). **New opcodes** (append-only from 12; interp.hpp + gen.py
+OPCODES + cards.hpp drift-pin): CHOOSE_CARD=12 (exhaust/put-on-draw-top/upgrade;
+kind+RANDOM bit packed in step `extra`, gen.py CHOICE_KINDS mirror),
+PLAY_TOP_DRAW=13 (Havoc), REMOVE_POWER=14 (LoseStrength self-removal). **Havoc**
+excludes the just-played source card from its own PLAY_TOP_DRAW deck (the game
+keeps it cardInUse/limbo — AbstractPlayer.useCard removeCard+cardInUse,
+UseCardAction queued after; our synchronous resolve moves it to discard early,
+so resolve_card_play stamps the source pool index and op_play_top_draw lifts it
+out of discard for the duration and restores it). **Flex** LoseStrength (native,
+DEBUFF, game_id "Flex") at_end_of_turn queues Strength -amount + REMOVE_POWER on
+the owner (both addToBot), so +Strength lasts one turn. **Acceptance — new
+tier-2 suite `tests/card_skills_test.cpp` (18 cases)** + `registry_gen_test`
+ManifestCounts (cards 5->10, powers 12->13) + the codegen SYNTH_XCOST card's id
+(6->100, since 6 is now ARMAMENTS): gen<->engine CHOOSE flag pin; Flex
+apply/upgrade/end-of-turn reversal+self-removal; True Grit random/forced exhaust
+(card_random_rng draw accounting) + upgraded CHOOSE mask/resolve; Warcry
+draw-then-put-back + upgraded draw-2; Armaments forced/prompted/upgrade-all +
+mask excluding upgraded; Havoc play-top/empty-noop/discard-reshuffle; directed
+CHOOSE->upgrade->play script. All hand-computed from the cited Java. Triple-preset
+(debug/asan/release) green at 6c5f7f4; merged debug green at e3f71c9 (potions +
+relics landed) — my power_hooks/action_queue additions are disjoint from B3.24's
+relic wiring. **Suites: debug/asan/release green (baseline + 18 new B3.4 cases).**
 
 ### B3.5 `[ ]` ∥ Red uncommons — attacks
 **Deps:** B3.2 · **Provenance:** cards/red UNCOMMON attacks (~12; enumerate)

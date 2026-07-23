@@ -19,6 +19,7 @@
 #include "sts/engine/card_play.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/interp.hpp"
 #include "sts/engine/monster_jaw_worm.hpp"
 #include "sts/engine/observation.hpp"
 #include "sts/engine/rng_jdk.hpp"
@@ -129,7 +130,31 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
 void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     const bool waiting =
         state.phase == static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+
+    // CHOOSE-in-combat (Stage B B3.4): if the head of the action queue is an open
+    // CHOOSE_CARD that needs a selection, the player is choosing a hand card. The
+    // ONLY legal actions are CHOOSE(hand_slot) over the eligible slots -- no
+    // play/end-turn while the hand-select screen is open (mandatory single-selects
+    // in scope: Armaments+/True Grit+/Warcry, canPickZero == false).
+    if (waiting && state.action_count > 0) {
+        const ActionQueueItem& front = state.action_queue[state.action_head];
+        if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
+            choice_requires_user(state, front)) {
+            const ChoiceKind kind = choose_kind_from_flags(front.flags);
+            out.choice_pending = true;
+            out.can_end_turn = false;
+            for (int i = 0; i < kHandCap; ++i) {
+                out.can_play[i] = false;
+                out.can_choose[i] =
+                    choice_slot_eligible(state, static_cast<uint8_t>(i), kind);
+            }
+            return;
+        }
+    }
+
+    out.choice_pending = false;
     for (int i = 0; i < kHandCap; ++i) {
+        out.can_choose[i] = false;
         if (waiting && i < state.hand_count) {
             const CardInstance& c = state.card_pool[state.hand[i]];
             // UNPLAYABLE (statuses/curses) is never a legal play regardless of
@@ -194,12 +219,37 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 add_card_to_queue_bottom(s, make_end_turn_sentinel());
                 pump(s, jaw_worm_take_turn);
                 break;
+            case ActionVerb::CHOOSE: {
+                // Stage B B3.4: resolve one selection on the open CHOOSE_CARD at
+                // the head of the action queue. arg0 = the chosen hand slot. Ignored
+                // (documented no-op) unless a choice is actually pending and the slot
+                // is a legal selection -- an illegal CHOOSE cannot corrupt state.
+                if (s.phase != static_cast<uint8_t>(CombatPhase::WAITING_ON_USER) ||
+                    s.action_count == 0) {
+                    break;
+                }
+                ActionQueueItem& front = s.action_queue[s.action_head];
+                if (static_cast<Opcode>(front.opcode) != Opcode::CHOOSE_CARD ||
+                    !choice_requires_user(s, front)) {
+                    break;
+                }
+                const ChoiceKind kind = choose_kind_from_flags(front.flags);
+                const uint8_t slot = action_arg0(a);
+                if (slot >= s.hand_count ||
+                    !choice_slot_eligible(s, slot, kind)) {
+                    break;  // illegal selection -- no-op
+                }
+                apply_choice_selection(s, slot, kind);
+                // One card selected: decrement the remaining count. When it hits 0
+                // (or no eligible cards remain), the next pump pops the now-satisfied
+                // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.
+                front.amount -= 1;
+                pump(s, jaw_worm_take_turn);
+                break;
+            }
             case ActionVerb::USE_POTION:
-            case ActionVerb::CHOOSE:
             default:
-                // Out of skeleton scope (design doc §9: no potions, no choice
-                // prompts in the 5-card micro-game). Documented no-op -- NOT
-                // silently wrong, just not yet built. Stage B wires these.
+                // Out of scope (no potions in S1 combat yet). Documented no-op.
                 break;
         }
         fill_result(s, results[i]);

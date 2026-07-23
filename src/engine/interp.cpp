@@ -322,6 +322,217 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
     }
 }
 
+// --- CHOOSE_CARD helpers + body (Stage B B3.4) ------------------------------
+
+// Remove hand slot `slot` from the hand (shifting the tail down) and return the
+// card's pool index. Precondition: slot < hand_count.
+CardPoolIndex remove_from_hand(CombatState& s, uint8_t slot) noexcept {
+    const CardPoolIndex pi = s.hand[slot];
+    for (uint8_t j = static_cast<uint8_t>(slot + 1); j < s.hand_count; ++j) {
+        s.hand[j - 1] = s.hand[j];
+    }
+    --s.hand_count;
+    return pi;
+}
+
+// Upgrade the pool instance in place (in-combat upgrade, ArmamentsAction:
+// c.upgrade() + applyPowers()). `upgrade` is a count; re-seed cost_now/flags from
+// the registry's upgraded row so the new cost/flags take effect (upgradeBaseCost).
+void upgrade_instance(CombatState& s, CardPoolIndex pi) noexcept {
+    CardInstance& c = s.card_pool[pi];
+    const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+    if (def == nullptr) {
+        return;
+    }
+    c.upgrade = static_cast<uint8_t>(c.upgrade + 1);
+    c.cost_now = card_cost(*def, c.upgrade);
+    c.flags = card_flags(*def, c.upgrade);
+}
+
+// Apply one CHOOSE_CARD manipulation to the card at hand slot `slot`.
+void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind) noexcept {
+    if (slot >= s.hand_count) {
+        return;
+    }
+    switch (kind) {
+        case ChoiceKind::EXHAUST:
+            // moveToExhaustPile (fires §5.5 onExhaust). exhaust_card locates by
+            // pool index, so removing by index first would be equivalent; call it
+            // directly on the slot's pool index.
+            exhaust_card(s, s.hand[slot]);
+            break;
+        case ChoiceKind::PUT_ON_DRAW_TOP: {
+            // moveToDeck -> addToTop == top of the draw pile (draw[draw_count-1]).
+            const CardPoolIndex pi = remove_from_hand(s, slot);
+            if (s.draw_count < kDrawCap) {
+                s.draw[s.draw_count++] = pi;
+            }
+            break;
+        }
+        case ChoiceKind::UPGRADE:
+            upgrade_instance(s, s.hand[slot]);
+            break;
+    }
+}
+
+// The eligible hand-card count for a CHOOSE_CARD of `kind`.
+[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind) noexcept {
+    int n = 0;
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (choice_slot_eligible(s, i, kind)) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+// CHOOSE_CARD execute (auto path only -- the pump reaches here only when the
+// choice does NOT require a user prompt: it is RANDOM, or forced because the
+// eligible count is <= the amount to select). Faithful to ExhaustAction /
+// PutOnDeckAction / ArmamentsAction's no-screen branches.
+void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
+    const ChoiceKind kind = choose_kind_from_flags(item.flags);
+    const bool is_random = choose_is_random(item.flags);
+    const int need = item.amount;
+    if (need <= 0) {
+        return;
+    }
+    const int eligible = count_eligible(s, kind);
+    if (eligible <= need) {
+        // Forced: apply to ALL eligible cards. Snapshot pool indices first (the
+        // apply mutates the hand). (ExhaustAction: hand.size() <= amount -> exhaust
+        // whole hand; ArmamentsAction: exactly one upgradeable -> upgrade it;
+        // PutOnDeckAction: hand.size() <= amount -> move all.)
+        CardPoolIndex picked[kHandCap];
+        int m = 0;
+        for (uint8_t i = 0; i < s.hand_count && m < kHandCap; ++i) {
+            if (choice_slot_eligible(s, i, kind)) {
+                picked[m++] = s.hand[i];
+            }
+        }
+        for (int k = 0; k < m; ++k) {
+            // Re-find the slot each time (earlier applies may have shifted hand).
+            for (uint8_t i = 0; i < s.hand_count; ++i) {
+                if (s.hand[i] == picked[k]) {
+                    apply_choice_to_slot(s, i, kind);
+                    break;
+                }
+            }
+        }
+        return;
+    }
+    // eligible > need and RANDOM: roll card_random_rng once per pick over the
+    // CURRENT hand (hand.getRandomCard(cardRandomRng), one draw per card;
+    // ExhaustAction.isRandom). Only EXHAUST uses RANDOM in scope, whose eligible
+    // set is the whole hand, so rolling over the hand matches getRandomCard.
+    if (is_random) {
+        for (int k = 0; k < need; ++k) {
+            if (s.hand_count == 0) {
+                break;
+            }
+            const int32_t ridx = random(s.card_random_rng,
+                                        static_cast<int32_t>(s.hand_count) - 1);
+            apply_choice_to_slot(s, static_cast<uint8_t>(ridx), kind);
+        }
+    }
+    // Non-random with eligible > need never reaches here (the pump blocks first).
+}
+
+// Remove pool index `idx` from the discard pile if present; return true if it was
+// removed (so the caller can restore it). Used to lift the just-played source card
+// (Havoc) out of the deck during its own PLAY_TOP_DRAW (see op_play_top_draw).
+bool discard_remove(CombatState& s, CardPoolIndex idx) noexcept {
+    for (uint8_t i = 0; i < s.discard_count; ++i) {
+        if (s.discard[i] == idx) {
+            for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.discard_count; ++j) {
+                s.discard[j - 1] = s.discard[j];
+            }
+            --s.discard_count;
+            return true;
+        }
+    }
+    return false;
+}
+
+// PLAY_TOP_DRAW (Havoc / PlayTopCardAction.update): play the top draw card, then
+// exhaust it. `exclude` is the pool index of the SOURCE card (Havoc): in the game
+// the source is cardInUse (limbo) during PlayTopCardAction and is moved to discard
+// only afterwards (AbstractPlayer.useCard: removeCard + cardInUse, then the queued
+// UseCardAction discards), so it is NOT a replay candidate. Our synchronous
+// resolve_card_play already moved it to discard, so lift it out for the duration
+// and restore it after -- reproducing the limbo state exactly. The card_random_rng
+// monster-target roll happens FIRST and UNCONDITIONALLY (getRandomMonster is
+// evaluated as Havoc.use()'s argument), then the empty / reshuffle checks.
+void op_play_top_draw(CombatState& s, int exclude) noexcept {
+    const bool restore = (exclude >= 0 && exclude < kCardPoolCap)
+                             ? discard_remove(s, static_cast<CardPoolIndex>(exclude))
+                             : false;
+    const CardPoolIndex excl = static_cast<CardPoolIndex>(exclude);
+    auto restore_source = [&]() noexcept {
+        if (restore && s.discard_count < kDiscardCap) {
+            s.discard[s.discard_count++] = excl;
+        }
+    };
+
+    // getRandomMonster(null, true, cardRandomRng): one card_random_rng draw over
+    // the live monsters (no draw if none alive -- combat is over in that case).
+    const uint8_t target = roll_random_target(s);
+    if (s.draw_count == 0 && s.discard_count == 0) {
+        restore_source();
+        return;  // deckSize + discardSize == 0 -> nothing to play (:34-36)
+    }
+    if (s.draw_count == 0) {
+        shuffle_discard_into_draw(s);  // EmptyDeckShuffleAction (one shuffle_rng draw)
+        if (s.draw_count == 0) {
+            restore_source();
+            return;
+        }
+    }
+    const CardPoolIndex pi = s.draw[s.draw_count - 1];  // getTopCard
+    --s.draw_count;
+    // exhaustOnUseOnce = true (:48) -> force the played card to exhaust; play it
+    // free (autoplay does not pay energy). Put it in hand so resolve_card_play's
+    // hand->pile move finds it, then queue its play at the front of the cardQueue
+    // (NewQueueCardAction -> the normal §5.3 resolve).
+    s.card_pool[pi].flags |= card_flag_bit(CardFlag::EXHAUST);
+    s.card_pool[pi].cost_now = 0;
+    if (s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = pi;
+    }
+    CardQueueItem q{};
+    q.card_index = pi;
+    q.target = target;
+    add_card_to_queue_top(s, q);
+    restore_source();
+}
+
+// REMOVE_POWER (RemoveSpecificPowerAction): drop PowerId(flags) from tgt's power
+// list (shifting the tail down). No-op if the actor lacks the power.
+void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
+    PowerSlot* slots = nullptr;
+    uint8_t* count = nullptr;
+    if (tgt == kActorPlayer) {
+        slots = s.player_powers;
+        count = &s.player_power_count;
+    } else if (tgt < kMonsterCap) {
+        slots = s.monsters[tgt].powers;
+        count = &s.monsters[tgt].power_count;
+    } else {
+        return;
+    }
+    const uint16_t pid = static_cast<uint16_t>(id);
+    for (uint8_t i = 0; i < *count; ++i) {
+        if (slots[i].power_id == pid) {
+            for (uint8_t j = static_cast<uint8_t>(i + 1); j < *count; ++j) {
+                slots[j - 1] = slots[j];
+            }
+            --*count;
+            slots[*count] = PowerSlot{};  // zero the vacated tail slot
+            return;
+        }
+    }
+}
+
 // SET_COST: set card_pool[src].cost_now = amount (Stage B B3.1 cost-modifier
 // write path). Clamped to the u8 cost_now range. The "temporary" (per-turn
 // reset) and "which card / under what condition" logic belongs to the consumer
@@ -389,6 +600,39 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
         out = 0;
     }
     return out;
+}
+
+// --- Public: CHOOSE_CARD queries (Stage B B3.4) ------------------------------
+
+bool choice_slot_eligible(const CombatState& s, uint8_t slot,
+                          ChoiceKind kind) noexcept {
+    if (slot >= s.hand_count) {
+        return false;
+    }
+    if (kind == ChoiceKind::UPGRADE) {
+        // canUpgrade(): !upgraded (and non-CURSE/STATUS -- every card in scope is
+        // ATTACK/SKILL, so the type guard is vacuously satisfied). `upgrade` is a
+        // count; 0 == not yet upgraded.
+        return s.card_pool[s.hand[slot]].upgrade == 0;
+    }
+    return true;  // EXHAUST / PUT_ON_DRAW_TOP accept any hand card
+}
+
+bool choice_requires_user(const CombatState& s,
+                          const ActionQueueItem& item) noexcept {
+    if (static_cast<Opcode>(item.opcode) != Opcode::CHOOSE_CARD) {
+        return false;
+    }
+    if (item.amount <= 0 || choose_is_random(item.flags)) {
+        return false;  // nothing left to pick / auto-rolled -- never blocks
+    }
+    const ChoiceKind kind = choose_kind_from_flags(item.flags);
+    return count_eligible(s, kind) > item.amount;
+}
+
+void apply_choice_selection(CombatState& s, uint8_t slot,
+                            ChoiceKind kind) noexcept {
+    apply_choice_to_slot(s, slot, kind);
 }
 
 // --- Public: dispatch --------------------------------------------------------
@@ -470,6 +714,19 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::LOSE_HP:
             op_lose_hp(s, item.tgt, item.amount);
+            return;
+        case Opcode::CHOOSE_CARD:
+            // Reached only on the auto path (RANDOM or forced-all); a real prompt
+            // is intercepted by the pump (choice_requires_user) before execute.
+            op_choose_card(s, item);
+            return;
+        case Opcode::PLAY_TOP_DRAW:
+            // `amount` carries the source card's pool index to exclude from the
+            // deck (stamped by resolve_card_play; see op_play_top_draw / Havoc).
+            op_play_top_draw(s, item.amount);
+            return;
+        case Opcode::REMOVE_POWER:
+            op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags));
             return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))

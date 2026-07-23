@@ -57,7 +57,20 @@ OPCODES = {
     # Stage B B3.2 addition: card/self HP loss (bypasses block, HP_LOSS type;
     # the firing site for the wasHPLost hook -- Rupture attribution).
     "LOSE_HP": 11,
+    # Stage B B3.4 additions (append-only): CHOOSE-in-combat hand-card select
+    # (exhaust/put-on-draw-top/upgrade), play-top-of-draw (Havoc), and
+    # remove-power (LoseStrength self-removal -- emitted natively, not authored in
+    # YAML, but pinned in the enum for the cards.hpp drift check).
+    "CHOOSE_CARD": 12,
+    "PLAY_TOP_DRAW": 13,
+    "REMOVE_POWER": 14,
 }
+# CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
+# A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
+# `random: true`); the step's `extra` packs kind (bits 0-1) | RANDOM (bit 2),
+# byte-identical to make_choose_flags() in interp.hpp.
+CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2}
+CHOICE_RANDOM_BIT = 1 << 2
 # StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
 # Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
 # RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
@@ -329,6 +342,16 @@ def _parse_card_steps(card_name: str, effects, powers: dict[str, int]) -> list:
                            f"references unknown power {pname!r}")
             # make_apply_power_flags: low 16 bits carry the PowerId.
             extra = powers[pname]
+        elif op == "CHOOSE_CARD":
+            # `extra` packs the ChoiceKind + RANDOM bit (interp.hpp make_choose_flags).
+            kind = str(step.get("choose", "")).lower()
+            if kind not in CHOICE_KINDS:
+                raise fail(f"cards.yaml: card {card_name} CHOOSE_CARD has unknown "
+                           f"choose {step.get('choose')!r} "
+                           f"(known: {sorted(CHOICE_KINDS)})")
+            extra = CHOICE_KINDS[kind]
+            if bool(step.get("random", False)):
+                extra |= CHOICE_RANDOM_BIT
         steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
     return steps
 

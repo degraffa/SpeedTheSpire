@@ -31,7 +31,8 @@ namespace {
 // skeleton's five cards (all player-owned effects), and tgt is substituted here:
 // kActorPlayer for SELF steps, the resolved monster slot for CARD_TARGET steps.
 void queue_effect_step(CombatState& s, const CardEffectStep& step,
-                       uint8_t resolved_target) noexcept {
+                       uint8_t resolved_target,
+                       CardPoolIndex source_index) noexcept {
     ActionQueueItem item{};
     item.opcode = static_cast<uint16_t>(step.op);
     item.src = kActorPlayer;
@@ -58,6 +59,12 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     }
     item.amount = step.amount;
     item.flags = step.extra;  // APPLY_POWER: PowerId flags; else 0
+    // PLAY_TOP_DRAW (Havoc): stamp the SOURCE card's pool index into `amount` so
+    // the opcode can exclude it from the deck it plays from -- the source is
+    // cardInUse (limbo) in the game, not a replay candidate (op_play_top_draw).
+    if (step.op == static_cast<decltype(step.op)>(Opcode::PLAY_TOP_DRAW)) {
+        item.amount = source_index;
+    }
     add_to_bottom(s, item);
 }
 
@@ -183,12 +190,12 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         }
         for (int rep = 0; rep < energy_on_use; ++rep) {
             for (uint8_t k = 0; k < eff.count; ++k) {
-                queue_effect_step(s, eff.steps[k], resolved_target);
+                queue_effect_step(s, eff.steps[k], resolved_target, pool_index);
             }
         }
     } else {
         for (uint8_t k = 0; k < eff.count; ++k) {
-            queue_effect_step(s, eff.steps[k], resolved_target);
+            queue_effect_step(s, eff.steps[k], resolved_target, pool_index);
         }
     }
 

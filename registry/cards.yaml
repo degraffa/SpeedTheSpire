@@ -96,3 +96,94 @@
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 9}
     - {op: DRAW, target: SELF, amount: 1}
+
+# --- B3.4 red common skills (ids 6-10; skeleton already has Shrug It Off) -----
+# CHOOSE-in-combat: a CHOOSE_CARD step opens the hand-select screen (interp.hpp);
+# `choose` is the manipulation kind, `amount` the number to pick (auto-resolves
+# when the selection is forced -- eligible <= amount -- or RANDOM). `target: SELF`
+# is a player-side action (its actor is the player; it operates on the hand).
+
+- id: 6
+  name: ARMAMENTS
+  game_id: "Armaments"
+  color: RED
+  rarity: COMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Armaments.use (Armaments.java:32-35) -> GainBlockAction(5), ArmamentsAction(upgraded). ArmamentsAction.update (ArmamentsAction.java:34-90): base upgrades ONE chosen upgradeable hand card (auto if exactly one, none if zero; handCardSelectScreen otherwise); upgraded (armamentsPlus) upgrades ALL upgradeable hand cards. baseBlock 5 (Armaments.java:28)."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 5}
+    - {op: CHOOSE_CARD, target: SELF, choose: upgrade, amount: 1}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 5}
+    # amount 99 >= hand size -> never blocks -> upgrade ALL upgradeable (armamentsPlus)
+    - {op: CHOOSE_CARD, target: SELF, choose: upgrade, amount: 99}
+
+- id: 7
+  name: FLEX
+  game_id: "Flex"
+  color: RED
+  rarity: COMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Flex.use (Flex.java:32-35) -> ApplyPowerAction(StrengthPower, magic) then ApplyPowerAction(LoseStrengthPower, magic); magicNumber 2 (Flex.java:28), upgradeMagicNumber(2) -> 4 (Flex.java:41). LoseStrengthPower (id 13) reverses the Strength at end of turn."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: LOSE_STRENGTH}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 4, power: STRENGTH}
+    - {op: APPLY_POWER, target: SELF, amount: 4, power: LOSE_STRENGTH}
+
+- id: 8
+  name: HAVOC
+  game_id: "Havoc"
+  color: RED
+  rarity: COMMON
+  type: SKILL
+  cost: 1
+  target: NONE
+  flags: []
+  provenance: "Havoc.use (Havoc.java:30-32) -> PlayTopCardAction(getRandomMonster(null,true,cardRandomRng), true). PlayTopCardAction.update (PlayTopCardAction.java:32-67): nothing if draw+discard empty; reshuffle if draw empty; else play the top draw card with exhaustOnUseOnce=true. upgradeBaseCost(0) (Havoc.java:38)."
+  effects:
+    - {op: PLAY_TOP_DRAW, target: SELF, amount: 0}
+  upgraded_cost: 0
+  upgraded:
+    - {op: PLAY_TOP_DRAW, target: SELF, amount: 0}
+
+- id: 9
+  name: TRUE_GRIT
+  game_id: "True Grit"
+  color: RED
+  rarity: COMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "TrueGrit.use (TrueGrit.java:32-39) -> GainBlockAction(block); base ExhaustAction(1,true,false,false) == exhaust ONE RANDOM hand card (cardRandomRng), upgraded ExhaustAction(1,false) == exhaust ONE CHOSEN hand card. baseBlock 7, upgradeBlock(2) -> 9 (TrueGrit.java:28,45). ExhaustAction.update: hand<=amount exhausts all with no roll."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 7}
+    - {op: CHOOSE_CARD, target: SELF, choose: exhaust, random: true, amount: 1}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 9}
+    - {op: CHOOSE_CARD, target: SELF, choose: exhaust, amount: 1}
+
+- id: 10
+  name: WARCRY
+  game_id: "Warcry"
+  color: RED
+  rarity: COMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: [exhaust]
+  provenance: "Warcry.use (Warcry.java:36-40) -> DrawCardAction(magic) then PutOnDeckAction(1,false) == draw magic, put ONE chosen hand card on top of draw. magicNumber 1, upgradeMagicNumber(1) -> 2 (Warcry.java:32,46); exhaust=true (Warcry.java:31). PutOnDeckAction.update: hand<=amount moves all with no screen (moveToDeck->addToTop == draw top)."
+  effects:
+    - {op: DRAW, target: SELF, amount: 1}
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1}
+  upgraded:
+    - {op: DRAW, target: SELF, amount: 2}
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1}

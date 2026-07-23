@@ -147,3 +147,14 @@
     on_play_card:
       - {op: BLOCK, target: SELF, amount: 0}   # block = power amount
   provenance: "RagePower.onUseCard (RagePower.java:41-47) -- if card.type==ATTACK: GainBlockAction(owner, amount). Bound to on_play_card here: our engine collapses the onPlayCard/onUseCard card-play cycles into one synchronous resolve_card_play (card_play.hpp HOOK-ORDER COLLAPSE), so both fire together; the attack-type guard is the power's concern, deferred to the B3.6 Rage card. Used as the §5.3 player-before-monster fan-out probe."
+
+# --- B3.4 (Flex): temporary-Strength reversal power --------------------------
+
+- id: 13
+  name: LOSE_STRENGTH
+  game_id: "Flex"
+  type: DEBUFF
+  native: true
+  hooks:
+    at_end_of_turn: []          # native: apply Strength -amount to owner, then self-remove
+  provenance: "LoseStrengthPower.atEndOfTurn (LoseStrengthPower.java:40-44) -- addToBot ApplyPowerAction(owner, StrengthPower(owner,-amount)) then addToBot RemoveSpecificPowerAction(owner, \"Flex\"); constructor type DEBUFF, POWER_ID \"Flex\" (LoseStrengthPower.java:19,29). Native body (power_hooks.cpp): queues APPLY_POWER Strength -amount and REMOVE_POWER LoseStrength on the owner (both addToBot -> resolve after the power-list walk). The reversal makes Flex's +Strength last exactly one turn."

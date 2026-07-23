@@ -277,6 +277,18 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     //    through the effect interpreter via execute_opcode (NOP/unrecognized
     //    opcodes are safe no-ops, so a value-init'd item still drains harmlessly).
     if (s.action_count > 0) {
+        // Stage B B3.4 CHOOSE-in-combat: a CHOOSE_CARD at the front that needs a
+        // real player prompt (choice_requires_user) BLOCKS the pump -- leave it at
+        // the head and hand control back to the player (the "hand card select
+        // screen" is open). advance(CHOOSE, hand_slot) resolves one selection and
+        // re-pumps. Forced / RANDOM choices auto-resolve via execute_opcode below.
+        const ActionQueueItem& front = s.action_queue[s.action_head];
+        if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
+            choice_requires_user(s, front)) {
+            s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+            r.outcome = PumpOutcome::WAITING_ON_USER;
+            return r;
+        }
         pop_action_front(s, r.executed);
         execute_opcode(s, r.executed);
         r.outcome = PumpOutcome::RAN_ACTION;

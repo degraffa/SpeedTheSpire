@@ -347,6 +347,30 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
             }
             return;
         }
+        case PowerId::LOSE_STRENGTH: {
+            // LoseStrengthPower.atEndOfTurn (LoseStrengthPower.java:40-44): at end
+            // of turn, addToBot ApplyPower(Strength, -amount) then
+            // RemoveSpecificPower(self) -- the "temporary Strength" reversal (Flex).
+            // Both queued (addToBot), so the Strength reduction and the self-removal
+            // resolve on later pump iterations, NOT during this power-list walk.
+            if (hook != Hook::AT_END_OF_TURN) {
+                return;
+            }
+            ActionQueueItem down{};
+            down.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+            down.src = ctx.owner;
+            down.tgt = ctx.owner;
+            down.amount = -ctx.power_amount;  // Strength -amount
+            down.flags = make_apply_power_flags(PowerId::STRENGTH);
+            add_to_bottom(s, down);
+            ActionQueueItem rem{};
+            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+            rem.src = ctx.owner;
+            rem.tgt = ctx.owner;
+            rem.flags = make_apply_power_flags(PowerId::LOSE_STRENGTH);
+            add_to_bottom(s, rem);
+            return;
+        }
         case PowerId::ARTIFACT:
             // Artifact's body is the target-side nullify in
             // apply_power_blocked_by_artifact (consumed inside APPLY_POWER); it

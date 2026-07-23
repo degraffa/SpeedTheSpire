@@ -22,7 +22,7 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-static_assert(sts::registry::manifest::kCardsCount == 5);
+static_assert(sts::registry::manifest::kCardsCount == 10);  // B3.4: +5 red common skills
 static_assert(sts::registry::kMaxCardSteps == 2);
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with

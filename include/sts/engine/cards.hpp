@@ -130,7 +130,13 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::SET_COST) ==
             static_cast<uint16_t>(Opcode::SET_COST) &&
         static_cast<uint16_t>(sts::registry::Opcode::LOSE_HP) ==
-            static_cast<uint16_t>(Opcode::LOSE_HP),
+            static_cast<uint16_t>(Opcode::LOSE_HP) &&
+        static_cast<uint16_t>(sts::registry::Opcode::CHOOSE_CARD) ==
+            static_cast<uint16_t>(Opcode::CHOOSE_CARD) &&
+        static_cast<uint16_t>(sts::registry::Opcode::PLAY_TOP_DRAW) ==
+            static_cast<uint16_t>(Opcode::PLAY_TOP_DRAW) &&
+        static_cast<uint16_t>(sts::registry::Opcode::REMOVE_POWER) ==
+            static_cast<uint16_t>(Opcode::REMOVE_POWER),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
