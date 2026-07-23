@@ -245,3 +245,23 @@ sts_set_warnings(registry_gen_test)
 sts_enable_sanitizers(registry_gen_test)
 
 gtest_discover_tests(registry_gen_test)
+
+# B1.5: translator acceptance -- the §2.5 oracle fields land in the right schema
+# field bit-for-bit; an unknown field is refused; round-trip stability (translate
+# twice -> identical structs + identical emitted combat trace). Runs on the
+# committed curated golden sample tests/golden/oracle_corpus/skeleton_sample.jsonl.
+# Links oracle_translator (which PRIVATE-links nlohmann); the test itself never
+# sees the JSON header, proving the tools-only grant.
+add_executable(translator_test
+    translator_test.cpp
+)
+
+target_link_libraries(translator_test PRIVATE oracle_translator GTest::gtest_main)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/translator_scratch")
+target_compile_definitions(translator_test PRIVATE
+    STS_ORACLE_CORPUS_DIR="${CMAKE_SOURCE_DIR}/tests/golden/oracle_corpus"
+    STS_TRANSLATOR_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/translator_scratch")
+sts_set_warnings(translator_test)
+sts_enable_sanitizers(translator_test)
+
+gtest_discover_tests(translator_test)

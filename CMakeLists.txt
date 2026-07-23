@@ -51,6 +51,10 @@ if(STS_BUILD_TESTS)
     # the tests since it links diff_harness (write_trace) + sts_engine and is run
     # manually to regenerate tests/golden/combat_fixtures/*.trace.
     add_subdirectory(tools/fixture_gen)
+    # B1.5: JSON->schema translator (campaign JSONL -> RunState/CombatState). Links
+    # diff_harness (write_trace) + nlohmann/json (tools-only grant, PRIVATE); its
+    # consumer is the WSL translator_test gtest.
+    add_subdirectory(tools/oracle_bridge/translator)
 endif()
 
 if(STS_BUILD_TESTS)

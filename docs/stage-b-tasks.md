@@ -445,7 +445,7 @@ actions. **B1.3 note:** the strip-equivalence A/B and throughput measurement
 reuse this lock-step transport; `--timeout`/`--probe-timeout`/`--stall-timeout`
 are tunable for the strip-patched ≥5/s floor.
 
-### B1.5 `[ ]` Translator (JSON → binary schema)
+### B1.5 `[x]` Translator (JSON → binary schema)
 **Deps:** B1.4 · **Spec:** design §2.6 · **Provenance:** PROTOCOL.md field
 table (B0.1)
 **Deliverables:** `tools/oracle_bridge/translator/` C++ target (nlohmann/json,
@@ -460,7 +460,56 @@ lands; the translator versions its output accordingly).
 every §2.5 oracle field lands in the right schema field bit-for-bit
 (counters, s0/s1, pity values); an artifact with an unknown field is refused;
 round-trip stability (translate twice → identical traces).
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred. New tools-only C++
+target `tools/oracle_bridge/translator/` (`oracle_translator` static lib +
+`translate_cli`): campaign JSONL → RunState/CombatState via a typed recursive
+disposition walker. **Dependency grant (design §2.6):** nlohmann/json v3.11.3
+fetched header-only, exposed SYSTEM/INTERFACE (the xxHash pattern), linked
+PRIVATE into `oracle_translator` only; proven `sts_engine` links no nlohmann
+(its `link.txt` is clean; engine sources grep nlohmann = 0). **Disposition table
+(fail-loud, design §2.6):** every container from PROTOCOL.md §3 (stock) + §5
+(oracle) has a typed parser that consumes exactly its known keys as
+mapped / ignore-with-reason / oracle-advisory / deferred-to-B4.x; any leftover
+key, unknown content id (`*_from_game_id`→NONE on a non-empty string), unknown
+15th stream name, or oracle-anchor mismatch (seed/floor/act/ascension) throws
+with `source:record N:path.key`. Id joins use the **generated** registry tables
+(B2.2), not a hand table (the deliverable's hand-table clause is moot post-B2.2).
+**Translates NOW (schema storage exists):** RunState `run_seed`, `master_deck`
+(registry-known cards), hp/max_hp/gold/ascension/act/floor, relics, potions,
+`card_blizz_randomizer`, `blizzard_potion_mod`, the 7 run-scoped streams +
+`mapRng`; CombatState player/monsters/piles/turn + the 5 floor-scoped streams.
+**Log-DEFERRED to B4.3** (no schema storage — the walker knows the fields and
+does not write them; the translator versions its output when B4.3 adds storage):
+`neowRng` (14th stream), event-pity floats ×3 (MONSTER/SHOP/TREASURE_CHANCE),
+`purgeCost`, `eventList`/`shrineList`/`specialOneTimeEventList`, relic-pool
+orders ×5, per-monster move history beyond 3, potion-slot count, real map
+nodes/room-types, boss_ids/keys/event_flags/shop_flags, and all `screen_state`
+content (events/rewards/shop/grid/map screens). **Boundary vs B1.6:** emits v1
+CombatState traces (`write_combat_trace` — "the trace files the diff harness
+already reads", design §2.6); the v2 `state_kind` container, `SCHEMA_VERSION`
+bump, RunState differ, and oracle adapter are B1.6, untouched here. **Acceptance
+— gtest `translator_test`, 7 cases on the committed curated golden sample**
+`tests/golden/oracle_corpus/skeleton_sample.jsonl` (13.7 KB, skeleton-scope
+content; its `oracle` block copied VERBATIM from real artifact campaign
+`b14_accept2` seed STS00001 so the bit-for-bit checks run against genuine
+sign-varied 64-bit state — `cardRng.s0` negative, `relicRng.counter==5`):
+(1) every stored §2.5 oracle field lands bit-for-bit (7 run streams + mapRng,
+5 floor streams, cardBlizz/blizzardPotion; signed longs preserved); (2) unknown
+field / unknown card id / unknown stream / anchor mismatch each refused with the
+loud message; (3) round-trip stability — translate twice → byte-identical
+RunState+CombatState and a byte-identical emitted v1 trace that reads back through
+`read_trace` with the floor streams intact. **Full WSL suite green: debug
+147/147, asan 147/147** (140 baseline + 7 new). **Real §7.3 corpus (10 artifacts,
+`b14_accept2`):** all 10 fail loudly at `record 1
+state_json.game_state.deck[0].id "AscendersBane"` — the A20 starting curse the
+skeleton registry deliberately lacks; the id-drift guard working on real data
+(B3/B4 content lands the registry rows that let real runs translate). Campaign
+artifacts never committed. **B1.6 needs:** the v2 container (per-record
+`state_kind` + both state sizes in the header; SCHEMA_VERSION 1→2 with a
+compat-read for the 20 v1 fixtures per the scoping report), a RunState query
+path on the adapter (streams/deck/relics/pity live in RunState, which v1 traces
+do not persist — B1.5 verifies them in-memory), and the RunState field-group
+differ reusing `cmp_stream` for the 8 run+act streams.
 
 ### B1.6 `[ ]` Diff-harness run-level + oracle adapter
 **Deps:** B1.5 · **Spec:** design §3.3 · **Provenance:** stage-a §8 (format),
