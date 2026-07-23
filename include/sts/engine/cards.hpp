@@ -136,7 +136,13 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::PLAY_TOP_DRAW) ==
             static_cast<uint16_t>(Opcode::PLAY_TOP_DRAW) &&
         static_cast<uint16_t>(sts::registry::Opcode::REMOVE_POWER) ==
-            static_cast<uint16_t>(Opcode::REMOVE_POWER),
+            static_cast<uint16_t>(Opcode::REMOVE_POWER) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_BLOCK) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_BLOCK) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_STR_MULT) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_STR_MULT) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_PER_STRIKE) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_PER_STRIKE),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

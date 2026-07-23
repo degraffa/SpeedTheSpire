@@ -71,11 +71,17 @@ struct PowerView {
 // Every hook is a float op mirroring the cited Java exactly.
 
 // atDamageGive: attacker-owned hooks. StrengthPower.atDamageGive (+amount),
-// WeakPower.atDamageGive (*0.75f). Others pass through.
-[[nodiscard]] float at_damage_give(float dmg, PowerSlot p) noexcept {
+// WeakPower.atDamageGive (*0.75f). Others pass through. `strength_mult` scales the
+// Strength contribution (Heavy Blade counts Strength x magicNumber by temporarily
+// multiplying strength.amount before applyPowers; HeavyBlade.java:426-435). The
+// default 1 is bit-identical to the pre-B3.3 hook: float(amount) * 1.0f == float(
+// amount), so every non-Heavy-Blade damage number is unchanged.
+[[nodiscard]] float at_damage_give(float dmg, PowerSlot p,
+                                   int strength_mult = 1) noexcept {
     switch (static_cast<PowerId>(p.power_id)) {
-        case PowerId::STRENGTH:
-            return dmg + static_cast<float>(p.amount);  // StrengthPower.java:96
+        case PowerId::STRENGTH:                        // StrengthPower.java:96
+            return dmg + static_cast<float>(p.amount) *
+                             static_cast<float>(strength_mult);
         case PowerId::WEAK:
             return dmg * 0.75f;                         // WeakPower.java:67
         default:
@@ -121,11 +127,12 @@ struct PowerView {
 // first (decrementBlock: block soaks up to its value), remainder hits hp,
 // currentHealth clamped >= 0. (Death/onDeath handling is not yet modeled; the
 // pump's hp<=0 check drives the COMBAT_OVER transition.)
-void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base) noexcept {
+void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
+               int strength_mult = 1) noexcept {
     if (tgt != kActorPlayer && tgt >= kMonsterCap) {
         return;
     }
-    const int out = compute_damage(s, src, tgt, base);
+    const int out = compute_damage(s, src, tgt, base, strength_mult);
     int16_t* hp = actor_hp(s, tgt);
     int16_t* blk = actor_block(s, tgt);
     if (hp == nullptr || blk == nullptr) {
@@ -257,12 +264,15 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
 // (:64-82, incl. the hand-full -> discard spill), MakeTempCardInDiscardAction,
 // ShuffleIntoDrawPileAction + CardGroup.addToRandomSpot (:463-468).
 void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
-                  int count) noexcept {
+                  int count, bool upgraded) noexcept {
     const CardId id = static_cast<CardId>(card_id_raw);
     const CardDef* def = card_def(id);
     if (def == nullptr || count <= 0) {
         return;
     }
+    // makeStatEquivalentCopy preserves timesUpgraded (Anger clones an upgraded
+    // Anger); every other in-scope MAKE_CARD source is a fresh base card.
+    const uint8_t upg = upgraded ? 1 : 0;
     for (int k = 0; k < count; ++k) {
         int slot = -1;
         for (int i = 0; i < kCardPoolCap; ++i) {
@@ -275,9 +285,9 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
             return;  // pool exhausted (defensive; the 160-row cap, design §4.2)
         }
         s.card_pool[slot].card_id = card_id_raw;
-        s.card_pool[slot].upgrade = 0;
-        s.card_pool[slot].cost_now = card_cost(*def, 0);
-        s.card_pool[slot].flags = card_flags(*def, 0);
+        s.card_pool[slot].upgrade = upg;
+        s.card_pool[slot].cost_now = card_cost(*def, upg);
+        s.card_pool[slot].flags = card_flags(*def, upg);
         s.card_pool[slot].misc = 0;
         const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
         switch (pile) {
@@ -349,9 +359,28 @@ void upgrade_instance(CombatState& s, CardPoolIndex pi) noexcept {
     c.flags = card_flags(*def, c.upgrade);
 }
 
-// Apply one CHOOSE_CARD manipulation to the card at hand slot `slot`.
+// Move discard slot `slot` to the top of the draw pile (Headbutt /
+// DiscardPileToTopOfDeckAction: removeCard from discard, moveToDeck == addToTop).
+void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
+    if (slot >= s.discard_count) {
+        return;
+    }
+    const CardPoolIndex pi = s.discard[slot];
+    for (uint8_t j = static_cast<uint8_t>(slot + 1); j < s.discard_count; ++j) {
+        s.discard[j - 1] = s.discard[j];
+    }
+    --s.discard_count;
+    if (s.draw_count < kDrawCap) {
+        s.draw[s.draw_count++] = pi;  // top of draw (draw[draw_count-1])
+    }
+}
+
+// Apply one CHOOSE_CARD manipulation to slot `slot` of the kind's SOURCE pile
+// (hand for exhaust/put-on-draw-top/upgrade; discard for discard-to-draw-top).
 void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind) noexcept {
-    if (slot >= s.hand_count) {
+    const uint8_t src_count =
+        choice_source_is_discard(kind) ? s.discard_count : s.hand_count;
+    if (slot >= src_count) {
         return;
     }
     switch (kind) {
@@ -372,14 +401,22 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind) noexcep
         case ChoiceKind::UPGRADE:
             upgrade_instance(s, s.hand[slot]);
             break;
+        case ChoiceKind::DISCARD_TO_DRAW_TOP:
+            discard_slot_to_draw_top(s, slot);
+            break;
     }
 }
 
-// The eligible hand-card count for a CHOOSE_CARD of `kind`.
-[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind) noexcept {
+// The eligible source-pile-card count for a CHOOSE_CARD of `kind` (hand slots for
+// the hand kinds, discard slots for discard-to-draw-top; `excluded` drops the
+// just-played source card from a discard-source count).
+[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind,
+                                 uint8_t excluded) noexcept {
+    const uint8_t src_count =
+        choice_source_is_discard(kind) ? s.discard_count : s.hand_count;
     int n = 0;
-    for (uint8_t i = 0; i < s.hand_count; ++i) {
-        if (choice_slot_eligible(s, i, kind)) {
+    for (uint8_t i = 0; i < src_count; ++i) {
+        if (choice_slot_eligible(s, i, kind, excluded)) {
             ++n;
         }
     }
@@ -397,23 +434,32 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
     if (need <= 0) {
         return;
     }
-    const int eligible = count_eligible(s, kind);
+    const bool from_discard = choice_source_is_discard(kind);
+    const uint8_t excluded = choice_excluded_index(item);
+    const int eligible = count_eligible(s, kind, excluded);
     if (eligible <= need) {
         // Forced: apply to ALL eligible cards. Snapshot pool indices first (the
-        // apply mutates the hand). (ExhaustAction: hand.size() <= amount -> exhaust
-        // whole hand; ArmamentsAction: exactly one upgradeable -> upgrade it;
-        // PutOnDeckAction: hand.size() <= amount -> move all.)
+        // apply mutates the source pile). (ExhaustAction: hand.size() <= amount ->
+        // exhaust whole hand; ArmamentsAction: exactly one upgradeable -> upgrade
+        // it; PutOnDeckAction: hand.size() <= amount -> move all;
+        // DiscardPileToTopOfDeckAction: <= 1 discard card -> auto-move it.) The
+        // eligible-<=-need bound keeps the snapshot within kHandCap (every in-scope
+        // discard-source choice has need == 1).
         CardPoolIndex picked[kHandCap];
         int m = 0;
-        for (uint8_t i = 0; i < s.hand_count && m < kHandCap; ++i) {
-            if (choice_slot_eligible(s, i, kind)) {
-                picked[m++] = s.hand[i];
+        const uint8_t sc = from_discard ? s.discard_count : s.hand_count;
+        const CardPoolIndex* src_pile = from_discard ? s.discard : s.hand;
+        for (uint8_t i = 0; i < sc && m < kHandCap; ++i) {
+            if (choice_slot_eligible(s, i, kind, excluded)) {
+                picked[m++] = src_pile[i];
             }
         }
         for (int k = 0; k < m; ++k) {
-            // Re-find the slot each time (earlier applies may have shifted hand).
-            for (uint8_t i = 0; i < s.hand_count; ++i) {
-                if (s.hand[i] == picked[k]) {
+            // Re-find the slot each time (earlier applies may have shifted the pile).
+            const uint8_t sc2 = from_discard ? s.discard_count : s.hand_count;
+            const CardPoolIndex* sp2 = from_discard ? s.discard : s.hand;
+            for (uint8_t i = 0; i < sc2; ++i) {
+                if (sp2[i] == picked[k]) {
                     apply_choice_to_slot(s, i, kind);
                     break;
                 }
@@ -555,6 +601,11 @@ void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept {
 
 int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
                    int base) noexcept {
+    return compute_damage(s, src, tgt, base, /*strength_mult=*/1);
+}
+
+int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
+                   int strength_mult) noexcept {
     const PowerView owner = actor_powers(s, src);
     const PowerView target = actor_powers(s, tgt);
     float tmp = static_cast<float>(base);
@@ -562,9 +613,10 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
     if (src != kActorPlayer) {
         // Monster-owned attack (DamageInfo.java:39-70). Target is (for the
         // skeleton) the player, so the stance hook is atDamageReceive and sits
-        // AFTER the target's atDamageReceive loop.
+        // AFTER the target's atDamageReceive loop. (strength_mult is only ever != 1
+        // for the player's Heavy Blade, so it is a no-op on this branch.)
         for (uint8_t i = 0; i < owner.count; ++i) {
-            tmp = at_damage_give(tmp, owner.slots[i]);
+            tmp = at_damage_give(tmp, owner.slots[i], strength_mult);
         }
         for (uint8_t i = 0; i < target.count; ++i) {
             tmp = at_damage_receive(tmp, target.slots[i]);
@@ -581,7 +633,7 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
         // the stance hook is atDamageGive and sits AFTER the owner's
         // atDamageGive loop, BEFORE the target's atDamageReceive loop.
         for (uint8_t i = 0; i < owner.count; ++i) {
-            tmp = at_damage_give(tmp, owner.slots[i]);
+            tmp = at_damage_give(tmp, owner.slots[i], strength_mult);
         }
         tmp = stance_at_damage_give(s, tmp);
         for (uint8_t i = 0; i < target.count; ++i) {
@@ -604,8 +656,14 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
 
 // --- Public: CHOOSE_CARD queries (Stage B B3.4) ------------------------------
 
-bool choice_slot_eligible(const CombatState& s, uint8_t slot,
-                          ChoiceKind kind) noexcept {
+bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
+                          uint8_t excluded) noexcept {
+    if (choice_source_is_discard(kind)) {
+        // Discard-to-draw-top: any discard card is a legal pick
+        // (DiscardPileToTopOfDeckAction has no eligibility filter) EXCEPT the
+        // just-played source card (in limbo in the game, not the discard).
+        return slot < s.discard_count && s.discard[slot] != excluded;
+    }
     if (slot >= s.hand_count) {
         return false;
     }
@@ -627,7 +685,7 @@ bool choice_requires_user(const CombatState& s,
         return false;  // nothing left to pick / auto-rolled -- never blocks
     }
     const ChoiceKind kind = choose_kind_from_flags(item.flags);
-    return count_eligible(s, kind) > item.amount;
+    return count_eligible(s, kind, choice_excluded_index(item)) > item.amount;
 }
 
 void apply_choice_selection(CombatState& s, uint8_t slot,
@@ -707,7 +765,8 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;  // stub: Jaw Worm rolls inside its MonsterTurnFn
         case Opcode::MAKE_CARD:
             op_make_card(s, make_card_id_from_flags(item.flags),
-                         static_cast<CardPile>(item.src), item.amount);
+                         static_cast<CardPile>(item.src), item.amount,
+                         make_card_upgraded_from_flags(item.flags));
             return;
         case Opcode::SET_COST:
             op_set_cost(s, item.src, item.amount);
@@ -727,6 +786,22 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::REMOVE_POWER:
             op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags));
+            return;
+        case Opcode::DAMAGE_BLOCK:
+            // Body Slam: base == the player's CURRENT block (read here at execute
+            // time), then the normal DamageInfo pipeline (Strength/Vulnerable still
+            // apply). `src` is the player (queue_effect_step), `amount` is unused.
+            op_damage(s, item.src, item.tgt, s.player_block);
+            return;
+        case Opcode::DAMAGE_STR_MULT:
+            // Heavy Blade: `amount` base with Strength counted x `flags` (the
+            // magicNumber multiplier), then the normal pipeline.
+            op_damage(s, item.src, item.tgt, item.amount,
+                      static_cast<int>(item.flags));
+            return;
+        case Opcode::DAMAGE_PER_STRIKE:
+            // Baked into a plain DAMAGE at queue time (card_play.cpp); never
+            // reaches execute in practice. Safe no-op if it somehow does.
             return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))

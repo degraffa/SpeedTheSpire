@@ -1012,7 +1012,7 @@ structural call sites; Barricade block-decay branch (B3.8, left structural).
 is additive (`stack: intensity`, the `op_apply_power` default); a hook step's
 `target: SELF` is the owner and `amount: 0` pulls the power's stack amount.
 
-### B3.3 `[ ]` ∥ Red commons — attacks
+### B3.3 `[x]` ∥ Red commons — attacks
 **Deps:** B3.2 · **Spec:** design §5.1 · **Provenance:** cards/red, the
 CardRarity.COMMON attack set (enumerate from source at task start; ~12 beyond
 the skeleton's Pommel Strike)
@@ -1025,7 +1025,53 @@ Wild Strike (shuffle Wound), Anger (copy to discard).
 **Acceptance:** tier-2 table test per card (both upgrade rows), hand-computed
 from the cited `use()`; trap-10 coverage for Sword Boomerang (dequeue-time
 rolls); directed script added.
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404); every card / action read in full
+in the decompiled Java before coding. Landed **cards.yaml ids 11-23** (the 13
+red common attacks, base+upgraded) **+ Wound (id 24, first STATUS card)** as the
+Wild Strike dependency (B3.9 lands the rest). **Zero CombatState/CardInstance
+layout change** → `SCHEMA_VERSION` unchanged, all combat fixtures load with zero
+regeneration (the new card-property columns are CardDef-only, NOT seeded onto
+CardInstance.flags). **New opcodes (append-only from 15; interp.hpp + gen.py
+OPCODES + cards.hpp drift-pin):** `DAMAGE_BLOCK`=15 (Body Slam — base ==
+player_block at execute; BodySlam.java:96), `DAMAGE_STR_MULT`=16 (Heavy Blade —
+`amount` base with Strength counted x `extra` via a new `compute_damage`
+strength_mult overload; HeavyBlade.java:426-435), `DAMAGE_PER_STRIKE`=17
+(Perfected Strike — `amount` + `extra`-per-"Strike"-card, **baked into a plain
+DAMAGE at QUEUE time** with the just-played source excluded, matching
+applyPowers-at-use; PerfectedStrike.java:565-607). **New engine surface (no new
+opcode):** (a) `ChoiceKind::DISCARD_TO_DRAW_TOP`=3 — Headbutt, a DISCARD-source
+CHOOSE_CARD; the just-played source card is stamped into the item's `tgt` and
+excluded from the choice because resolve_card_play moves it to the discard early
+but the game keeps it in limbo (UseCardAction is queued AFTER the card's own
+DiscardPileToTopOfDeckAction, AbstractPlayer.useCard:1369-1375) — `excluded`
+threaded through choice_slot_eligible/count_eligible/choice_requires_user +
+`ActionMask.choice_from_discard`; (b) Clash `canUse` — a CardDef `requires_all_attacks`
+column checked in legal_actions (playable only if every hand card is an Attack;
+Clash.java:184-194); (c) `is_strike` CardDef column (mirrors CardTags.STRIKE;
+set on Strike/Pommel/Perfected/Twin/Wild) driving the Perfected Strike count;
+(d) `CardType::STATUS`=2 (Wound). **MAKE_CARD authoring (gen.py, B3.1 left it to
+the first consumer):** the step packs `{CardId | CardPile<<16 | upgraded-copy<<24}`
+into `extra`; card_play.cpp splits it into `{flags=CardId(+upg bit), src=CardPile}`;
+op_make_card honors the upgraded-copy bit — Anger clones an UPGRADED Anger when
+upgraded (makeStatEquivalentCopy preserves timesUpgraded), Wild Strike shuffles a
+base Wound into a random draw-pile spot (one card_random_rng draw). AoE
+(Cleave/Thunderclap) reuse B3.1's ALL_ENEMY fan-out; Sword Boomerang reuses
+RANDOM_ENEMY (one card_random_rng draw per hit, dead excluded). **Acceptance —
+new tier-2 suite `tests/card_attacks_test.cpp` (35 cases)**, per-card both upgrade
+rows hand-computed from the cited use(): block-derived (Body Slam +Strength),
+Strength×3/×5 + Strength-then-Vulnerable (Heavy Blade), per-Strike count
+excluding self (Perfected Strike), Anger base/upgraded self-copy, Wild Strike
+Wound + one-draw, Cleave/Thunderclap AoE live-only + Vulnerable-to-all,
+Sword Boomerang 3/4 hits one-draw-per-hit + dead-exclusion (trap-10), Clash
+canUse masking, Headbutt empty/auto/prompt discard-choice with source excluded,
+Wound unplayable, + a directed advance() script (Cleave then Thunderclap over 2
+monsters). `registry_gen_test` counts updated (cards 10→24, total 105→ tracks
+powers; standalone kMaxCardSteps 2→4). **Verified in an ISOLATED worktree at HEAD
+40e1715 + only my files** (the concurrent potion-powers agent's uncommitted
+powers/potions/relics.yaml were excluded): **debug 308/308, asan 308/308, release
+308/308** (273 baseline + 35 new). Also removed an orphaned `DamageType`/`kBlockNoPowers`
+hunk the powers agent left in interp.hpp (unreferenced anywhere; that branch is
+authoritative for it).
 
 ### B3.4 `[x]` ∥ Red commons — skills
 **Deps:** B3.2 · **Spec:** design §5.1 · **Provenance:** cards/red COMMON

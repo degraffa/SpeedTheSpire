@@ -38,6 +38,7 @@
   cost: 1
   target: ENEMY
   flags: []
+  strike: true  # CardTags.STRIKE + STARTER_STRIKE (Strike_Red.java:35-36); Perfected Strike counts it
   provenance: "Strike_Red.use (Strike_Red.java) -> DamageAction(6); ID (Strike_Red.java:29)"
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 6}
@@ -92,6 +93,7 @@
   cost: 1
   target: ENEMY
   flags: []
+  strike: true  # CardTags.STRIKE (PommelStrike.java:34); Perfected Strike counts it
   provenance: "PommelStrike.use (PommelStrike.java) -> DamageAction(9), DrawCardAction(1); ID (PommelStrike.java:27)"
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 9}
@@ -187,3 +189,251 @@
   upgraded:
     - {op: DRAW, target: SELF, amount: 2}
     - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1}
+
+# --- B3.3 red common attacks (ids 11-23; skeleton already has Pommel Strike) --
+# Mechanically-loaded ops (Stage B B3.3, all read in full from cards/red):
+#   DAMAGE_BLOCK      -- base == player block at execute (Body Slam).
+#   DAMAGE_STR_MULT   -- `amount` base, Strength counted x `mult` (Heavy Blade).
+#   DAMAGE_PER_STRIKE -- `amount` + `per`-per-"Strike"-card, baked at queue time,
+#                        source card excluded (Perfected Strike).
+#   MAKE_CARD         -- create `card` copies into `pile` (Anger self-copy to
+#                        discard; Wild Strike Wound to a random draw-pile spot).
+#   CHOOSE_CARD discard_to_draw_top -- Headbutt (discard -> top of draw).
+# `strike: true` mirrors CardTags.STRIKE (Perfected Strike's count reads it);
+# `requires_all_attacks: true` is Clash's canUse predicate. Neither is a
+# per-instance flag, so the combat fixtures are untouched.
+
+- id: 11
+  name: ANGER
+  game_id: "Anger"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 0
+  target: ENEMY
+  flags: []
+  provenance: "Anger.use (Anger.java:39-43) -> DamageAction(6), MakeTempCardInDiscardAction(makeStatEquivalentCopy(), 1). baseDamage 6 (Anger.java:35); upgradeDamage(2) -> 8 (Anger.java:49). makeStatEquivalentCopy preserves timesUpgraded (AbstractCard.java:825-848) -> an upgraded Anger clones an upgraded Anger."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 6}
+    - {op: MAKE_CARD, card: ANGER, pile: DISCARD, amount: 1}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 8}
+    - {op: MAKE_CARD, card: ANGER, pile: DISCARD, amount: 1, upgraded_copy: true}
+
+- id: 12
+  name: BODY_SLAM
+  game_id: "Body Slam"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "BodySlam.use (BodySlam.java:95-98) -> baseDamage = p.currentBlock; DamageAction(damage). Damage == current player block (then the normal Strength/Vulnerable pipeline). upgrade() only upgradeBaseCost(0) (BodySlam.java:127-131) -> cost 1 -> 0, program unchanged."
+  effects:
+    - {op: DAMAGE_BLOCK, target: CARD_TARGET}
+  upgraded_cost: 0
+  upgraded:
+    - {op: DAMAGE_BLOCK, target: CARD_TARGET}
+
+- id: 13
+  name: CLASH
+  game_id: "Clash"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 0
+  target: ENEMY
+  flags: []
+  requires_all_attacks: true
+  provenance: "Clash.use (Clash.java:176-181) -> DamageAction(14). canUse (Clash.java:184-194): playable only if EVERY card in p.hand is CardType.ATTACK. baseDamage 14 (Clash.java:172); upgradeDamage(4) -> 18 (Clash.java:198-203)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 14}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 18}
+
+- id: 14
+  name: CLEAVE
+  game_id: "Cleave"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ALL_ENEMY
+  flags: []
+  provenance: "Cleave.use (Cleave.java:248-252) -> DamageAllEnemiesAction(multiDamage). isMultiDamage; baseDamage 8 (Cleave.java:243-244); upgradeDamage(3) -> 11 (Cleave.java:255-260). Separate DamageInfo per live monster (execute-time ALL_ENEMY fan-out)."
+  effects:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 8}
+  upgraded:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 11}
+
+- id: 15
+  name: CLOTHESLINE
+  game_id: "Clothesline"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "Clothesline.use (Clothesline.java:305-308) -> DamageAction(12), ApplyPowerAction(WeakPower, magic). baseDamage 12 / magic 2 (Clothesline.java:300-301); upgradeDamage(2)->14, upgradeMagicNumber(1)->3 (Clothesline.java:311-317)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 12}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: WEAK}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 14}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 3, power: WEAK}
+
+- id: 16
+  name: HEADBUTT
+  game_id: "Headbutt"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "Headbutt.use (Headbutt.java:360-363) -> DamageAction(9), DiscardPileToTopOfDeckAction(p). DiscardPileToTopOfDeckAction.update: discard empty -> nothing; size 1 -> auto-move that card to top of draw; size >= 2 -> gridSelect 1 card -> top of draw. baseDamage 9 (Headbutt.java:356); upgradeDamage(3) -> 12 (Headbutt.java:366-371)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 9}
+    - {op: CHOOSE_CARD, target: SELF, choose: discard_to_draw_top, amount: 1}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 12}
+    - {op: CHOOSE_CARD, target: SELF, choose: discard_to_draw_top, amount: 1}
+
+- id: 17
+  name: HEAVY_BLADE
+  game_id: "Heavy Blade"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "HeavyBlade.use (HeavyBlade.java:418-423) -> DamageAction(14). applyPowers/calculateCardDamage (HeavyBlade.java:426-447): Strength.amount *= magicNumber before applyPowers, /= after -> Strength counts x magic. baseDamage 14 / magic 3 (HeavyBlade.java:413-414); upgradeMagicNumber(2) -> 5 (HeavyBlade.java:450-457)."
+  effects:
+    - {op: DAMAGE_STR_MULT, target: CARD_TARGET, amount: 14, mult: 3}
+  upgraded:
+    - {op: DAMAGE_STR_MULT, target: CARD_TARGET, amount: 14, mult: 5}
+
+- id: 18
+  name: IRON_WAVE
+  game_id: "Iron Wave"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "IronWave.use (IronWave.java:504-510) -> GainBlockAction(block) FIRST, then DamageAction(damage). baseDamage 5 / baseBlock 5 (IronWave.java:499-500); upgradeDamage(2)->7, upgradeBlock(2)->7 (IronWave.java:513-520)."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 5}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 5}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 7}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 7}
+
+- id: 19
+  name: PERFECTED_STRIKE
+  game_id: "Perfected Strike"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  strike: true
+  provenance: "PerfectedStrike (PerfectedStrike.java): DamageAction(damage); calculateCardDamage/applyPowers (:592-607) baseDamage += magic * countCards(). countCards (:565-580) = STRIKE-tagged cards in hand+draw+discard (source in limbo -> excluded). baseDamage 6 / magic 2 (:560-561); upgradeMagicNumber(1) -> 3 (:615-622). tags STRIKE (:562)."
+  effects:
+    - {op: DAMAGE_PER_STRIKE, target: CARD_TARGET, amount: 6, per: 2}
+  upgraded:
+    - {op: DAMAGE_PER_STRIKE, target: CARD_TARGET, amount: 6, per: 3}
+
+- id: 20
+  name: SWORD_BOOMERANG
+  game_id: "Sword Boomerang"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ALL_ENEMY
+  flags: []
+  provenance: "SwordBoomerang.use (SwordBoomerang.java:658-662) -> magicNumber x AttackDamageRandomEnemyAction(this). Each action re-rolls getRandomMonster(cardRandomRng) at execute -> one card_random_rng draw per hit, excluding dead. baseDamage 3 / magic 3 (:653-654); upgradeMagicNumber(1) -> 4 hits (:664-670). Card target ALL_ENEMY but effect is random-per-hit (no dequeue roll)."
+  effects:
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+  upgraded:
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+    - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
+
+- id: 21
+  name: THUNDERCLAP
+  game_id: "Thunderclap"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ALL_ENEMY
+  flags: []
+  provenance: "ThunderClap.use (ThunderClap.java:718-728) -> DamageAllEnemiesAction(multiDamage), then ApplyPowerAction(VulnerablePower, 1) on every monster. isMultiDamage; baseDamage 4 (:713-714); upgradeDamage(3) -> 7 (:730-736). Vulnerable 1 to all (both base and upgraded)."
+  effects:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 4}
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 1, power: VULNERABLE}
+  upgraded:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 7}
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 1, power: VULNERABLE}
+
+- id: 22
+  name: TWIN_STRIKE
+  game_id: "Twin Strike"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  strike: true
+  provenance: "TwinStrike.use (TwinStrike.java:780-782) -> DamageAction(damage) TWICE. baseDamage 5 (:775); upgradeDamage(2) -> 7 (:785-791). tags STRIKE (:776)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 5}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 5}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 7}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 7}
+
+- id: 23
+  name: WILD_STRIKE
+  game_id: "Wild Strike"
+  color: RED
+  rarity: COMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  strike: true
+  provenance: "WildStrike.use (WildStrike.java:838-841) -> DamageAction(12), MakeTempCardInDrawPileAction(new Wound(), 1, randomSpot=true, autoPosition=true) -> a fresh (base) Wound at a random draw-pile spot (one card_random_rng draw). baseDamage 12 (:832); upgradeDamage(5) -> 17 (:843-849). tags STRIKE (:833)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 12}
+    - {op: MAKE_CARD, card: WOUND, pile: DRAW_RANDOM, amount: 1}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 17}
+    - {op: MAKE_CARD, card: WOUND, pile: DRAW_RANDOM, amount: 1}
+
+# --- B3.3 status-card dependency: Wound (first STATUS card, id 24) ------------
+# Wild Strike shuffles a Wound into the draw pile. Wound is unplayable clutter;
+# B3.9 lands the remaining statuses/curses. Added here as its first consumer.
+
+- id: 24
+  name: WOUND
+  game_id: "Wound"
+  color: COLORLESS
+  rarity: COMMON
+  type: STATUS
+  cost: -2
+  target: NONE
+  flags: []
+  provenance: "Wound (Wound.java:23-25): super cost -2 (unplayable), CardType.STATUS, COLORLESS, CardTarget.NONE; use() and upgrade() are no-ops (Wound.java:28-33). Inert clutter -- the -2 cost maps to the UNPLAYABLE flag (gen.py); no effect program."
+  effects: []

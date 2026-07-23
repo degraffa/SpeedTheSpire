@@ -64,19 +64,41 @@ OPCODES = {
     "CHOOSE_CARD": 12,
     "PLAY_TOP_DRAW": 13,
     "REMOVE_POWER": 14,
+    # Stage B B3.3 additions (append-only from 15): dynamic-base attack damage.
+    # DAMAGE_BLOCK reads the player's current block as the base at EXECUTE time
+    # (Body Slam, BodySlam.java:96). DAMAGE_STR_MULT deals `amount` base with the
+    # player's Strength counted x `extra` (Heavy Blade, HeavyBlade.java:426-435).
+    # DAMAGE_PER_STRIKE deals `amount` + `extra` per "Strike"-named card owned; it
+    # is BAKED into a plain DAMAGE at queue time (source card excluded), matching
+    # applyPowers-at-use timing (Perfected Strike, PerfectedStrike.java:592-607).
+    "DAMAGE_BLOCK": 15,
+    "DAMAGE_STR_MULT": 16,
+    "DAMAGE_PER_STRIKE": 17,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
 # `random: true`); the step's `extra` packs kind (bits 0-1) | RANDOM (bit 2),
-# byte-identical to make_choose_flags() in interp.hpp.
-CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2}
+# byte-identical to make_choose_flags() in interp.hpp. Stage B B3.3 adds
+# `discard_to_draw_top` (source pile = discard, not hand): choose a card from the
+# DISCARD pile and put it on top of the draw pile (Headbutt /
+# DiscardPileToTopOfDeckAction).
+CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
+                "discard_to_draw_top": 3}
 CHOICE_RANDOM_BIT = 1 << 2
 # StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
 # Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
 # RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
 STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1, "ALL_ENEMY": 2, "RANDOM_ENEMY": 3}
-# CardType: cards.hpp (ATTACK=0, SKILL=1).
-CARD_TYPES = {"ATTACK": 0, "SKILL": 1}
+# CardType: cards.hpp. Stage B B3.3 adds STATUS=2 (Wound, the first status card,
+# created by Wild Strike); POWER/CURSE land with B3.7/B3.9.
+CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2}
+# CardPile destination for a MAKE_CARD effect step (Stage B B3.3 card-authoring;
+# MIRROR of interp.hpp CardPile). The step's `extra` packs the created CardId in
+# bits 0-15, the CardPile in bits 16-23, and an "upgraded copy" flag in bit 24
+# (makeStatEquivalentCopy of an upgraded card -- Anger); card_play.cpp splits it
+# back into the ActionQueueItem {flags=CardId(+upg bit), src=CardPile}.
+CARD_PILES = {"HAND": 0, "DRAW": 1, "DISCARD": 2, "DRAW_RANDOM": 3}
+CARD_MAKE_UPGRADED_BIT = 1 << 24
 
 # CardFlag bits -- MIRROR of include/sts/engine/types.hpp CardFlag (append-only).
 # YAML `flags:` names are lower-case; cards.hpp static_asserts the emitted
@@ -320,10 +342,14 @@ def _power_id_map(domains: dict[str, list[dict]]) -> dict[str, int]:
     return {e["name"]: e["id"] for e in domains["powers"]}
 
 
-def _parse_card_steps(card_name: str, effects, powers: dict[str, int]) -> list:
+def _parse_card_steps(card_name: str, effects, powers: dict[str, int],
+                      cards: dict[str, int]) -> list:
     """Parse an effect program (base or upgraded) into (op, amount, extra, target)
-    tuples. MAKE_CARD encodes {card, pile} into `extra`/`target` per interp.hpp;
-    every other op follows the stage-a {op, target, amount[, power]} shape."""
+    tuples. APPLY_POWER packs its PowerId into `extra`; CHOOSE_CARD packs the
+    ChoiceKind (+ RANDOM); MAKE_CARD packs {CardId, CardPile, upgraded-copy} into
+    `extra` (interp.hpp / card_play.cpp); DAMAGE_STR_MULT / DAMAGE_PER_STRIKE carry
+    their multiplier / per-Strike bonus in `extra`. Every other op follows the
+    stage-a {op, target, amount[, power]} shape."""
     steps = []
     for step in effects or []:
         op = step.get("op")
@@ -352,6 +378,25 @@ def _parse_card_steps(card_name: str, effects, powers: dict[str, int]) -> list:
             extra = CHOICE_KINDS[kind]
             if bool(step.get("random", False)):
                 extra |= CHOICE_RANDOM_BIT
+        elif op == "MAKE_CARD":
+            # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24).
+            csym = step.get("card")
+            if csym not in cards:
+                raise fail(f"cards.yaml: card {card_name} MAKE_CARD references "
+                           f"unknown card {csym!r}")
+            pile = str(step.get("pile", "")).upper()
+            if pile not in CARD_PILES:
+                raise fail(f"cards.yaml: card {card_name} MAKE_CARD has unknown "
+                           f"pile {step.get('pile')!r} (known: {sorted(CARD_PILES)})")
+            extra = cards[csym] | (CARD_PILES[pile] << 16)
+            if bool(step.get("upgraded_copy", False)):
+                extra |= CARD_MAKE_UPGRADED_BIT
+        elif op == "DAMAGE_STR_MULT":
+            # Strength counts x `mult` (Heavy Blade magicNumber).
+            extra = int(step.get("mult", 1))
+        elif op == "DAMAGE_PER_STRIKE":
+            # +`per` damage per "Strike"-named card (Perfected Strike magicNumber).
+            extra = int(step.get("per", 0))
         steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
     return steps
 
@@ -386,6 +431,9 @@ def _parse_card_flags(card_name: str, raw_flags, cost: int) -> tuple[int, int]:
 def emit_card_table(domains: dict[str, list[dict]]) -> str:
     cards = domains["cards"]
     powers = _power_id_map(domains)
+    # name -> CardId, so a MAKE_CARD step can reference a created card by symbol
+    # (forward references allowed: the map covers every card in the domain).
+    card_ids = {c["name"]: c["id"] for c in cards}
 
     # Build the resolved rows first so we can compute kMaxCardSteps and surface
     # validation errors before emitting anything.
@@ -404,12 +452,12 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
 
         cost = int(c.get("cost", 0))
         flags, base_cost = _parse_card_flags(c["name"], c.get("flags"), cost)
-        steps = _parse_card_steps(c["name"], c.get("effects"), powers)
+        steps = _parse_card_steps(c["name"], c.get("effects"), powers, card_ids)
 
         # Upgraded program (design doc §4.2: a FULL program, not a delta). Absent
         # -> upgraded == base (safe default; real content lands per-card in B3.3+).
         if "upgraded" in c and c["upgraded"] is not None:
-            up_steps = _parse_card_steps(c["name"], c["upgraded"], powers)
+            up_steps = _parse_card_steps(c["name"], c["upgraded"], powers, card_ids)
             up_cost = int(c.get("upgraded_cost", cost))
             up_flags_bits, up_base_cost = _parse_card_flags(
                 c["name"], c.get("upgraded_flags", c.get("flags")), up_cost)
@@ -418,13 +466,22 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             up_base_cost = base_cost
             up_flags_bits = flags
 
+        # B3.3 card-property columns (NOT per-instance flags -- CardDef-only, so
+        # they never touch CardInstance.flags / the combat fixtures). `strike`
+        # mirrors CardTags.STRIKE (Perfected Strike's per-Strike count reads it);
+        # `requires_all_attacks` is Clash's canUse predicate (playable only when
+        # every hand card is an Attack).
+        is_strike = bool(c.get("strike", False))
+        requires_all_attacks = bool(c.get("requires_all_attacks", False))
+
         max_steps = max(max_steps, len(steps), len(up_steps))
         rows.append({
             "name": c["name"], "cost": base_cost, "flags": flags,
             "ctype": CARD_TYPES[ctype], "needs_target": needs_target,
             "random_target": random_target, "steps": steps,
             "up_cost": up_base_cost, "up_flags": up_flags_bits,
-            "up_steps": up_steps,
+            "up_steps": up_steps, "is_strike": is_strike,
+            "requires_all_attacks": requires_all_attacks,
         })
 
     out: list[str] = [BANNER, "#pragma once\n",
@@ -480,6 +537,8 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    uint16_t upgraded_flags;       // CardFlag bits (upgraded)")
     out.append("    uint8_t upgraded_step_count;")
     out.append("    std::array<CardEffectStep, kMaxCardSteps> upgraded_steps;")
+    out.append("    bool is_strike;                // CardTags.STRIKE (B3.3)")
+    out.append("    bool requires_all_attacks;     // Clash canUse predicate (B3.3)")
     out.append("};\n")
 
     def step_literal(step) -> str:
@@ -511,7 +570,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    {r['up_cost']}, {r['up_flags']}, {len(r['up_steps'])},")
         out.append("    {{")
         out.append(f"        {up_steps_txt},")
-        out.append("    }}};\n")
+        out.append("    }},")
+        out.append(f"    {'true' if r['is_strike'] else 'false'}, "
+                   f"{'true' if r['requires_all_attacks'] else 'false'}}};\n")
 
     # Lookup table + accessor (mirrors cards.hpp card_def()).
     out.append("inline constexpr std::array<const CardDef*, "

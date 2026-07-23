@@ -129,6 +129,20 @@ enum class Opcode : uint16_t {
     REMOVE_POWER = 14, // remove PowerId(flags low16) from `tgt`'s power list
                         // (RemoveSpecificPowerAction). Used by LoseStrengthPower's
                         // end-of-turn self-removal (Flex).
+    // --- Stage B B3.3 additions (append-only from 15): dynamic-base attack damage.
+    DAMAGE_BLOCK = 15,  // src (player) attacks tgt for base == player_block, read
+                         // at EXECUTE time, then the normal DamageInfo pipeline
+                         // (Body Slam; BodySlam.java:96 baseDamage = p.currentBlock).
+    DAMAGE_STR_MULT = 16, // src attacks tgt for `amount` base with Strength counted
+                           // x `flags` (the multiplier), then the pipeline (Heavy
+                           // Blade; HeavyBlade.java:426-435 strength.amount *= magic).
+    DAMAGE_PER_STRIKE = 17, // deal `amount` + `extra`-per-"Strike"-card damage
+                             // (Perfected Strike; PerfectedStrike.java:592-607). BAKED
+                             // into a plain DAMAGE at QUEUE time (card_play.cpp), with
+                             // the just-played source card excluded from the count --
+                             // it is in limbo at applyPowers-at-use time. This opcode
+                             // therefore never reaches execute_opcode (a safe no-op if
+                             // it somehow does); it exists only as the table encoding.
 };
 
 // --- CHOOSE_CARD field encoding (Stage B B3.4) ------------------------------
@@ -143,7 +157,17 @@ enum class ChoiceKind : uint8_t {
     EXHAUST = 0,         // move each selected hand card to the exhaust pile
     PUT_ON_DRAW_TOP = 1, // move each selected hand card to the top of the draw pile
     UPGRADE = 2,         // upgrade each selected hand card in place (upgrade++)
+    // Stage B B3.3: the source pile is the DISCARD pile, not the hand. Choose a
+    // card from the discard pile and put it on top of the draw pile (Headbutt /
+    // DiscardPileToTopOfDeckAction: forced when discard has <= 1 card, a real
+    // gridSelect prompt when >= 2). All other kinds source from the hand.
+    DISCARD_TO_DRAW_TOP = 3,
 };
+
+// Does a CHOOSE_CARD of this kind select from the discard pile (vs. the hand)?
+[[nodiscard]] constexpr bool choice_source_is_discard(ChoiceKind k) noexcept {
+    return k == ChoiceKind::DISCARD_TO_DRAW_TOP;
+}
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
 
@@ -186,6 +210,15 @@ enum class CardPile : uint8_t {
 [[nodiscard]] constexpr uint16_t make_card_id_from_flags(uint32_t flags) noexcept {
     return static_cast<uint16_t>(flags & 0xFFFFu);
 }
+// Bit 24 of a MAKE_CARD item's `flags`: create the copy already upgraded
+// (makeStatEquivalentCopy of an upgraded card -- an upgraded Anger clones an
+// upgraded Anger; AbstractCard.makeStatEquivalentCopy:825-848). The destination
+// CardPile lives in the item's `src`, not here (card_play.cpp splits the step's
+// packed `extra` into {flags = CardId(+upg bit), src = CardPile}).
+inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
+[[nodiscard]] constexpr bool make_card_upgraded_from_flags(uint32_t flags) noexcept {
+    return (flags & kMakeCardUpgradedBit) != 0u;
+}
 
 // --- APPLY_POWER field encoding ---------------------------------------------
 // `flags` low 16 bits hold the PowerId; `amount` holds the stack count. Use
@@ -214,16 +247,49 @@ enum class CardPile : uint8_t {
 [[nodiscard]] int compute_damage(const CombatState& state, uint8_t src_actor,
                                  uint8_t tgt_actor, int base_damage) noexcept;
 
+// As compute_damage, but the attacker's Strength contributes `strength_mult` x
+// its stacks in the atDamageGive pass (Heavy Blade: strength.amount *= magicNumber
+// before applyPowers, /= after; HeavyBlade.java:426-435). strength_mult == 1
+// reproduces compute_damage bit-for-bit (float * 1.0f is exact). Exposed pure so
+// the Heavy Blade tier-2 test can check the hand-computed number directly.
+[[nodiscard]] int compute_damage(const CombatState& state, uint8_t src_actor,
+                                 uint8_t tgt_actor, int base_damage,
+                                 int strength_mult) noexcept;
+
 // --- CHOOSE_CARD queries (Stage B B3.4) -------------------------------------
 // Shared by the pump (block-or-auto decision), legal_actions (which hand slots
 // the player may CHOOSE), and advance (validating a CHOOSE action). Pure reads.
 
-// Is hand slot `slot` a legal selection for a CHOOSE_CARD of the given kind?
+// "No card excluded" sentinel for a discard-source choice's `excluded` argument
+// (a real pool index is 0..kCardPoolCap-1 == 0..159, so 255 can never collide).
+inline constexpr uint8_t kNoChoiceExclusion = 255;
+
+// The pool index a CHOOSE_CARD excludes from its SOURCE pile, or kNoChoiceExclusion.
+// Discard-source choices (Headbutt) stamp the just-played card's pool index into
+// the item's `tgt` (card_play.cpp): our resolve_card_play moves the played card to
+// the discard pile BEFORE the queued choice resolves, but the game keeps it in
+// limbo (cardInUse) -- the UseCardAction that discards it is queued AFTER the
+// card's own DiscardPileToTopOfDeckAction (AbstractPlayer.useCard:1369-1375). So
+// the just-played card must not be a discard-choice candidate. Hand-source choices
+// carry no exclusion.
+[[nodiscard]] constexpr uint8_t choice_excluded_index(
+    const ActionQueueItem& item) noexcept {
+    if (static_cast<Opcode>(item.opcode) == Opcode::CHOOSE_CARD &&
+        choice_source_is_discard(choose_kind_from_flags(item.flags))) {
+        return item.tgt;
+    }
+    return kNoChoiceExclusion;
+}
+
+// Is slot `slot` of the kind's SOURCE pile (hand, or discard for
+// discard-to-draw-top) a legal selection for a CHOOSE_CARD of the given kind?
 // UPGRADE requires an un-upgraded card (AbstractCard.canUpgrade: !upgraded, and
 // non-CURSE/STATUS -- every card in scope is ATTACK/SKILL); EXHAUST /
-// PUT_ON_DRAW_TOP accept any hand card.
-[[nodiscard]] bool choice_slot_eligible(const CombatState& state, uint8_t slot,
-                                        ChoiceKind kind) noexcept;
+// PUT_ON_DRAW_TOP accept any hand card; DISCARD_TO_DRAW_TOP accepts any discard
+// card except `excluded` (the just-played source, in limbo in the game).
+[[nodiscard]] bool choice_slot_eligible(
+    const CombatState& state, uint8_t slot, ChoiceKind kind,
+    uint8_t excluded = kNoChoiceExclusion) noexcept;
 
 // Does the CHOOSE_CARD `item` (assumed at the front of the action queue) require
 // a real player prompt? True iff it selects fewer cards than are eligible AND it

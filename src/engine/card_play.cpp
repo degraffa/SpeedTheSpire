@@ -25,6 +25,34 @@ namespace sts::engine {
 
 namespace {
 
+// Count "Strike"-named cards (CardTags.STRIKE == CardDef.is_strike) in the
+// hand + draw + discard piles, excluding pool index `exclude` (the just-played
+// source card). Perfected Strike's countCards() scans exactly those three piles
+// (PerfectedStrike.java:565-580); at queue time the source is still in hand but
+// is in limbo (cardInUse) in the game, so it is excluded. Exhaust pile is NOT
+// counted (matching the Java).
+[[nodiscard]] int count_strikes_excluding(const CombatState& s,
+                                          CardPoolIndex exclude) noexcept {
+    int n = 0;
+    auto scan = [&](const CardPoolIndex* pile, uint8_t cnt) noexcept {
+        for (uint8_t i = 0; i < cnt; ++i) {
+            const CardPoolIndex pi = pile[i];
+            if (pi == exclude) {
+                continue;
+            }
+            const CardDef* d =
+                card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+            if (d != nullptr && d->is_strike) {
+                ++n;
+            }
+        }
+    };
+    scan(s.hand, s.hand_count);
+    scan(s.draw, s.draw_count);
+    scan(s.discard, s.discard_count);
+    return n;
+}
+
 // Instantiate one registry effect step into a concrete ActionQueueItem and queue
 // it via add_to_bottom (exactly how AbstractCard.use() calls addToBot(...)). The
 // registry stores src-independent templates; src is always the player for the
@@ -64,6 +92,31 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     // cardInUse (limbo) in the game, not a replay candidate (op_play_top_draw).
     if (step.op == static_cast<decltype(step.op)>(Opcode::PLAY_TOP_DRAW)) {
         item.amount = source_index;
+    } else if (step.op == static_cast<decltype(step.op)>(Opcode::MAKE_CARD)) {
+        // MAKE_CARD (Stage B B3.3 authoring): the step's `extra` packs the created
+        // CardId (bits 0-15), the destination CardPile (bits 16-23), and an
+        // upgraded-copy flag (bit 24). The interpreter reads the CardId + upgrade
+        // bit from the item's `flags` and the CardPile from `src`, so split them
+        // out here (tgt stays kActorPlayer -- SELF -- so it is not mistaken for an
+        // enemy-fan-out sentinel).
+        item.src = static_cast<uint8_t>((step.extra >> 16) & 0xFFu);
+        item.flags = step.extra;  // CardId(low16) + upgraded bit(24)
+    } else if (step.op == static_cast<decltype(step.op)>(Opcode::DAMAGE_PER_STRIKE)) {
+        // Perfected Strike: BAKE the per-"Strike" bonus into a plain DAMAGE at
+        // queue time -- applyPowers-at-use timing, with the just-played source card
+        // excluded from the count (it is in limbo, PerfectedStrike.java:592-607).
+        // `extra` is the per-Strike magicNumber; `amount` the flat base.
+        const int strikes = count_strikes_excluding(s, source_index);
+        item.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        item.amount = step.amount + static_cast<int32_t>(step.extra) * strikes;
+        item.flags = 0;
+    } else if (step.op == static_cast<decltype(step.op)>(Opcode::CHOOSE_CARD) &&
+               choice_source_is_discard(choose_kind_from_flags(step.extra))) {
+        // Headbutt (discard-source choice): stamp the just-played source card's
+        // pool index into `tgt` so the choice excludes it -- resolve_card_play
+        // moves the source to the discard early, but the game keeps it in limbo
+        // (AbstractPlayer.useCard:1369-1375; choice_excluded_index).
+        item.tgt = source_index;
     }
     add_to_bottom(s, item);
 }

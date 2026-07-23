@@ -96,6 +96,16 @@ struct ActionMask {
     // false and `can_choose` is all false.
     bool choice_pending;
     bool can_choose[kHandCap];
+
+    // --- Discard-source CHOOSE (Stage B B3.3: Headbutt) ---
+    // A DISCARD_TO_DRAW_TOP choice selects from the DISCARD pile, not the hand.
+    // When `choice_from_discard` is true, the CHOOSE action arg0 is a DISCARD slot
+    // (every discard card is eligible -- DiscardPileToTopOfDeckAction has no
+    // filter), and `can_choose[i]` reflects the first min(discard_count, kHandCap)
+    // discard slots (a convenience for the common small-discard case; discard slots
+    // >= kHandCap are still legal and validated by advance against discard_count).
+    // `choice_from_discard` is false for hand-source choices and when idle.
+    bool choice_from_discard;
 };
 
 static_assert(std::is_trivially_copyable_v<ActionMask>,

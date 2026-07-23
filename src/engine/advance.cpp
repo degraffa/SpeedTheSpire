@@ -141,18 +141,39 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
             choice_requires_user(state, front)) {
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
+            const uint8_t excluded = choice_excluded_index(front);
             out.choice_pending = true;
+            out.choice_from_discard = choice_source_is_discard(kind);
             out.can_end_turn = false;
+            // can_choose[i] over the kind's SOURCE pile: hand slots for the hand
+            // kinds, discard slots for discard-to-draw-top (Headbutt). For a large
+            // discard pile only the first kHandCap slots are reflected here; advance
+            // validates any arg0 against the real source-pile count.
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
-                out.can_choose[i] =
-                    choice_slot_eligible(state, static_cast<uint8_t>(i), kind);
+                out.can_choose[i] = choice_slot_eligible(
+                    state, static_cast<uint8_t>(i), kind, excluded);
             }
             return;
         }
     }
 
     out.choice_pending = false;
+    out.choice_from_discard = false;
+
+    // Clash (canUse): playable only when EVERY card in hand is an Attack
+    // (Clash.java:184-194). Computed once and applied to any hand card whose
+    // CardDef.requires_all_attacks is set.
+    bool all_hand_attacks = true;
+    for (uint8_t i = 0; i < state.hand_count; ++i) {
+        const CardDef* d =
+            card_def(static_cast<CardId>(state.card_pool[state.hand[i]].card_id));
+        if (d == nullptr || d->type != CardType::ATTACK) {
+            all_hand_attacks = false;
+            break;
+        }
+    }
+
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
         if (waiting && i < state.hand_count) {
@@ -162,7 +183,15 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // (X-cost cards carry cost_now 0, so they are always affordable,
             // matching costForTurn == -1).
             const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
-            out.can_play[i] = !unplayable && state.player_energy >= c.cost_now;
+            bool playable = !unplayable && state.player_energy >= c.cost_now;
+            // Clash's all-attacks canUse predicate (Stage B B3.3).
+            if (playable) {
+                const CardDef* d = card_def(static_cast<CardId>(c.card_id));
+                if (d != nullptr && d->requires_all_attacks && !all_hand_attacks) {
+                    playable = false;
+                }
+            }
+            out.can_play[i] = playable;
         } else {
             out.can_play[i] = false;
         }
@@ -235,8 +264,11 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 }
                 const ChoiceKind kind = choose_kind_from_flags(front.flags);
                 const uint8_t slot = action_arg0(a);
-                if (slot >= s.hand_count ||
-                    !choice_slot_eligible(s, slot, kind)) {
+                // arg0 indexes the kind's SOURCE pile (hand, or discard for
+                // discard-to-draw-top). choice_slot_eligible checks the bound and
+                // the discard source-card exclusion.
+                if (!choice_slot_eligible(s, slot, kind,
+                                          choice_excluded_index(front))) {
                     break;  // illegal selection -- no-op
                 }
                 apply_choice_selection(s, slot, kind);

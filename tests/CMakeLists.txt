@@ -382,3 +382,14 @@ target_link_libraries(card_skills_test PRIVATE sts_engine GTest::gtest_main)
 sts_set_warnings(card_skills_test)
 sts_enable_sanitizers(card_skills_test)
 gtest_discover_tests(card_skills_test)
+
+# B3.3 red common attacks (block/Strength/Strike-scaled damage, AoE + random
+# multi-hit, MAKE_CARD self-copy/Wound, Headbutt discard->draw-top choice, Clash
+# canUse). Tier-2 per card (both upgrade rows), hand-computed from the cited use().
+add_executable(card_attacks_test
+    card_attacks_test.cpp
+)
+target_link_libraries(card_attacks_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(card_attacks_test)
+sts_enable_sanitizers(card_attacks_test)
+gtest_discover_tests(card_attacks_test)
