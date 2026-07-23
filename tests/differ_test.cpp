@@ -28,6 +28,7 @@
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/advance.hpp"
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/run_state.hpp"
 #include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
 
@@ -495,7 +496,10 @@ TEST(TraceRoundTrip, WriteReadReproducesEveryStateAndAction) {
     ASSERT_TRUE(read_trace(path, h, recs));
 
     EXPECT_EQ(h.seed, seed);
-    EXPECT_EQ(h.schema_version, SCHEMA_VERSION);
+    // write_trace is the v1 (CombatState-only) writer; it stamps the v1 format
+    // tag, which is decoupled from engine::SCHEMA_VERSION (now 2 after the B1.6
+    // v2-container bump). The v2 path is exercised by the TraceV2* tests below.
+    EXPECT_EQ(h.schema_version, kTraceFormatV1);
     EXPECT_EQ(h.state_size, static_cast<uint32_t>(sizeof(CombatState)));
     ASSERT_EQ(recs.size(), states.size());
 
@@ -648,6 +652,472 @@ TEST(FixtureOracle, QueryReturnsRecordedStateForPrefix) {
     std::vector<Action> divergent = actions;
     divergent[1] = make_action(ActionVerb::PLAY_CARD, 0, 0);
     EXPECT_FALSE(oracle.query(seed, std::span<const Action>(divergent), out));
+}
+
+// =============================================================================
+// B1.6: RunState differ (diff_run_states) -- one test per new field group
+// =============================================================================
+
+using engine::CardInstance;
+using engine::MapNode;
+using engine::RelicSlot;
+using engine::RunState;
+
+// A rich, value-initialized RunState with every field group populated so a
+// single-field mutation of a copy yields exactly one named diff.
+RunState MakeBaseRun() {
+    RunState s{};
+
+    // character sheet
+    s.run_seed = 0x1234ABCDLL;
+    s.hp = 60;
+    s.max_hp = 80;
+    s.gold = 137;
+    s.ascension = 20;
+    s.act = 1;
+    s.floor = 5;
+
+    // master deck (3 cards, in order)
+    s.master_deck_count = 3;
+    s.master_deck[0] = CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 1, 0, 0};
+    s.master_deck[1] = CardInstance{static_cast<uint16_t>(CardId::DEFEND), 0, 1, 0, 0};
+    s.master_deck[2] = CardInstance{static_cast<uint16_t>(CardId::BASH), 1, 2, 0, 0};
+
+    // relics (acquisition order == trigger order)
+    s.relic_count = 2;
+    s.relics[0] = RelicSlot{1, 5};
+    s.relics[1] = RelicSlot{2, 0};
+
+    // potions (positional)
+    s.potions[0] = 1;
+    s.potions[2] = 3;
+
+    // map grid (placeholder encoding; a couple of live nodes)
+    s.map[0] = MapNode{1, 2};
+    s.map[46] = MapNode{3, 4};
+
+    // boss / keys / event-shop placeholders
+    s.boss_ids[0] = 7;
+    s.keys = 1;
+    s.event_flags = 0xF0u;
+    s.shop_flags = 0x0Fu;
+
+    // pity counters
+    s.card_blizz_randomizer = 5;
+    s.blizzard_potion_mod = 0;
+
+    // the 8 run-level streams (distinct so each is individually testable)
+    s.monster_rng = RngStream{1, 2, 3, 0};
+    s.event_rng = RngStream{10, 20, 30, 0};
+    s.merchant_rng = RngStream{100, 200, 300, 0};
+    s.card_rng = RngStream{1000, 2000, 3000, 0};
+    s.treasure_rng = RngStream{11, 22, 33, 0};
+    s.relic_rng = RngStream{111, 222, 333, 0};
+    s.potion_rng = RngStream{5, 6, 7, 0};
+    s.map_rng = RngStream{9, 8, 7, 0};
+
+    return s;
+}
+
+TEST(RunDifferFastPath, IdenticalRunsDiffEmpty) {
+    RunState base = MakeBaseRun();
+    RunState copy = base;
+    DiffReport r = diff_run_states(base, copy);
+    EXPECT_TRUE(r.empty()) << r.to_string();
+
+    RunState z1{};
+    RunState z2{};
+    EXPECT_TRUE(diff_run_states(z1, z2).empty());
+}
+
+TEST(RunDifferCharacterSheet, ScalarFields) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.run_seed = base.run_seed + 1;
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("run_seed")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.gold = base.gold + 25;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("gold")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    RunState m3 = base;
+    m3.hp = static_cast<int16_t>(base.hp - 7);
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("hp")) << r3.to_string();
+    EXPECT_EQ(r3.size(), 1u) << r3.to_string();
+
+    RunState m4 = base;
+    m4.floor = static_cast<uint16_t>(base.floor + 1);
+    DiffReport r4 = diff_run_states(base, m4);
+    EXPECT_TRUE(r4.mentions("floor")) << r4.to_string();
+    EXPECT_EQ(r4.size(), 1u) << r4.to_string();
+
+    RunState m5 = base;
+    m5.ascension = 19;
+    DiffReport r5 = diff_run_states(base, m5);
+    EXPECT_TRUE(r5.mentions("ascension")) << r5.to_string();
+    EXPECT_EQ(r5.size(), 1u) << r5.to_string();
+}
+
+TEST(RunDifferDeck, ElementAndCount) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.master_deck[1].card_id = static_cast<uint16_t>(CardId::SHRUG_IT_OFF);
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("master_deck[1].card_id")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.master_deck[2].upgrade = 0;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("master_deck[2].upgrade")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    // count change surfaces the count and the newly-live element
+    RunState m3 = base;
+    m3.master_deck_count = static_cast<uint16_t>(base.master_deck_count + 1);
+    m3.master_deck[base.master_deck_count] =
+        CardInstance{static_cast<uint16_t>(CardId::POMMEL_STRIKE), 0, 1, 0, 0};
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("master_deck_count")) << r3.to_string();
+    EXPECT_TRUE(r3.mentions("master_deck[3]")) << r3.to_string();
+}
+
+TEST(RunDifferRelics, ElementAndOrder) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.relics[0].counter = static_cast<int16_t>(base.relics[0].counter + 1);
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("relics[0].counter")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.relics[1].relic_id = 9;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("relics[1].relic_id")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    // Order is load-bearing (acquisition == trigger order): swapping two relics
+    // is a real divergence, NOT treated as an equal set.
+    RunState m3 = base;
+    std::swap(m3.relics[0], m3.relics[1]);
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_FALSE(r3.empty()) << "relic order must be compared positionally";
+    EXPECT_TRUE(r3.mentions("relics[0]")) << r3.to_string();
+    EXPECT_TRUE(r3.mentions("relics[1]")) << r3.to_string();
+}
+
+TEST(RunDifferPotions, Slot) {
+    RunState base = MakeBaseRun();
+    RunState mut = base;
+    mut.potions[2] = 9;
+    DiffReport r = diff_run_states(base, mut);
+    EXPECT_TRUE(r.mentions("potions[2]")) << r.to_string();
+    EXPECT_EQ(r.size(), 1u) << r.to_string();
+}
+
+TEST(RunDifferMap, Node) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.map[46].room_type = static_cast<uint8_t>(base.map[46].room_type + 1);
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("map[46].room_type")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.map[0].edges = static_cast<uint8_t>(base.map[0].edges + 1);
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("map[0].edges")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+}
+
+TEST(RunDifferPlaceholders, BossKeysFlags) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.boss_ids[0] = 3;
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("boss_ids[0]")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.keys = 7;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("keys")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    RunState m3 = base;
+    m3.event_flags = 0xDEADu;
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("event_flags")) << r3.to_string();
+    EXPECT_EQ(r3.size(), 1u) << r3.to_string();
+
+    RunState m4 = base;
+    m4.shop_flags = 0xBEEFu;
+    DiffReport r4 = diff_run_states(base, m4);
+    EXPECT_TRUE(r4.mentions("shop_flags")) << r4.to_string();
+    EXPECT_EQ(r4.size(), 1u) << r4.to_string();
+}
+
+TEST(RunDifferPity, Counters) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.card_blizz_randomizer = static_cast<int16_t>(base.card_blizz_randomizer - 1);
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("card_blizz_randomizer")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.blizzard_potion_mod = 10;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("blizzard_potion_mod")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+}
+
+// Each of the 8 run-level streams individually, so a divergence is attributable
+// to the specific stream (reusing the combat differ's cmp_stream idiom).
+TEST(RunDifferRng, EachStreamNamedSeparately) {
+    struct Case {
+        const char* name;
+        RngStream RunState::*member;
+    };
+    const Case cases[] = {
+        {"monster_rng", &RunState::monster_rng},
+        {"event_rng", &RunState::event_rng},
+        {"merchant_rng", &RunState::merchant_rng},
+        {"card_rng", &RunState::card_rng},
+        {"treasure_rng", &RunState::treasure_rng},
+        {"relic_rng", &RunState::relic_rng},
+        {"potion_rng", &RunState::potion_rng},
+        {"map_rng", &RunState::map_rng},
+    };
+    for (const Case& c : cases) {
+        RunState base = MakeBaseRun();
+        RunState mut = base;
+        (mut.*(c.member)).counter = (base.*(c.member)).counter + 1;
+        DiffReport r = diff_run_states(base, mut);
+        EXPECT_TRUE(r.mentions(std::string(c.name) + ".counter"))
+            << c.name << ": " << r.to_string();
+        EXPECT_EQ(r.size(), 1u) << c.name << ": " << r.to_string();
+
+        RunState mut2 = base;
+        (mut2.*(c.member)).s0 = (base.*(c.member)).s0 + 1;
+        DiffReport r2 = diff_run_states(base, mut2);
+        EXPECT_TRUE(r2.mentions(std::string(c.name) + ".s0"))
+            << c.name << ": " << r2.to_string();
+        EXPECT_EQ(r2.size(), 1u) << c.name << ": " << r2.to_string();
+    }
+}
+
+// =============================================================================
+// B1.6: trace format v2 (state_kind mixed container) + v1 compatibility read
+// =============================================================================
+
+// Build a small mixed v2 container: a RUN header record, a COMBAT record, and a
+// second RUN record, with meaningful action bits.
+std::vector<TraceRecordV2> MakeMixedRecords(const std::vector<Action>& actions) {
+    std::vector<TraceRecordV2> recs;
+
+    TraceRecordV2 r0;
+    r0.kind = StateKind::RUN;
+    r0.run = MakeBaseRun();
+    r0.action = 0;  // initial record
+    r0.aux = 0;
+    recs.push_back(r0);
+
+    TraceRecordV2 r1;
+    r1.kind = StateKind::COMBAT;
+    r1.combat = MakeBase();
+    r1.action = actions[0].bits;
+    r1.aux = 0;
+    recs.push_back(r1);
+
+    TraceRecordV2 r2;
+    r2.kind = StateKind::RUN;
+    r2.run = MakeBaseRun();
+    r2.run.floor = 6;  // advanced a floor
+    r2.action = actions[1].bits;
+    r2.aux = 0;
+    recs.push_back(r2);
+
+    return recs;
+}
+
+TEST(TraceV2RoundTrip, MixedContainerReadsBackByteIdentical) {
+    const int64_t seed = 0x5EEDF00D;
+    const std::vector<Action> actions = ThreeEndTurns();
+    const std::vector<TraceRecordV2> recs = MakeMixedRecords(actions);
+
+    const std::string path = TempPath("trace_v2.bin");
+    ASSERT_TRUE(write_trace_v2(path, seed, recs));
+
+    TraceHeaderV2 h{};
+    std::vector<TraceRecordV2> back;
+    ASSERT_TRUE(read_trace_v2(path, h, back));
+
+    EXPECT_EQ(h.seed, seed);
+    EXPECT_EQ(h.schema_version, kTraceFormatV2);
+    EXPECT_EQ(h.combat_state_size, static_cast<uint32_t>(sizeof(CombatState)));
+    EXPECT_EQ(h.run_state_size, static_cast<uint32_t>(sizeof(engine::RunState)));
+    ASSERT_EQ(back.size(), recs.size());
+
+    for (std::size_t i = 0; i < recs.size(); ++i) {
+        EXPECT_EQ(static_cast<int>(back[i].kind), static_cast<int>(recs[i].kind)) << i;
+        EXPECT_EQ(back[i].action, recs[i].action) << i;
+        EXPECT_EQ(back[i].aux, recs[i].aux) << i;
+        if (recs[i].kind == StateKind::COMBAT) {
+            EXPECT_EQ(std::memcmp(&back[i].combat, &recs[i].combat, sizeof(CombatState)), 0)
+                << "combat record " << i;
+        } else {
+            EXPECT_EQ(std::memcmp(&back[i].run, &recs[i].run, sizeof(engine::RunState)), 0)
+                << "run record " << i;
+        }
+    }
+}
+
+TEST(TraceV2Refusal, WrongCombatSizeRefused) {
+    const std::vector<Action> actions = ThreeEndTurns();
+    const std::string path = TempPath("v2_badcombat.bin");
+    ASSERT_TRUE(write_trace_v2(path, 0x11, MakeMixedRecords(actions)));
+
+    // combat_state_size lives at offset 8 (magic[4] + version u32).
+    {
+        std::fstream f(path, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(f.is_open());
+        f.seekp(8, std::ios::beg);
+        const uint32_t bad = static_cast<uint32_t>(sizeof(CombatState)) + 8u;
+        f.write(reinterpret_cast<const char*>(&bad), sizeof(bad));
+    }
+
+    TraceHeaderV2 h{};
+    std::vector<TraceRecordV2> back;
+    EXPECT_FALSE(read_trace_v2(path, h, back));
+}
+
+TEST(TraceV2Refusal, WrongRunSizeRefused) {
+    const std::vector<Action> actions = ThreeEndTurns();
+    const std::string path = TempPath("v2_badrun.bin");
+    ASSERT_TRUE(write_trace_v2(path, 0x22, MakeMixedRecords(actions)));
+
+    // run_state_size lives at offset 12 (magic[4] + version u32 + combat_size u32).
+    {
+        std::fstream f(path, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(f.is_open());
+        f.seekp(12, std::ios::beg);
+        const uint32_t bad = static_cast<uint32_t>(sizeof(engine::RunState)) + 8u;
+        f.write(reinterpret_cast<const char*>(&bad), sizeof(bad));
+    }
+
+    TraceHeaderV2 h{};
+    std::vector<TraceRecordV2> back;
+    EXPECT_FALSE(read_trace_v2(path, h, back));
+}
+
+TEST(TraceV2Refusal, UnknownRecordKindRefused) {
+    const std::vector<Action> actions = ThreeEndTurns();
+    const std::string path = TempPath("v2_badkind.bin");
+    ASSERT_TRUE(write_trace_v2(path, 0x33, MakeMixedRecords(actions)));
+
+    // The first record's state_kind byte is at offset 32 (past the 32-byte header).
+    {
+        std::fstream f(path, std::ios::binary | std::ios::in | std::ios::out);
+        ASSERT_TRUE(f.is_open());
+        f.seekp(32, std::ios::beg);
+        const uint8_t bad = 0xFF;
+        f.write(reinterpret_cast<const char*>(&bad), sizeof(bad));
+    }
+
+    TraceHeaderV2 h{};
+    std::vector<TraceRecordV2> back;
+    EXPECT_FALSE(read_trace_v2(path, h, back));
+}
+
+// The v1 fixtures must keep loading after the bump: read_trace_v2 compat-reads a
+// v1 (CombatState-only) trace, exposing every record as a COMBAT record.
+TEST(TraceV2Compat, ReadsV1TraceAsCombatRecords) {
+    const int64_t seed = 0x0C0FFEE;
+    const std::vector<Action> actions = ThreeEndTurns();
+    std::vector<CombatState> states;
+    replay_skeleton(seed, actions, states);
+
+    const std::string path = TempPath("v1_for_compat.bin");
+    ASSERT_TRUE(write_trace(path, seed, actions, states));  // a genuine v1 file
+
+    // v1 reader still works (unchanged Stage-A path).
+    TraceHeader h1{};
+    std::vector<TraceRecord> v1recs;
+    ASSERT_TRUE(read_trace(path, h1, v1recs));
+    EXPECT_EQ(h1.schema_version, kTraceFormatV1);
+
+    // v2 reader compat-reads the same file.
+    TraceHeaderV2 h2{};
+    std::vector<TraceRecordV2> v2recs;
+    ASSERT_TRUE(read_trace_v2(path, h2, v2recs));
+    EXPECT_EQ(h2.schema_version, kTraceFormatV1);
+    EXPECT_EQ(h2.run_state_size, 0u);  // v1 had no run records
+    EXPECT_EQ(h2.seed, seed);
+    ASSERT_EQ(v2recs.size(), states.size());
+    for (std::size_t i = 0; i < states.size(); ++i) {
+        EXPECT_EQ(static_cast<int>(v2recs[i].kind), static_cast<int>(StateKind::COMBAT)) << i;
+        EXPECT_EQ(std::memcmp(&v2recs[i].combat, &states[i], sizeof(CombatState)), 0) << i;
+    }
+}
+
+// =============================================================================
+// B1.6: CommunicationModOracleAdapter over a v2 (run+combat) container
+// =============================================================================
+
+TEST(CommunicationModOracle, QueryBothKindsAndNegativeCases) {
+    const int64_t seed = 0xABCDEF01;
+    const std::vector<Action> actions = ThreeEndTurns();
+    const std::vector<TraceRecordV2> recs = MakeMixedRecords(actions);
+    // recs: [0]=RUN (initial), [1]=COMBAT (after actions[0]), [2]=RUN (after actions[1]).
+
+    const std::string path = TempPath("adapter_run.bin");
+    ASSERT_TRUE(write_trace_v2(path, seed, recs));
+
+    CommunicationModOracleAdapter oracle;
+    ASSERT_TRUE(oracle.load_run_trace(path));
+    EXPECT_EQ(oracle.run_count(), 1u);
+
+    // prefix length 0 -> record[0], a RUN record.
+    RunState run_out{};
+    ASSERT_TRUE(oracle.query_run(seed, std::span<const Action>{}, run_out));
+    EXPECT_EQ(std::memcmp(&run_out, &recs[0].run, sizeof(RunState)), 0);
+    // ... and querying it as combat fails (wrong kind).
+    CombatState combat_out{};
+    EXPECT_FALSE(oracle.query(seed, std::span<const Action>{}, combat_out));
+
+    // prefix length 1 (actions[0]) -> record[1], a COMBAT record.
+    ASSERT_TRUE(oracle.query(seed, std::span<const Action>(actions).subspan(0, 1), combat_out));
+    EXPECT_EQ(hash_state(combat_out), hash_state(recs[1].combat));
+    // ... and querying it as run fails (wrong kind).
+    EXPECT_FALSE(oracle.query_run(seed, std::span<const Action>(actions).subspan(0, 1), run_out));
+
+    // prefix length 2 (actions[0..1]) -> record[2], a RUN record.
+    ASSERT_TRUE(oracle.query_run(seed, std::span<const Action>(actions).subspan(0, 2), run_out));
+    EXPECT_EQ(run_out.floor, 6);  // the advanced-floor RUN record
+
+    // unknown seed -> no answer (both kinds).
+    EXPECT_FALSE(oracle.query(seed + 1, std::span<const Action>{}, combat_out));
+    EXPECT_FALSE(oracle.query_run(seed + 1, std::span<const Action>{}, run_out));
+
+    // prefix longer than the run -> no answer.
+    std::vector<Action> too_long = actions;  // 3 actions, but only 2 recorded
+    EXPECT_FALSE(oracle.query_run(seed, std::span<const Action>(too_long), run_out));
+
+    // prefix that diverges from the recorded action bits -> no answer.
+    std::vector<Action> divergent = {make_action(ActionVerb::PLAY_CARD, 0, 0)};
+    EXPECT_FALSE(oracle.query(seed, std::span<const Action>(divergent), combat_out));
 }
 
 }  // namespace

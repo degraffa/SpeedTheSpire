@@ -22,6 +22,17 @@
 
 namespace sts::engine {
 
-inline constexpr uint32_t SCHEMA_VERSION = 1;
+// v1 (=1): the Stage-A trajectory container -- a CombatState-only record stream
+//   (`{magic 'STS0', schema_version u32, state_size u32, record[]}`).
+// v2 (=2): B1.6 adds a per-record `state_kind` discriminator so one container
+//   can hold both CombatState and RunState records (design §3.3 run-level
+//   traces). The header now advertises BOTH sizeof(CombatState) and
+//   sizeof(RunState) for the loader's refusal check. The 20 frozen v1 combat
+//   fixtures still load via a compatibility read in the v2 loader (they are
+//   NOT regenerated). The struct layouts themselves are unchanged by B1.6
+//   (sizeof(CombatState)/sizeof(RunState) identical); the bump reflects the
+//   container-format change, per §8's "bumped by any struct/format edit" and
+//   design §3.3's "schema-version bump". See tools/diff_harness/sts/diff/trace.hpp.
+inline constexpr uint32_t SCHEMA_VERSION = 2;
 
 }  // namespace sts::engine

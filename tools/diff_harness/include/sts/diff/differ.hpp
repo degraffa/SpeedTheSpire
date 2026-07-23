@@ -35,6 +35,7 @@
 
 namespace sts::engine {
 struct CombatState;
+struct RunState;
 }
 
 namespace sts::diff {
@@ -74,5 +75,27 @@ struct DiffReport {
 // named FieldDiff for every element that differs.
 [[nodiscard]] DiffReport diff_states(const engine::CombatState& expected,
                                      const engine::CombatState& actual);
+
+// Compare two RunStates field by field (design §3.3 run-level diffing; B1.6).
+// The whole-run analogue of diff_states: same DiffReport / named-field-path
+// output, so a run-level divergence reads as `master_deck[7].card_id`,
+// `relics[2].counter`, `card_rng.counter`, `card_blizz_randomizer`,
+// `map[46].room_type`, etc. Field groups covered: the character sheet
+// (run_seed, hp/max_hp/gold/ascension/act/floor), master deck (counted,
+// in-order), relics (counted, in acquisition order -- order is trigger order,
+// so compared positionally, not as a set), potions (5 positional slots), the
+// map grid, the boss/keys/event/shop placeholder fields, the two pity counters
+// (card_blizz_randomizer, blizzard_potion_mod), and each of the 8 run-level RNG
+// streams individually (7 run-scoped + map_rng), reusing the same per-stream
+// `.s0/.s1/.counter` naming as the combat differ.
+//
+// Fast path: byte-identical RunStates (POD, value-init padding-stable) diff
+// empty via a single memcmp, mirroring diff_states' hash fast path.
+//
+// NOTE (scope): relic-/card-pool ORDER lists and the remaining event/shrine/
+// special membership have no RunState storage yet (deferred to B4.3, per the
+// B1.5 Log); they are not compared here because there is nothing to compare.
+[[nodiscard]] DiffReport diff_run_states(const engine::RunState& expected,
+                                         const engine::RunState& actual);
 
 }  // namespace sts::diff

@@ -265,3 +265,23 @@ sts_set_warnings(translator_test)
 sts_enable_sanitizers(translator_test)
 
 gtest_discover_tests(translator_test)
+
+# B1.6: the CommunicationModOracleAdapter answers query()/query_run() over a
+# TRANSLATED campaign sample. Translates the committed golden sample through the
+# real B1.5 translator, packs it into a v2 trace container (write_trace_v2), and
+# exercises the file-based adapter for both state kinds + unknown-seed/prefix.
+# Links oracle_translator (which PUBLIC-links diff_harness, so the v2 trace API
+# and the adapter are reachable); nlohmann stays PRIVATE to the translator.
+add_executable(oracle_adapter_test
+    oracle_adapter_test.cpp
+)
+
+target_link_libraries(oracle_adapter_test PRIVATE oracle_translator GTest::gtest_main)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/translator_scratch")
+target_compile_definitions(oracle_adapter_test PRIVATE
+    STS_ORACLE_CORPUS_DIR="${CMAKE_SOURCE_DIR}/tests/golden/oracle_corpus"
+    STS_TRANSLATOR_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/translator_scratch")
+sts_set_warnings(oracle_adapter_test)
+sts_enable_sanitizers(oracle_adapter_test)
+
+gtest_discover_tests(oracle_adapter_test)

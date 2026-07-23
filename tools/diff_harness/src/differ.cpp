@@ -1,11 +1,13 @@
 #include "sts/diff/differ.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <sstream>
 #include <string>
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/run_state.hpp"
 #include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
 
@@ -213,6 +215,46 @@ void cmp_stream(DiffReport& r, const char* name, const RngStream& e,
     // `pad` deliberately not compared (value-init-zeroed padding, not state).
 }
 
+// --- RunState composite helpers (B1.6) --------------------------------------
+
+// One master-deck card instance: same field set the combat differ walks over
+// card_pool, so a deck divergence reads `master_deck[i].card_id` etc.
+void cmp_card_instance(DiffReport& r, const std::string& base, const CardInstance& e,
+                       const CardInstance& a) {
+    cmp_card_id(r, base + ".card_id", e.card_id, a.card_id);
+    cmp_u(r, base + ".upgrade", e.upgrade, a.upgrade);
+    cmp_u(r, base + ".cost_now", e.cost_now, a.cost_now);
+    cmp_u(r, base + ".flags", e.flags, a.flags);
+    cmp_u(r, base + ".misc", e.misc, a.misc);
+}
+
+std::string card_instance_repr(const CardInstance& c) {
+    std::ostringstream os;
+    os << "{card_id=" << card_repr(c.card_id) << ",upgrade=" << static_cast<int>(c.upgrade)
+       << ",cost=" << static_cast<int>(c.cost_now) << "}";
+    return os.str();
+}
+
+// A counted array of CardInstance (master deck): compare the count, then the
+// live members over [0, max(count)); a member present on only one side reads
+// "(absent)". Order is meaningful and compared positionally.
+void cmp_deck(DiffReport& r, const char* name, const CardInstance* e, uint16_t ec,
+              const CardInstance* a, uint16_t ac) {
+    cmp_u(r, std::string(name) + "_count", ec, ac);
+    const int n = std::max<int>(ec, ac);
+    for (int i = 0; i < n; ++i) {
+        const std::string b = std::string(name) + "[" + std::to_string(i) + "]";
+        const bool ein = i < ec;
+        const bool ain = i < ac;
+        if (ein && ain) {
+            cmp_card_instance(r, b, e[i], a[i]);
+        } else {
+            push(r, b, ein ? card_instance_repr(e[i]) : std::string("(absent)"),
+                 ain ? card_instance_repr(a[i]) : std::string("(absent)"));
+        }
+    }
+}
+
 }  // namespace
 
 // --- diff_states ------------------------------------------------------------
@@ -336,6 +378,91 @@ DiffReport diff_states(const CombatState& e, const CombatState& a) {
     cmp_stream(r, "shuffle_rng", e.shuffle_rng, a.shuffle_rng);
     cmp_stream(r, "card_random_rng", e.card_random_rng, a.card_random_rng);
     cmp_stream(r, "misc_rng", e.misc_rng, a.misc_rng);
+
+    return r;
+}
+
+// --- diff_run_states (B1.6) -------------------------------------------------
+
+DiffReport diff_run_states(const RunState& e, const RunState& a) {
+    DiffReport r;
+
+    // Fast path: byte-identical value-initialized PODs (padding is value-init
+    // zeroed, so byte equality == logical equality). Mirrors diff_states' hash
+    // fast path with a plain memcmp (RunState has no dedicated hash).
+    if (std::memcmp(&e, &a, sizeof(RunState)) == 0) {
+        return r;
+    }
+
+    // -- character sheet --
+    cmp_i(r, "run_seed", e.run_seed, a.run_seed);
+    cmp_i(r, "hp", e.hp, a.hp);
+    cmp_i(r, "max_hp", e.max_hp, a.max_hp);
+    cmp_i(r, "gold", e.gold, a.gold);
+    cmp_u(r, "ascension", e.ascension, a.ascension);
+    cmp_u(r, "act", e.act, a.act);
+    cmp_u(r, "floor", e.floor, a.floor);
+
+    // -- master deck (counted, in order) --
+    cmp_deck(r, "master_deck", e.master_deck, e.master_deck_count, a.master_deck,
+             a.master_deck_count);
+
+    // -- relics (counted; acquisition order == trigger order, so positional) --
+    cmp_u(r, "relic_count", e.relic_count, a.relic_count);
+    {
+        const int n = std::max<int>(e.relic_count, a.relic_count);
+        for (int i = 0; i < n; ++i) {
+            const std::string b = "relics[" + std::to_string(i) + "]";
+            const bool ein = i < e.relic_count;
+            const bool ain = i < a.relic_count;
+            if (ein && ain) {
+                cmp_u(r, b + ".relic_id", e.relics[i].relic_id, a.relics[i].relic_id);
+                cmp_i(r, b + ".counter", e.relics[i].counter, a.relics[i].counter);
+            } else {
+                auto repr = [](const RelicSlot& s) {
+                    return "{relic_id=" + std::to_string(s.relic_id) + ",counter=" +
+                           std::to_string(s.counter) + "}";
+                };
+                push(r, b, ein ? repr(e.relics[i]) : std::string("(absent)"),
+                     ain ? repr(a.relics[i]) : std::string("(absent)"));
+            }
+        }
+    }
+
+    // -- potions (5 positional slots; PotionId per slot, NONE == empty) --
+    for (int i = 0; i < kPotionCap; ++i) {
+        cmp_u(r, "potions[" + std::to_string(i) + "]", e.potions[i], a.potions[i]);
+    }
+
+    // -- map grid (flattened row-major; placeholder encoding until B4.x) --
+    for (int i = 0; i < kMapRows * kMapCols; ++i) {
+        const std::string b = "map[" + std::to_string(i) + "]";
+        cmp_u(r, b + ".room_type", e.map[i].room_type, a.map[i].room_type);
+        cmp_u(r, b + ".edges", e.map[i].edges, a.map[i].edges);
+    }
+
+    // -- boss / keys / event-shop placeholders (real semantics at B4.3) --
+    for (int i = 0; i < kBossIdCap; ++i) {
+        cmp_u(r, "boss_ids[" + std::to_string(i) + "]", e.boss_ids[i], a.boss_ids[i]);
+    }
+    cmp_u(r, "keys", e.keys, a.keys);
+    cmp_u(r, "event_flags", e.event_flags, a.event_flags);
+    cmp_u(r, "shop_flags", e.shop_flags, a.shop_flags);
+
+    // -- pity counters riding on the streams --
+    cmp_i(r, "card_blizz_randomizer", e.card_blizz_randomizer, a.card_blizz_randomizer);
+    cmp_i(r, "blizzard_potion_mod", e.blizzard_potion_mod, a.blizzard_potion_mod);
+
+    // -- the 8 run-level RNG streams (7 run-scoped + act-scoped map_rng), each
+    //    named individually so a divergence is attributable to the stream --
+    cmp_stream(r, "monster_rng", e.monster_rng, a.monster_rng);
+    cmp_stream(r, "event_rng", e.event_rng, a.event_rng);
+    cmp_stream(r, "merchant_rng", e.merchant_rng, a.merchant_rng);
+    cmp_stream(r, "card_rng", e.card_rng, a.card_rng);
+    cmp_stream(r, "treasure_rng", e.treasure_rng, a.treasure_rng);
+    cmp_stream(r, "relic_rng", e.relic_rng, a.relic_rng);
+    cmp_stream(r, "potion_rng", e.potion_rng, a.potion_rng);
+    cmp_stream(r, "map_rng", e.map_rng, a.map_rng);
 
     return r;
 }
