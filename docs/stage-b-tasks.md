@@ -1181,7 +1181,7 @@ draw-order accounting tested (trap-10 family).
 
 ## Phase B4 — The run layer (Gate G6 = M3)
 
-### B4.1 `[ ]` Map path generation
+### B4.1 `[x]` Map path generation
 **Deps:** G4, G5 · **Spec:** design §5.6 · **Provenance:**
 MapGenerator.java:23, 62-77, 157-190, 270-276; AbstractDungeon.java:510-540
 **Deliverables:** path generation into `RunState`'s 7×15 node grid
@@ -1191,7 +1191,57 @@ edge dedup) — exact draw order per the cited lines.
 dumped map** node-for-node (bridge artifacts from B1.4 — this is the first
 run-layer bit-exactness proof); mapRng draw count per generation matches
 the hand-derived count for one seed.
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), isolated from a concurrent
+B3.1 dirty tree via a detached worktree at HEAD `e2e4f6e`. Delivered
+header-only `include/sts/engine/map_gen.hpp` re-expressing MapGenerator path
+generation bit-for-bit on `mapRng`, in GAME semantics (15 floors × 7 cols),
+with a documented game-oriented index adapter (`run_state_map_index`,
+floor-major) onto the current transposed 7×15 storage so B4.3's rename is
+mechanical (room_type left untouched — B4.2). Pipeline: createNodes (no RNG) →
+createPaths (6 walks, first-two-distinct walk-1 re-roll) → 6× _createPaths
+random walk (per-floor primary `randRange` draw + conditional per-parent
+ancestor-gap re-rolls + no-RNG sibling clamp + boss terminator) →
+filterRedundantEdgesFromRow (row-0 dedup). Provenance (each read in full):
+MapGenerator.java:23-28,50-77,111-131,133-211,270-276; MapRoomNode.java:75-84,
+149-151; MapEdge.java:71-90; AbstractDungeon.java:510-540.
+Hazards honoured: H1 (MathUtils global RNG in node/edge ctors NOT modelled);
+H4 (edge lists stable-sorted by MapEdge.compareTo); parents appended WITH
+duplicates and addParent called unconditionally (even on de-duped edges).
+**H5 replicated verbatim** — getCommonAncestor's :116 bug `node1.x < node2.y`
+(should be `node2.x`) — PROVEN exercised (ancestor re-roll fires 1..12×/seed
+on the corpus) and PROVEN load-bearing (a counterfactual "fixed" comparison
+diverges ≥1 corpus seed).
+**Acceptance — gtest `map_gen_test`, 8 cases over the 20-seed A20-Ironclad
+live-oracle corpus `b13_on20b` (fork 04477E4E)**, curated to
+`tests/golden/map_paths/oracle_maps.txt` (derived golden vector, not a raw
+artifact): (1) **generated edges match the oracle's dumped map NODE-FOR-NODE
+for all 20 seeds** (`EdgesMatchOracleNodeForNode`; ledger asked ≥3) — first
+run-layer bit-exactness proof; (2) **path-gen mapRng draw count == hand-derived
+count** — STS00001 decomposes as 6 walk seeds + 84 primaries (14×6) + 3
+ancestor re-rolls = 93 (`HandDerivedPathDrawCountSingleSeed`), and across all
+20 seeds the path-gen counter == oracle_counter − 1 exactly
+(`PathGenCounterMatchesOracleMinusEmerald`); (3) boss row-14→(3,16) edge case +
+RunState edge-bitfield round-trip. Full suite green in the HEAD-isolated
+worktree: **debug 174/174, asan 174/174, release 174/174** (166 baseline + 8
+new; header-only — no engine `.cpp` changed, `sizeof(RunState)` /
+`SCHEMA_VERSION` untouched).
+**STOP-THE-LINE finding (live oracle > design docs):** across ALL 20 seeds the
+oracle's post-`generateMap` `mapRng.counter` is EXACTLY path-gen + 1,
+independent of the varying re-roll counts (1..12). The +1 is **`setEmeraldElite`
+(AbstractDungeon.java:539,551) firing** — its guard `Settings.isFinalActAvailable
+&& !hasEmeraldKey` (:543) PASSES because `isFinalActAvailable = IRONCLAD_WIN &&
+SILENT_WIN && DEFECT_WIN && …` (Settings.java:642) is TRUE on the frozen
+fully-unlocked profile (design §1.1:45-49) and no emerald key exists at act-1
+start. This **overturns design §1.1:43** ("`setEmeraldElite` is likewise
+final-act-gated … never fires in S1") and the scoping report's H6/R3.
+RoomTypeAssigner's only mapRng use is the trap-12 raw `Collections.shuffle`
+(no counter advance). **B4.1 is unaffected** (setEmeraldElite runs
+post-room-assignment, outside path-gen). **B4.2 MUST model the setEmeraldElite
+draw** (one `mapRng.random(0, eliteNodes.size()-1)` after the shuffle) to hit
+the full {counter,s0,s1} oracle match; its counter target = path-gen + 0
+(shuffle) + 1 (emerald). **Design §1.1:43 + a §11 change-log entry need
+correction** — flagged for orchestrator sequencing (frozen shared doc not
+edited unilaterally mid-parallel-work).
 
 ### B4.2 `[ ]` Room-type assignment
 **Deps:** B4.1 · **Spec:** design §5.6; §10 trap 12 · **Provenance:**

@@ -285,3 +285,18 @@ sts_set_warnings(oracle_adapter_test)
 sts_enable_sanitizers(oracle_adapter_test)
 
 gtest_discover_tests(oracle_adapter_test)
+
+# B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
+# corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign
+# b13_on20b). Header-only engine code, so it links sts_engine like the other
+# tier-2 suites.
+add_executable(map_gen_test
+    map_gen_test.cpp
+)
+
+target_link_libraries(map_gen_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(map_gen_test PRIVATE STS_GOLDEN_DIR="${CMAKE_SOURCE_DIR}/tests/golden")
+sts_set_warnings(map_gen_test)
+sts_enable_sanitizers(map_gen_test)
+
+gtest_discover_tests(map_gen_test)

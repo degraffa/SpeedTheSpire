@@ -40,8 +40,13 @@ against the vendored upstream source (§11, and tools/oracle_bridge/PROTOCOL.md)
   boss-relic pick** (the run terminates when the act-1 boss's combat rewards
   are claimed), acts 2–4, keys (the sapphire-key reward branch in chests is
   final-act-gated, AbstractChest.java:95-96, so it never fires in S1;
-  `setEmeraldElite` is likewise final-act-gated, AbstractDungeon.java:542-556),
-  save-file loading, other characters.
+  `setEmeraldElite`, by contrast, is gated by `isFinalActAvailable`, **not** by
+  keys — a profile-unlock condition (`IRONCLAD_WIN && SILENT_WIN && DEFECT_WIN
+  && …`, Settings.java:642) that the frozen fully-unlocked assumption below
+  makes TRUE, so it **DOES fire every act in S1**, consuming one `mapRng` draw
+  (`mapRng.random(0, eliteNodes.size()-1)`) **after** room assignment
+  (AbstractDungeon.java:539, 542-556); corrected at B4.1 from live evidence,
+  see §11 v0.1.3), save-file loading, other characters.
 - **Environment assumption (frozen):** the sim models a **fully-unlocked
   profile**. Unlock state gates real content — e.g. `initializeBoss` special-
   cases unseen bosses via `UnlockTracker.isBossSeen` (Exordium.java:196-201)
@@ -912,3 +917,30 @@ Continuing stage-a §10's numbering:
   (e.g. b14_accept2) may have dropped cards wherever the driver navigated during
   an obtain — flagged for B5.2 triage; B1.4's acceptance (driver mechanics) is
   unaffected.
+- v0.1.3 (2026-07-23) — B4.1 map-path-generation live-game override (§1.3:
+  reproduced live-game observation > decompiled Java > design docs). §1.1's
+  "Out (S2+)" list previously claimed `setEmeraldElite` "is likewise
+  final-act-gated … never fires in S1". **Corrected: it fires every act on the
+  fully-unlocked profile**, consuming exactly one `mapRng` draw
+  (`mapRng.random(0, eliteNodes.size()-1)`, AbstractDungeon.java:551) **after**
+  room assignment (called from `generateMap`, AbstractDungeon.java:539). Its
+  guard is `Settings.isFinalActAvailable && !Settings.hasEmeraldKey` (:543):
+  `isFinalActAvailable = IRONCLAD_WIN && SILENT_WIN && DEFECT_WIN && !isDailyRun
+  && !isTrial || CustomModeScreen.finalActAvailable` (Settings.java:642) is TRUE
+  on the frozen fully-unlocked profile (§1.1), and no emerald key exists at
+  act-1 start — so the guard passes. The earlier reading conflated
+  "needs the 3 keys to *enter* Act 4" with `isFinalActAvailable` (a
+  *profile-unlock* condition the fully-unlocked assumption guarantees). **Live
+  evidence:** over the 20-seed A20-Ironclad corpus `b13_on20b`, every seed's
+  post-`generateMap` `mapRng.counter` is EXACTLY the B4.1 path-generation
+  counter + 1, independent of the per-seed ancestor-re-roll counts (1..12) and
+  walk-1 re-rolls; `RoomTypeAssigner`'s only `mapRng` use is the trap-12 raw
+  `Collections.shuffle` (no counter advance, RoomTypeAssigner.java:135), so the
+  +1 is uniquely attributable to `setEmeraldElite`. This overturns the scoping
+  report's H6/R3. **Scope impact:** B4.1 (path generation) is unaffected — the
+  draw is post-room-assignment. **B4.2 (room-type assignment) MUST model the
+  `setEmeraldElite` draw** (after the shuffle) to reach the full
+  `{counter, s0, s1}` oracle state; its `mapRng` counter target is
+  `path-gen + 0 (shuffle) + 1 (emerald)`. Evidence + the named tests are in the
+  B4.1 ledger Log (docs/stage-b-tasks.md) and `tests/map_gen_test.cpp`
+  (`PathGenCounterMatchesOracleMinusEmerald`, `HandDerivedPathDrawCountSingleSeed`).
