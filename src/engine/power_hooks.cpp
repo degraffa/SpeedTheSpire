@@ -22,6 +22,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags, CardPile
 #include "sts/engine/powers.hpp"        // power_def, PowerDef, PowerType
+#include "sts/engine/relic_hooks.hpp"   // relic dispatch (B3.24; the acq-order sites)
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -147,7 +148,9 @@ void dispatch_on_play_card(CombatState& s, uint16_t card_id,
     for (uint8_t m = 0; m < s.monster_count; ++m) {
         dispatch_actor_powers(s, m, Hook::ON_PLAY_CARD, ctx);
     }
-    // relics onPlayCard (acq order)  -- none yet (B3.24+)
+    // relics onPlayCard (acquisition order), AFTER player+monster powers (B3.24).
+    const RelicView rv = player_relics(s);
+    dispatch_relics_on_play_card(s, rv.relics, rv.count, card_id);
     // stance.onPlayCard              -- stanceless skeleton
     // blights onPlayCard             -- none
     // hand / discard / draw cards onPlayCard -- card-level hooks (B3.9)
@@ -163,7 +166,11 @@ void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
     // LAST). Corruption (native, player power) redirects the played SKILL to
     // exhaust here.
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_USE_CARD, ctx);
-    // player relics onUseCard        -- none yet
+    // player relics onUseCard (acquisition order), AFTER player powers and BEFORE
+    // monster powers -- the UseCardAction.java:41-64 order (B3.24). Nunchaku/Pen Nib
+    // count attacks here.
+    const RelicView rv = player_relics(s);
+    dispatch_relics_on_use_card(s, rv.relics, rv.count, card_id, played_pool_index);
     // hand / discard / draw cards onUseCard -- card-level hooks (later)
     for (uint8_t m = 0; m < s.monster_count; ++m) {
         dispatch_actor_powers(s, m, Hook::ON_USE_CARD, ctx);
@@ -178,7 +185,9 @@ void dispatch_on_exhaust(CombatState& s, uint16_t card_id) noexcept {
     // CardGroup.moveToExhaustPile:851-856 -- relics onExhaust -> player powers
     // onExhaust (list order) -> card.triggerOnExhaust. Feel No Pain + Dark Embrace
     // sequence is decided by the player power-list order here (§5.5).
-    // relics onExhaust -- none yet.
+    // relics onExhaust FIRST (acquisition order), before player powers (B3.24).
+    const RelicView rv = player_relics(s);
+    dispatch_relics_on_exhaust(s, rv.relics, rv.count, card_id);
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_EXHAUST, ctx);
     // card.triggerOnExhaust (Sentinel-style card-level onExhaust) -- B3.6.
 }
@@ -217,7 +226,12 @@ void dispatch_on_gained_block(CombatState& s, uint8_t actor,
     HookContext ctx{};
     ctx.amount = amount;
     // player relics onPlayerGainedBlock -> the actor's powers onGainedBlock
-    // (Juggernaut). Relics: none yet.
+    // (Juggernaut). Relics fire FIRST (acquisition order), only on the player's own
+    // block gain (AbstractCreature.addBlock:426-433; B3.24).
+    if (actor == kActorPlayer) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_gained_block(s, rv.relics, rv.count, amount);
+    }
     dispatch_actor_powers(s, actor, Hook::ON_GAINED_BLOCK, ctx);
 }
 

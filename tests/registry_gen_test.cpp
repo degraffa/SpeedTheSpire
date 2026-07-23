@@ -37,6 +37,7 @@
 #include "sts/registry/ids.hpp"
 #include "sts/registry/manifest.hpp"
 #include "sts/registry/monster_table.hpp"
+#include "sts/registry/relic_table.hpp"
 
 // Engine headers -- post-migration these re-export the generated tables; the
 // equivalence tests double as the proof that the re-exports are the same
@@ -77,9 +78,10 @@ std::string read_text(const fs::path& p) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-const std::array<const char*, 7> kGenFiles = {
+const std::array<const char*, 8> kGenFiles = {
     "sts/registry/ids.hpp", "sts/registry/card_table.hpp",
-    "sts/registry/power_table.hpp", "sts/registry/potion_table.hpp",
+    "sts/registry/power_table.hpp", "sts/registry/relic_table.hpp",
+    "sts/registry/potion_table.hpp",
     "sts/registry/monster_table.hpp",
     "sts/registry/game_ids.hpp", "sts/registry/manifest.hpp"};
 
@@ -231,9 +233,49 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
     EXPECT_EQ(r::monster_game_id(r::MonsterId::JAW_WORM), "JawWorm");
     EXPECT_EQ(r::monster_from_game_id("JawWorm"), r::MonsterId::JAW_WORM);
 
-    // Empty domains: unknown lookups return NONE, NONE maps to "".
+    // Relics (B3.24): the game's relicId strings round-trip, including ids whose
+    // string differs from the display name (Boot, CeramicFish).
+    EXPECT_EQ(r::relic_game_id(r::RelicId::BURNING_BLOOD), "Burning Blood");
+    EXPECT_EQ(r::relic_from_game_id("Burning Blood"), r::RelicId::BURNING_BLOOD);
+    EXPECT_EQ(r::relic_from_game_id("Bag of Marbles"), r::RelicId::BAG_OF_MARBLES);
+    EXPECT_EQ(r::relic_game_id(r::RelicId::BOOT), "Boot");
+    EXPECT_EQ(r::relic_from_game_id("CeramicFish"), r::RelicId::CERAMIC_FISH);
     EXPECT_EQ(r::relic_from_game_id("anything"), r::RelicId::NONE);
     EXPECT_TRUE(r::potion_game_id(r::PotionId::NONE).empty());
+}
+
+// --- B3.24 relic table: tier + hook bindings match the registry --------------
+TEST(RegistryGen, RelicTableMatchesRegistry) {
+    namespace r = sts::registry;
+    EXPECT_EQ(r::manifest::kRelicsCount, 34u);
+
+    // Burning Blood (starter, native on_victory).
+    const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
+    ASSERT_NE(bb, nullptr);
+    EXPECT_EQ(bb->tier, r::RelicTier::STARTER);
+    EXPECT_TRUE(bb->native);
+    ASSERT_EQ(bb->hook_count, 1);
+    EXPECT_EQ(bb->hooks[0].hook, r::RelicHook::ON_VICTORY);
+    EXPECT_EQ(bb->hooks[0].step_count, 0) << "native relic lists an empty program";
+
+    // Vajra (data): atBattleStart APPLY_POWER Strength 1 on self; extra packs the
+    // PowerId exactly like the card table's make_apply_power_flags.
+    const r::RelicDef* vajra = r::relic_def(r::RelicId::VAJRA);
+    ASSERT_NE(vajra, nullptr);
+    EXPECT_EQ(vajra->tier, r::RelicTier::COMMON);
+    EXPECT_FALSE(vajra->native);
+    ASSERT_EQ(vajra->hook_count, 1);
+    const auto* vb = vajra->hook_binding(r::RelicHook::AT_BATTLE_START);
+    ASSERT_NE(vb, nullptr);
+    ASSERT_EQ(vb->step_count, 1);
+    EXPECT_EQ(vb->steps[0].op, r::Opcode::APPLY_POWER);
+    EXPECT_EQ(vb->steps[0].target, r::StepTarget::SELF);
+    EXPECT_EQ(vb->steps[0].amount, 1);
+    EXPECT_EQ(vb->steps[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::STRENGTH));
+
+    // A non-combat relic carries no hook bindings.
+    EXPECT_EQ(r::relic_def(r::RelicId::WHETSTONE)->hook_count, 0);
 }
 
 // --- 5. Manifest row counts match the seeded content ------------------------
@@ -242,12 +284,12 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kCardsCount, 5u);
     EXPECT_EQ(m::kPowersCount, 12u);  // 3 skeleton + 9 B3.2 framework powers
     EXPECT_EQ(m::kMonstersCount, 1u);
-    EXPECT_EQ(m::kRelicsCount, 0u);
+    EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 0u);
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 51u);
+    EXPECT_EQ(m::kTotalCount, 85u);  // 18 skeleton/B3.2 + 33 potions + 34 relics
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

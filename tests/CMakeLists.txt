@@ -360,3 +360,16 @@ sts_set_warnings(potions_test)
 sts_enable_sanitizers(potions_test)
 
 gtest_discover_tests(potions_test)
+
+# B3.24 relic-hook framework tier-2 suite: acquisition-order dispatch + per-relic
+# combat triggers (starter Burning Blood + common pool) + counter persistence
+# (Nunchaku/Pen Nib). Engine surface + relic_hooks.cpp (in sts_engine).
+add_executable(relic_hooks_test
+    relic_hooks_test.cpp
+)
+
+target_link_libraries(relic_hooks_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(relic_hooks_test)
+sts_enable_sanitizers(relic_hooks_test)
+
+gtest_discover_tests(relic_hooks_test)

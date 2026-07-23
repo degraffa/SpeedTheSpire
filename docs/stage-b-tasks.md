@@ -1310,7 +1310,7 @@ sits between emit_power_table and the Monster table section. **Shared-file flag:
 tests/registry_gen_test.cpp kTotalCount/kGenFiles-size are cross-agent sums --
 reconcile at serialize (my delta: +33 potions, +potion_table.hpp).
 
-### B3.24 `[ ]` ∥ Relics: starter + commons
+### B3.24 `[x]` ∥ Relics: starter + commons
 **Deps:** B3.2 · **Spec:** design §5.3 · **Provenance:** relics/ COMMON tier,
 Ironclad-obtainable subset (enumerate via class/canSpawn gates at task);
 Ironclad.java starting relic
@@ -1322,7 +1322,61 @@ bindings through the B3.2 hook framework in **acquisition order** (trap 8).
 **Acceptance:** tier-2 per relic (combat triggers in constructed states);
 counter-based relics (Nunchaku, Pen Nib) persist counters in RunState relic
 slots (stage-a §4.3's `{relic_id, counter}`).
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred — debug **250/250**,
+asan **250/250** (232 baseline incl. the concurrent B3.23 potions + 18 new relic
+cases), rebased onto master `6c5f7f4`. Every relic body read in full in the
+decompiled Java before coding (per-row provenance in `registry/relics.yaml`).
+**Batch (34 = starter + 33 commons):** enumerated from
+RelicLibrary.initialize() (shared `add()` + `addRed()`, :231-382), filtered to
+RelicTier.COMMON per-file; color-gated commons EXCLUDED as non-Ironclad
+(Damaru→addPurple, DataDisk→addBlue, SneckoSkull→addGreen; Test5 unused), Red
+Skull the only RED common. `game_id` join keys are the AbstractRelic `ID`
+strings (some differ from display: `Boot`, `CeramicFish`, `MawBank`,
+`MealTicket`, `PreservedInsect`).
+**Registry + codegen.** `registry/relics.yaml` defines the entry schema following
+the powers.yaml `hooks:`/`native:` precedent (id/name/game_id/tier/native/hooks +
+provenance). `gen.py` emits `relic_table.hpp` (`RelicTier`+`RelicHook` enums with
+pinned static_asserts, `RelicDef`/`RelicHookBinding`/`relic_def()`, deterministic/
+sorted, mirroring the `power_table.hpp` pattern); the `RelicId` enum + game_id
+tables come from the existing id/game_id emission. Determinism + standalone-compile
+tests now cover `relic_table.hpp`. Ids append-only 1..34 from Burning Blood.
+**Framework.** `include/sts/engine/relic_hooks.hpp` (a DISTINCT `RelicHook` enum —
+relics carry battle-start/turn-start/end-turn/victory hooks powers do not,
+AbstractRelic.java:492-620) + `src/engine/relic_hooks.cpp` dispatch relics in
+**ACQUISITION ORDER** (relic-list index order, trap 8), each either DATA (Anchor
+BLOCK 10, Bag of Marbles Vulnerable-all, Bag of Preparation DRAW 2, Vajra Strength
+1) or NATIVE (Burning Blood/Blood Vial heal, Centennial Puzzle first-HP-loss draw,
+Orichalcum unblocked-block, Red Skull bloodied +3 Strength, and the counter relics
+Nunchaku/Pen Nib/Happy Flower/Lantern whose counter persists in the RelicSlot
+`{relic_id, counter}`). `include/sts/engine/relics.hpp` re-exports the generated
+table and pins `RelicHook` byte-equal to the engine's.
+**Wiring + the B4.3 relic-storage seam.** `power_hooks.cpp` (onPlayCard/onUseCard/
+onExhaust/onGainedBlock) and `action_queue.cpp` (applyEndOfTurnRelics
+onPlayerEndTurn / applyStartOfTurnRelics atTurnStart) call the relic dispatchers at
+the exact structural sites B3.2 left, in the frozen relic-vs-power interleave,
+reading `player_relics(s)`. **CombatState has no relic mirror** (adding one is a
+schema-bump additive field owned by B4.3), so `player_relics()` returns an EMPTY
+view and every wired site is a pure **no-op today** → zero CombatState/schema
+change, `SCHEMA_VERSION` untouched, the 20 combat fixtures byte-identical
+(`fixture_oracle` green). A one-line `TODO(B4.3)` returns `{s.relics, s.relic_count}`
+once B4.3 lands the mirror. Acquisition-order + per-relic combat behaviour are
+proven by `relic_hooks_test.cpp` constructing relic lists directly.
+**G4:** `relic:Burning Blood` now resolves in **strict-mode** translation
+(`join_relic` → `relic_from_game_id`, translate.cpp:168), clearing it from the
+94-unknown-id tolerant tally (738 live-corpus hits).
+**Deferred (documented per hygiene; un-deferral owners):** power-granting relics
+whose power row is not yet registered — **Bronze Scales (Thorns) / Oddly Smooth
+Stone (Dexterity)** land with the potion-support-powers follow-up (powers.yaml ids
+14+, right after B3.4); **Akabeko (Vigor)** and **Pen Nib (double-damage
+PenNibPower)** land with their card-batch consumers (Pen Nib's attack counter is
+already live). *(B3.4 next takes powers.yaml id 13 = LOSE_STRENGTH.)* Also
+deferred: **Boot** (a DAMAGE-pipeline `onAttackToChangeDamage` modifier — keeps the
+frozen float-exact pipeline untouched); **Red Skull onNotBloodied** −3 heal-cross
+(needs a heal-cross hook); **Art of War / Ancient Tea Set** (cross-turn/cross-room
+energy flags beyond `RelicSlot.counter`); **Preserved Insect** (elite-room HP
+scaling); **Toy Ornithopter** (potion-use trigger, B3.23). Each is a documented
+no-op native branch — the relic row + hook are registered so the accounting/wiring
+is already in place.
 
 ### B3.25 `[ ]` ∥ Relics: uncommons
 **Deps:** B3.24 · **Provenance:** relics/ UNCOMMON, Ironclad-obtainable

@@ -15,6 +15,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"  // execute_opcode wired into pump_step
 #include "sts/engine/power_hooks.hpp"  // B3.2: start/end-of-turn power dispatch
+#include "sts/engine/relic_hooks.hpp"  // B3.24: start/end-of-turn relic dispatch
 
 namespace sts::engine {
 
@@ -80,7 +81,7 @@ void monster_queue_pop_front(CombatState& s) noexcept {
 // can attach without moving the call site.
 void call_end_of_turn_actions(CombatState& s) noexcept {
     // Frozen §5.4 order (GameActionManager.callEndOfTurnActions:369-377):
-    //   applyEndOfTurnRelics                    -- none yet
+    //   applyEndOfTurnRelics -> relics onPlayerEndTurn (acq order; Orichalcum), B3.24
     //   applyEndOfTurnPreCardPowers             -- Metallicize (atEndOfTurnPreEndTurnCards)
     //   TriggerEndOfTurnOrbsAction               -- no orbs
     //   hand cards triggerOnEndOfTurnForPlayingCard -- Burn/Regret/Decay (card-level, B3.9)
@@ -89,6 +90,10 @@ void call_end_of_turn_actions(CombatState& s) noexcept {
     // discard sequence (AbstractCreature.java:548-553) -- AFTER the pre-card
     // powers and hand triggers. All queue via add_to_bottom, so call order ==
     // resolution order: Metallicize block lands before Combust's HP loss/damage.
+    {
+        const RelicView rv = player_relics(s);  // applyEndOfTurnRelics (B3.24)
+        dispatch_relics_on_player_end_turn(s, rv.relics, rv.count);
+    }
     dispatch_at_end_of_turn_pre_card(s);   // Metallicize
     // hand-card end-of-turn triggers (Burn/Decay) -- card-level, B3.9 stub.
     // stance.onEndOfTurn -- stanceless stub.
@@ -102,7 +107,12 @@ void start_of_turn(CombatState& s) noexcept {
     // monsters' applyEndOfTurnPowers -- stub (no monster powers with this hook).
     s.cards_played_this_turn = 0;               // player.cardsPlayedThisTurn = 0
     // orbsChanneledThisTurn.clear() -- no orbs.
-    // applyStartOfTurnRelics / PreDrawCards -- no relics / card-level hooks yet.
+    // applyStartOfTurnRelics -> relics atTurnStart (acq order; Happy Flower, Lantern,
+    // B3.24). PreDrawCards -- card-level hooks not in scope.
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_at_turn_start(s, rv.relics, rv.count);
+    }
     // applyStartOfTurnPowers (§5.2 step 6, pre-draw): Berserk/Mayhem/Magnetism
     // energy/play; applyStartOfTurnOrbs -- no orbs. No-op without such a power.
     dispatch_at_start_of_turn(s);

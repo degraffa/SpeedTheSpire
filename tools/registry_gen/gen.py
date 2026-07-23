@@ -107,6 +107,37 @@ POWER_TYPES = {"BUFF": 0, "DEBUFF": 1}
 # NONE == a non-stacking marker for a bespoke consumer. Default INTENSITY.
 POWER_STACK = {"intensity": 0, "none": 1}
 
+# Relic hook points (generated sts::registry::RelicHook) -- MIRROR of the engine's
+# include/sts/engine/relic_hooks.hpp RelicHook enum (B3.24). Values are pinned and
+# append-only (design doc §4.4); relics.hpp static_asserts the generated RelicHook
+# byte-equal to the engine's. YAML `hooks:` keys are these lower-case names. The
+# frozen ACQUISITION-order dispatch (stage-a trap 8) lives in relic_hooks.cpp, NOT
+# in this numbering -- these are identity tags. DISTINCT from the power Hook enum:
+# relics carry battle-start/turn-start/end-turn/victory hooks powers do not
+# (AbstractRelic's hook inventory, AbstractRelic.java:492-620).
+RELIC_HOOKS = {
+    "at_pre_battle": 0,              # AbstractRelic.atPreBattle (pre-combat reset)
+    "at_battle_start": 1,           # atBattleStart
+    "at_battle_start_pre_draw": 2,  # atBattleStartPreDraw
+    "at_turn_start": 3,             # atTurnStart (pre-draw)
+    "at_turn_start_post_draw": 4,   # atTurnStartPostDraw
+    "on_player_end_turn": 5,        # onPlayerEndTurn
+    "on_use_card": 6,               # onUseCard
+    "on_play_card": 7,              # onPlayCard
+    "on_exhaust": 8,                # onExhaust
+    "on_card_draw": 9,              # onCardDraw
+    "on_gained_block": 10,          # onPlayerGainedBlock
+    "was_hp_lost": 11,              # wasHPLost / onLoseHp
+    "on_attack": 12,                # onAttack / onAttackToChangeDamage
+    "on_victory": 13,               # onVictory (combat end)
+}
+# RelicTier (AbstractRelic.RelicTier). Pinned/append-only; the translator's relic
+# table joins on it and reward/shop pools gate by it (design doc §5.3).
+RELIC_TIERS = {
+    "STARTER": 0, "COMMON": 1, "UNCOMMON": 2, "RARE": 3,
+    "BOSS": 4, "SHOP": 5, "SPECIAL": 6, "EVENT": 7,
+}
+
 # Potion rarity (AbstractPotion.PotionRarity): the reward tier gate reads it
 # (65/25/10, PotionHelper.java:70-71). Pinned/append-only; the potion table and
 # the identity roll (AbstractDungeon.returnRandomPotion) join on it. YAML
@@ -675,6 +706,189 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
     return "\n".join(out) + "\n"
 
 
+# --- Relic table (B3.24: RelicHook -> effect-program bindings) ---------------
+
+def _parse_relic_hook_steps(relic_name: str, hook_name: str, effects,
+                            powers: dict[str, int]) -> list:
+    """Parse a relic hook's effect program into (op, amount, extra, target)
+    tuples -- the SAME CardEffectStep shape as card/power programs. `target: SELF`
+    is the player; ALL_ENEMY/RANDOM_ENEMY fan out at execute time. Unlike powers,
+    a relic step's amount is ALWAYS a literal (relics carry no stack amount)."""
+    steps = []
+    for step in effects or []:
+        op = step.get("op")
+        if op not in OPCODES:
+            raise fail(f"relics.yaml: relic {relic_name} hook {hook_name} uses "
+                       f"unknown op {op!r}")
+        amount = int(step.get("amount", 0))
+        st = step.get("target", "SELF")
+        if st not in STEP_TARGETS:
+            raise fail(f"relics.yaml: relic {relic_name} hook {hook_name} step has "
+                       f"unknown target {st!r} (known: {sorted(STEP_TARGETS)})")
+        extra = 0
+        if op == "APPLY_POWER":
+            pname = step.get("power")
+            if pname not in powers:
+                raise fail(f"relics.yaml: relic {relic_name} hook {hook_name} "
+                           f"APPLY_POWER references unknown power {pname!r}")
+            extra = powers[pname]
+        steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
+    return steps
+
+
+def emit_relic_table(domains: dict[str, list[dict]]) -> str:
+    relics = domains["relics"]
+    power_ids = _power_id_map(domains)
+
+    rows = []
+    max_hooks = 1        # floor 1 so std::array<RelicHookBinding, N> is valid
+    max_hook_steps = 1   # floor 1 likewise
+    for r in relics:
+        tier = r.get("tier")
+        if tier not in RELIC_TIERS:
+            raise fail(f"relics.yaml: relic {r['name']} has unsupported tier "
+                       f"{tier!r} (known: {sorted(RELIC_TIERS)})")
+        native = bool(r.get("native", False))
+
+        raw_hooks = r.get("hooks") or {}
+        if not isinstance(raw_hooks, dict):
+            raise fail(f"relics.yaml: relic {r['name']} 'hooks' must be a mapping "
+                       f"of hook -> effect program, got {type(raw_hooks).__name__}")
+        bindings = []
+        for hook_name in sorted(raw_hooks, key=lambda h: RELIC_HOOKS.get(h, 1 << 30)):
+            if hook_name not in RELIC_HOOKS:
+                raise fail(f"relics.yaml: relic {r['name']} has unknown hook "
+                           f"{hook_name!r} (known: {sorted(RELIC_HOOKS)})")
+            steps = _parse_relic_hook_steps(r["name"], hook_name,
+                                            raw_hooks[hook_name], power_ids)
+            if steps and native:
+                raise fail(f"relics.yaml: relic {r['name']} hook {hook_name} has "
+                           f"a data program AND native: true -- a native relic "
+                           f"lists its hooks with an EMPTY program (the escape "
+                           f"hatch handles the body)")
+            if not steps and not native:
+                raise fail(f"relics.yaml: relic {r['name']} hook {hook_name} has "
+                           f"an empty program but native is not set -- a data-"
+                           f"bound relic hook needs at least one step")
+            bindings.append((RELIC_HOOKS[hook_name], hook_name, steps))
+            max_hook_steps = max(max_hook_steps, len(steps))
+        max_hooks = max(max_hooks, len(bindings))
+        rows.append({"name": r["name"], "tier": RELIC_TIERS[tier],
+                     "native": native, "bindings": bindings})
+
+    out: list[str] = [BANNER, "#pragma once\n",
+                      "#include <array>", "#include <cstdint>\n",
+                      '#include "sts/registry/card_table.hpp"',
+                      '#include "sts/registry/ids.hpp"\n',
+                      "// Relic hook->effect-program tables (design doc B §4.2, "
+                      "§5.3; B3.24). A relic",
+                      "// binds RelicHook points to effect programs (reusing "
+                      "CardEffectStep) or is",
+                      "// `native` (the escape hatch: relic_hooks.cpp handles the "
+                      "body, the binding",
+                      "// lists the hook with an empty program). The frozen "
+                      "ACQUISITION-order dispatch",
+                      "// (stage-a trap 8) lives in the framework, not here. Types "
+                      "are duplicated in",
+                      "// sts::registry so this header compiles standalone; "
+                      "relics.hpp pins RelicHook",
+                      "// byte-equal to the engine's relic_hooks.hpp.\n",
+                      "namespace sts::registry {\n"]
+
+    out.append("enum class RelicTier : uint8_t {")
+    for name, val in sorted(RELIC_TIERS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name} = {val},")
+    out.append("};")
+    for name, val in sorted(RELIC_TIERS.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>(RelicTier::{name}) "
+                   f"== {val}, \"RelicTier::{name} is pinned to {val} "
+                   f"(append-only, never renumber)\");")
+    out.append("")
+    out.append("// Hook identity tags (MIRROR of relic_hooks.hpp RelicHook; "
+               "pinned, append-only).")
+    out.append("enum class RelicHook : uint8_t {")
+    for name, val in sorted(RELIC_HOOKS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name.upper()} = {val},")
+    out.append("};")
+    for name, val in sorted(RELIC_HOOKS.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>(RelicHook::{name.upper()}) "
+                   f"== {val}, \"RelicHook::{name.upper()} is pinned to {val} "
+                   f"(append-only, never renumber)\");")
+    out.append(f"inline constexpr int kRelicHookCount = {len(RELIC_HOOKS)};\n")
+    out.append(f"inline constexpr int kMaxRelicHooks = {max_hooks};")
+    out.append(f"inline constexpr int kMaxRelicHookSteps = {max_hook_steps};\n")
+    out.append("// One (hook, program) binding. A `native` relic's programs are "
+               "empty (step_count")
+    out.append("// == 0); the framework routes those hooks to the native escape "
+               "hatch instead.")
+    out.append("struct RelicHookBinding {")
+    out.append("    RelicHook hook;")
+    out.append("    uint8_t step_count;")
+    out.append("    std::array<CardEffectStep, kMaxRelicHookSteps> steps;")
+    out.append("};\n")
+    out.append("struct RelicDef {")
+    out.append("    RelicId id;")
+    out.append("    RelicTier tier;")
+    out.append("    bool native;")
+    out.append("    uint8_t hook_count;")
+    out.append("    std::array<RelicHookBinding, kMaxRelicHooks> hooks;")
+    out.append("    [[nodiscard]] constexpr const RelicHookBinding* "
+               "hook_binding(RelicHook h) const noexcept {")
+    out.append("        for (uint8_t i = 0; i < hook_count; ++i) {")
+    out.append("            if (hooks[i].hook == h) { return &hooks[i]; }")
+    out.append("        }")
+    out.append("        return nullptr;")
+    out.append("    }")
+    out.append("};\n")
+
+    def step_literal(step) -> str:
+        op, amount, extra, tgt = step
+        op_name = next(k for k, v in OPCODES.items() if v == op)
+        tgt_name = next(k for k, v in STEP_TARGETS.items() if v == tgt)
+        return (f"{{Opcode::{op_name}, {amount}, {extra}, "
+                f"StepTarget::{tgt_name}}}")
+
+    def pad_steps(steps) -> str:
+        padded = list(steps)
+        while len(padded) < max_hook_steps:
+            padded.append((OPCODES["NOP"], 0, 0, STEP_TARGETS["SELF"]))
+        return ", ".join(step_literal(s) for s in padded)
+
+    def pad_bindings(bindings) -> list[str]:
+        lines = []
+        for _hval, hname, steps in bindings:
+            lines.append(f"        {{RelicHook::{hname.upper()}, {len(steps)}, "
+                         f"{{{{{pad_steps(steps)}}}}}}},")
+        empty_hook = next(k for k, v in RELIC_HOOKS.items() if v == 0)
+        while len(lines) < max_hooks:
+            lines.append(f"        {{RelicHook::{empty_hook.upper()}, 0, "
+                         f"{{{{{pad_steps([])}}}}}}},")
+        return lines
+
+    for r in rows:
+        out.append(f"inline constexpr RelicDef k{_pascal(r['name'])}Relic{{")
+        tier_name = next(k for k, v in RELIC_TIERS.items() if v == r["tier"])
+        out.append(f"    RelicId::{r['name']}, RelicTier::{tier_name}, "
+                   f"{'true' if r['native'] else 'false'}, "
+                   f"{len(r['bindings'])},")
+        out.append("    {{")
+        out.extend(pad_bindings(r["bindings"]))
+        out.append("    }}};\n")
+
+    out.append("[[nodiscard]] inline const RelicDef* "
+               "relic_def(RelicId id) noexcept {")
+    out.append("    switch (id) {")
+    for r in rows:
+        out.append(f"        case RelicId::{r['name']}: "
+                   f"return &k{_pascal(r['name'])}Relic;")
+    out.append("        case RelicId::NONE:")
+    out.append("        default: return nullptr;")
+    out.append("    }")
+    out.append("}\n")
+    out.append("}  // namespace sts::registry")
+    return "\n".join(out) + "\n"
+
+
 # --- Potion table (B3.23: USE effect programs + potency/rarity) --------------
 
 def _parse_potion_steps(potion_name: str, effects, powers: dict[str, int]) -> list:
@@ -1204,6 +1418,7 @@ def generate(registry_dir: Path, out_dir: Path) -> list[Path]:
         "ids.hpp": emit_ids(domains),
         "card_table.hpp": emit_card_table(domains),
         "power_table.hpp": emit_power_table(domains),
+        "relic_table.hpp": emit_relic_table(domains),
         "potion_table.hpp": emit_potion_table(domains),
         "monster_table.hpp": emit_monster_table(domains),
         "game_ids.hpp": emit_game_ids(domains),
