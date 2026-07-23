@@ -74,6 +74,14 @@ inline constexpr int kMonsterQueueCap = 5;
 // action ring's element type/idiom rather than trimmed to a tight bound.
 inline constexpr int kPreTurnActionQueueCap = 16;
 
+// CombatState.flags bit for FrailPower.justApplied on the player. Shame and
+// Act-1 monster Frail applications construct FrailPower(..., true), so a newly
+// created instance skips its first atEndOfRound decrement. Stacking an existing
+// instance preserves the current latch (ApplyPowerAction stacks the existing
+// object rather than replacing it). The reserved header flags keep this state
+// inside the frozen POD without a schema/layout change.
+inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;

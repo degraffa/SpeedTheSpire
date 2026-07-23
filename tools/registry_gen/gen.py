@@ -74,6 +74,16 @@ OPCODES = {
     "DAMAGE_BLOCK": 15,
     "DAMAGE_STR_MULT": 16,
     "DAMAGE_PER_STRIKE": 17,
+    # Stage B B3.9 addition (append-only from 18): dynamic self HP loss scaled by
+    # the current hand size (Regret -- magicNumber = player.hand.size() locked in
+    # triggerOnEndOfTurnForPlayingCard, Regret.java:35-38). Bypasses block (HP_LOSS
+    # type). The hand count is read at EXECUTE time; the end-of-turn card triggers
+    # queue their programs BEFORE the ethereal-exhaust sweep (action_queue.cpp), so
+    # the ethereal cards are still in hand when this resolves -- matching the game's
+    # trigger-time lock (nothing between trigger and resolve changes the hand).
+    "LOSE_HP_PER_HAND": 18,
+    "DISCARD_HAND": 19,
+    "REDUCE_POWER": 20,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -90,8 +100,27 @@ CHOICE_RANDOM_BIT = 1 << 2
 # RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
 STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1, "ALL_ENEMY": 2, "RANDOM_ENEMY": 3}
 # CardType: cards.hpp. Stage B B3.3 adds STATUS=2 (Wound, the first status card,
-# created by Wild Strike); POWER/CURSE land with B3.7/B3.9.
-CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2}
+# created by Wild Strike); B3.9 adds CURSE=3 (the 10 poolable curses + Ascender's
+# Bane). POWER lands with B3.7.
+CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3}
+# DamageType (interp.hpp DamageType): the DAMAGE opcode's `flags` low byte. A card
+# DAMAGE step defaults to NORMAL (the full applyPowers pipeline); a status/curse's
+# self-inflicted DAMAGE is THORNS (Burn/Decay -- new DamageInfo(player, n, THORNS),
+# Burn.java:45 / Decay.java:43), which skips the NORMAL-only power hooks so the
+# player's own Strength/Vulnerable do NOT scale the self-damage (but block still
+# absorbs it, unlike LOSE_HP). MIRROR of interp.hpp make_damage_flags.
+DAMAGE_TYPES = {"NORMAL": 0, "THORNS": 1, "HP_LOSS": 2}
+# CardTrigger (cards.hpp CardTrigger): WHEN a card's effect program runs. Default
+# ON_PLAY (the played-card path, every ATTACK/SKILL + playable Slimed). The
+# unplayable statuses/curses instead run their `effects` program at a passive
+# trigger: END_OF_TURN (Burn/Decay/Doubt/Regret/Shame --
+# triggerOnEndOfTurnForPlayingCard, the stage-a §5.4 sentinel path), ON_DRAW (Void
+# -- triggerWhenDrawn, VoidCard.java:24-26), ON_OTHER_CARD_PLAYED (Pain --
+# triggerOnOtherCardPlayed, Pain.java:34-36). Because these cards are unplayable,
+# reusing their `effects`/`upgraded` program for the trigger is unambiguous (it is
+# never run on play), and the two-row upgrade selection carries Burn's 2->4.
+CARD_TRIGGERS = {"on_play": 0, "end_of_turn": 1, "on_draw": 2,
+                 "on_other_card_played": 3}
 # CardPile destination for a MAKE_CARD effect step (Stage B B3.3 card-authoring;
 # MIRROR of interp.hpp CardPile). The step's `extra` packs the created CardId in
 # bits 0-15, the CardPile in bits 16-23, and an "upgraded copy" flag in bit 24
@@ -392,6 +421,17 @@ def _parse_card_steps(card_name: str, effects, powers: dict[str, int],
                            f"references unknown power {pname!r}")
             # make_apply_power_flags: low 16 bits carry the PowerId.
             extra = powers[pname]
+        elif op == "DAMAGE":
+            # `extra` = the DamageType (interp.hpp make_damage_flags). Default
+            # NORMAL (0) keeps every existing DAMAGE step byte-identical; a
+            # status/curse self-hit sets THORNS (Burn/Decay) so it skips the
+            # NORMAL-only power pipeline (no self Strength/Vulnerable scaling).
+            dt = str(step.get("damage_type", "NORMAL")).upper()
+            if dt not in DAMAGE_TYPES:
+                raise fail(f"cards.yaml: card {card_name} DAMAGE has unknown "
+                           f"damage_type {step.get('damage_type')!r} "
+                           f"(known: {sorted(DAMAGE_TYPES)})")
+            extra = DAMAGE_TYPES[dt]
         elif op == "CHOOSE_CARD":
             # `extra` packs the ChoiceKind + RANDOM bit (interp.hpp make_choose_flags).
             kind = str(step.get("choose", "")).lower()
@@ -498,6 +538,23 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         is_strike = bool(c.get("strike", False))
         requires_all_attacks = bool(c.get("requires_all_attacks", False))
 
+        # B3.9 trigger column: WHEN the effect program runs (default ON_PLAY). The
+        # passive statuses/curses (Burn/Void/Pain/...) run their program at an
+        # end-of-turn / on-draw / on-other-card-played hook instead of on play.
+        trig = str(c.get("trigger", "on_play")).lower()
+        if trig not in CARD_TRIGGERS:
+            raise fail(f"cards.yaml: card {c['name']} has unknown trigger "
+                       f"{c.get('trigger')!r} (known: {sorted(CARD_TRIGGERS)})")
+
+        # Run-layer B3.9 metadata. CardLibrary.getCurse selects only the ten
+        # ordinary curses; Parasite alone has an on-remove master-deck penalty.
+        curse_pool = bool(c.get("curse_pool", False))
+        if curse_pool and ctype != "CURSE":
+            raise fail(f"cards.yaml: card {c['name']} marks curse_pool but is not CURSE")
+        on_remove_max_hp_loss = int(c.get("on_remove_max_hp_loss", 0))
+        if on_remove_max_hp_loss < 0 or on_remove_max_hp_loss > 127:
+            raise fail(f"cards.yaml: card {c['name']} has invalid on_remove_max_hp_loss")
+
         max_steps = max(max_steps, len(steps), len(up_steps))
         rows.append({
             "name": c["name"], "cost": base_cost, "flags": flags,
@@ -506,6 +563,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "up_cost": up_base_cost, "up_flags": up_flags_bits,
             "up_steps": up_steps, "is_strike": is_strike,
             "requires_all_attacks": requires_all_attacks,
+            "trigger": CARD_TRIGGERS[trig],
+            "curse_pool": curse_pool,
+            "on_remove_max_hp_loss": on_remove_max_hp_loss,
         })
 
     out: list[str] = [BANNER, "#pragma once\n",
@@ -531,6 +591,11 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("enum class CardType : uint8_t {")
     for name, val in sorted(CARD_TYPES.items(), key=lambda kv: kv[1]):
         out.append(f"    {name} = {val},")
+    out.append("};\n")
+    # CardTrigger (B3.9): mirror of cards.hpp CardTrigger; pinned/append-only.
+    out.append("enum class CardTrigger : uint8_t {")
+    for name, val in sorted(CARD_TRIGGERS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name.upper()} = {val},")
     out.append("};\n")
     # Card-flag bit constants (Stage B B3.1): mirror of the engine's CardFlag
     # (types.hpp); cards.hpp static_asserts these equal. Emitted sorted by bit.
@@ -563,6 +628,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    std::array<CardEffectStep, kMaxCardSteps> upgraded_steps;")
     out.append("    bool is_strike;                // CardTags.STRIKE (B3.3)")
     out.append("    bool requires_all_attacks;     // Clash canUse predicate (B3.3)")
+    out.append("    CardTrigger trigger;           // WHEN effects run (B3.9)")
+    out.append("    bool curse_pool;               // CardLibrary.getCurse member (B3.9)")
+    out.append("    uint8_t on_remove_max_hp_loss; // master-deck removal hook (B3.9)")
     out.append("};\n")
 
     def step_literal(step) -> str:
@@ -595,8 +663,21 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append("    {{")
         out.append(f"        {up_steps_txt},")
         out.append("    }},")
+        trig_name = next(k for k, v in CARD_TRIGGERS.items()
+                         if v == r["trigger"])
         out.append(f"    {'true' if r['is_strike'] else 'false'}, "
-                   f"{'true' if r['requires_all_attacks'] else 'false'}}};\n")
+                   f"{'true' if r['requires_all_attacks'] else 'false'}, "
+                   f"CardTrigger::{trig_name.upper()}, "
+                   f"{'true' if r['curse_pool'] else 'false'}, "
+                   f"{r['on_remove_max_hp_loss']}}};\n")
+
+    poolable_curses = [r for r in rows if r["curse_pool"]]
+    out.append(f"inline constexpr int kPoolableCurseCount = {len(poolable_curses)};")
+    out.append("inline constexpr std::array<CardId, kPoolableCurseCount> "
+               "kPoolableCurses{{")
+    for r in poolable_curses:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
 
     # Lookup table + accessor (mirrors cards.hpp card_def()).
     out.append("inline constexpr std::array<const CardDef*, "

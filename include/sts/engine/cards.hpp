@@ -36,6 +36,12 @@ namespace sts::engine {
 // content tasks.
 using CardType = sts::registry::CardType;
 
+// When a card's effect program runs (Stage B B3.9). ON_PLAY is the played-card
+// path (every ATTACK/SKILL + the playable Slimed status); the unplayable
+// statuses/curses instead run their program at a passive hook -- END_OF_TURN
+// (Burn/Decay/Doubt/Regret/Shame), ON_DRAW (Void), ON_OTHER_CARD_PLAYED (Pain).
+using CardTrigger = sts::registry::CardTrigger;
+
 // Where a single effect step lands, symbolically; card_play.cpp substitutes the
 // concrete actor index (kActorPlayer for SELF, the chosen/rolled monster slot
 // for CARD_TARGET) at resolution time.
@@ -50,6 +56,8 @@ using CardEffectStep = sts::registry::CardEffectStep;
 using CardDef = sts::registry::CardDef;
 
 using sts::registry::kMaxCardSteps;
+using sts::registry::kPoolableCurseCount;
+using sts::registry::kPoolableCurses;
 
 // --- The card table (generated from registry/cards.yaml) ---------------------
 // Each entry mirrors its use()'s addToBot order exactly; provenance is cited
@@ -142,7 +150,13 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_STR_MULT) ==
             static_cast<uint16_t>(Opcode::DAMAGE_STR_MULT) &&
         static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_PER_STRIKE) ==
-            static_cast<uint16_t>(Opcode::DAMAGE_PER_STRIKE),
+            static_cast<uint16_t>(Opcode::DAMAGE_PER_STRIKE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::LOSE_HP_PER_HAND) ==
+            static_cast<uint16_t>(Opcode::LOSE_HP_PER_HAND) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DISCARD_HAND) ==
+            static_cast<uint16_t>(Opcode::DISCARD_HAND) &&
+        static_cast<uint16_t>(sts::registry::Opcode::REDUCE_POWER) ==
+            static_cast<uint16_t>(Opcode::REDUCE_POWER),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

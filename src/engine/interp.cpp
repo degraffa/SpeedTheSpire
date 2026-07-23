@@ -100,16 +100,18 @@ struct PowerView {
 }
 
 // modifyBlock (block-gain hook, distinct from the damage hooks above):
-// DexterityPower.modifyBlock adds `amount` to the block gained, flooring the
-// running total at 0 (DexterityPower.java:106-111). The only skeleton block
-// modifier; iterated in power-list order over the block GAINER's powers. Applied
-// by op_block for CARD block only (power/relic/potion block sets kBlockNoPowers).
+// DexterityPower.modifyBlock adds `amount`; FrailPower multiplies by 0.75f.
+// Iterate in power-list order and floor once after all modifiers, matching
+// AbstractCard.applyPowersToBlock. Applied by op_block for CARD block only
+// (power/relic/potion block sets kBlockNoPowers).
 [[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::DEXTERITY: {
             const float m = blk + static_cast<float>(p.amount);
             return m < 0.0f ? 0.0f : m;                 // modifyBlock floors at 0
         }
+        case PowerId::FRAIL:
+            return blk * 0.75f;                         // FrailPower.java:59-61
         default:
             return blk;
     }
@@ -307,6 +309,12 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // stacked; only the new-slot path clears it.
         s.monsters[tgt].flags = static_cast<uint16_t>(
             s.monsters[tgt].flags & ~kMonsterFlagCurlUpTriggered);
+    }
+    if (id == PowerId::FRAIL && tgt == kActorPlayer) {
+        // All in-scope player Frail constructors pass isSourceMonster=true
+        // (Shame and Act-1 monsters). Only a NEW instance gets justApplied;
+        // stacking returned above and therefore preserves the existing latch.
+        s.flags |= kCombatFlagFrailJustApplied;
     }
     slots[*count].power_id = pid;
     slots[*count].amount = static_cast<int16_t>(amount);
@@ -639,8 +647,43 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
                 s.monsters[tgt].flags = static_cast<uint16_t>(
                     s.monsters[tgt].flags & ~kMonsterFlagCurlUpTriggered);
             }
+            if (id == PowerId::FRAIL && tgt == kActorPlayer) {
+                s.flags &= ~kCombatFlagFrailJustApplied;
+            }
             return;
         }
+    }
+}
+
+// REDUCE_POWER (ReducePowerAction): subtract `amount` from one power and remove
+// the slot when it reaches zero. Kept as a queued opcode so an atEndOfRound power
+// cannot mutate/compact the list while the dispatcher is still iterating it.
+void op_reduce_power(CombatState& s, uint8_t tgt, PowerId id,
+                     int amount) noexcept {
+    if (amount <= 0) {
+        return;
+    }
+    PowerSlot* slots = nullptr;
+    uint8_t count = 0;
+    if (tgt == kActorPlayer) {
+        slots = s.player_powers;
+        count = s.player_power_count;
+    } else if (tgt < kMonsterCap) {
+        slots = s.monsters[tgt].powers;
+        count = s.monsters[tgt].power_count;
+    } else {
+        return;
+    }
+    const uint16_t pid = static_cast<uint16_t>(id);
+    for (uint8_t i = 0; i < count; ++i) {
+        if (slots[i].power_id != pid) {
+            continue;
+        }
+        slots[i].amount = static_cast<int16_t>(slots[i].amount - amount);
+        if (slots[i].amount <= 0) {
+            op_remove_power(s, tgt, id);
+        }
+        return;
     }
 }
 
@@ -814,6 +857,9 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                     break;
                 }
                 const CardPoolIndex pi = s.hand[hi];
+                // c.triggerWhenDrawn() fires FIRST (AbstractPlayer.draw:1642):
+                // Void queues its energy loss before the power onCardDraw fan-out.
+                dispatch_card_on_draw(s, pi);
                 dispatch_on_card_draw(s, pi, s.card_pool[pi].card_id);
             }
             return;
@@ -842,6 +888,16 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::LOSE_HP:
             op_lose_hp(s, item.tgt, item.amount);
             return;
+        case Opcode::LOSE_HP_PER_HAND:
+            // Regret: lose HP == the current hand size (read at execute time; the
+            // end-of-turn card triggers resolve before the ethereal-exhaust sweep,
+            // so the hand still holds every card it held when Regret triggered --
+            // matching the game locking magicNumber = hand.size() at trigger).
+            op_lose_hp(s, item.tgt, static_cast<int>(s.hand_count));
+            return;
+        case Opcode::DISCARD_HAND:
+            discard_hand_at_end_of_turn(s);
+            return;
         case Opcode::CHOOSE_CARD:
             // Reached only on the auto path (RANDOM or forced-all); a real prompt
             // is intercepted by the pump (choice_requires_user) before execute.
@@ -854,6 +910,10 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::REMOVE_POWER:
             op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags));
+            return;
+        case Opcode::REDUCE_POWER:
+            op_reduce_power(s, item.tgt,
+                            apply_power_id_from_flags(item.flags), item.amount);
             return;
         case Opcode::DAMAGE_BLOCK:
             // Body Slam: base == the player's CURRENT block (read here at execute

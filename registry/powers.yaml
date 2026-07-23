@@ -235,3 +235,12 @@
   hooks:
     on_attacked: []         # one-shot guard: first NORMAL, non-lethal, >0 attack -> gain `amount` Block, then self-remove
   provenance: "CurlUpPower.onAttacked (CurlUpPower.java:36-46) -- if !triggered && damageAmount < owner.currentHealth && damageAmount > 0 && info.owner != null && info.type == NORMAL: flash, set triggered=true SYNCHRONOUSLY, then addToBot ChangeStateAction(CLOSED), GainBlockAction(owner, owner, amount), and RemoveSpecificPowerAction(owner, owner, \"Curl Up\"). Native (guard + one-shot): op_damage dispatches onAttacked for NORMAL src!=tgt AFTER decrementBlock with post-block damage; the body re-checks amount>0 && amount<owner.hp, sets MonsterState.flags kMonsterFlagCurlUpTriggered before queueing kBlockNoPowers BLOCK and REMOVE_POWER. The explicit latch is required because queued multi-hit DAMAGE actions can resolve before the queued removal; removal clears the latch with the power instance. ChangeState CLOSED is presentation. POWER_ID \"Curl Up\" (:21)."
+# --- B3.9 curse-applied debuff -----------------------------------------------
+- id: 21
+  name: FRAIL
+  game_id: "Frail"
+  type: DEBUFF
+  native: true
+  hooks:
+    at_end_of_round: []     # native: justApplied skip, then decrement/remove
+  provenance: "FrailPower (FrailPower.java:22-64): DEBUFF; modifyBlock returns blockAmount*0.75f; a monster-sourced new instance sets justApplied, whose first atEndOfRound clears the latch without decrementing, then later rounds reduce 1/remove at zero. Shame applies new FrailPower(player,1,true) (Shame.java:24-26). Native: card BLOCK's float modify-block pass applies x0.75 and floors once after all powers; direct GainBlockAction items carry kBlockNoPowers and bypass it. CombatState.flags kCombatFlagFrailJustApplied stores the player instance latch without changing the frozen POD layout; stacking an existing instance preserves its latch, matching ApplyPowerAction.stackPower. POWER_ID \"Frail\" (:22)."

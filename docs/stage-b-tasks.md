@@ -1166,7 +1166,7 @@ Feed/Reaper HP-max/heal opcodes.
 frozen start-of-turn sequence; directed script.
 **Log:** —
 
-### B3.9 `[ ]` ∥ Status + curses
+### B3.9 `[x]` ∥ Status + curses
 **Deps:** B3.2 · **Spec:** design §5.1 (11 curses + 5 statuses) ·
 **Provenance:** cards/status (5), cards/curses (the 10 poolable +
 AscendersBane)
@@ -1177,7 +1177,13 @@ on-remove, Writhe innate, Void on-draw energy loss, Ascender's Bane
 ethereal-curse); curse pool membership for `returnRandomCurse`.
 **Acceptance:** tier-2 per entry; end-of-turn trigger ordering vs. hand
 discard tested against the frozen §5.4 order; directed script.
-**Log:** —
+**Log:** Done 2026-07-23. Read the full status/curses sources before coding: `Burn`, `Dazed`, `Slimed`, `VoidCard`, `Wound`, `Clumsy`, `Decay`, `Doubt`, `Injury`, `Normality`, `Pain`, `Parasite`, `Regret`, `Shame`, `Writhe`, and `AscendersBane`, plus `CardLibrary.getCurse`/`AbstractDungeon.returnRandomCurse`, `CardGroup.initializeDeck`, `DiscardAtEndOfTurnAction`, and `AbstractCreature.decreaseMaxHealth`.
+
+- Registry card ids 25–39 add the four remaining statuses and all eleven curses. Append-only integration after B3.13 preserves `RITUAL=19` and `CURL_UP=20`, then adds native `FRAIL=21`; combined manifest counts are cards 39 / powers 21 / monsters 4 / total 151. The generated card table carries passive-trigger, ten-card curse-pool, and master-deck-removal metadata. `return_random_curse(card_rng)` consumes exactly one cardRng draw and excludes Ascender's Bane; `remove_master_deck_card` applies Parasite's -3 max-HP/clamp rule.
+- End-of-turn now queues hand-card effects, then player at-end powers, then `DISCARD_HAND=19`: Regret/Burn/Decay/Doubt/Shame resolve against the full hand before ethereals exhaust and non-Retain cards discard. `LOSE_HP_PER_HAND=18` and queued `REDUCE_POWER=20` extend the opcode table without renumbering prior values. Void, Pain, Normality, Slimed, and Writhe innate opening-hand ordering are wired through their cited runtime paths.
+- Frail is fully live, not an inert row: card block runs its x0.75 float modifier and floors once after all powers; direct GainBlockAction block bypasses it. `CombatState.flags` stores the player instance's `justApplied` latch without a layout/schema change; a new Shame/monster-sourced instance skips its first end-of-round decrement, stacking preserves the existing latch, and later rounds queue ReducePowerAction-equivalent reduction/removal after the power-list walk. B3.13's Cultist Ritual end-of-round and louse Curl Up behavior remain intact.
+- Added `status_curse_test` (9 tier-2/directed tests). Correct hand discard intentionally changes the 20 combat traces; all were regenerated from the checked-in generator, replay green, and a repeated generation produced an identical sorted SHA-256 manifest. Updated the affected CardIntegration hash/trace, power-hook action count, and translator unknown-id probe rather than weakening them.
+- Verification: task branch full Debug 353/353 and leak-detecting ASan/UBSan 353/353. After semantic integration with B3.13 and Frail completion, full WSL Ubuntu-2404 Debug 368/368 and `ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1` ASan/UBSan 368/368. No schema bump; `git diff --check` clean.
 
 ### B3.10 `[ ]` ∥ Colorless uncommons
 **Deps:** B3.2 · **Provenance:** cards/colorless UNCOMMON (20)

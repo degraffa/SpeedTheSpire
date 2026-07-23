@@ -437,3 +437,233 @@
   flags: []
   provenance: "Wound (Wound.java:23-25): super cost -2 (unplayable), CardType.STATUS, COLORLESS, CardTarget.NONE; use() and upgrade() are no-ops (Wound.java:28-33). Inert clutter -- the -2 cost maps to the UNPLAYABLE flag (gen.py); no effect program."
   effects: []
+
+# --- B3.9: remaining statuses (4) + curses (11) ------------------------------
+# Design §5.1: 5 statuses (Wound landed id 24) + 11 curses (10 poolable + the
+# A10+ starter Ascender's Bane). Unplayable (cost -2) -> UNPLAYABLE flag; the
+# passive behaviors run their `effects` program at a trigger hook (end_of_turn /
+# on_draw / on_other_card_played), NOT on play (they are unplayable). color/rarity
+# are documentation-only (gen.py does not read them): CURSE cards are
+# CardColor.CURSE / CardRarity.CURSE, statuses COLORLESS/COMMON per the Java ctor.
+
+# STATUS: Burn -- end-of-turn self THORNS damage (2, upg 4).
+- id: 25
+  name: BURN
+  game_id: "Burn"
+  color: COLORLESS
+  rarity: COMMON
+  type: STATUS
+  cost: -2
+  target: NONE
+  flags: []
+  trigger: end_of_turn
+  provenance: "Burn (Burn.java:29-33): cost -2 STATUS COLORLESS NONE; magicNumber 2 (baseMagic 2). triggerOnEndOfTurnForPlayingCard (Burn.java:53-56) sets dontTriggerOnUseCard and re-queues itself; use() with dontTriggerOnUseCard -> DamageAction(player, DamageInfo(player, magicNumber, THORNS)) (Burn.java:43-47). THORNS self-damage: reduced by block, NOT scaled by the player's own Strength/Vulnerable. upgrade() upgradeMagicNumber(2) -> 4 (Burn.java:64-71). Maps to trigger=end_of_turn + a self DAMAGE(THORNS) program (base 2 / upgraded 4)."
+  effects:
+    - {op: DAMAGE, target: SELF, amount: 2, damage_type: THORNS}
+  upgraded:
+    - {op: DAMAGE, target: SELF, amount: 4, damage_type: THORNS}
+
+# STATUS: Dazed -- ethereal, inert (auto-exhausts at end of turn).
+- id: 26
+  name: DAZED
+  game_id: "Dazed"
+  color: COLORLESS
+  rarity: COMMON
+  type: STATUS
+  cost: -2
+  target: NONE
+  flags: [ethereal]
+  provenance: "Dazed (Dazed.java:22-25): cost -2 STATUS COLORLESS NONE, isEthereal=true; use()/upgrade() no-ops (Dazed.java:28-36). Ethereal -> auto-exhausts at end of turn in the later DiscardAtEndOfTurnAction sweep. No effect program."
+  effects: []
+
+# STATUS: Slimed -- playable (cost 1), exhausts on play, no effect.
+- id: 27
+  name: SLIMED
+  game_id: "Slimed"
+  color: COLORLESS
+  rarity: COMMON
+  type: STATUS
+  cost: 1
+  target: SELF
+  flags: [exhaust]
+  provenance: "Slimed (Slimed.java:22-25): cost 1 STATUS COLORLESS CardTarget.SELF, exhaust=true; use() no-op (Slimed.java:28-30). The ONE playable status -- costs 1 energy, does nothing, exhausts on play (EXHAUST flag -> exhaust pile in resolve_card_play). NOT unplayable (cost >= 0). No effect program."
+  effects: []
+
+# STATUS: Void -- ethereal; on draw lose 1 energy.
+- id: 28
+  name: VOID
+  game_id: "Void"
+  color: COLORLESS
+  rarity: COMMON
+  type: STATUS
+  cost: -2
+  target: NONE
+  flags: [ethereal]
+  trigger: on_draw
+  provenance: "VoidCard (VoidCard.java:22-25): cost -2 STATUS COLORLESS NONE, isEthereal=true; use()/upgrade() no-ops. triggerWhenDrawn (VoidCard.java:28-30) -> addToBot LoseEnergyAction(1) (loseEnergy -> player_energy -1). Maps to trigger=on_draw + GAIN_ENERGY -1 (dispatch_card_on_draw). Also ethereal -> auto-exhausts at end of turn."
+  effects:
+    - {op: GAIN_ENERGY, target: SELF, amount: -1}
+
+# CURSE: Clumsy -- ethereal, inert (exhausts at end of turn).
+- id: 29
+  name: CLUMSY
+  game_id: "Clumsy"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: [ethereal]
+  provenance: "Clumsy (Clumsy.java:23-26): cost -2 CURSE CURSE NONE, isEthereal=true. triggerOnEndOfPlayerTurn (Clumsy.java:35-37) addToTop ExhaustSpecificCardAction(this) -- REDUNDANT with isEthereal (AbstractCard.triggerOnEndOfPlayerTurn:2176-2179 already exhausts ethereal cards), so the net effect is exactly 'ethereal curse: exhausts itself at end of turn'. NOTE: the scoping report (b3_card_opcode_gap.md line 175) says Clumsy 'exhausts itself when drawn (triggerWhenDrawn)' -- that is INCORRECT per the decompiled Java (the hook is triggerOnEndOfPlayerTurn, end of turn, not on draw); the Java is authoritative and models as an ethereal curse. No effect program."
+  effects: []
+
+# CURSE: Decay -- end-of-turn self THORNS damage (2).
+- id: 30
+  name: DECAY
+  game_id: "Decay"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  trigger: end_of_turn
+  provenance: "Decay (Decay.java:29-31): cost -2 CURSE CURSE NONE. triggerOnEndOfTurnForPlayingCard (Decay.java:49-52) re-queues itself; use() with dontTriggerOnUseCard -> addToTop DamageAction(player, DamageInfo(player, 2, THORNS)) (Decay.java:41-45). Fixed 2 THORNS to self, blockable, no Strength scaling. upgrade() no-op. Maps to trigger=end_of_turn + self DAMAGE(THORNS, 2)."
+  effects:
+    - {op: DAMAGE, target: SELF, amount: 2, damage_type: THORNS}
+
+# CURSE: Doubt -- end-of-turn apply Weak 1 to self.
+- id: 31
+  name: DOUBT
+  game_id: "Doubt"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  trigger: end_of_turn
+  provenance: "Doubt (Doubt.java:26-28): cost -2 CURSE CURSE NONE. triggerOnEndOfTurnForPlayingCard (Doubt.java:49-52) re-queues; use() with dontTriggerOnUseCard -> addToTop ApplyPowerAction(player, player, WeakPower(player, 1, true), 1) (Doubt.java:41-45). Applies Weak 1 to the PLAYER at end of turn (player's own attacks x0.75 next turn -- WeakPower.atDamageGive is wired). triggerWhenDrawn (Doubt.java:47-49) is a SetDontTrigger reset (bookkeeping so the card can re-trigger next turn) -- no combat effect. upgrade() no-op. Maps to trigger=end_of_turn + APPLY_POWER WEAK 1 SELF."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: WEAK}
+
+# CURSE: Injury -- inert clutter.
+- id: 32
+  name: INJURY
+  game_id: "Injury"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  provenance: "Injury (Injury.java:22-25): cost -2 CURSE CURSE NONE; use()/upgrade() no-ops (Injury.java:28-33). Pure unplayable clutter, no trigger, no effect program."
+  effects: []
+
+# CURSE: Normality -- cannot play >3 cards/turn (canPlay veto in legal_actions).
+- id: 33
+  name: NORMALITY
+  game_id: "Normality"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  provenance: "Normality (Normality.java:22-30): cost -2 CURSE CURSE NONE; PLAY_LIMIT=3 (Normality.java:26). canPlay(card) returns FALSE for every OTHER card once cardsPlayedThisTurn.size() >= 3 (Normality.java:29-35). Modeled NATIVELY in legal_actions (advance.cpp): while a Normality is in hand and cards_played_this_turn >= 3, no card is playable. use()/upgrade() no-ops; applyPowers only rewrites the description. No effect program."
+  effects: []
+
+# CURSE: Pain -- whenever another card is played, lose 1 HP.
+- id: 34
+  name: PAIN
+  game_id: "Pain"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  trigger: on_other_card_played
+  provenance: "Pain (Pain.java:24-27): cost -2 CURSE CURSE NONE. triggerOnOtherCardPlayed (Pain.java:34-36) -> addToTop LoseHPAction(player, player, 1) whenever ANOTHER card is played (AbstractPlayer.useCard:1371-1373 fires hand.triggerOnOtherCardPlayed). 1 HP loss (bypasses block, HP_LOSS) per other card played. use()/upgrade() no-ops. Maps to trigger=on_other_card_played + LOSE_HP SELF 1 (queued addToTop, matching the Java)."
+  effects:
+    - {op: LOSE_HP, target: SELF, amount: 1}
+
+# CURSE: Parasite -- run-layer only (on remove: -3 max HP); combat-inert.
+- id: 35
+  name: PARASITE
+  game_id: "Parasite"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  on_remove_max_hp_loss: 3
+  cost: -2
+  target: NONE
+  flags: []
+  provenance: "Parasite (Parasite.java:22-25): cost -2 CURSE CURSE NONE. onRemoveFromMasterDeck (Parasite.java:34-37) -> player.decreaseMaxHealth(3): a RUN-LAYER effect (deck removal, -3 max HP) implemented by remove_master_deck_card; it remains combat-inert here. use()/upgrade() no-ops. No combat effect program."
+  effects: []
+
+# CURSE: Regret -- end-of-turn lose HP equal to hand size.
+- id: 36
+  name: REGRET
+  game_id: "Regret"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  trigger: end_of_turn
+  provenance: "Regret (Regret.java:24-26): cost -2 CURSE CURSE NONE. triggerOnEndOfTurnForPlayingCard (Regret.java:35-38) sets magicNumber = baseMagicNumber = player.hand.size() (locked at trigger time) then re-queues; use() with dontTriggerOnUseCard -> addToTop LoseHPAction(player, player, magicNumber) (Regret.java:28-32). Loses HP == the current hand size (bypasses block). upgrade() no-op. Maps to trigger=end_of_turn + LOSE_HP_PER_HAND (reads hand_count at execute; queued before the ethereal sweep so ethereals still count)."
+  effects:
+    - {op: LOSE_HP_PER_HAND, target: SELF}
+
+# CURSE: Shame -- end-of-turn apply Frail 1 to self.
+- id: 37
+  name: SHAME
+  game_id: "Shame"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: []
+  trigger: end_of_turn
+  provenance: "Shame (Shame.java:25-27): cost -2 CURSE CURSE NONE. triggerOnEndOfTurnForPlayingCard (Shame.java:37-40) re-queues; use() with dontTriggerOnUseCard -> addToTop ApplyPowerAction(player, player, FrailPower(player, 1, true), 1) (Shame.java:29-33). Applies Frail 1 to the PLAYER at end of turn. upgrade() no-op. Maps to trigger=end_of_turn + APPLY_POWER FRAIL 1 SELF. (Frail's block-gain x0.75 is the deferred BLOCK-hook piece -- see powers.yaml FRAIL; the applied debuff slot is observable now.)"
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: FRAIL}
+
+# CURSE: Writhe -- innate (starts in opening hand); combat-inert otherwise.
+- id: 38
+  name: WRITHE
+  game_id: "Writhe"
+  color: CURSE
+  rarity: CURSE
+  type: CURSE
+  curse_pool: true
+  cost: -2
+  target: NONE
+  flags: [innate]
+  provenance: "Writhe (Writhe.java:23-26): cost -2 CURSE CURSE NONE, isInnate=true; use()/upgrade() no-ops. INNATE -> guaranteed in the opening hand (AbstractCard.isInnate). combat_begin now partitions innates after the deterministic shuffle and places them on top, guaranteeing Writhe in the opening hand. No combat effect program otherwise."
+  effects: []
+
+# CURSE (special): Ascender's Bane -- ethereal, unremovable; added at A10.
+- id: 39
+  name: ASCENDERS_BANE
+  game_id: "AscendersBane"
+  color: CURSE
+  rarity: SPECIAL
+  type: CURSE
+  cost: -2
+  target: NONE
+  flags: [ethereal]
+  provenance: "AscendersBane (AscendersBane.java:22-25): cost -2 CURSE, CardRarity.SPECIAL, NONE, isEthereal=true; use()/upgrade() no-ops. The A10+ starter curse (the single largest strict-mode unknown-id, 1648 G4 hits) -- added to the deck at ascension 10, cannot be removed. Ethereal -> auto-exhausts each turn in the later DiscardAtEndOfTurnAction sweep. Unremovability is a RUN-LAYER deck-edit rule (B4.4/B4.5), not combat; NOT in the returnRandomCurse pool. Combat behavior = ethereal unplayable curse. No effect program."
+  effects: []

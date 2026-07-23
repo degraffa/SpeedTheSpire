@@ -163,6 +163,8 @@ TEST(RegistryGen, EnumIdsMatchEngine) {
     EXPECT_EQ(static_cast<int>(r::PowerId::VULNERABLE),
               static_cast<int>(PowerId::VULNERABLE));
     EXPECT_EQ(static_cast<int>(r::PowerId::WEAK), static_cast<int>(PowerId::WEAK));
+    EXPECT_EQ(static_cast<uint16_t>(PowerId::CURL_UP), 20u);
+    EXPECT_EQ(static_cast<uint16_t>(PowerId::FRAIL), 21u);
 
     EXPECT_EQ(static_cast<int>(r::MonsterId::JAW_WORM),
               static_cast<int>(MonsterId::JAW_WORM));
@@ -282,19 +284,17 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 24u);   // B3.3: 10 + 13 red common attacks + Wound
-    EXPECT_EQ(m::kPowersCount, 20u);  // 13 + 6 potion-support (Dex/LoseDex/Thorns/
-                                      // PlatedArmor/Regen/Ritual) + 1 B3.13 (CurlUp)
-    EXPECT_EQ(m::kMonstersCount, 4u); // B3.13: JawWorm + Cultist + Louse Normal/Defensive
+    EXPECT_EQ(m::kCardsCount, 39u);   // B3.9: 24 + 4 statuses (Burn/Dazed/Slimed/
+                                      // Void) + 11 curses
+    EXPECT_EQ(m::kPowersCount, 21u);  // 19 + B3.13 Curl Up + B3.9 Frail
+    EXPECT_EQ(m::kMonstersCount, 4u); // Jaw Worm + Cultist + two louse variants
     EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 135u);  // 111 (B3.3 cards + potion-support powers)
-                                      // + 20 B3.12 encounters + 4 B3.13 (CurlUp
-                                      // power + Cultist + 2 Louses)
+    EXPECT_EQ(m::kTotalCount, 151u);  // B3.13 total 135 + 15 cards + Frail
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

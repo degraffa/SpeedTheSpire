@@ -85,4 +85,11 @@ int draw_cards(CombatState& state, int amount) noexcept;
 // default, so this is exercised directly by tests rather than by card play at M1.
 void exhaust_card(CombatState& state, int pool_index) noexcept;
 
+// Exhaust ETHEREAL hand cards, then discard all non-RETAIN hand cards. This
+// models the state result of DiscardAtEndOfTurnAction after the sentinel-path
+// card effects and atEndOfTurn powers have drained, so Regret sees the full hand
+// before this sweep. The animation-only ClearCardQueue/DiscardAction chain is
+// intentionally collapsed without changing pile outcome or trigger ordering.
+void discard_hand_at_end_of_turn(CombatState& state) noexcept;
+
 }  // namespace sts::engine

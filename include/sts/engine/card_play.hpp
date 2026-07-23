@@ -89,4 +89,22 @@ bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noe
 // index of the played card.
 void resolve_card_play(CombatState& state, const CardQueueItem& item) noexcept;
 
+// --- B3.9 card-level passive triggers ----------------------------------------
+// Status/curse cards whose CardDef.trigger != ON_PLAY run their effect program at
+// a passive hook rather than on play (they are unplayable). Both are no-ops when
+// no such card is at the relevant site, so the skeleton fixtures are unchanged.
+
+// c.triggerWhenDrawn() for the card just drawn into hand at pool index
+// `pool_index` (AbstractPlayer.draw:1642). Void (ON_DRAW) queues GAIN_ENERGY -1.
+// Called by the DRAW opcode per newly-drawn card, before the power onCardDraw
+// fan-out (interp.cpp).
+void dispatch_card_on_draw(CombatState& state, uint8_t pool_index) noexcept;
+
+// The §5.4 hand-card end-of-turn stage: each hand card with trigger END_OF_TURN
+// (Burn/Decay/Doubt/Regret/Shame) queues its self-effect via
+// triggerOnEndOfTurnForPlayingCard. The DiscardAtEndOfTurnAction pile sweep is
+// queued separately after at-end-of-turn powers, so every trigger sees the full
+// hand before ethereal cards exhaust and normal cards discard.
+void dispatch_card_end_of_turn(CombatState& state) noexcept;
+
 }  // namespace sts::engine

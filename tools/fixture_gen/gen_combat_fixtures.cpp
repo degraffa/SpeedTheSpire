@@ -46,8 +46,8 @@
 //   * Pump turn boundary (action_queue.cpp start_of_turn / pump_step): a monster
 //       attack resolves BEFORE the player's block is decayed, so this turn's block
 //       absorbs it; then start-of-turn zeroes player block, refills energy to 3,
-//       ++turn, and draws 5 (no end-of-turn hand discard in the skeleton, so the
-//       hand persists and fills toward the cap of 10). If the player dies on the
+//       ++turn, and draws 5. DiscardAtEndOfTurnAction first moves the ordinary
+//       (non-ethereal) hand to discard. If the player dies on the
 //       monster's turn, pump halts at COMBAT_OVER: start-of-turn does NOT run, and
 //       any of the monster's still-queued effects after the lethal hit are not
 //       applied -- so every death fixture is arranged to kill on a SINGLE-effect
@@ -398,6 +398,13 @@ struct RefSim {
 
     void end_turn() {
         if (phase == CombatPhase::COMBAT_OVER) return;  // see play_card guard
+        // DiscardAtEndOfTurnAction follows the card-queue sentinel. This fixture
+        // deck has no ethereal or Retain cards, so every hand card moves from the
+        // top (tail) to discard before the monster turn, matching piles.cpp.
+        for (auto it = hand.rbegin(); it != hand.rend(); ++it) {
+            discard.push_back(*it);
+        }
+        hand.clear();
         // sentinel -> turn_has_ended, clear monster_attacks_queued; step 4 requeues
         // and step 5 runs the monster turn.
         turn_has_ended = 1;

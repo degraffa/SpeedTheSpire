@@ -156,6 +156,33 @@ void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
     // caller/queue_card_play only ever queues a card that was in hand).
 }
 
+// --- B3.9 card-level trigger programs ---------------------------------------
+// A passive status/curse (trigger != ON_PLAY) runs its `effects`/`upgraded`
+// program at a hook site instead of on play. Every in-scope trigger step is
+// SELF/player-targeted (Burn/Decay self-DAMAGE, Doubt/Shame self-APPLY_POWER,
+// Regret self-LOSE_HP_PER_HAND, Void GAIN_ENERGY, Pain self-LOSE_HP), so the
+// queued item is always player-owned/player-targeted -- no enemy fan-out. Since
+// these cards are UNPLAYABLE, reusing their effect program for the trigger is
+// unambiguous (it is never run on play). add_top mirrors the Java's
+// addToTop/addToBot for the specific hook (Pain's LoseHP is addToTop).
+void queue_card_trigger_program(CombatState& s, CardEffectView eff,
+                                bool add_top) noexcept {
+    for (uint8_t k = 0; k < eff.count; ++k) {
+        const CardEffectStep& step = eff.steps[k];
+        ActionQueueItem item{};
+        item.opcode = static_cast<uint16_t>(step.op);
+        item.src = kActorPlayer;
+        item.tgt = kActorPlayer;   // all trigger steps are SELF (player-owned)
+        item.amount = step.amount;
+        item.flags = step.extra;   // DAMAGE: DamageType; APPLY_POWER: PowerId
+        if (add_top) {
+            add_to_top(s, item);
+        } else {
+            add_to_bottom(s, item);
+        }
+    }
+}
+
 }  // namespace
 
 // --- Public ------------------------------------------------------------------
@@ -258,6 +285,22 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    exhaust destination is re-read from the instance flags AFTER the fan-out
     //    (not the pre-fan-out snapshot). EXHAUST -> exhaust pile, else discard.
     dispatch_on_use_card(s, pool_index, s.card_pool[pool_index].card_id);
+    // hand.triggerOnOtherCardPlayed(c) (AbstractPlayer.useCard:1371-1373): fired
+    // AFTER c.use() + the UseCardAction fan-out, BEFORE the card leaves the hand,
+    // on every OTHER hand card. Pain (trigger ON_OTHER_CARD_PLAYED) addToTop's a
+    // 1-HP loss per other card played. No-op unless a Pain-style curse is in hand.
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        if (pi == pool_index) {
+            continue;  // the just-played card does not trigger on itself
+        }
+        const CardDef* od = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        if (od == nullptr || od->trigger != CardTrigger::ON_OTHER_CARD_PLAYED) {
+            continue;
+        }
+        queue_card_trigger_program(
+            s, card_effect_steps(*od, s.card_pool[pi].upgrade), /*add_top=*/true);
+    }
     move_card_hand_to_pile(
         s, pool_index,
         has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST));
@@ -271,6 +314,44 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     } else {
         s.player_energy =
             static_cast<int16_t>(s.player_energy - static_cast<int16_t>(cost_now));
+    }
+}
+
+// --- B3.9 card-level trigger dispatch (public) -------------------------------
+
+void dispatch_card_on_draw(CombatState& s, uint8_t pool_index) noexcept {
+    // AbstractPlayer.draw():1642 c.triggerWhenDrawn() -- fired per drawn card,
+    // BEFORE the power/relic onCardDraw fan-out. Void (trigger ON_DRAW) addToBot's
+    // a LoseEnergy(1) (GAIN_ENERGY -1). No-op unless the drawn card is a trigger
+    // card, so a normal draw is unchanged.
+    if (pool_index >= kCardPoolCap) {
+        return;
+    }
+    const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pool_index].card_id));
+    if (def == nullptr || def->trigger != CardTrigger::ON_DRAW) {
+        return;
+    }
+    queue_card_trigger_program(
+        s, card_effect_steps(*def, s.card_pool[pool_index].upgrade),
+        /*add_top=*/false);
+}
+
+void dispatch_card_end_of_turn(CombatState& s) noexcept {
+    // §5.4 hand-card triggerOnEndOfTurnForPlayingCard (GameActionManager:373-375):
+    // Burn/Decay/Doubt/Regret/Shame each queue their self-effect (self DAMAGE /
+    // debuff / HP loss). The game routes these through the cardQueue (the card
+    // plays itself); the observable result is the self-effect queued at the §5.4
+    // hand-trigger stage, which is what we queue here. add_to_bottom preserves
+    // hand order; all resolve on later pump iterations.
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        const CardDef* def =
+            card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        if (def == nullptr || def->trigger != CardTrigger::END_OF_TURN) {
+            continue;
+        }
+        queue_card_trigger_program(
+            s, card_effect_steps(*def, s.card_pool[pi].upgrade), /*add_top=*/false);
     }
 }
 

@@ -252,7 +252,7 @@ TEST(Translator, TolerateUnknownIdsTalliesInsteadOfThrowing) {
         const std::string a = "\"id\":\"Bash\"";
         auto p = tampered.find(a);
         ASSERT_NE(p, std::string::npos);
-        tampered.replace(p, a.size(), "\"id\":\"AscendersBane\"");
+        tampered.replace(p, a.size(), "\"id\":\"B3_9_UnknownCard\"");
     }
 
     tr::TranslateOptions opts;
@@ -266,8 +266,8 @@ TEST(Translator, TolerateUnknownIdsTalliesInsteadOfThrowing) {
     tr::TranslatedRun run = tr::translate_lines({lines[0], tampered}, "tolerant", opts);
     ASSERT_EQ(run.records.size(), 1u);
     EXPECT_EQ(run.unknown_id_hits, 1u);
-    ASSERT_EQ(run.unknown_ids.count("card:AscendersBane"), 1u);
-    EXPECT_EQ(run.unknown_ids.at("card:AscendersBane"), 1u);
+    ASSERT_EQ(run.unknown_ids.count("card:B3_9_UnknownCard"), 1u);
+    EXPECT_EQ(run.unknown_ids.at("card:B3_9_UnknownCard"), 1u);
     // The tampered card joined to NONE; the rest of the record is intact.
     EXPECT_EQ(run.records[0].run.master_deck_count, 7);
     expect_stream(run.records[0].run.relic_rng, 5, -6368056192266778531LL,

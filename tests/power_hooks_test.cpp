@@ -249,7 +249,7 @@ TEST(PowerHooks, EndOfTurnPreCardPowersBeforeAtEndOfTurnPowers) {
     ASSERT_EQ(r.outcome, PumpOutcome::END_TURN_SENTINEL);
 
     // Queue order: Metallicize BLOCK(3) -> Combust LOSE_HP(1) -> Combust DAMAGE(5).
-    ASSERT_EQ(s.action_count, 3);
+    ASSERT_EQ(s.action_count, 4);  // then B3.9's hand-discard action
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::BLOCK));
     EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
     EXPECT_EQ(queued(s, 0).amount, 3);
@@ -258,6 +258,7 @@ TEST(PowerHooks, EndOfTurnPreCardPowersBeforeAtEndOfTurnPowers) {
     EXPECT_EQ(queued(s, 2).opcode, kOp(Opcode::DAMAGE));    // Combust AoE
     EXPECT_EQ(queued(s, 2).tgt, kActorAllEnemies);
     EXPECT_EQ(queued(s, 2).amount, 5);
+    EXPECT_EQ(queued(s, 3).opcode, kOp(Opcode::DISCARD_HAND));
 
     drain_actions(s);
     EXPECT_EQ(s.player_block, 3);      // Metallicize

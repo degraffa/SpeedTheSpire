@@ -434,3 +434,14 @@ target_link_libraries(card_attacks_test PRIVATE sts_engine GTest::gtest_main)
 sts_set_warnings(card_attacks_test)
 sts_enable_sanitizers(card_attacks_test)
 gtest_discover_tests(card_attacks_test)
+
+# B3.9 statuses + curses (unplayable gating, end-of-turn triggers vs. §5.4 order,
+# on-draw energy loss, on-other-card-played HP loss, ethereal exhaust, Normality
+# play-cap, Slimed exhaust-on-play). Tier-2 per entry, hand-computed from the Java.
+add_executable(status_curse_test
+    status_curse_test.cpp
+)
+target_link_libraries(status_curse_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(status_curse_test)
+sts_enable_sanitizers(status_curse_test)
+gtest_discover_tests(status_curse_test)

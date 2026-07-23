@@ -85,7 +85,25 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
         jdk_shuffle(std::span<CardPoolIndex>(state.draw, static_cast<std::size_t>(n)),
                     jrng);
     }
-    state.draw_count = static_cast<uint8_t>(n);
+    // CardGroup.initializeDeck (AbstractCard.isInnate): after the one shuffle,
+    // normal cards are added to the draw pile first and the collected innate
+    // cards are then placed on top. This keeps the shuffled relative order in
+    // both groups and guarantees Writhe is among the first opening draws.
+    CardPoolIndex innate[kDrawCap]{};
+    uint8_t innate_count = 0;
+    uint8_t normal_count = 0;
+    for (int i = 0; i < n; ++i) {
+        const CardPoolIndex pi = state.draw[i];
+        if (has_card_flag(state.card_pool[pi].flags, CardFlag::INNATE)) {
+            innate[innate_count++] = pi;
+        } else {
+            state.draw[normal_count++] = pi;
+        }
+    }
+    for (uint8_t i = 0; i < innate_count; ++i) {
+        state.draw[static_cast<uint8_t>(normal_count + i)] = innate[i];
+    }
+    state.draw_count = static_cast<uint8_t>(normal_count + innate_count);
     // hand / discard / exhaust / limbo start empty (value-init zeroed).
 
     // -- Player (placeholder A20 stats -- see advance.hpp's PLACEHOLDER STATS
@@ -192,6 +210,21 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         }
     }
 
+    // Normality (curse): while a Normality is in hand, no card may be played once
+    // 3 cards have been played this turn (Normality.canPlay:29-35 -- a canPlay veto
+    // on EVERY other card when cardsPlayedThisTurn >= 3). PLAY_LIMIT is the fixed 3
+    // (Normality.java:26). Computed once; forces every hand card unplayable below.
+    bool normality_locked = false;
+    if (state.cards_played_this_turn >= 3) {
+        for (uint8_t i = 0; i < state.hand_count; ++i) {
+            if (state.card_pool[state.hand[i]].card_id ==
+                static_cast<uint16_t>(CardId::NORMALITY)) {
+                normality_locked = true;
+                break;
+            }
+        }
+    }
+
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
         if (waiting && i < state.hand_count) {
@@ -201,7 +234,8 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // (X-cost cards carry cost_now 0, so they are always affordable,
             // matching costForTurn == -1).
             const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
-            bool playable = !unplayable && state.player_energy >= c.cost_now;
+            bool playable = !unplayable && state.player_energy >= c.cost_now &&
+                            !normality_locked;
             // Clash's all-attacks canUse predicate (Stage B B3.3).
             if (playable) {
                 const CardDef* d = card_def(static_cast<CardId>(c.card_id));

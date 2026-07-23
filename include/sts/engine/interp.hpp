@@ -143,6 +143,24 @@ enum class Opcode : uint16_t {
                              // it is in limbo at applyPowers-at-use time. This opcode
                              // therefore never reaches execute_opcode (a safe no-op if
                              // it somehow does); it exists only as the table encoding.
+    // --- Stage B B3.9 addition (append-only from 18) ---
+    LOSE_HP_PER_HAND = 18,  // `tgt` loses HP == the current hand size, bypassing
+                             // block (HP_LOSS type). Regret's end-of-turn self-loss
+                             // (Regret.java:35-38: magicNumber = player.hand.size()
+                             // locked at triggerOnEndOfTurnForPlayingCard). The hand
+                             // count is read at EXECUTE; the end-of-turn card triggers
+                             // are queued BEFORE the ethereal-exhaust sweep so the
+                             // ethereals are still in hand when this resolves --
+                             // matching the game's trigger-time value lock.
+    DISCARD_HAND = 19,       // end-of-turn DiscardAtEndOfTurnAction collapse:
+                             // exhaust ETHEREAL hand cards, then move the remaining
+                             // non-RETAIN hand cards to discard. This is queued after
+                             // all end-of-turn card/power effects, never invoked by a
+                             // registry card program.
+    REDUCE_POWER = 20,       // ReducePowerAction: subtract `amount` from
+                             // PowerId(flags low16) on `tgt`, removing at zero.
+                             // Frail queues this at end of round so power-list
+                             // iteration completes before the slot can disappear.
 };
 
 // --- CHOOSE_CARD field encoding (Stage B B3.4) ------------------------------

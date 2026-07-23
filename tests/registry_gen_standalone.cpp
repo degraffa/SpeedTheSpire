@@ -22,7 +22,8 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-static_assert(sts::registry::manifest::kCardsCount == 24);  // B3.3: +13 red common attacks + Wound
+static_assert(sts::registry::manifest::kCardsCount == 39);  // B3.9: +4 statuses +11 curses
+static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 4);  // B3.3: upgraded Sword Boomerang, 4 hits
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with

@@ -95,9 +95,19 @@ void call_end_of_turn_actions(CombatState& s) noexcept {
         dispatch_relics_on_player_end_turn(s, rv.relics, rv.count);
     }
     dispatch_at_end_of_turn_pre_card(s);   // Metallicize
-    // hand-card end-of-turn triggers (Burn/Decay) -- card-level, B3.9 stub.
+    // Hand-card end-of-turn triggers (Burn/Decay/Doubt/Regret/Shame) queue here,
+    // before at-end-of-turn powers. The later DiscardAtEndOfTurnAction sweep is a
+    // separate bottom-queued action, so trigger effects see the full hand first.
+    dispatch_card_end_of_turn(s);
     // stance.onEndOfTurn -- stanceless stub.
     dispatch_at_end_of_turn(s);            // Combust
+    // DiscardAtEndOfTurnAction follows the sentinel's card/power effects. Its
+    // ethereal sweep and ordinary hand discard are collapsed into one action.
+    ActionQueueItem discard_hand{};
+    discard_hand.opcode = static_cast<uint16_t>(Opcode::DISCARD_HAND);
+    discard_hand.src = kActorPlayer;
+    discard_hand.tgt = kActorPlayer;
+    add_to_bottom(s, discard_hand);
     // All no-op unless a hook-bearing power is present (fixtures unchanged).
 }
 

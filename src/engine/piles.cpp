@@ -112,4 +112,33 @@ void exhaust_card(CombatState& s, int pool_index) noexcept {
     }
 }
 
+void discard_hand_at_end_of_turn(CombatState& s) noexcept {
+    // DiscardAtEndOfTurnAction queues normal discards, then each ethereal hand
+    // card prepends ExhaustSpecificCardAction. Exhaust therefore resolves first.
+    // Scan right-to-left because exhaust_card removes from the compact hand.
+    for (uint8_t i = s.hand_count; i > 0; --i) {
+        const CardPoolIndex pi = s.hand[static_cast<uint8_t>(i - 1)];
+        if (has_card_flag(s.card_pool[pi].flags, CardFlag::ETHEREAL)) {
+            exhaust_card(s, pi);
+        }
+    }
+
+    // DiscardAction repeatedly takes hand.getTopCard(), represented by the tail.
+    // RETAIN cards are the cards DiscardAtEndOfTurnAction moves aside first.
+    for (uint8_t i = s.hand_count; i > 0; --i) {
+        const CardPoolIndex pi = s.hand[static_cast<uint8_t>(i - 1)];
+        if (has_card_flag(s.card_pool[pi].flags, CardFlag::RETAIN)) {
+            continue;
+        }
+        for (uint8_t j = i; j < s.hand_count; ++j) {
+            s.hand[j - 1] = s.hand[j];
+        }
+        --s.hand_count;
+        assert(s.discard_count < kDiscardCap &&
+               "discard overflow (design doc pile capacity)");
+        s.discard[s.discard_count] = pi;
+        ++s.discard_count;
+    }
+}
+
 }  // namespace sts::engine
