@@ -249,7 +249,13 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
         ms.block = static_cast<int16_t>(as_i64(*b, ctx, path + ".block"));
         fr.mapped();
     }
-    if (const json* mv = fr.take("move_id")) {  // telegraphed next move byte -> intent
+    if (const json* mv = fr.take("move_id")) {
+        // move_id (EnemyMoveInfo.nextMove) is the SEMANTIC next-move anchor; the
+        // monster's telegraphed move/intent is derived from it here, never from
+        // the display `intent` string. Reclassified PROTOCOL §3.12 S->D at design
+        // §11 v0.1.2 / B1.3: a stripped capture can carry intent=="DEBUG" on a
+        // living monster while move_id stays byte-identical, so anchoring on the
+        // string would corrupt the move; anchoring on move_id does not.
         ms.intent = static_cast<uint8_t>(as_i64(*mv, ctx, path + ".move_id"));
         fr.mapped();
     }
@@ -258,10 +264,15 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
         fr.mapped();
     }
     fr.ignore("name");            // localization
-    fr.ignore("intent");          // presentation of move_id (§3.12); the byte is move_id
-    fr.defer("move_base_damage");
-    fr.defer("move_adjusted_damage");
-    fr.defer("move_hits");
+    // Display-derived (PROTOCOL §3.12 disposition D, reclassified from S at design
+    // §11 v0.1.2 / B1.3): the intent banner enum and its shown damage, both a
+    // presentation of the move_id anchor above. `intent` reads "DEBUG" on a living
+    // monster until the banner refreshes; `move_adjusted_damage` == -1 in exactly
+    // that state. The translator ignores both and reconstructs from move_id.
+    fr.ignore("intent");
+    fr.ignore("move_adjusted_damage");
+    fr.defer("move_base_damage");  // semantic pre-power damage; no MonsterState slot yet
+    fr.defer("move_hits");         // semantic attack multiplier; no slot yet
     fr.defer("half_dead");        // no schema flag yet
     fr.defer("is_gone");          // no schema flag yet
     fr.oracle("last_move_id");        // stock 2-back; authoritative = oracle move history (§2.5 #9)

@@ -241,4 +241,62 @@ TEST(Translator, CombatTraceReadsBackWithFloorStreams) {
               static_cast<uint16_t>(engine::MonsterId::JAW_WORM));
 }
 
+// --- Regression (B1.3 / design §11 v0.1.2): DEBUG intent anchors on move_id ---
+//
+// A stripped capture can carry intent=="DEBUG" and move_adjusted_damage==-1 on a
+// LIVING monster whose semantic move_id is intact (18/20 B1.3 seeds; stock hits
+// it too). Both are display-derived (PROTOCOL §3.12 disposition D); the translator
+// must NOT treat the display enum as the move source — it anchors on move_id and
+// must yield the SAME CombatState as the refreshed-intent dump. This is the
+// regression G4's 20-seed translation run depends on.
+TEST(Translator, DebugIntentAnchorsOnMoveId) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    const std::string& header = lines[0];
+    const std::string& combat = lines[2];  // the floor-1 combat action record
+
+    // Refreshed-intent baseline: the sample as-is (JawWorm intent ATTACK, move_id 1,
+    // move_adjusted_damage 11) on a living monster (current_hp 40, is_gone false).
+    ASSERT_NE(combat.find("\"intent\":\"ATTACK\""), std::string::npos);
+    ASSERT_NE(combat.find("\"move_id\":1"), std::string::npos);
+    ASSERT_NE(combat.find("\"move_adjusted_damage\":11"), std::string::npos);
+
+    // Display-derived DEBUG variant: same move_id, banner not yet refreshed.
+    std::string debug = combat;
+    {
+        const std::string i_from = "\"intent\":\"ATTACK\"", i_to = "\"intent\":\"DEBUG\"";
+        const std::string d_from = "\"move_adjusted_damage\":11", d_to = "\"move_adjusted_damage\":-1";
+        debug.replace(debug.find(i_from), i_from.size(), i_to);
+        debug.replace(debug.find(d_from), d_from.size(), d_to);
+    }
+
+    tr::TranslatedRun ref = tr::translate_lines({header, combat}, "ref");
+    tr::TranslatedRun dbg = tr::translate_lines({header, debug}, "debug");
+
+    // Both translate successfully to one living-monster combat record.
+    ASSERT_EQ(ref.records.size(), 1u);
+    ASSERT_EQ(dbg.records.size(), 1u);
+    ASSERT_TRUE(ref.records[0].in_combat);
+    ASSERT_TRUE(dbg.records[0].in_combat);
+    ASSERT_EQ(ref.records[0].combat.monster_count, 1);
+    ASSERT_EQ(dbg.records[0].combat.monster_count, 1);
+
+    const engine::MonsterState& mr = ref.records[0].combat.monsters[0];
+    const engine::MonsterState& md = dbg.records[0].combat.monsters[0];
+
+    // The move/intent representation is derived from move_id (== 1), identically.
+    EXPECT_EQ(mr.intent, 1);
+    EXPECT_EQ(md.intent, mr.intent);
+    EXPECT_EQ(md.monster_id, static_cast<uint16_t>(engine::MonsterId::JAW_WORM));
+    EXPECT_EQ(md.hp, 40);  // living monster
+
+    // The DEBUG display strings do not perturb the semantic MonsterState at all...
+    EXPECT_EQ(0, std::memcmp(&mr, &md, sizeof(engine::MonsterState)))
+        << "DEBUG-intent monster must translate identically to refreshed-intent";
+    // ...and the whole CombatState is byte-identical.
+    EXPECT_EQ(0, std::memcmp(&ref.records[0].combat, &dbg.records[0].combat,
+                             sizeof(engine::CombatState)))
+        << "display-derived intent/move_adjusted_damage must not affect CombatState";
+}
+
 }  // namespace

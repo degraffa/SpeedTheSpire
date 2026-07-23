@@ -165,6 +165,13 @@ Disposition legend (per design §2.6 fail-loudly policy):
 - **oracle-block (O)** — the stock value is insufficient/untrustworthy for
   bit-exact diffing; the authoritative value is supplied by the fork's §2.5
   oracle state block. Stock field is advisory only.
+- **display-derived (D)** — a presentation value the converter computes from a
+  semantic field for the banner/UI. It is redundant with (and can be transiently
+  stale versus) its semantic anchor, so it is **not** diffed and the translator
+  does not read it — the value is reconstructed from the anchor instead. Drift in
+  a `D` field alone is not schema drift. (Added v0.1.2 / B1.3, which dually proved
+  the monster `intent`/`move_adjusted_damage` pair display-derived over a 20-seed
+  A/B; the semantic anchor is `move_id`. See §3.12 and design §11 v0.1.2.)
 
 Coverage is organized by the object each converter emits. Every `.put("…")`
 site in `GameStateConverter.java` maps to exactly one row below (see §4).
@@ -307,10 +314,10 @@ site in `GameStateConverter.java` maps to exactly one row below (see §4).
 | `name` | str | I (localization) | :669 | |
 | `current_hp` | int | S | :670 | |
 | `max_hp` | int | S | :671 | |
-| `intent` | str | S | :673,675 | `AbstractMonster.Intent` name — forced `NONE` under Runic Dome (:672; a boss relic, S2-typical, noted) |
-| `move_id` | int | S | :678 | current `EnemyMoveInfo.nextMove` byte |
-| `move_base_damage` | int | S | :679 | |
-| `move_adjusted_damage` | int | S | :682,684 | shown intent damage |
+| `intent` | str | **D** | :673,675 | `AbstractMonster.Intent` banner of the current move — **display-derived** from `move_id` (the semantic anchor, byte-identical in every B1.3 diff). Reads `DEBUG` on a living monster until `showIntent` refreshes the banner (§11 v0.1.2 / B1.3). Forced `NONE` under Runic Dome (:672; a boss relic, S2-typical) |
+| `move_id` | int | S | :678 | current `EnemyMoveInfo.nextMove` byte — **the semantic move/intent anchor** the translator maps (§3.12 note) |
+| `move_base_damage` | int | S | :679 | pre-power move damage; semantic |
+| `move_adjusted_damage` | int | **D** | :682,684 | shown intent damage = `move_base_damage` adjusted by powers (Strength/Vulnerable) — **display-derived** and display-coupled to `intent`: `== -1` exactly when `intent`==`DEBUG`. The sim recomputes it from `move_base_damage` + powers (§11 v0.1.2 / B1.3) |
 | `move_hits` | int | S | :691 | attack multiplier (1 if not multi) |
 | `last_move_id` | int | **O** | :695 | from `moveHistory` — stock exposes only 2 back; the sim tracks 3 and the fork must dump the full history (§2.5 #9) |
 | `second_last_move_id` | int | **O** | :698 | as above (§2.5 #9) |
@@ -431,7 +438,9 @@ the nondeterministic card `uuid`, protocol-plumbing (`ready_for_command`,
 `in_game`, `current_action`, error keys), and S2-scope (`boss_reward.relics`,
 `combat_reward … link`, `score`); **oracle-block** are `draw_pile` (order) and
 monster `last_move_id`/`second_last_move_id` (move history), each cross-
-referenced to design §2.5.
+referenced to design §2.5; **display-derived (D)** are monster `intent` and
+`move_adjusted_damage` (banner values computed from the `move_id` anchor; §3.12,
+design §11 v0.1.2 / B1.3).
 
 ## 5. The `"oracle"` state block (fork addition, B1.2)
 
