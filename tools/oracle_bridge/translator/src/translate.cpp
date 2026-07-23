@@ -34,10 +34,22 @@ struct Ctx {
     std::string source;
     int record_idx = 0;
     DispositionStats* stats = nullptr;
+    // Id-tolerance accounting mode (G4). When set, an unknown content id is
+    // tallied here and joined to NONE instead of throwing; unknown fields /
+    // stream names / anchor mismatches are unaffected.
+    bool tolerate_ids = false;
+    std::map<std::string, uint64_t>* unknown_ids = nullptr;
+    uint64_t* unknown_id_hits = nullptr;
 };
 
 [[nodiscard]] std::string loc(const Ctx& c) {
     return c.source + ":record " + std::to_string(c.record_idx) + ":";
+}
+
+// Record one unknown-id occurrence under "<domain>:<id>" (id-tolerance mode).
+void tally_unknown_id(const Ctx& c, const char* domain, const std::string& id) {
+    if (c.unknown_ids) ++(*c.unknown_ids)[std::string(domain) + ":" + id];
+    if (c.unknown_id_hits) ++(*c.unknown_id_hits);
 }
 
 // A typed-object reader that enforces the fail-loud disposition policy: it marks
@@ -119,6 +131,7 @@ private:
     if (id.empty()) return eng::CardId::NONE;
     eng::CardId cid = reg::card_from_game_id(id);
     if (cid == eng::CardId::NONE) {
+        if (c.tolerate_ids) { tally_unknown_id(c, "card", id); return eng::CardId::NONE; }
         throw TranslateError(loc(c) + " unknown card id \"" + id + "\" at " + where +
                              " — registry has no game_id mapping (schema drift, "
                              "translation aborted)");
@@ -130,6 +143,7 @@ private:
     if (id.empty()) return eng::PowerId::NONE;
     eng::PowerId pid = reg::power_from_game_id(id);
     if (pid == eng::PowerId::NONE) {
+        if (c.tolerate_ids) { tally_unknown_id(c, "power", id); return eng::PowerId::NONE; }
         throw TranslateError(loc(c) + " unknown power id \"" + id + "\" at " + where +
                              " — registry has no game_id mapping (schema drift, "
                              "translation aborted)");
@@ -141,6 +155,7 @@ private:
     if (id.empty()) return eng::MonsterId::NONE;
     eng::MonsterId mid = reg::monster_from_game_id(id);
     if (mid == eng::MonsterId::NONE) {
+        if (c.tolerate_ids) { tally_unknown_id(c, "monster", id); return eng::MonsterId::NONE; }
         throw TranslateError(loc(c) + " unknown monster id \"" + id + "\" at " + where +
                              " — registry has no game_id mapping (schema drift, "
                              "translation aborted)");
@@ -152,6 +167,7 @@ private:
     if (id.empty()) return eng::RelicId::NONE;
     eng::RelicId rid = reg::relic_from_game_id(id);
     if (rid == eng::RelicId::NONE) {
+        if (c.tolerate_ids) { tally_unknown_id(c, "relic", id); return eng::RelicId::NONE; }
         throw TranslateError(loc(c) + " unknown relic id \"" + id + "\" at " + where +
                              " — registry has no game_id mapping (schema drift, "
                              "translation aborted)");
@@ -659,11 +675,17 @@ void parse_potions(const json& arr, const std::string& path, Ctx& ctx, eng::RunS
         } else {
             reg::PotionId pid = reg::potion_from_game_id(id);
             if (pid == reg::PotionId::NONE) {
-                throw TranslateError(loc(ctx) + " unknown potion id \"" + id + "\" at " +
-                                     pp + ".id — registry has no game_id mapping "
-                                     "(schema drift, translation aborted)");
+                if (ctx.tolerate_ids) {
+                    tally_unknown_id(ctx, "potion", id);
+                    rs.potions[i] = static_cast<uint16_t>(reg::PotionId::NONE);
+                } else {
+                    throw TranslateError(loc(ctx) + " unknown potion id \"" + id + "\" at " +
+                                         pp + ".id — registry has no game_id mapping "
+                                         "(schema drift, translation aborted)");
+                }
+            } else {
+                rs.potions[i] = static_cast<uint16_t>(pid);
             }
-            rs.potions[i] = static_cast<uint16_t>(pid);
         }
         fr.mapped();
         fr.ignore("name");
@@ -855,11 +877,15 @@ bool translate_record(const json& rec, Ctx& ctx, TranslatedRun& run) {
 // ---- public API ----------------------------------------------------------
 
 TranslatedRun translate_lines(const std::vector<std::string>& lines,
-                              const std::string& source_name) {
+                              const std::string& source_name,
+                              const TranslateOptions& opts) {
     TranslatedRun run;
     Ctx ctx;
     ctx.source = source_name;
     ctx.stats = &run.stats;
+    ctx.tolerate_ids = opts.tolerate_unknown_ids;
+    ctx.unknown_ids = &run.unknown_ids;
+    ctx.unknown_id_hits = &run.unknown_id_hits;
     int idx = 0;
     for (const std::string& line : lines) {
         ctx.record_idx = idx++;
@@ -875,7 +901,13 @@ TranslatedRun translate_lines(const std::vector<std::string>& lines,
     return run;
 }
 
-TranslatedRun translate_file(const std::string& jsonl_path) {
+TranslatedRun translate_lines(const std::vector<std::string>& lines,
+                              const std::string& source_name) {
+    return translate_lines(lines, source_name, TranslateOptions{});
+}
+
+TranslatedRun translate_file(const std::string& jsonl_path,
+                             const TranslateOptions& opts) {
     std::ifstream is(jsonl_path, std::ios::binary);
     if (!is) throw std::runtime_error("translate_file: cannot open " + jsonl_path);
     std::vector<std::string> lines;
@@ -884,7 +916,11 @@ TranslatedRun translate_file(const std::string& jsonl_path) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         lines.push_back(line);
     }
-    return translate_lines(lines, jsonl_path);
+    return translate_lines(lines, jsonl_path, opts);
+}
+
+TranslatedRun translate_file(const std::string& jsonl_path) {
+    return translate_file(jsonl_path, TranslateOptions{});
 }
 
 bool write_combat_trace(const std::string& path, const TranslatedRun& run) {

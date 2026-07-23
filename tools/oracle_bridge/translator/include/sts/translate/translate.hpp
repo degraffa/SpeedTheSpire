@@ -36,6 +36,7 @@
 // §2.6 grant); sts_engine links neither the translator nor nlohmann.
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -45,6 +46,23 @@
 #include "sts/engine/run_state.hpp"
 
 namespace sts::translate {
+
+// Translation options (design §2.6 / G4 gate tooling).
+//
+// `tolerate_unknown_ids` switches the translator from strict (default, B1.5
+// contract: an unknown content id is a fatal drift) to an ACCOUNTING mode: an
+// unknown content id (card/power/monster/relic/potion the registry does not
+// know) is TALLIED per-id and translated to NONE instead of aborting, and the
+// affected record's remaining fields are STILL field-checked. Unknown *fields*,
+// unknown RNG stream names, and oracle-anchor mismatches remain fatal in both
+// modes -- id tolerance loosens only the id join, never the fail-loud field
+// discipline. This is what lets a real A20 campaign (whose captures carry
+// content ids the skeleton registry lacks pre-B3, e.g. AscendersBane / Burning
+// Blood / Cultist) be checked for "zero unknown-FIELD errors" at G4 while the
+// expected unknown-id set is reported rather than swallowed.
+struct TranslateOptions {
+    bool tolerate_unknown_ids = false;
+};
 
 // Thrown on any drift the frozen policy makes fatal: an unmapped JSON field, an
 // unknown content id, an unknown RNG stream name, or a failed sanity-anchor
@@ -86,16 +104,29 @@ struct TranslatedRun {
     std::vector<TranslatedRecord> records;
     DispositionStats stats;
     int combat_record_count = 0;
+
+    // Unknown-content-id tally, populated ONLY under
+    // TranslateOptions::tolerate_unknown_ids. Key is "<domain>:<game_id>" (e.g.
+    // "card:AscendersBane"); value is the number of occurrences across the run.
+    // Empty in strict mode (an unknown id throws before it could be tallied).
+    // `sorted()` iteration order (std::map) keeps the report deterministic.
+    std::map<std::string, uint64_t> unknown_ids;
+    uint64_t unknown_id_hits = 0;  // sum over unknown_ids values
 };
 
 // Translate a JSONL file from disk. Throws TranslateError on drift; throws
 // std::runtime_error on I/O or JSON-parse failure.
 [[nodiscard]] TranslatedRun translate_file(const std::string& jsonl_path);
+[[nodiscard]] TranslatedRun translate_file(const std::string& jsonl_path,
+                                           const TranslateOptions& opts);
 
 // Translate JSONL lines already in memory (one JSON object per element).
 // `source_name` is used only in error messages.
 [[nodiscard]] TranslatedRun translate_lines(const std::vector<std::string>& lines,
                                             const std::string& source_name);
+[[nodiscard]] TranslatedRun translate_lines(const std::vector<std::string>& lines,
+                                            const std::string& source_name,
+                                            const TranslateOptions& opts);
 
 // Persist the run's CombatState snapshots as a v1 trace (the format the diff
 // harness reads, design §8 / sts/diff/trace.hpp). Snapshots are written in

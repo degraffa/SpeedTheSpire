@@ -194,6 +194,69 @@ TEST(Translator, AnchorMismatchRefused) {
     }
 }
 
+// --- G4 id-tolerance accounting mode --------------------------------------
+//
+// G4's checklist item 1 runs the translator over a real A20 campaign that
+// carries content ids the skeleton registry lacks (AscendersBane, Burning Blood,
+// Cultist, ...) and requires "zero unknown-FIELD errors" while the unknown-ids
+// are an EXPECTED, tallied set (not fatal). TranslateOptions::tolerate_unknown_ids
+// is that mode: an unknown content id is tallied per-id and joined to NONE; the
+// record's remaining fields are STILL field-checked; unknown FIELDS still fail.
+
+TEST(Translator, TolerateUnknownIdsTalliesInsteadOfThrowing) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    // Rename a known deck card to an id the registry does not know (twice, to
+    // prove per-id counting): Bash and one Strike_R -> unknown ids.
+    std::string tampered = lines[1];
+    {
+        const std::string a = "\"id\":\"Bash\"";
+        auto p = tampered.find(a);
+        ASSERT_NE(p, std::string::npos);
+        tampered.replace(p, a.size(), "\"id\":\"AscendersBane\"");
+    }
+
+    tr::TranslateOptions opts;
+    opts.tolerate_unknown_ids = true;
+    // Strict mode (default) must still throw on the same input.
+    EXPECT_THROW((void)tr::translate_lines({lines[0], tampered}, "strict"),
+                 tr::TranslateError);
+
+    // Tolerant mode: no throw, the unknown id is tallied, and the record still
+    // translates (the other 6 known deck cards land, streams land bit-for-bit).
+    tr::TranslatedRun run = tr::translate_lines({lines[0], tampered}, "tolerant", opts);
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.unknown_id_hits, 1u);
+    ASSERT_EQ(run.unknown_ids.count("card:AscendersBane"), 1u);
+    EXPECT_EQ(run.unknown_ids.at("card:AscendersBane"), 1u);
+    // The tampered card joined to NONE; the rest of the record is intact.
+    EXPECT_EQ(run.records[0].run.master_deck_count, 7);
+    expect_stream(run.records[0].run.relic_rng, 5, -6368056192266778531LL,
+                  -2945499761529171947LL, "relicRng");
+}
+
+TEST(Translator, TolerateUnknownIdsStillFailsOnUnknownField) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    // An unknown FIELD must remain fatal EVEN in id-tolerance mode: tolerance
+    // loosens only the id join, never the fail-loud field discipline (§2.6).
+    std::string tampered = lines[1];
+    const std::string anchor = "\"game_state\":{";
+    auto pos = tampered.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    tampered.insert(pos + anchor.size(), "\"bogus_field\":1,");
+
+    tr::TranslateOptions opts;
+    opts.tolerate_unknown_ids = true;
+    try {
+        (void)tr::translate_lines({lines[0], tampered}, "tolerant", opts);
+        FAIL() << "expected TranslateError for an unknown field even under id tolerance";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("bogus_field"), std::string::npos) << e.what();
+        EXPECT_NE(std::string(e.what()).find("unknown field"), std::string::npos) << e.what();
+    }
+}
+
 // --- Acceptance 3: round-trip stability -----------------------------------
 
 TEST(Translator, RoundTripDeterministic) {

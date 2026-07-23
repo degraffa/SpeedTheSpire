@@ -37,10 +37,15 @@ layer.
 
 ## Current state
 
-**Stage B in progress** — registry track complete through gate **G5**
-(tag `g5-registry-live`) and bridge groundwork (Phase B0) done, tracked in
+**Stage B in progress — milestone M2 reached.** Both Stage B gates so far are
+`[x]`: the oracle-bridge track through gate **G4** (tag `g4-bridge-live`, = M2)
+and the registry track through gate **G5** (tag `g5-registry-live`); bridge
+groundwork (Phase B0) done. Tracked in
 [docs/stage-b-tasks.md](docs/stage-b-tasks.md) against the frozen
-[docs/stage-b-design.md](docs/stage-b-design.md). Landed so far:
+[docs/stage-b-design.md](docs/stage-b-design.md). The full oracle bridge is
+**live end-to-end**: deterministic fork jar (sha `04477E4E…`) → campaign driver
+→ JSONL artifacts → C++ translator → v2 trace container + `diff_run_states` +
+oracle adapter. Landed so far:
 
 - **B0.1** — CommunicationMod v1.2.1 vendored source-only (MIT) under
   `tools/oracle_bridge/communicationmod-oracle/`, with
@@ -66,13 +71,32 @@ layer.
   the generated enums/tables into `sts::engine` (no hand tables left — no dual
   system); ids are append-only and `static_assert`-pinned. CI installs
   `python3-yaml` and runs the generator.
+- **B1.1–B1.6 + G4** — the oracle fork track. The vendored fork
+  (`CommunicationMod-oracle`) is built by `tools/oracle_bridge/build_fork.ps1`
+  (JDK 8, no Maven, **deterministic jar** sha `04477E4E…`) and emits the §2.5
+  `oracle` block (14 RNG streams as `{counter,s0,s1}` + pity + pools + move
+  history) plus toggleable rendering-strip patches (≥32 act/s stripped). The
+  `driver/` runs seeded A20 campaigns (crash-resume) → versioned JSONL; the C++
+  `tools/oracle_bridge/translator/` (nlohmann, tools-only) turns JSONL into
+  RunState/CombatState with a fail-loud disposition table, feeding the v2 trace
+  container + `diff_run_states` + `CommunicationModOracleAdapter`. **G4 verified
+  the bridge against the live game**: over a 20-seed A20 campaign (996 records)
+  every dump translated with **zero unknown-FIELD errors** (unknown content ids
+  are the expected pre-B3 registry gap, tallied via the translator's
+  `--tolerate-unknown-ids` accounting mode); `floor_stream`/`map_stream`/
+  `relicRng`-init cross-checked bit-for-bit against the engine's tier-1 RNG
+  (`tools/oracle_bridge/translator/src/oracle_gate_check.cpp`). **The bridge runs
+  only against the live game on the Windows host** (JDK-8 / ModTheSpire) and its
+  campaign artifacts live under the §7.3 data root — never in WSL/CI, never
+  committed.
 
-All **140** gtest cases green in `debug`, `asan`, and `release` (Stage A's 131
-+ 9 registry-gen cases); `SCHEMA_VERSION`=1 and `sizeof(CombatState)`=3504
-unchanged across the migration. **Next:** the oracle fork track (**B1.1** →
-B1.2–B1.6 → gate **G4**), which requires the live Slay the Spire game (JDK-8
-fork build + interactive seeded runs); Phases B3/B4 (S1 content) are gated on
-**both** G4 and G5 (G5 done, G4 is the blocker).
+All **166** gtest cases green in `debug`, `asan`, and `release` (Stage A's 131
++ 9 registry-gen + 26 bridge/translator/adapter cases); `SCHEMA_VERSION` bumped
+to **2** at B1.6 (v1 fixtures compat-read), `sizeof(CombatState)`=3504 unchanged.
+**Next:** Phases **B3/B4** (S1 = Ironclad / Act 1 / A20 content) — now unblocked
+since **both** G4 and G5 are `[x]`; B3 registry rows land the content ids the
+real A20 captures need (the id-drift guard currently reports them as unknown),
+then B4 builds out the run layer (map/events/shops/relics/potions).
 
 ---
 
@@ -109,17 +133,20 @@ InitialPlan §B.1 (oracle bridge first).
 
 ## Immediate next step
 
-**B1.1 — oracle fork build pipeline** (Stage B Phase B1, toward gate **G4**).
-Deps B0.1 + B0.2 are done. Write a JDK-8 build script for the vendored fork
-(`tools/oracle_bridge/communicationmod-oracle/`) against the local
-`desktop-1.0.jar` + ModTheSpire + BaseMod; acceptance is the **unpatched** fork
-jar reproducing B0.2's capture byte-for-byte. This and all of B1.x → **G4**
-**require the live game** on the Windows host + brief interactive co-driving —
-not headless/WSL work. See `docs/stage-b-tasks.md` Phase B1 and
-`docs/stage-b-design.md` §2.4-2.7. Phases B3/B4 (S1 content) stay gated on
-**both** G4 and G5 (G5 done → G4 is the blocker).
+**Phase B3/B4 — S1 content** (Ironclad / Act 1 / A20), now **unblocked**: both
+G4 (`g4-bridge-live`, M2) and G5 are `[x]`, the design §3.2 precondition for
+content work. Start with **B3.1** (interpreter/card-mechanics extensions) per
+`docs/stage-b-tasks.md`; the B3 registry waves add the ~126 card / 25 monster /
+relic / potion / power rows the real A20 captures need — the id-drift guard
+currently reports those as unknown content ids (see the G4 unknown-id tally: 94
+distinct, e.g. `Burning Blood`, `AscendersBane`, `Cultist`). Once a batch's rows
+land, re-run the translator over the §7.3 campaign corpus **without**
+`--tolerate-unknown-ids` to watch the unknown-id set shrink. Most B3/B4 work is
+headless WSL/CI (engine + registry + tests); the oracle bridge is only re-touched
+to capture new directed scripts or spot-diff a batch (needs the live game on the
+Windows host).
 
-### Oracle bridge — operational state (read before touching B1.x)
+### Oracle bridge — operational state (read before touching the bridge)
 
 - The bridge is wired and working against the **stock** CommunicationMod jar.
   Data root (uncommitted, design §7.3): **`D:\STS_BG_Mod\_oracle_data`** — holds

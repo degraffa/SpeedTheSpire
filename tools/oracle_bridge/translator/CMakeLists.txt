@@ -52,3 +52,13 @@ add_executable(translate_cli src/main.cpp)
 target_link_libraries(translate_cli PRIVATE oracle_translator)
 sts_set_warnings(translate_cli)
 sts_enable_sanitizers(translate_cli)
+
+# G4 gate verifier: presence + RNG cross-check of campaign artifacts against the
+# engine's tier-1-tested floor_stream/map_stream. Links diff_harness for the
+# engine's POD RNG headers and nlohmann for JSONL parsing (tools-only grant).
+# Reads the uncommitted §7.3 corpus at runtime; not a CI test.
+add_executable(oracle_gate_check src/oracle_gate_check.cpp)
+target_link_libraries(oracle_gate_check PRIVATE diff_harness nlohmann_json)
+add_dependencies(oracle_gate_check registry_gen_headers)
+sts_set_warnings(oracle_gate_check)
+sts_enable_sanitizers(oracle_gate_check)

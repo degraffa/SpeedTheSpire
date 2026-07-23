@@ -641,23 +641,94 @@ campaign fails loudly at unknown content ids (`AscendersBane`/`Burning Blood`/
 `Cultist`, the id-drift guard working as designed); validated now on the golden
 sample + synthetic mixed containers.
 
-### G4 `[ ]` **Gate: oracle bridge live (M2)** — tag `g4-bridge-live`
+### G4 `[x]` **Gate: oracle bridge live (M2)** — tag `g4-bridge-live`
 **Deps:** B1.3, B1.6
 Checklist (all must hold, evidence linked in Log):
-- [ ] 20-seed campaign: every dumped state translates with zero unknown-field
+- [x] 20-seed campaign: every dumped state translates with zero unknown-field
       errors; all 14 stream counters + both pity counters + event pity floats
       + purgeCost present in every record.
-- [ ] RNG cross-check across the campaign: floor-scoped stream `(s0,s1)` at
+- [x] RNG cross-check across the campaign: floor-scoped stream `(s0,s1)` at
       every floor entry matches sim `floor_stream(seed, floor)`; `mapRng`
       state matches `map_stream(seed, 1)`; relicRng counter = 5 at init —
       i.e. the run-scoped/act-scoped derivations hold against the **live
       game**, not just golden vectors.
-- [ ] Strip-patch equivalence (B1.3 acceptance) re-confirmed on the final
+- [x] Strip-patch equivalence (B1.3 acceptance) re-confirmed on the final
       fork build; throughput ≥ 5 actions/sec recorded.
-- [ ] WSL CI untouched and green (bridge code adds no CI dependency on the
+- [x] WSL CI untouched and green (bridge code adds no CI dependency on the
       game).
 Then: update CLAUDE.md "Current state".
-**Log:** —
+**Log:** Verified by running every check against evidence, not inferred. Corpus:
+the FINAL-build 20-seed stripped campaign
+`D:\STS_BG_Mod\_oracle_data\campaigns\b13_on20b` (STS00001-20, A20 Ironclad,
+script policy, floors 1-6; manifest `fork_jar_sha256` =
+`04477E4E…B2C36636`), **996 in-dungeon action records** (all 996 carry an
+`oracle` block). **Gate tooling landed in this commit** (G4-scoped, clearly
+described): (a) translator id-tolerance accounting mode
+`TranslateOptions::tolerate_unknown_ids` (CLI `--tolerate-unknown-ids`) —
+unknown content ids are tallied per-`<domain>:<id>` and joined to `NONE` instead
+of aborting, while unknown **fields**/stream names/anchor mismatches stay fatal;
++2 focused tests (`Translator.TolerateUnknownIdsTalliesInsteadOfThrowing`,
+`Translator.TolerateUnknownIdsStillFailsOnUnknownField`); (b)
+`tools/oracle_bridge/translator/src/oracle_gate_check.cpp` — a reusable verifier
+that `#include`s the engine's tier-1-tested `rng_stream.hpp`/`rng_xs128.hpp`
+(the exact constexpr code `rng_stream_test` pins) and checks presence + the RNG
+cross-checks over campaign JSONL (reads the uncommitted §7.3 corpus at runtime;
+**not** a CI test).
+
+**(1) Translate + presence — PASS.** `translate_cli --tolerate-unknown-ids` over
+all 20 runs: **0 drift/error → zero unknown-FIELD errors** across the 996
+records (the only fatal conditions left in tolerate mode are unknown fields,
+unknown 15th stream names, and oracle-anchor mismatches — none fired).
+Unknown-id tally: **94 distinct ids / 5711 hits**, entirely the A20 content the
+skeleton registry deliberately lacks pre-B3 — `relic:Burning Blood` 738,
+`card:AscendersBane` 1648 (the A20 starting curse), `card:Slimed` 293,
+`monster:Cultist` 149, `monster:SpikeSlime_M` 130, `power:Ritual` 124,
+`card:Headbutt` 200, … (the id-drift guard reporting, not swallowing). Presence
+(`oracle_gate_check`): **0 presence failures over 996 records** — every record
+exposes all **13 dungeon stream counters**, **`neowRng`-when-present** (989/996;
+absent only in the ~7 pre-blessing dumps, exactly the §2.5 phase rule), both
+pity counters (`cardBlizzRandomizer`, `blizzardPotionMod`), the three
+`eventPity` floats (`monster`/`shop`/`treasure`), and `purgeCost`.
+
+**(2) RNG cross-check — PASS (all 20 seeds).** Against the engine's own
+`floor_stream`/`map_stream`: **`relicRng.counter == 5` at dungeon init** for all
+20 (the 5 init relic-pool shuffles); **floor-scoped `(s0,s1)` == `floor_stream(seed,
+floor)` bit-for-bit at 75 floor entries** (floors 0-6 across the seeds, read off
+`cardRandomRng` at `counter==0` — the pristine per-floor reseed, B1.2 anchor);
+**`mapRng` lies on the `map_stream(seed,1)` trajectory** for all 20 (dumped raw
+state reached from the pristine act-1 seed `from_seed(seed+1)` in 136-151 raw
+`next_long()` steps — map generation mixes wrapper draws (`counter`≈94) with
+direct `.random.*` draws so the wrapper counter under-counts `next_long()`s;
+matching the full 128-bit state at a specific step is a ~2⁻¹²⁸ coincidence, so
+trajectory membership IS the act-scoped seeding proof against the live game).
+`oracle_gate_check` summary: `20 run(s): 996 records checked, 0 presence
+failures, 75 floor-entries cross-checked, 0 run(s) FAILED`.
+
+**(3) Strip equivalence + throughput — PASS (re-confirmed on the final build).**
+`tools/oracle_bridge/build_fork.ps1 -CheckDeterminism -NoDeploy` (Windows host,
+JDK 8) reproduces sha256 **`04477E4E…B2C36636`** with **determinism PASS** (two
+full builds byte-identical); the **deployed jar** that produced the corpus
+(`<game>\mods\CommunicationMod-oracle.jar`) hashes to the same
+`04477E4E…B2C36636`, and the corpus manifest stamps the same sha — so B1.3's
+evidence was produced on this exact build and stands without re-running game
+legs. Cited from B1.3 (design §11 v0.1.2 refined definition): A/B over the same
+20 seeds on this build (`b13_on20b` ON twin vs `b13_offscript2` OFF twin, 996
+records / **12,245,722 B** each) → **12/20 byte-identical, 8/20 differ only in
+the enumerated dually-proven presentation fields**, **0 cmd/length diffs, 0
+semantic leaks** (all 14 streams, pity, pools, `neowRng`, move history, HP,
+master deck, gold, map, living-monster powers byte-identical). **Throughput
+(stripped): sustained pooled 32.0, median 30.1, worst 20.9 (floor 5) act/s** — ≥5
+floor met (~89× the 0.36 states/s B0.2 baseline).
+
+**(4) WSL CI untouched + green — PASS.** `.github/workflows/ci.yml` is generic
+Ubuntu (`ninja-build` + `python3-yaml`, configure→build→ctest matrix
+debug×{asan off,on}) with **no** game / JDK / fork-jar / campaign dependency and
+is **untouched** by this commit (the bridge tools read campaign data only at
+runtime; nothing in CI builds or runs the game). Full clean suite (`rm -rf
+build/<preset>` each) green in all three presets: **debug 166/166, asan 166/166,
+release 166/166** (164 baseline + the 2 new id-tolerance translator tests; no
+engine change — `SCHEMA_VERSION`=1, `sizeof(CombatState)`=3504 unchanged; changes
+confined to `tools/oracle_bridge/translator/**` + `tests/translator_test.cpp`).
 
 ---
 
