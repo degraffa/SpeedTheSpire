@@ -87,6 +87,25 @@ TEST(Translator, OracleFieldsLandBitForBit) {
     EXPECT_EQ(rl.run.card_blizz_randomizer, 5);
     EXPECT_EQ(rl.run.blizzard_potion_mod, 0);
 
+    // B4.3 un-deferred, now-representable oracle fields (schema v3). The golden's
+    // oracle block carries real values (copied from STS00001) for all of these.
+    // Event-pity floats: the game's float literals reproduce bit-for-bit.
+    EXPECT_EQ(rl.run.event_pity_monster, 0.1f);
+    EXPECT_EQ(rl.run.event_pity_shop, 0.03f);
+    EXPECT_EQ(rl.run.event_pity_treasure, 0.02f);
+    EXPECT_EQ(cb.run.event_pity_monster, 0.1f);
+    // Shop purge cost (base 75, un-ramped).
+    EXPECT_EQ(rl.run.purge_cost, 75);
+    EXPECT_EQ(cb.run.purge_cost, 75);
+    // Potion-slot count = length of the potions array (A20 -> A11 -> 2 slots).
+    EXPECT_EQ(rl.run.potion_slots, 2);
+    EXPECT_EQ(cb.run.potion_slots, 2);
+    // neowRng: absent from these in-dungeon dumps (floor-0/Neow only), so it maps
+    // nothing and stays a value-init (zero) stream -- storage present, unset here.
+    EXPECT_EQ(rl.run.neow_rng.counter, 0);
+    EXPECT_EQ(rl.run.neow_rng.s0, 0u);
+    EXPECT_EQ(rl.run.neow_rng.s1, 0u);
+
     // floor-scoped streams -> CombatState (from the combat record's oracle).
     expect_stream(cb.combat.monster_hp_rng, 1, -5471394293180523395LL, 630273432087629641LL, "monsterHpRng");
     expect_stream(cb.combat.shuffle_rng, 1, -5471394293180523395LL, 630273432087629641LL, "shuffleRng");
@@ -115,6 +134,26 @@ TEST(Translator, OracleFieldsLandBitForBit) {
     EXPECT_GT(run.stats.ignored, 0u);
     EXPECT_GT(run.stats.oracle, 0u);
     EXPECT_GT(run.stats.deferred, 0u);
+}
+
+// B4.3: when the oracle DOES carry neowRng (floor-0 / Neow dumps), it maps into
+// RunState.neow_rng as the 14th stream (§2.5 #2). The golden's in-dungeon dumps
+// omit it, so inject one into the run-level record's streams block and confirm
+// it lands bit-for-bit (and that an in-dungeon dump WITHOUT it still translates).
+TEST(Translator, NeowRngMapsWhenPresent) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    std::string tampered = lines[1];
+    const std::string anchor = "\"streams\":{";
+    auto pos = tampered.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    // signed longs, as the oracle emits them; distinct from every other stream.
+    tampered.insert(pos + anchor.size(),
+                    "\"neowRng\":{\"counter\":3,\"s0\":-77,\"s1\":88},");
+
+    tr::TranslatedRun run = tr::translate_lines({lines[0], tampered}, "neow");
+    ASSERT_EQ(run.records.size(), 1u);
+    expect_stream(run.records[0].run.neow_rng, 3, -77LL, 88LL, "neowRng");
 }
 
 // --- Acceptance 2: fail loudly --------------------------------------------

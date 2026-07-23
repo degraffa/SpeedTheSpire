@@ -30,14 +30,16 @@
 // (AbstractRelic.java:492-620). The generated sts::registry::RelicHook mirrors the
 // enum below; relics.hpp pins the two byte-equal.
 //
-// COMBAT STORAGE SEAM (B4.3): CombatState carries no relic list yet -- adding one
-// is a schema change owned by B4.3 (RunState population + additive fields). Until
-// it lands, player_relics() returns an EMPTY view, so the dispatch sites wired
-// into power_hooks.cpp / action_queue.cpp are genuine no-ops and the 20 combat
-// fixtures stay byte-identical. The acquisition-order dispatch and per-relic combat
-// behaviour are proven by relic_hooks_test.cpp constructing relic lists directly;
-// when B4.3 gives CombatState its relic mirror, player_relics() returns it and the
-// wiring lights up with a one-line change.
+// COMBAT STORAGE SEAM (LIVE as of B4.3): CombatState now carries the relic mirror
+// (CombatState.relics / relic_count, an additive schema-v3 field), so
+// player_relics() returns {s.relics, s.relic_count} and the dispatch sites wired
+// into power_hooks.cpp / action_queue.cpp are LIVE. The mirror is value-init empty
+// until a run populates it (the run-level fold-back is B4.4), so the 20 combat
+// fixtures carry a zeroed mirror and their dispatch stays a no-op -- the fixtures
+// were regenerated for the struct-size growth (zeroed relic bytes only, B4.3 Log).
+// The acquisition-order dispatch and per-relic combat behaviour are proven by
+// relic_hooks_test.cpp (which builds relic lists directly and, as of B4.3, also
+// exercises player_relics() against a populated mirror).
 
 #include <cstdint>
 

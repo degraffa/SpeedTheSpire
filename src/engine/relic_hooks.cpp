@@ -1,8 +1,8 @@
 // Relic-hook framework -- acquisition-order dispatch + the native escape hatch.
 // See relic_hooks.hpp for the full hook inventory, the acquisition-order rule
 // (stage-a trap 8), the relic-vs-power interleave at each call site, and the
-// combat-storage seam (player_relics() empty until B4.3's CombatState relic
-// mirror).
+// combat-storage seam (player_relics() reads CombatState's relic mirror, live as
+// of B4.3).
 //
 // Provenance (each relic body read in full in the decompiled Java before coding):
 // registry/relics.yaml carries the per-relic citation. Hook sites:
@@ -66,13 +66,15 @@ void heal_player(CombatState& s, int32_t n) noexcept {
 
 }  // namespace
 
-// --- player_relics: the combat relic view (empty until B4.3) -----------------
+// --- player_relics: the combat relic view (live as of B4.3) ------------------
 
-RelicView player_relics(CombatState& /*s*/) noexcept {
-    // TODO(B4.3): once CombatState gains its relic mirror (schema additive field),
-    // return {s.relics, s.relic_count}. Until then there is no combat relic storage,
-    // so the wired dispatch sites are pure no-ops (fixtures byte-identical).
-    return RelicView{nullptr, 0};
+RelicView player_relics(CombatState& s) noexcept {
+    // B4.3 gave CombatState its relic mirror (s.relics / s.relic_count), so the
+    // wired dispatch sites (power_hooks.cpp / action_queue.cpp) now read the live
+    // acquisition-ordered list. It is empty (relic_count == 0) until a run
+    // populates it -- the run-level fold-back is B4.4 -- so states with no relics
+    // (the 20 combat fixtures) still dispatch nothing.
+    return RelicView{s.relics, s.relic_count};
 }
 
 // --- Generic dispatch (acquisition order) ------------------------------------

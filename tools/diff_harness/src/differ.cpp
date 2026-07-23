@@ -52,6 +52,15 @@ void cmp_u(DiffReport& r, const std::string& name, unsigned long long e,
     if (e != a) push(r, name, std::to_string(e), std::to_string(a));
 }
 
+// Exact float compare (B4.3 event-pity floats): a replay is deterministic, so
+// any bit difference is a real divergence. Bit-compare avoids treating NaN as
+// "equal to itself" wrongly and catches -0.0 vs 0.0; the repr is the value.
+void cmp_f(DiffReport& r, const std::string& name, float e, float a) {
+    if (std::memcmp(&e, &a, sizeof(float)) != 0) {
+        push(r, name, std::to_string(e), std::to_string(a));
+    }
+}
+
 // --- enum reprs: "NAME(n)" when known, bare "n" otherwise -------------------
 
 std::string named(const char* name, unsigned long long v) {
@@ -457,8 +466,38 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
     cmp_i(r, "card_blizz_randomizer", e.card_blizz_randomizer, a.card_blizz_randomizer);
     cmp_i(r, "blizzard_potion_mod", e.blizzard_potion_mod, a.blizzard_potion_mod);
 
-    // -- the 8 run-level RNG streams (7 run-scoped + act-scoped map_rng), each
-    //    named individually so a divergence is attributable to the stream --
+    // -- schema-v3 additive run inventory (B4.3) --
+    // event-pity chances (floats) + shop purge cost + potion-slot count.
+    cmp_f(r, "event_pity_monster", e.event_pity_monster, a.event_pity_monster);
+    cmp_f(r, "event_pity_shop", e.event_pity_shop, a.event_pity_shop);
+    cmp_f(r, "event_pity_treasure", e.event_pity_treasure, a.event_pity_treasure);
+    cmp_i(r, "purge_cost", e.purge_cost, a.purge_cost);
+    cmp_u(r, "potion_slots", e.potion_slots, a.potion_slots);
+
+    // event/shrine/special pool-membership bitsets (remaining-pool view).
+    cmp_u(r, "event_membership", e.event_membership, a.event_membership);
+    cmp_u(r, "special_membership", e.special_membership, a.special_membership);
+    cmp_u(r, "shrine_membership", e.shrine_membership, a.shrine_membership);
+
+    // relic-pool orders, all 5 tiers: per-tier count + live members [0, count).
+    // Order is load-bearing (front/end pop, trap 15), so compared positionally.
+    for (int t = 0; t < kRelicTierCount; ++t) {
+        const std::string tb = "relic_pool[" + std::to_string(t) + "]";
+        cmp_u(r, tb + ".count", e.relic_pool_count[t], a.relic_pool_count[t]);
+        const int n = std::max<int>(e.relic_pool_count[t], a.relic_pool_count[t]);
+        for (int i = 0; i < n; ++i) {
+            const std::string b = tb + "[" + std::to_string(i) + "]";
+            const bool ein = i < e.relic_pool_count[t];
+            const bool ain = i < a.relic_pool_count[t];
+            std::string ev = ein ? std::to_string(e.relic_pools[t][i]) : std::string("(absent)");
+            std::string av = ain ? std::to_string(a.relic_pools[t][i]) : std::string("(absent)");
+            if (ev != av) push(r, b, std::move(ev), std::move(av));
+        }
+    }
+
+    // -- the 9 run-level RNG streams (7 run-scoped + act-scoped map_rng + the
+    //    event-scoped neow_rng, B4.3), each named individually so a divergence is
+    //    attributable to the stream --
     cmp_stream(r, "monster_rng", e.monster_rng, a.monster_rng);
     cmp_stream(r, "event_rng", e.event_rng, a.event_rng);
     cmp_stream(r, "merchant_rng", e.merchant_rng, a.merchant_rng);
@@ -467,6 +506,7 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
     cmp_stream(r, "relic_rng", e.relic_rng, a.relic_rng);
     cmp_stream(r, "potion_rng", e.potion_rng, a.potion_rng);
     cmp_stream(r, "map_rng", e.map_rng, a.map_rng);
+    cmp_stream(r, "neow_rng", e.neow_rng, a.neow_rng);
 
     return r;
 }

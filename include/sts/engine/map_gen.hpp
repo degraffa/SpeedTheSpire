@@ -25,13 +25,12 @@
 //
 // ORIENTATION (see docs scoping report §0). This file works entirely in the
 // GAME's map semantics: 15 floors (rows, y = 0..14) x 7 columns (x = 0..6),
-// `MAP_HEIGHT=15 / MAP_WIDTH=7` (AbstractDungeon.java:210-211). The current
-// RunState storage names its dims transposed (kMapRows=7 / kMapCols=15); the
-// schema-v2 rename/reorientation is B4.3's job. To avoid perpetuating the
-// confusion, path data is written into RunState via one documented index
-// convention (`run_state_map_index` below): after B4.3 flips the kMapRows/
-// kMapCols names to 15x7 that convention becomes the natural row-major index
-// and the call sites need no logic change.
+// `MAP_HEIGHT=15 / MAP_WIDTH=7` (AbstractDungeon.java:210-211). As of B4.3 the
+// RunState storage is game-native too (kMapRows=15 floors / kMapCols=7 columns),
+// so `run_state_map_index` below is now the plain row-major index
+// `floor*kMapCols + col`. It is retained (rather than inlined) so the encode call
+// sites read clearly and the game<->storage index convention has one home; a
+// static_assert ties the game constants here to the RunState dims.
 //
 // HAZARDS honoured (scoping report §6):
 //   H1  MapRoomNode/MapEdge ctors call libgdx MathUtils (global static RNG),
@@ -60,6 +59,14 @@ namespace sts::engine {
 
 inline constexpr int kGameMapFloors = 15;   // MAP_HEIGHT: rows y = 0..14
 inline constexpr int kGameMapCols = 7;      // MAP_WIDTH:  cols x = 0..6
+
+// As of B4.3 the RunState map storage is game-native, so the game dims here ARE
+// the RunState dims. Pin it so a future accidental transpose of either breaks
+// the build rather than silently corrupting the encode/index.
+static_assert(kGameMapFloors == kMapRows && kGameMapCols == kMapCols,
+              "RunState map dims must match the game map orientation "
+              "(15 floors x 7 cols) after the B4.3 reorientation");
+
 inline constexpr int kMapPathDensity = 6;   // MAP_PATH_DENSITY (6 walks)
 inline constexpr int kBossCol = 3;          // hardcoded boss column (:140)
 inline constexpr int kBossDstY = 16;        // synthetic boss edge dstY (dstY+2)
@@ -80,12 +87,12 @@ inline constexpr uint8_t kEdgeCenter = 0x2;  // -> (x,   y+1)
 inline constexpr uint8_t kEdgeRight = 0x4;   // -> (x+1, y+1)
 inline constexpr uint8_t kEdgeBoss = 0x8;    // -> boss (row 14 only)
 
-// RunState.map[] index for GAME node (x = col 0..6, y = floor 0..14). The
-// backing array is kMapRows*kMapCols = 105 entries either way; this convention
-// is game-oriented (floor-major). B4.3's schema-v2 rename (kMapRows->15,
-// kMapCols->7) turns this into the plain row-major `y*width + x`.
+// RunState.map[] index for GAME node (x = col 0..6, y = floor 0..14). Post-B4.3
+// this is the plain row-major index into the game-native 15x7 grid:
+// `floor*kMapCols + col`. (kGameMapCols == kMapCols by the static_assert above,
+// so this is byte-identical to the pre-rename `y*7 + x` -- no map bytes moved.)
 [[nodiscard]] constexpr int run_state_map_index(int x, int y) noexcept {
-    return y * kGameMapCols + x;
+    return y * kMapCols + x;
 }
 
 // --- Working generation structures (game semantics) --------------------------

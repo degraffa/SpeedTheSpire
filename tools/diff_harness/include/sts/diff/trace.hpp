@@ -57,9 +57,14 @@ namespace sts::diff {
 // the ON-DISK format tags and are deliberately DECOUPLED from
 // engine::SCHEMA_VERSION so the v1 writer/reader keep their exact Stage-A
 // behavior (the 20 frozen v1 fixtures load unchanged) while SCHEMA_VERSION
-// advances to the current format. kTraceFormatV2 tracks engine::SCHEMA_VERSION.
+// advances to the current format. kTraceFormatV2 tracks engine::SCHEMA_VERSION:
+// B4.3 grew sizeof(RunState) and bumped SCHEMA_VERSION 2->3, so kTraceFormatV2
+// follows to 3. The v2 CONTAINER format (state_kind + both struct sizes in the
+// header) is unchanged; a stale-sized RunState trace is refused both by the
+// stamped version and by the header's run_state_size check. No v2/RUN goldens
+// are committed, so nothing on disk needs regeneration.
 inline constexpr uint32_t kTraceFormatV1 = 1;
-inline constexpr uint32_t kTraceFormatV2 = 2;
+inline constexpr uint32_t kTraceFormatV2 = 3;
 static_assert(kTraceFormatV2 == engine::SCHEMA_VERSION,
               "v2 trace format tag must equal the current engine::SCHEMA_VERSION");
 
@@ -119,7 +124,7 @@ inline constexpr uint32_t kAuxTerminal = 1u;  // bit 0
 //
 //   TraceHeaderV2 (32 bytes, no padding):
 //     char     magic[4]          = {'S','T','S','0'}
-//     uint32_t schema_version    = kTraceFormatV2 (=2)
+//     uint32_t schema_version    = kTraceFormatV2 (=3 as of B4.3)
 //     uint32_t combat_state_size = sizeof(CombatState)   (refusal check)
 //     uint32_t run_state_size    = sizeof(RunState)      (refusal check)
 //     uint32_t record_count

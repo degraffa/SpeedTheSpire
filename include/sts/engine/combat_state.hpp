@@ -39,6 +39,7 @@
 #include "sts/engine/schema.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
+#include "sts/engine/run_state.hpp"  // RelicSlot, kRelicCap (combat relic mirror, B4.3)
 
 namespace sts::engine {
 
@@ -236,6 +237,21 @@ struct CombatState {
     MonsterQueueItem monster_queue[kMonsterQueueCap];
     uint8_t monster_queue_count;
     uint8_t monster_attacks_queued;   // design doc §5.2 step 4 flag (0/1)
+
+    // -- combat relic mirror (B4.3, orchestrator-approved addition beyond the
+    //    block's literal RunState list; see the B4.3 Log). The player's relics in
+    //    acquisition order (== trigger order, trap 8), mirrored from RunState.relics
+    //    at combat_begin so in-combat relic hooks (relic_hooks.hpp player_relics)
+    //    read the live list instead of the empty view B3.24 left as a seam. The
+    //    RUN-LEVEL fold-back (populating/refreshing this across combats) is B4.4's
+    //    (its deliverable lists "relic counters"); this is only the storage the
+    //    dispatch reads. Capacity == kRelicCap (== RunState.relics) so the fold is
+    //    a plain array copy; kRelicCap = 40 covers S1 A20 runs (which can
+    //    accumulate ~30+ relics) with margin. Value-init leaves it empty, so the
+    //    20 combat fixtures carry a zeroed mirror (dispatch stays a no-op there). --
+    RelicSlot relics[kRelicCap];
+    uint8_t relic_count;
+    uint8_t pad_relics[7];            // explicit padding (keeps the RNG block aligned)
 
     // -- RNG: the 5 floor-scoped streams (design doc §3.4 / §3.6). Named
     //    exactly as the game's streams so combat_begin() can derive each via

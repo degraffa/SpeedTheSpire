@@ -33,6 +33,19 @@ namespace sts::engine {
 //   (sizeof(CombatState)/sizeof(RunState) identical); the bump reflects the
 //   container-format change, per §8's "bumped by any struct/format edit" and
 //   design §3.3's "schema-version bump". See tools/diff_harness/sts/diff/trace.hpp.
-inline constexpr uint32_t SCHEMA_VERSION = 2;
+// v3 (=3): B4.3 additively extends RunState (design §2.6): the NeowEvent rng
+//   (14th stream), the three event-pity floats, the shop purge cost, the
+//   potion-slot count, the event/shrine/special pool-membership bitsets, and the
+//   five relic-pool orders; plus the schema-v2 map reorientation (kMapRows/
+//   kMapCols renamed to game-native 15 floors x 7 cols -- a rename only, the 105
+//   MapNode layout is byte-identical). sizeof(RunState) grows, so per §8 this is
+//   a schema bump. The trace v2 container FORMAT is unchanged (still the B1.6
+//   state_kind discriminator + both struct sizes in the header); the bump is
+//   carried by the header's stamped version AND the run_state_size refusal check,
+//   so an old-sized RunState trace is refused. The 20 frozen v1 combat fixtures
+//   are untouched (kTraceFormatV1, zero regeneration); no run-level (RUN/v2)
+//   trace goldens are committed, so nothing is regenerated. The on-disk v2 format
+//   tag tracks this constant (kTraceFormatV2 == SCHEMA_VERSION).
+inline constexpr uint32_t SCHEMA_VERSION = 3;
 
 }  // namespace sts::engine

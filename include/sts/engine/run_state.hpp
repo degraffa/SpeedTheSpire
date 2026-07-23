@@ -19,7 +19,8 @@
 //
 // STREAM COUNT (design doc §3.4 / §3.6): RunState carries the 7 run-scoped
 // streams (monsterRng, eventRng, merchantRng, cardRng, treasureRng, relicRng,
-// potionRng) plus the act-scoped mapRng.
+// potionRng), the act-scoped mapRng, and (B4.3) the event-scoped neowRng -- the
+// 14th stream of design §2.5 #1/#2.
 
 #include <cstdint>
 #include <type_traits>
@@ -35,9 +36,27 @@ namespace sts::engine {
 inline constexpr int kMasterDeckCap = 128;
 inline constexpr int kRelicCap = 40;
 inline constexpr int kPotionCap = 5;
-inline constexpr int kMapRows = 7;
-inline constexpr int kMapCols = 15;
+// Map dims in GAME-NATIVE orientation (design §2.6 schema-v2 reorientation, B4.3):
+// the act map is MAP_HEIGHT=15 floors (rows, y=0..14) x MAP_WIDTH=7 columns
+// (x=0..6) (AbstractDungeon.java:210-211). Stage A named these transposed
+// (kMapRows=7 / kMapCols=15); B4.1/B4.2 built game-oriented logic over an index
+// adapter. This is the promised rename: the 105-node backing array is unchanged
+// (7*15 == 15*7 == 105) and the row-major index `floor*kMapCols + col` is
+// byte-identical to the old `y*7 + x`, so NO map bytes move -- only the names now
+// read the way the game does. map_gen.hpp / map_rooms.hpp adapt accordingly.
+inline constexpr int kMapRows = 15;    // map height: floors  (game MAP_HEIGHT)
+inline constexpr int kMapCols = 7;     // map width:  columns (game MAP_WIDTH)
 inline constexpr int kBossIdCap = 4;   // placeholder: up to one boss id per act
+
+// Relic-pool storage (design §2.5 #8, B4.3): the five relic tiers, each a pool
+// shuffled once at dungeon init then popped (front for rewards, end for shop --
+// trap 15). kRelicTierCount is the tier count; kRelicPoolCap bounds one tier's
+// initialized dungeon pool (S1 Ironclad's largest is the common pool at 33 --
+// oracle golden; 48 leaves headroom). Tier index convention (matches the game's
+// AbstractRelic.RelicTier ordering used at pool init): 0=Common, 1=Uncommon,
+// 2=Rare, 3=Shop, 4=Boss.
+inline constexpr int kRelicTierCount = 5;
+inline constexpr int kRelicPoolCap = 48;
 
 // --- RelicSlot (design doc §4.3) --------------------------------------------
 
@@ -55,7 +74,7 @@ static_assert(std::is_trivially_copyable_v<RelicSlot>);
 static_assert(sizeof(RelicSlot) == 4,
               "RelicSlot must be 4 bytes (design doc §4.3: u16+i16)");
 
-// --- MapNode (design doc §4.3: 7×15 node grid) ------------------------------
+// --- MapNode (design doc §4.3: 15×7 node grid -- 15 floors × 7 columns) ------
 
 // One node of the act map. `room_type` is the room-kind id (monster/elite/rest/
 // shop/treasure/event/boss -- enumerated by Stage B's map generator, opaque
@@ -104,14 +123,15 @@ struct RunState {
     //    are Stage B (design doc §11); the skeleton uses none. --
     uint16_t potions[kPotionCap];
 
-    // -- map (design doc §4.3): 7×15 node grid. Flattened row-major. --
+    // -- map (design doc §4.3): 15×7 node grid (15 floors × 7 columns), flattened
+    //    row-major as `floor*kMapCols + col` (game-native after the B4.3 rename). --
     MapNode map[kMapRows * kMapCols];
 
     // -- placeholders (design doc §4.3), not exercised by the skeleton --
     uint16_t boss_ids[kBossIdCap];    // one boss id per act (0 = unset)
     uint8_t keys;                     // emerald/ruby/sapphire key bitflags
     uint8_t pad_keys;                 // explicit padding
-    uint32_t event_flags;             // one-shot event bitset (Stage B)
+    uint32_t event_flags;             // one-shot event *fired* bitset (Stage B)
     uint32_t shop_flags;              // one-shot shop bitset (Stage B)
 
     // -- pity counters riding on the streams, persisted in the save file so they
@@ -120,6 +140,54 @@ struct RunState {
     //    value-init leaves them 0. --
     int16_t card_blizz_randomizer;    // rare/uncommon reward bias (starts 5)
     int16_t blizzard_potion_mod;      // ±10% potion-drop ratchet
+
+    // ========================================================================
+    // schema-v3 additive run inventory (B4.3, design §2.6 / §2.5 items 2,5,6,7,8)
+    // ========================================================================
+    // Additive per stage-a §12: POD, trivially copyable, capacity-bounded, and
+    // value-init zero-fills them so pre-population states are byte-clean. The
+    // translator (tools/oracle_bridge/translator) writes the NUMERIC/COUNT ones
+    // now; the id-list ones (relic pools, event/shrine/special membership) need
+    // registry enums that do not exist at HEAD (relics.yaml/events.yaml empty)
+    // and are populated by B4.6 (relics) / B4.10-B4.13 (events) -- storage lands
+    // here so those tasks need no further schema bump (design §2.6 front-loading).
+
+    // Event-pity chances (EventHelper.MONSTER/SHOP/TREASURE_CHANCE, floats; grow
+    // 0.1/0.03/0.02 per miss, reset on hit; §2.5 #5). Stored as float so the
+    // game's float literals reproduce bit-for-bit. Consumed/advanced by B4.10.
+    float event_pity_monster;
+    float event_pity_shop;
+    float event_pity_treasure;
+
+    // Shop purge cost (ShopScreen.purgeCost, base 75, +25 per purge; run-
+    // persistent; §2.5 #6). Consumed by B4.8. u16-range is ample.
+    int16_t purge_cost;
+
+    // Potion-slot count: how many slots the player actually has (base 3; A11
+    // removes one -> 2). Distinct from kPotionCap (the storage ceiling). Set at
+    // run_begin (A11) / by potion-belt relics later.
+    uint8_t potion_slots;
+    uint8_t pad_potion_slots;         // explicit padding
+
+    // Remaining event/shrine/special POOL-membership bitsets (§2.5 #7): bit set
+    // == that entry is still in the draw pool (cleared on use). Bit index =
+    // position in the act's canonical init list; that list is defined by the
+    // event registry (B4.10-B4.13), which also populates these. Widths cover the
+    // Act-1 lists (11 events / 6 shrines / 14 specials). These are the "remaining
+    // pool" view; event_flags above stays the one-shot "already fired" view.
+    uint16_t event_membership;
+    uint16_t special_membership;
+    uint8_t  shrine_membership;
+    uint8_t  pad_membership;
+
+    // Remaining relic-pool ORDER for all 5 tiers (§2.5 #8, trap 15): each tier is
+    // an ordered list of RelicId (== relics[].relic_id widths), with a live count;
+    // front-pop (rewards) / end-pop (shop) act on [0, count). Shuffled once at
+    // init by B4.6 (relicRng); popped by B4.6/B4.7/B4.8. Tier index per the
+    // kRelicTierCount comment above (0=Common..4=Boss).
+    uint16_t relic_pools[kRelicTierCount][kRelicPoolCap];
+    uint8_t  relic_pool_count[kRelicTierCount];
+    uint8_t  pad_relic_pools[3];      // pad kRelicTierCount(5) -> 8
 
     // -- RNG: the 7 run-scoped streams (design doc §3.4) + the act-scoped mapRng
     //    (design doc §3.6). See the STREAM COUNT note at the top of this file.
@@ -133,6 +201,10 @@ struct RunState {
     RngStream relic_rng;              // relic pool shuffles & rolls
     RngStream potion_rng;             // potion drops & identity
     RngStream map_rng;                // map generation (act-scoped seed)
+    RngStream neow_rng;               // NeowEvent.rng: event-scoped 14th stream,
+                                      // fresh Random(seed) at run start (§2.5 #2,
+                                      // B4.14). Only meaningful at floor 0; other
+                                      // dumps carry a value-init (zero) stream.
 };
 
 static_assert(std::is_trivially_copyable_v<RunState>,

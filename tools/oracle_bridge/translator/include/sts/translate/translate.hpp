@@ -14,15 +14,20 @@
 //     that consumes exactly its known keys; any leftover key throws.
 //   * Id mapping via the generated registry tables (sts::registry::*_from_game_id,
 //     B2.2). A non-empty content id the registry does not know is drift -> throw.
-//   * The §2.5 oracle fields that have schema storage TODAY land bit-for-bit:
-//     the 7 run-scoped streams + mapRng -> RunState, the 5 floor-scoped streams
-//     -> CombatState, cardBlizzRandomizer / blizzardPotionMod -> RunState. The
-//     §2.5 items with no storage yet (neowRng, event-pity floats, purgeCost,
-//     event/shrine/special lists, relic-pool orders, per-monster move history
-//     beyond 3, potion-slot count, real map/boss/event/shop fields) are known
-//     to the walker (so they do not trip the drift error) but are NOT written
-//     to the schema -- they are DEFERRED to B4.3, which adds their storage and
-//     upgrades this translator to emit them (schema-version bump lives there).
+//   * The §2.5 oracle fields that have schema storage land bit-for-bit: the 7
+//     run-scoped streams + mapRng + (B4.3) neowRng -> RunState, the 5 floor-
+//     scoped streams -> CombatState, cardBlizzRandomizer / blizzardPotionMod
+//     -> RunState. B4.3 (schema v3) additively grew RunState and UN-DEFERRED the
+//     now-representable §2.5 items: neowRng (14th stream), the 3 event-pity
+//     floats, purgeCost, and the potion-slot count now map. The id-LIST items
+//     (relic-pool orders -> relic_pools[5]; event/shrine/special membership ->
+//     bitsets) HAVE storage but stay deferred until their content-id registries
+//     exist -- relics.yaml is populated by B4.6, events.yaml by B4.10-B4.13;
+//     each is that task's translator un-deferral (no further schema bump). Real
+//     map/boss/event-shop-flag fields and per-monster move history beyond 3
+//     remain deferred to their owning run-layer tasks. Deferred keys are still
+//     STRUCTURALLY consumed (a new/renamed oracle key still trips the drift
+//     error).
 //
 // BOUNDARY vs B1.6: this task does NOT introduce the v2 trace container
 // (state_kind discriminator, RunState-in-container, SCHEMA_VERSION bump) or the

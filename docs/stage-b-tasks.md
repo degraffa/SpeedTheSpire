@@ -1594,7 +1594,7 @@ applied) so B4.4 run-advance must NOT re-consume the emerald draw. **Unmodeled**
 `Boss` room-type reserved/unused (boss is not a grid node); fixed-row no-edge
 nodes the game also stamps (irrelevant to the traversable grid).
 
-### B4.3 `[ ]` RunState population + additive fields (schema v2)
+### B4.3 `[x]` RunState population + additive fields (schema v2)
 **Deps:** B4.2 · **Spec:** design §2.6 (placeholder population; additive
 inventory) · **Provenance:** design §2.5 rows 5-8; SaveFile parity fields
 stage-a §3.4
@@ -1607,7 +1607,115 @@ only; translator (B1.5) upgraded to emit the now-representable fields.
 **Acceptance:** `state_test` updated ceilings (`RunState` ≤ 8192 holds);
 schema-bump discipline verified (old traces refused, regenerated fixtures
 zero-diff); translator round-trips the full §2.5 inventory bit-for-bit.
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred; isolated in a
+detached worktree at HEAD `f0617c5`. **`sizeof(RunState)` 1648 -> 2184 B**
+(design §2.6 baseline confirmed 1648; well under the 8192 budget). **Schema bump
+2 -> 3** (NOT 1 -> 2: B1.6 already advanced `SCHEMA_VERSION` to 2 when it
+decoupled the trace FORMAT tag from the engine version, so this additive struct
+edit is v3 per stage-a §12 / §8's "bumped by any struct edit"). The `(schema v2)`
+in the heading is the pre-B1.6 expectation; the effective bump is 2 -> 3.
+**Additive RunState fields** (`run_state.hpp`, all POD / value-init-clean per
+stage-a §12): `neow_rng` (event-scoped 14th stream, §2.5 #2); `event_pity_monster/
+shop/treasure` floats (EventHelper MONSTER/SHOP/TREASURE_CHANCE, §2.5 #5);
+`purge_cost` i16 (§2.5 #6); `potion_slots` u8 (A11 count); `event_membership` u16
+/ `shrine_membership` u8 / `special_membership` u16 (remaining-pool bitsets,
+§2.5 #7); `relic_pools[5][48]` u16 + `relic_pool_count[5]` (relic pool orders ×5,
+§2.5 #8, trap 15; tier order Common/Uncommon/Rare/Shop/Boss). Existing
+`event_flags`/`shop_flags` retained as the one-shot *fired* view (distinct from
+the new *remaining-pool* membership); `boss_ids` already real storage.
+**Map-orientation reorientation (owned since B4.1):** `kMapRows` 7 -> 15 (floors)
+/ `kMapCols` 15 -> 7 (cols) so `RunState.map` is game-native (AbstractDungeon.java:
+210-211). This is a RENAME ONLY: the 105-node backing array and the row-major
+index `floor*7 + col` are byte-identical either way (`run_state_map_index` now
+`y*kMapCols + x`), so ZERO map bytes move and it is NOT fixture regeneration. A
+`static_assert(kGameMapFloors==kMapRows && kGameMapCols==kMapCols)` in
+`map_gen.hpp` pins it; `map_rooms.hpp`'s `RoomType` is finalized as the
+`MapNode.room_type` encoding (append-only). All 20-seed `map_gen_test` /
+`map_rooms_test` stay green UNCHANGED in meaning (they index via
+`run_state_map_index`, whose value is unchanged). **Trace/schema pins:**
+`kTraceFormatV2` 2 -> 3 (tracks `SCHEMA_VERSION`; the `static_assert(kTraceFormatV2
+== engine::SCHEMA_VERSION)` holds). The v2 CONTAINER format is unchanged; a
+stale-sized RunState trace is refused by BOTH the stamped version and the
+header's `run_state_size` check. `observation.hpp` uses `SCHEMA_VERSION`
+symbolically (compiles green). **Fixture discipline (per the frozen rules):** the
+20 frozen v1 combat fixtures carry `kTraceFormatV1`=1 and load via
+`read_trace`/`read_trace_v2` compat with **ZERO regeneration**
+(`FixtureOracle.AllFixturesReplayWithZeroDiffs` green); no run-level (RUN/v2)
+trace goldens are committed, so there is nothing to regenerate. **Translator
+un-deferral (`translate.cpp`) — the "now-representable" deliverable clause:**
+`neowRng`, `eventPity`×3, `purgeCost` now MAP bit-for-bit; `potion_slots` = the
+potions-array length. **Kept DEFERRED with storage present:** `relicPools`,
+`eventList`/`shrineList`/`specialOneTimeEventList` — mapping the golden's real
+values bit-for-bit needs content-id enums that DO NOT EXIST at HEAD (`relics.yaml`
+and `events.yaml` are empty skeletons; a fail-loud join would throw). Their
+RunState storage now exists (front-loaded per design §2.6), so they un-defer with
+no further schema bump when **B4.6** populates `relics.yaml` (relic pools) and
+**B4.10-B4.13** populate `events.yaml` + the canonical list order (membership
+bitsets); each is that task's translator un-deferral. `monster_move_history`
+(>3) and real `act_boss`/screen fields stay deferred to their owning tasks
+(`act_boss` is null in the golden; no boss registry). Deferred keys are still
+STRUCTURALLY consumed, so a new/renamed oracle key still trips the fail-loud
+drift error. **card-pool removal bookkeeping** (a deliverable sub-item) added NO
+storage: design §2.5's note is "add if pools mutate", and the B4.5 card-reward
+dup-loop operates on pools derived from the card library filtered by the master
+deck, not a persisted removal set — flagged for B4.5 to add then if it needs it.
+**Differ (`differ.cpp`):** `diff_run_states` gains named comparisons for every new
+field group (pity floats via a new exact-bit `cmp_f`, `purge_cost`,
+`potion_slots`, the three membership bitsets, the 5 relic-pool orders with
+positional/count checks, and `neow_rng` as the 9th run-level stream). **Tests:**
+`translator_test` (+1 `NeowRngMapsWhenPresent`; `OracleFieldsLandBitForBit`
+extended: `event_pity` bit-for-bit {0.1/0.03/0.02f}, `purge_cost`==75,
+`potion_slots`==2 on both records, `neow_rng` value-init when absent);
+`differ_test` (+3 `RunDifferAdditive` cases; `neow_rng` added to the per-stream
+matrix; `MakeBaseRun` populates the new fields); `state_test`
+(`RunMemcpyRoundTripIsEqual` exercises the new fields; the `<= 8192` ceiling
+holds). **COMBAT RELIC MIRROR (orchestrator-approved addition beyond the block's
+literal RunState-only deliverables; escalated + ruled IN because it is
+schema-efficient to fold into this bump and makes B3.24's committed relic
+dispatch live instead of dead code).** `CombatState` gains `relics[kRelicCap]`
++ `relic_count` (`combat_state.hpp`; the RUN-LEVEL fold-back that populates it
+across combats stays B4.4's, whose deliverable lists "relic counters");
+`relic_hooks.cpp::player_relics()` now returns `{s.relics, s.relic_count}`, so the
+wired sites in `power_hooks.cpp`/`action_queue.cpp` are live. **`sizeof(CombatState)`
+3504 -> 3672** (+168 = `RelicSlot[40]` 160 + count 1 + 7 pad; a clean 8-aligned
+insertion at offset 3382). **Fixture regeneration (explicitly authorized by the
+orchestrator; sanctioned by THIS block's own deliverable "trace/fixture
+regeneration via checked-in generators only" + acceptance "regenerated fixtures
+zero-diff"):** growing `CombatState` invalidates the 20 v1 combat fixtures (they
+embed `sizeof(CombatState)` in the header + as raw bytes; `read_trace` refuses a
+size mismatch). Regenerated ALL 20 via the committed INDEPENDENT reference
+simulator `tools/fixture_gen/gen_combat_fixtures.cpp` (never by replaying the
+engine-under-test -- the generator's independence is the point). **This
+distinguishes the B1.6 zero-regen precedent:** B1.6 kept `sizeof(CombatState)`
+UNCHANGED so the fixtures loaded via compat-read with zero regeneration; B4.3
+GROWS `CombatState`, so the ledger's generator-regeneration path applies instead
+(the stage-a "no hand-edit" rule is honoured -- the checked-in generator, not a
+human, rewrote them). **Zero-diff-in-meaning proven mechanically**
+(`<scratchpad>/b43_fixture_proof.py`, output archived): over all **20 fixtures /
+111 records**, each new record's `CombatState` == the old record's bytes with a
+single contiguous run of **168 zero bytes inserted at offset 3382** (== the mirror
+field's offset) and NOTHING else changed -- header magic/schema_version(v1)/
+record_count/seed and every per-record action/aux byte identical; i.e. every
+pre-existing byte is preserved in order and the only delta is the zero-init relic
+mirror. `FixtureOracle.AllFixturesReplayWithZeroDiffs` is green on the regenerated
+set (engine replay == regenerated fixture, all 20). **`observation.hpp` pin
+unaffected:** `ObsBuffer` (188 B) does not mirror relics, so its `sizeof`
+static_assert is unchanged; there is no exact `sizeof(CombatState)` pin in code
+(only the `<= 4096` budget assert, which holds at 3672). **`relic_hooks_test`
+against the REAL mirror:** the stale "empty until B4.3" seam test is replaced by
+two live tests -- empty-mirror (view returns `{s.relics,0}`, dispatch no-op, so
+the zeroed-mirror fixtures stay behaviourally identical) and populated-mirror
+(Anchor+Bag-of-Preparation via the mirror view drive the battle-start dispatch);
+`RelicHooks` 50/50. **Full suite green all three presets on the final base
+`a9c1c63` (post B3.4/B3.23/B3.24): debug 273/273, asan 273/273, release 273/273**
+(268 baseline + 5: translator +1, differ +3, relic-seam +1). (RunState-only slice
+was independently green 254/254 x3 on the e3f71c9 checkpoint before the mirror.)
+**B4.6/B4.10 note:** RunState storage for relic pools + event/shrine/special
+membership is in place; those tasks add only their population + translator
+un-deferral (no schema bump). **B4.4 note:** `neow_rng` / `potion_slots` / pity
+floats are set at `run_begin`; the relic pools are shuffled at dungeon init (5
+relicRng draws) into `relic_pools[]`; the combat relic mirror is filled from
+`RunState.relics` at combat spawn and folded back after.
 
 ### B4.4 `[ ]` Run-level advance + room lifecycle
 **Deps:** B4.3, B3.12 · **Spec:** stage-a §3.4 (floor reseed), §7 (one enum,

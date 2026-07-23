@@ -123,6 +123,14 @@ private:
     if (!v.is_string()) throw TranslateError(loc(c) + " expected string at " + where);
     return v.get<std::string>();
 }
+[[nodiscard]] float as_f32(const json& v, const Ctx& c, const std::string& where) {
+    if (!v.is_number()) throw TranslateError(loc(c) + " expected number at " + where);
+    // The game's chances are float literals (e.g. MONSTER_CHANCE = 0.1f). The
+    // oracle serializes them as JSON numbers; parse as double then narrow to
+    // float, which reproduces the original float bit-pattern (round-trip exact
+    // for the game's clean literals). RunState stores float (§2.5 #5).
+    return static_cast<float>(v.get<double>());
+}
 
 // ---- id joins (fail loud on an id the registry does not know) ------------
 
@@ -400,7 +408,10 @@ void parse_streams(const json& j, const std::string& path, Ctx& ctx,
     route_run("cardRandomRng", cs.card_random_rng);
     route_run("miscRng", cs.misc_rng);
 
-    fr.defer("neowRng");  // 14th stream; no schema field yet (§2.5 #2, B4.3)
+    // neowRng: the event-scoped 14th stream (§2.5 #2). B4.3 gave it RunState
+    // storage, so it is now MAPPED when present (it appears only at floor 0 /
+    // Neow; most in-dungeon dumps omit it, in which case route_run maps nothing).
+    route_run("neowRng", rs.neow_rng);
     fr.finish();
 }
 
@@ -435,13 +446,38 @@ struct OracleAnchors {
                                     path + ".blizzardPotionMod"));
     fr.mapped();
 
-    // §2.5 items with no schema storage yet -> deferred to B4.3.
-    fr.defer("eventPity");                // MONSTER/SHOP/TREASURE_CHANCE floats (§2.5 #5)
-    fr.defer("purgeCost");                // shop purge ramp (§2.5 #6)
-    fr.defer("eventList");                // remaining events (§2.5 #7)
-    fr.defer("shrineList");               // remaining shrines (§2.5 #7)
-    fr.defer("specialOneTimeEventList");  // remaining specials (§2.5 #7)
-    fr.defer("relicPools");               // 5-tier pool orders (§2.5 #8)
+    // -- B4.3 un-deferral: the §2.5 items whose storage B4.3 added AND which are
+    //    representable now (numeric / count -- no content-id registry needed). --
+
+    // eventPity: EventHelper MONSTER/SHOP/TREASURE_CHANCE floats (§2.5 #5). The
+    // sub-object's keys are enforced fail-loud too (an extra key is drift).
+    if (const json* ep = fr.take("eventPity")) {
+        FieldReader epr(*ep, path + ".eventPity", ctx);
+        rs.event_pity_monster = as_f32(epr.require("monster"), ctx, path + ".eventPity.monster");
+        rs.event_pity_shop = as_f32(epr.require("shop"), ctx, path + ".eventPity.shop");
+        rs.event_pity_treasure = as_f32(epr.require("treasure"), ctx, path + ".eventPity.treasure");
+        epr.finish();
+        fr.mapped();
+    }
+    // purgeCost: shop purge ramp (§2.5 #6).
+    rs.purge_cost = static_cast<int16_t>(as_i64(fr.require("purgeCost"), ctx, path + ".purgeCost"));
+    fr.mapped();
+
+    // -- Still deferred: the id-LIST items. B4.3 added their RunState storage
+    //    (relic_pools[5], event/shrine/special membership bitsets), but mapping
+    //    the golden's real values bit-for-bit needs content-id enums that do NOT
+    //    exist at HEAD -- relics.yaml and events.yaml are empty (skeleton). A
+    //    fail-loud join of these ids would throw. They translate once B4.6
+    //    (relics.yaml -> relic_from_game_id) and B4.10-B4.13 (events.yaml -> an
+    //    event id/enum + canonical list order) land the registries; each is that
+    //    task's translator un-deferral, needing no further schema bump (the
+    //    storage is already here). Per the B4.3 deliverable's "now-representable
+    //    fields". These defer() calls still STRUCTURALLY consume the keys (so a
+    //    genuinely new/renamed oracle key still trips the drift error). --
+    fr.defer("eventList");                // remaining events -> event_membership (needs event enum)
+    fr.defer("shrineList");               // remaining shrines -> shrine_membership (needs event enum)
+    fr.defer("specialOneTimeEventList");  // remaining specials -> special_membership (needs event enum)
+    fr.defer("relicPools");               // 5-tier pool orders -> relic_pools[5] (needs relics.yaml)
     fr.defer("monster_move_history");     // full per-monster history (§2.5 #9);
                                           // CombatState holds only move_history[3]
     fr.finish();
@@ -666,6 +702,10 @@ void parse_potions(const json& arr, const std::string& path, Ctx& ctx, eng::RunS
         throw TranslateError(loc(ctx) + " " + path + " has " + std::to_string(arr.size()) +
                              " potion slots > kPotionCap (" + std::to_string(eng::kPotionCap) + ")");
     }
+    // Potion-slot COUNT (§2.5-adjacent; A11 = one fewer). The potions array has
+    // one entry per slot (empty slots carry id "Potion Slot"), so its length IS
+    // the slot count. B4.3 gave RunState a potion_slots field; populate it here.
+    rs.potion_slots = static_cast<uint8_t>(arr.size());
     for (std::size_t i = 0; i < arr.size(); ++i) {
         const std::string pp = path + "[" + std::to_string(i) + "]";
         FieldReader fr(arr[i], pp, ctx);

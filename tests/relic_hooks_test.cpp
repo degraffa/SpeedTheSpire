@@ -5,11 +5,11 @@
 // counter relics (Nunchaku, Pen Nib) persist their counter in the RelicSlot
 // (stage-a §4.3's {relic_id, counter}).
 //
-// The dispatch functions take an explicit relic list (CombatState carries no relic
-// mirror yet -- that additive field is B4.3's schema-owned change), so these tests
-// construct the relic list directly. player_relics() returning an empty view (the
-// wired power_hooks.cpp / action_queue.cpp sites are no-ops until B4.3) is asserted
-// too.
+// The dispatch functions take an explicit relic list, so these tests construct the
+// relic list directly. As of B4.3 CombatState carries the relic mirror
+// (s.relics / s.relic_count), so player_relics() returns the LIVE list -- asserted
+// here against both an empty and a populated mirror (the wired power_hooks.cpp /
+// action_queue.cpp sites read it).
 
 #include <cstdint>
 
@@ -85,15 +85,39 @@ const PowerSlot* monster_power(const CombatState& s, uint8_t m, PowerId id) {
     return nullptr;
 }
 
-// --- Seam: player_relics() is empty until B4.3's CombatState relic mirror -----
+// --- Seam: player_relics() reads CombatState's relic mirror (live as of B4.3) --
 
-TEST(RelicHooks, PlayerRelicsViewEmptyUntilB43) {
+// Empty mirror (the 20 combat fixtures' state): the view is empty and the wired
+// dispatch sites are no-ops, so fixtures stay behaviourally unchanged.
+TEST(RelicHooks, PlayerRelicsViewEmptyWhenMirrorEmpty) {
     CombatState s = MakeState();
+    ASSERT_EQ(s.relic_count, 0);  // value-init -> empty mirror
     const RelicView rv = player_relics(s);
-    EXPECT_EQ(rv.count, 0) << "no CombatState relic storage yet (B4.3)";
-    // A null/empty relic list dispatches nothing (the wired no-op sites).
+    EXPECT_EQ(rv.count, 0);
+    EXPECT_EQ(rv.relics, s.relics);  // returns the mirror, not nullptr
     dispatch_relics_at_battle_start(s, rv.relics, rv.count);
-    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.action_count, 0);  // empty list dispatches nothing
+}
+
+// Populated mirror: player_relics() returns the live list in acquisition order,
+// and dispatching through it drives the wired sites (B3.24's dispatch is now
+// reachable from a CombatState, not just a hand-built list).
+TEST(RelicHooks, PlayerRelicsViewReflectsPopulatedMirror) {
+    CombatState s = MakeState();
+    // Anchor (BLOCK 10) then Bag of Preparation (DRAW 2), both atBattleStart --
+    // the same proven battle-start relics AtBattleStartFollowsAcquisitionOrder uses.
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ANCHOR), 0};
+    s.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::BAG_OF_PREPARATION), 0};
+    s.relic_count = 2;
+    const RelicView rv = player_relics(s);
+    ASSERT_EQ(rv.count, 2);
+    EXPECT_EQ(rv.relics[0].relic_id, static_cast<uint16_t>(RelicId::ANCHOR));
+    EXPECT_EQ(rv.relics[1].relic_id, static_cast<uint16_t>(RelicId::BAG_OF_PREPARATION));
+    // Dispatching battle-start THROUGH the mirror view queues their actions,
+    // proving the wired path is now reachable from a CombatState (not just a
+    // hand-built list) -- B3.24's dispatch is live as of B4.3.
+    dispatch_relics_at_battle_start(s, rv.relics, rv.count);
+    EXPECT_GT(s.action_count, 0) << "populated mirror must drive the dispatch sites";
 }
 
 // --- ACQUISITION-ORDER dispatch (acceptance) ---------------------------------

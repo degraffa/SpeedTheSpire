@@ -72,7 +72,8 @@ namespace sts::engine {
 
 // Room-kind id written into RunState.MapNode.room_type (a u8). None(0) is the
 // value-initialized "unassigned / no room" state (matches Java room==null).
-// Values are B4.2's provisional enum; B4.3 finalizes the RunState encoding.
+// FINALIZED by B4.3 (schema v3): these are THE RunState.MapNode.room_type
+// encoding, append-only (never renumber; new room kinds get the next value).
 enum class RoomType : uint8_t {
     None = 0,
     Monster = 1,   // "M"  MonsterRoom

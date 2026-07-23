@@ -497,8 +497,9 @@ TEST(TraceRoundTrip, WriteReadReproducesEveryStateAndAction) {
 
     EXPECT_EQ(h.seed, seed);
     // write_trace is the v1 (CombatState-only) writer; it stamps the v1 format
-    // tag, which is decoupled from engine::SCHEMA_VERSION (now 2 after the B1.6
-    // v2-container bump). The v2 path is exercised by the TraceV2* tests below.
+    // tag, which is decoupled from engine::SCHEMA_VERSION (now 3 after the B4.3
+    // RunState-extension bump; the v1 fixtures still load unchanged). The v2 path
+    // is exercised by the TraceV2* tests below.
     EXPECT_EQ(h.schema_version, kTraceFormatV1);
     EXPECT_EQ(h.state_size, static_cast<uint32_t>(sizeof(CombatState)));
     ASSERT_EQ(recs.size(), states.size());
@@ -706,7 +707,24 @@ RunState MakeBaseRun() {
     s.card_blizz_randomizer = 5;
     s.blizzard_potion_mod = 0;
 
-    // the 8 run-level streams (distinct so each is individually testable)
+    // schema-v3 additive run inventory (B4.3): distinct values so each field is
+    // individually testable.
+    s.event_pity_monster = 0.1f;
+    s.event_pity_shop = 0.03f;
+    s.event_pity_treasure = 0.02f;
+    s.purge_cost = 75;
+    s.potion_slots = 2;
+    s.event_membership = 0x07FFu;    // 11 events present
+    s.special_membership = 0x3FFFu;  // 14 specials present
+    s.shrine_membership = 0x3Fu;     // 6 shrines present
+    // two relic tiers with a couple of ordered entries each.
+    s.relic_pool_count[0] = 2;  // Common
+    s.relic_pools[0][0] = 11;
+    s.relic_pools[0][1] = 12;
+    s.relic_pool_count[4] = 1;  // Boss
+    s.relic_pools[4][0] = 99;
+
+    // the 9 run-level streams (distinct so each is individually testable)
     s.monster_rng = RngStream{1, 2, 3, 0};
     s.event_rng = RngStream{10, 20, 30, 0};
     s.merchant_rng = RngStream{100, 200, 300, 0};
@@ -715,6 +733,7 @@ RunState MakeBaseRun() {
     s.relic_rng = RngStream{111, 222, 333, 0};
     s.potion_rng = RngStream{5, 6, 7, 0};
     s.map_rng = RngStream{9, 8, 7, 0};
+    s.neow_rng = RngStream{44, 55, 66, 0};
 
     return s;
 }
@@ -883,7 +902,85 @@ TEST(RunDifferPity, Counters) {
     EXPECT_EQ(r2.size(), 1u) << r2.to_string();
 }
 
-// Each of the 8 run-level streams individually, so a divergence is attributable
+// B4.3 additive run inventory: each new field group is caught and named.
+TEST(RunDifferAdditive, PityFloatsPurgeAndPotionSlots) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.event_pity_monster = 0.2f;
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("event_pity_monster")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.event_pity_treasure = 0.04f;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("event_pity_treasure")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    RunState m3 = base;
+    m3.purge_cost = 100;
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("purge_cost")) << r3.to_string();
+    EXPECT_EQ(r3.size(), 1u) << r3.to_string();
+
+    RunState m4 = base;
+    m4.potion_slots = 3;
+    DiffReport r4 = diff_run_states(base, m4);
+    EXPECT_TRUE(r4.mentions("potion_slots")) << r4.to_string();
+    EXPECT_EQ(r4.size(), 1u) << r4.to_string();
+}
+
+TEST(RunDifferAdditive, MembershipBitsets) {
+    RunState base = MakeBaseRun();
+
+    RunState m1 = base;
+    m1.event_membership = static_cast<uint16_t>(base.event_membership & ~0x1u);  // one event used
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("event_membership")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    RunState m2 = base;
+    m2.shrine_membership = static_cast<uint8_t>(base.shrine_membership & ~0x2u);
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("shrine_membership")) << r2.to_string();
+    EXPECT_EQ(r2.size(), 1u) << r2.to_string();
+
+    RunState m3 = base;
+    m3.special_membership = static_cast<uint16_t>(base.special_membership & ~0x4u);
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("special_membership")) << r3.to_string();
+    EXPECT_EQ(r3.size(), 1u) << r3.to_string();
+}
+
+TEST(RunDifferAdditive, RelicPoolOrderAndCount) {
+    RunState base = MakeBaseRun();
+
+    // element change within a tier
+    RunState m1 = base;
+    m1.relic_pools[0][1] = 77;
+    DiffReport r1 = diff_run_states(base, m1);
+    EXPECT_TRUE(r1.mentions("relic_pool[0][1]")) << r1.to_string();
+    EXPECT_EQ(r1.size(), 1u) << r1.to_string();
+
+    // a front-pop (count--, elements shift) surfaces the count + shifted members
+    RunState m2 = base;
+    m2.relic_pool_count[0] = 1;
+    m2.relic_pools[0][0] = base.relic_pools[0][1];  // popped front
+    m2.relic_pools[0][1] = 0;
+    DiffReport r2 = diff_run_states(base, m2);
+    EXPECT_TRUE(r2.mentions("relic_pool[0].count")) << r2.to_string();
+    EXPECT_FALSE(r2.empty());
+
+    // order is load-bearing: swapping two entries is a real divergence
+    RunState m3 = base;
+    std::swap(m3.relic_pools[0][0], m3.relic_pools[0][1]);
+    DiffReport r3 = diff_run_states(base, m3);
+    EXPECT_TRUE(r3.mentions("relic_pool[0][0]")) << r3.to_string();
+    EXPECT_TRUE(r3.mentions("relic_pool[0][1]")) << r3.to_string();
+}
+
+// Each of the 9 run-level streams individually, so a divergence is attributable
 // to the specific stream (reusing the combat differ's cmp_stream idiom).
 TEST(RunDifferRng, EachStreamNamedSeparately) {
     struct Case {
@@ -899,6 +996,7 @@ TEST(RunDifferRng, EachStreamNamedSeparately) {
         {"relic_rng", &RunState::relic_rng},
         {"potion_rng", &RunState::potion_rng},
         {"map_rng", &RunState::map_rng},
+        {"neow_rng", &RunState::neow_rng},
     };
     for (const Case& c : cases) {
         RunState base = MakeBaseRun();

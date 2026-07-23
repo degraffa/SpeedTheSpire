@@ -102,8 +102,21 @@ TEST(StateHash, RunMemcpyRoundTripIsEqual) {
     a.keys = 0b010;
     a.card_blizz_randomizer = 5;
     a.blizzard_potion_mod = -10;
+    // schema-v3 additive fields (B4.3): exercised so the round-trip covers them.
+    a.event_pity_monster = 0.1f;
+    a.event_pity_shop = 0.03f;
+    a.event_pity_treasure = 0.02f;
+    a.purge_cost = 75;
+    a.potion_slots = 2;
+    a.event_membership = 0x07FFu;
+    a.special_membership = 0x3FFFu;
+    a.shrine_membership = 0x3Fu;
+    a.relic_pool_count[0] = 2;
+    a.relic_pools[0][0] = 11;
+    a.relic_pools[0][1] = 12;
     a.monster_rng = from_seed(42);
     a.map_rng = from_seed(43);
+    a.neow_rng = from_seed(44);
 
     const uint64_t h_a = hash_state(a);
 
