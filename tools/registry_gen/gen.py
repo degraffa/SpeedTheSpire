@@ -54,6 +54,9 @@ OPCODES = {
     # Stage B B3.1 additions (append-only from 9, design doc §4.4).
     "MAKE_CARD": 9,
     "SET_COST": 10,
+    # Stage B B3.2 addition: card/self HP loss (bypasses block, HP_LOSS type;
+    # the firing site for the wasHPLost hook -- Rupture attribution).
+    "LOSE_HP": 11,
 }
 # StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
 # Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
@@ -73,6 +76,36 @@ CARD_FLAGS = {
     "retain": 1 << 4,
     "xcost": 1 << 5,
 }
+
+# Power hook points (generated sts::registry::Hook) -- MIRROR of the engine's
+# include/sts/engine/power_hooks.hpp Hook enum. Values are pinned and append-only
+# (design doc §4.4); powers.hpp static_asserts the generated Hook byte-equal to
+# the engine's. YAML `hooks:` keys are these lower-case names. The frozen dispatch
+# order (stage-a §5.2-5.5) lives in the framework (power_hooks.cpp), NOT in this
+# numbering -- these are identity tags, not a sequence.
+HOOKS = {
+    "on_play_card": 0,               # §5.3 card-play fan-out
+    "on_use_card": 1,                # UseCardAction fan-out
+    "on_exhaust": 2,                 # §5.5 CardGroup.moveToExhaustPile
+    "on_card_draw": 3,               # per drawn card, in draw
+    "at_end_of_turn_pre_card": 4,    # §5.4 applyEndOfTurnPreCardPowers
+    "at_end_of_turn": 5,             # applyEndOfTurnTriggers
+    "at_end_of_round": 6,            # decrement-at-round-end
+    "at_start_of_turn": 7,           # §5.2 step 6, pre-draw
+    "at_start_of_turn_post_draw": 8, # §5.2 step 6, post-draw
+    "on_gained_block": 9,            # inside the BLOCK opcode
+    "on_attacked": 10,               # DAMAGE receive path
+    "on_apply_power": 11,            # inside the APPLY_POWER opcode
+    "was_hp_lost": 12,               # after an HP write (LOSE_HP / DAMAGE)
+    "on_death": 13,                  # actor death
+}
+# Power type (AbstractPower.PowerType): the APPLY_POWER interception (Artifact /
+# Sadistic) reads this. Pinned/append-only (fixtures never store it, but the
+# translator's power table joins on it).
+POWER_TYPES = {"BUFF": 0, "DEBUFF": 1}
+# Stacking behaviour: INTENSITY == additive amount (stackPower this.amount +=);
+# NONE == a non-stacking marker for a bespoke consumer. Default INTENSITY.
+POWER_STACK = {"intensity": 0, "none": 1}
 
 # Card-level targeting -> (needs_target, random_target) (cards.hpp semantics).
 CARD_TARGETING = {
@@ -441,6 +474,199 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
 
 def _pascal(upper_snake: str) -> str:
     return "".join(part.capitalize() for part in upper_snake.split("_"))
+
+
+# --- Power table (B3.2: hook -> effect-program bindings) ---------------------
+
+def _parse_power_hook_steps(power_name: str, hook_name: str, effects,
+                            powers: dict[str, int]) -> list:
+    """Parse a power hook's effect program into (op, amount, extra, target)
+    tuples -- the SAME CardEffectStep shape as card programs. `target: SELF` is
+    the power's owner; ALL_ENEMY/RANDOM_ENEMY fan out at execute time."""
+    steps = []
+    for step in effects or []:
+        op = step.get("op")
+        if op not in OPCODES:
+            raise fail(f"powers.yaml: power {power_name} hook {hook_name} uses "
+                       f"unknown op {op!r}")
+        amount = int(step.get("amount", 0))
+        st = step.get("target", "SELF")
+        if st not in STEP_TARGETS:
+            raise fail(f"powers.yaml: power {power_name} hook {hook_name} step has "
+                       f"unknown target {st!r} (known: {sorted(STEP_TARGETS)})")
+        extra = 0
+        if op == "APPLY_POWER":
+            pname = step.get("power")
+            if pname not in powers:
+                raise fail(f"powers.yaml: power {power_name} hook {hook_name} "
+                           f"APPLY_POWER references unknown power {pname!r}")
+            extra = powers[pname]
+        steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
+    return steps
+
+
+def emit_power_table(domains: dict[str, list[dict]]) -> str:
+    powers = domains["powers"]
+    power_ids = _power_id_map(domains)
+
+    # Resolve rows first so the array budgets and validation errors surface
+    # before any output is emitted.
+    rows = []
+    max_hooks = 1        # floor 1 so std::array<PowerHookBinding, N> is valid
+    max_hook_steps = 1   # floor 1 likewise
+    for p in powers:
+        ptype = p.get("type")
+        if ptype not in POWER_TYPES:
+            raise fail(f"powers.yaml: power {p['name']} has unsupported type "
+                       f"{ptype!r} (known: {sorted(POWER_TYPES)})")
+        stack = str(p.get("stack", "intensity")).lower()
+        if stack not in POWER_STACK:
+            raise fail(f"powers.yaml: power {p['name']} has unknown stack "
+                       f"{stack!r} (known: {sorted(POWER_STACK)})")
+        native = bool(p.get("native", False))
+
+        raw_hooks = p.get("hooks") or {}
+        if not isinstance(raw_hooks, dict):
+            raise fail(f"powers.yaml: power {p['name']} 'hooks' must be a mapping "
+                       f"of hook -> effect program, got {type(raw_hooks).__name__}")
+        # Emit hooks sorted by their pinned Hook value (deterministic, order-stable).
+        bindings = []
+        for hook_name in sorted(raw_hooks, key=lambda h: HOOKS.get(h, 1 << 30)):
+            if hook_name not in HOOKS:
+                raise fail(f"powers.yaml: power {p['name']} has unknown hook "
+                           f"{hook_name!r} (known: {sorted(HOOKS)})")
+            steps = _parse_power_hook_steps(p["name"], hook_name,
+                                            raw_hooks[hook_name], power_ids)
+            if steps and native:
+                raise fail(f"powers.yaml: power {p['name']} hook {hook_name} has "
+                           f"a data program AND native: true -- a native power "
+                           f"lists its hooks with an EMPTY program (the escape "
+                           f"hatch handles the body)")
+            if not steps and not native:
+                raise fail(f"powers.yaml: power {p['name']} hook {hook_name} has "
+                           f"an empty program but native is not set -- a data-"
+                           f"bound hook needs at least one step")
+            bindings.append((HOOKS[hook_name], hook_name, steps))
+            max_hook_steps = max(max_hook_steps, len(steps))
+        max_hooks = max(max_hooks, len(bindings))
+        rows.append({"name": p["name"], "type": POWER_TYPES[ptype],
+                     "stack": POWER_STACK[stack], "native": native,
+                     "bindings": bindings})
+
+    out: list[str] = [BANNER, "#pragma once\n",
+                      "#include <array>", "#include <cstdint>\n",
+                      '#include "sts/registry/card_table.hpp"',
+                      '#include "sts/registry/ids.hpp"\n',
+                      "// Power hook->effect-program tables (design doc B §4.2; "
+                      "B3.2). A power",
+                      "// binds Hook points to effect programs (reusing "
+                      "CardEffectStep) or is",
+                      "// `native` (the escape hatch: power_hooks.cpp handles the "
+                      "body, the",
+                      "// binding lists the hook with an empty program). The frozen "
+                      "dispatch order",
+                      "// (stage-a §5.2-5.5) lives in the framework, not here. Types "
+                      "are duplicated",
+                      "// in sts::registry so this header compiles standalone; "
+                      "powers.hpp pins them",
+                      "// byte-equal to the engine's power_hooks.hpp.\n",
+                      "namespace sts::registry {\n"]
+
+    out.append("enum class PowerType : uint8_t {")
+    for name, val in sorted(POWER_TYPES.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name} = {val},")
+    out.append("};\n")
+    out.append("enum class PowerStack : uint8_t {")
+    for name, val in sorted(POWER_STACK.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name.upper()} = {val},")
+    out.append("};\n")
+    out.append("// Hook identity tags (MIRROR of power_hooks.hpp Hook; pinned, "
+               "append-only).")
+    out.append("enum class Hook : uint8_t {")
+    for name, val in sorted(HOOKS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name.upper()} = {val},")
+    out.append("};")
+    for name, val in sorted(HOOKS.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>(Hook::{name.upper()}) "
+                   f"== {val}, \"Hook::{name.upper()} is pinned to {val} "
+                   f"(append-only, never renumber)\");")
+    out.append(f"inline constexpr int kPowerHookCount = {len(HOOKS)};\n")
+    out.append(f"inline constexpr int kMaxPowerHooks = {max_hooks};")
+    out.append(f"inline constexpr int kMaxPowerHookSteps = {max_hook_steps};\n")
+    out.append("// One (hook, program) binding. A `native` power's programs are "
+               "empty (step_count")
+    out.append("// == 0); the framework routes those hooks to the native escape "
+               "hatch instead.")
+    out.append("struct PowerHookBinding {")
+    out.append("    Hook hook;")
+    out.append("    uint8_t step_count;")
+    out.append("    std::array<CardEffectStep, kMaxPowerHookSteps> steps;")
+    out.append("};\n")
+    out.append("struct PowerDef {")
+    out.append("    PowerId id;")
+    out.append("    PowerType type;")
+    out.append("    PowerStack stack;")
+    out.append("    bool native;")
+    out.append("    uint8_t hook_count;")
+    out.append("    std::array<PowerHookBinding, kMaxPowerHooks> hooks;")
+    out.append("    [[nodiscard]] constexpr const PowerHookBinding* "
+               "hook_binding(Hook h) const noexcept {")
+    out.append("        for (uint8_t i = 0; i < hook_count; ++i) {")
+    out.append("            if (hooks[i].hook == h) { return &hooks[i]; }")
+    out.append("        }")
+    out.append("        return nullptr;")
+    out.append("    }")
+    out.append("};\n")
+
+    def step_literal(step) -> str:
+        op, amount, extra, tgt = step
+        op_name = next(k for k, v in OPCODES.items() if v == op)
+        tgt_name = next(k for k, v in STEP_TARGETS.items() if v == tgt)
+        return (f"{{Opcode::{op_name}, {amount}, {extra}, "
+                f"StepTarget::{tgt_name}}}")
+
+    def pad_steps(steps) -> str:
+        padded = list(steps)
+        while len(padded) < max_hook_steps:
+            padded.append((OPCODES["NOP"], 0, 0, STEP_TARGETS["SELF"]))
+        return ", ".join(step_literal(s) for s in padded)
+
+    def pad_bindings(bindings) -> list[str]:
+        lines = []
+        for hval, hname, steps in bindings:
+            lines.append(f"        {{Hook::{hname.upper()}, {len(steps)}, "
+                         f"{{{{{pad_steps(steps)}}}}}}},")
+        # Pad to kMaxPowerHooks with empty NOP bindings (hook value 0, count 0).
+        empty_hook = next(k for k, v in HOOKS.items() if v == 0)
+        while len(lines) < max_hooks:
+            lines.append(f"        {{Hook::{empty_hook.upper()}, 0, "
+                         f"{{{{{pad_steps([])}}}}}}},")
+        return lines
+
+    for r in rows:
+        out.append(f"inline constexpr PowerDef k{_pascal(r['name'])}Power{{")
+        stack_name = next(k for k, v in POWER_STACK.items() if v == r["stack"])
+        out.append(f"    PowerId::{r['name']}, PowerType::"
+                   f"{next(k for k, v in POWER_TYPES.items() if v == r['type'])}, "
+                   f"PowerStack::{stack_name.upper()}, "
+                   f"{'true' if r['native'] else 'false'}, "
+                   f"{len(r['bindings'])},")
+        out.append("    {{")
+        out.extend(pad_bindings(r["bindings"]))
+        out.append("    }}};\n")
+
+    out.append("[[nodiscard]] inline const PowerDef* "
+               "power_def(PowerId id) noexcept {")
+    out.append("    switch (id) {")
+    for r in rows:
+        out.append(f"        case PowerId::{r['name']}: "
+                   f"return &k{_pascal(r['name'])}Power;")
+    out.append("        case PowerId::NONE:")
+    out.append("        default: return nullptr;")
+    out.append("    }")
+    out.append("}\n")
+    out.append("}  // namespace sts::registry")
+    return "\n".join(out) + "\n"
 
 
 # --- Monster table -----------------------------------------------------------
@@ -828,6 +1054,7 @@ def generate(registry_dir: Path, out_dir: Path) -> list[Path]:
     outputs = {
         "ids.hpp": emit_ids(domains),
         "card_table.hpp": emit_card_table(domains),
+        "power_table.hpp": emit_power_table(domains),
         "monster_table.hpp": emit_monster_table(domains),
         "game_ids.hpp": emit_game_ids(domains),
         "manifest.hpp": emit_manifest(domains),

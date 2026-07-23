@@ -16,6 +16,8 @@
 #include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
+#include "sts/engine/power_hooks.hpp"   // B3.2 hook dispatch (onGainedBlock/onApplyPower/wasHPLost/onCardDraw)
+#include "sts/engine/powers.hpp"        // power_def / PowerType (APPLY_POWER interception)
 #include "sts/engine/rng_stream.hpp"    // random (DRAW_RANDOM insert position)
 #include "sts/engine/types.hpp"
 
@@ -139,11 +141,38 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base) noexcept {
         dmg = 0;
     }
     *blk = static_cast<int16_t>(block);
-    int new_hp = *hp - dmg;
+    const int old_hp = *hp;
+    int new_hp = old_hp - dmg;
     if (new_hp < 0) {
         new_hp = 0;
     }
     *hp = static_cast<int16_t>(new_hp);
+    // wasHPLost (AbstractPlayer.damage:1445-1447): fires on the VICTIM's powers
+    // for the HP actually lost, with the ATTACKER as source. Rupture's guard
+    // (source == victim) means unblocked enemy damage does NOT grant Strength --
+    // only self-inflicted (card) HP loss does. No-op without Rupture, so skeleton
+    // DAMAGE is unchanged.
+    dispatch_was_hp_lost(s, tgt, src, old_hp - new_hp);
+}
+
+// LOSE_HP: `tgt` loses `amount` HP directly, bypassing block (LoseHPAction /
+// DamageInfo.HP_LOSS). Fires wasHPLost with source == tgt (SELF) -- the card /
+// self HP-loss path that Rupture attributes to (Hemokinesis, Offering, Combust).
+void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
+    if (amount <= 0) {
+        return;
+    }
+    int16_t* hp = actor_hp(s, tgt);
+    if (hp == nullptr) {
+        return;
+    }
+    const int old_hp = *hp;
+    int new_hp = old_hp - amount;
+    if (new_hp < 0) {
+        new_hp = 0;
+    }
+    *hp = static_cast<int16_t>(new_hp);
+    dispatch_was_hp_lost(s, tgt, tgt, old_hp - new_hp);  // source == victim (self)
 }
 
 // BLOCK: tgt gains `amount` block. Skeleton path is a straight add -- in the
@@ -156,19 +185,40 @@ void op_block(CombatState& s, uint8_t tgt, int amount) noexcept {
     if (blk == nullptr) {
         return;
     }
-    int nb = *blk + amount;  // future: relic/power onGainedBlock hooks go here
+    int nb = *blk + amount;
     if (nb < 0) {
         nb = 0;
     }
     *blk = static_cast<int16_t>(nb);
+    // onGainedBlock (Juggernaut): fires after the block gain, on the actor's own
+    // powers, only for a positive gain (AbstractCreature.addBlock:426-433). No-op
+    // unless a power binds ON_GAINED_BLOCK -- so the skeleton BLOCK is unchanged.
+    dispatch_on_gained_block(s, tgt, amount);
 }
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
 // slot of the same id, else appends a new slot (hard cap kPowerCap -- overflow
 // is a silent no-op here rather than an assert, since a malformed item must not
 // crash; real card play never overflows 24 skeleton powers).
-void op_apply_power(CombatState& s, uint8_t tgt, PowerId id, int amount) noexcept {
+//
+// B3.2 interception (ApplyPowerAction.java:106-138): (1) the SOURCE's powers'
+// onApplyPower fire FIRST (Sadistic queues damage on a debuffed target); (2) if
+// the TARGET has Artifact and the applied power is a DEBUFF, one Artifact stack is
+// consumed and the power does NOT land. Both are no-ops without Sadistic/Artifact,
+// so skeleton APPLY_POWER (Bash's Vulnerable, Bellow's Strength) is unchanged.
+void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
+                    int amount) noexcept {
     if (id == PowerId::NONE) {
+        return;
+    }
+    const PowerDef* applied_def = power_def(id);
+    const bool is_debuff =
+        applied_def != nullptr && applied_def->type == PowerType::DEBUFF;
+    // (1) source-side onApplyPower (fires before the power lands).
+    dispatch_on_apply_power_source(s, src, tgt, static_cast<uint16_t>(id),
+                                   is_debuff);
+    // (2) target-side Artifact nullify: a consumed Artifact stack blocks the debuff.
+    if (apply_power_blocked_by_artifact(s, tgt, is_debuff)) {
         return;
     }
     PowerSlot* slots = nullptr;
@@ -379,12 +429,25 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_block(s, item.tgt, item.amount);
             return;
         case Opcode::APPLY_POWER:
-            op_apply_power(s, item.tgt, apply_power_id_from_flags(item.flags),
-                           item.amount);
+            op_apply_power(s, item.src, item.tgt,
+                           apply_power_id_from_flags(item.flags), item.amount);
             return;
-        case Opcode::DRAW:
-            (void)draw_cards(s, item.amount);  // piles.cpp: cap + reshuffle
+        case Opcode::DRAW: {
+            // draw, then fire onCardDraw per newly-drawn card (in draw order) --
+            // Corruption zeroes a drawn skill's cost, Evolve/FireBreathing (later)
+            // react to statuses. No-op without such a power.
+            const uint8_t before = s.hand_count;
+            const int drawn = draw_cards(s, item.amount);  // piles.cpp: cap + reshuffle
+            for (int i = 0; i < drawn; ++i) {
+                const uint8_t hi = static_cast<uint8_t>(before + i);
+                if (hi >= s.hand_count) {
+                    break;
+                }
+                const CardPoolIndex pi = s.hand[hi];
+                dispatch_on_card_draw(s, pi, s.card_pool[pi].card_id);
+            }
             return;
+        }
         case Opcode::GAIN_ENERGY:
             // player_energy += amount; no max-energy field to clamp against
             // (Ironclad base 3 is a constant, no relic/potion raises it here).
@@ -404,6 +467,9 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::SET_COST:
             op_set_cost(s, item.src, item.amount);
+            return;
+        case Opcode::LOSE_HP:
+            op_lose_hp(s, item.tgt, item.amount);
             return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))

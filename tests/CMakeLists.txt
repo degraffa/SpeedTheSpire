@@ -331,3 +331,19 @@ sts_set_warnings(map_rooms_test)
 sts_enable_sanitizers(map_rooms_test)
 
 gtest_discover_tests(map_rooms_test)
+
+# B3.2: power-hook framework -- the frozen §5.2-5.5 dispatch order, the data-bound
+# + native-escape-hatch mechanisms, and the five hook-order stress cases
+# (onExhaust list order, onUseCard/Corruption redirect, atEndOfTurn stack,
+# APPLY_POWER Artifact/Sadistic interception, wasHPLost/Rupture attribution).
+# Engine surface + power_hooks.cpp (in sts_engine); links sts_engine like the
+# other tier-2 suites.
+add_executable(power_hooks_test
+    power_hooks_test.cpp
+)
+
+target_link_libraries(power_hooks_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(power_hooks_test)
+sts_enable_sanitizers(power_hooks_test)
+
+gtest_discover_tests(power_hooks_test)

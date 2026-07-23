@@ -6,6 +6,7 @@ add_library(sts_engine
     interp.cpp
     piles.cpp
     card_play.cpp
+    power_hooks.cpp
     advance.cpp
 )
 

@@ -17,30 +17,13 @@
 #include "sts/engine/cards.hpp"         // CardDef, card_def
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
+#include "sts/engine/power_hooks.hpp"   // B3.2: onPlayCard/onUseCard fan-out + onExhaust
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
 #include "sts/engine/types.hpp"         // CardId
 
 namespace sts::engine {
 
 namespace {
-
-// The card-play hook fan-out (design doc §5.3; AbstractPlayer.useCard:1358-1372).
-// Every listener is a no-op in the M1 skeleton (zero relics/powers/blights/
-// stances with an onPlayCard body). Present as a documented stub so a future
-// stage attaches real listeners here without moving the call site -- and in the
-// exact acquisition/pile order the game triggers them.
-void trigger_on_play_card(CombatState& /*s*/, const CardDef& /*def*/,
-                          uint8_t /*target*/) noexcept {
-    // player powers onPlayCard -> each monster's powers onPlayCard -> relics
-    // onPlayCard (acquisition order) -> stance -> blights -> hand cards
-    // onPlayCard -> discard pile cards -> draw pile cards. All no-ops (skeleton).
-}
-
-// UseCardAction's onUseCard/onAfterUseCard hook stage (UseCardAction.java). Also
-// entirely no-op in the skeleton; kept as a named site for the same reason.
-void trigger_on_use_card(CombatState& /*s*/, const CardDef& /*def*/) noexcept {
-    // onUseCard -> onAfterUseCard listeners. All no-ops (skeleton).
-}
 
 // Instantiate one registry effect step into a concrete ActionQueueItem and queue
 // it via add_to_bottom (exactly how AbstractCard.use() calls addToBot(...)). The
@@ -97,6 +80,9 @@ void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
                        "exhaust overflow (design doc §4.1: hard assert)");
                 s.exhaust[s.exhaust_count] = pool_index;
                 ++s.exhaust_count;
+                // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card
+                // lands in the exhaust pile. No-op without an on-exhaust power.
+                dispatch_on_exhaust(s, s.card_pool[pool_index].card_id);
             } else {
                 assert(s.discard_count < kDiscardCap &&
                        "discard overflow (design doc §4.1: hard assert)");
@@ -164,8 +150,10 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         return;
     }
 
-    // 1. onPlayCard hook fan-out (no-op stubs; declared target for the hooks).
-    trigger_on_play_card(s, *def, item.target);
+    // 1. onPlayCard hook fan-out (§5.3: player powers -> monster powers ->
+    //    relics -> stance -> blights -> hand/discard/draw cards). Queues each
+    //    responding hook's effects; no-op without a hook-bearing power.
+    dispatch_on_play_card(s, s.card_pool[pool_index].card_id, item.target);
 
     // 2. ++cardsPlayedThisTurn (AbstractPlayer.useCard:1373).
     ++s.cards_played_this_turn;
@@ -204,10 +192,15 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         }
     }
 
-    // 5. UseCardAction hook stage (no-op) + move the card out of hand. EXHAUST
-    //    cards go to the exhaust pile; every other card to discard.
-    trigger_on_use_card(s, *def);
-    move_card_hand_to_pile(s, pool_index, has_card_flag(inst_flags, CardFlag::EXHAUST));
+    // 5. UseCardAction onUseCard fan-out (UseCardAction.java:41-64 order: player
+    //    powers -> relics -> cards -> monster powers), THEN move the card out of
+    //    hand. Corruption's onUseCard may redirect a SKILL to exhaust here, so the
+    //    exhaust destination is re-read from the instance flags AFTER the fan-out
+    //    (not the pre-fan-out snapshot). EXHAUST -> exhaust pile, else discard.
+    dispatch_on_use_card(s, pool_index, s.card_pool[pool_index].card_id);
+    move_card_hand_to_pile(
+        s, pool_index,
+        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST));
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
     //    X-cost already consumed all energy above; otherwise deduct the

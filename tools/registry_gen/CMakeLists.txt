@@ -32,6 +32,7 @@ set(REGISTRY_YAML
 set(GEN_HEADERS
     "${GEN_OUT_ROOT}/sts/registry/ids.hpp"
     "${GEN_OUT_ROOT}/sts/registry/card_table.hpp"
+    "${GEN_OUT_ROOT}/sts/registry/power_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/monster_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/game_ids.hpp"
     "${GEN_OUT_ROOT}/sts/registry/manifest.hpp")

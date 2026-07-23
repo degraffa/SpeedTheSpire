@@ -926,7 +926,7 @@ and an optional `upgraded:` full-program block are now honored by codegen. B3.2'
 power hooks attach the cost_now/exhaust/ethereal sweeps to the frozen §5.3-5.5
 order.
 
-### B3.2 `[ ]` Power-hook framework completion
+### B3.2 `[x]` Power-hook framework completion
 **Deps:** B3.1 · **Spec:** stage-a §5.3-5.5 hook order (frozen) ·
 **Provenance:** AbstractPower hook inventory; GameActionManager.java:214-249,
 329-377 (re-read)
@@ -940,7 +940,77 @@ hatch.
 (acquisition order) → hand/discard/draw cards on card play (stage-a §5.3);
 end-of-turn hand triggers before discard (stage-a §5.4); regression: full
 suite green (the stub removal must not shift any fixture).
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred. Landed the power-
+hook framework with **zero CombatState/CardInstance/PowerSlot layout change** ->
+`SCHEMA_VERSION` stays 2, all 20 combat fixtures load with **zero regeneration**
+(`git status tests/golden` clean; `FixtureOracle` green). Every hook firing site
+read in full in the decompiled Java before coding.
+**Framework.** `Hook` enum + dispatch (`include/sts/engine/power_hooks.hpp`,
+`src/engine/power_hooks.cpp`): 14 hook points, each dispatched in the FROZEN
+per-hook source order (verified against Java, which differs by hook -- NOT one
+generic fan-out): §5.3 onPlayCard = player powers -> monster powers -> relics ->
+stance -> blights -> hand/discard/draw cards (GameActionManager.java:222-245);
+UseCardAction onUseCard = player powers -> relics -> hand/discard/draw cards ->
+monster powers (UseCardAction.java:41-64, monsters LAST -- distinct from
+onPlayCard); §5.4 callEndOfTurnActions (:369-377); §5.5 onExhaust relics ->
+player powers (CardGroup.moveToExhaustPile:851-856); APPLY_POWER source
+onApplyPower then target Artifact nullify (ApplyPowerAction.java:106-138);
+wasHPLost victim powers guarded on info.owner (AbstractPlayer.damage:1445-1447);
+onGainedBlock (AbstractCreature.addBlock:426-433); atStart/atEnd pre/post.
+Per-power a hook is DATA (a hook->effect-program binding, run by queuing the
+steps owner-relative) or **native** (the escape hatch `dispatch_native_hook`).
+**Registry schema.** `powers.yaml` gains `type` (BUFF/DEBUFF -- the interception
+reads it), `stack` (intensity/none), `native`, and `hooks:` (hook -> effect
+program, reusing the CardEffectStep shape; `amount: 0` = "use the power's stack
+amount"). `gen.py` emits `power_table.hpp` (`PowerDef` + `hook_binding` +
+`power_def()`, deterministic, sorted); new engine re-export
+`include/sts/engine/powers.hpp` with the `Hook`/`kPowerHookCount` drift-pins
+(byte-equal to `power_hooks.hpp`). The 3 skeleton powers bind ZERO hooks (their
+damage-pipeline behaviour stays native in `interp.cpp`, unchanged).
+**New opcode `LOSE_HP`=11** (append-only; interp.hpp + cards.hpp drift-pin +
+`gen.py`): card/self HP loss bypassing block (HP_LOSS), the firing site for
+wasHPLost with source==self -- the Rupture attribution. `execute_opcode` /
+`op_apply_power` (now threads `src`) / `op_block` / DRAW / `op_damage` all invoke
+the dispatch; the pump (`action_queue.cpp` start/end-of-turn) and `card_play.cpp`
+(onPlayCard/onUseCard fan-out, onExhaust on played-card exhaust) + `piles.cpp`
+(onExhaust on the EXHAUST opcode) replace the A4.3/skeleton no-op stubs.
+**Regression invariant** held by construction: every dispatch site is a pure
+no-op when no hook-bearing power is present
+(`PowerHooks.NoBoundPowerQueuesNothing`), so the fixtures -- which carry only
+Strength/Vulnerable/Weak -- stay byte-identical.
+**Framework powers (ids 4-12, the hook plumbing the ~30 card-applied powers
+attach to; the CARDS that create them + the remaining powers land with B3.3+):**
+Artifact, Metallicize, Feel No Pain, Dark Embrace, Combust, Rupture, Sadistic,
+Corruption, Rage -- each cited to its `*Power.java` hook body (read in full) in
+`powers.yaml`. **Acceptance -- new tier-2 suite `tests/power_hooks_test.cpp` (12
+cases)** + `registry_gen` updates (ManifestCounts 3->12 powers; determinism now
+covers `power_table.hpp`; standalone-compile asserts on the generated PowerDef):
+ordering (§5.3 player-before-monster fan-out) + the **five §5.3-5.5 stress
+cases**, each hand-derived from the Java: (1) onExhaust list order --
+`OnExhaustFollowsPlayerPowerListOrder` (Feel No Pain + Dark Embrace, both
+orderings); (2) onUseCard fan-out -- `CorruptionRedirectsPlayedSkillToExhaust` /
+`CorruptionDoesNotRedirectAttacks` / `CorruptionZeroesDrawnSkillCost`; (3)
+atEndOfTurn stack -- `EndOfTurnPreCardPowersBeforeAtEndOfTurnPowers`
+(Metallicize pre-card BLOCK queues before Combust LOSE_HP+AoE); (4) APPLY_POWER
+interception -- `SadisticFiresWhenPlayerDebuffsUnprotectedTarget` /
+`ArtifactNullifiesDebuffAndBeatsSadistic` / `ArtifactDoesNotBlockBuffs`; (5)
+wasHPLost attribution -- `RuptureFiresOnSelfInflictedHpLoss` /
+`RuptureDoesNotFireOnUnblockedEnemyDamage`. **Suites: debug 213/213, asan
+213/213, release 213/213** (201 pre-B3.2 baseline incl. the concurrent B4.2 map
+tests + 12 new power-hook cases; generator determinism green). **Deferred (noted
+per hygiene, land with their consumers):** DAMAGE-opcode damage-TYPE (THORNS/
+HP_LOSS vs NORMAL -- Sadistic/Combust THORNS is NORMAL-typed today, so a
+Vulnerable target over-counts hook-queued damage; the stress-4 test uses Weak to
+stay on the dispatch the framework owns); per-power counter storage (Panache
+every-5th, The Bomb 3-turn, Combust hpLoss ratchet, Rampage) -- no new PowerSlot
+field in B3.2; recursive-play (Double Tap/Havoc/Mayhem, opcode R14); card-level
+hooks (Sentinel onExhaust, curse EOT/on-draw triggers -- B3.6/B3.9) and relic
+onPlayCard/onExhaust (B3.24+) -- their dispatch stages are present as ordered
+structural call sites; Barricade block-decay branch (B3.8, left structural).
+**Card batches inherit:** a power row declares hooks via `hooks: {<hook>: [steps]}`
+(data) or `native: true` (escape hatch, body in `dispatch_native_hook`); stacking
+is additive (`stack: intensity`, the `op_apply_power` default); a hook step's
+`target: SELF` is the owner and `amount: 0` pulls the power's stack amount.
 
 ### B3.3 `[ ]` ∥ Red commons — attacks
 **Deps:** B3.2 · **Spec:** design §5.1 · **Provenance:** cards/red, the

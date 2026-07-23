@@ -77,6 +77,10 @@ std::string power_repr(uint16_t v) {
         case PowerId::STRENGTH: n = "STRENGTH"; break;
         case PowerId::VULNERABLE: n = "VULNERABLE"; break;
         case PowerId::WEAK: n = "WEAK"; break;
+        // The B3.2 framework powers (Artifact..Rage) have no named repr here yet;
+        // they fall through to the raw-value form (named() below). The fixtures
+        // carry only the three skeleton powers.
+        default: break;
     }
     return named(n, v);
 }

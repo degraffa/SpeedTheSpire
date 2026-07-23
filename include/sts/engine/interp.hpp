@@ -105,6 +105,10 @@ enum class Opcode : uint16_t {
     // --- Stage B B3.1 additions (append-only from 9, design doc §4.4) ---
     MAKE_CARD = 9,    // create `amount` copies of CardId(flags low16) into pile(src)
     SET_COST = 10,    // set card_pool[src].cost_now = `amount` (temporary cost modifier)
+    // --- Stage B B3.2 addition (append-only) ---
+    LOSE_HP = 11,     // tgt loses `amount` HP directly (bypasses block; HP_LOSS
+                       // type). Fires wasHPLost with source == tgt (self). The
+                       // firing site for the Rupture attribution (power_hooks).
 };
 
 // --- MAKE_CARD field encoding (Stage B B3.1) --------------------------------

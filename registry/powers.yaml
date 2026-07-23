@@ -4,15 +4,46 @@
 #   - id: <int>            numeric enum value -- append-only, NEVER renumbered
 #     name: <SYMBOL>       generated enum symbol (PowerId::<SYMBOL>)
 #     game_id: "<string>"  the game's POWER_ID string -- translator/oracle join key
-#     type: BUFF|DEBUFF
+#     type: BUFF|DEBUFF    AbstractPower.PowerType (Artifact/Sadistic debuff-gating,
+#                          the APPLY_POWER interception, read this field)
+#     stack: intensity|none  how a re-applied power combines (default: intensity ==
+#                          additive amount stacking, AbstractPower.stackPower's
+#                          this.amount += stackAmount; `none` == non-stacking marker
+#                          for a later bespoke consumer). Optional (default intensity).
+#     native: true         (optional) the power's hooks are handled by the native
+#                          escape hatch (power_hooks.cpp dispatch_native_hook) rather
+#                          than by a data-bound effect program -- for the irreducibly
+#                          bespoke powers (guards, counters, interception, redirects).
+#     hooks:               (optional) hook -> effect program bindings (B3.2). Each
+#                          key is a Hook name (power_hooks.hpp); the value is a list
+#                          of {op, target, amount[, power]} steps queued (addToBot)
+#                          in list order when the hook fires. `target: SELF` means
+#                          the power's OWNER; ALL_ENEMY/RANDOM_ENEMY fan out over the
+#                          owner's enemies at execute time (interp.hpp). AMOUNT
+#                          CONVENTION: `amount: 0` (or omitted) means "use the
+#                          power's current stack amount" (PowerSlot.amount -- the
+#                          usual stack-scaled effect: block N, draw N, damage N);
+#                          a NON-zero amount is a literal (e.g. Combust's fixed
+#                          1-HP loss). A `native:`
+#                          power still LISTS the hooks it responds to here (with an
+#                          empty program) so the framework knows which hooks to route
+#                          to the native switch.
 #     provenance: "<Class.method (File.java:line) -- read in full>"
 #
-# Powers have no effect program of their own: their behaviour lives in the DAMAGE
-# pipeline hooks (interp.hpp). This domain generates the PowerId enum and the
-# game_id<->enum string table only.
+# The framework (B3.2) dispatches these hooks through the pump in the frozen
+# stage-a §5.2/§5.3/§5.4/§5.5 order (power_hooks.cpp). The three skeleton powers
+# (Strength/Vulnerable/Weak) carry NO hook bindings: their behaviour is the DAMAGE-
+# pipeline atDamageGive/atDamageReceive hooks, which stay native in interp.cpp
+# (the damage pipeline is not routed through this data table -- it is float-exact
+# and hot, stage-a §5.5). This domain also generates the PowerId enum + game_id
+# table (unchanged).
 #
-# Skeleton content (stage-a design §9). Ids pinned STRENGTH=1, VULNERABLE=2, WEAK=3
-# and re-asserted in the generated header (design doc B §4.4).
+# Ids pinned STRENGTH=1..WEAK=3 (skeleton, stage-a §9); the B3.2 framework powers
+# are appended from 4 (append-only, design doc B §4.4) -- the hook plumbing the
+# ~30 card-applied powers (scoping report §4) attach to. Each carries the (hook,
+# program) or native binding the five §5.3-5.5 stress cases exercise; the cards
+# that CREATE these powers, and the remaining powers, land with their batches
+# (B3.3+).
 
 - id: 1
   name: STRENGTH
@@ -31,3 +62,88 @@
   game_id: "Weakened"
   type: DEBUFF
   provenance: "WeakPower.atDamageGive (WeakPower.java:61-70) -- damage * 0.75f; POWER_ID (WeakPower.java:21)"
+
+# --- B3.2 framework powers (hook bindings for the §5.3-5.5 dispatch order) ----
+
+- id: 4
+  name: ARTIFACT
+  game_id: "Artifact"
+  type: BUFF
+  native: true
+  hooks:
+    on_apply_power: []          # target-side DEBUFF nullify, consumed inside APPLY_POWER
+  provenance: "ArtifactPower.onSpecificTrigger (ArtifactPower.java:34-44) -- decrement, remove at 0; the nullify + PowerType.DEBUFF check is ApplyPowerAction.update (ApplyPowerAction.java:131-138)"
+
+- id: 5
+  name: METALLICIZE
+  game_id: "Metallicize"
+  type: BUFF
+  hooks:
+    at_end_of_turn_pre_card:
+      - {op: BLOCK, target: SELF, amount: 0}   # block = power amount
+  provenance: "MetallicizePower.atEndOfTurnPreEndTurnCards (MetallicizePower.java:39-42) -- GainBlockAction(owner, amount); fires in AbstractRoom.applyEndOfTurnPreCardPowers (AbstractRoom.java:535-539), stage-a §5.4"
+
+- id: 6
+  name: FEEL_NO_PAIN
+  game_id: "Feel No Pain"
+  type: BUFF
+  hooks:
+    on_exhaust:
+      - {op: BLOCK, target: SELF, amount: 0}   # block = power amount
+  provenance: "FeelNoPainPower.onExhaust (FeelNoPainPower.java:36-39) -- GainBlockAction(owner, amount); fires in CardGroup.moveToExhaustPile (CardGroup.java:851-856), stage-a §5.5"
+
+- id: 7
+  name: DARK_EMBRACE
+  game_id: "Dark Embrace"
+  type: BUFF
+  hooks:
+    on_exhaust:
+      - {op: DRAW, target: SELF, amount: 0}    # draw = power amount
+  provenance: "DarkEmbracePower.onExhaust (DarkEmbracePower.java:36-41) -- DrawCardAction(owner, amount); fires in CardGroup.moveToExhaustPile (CardGroup.java:851-856), stage-a §5.5"
+
+- id: 8
+  name: COMBUST
+  game_id: "Combust"
+  type: BUFF
+  hooks:
+    at_end_of_turn:
+      - {op: LOSE_HP, target: SELF, amount: 1}       # fixed hpLoss (base)
+      - {op: DAMAGE, target: ALL_ENEMY, amount: 0}   # damage = power amount
+  provenance: "CombustPower.atEndOfTurn (CombustPower.java:39-47) -- LoseHPAction(owner, hpLoss) then DamageAllEnemiesAction(amount, THORNS); fires via AbstractCreature.applyEndOfTurnTriggers (AbstractCreature.java:548-553). NOTE: the hpLoss ratchet (stackPower ++hpLoss) is a per-instance counter deferred to B3.7; the base program loses 1 HP."
+
+- id: 9
+  name: RUPTURE
+  game_id: "Rupture"
+  type: BUFF
+  native: true
+  hooks:
+    was_hp_lost: []             # guarded: fires only for self-inflicted (card) HP loss
+  provenance: "RupturePower.wasHPLost (RupturePower.java:60-66) -- if damageAmount>0 && info.owner==owner: addToTop ApplyPowerAction(Strength, amount). The info.owner==owner guard is the attribution (card HP loss, NOT unblocked enemy damage)."
+
+- id: 10
+  name: SADISTIC
+  game_id: "Sadistic"
+  type: BUFF
+  native: true
+  hooks:
+    on_apply_power: []          # source-side: on applying a debuff, damage the target
+  provenance: "SadisticPower.onApplyPower (SadisticPower.java:38-44) -- if power.type==DEBUFF && !Shackled && source==owner && target!=owner && !target.hasPower(Artifact): addToBot DamageAction(target, amount, THORNS); fires FIRST in ApplyPowerAction.update (ApplyPowerAction.java:106-109), before the Artifact nullify."
+
+- id: 11
+  name: CORRUPTION
+  game_id: "Corruption"
+  type: BUFF
+  native: true
+  hooks:
+    on_use_card: []             # a played SKILL is redirected to exhaust
+    on_card_draw: []            # a drawn SKILL costs 0 this turn
+  provenance: "CorruptionPower.onUseCard (CorruptionPower.java:45-49) -- if card.type==SKILL: card.exhaustOnUseOnce=true; onCardDraw (CorruptionPower.java:38-43) -- if card.type==SKILL: card.setCostForTurn(0). Skills-cost-0 at play is AbstractPlayer.useCard's hasPower(Corruption) energy skip (AbstractPlayer.java:1378)."
+
+- id: 12
+  name: RAGE
+  game_id: "Rage"
+  type: BUFF
+  hooks:
+    on_play_card:
+      - {op: BLOCK, target: SELF, amount: 0}   # block = power amount
+  provenance: "RagePower.onUseCard (RagePower.java:41-47) -- if card.type==ATTACK: GainBlockAction(owner, amount). Bound to on_play_card here: our engine collapses the onPlayCard/onUseCard card-play cycles into one synchronous resolve_card_play (card_play.hpp HOOK-ORDER COLLAPSE), so both fire together; the attack-type guard is the power's concern, deferred to the B3.6 Rage card. Used as the §5.3 player-before-monster fan-out probe."

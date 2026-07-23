@@ -14,6 +14,7 @@
 #include "sts/engine/card_play.hpp"  // resolve_card_play wired into pump_step step 3
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"  // execute_opcode wired into pump_step
+#include "sts/engine/power_hooks.hpp"  // B3.2: start/end-of-turn power dispatch
 
 namespace sts::engine {
 
@@ -77,10 +78,22 @@ void monster_queue_pop_front(CombatState& s) noexcept {
 // cards' triggerOnEndOfTurnForPlayingCard (Burn/Regret/Decay) are not in scope.
 // The sequence's *structure* lives here as a documented stub so future listeners
 // can attach without moving the call site.
-void call_end_of_turn_actions(CombatState& /*s*/) noexcept {
-    // applyEndOfTurnRelics -> applyEndOfTurnPreCardPowers -> trigger end-of-turn
-    // orbs -> hand cards triggerOnEndOfTurnForPlayingCard -> stance onEndOfTurn.
-    // All no-ops in the M1 skeleton.
+void call_end_of_turn_actions(CombatState& s) noexcept {
+    // Frozen §5.4 order (GameActionManager.callEndOfTurnActions:369-377):
+    //   applyEndOfTurnRelics                    -- none yet
+    //   applyEndOfTurnPreCardPowers             -- Metallicize (atEndOfTurnPreEndTurnCards)
+    //   TriggerEndOfTurnOrbsAction               -- no orbs
+    //   hand cards triggerOnEndOfTurnForPlayingCard -- Burn/Regret/Decay (card-level, B3.9)
+    //   stance.onEndOfTurn                       -- stanceless
+    // then applyEndOfTurnTriggers (Combust atEndOfTurn) fires via the queued
+    // discard sequence (AbstractCreature.java:548-553) -- AFTER the pre-card
+    // powers and hand triggers. All queue via add_to_bottom, so call order ==
+    // resolution order: Metallicize block lands before Combust's HP loss/damage.
+    dispatch_at_end_of_turn_pre_card(s);   // Metallicize
+    // hand-card end-of-turn triggers (Burn/Decay) -- card-level, B3.9 stub.
+    // stance.onEndOfTurn -- stanceless stub.
+    dispatch_at_end_of_turn(s);            // Combust
+    // All no-op unless a hook-bearing power is present (fixtures unchanged).
 }
 
 // Start-of-turn sequence (design doc §5.2 step 6; GameActionManager.java:
@@ -89,8 +102,10 @@ void start_of_turn(CombatState& s) noexcept {
     // monsters' applyEndOfTurnPowers -- stub (no monster powers with this hook).
     s.cards_played_this_turn = 0;               // player.cardsPlayedThisTurn = 0
     // orbsChanneledThisTurn.clear() -- no orbs.
-    // applyStartOfTurnRelics / PreDrawCards / Cards / Powers / Orbs -- all stubs
-    // (no relics/orbs; skeleton powers have no start-of-turn hook).
+    // applyStartOfTurnRelics / PreDrawCards -- no relics / card-level hooks yet.
+    // applyStartOfTurnPowers (§5.2 step 6, pre-draw): Berserk/Mayhem/Magnetism
+    // energy/play; applyStartOfTurnOrbs -- no orbs. No-op without such a power.
+    dispatch_at_start_of_turn(s);
 
     // Energy recharge (EnergyManager.recharge(); see kIroncladBaseEnergy in
     // action_queue.hpp). The real game performs this every turn via a
@@ -127,7 +142,10 @@ void start_of_turn(CombatState& s) noexcept {
     draw.amount = kStartOfTurnDrawCount;
     draw.flags = 0;
     add_to_bottom(s, draw);
-    // applyStartOfTurnPostDrawRelics / PostDrawPowers -- stubs.
+    // applyStartOfTurnPostDrawRelics -- none. applyStartOfTurnPostDrawPowers
+    // (Brutality/Demon Form): queued AFTER the DrawCardAction (line 362-363), so
+    // its effects resolve after the draw. No-op without such a power.
+    dispatch_at_start_of_turn_post_draw(s);
     // EnableEndTurnButtonAction (line 364) is modeled by step 7 handing control
     // back to the player once the queued DrawCard has drained; no separate item.
 }

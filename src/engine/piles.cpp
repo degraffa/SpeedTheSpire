@@ -16,6 +16,7 @@
 #include <span>
 
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/power_hooks.hpp"  // B3.2: onExhaust dispatch (EXHAUST opcode path)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -102,6 +103,10 @@ void exhaust_card(CombatState& s, int pool_index) noexcept {
                 s.exhaust[s.exhaust_count] = idx;
                 ++s.exhaust_count;
             }
+            // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card lands
+            // in the exhaust pile. No-op without an on-exhaust power, so the
+            // skeleton EXHAUST-opcode path is unchanged.
+            dispatch_on_exhaust(s, s.card_pool[idx].card_id);
             return;
         }
     }

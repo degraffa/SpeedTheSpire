@@ -12,6 +12,7 @@
 #include "sts/registry/game_ids.hpp"
 #include "sts/registry/manifest.hpp"
 #include "sts/registry/monster_table.hpp"
+#include "sts/registry/power_table.hpp"
 
 namespace {
 
@@ -22,6 +23,16 @@ static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
 static_assert(sts::registry::manifest::kCardsCount == 5);
 static_assert(sts::registry::kMaxCardSteps == 2);
+
+// Power table (B3.2): the constexpr PowerDef evaluates at compile time with
+// nothing but the generated headers in scope.
+static_assert(sts::registry::kStrengthPower.hook_count == 0);
+static_assert(sts::registry::kFeelNoPainPower.hook_count == 1);
+static_assert(sts::registry::kFeelNoPainPower.hooks[0].hook ==
+              sts::registry::Hook::ON_EXHAUST);
+static_assert(sts::registry::kFeelNoPainPower.hooks[0].step_count == 1);
+static_assert(sts::registry::kCorruptionPower.native);
+static_assert(sts::registry::kCorruptionPower.hook_count == 2);
 
 // Monster table (B2.2): the constexpr tier lookups evaluate at compile time
 // with nothing but the generated headers in scope.
@@ -37,5 +48,7 @@ static_assert(sts::registry::kJawWorm.move(9) == nullptr);
     sts::registry::card_def(sts::registry::CardId::BASH);
 [[maybe_unused]] const sts::registry::MonsterDef* kMonsterProbe =
     sts::registry::monster_def(sts::registry::MonsterId::JAW_WORM);
+[[maybe_unused]] const sts::registry::PowerDef* kPowerProbe =
+    sts::registry::power_def(sts::registry::PowerId::CORRUPTION);
 
 }  // namespace

@@ -128,7 +128,9 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::MAKE_CARD) ==
             static_cast<uint16_t>(Opcode::MAKE_CARD) &&
         static_cast<uint16_t>(sts::registry::Opcode::SET_COST) ==
-            static_cast<uint16_t>(Opcode::SET_COST),
+            static_cast<uint16_t>(Opcode::SET_COST) &&
+        static_cast<uint16_t>(sts::registry::Opcode::LOSE_HP) ==
+            static_cast<uint16_t>(Opcode::LOSE_HP),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
