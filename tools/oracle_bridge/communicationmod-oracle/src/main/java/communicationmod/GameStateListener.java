@@ -7,6 +7,10 @@ import com.megacrit.cardcrawl.neow.NeowRoom;
 import com.megacrit.cardcrawl.rooms.AbstractRoom;
 import com.megacrit.cardcrawl.rooms.EventRoom;
 import com.megacrit.cardcrawl.rooms.VictoryRoom;
+import com.megacrit.cardcrawl.vfx.AbstractGameEffect;
+import com.megacrit.cardcrawl.vfx.cardManip.ShowCardAndObtainEffect;
+
+import java.util.ArrayList;
 
 public class GameStateListener {
     private static AbstractDungeon.CurrentScreen previousScreen = null;
@@ -105,6 +109,22 @@ public class GameStateListener {
         boolean inCombat = (newPhase == AbstractRoom.RoomPhase.COMBAT);
         // Lots of stuff can happen while the dungeon is fading out, but nothing that requires input from the user.
         if (AbstractDungeon.isFadingOut || AbstractDungeon.isFadingIn) {
+            return false;
+        }
+        // SpeedTheSpire fork fix (2026-07-23): a card-obtain effect commits its
+        // card to the master deck only when it finishes animating
+        // (ShowCardAndObtainEffect.update, vfx/cardManip/ShowCardAndObtainEffect.java:98-108,
+        // -> souls.obtain -> Soul.obtain -> masterDeck.addToTop, cards/Soul.java:145-148).
+        // The game reports ready_for_command before that commit, so a driver that
+        // navigates away (e.g. leaving the Golden Idol event on its [Leave] screen)
+        // can outrun the effect and DROP the obtained card -- making a semantic
+        // outcome (masterDeck contents) depend on animation speed. Hold readiness
+        // until every pending obtain effect has committed, so the dumped deck is
+        // deterministic regardless of stripping. Narrow (only this one on-completion
+        // master-deck mutator; the add-to-pile siblings commit in their constructors)
+        // and bounded (these effects always finish -- duration 0.5-2.0s -- so no
+        // never-ready hang).
+        if (pendingObtainEffect()) {
             return false;
         }
         // This check happens before the rest since dying can happen in combat and messes with the other cases.
@@ -234,5 +254,35 @@ public class GameStateListener {
 
     public static boolean isWaitingForCommand() {
         return waitingForCommand;
+    }
+
+    /**
+     * True while any card-obtain effect is still animating (i.e. has not yet
+     * committed its card to the master deck). See the call site in
+     * hasDungeonStateChanged for the rationale. Scans all four effect queues an
+     * obtain effect can live in (AbstractDungeon.java:186-189): effectList (the
+     * common path), effectsQueue / topLevelEffectsQueue (staged, moved next
+     * update), and topLevelEffects (e.g. the Accursed blight).
+     */
+    private static boolean pendingObtainEffect() {
+        return hasPendingObtain(AbstractDungeon.effectList)
+                || hasPendingObtain(AbstractDungeon.effectsQueue)
+                || hasPendingObtain(AbstractDungeon.topLevelEffects)
+                || hasPendingObtain(AbstractDungeon.topLevelEffectsQueue);
+    }
+
+    private static boolean hasPendingObtain(ArrayList<AbstractGameEffect> effects) {
+        if (effects == null) {
+            return false;
+        }
+        // Index loop, re-reading size(): this runs on the game thread alongside
+        // the effect-list mutation, so avoid a for-each's fail-fast iterator.
+        for (int i = 0; i < effects.size(); i++) {
+            AbstractGameEffect e = effects.get(i);
+            if (e instanceof ShowCardAndObtainEffect && !e.isDone) {
+                return true;
+            }
+        }
+        return false;
     }
 }
