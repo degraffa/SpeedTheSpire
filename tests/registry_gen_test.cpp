@@ -77,9 +77,10 @@ std::string read_text(const fs::path& p) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-const std::array<const char*, 6> kGenFiles = {
+const std::array<const char*, 7> kGenFiles = {
     "sts/registry/ids.hpp", "sts/registry/card_table.hpp",
-    "sts/registry/power_table.hpp", "sts/registry/monster_table.hpp",
+    "sts/registry/power_table.hpp", "sts/registry/potion_table.hpp",
+    "sts/registry/monster_table.hpp",
     "sts/registry/game_ids.hpp", "sts/registry/manifest.hpp"};
 
 }  // namespace
@@ -242,11 +243,11 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kPowersCount, 12u);  // 3 skeleton + 9 B3.2 framework powers
     EXPECT_EQ(m::kMonstersCount, 1u);
     EXPECT_EQ(m::kRelicsCount, 0u);
-    EXPECT_EQ(m::kPotionsCount, 0u);
+    EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 0u);
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 18u);
+    EXPECT_EQ(m::kTotalCount, 51u);
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

@@ -1,15 +1,347 @@
-# potions.yaml -- potion registry (rules-as-data, design doc B §4.2).
+# potions.yaml -- potion registry (rules-as-data, design doc B §4.2, §5.4; task B3.23).
 #
-# Entry shape (frozen):
-#   - id: <int>            numeric enum value -- append-only, NEVER renumbered
-#     name: <SYMBOL>       generated enum symbol (PotionId::<SYMBOL>)
-#     game_id: "<string>"  the game's potion id string -- translator/oracle join key
-#     rarity: COMMON|UNCOMMON|RARE
+# The 33 Ironclad-obtainable potions: PotionHelper.getPotions(IRONCLAD, false)
+# (PotionHelper.java:88-162) = the 3 Ironclad-specific (BloodPotion, Elixir,
+# HeartOfIron) + the 30 shared potions. The class-specific potions of the other
+# three characters (Poison/Cunning/GhostInAJar = Silent; Focus/PotionOfCapacity/
+# EssenceOfDarkness = Defect; BottledMiracle/Stance/Ambrosia = Watcher) are NOT
+# in the Ironclad pool and are out of S1 scope. Sacred Bark (potency-doubling) is
+# S2 (design §5.4) and not modeled here.
+#
+# Entry shape (frozen; extends the §4.2 shape, mirrors powers.yaml's precedent):
+#   - id: <int>            PotionId enum value -- append-only, NEVER renumbered.
+#                          Ordered to match the Ironclad pool list order
+#                          (getPotions), so the identity-roll pool index maps 1:1.
+#     name: <SYMBOL>       generated enum symbol (PotionId::<SYMBOL>).
+#     game_id: "<string>"  the game's AbstractPotion.ID (POTION_ID) -- translator
+#                          join key; identical to the PotionHelper pool key.
+#     rarity: COMMON|UNCOMMON|RARE   AbstractPotion.PotionRarity (tier gate 65/25/10).
+#     potency: <int>       getPotency(ascensionLevel) -- ascension-INDEPENDENT for
+#                          every Ironclad potion (each override returns a constant),
+#                          so potency@A20 == this value.
 #     provenance: "<Class.method (File.java:line) -- read in full>"
-#     effects:             OPTIONAL effect program (same {op, target, amount} shape)
-#     native: <bool>       OPTIONAL; true -> named native branch (default false).
+#     effects:             OPTIONAL USE effect program (the CardEffectStep shape:
+#                          {op, target, amount[, power]}). The step `amount` is the
+#                          potion's potency. Absent -> native.
+#     native: <bool>       OPTIONAL; true -> the USE body is a named native branch
+#                          (potions.cpp dispatch_native_potion). Default false.
 #
-# Empty in the skeleton (stage-a design §9: no potions). Populating this domain is a
-# later task; the file exists now so codegen produces the (NONE-only) PotionId enum
-# and a zero row-count manifest entry cleanly.
-[]
+# EFFECT PROGRAMS vs NATIVE (B3.2 convention). A potion is a DATA effect program
+# only where the frozen opcode set (interp.hpp) AND an already-registered power
+# suffice. The registered powers today (powers.yaml, owned by B3.4) are Strength,
+# Vulnerable, Weak, Artifact, Metallicize (+ the B3.2 framework powers). Potions
+# that grant powers NOT yet in the registry (Dexterity, Regen, Thorns, Plated
+# Armor, Ritual, StrengthDown/LoseDexterity, a Duplication/Double-Tap power), or
+# that need verbs owned by other tasks (in-combat card CHOOSE = B3.4; recursive
+# play = a later opcode; run-layer max-HP / potion-slot mutation = B4.x; combat
+# escape = B3.15; out-of-combat revive), are `native: true` with the body
+# DEFERRED to when that dependency lands (see the B3.23 Log). They still carry
+# their real potency/rarity/game_id here so the registry, translator join, and
+# identity roll are complete now.
+
+# --- Ironclad-specific (PotionHelper.java:92-96) ----------------------------
+
+- id: 1
+  name: BLOOD_POTION
+  game_id: "BloodPotion"
+  rarity: COMMON
+  potency: 20
+  # Heal floor(maxHealth * potency/100). No HEAL opcode -> native (combat-
+  # expressible: writes player_hp, clamped to max). potency = heal PERCENT.
+  native: true
+  provenance: "BloodPotion.use (BloodPotion.java:43), getPotency (:60) -- HealAction maxHealth*potency/100 float floor"
+
+- id: 2
+  name: ELIXIR
+  game_id: "ElixirPotion"
+  rarity: UNCOMMON
+  potency: 0
+  # Exhaust any number of chosen hand cards -> in-combat card CHOOSE (B3.4). Deferred native.
+  native: true
+  provenance: "Elixir.use (Elixir.java:45), getPotency (:52) -- ExhaustSpecificCardsAction over a hand grid choice"
+
+- id: 3
+  name: HEART_OF_IRON
+  game_id: "HeartOfIron"
+  rarity: RARE
+  potency: 6
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 6, power: METALLICIZE}
+  provenance: "HeartOfIron.use (HeartOfIron.java:43), getPotency (:51) -- ApplyPower MetallicizePower(potency), COMBAT-gated"
+
+# --- Shared pool (PotionHelper.java:131-160), pool order ---------------------
+
+- id: 4
+  name: BLOCK_POTION
+  game_id: "Block Potion"
+  rarity: COMMON
+  potency: 12
+  effects:
+    - {op: BLOCK, target: SELF, amount: 12}
+  provenance: "BlockPotion.use (BlockPotion.java:41), getPotency (:46) -- GainBlockAction(player, potency)"
+
+- id: 5
+  name: DEXTERITY_POTION
+  game_id: "Dexterity Potion"
+  rarity: COMMON
+  potency: 2
+  # Grants DexterityPower -- not in the registry (powers.yaml, B3.4). Deferred native.
+  native: true
+  provenance: "DexterityPotion.use (DexterityPotion.java:45), getPotency (:52) -- ApplyPower DexterityPower(potency)"
+
+- id: 6
+  name: ENERGY_POTION
+  game_id: "Energy Potion"
+  rarity: COMMON
+  potency: 2
+  effects:
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+  provenance: "EnergyPotion.use (EnergyPotion.java:37), getPotency (:42) -- GainEnergyAction(potency)"
+
+- id: 7
+  name: EXPLOSIVE_POTION
+  game_id: "Explosive Potion"
+  rarity: COMMON
+  potency: 10
+  effects:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 10}
+  provenance: "ExplosivePotion.use (ExplosivePotion.java:46), getPotency (:56) -- DamageAllEnemiesAction NORMAL potency"
+
+- id: 8
+  name: FIRE_POTION
+  game_id: "Fire Potion"
+  rarity: COMMON
+  potency: 20
+  # THORNS-typed with applyEnemyPowersOnly (player Strength/Weak do NOT scale it;
+  # enemy Vulnerable does). The DAMAGE opcode is NORMAL-typed today (damage-TYPE
+  # is B3.2's deferred item); coincides with THORNS when the player has no
+  # Strength/Weak, which the tier-2 test uses. Seam noted in the B3.23 Log.
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 20}
+  provenance: "FirePotion.use (FirePotion.java:43), getPotency (:50) -- DamageAction THORNS applyEnemyPowersOnly, potency"
+
+- id: 9
+  name: STRENGTH_POTION
+  game_id: "Strength Potion"
+  rarity: COMMON
+  potency: 2
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+  provenance: "StrengthPotion.use (StrengthPotion.java:44), getPotency (:52) -- ApplyPower StrengthPower(potency), COMBAT-gated"
+
+- id: 10
+  name: SWIFT_POTION
+  game_id: "Swift Potion"
+  rarity: COMMON
+  potency: 3
+  effects:
+    - {op: DRAW, target: SELF, amount: 3}
+  provenance: "SwiftPotion.use (SwiftPotion.java:38), getPotency (:43) -- DrawCardAction(player, potency)"
+
+- id: 11
+  name: WEAK_POTION
+  game_id: "Weak Potion"
+  rarity: COMMON
+  potency: 3
+  effects:
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 3, power: WEAK}
+  provenance: "WeakenPotion.use (WeakenPotion.java:43), getPotency (:48) -- ApplyPower WeakPower(target, potency, false)"
+
+- id: 12
+  name: FEAR_POTION
+  game_id: "FearPotion"
+  rarity: COMMON
+  potency: 3
+  effects:
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 3, power: VULNERABLE}
+  provenance: "FearPotion.use (FearPotion.java:43), getPotency (:48) -- ApplyPower VulnerablePower(target, potency, false)"
+
+- id: 13
+  name: ATTACK_POTION
+  game_id: "AttackPotion"
+  rarity: COMMON
+  potency: 1
+  # Choose 1 of 3 random attack cards into hand (costs 0 this turn) -> card CHOOSE + MAKE_CARD (B3.4). Deferred native.
+  native: true
+  provenance: "AttackPotion.use (AttackPotion.java:40), getPotency (:45) -- 3-attack reward choice, temp cost 0"
+
+- id: 14
+  name: SKILL_POTION
+  game_id: "SkillPotion"
+  rarity: COMMON
+  potency: 1
+  native: true
+  provenance: "SkillPotion.use (SkillPotion.java:40), getPotency (:45) -- 3-skill reward choice, temp cost 0"
+
+- id: 15
+  name: POWER_POTION
+  game_id: "PowerPotion"
+  rarity: COMMON
+  potency: 1
+  native: true
+  provenance: "PowerPotion.use (PowerPotion.java:40), getPotency (:45) -- 3-power reward choice, temp cost 0"
+
+- id: 16
+  name: COLORLESS_POTION
+  game_id: "ColorlessPotion"
+  rarity: COMMON
+  potency: 1
+  native: true
+  provenance: "ColorlessPotion.use (ColorlessPotion.java:38), getPotency (:43) -- 3-colorless reward choice, temp cost 0"
+
+- id: 17
+  name: STEROID_POTION
+  game_id: "SteroidPotion"
+  rarity: COMMON
+  potency: 5
+  # Gain Strength(potency) AND StrengthDown(potency) at end of turn -- StrengthDown
+  # is not registered (powers.yaml, B3.4). Whole effect deferred native (a partial
+  # Strength-only program would be WRONG: it must be temporary).
+  native: true
+  provenance: "SteroidPotion.use (SteroidPotion.java:45), getPotency (:54) -- ApplyPower StrengthPower + StrengthDown(potency)"
+
+- id: 18
+  name: SPEED_POTION
+  game_id: "SpeedPotion"
+  rarity: COMMON
+  potency: 5
+  # Gain Dexterity(potency) + LoseDexterity(potency) end of turn -- neither power registered. Deferred native.
+  native: true
+  provenance: "SpeedPotion.use (SpeedPotion.java:45), getPotency (:54) -- ApplyPower DexterityPower + LoseDexterityPower(potency)"
+
+- id: 19
+  name: BLESSING_OF_THE_FORGE
+  game_id: "BlessingOfTheForge"
+  rarity: COMMON
+  potency: 0
+  # Upgrade every upgradeable card in hand for the combat -> in-combat upgrade verb (B3.4 Armaments). Deferred native.
+  native: true
+  provenance: "BlessingOfTheForge.use (BlessingOfTheForge.java:43), getPotency (:50) -- upgrade all cards in hand this combat"
+
+- id: 20
+  name: REGEN_POTION
+  game_id: "Regen Potion"
+  rarity: UNCOMMON
+  potency: 5
+  # Grants RegenPower -- not registered (powers.yaml, B3.4). Deferred native.
+  native: true
+  provenance: "RegenPotion.use (RegenPotion.java:44), getPotency (:51) -- ApplyPower RegenPower(potency)"
+
+- id: 21
+  name: ANCIENT_POTION
+  game_id: "Ancient Potion"
+  rarity: UNCOMMON
+  potency: 1
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: ARTIFACT}
+  provenance: "AncientPotion.use (AncientPotion.java:44), getPotency (:52) -- ApplyPower ArtifactPower(potency), COMBAT-gated"
+
+- id: 22
+  name: LIQUID_BRONZE
+  game_id: "LiquidBronze"
+  rarity: UNCOMMON
+  potency: 3
+  # Grants ThornsPower -- not registered (powers.yaml, B3.4). Deferred native.
+  native: true
+  provenance: "LiquidBronze.use (LiquidBronze.java:45), getPotency (:53) -- ApplyPower ThornsPower(potency)"
+
+- id: 23
+  name: GAMBLERS_BREW
+  game_id: "GamblersBrew"
+  rarity: UNCOMMON
+  potency: 0
+  # Discard any number, draw that many -> card CHOOSE (B3.4). Deferred native.
+  native: true
+  provenance: "GamblersBrew.use (GamblersBrew.java:37), getPotency (:44) -- discard-then-draw grid choice"
+
+- id: 24
+  name: ESSENCE_OF_STEEL
+  game_id: "EssenceOfSteel"
+  rarity: UNCOMMON
+  potency: 4
+  # Grants PlatedArmorPower -- not registered (powers.yaml, B3.4). Deferred native.
+  native: true
+  provenance: "EssenceOfSteel.use (EssenceOfSteel.java:42), getPotency (:50) -- ApplyPower PlatedArmorPower(potency)"
+
+- id: 25
+  name: DUPLICATION_POTION
+  game_id: "DuplicationPotion"
+  rarity: UNCOMMON
+  potency: 1
+  # Grants DuplicationPower (next N cards played twice) -- not registered; recursive-play semantics. Deferred native.
+  native: true
+  provenance: "DuplicationPotion.use (DuplicationPotion.java:42), getPotency (:49) -- ApplyPower DuplicationPower(potency)"
+
+- id: 26
+  name: DISTILLED_CHAOS
+  game_id: "DistilledChaos"
+  rarity: UNCOMMON
+  potency: 3
+  # Play the top `potency` cards of the draw pile -> recursive play (a later opcode, cf. B3.2 Double Tap deferral). Deferred native.
+  native: true
+  provenance: "DistilledChaosPotion.use (DistilledChaosPotion.java:39), getPotency (:46) -- play top potency draw-pile cards"
+
+- id: 27
+  name: LIQUID_MEMORIES
+  game_id: "LiquidMemories"
+  rarity: UNCOMMON
+  potency: 1
+  # Return `potency` chosen cards from discard to hand, cost 0 this turn -> card CHOOSE (B3.4). Deferred native.
+  native: true
+  provenance: "LiquidMemories.use (LiquidMemories.java:38), getPotency (:43) -- discard->hand grid choice, temp cost 0"
+
+- id: 28
+  name: CULTIST_POTION
+  game_id: "CultistPotion"
+  rarity: RARE
+  potency: 1
+  # Grants RitualPower -- not registered (powers.yaml, B3.4). Deferred native.
+  native: true
+  provenance: "CultistPotion.use (CultistPotion.java:50), getPotency (:71) -- ApplyPower RitualPower(potency, false)"
+
+- id: 29
+  name: FRUIT_JUICE
+  game_id: "Fruit Juice"
+  rarity: RARE
+  potency: 5
+  # Permanent +potency max HP -> run-layer maxHealth mutation (B4.x). Deferred native.
+  native: true
+  provenance: "FruitJuice.use (FruitJuice.java:40), getPotency (:53) -- player.increaseMaxHp(potency, ...)"
+
+- id: 30
+  name: SNECKO_OIL
+  game_id: "SneckoOil"
+  rarity: RARE
+  potency: 5
+  # Draw `potency` cards, randomize their costs (0..3 via a per-card rng draw) -> cost randomization verb. Deferred native.
+  native: true
+  provenance: "SneckoOil.use (SneckoOil.java:41), getPotency (:49) -- DrawCardAction(potency) + SetRandomCost per drawn card"
+
+- id: 31
+  name: FAIRY_POTION
+  game_id: "FairyPotion"
+  rarity: RARE
+  potency: 30
+  # Out-of-combat auto-trigger on lethal: revive to potency% max HP. Not a USE
+  # action (triggers on death) -> native, flagged (design/ledger). Deferred body.
+  native: true
+  provenance: "FairyPotion (FairyPotion.java:37 canUse=false; getPotency :53) -- on-fatal revive to potency% maxHP, out-of-combat trigger"
+
+- id: 32
+  name: SMOKE_BOMB
+  game_id: "SmokeBomb"
+  rarity: RARE
+  potency: 0
+  # Escape combat (non-boss) -> reuses the B3.15 combat-escape path. Native, flagged (ledger). Deferred body.
+  native: true
+  provenance: "SmokeBomb.use (SmokeBomb.java:37), getPotency (:66) -- EscapeAction / room escape, combat-escape semantics"
+
+- id: 33
+  name: ENTROPIC_BREW
+  game_id: "EntropicBrew"
+  rarity: RARE
+  potency: 0
+  # Fill every empty potion slot with a random potion -> run-layer potion-slot
+  # mutation (B4.x) + repeated identity rolls. potency is runtime potionSlots. Deferred native.
+  native: true
+  provenance: "EntropicBrew.use (EntropicBrew.java:38), getPotency (:61) -- fill empty slots via returnRandomPotion loop"

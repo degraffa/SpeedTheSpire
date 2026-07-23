@@ -1237,7 +1237,7 @@ line; move cycle across 12+ turns matches hand-derivation; Burn upgrades at
 the cited turn.
 **Log:** —
 
-### B3.23 `[ ]` ∥ Potions
+### B3.23 `[x]` ∥ Potions
 **Deps:** B3.2 · **Spec:** design §5.4 · **Provenance:**
 PotionHelper.java:70-71, 88-172; AbstractDungeon.java:829-850; per-potion
 classes (33, enumerate)
@@ -1249,7 +1249,66 @@ combat-escape semantics — escape reuses B3.15's path).
 **Acceptance:** tier-2 per potion effect; identity-roll draw-count test
 (rejection loop consumes exactly the observed number for a fixed stream);
 slots at A20 = 2 (A11 row cited).
-**Log:** —
+**Log:** Verified by running in an ISOLATED worktree at f0617c5 (clean of the
+concurrent B3.4/B3.24 in-flight edits in the shared tree): **debug 232/232, asan
+232/232** (213 baseline + 19 new potion cases; generator determinism green).
+Every potion's use()/getPotency read in full before coding.
+**Registry.** `potions.yaml` = the 33 Ironclad-obtainable potions
+(getPotions(IRONCLAD,false): 3 Ironclad-specific + 30 shared; the Silent/Defect/
+Watcher class potions are NOT in-pool), ids 1..33 in pool order so the identity-
+roll index maps 1:1. Potion potency is **ascension-independent** (every getPotency
+override returns a constant), so potency@A20 == base -> flat `potency` field (no
+tier columns). `gen.py` emits `potion_table.hpp` (`PotionDef` id/rarity/native/
+potency + the reused `CardEffectStep` USE program; sorted, deterministic) per the
+power_table precedent; `PotionRarity` pinned/append-only; manifest kPotionsCount
+0->33.
+**Engine (new module `potions.hpp`/`potions.cpp`).** `use_potion()` queues a
+potion's USE effect program onto the action queue (identical translation to
+card_play's queue_effect_step), or routes a `native` potion to
+`dispatch_native_potion`. `PotionId` is aliased into sts::engine here (types.hpp
+never did). **10 DATA potions** (opcode set + an already-registered power suffice
+-- Metallicize/Strength/Weak/Vulnerable/Artifact) run end-to-end (queue->pump):
+HeartOfIron, Block, Energy, Explosive, Fire, Strength, Swift, Weak, Fear, Ancient.
+**BloodPotion** percent-heal is a native body (float floor of maxHP*potency/100,
+clamped). Each checked at tier-2 (effect + potency@A20).
+**Trap 14** (AbstractDungeon.java:829-850): `return_random_potion()` = the
+65/25/10 tier roll (`potion_tier_for_roll`) then the rejection loop
+(getRandomPotion until the rolled rarity matches), consuming a VARIABLE number of
+potionRng draws. The test hand-derives the exact draw sequence over an identical
+stream and asserts same PotionId AND same draw count (rng.counter delta), 10 seeds
+across all tiers.
+**A11 seam (design §5.4).** `potion_slot_count(asc)` = 3, -1 at A11+ (A20->2) as
+a **pure function** -- the RunState potion-slot FIELD is **B4.3's** (schema v2);
+this task's combat-side USE mechanics do NOT touch RunState/CombatState layout and
+do not depend on that field landing. Run-level USE_POTION/discard action wiring is
+**B4.4** ("USE_POTION both layers"); a potion discard has no combat effect (pure
+slot removal), so use_potion is the only combat verb.
+**DEFERRED (per hygiene; registry rows complete now -- rarity/potency/native flag
+tested; runtime bodies land with their dependency).** (1) **BLOCKED on powers.yaml
+(B3.4, not ownable concurrently):** potions granting powers not yet registered --
+Dexterity, Steroid (Strength+StrengthDown), Speed (Dex+LoseDex), Regen,
+LiquidBronze (Thorns), EssenceOfSteel (PlatedArmor), Duplication, Cultist
+(Ritual). These cannot even name a PowerId today; B3.23 Deps lists only B3.2 but
+the effect-side functionally needs these powers, and design §5.5 assigns "potion-
+granted powers" to per-batch extraction. **Orchestrator ruling (APPROVED):** the
+native+deferred approach stands; a queued follow-up task **"potion-support
+powers"** runs immediately after B3.4 lands -- it appends the missing PowerId rows
+(continuing from B3.4's allocation, 13+), wires their hook bodies, and **un-defers
+these potion USE bodies with their tier-2 effect tests**. The potion rows are
+complete here (rarity/potency/native flag tested); only the runtime effect awaits
+that follow-up, which is the traceable owner of the un-deferral. (2)
+verb-owned elsewhere: in-combat card CHOOSE = B3.4 (Elixir, Attack/Skill/Power/
+Colorless, GamblersBrew, LiquidMemories, BlessingOfTheForge); recursive play =
+later opcode (DistilledChaos); cost randomization (SneckoOil); run-layer mutation
+= B4.x (FruitJuice max-HP, EntropicBrew slot-fill); combat escape = B3.15
+(SmokeBomb, flagged); out-of-combat revive (FairyPotion, flagged). (3) Fire's
+THORNS/applyEnemyPowersOnly typing rides **B3.2's deferred DAMAGE damage-TYPE**
+item (NORMAL today; coincides on the number when the player has no Strength -- the
+tier-2 test's condition). **gen.py note:** the potion-emission section
+(POTION_RARITIES + emit_potion_table + generate() wiring) is self-contained and
+sits between emit_power_table and the Monster table section. **Shared-file flag:**
+tests/registry_gen_test.cpp kTotalCount/kGenFiles-size are cross-agent sums --
+reconcile at serialize (my delta: +33 potions, +potion_table.hpp).
 
 ### B3.24 `[ ]` ∥ Relics: starter + commons
 **Deps:** B3.2 · **Spec:** design §5.3 · **Provenance:** relics/ COMMON tier,

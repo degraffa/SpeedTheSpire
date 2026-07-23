@@ -347,3 +347,16 @@ sts_set_warnings(power_hooks_test)
 sts_enable_sanitizers(power_hooks_test)
 
 gtest_discover_tests(power_hooks_test)
+
+# B3.23 potions: each Ironclad potion's USE effect + potency (S1 A20), the
+# trap-14 rejection-sampling identity roll, and the A11 potion-slot count.
+# Engine surface + potions.cpp (in sts_engine).
+add_executable(potions_test
+    potions_test.cpp
+)
+
+target_link_libraries(potions_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(potions_test)
+sts_enable_sanitizers(potions_test)
+
+gtest_discover_tests(potions_test)

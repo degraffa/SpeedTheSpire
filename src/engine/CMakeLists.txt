@@ -7,6 +7,7 @@ add_library(sts_engine
     piles.cpp
     card_play.cpp
     power_hooks.cpp
+    potions.cpp
     advance.cpp
 )
 

@@ -107,6 +107,12 @@ POWER_TYPES = {"BUFF": 0, "DEBUFF": 1}
 # NONE == a non-stacking marker for a bespoke consumer. Default INTENSITY.
 POWER_STACK = {"intensity": 0, "none": 1}
 
+# Potion rarity (AbstractPotion.PotionRarity): the reward tier gate reads it
+# (65/25/10, PotionHelper.java:70-71). Pinned/append-only; the potion table and
+# the identity roll (AbstractDungeon.returnRandomPotion) join on it. YAML
+# `rarity:` names are these UPPER-case keys.
+POTION_RARITIES = {"COMMON": 0, "UNCOMMON": 1, "RARE": 2}
+
 # Card-level targeting -> (needs_target, random_target) (cards.hpp semantics).
 CARD_TARGETING = {
     "ENEMY": (True, False),
@@ -669,6 +675,149 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
     return "\n".join(out) + "\n"
 
 
+# --- Potion table (B3.23: USE effect programs + potency/rarity) --------------
+
+def _parse_potion_steps(potion_name: str, effects, powers: dict[str, int]) -> list:
+    """Parse a potion's USE effect program into (op, amount, extra, target)
+    tuples -- the SAME CardEffectStep shape as card/power programs. `target: SELF`
+    is the player; CARD_TARGET is the used-on monster; ALL_ENEMY fans out at
+    execute time. The step `amount` is the potion's potency."""
+    steps = []
+    for step in effects or []:
+        op = step.get("op")
+        if op not in OPCODES:
+            raise fail(f"potions.yaml: potion {potion_name} uses unknown op {op!r}")
+        amount = int(step.get("amount", 0))
+        st = step.get("target", "SELF")
+        if st not in STEP_TARGETS:
+            raise fail(f"potions.yaml: potion {potion_name} step has unknown "
+                       f"target {st!r} (known: {sorted(STEP_TARGETS)})")
+        extra = 0
+        if op == "APPLY_POWER":
+            pname = step.get("power")
+            if pname not in powers:
+                raise fail(f"potions.yaml: potion {potion_name} APPLY_POWER "
+                           f"references unknown power {pname!r} (potion-granted "
+                           f"powers must be registered in powers.yaml first)")
+            extra = powers[pname]
+        steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
+    return steps
+
+
+def emit_potion_table(domains: dict[str, list[dict]]) -> str:
+    potions = domains["potions"]
+    power_ids = _power_id_map(domains)
+
+    # Resolve rows first so array budgets + validation errors surface before any
+    # output is emitted.
+    rows = []
+    max_steps = 1  # floor 1 so std::array<CardEffectStep, N> stays valid when empty
+    for p in potions:
+        rarity = str(p.get("rarity", "")).upper()
+        if rarity not in POTION_RARITIES:
+            raise fail(f"potions.yaml: potion {p['name']} has unknown rarity "
+                       f"{p.get('rarity')!r} (known: {sorted(POTION_RARITIES)})")
+        if "potency" not in p or not isinstance(p["potency"], int) or \
+                isinstance(p["potency"], bool):
+            raise fail(f"potions.yaml: potion {p['name']} 'potency' must be an "
+                       f"integer (getPotency value), got {p.get('potency')!r}")
+        native = bool(p.get("native", False))
+        steps = _parse_potion_steps(p["name"], p.get("effects"), power_ids)
+        # native XOR effect-program (mirrors the B3.2 power convention: a native
+        # potion's USE body is the escape hatch, so it carries no data steps).
+        if native and steps:
+            raise fail(f"potions.yaml: potion {p['name']} is native AND has an "
+                       f"effect program -- a native potion lists no effects (the "
+                       f"escape hatch handles the body)")
+        if not native and not steps:
+            raise fail(f"potions.yaml: potion {p['name']} has no effect program "
+                       f"and native is not set -- a data potion needs >= 1 step")
+        max_steps = max(max_steps, len(steps))
+        rows.append({"name": p["name"], "rarity": POTION_RARITIES[rarity],
+                     "potency": p["potency"], "native": native, "steps": steps})
+
+    out: list[str] = [BANNER, "#pragma once\n",
+                      "#include <array>", "#include <cstdint>\n",
+                      '#include "sts/registry/card_table.hpp"',
+                      '#include "sts/registry/ids.hpp"\n',
+                      "// Potion USE-effect tables (design doc §5.4; B3.23). A "
+                      "potion binds its",
+                      "// USE to an effect program (reusing CardEffectStep) or is "
+                      "`native` (the",
+                      "// escape hatch: potions.cpp dispatch_native_potion handles "
+                      "the body, and the",
+                      "// row carries an empty program). potency is the "
+                      "ascension-independent",
+                      "// getPotency value; rarity drives the 65/25/10 reward tier "
+                      "gate + the",
+                      "// identity roll. Types are duplicated in sts::registry so "
+                      "this header",
+                      "// compiles standalone; potions.hpp re-exports it into "
+                      "sts::engine.\n",
+                      "namespace sts::registry {\n"]
+
+    out.append("enum class PotionRarity : uint8_t {")
+    for name, val in sorted(POTION_RARITIES.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name} = {val},")
+    out.append("};")
+    for name, val in sorted(POTION_RARITIES.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>(PotionRarity::{name}) "
+                   f"== {val}, \"PotionRarity::{name} is pinned to {val} "
+                   f"(append-only, never renumber)\");")
+    out.append("")
+    out.append(f"inline constexpr int kMaxPotionSteps = {max_steps};\n")
+    out.append("// One potion registry entry: potency + rarity + the USE effect")
+    out.append("// program (empty for a native potion; step_count == 0).")
+    out.append("struct PotionDef {")
+    out.append("    PotionId id;")
+    out.append("    PotionRarity rarity;")
+    out.append("    bool native;")
+    out.append("    int32_t potency;")
+    out.append("    uint8_t step_count;")
+    out.append("    std::array<CardEffectStep, kMaxPotionSteps> steps;")
+    out.append("};\n")
+
+    def step_literal(step) -> str:
+        op, amount, extra, tgt = step
+        op_name = next(k for k, v in OPCODES.items() if v == op)
+        tgt_name = next(k for k, v in STEP_TARGETS.items() if v == tgt)
+        return (f"{{Opcode::{op_name}, {amount}, {extra}, "
+                f"StepTarget::{tgt_name}}}")
+
+    def pad(steps) -> str:
+        padded = list(steps)
+        while len(padded) < max_steps:
+            padded.append((OPCODES["NOP"], 0, 0, STEP_TARGETS["SELF"]))
+        return ", ".join(step_literal(s) for s in padded)
+
+    for r in rows:
+        rarity_name = next(k for k, v in POTION_RARITIES.items()
+                           if v == r["rarity"])
+        out.append(f"inline constexpr PotionDef k{_pascal(r['name'])}Potion{{")
+        out.append(f"    PotionId::{r['name']}, PotionRarity::{rarity_name}, "
+                   f"{'true' if r['native'] else 'false'}, {r['potency']}, "
+                   f"{len(r['steps'])},")
+        out.append(f"    {{{{{pad(r['steps'])}}}}}}};\n")
+
+    out.append("inline constexpr std::array<const PotionDef*, "
+               f"{len(rows)}> kPotionDefs{{{{")
+    for r in rows:
+        out.append(f"    &k{_pascal(r['name'])}Potion,")
+    out.append("}};\n")
+    out.append("[[nodiscard]] inline const PotionDef* "
+               "potion_def(PotionId id) noexcept {")
+    out.append("    switch (id) {")
+    for r in rows:
+        out.append(f"        case PotionId::{r['name']}: "
+                   f"return &k{_pascal(r['name'])}Potion;")
+    out.append("        case PotionId::NONE:")
+    out.append("        default: return nullptr;")
+    out.append("    }")
+    out.append("}\n")
+    out.append("}  // namespace sts::registry")
+    return "\n".join(out) + "\n"
+
+
 # --- Monster table -----------------------------------------------------------
 
 def _parse_tiers(owner: str, what: str, raw) -> list[tuple[int, dict]]:
@@ -1055,6 +1204,7 @@ def generate(registry_dir: Path, out_dir: Path) -> list[Path]:
         "ids.hpp": emit_ids(domains),
         "card_table.hpp": emit_card_table(domains),
         "power_table.hpp": emit_power_table(domains),
+        "potion_table.hpp": emit_potion_table(domains),
         "monster_table.hpp": emit_monster_table(domains),
         "game_ids.hpp": emit_game_ids(domains),
         "manifest.hpp": emit_manifest(domains),
