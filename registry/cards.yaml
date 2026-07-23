@@ -87,7 +87,7 @@
   name: POMMEL_STRIKE
   game_id: "Pommel Strike"
   color: RED
-  rarity: UNCOMMON
+  rarity: COMMON
   type: ATTACK
   cost: 1
   target: ENEMY
