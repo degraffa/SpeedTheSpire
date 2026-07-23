@@ -221,7 +221,17 @@
   name: RITUAL
   game_id: "Ritual"
   type: BUFF
+  native: true
   hooks:
-    at_end_of_turn:
-      - {op: APPLY_POWER, target: SELF, power: STRENGTH}   # Strength = power amount
-  provenance: "RitualPower.atEndOfTurn (RitualPower.java:37-42) -- if isPlayer: addToBot ApplyPowerAction(owner, StrengthPower(owner, amount)). Cultist Potion applies RitualPower(player, potency, playerControlled=TRUE) (CultistPotion.java:54), so onPlayer==true -> the atEndOfRound monster path (:44-53, skipFirst) does NOT fire and only the player-facing atEndOfTurn Strength gain applies -> a clean DATA hook. The monster-Cultist atEndOfRound variant lands with the Cultist monster (B3.12). POWER_ID \"Ritual\" (:16)."
+    at_end_of_turn: []      # player/potion variant (onPlayer==true): +Strength=amount each end of turn
+    at_end_of_round: []     # monster variant (Cultist, onPlayer==false): +Strength=amount each round AFTER the first (skipFirst)
+  provenance: "RitualPower.atEndOfTurn (RitualPower.java:37-43) -- if isPlayer: addToBot ApplyPowerAction(owner, StrengthPower(owner, amount)); atEndOfRound (:45-55) -- if !onPlayer: skipFirst gate then addToBot ApplyPowerAction(owner, StrengthPower(owner, amount)). The two branches are the SAME power with opposite onPlayer, so made NATIVE (B3.13): the native body keys player-vs-monster on the OWNER actor (Cultist Potion applies to the PLAYER -> onPlayer==true -> at_end_of_turn; the Cultist monster applies to ITSELF -> onPlayer==false -> at_end_of_round with skipFirst). skipFirst per-instance state is the monster's kMonsterFlagRitualSkip flag bit (combat_state.hpp), set by the Cultist when it casts Incantation. Cultist Potion: RitualPower(player, potency, playerControlled=TRUE) (CultistPotion.java:54). Cultist monster: new RitualPower(this, ritualAmount, false) (Cultist.java:96,99). POWER_ID \"Ritual\" (:15)."
+
+- id: 20
+  name: CURL_UP
+  game_id: "Curl Up"
+  type: BUFF
+  native: true
+  hooks:
+    on_attacked: []         # one-shot guard: first NORMAL, non-lethal, >0 attack -> gain `amount` Block, then self-remove
+  provenance: "CurlUpPower.onAttacked (CurlUpPower.java:36-46) -- if !triggered && damageAmount < owner.currentHealth && damageAmount > 0 && info.owner != null && info.type == NORMAL: flash, set triggered=true SYNCHRONOUSLY, then addToBot ChangeStateAction(CLOSED), GainBlockAction(owner, owner, amount), and RemoveSpecificPowerAction(owner, owner, \"Curl Up\"). Native (guard + one-shot): op_damage dispatches onAttacked for NORMAL src!=tgt AFTER decrementBlock with post-block damage; the body re-checks amount>0 && amount<owner.hp, sets MonsterState.flags kMonsterFlagCurlUpTriggered before queueing kBlockNoPowers BLOCK and REMOVE_POWER. The explicit latch is required because queued multi-hit DAMAGE actions can resolve before the queued removal; removal clears the latch with the power instance. ChangeState CLOSED is presentation. POWER_ID \"Curl Up\" (:21)."

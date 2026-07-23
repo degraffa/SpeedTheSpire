@@ -37,6 +37,7 @@
 #include "sts/registry/ids.hpp"
 #include "sts/registry/manifest.hpp"
 #include "sts/registry/monster_table.hpp"
+#include "sts/registry/power_table.hpp"
 #include "sts/registry/relic_table.hpp"
 
 // Engine headers -- post-migration these re-export the generated tables; the
@@ -282,17 +283,18 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 24u);   // B3.3: 10 + 13 red common attacks + Wound
-    EXPECT_EQ(m::kPowersCount, 19u);  // 13 + 6 potion-support (Dex/LoseDex/Thorns/
-                                      // PlatedArmor/Regen/Ritual)
-    EXPECT_EQ(m::kMonstersCount, 1u);
+    EXPECT_EQ(m::kPowersCount, 20u);  // 13 + 6 potion-support (Dex/LoseDex/Thorns/
+                                      // PlatedArmor/Regen/Ritual) + 1 B3.13 (CurlUp)
+    EXPECT_EQ(m::kMonstersCount, 4u); // B3.13: JawWorm + Cultist + Louse Normal/Defensive
     EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 131u);  // 111 (B3.3 cards + potion-support powers)
-                                      // + 20 B3.12 encounters
+    EXPECT_EQ(m::kTotalCount, 135u);  // 111 (B3.3 cards + potion-support powers)
+                                      // + 20 B3.12 encounters + 4 B3.13 (CurlUp
+                                      // power + Cultist + 2 Louses)
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -406,7 +408,123 @@ TEST(RegistryGen, MonsterTableMatchesJava) {
     EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::ATTACK_DEFEND), 3);
 }
 
-// --- 6c. Duplicate move_id is rejected with a clear error --------------------
+// --- 6c. B3.13 Cultist/louse tables vs. hand-derived Java columns -----------
+
+TEST(RegistryGen, CultistTableMatchesJava) {
+    namespace r = sts::registry;
+    const r::MonsterDef& c = r::kCultist;
+    EXPECT_EQ(static_cast<int>(c.id), 2);
+    EXPECT_EQ(r::monster_def(r::MonsterId::CULTIST), &c);
+    EXPECT_TRUE(c.ai_native);
+    EXPECT_EQ(c.roll_count, 0);
+
+    // Cultist.java:59-62: HP 48-54 base, 50-56 from A7.
+    EXPECT_EQ(c.hp_min(6), 48);
+    EXPECT_EQ(c.hp_max(6), 54);
+    EXPECT_EQ(c.hp_min(7), 50);
+    EXPECT_EQ(c.hp_max(20), 56);
+
+    const r::MonsterMove* strike = c.move(r::kCultistMoveDarkStrike);
+    ASSERT_NE(strike, nullptr);
+    EXPECT_EQ(strike->intent, r::MonsterIntent::ATTACK);
+    ASSERT_EQ(strike->effect_count, 1);
+    EXPECT_EQ(strike->effects[0].op, r::Opcode::DAMAGE);
+    EXPECT_EQ(strike->effects[0].target, r::MonsterMoveTarget::PLAYER);
+    EXPECT_EQ(strike->effects[0].amount.at(0), 6);
+    EXPECT_EQ(strike->effects[0].amount.at(20), 6);
+
+    // ritualAmount 3 base / 4 at A2; Incantation adds one more at A17.
+    const r::MonsterMove* inc = c.move(r::kCultistMoveIncantation);
+    ASSERT_NE(inc, nullptr);
+    EXPECT_EQ(inc->intent, r::MonsterIntent::BUFF);
+    ASSERT_EQ(inc->effect_count, 1);
+    EXPECT_EQ(inc->effects[0].op, r::Opcode::APPLY_POWER);
+    EXPECT_EQ(inc->effects[0].target, r::MonsterMoveTarget::SELF);
+    EXPECT_EQ(inc->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::RITUAL));
+    EXPECT_EQ(inc->effects[0].amount.at(1), 3);
+    EXPECT_EQ(inc->effects[0].amount.at(2), 4);
+    EXPECT_EQ(inc->effects[0].amount.at(16), 4);
+    EXPECT_EQ(inc->effects[0].amount.at(17), 5);
+}
+
+TEST(RegistryGen, LouseTablesMatchJava) {
+    namespace r = sts::registry;
+    const auto check_rolls = [](const r::MonsterDef& l) {
+        ASSERT_EQ(l.roll_count, 2);
+        const r::MonsterRollDef* bite = l.roll(0);
+        const r::MonsterRollDef* curl = l.roll(1);
+        ASSERT_NE(bite, nullptr);
+        ASSERT_NE(curl, nullptr);
+        EXPECT_EQ(l.roll(2), nullptr);
+        EXPECT_EQ(bite->stream, r::MonsterRollStream::MONSTER_HP);
+        EXPECT_EQ(bite->timing,
+                  r::MonsterRollTiming::CONSTRUCTOR_AFTER_HP);
+        EXPECT_EQ(bite->min(1), 5);
+        EXPECT_EQ(bite->max(1), 7);
+        EXPECT_EQ(bite->min(2), 6);
+        EXPECT_EQ(bite->max(20), 8);
+        EXPECT_EQ(curl->stream, r::MonsterRollStream::MONSTER_HP);
+        EXPECT_EQ(curl->timing, r::MonsterRollTiming::PRE_BATTLE);
+        EXPECT_EQ(curl->min(6), 3);
+        EXPECT_EQ(curl->max(6), 7);
+        EXPECT_EQ(curl->min(7), 4);
+        EXPECT_EQ(curl->max(16), 8);
+        EXPECT_EQ(curl->min(17), 9);
+        EXPECT_EQ(curl->max(20), 12);
+    };
+
+    const r::MonsterDef& red = r::kLouseNormal;
+    EXPECT_EQ(static_cast<int>(red.id), 3);
+    EXPECT_EQ(red.hp_min(6), 10);
+    EXPECT_EQ(red.hp_max(6), 15);
+    EXPECT_EQ(red.hp_min(7), 11);
+    EXPECT_EQ(red.hp_max(20), 16);
+    EXPECT_EQ(r::kLouseNormalRollBiteDamage, 0);
+    EXPECT_EQ(r::kLouseNormalRollCurlUp, 1);
+    check_rolls(red);
+
+    const r::MonsterMove* red_bite = red.move(r::kLouseNormalMoveBite);
+    const r::MonsterMove* strengthen = red.move(r::kLouseNormalMoveStrengthen);
+    ASSERT_NE(red_bite, nullptr);
+    ASSERT_NE(strengthen, nullptr);
+    EXPECT_EQ(red_bite->intent, r::MonsterIntent::ATTACK);
+    EXPECT_EQ(red_bite->effects[0].amount.at(20), 0)
+        << "native turn substitutes the per-instance registry roll";
+    EXPECT_EQ(strengthen->intent, r::MonsterIntent::BUFF);
+    EXPECT_EQ(strengthen->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::STRENGTH));
+    EXPECT_EQ(strengthen->effects[0].amount.at(16), 3);
+    EXPECT_EQ(strengthen->effects[0].amount.at(17), 4);
+
+    const r::MonsterDef& green = r::kLouseDefensive;
+    EXPECT_EQ(static_cast<int>(green.id), 4);
+    EXPECT_EQ(green.hp_min(6), 11);
+    EXPECT_EQ(green.hp_max(6), 17);
+    EXPECT_EQ(green.hp_min(7), 12);
+    EXPECT_EQ(green.hp_max(20), 18);
+    EXPECT_EQ(r::kLouseDefensiveRollBiteDamage, 0);
+    EXPECT_EQ(r::kLouseDefensiveRollCurlUp, 1);
+    check_rolls(green);
+
+    const r::MonsterMove* weaken = green.move(r::kLouseDefensiveMoveWeaken);
+    ASSERT_NE(weaken, nullptr);
+    EXPECT_EQ(weaken->intent, r::MonsterIntent::DEBUFF);
+    EXPECT_EQ(weaken->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::WEAK));
+    EXPECT_EQ(weaken->effects[0].amount.at(0), 2);
+    EXPECT_EQ(weaken->effects[0].amount.at(20), 2);
+
+    const r::PowerDef* curl_power = r::power_def(r::PowerId::CURL_UP);
+    ASSERT_NE(curl_power, nullptr);
+    EXPECT_TRUE(curl_power->native);
+    EXPECT_NE(curl_power->hook_binding(r::Hook::ON_ATTACKED), nullptr);
+
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::BUFF), 4);
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::DEBUFF), 5);
+}
+
+// --- 6d. Duplicate move_id is rejected with a clear error --------------------
 TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
     const fs::path scratch = fs::path(kScratchDir);
     const fs::path bad_reg = scratch / "bad_registry_moves";
@@ -423,7 +541,9 @@ TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
     }
     {
         std::ofstream monsters(bad_reg / "monsters.yaml", std::ios::app);
-        monsters << "\n- id: 2\n  name: BAD_MOVES\n  game_id: \"BadMoves\"\n"
+        // id 99: an unused id (real ids 1..4 are JawWorm/Cultist/Louses) so the
+        // parser reaches the duplicate-move_id check rather than an id collision.
+        monsters << "\n- id: 99\n  name: BAD_MOVES\n  game_id: \"BadMoves\"\n"
                     "  provenance: \"synthetic duplicate-move_id negative test\"\n"
                     "  hp:\n    base: {min: 10, max: 12}\n"
                     "  moves:\n"

@@ -156,18 +156,38 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 // is an opaque uint8_t. `intent` is the telegraphed next move id. `flags` is a
 // reserved per-monster bitfield. `power_count` is the live length of `powers`
 // (parallels the pile counts); empty slots also read PowerId::NONE.
+//
+// PER-MONSTER-TYPE fields (`flags`, `pad0`) carry monster-specific meaning,
+// interpreted only by that monster's native module (B3.13+):
+//   * `flags` bit kMonsterFlagRitualSkip -- Cultist: the RitualPower's `skipFirst`
+//     (RitualPower.java:19,46-55). Set when the Cultist casts Incantation; the
+//     RITUAL native at_end_of_round body consumes it to skip the first tick.
+//   * `flags` bit kMonsterFlagCurlUpTriggered -- Louse: CurlUpPower.triggered
+//     (CurlUpPower.java:25,38-43). Set synchronously by onAttacked before its
+//     queued GainBlock/RemoveSpecificPower actions resolve, preventing a queued
+//     multi-hit attack from triggering more than once; cleared on power removal.
+//   * `pad0` -- Louse (Normal/Defensive): the per-instance rolled bite damage
+//     (monsterHpRng draw in the ctor, LouseNormal.java:60). 5..8 fits a byte; the
+//     louse turn reads it for the BITE DamageAction (see monster_louse.cpp).
+// These are mutually exclusive across monster types (a Cultist never bites; a
+// Louse never has Ritual), so no field is read under two meanings at once.
 struct MonsterState {
     uint16_t monster_id;              // MonsterId; NONE == empty slot
     int16_t hp;
     int16_t max_hp;
     int16_t block;
-    uint16_t flags;                   // reserved per-monster bitfield
+    uint16_t flags;                   // reserved per-monster bitfield (see above)
     uint8_t move_history[3];          // last 3 move ids, [0] = most recent
     uint8_t intent;                   // telegraphed next move id
     uint8_t power_count;              // live length of powers[]
-    uint8_t pad0;                     // explicit; keeps layout deterministic
+    uint8_t pad0;                     // per-monster aux byte (Louse bite dmg; else 0)
     PowerSlot powers[kPowerCap];
 };
+
+// Cultist RitualPower.skipFirst (MonsterState.flags bit): while set, the RITUAL
+// power's next at_end_of_round Strength tick is skipped (RitualPower.java:48-53).
+inline constexpr uint16_t kMonsterFlagRitualSkip = 0x0001u;
+inline constexpr uint16_t kMonsterFlagCurlUpTriggered = 0x0002u;
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,

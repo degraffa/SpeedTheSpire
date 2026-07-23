@@ -1270,7 +1270,7 @@ still fields a single Jaw Worm — but through the generalized path.
   (a later monsterHpRng phase, e.g. Louse curl-up) is a spawn seam for B3.13 --
   no B3.12 monster has one.
 
-### B3.13 `[ ]` ∥ Monsters: Cultist + louses
+### B3.13 `[x]` ∥ Monsters: Cultist + louses
 **Deps:** B3.12 · **Provenance:** Cultist.java (:59/66/95 A-branches),
 LouseNormal.java (:55-68/95/130), LouseDefensive.java
 **Deliverables:** registry entries (A2/A7/A17 columns cited per branch):
@@ -1279,7 +1279,25 @@ Cultist (Ritual), LouseNormal/Defensive (Curl Up, bite damage roll at spawn
 **Acceptance:** tier-2 per monster: move tables vs. hand-derived aiRng
 sequences (A3.2 fixture pattern); Curl Up block trigger on first attack
 damage.
-**Log:** —
+**Log:** Done 2026-07-23. Appended Cultist (monster 2), LouseNormal
+(monster 3), LouseDefensive (monster 4), and Curl Up (power 20) without
+renumbering IDs/opcodes or changing the fixed state layout. Generated monster
+roll metadata now records inclusive tier ranges plus RNG stream/timing: louse
+bite is `monsterHpRng` during construction after HP (base 5–7, A2 6–8), and
+Curl Up is the later pre-battle draw (base 3–7, A7 4–8, A17 9–12).
+Cultist Ritual is 3/4/5 at base/A2/A17 and preserves its first-round skip.
+Native turn/pre-battle hooks implement both louse move tables, rolled bite
+damage, Strength/Weak effects, and Curl Up's synchronous one-shot latch before
+queued block/removal (including queued multi-hit, fully blocked, and lethal
+guards). Committed independent Python XS128 fixtures cover 32 seeds × 20 turns
+for Cultist and both louses, asserting every move and exact RNG state/counter;
+registry tests pin all A2/A7/A17 columns and stream/timing metadata. Provenance:
+`Cultist.java:57-67,82-108,145-153`,
+`LouseNormal.java:50-73,75-104,128-153`,
+`LouseDefensive.java:53-76,78-107,131-156`,
+`RitualPower.java:19-55`, `CurlUpPower.java:25,36-46`, and
+`AbstractMonster.java:431-491,622-678`. Verification: focused
+Cultist/Louse/RegistryGen 29/29; full Debug 359/359; full ASan 359/359.
 
 ### B3.14 `[ ]` ∥ Monsters: small/medium slimes
 **Deps:** B3.12 · **Provenance:** SpikeSlime_S/M.java, AcidSlime_S/M.java

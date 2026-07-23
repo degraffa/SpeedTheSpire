@@ -140,6 +140,15 @@ void dispatch_at_end_of_turn_pre_card(CombatState& state) noexcept;
 // atEndOfTurn (Combust): player powers, via applyEndOfTurnTriggers.
 void dispatch_at_end_of_turn(CombatState& state) noexcept;
 
+// atEndOfRound (MonsterGroup.applyEndOfTurnPowers, MonsterGroup.java:290-304):
+// fires once per round when the player's next turn begins (GameActionManager.java:
+// 329-332). Order: each LIVE monster's applyEndOfTurnTriggers (monster powers'
+// atEndOfTurn) -> player powers atEndOfRound -> each LIVE monster's powers
+// atEndOfRound. The monster-Ritual Strength ramp (Cultist) fires in the last step.
+// No-op unless a monster/player holds a power binding these hooks, so the
+// jaw-worm-only fixtures are unchanged.
+void dispatch_at_end_of_round(CombatState& state) noexcept;
+
 // Start-of-turn player powers (§5.2 step 6): pre-draw and post-draw phases.
 void dispatch_at_start_of_turn(CombatState& state) noexcept;
 void dispatch_at_start_of_turn_post_draw(CombatState& state) noexcept;

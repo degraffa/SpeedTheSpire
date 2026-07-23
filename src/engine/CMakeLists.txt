@@ -3,6 +3,8 @@ add_library(sts_engine
     state_hash.cpp
     action_queue.cpp
     monster_jaw_worm.cpp
+    monster_cultist.cpp
+    monster_louse.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp

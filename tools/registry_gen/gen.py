@@ -197,10 +197,21 @@ MONSTER_INTENTS = {
     "ATTACK": 1,
     "DEFEND_BUFF": 2,
     "ATTACK_DEFEND": 3,
+    "BUFF": 4,       # Cultist Incantation, Louse Strengthen (AbstractMonster.Intent.BUFF)
+    "DEBUFF": 5,     # Louse Defensive Weaken (AbstractMonster.Intent.DEBUFF)
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).
 MONSTER_MOVE_TARGETS = {"SELF": 0, "PLAYER": 1}
+
+# Native per-instance monster rolls. These are registry data even when a native
+# monster module consumes them: the stream and lifecycle phase are as
+# bit-exactness-relevant as the range columns (B3.13 louse bite/Curl Up).
+MONSTER_ROLL_STREAMS = {'MONSTER_HP': 0}
+MONSTER_ROLL_TIMINGS = {
+    'CONSTRUCTOR_AFTER_HP': 0,
+    'PRE_BATTLE': 1,
+}
 
 # Encounter pool (generated EncounterPool) -- which Exordium.generateXxx list an
 # encounter belongs to (B3.12). Pinned/append-only. WEAK+STRONG feed the shared
@@ -1180,6 +1191,44 @@ def _parse_monster(entry: dict, powers: dict[str, int]) -> dict:
                        f"got {col!r}")
         hp_tiers.append((threshold, col["min"], col["max"]))
 
+    rolls = []
+    seen_roll_names: set[str] = set()
+    raw_rolls = entry.get('rolls', [])
+    if not isinstance(raw_rolls, list):
+        raise fail(f'{owner}: optional rolls must be a list, got {raw_rolls!r}')
+    for roll in raw_rolls:
+        if not isinstance(roll, dict):
+            raise fail(f'{owner}: each roll must be a mapping, got {roll!r}')
+        rname = roll.get('name')
+        if not isinstance(rname, str) or not _IDENT_RE.match(rname):
+            raise fail(f'{owner}: roll name must be an UPPER_SNAKE symbol, '
+                       f'got {rname!r}')
+        if rname in seen_roll_names:
+            raise fail(f'{owner}: duplicate roll name {rname!r}')
+        seen_roll_names.add(rname)
+        stream = roll.get('stream')
+        if stream not in MONSTER_ROLL_STREAMS:
+            raise fail(f'{owner}: roll {rname} has unknown stream {stream!r} '
+                       f'(known: {sorted(MONSTER_ROLL_STREAMS)})')
+        timing = roll.get('timing')
+        if timing not in MONSTER_ROLL_TIMINGS:
+            raise fail(f'{owner}: roll {rname} has unknown timing {timing!r} '
+                       f'(known: {sorted(MONSTER_ROLL_TIMINGS)})')
+        ranges = []
+        for threshold, col in _parse_tiers(
+                f'{owner}: roll {rname}', 'range', roll.get('range')):
+            if (not isinstance(col, dict) or
+                    not isinstance(col.get('min'), int) or
+                    not isinstance(col.get('max'), int)):
+                raise fail(f'{owner}: roll {rname} range tier must be '
+                           f'{{min: <int>, max: <int>}}, got {col!r}')
+            if col['min'] > col['max']:
+                raise fail(f'{owner}: roll {rname} range min exceeds max '
+                           f'({col["min"]} > {col["max"]})')
+            ranges.append((threshold, col['min'], col['max']))
+        rolls.append({'name': rname, 'stream': stream, 'timing': timing,
+                      'ranges': ranges})
+
     raw_moves = entry.get("moves")
     if not isinstance(raw_moves, list) or not raw_moves:
         raise fail(f"{owner}: 'moves' must be a non-empty list")
@@ -1240,7 +1289,8 @@ def _parse_monster(entry: dict, powers: dict[str, int]) -> dict:
         raise fail(f"{owner}: 'ai' must be 'native' (ai tables are a later "
                    f"task), got {ai!r}")
 
-    return {"name": name, "hp": hp_tiers, "moves": moves, "ai_native": True}
+    return {'name': name, 'hp': hp_tiers, 'rolls': rolls, 'moves': moves,
+            'ai_native': True}
 
 
 def emit_monster_table(domains: dict[str, list[dict]]) -> str:
@@ -1251,10 +1301,15 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     # while a domain is empty).
     max_stat_tiers = 1
     max_hp_tiers = 1
+    max_roll_tiers = 1
+    max_rolls = 1
     max_moves = 1
     max_effects = 1
     for m in monsters:
         max_hp_tiers = max(max_hp_tiers, len(m["hp"]))
+        max_rolls = max(max_rolls, len(m["rolls"]))
+        for roll in m["rolls"]:
+            max_roll_tiers = max(max_roll_tiers, len(roll["ranges"]))
         max_moves = max(max_moves, len(m["moves"]))
         for mv in m["moves"]:
             max_effects = max(max_effects, len(mv["effects"]))
@@ -1275,7 +1330,10 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
                       "if/else-if branches). Move",
                       "// *selection* for ai_native monsters stays in engine "
                       "code; the effects here",
-                      "// are the data it enqueues.\n",
+                       "// are the data it enqueues. Native per-instance rolls "
+                       "also carry their range,",
+                       "// RNG stream, and lifecycle timing here so those values "
+                       "cannot drift into code.\n",
                       "namespace sts::registry {\n"]
 
     out.append("// Telegraphed intent (AbstractMonster.Intent, player-facing "
@@ -1296,6 +1354,16 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("enum class MonsterMoveTarget : uint8_t {")
     for tname, val in sorted(MONSTER_MOVE_TARGETS.items(), key=lambda kv: kv[1]):
         out.append(f"    {tname} = {val},")
+    out.append("};\n")
+
+    out.append("// RNG stream and lifecycle phase for native per-instance rolls.")
+    out.append("enum class MonsterRollStream : uint8_t {")
+    for rname, val in sorted(MONSTER_ROLL_STREAMS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {rname} = {val},")
+    out.append("};")
+    out.append("enum class MonsterRollTiming : uint8_t {")
+    for rname, val in sorted(MONSTER_ROLL_TIMINGS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {rname} = {val},")
     out.append("};\n")
 
     out.append("// One per-ascension-tier column: value applies from "
@@ -1327,6 +1395,8 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("    int32_t hp_max;")
     out.append("};\n")
     out.append(f"inline constexpr int kMaxHpTiers = {max_hp_tiers};")
+    out.append(f"inline constexpr int kMaxMonsterRollTiers = {max_roll_tiers};")
+    out.append(f"inline constexpr int kMaxMonsterRolls = {max_rolls};")
     out.append(f"inline constexpr int kMaxMoveEffects = {max_effects};")
     out.append(f"inline constexpr int kMaxMonsterMoves = {max_moves};\n")
     out.append("struct MonsterMoveEffect {")
@@ -1343,11 +1413,39 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("    std::array<MonsterMoveEffect, kMaxMoveEffects> effects;  "
                "// takeTurn addToBottom order")
     out.append("};\n")
+    out.append("struct MonsterRollDef {")
+    out.append("    MonsterRollStream stream;")
+    out.append("    MonsterRollTiming timing;")
+    out.append("    uint8_t tier_count;")
+    out.append("    std::array<MonsterHpTier, kMaxMonsterRollTiers> range;")
+    out.append("    [[nodiscard]] constexpr int32_t min(int32_t ascension) "
+               "const noexcept {")
+    out.append("        int32_t value = range[0].hp_min;")
+    out.append("        for (uint8_t i = 1; i < tier_count; ++i) {")
+    out.append("            if (ascension >= range[i].min_ascension) {")
+    out.append("                value = range[i].hp_min;")
+    out.append("            }")
+    out.append("        }")
+    out.append("        return value;")
+    out.append("    }")
+    out.append("    [[nodiscard]] constexpr int32_t max(int32_t ascension) "
+               "const noexcept {")
+    out.append("        int32_t value = range[0].hp_max;")
+    out.append("        for (uint8_t i = 1; i < tier_count; ++i) {")
+    out.append("            if (ascension >= range[i].min_ascension) {")
+    out.append("                value = range[i].hp_max;")
+    out.append("            }")
+    out.append("        }")
+    out.append("        return value;")
+    out.append("    }")
+    out.append("};\n")
     out.append("struct MonsterDef {")
     out.append("    MonsterId id;")
     out.append("    uint8_t hp_tier_count;")
     out.append("    std::array<MonsterHpTier, kMaxHpTiers> hp;  "
                "// ascending; [0] is base (0)")
+    out.append("    uint8_t roll_count;")
+    out.append("    std::array<MonsterRollDef, kMaxMonsterRolls> rolls;")
     out.append("    uint8_t move_count;")
     out.append("    std::array<MonsterMove, kMaxMonsterMoves> moves;")
     out.append("    bool ai_native;      // move selection lives in engine code")
@@ -1380,6 +1478,10 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("        }")
     out.append("        return nullptr;")
     out.append("    }")
+    out.append("    [[nodiscard]] constexpr const MonsterRollDef* "
+               "roll(uint8_t index) const noexcept {")
+    out.append("        return index < roll_count ? &rolls[index] : nullptr;")
+    out.append("    }")
     out.append("};\n")
 
     def tiered_literal(amount: list[tuple[int, int]]) -> str:
@@ -1396,6 +1498,9 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
         for mv in m["moves"]:
             out.append(f"inline constexpr uint8_t k{pname}Move"
                        f"{_pascal(mv['name'])} = {mv['move_id']};")
+        for index, roll in enumerate(m["rolls"]):
+            out.append(f"inline constexpr uint8_t k{pname}Roll"
+                       f"{_pascal(roll['name'])} = {index};")
         out.append("")
         out.append(f"inline constexpr MonsterDef k{pname}{{")
         out.append(f"    MonsterId::{m['name']},")
@@ -1404,6 +1509,25 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
             hp_rows.append((0, 0, 0))
         hp_txt = ", ".join(f"{{{t}, {lo}, {hi}}}" for t, lo, hi in hp_rows)
         out.append(f"    {len(m['hp'])}, {{{{{hp_txt}}}}},")
+        out.append(f"    {len(m['rolls'])},")
+        out.append("    {{")
+        for roll in m["rolls"]:
+            range_rows = list(roll["ranges"])
+            while len(range_rows) < max_roll_tiers:
+                range_rows.append((0, 0, 0))
+            range_txt = ", ".join(
+                f"{{{t}, {lo}, {hi}}}" for t, lo, hi in range_rows)
+            out.append(
+                f"        {{MonsterRollStream::{roll['stream']}, "
+                f"MonsterRollTiming::{roll['timing']}, "
+                f"{len(roll['ranges'])}, {{{{{range_txt}}}}}}},")
+        for _ in range(len(m["rolls"]), max_rolls):
+            range_txt = ", ".join("{0, 0, 0}" for _ in range(max_roll_tiers))
+            out.append(
+                "        {MonsterRollStream::MONSTER_HP, "
+                "MonsterRollTiming::CONSTRUCTOR_AFTER_HP, 1, "
+                f"{{{{{range_txt}}}}}}},")
+        out.append("    }},")
         out.append(f"    {len(m['moves'])},")
         out.append("    {{")
         for mv in m["moves"]:

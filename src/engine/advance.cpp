@@ -107,6 +107,10 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    encounter. --
     static constexpr MonsterId kSkeletonGroup[] = {MonsterId::JAW_WORM};
     spawn_group(state, kSkeletonGroup);
+    // usePreBattleAction phase (the player's preBattlePrep, AFTER all ctors+init;
+    // B3.13's monster_hp_rng curl-up seam). Jaw Worm has none, so this is a no-op
+    // for the skeleton group and the 20 fixtures stay byte-identical.
+    use_pre_battle_actions(state);
 
     // -- Prime the pump's turn-1 invariants so the FIRST pump() call takes the
     //    start-of-turn branch (step 6) WITHOUT first misfiring the monster-turn

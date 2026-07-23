@@ -130,6 +130,34 @@ sts_enable_sanitizers(jaw_worm_test)
 
 gtest_discover_tests(jaw_worm_test)
 
+# B3.13: Cultist AI + monster turn. Same hand-derived-oracle pattern as
+# jaw_worm_test (tests/fixtures/cultist_fixture.tsv, gen by gen_cultist_fixture.py),
+# plus a pump-driven check of the monster Ritual Strength ramp (skipFirst).
+add_executable(cultist_test
+    cultist_test.cpp
+)
+
+target_link_libraries(cultist_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(cultist_test PRIVATE STS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+sts_set_warnings(cultist_test)
+sts_enable_sanitizers(cultist_test)
+
+gtest_discover_tests(cultist_test)
+
+# B3.13: Louse (Normal + Defensive) AI + monster turn + curl-up. Hand-derived
+# oracle (louse_{normal,defensive}_fixture.tsv, gen by gen_louse_fixture.py),
+# plus the Curl Up on-first-attack block trigger acceptance test.
+add_executable(louse_test
+    louse_test.cpp
+)
+
+target_link_libraries(louse_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(louse_test PRIVATE STS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+sts_set_warnings(louse_test)
+sts_enable_sanitizers(louse_test)
+
+gtest_discover_tests(louse_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

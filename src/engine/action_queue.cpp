@@ -104,7 +104,11 @@ void call_end_of_turn_actions(CombatState& s) noexcept {
 // Start-of-turn sequence (design doc §5.2 step 6; GameActionManager.java:
 // 329-366). Stubs are named where a future subsystem would attach.
 void start_of_turn(CombatState& s) noexcept {
-    // monsters' applyEndOfTurnPowers -- stub (no monster powers with this hook).
+    // monsters.applyEndOfTurnPowers() (GameActionManager.java:331) -- the
+    // atEndOfRound dispatch (monster atEndOfTurn -> player atEndOfRound -> monster
+    // atEndOfRound). The Cultist's Ritual Strength ramp fires here. No-op unless a
+    // power binds these hooks, so jaw-worm-only fixtures are byte-identical.
+    dispatch_at_end_of_round(s);
     s.cards_played_this_turn = 0;               // player.cardsPlayedThisTurn = 0
     // orbsChanneledThisTurn.clear() -- no orbs.
     // applyStartOfTurnRelics -> relics atTurnStart (acq order; Happy Flower, Lantern,

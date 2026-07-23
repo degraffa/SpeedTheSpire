@@ -112,6 +112,9 @@ std::string monster_repr(uint16_t v) {
     switch (static_cast<MonsterId>(v)) {
         case MonsterId::NONE: n = "NONE"; break;
         case MonsterId::JAW_WORM: n = "JAW_WORM"; break;
+        case MonsterId::CULTIST: n = "CULTIST"; break;
+        case MonsterId::LOUSE_NORMAL: n = "LOUSE_NORMAL"; break;
+        case MonsterId::LOUSE_DEFENSIVE: n = "LOUSE_DEFENSIVE"; break;
     }
     return named(n, v);
 }

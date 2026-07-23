@@ -8,6 +8,13 @@
 #     hp:                  per-ascension-tier HP range columns (design doc B §4.2/§6):
 #       base: {min: , max: }     ascension 0+ column (mandatory)
 #       a<N>: {min: , max: }     ascension >= N column(s), ascending
+#     rolls: []            optional native per-instance RNG rolls; each carries
+#                          name, stream, lifecycle timing, and tiered inclusive
+#                          range columns. The native module consumes the data.
+#       - name: <SYMBOL>
+#         stream: MONSTER_HP
+#         timing: CONSTRUCTOR_AFTER_HP | PRE_BATTLE
+#         range: {base: {min: , max: }, a<N>: {min: , max: }}
 #     moves:               move list; each move an intent + effect program in
 #                          takeTurn addToBottom order (effects as data, §4.2)
 #       - name: <SYMBOL>
@@ -67,3 +74,111 @@
                # Chomp, then d100 on aiRng with lastMove/lastTwoMoves history and
                # randomBoolean tiebreaks. Selection stays native (AbstractMonster
                # move history); move *effects* above are data.
+
+# --- B3.13: Cultist + Louses (Act-1 weak pool) -------------------------------
+# Stat/move numbers per-column below cite the decompiled Java (read in full;
+# D:\STS_BG_Mod\SlayTheSpireDecompiled\...\monsters\exordium). Ascension-threshold
+# convention for normals (scoping §2): HP keys on A7, damage/ritual on A2, AI/
+# special on A17 (the A_2_* static field names are misleading -- trust the
+# `if (ascensionLevel >= N)` branches). Selection is native (monster_cultist.*,
+# monster_louse.*); the move *effects* are the data below.
+
+- id: 2
+  name: CULTIST
+  game_id: "Cultist"
+  provenance: "Cultist ctor setHp/ritual branches (Cultist.java:57-75), takeTurn (Cultist.java:82-109), getMove (Cultist.java:145-153), move ids DARK_STRIKE=1/INCANTATION=3 (Cultist.java:53-54), ATTACK_DMG 6 (:47,67), RITUAL_AMT A2?4:3 (:50-51,66), A17 ritualAmount+1 (:95-99); ID (Cultist.java:32)"
+  hp:
+    base: {min: 48, max: 54}   # Cultist.java:61-62 (ascension < 7)
+    a7:   {min: 50, max: 56}   # Cultist.java:59-60 (ascension >= 7)
+  moves:
+    - name: DARK_STRIKE
+      move_id: 1               # Cultist.java:53
+      intent: ATTACK
+      effects:
+        # attackDmg 6 flat, all ascensions (Cultist.java:47, damage.add(new DamageInfo(this,6)) :67).
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+    - name: INCANTATION
+      move_id: 3               # Cultist.java:54
+      intent: BUFF
+      effects:
+        # RitualPower(this, ritualAmount, false): ritualAmount = A2?4:3 (:66); at
+        # A17 applies ritualAmount+1 (=5) (:95-99). Applied to SELF (onPlayer=false
+        # -> the monster atEndOfRound Strength ramp, skipFirst; RITUAL native body).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a2: 4, a17: 5}, power: RITUAL}
+  ai: native   # getMove (Cultist.java:145-153): firstMove -> INCANTATION(3), then
+               # DARK_STRIKE(1) forever. Deterministic; num ignored; 1 aiRng/turn.
+
+- id: 3
+  name: LOUSE_NORMAL
+  game_id: "FuzzyLouseNormal"
+  provenance: "LouseNormal ctor setHp+bite (LouseNormal.java:50-62), usePreBattleAction curl-up (:64-73), takeTurn (:75-104), getMove (:128-153), move ids BITE=3/STRENGTHEN=4 (:41-42), STR_AMOUNT 3 / A17 4 (:48,95-100); bite = monsterHpRng.random(A2?6-8:5-7) IN THE CTOR after setHp (:60); ID (:31)"
+  hp:
+    base: {min: 10, max: 15}   # LouseNormal.java:57-58 (ascension < 7)
+    a7:   {min: 11, max: 16}   # LouseNormal.java:55-56 (ascension >= 7)
+  rolls:
+    - name: BITE_DAMAGE
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_AFTER_HP
+      range:
+        base: {min: 5, max: 7}  # LouseNormal.java:60 (ascension < 2)
+        a2:   {min: 6, max: 8}  # LouseNormal.java:60 (ascension >= 2)
+    - name: CURL_UP
+      stream: MONSTER_HP
+      timing: PRE_BATTLE
+      range:
+        base: {min: 3, max: 7}  # LouseNormal.java:71 (ascension < 7)
+        a7:   {min: 4, max: 8}  # LouseNormal.java:68-69 (ascension 7..16)
+        a17:  {min: 9, max: 12} # LouseNormal.java:65-66 (ascension >= 17)
+  moves:
+    - name: BITE
+      move_id: 3               # LouseNormal.java:41
+      intent: ATTACK
+      effects:
+        # biteDamage is a PER-INSTANCE monsterHpRng roll in the ctor (A2?random(6,8):
+        # random(5,7), LouseNormal.java:60), NOT a static column -- the native louse
+        # turn substitutes the rolled value (stored in MonsterState.pad0) for this
+        # placeholder amount. See monster_louse.cpp.
+        - {op: DAMAGE, target: PLAYER, amount: 0}
+    - name: STRENGTHEN
+      move_id: 4               # LouseNormal.java:42
+      intent: BUFF
+      effects:
+        # StrengthPower(this, 3), or 4 at A17 (LouseNormal.java:95-100).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a17: 4}, power: STRENGTH}
+  ai: native
+
+- id: 4
+  name: LOUSE_DEFENSIVE
+  game_id: "FuzzyLouseDefensive"
+  provenance: "LouseDefensive ctor setHp+bite (LouseDefensive.java:53-65), usePreBattleAction curl-up (:67-76), takeTurn (:78-107), getMove (:131-156), move ids BITE=3/WEAKEN=4 (:44-45), WEAK_AMT 2 (:51,102); bite = monsterHpRng.random(A2?6-8:5-7) IN THE CTOR after setHp (:63); ID (:35)"
+  hp:
+    base: {min: 11, max: 17}   # LouseDefensive.java:61-62 (ascension < 7)
+    a7:   {min: 12, max: 18}   # LouseDefensive.java:59-60 (ascension >= 7)
+  rolls:
+    - name: BITE_DAMAGE
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_AFTER_HP
+      range:
+        base: {min: 5, max: 7}  # LouseDefensive.java:63 (ascension < 2)
+        a2:   {min: 6, max: 8}  # LouseDefensive.java:63 (ascension >= 2)
+    - name: CURL_UP
+      stream: MONSTER_HP
+      timing: PRE_BATTLE
+      range:
+        base: {min: 3, max: 7}  # LouseDefensive.java:74 (ascension < 7)
+        a7:   {min: 4, max: 8}  # LouseDefensive.java:71-72 (ascension 7..16)
+        a17:  {min: 9, max: 12} # LouseDefensive.java:69-70 (ascension >= 17)
+  moves:
+    - name: BITE
+      move_id: 3               # LouseDefensive.java:44
+      intent: ATTACK
+      effects:
+        # per-instance biteDamage roll (LouseDefensive.java:63); native substitutes.
+        - {op: DAMAGE, target: PLAYER, amount: 0}
+    - name: WEAKEN
+      move_id: 4               # LouseDefensive.java:45
+      intent: DEBUFF
+      effects:
+        # WeakPower(player, 2, true) -- 2 Weak to the player (LouseDefensive.java:102).
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+  ai: native

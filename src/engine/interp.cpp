@@ -301,6 +301,13 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (*count >= kPowerCap) {
         return;
     }
+    if (id == PowerId::CURL_UP && tgt < kMonsterCap) {
+        // A newly-created CurlUpPower starts with triggered=false
+        // (CurlUpPower.java:25,27-34). Existing instances preserve the latch when
+        // stacked; only the new-slot path clears it.
+        s.monsters[tgt].flags = static_cast<uint16_t>(
+            s.monsters[tgt].flags & ~kMonsterFlagCurlUpTriggered);
+    }
     slots[*count].power_id = pid;
     slots[*count].amount = static_cast<int16_t>(amount);
     ++*count;
@@ -626,6 +633,12 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
             }
             --*count;
             slots[*count] = PowerSlot{};  // zero the vacated tail slot
+            if (id == PowerId::CURL_UP && tgt < kMonsterCap) {
+                // RemoveSpecificPowerAction destroys the CurlUpPower instance;
+                // its private triggered latch leaves with it.
+                s.monsters[tgt].flags = static_cast<uint16_t>(
+                    s.monsters[tgt].flags & ~kMonsterFlagCurlUpTriggered);
+            }
             return;
         }
     }

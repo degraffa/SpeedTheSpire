@@ -214,6 +214,35 @@ void dispatch_at_end_of_turn(CombatState& s) noexcept {
     dispatch_actor_powers(s, kActorPlayer, Hook::AT_END_OF_TURN, HookContext{});
 }
 
+void dispatch_at_end_of_round(CombatState& s) noexcept {
+    // MonsterGroup.applyEndOfTurnPowers (MonsterGroup.java:290-304), in order:
+    //   (1) each LIVE monster: applyEndOfTurnTriggers -> monster powers'
+    //       atEndOfTurnPreEndTurnCards(false) + atEndOfTurn(false). No B3.13
+    //       monster power binds these (Metallicize is B3.19; the Cultist's RITUAL
+    //       guards atEndOfTurn on isPlayer -> no-op for a monster owner). Call
+    //       sites kept for faithful ordering / future powers.
+    //   (2) player powers atEndOfRound (a player-owner Ritual is onPlayer -> its
+    //       atEndOfRound is a no-op; guarded in the native body).
+    //   (3) each LIVE monster: its powers atEndOfRound -- the Cultist Ritual
+    //       Strength ramp fires here.
+    // "live" == hp > 0 (dying/escaping are skipped in the game; we model dying as
+    // hp <= 0). No-op unless a power binds these hooks -> jaw-worm fixtures unchanged.
+    for (uint8_t m = 0; m < s.monster_count; ++m) {
+        if (s.monsters[m].hp <= 0) {
+            continue;
+        }
+        dispatch_actor_powers(s, m, Hook::AT_END_OF_TURN_PRE_CARD, HookContext{});
+        dispatch_actor_powers(s, m, Hook::AT_END_OF_TURN, HookContext{});
+    }
+    dispatch_actor_powers(s, kActorPlayer, Hook::AT_END_OF_ROUND, HookContext{});
+    for (uint8_t m = 0; m < s.monster_count; ++m) {
+        if (s.monsters[m].hp <= 0) {
+            continue;
+        }
+        dispatch_actor_powers(s, m, Hook::AT_END_OF_ROUND, HookContext{});
+    }
+}
+
 void dispatch_at_start_of_turn(CombatState& s) noexcept {
     dispatch_actor_powers(s, kActorPlayer, Hook::AT_START_OF_TURN, HookContext{});
 }
@@ -497,6 +526,92 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
             rem.tgt = ctx.owner;
             rem.flags = make_apply_power_flags(PowerId::LOSE_DEXTERITY);
             add_to_bottom(s, rem);
+            return;
+        }
+        case PowerId::RITUAL: {
+            // RitualPower has two branches on `onPlayer`; we key it on the OWNER
+            // actor (the potion applies to the PLAYER; the Cultist to ITSELF):
+            //   * atEndOfTurn (RitualPower.java:38-43, isPlayer guard): the
+            //     player/potion Ritual gains `amount` Strength each end of turn.
+            //     Only the player is dispatched AT_END_OF_TURN (dispatch_at_end_of_
+            //     turn), and a monster owner is guarded out here for safety.
+            //   * atEndOfRound (:46-55, !onPlayer + skipFirst): the monster Cultist
+            //     Ritual gains `amount` Strength each round AFTER the first. The
+            //     skipFirst state is the owner monster's kMonsterFlagRitualSkip bit,
+            //     set by the Cultist when it casts Incantation.
+            if (hook == Hook::AT_END_OF_TURN) {
+                if (ctx.owner != kActorPlayer) {
+                    return;  // RitualPower.atEndOfTurn's isPlayer guard
+                }
+                ActionQueueItem up{};
+                up.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                up.src = ctx.owner;
+                up.tgt = ctx.owner;
+                up.amount = ctx.power_amount;  // +amount Strength
+                up.flags = make_apply_power_flags(PowerId::STRENGTH);
+                add_to_bottom(s, up);          // addToBot (RitualPower.java:41)
+                return;
+            }
+            if (hook == Hook::AT_END_OF_ROUND) {
+                if (ctx.owner == kActorPlayer || ctx.owner >= kMonsterCap) {
+                    return;  // player Ritual is onPlayer -> atEndOfRound no-op
+                }
+                uint16_t& mf = s.monsters[ctx.owner].flags;
+                if ((mf & kMonsterFlagRitualSkip) != 0u) {
+                    mf = static_cast<uint16_t>(mf & ~kMonsterFlagRitualSkip);
+                    return;  // skipFirst: consume, no Strength this round
+                }
+                ActionQueueItem up{};
+                up.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                up.src = ctx.owner;
+                up.tgt = ctx.owner;
+                up.amount = ctx.power_amount;  // +amount Strength
+                up.flags = make_apply_power_flags(PowerId::STRENGTH);
+                add_to_bottom(s, up);          // addToBot (RitualPower.java:50)
+                return;
+            }
+            return;
+        }
+        case PowerId::CURL_UP: {
+            // CurlUpPower.onAttacked (CurlUpPower.java:36-46): the FIRST NORMAL,
+            // non-lethal (damageAmount < owner.currentHealth), >0 attack makes the
+            // louse gain `amount` Block, then removes Curl Up (one-shot -- modelled
+            // by the self-removal). op_damage already gated dispatch_on_attacked to
+            // NORMAL src != tgt AFTER decrementBlock, with the post-block damage and
+            // the owner's pre-hit HP, so `ctx.amount` == damageAmount and the owner's
+            // hp is still currentHealth here.
+            if (hook != Hook::ON_ATTACKED) {
+                return;
+            }
+            if (ctx.source == ctx.owner || ctx.amount <= 0 ||
+                ctx.owner >= kMonsterCap) {
+                return;
+            }
+            MonsterState& owner = s.monsters[ctx.owner];
+            if ((owner.flags & kMonsterFlagCurlUpTriggered) != 0u) {
+                return;  // triggered latch flips before queued actions resolve
+            }
+            if (ctx.amount >= owner.hp) {
+                return;  // damageAmount < owner.currentHealth guard (lethal skips)
+            }
+            // CurlUpPower.java:40 sets triggered=true synchronously, before the
+            // GainBlock/RemoveSpecificPower actions it adds to the bottom. This is
+            // observable for queued multi-hit attacks: later hits run while Curl Up
+            // is still present but must not queue another block gain.
+            owner.flags |= kMonsterFlagCurlUpTriggered;
+            ActionQueueItem blk{};
+            blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+            blk.src = ctx.owner;
+            blk.tgt = ctx.owner;
+            blk.amount = ctx.power_amount;  // Block = Curl Up amount
+            blk.flags = kBlockNoPowers;     // GainBlockAction (direct, no Dexterity)
+            add_to_bottom(s, blk);          // addToBot (CurlUpPower.java:42)
+            ActionQueueItem rem{};
+            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+            rem.src = ctx.owner;
+            rem.tgt = ctx.owner;
+            rem.flags = make_apply_power_flags(PowerId::CURL_UP);
+            add_to_bottom(s, rem);          // addToBot (CurlUpPower.java:43)
             return;
         }
         case PowerId::ARTIFACT:
