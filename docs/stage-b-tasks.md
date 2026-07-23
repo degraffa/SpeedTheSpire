@@ -348,7 +348,7 @@ floor is unreachable, stop and amend design §2.2/§8 per its own rule before
 proceeding.
 **Log:** —
 
-### B1.4 `[ ]` Campaign driver
+### B1.4 `[x]` Campaign driver
 **Deps:** B1.2 · **Spec:** design §2.7, §3.3 (generators), §7.2
 **Deliverables:** `tools/oracle_bridge/driver/` grows into the real driver:
 seeded A20 Ironclad starts; action-script execution (scripted sequences) and
@@ -360,7 +360,90 @@ mode over seed lists.
 completes without manual intervention, surviving at least one deliberately
 induced game kill mid-campaign; artifacts validate against the PROTOCOL.md
 schema.
-**Log:** —
+**Log:** Verified by running, not inferred (Windows host — excluded from WSL
+CI). Grew `tools/oracle_bridge/driver/` into the real driver:
+`campaign_driver.py` (the CommunicationMod-oracle child), `orchestrator.py`
+(Windows-host game-lifecycle owner), `validate_artifacts.py` (PROTOCOL.md
+schema check); `echo_driver.py` kept as the B0.2 bring-up tool.
+**Driver design.** Strict lock-step stepper — **one command per fresh
+`ready_for_command`**, freshness by a monotonic recv-index, per-command
+wall-clock watchdog, **never blind-resends** (the B0.2 contamination
+discipline; the game spawns the child and owns its stdio, so process lifecycle
+is the orchestrator's job). Seeded start `start ironclad 20 <SEED>` (base-35
+display string); the seed long is read back from `game_state.seed` and
+crosschecked against a bit-exact `SeedHelper.getLong` port
+(STS12345↔1790052133945; all 10 run headers `crosscheck_ok:true`). Two
+generators: **random-legal** (uniform over the game's own `available_commands`,
+expanded to concrete legal actions — play+target / potion / choose / confirm /
+cancel; `key`/`click`/`wait`/`state`/`start` excluded per scoping §4) and
+**script** (paced through the same gate). Per-seed policy RNG (`policy_seed:seed`)
+so any run reproduces in isolation (design §7.5 (seed, action-prefix)
+reproducers). Terminations (§4.3 / design §1.1): death (GAME_OVER → `proceed`
+back to the menu, then the next `start`), **Act-1 boss reward claimed** — stops
+BEFORE the boss chest / boss-relic pick — action cap, legal-action exhaustion.
+**Artifacts** (design §2.7): one JSONL per run — `header` (schema/driver ver,
+game+mod-set, **fork-jar sha256 computed at runtime**, seed **both** encodings,
+`oracle_block_enabled`), then one `action` record per injected action
+`{action_command, sim_action_bits:null, ready_for_command, available_commands,
+state_json}` where `state_json` is the game's dump **verbatim / un-pruned**
+(lossless — 64-bit stream longs preserved exactly; B1.5's unknown-field-is-error
+contract honoured), then a `terminal` record. **Resume:** durable
+`campaign_progress.json` (fsync'd per seed transition) + heartbeat; the
+orchestrator relaunches under the bundled JRE 8 on crash / hang / boss-reward;
+resume granularity = one seed (retry-once-then-fail, so one seed can't wedge the
+campaign). Artifacts live under the §7.3 data root
+`D:\STS_BG_Mod\_oracle_data\campaigns`, **never committed**.
+**Acceptance — unattended 10-seed campaign, A20 Ironclad, random-legal,
+policy-seed 1234, seeds STS00001–STS00010, one deliberate mid-campaign game kill
+after 3 seeds** (Windows-host: `python orchestrator.py --campaign-id
+b14_accept2 --seeds …/b14_seeds.txt --policy random-legal --policy-seed 1234
+--kill-after-seeds 3 --fresh`). Result: **10/10 done, 0 failed, 574 injected
+actions**, 2 launches (1 induced kill → 1 relaunch); the killed seed **STS00004
+resumed from `start` on launch #2 and completed (attempt 2)**:
+
+| seed | outcome | floor | actions | attempts |
+|---|---|---|---|---|
+| STS00001 | death | 4 | 79 | 1 |
+| STS00002 | death | 2 | 51 | 1 |
+| STS00003 | death | 1 | 24 | 1 |
+| STS00004 | death | 5 | 67 | **2** (killed+resumed) |
+| STS00005 | death | 2 | 42 | 1 |
+| STS00006 | death | 1 | 26 | 1 |
+| STS00007 | death | 3 | 56 | 1 |
+| STS00008 | death | 5 | 76 | 1 |
+| STS00009 | death | 6 | 89 | 1 |
+| STS00010 | death | 3 | 64 | 1 |
+
+All 10 artifacts **validate against the PROTOCOL.md schema**
+(`validate_artifacts.py --campaign`: 10 files, **0 errors**) — header
+provenance present, every in-game `state_json` carrying the §3.1 status keys +
+§3.2 anchors + the fork **`oracle`** block (14 streams as {counter,s0,s1}, pity,
+pools), each run ending in a `terminal` record.
+**Honest triage (recorded per the hygiene rules).** A first campaign run
+(`b14_accept`, pre-fix code) had **STS00007 fail after 2 crash-retries** (9/10;
+the induced kill + crash-resume still let the campaign run unattended to the
+end). Root cause, from the seed's partial JSONL + game log (no game exception,
+game process alive): on Living Wall's event **GRID**, the random policy sent
+`cancel` on the grid-confirm — a game-advertised legal action that **never
+re-armed `ready_for_command`**; the 90 s watchdog fired and, retry-once
+exhausted, the seed was failed. Classified as a **driver deficiency**, not a
+flake: the watchdog conflated "game gone" with "advertised no-op". **Fixed** —
+on a watchdog trip the driver now pings `state` (forces a dump regardless of
+readiness); a reply proves the game is alive, so the command was a no-op and the
+driver escapes by completing the pending screen (`confirm`) instead of declaring
+a crash (bounded by `--max-noops`). Reproduced+fixed on the exact seed (per-seed
+RNG): STS00007 hits the `cancel` no-op **3×** and now recovers to a natural death
+(floor 3). The canonical 10/10 table above was then produced end-to-end by this
+committed code.
+**Windows-host command + WSL.** Command above; **WSL suite green — 140/140 in
+debug + asan** (no engine change; `tools/oracle_bridge/driver` is excluded from
+WSL CI, per the working agreements). **B1.5 note:** `state_json` is lossless /
+un-pruned (oracle block + signed 64-bit stream longs bit-preserved);
+`sim_action_bits` is present-but-`null` for a stable shape; per-record
+`ready_for_command` lets the translator drop the driver's no-op recovery
+actions. **B1.3 note:** the strip-equivalence A/B and throughput measurement
+reuse this lock-step transport; `--timeout`/`--probe-timeout`/`--stall-timeout`
+are tunable for the strip-patched ≥5/s floor.
 
 ### B1.5 `[ ]` Translator (JSON → binary schema)
 **Deps:** B1.4 · **Spec:** design §2.6 · **Provenance:** PROTOCOL.md field

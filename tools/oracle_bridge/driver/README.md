@@ -1,10 +1,83 @@
-# Oracle bridge driver (Stage B B0.2)
+# Oracle bridge driver (Stage B)
+
+This directory holds the oracle-bridge driver family. Protocol details are in
+[../PROTOCOL.md](../PROTOCOL.md) (surveyed from the vendored source at B0.1).
+
+| File | Task | Role |
+|---|---|---|
+| `campaign_driver.py` | **B1.4** | the real campaign driver — the CommunicationMod-oracle child: seeded A20 Ironclad starts, random-legal + scripted generators, per-run JSONL artifacts (design 2.7), crash detection, seed-level resume, batch over a seed list |
+| `orchestrator.py` | **B1.4** | Windows-host outer loop that owns the game process: writes config.properties, launches ModTheSpire under the bundled JRE 8, relaunches on crash/hang/boss-reward, induces a kill for acceptance |
+| `validate_artifacts.py` | **B1.4** | validates run JSONL against the PROTOCOL.md schema (header + action `state_json` + oracle block + terminal) |
+| `echo_driver.py` | B0.2 | bring-up child: logs every state JSON, forwards side-channel commands, `--verify` re-parse |
+
+## B1.4 campaign driver
+
+`campaign_driver.py` is the CommunicationMod-oracle child (the game spawns it and
+owns its stdio — see [Topology](#topology-protocolmd-1)). It is a strict
+**lock-step** stepper: it sends **one command per fresh `ready_for_command`**
+state and **never blind-resends** on silence (prolonged silence is a crash, per a
+wall-clock watchdog — the B0.2 contamination postmortem, ledger B1.1 Log). It
+plays seeded A20 Ironclad runs to a terminal state (death, Act-1 boss-reward
+claimed — design 1.1, so it stops *before* the boss chest — legal-action
+exhaustion, or an action cap), writing one JSONL artifact per run.
+
+Because the game (not the orchestrator) is the driver's parent, the driver cannot
+own game launch/kill/relaunch — `orchestrator.py` does. The driver owns the
+per-run protocol, the artifacts, and a durable `campaign_progress.json`; a
+crashed game costs one run, not the campaign (design 7.1(2)). Resume granularity
+is **one seed** (the protocol exposes no mid-run save): an interrupted seed is
+re-run from `start` on the next launch (retry-once, then failed).
+
+### Running a campaign (operator, Windows host)
+
+```bat
+C:\Python39\python.exe orchestrator.py ^
+    --campaign-id b14_accept ^
+    --seeds D:/STS_BG_Mod/_oracle_data/campaigns/b14_seeds.txt ^
+    --policy random-legal ^
+    --kill-after-seeds 3 --fresh
+```
+
+The orchestrator writes `%LOCALAPPDATA%\ModTheSpire\CommunicationMod\config.properties`
+(so `runAtGameStart=true` spawns the driver with the right args), launches the
+game under `<game>\jre\bin\java.exe` (bundled JRE 8 — never system Java, ledger
+B1.1 Log), watches `campaign_progress.json` + `campaign_heartbeat.json`, and
+relaunches on crash / hang / boss-reward until the driver marks the campaign
+complete. `--kill-after-seeds N` induces one deliberate mid-campaign game kill to
+exercise crash-resume (the B1.4 acceptance bar).
+
+Artifacts land under `<data-root>/<campaign-id>/`:
+`run_<seed>_a20_ironclad.jsonl` (one per run), `campaign_progress.json`,
+`campaign_manifest.json`, `campaign_heartbeat.json`,
+`orchestrator_timeline.json`, `mts_launch<N>.log`. The **data root is never
+committed** (design 7.3); default `D:\STS_BG_Mod\_oracle_data\campaigns`.
+
+### Artifact schema (design 2.7)
+
+Line 1 is a `header` (schema/driver version, game+mod-set, **fork-jar sha256**,
+seed as **both** base-35 string and long, ascension, character, policy). Then one
+`action` record per injected action — `{action_command, sim_action_bits (null,
+B1.5 fills it), ready_for_command, available_commands, state_json}` — where
+`state_json` is the game's dump **verbatim / un-pruned** (lossless: the translator
+B1.5 enforces unknown-field-is-error). The file ends with a `terminal` record
+(`outcome`, floor, act, actions). Validate with:
+
+```bash
+python validate_artifacts.py --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b14_accept
+```
+
+### Scripted mode
+
+`--policy script --script <file>` paces a fixed command list (one per line) through
+the same lock-step gate instead of the random-legal generator.
+
+---
+
+## B0.2 echo_driver
 
 `echo_driver.py` is the minimal CommunicationMod child process: it logs every
-game-state JSON the game emits and forwards commands the operator supplies. It
-is the bring-up tool for the bridge; the real campaign driver (B1.4) grows from
-here. Protocol details it relies on are in [../PROTOCOL.md](../PROTOCOL.md)
-(surveyed from the vendored source at B0.1).
+game-state JSON the game emits and forwards commands the operator supplies. It is
+the bring-up tool for the bridge; `campaign_driver.py` grew from here.
 
 ## Topology (PROTOCOL.md §1)
 
