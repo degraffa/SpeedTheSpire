@@ -48,9 +48,13 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
     private static final String GAME_START_OPTION = "runAtGameStart";
     private static final String VERBOSE_OPTION = "verbose";
     private static final String INITIALIZATION_TIMEOUT_OPTION = "maxInitializationTimeout";
+    // SpeedTheSpire fork addition (stage-b-design §2.5): gate the "oracle" state
+    // block so stock CommunicationMod consumers (this key absent) are unaffected.
+    private static final String ORACLE_BLOCK_OPTION = "oracleBlock";
     private static final String DEFAULT_COMMAND = "";
     private static final long DEFAULT_TIMEOUT = 10L;
     private static final boolean DEFAULT_VERBOSITY = true;
+    private static final boolean DEFAULT_ORACLE_BLOCK = true;
 
     public CommunicationMod(){
         BaseMod.subscribe(this);
@@ -62,6 +66,7 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             defaults.put(GAME_START_OPTION, Boolean.toString(false));
             defaults.put(INITIALIZATION_TIMEOUT_OPTION, Long.toString(DEFAULT_TIMEOUT));
             defaults.put(VERBOSE_OPTION, Boolean.toString(DEFAULT_VERBOSITY));
+            defaults.put(ORACLE_BLOCK_OPTION, Boolean.toString(DEFAULT_ORACLE_BLOCK));
             communicationConfig = new SpireConfig("CommunicationMod", "config", defaults);
             String command = communicationConfig.getString(COMMAND_OPTION);
             // I want this to always be saved to the file so people can set it more easily.
@@ -216,6 +221,23 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
                     }
                 });
         settingsPanel.addUIElement(verbosityOption);
+
+        // SpeedTheSpire fork addition (stage-b-design §2.5): toggle the oracle block.
+        ModLabeledToggleButton oracleBlockOption = new ModLabeledToggleButton(
+                "Emit SpeedTheSpire oracle state block",
+                350, 450, Settings.CREAM_COLOR, FontHelper.charDescFont,
+                getOracleBlockOption(), settingsPanel, modLabel -> {},
+                modToggleButton -> {
+                    if (communicationConfig != null) {
+                        communicationConfig.setBool(ORACLE_BLOCK_OPTION, modToggleButton.enabled);
+                        try {
+                            communicationConfig.save();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+        settingsPanel.addUIElement(oracleBlockOption);
         BaseMod.registerModBadge(ImageMaster.loadImage("Icon.png"),"Communication Mod", "Forgotten Arbiter", null, settingsPanel);
     }
 
@@ -298,6 +320,18 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             return DEFAULT_VERBOSITY;
         }
         return communicationConfig.getBool(VERBOSE_OPTION);
+    }
+
+    // SpeedTheSpire fork addition (stage-b-design §2.5, task B1.2): when true, the
+    // fork appends the "oracle" hidden-state block to every in-dungeon state dump
+    // (see GameStateConverter.getOracleState). When false the fork behaves exactly
+    // like stock CommunicationMod (no "oracle" key), which is how B1.3 proves the
+    // rendering-strip patches leave the dump byte-identical.
+    public static boolean getOracleBlockOption() {
+        if (communicationConfig == null) {
+            return DEFAULT_ORACLE_BLOCK;
+        }
+        return communicationConfig.getBool(ORACLE_BLOCK_OPTION);
     }
 
     private boolean startExternalProcess() {

@@ -257,7 +257,7 @@ clean (`echo_driver.py --verify`: 206 recv, 0 errors). Replay/compare helpers
 (`replay_b11.py`, `compare_b11.py`) are data-root throwaways per the B0.2
 stepper precedent. WSL suite untouched: 140/140 green in debug + asan.
 
-### B1.2 `[ ]` Oracle state block
+### B1.2 `[x]` Oracle state block
 **Deps:** B1.1 · **Spec:** design §2.5 (the frozen 10-row field inventory) ·
 **Provenance:** AbstractDungeon.java:149-161; Random.java:17-18;
 NeowEvent.java:62/289/363; AbstractDungeon.java:247-250;
@@ -275,7 +275,66 @@ at floor N equals the sim's `floor_stream(seed, N)` (tier-1-tested) for
 floors 1-3; blizzardPotionMod visibly ratchets across two combat rewards;
 event-list contents shrink after an event fires. Each checked from the dump,
 recorded in the Log.
-**Log:** —
+**Log:** Verified by running, not inferred (Windows host — excluded from WSL
+CI). Delivered the oracle-state-block fork patch: `GameStateConverter`
+gains `getOracleState()`/`rngToJson()` appending a single `"oracle"` key to
+every in-dungeon dump, gated by a new fork config flag `oracleBlock` (default
+true; `config.properties` + a mod-settings toggle) so with the flag off the
+fork output is byte-identical to stock (the B1.3 strip-equivalence baseline).
+The block carries **every** design-§2.5 row: the 14 RNG streams as
+`{counter,s0,s1}` — 7 run-scoped (`monsterRng eventRng merchantRng cardRng
+treasureRng relicRng potionRng`), 5 floor-scoped (`monsterHpRng aiRng
+shuffleRng cardRandomRng miscRng`), `mapRng`, and `neowRng`
+(`NeowEvent.rng`, key absent until the blessing screen) — plus
+`cardBlizzRandomizer`, `blizzardPotionMod`, the three `eventPity` floats
+(`monster/shop/treasure`), `purgeCost`, the three remaining-pool lists
+(`eventList/shrineList/specialOneTimeEventList`), the five `relicPools`
+orders, per-monster `monster_move_history` (combat only), and
+seed/floor/act/ascension anchors. `s0`/`s1` come from public
+`Random.random.getState(0/1)` (RandomXS128 seed0/seed1); the two private
+`EventHelper` pity floats use the sanctioned `ReflectionHacks` fallback
+(design §2.5), everything else is public/static — **no other reflection
+needed** on the 11-30-2020 build. PROTOCOL.md gains §5 (the block's full
+schema). **Provenance** (all read in full before coding): AbstractDungeon.java
+:149-161 (stream fields), :247-250 (cardBlizz), :182-184 (event/shrine/special
+lists), :1221-1256 (5 `relicRng.randomLong()` pool shuffles), :1747-1751 (floor
+reseed = `Random(seed+floorNum)`); Random.java:17-18; NeowEvent.java:62/289/363;
+AbstractRoom.java:100-101; EventHelper.java:88-92; ShopScreen.java:100-102,
+278-292; AbstractMonster.java:106; RandomXS128.getState.
+**Acceptance — one fixed 205-cmd scripted run (seed STS12345, A20 Ironclad,
+Neow→floor-3 reward; B1.1's derived script) + one short adaptive second run for
+the event observation the fixed path can't reach (its map only visits monster
+rooms; its one `?` room rolls MONSTER on this seed):**
+**(1)** `relicRng.counter` = **5** at the first in-dungeon dump (floor-0 Neow),
+exactly the 5 init pool shuffles.
+**(2)** floor-scoped `(s0,s1)` == sim `floor_stream(1790052133945, N)` **bit-for-bit**
+(read off `cardRandomRng` at `counter==0`, pristine per-floor reseed), floors
+1/2/3: floor 1 `s0=7342732389453056061 s1=-1677929205632241533`, floor 2
+`s0=-6609920522105378709 s1=-9206057524216559371`, floor 3
+`s0=1660650329036603239 s1=1975031184179605387` — each equal to the sim's
+tier-1-tested derivation (WSL probe over `include/sts/engine/rng_stream.hpp`
+`floor_stream`).
+**(3)** `blizzardPotionMod` ratchets across the combat rewards: 0 (Neow) → **10**
+(floor-1 reward, +10 no-drop) → 0 (floor-2 reward, potion dropped→reset) → **10**
+(floor-3 reward, +10) — two visible +10 ratchets.
+**(4)** `eventList` shrinks **11→10** when an event fires: floor-5 `?`-room rolled
+EVENT and removed **"Liars Game"** (`eventRng.counter` 0→3). The fixed run's
+floor-2 `?` rolled MONSTER (`eventRng.counter` 0→1, `room_type=MonsterRoom`, no
+list change) — the oracle correctly captured the non-event roll too.
+Windows-host commands: `build_fork.ps1` (jar sha256
+`7A735C1F1B16368DF4B7E68042EFC23533708FBA08263592CF2C4302552E9960`, deployed to
+`<game>\mods\`, never committed); game launched under the bundled JRE 8
+(`<game>\jre\bin\java.exe … --skip-launcher --mods basemod,CommunicationMod-oracle`);
+scripted via `echo_driver.py` + data-root throwaway feeders
+(`feed_b12.py`/`autopilot2_b12.py`/`analyze_b12.py`) per the B0.2/B1.1
+precedent; captures under the §7.3 data root, uncommitted. WSL suite green:
+**140/140 in debug + asan** (no engine change; tree verified green to commit).
+Spec note resolved: design §2.5 row 6 names `ShopScreen.purgeCost` — emitted as
+`purgeCost`; the relic-adjusted `actualPurgeCost` is already the stock
+`purge_cost` shop-screen field, so both are observable. B1.3 note: with
+`oracleBlock=false` the dump has no `oracle` key (the strip-equivalence
+baseline); block size ~3.85 KB/dump at floor 0 (the 5 full relic-pool id-string
+lists dominate; shrinks as pools pop).
 
 ### B1.3 `[ ]` Rendering-strip / fast-forward patches
 **Deps:** B1.2 · **Spec:** design §2.2 (semantic guard; throughput floor)

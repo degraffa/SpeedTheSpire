@@ -432,3 +432,65 @@ the nondeterministic card `uuid`, protocol-plumbing (`ready_for_command`,
 `combat_reward … link`, `score`); **oracle-block** are `draw_pile` (order) and
 monster `last_move_id`/`second_last_move_id` (move history), each cross-
 referenced to design §2.5.
+
+## 5. The `"oracle"` state block (fork addition, B1.2)
+
+The `CommunicationMod-oracle` fork appends one extra key, **`oracle`**, to the
+`game_state` object (GameStateConverter §3.2) on every in-dungeon dump. It
+carries the hidden RNG/pity/pool state the stock converter cannot see but that
+bit-exact differential testing needs — the frozen inventory of design §2.5.
+
+- **Gate.** Emitted only when the fork config flag `oracleBlock` is true
+  (`config.properties`; default `true`, also a mod-settings toggle). When false
+  the fork's output is byte-identical to stock (no `oracle` key) — this is how
+  B1.3 proves the rendering-strip patches don't perturb the dump.
+- **Scope.** Stock consumers use the stock jar and never see this key; the fork
+  is a distinct modid (`CommunicationMod-oracle`).
+- **Provenance.** Every field's game source is cited in the B1.2 commit body.
+  Emitter: `GameStateConverter.getOracleState()` / `rngToJson()`.
+
+### 5.1 `oracle` field catalog
+
+| Field | Type | §2.5 row | Source | Note |
+|---|---|---|---|---|
+| `seed` | long | 10 | `Settings.seed` | run seed (signed long; base-35 via `start`) |
+| `floor` | int | 10 | `AbstractDungeon.floorNum` | anchor |
+| `act` | int | 10 | `AbstractDungeon.actNum` | anchor |
+| `ascension` | int | 10 | `AbstractDungeon.ascensionLevel` | anchor |
+| `streams` | object | 1-2 | see §5.2 | the 14 RNG streams |
+| `cardBlizzRandomizer` | int | 3 | `AbstractDungeon.cardBlizzRandomizer` | card-reward rarity pity offset |
+| `blizzardPotionMod` | int | 4 | `AbstractRoom.blizzardPotionMod` | potion-drop ratchet (±10) |
+| `eventPity` | object | 5 | `EventHelper` | `{monster,shop,treasure}` floats — `?`-room pity chances; `MONSTER_CHANCE`/`SHOP_CHANCE` read by reflection (private static), `TREASURE_CHANCE` public |
+| `purgeCost` | int | 6 | `ShopScreen.purgeCost` | run-persistent card-removal ramp (75 +25/purge). The relic-adjusted `actualPurgeCost` is already the stock `screen_state.purge_cost` (§3.9) |
+| `eventList` | list<str> | 7 | `AbstractDungeon.eventList` | remaining Exordium events (removed on use) |
+| `shrineList` | list<str> | 7 | `AbstractDungeon.shrineList` | remaining shrines |
+| `specialOneTimeEventList` | list<str> | 7 | `AbstractDungeon.specialOneTimeEventList` | remaining shared one-time events |
+| `relicPools` | object | 8 | `AbstractDungeon.{common,uncommon,rare,shop,boss}RelicPool` | `{common,uncommon,rare,shop,boss}`: each the live shuffled pool **order** (front popped for rewards, end for shop) |
+| `monster_move_history` | list | 9 | `AbstractMonster.moveHistory` | present only in COMBAT: `[{id, move_history:[byte,…]}]`, one per monster in room order (full history, not stock's 2-back) |
+
+### 5.2 `oracle.streams` — the 14 RNG streams
+
+`streams` maps each stream name to `{counter, s0, s1}` (or the key is **absent**
+when the stream is still null — pre-init, e.g. `neowRng` before the blessing
+screen). `counter` is `Random.counter` (save-parity draw count); `s0`/`s1` are
+the raw xorshift128+ state `RandomXS128.getState(0)`/`getState(1)` (seed0/seed1),
+emitted as **signed** Java longs. Provenance: `Random.java:17-18`
+(`public RandomXS128 random; public int counter`), `RandomXS128.getState`.
+
+- **Run-scoped (7):** `monsterRng`, `eventRng`, `merchantRng`, `cardRng`,
+  `treasureRng`, `relicRng`, `potionRng`.
+- **Floor-scoped (5):** `monsterHpRng`, `aiRng`, `shuffleRng`, `cardRandomRng`,
+  `miscRng` — each reseeded `Random(Settings.seed + floorNum)` on room entry
+  (AbstractDungeon.java:1747-1751), i.e. the sim's `floor_stream(seed, floor)`.
+- **Act-scoped (1):** `mapRng`.
+- **Event-scoped (1):** `neowRng` = `NeowEvent.rng`, a fresh
+  `Random(Settings.seed)` created at the blessing screen (NeowEvent.java:289/363).
+
+### 5.3 Verified at B1.2 (one scripted run each, Windows host)
+
+- `relicRng.counter == 5` at first in-dungeon dump (the 5 init pool shuffles,
+  AbstractDungeon.java:1237-1241).
+- Floor-scoped `(s0,s1)` at floors 1-3 == sim `floor_stream(STS12345, N)`
+  bit-for-bit (read off `cardRandomRng` at `counter==0`).
+- `blizzardPotionMod` ratchets across combat rewards (0→10→0→10 over floors 1-3).
+- `eventList` shrinks 11→10 when an event fires (floor-5 `?`→"Liars Game").

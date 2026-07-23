@@ -9,6 +9,7 @@ import com.megacrit.cardcrawl.core.AbstractCreature;
 import com.megacrit.cardcrawl.core.Settings;
 import com.megacrit.cardcrawl.dungeons.AbstractDungeon;
 import com.megacrit.cardcrawl.events.AbstractEvent;
+import com.megacrit.cardcrawl.helpers.EventHelper;
 import com.megacrit.cardcrawl.map.MapEdge;
 import com.megacrit.cardcrawl.map.MapRoomNode;
 import com.megacrit.cardcrawl.monsters.AbstractMonster;
@@ -18,6 +19,7 @@ import com.megacrit.cardcrawl.orbs.AbstractOrb;
 import com.megacrit.cardcrawl.potions.AbstractPotion;
 import com.megacrit.cardcrawl.potions.PotionSlot;
 import com.megacrit.cardcrawl.powers.AbstractPower;
+import com.megacrit.cardcrawl.random.Random;
 import com.megacrit.cardcrawl.relics.AbstractRelic;
 import com.megacrit.cardcrawl.relics.RunicDome;
 import com.megacrit.cardcrawl.rewards.RewardItem;
@@ -142,7 +144,129 @@ public class GameStateConverter {
             state.put("combat_state", getCombatState());
         }
         state.put("screen_state", getScreenState());
+        // SpeedTheSpire fork addition (stage-b-design §2.5, task B1.2): the hidden
+        // RNG/pity state block, gated so stock consumers stay unaffected.
+        if (CommunicationMod.getOracleBlockOption()) {
+            state.put("oracle", getOracleState());
+        }
         return state;
+    }
+
+    /**
+     * The SpeedTheSpire oracle state block (stage-b-design §2.5): the hidden
+     * RNG-stream, pity-counter and remaining-pool state the stock
+     * GameStateConverter does not expose, but which the simulator needs for
+     * bit-exact differential testing. Emitted under the single "oracle" key,
+     * gated by the fork config flag CommunicationMod.getOracleBlockOption().
+     * Provenance for every row is cited in the B1.2 commit body.
+     *
+     * A stream reference that is still null (pre-init, e.g. NeowEvent.rng before
+     * the blessing screen) is skipped by Gson's default null-omitting behavior.
+     * @return the oracle state object
+     */
+    private static HashMap<String, Object> getOracleState() {
+        HashMap<String, Object> oracle = new HashMap<>();
+
+        // Row 10 -- sanity anchors on every record (AbstractDungeon fields).
+        oracle.put("seed", Settings.seed);
+        oracle.put("floor", AbstractDungeon.floorNum);
+        oracle.put("act", AbstractDungeon.actNum);
+        oracle.put("ascension", AbstractDungeon.ascensionLevel);
+
+        // Rows 1-2 -- the 13 dungeon streams (AbstractDungeon.java:149-161) plus
+        // Neow's event-scoped 14th (NeowEvent.rng), each {counter, s0, s1}.
+        // Random exposes `public int counter` and `public RandomXS128 random`
+        // (Random.java:17-18); RandomXS128.getState(0)/getState(1) = seed0/seed1.
+        HashMap<String, Object> streams = new HashMap<>();
+        streams.put("monsterRng", rngToJson(AbstractDungeon.monsterRng));
+        streams.put("eventRng", rngToJson(AbstractDungeon.eventRng));
+        streams.put("merchantRng", rngToJson(AbstractDungeon.merchantRng));
+        streams.put("cardRng", rngToJson(AbstractDungeon.cardRng));
+        streams.put("treasureRng", rngToJson(AbstractDungeon.treasureRng));
+        streams.put("relicRng", rngToJson(AbstractDungeon.relicRng));
+        streams.put("potionRng", rngToJson(AbstractDungeon.potionRng));
+        streams.put("monsterHpRng", rngToJson(AbstractDungeon.monsterHpRng));
+        streams.put("aiRng", rngToJson(AbstractDungeon.aiRng));
+        streams.put("shuffleRng", rngToJson(AbstractDungeon.shuffleRng));
+        streams.put("cardRandomRng", rngToJson(AbstractDungeon.cardRandomRng));
+        streams.put("miscRng", rngToJson(AbstractDungeon.miscRng));
+        streams.put("mapRng", rngToJson(AbstractDungeon.mapRng));
+        streams.put("neowRng", rngToJson(NeowEvent.rng));
+        oracle.put("streams", streams);
+
+        // Row 3 -- cardBlizzRandomizer (AbstractDungeon.java:247-250).
+        oracle.put("cardBlizzRandomizer", AbstractDungeon.cardBlizzRandomizer);
+
+        // Row 4 -- AbstractRoom.blizzardPotionMod (AbstractRoom.java:100-101).
+        oracle.put("blizzardPotionMod", AbstractRoom.blizzardPotionMod);
+
+        // Row 5 -- the three EventHelper ?-room pity floats (EventHelper.java:88-92).
+        // MONSTER_CHANCE/SHOP_CHANCE are private static (ReflectionHacks fallback,
+        // sanctioned by design §2.5); TREASURE_CHANCE is public static.
+        HashMap<String, Object> pity = new HashMap<>();
+        pity.put("monster", (float) ReflectionHacks.getPrivateStatic(EventHelper.class, "MONSTER_CHANCE"));
+        pity.put("shop", (float) ReflectionHacks.getPrivateStatic(EventHelper.class, "SHOP_CHANCE"));
+        pity.put("treasure", EventHelper.TREASURE_CHANCE);
+        oracle.put("eventPity", pity);
+
+        // Row 6 -- ShopScreen.purgeCost, the run-persistent card-removal ramp
+        // (base 75, +25 per purge; ShopScreen.java:100-102, 278-292). The
+        // relic-adjusted display value actualPurgeCost is already exposed as the
+        // stock shop-screen `purge_cost` field (PROTOCOL.md §3.9).
+        oracle.put("purgeCost", ShopScreen.purgeCost);
+
+        // Row 7 -- remaining event/shrine/special pools (removed on use;
+        // AbstractDungeon.java:182-184).
+        oracle.put("eventList", new ArrayList<Object>(AbstractDungeon.eventList));
+        oracle.put("shrineList", new ArrayList<Object>(AbstractDungeon.shrineList));
+        oracle.put("specialOneTimeEventList", new ArrayList<Object>(AbstractDungeon.specialOneTimeEventList));
+
+        // Row 8 -- the 5 relic pool orders (shuffled once at init via 5
+        // relicRng.randomLong() draws, then popped front-for-rewards /
+        // end-for-shop; AbstractDungeon.java:1221-1256).
+        HashMap<String, Object> relicPools = new HashMap<>();
+        relicPools.put("common", new ArrayList<Object>(AbstractDungeon.commonRelicPool));
+        relicPools.put("uncommon", new ArrayList<Object>(AbstractDungeon.uncommonRelicPool));
+        relicPools.put("rare", new ArrayList<Object>(AbstractDungeon.rareRelicPool));
+        relicPools.put("shop", new ArrayList<Object>(AbstractDungeon.shopRelicPool));
+        relicPools.put("boss", new ArrayList<Object>(AbstractDungeon.bossRelicPool));
+        oracle.put("relicPools", relicPools);
+
+        // Row 9 -- per-monster moveHistory (public ArrayList<Byte>,
+        // AbstractMonster.java:106). Only meaningful in combat.
+        AbstractRoom currRoom = AbstractDungeon.getCurrRoom();
+        if (currRoom != null && currRoom.phase == AbstractRoom.RoomPhase.COMBAT
+                && currRoom.monsters != null) {
+            ArrayList<Object> moveHistories = new ArrayList<>();
+            for (AbstractMonster monster : currRoom.monsters.monsters) {
+                HashMap<String, Object> mh = new HashMap<>();
+                mh.put("id", monster.id);
+                mh.put("move_history", new ArrayList<Object>(monster.moveHistory));
+                moveHistories.add(mh);
+            }
+            oracle.put("monster_move_history", moveHistories);
+        }
+
+        return oracle;
+    }
+
+    /**
+     * Serialises one game RNG stream as {counter, s0, s1}: the game-side draw
+     * counter (for save-parity) plus the raw xorshift128+ state seed0/seed1 (to
+     * catch wrapper bugs directly, design §2.5 row 1). Returns null for an
+     * uninitialised stream; Gson then omits the key.
+     * @param rng the stream, or null
+     * @return the stream object, or null
+     */
+    private static HashMap<String, Object> rngToJson(Random rng) {
+        if (rng == null || rng.random == null) {
+            return null;
+        }
+        HashMap<String, Object> json = new HashMap<>();
+        json.put("counter", rng.counter);
+        json.put("s0", rng.random.getState(0));
+        json.put("s1", rng.random.getState(1));
+        return json;
     }
 
     private static HashMap<String, Object> getRoomState() {
