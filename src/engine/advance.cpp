@@ -20,7 +20,7 @@
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
-#include "sts/engine/monster_jaw_worm.hpp"
+#include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
 #include "sts/engine/observation.hpp"
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
@@ -97,11 +97,16 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     state.player_max_hp = 80;
     state.player_block = 0;
 
-    // -- Monster: one Jaw Worm (design doc §9). jaw_worm_init rolls HP from
-    //    monster_hp_rng and performs decision #1 (forced-first-move Chomp,
-    //    consuming one ai_rng draw). --
-    state.monster_count = 1;
-    jaw_worm_init(state, 0);
+    // -- Monster group (B3.12): the skeleton's fixed encounter is a single Jaw
+    //    Worm (design doc §9), spawned through the generalized spawn_group /
+    //    monster-dispatch path rather than a hard-wired jaw_worm_init call. For a
+    //    single Jaw Worm this is byte-identical to the old path (spawn_group sets
+    //    monster_count and calls jaw_worm_init(state, 0)); the real
+    //    encounter-driven group derivation (resolve_composition -> game_ids ->
+    //    MonsterIds) threads through here once the run layer supplies the
+    //    encounter. --
+    static constexpr MonsterId kSkeletonGroup[] = {MonsterId::JAW_WORM};
+    spawn_group(state, kSkeletonGroup);
 
     // -- Prime the pump's turn-1 invariants so the FIRST pump() call takes the
     //    start-of-turn branch (step 6) WITHOUT first misfiring the monster-turn
@@ -120,7 +125,7 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     state.turn = 0;                   // start_of_turn's ++turn lands on 1
     state.monster_attacks_queued = 1;
     state.turn_has_ended = 1;
-    pump(state, jaw_worm_take_turn);
+    pump(state, dispatch_monster_turn);
     // Post: phase == WAITING_ON_USER, turn == 1, energy == kIroncladBaseEnergy,
     // hand_count == kStartOfTurnDrawCount (5), draw_count == n - 5.
 
@@ -130,6 +135,15 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
 void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     const bool waiting =
         state.phase == static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+
+    // Zero the (hand_slot x target) grid up front so every early-return path
+    // (CHOOSE-pending, not-waiting) leaves it well-defined; the main loop fills
+    // the rows for enemy-target cards (B3.12).
+    for (int i = 0; i < kHandCap; ++i) {
+        for (int t = 0; t < kMonsterCap; ++t) {
+            out.can_play_target[i][t] = false;
+        }
+    }
 
     // CHOOSE-in-combat (Stage B B3.4): if the head of the action queue is an open
     // CHOOSE_CARD that needs a selection, the player is choosing a hand card. The
@@ -192,6 +206,20 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
                 }
             }
             out.can_play[i] = playable;
+            // Per-target legality (B3.12): an enemy-target (needs_target) card is
+            // legal only against a LIVE monster slot. Self/all/none/random cards
+            // ignore the declared target, so their grid row stays all-false and
+            // can_play[i] alone carries their legality.
+            if (out.can_play[i]) {
+                const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+                if (def != nullptr && def->needs_target) {
+                    for (int t = 0; t < kMonsterCap; ++t) {
+                        out.can_play_target[i][t] =
+                            t < static_cast<int>(state.monster_count) &&
+                            state.monsters[t].hp > 0;
+                    }
+                }
+            }
         } else {
             out.can_play[i] = false;
         }
@@ -242,11 +270,11 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 // queue_card_play enqueues; pump resolves the play + any monster
                 // turn triggered by an end-of-turn (none here, mid-turn play).
                 queue_card_play(s, action_arg0(a), action_arg1(a));
-                pump(s, jaw_worm_take_turn);
+                pump(s, dispatch_monster_turn);
                 break;
             case ActionVerb::END_TURN:
                 add_card_to_queue_bottom(s, make_end_turn_sentinel());
-                pump(s, jaw_worm_take_turn);
+                pump(s, dispatch_monster_turn);
                 break;
             case ActionVerb::CHOOSE: {
                 // Stage B B3.4: resolve one selection on the open CHOOSE_CARD at
@@ -276,7 +304,7 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 // (or no eligible cards remain), the next pump pops the now-satisfied
                 // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.
                 front.amount -= 1;
-                pump(s, jaw_worm_take_turn);
+                pump(s, dispatch_monster_turn);
                 break;
             }
             case ActionVerb::USE_POTION:

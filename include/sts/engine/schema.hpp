@@ -46,6 +46,18 @@ namespace sts::engine {
 //   are untouched (kTraceFormatV1, zero regeneration); no run-level (RUN/v2)
 //   trace goldens are committed, so nothing is regenerated. The on-disk v2 format
 //   tag tracks this constant (kTraceFormatV2 == SCHEMA_VERSION).
-inline constexpr uint32_t SCHEMA_VERSION = 3;
+// v4 (=4): B3.12 (multi-monster combat + encounter framework) grows kMonsterCap
+//   5 -> 7 so CombatState can hold the dead-in-place records a fully-split Slime
+//   Boss leaves behind (design §4.4 / scoping report §1.5). sizeof(CombatState)
+//   grows by two MonsterState slots (224 B: 3672 -> 3896), so per §8 this is a
+//   schema bump. The 20 combat fixtures are REGENERATED via the checked-in
+//   generator (tools/fixture_gen/gen_combat_fixtures.cpp) -- they carry the new
+//   state_size but are proven byte-equivalent modulo a single zero-run inserted
+//   at the old monsters[]-array end (B4.3 zero-diff-in-meaning precedent;
+//   scratchpad/b312_fixture_proof.py). The 20 fixtures stamp the DECOUPLED
+//   on-disk format tag kTraceFormatV1 (=1), NOT this constant, so their header
+//   schema_version is unchanged; only their state_size field moves. The trace v2
+//   container format is unchanged; kTraceFormatV2 follows this constant to 4.
+inline constexpr uint32_t SCHEMA_VERSION = 4;
 
 }  // namespace sts::engine

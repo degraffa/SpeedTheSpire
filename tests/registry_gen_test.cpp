@@ -288,9 +288,11 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
-    EXPECT_EQ(m::kEncountersCount, 0u);
+    EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
+                                          // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 111u);  // 105 (B3.3) + 6 potion-support powers
+    EXPECT_EQ(m::kTotalCount, 131u);  // 111 (B3.3 cards + potion-support powers)
+                                      // + 20 B3.12 encounters
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

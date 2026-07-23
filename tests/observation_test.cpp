@@ -76,7 +76,7 @@ namespace {
 // --- Regression-guard static asserts (mirror the header source of truth) ----
 
 static_assert(std::is_trivially_copyable_v<ObsBuffer>);
-static_assert(sizeof(ObsBuffer) == 188);
+static_assert(sizeof(ObsBuffer) == 240);  // B3.12: kObsMonsterCap 5 -> 7 (== kMonsterCap)
 
 // Build a CombatState with a small, fully-known combat situation.
 CombatState make_sample_state() {

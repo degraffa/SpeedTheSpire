@@ -36,6 +36,7 @@ set(GEN_HEADERS
     "${GEN_OUT_ROOT}/sts/registry/relic_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/potion_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/monster_table.hpp"
+    "${GEN_OUT_ROOT}/sts/registry/encounter_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/game_ids.hpp"
     "${GEN_OUT_ROOT}/sts/registry/manifest.hpp")
 

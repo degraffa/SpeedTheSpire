@@ -1199,7 +1199,7 @@ Transmutation, Violence — verify from source).
 **Acceptance:** tier-2 per card; directed script.
 **Log:** —
 
-### B3.12 `[ ]` Multi-monster combat + encounter framework
+### B3.12 `[x]` Multi-monster combat + encounter framework
 **Deps:** B3.2 · **Spec:** design §5.2 · **Provenance:** Exordium.java:
 110-186 (pools/exclusions), MonsterHelper.java:389-604 + 614-836
 (compositions, miscRng), AbstractMonster.java:765-775 (HP roll)
@@ -1213,7 +1213,62 @@ targeting/legal-action masks (slot × target).
 hand-derived draws (louse variants, gremlin order, slime mixes); HP rolls
 consume monsterHpRng in spawn order; legal-action mask over dead/alive slots;
 existing single-monster tests green.
-**Log:** —
+**Log:** Done 2026-07-23. Shipped the FRAMEWORK (individual monsters land in
+B3.13-B3.22); JAW_WORM is the only spawnable monster today, so combat_begin
+still fields a single Jaw Worm — but through the generalized path.
+- **encounters.yaml** rebuilt from an empty stub into the Act-1 Exordium data:
+  20 encounters (4 weak / 10 strong / 3 elite / 3 boss) with pool + weight +
+  WEAK exclusions + a data-driven miscRng COMPOSITION PROGRAM each. New codegen
+  `emit_encounter_table` (gen.py) -> generated `encounter_table.hpp`
+  (EncounterPool/CompOp enums, CompStep/EncounterDef, kEncounters,
+  encounter_by_game_id). Composition op set EMIT/BOOL/PICK/SEQ_BOOL/POOL covers
+  every S1 shape; monster refs are the game's AbstractMonster.ID strings
+  (verified per class), join keys to monsters.yaml as those land later.
+- **engine** `encounters.{hpp,cpp}`: `resolve_composition` (miscRng) +
+  `generate_monster_lists` (monsterRng: stable ascending-weight roll TRAP 1,
+  populateMonsterList no-repeat/no-A-B-A, populateFirstStrongEnemy exclusion
+  loop, boss jdk_shuffle). `monster_dispatch.{hpp,cpp}`: per-MonsterId
+  init/turn tables + `dispatch_monster_turn` (generalized MonsterTurnFn seam) +
+  `spawn_group` (HP roll in spawn order). `combat_begin`/`advance` now spawn via
+  spawn_group([JAW_WORM]) and pump via dispatch_monster_turn -- byte-identical to
+  the old single-Jaw-Worm path (all 20 fixtures replay unchanged).
+- **targeting**: ActionMask gained `can_play_target[hand_slot][target]`
+  (enemy-target cards x live monster slots; dead/absent slots excluded);
+  `can_play[i]` keeps its affordability meaning (additive, zero-risk to prior
+  tests).
+- **schema bump 3->4**: kMonsterCap 5->7 (dead-in-place records for a fully-split
+  Slime Boss; scoping §1.5/§6). sizeof(CombatState) 3672->3896 (<= 4096, 200 B
+  margin -- budget HOLDS). kMonsterQueueCap stays 5 (max S1 alive = 5).
+  kObsMonsterCap tracks kMonsterCap so ObsBuffer 188->240. 20 combat fixtures
+  REGENERATED via the checked-in generator; zero-diff-in-meaning proof
+  (scratchpad/b312_fixture_proof.py, B4.3 precedent) PASSED over 20 fixtures /
+  111 records: header schema_version stays v1, record_count/seed/action/aux
+  unchanged, only 224 zero bytes (2 MonsterState slots) inserted per record in
+  the monsters[] region -- every pre-existing byte preserved in order.
+- **CORRECTION to the scoping report (§1.4)**: bottomGetWeakWildlife /
+  bottomGetStrongHumanoid construct getLouse/getSlaver UNCONDITIONALLY during
+  ArrayList build (MonsterHelper.java:801-822), so the louse/slaver coin ALWAYS
+  fires BEFORE the random(0,n) select -- not "only if the louse index is
+  picked". The PICK op models this eager construction; tests pin the exact draw
+  order.
+- **tests** `encounters_test.cpp` (13, all green): DIFFERENTIAL composition
+  tests hand-derive each miscRng draw sequence (louse variants, gremlin/lots-of-
+  slimes draw-without-replacement order, small/large slime mixes, Exordium
+  Thugs/Wildlife eager-PICK order) vs the resolver, pinning draw ORDER + count;
+  spawn_group HP rolls consume monsterHpRng in spawn order; the target grid over
+  a dead middle slot; pool-draw determinism + shape (16/10/3) + no-repeat/no-
+  A-B-A + membership + exclusion honored + boss permutation.
+- Suite 286/286 debug+asan+release (273 baseline + 13). registry_gen manifest
+  counts updated (encounters 0->20, total 91->111).
+- **Deferred / honest gaps**: (a) a BIT-EXACT oracle for the raw monsterRng
+  monster/elite/boss lists needs the B4 dungeon-construction wiring (monsterRng
+  seed derivation) + a captured run; B3.12 pins the algorithm (Java-verified
+  draw order) + structural invariants + determinism, not a golden list. (b) G4's
+  live corpus can cross-check compositions per-fight but most target monsters
+  are unimplemented pre-B3.13 and the corpus is uncommitted (non-CI); the
+  Java-verified differential test is the committed check. (c) usePreBattleAction
+  (a later monsterHpRng phase, e.g. Louse curl-up) is a spawn seam for B3.13 --
+  no B3.12 monster has one.
 
 ### B3.13 `[ ]` ∥ Monsters: Cultist + louses
 **Deps:** B3.12 · **Provenance:** Cultist.java (:59/66/95 A-branches),

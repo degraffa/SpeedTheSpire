@@ -65,23 +65,33 @@ namespace sts::engine {
 // legal_actions(const CombatState&, ActionMask&)). The design doc names the
 // call but leaves the type's shape to the implementation; this is that shape.
 //
-// The skeleton has exactly one monster, so target enumeration is trivial (an
-// enemy-targeted card always targets monster slot 0; a self-targeted card
-// ignores its target). We therefore expose per-hand-slot playability plus a
-// single END_TURN flag rather than a full (hand_slot x target) cross-product.
+// can_play[i] is per-hand-slot playability (affordability + not-unplayable +
+// phase gate); can_play_target[i][t] is the B3.12 multi-monster (hand_slot x
+// target) grid for enemy-targeted cards. Together with can_end_turn / the CHOOSE
+// fields they enumerate every legal action.
 //
-// NOTE (Stage B): once combats can hold more than one monster, an Attack's
-// legality becomes per-target and this mask must grow real target enumeration
-// (a can_play[hand_slot][target] grid, or a packed legal-action list). The flat
-// per-slot form here is honest about the skeleton's single-monster scope.
+// TARGETING (B3.12): a card with `needs_target` (an enemy-target Attack) is legal
+// only against a LIVE monster slot; can_play_target[i][t] is true iff hand slot i
+// is playable AND card_def(hand[i]).needs_target AND t < monster_count AND
+// monsters[t].hp > 0. Self / all-enemy / no-target / random-target cards ignore
+// the declared target, so their can_play_target row is all-false and their
+// legality is carried by can_play[i] alone. This is the real target enumeration
+// the earlier single-monster mask deferred.
 //
 // Fixed-size, trivially copyable, no allocation.
 struct ActionMask {
     // can_play[i] is true iff hand slot i holds a card the player can legally
-    // play right now: phase == WAITING_ON_USER AND i < hand_count AND
-    // player_energy >= card_pool[hand[i]].cost_now. Slots >= hand_count and all
-    // slots when not WAITING_ON_USER are false.
+    // play right now: phase == WAITING_ON_USER AND i < hand_count AND not
+    // UNPLAYABLE AND player_energy >= card_pool[hand[i]].cost_now. Slots >=
+    // hand_count and all slots when not WAITING_ON_USER are false. (A live-target
+    // check for enemy-target cards lives in can_play_target below; can_play[i]
+    // keeps its affordability meaning so a policy can read either view.)
     bool can_play[kHandCap];
+    // can_play_target[i][t]: hand slot i is a legal play against monster slot t
+    // (enemy-target cards only; see TARGETING above). All-false for non-target
+    // cards, dead/absent monster slots, and unplayable/unaffordable/non-waiting
+    // states. The PLAY_CARD action's arg1 is the chosen target slot t.
+    bool can_play_target[kHandCap][kMonsterCap];
     // END_TURN is always legal while WAITING_ON_USER (the player may always
     // choose to end the turn), and illegal otherwise.
     bool can_end_turn;

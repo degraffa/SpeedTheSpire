@@ -1,21 +1,290 @@
 # encounters.yaml -- encounter registry (rules-as-data, design doc B §4.2, §5.2).
 #
 # An encounter is a monster-group definition (the actors that spawn together for a
-# combat), referencing monsters.yaml entries by name.
+# combat). B3.12 generalizes this domain from an empty stub into the Act-1
+# (Exordium) encounter FRAMEWORK: the monsterRng pool tables + weights + exclusions
+# that build a run's monster list, and the miscRng COMPOSITION PROGRAMS that turn an
+# encounter key into a concrete spawn order. The per-monster stats/AI land in
+# B3.13-B3.22 (monsters.yaml); this domain is the spawn scaffolding.
 #
-# Entry shape (frozen):
-#   - id: <int>            numeric id -- append-only, NEVER renumbered
-#     name: <SYMBOL>       symbolic encounter name
-#     game_id: "<string>"  the game's encounter/monster-group key -- join key
-#     act: <int>
-#     pool: WEAK|STRONG|ELITE|BOSS
-#     monsters: [ <MonsterId symbol>, ... ]   members (order = spawn order)
+# Entry shape (frozen at B3.12):
+#   - id: <int>            numeric id -- append-only, NEVER renumbered. Within a
+#                          (act,pool) group, id order == the game's ArrayList add()
+#                          order, so the engine's stable-sort-by-weight roll
+#                          (MonsterInfo.normalizeWeights, TRAP 1) reproduces the
+#                          game's tie order.
+#     name: <SYMBOL>       symbolic name (documentation; this domain emits no enum)
+#     game_id: "<string>"  the game's encounter/monster-group KEY (Exordium pool
+#                          string == MonsterHelper.getEncounter key) -- join key.
+#     act: <int>           1 (Exordium) for every B3.12 entry.
+#     pool: WEAK|STRONG|ELITE|BOSS   which generateXxx list it belongs to.
+#     weight: <float>      MonsterInfo weight (pool-roll band width). BOSS = 0.0
+#                          (bosses are shuffled, not weight-rolled).
+#     excludes: [<game_id>, ...]   WEAK only, optional: strong-pool keys forbidden
+#                          as the FIRST strong enemy when THIS is the 3rd weak
+#                          monster (Exordium.generateExclusions, keyed on
+#                          monsterList.last()). Absent == no exclusions.
+#     program: [ <node>, ... ]     the miscRng COMPOSITION PROGRAM: an ordered list
+#                          of spawn nodes (spawn order == turn order). Nodes:
+#             {emit: "<MonsterGameId>"}                 -- one fixed monster, 0 draws
+#             {bool: {if_true: "<G>", if_false: "<G>"}} -- 1 randomBoolean(); the
+#                          getLouse/getSlaver/Large-Slime coin flip (true->if_true).
+#             {seq_bool: {if_true: [<G>...], if_false: [<G>...]}} -- 1 randomBoolean()
+#                          selecting a whole SEQUENCE (spawnSmallSlimes).
+#             {pick: [ <choice>, ... ]}                 -- EAGER-construct every
+#                          choice in order (a {bool:...} choice DRAWS its coin now,
+#                          during list build -- MonsterHelper builds the ArrayList
+#                          before selecting), THEN one random(0,n-1) selects which
+#                          constructed monster to keep. A choice is {emit:"<G>"} or
+#                          {bool:{...}}. (bottomGetWeakWildlife/StrongHumanoid/
+#                          StrongWildlife.)
+#             {pool: {members: [<G>...], count: <n>}}   -- draw-WITHOUT-replacement:
+#                          n times draw random(remaining-1), pop, emit (spawnGremlins,
+#                          spawnManySmallSlimes).
+#          Monster game_ids are the game's AbstractMonster.ID strings (verified from
+#          the decompiled sources) -- the join keys to monsters.yaml as those
+#          monsters land in later batches.
 #     provenance: "<Class.method (File.java:line) -- read in full>"
 #
-# This domain generates no enum (encounters are groupings, not content ids); codegen
-# validates entries and reports the row count in the manifest only.
+# This domain emits no id enum (encounters are groupings, not content ids); codegen
+# emits the pool/composition tables (encounter_table.hpp) and reports the row count
+# in the manifest. Empty-in-skeleton is over (stage-a §9); the framework is now live.
 #
-# Empty in the skeleton (stage-a design §9: a single hand-wired Jaw Worm fight).
-# Populating this domain is a later task; the file exists now so codegen reports a
-# zero row-count manifest entry cleanly.
-[]
+# Provenance base (all read in full from D:\STS_BG_Mod\SlayTheSpireDecompiled):
+#   Exordium.generateMonsters/generateWeak/Strong/Elites/generateExclusions/
+#   initializeBoss (Exordium.java:110-221); MonsterInfo.normalizeWeights/roll/
+#   compareTo (MonsterInfo.java:27-52, stable ascending-weight sort BEFORE rolling,
+#   TRAP 1); AbstractDungeon.populateMonsterList/populateFirstStrongEnemy
+#   (AbstractDungeon.java:1057-1096); MonsterHelper.getEncounter + spawn helpers
+#   (MonsterHelper.java:389-836).
+
+# =============================================================================
+# WEAK pool -- generateWeakEnemies(3) (Exordium.java:117-126), all weight 2.0.
+# populateMonsterList(3, elites=false): no immediate repeat + no A-B-A.
+# =============================================================================
+- id: 1
+  name: CULTIST
+  game_id: "Cultist"
+  act: 1
+  pool: WEAK
+  weight: 2.0
+  program:
+    - {emit: "Cultist"}
+  provenance: "Exordium.generateWeakEnemies (Exordium.java:120); MonsterHelper.getEncounter \"Cultist\" (MonsterHelper.java:394-396)"
+
+- id: 2
+  name: JAW_WORM_ENC
+  game_id: "Jaw Worm"
+  act: 1
+  pool: WEAK
+  weight: 2.0
+  program:
+    - {emit: "JawWorm"}
+  provenance: "Exordium.generateWeakEnemies (Exordium.java:121); MonsterHelper.getEncounter \"Jaw Worm\" (MonsterHelper.java:397-399)"
+
+- id: 3
+  name: TWO_LOUSE
+  game_id: "2 Louse"
+  act: 1
+  pool: WEAK
+  weight: 2.0
+  excludes: ["3 Louse"]
+  program:
+    - {bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}
+    - {bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}
+  provenance: "Exordium.generateWeakEnemies (Exordium.java:122), generateExclusions \"2 Louse\" (Exordium.java:175-178); MonsterHelper.getEncounter \"2 Louse\" -> getLouse x2 (MonsterHelper.java:424-425,831-836)"
+
+- id: 4
+  name: SMALL_SLIMES
+  game_id: "Small Slimes"
+  act: 1
+  pool: WEAK
+  weight: 2.0
+  excludes: ["Large Slime", "Lots of Slimes"]
+  program:
+    - {seq_bool: {if_true: ["SpikeSlime_S", "AcidSlime_M"], if_false: ["AcidSlime_S", "SpikeSlime_M"]}}
+  provenance: "Exordium.generateWeakEnemies (Exordium.java:123), generateExclusions \"Small Slimes\" (Exordium.java:179-183); MonsterHelper.spawnSmallSlimes (MonsterHelper.java:694-704)"
+
+# =============================================================================
+# STRONG pool -- generateStrongEnemies(12) (Exordium.java:128-144).
+# populateFirstStrongEnemy(exclusions) then populateMonsterList(12, false).
+# =============================================================================
+- id: 5
+  name: BLUE_SLAVER
+  game_id: "Blue Slaver"
+  act: 1
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {emit: "SlaverBlue"}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:131); MonsterHelper.getEncounter \"Blue Slaver\" (MonsterHelper.java:391-393)"
+
+- id: 6
+  name: GREMLIN_GANG
+  game_id: "Gremlin Gang"
+  act: 1
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {pool: {members: ["GremlinWarrior", "GremlinWarrior", "GremlinThief", "GremlinThief", "GremlinFat", "GremlinFat", "GremlinTsundere", "GremlinWizard"], count: 4}}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:132); MonsterHelper.spawnGremlins (MonsterHelper.java:737-765)"
+
+- id: 7
+  name: LOOTER
+  game_id: "Looter"
+  act: 1
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {emit: "Looter"}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:133); MonsterHelper.getEncounter \"Looter\" (MonsterHelper.java:400-402)"
+
+- id: 8
+  name: LARGE_SLIME
+  game_id: "Large Slime"
+  act: 1
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {bool: {if_true: "AcidSlime_L", if_false: "SpikeSlime_L"}}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:134); MonsterHelper.getEncounter \"Large Slime\" (MonsterHelper.java:409-414)"
+
+- id: 9
+  name: LOTS_OF_SLIMES
+  game_id: "Lots of Slimes"
+  act: 1
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {pool: {members: ["SpikeSlime_S", "SpikeSlime_S", "SpikeSlime_S", "AcidSlime_S", "AcidSlime_S"], count: 5}}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:135); MonsterHelper.spawnManySmallSlimes (MonsterHelper.java:706-735)"
+
+- id: 10
+  name: EXORDIUM_THUGS
+  game_id: "Exordium Thugs"
+  act: 1
+  pool: STRONG
+  weight: 1.5
+  program:
+    # bottomGetWeakWildlife: getLouse coin (list build) THEN random(0,2) select.
+    - {pick: [{bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}, {emit: "SpikeSlime_M"}, {emit: "AcidSlime_M"}]}
+    # bottomGetStrongHumanoid: getSlaver coin (list build) THEN random(0,2) select.
+    - {pick: [{emit: "Cultist"}, {bool: {if_true: "SlaverRed", if_false: "SlaverBlue"}}, {emit: "Looter"}]}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:136); MonsterHelper.bottomHumanoid/bottomGetWeakWildlife/bottomGetStrongHumanoid/getSlaver (MonsterHelper.java:780-806,816-829)"
+
+- id: 11
+  name: EXORDIUM_WILDLIFE
+  game_id: "Exordium Wildlife"
+  act: 1
+  pool: STRONG
+  weight: 1.5
+  program:
+    # bottomGetStrongWildlife: random(0,1) over [FungiBeast, JawWorm].
+    - {pick: [{emit: "FungiBeast"}, {emit: "JawWorm"}]}
+    # bottomGetWeakWildlife: getLouse coin (list build) THEN random(0,2) select.
+    - {pick: [{bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}, {emit: "SpikeSlime_M"}, {emit: "AcidSlime_M"}]}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:137); MonsterHelper.bottomWildlife/bottomGetStrongWildlife/bottomGetWeakWildlife (MonsterHelper.java:785-822)"
+
+- id: 12
+  name: RED_SLAVER
+  game_id: "Red Slaver"
+  act: 1
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {emit: "SlaverRed"}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:138); MonsterHelper.getEncounter \"Red Slaver\" (MonsterHelper.java:406-408)"
+
+- id: 13
+  name: THREE_LOUSE
+  game_id: "3 Louse"
+  act: 1
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}
+    - {bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}
+    - {bool: {if_true: "FuzzyLouseNormal", if_false: "FuzzyLouseDefensive"}}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:139); MonsterHelper.getEncounter \"3 Louse\" -> getLouse x3 (MonsterHelper.java:421-423,831-836)"
+
+- id: 14
+  name: TWO_FUNGI_BEASTS
+  game_id: "2 Fungi Beasts"
+  act: 1
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {emit: "FungiBeast"}
+    - {emit: "FungiBeast"}
+  provenance: "Exordium.generateStrongEnemies (Exordium.java:140); MonsterHelper.getEncounter \"2 Fungi Beasts\" (MonsterHelper.java:427-429)"
+
+# =============================================================================
+# ELITE pool -- generateElites(10) (Exordium.java:146-154), all weight 1.0.
+# populateMonsterList(10, elites=true): only no-immediate-repeat (no A-B-A).
+# =============================================================================
+- id: 15
+  name: GREMLIN_NOB
+  game_id: "Gremlin Nob"
+  act: 1
+  pool: ELITE
+  weight: 1.0
+  program:
+    - {emit: "GremlinNob"}
+  provenance: "Exordium.generateElites (Exordium.java:149); MonsterHelper.getEncounter \"Gremlin Nob\" (MonsterHelper.java:436-438)"
+
+- id: 16
+  name: LAGAVULIN_ENC
+  game_id: "Lagavulin"
+  act: 1
+  pool: ELITE
+  weight: 1.0
+  program:
+    - {emit: "Lagavulin"}
+  provenance: "Exordium.generateElites (Exordium.java:150); MonsterHelper.getEncounter \"Lagavulin\" -> new Lagavulin(true) asleep (MonsterHelper.java:439-441)"
+
+- id: 17
+  name: THREE_SENTRIES
+  game_id: "3 Sentries"
+  act: 1
+  pool: ELITE
+  weight: 1.0
+  program:
+    - {emit: "Sentry"}
+    - {emit: "Sentry"}
+    - {emit: "Sentry"}
+  provenance: "Exordium.generateElites (Exordium.java:151); MonsterHelper.getEncounter \"3 Sentries\" (MonsterHelper.java:442-444)"
+
+# =============================================================================
+# BOSS list -- initializeBoss (Exordium.java:188-221). Fully-unlocked else-branch
+# adds all three IN THIS ORDER, then Collections.shuffle(new Random(
+# monsterRng.randomLong())). weight 0.0 (shuffled, not weight-rolled).
+# =============================================================================
+- id: 18
+  name: THE_GUARDIAN
+  game_id: "The Guardian"
+  act: 1
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "TheGuardian"}
+  provenance: "Exordium.initializeBoss (Exordium.java:203); MonsterHelper.getEncounter \"The Guardian\" (MonsterHelper.java:451-453)"
+
+- id: 19
+  name: HEXAGHOST
+  game_id: "Hexaghost"
+  act: 1
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "Hexaghost"}
+  provenance: "Exordium.initializeBoss (Exordium.java:204); MonsterHelper.getEncounter \"Hexaghost\" (MonsterHelper.java:454-456)"
+
+- id: 20
+  name: SLIME_BOSS
+  game_id: "Slime Boss"
+  act: 1
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "SlimeBoss"}
+  provenance: "Exordium.initializeBoss (Exordium.java:205); MonsterHelper.getEncounter \"Slime Boss\" (MonsterHelper.java:457-459)"

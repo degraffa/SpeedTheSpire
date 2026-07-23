@@ -188,6 +188,19 @@ sts_enable_sanitizers(advance_test)
 
 gtest_discover_tests(advance_test)
 
+# B3.12: encounter framework -- composition resolution (miscRng), spawn HP-roll
+# order (monsterHpRng), multi-monster legal-action target grid, monsterRng pool
+# draw.
+add_executable(encounters_test
+    encounters_test.cpp
+)
+
+target_link_libraries(encounters_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(encounters_test)
+sts_enable_sanitizers(encounters_test)
+
+gtest_discover_tests(encounters_test)
+
 # A6.1: diff harness -- trace format + field-by-field differ + reproducer +
 # fixture oracle (design doc §8, §9). Links diff_harness (tools/diff_harness),
 # which PUBLIC-links sts_engine, so this test reaches both the harness API and

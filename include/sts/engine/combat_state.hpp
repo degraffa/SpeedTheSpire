@@ -52,7 +52,18 @@ inline constexpr int kDrawCap = 128;
 inline constexpr int kDiscardCap = 128;
 inline constexpr int kExhaustCap = 128;
 inline constexpr int kLimboCap = 8;
-inline constexpr int kMonsterCap = 5;
+// kMonsterCap grew 5 -> 7 at B3.12 (multi-monster combat + encounter framework).
+// The largest INITIAL S1 group is 5 (Lots of Slimes), but mid-combat splits retain
+// dead records in place (SuicideAction/die() never remove from MonsterGroup.monsters,
+// SuicideAction.java:29-34 / AbstractMonster.java:925-951): Slime Boss fully split =
+// 1 boss(dead) + 2 Large(dead) + 4 Medium = 7 simultaneous records. Sentry's
+// index-parity opener and SpawnMonsterAction smart-positioning read list indices
+// among ALL (incl. dead) records, so index identity must be stable -- growing the
+// cap (rather than compacting dead records) preserves it. Sized once here so the
+// framework is correct for B3.17/B3.20 (scoping report §1.5/§6). Budget: MonsterState
+// is 112 B, so 7 slots = 784 B; sizeof(CombatState) 3672 -> 3896, inside the 4 KB
+// ceiling (static_assert below). This is a schema change -> SCHEMA_VERSION 3 -> 4.
+inline constexpr int kMonsterCap = 7;
 inline constexpr int kActionQueueCap = 64;
 inline constexpr int kCardQueueCap = 16;
 inline constexpr int kMonsterQueueCap = 5;
@@ -233,7 +244,14 @@ struct CombatState {
     uint8_t card_queue_count;
     uint8_t pad_cardq;                // explicit padding
 
-    // -- monster queue (design doc §5.1: monsters awaiting turn, cap 5) --
+    // -- monster queue (design doc §5.1: monsters awaiting turn). Cap stays 5
+    //    even though kMonsterCap grew to 7 (B3.12): queueMonsters only enqueues
+    //    LIVE monsters (MonsterGroup.queueMonsters skips dead/escaped,
+    //    MonsterGroup.java:117-122), and the max simultaneously-alive S1 group is
+    //    5 (Lots of Slimes). Splits raise the RECORD count past 5 but not the live
+    //    count (a splitting parent dies as its children spawn), so 5 is the true
+    //    turn-queue bound; the 2 extra monster RECORD slots are for dead-in-place
+    //    retention, not extra queued turns. --
     MonsterQueueItem monster_queue[kMonsterQueueCap];
     uint8_t monster_queue_count;
     uint8_t monster_attacks_queued;   // design doc §5.2 step 4 flag (0/1)
