@@ -58,6 +58,22 @@ inline constexpr uint16_t kOpcodeDrawCard = 4;
 // indices"). 0xFF cannot alias a monster slot (0..4).
 inline constexpr uint8_t kActorPlayer = 0xFF;
 
+// Dynamic-target sentinels for an ActionQueueItem's `tgt` (Stage B B3.1). They
+// cannot alias a monster slot (0..4) or the player (0xFF). execute_opcode
+// resolves them at EXECUTE time (not enqueue), matching the game's per-action
+// resolution of AoE / random targets:
+//   * kActorAllEnemies -- the effect fans out over every LIVE monster, computing
+//     a SEPARATE DamageInfo per target (DamageAllEnemiesAction.update snapshots
+//     the monster list and skips isDeadOrEscaped; DamageAllEnemiesAction.java:
+//     56-83). Whirlwind queues one such item per energy point (WhirlwindAction).
+//   * kActorRandomEnemy -- the effect hits ONE uniformly-random live monster,
+//     rolled with a single card_random_rng draw AT EXECUTE TIME
+//     (AttackDamageRandomEnemyAction.update: getRandomMonster(cardRandomRng) is
+//     re-rolled per hit). Multi-hit-random cards queue N such items so each hit
+//     rolls its own target against the then-live monsters.
+inline constexpr uint8_t kActorAllEnemies = 0xFD;
+inline constexpr uint8_t kActorRandomEnemy = 0xFE;
+
 // Player draw count at start of turn (the game's DrawCardAction(gameHandSize);
 // gameHandSize is 5 for the Ironclad skeleton, design doc §9). Carried as the
 // queued DrawCard item's `amount`; interpreted by the DRAW opcode, not here.

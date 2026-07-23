@@ -51,11 +51,28 @@ OPCODES = {
     "SHUFFLE_IN": 6,
     "EXHAUST": 7,
     "ROLL_MOVE": 8,
+    # Stage B B3.1 additions (append-only from 9, design doc §4.4).
+    "MAKE_CARD": 9,
+    "SET_COST": 10,
 }
-# StepTarget: cards.hpp (SELF=0, CARD_TARGET=1).
-STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1}
+# StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
+# Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
+# RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
+STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1, "ALL_ENEMY": 2, "RANDOM_ENEMY": 3}
 # CardType: cards.hpp (ATTACK=0, SKILL=1).
 CARD_TYPES = {"ATTACK": 0, "SKILL": 1}
+
+# CardFlag bits -- MIRROR of include/sts/engine/types.hpp CardFlag (append-only).
+# YAML `flags:` names are lower-case; cards.hpp static_asserts the emitted
+# kCardFlag* constants equal the engine's CardFlag values.
+CARD_FLAGS = {
+    "exhaust": 1 << 0,
+    "ethereal": 1 << 1,
+    "innate": 1 << 2,
+    "unplayable": 1 << 3,
+    "retain": 1 << 4,
+    "xcost": 1 << 5,
+}
 
 # Card-level targeting -> (needs_target, random_target) (cards.hpp semantics).
 CARD_TARGETING = {
@@ -220,6 +237,59 @@ def _power_id_map(domains: dict[str, list[dict]]) -> dict[str, int]:
     return {e["name"]: e["id"] for e in domains["powers"]}
 
 
+def _parse_card_steps(card_name: str, effects, powers: dict[str, int]) -> list:
+    """Parse an effect program (base or upgraded) into (op, amount, extra, target)
+    tuples. MAKE_CARD encodes {card, pile} into `extra`/`target` per interp.hpp;
+    every other op follows the stage-a {op, target, amount[, power]} shape."""
+    steps = []
+    for step in effects or []:
+        op = step.get("op")
+        if op not in OPCODES:
+            raise fail(f"cards.yaml: card {card_name} uses unknown op {op!r}")
+        amount = int(step.get("amount", 0))
+        extra = 0
+        st = step.get("target", "SELF")
+        if st not in STEP_TARGETS:
+            raise fail(f"cards.yaml: card {card_name} step has unknown "
+                       f"target {st!r} (known: {sorted(STEP_TARGETS)})")
+        if op == "APPLY_POWER":
+            pname = step.get("power")
+            if pname not in powers:
+                raise fail(f"cards.yaml: card {card_name} APPLY_POWER "
+                           f"references unknown power {pname!r}")
+            # make_apply_power_flags: low 16 bits carry the PowerId.
+            extra = powers[pname]
+        steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
+    return steps
+
+
+def _parse_card_flags(card_name: str, raw_flags, cost: int) -> tuple[int, int]:
+    """Return (flag_bits, base_cost). YAML `flags:` names OR the game's negative
+    cost sentinels (-1 == X-cost, -2 == unplayable status/curse) set the bits;
+    base_cost is the non-negative cost (0 for the sentinel costs, since base_cost
+    is unsigned)."""
+    bits = 0
+    for name in (raw_flags or []):
+        key = str(name).lower()
+        if key not in CARD_FLAGS:
+            raise fail(f"cards.yaml: card {card_name} has unknown flag {name!r} "
+                       f"(known: {sorted(CARD_FLAGS)})")
+        bits |= CARD_FLAGS[key]
+    base_cost = cost
+    if cost == -1:            # X-cost (AbstractCard cost -1; consumes all energy)
+        bits |= CARD_FLAGS["xcost"]
+        base_cost = 0
+    elif cost == -2:          # unplayable status/curse (cost < -1)
+        bits |= CARD_FLAGS["unplayable"]
+        base_cost = 0
+    elif cost < 0:
+        raise fail(f"cards.yaml: card {card_name} has unsupported negative cost "
+                   f"{cost} (only -1 X-cost / -2 unplayable are sentinels)")
+    if base_cost > 255:
+        raise fail(f"cards.yaml: card {card_name} cost {cost} exceeds u8 base_cost")
+    return bits, base_cost
+
+
 def emit_card_table(domains: dict[str, list[dict]]) -> str:
     cards = domains["cards"]
     powers = _power_id_map(domains)
@@ -239,31 +309,29 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
                        f"{target!r}")
         needs_target, random_target = CARD_TARGETING[target]
 
-        effects = c.get("effects") or []
-        steps = []
-        for step in effects:
-            op = step.get("op")
-            if op not in OPCODES:
-                raise fail(f"cards.yaml: card {c['name']} uses unknown op {op!r}")
-            st = step.get("target")
-            if st not in STEP_TARGETS:
-                raise fail(f"cards.yaml: card {c['name']} step has unknown "
-                           f"target {st!r}")
-            amount = int(step.get("amount", 0))
-            extra = 0
-            if op == "APPLY_POWER":
-                pname = step.get("power")
-                if pname not in powers:
-                    raise fail(f"cards.yaml: card {c['name']} APPLY_POWER "
-                               f"references unknown power {pname!r}")
-                # make_apply_power_flags: low 16 bits carry the PowerId.
-                extra = powers[pname]
-            steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
-        max_steps = max(max_steps, len(steps))
+        cost = int(c.get("cost", 0))
+        flags, base_cost = _parse_card_flags(c["name"], c.get("flags"), cost)
+        steps = _parse_card_steps(c["name"], c.get("effects"), powers)
+
+        # Upgraded program (design doc §4.2: a FULL program, not a delta). Absent
+        # -> upgraded == base (safe default; real content lands per-card in B3.3+).
+        if "upgraded" in c and c["upgraded"] is not None:
+            up_steps = _parse_card_steps(c["name"], c["upgraded"], powers)
+            up_cost = int(c.get("upgraded_cost", cost))
+            up_flags_bits, up_base_cost = _parse_card_flags(
+                c["name"], c.get("upgraded_flags", c.get("flags")), up_cost)
+        else:
+            up_steps = list(steps)
+            up_base_cost = base_cost
+            up_flags_bits = flags
+
+        max_steps = max(max_steps, len(steps), len(up_steps))
         rows.append({
-            "name": c["name"], "cost": int(c.get("cost", 0)),
+            "name": c["name"], "cost": base_cost, "flags": flags,
             "ctype": CARD_TYPES[ctype], "needs_target": needs_target,
             "random_target": random_target, "steps": steps,
+            "up_cost": up_base_cost, "up_flags": up_flags_bits,
+            "up_steps": up_steps,
         })
 
     out: list[str] = [BANNER, "#pragma once\n",
@@ -290,6 +358,12 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     for name, val in sorted(CARD_TYPES.items(), key=lambda kv: kv[1]):
         out.append(f"    {name} = {val},")
     out.append("};\n")
+    # Card-flag bit constants (Stage B B3.1): mirror of the engine's CardFlag
+    # (types.hpp); cards.hpp static_asserts these equal. Emitted sorted by bit.
+    for fname, fval in sorted(CARD_FLAGS.items(), key=lambda kv: kv[1]):
+        out.append(f"inline constexpr uint16_t kCardFlag{fname.capitalize()} "
+                   f"= {fval};")
+    out.append("")
     out.append("struct CardEffectStep {")
     out.append("    Opcode op;")
     out.append("    int32_t amount;")
@@ -297,14 +371,22 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    StepTarget target;")
     out.append("};\n")
     out.append(f"inline constexpr int kMaxCardSteps = {max_steps};\n")
+    out.append("// Two effect-program rows per card (design doc §4.2: base +")
+    out.append("// upgraded, indexed by CardInstance.upgrade). A card with no")
+    out.append("// `upgraded:` block emits upgraded_* byte-identical to base.")
     out.append("struct CardDef {")
     out.append("    CardId id;")
     out.append("    uint8_t base_cost;")
     out.append("    CardType type;")
     out.append("    bool needs_target;")
     out.append("    bool random_target;")
+    out.append("    uint16_t flags;                // CardFlag bits (base)")
     out.append("    uint8_t step_count;")
     out.append("    std::array<CardEffectStep, kMaxCardSteps> steps;")
+    out.append("    uint8_t upgraded_cost;")
+    out.append("    uint16_t upgraded_flags;       // CardFlag bits (upgraded)")
+    out.append("    uint8_t upgraded_step_count;")
+    out.append("    std::array<CardEffectStep, kMaxCardSteps> upgraded_steps;")
     out.append("};\n")
 
     def step_literal(step) -> str:
@@ -323,14 +405,19 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     for r in rows:
         ctype_name = next(k for k, v in CARD_TYPES.items() if v == r["ctype"])
         steps_txt = ",\n        ".join(pad(r["steps"]))
+        up_steps_txt = ",\n        ".join(pad(r["up_steps"]))
         out.append(f"inline constexpr CardDef k{_pascal(r['name'])}{{")
         out.append(f"    CardId::{r['name']}, {r['cost']}, "
                    f"CardType::{ctype_name}, "
                    f"{'true' if r['needs_target'] else 'false'}, "
                    f"{'true' if r['random_target'] else 'false'}, "
-                   f"{len(r['steps'])},")
+                   f"{r['flags']}, {len(r['steps'])},")
         out.append("    {{")
         out.append(f"        {steps_txt},")
+        out.append("    }},")
+        out.append(f"    {r['up_cost']}, {r['up_flags']}, {len(r['up_steps'])},")
+        out.append("    {{")
+        out.append(f"        {up_steps_txt},")
         out.append("    }}};\n")
 
     # Lookup table + accessor (mirrors cards.hpp card_def()).

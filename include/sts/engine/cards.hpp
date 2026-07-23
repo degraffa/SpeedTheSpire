@@ -65,6 +65,41 @@ using sts::registry::kPommelStrike;
 // registry row (a defensive guard; card_play asserts a real card was played).
 using sts::registry::card_def;
 
+// --- Upgrade plumbing (Stage B B3.1: two-row lookup by the `upgrade` bit) -----
+// The generated CardDef carries BOTH a base program (steps/step_count/base_cost/
+// flags) and an upgraded program (upgraded_steps/upgraded_step_count/
+// upgraded_cost/upgraded_flags). A card with no `upgraded:` block in the YAML
+// gets an upgraded program byte-identical to its base (so an upgraded instance
+// of an as-yet-un-upgraded card behaves like base -- safe default; the real
+// upgraded content lands per-card in B3.3+). `upgrade` is a COUNT
+// (CardInstance.upgrade, u8): 0 == base, >0 == upgraded. (Infinitely-upgradeable
+// Searing Blow, which needs the count rather than a bit, is B3.5's schema call
+// per the scoping report -- storage is already a u8 count.)
+
+// The effect steps (pointer + count) for a card at the given upgrade level.
+struct CardEffectView {
+    const CardEffectStep* steps;
+    uint8_t count;
+};
+
+[[nodiscard]] inline CardEffectView card_effect_steps(const CardDef& def,
+                                                      uint8_t upgrade) noexcept {
+    if (upgrade > 0) {
+        return CardEffectView{def.upgraded_steps.data(), def.upgraded_step_count};
+    }
+    return CardEffectView{def.steps.data(), def.step_count};
+}
+
+// The energy cost for a card at the given upgrade level.
+[[nodiscard]] inline uint8_t card_cost(const CardDef& def, uint8_t upgrade) noexcept {
+    return upgrade > 0 ? def.upgraded_cost : def.base_cost;
+}
+
+// The CardFlag bitset for a card at the given upgrade level.
+[[nodiscard]] inline uint16_t card_flags(const CardDef& def, uint8_t upgrade) noexcept {
+    return upgrade > 0 ? def.upgraded_flags : def.flags;
+}
+
 // --- Drift pins ---------------------------------------------------------------
 // The generated table encodes ops as sts::registry::Opcode (its standalone
 // mirror of interp.hpp's set) and APPLY_POWER power ids in `extra` via the
@@ -89,12 +124,29 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::EXHAUST) ==
             static_cast<uint16_t>(Opcode::EXHAUST) &&
         static_cast<uint16_t>(sts::registry::Opcode::ROLL_MOVE) ==
-            static_cast<uint16_t>(Opcode::ROLL_MOVE),
+            static_cast<uint16_t>(Opcode::ROLL_MOVE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::MAKE_CARD) ==
+            static_cast<uint16_t>(Opcode::MAKE_CARD) &&
+        static_cast<uint16_t>(sts::registry::Opcode::SET_COST) ==
+            static_cast<uint16_t>(Opcode::SET_COST),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
 static_assert(kBash.steps[1].extra == make_apply_power_flags(PowerId::VULNERABLE),
               "generated APPLY_POWER `extra` must use the make_apply_power_flags "
               "packing (interp.hpp)");
+
+// Card-flag bit constants (Stage B B3.1): the generated header emits kCardFlag*
+// mirroring gen.py's CARD_FLAGS; pin them byte-equal to the engine's CardFlag
+// (types.hpp) so the codegen vocabulary cannot drift from the interpreter's.
+static_assert(
+    sts::registry::kCardFlagExhaust == card_flag_bit(CardFlag::EXHAUST) &&
+        sts::registry::kCardFlagEthereal == card_flag_bit(CardFlag::ETHEREAL) &&
+        sts::registry::kCardFlagInnate == card_flag_bit(CardFlag::INNATE) &&
+        sts::registry::kCardFlagUnplayable == card_flag_bit(CardFlag::UNPLAYABLE) &&
+        sts::registry::kCardFlagRetain == card_flag_bit(CardFlag::RETAIN) &&
+        sts::registry::kCardFlagXcost == card_flag_bit(CardFlag::XCOST),
+    "generated kCardFlag* must stay byte-equal to types.hpp's CardFlag "
+    "(append-only; mirrored in gen.py CARD_FLAGS)");
 
 }  // namespace sts::engine

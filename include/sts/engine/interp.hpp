@@ -45,7 +45,16 @@
 //     kOpcodeDrawCard mirrors Opcode::DRAW and is static_assert'd equal in
 //     action_queue.cpp. Design doc §6 names the opcode SET but assigns no
 //     numeric values, so the numbering is an implementation choice, not a doc
-//     conflict.
+//     conflict. Stage B B3.1 appends MAKE_CARD == 9 and SET_COST == 10 (the
+//     append-from-9 rule); gen.py's OPCODES and the cards.hpp drift pin are
+//     extended to cover them.
+//
+// (4) DYNAMIC TARGETS (Stage B B3.1). An item's `tgt` may be a sentinel
+//     kActorAllEnemies / kActorRandomEnemy (action_queue.hpp). execute_opcode
+//     resolves them at EXECUTE time -- fanning the op out over the currently-
+//     live monsters (AoE, one DamageInfo per target) or rolling a single
+//     card_random_rng draw for the random case (one draw per queued hit). A
+//     concrete monster slot or kActorPlayer dispatches straight to the op body.
 //
 // FIELD-ENCODING CONVENTIONS:
 //   * Actor identity: src/tgt are actor indices -- monster slots 0..4, and the
@@ -93,7 +102,38 @@ enum class Opcode : uint16_t {
     SHUFFLE_IN = 6,   // reshuffle discard -> draw (implemented in piles.cpp)
     EXHAUST = 7,      // move card-pool-index `amount` from hand to exhaust
     ROLL_MOVE = 8,    // no-op: Jaw Worm rolls its own next move in its MonsterTurnFn
+    // --- Stage B B3.1 additions (append-only from 9, design doc §4.4) ---
+    MAKE_CARD = 9,    // create `amount` copies of CardId(flags low16) into pile(src)
+    SET_COST = 10,    // set card_pool[src].cost_now = `amount` (temporary cost modifier)
 };
+
+// --- MAKE_CARD field encoding (Stage B B3.1) --------------------------------
+// Card creation into a pile (MakeTempCardInHand/Discard, ShuffleIntoDrawPile).
+// The status/created card is allocated into a free card_pool row and its pool
+// index inserted into the destination pile.
+//   * `flags` low 16 bits  -> the CardId to create (make_make_card_flags below).
+//   * `src`                -> the destination CardPile (HAND/DRAW/DISCARD/DRAW_RANDOM).
+//   * `amount`             -> how many copies to create.
+//   * `tgt`                -> unused; MUST be kActorPlayer so it is not mistaken
+//                             for an enemy-fan-out sentinel.
+// Hand-cap interaction (MakeTempCardInHandAction.update, :71-77): when creating
+// into HAND would overflow kHandCap, the overflow copies go to the DISCARD pile
+// instead (the game's "hand is full" spill). DRAW_RANDOM inserts at a random
+// draw-pile position via ONE card_random_rng draw (CardGroup.addToRandomSpot,
+// CardGroup.java:463-468) -- the Wild Strike / Reckless Charge status-shuffle path.
+enum class CardPile : uint8_t {
+    HAND = 0,
+    DRAW = 1,         // onto the top of the draw pile (drawn next)
+    DISCARD = 2,
+    DRAW_RANDOM = 3,  // random spot in the draw pile (one card_random_rng draw)
+};
+
+[[nodiscard]] constexpr uint32_t make_make_card_flags(uint16_t card_id) noexcept {
+    return static_cast<uint32_t>(card_id);
+}
+[[nodiscard]] constexpr uint16_t make_card_id_from_flags(uint32_t flags) noexcept {
+    return static_cast<uint16_t>(flags & 0xFFFFu);
+}
 
 // --- APPLY_POWER field encoding ---------------------------------------------
 // `flags` low 16 bits hold the PowerId; `amount` holds the stack count. Use

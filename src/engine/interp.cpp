@@ -12,8 +12,11 @@
 #include <cstdint>
 
 #include "sts/engine/action_queue.hpp"
+#include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
+#include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
+#include "sts/engine/rng_stream.hpp"    // random (DRAW_RANDOM insert position)
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -198,6 +201,93 @@ void op_apply_power(CombatState& s, uint8_t tgt, PowerId id, int amount) noexcep
 // (draw_cards / exhaust_card / shuffle_discard_into_draw); the dispatch below
 // delegates to them.
 
+// MAKE_CARD: create `count` copies of `id` into `pile` (Stage B B3.1). Each copy
+// takes a free card_pool row (card_id == NONE); a new instance's cost_now/flags
+// come from the registry (base, upgrade 0). Provenance: MakeTempCardInHandAction
+// (:64-82, incl. the hand-full -> discard spill), MakeTempCardInDiscardAction,
+// ShuffleIntoDrawPileAction + CardGroup.addToRandomSpot (:463-468).
+void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
+                  int count) noexcept {
+    const CardId id = static_cast<CardId>(card_id_raw);
+    const CardDef* def = card_def(id);
+    if (def == nullptr || count <= 0) {
+        return;
+    }
+    for (int k = 0; k < count; ++k) {
+        int slot = -1;
+        for (int i = 0; i < kCardPoolCap; ++i) {
+            if (s.card_pool[i].card_id == static_cast<uint16_t>(CardId::NONE)) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            return;  // pool exhausted (defensive; the 160-row cap, design §4.2)
+        }
+        s.card_pool[slot].card_id = card_id_raw;
+        s.card_pool[slot].upgrade = 0;
+        s.card_pool[slot].cost_now = card_cost(*def, 0);
+        s.card_pool[slot].flags = card_flags(*def, 0);
+        s.card_pool[slot].misc = 0;
+        const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
+        switch (pile) {
+            case CardPile::HAND:
+                // MakeTempCardInHandAction: overflow past kHandCap spills to the
+                // discard pile (the "hand is full" branch, :71-77).
+                if (s.hand_count < kHandCap) {
+                    s.hand[s.hand_count++] = idx;
+                } else if (s.discard_count < kDiscardCap) {
+                    s.discard[s.discard_count++] = idx;
+                }
+                break;
+            case CardPile::DISCARD:
+                if (s.discard_count < kDiscardCap) {
+                    s.discard[s.discard_count++] = idx;
+                }
+                break;
+            case CardPile::DRAW:
+                // Onto the top of the draw pile (draw[draw_count-1] == top).
+                if (s.draw_count < kDrawCap) {
+                    s.draw[s.draw_count++] = idx;
+                }
+                break;
+            case CardPile::DRAW_RANDOM: {
+                // CardGroup.addToRandomSpot: insert at cardRandomRng.random(size-1)
+                // (one draw), or append with NO draw when the pile is empty.
+                if (s.draw_count >= kDrawCap) {
+                    break;
+                }
+                int pos = 0;
+                if (s.draw_count > 0) {
+                    pos = random(s.card_random_rng, s.draw_count - 1);
+                }
+                for (int j = s.draw_count; j > pos; --j) {
+                    s.draw[j] = s.draw[j - 1];
+                }
+                s.draw[pos] = idx;
+                ++s.draw_count;
+                break;
+            }
+        }
+    }
+}
+
+// SET_COST: set card_pool[src].cost_now = amount (Stage B B3.1 cost-modifier
+// write path). Clamped to the u8 cost_now range. The "temporary" (per-turn
+// reset) and "which card / under what condition" logic belongs to the consumer
+// (a power hook -- B3.2 -- or a CHOOSE selection); this is the write primitive.
+void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept {
+    if (pool_index >= kCardPoolCap) {
+        return;
+    }
+    if (new_cost < 0) {
+        new_cost = 0;
+    } else if (new_cost > 255) {
+        new_cost = 255;
+    }
+    s.card_pool[pool_index].cost_now = static_cast<uint8_t>(new_cost);
+}
+
 }  // namespace
 
 // --- Public: DAMAGE pipeline -------------------------------------------------
@@ -254,6 +344,31 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt,
 // --- Public: dispatch --------------------------------------------------------
 
 void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
+    // Dynamic-target resolution at EXECUTE time (interp.hpp decision (4)).
+    if (item.tgt == kActorAllEnemies) {
+        // AoE: a SEPARATE op (and, for DAMAGE, a separate DamageInfo) per LIVE
+        // monster (DamageAllEnemiesAction skips isDeadOrEscaped). Snapshotting
+        // the live set here matches the game resolving the AoE action in place.
+        for (uint8_t i = 0; i < s.monster_count; ++i) {
+            if (s.monsters[i].hp > 0) {
+                ActionQueueItem one = item;
+                one.tgt = i;
+                execute_opcode(s, one);
+            }
+        }
+        return;
+    }
+    if (item.tgt == kActorRandomEnemy) {
+        // One uniformly-random LIVE monster, one card_random_rng draw per hit
+        // (AttackDamageRandomEnemyAction re-rolls per resolution).
+        const uint8_t t = roll_random_target(s);
+        if (t != kActorPlayer) {
+            ActionQueueItem one = item;
+            one.tgt = t;
+            execute_opcode(s, one);
+        }
+        return;
+    }
     switch (static_cast<Opcode>(item.opcode)) {
         case Opcode::NOP:
             return;  // reserved safe no-op (value-init / unrecognized item)
@@ -283,6 +398,13 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::ROLL_MOVE:
             return;  // stub: Jaw Worm rolls inside its MonsterTurnFn
+        case Opcode::MAKE_CARD:
+            op_make_card(s, make_card_id_from_flags(item.flags),
+                         static_cast<CardPile>(item.src), item.amount);
+            return;
+        case Opcode::SET_COST:
+            op_set_cost(s, item.src, item.amount);
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

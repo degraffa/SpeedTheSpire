@@ -52,27 +52,57 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     ActionQueueItem item{};
     item.opcode = static_cast<uint16_t>(step.op);
     item.src = kActorPlayer;
-    item.tgt = (step.target == StepTarget::SELF) ? kActorPlayer : resolved_target;
+    // Where the step lands. SELF -> the player; CARD_TARGET -> the card's
+    // resolved monster (declared or the card-level random roll); ALL_ENEMY /
+    // RANDOM_ENEMY -> the execute-time fan-out / per-hit-roll sentinels (Stage B
+    // B3.1; execute_opcode resolves them against the then-live monsters).
+    switch (step.target) {
+        case StepTarget::SELF:
+            item.tgt = kActorPlayer;
+            break;
+        case StepTarget::CARD_TARGET:
+            item.tgt = resolved_target;
+            break;
+        case StepTarget::ALL_ENEMY:
+            item.tgt = kActorAllEnemies;
+            break;
+        case StepTarget::RANDOM_ENEMY:
+            item.tgt = kActorRandomEnemy;
+            break;
+        default:
+            item.tgt = kActorPlayer;
+            break;
+    }
     item.amount = step.amount;
     item.flags = step.extra;  // APPLY_POWER: PowerId flags; else 0
     add_to_bottom(s, item);
 }
 
-// Move the played card (pool index) from hand to the discard pile. None of the
-// five skeleton cards exhausts/reshuffles/rebounds, so the destination is always
-// discard (AbstractPlayer.useCard -> moveToDiscardPile equivalent). Locating by
-// pool index is unambiguous (each pool row is a distinct instance).
-void move_card_hand_to_discard(CombatState& s, CardPoolIndex pool_index) noexcept {
+// Move the played card (pool index) from hand to its destination pile. A card
+// with the EXHAUST flag goes to the exhaust pile (AbstractCard.exhaust /
+// UseCardAction), otherwise to discard (AbstractPlayer.useCard ->
+// moveToDiscardPile). Locating by pool index is unambiguous (each pool row is a
+// distinct instance). Stage B B3.1 adds the exhaust destination; the skeleton's
+// five cards are all non-exhaust, so the discard path is unchanged for them.
+void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
+                            bool to_exhaust) noexcept {
     for (uint8_t i = 0; i < s.hand_count; ++i) {
         if (s.hand[i] == pool_index) {
             for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.hand_count; ++j) {
                 s.hand[j - 1] = s.hand[j];
             }
             --s.hand_count;
-            assert(s.discard_count < kDiscardCap &&
-                   "discard overflow (design doc §4.1: hard assert)");
-            s.discard[s.discard_count] = pool_index;
-            ++s.discard_count;
+            if (to_exhaust) {
+                assert(s.exhaust_count < kExhaustCap &&
+                       "exhaust overflow (design doc §4.1: hard assert)");
+                s.exhaust[s.exhaust_count] = pool_index;
+                ++s.exhaust_count;
+            } else {
+                assert(s.discard_count < kDiscardCap &&
+                       "discard overflow (design doc §4.1: hard assert)");
+                s.discard[s.discard_count] = pool_index;
+                ++s.discard_count;
+            }
             return;
         }
     }
@@ -143,22 +173,52 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     // 3. Resolve the effect target (trap-10 random roll at dequeue, else declared).
     const uint8_t resolved_target = resolve_play_target(s, *def, item.target);
 
+    // Per-instance runtime data: the upgrade level selects which of the two
+    // effect programs runs (Stage B B3.1 two-row lookup); the instance flags
+    // (seeded from the registry at combat_begin / card creation) drive X-cost
+    // and the exhaust destination.
+    const uint8_t upgrade = s.card_pool[pool_index].upgrade;
+    const uint16_t inst_flags = s.card_pool[pool_index].flags;
+    const uint8_t cost_now = s.card_pool[pool_index].cost_now;
+    const CardEffectView eff = card_effect_steps(*def, upgrade);
+    const bool is_xcost = has_card_flag(inst_flags, CardFlag::XCOST);
+
     // 4. c.use(): QUEUE the card's effect actions via add_to_bottom, in the
     //    card's addToBot order. Effects resolve later through the pump priority
     //    loop -- they are NOT applied inline here (matches AbstractCard.use()).
-    for (uint8_t k = 0; k < def->step_count; ++k) {
-        queue_effect_step(s, def->steps[k], resolved_target);
+    //    X-cost cards repeat their program energyOnUse times (WhirlwindAction:
+    //    for i in [0, energyOnUse) queue the effect), then spend ALL energy.
+    if (is_xcost) {
+        int energy_on_use = s.player_energy;
+        if (energy_on_use < 0) {
+            energy_on_use = 0;
+        }
+        for (int rep = 0; rep < energy_on_use; ++rep) {
+            for (uint8_t k = 0; k < eff.count; ++k) {
+                queue_effect_step(s, eff.steps[k], resolved_target);
+            }
+        }
+    } else {
+        for (uint8_t k = 0; k < eff.count; ++k) {
+            queue_effect_step(s, eff.steps[k], resolved_target);
+        }
     }
 
-    // 5. UseCardAction hook stage (no-op) + move the card hand->discard.
+    // 5. UseCardAction hook stage (no-op) + move the card out of hand. EXHAUST
+    //    cards go to the exhaust pile; every other card to discard.
     trigger_on_use_card(s, *def);
-    move_card_hand_to_discard(s, pool_index);
+    move_card_hand_to_pile(s, pool_index, has_card_flag(inst_flags, CardFlag::EXHAUST));
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
-    //    The per-instance runtime cost is card_pool[...].cost_now (not the
-    //    registry base cost), so a future cost-reduction effect is honored.
-    s.player_energy = static_cast<int16_t>(
-        s.player_energy - static_cast<int16_t>(s.card_pool[pool_index].cost_now));
+    //    X-cost already consumed all energy above; otherwise deduct the
+    //    per-instance runtime cost (card_pool[...].cost_now), so a cost modifier
+    //    (SET_COST) is honored.
+    if (is_xcost) {
+        s.player_energy = 0;
+    } else {
+        s.player_energy =
+            static_cast<int16_t>(s.player_energy - static_cast<int16_t>(cost_now));
+    }
 }
 
 }  // namespace sts::engine

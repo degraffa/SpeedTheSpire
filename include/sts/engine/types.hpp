@@ -54,6 +54,51 @@ using MonsterId = sts::registry::MonsterId;
 // zero relics, design doc §9); rows land with Stage B's relic content tasks.
 using RelicId = sts::registry::RelicId;
 
+// --- CardFlag (per-card / per-instance flag bits) ----------------------------
+
+// Named bits for `CardInstance.flags` and the generated `CardDef.flags`
+// (Stage B B3.1). Both fields are raw `uint16_t`; these constants give the bit
+// positions meaning. Values are APPEND-ONLY (design doc §4.4 opcode/id rule
+// applied to flags) and MIRRORED in tools/registry_gen/gen.py's `CARD_FLAGS`;
+// the generated header emits matching `kCardFlag*` constants that cards.hpp
+// static_asserts equal to these, so the codegen vocabulary cannot silently
+// diverge from the engine's.
+//
+// Semantics (each cites its consumer wave; B3.1 wires the bits + the two the
+// acceptance names — EXHAUST routing and UNPLAYABLE/XCOST at play/legality —
+// while ETHEREAL/INNATE/RETAIN are named reserved bits whose end-of-turn /
+// combat-begin sweeps land with their first content consumer per §5.4's frozen
+// ordering):
+//   EXHAUST    -- on play the card goes to the exhaust pile, not discard
+//                 (AbstractCard.exhaust; UseCardAction.java).
+//   ETHEREAL   -- auto-exhaust at end of turn if still in hand
+//                 (AbstractCard.isEthereal, AbstractCard.java:110/2177).
+//   INNATE     -- starts in the opening hand (AbstractCard.isInnate:86).
+//   UNPLAYABLE -- never a legal play; status/curse clutter with cost < -1
+//                 (AbstractCard.cantUseMessage / canUse, AbstractCard.java:917,920).
+//   RETAIN     -- not discarded at end of turn (AbstractCard.selfRetain/retain:81-82).
+//   XCOST      -- cost is ALL current energy at play; the effect program is
+//                 repeated `energyOnUse` times and energy is zeroed
+//                 (Whirlwind/WhirlwindAction: cost -1, energyOnUse). Encoded as
+//                 a flag rather than a negative `base_cost` (which is unsigned);
+//                 the generator maps YAML `cost: -1` to this bit.
+enum class CardFlag : uint16_t {
+    NONE       = 0,
+    EXHAUST    = 1u << 0,
+    ETHEREAL   = 1u << 1,
+    INNATE     = 1u << 2,
+    UNPLAYABLE = 1u << 3,
+    RETAIN     = 1u << 4,
+    XCOST      = 1u << 5,
+};
+
+[[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {
+    return static_cast<uint16_t>(f);
+}
+[[nodiscard]] constexpr bool has_card_flag(uint16_t flags, CardFlag f) noexcept {
+    return (flags & card_flag_bit(f)) != 0u;
+}
+
 // --- ActionVerb --------------------------------------------------------------
 
 // The batch API's action verb set (design doc §7): "one enum, all phases".

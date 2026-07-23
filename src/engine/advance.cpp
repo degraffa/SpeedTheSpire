@@ -48,8 +48,11 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
         assert(def != nullptr && "deck holds an unknown CardId");
         state.card_pool[i].card_id = static_cast<uint16_t>(deck[i]);
         state.card_pool[i].upgrade = 0;
-        state.card_pool[i].cost_now = def->base_cost;
-        state.card_pool[i].flags = 0;
+        state.card_pool[i].cost_now = card_cost(*def, 0);
+        // Seed per-instance flags from the registry (Stage B B3.1: exhaust/
+        // ethereal/innate/unplayable/retain/xcost). The skeleton deck is all
+        // base cards with no flags, so this is 0 for every skeleton card.
+        state.card_pool[i].flags = card_flags(*def, 0);
         state.card_pool[i].misc = 0;
     }
 
@@ -129,7 +132,12 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     for (int i = 0; i < kHandCap; ++i) {
         if (waiting && i < state.hand_count) {
             const CardInstance& c = state.card_pool[state.hand[i]];
-            out.can_play[i] = state.player_energy >= c.cost_now;
+            // UNPLAYABLE (statuses/curses) is never a legal play regardless of
+            // energy (Stage B B3.1). Otherwise affordability: energy >= cost_now
+            // (X-cost cards carry cost_now 0, so they are always affordable,
+            // matching costForTurn == -1).
+            const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
+            out.can_play[i] = !unplayable && state.player_energy >= c.cost_now;
         } else {
             out.can_play[i] = false;
         }

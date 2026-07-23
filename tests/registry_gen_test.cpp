@@ -400,3 +400,86 @@ TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
     EXPECT_NE(msg.find("duplicate move_id"), std::string::npos) << msg;
     EXPECT_NE(msg.find("BAD_MOVES"), std::string::npos) << msg;
 }
+
+// --- 7. B3.1 card-flag + two-row (upgrade) codegen --------------------------
+// The skeleton cards carry no flags and no distinct `upgraded:` block, so the
+// generated flags are 0 and the upgraded program mirrors the base program
+// byte-for-byte (the safe default). The generated kCardFlag* constants match the
+// engine's CardFlag (pinned by the cards.hpp static_assert; re-checked here as a
+// value equality for good measure).
+TEST(RegistryGen, CardFlagsAndUpgradeDefaultsForSkeleton) {
+    namespace r = sts::registry;
+
+    EXPECT_EQ(r::kCardFlagExhaust,
+              sts::engine::card_flag_bit(sts::engine::CardFlag::EXHAUST));
+    EXPECT_EQ(r::kCardFlagUnplayable,
+              sts::engine::card_flag_bit(sts::engine::CardFlag::UNPLAYABLE));
+    EXPECT_EQ(r::kCardFlagXcost,
+              sts::engine::card_flag_bit(sts::engine::CardFlag::XCOST));
+
+    for (int id = 1; id <= 5; ++id) {
+        const r::CardDef* g = r::card_def(static_cast<r::CardId>(id));
+        ASSERT_NE(g, nullptr) << "id " << id;
+        EXPECT_EQ(g->flags, 0u) << "skeleton card " << id << " has no flags";
+        // No `upgraded:` in the YAML -> upgraded mirrors base.
+        EXPECT_EQ(g->upgraded_cost, g->base_cost) << "id " << id;
+        EXPECT_EQ(g->upgraded_flags, g->flags) << "id " << id;
+        ASSERT_EQ(g->upgraded_step_count, g->step_count) << "id " << id;
+        for (int s = 0; s < r::kMaxCardSteps; ++s) {
+            const auto si = static_cast<std::size_t>(s);
+            EXPECT_EQ(static_cast<int>(g->upgraded_steps[si].op),
+                      static_cast<int>(g->steps[si].op)) << "id " << id << " step " << s;
+            EXPECT_EQ(g->upgraded_steps[si].amount, g->steps[si].amount)
+                << "id " << id << " step " << s;
+            EXPECT_EQ(g->upgraded_steps[si].extra, g->steps[si].extra)
+                << "id " << id << " step " << s;
+        }
+    }
+}
+
+// A card WITH an `upgraded:` block (and a `flags:`/X-cost `cost:`) emits a
+// DISTINCT upgraded program + the expected flag bits -- end-to-end through the
+// generator. Writes a synthetic registry (real files + one appended card),
+// generates, and reads the resulting literal back.
+TEST(RegistryGen, UpgradedBlockAndFlagsEmitDistinctRow) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path reg = scratch / "upgrade_registry";
+    fs::remove_all(reg);
+    fs::create_directories(reg);
+    for (const auto& e : fs::directory_iterator(kRegistryDir)) {
+        if (e.path().extension() == ".yaml") {
+            fs::copy_file(e.path(), reg / e.path().filename(),
+                          fs::copy_options::overwrite_existing);
+        }
+    }
+    {
+        // id 6: X-cost + exhaust; base DAMAGE 7 (all enemies), upgraded DAMAGE 99.
+        std::ofstream cards(reg / "cards.yaml", std::ios::app);
+        cards << "\n- id: 6\n  name: SYNTH_XCOST\n  game_id: \"SynthX\"\n"
+                 "  type: ATTACK\n  cost: -1\n  target: ALL_ENEMY\n"
+                 "  flags: [exhaust]\n"
+                 "  provenance: \"synthetic B3.1 upgrade/flags codegen test\"\n"
+                 "  effects:\n"
+                 "    - {op: DAMAGE, target: ALL_ENEMY, amount: 7}\n"
+                 "  upgraded:\n"
+                 "    - {op: DAMAGE, target: ALL_ENEMY, amount: 99}\n";
+    }
+
+    const fs::path out = scratch / "upgrade_out";
+    const fs::path err = scratch / "upgrade_err.txt";
+    fs::remove_all(out);
+    ASSERT_EQ(run_generator(reg.string(), out.string(), err.string()), 0)
+        << read_text(err);
+
+    const std::string hpp = read_text(out / "sts/registry/card_table.hpp");
+    // The distinct upgraded amount appears (proving two rows were emitted).
+    EXPECT_NE(hpp.find("99"), std::string::npos) << "upgraded amount not emitted";
+    // The synthetic card's literal carries the X-cost (32) | exhaust (1) == 33
+    // flag word and the ALL_ENEMY step target.
+    const auto pos = hpp.find("kSynthXcost");
+    ASSERT_NE(pos, std::string::npos) << "synthetic card literal missing";
+    const std::string lit = hpp.substr(pos, 400);
+    EXPECT_NE(lit.find("StepTarget::ALL_ENEMY"), std::string::npos) << lit;
+    EXPECT_NE(lit.find(", 33, "), std::string::npos)
+        << "expected flags word 33 (xcost|exhaust) in: " << lit;
+}

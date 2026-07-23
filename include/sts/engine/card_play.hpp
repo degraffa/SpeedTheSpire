@@ -81,9 +81,12 @@ bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noe
 // Resolve one dequeued card play (design doc §5.3, collapsed per the note above).
 // Called from pump_step()'s step 3 when the cardQueue head is a real card (not
 // the end-turn sentinel). Runs the no-op hook stubs, ++cards_played_this_turn,
-// the trap-10 target resolution, queues the card's effect ActionQueueItems via
-// add_to_bottom, moves the card hand->discard, then deducts its cost from
-// player_energy. `item.card_index` is the card-pool index of the played card.
+// the trap-10 target resolution, then queues the card's effect ActionQueueItems
+// via add_to_bottom. The upgrade-selected effect program (Stage B B3.1 two-row
+// lookup) runs once, or -- for an X-cost card -- energyOnUse times with energy
+// then zeroed. The card moves hand->exhaust (EXHAUST flag) or hand->discard, and
+// non-X cost is deducted from player_energy. `item.card_index` is the card-pool
+// index of the played card.
 void resolve_card_play(CombatState& state, const CardQueueItem& item) noexcept;
 
 }  // namespace sts::engine

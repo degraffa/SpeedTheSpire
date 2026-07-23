@@ -300,3 +300,17 @@ sts_set_warnings(map_gen_test)
 sts_enable_sanitizers(map_gen_test)
 
 gtest_discover_tests(map_gen_test)
+
+# B3.1: interpreter / card-mechanics extensions (X-cost, ALL_ENEMY / RANDOM_ENEMY
+# targeting, exhaust/unplayable flag bits, MAKE_CARD/SET_COST opcodes, upgrade
+# plumbing). Tier-2 tests over constructed states, hand-computed from the cited
+# Java. Header-only engine surface, links sts_engine like the other tier-2 suites.
+add_executable(card_ext_test
+    card_ext_test.cpp
+)
+
+target_link_libraries(card_ext_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(card_ext_test)
+sts_enable_sanitizers(card_ext_test)
+
+gtest_discover_tests(card_ext_test)

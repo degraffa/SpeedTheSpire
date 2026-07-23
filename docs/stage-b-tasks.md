@@ -852,7 +852,7 @@ content use combat-state comparison inside bridge runs whose context the
 translator can seed (B1.6), or are deferred to the batch's campaign debut and
 noted in the Log.
 
-### B3.1 `[ ]` Interpreter/card-mechanics extensions
+### B3.1 `[x]` Interpreter/card-mechanics extensions
 **Deps:** G4, G5 · **Spec:** design §5.1; stage-a §5-§6 · **Provenance:**
 AbstractCard/AbstractPlayer use/cost paths; UseCardAction; read at task
 **Deliverables:** engine support the full red set needs beyond the skeleton:
@@ -864,7 +864,67 @@ paths status cards need. New opcodes appended (≥9), documented in interp.hpp.
 **Acceptance:** gtest coverage per mechanic in constructed states (incl.
 X-cost consuming all energy, AOE hitting only live monsters, hand-cap
 interaction with created cards); all existing tests green.
-**Log:** —
+**Log:** Verified by running (WSL Ubuntu-2404), not inferred. Landed the B3.1
+engine surface with **zero CombatState/CardInstance layout change**
+(`CardInstance.flags`/`cost_now`/`misc`/`upgrade` already existed) -> `SCHEMA_VERSION`
+stays 2, all 20 combat fixtures load with **zero regeneration** (`git status
+tests/golden` clean; `FixtureOracle` green). Every semantics cite read in full
+before coding.
+**New opcodes (append-only from 9, documented interp.hpp; gen.py OPCODES +
+cards.hpp drift-pin extended):** `MAKE_CARD`=9 (card creation into a pile),
+`SET_COST`=10 (cost_now write primitive). **Targeting:** new `StepTarget`
+ALL_ENEMY=2 / RANDOM_ENEMY=3 + execute-time actor sentinels
+`kActorAllEnemies`=0xFD / `kActorRandomEnemy`=0xFE. `execute_opcode` resolves
+them at EXECUTE time -- AoE fans out over LIVE monsters with a SEPARATE
+DamageInfo per target (DamageAllEnemiesAction.update:56-83); RANDOM rolls one
+`card_random_rng` draw PER hit (AttackDamageRandomEnemyAction.update). **Flags:**
+`CardFlag` bits EXHAUST/ETHEREAL/INNATE/UNPLAYABLE/RETAIN/XCOST (types.hpp),
+mirrored in gen.py `CARD_FLAGS` + generated `kCardFlag*`, drift-pinned in
+cards.hpp; seeded onto each `CardInstance.flags` at combat_begin/creation. B3.1
+WIRES: EXHAUST (played card -> exhaust pile, UseCardAction), UNPLAYABLE (barred
+in `legal_actions`), XCOST; ETHEREAL/INNATE/RETAIN are named reserved bits whose
+end-of-turn/combat-begin sweeps land with their first content consumer (§5.4
+frozen order). **X-cost** (XCOST flag; gen maps YAML `cost: -1`): consumes ALL
+energy, repeats the effect program `energyOnUse` times, zeroes energy
+(WhirlwindAction.update); cost_now 0 keeps it affordable at 0 energy
+(costForTurn -1). **Upgrade plumbing (two-row):** the generated `CardDef` gains
+`flags` + `upgraded_cost`/`upgraded_flags`/`upgraded_step_count`/`upgraded_steps`
+(a card with no `upgraded:` block emits upgraded == base); `card_effect_steps`/
+`card_cost`/`card_flags(def, upgrade)` select the row by `CardInstance.upgrade`
+(a count -> 0 base, >0 upgraded; Searing Blow's count-encoding left to B3.5 per
+the scoping report). **Cost modifiers:** SET_COST writes `card_pool[src].cost_now`
+(clamped u8); the per-instance cost is honored at play (the "temporary"/per-turn
+reset + which-card selection belong to the consumer power hook (B3.2) / CHOOSE).
+**MAKE_CARD** into HAND/DRAW/DISCARD/DRAW_RANDOM: allocates a free 160-row pool
+slot, seeds cost/flags from the registry; hand-full spills to discard
+(MakeTempCardInHandAction.update:71-77); DRAW_RANDOM inserts at
+`cardRandomRng.random(size-1)` (one draw; CardGroup.addToRandomSpot:463-468),
+empty pile appends with no draw. **Provenance read in full:** Whirlwind.java /
+WhirlwindAction, DamageAllEnemiesAction, AttackDamageRandomEnemyAction,
+MakeTempCardInHandAction, CardGroup.addToRandomSpot, AbstractCard flag/cost
+fields (exhaust/isEthereal/isInnate/retain/costForTurn/energyOnUse; cost -1 X /
+-2 unplayable).
+**Acceptance -- new tier-2 suite `tests/card_ext_test.cpp` (15 cases)** + 2 new
+`registry_gen_test` cases: AoE live-only + per-target DamageInfo; random per-hit
+one-draw/exclude-dead; X-cost consumes-all-energy + repeat (and 0-energy plays
+for nothing, still legal); EXHAUST routing; UNPLAYABLE gating; MAKE_CARD into
+hand (with room + hand-full->discard spill), discard, draw-top, draw-random
+(one card_random_rng draw / empty-append no draw); SET_COST write+clamp+honored-
+at-play; upgrade helpers select base/upgraded by bit + resolve honors the bit;
+codegen: skeleton flags==0 & upgraded==base, and a synthetic `upgraded:`+`flags:`+
+X-cost card emits a DISTINCT upgraded row + flag word end-to-end through gen.py.
+**Suites: debug 191/191, asan 191/191, release 191/191** (166 pre-B3 baseline +
+17 new mechanic tests + 8 concurrent B4.1 map tests; generator determinism green;
+gen.py runs on PyYAML per CI). **B3.2 / card batches inherit:** effect-program
+authoring conventions -- ALL_ENEMY/RANDOM_ENEMY step targets fan out at execute
+time; the two upgrade rows are selected by `card_effect_steps`; the MAKE_CARD
+ActionQueueItem encoding is `{flags low16 = CardId, src = CardPile, amount =
+count, tgt = kActorPlayer}` and SET_COST is `{src = pool index, amount = cost}`
+(gen.py step-authoring for these two ops is deferred to their first card
+consumer -- the opcodes/interpreter are ready); YAML `flags:` (+ `cost: -1/-2`)
+and an optional `upgraded:` full-program block are now honored by codegen. B3.2's
+power hooks attach the cost_now/exhaust/ethereal sweeps to the frozen §5.3-5.5
+order.
 
 ### B3.2 `[ ]` Power-hook framework completion
 **Deps:** B3.1 · **Spec:** stage-a §5.3-5.5 hook order (frozen) ·
