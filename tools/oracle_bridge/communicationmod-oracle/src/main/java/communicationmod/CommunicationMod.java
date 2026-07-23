@@ -51,10 +51,19 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
     // SpeedTheSpire fork addition (stage-b-design §2.5): gate the "oracle" state
     // block so stock CommunicationMod consumers (this key absent) are unaffected.
     private static final String ORACLE_BLOCK_OPTION = "oracleBlock";
+    // SpeedTheSpire fork addition (stage-b-design §2.2, task B1.3): the three
+    // rendering-strip / fast-forward patch families, each individually toggleable.
+    // Public so the strip patches (incl. the pre-init DesktopLauncher patch) can
+    // reference the exact key names. With all three false the fork is
+    // byte-identical to its pre-B1.3 behavior (the strip-equivalence baseline).
+    public static final String STRIP_DRAW_OPTION = "stripDrawSuppression";
+    public static final String STRIP_ANIM_OPTION = "stripAnimationCollapse";
+    public static final String STRIP_CADENCE_OPTION = "stripFastCadence";
     private static final String DEFAULT_COMMAND = "";
     private static final long DEFAULT_TIMEOUT = 10L;
     private static final boolean DEFAULT_VERBOSITY = true;
     private static final boolean DEFAULT_ORACLE_BLOCK = true;
+    public static final boolean DEFAULT_STRIP = true;
 
     public CommunicationMod(){
         BaseMod.subscribe(this);
@@ -67,6 +76,9 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             defaults.put(INITIALIZATION_TIMEOUT_OPTION, Long.toString(DEFAULT_TIMEOUT));
             defaults.put(VERBOSE_OPTION, Boolean.toString(DEFAULT_VERBOSITY));
             defaults.put(ORACLE_BLOCK_OPTION, Boolean.toString(DEFAULT_ORACLE_BLOCK));
+            defaults.put(STRIP_DRAW_OPTION, Boolean.toString(DEFAULT_STRIP));
+            defaults.put(STRIP_ANIM_OPTION, Boolean.toString(DEFAULT_STRIP));
+            defaults.put(STRIP_CADENCE_OPTION, Boolean.toString(DEFAULT_STRIP));
             communicationConfig = new SpireConfig("CommunicationMod", "config", defaults);
             String command = communicationConfig.getString(COMMAND_OPTION);
             // I want this to always be saved to the file so people can set it more easily.
@@ -238,6 +250,59 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
                     }
                 });
         settingsPanel.addUIElement(oracleBlockOption);
+
+        // SpeedTheSpire fork additions (stage-b-design §2.2, task B1.3): one
+        // toggle per rendering-strip family. Changing fast cadence only takes
+        // effect on the next game launch (it is read at DesktopLauncher init).
+        ModLabeledToggleButton stripDrawOption = new ModLabeledToggleButton(
+                "Strip: suppress rendering (draw)",
+                350, 400, Settings.CREAM_COLOR, FontHelper.charDescFont,
+                getStripDrawSuppression(), settingsPanel, modLabel -> {},
+                modToggleButton -> {
+                    if (communicationConfig != null) {
+                        communicationConfig.setBool(STRIP_DRAW_OPTION, modToggleButton.enabled);
+                        try {
+                            communicationConfig.save();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+        settingsPanel.addUIElement(stripDrawOption);
+
+        ModLabeledToggleButton stripAnimOption = new ModLabeledToggleButton(
+                "Strip: collapse animation time",
+                350, 350, Settings.CREAM_COLOR, FontHelper.charDescFont,
+                getStripAnimationCollapse(), settingsPanel, modLabel -> {},
+                modToggleButton -> {
+                    if (communicationConfig != null) {
+                        communicationConfig.setBool(STRIP_ANIM_OPTION, modToggleButton.enabled);
+                        try {
+                            communicationConfig.save();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+        settingsPanel.addUIElement(stripAnimOption);
+
+        ModLabeledToggleButton stripCadenceOption = new ModLabeledToggleButton(
+                "Strip: fast update cadence (uncap FPS -- next launch)",
+                350, 300, Settings.CREAM_COLOR, FontHelper.charDescFont,
+                communicationConfig != null && communicationConfig.getBool(STRIP_CADENCE_OPTION),
+                settingsPanel, modLabel -> {},
+                modToggleButton -> {
+                    if (communicationConfig != null) {
+                        communicationConfig.setBool(STRIP_CADENCE_OPTION, modToggleButton.enabled);
+                        try {
+                            communicationConfig.save();
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                });
+        settingsPanel.addUIElement(stripCadenceOption);
+
         BaseMod.registerModBadge(ImageMaster.loadImage("Icon.png"),"Communication Mod", "Forgotten Arbiter", null, settingsPanel);
     }
 
@@ -332,6 +397,26 @@ public class CommunicationMod implements PostInitializeSubscriber, PostUpdateSub
             return DEFAULT_ORACLE_BLOCK;
         }
         return communicationConfig.getBool(ORACLE_BLOCK_OPTION);
+    }
+
+    // SpeedTheSpire fork additions (stage-b-design §2.2, task B1.3). The two
+    // runtime-checked strip families (draw suppression, animation-time collapse)
+    // read through the mod's live SpireConfig -- by the time the game is drawing
+    // frames or ticking actions the config is loaded. The fast-cadence family is
+    // read pre-init in the DesktopLauncher patch via its own SpireConfig, because
+    // loadSettings runs before this mod's constructor (see FastCadencePatch).
+    public static boolean getStripDrawSuppression() {
+        if (communicationConfig == null) {
+            return DEFAULT_STRIP;
+        }
+        return communicationConfig.getBool(STRIP_DRAW_OPTION);
+    }
+
+    public static boolean getStripAnimationCollapse() {
+        if (communicationConfig == null) {
+            return DEFAULT_STRIP;
+        }
+        return communicationConfig.getBool(STRIP_ANIM_OPTION);
     }
 
     private boolean startExternalProcess() {

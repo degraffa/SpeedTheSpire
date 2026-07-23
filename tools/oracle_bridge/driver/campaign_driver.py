@@ -328,6 +328,30 @@ def expand_legal_actions(state: dict, rng: random.Random) -> list:
 # ---------------------------------------------------------------------------
 # Termination (scoping 4.3 / design 1.1).
 
+def cmd_verb_ready(state: dict, cmd: str) -> bool:
+    """True if the game currently advertises the verb of `cmd`.
+
+    Script replay (B1.3 A/B) must send each command only when the game is at the
+    matching interactive state -- exactly the invariant the random-legal baseline
+    satisfied for free (it only ever emitted commands drawn from
+    available_commands). Blind replay can otherwise fire a command into a
+    transient not-ready window (e.g. a Neow/event phase where waitTimer has hit 0
+    -- so the fork reports ready_for_command -- but the option buttons are not yet
+    presented, so `choose` is absent). Waiting for the verb makes replay robust to
+    strip-on/off timing differences WITHOUT masking a real divergence: the wait is
+    bounded, and a verb that never appears ends the run as a divergence."""
+    avail = state.get("available_commands") or []
+    verb = cmd.split()[0] if cmd else ""
+    if verb in ("state", "wait", "key", "click"):
+        return True
+    if verb == "proceed":
+        return any(a in avail for a in ("proceed", "confirm"))
+    if verb in ("skip", "cancel", "return", "leave"):
+        return any(a in avail for a in ("skip", "cancel", "return", "leave"))
+    # play / end / choose / potion
+    return verb in avail
+
+
 def is_boss_combat_reward(gs: dict) -> bool:
     """Act-1 boss combat rewards up: the S1 terminal (design 1.1 -- stop BEFORE
     the boss chest / boss-relic pick)."""
@@ -384,6 +408,39 @@ class RunLogger:
 
     def close(self) -> None:
         self._fh.close()
+
+
+class TimingLog:
+    """B1.3 throughput sidecar: one JSONL line per injected action, stamped with
+    a monotonic clock at the instant the command is about to be sent. Separate
+    from the state artifact so the equivalence-critical schema is untouched.
+
+    The lock-step transport sends exactly one command per fully-resolved
+    ready-for-command state, so the wall time between consecutive marks is the
+    time the game took to resolve the previous injected action. Sustained
+    throughput = (#marks - 1) / (t_last - t_first) over a run's in-dungeon
+    actions (measure_throughput.py). perf_counter is process-local and monotonic;
+    a run completes within a single game launch, so its marks share one clock."""
+
+    def __init__(self, path: str, meta: dict) -> None:
+        self._fh = open(path, "w", encoding="utf-8", newline="\n")
+        self._write({"record_kind": "timing_header",
+                     "created_utc": _utc(), **meta})
+
+    def _write(self, rec: dict) -> None:
+        self._fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+        self._fh.flush()
+
+    def mark(self, seq: int, cmd: str, floor, screen) -> None:
+        self._write({"record_kind": "mark", "seq": seq,
+                     "t_mono": time.perf_counter(), "t_wall": _now(),
+                     "cmd": cmd, "floor": floor, "screen": screen})
+
+    def close(self) -> None:
+        try:
+            self._fh.close()
+        except OSError:
+            pass
 
 
 class Progress:
@@ -459,14 +516,32 @@ class CampaignDriver:
             os.path.join(self.run_dir(), "campaign_progress.json"),
             os.path.join(self.run_dir(), "campaign_heartbeat.json"),
         )
-        self.script = None
-        if args.policy == "script":
+        # Script(s) are loaded per-seed in run_seed (a --script-dir campaign has a
+        # distinct command list per seed). A single --script applies to all seeds.
+        self.single_script = None
+        if args.policy == "script" and not args.script_dir:
             with open(args.script, "r", encoding="utf-8") as fh:
-                self.script = [ln.strip() for ln in fh
-                               if ln.strip() and not ln.startswith("#")]
+                self.single_script = self._parse_script(fh)
+
+    @staticmethod
+    def _parse_script(lines) -> list:
+        return [ln.strip() for ln in lines
+                if ln.strip() and not ln.startswith("#")]
+
+    def _load_script(self, seed: str) -> list:
+        if self.args.script_dir:
+            path = os.path.join(self.args.script_dir, f"script_{seed}.txt")
+            with open(path, "r", encoding="utf-8") as fh:
+                return self._parse_script(fh)
+        return list(self.single_script)
 
     def run_dir(self) -> str:
         return os.path.join(self.args.data_root, self.args.campaign_id)
+
+    def strip_flags(self) -> dict:
+        return {"run_label": self.args.run_label,
+                "campaign_id": self.args.campaign_id,
+                "policy": self.args.policy}
 
     # -- menu / seed helpers -------------------------------------------------
     def wait_menu(self):
@@ -549,6 +624,15 @@ class CampaignDriver:
             "campaign_id": self.args.campaign_id,
         }
         rl = RunLogger(artifact, header)
+        # B1.3 throughput sidecar: one line per injected action with a monotonic
+        # timestamp, captured at the moment the command is about to be sent. This
+        # is a SEPARATE file from the JSONL artifact, so the equivalence-critical
+        # action-record / state_json schema (B1.5) is untouched. measure_
+        # throughput.py reads these to compute sustained injected-actions/sec.
+        timing = TimingLog(os.path.join(
+            self.run_dir(), f"run_{seed}_a20_ironclad.timing.jsonl"),
+            self.strip_flags())
+        script = self._load_script(seed) if self.args.policy == "script" else None
         _log(f"seed {seed} attempt {attempt}: header written "
              f"(long={seed_long}, oracle={'oracle' in gs}); playing")
 
@@ -584,10 +668,43 @@ class CampaignDriver:
 
                 # ---- choose a command ----
                 if self.args.policy == "script":
-                    if script_i >= len(self.script):
+                    if script_i >= len(script):
                         rl.terminal("script_exhausted", gs, actions)
                         return "script_exhausted", floor, actions, False
-                    cmd = self.script[script_i]
+                    cmd = script[script_i]
+                    # Wait for the game to actually advertise this command's verb
+                    # (see cmd_verb_ready). Bounded: if it never settles, that is
+                    # a divergence, not something to blast past.
+                    settle = 0
+                    while not cmd_verb_ready(state, cmd):
+                        # a terminal can appear while settling (e.g. death mid
+                        # animation); hand it back to the loop's terminal checks
+                        if game_over_outcome(gs) is not None \
+                                or is_boss_combat_reward(gs):
+                            break
+                        settle += 1
+                        if settle % 15 == 1:
+                            ss = gs.get("screen_state") or {}
+                            _log(f"seed {seed}: settle#{settle} for {cmd!r} "
+                                 f"screen={gs.get('screen_type')} "
+                                 f"ready={state.get('ready_for_command')} "
+                                 f"avail={state.get('available_commands')} "
+                                 f"choice_list={gs.get('choice_list')} "
+                                 f"ss_opts={ss.get('options')}")
+                        if settle > self.args.max_settle:
+                            rl.terminal("cmd_never_ready", gs, actions)
+                            _log(f"seed {seed}: cmd {cmd!r} verb never became "
+                                 f"legal at floor {floor} screen "
+                                 f"{gs.get('screen_type')} after "
+                                 f"{self.args.max_settle} settles -- divergence")
+                            return "cmd_never_ready", floor, actions, False
+                        if self.args.settle_sleep > 0:
+                            time.sleep(self.args.settle_sleep)
+                        kind, state = self.stepper.step("state")
+                        gs = state.get("game_state") or {}
+                    if game_over_outcome(gs) is not None \
+                            or is_boss_combat_reward(gs):
+                        continue
                     script_i += 1
                 else:
                     cmd = self._policy_command(state)
@@ -612,6 +729,7 @@ class CampaignDriver:
                     return "stuck", floor, actions, False
 
                 rl.action(cmd, state)
+                timing.mark(actions, cmd, floor, gs.get("screen_type"))
                 actions += 1
                 kind, state = self.stepper.step(cmd)
                 if kind == "error":
@@ -650,6 +768,7 @@ class CampaignDriver:
                     kind, state = self.stepper.step(esc)
         finally:
             rl.close()
+            timing.close()
 
     def _policy_command(self, state):
         acts = expand_legal_actions(state, self.rng)
@@ -816,12 +935,20 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--policy", choices=["random-legal", "script"],
                     default="random-legal")
     ap.add_argument("--script", help="command script (one per line) for "
-                    "--policy script")
+                    "--policy script; applied to every seed")
+    ap.add_argument("--script-dir", help="directory of per-seed scripts "
+                    "script_<SEED>.txt for --policy script. Takes precedence "
+                    "over --script. Used by the B1.3 A/B equivalence replay: the "
+                    "same fixed command list is forced on the strip-on and "
+                    "strip-off runs so any divergence surfaces at a matching seq.")
     ap.add_argument("--fork-jar", required=True,
                     help="deployed CommunicationMod-oracle.jar (hashed for the "
                          "header)")
     ap.add_argument("--policy-seed", type=int, default=1234,
                     help="RNG seed for the random-legal policy (driver-side)")
+    ap.add_argument("--run-label", default="",
+                    help="free-form label recorded in the throughput sidecar "
+                         "header (e.g. strip-on / strip-off), for B1.3 reporting")
     ap.add_argument("--timeout", type=float, default=90.0,
                     help="per-command wall-clock watchdog (s); sized for stock "
                          "animation speed (~0.36 states/s baseline)")
@@ -831,6 +958,13 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--max-noops", type=int, default=3,
                     help="advertised no-op recoveries before ending a run as "
                          "noop_wedge (game alive but unresponsive to legal moves)")
+    ap.add_argument("--max-settle", type=int, default=60,
+                    help="script mode: max `state` nudges to wait for a "
+                         "command's verb to become legal before declaring a "
+                         "divergence (B1.3 replay robustness)")
+    ap.add_argument("--settle-sleep", type=float, default=0.0,
+                    help="wall-clock sleep between script settle nudges, to give "
+                         "the game frame-loop time to advance (diagnostic)")
     ap.add_argument("--menu-timeout", type=float, default=120.0)
     ap.add_argument("--max-actions", type=int, default=3000,
                     help="per-run action cap (safety bound)")
@@ -850,8 +984,8 @@ def resolve_seeds(spec: str) -> list:
 def main(argv=None) -> int:
     args = parse_args(argv)
     args.seeds = resolve_seeds(args.seeds)
-    if args.policy == "script" and not args.script:
-        _log("--policy script requires --script")
+    if args.policy == "script" and not args.script and not args.script_dir:
+        _log("--policy script requires --script or --script-dir")
         return EXIT_FATAL
     try:
         return CampaignDriver(args).run()

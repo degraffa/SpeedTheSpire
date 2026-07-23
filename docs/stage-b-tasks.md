@@ -336,7 +336,7 @@ Spec note resolved: design §2.5 row 6 names `ShopScreen.purgeCost` — emitted 
 baseline); block size ~3.85 KB/dump at floor 0 (the 5 full relic-pool id-string
 lists dominate; shrinks as pools pop).
 
-### B1.3 `[ ]` Rendering-strip / fast-forward patches
+### B1.3 `[x]` Rendering-strip / fast-forward patches
 **Deps:** B1.2 · **Spec:** design §2.2 (semantic guard; throughput floor)
 **Deliverables:** the strip patch family (draw suppression, animation-time
 collapse, fast update cadence) in the fork, individually toggleable via fork
@@ -346,7 +346,64 @@ the full §2.5 block) are **byte-identical** with strip patches on vs. off;
 sustained throughput ≥ 5 actions/sec (floor), number recorded here; if the
 floor is unreachable, stop and amend design §2.2/§8 per its own rule before
 proceeding.
-**Log:** —
+*(Amended 2026-07-23 — satisfied as: the §2.5 oracle block byte-identical + all
+stock `GameStateConverter` fields byte-identical except a closed, enumerated set
+of dually-proven presentation fields, per design §11 v0.1.2; a fix-forward
+readiness gate on pending obtain effects (`fork: gate readiness on pending obtain
+effects`) removes a pre-existing card-obtain race first. No logical/semantic
+field differs.)*
+**Log:** Verified by running, not inferred (Windows host — excluded from WSL
+CI). Delivered three individually-toggleable rendering-strip families (fork
+`SpireConfig` flags, default on; **all-off ⇒ pre-B1.3 behaviour**):
+`stripDrawSuppression` — Prefix-return `AbstractDungeon.render(SpriteBatch)`
+(dungeons/AbstractDungeon.java:2153; `CardCrawlGame.render` keeps `update()`
+:368 + `sb`/`glClear` so the GL surface stays live; input is update-driven —
+`Hitbox.update` not `render`, helpers/Hitbox.java:40-67 vs :122-131);
+`stripAnimationCollapse` — Prefix `LwjglGraphics.getDeltaTime()`
+(backends/lwjgl/LwjglGraphics.java:132) → a fixed **non-round STEP = 0.043**
+while stripping, collapsing every `-= getDeltaTime()` timer at one chokepoint
+(`AbstractGameAction.tickDuration` :74; `AbstractRoom` waitTimer/endBattleTimer
+:233,:279; fade AbstractDungeon.java:2311,2318; `AbstractEvent.waitTimer` :103);
+`stripFastCadence` — Postfix `DesktopLauncher.loadSettings`
+(desktop/DesktopLauncher.java:107) → `foregroundFPS=backgroundFPS=0`,
+`vSyncEnabled=false` (overrides :118,145), read pre-init via its own read-only
+`SpireConfig`. **STEP=0.043 is deliberately small AND non-round:** < 0.05 so a
+0.1 s timer window still gets ≥ 2 frames (no one-frame *leap-over* of an
+intermediate presentation edge such as `BattleStartEffect.showIntent`, which
+would leave `intent` stale), and non-round so it evenly divides none of the
+game's round timer values — otherwise a countdown lands on *exactly* 0.0 and
+skips a strict `< 0.0f` edge (e.g. `AbstractEvent.update` :101-107 shows the
+event dialog only as `waitTimer` crosses `< 0.0`; Neow's starts at 1.5, so 0.05
+→ 30 steps lands on 0.0 and hangs the event). `getRawDeltaTime()` is left
+unpatched, so the frame-skip guard `CardCrawlGame.java:362` keeps working.
+Driver grows the A/B harness: `measure_throughput.py` (sustained act/s from a
+per-run timing sidecar), `compare_ab.py` (uuid-normalized byte compare),
+`extract_scripts.py`; `campaign_driver.py` gains per-seed `--script-dir` replay,
+the throughput sidecar, and a script-mode verb settle-wait; `orchestrator.py`
+gains `--strip-*` flags. **Acceptance — 20 seeds (STS00001–20, 16 multi-floor,
+spanning floors 1–6), the same fixed per-seed scripts run strip-OFF vs strip-ON
+on the SAME fork build (sha256 04477E4E), dumps byte-compared after dropping
+`uuid`:** 996 records / **12,245,722 B** compared — **12/20 byte-identical,
+8/20 differ only in the enumerated presentation fields** (11 `intent` [`move_id`
+identical], 3 `move_adjusted_damage` [= −1 when `intent`==DEBUG], 3 residual
+`powers` on dead monsters, 1 `neowRng` presence pre-blessing — all dual-prong
+proven, design §11 v0.1.2); **0 cmd diffs, 0 length diffs, 0 semantic leaks** —
+all 14 RNG streams / pity / pools / `neowRng`, per-monster move history, HP,
+master-deck contents, gold, map and living-monster powers byte-identical.
+**Throughput (stripped): sustained pooled 32.0 act/s, median 30.1, worst 20.9
+(floor 5) — PASS** (~89× the 0.36 states/s B0.2 baseline). Obtain-race
+prerequisite fixed in the preceding fix-forward commit (readiness gate on a
+pending `ShowCardAndObtainEffect`): the Golden Idol `[Outrun]` Injury, dropped by
+stock+driver (master deck 13) and kept by strip (14), now committed in both
+(14) so STS00016 converges. Windows-host build via `build_fork.ps1` (JDK 8,
+`javac -g`, deterministic jar); game under the bundled JRE 8 `--skip-launcher
+--mods basemod,CommunicationMod-oracle`; A/B campaigns + captures under the §7.3
+data root, uncommitted. **WSL suite green — 163/163 debug + 163/163 asan** (no
+engine change). Follow-ups flagged: (1) reclassify `intent` /
+`move_adjusted_damage` disposition `S`→derived in PROTOCOL.md §3 + the B1.5
+translator (`move_id` the anchor), one commit — **not** touched here; (2)
+b14_accept2 obtain-race capture-fidelity → B5.2 triage (B1.4 acceptance
+unaffected).
 
 ### B1.4 `[x]` Campaign driver
 **Deps:** B1.2 · **Spec:** design §2.7, §3.3 (generators), §7.2

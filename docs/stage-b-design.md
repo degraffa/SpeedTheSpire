@@ -157,7 +157,9 @@ patches must not remove or reorder queued actions (even presentation ones),
 because their queue positions can reorder gameplay. The acceptance test for
 the whole patch set is behavioral, not visual: same seed + same action script
 ⇒ **byte-identical oracle state dumps** with patches on vs. off (run at
-B1.3 over ≥20 seeds), plus a throughput measurement.
+B1.3 over ≥20 seeds), plus a throughput measurement. (Refined at B1.3 — the
+dump carries some presentation fields that timing legitimately shifts; see §11
+v0.1.2 for the enumerated, dually-proven presentation exceptions.)
 
 **Throughput budget (floor frozen, target aspirational):** ≥ 5 injected
 actions/sec sustained is the floor; ~20/sec is the working target. At 5/s the
@@ -863,3 +865,50 @@ Continuing stage-a §10's numbering:
   Also confirmed at B0.1: the `LICENSE` file is MIT ("MIT License",
   Copyright (c) 2019 ForgottenArbiter) — the one vendored source tree allowed
   under the working rules, kept intact.
+- v0.1.2 (2026-07-23) — B1.3 rendering-strip acceptance refinement + obtain-race
+  fix. §2.2's acceptance ("byte-identical oracle state dumps with patches on vs.
+  off") is refined to: the **§2.5 oracle block byte-identical, AND all stock
+  `GameStateConverter` fields byte-identical EXCEPT a closed, enumerated set of
+  presentation fields**, each dually proven (a) derived-redundant with a
+  byte-identical semantic field / already phase-specified by disposition, AND
+  (b) transient (converges to identity by a later dump). This re-expresses the
+  frozen guard "remove time and pixels, never order or state" for a dump that
+  happens to carry presentation fields; it is **not** a weakening — over the
+  B1.3 20-seed A/B (strip-off vs strip-on, same fork build) **no logical field
+  differs**: all 14 RNG streams, both pity counters, event pity floats, purgeCost,
+  the pool orders, `neowRng`, per-monster move history, HP, master-deck contents,
+  gold, map, and living-monster powers are byte-identical. Enumerated
+  presentation fields (evidence in the B1.3 ledger Log):
+    · monster `intent` — the `AbstractMonster.Intent` display of the current
+      move; semantic anchor is `move_id` (byte-identical in every observed
+      diff). Reads `DEBUG` until the intent banner refreshes
+      (`BattleStartEffect`/`PlayerTurnEffect` → `showIntent`), a phase the strip
+      timing shifts (18/20 stripped seeds carry a `DEBUG`-at-`ready_for_command`
+      intent on a *living* monster with a valid `move_id`; stock hits it too).
+    · monster `move_adjusted_damage` — "shown intent damage"; equals `-1` exactly
+      when `intent`==`DEBUG`; display-coupled to `intent`.
+    · residual monster `powers` on a monster both dumps mark dead (`is_gone` /
+      `hp<=0`, byte-identical) — cleanup lag on an inert, about-to-be-removed
+      entity.
+    · in-flight card zone membership (`deck`/draw/discard/hand counts) while a
+      card animates between zones — full card multiset across all zones
+      conserved; converges next dump.
+    · `neowRng` stream *presence* before the Neow blessing screen — §2.5 already
+      specifies this key is absent until blessing; value byte-identical when
+      present.
+  Reclassification of `intent` and `move_adjusted_damage` from disposition `S`
+  (semantic) to derived in PROTOCOL.md §3 and the B1.5 translator (`move_id` the
+  semantic anchor) is a **queued follow-up task** (docs + `translate.cpp` +
+  tests in one commit); flagged here, deliberately not done in the B1.3 commit.
+  **Obtain-race fix** (separate fix-forward commit `fork: gate readiness on
+  pending obtain effects`): the game reported `ready_for_command` before a
+  `ShowCardAndObtainEffect` committed its card to the master deck
+  (`vfx/cardManip/ShowCardAndObtainEffect.java:94-108` → `cards/Soul.java:145-148`),
+  so a fast-navigating driver could **drop** an obtained card (observed: the
+  Golden Idol `[Outrun]` Injury — stock+driver dropped it, master deck stayed 13;
+  stripped timing kept it, 14). `GameStateListener.hasDungeonStateChanged` now
+  holds readiness while any obtain effect is pending, making the master deck
+  deterministic regardless of animation speed. This race means pre-fix captures
+  (e.g. b14_accept2) may have dropped cards wherever the driver navigated during
+  an obtain — flagged for B5.2 triage; B1.4's acceptance (driver mechanics) is
+  unaffected.

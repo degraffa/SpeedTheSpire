@@ -59,9 +59,48 @@ the same patch classes and would double-patch.
 
 | Family | Status |
 |---|---|
-| 1. Oracle state block (§2.5) | lands at B1.2 |
-| 2. Rendering-strip / fast-forward (§2.2) | lands at B1.3 |
+| 1. Oracle state block (§2.5) | landed at B1.2 (`GameStateConverter`, flag `oracleBlock`) |
+| 2. Rendering-strip / fast-forward (§2.2) | landed at B1.3 (see below) |
 | 3. Campaign QoL (fast startup, restart hooks) | scoped at B1.4 with the driver |
 
 B1.1 = build pipeline only: the fork jar must reproduce the stock jar's
 behavior byte-for-byte (B0.2 capture replay, uuid-normalized per PROTOCOL.md).
+
+## Rendering-strip / fast-forward patches (B1.3, design §2.2)
+
+Three individually-toggleable patch families make wall-clock time stop mattering
+without changing gameplay state or queue order ("remove time and pixels, never
+order or state"). Config flags live in the same
+`SpireConfig("CommunicationMod","config")` store, all default **on**; with all
+three **off** the fork is byte-identical to its pre-B1.3 behaviour (the
+strip-equivalence baseline). Each is also a toggle in the mod-settings panel.
+
+| Flag (`config.properties`) | Patch class | Seam (provenance into `SlayTheSpireDecompiled`) |
+|---|---|---|
+| `stripDrawSuppression` | `patches/StripDrawSuppressionPatch` | Prefix-return `AbstractDungeon.render(SpriteBatch)` (`dungeons/AbstractDungeon.java:2153`) — skips all scene/room/effect draws; `CardCrawlGame.render` keeps `this.update()` (:368) + `sb`/`glClear` (:371-372,426) so the GL surface stays live. |
+| `stripAnimationCollapse` | `patches/StripAnimationCollapsePatch` | Prefix `LwjglGraphics.getDeltaTime()` (`backends/lwjgl/LwjglGraphics.java:132`) → fixed `STEP=0.043` while stripping. Collapses every `-= getDeltaTime()` timer (action `tickDuration` `AbstractGameAction.java:74`; room `waitTimer`/`endBattleTimer` `AbstractRoom.java:233,279`; fade `AbstractDungeon.java:2311,2318`; `AbstractEvent.waitTimer` :103) at one chokepoint. |
+| `stripFastCadence` | `patches/StripFastCadencePatch` | Postfix `DesktopLauncher.loadSettings` (`desktop/DesktopLauncher.java:107`) → `foregroundFPS=backgroundFPS=0` (uncapped), `vSyncEnabled=false` (overrides :118,145). Read pre-init via its own read-only `SpireConfig`. |
+
+**Why `STEP` is small and non-round (0.043), not a big constant.** Game logic
+fires on timer edges, and two edge hazards bite a naive delta:
+- *Leap-over*: some presentation edges fire on an INTERMEDIATE threshold, e.g.
+  `BattleStartEffect.showIntent()` sets each monster's dumped `intent` only once
+  its 4.0s effect duration falls below 3.0 and a sub-timer elapses. A huge delta
+  leaps duration past done in one frame, skipping it → `intent` diverges. A small
+  step steps through.
+- *Exact-zero landing*: `AbstractEvent.update` (:101-107) shows event dialog
+  options only on the frame `waitTimer` crosses `< 0.0f` (Neow's starts at 1.5).
+  A round step that evenly divides the start (0.05→30, 0.1→15) lands on exactly
+  0.0, skipping the `< 0.0f` edge — options never show, yet `waitTimer==0`
+  reports ready, hanging the event. A non-round step never evenly divides the
+  game's round timer values.
+
+`getRawDeltaTime()` is deliberately left unpatched (it and `getDeltaTime` are
+separate methods over the same field, `LwjglGraphics.java:132-139`), so the
+frame-skip guard `if (getRawDeltaTime() > 0.1f) return` (`CardCrawlGame.java:362`)
+keeps its stability role.
+
+Equivalence + throughput are proven by the driver A/B harness
+(`../driver/{extract_scripts,compare_ab,measure_throughput}.py`): the same fixed
+per-seed scripts run strip-on and strip-off, dumps byte-compared after dropping
+`uuid` (PROTOCOL.md). See the B1.3 ledger Log for the acceptance numbers.

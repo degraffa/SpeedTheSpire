@@ -50,14 +50,21 @@ def esc_prop(value: str) -> str:
     return value.replace("\\", "/").replace(":", r"\:")
 
 
-def write_config(config_path: str, command: str, oracle_block: bool) -> None:
+def write_config(config_path: str, command: str, oracle_block: bool,
+                 strip_draw: bool, strip_anim: bool, strip_cadence: bool) -> None:
     os.makedirs(os.path.dirname(config_path), exist_ok=True)
     body = (
-        "#SpeedTheSpire campaign orchestrator (B1.4) -- generated\n"
+        "#SpeedTheSpire campaign orchestrator (B1.3/B1.4) -- generated\n"
         f"#{time.ctime()}\n"
         "verbose=false\n"
         "maxInitializationTimeout=10\n"
         f"oracleBlock={'true' if oracle_block else 'false'}\n"
+        # B1.3 rendering-strip family flags (each individually toggleable). With
+        # all three false the fork is byte-identical to its pre-B1.3 behaviour --
+        # the strip-equivalence baseline.
+        f"stripDrawSuppression={'true' if strip_draw else 'false'}\n"
+        f"stripAnimationCollapse={'true' if strip_anim else 'false'}\n"
+        f"stripFastCadence={'true' if strip_cadence else 'false'}\n"
         "runAtGameStart=true\n"
         f"command={esc_prop(command)}\n"
     )
@@ -77,9 +84,16 @@ def build_driver_command(args) -> str:
         "--policy-seed", str(args.policy_seed),
         "--timeout", str(args.command_timeout),
         "--max-actions", str(args.max_actions),
+        "--run-label",
+        f"strip-{args.strip_draw[0]}{args.strip_anim[0]}{args.strip_cadence[0]}",
+        "--max-settle", str(args.max_settle),
+        "--settle-sleep", str(args.settle_sleep),
     ]
     if args.policy == "script":
-        parts += ["--script", args.script.replace("\\", "/")]
+        if args.script_dir:
+            parts += ["--script-dir", args.script_dir.replace("\\", "/")]
+        else:
+            parts += ["--script", args.script.replace("\\", "/")]
     return " ".join(parts)
 
 
@@ -134,8 +148,19 @@ def main(argv=None) -> int:
                     help="comma-separated seeds or a path to a seed-list file")
     ap.add_argument("--policy", choices=["random-legal", "script"],
                     default="random-legal")
-    ap.add_argument("--script", help="command script for --policy script")
+    ap.add_argument("--script", help="single command script for --policy script "
+                    "(applied to every seed)")
+    ap.add_argument("--script-dir", help="directory of per-seed scripts "
+                    "script_<SEED>.txt for --policy script (B1.3 A/B replay)")
     ap.add_argument("--policy-seed", type=int, default=1234)
+    # B1.3 rendering-strip toggles. Default matches the fork default (on). For an
+    # A/B equivalence pass: one campaign with all three true (strip on), one with
+    # all three false (strip off); byte-compare the normalized dumps.
+    ap.add_argument("--strip-draw", choices=["true", "false"], default="true")
+    ap.add_argument("--strip-anim", choices=["true", "false"], default="true")
+    ap.add_argument("--strip-cadence", choices=["true", "false"], default="true")
+    ap.add_argument("--max-settle", type=int, default=60)
+    ap.add_argument("--settle-sleep", type=float, default=0.0)
     ap.add_argument("--game-dir",
                     default=r"D:\SteamLibrary\steamapps\common\SlayTheSpire")
     ap.add_argument("--mts-jar",
@@ -176,8 +201,13 @@ def main(argv=None) -> int:
         "config.properties")
     driver_cmd = build_driver_command(args)
     write_config(config_path, driver_cmd,
-                 oracle_block=True)
+                 oracle_block=True,
+                 strip_draw=(args.strip_draw == "true"),
+                 strip_anim=(args.strip_anim == "true"),
+                 strip_cadence=(args.strip_cadence == "true"))
     log(f"wrote {config_path}")
+    log(f"strip: draw={args.strip_draw} anim={args.strip_anim} "
+        f"cadence={args.strip_cadence}")
     log(f"driver command: {driver_cmd}")
 
     start = time.time()
@@ -241,16 +271,20 @@ def main(argv=None) -> int:
                 break
 
             # heartbeat stall while the game is still alive: driver gone
-            # (EXIT_NEED_RESTART / EXIT_GAME_GONE) or a true hang -> relaunch
+            # (EXIT_NEED_RESTART / EXIT_GAME_GONE) or a true hang -> relaunch.
+            # A missing heartbeat file (the driver died at startup before writing
+            # one) is treated the same once the launch has had stall_timeout to
+            # produce one, so a driver-startup death can't hang the campaign.
             hb = read_json(heartbeat_path(args))
-            if hb and (now - hb.get("t", now)) > args.stall_timeout \
+            hb_age = (now - hb.get("t", now)) if hb else (now - launch_started)
+            if hb_age > args.stall_timeout \
                     and (now - launch_started) > args.stall_timeout:
-                age = now - hb.get("t", now)
-                log(f"heartbeat stale {age:.0f}s (> {args.stall_timeout:.0f}); "
-                    f"game still up -- killing + relaunching")
+                log(f"heartbeat stale/absent {hb_age:.0f}s "
+                    f"(> {args.stall_timeout:.0f}); game still up -- "
+                    f"killing + relaunching")
                 kill_tree(proc)
                 timeline.append({"event": "stall_relaunch", "utc": utc(),
-                                 "age": round(age, 1), "done": done})
+                                 "age": round(hb_age, 1), "done": done})
                 break
 
     _summary(args, timeline)
