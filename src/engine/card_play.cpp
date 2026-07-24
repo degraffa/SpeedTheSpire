@@ -17,6 +17,7 @@
 #include "sts/engine/cards.hpp"         // CardDef, card_def
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
+#include "sts/engine/piles.hpp"         // B3.6: reset_cost_for_turn (exhaust reset)
 #include "sts/engine/power_hooks.hpp"   // B3.2: onPlayCard/onUseCard fan-out + onExhaust
 #include "sts/engine/relic_hooks.hpp"   // B3.25: player_has_relic (Strike Dummy bake)
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
@@ -178,9 +179,13 @@ void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
                        "exhaust overflow (design doc §4.1: hard assert)");
                 s.exhaust[s.exhaust_count] = pool_index;
                 ++s.exhaust_count;
+                // B3.6: an exhausted card's this-turn-only cost reverts
+                // (ExhaustCardEffect.update:41-43 resetAttributes).
+                reset_cost_for_turn(s, pool_index);
                 // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card
-                // lands in the exhaust pile. No-op without an on-exhaust power.
-                dispatch_on_exhaust(s, s.card_pool[pool_index].card_id);
+                // lands in the exhaust pile. No-op without an on-exhaust power or
+                // card-level on-exhaust program (Sentinel).
+                dispatch_on_exhaust(s, pool_index, s.card_pool[pool_index].card_id);
             } else {
                 assert(s.discard_count < kDiscardCap &&
                        "discard overflow (design doc §4.1: hard assert)");

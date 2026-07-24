@@ -82,6 +82,14 @@ using RelicId = sts::registry::RelicId;
 //                 (Whirlwind/WhirlwindAction: cost -1, energyOnUse). Encoded as
 //                 a flag rather than a negative `base_cost` (which is unsigned);
 //                 the generator maps YAML `cost: -1` to this bit.
+//   COST_MODIFIED_FOR_TURN -- (B3.6, per-INSTANCE runtime bit, never authored
+//                 in YAML) this instance's cost_now is a this-turn-only value
+//                 (AbstractCard.setCostForTurn / isCostModifiedForTurn). Set by
+//                 Infernal Blade's generated attack; cleared -- with cost_now
+//                 restored to the registry cost -- by the end-turn sweep
+//                 (AbstractRoom.endTurn:397-405 resets costForTurn = cost on
+//                 every draw/discard/hand card) and on exhaust
+//                 (ExhaustCardEffect.update:41-43 resetAttributes).
 enum class CardFlag : uint16_t {
     NONE       = 0,
     EXHAUST    = 1u << 0,
@@ -90,6 +98,7 @@ enum class CardFlag : uint16_t {
     UNPLAYABLE = 1u << 3,
     RETAIN     = 1u << 4,
     XCOST      = 1u << 5,
+    COST_MODIFIED_FOR_TURN = 1u << 6,
 };
 
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {

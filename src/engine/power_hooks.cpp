@@ -184,17 +184,40 @@ void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
 
 // --- Single-source hooks -----------------------------------------------------
 
-void dispatch_on_exhaust(CombatState& s, uint16_t card_id) noexcept {
+void dispatch_on_exhaust(CombatState& s, uint8_t pool_index,
+                         uint16_t card_id) noexcept {
     HookContext ctx{};
     ctx.card_id = card_id;
-    // CardGroup.moveToExhaustPile:851-856 -- relics onExhaust -> player powers
+    ctx.card_pool_index = pool_index;
+    // CardGroup.moveToExhaustPile:851-857 -- relics onExhaust -> player powers
     // onExhaust (list order) -> card.triggerOnExhaust. Feel No Pain + Dark Embrace
     // sequence is decided by the player power-list order here (§5.5).
     // relics onExhaust FIRST (acquisition order), before player powers (B3.24).
     const RelicView rv = player_relics(s);
     dispatch_relics_on_exhaust(s, rv.relics, rv.count, card_id);
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_EXHAUST, ctx);
-    // card.triggerOnExhaust (Sentinel-style card-level onExhaust) -- B3.6.
+    // card.triggerOnExhaust (B3.6): the exhausted card's own on_exhaust program,
+    // LAST in the §5.5 order. Sentinel addToTop's its GainEnergyAction
+    // (Sentinel.java:37-43) -- steps are queued add_to_top, in REVERSE program
+    // order so a multi-step program still resolves first-step-first (every S1
+    // program is single-step).
+    if (pool_index < kCardPoolCap) {
+        const CardDef* def = card_def(static_cast<CardId>(card_id));
+        if (def != nullptr) {
+            const CardEffectView ox =
+                card_on_exhaust_steps(*def, s.card_pool[pool_index].upgrade);
+            for (uint8_t k = ox.count; k > 0; --k) {
+                const CardEffectStep& step = ox.steps[k - 1];
+                ActionQueueItem item{};
+                item.opcode = static_cast<uint16_t>(step.op);
+                item.src = kActorPlayer;
+                item.tgt = kActorPlayer;  // in-scope on-exhaust steps are SELF
+                item.amount = step.amount;
+                item.flags = step.extra;
+                add_to_top(s, item);
+            }
+        }
+    }
 }
 
 void dispatch_on_card_draw(CombatState& s, uint8_t pool_index,
@@ -673,6 +696,72 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
             rem.tgt = ctx.owner;
             rem.flags = make_apply_power_flags(PowerId::NEXT_TURN_BLOCK);
             add_to_bottom(s, rem);
+            return;
+        }
+        case PowerId::RAGE: {
+            // RagePower (B3.6 completes the B3.2 stub). onUseCard (RagePower.
+            // java:41-47): if the played card is an ATTACK, GainBlockAction(
+            // player, amount) -- dispatched at ON_USE_CARD (after the card's own
+            // effects are queued, so the block lands after the attack's damage;
+            // a direct GainBlockAction -> kBlockNoPowers, no Dexterity/Frail).
+            // atEndOfTurn (:49-52): addToBot RemoveSpecificPowerAction(owner,
+            // "Rage") -- Rage lasts one turn.
+            if (hook == Hook::ON_USE_CARD) {
+                const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+                if (cd == nullptr || cd->type != CardType::ATTACK) {
+                    return;  // the attack-type guard (RagePower.java:42)
+                }
+                ActionQueueItem blk{};
+                blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+                blk.src = ctx.owner;
+                blk.tgt = ctx.owner;  // owner == the player in every S1 scope
+                blk.amount = ctx.power_amount;
+                blk.flags = kBlockNoPowers;
+                add_to_bottom(s, blk);  // addToBot (RagePower.java:43)
+                return;
+            }
+            if (hook == Hook::AT_END_OF_TURN) {
+                ActionQueueItem rem{};
+                rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+                rem.src = ctx.owner;
+                rem.tgt = ctx.owner;
+                rem.flags = make_apply_power_flags(PowerId::RAGE);
+                add_to_bottom(s, rem);  // addToBot (RagePower.java:50)
+                return;
+            }
+            return;
+        }
+        case PowerId::FLAME_BARRIER: {
+            // FlameBarrierPower (B3.6). onAttacked (FlameBarrierPower.java:
+            // 53-59): reflect `amount` THORNS damage to a DISTINCT attacker --
+            // op_damage already gated dispatch to NORMAL src != tgt after
+            // decrementBlock (fires whether or not the hit penetrated); the
+            // owner != attacker guard is re-checked. addToTop, THORNS-typed
+            // (skips the NORMAL-only power modifiers -- a Vulnerable attacker
+            // is NOT amplified). atStartOfTurn (:62-64): addToBot
+            // RemoveSpecificPowerAction -- gone at the player's next turn start.
+            if (hook == Hook::ON_ATTACKED) {
+                if (ctx.source == ctx.owner) {
+                    return;
+                }
+                ActionQueueItem dmg{};
+                dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+                dmg.src = ctx.owner;
+                dmg.tgt = ctx.source;
+                dmg.amount = ctx.power_amount;
+                dmg.flags = make_damage_flags(DamageType::THORNS);
+                add_to_top(s, dmg);  // addToTop (FlameBarrierPower.java:56)
+                return;
+            }
+            if (hook == Hook::AT_START_OF_TURN) {
+                ActionQueueItem rem{};
+                rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+                rem.src = ctx.owner;
+                rem.tgt = ctx.owner;
+                rem.flags = make_apply_power_flags(PowerId::FLAME_BARRIER);
+                add_to_bottom(s, rem);  // addToBot (FlameBarrierPower.java:63)
+                return;
+            }
             return;
         }
         case PowerId::ARTIFACT:

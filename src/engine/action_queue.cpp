@@ -14,6 +14,7 @@
 #include "sts/engine/card_play.hpp"  // resolve_card_play wired into pump_step step 3
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"  // execute_opcode wired into pump_step
+#include "sts/engine/piles.hpp"   // B3.6: reset_cost_for_turn (end-turn sweep)
 #include "sts/engine/power_hooks.hpp"  // B3.2: start/end-of-turn power dispatch
 #include "sts/engine/relic_hooks.hpp"  // B3.24: start/end-of-turn relic dispatch
 
@@ -338,6 +339,21 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         if (is_end_turn_sentinel(head)) {
             s.turn_has_ended = 1;              // (endTurn(): turnHasEnded = true)
             s.monster_attacks_queued = 0;      // prime step 4 (see hpp note (2))
+            // B3.6 (AbstractRoom.endTurn:397-405): the moment the turn ends,
+            // every draw/discard/hand card's costForTurn resets to its cost --
+            // SYNCHRONOUSLY, before any queued end-of-turn action resolves. Only
+            // COST_MODIFIED_FOR_TURN rows (Infernal Blade's setCostForTurn(0)
+            // attack) change; Blood for Blood's updateCost edits `cost` itself
+            // and is untouched (reset_cost_for_turn's bit gate).
+            for (uint8_t i = 0; i < s.draw_count; ++i) {
+                reset_cost_for_turn(s, s.draw[i]);
+            }
+            for (uint8_t i = 0; i < s.discard_count; ++i) {
+                reset_cost_for_turn(s, s.discard[i]);
+            }
+            for (uint8_t i = 0; i < s.hand_count; ++i) {
+                reset_cost_for_turn(s, s.hand[i]);
+            }
             call_end_of_turn_actions(s);       // §5.4 stub sequence
             r.outcome = PumpOutcome::END_TURN_SENTINEL;
         } else {

@@ -854,3 +854,295 @@
     - {op: DAMAGE, target: ALL_ENEMY, amount: 5}
   upgraded:
     - {op: DAMAGE, target: ALL_ENEMY, amount: 8}
+
+# --- B3.6 red uncommon skills (ids 51-67) -------------------------------------
+# Enumerated from the actual cards/red sources by constructor rarity+type
+# (CardRarity.UNCOMMON + CardType.SKILL): exactly 17 members, the ledger's ~16
+# plus RAGE (Rage.java:31 is CardType.SKILL -- the ledger misfiled it under the
+# B3.7 power cards; source wins). Ids are assigned in the addRedCards
+# registration order (alphabetical by class).
+#
+# End-of-turn cost reset (Infernal Blade): AbstractRoom.endTurn (AbstractRoom.
+# java:393-408) resets every draw/discard/hand card's costForTurn to its cost --
+# modeled by the COST_MODIFIED_FOR_TURN instance bit + the end-turn sentinel
+# sweep (action_queue.cpp). Ethereal note: Entrench.triggerOnEndOfPlayerTurn
+# (Entrench.java:35-37) and GhostlyArmor.triggerOnEndOfPlayerTurn (GhostlyArmor.
+# java:38-40) both queue ExhaustAllEtherealAction, which exhausts exactly the
+# ethereal hand cards -- behaviorally subsumed by the base per-card ethereal
+# exhaust (AbstractCard.triggerOnEndOfPlayerTurn:2176-2179) that the engine's
+# DISCARD_HAND sweep already collapses (piles.cpp), so neither override needs
+# engine support (no on-exhaust-order consumer exists among S1 ethereals).
+
+- id: 51
+  name: BATTLE_TRANCE
+  game_id: "Battle Trance"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: []
+  provenance: "BattleTrance (BattleTrance.java:26-43): cost 0, magic 3, upgradeMagicNumber(1) -> 4; use queues DrawCardAction(magic) then ApplyPowerAction(NoDrawPower(p)) -- draw resolves BEFORE No Draw lands. NoDrawPower amount is -1 (NoDrawPower.java:27); re-applying while the target already has No Draw is a whole-action no-op (ApplyPowerAction.java:102-105)."
+  effects:
+    - {op: DRAW, target: SELF, amount: 3}
+    - {op: APPLY_POWER, target: SELF, amount: -1, power: NO_DRAW}
+  upgraded:
+    - {op: DRAW, target: SELF, amount: 4}
+    - {op: APPLY_POWER, target: SELF, amount: -1, power: NO_DRAW}
+
+- id: 52
+  name: BLOODLETTING
+  game_id: "Bloodletting"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Bloodletting (Bloodletting.java:25-44): cost 0, magic 2, upgradeMagicNumber(1) -> 3; use queues LoseHPAction(p, p, 3) then GainEnergyAction(magic). The fixed 3 HP loss fires wasHPLost with source == self (Rupture attribution) and the Blood for Blood tookDamage sweep."
+  effects:
+    - {op: LOSE_HP, target: SELF, amount: 3}
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+  upgraded:
+    - {op: LOSE_HP, target: SELF, amount: 3}
+    - {op: GAIN_ENERGY, target: SELF, amount: 3}
+
+- id: 53
+  name: BURNING_PACT
+  game_id: "Burning Pact"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: NONE
+  flags: []
+  provenance: "BurningPact (BurningPact.java:25-42): cost 1, magic 2, upgradeMagicNumber(1) -> 3; use queues ExhaustAction(1, false) == exhaust ONE CHOSEN hand card (prompt; forced when hand <= 1) then DrawCardAction(magic). The draw resolves after the exhaust choice, so an on-exhaust trigger (Sentinel energy) lands before the draw."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: exhaust, amount: 1}
+    - {op: DRAW, target: SELF, amount: 2}
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: exhaust, amount: 1}
+    - {op: DRAW, target: SELF, amount: 3}
+
+- id: 54
+  name: DISARM
+  game_id: "Disarm"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: ENEMY
+  flags: [exhaust]
+  provenance: "Disarm (Disarm.java:25-42): cost 1, exhaust, magic 2, upgradeMagicNumber(1) -> 3; use queues ApplyPowerAction(m, p, StrengthPower(m, -magic), -magic). A negative-amount StrengthPower constructs as PowerType.DEBUFF (StrengthPower.updateDescription:81-89 via ctor :37), so Artifact nullifies it; stacking an existing Strength slot to exactly 0 queues its removal (StrengthPower.stackPower:48-53)."
+  effects:
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: -2, power: STRENGTH}
+  upgraded:
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: -3, power: STRENGTH}
+
+- id: 55
+  name: DUAL_WIELD
+  game_id: "Dual Wield"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: NONE
+  flags: []
+  provenance: "DualWield (DualWield.java:24-42) -> DualWieldAction(p, magic); magic 1, upgradeMagicNumber(1) -> 2. DualWieldAction.update (DualWieldAction.java:38-97): eligibility = ATTACK or POWER type (isDualWieldable:95-97); zero eligible -> nothing; exactly one eligible -> `copies` stat-equivalent copies with NO reorder (:49-57); else prompt one card (handCardSelectScreen, ineligible cards removed then re-appended, :59-84) -> hand becomes [other eligibles] + [ineligibles] + [selected + copies] (the selected original is consumed and replaced by a fresh makeStatEquivalentCopy among 1+copies added at the end; net +copies). Copies preserve upgrade count / costForTurn / misc (AbstractCard.makeStatEquivalentCopy:826-848); MakeTempCardInHandAction spills past a full hand to the discard (:71-77)."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: duplicate, amount: 1, copies: 1}
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: duplicate, amount: 1, copies: 2}
+
+- id: 56
+  name: ENTRENCH
+  game_id: "Entrench"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 2
+  target: SELF
+  flags: []
+  provenance: "Entrench (Entrench.java:25-47): cost 2, upgradeBaseCost(1) -> 1; use queues DoubleYourBlockAction(p). DoubleYourBlockAction.update (DoubleYourBlockAction.java:24-30): if target.currentBlock > 0, target.addBlock(currentBlock) -- a direct addBlock (no card applyPowers -> no Dexterity/Frail), firing onGainedBlock; zero block -> nothing."
+  effects:
+    - {op: DOUBLE_BLOCK, target: SELF}
+  upgraded_cost: 1
+  upgraded:
+    - {op: DOUBLE_BLOCK, target: SELF}
+
+- id: 57
+  name: FLAME_BARRIER
+  game_id: "Flame Barrier"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 2
+  target: SELF
+  flags: []
+  provenance: "FlameBarrier (FlameBarrier.java:30-54): cost 2, baseBlock 12, magic 4; upgradeBlock(4) -> 16, upgradeMagicNumber(2) -> 6; use queues GainBlockAction(block) then ApplyPowerAction(FlameBarrierPower(p, magic), magic). The power reflects `amount` THORNS damage per NORMAL non-self attack (FlameBarrierPower.onAttacked:53-59, addToTop) and removes itself at the player's next start of turn (atStartOfTurn:62-64)."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 12}
+    - {op: APPLY_POWER, target: SELF, amount: 4, power: FLAME_BARRIER}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 16}
+    - {op: APPLY_POWER, target: SELF, amount: 6, power: FLAME_BARRIER}
+
+- id: 58
+  name: GHOSTLY_ARMOR
+  game_id: "Ghostly Armor"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: [ethereal]
+  provenance: "GhostlyArmor (GhostlyArmor.java:26-48): cost 1, isEthereal, baseBlock 10, upgradeBlock(3) -> 13; use queues GainBlockAction(block). triggerOnEndOfPlayerTurn (:38-40) queues ExhaustAllEtherealAction -- subsumed by the engine's ethereal end-of-turn sweep (see the B3.6 section header note)."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 10}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 13}
+
+- id: 59
+  name: INFERNAL_BLADE
+  game_id: "Infernal Blade"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: NONE
+  flags: [exhaust]
+  provenance: "InfernalBlade (InfernalBlade.java:25-43): cost 1, exhaust, upgradeBaseCost(0) -> 0; use = returnTrulyRandomCardInCombat(ATTACK).makeCopy(), setCostForTurn(0), MakeTempCardInHandAction(c, true). The pool is srcCommon+srcUncommon+srcRare filtered to ATTACK minus HEALING (AbstractDungeon.java:964-979) -- ONE cardRandomRng.random(size-1) draw; the copy is base (library rows are unupgraded), costs 0 for THIS turn only (AbstractRoom.endTurn reset), and spills to discard past a full hand."
+  effects:
+    - {op: RANDOM_ATTACK_TO_HAND, target: SELF}
+  upgraded_cost: 0
+  upgraded:
+    - {op: RANDOM_ATTACK_TO_HAND, target: SELF}
+
+- id: 60
+  name: INTIMIDATE
+  game_id: "Intimidate"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: ALL_ENEMY
+  flags: [exhaust]
+  provenance: "Intimidate (Intimidate.java:31-52): cost 0, exhaust, magic 1, upgradeMagicNumber(1) -> 2; use queues ApplyPowerAction(WeakPower(mo, magic, false), magic) per monster in group order (:41-43). ALL_ENEMY fan-out (live-only, matching Thunderclap's B3.3 precedent; a dead monster's ApplyPowerAction short-circuits, ApplyPowerAction.java:97-100)."
+  effects:
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 1, power: WEAK}
+  upgraded:
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: WEAK}
+
+- id: 61
+  name: POWER_THROUGH
+  game_id: "Power Through"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "PowerThrough (PowerThrough.java:27-45): cost 1, baseBlock 15, upgradeBlock(5) -> 20; use queues MakeTempCardInHandAction(new Wound(), 2) FIRST, then GainBlockAction(block). Two base Wounds into the hand (spill to discard past 10, MakeTempCardInHandAction.update:71-77)."
+  effects:
+    - {op: MAKE_CARD, card: WOUND, pile: HAND, amount: 2}
+    - {op: BLOCK, target: SELF, amount: 15}
+  upgraded:
+    - {op: MAKE_CARD, card: WOUND, pile: HAND, amount: 2}
+    - {op: BLOCK, target: SELF, amount: 20}
+
+- id: 62
+  name: RAGE
+  game_id: "Rage"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Rage (Rage.java:30-48): cost 0, magic 3, upgradeMagicNumber(2) -> 5; use queues ApplyPowerAction(RagePower(p, magic), magic). CardType.SKILL + CardRarity.UNCOMMON (Rage.java:31) -- the ledger listed Rage under B3.7 power cards; the source enumeration places it here. RagePower body: powers.yaml id 12 (rebound to on_use_card + at_end_of_turn by B3.6)."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: RAGE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: RAGE}
+
+- id: 63
+  name: SECOND_WIND
+  game_id: "Second Wind"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "SecondWind (SecondWind.java:24-40): cost 1, baseBlock 5, upgradeBlock(2) -> 7; use queues BlockPerNonAttackAction(this.block). BlockPerNonAttackAction.update (BlockPerNonAttackAction.java:29-42): collect every non-ATTACK hand card, then addToTop one GainBlockAction(blockPerCard) per card and addToTop one ExhaustSpecificCardAction per card -- so the exhausts resolve FIRST (in reverse hand order: last hand card first), then the per-card block gains. this.block is the card's applyPowers block, so each per-card gain takes Dexterity/Frail like card block (modeled as per-card BLOCK items without kBlockNoPowers)."
+  effects:
+    - {op: BLOCK_PER_NON_ATTACK, target: SELF, amount: 5}
+  upgraded:
+    - {op: BLOCK_PER_NON_ATTACK, target: SELF, amount: 7}
+
+- id: 64
+  name: SEEING_RED
+  game_id: "Seeing Red"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: NONE
+  flags: [exhaust]
+  provenance: "SeeingRed (SeeingRed.java:24-40): cost 1, exhaust, upgradeBaseCost(0) -> 0; use queues GainEnergyAction(2) (fixed 2, both rows)."
+  effects:
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+  upgraded_cost: 0
+  upgraded:
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+
+- id: 65
+  name: SENTINEL
+  game_id: "Sentinel"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Sentinel (Sentinel.java:26-53): cost 1, baseBlock 5, upgradeBlock(3) -> 8; use queues GainBlockAction(block). triggerOnExhaust (:37-43): addToTop GainEnergyAction(2) base / GainEnergyAction(3) upgraded -- fires whenever the card is exhausted from ANY source (CardGroup.moveToExhaustPile:857, AFTER relics+powers onExhaust), authored as the on_exhaust program pair."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 5}
+  on_exhaust:
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 8}
+  upgraded_on_exhaust:
+    - {op: GAIN_ENERGY, target: SELF, amount: 3}
+
+- id: 66
+  name: SHOCKWAVE
+  game_id: "Shockwave"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 2
+  target: ALL_ENEMY
+  flags: [exhaust]
+  provenance: "Shockwave (Shockwave.java:29-49): cost 2, exhaust, magic 3, upgradeMagicNumber(2) -> 5; use queues per monster (group order) ApplyPowerAction(WeakPower(mo, magic, false), magic) then ApplyPowerAction(VulnerablePower(mo, magic, false), magic) (:37-40) -- i.e. per-monster Weak-then-Vulnerable. Modeled as two ALL_ENEMY fan-out steps; observably identical (no S1 hook distinguishes per-monster interleaving of pure debuff applications, and Sadistic/Artifact fire per application either way)."
+  effects:
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 3, power: WEAK}
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 3, power: VULNERABLE}
+  upgraded:
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 5, power: WEAK}
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 5, power: VULNERABLE}
+
+- id: 67
+  name: SPOT_WEAKNESS
+  game_id: "Spot Weakness"
+  color: RED
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: SELF_AND_ENEMY
+  flags: []
+  provenance: "SpotWeakness (SpotWeakness.java:24-40): cost 1, magic 3, upgradeMagicNumber(1) -> 4; use queues SpotWeaknessAction(magic, m). SpotWeaknessAction.update (SpotWeaknessAction.java:32-40): if targetMonster.getIntentBaseDmg() >= 0 (the telegraphed move deals attack damage -- setMove stores baseDamage -1 for non-attacks, AbstractMonster.java:451-463; createIntent :412), addToBot ApplyPowerAction(player, StrengthPower(player, magic), magic); else nothing."
+  effects:
+    - {op: SPOT_WEAKNESS, target: CARD_TARGET, amount: 3}
+  upgraded:
+    - {op: SPOT_WEAKNESS, target: CARD_TARGET, amount: 4}

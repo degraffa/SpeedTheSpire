@@ -179,10 +179,13 @@ TEST(CardSkillsFlex, StrengthRevertsAtEndOfTurnAndPowerSelfRemoves) {
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
     pump(s, default_monster_turn);
 
-    const PowerSlot* str = FindPlayerPower(s, PowerId::STRENGTH);
-    ASSERT_NE(str, nullptr);
-    EXPECT_EQ(str->amount, 0)
-        << "Flex's +Strength is fully reversed at end of turn";
+    // B3.6 Java-exactness fix: StrengthPower.stackPower removes the slot when a
+    // stack lands on exactly 0 (addToTop RemoveSpecificPowerAction,
+    // StrengthPower.java:48-53) -- so after the reversal the Strength slot is
+    // GONE, not a 0-amount residue (the pre-B3.6 expectation contradicted the
+    // cited Java; recorded in the B3.6 ledger Log).
+    EXPECT_EQ(FindPlayerPower(s, PowerId::STRENGTH), nullptr)
+        << "Strength stacked to exactly 0 removes the slot";
     EXPECT_EQ(FindPlayerPower(s, PowerId::LOSE_STRENGTH), nullptr)
         << "LoseStrengthPower removes itself after firing";
 }

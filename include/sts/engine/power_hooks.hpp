@@ -123,10 +123,14 @@ void dispatch_on_use_card(CombatState& state, uint8_t played_pool_index,
 // --- Single-source hooks (player-power list order == §5.5) ------------------
 
 // onExhaust (§5.5): relics onExhaust -> player powers onExhaust, in application
-// (power-list) order. `card_id` is the exhausted card. Feel No Pain + Dark Embrace
+// (power-list) order -> card.triggerOnExhaust (B3.6: the exhausted card's own
+// on_exhaust program -- Sentinel's addToTop energy; CardGroup.moveToExhaustPile:
+// 851-857). `pool_index`/`card_id` identify the exhausted instance (the pool row
+// selects the base vs upgraded on-exhaust program). Feel No Pain + Dark Embrace
 // resolving on one exhaust is the B3.7 acceptance -- the list order here decides
 // their sequence.
-void dispatch_on_exhaust(CombatState& state, uint16_t card_id) noexcept;
+void dispatch_on_exhaust(CombatState& state, uint8_t pool_index,
+                         uint16_t card_id) noexcept;
 
 // onCardDraw: player powers, once per drawn card. `pool_index`/`card_id` identify
 // the drawn card (Corruption zeroes a drawn skill's cost).

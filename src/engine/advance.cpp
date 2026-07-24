@@ -350,7 +350,13 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                                           choice_excluded_index(front))) {
                     break;  // illegal selection -- no-op
                 }
-                apply_choice_selection(s, slot, kind);
+                // B3.6: DUPLICATE carries its clone count in the packed flags
+                // (Dual Wield magicNumber) and, being a REAL prompt here, takes
+                // the prompted-resolution branch (the hand-select screen's
+                // reorder bookkeeping, DualWieldAction.java:59-84).
+                apply_choice_selection(s, slot, kind,
+                                       choose_copies_from_flags(front.flags),
+                                       /*prompted=*/true);
                 // One card selected: decrement the remaining count. When it hits 0
                 // (or no eligible cards remain), the next pump pops the now-satisfied
                 // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.

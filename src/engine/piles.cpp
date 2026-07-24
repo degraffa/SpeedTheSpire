@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <span>
 
+#include "sts/engine/cards.hpp"        // B3.6: card_cost (reset_cost_for_turn)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/power_hooks.hpp"  // B3.2: onExhaust dispatch (EXHAUST opcode path)
 #include "sts/engine/relic_hooks.hpp"  // B3.25: onShuffle dispatch (Sundial)
@@ -23,6 +24,22 @@
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
+
+void reset_cost_for_turn(CombatState& s, uint8_t pool_index) noexcept {
+    if (pool_index >= kCardPoolCap) {
+        return;
+    }
+    CardInstance& c = s.card_pool[pool_index];
+    if (!has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN)) {
+        return;
+    }
+    const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+    if (def != nullptr) {
+        c.cost_now = card_cost(*def, c.upgrade);  // costForTurn = cost
+    }
+    c.flags = static_cast<uint16_t>(
+        c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+}
 
 void shuffle_discard_into_draw(CombatState& s) noexcept {
     if (s.discard_count == 0) {
@@ -116,10 +133,14 @@ void exhaust_card(CombatState& s, int pool_index) noexcept {
                 s.exhaust[s.exhaust_count] = idx;
                 ++s.exhaust_count;
             }
+            // B3.6: an exhausted card's this-turn-only cost reverts
+            // (ExhaustCardEffect.update:41-43 resetAttributes -> costForTurn =
+            // cost). Restore cost_now from the registry row and clear the bit.
+            reset_cost_for_turn(s, idx);
             // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card lands
-            // in the exhaust pile. No-op without an on-exhaust power, so the
-            // skeleton EXHAUST-opcode path is unchanged.
-            dispatch_on_exhaust(s, s.card_pool[idx].card_id);
+            // in the exhaust pile. No-op without an on-exhaust power or card-level
+            // on-exhaust program, so the skeleton EXHAUST-opcode path is unchanged.
+            dispatch_on_exhaust(s, idx, s.card_pool[idx].card_id);
             return;
         }
     }

@@ -58,6 +58,12 @@ using CardDef = sts::registry::CardDef;
 using sts::registry::kMaxCardSteps;
 using sts::registry::kPoolableCurseCount;
 using sts::registry::kPoolableCurses;
+// B3.6: the Ironclad in-combat ATTACK transform pool (Infernal Blade /
+// returnTrulyRandomCardInCombat(ATTACK), AbstractDungeon.java:964-979). Derived
+// by the generator from the rows' color/rarity/type/healing columns; see the
+// pool-order note in gen.py (registry-id order until B4.5 pins library order).
+using sts::registry::kIroncladAttackPoolCount;
+using sts::registry::kIroncladAttackPool;
 
 // --- The card table (generated from registry/cards.yaml) ---------------------
 // Each entry mirrors its use()'s addToBot order exactly; provenance is cited
@@ -106,6 +112,21 @@ struct CardEffectView {
 // The CardFlag bitset for a card at the given upgrade level.
 [[nodiscard]] inline uint16_t card_flags(const CardDef& def, uint8_t upgrade) noexcept {
     return upgrade > 0 ? def.upgraded_flags : def.flags;
+}
+
+// B3.6: the card's triggerOnExhaust program at the given upgrade level
+// (CardGroup.moveToExhaustPile:857 fires card.triggerOnExhaust AFTER the relic
+// and power onExhaust hooks; Sentinel is the S1 consumer -- addToTop
+// GainEnergyAction 2/3, Sentinel.java:37-43). Empty (count 0) for every card
+// without an `on_exhaust:` block.
+[[nodiscard]] inline CardEffectView card_on_exhaust_steps(
+    const CardDef& def, uint8_t upgrade) noexcept {
+    if (upgrade > 0) {
+        return CardEffectView{def.upgraded_on_exhaust_steps.data(),
+                              def.upgraded_on_exhaust_step_count};
+    }
+    return CardEffectView{def.on_exhaust_steps.data(),
+                          def.on_exhaust_step_count};
 }
 
 // --- Drift pins ---------------------------------------------------------------
@@ -174,7 +195,15 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::SPAWN_MONSTER) ==
             static_cast<uint16_t>(Opcode::SPAWN_MONSTER) &&
         static_cast<uint16_t>(sts::registry::Opcode::SET_MOVE) ==
-            static_cast<uint16_t>(Opcode::SET_MOVE),
+            static_cast<uint16_t>(Opcode::SET_MOVE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DOUBLE_BLOCK) ==
+            static_cast<uint16_t>(Opcode::DOUBLE_BLOCK) &&
+        static_cast<uint16_t>(sts::registry::Opcode::BLOCK_PER_NON_ATTACK) ==
+            static_cast<uint16_t>(Opcode::BLOCK_PER_NON_ATTACK) &&
+        static_cast<uint16_t>(sts::registry::Opcode::SPOT_WEAKNESS) ==
+            static_cast<uint16_t>(Opcode::SPOT_WEAKNESS) &&
+        static_cast<uint16_t>(sts::registry::Opcode::RANDOM_ATTACK_TO_HAND) ==
+            static_cast<uint16_t>(Opcode::RANDOM_ATTACK_TO_HAND),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
@@ -191,7 +220,9 @@ static_assert(
         sts::registry::kCardFlagInnate == card_flag_bit(CardFlag::INNATE) &&
         sts::registry::kCardFlagUnplayable == card_flag_bit(CardFlag::UNPLAYABLE) &&
         sts::registry::kCardFlagRetain == card_flag_bit(CardFlag::RETAIN) &&
-        sts::registry::kCardFlagXcost == card_flag_bit(CardFlag::XCOST),
+        sts::registry::kCardFlagXcost == card_flag_bit(CardFlag::XCOST) &&
+        sts::registry::kCardFlagCostModifiedForTurn ==
+            card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN),
     "generated kCardFlag* must stay byte-equal to types.hpp's CardFlag "
     "(append-only; mirrored in gen.py CARD_FLAGS)");
 

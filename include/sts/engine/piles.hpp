@@ -92,4 +92,14 @@ void exhaust_card(CombatState& state, int pool_index) noexcept;
 // intentionally collapsed without changing pile outcome or trigger ordering.
 void discard_hand_at_end_of_turn(CombatState& state) noexcept;
 
+// B3.6: if pool row `pool_index` carries the COST_MODIFIED_FOR_TURN bit
+// (setCostForTurn -- Infernal Blade's generated attack), restore cost_now to the
+// registry cost for its upgrade level and clear the bit (AbstractCard.
+// resetAttributes:2035-2045, costForTurn = cost). Fired per-card by the end-turn
+// sweep (AbstractRoom.endTurn:397-405 -- draw/discard/hand) and on exhaust
+// (ExhaustCardEffect.update:41-43). A row without the bit is untouched -- Blood
+// for Blood's combat-persistent updateCost reductions modify `cost` itself in
+// the game and are therefore NOT reverted by resetAttributes.
+void reset_cost_for_turn(CombatState& state, uint8_t pool_index) noexcept;
+
 }  // namespace sts::engine

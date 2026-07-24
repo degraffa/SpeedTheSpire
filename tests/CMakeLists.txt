@@ -500,6 +500,20 @@ sts_set_warnings(card_uncommon_attacks_test)
 sts_enable_sanitizers(card_uncommon_attacks_test)
 gtest_discover_tests(card_uncommon_attacks_test)
 
+# B3.6: the exact 17 Ironclad uncommon skills. Per-card base/upgraded tier-2
+# behavior plus No Draw gating, Dual Wield DUPLICATE choice (forced/prompted/
+# copies), Sentinel on-exhaust energy, Infernal Blade cardRandomRng accounting +
+# cost-for-turn reset, Entrench block doubling, Flame Barrier thorns/removal,
+# Second Wind exhaust-then-block ordering, Spot Weakness intent gating, and a
+# directed public advance()/legal_actions() script.
+add_executable(card_uncommon_skills_test
+    card_uncommon_skills_test.cpp
+)
+target_link_libraries(card_uncommon_skills_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(card_uncommon_skills_test)
+sts_enable_sanitizers(card_uncommon_skills_test)
+gtest_discover_tests(card_uncommon_skills_test)
+
 # B3.9 statuses + curses (unplayable gating, end-of-turn triggers vs. §5.4 order,
 # on-draw energy loss, on-other-card-played HP loss, ethereal exhaust, Normality
 # play-cap, Slimed exhaust-on-play). Tier-2 per entry, hand-computed from the Java.

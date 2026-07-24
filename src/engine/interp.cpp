@@ -15,7 +15,7 @@
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/monster_dispatch.hpp"  // B3.17: on_monster_damaged / roll_monster_move / spawn_monster_at_slot
+#include "sts/engine/monster_dispatch.hpp"  // B3.17: on_monster_damaged / roll_monster_move / spawn_monster_at_slot; MonsterIntent (SPOT_WEAKNESS intent gate)
 #include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
 #include "sts/engine/power_hooks.hpp"   // B3.2 hook dispatch (onGainedBlock/onApplyPower/wasHPLost/onCardDraw)
 #include "sts/engine/powers.hpp"        // power_def / PowerType (APPLY_POWER interception)
@@ -388,9 +388,28 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (id == PowerId::NONE) {
         return;
     }
+    // B3.6 (ApplyPowerAction.update:102-105): applying No Draw to a target that
+    // ALREADY has No Draw is a whole-action no-op -- it short-circuits BEFORE the
+    // source onApplyPower hooks and the Artifact nullify, and never stacks.
+    if (id == PowerId::NO_DRAW) {
+        const PowerView pv = actor_powers(s, tgt);
+        for (uint8_t i = 0; i < pv.count; ++i) {
+            if (pv.slots[i].power_id == static_cast<uint16_t>(PowerId::NO_DRAW)) {
+                return;
+            }
+        }
+    }
     const PowerDef* applied_def = power_def(id);
+    // The applied instance's PowerType. Strength/Dexterity flip to DEBUFF when
+    // constructed with a non-positive amount (StrengthPower ctor :37 calls
+    // updateDescription :81-89, `amount > 0 ? BUFF : DEBUFF`; DexterityPower
+    // likewise :74-82) -- so Disarm's Strength(-N) IS Artifact-nullified and
+    // Sadistic-visible, while Spot Weakness's Strength(+N) stays a BUFF.
+    const bool negative_stat_flip =
+        (id == PowerId::STRENGTH || id == PowerId::DEXTERITY) && amount <= 0;
     const bool is_debuff =
-        applied_def != nullptr && applied_def->type == PowerType::DEBUFF;
+        (applied_def != nullptr && applied_def->type == PowerType::DEBUFF) ||
+        negative_stat_flip;
     // (1) source-side onApplyPower (fires before the power lands).
     dispatch_on_apply_power_source(s, src, tgt, static_cast<uint16_t>(id),
                                    is_debuff);
@@ -413,6 +432,20 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     for (uint8_t i = 0; i < *count; ++i) {
         if (slots[i].power_id == pid) {
             slots[i].amount = static_cast<int16_t>(slots[i].amount + amount);
+            // StrengthPower/DexterityPower.stackPower (:48-53 / :44-49): a stack
+            // landing on EXACTLY 0 queues the slot's removal (addToTop
+            // RemoveSpecificPowerAction) -- Disarm cancelling equal Strength, or
+            // Flex's end-of-turn reversal. Queued, not synchronous: the 0-amount
+            // slot remains visible until the queued removal resolves.
+            if ((id == PowerId::STRENGTH || id == PowerId::DEXTERITY) &&
+                slots[i].amount == 0) {
+                ActionQueueItem rem{};
+                rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+                rem.src = tgt;
+                rem.tgt = tgt;
+                rem.flags = make_apply_power_flags(id);
+                add_to_top(s, rem);
+            }
             return;
         }
     }
@@ -570,9 +603,40 @@ void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
     }
 }
 
+// B3.6 (Dual Wield): add one stat-equivalent clone of pool instance `src_pi` to
+// the hand, spilling to the discard when the hand is full (MakeTempCardInHand-
+// Action.update:71-77). makeStatEquivalentCopy (AbstractCard.java:826-848)
+// preserves the upgrade count, cost/costForTurn (cost_now + the FOR_TURN bit in
+// `flags`), and misc (Rampage's combat counter), so the clone copies the whole
+// CardInstance into a fresh pool row.
+void clone_card_to_hand(CombatState& s, CardPoolIndex src_pi) noexcept {
+    int slot = -1;
+    for (int i = 0; i < kCardPoolCap; ++i) {
+        if (s.card_pool[i].card_id == static_cast<uint16_t>(CardId::NONE)) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        return;  // pool exhausted (defensive; 160-row cap, design §4.2)
+    }
+    s.card_pool[slot] = s.card_pool[src_pi];
+    const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
+    if (s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = idx;
+    } else if (s.discard_count < kDiscardCap) {
+        s.discard[s.discard_count++] = idx;
+    }
+}
+
 // Apply one CHOOSE_CARD manipulation to slot `slot` of the kind's SOURCE pile
-// (hand for exhaust/put-on-draw-top/upgrade; discard for discard-to-draw-top).
-void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind) noexcept {
+// (hand for exhaust/put-on-draw-top/upgrade/duplicate; discard for
+// discard-to-draw-top). `copies` is the DUPLICATE clone count (Dual Wield
+// magicNumber); the other kinds ignore it. This is the FORCED/auto shape for
+// DUPLICATE (DualWieldAction.java:49-57: clones appended, NO hand reorder);
+// the prompted screen bookkeeping lives in apply_choice_selection.
+void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
+                          int copies = 1) noexcept {
     const uint8_t src_count =
         choice_source_is_discard(kind) ? s.discard_count : s.hand_count;
     if (slot >= src_count) {
@@ -599,6 +663,13 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind) noexcep
         case ChoiceKind::DISCARD_TO_DRAW_TOP:
             discard_slot_to_draw_top(s, slot);
             break;
+        case ChoiceKind::DUPLICATE: {
+            const CardPoolIndex pi = s.hand[slot];
+            for (int k = 0; k < copies; ++k) {
+                clone_card_to_hand(s, pi);
+            }
+            break;
+        }
     }
 }
 
@@ -655,7 +726,8 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
             const CardPoolIndex* sp2 = from_discard ? s.discard : s.hand;
             for (uint8_t i = 0; i < sc2; ++i) {
                 if (sp2[i] == picked[k]) {
-                    apply_choice_to_slot(s, i, kind);
+                    apply_choice_to_slot(s, i, kind,
+                                         choose_copies_from_flags(item.flags));
                     break;
                 }
             }
@@ -831,6 +903,128 @@ void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept {
     s.card_pool[pool_index].cost_now = static_cast<uint8_t>(new_cost);
 }
 
+// --- B3.6 red-uncommon-skill opcode bodies -----------------------------------
+
+// DOUBLE_BLOCK (Entrench / DoubleYourBlockAction.update:24-30): if tgt has
+// block, addBlock(currentBlock). A direct addBlock -- no card applyPowers, so
+// no Dexterity/Frail (kBlockNoPowers) -- and the onGainedBlock hooks fire via
+// op_block. Zero block does nothing (no hook fires).
+void op_double_block(CombatState& s, uint8_t tgt) noexcept {
+    const int16_t* blk = actor_block(s, tgt);
+    if (blk == nullptr || *blk <= 0) {
+        return;
+    }
+    op_block(s, tgt, *blk, kBlockNoPowers);
+}
+
+// BLOCK_PER_NON_ATTACK (Second Wind / BlockPerNonAttackAction.update:29-42):
+// collect every non-ATTACK hand card; the queued ExhaustSpecificCardActions
+// resolve FIRST and in REVERSE hand order (each addToTop lands in front of the
+// previous), then the per-card GainBlockActions. The exhausts run synchronously
+// here (each firing the §5.5 onExhaust chain -- a Sentinel's addToTop energy
+// lands at the queue front, ahead of the block items, matching the game's
+// resolve-immediately-after-that-exhaust ordering); the block gains are queued
+// as per-card CARD-style BLOCK items (flags 0): SecondWind.use passes
+// `this.block`, the card's applyPowers value, so Dexterity/Frail modify each
+// per-card gain exactly as op_block's modify-block pass does.
+void op_block_per_non_attack(CombatState& s, int block_per_card) noexcept {
+    // Snapshot the non-Attack pool indices first (exhausting compacts the hand).
+    CardPoolIndex to_exhaust[kHandCap];
+    int n = 0;
+    for (uint8_t i = 0; i < s.hand_count && n < kHandCap; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        if (def != nullptr && def->type != CardType::ATTACK) {
+            to_exhaust[n++] = pi;
+        }
+    }
+    for (int k = n - 1; k >= 0; --k) {  // reverse hand order: last card first
+        exhaust_card(s, to_exhaust[k]);
+    }
+    for (int k = 0; k < n; ++k) {
+        ActionQueueItem blk{};
+        blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+        blk.src = kActorPlayer;
+        blk.tgt = kActorPlayer;
+        blk.amount = block_per_card;
+        blk.flags = 0;  // card-style block: Dexterity/Frail apply per gain
+        add_to_bottom(s, blk);
+    }
+}
+
+// SPOT_WEAKNESS (SpotWeaknessAction.update:32-40): if the target monster's
+// telegraphed move deals attack damage (getIntentBaseDmg() >= 0 -- setMove
+// stores baseDamage -1 for every non-attack move, AbstractMonster.java:451-463,
+// and createIntent copies it, :412), addToBot ApplyPowerAction(player,
+// StrengthPower(player, amount), amount). MonsterState.intent stores the
+// MonsterIntent classification the monster module decided (monster modules set
+// it in their set_move); the ATTACK* variants are exactly the moves constructed
+// with a non-negative baseDamage. No liveness check: the Java action only
+// null-checks the target.
+void op_spot_weakness(CombatState& s, uint8_t tgt, int amount) noexcept {
+    if (tgt >= kMonsterCap) {
+        return;
+    }
+    const MonsterIntent intent =
+        static_cast<MonsterIntent>(s.monsters[tgt].intent);
+    const bool attacks = intent == MonsterIntent::ATTACK ||
+                         intent == MonsterIntent::ATTACK_DEFEND ||
+                         intent == MonsterIntent::ATTACK_DEBUFF;
+    if (!attacks) {
+        return;
+    }
+    ActionQueueItem up{};
+    up.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    up.src = kActorPlayer;
+    up.tgt = kActorPlayer;
+    up.amount = amount;
+    up.flags = make_apply_power_flags(PowerId::STRENGTH);
+    add_to_bottom(s, up);  // addToBot (SpotWeaknessAction.java:35)
+}
+
+// RANDOM_ATTACK_TO_HAND (Infernal Blade / InfernalBlade.use:31-35): pick ONE
+// uniformly-random member of the combat ATTACK pool (returnTrulyRandomCardIn-
+// Combat(ATTACK), AbstractDungeon.java:964-979 -- ONE cardRandomRng
+// random(size-1) draw over srcCommon+srcUncommon+srcRare filtered to
+// non-HEALING ATTACKs), makeCopy() a BASE instance, setCostForTurn(0), and add
+// it to the hand (MakeTempCardInHandAction: hand-cap spill to discard). The
+// cost-0 is this-turn-only: COST_MODIFIED_FOR_TURN is reset by the end-turn
+// sweep (AbstractRoom.endTurn:397-405) / on exhaust (ExhaustCardEffect:41-43).
+// Pool membership/order provenance: generated kIroncladAttackPool (cards.hpp).
+void op_random_attack_to_hand(CombatState& s) noexcept {
+    static_assert(kIroncladAttackPoolCount > 0,
+                  "Infernal Blade needs a non-empty attack pool");
+    const int32_t pick = random(
+        s.card_random_rng, static_cast<int32_t>(kIroncladAttackPoolCount) - 1);
+    const CardId id = kIroncladAttackPool[static_cast<unsigned>(pick)];
+    const CardDef* def = card_def(id);
+    if (def == nullptr) {
+        return;  // defensive; the pool only holds registry rows
+    }
+    int slot = -1;
+    for (int i = 0; i < kCardPoolCap; ++i) {
+        if (s.card_pool[i].card_id == static_cast<uint16_t>(CardId::NONE)) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        return;  // pool exhausted (defensive; 160-row cap, design §4.2)
+    }
+    s.card_pool[slot].card_id = static_cast<uint16_t>(id);
+    s.card_pool[slot].upgrade = 0;                    // library copies are base
+    s.card_pool[slot].cost_now = 0;                   // setCostForTurn(0)
+    s.card_pool[slot].flags = static_cast<uint16_t>(
+        card_flags(*def, 0) | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+    s.card_pool[slot].misc = 0;
+    const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
+    if (s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = idx;
+    } else if (s.discard_count < kDiscardCap) {
+        s.discard[s.discard_count++] = idx;
+    }
+}
+
 }  // namespace
 
 // --- Public: DAMAGE pipeline -------------------------------------------------
@@ -912,6 +1106,14 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
         }
         return c.upgrade == 0;
     }
+    if (kind == ChoiceKind::DUPLICATE) {
+        // Dual Wield: only ATTACK or POWER cards can be duplicated
+        // (DualWieldAction.isDualWieldable:95-97).
+        const CardDef* def = card_def(
+            static_cast<CardId>(s.card_pool[s.hand[slot]].card_id));
+        return def != nullptr &&
+               (def->type == CardType::ATTACK || def->type == CardType::POWER);
+    }
     return true;  // EXHAUST / PUT_ON_DRAW_TOP accept any hand card
 }
 
@@ -927,9 +1129,48 @@ bool choice_requires_user(const CombatState& s,
     return count_eligible(s, kind, choice_excluded_index(item)) > item.amount;
 }
 
-void apply_choice_selection(CombatState& s, uint8_t slot,
-                            ChoiceKind kind) noexcept {
-    apply_choice_to_slot(s, slot, kind);
+void apply_choice_selection(CombatState& s, uint8_t slot, ChoiceKind kind,
+                            int copies, bool prompted) noexcept {
+    if (kind == ChoiceKind::DUPLICATE && prompted) {
+        // DualWieldAction's PROMPTED branch (DualWieldAction.java:59-84): the
+        // screen removed the ineligible cards from the hand up front and
+        // returnCards() re-appends them at the END (hand.addToTop == list append,
+        // :88-92) after retrieval; the SELECTED card left the hand into
+        // selectedCards, is cleared, and 1 + dupeAmount stat-equivalent copies
+        // are Make'd into the hand (:74-79). Net observable hand:
+        //   [other eligibles, original relative order] +
+        //   [ineligibles, original relative order] +
+        //   [selected-equivalent + `copies` clones].
+        // We keep the ORIGINAL instance as the "selected-equivalent" (a
+        // makeStatEquivalentCopy is field-identical to it) and append `copies`
+        // clones -- byte-identical piles, one fewer pool row consumed.
+        if (slot >= s.hand_count) {
+            return;
+        }
+        const CardPoolIndex sel = s.hand[slot];
+        CardPoolIndex reordered[kHandCap];
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < s.hand_count; ++i) {  // eligibles except selected
+            if (i != slot && choice_slot_eligible(s, i, ChoiceKind::DUPLICATE)) {
+                reordered[n++] = s.hand[i];
+            }
+        }
+        for (uint8_t i = 0; i < s.hand_count; ++i) {  // then the ineligibles
+            if (i != slot && !choice_slot_eligible(s, i, ChoiceKind::DUPLICATE)) {
+                reordered[n++] = s.hand[i];
+            }
+        }
+        reordered[n++] = sel;                          // selected at the end
+        for (uint8_t i = 0; i < n; ++i) {
+            s.hand[i] = reordered[i];
+        }
+        s.hand_count = n;
+        for (int k = 0; k < copies; ++k) {
+            clone_card_to_hand(s, sel);
+        }
+        return;
+    }
+    apply_choice_to_slot(s, slot, kind, copies);
 }
 
 // --- Public: dispatch --------------------------------------------------------
@@ -977,6 +1218,20 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                            apply_power_id_from_flags(item.flags), item.amount);
             return;
         case Opcode::DRAW: {
+            // B3.6 (DrawCardAction.update:69-73): while the player has No Draw,
+            // a DrawCardAction ends immediately -- NOTHING is drawn (any amount,
+            // including the start-of-turn 5; the power self-removes at end of
+            // turn before the next start-of-turn draw). The check ignores the
+            // slot amount: NoDrawPower carries the -1 no-amount marker.
+            {
+                const PowerView pv = actor_powers(s, kActorPlayer);
+                for (uint8_t i = 0; i < pv.count; ++i) {
+                    if (pv.slots[i].power_id ==
+                        static_cast<uint16_t>(PowerId::NO_DRAW)) {
+                        return;
+                    }
+                }
+            }
             // draw, then fire onCardDraw per newly-drawn card (in draw order) --
             // Corruption zeroes a drawn skill's cost, Evolve/FireBreathing (later)
             // react to statuses. No-op without such a power.
@@ -1071,6 +1326,18 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         }
         case Opcode::EXHAUST_NON_ATTACKS:
             op_exhaust_non_attacks(s);
+            return;
+        case Opcode::DOUBLE_BLOCK:
+            op_double_block(s, item.tgt);
+            return;
+        case Opcode::BLOCK_PER_NON_ATTACK:
+            op_block_per_non_attack(s, item.amount);
+            return;
+        case Opcode::SPOT_WEAKNESS:
+            op_spot_weakness(s, item.tgt, item.amount);
+            return;
+        case Opcode::RANDOM_ATTACK_TO_HAND:
+            op_random_attack_to_hand(s);
             return;
         case Opcode::DAMAGE_BLOCK:
             // Body Slam: base == the player's CURRENT block (read here at execute

@@ -362,9 +362,10 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 50u);   // B3.5: prior 39 + 11 red uncommon attacks
-    EXPECT_EQ(m::kPowersCount, 23u);  // 21 + B3.17 Split (22) + B3.25 Next Turn
-                                      // Block (23, Self-Forming Clay)
+    EXPECT_EQ(m::kCardsCount, 67u);   // B3.6: prior 50 + 17 red uncommon skills
+    EXPECT_EQ(m::kPowersCount, 25u);  // 21 + B3.17 Split (22) + B3.25 Next Turn
+                                      // Block (23) + B3.6 No Draw (24) +
+                                      // Flame Barrier (25)
     EXPECT_EQ(m::kMonstersCount, 10u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large slimes
     EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
@@ -373,7 +374,7 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 201u);  // integrated through B3.17 + B3.25
+    EXPECT_EQ(m::kTotalCount, 220u);  // integrated through B3.6/B3.17/B3.25
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

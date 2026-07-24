@@ -112,7 +112,7 @@ TEST(PowerHooks, NoBoundPowerQueuesNothing) {
     give_monster_power(s, 0, PowerId::VULNERABLE, 1);
 
     dispatch_on_play_card(s, static_cast<uint16_t>(CardId::STRIKE), 0);
-    dispatch_on_exhaust(s, static_cast<uint16_t>(CardId::STRIKE));
+    dispatch_on_exhaust(s, /*pool_index=*/0, static_cast<uint16_t>(CardId::STRIKE));
     dispatch_at_end_of_turn_pre_card(s);
     dispatch_at_end_of_turn(s);
     dispatch_at_start_of_turn(s);
@@ -123,19 +123,22 @@ TEST(PowerHooks, NoBoundPowerQueuesNothing) {
     EXPECT_EQ(s.action_count, 0) << "no hook-bearing power -> nothing queued";
 }
 
-// --- ORDERING (acceptance): §5.3 player powers before monster powers ---------
+// --- ORDERING (acceptance): player powers before monster powers --------------
 
-TEST(PowerHooks, OnPlayCardFanOutPlayerBeforeMonster) {
-    // Rage binds on_play_card (BLOCK self = power amount). Player Rage(2),
-    // monster Rage(4): §5.3 fires PLAYER powers, then MONSTER powers -> the
-    // player's block queues before the monster's.
+TEST(PowerHooks, OnUseCardFanOutPlayerBeforeMonster) {
+    // B3.6 rebound RAGE to its Java hook (RagePower.onUseCard, native with the
+    // ATTACK-type guard), so the ordering probe moves to the UseCardAction
+    // fan-out (UseCardAction.java:41-64): PLAYER powers first, MONSTER powers
+    // LAST. Player Rage(2), monster Rage(4), played card = STRIKE (an ATTACK):
+    // the player's block queues before the monster's.
     CombatState s{};
     s.monster_count = 1;
     s.monsters[0].hp = 30;
     give_player_power(s, PowerId::RAGE, 2);
     give_monster_power(s, 0, PowerId::RAGE, 4);
 
-    dispatch_on_play_card(s, static_cast<uint16_t>(CardId::STRIKE), 0);
+    dispatch_on_use_card(s, /*played_pool_index=*/0,
+                         static_cast<uint16_t>(CardId::STRIKE));
 
     ASSERT_EQ(s.action_count, 2);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::BLOCK));
@@ -144,6 +147,16 @@ TEST(PowerHooks, OnPlayCardFanOutPlayerBeforeMonster) {
     EXPECT_EQ(queued(s, 1).opcode, kOp(Opcode::BLOCK));
     EXPECT_EQ(queued(s, 1).tgt, 0);              // monster 0 Rage second
     EXPECT_EQ(queued(s, 1).amount, 4);
+}
+
+TEST(PowerHooks, RageAttackGuardSkipsNonAttacks) {
+    // RagePower.onUseCard's card.type == ATTACK guard (RagePower.java:42): a
+    // played SKILL queues nothing.
+    CombatState s{};
+    give_player_power(s, PowerId::RAGE, 3);
+    dispatch_on_use_card(s, /*played_pool_index=*/0,
+                         static_cast<uint16_t>(CardId::DEFEND));
+    EXPECT_EQ(s.action_count, 0);
 }
 
 // --- STRESS 1: onExhaust list order (Feel No Pain + Dark Embrace) ------------
@@ -155,7 +168,7 @@ TEST(PowerHooks, OnExhaustFollowsPlayerPowerListOrder) {
     CombatState a{};
     give_player_power(a, PowerId::FEEL_NO_PAIN, 3);   // applied first
     give_player_power(a, PowerId::DARK_EMBRACE, 1);   // applied second
-    dispatch_on_exhaust(a, static_cast<uint16_t>(CardId::STRIKE));
+    dispatch_on_exhaust(a, /*pool_index=*/0, static_cast<uint16_t>(CardId::STRIKE));
     ASSERT_EQ(a.action_count, 2);
     EXPECT_EQ(queued(a, 0).opcode, kOp(Opcode::BLOCK));  // Feel No Pain first
     EXPECT_EQ(queued(a, 0).amount, 3);
@@ -166,7 +179,7 @@ TEST(PowerHooks, OnExhaustFollowsPlayerPowerListOrder) {
     CombatState b{};
     give_player_power(b, PowerId::DARK_EMBRACE, 1);   // applied first
     give_player_power(b, PowerId::FEEL_NO_PAIN, 3);   // applied second
-    dispatch_on_exhaust(b, static_cast<uint16_t>(CardId::STRIKE));
+    dispatch_on_exhaust(b, /*pool_index=*/0, static_cast<uint16_t>(CardId::STRIKE));
     ASSERT_EQ(b.action_count, 2);
     EXPECT_EQ(queued(b, 0).opcode, kOp(Opcode::DRAW));   // Dark Embrace first now
     EXPECT_EQ(queued(b, 1).opcode, kOp(Opcode::BLOCK));  // Feel No Pain second
@@ -473,7 +486,13 @@ TEST(PowerHooks, LoseDexterityReversesDexterityAtEndOfTurn) {
     dispatch_at_end_of_turn(s);
     ASSERT_EQ(s.action_count, 2) << "APPLY_POWER Dexterity -5 then REMOVE_POWER";
     drain_actions(s);
-    EXPECT_EQ(player_power_stack(s, PowerId::DEXTERITY), 0) << "Dexterity reversed to 0";
+    // B3.6 Java-exactness fix: DexterityPower.stackPower removes the slot when a
+    // stack lands on exactly 0 (addToTop RemoveSpecificPowerAction,
+    // DexterityPower.java:44-49) -- so the reversed Dexterity slot is GONE, not
+    // a 0-amount residue (the pre-B3.6 expectation contradicted the cited Java;
+    // recorded in the B3.6 ledger Log).
+    EXPECT_EQ(player_power_stack(s, PowerId::DEXTERITY), -1)
+        << "Dexterity stacked to exactly 0 removes the slot";
     EXPECT_EQ(player_power_stack(s, PowerId::LOSE_DEXTERITY), -1) << "LoseDexterity removed";
 }
 

@@ -143,10 +143,11 @@
   name: RAGE
   game_id: "Rage"
   type: BUFF
+  native: true
   hooks:
-    on_play_card:
-      - {op: BLOCK, target: SELF, amount: 0}   # block = power amount
-  provenance: "RagePower.onUseCard (RagePower.java:41-47) -- if card.type==ATTACK: GainBlockAction(owner, amount). Bound to on_play_card here: our engine collapses the onPlayCard/onUseCard card-play cycles into one synchronous resolve_card_play (card_play.hpp HOOK-ORDER COLLAPSE), so both fire together; the attack-type guard is the power's concern, deferred to the B3.6 Rage card. Used as the §5.3 player-before-monster fan-out probe."
+    on_use_card: []             # native: if the played card is an ATTACK, gain `amount` block (direct GainBlockAction -- no Dexterity)
+    at_end_of_turn: []          # native: RemoveSpecificPowerAction(self) -- Rage lasts one turn
+  provenance: "RagePower.onUseCard (RagePower.java:41-47) -- if card.type==ATTACK: GainBlockAction(player, amount), fired in the UseCardAction fan-out; atEndOfTurn (:49-52) -- addToBot RemoveSpecificPowerAction(owner, \"Rage\"). B3.6 completes the B3.2 stub: the binding moves from on_play_card to ON_USE_CARD (dispatched AFTER the card's own effects are queued, so the block lands after the attack's damage -- observable via Body Slam's execute-time block read: the game computes Body Slam's base at use() while Rage's block arrives via the later UseCardAction), the deferred ATTACK-type guard is live (native), and the end-of-turn self-removal lands. Block is queued kBlockNoPowers (direct GainBlockAction, no card applyPowers -> no Dexterity/Frail) to the OWNER (== the player for every in-scope application; the engine's owner-relative convention)."
 
 # --- B3.4 (Flex): temporary-Strength reversal power --------------------------
 
@@ -260,3 +261,24 @@
   hooks:
     at_start_of_turn: []    # native: gain `amount` block (direct GainBlockAction), then self-remove
   provenance: "NextTurnBlockPower.atStartOfTurn (NextTurnBlockPower.java:44-50) -- addToBot GainBlockAction(owner, owner, amount) then addToBot RemoveSpecificPowerAction(owner, owner, \"Next Turn Block\"); POWER_ID \"Next Turn Block\" (:21); default BUFF (AbstractPower.java:67); stackPower additive (ApplyPowerAction). Native body (power_hooks.cpp): queues a kBlockNoPowers BLOCK(=amount) then REMOVE_POWER, both addToBot -- the block-gain resolves AFTER start-of-turn block decay (GameActionManager.java:353-359 runs synchronously first), matching the game's queued GainBlockAction. Applied by Self-Forming Clay (relics.yaml id 46). (Renumbered 22->23 at integration: 22 was taken by B3.17 SPLIT, which landed on master first.)"
+
+# --- B3.6 red-uncommon-skill powers (ids 24-25) --------------------------------
+
+- id: 24
+  name: NO_DRAW
+  game_id: "No Draw"
+  type: DEBUFF
+  hooks:
+    at_end_of_turn:
+      - {op: REMOVE_POWER, target: SELF, power: NO_DRAW}
+  provenance: "NoDrawPower (NoDrawPower.java:22-37): DEBUFF, amount -1 (a no-amount marker; AbstractPower.stackPower default adds, but ApplyPowerAction.java:102-105 makes a re-application onto a target that already has No Draw a whole-action no-op, so the amount never stacks); atEndOfTurn(isPlayer) -> addToBot RemoveSpecificPowerAction(owner, \"No Draw\") (:33-37). The draw BLOCK itself is native-in-interp like Dexterity: DrawCardAction.update returns immediately when the player hasPower(\"No Draw\") (DrawCardAction.java:69-73) -- the DRAW opcode is gated in interp.cpp (any amount, including the start-of-turn 5). Applied by Battle Trance."
+
+- id: 25
+  name: FLAME_BARRIER
+  game_id: "Flame Barrier"
+  type: BUFF
+  native: true
+  hooks:
+    on_attacked: []             # native: reflect `amount` THORNS damage to a distinct NORMAL attacker (addToTop)
+    at_start_of_turn: []        # native: RemoveSpecificPowerAction(self) at the player's next turn start
+  provenance: "FlameBarrierPower (FlameBarrierPower.java:32-64): onAttacked (:53-59) -- if info.owner != null && type != THORNS && type != HP_LOSS && info.owner != owner: addToTop DamageAction(info.owner, DamageInfo(owner, amount, THORNS)) -- fires AFTER decrementBlock regardless of whether damage penetrated (AbstractPlayer.damage:1425-1426); the THORNS type skips the NORMAL-only power modifiers (a Vulnerable attacker is not amplified). atStartOfTurn (:62-64) -- addToBot RemoveSpecificPowerAction(player, \"Flame Barrier\"), the §5.2 step-6 pre-draw power phase. stackPower additive (:42-50). Native: the on-attacked body targets ctx.source (no StepTarget encodes the attacker) -- the same shape as THORNS (id 16); the removal is queued addToBot at at_start_of_turn. Applied by the Flame Barrier card."

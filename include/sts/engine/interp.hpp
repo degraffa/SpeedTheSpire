@@ -207,14 +207,48 @@ enum class Opcode : uint16_t {
                               // like a direct setMove (SetMoveAction.java:52-56 ->
                               // AbstractMonster.setMove:431-437). No liveness
                               // check, matching the Java.
+    // --- Stage B B3.6 additions (append-only from 30) ------------------------
+    DOUBLE_BLOCK = 30,        // Entrench / DoubleYourBlockAction.update (:24-30):
+                              // if tgt has block, addBlock(currentBlock) -- a
+                              // direct addBlock (kBlockNoPowers path: no card
+                              // applyPowers, so no Dexterity/Frail), firing
+                              // onGainedBlock; zero block does nothing.
+    BLOCK_PER_NON_ATTACK = 31,// Second Wind / BlockPerNonAttackAction.update
+                              // (:29-42): exhaust every non-Attack in hand (the
+                              // queued addToTop actions resolve in REVERSE hand
+                              // order -- last hand card first), then queue one
+                              // card-style BLOCK(`amount`) per exhausted card
+                              // (this.block was applyPowers block, so Dexterity/
+                              // Frail apply per gain -- flags 0, NOT NoPowers).
+    SPOT_WEAKNESS = 32,       // SpotWeaknessAction.update (:32-40): if tgt's
+                              // telegraphed move deals attack damage
+                              // (getIntentBaseDmg() >= 0 <=> the stored intent
+                              // classification is an ATTACK* variant -- setMove
+                              // stores baseDamage -1 for non-attacks,
+                              // AbstractMonster.java:451-463), addToBot
+                              // APPLY_POWER Strength `amount` on the player.
+    RANDOM_ATTACK_TO_HAND = 33, // Infernal Blade / returnTrulyRandomCardInCombat
+                              // (ATTACK) (AbstractDungeon.java:964-979): ONE
+                              // card_random_rng random(poolSize-1) draw over the
+                              // generated kIroncladAttackPool, then a base copy
+                              // with cost_now 0 for THIS turn only
+                              // (COST_MODIFIED_FOR_TURN) into the hand
+                              // (MakeTempCardInHandAction hand-cap spill).
 };
 
-// --- CHOOSE_CARD field encoding (Stage B B3.4) ------------------------------
+// --- CHOOSE_CARD field encoding (Stage B B3.4; B3.6 extends) -----------------
 // The blocking hand-card select verb. `amount` carries how many cards to select;
 // `flags` (the step's `extra`) packs the manipulation kind and the RANDOM bit:
-//   * bits [0..1] -> ChoiceKind (what to do with each selected card).
+//   * bits [0..1] -> ChoiceKind low bits (what to do with each selected card).
 //   * bit  [2]    -> RANDOM: pick with card_random_rng instead of prompting the
 //                    player (ExhaustAction.isRandom -- True Grit base).
+//   * bit  [3]    -> (B3.6) ChoiceKind bit 2 -- the high kind bit lives ABOVE the
+//                    RANDOM bit so kinds 0..3 keep their original packed bytes
+//                    (append-only). kind = bits[0..1] | bit3 << 2.
+//   * bits [4..7] -> (B3.6) `copies` - 1 for the DUPLICATE kind (Dual Wield
+//                    magicNumber: 1 base / 2 upgraded). Storing copies-1 keeps
+//                    the default (1 copy) at 0, so every pre-B3.6 extra is
+//                    byte-identical.
 // MIRRORED in tools/registry_gen/gen.py (CHOICE_KINDS + the bit layout) so a
 // CHOOSE_CARD effect step authored in cards.yaml packs an identical `extra`.
 enum class ChoiceKind : uint8_t {
@@ -226,6 +260,12 @@ enum class ChoiceKind : uint8_t {
     // DiscardPileToTopOfDeckAction: forced when discard has <= 1 card, a real
     // gridSelect prompt when >= 2). All other kinds source from the hand.
     DISCARD_TO_DRAW_TOP = 3,
+    // Stage B B3.6 (Dual Wield / DualWieldAction): choose one ATTACK-or-POWER
+    // hand card and add `copies` stat-equivalent clones of it to the hand (hand
+    // cap spills to discard). Eligibility is the isDualWieldable predicate
+    // (DualWieldAction.java:95-97); the PROMPTED resolution also reproduces the
+    // hand-order shuffle of the select screen (see apply_choice_selection).
+    DUPLICATE = 4,
 };
 
 // Does a CHOOSE_CARD of this kind select from the discard pile (vs. the hand)?
@@ -234,17 +274,26 @@ enum class ChoiceKind : uint8_t {
 }
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
+inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;
+inline constexpr uint32_t kChoiceCopiesShift = 4;
 
-[[nodiscard]] constexpr uint32_t make_choose_flags(ChoiceKind kind,
-                                                   bool random) noexcept {
-    return static_cast<uint32_t>(static_cast<uint8_t>(kind)) |
-           (random ? kChoiceRandomBit : 0u);
+[[nodiscard]] constexpr uint32_t make_choose_flags(ChoiceKind kind, bool random,
+                                                   int copies = 1) noexcept {
+    const uint32_t kv = static_cast<uint32_t>(static_cast<uint8_t>(kind));
+    return (kv & 0x3u) | ((kv >> 2) != 0u ? kChoiceKindHighBit : 0u) |
+           (random ? kChoiceRandomBit : 0u) |
+           (static_cast<uint32_t>(copies - 1) << kChoiceCopiesShift);
 }
 [[nodiscard]] constexpr ChoiceKind choose_kind_from_flags(uint32_t flags) noexcept {
-    return static_cast<ChoiceKind>(static_cast<uint8_t>(flags & 0x3u));
+    return static_cast<ChoiceKind>(static_cast<uint8_t>(
+        (flags & 0x3u) | ((flags & kChoiceKindHighBit) != 0u ? 0x4u : 0u)));
 }
 [[nodiscard]] constexpr bool choose_is_random(uint32_t flags) noexcept {
     return (flags & kChoiceRandomBit) != 0u;
+}
+// The DUPLICATE kind's copy count (1-based; bits [4..7] store copies - 1).
+[[nodiscard]] constexpr int choose_copies_from_flags(uint32_t flags) noexcept {
+    return static_cast<int>((flags >> kChoiceCopiesShift) & 0xFu) + 1;
 }
 
 // --- MAKE_CARD field encoding (Stage B B3.1) --------------------------------
@@ -383,7 +432,9 @@ inline constexpr uint8_t kNoChoiceExclusion = 255;
 // UPGRADE requires an un-upgraded card (AbstractCard.canUpgrade: !upgraded, and
 // non-CURSE/STATUS -- every card in scope is ATTACK/SKILL); EXHAUST /
 // PUT_ON_DRAW_TOP accept any hand card; DISCARD_TO_DRAW_TOP accepts any discard
-// card except `excluded` (the just-played source, in limbo in the game).
+// card except `excluded` (the just-played source, in limbo in the game);
+// DUPLICATE (B3.6, Dual Wield) accepts ATTACK or POWER hand cards only
+// (DualWieldAction.isDualWieldable:95-97).
 [[nodiscard]] bool choice_slot_eligible(
     const CombatState& state, uint8_t slot, ChoiceKind kind,
     uint8_t excluded = kNoChoiceExclusion) noexcept;
@@ -396,11 +447,21 @@ inline constexpr uint8_t kNoChoiceExclusion = 255;
                                         const ActionQueueItem& item) noexcept;
 
 // Apply one player-selected CHOOSE_CARD manipulation to hand slot `slot`
-// (advance's CHOOSE dispatch). exhaust / put-on-draw-top / upgrade the card.
-// Precondition (checked by the caller): slot < hand_count and the slot is a
-// legal selection for `kind`.
-void apply_choice_selection(CombatState& state, uint8_t slot,
-                            ChoiceKind kind) noexcept;
+// (advance's CHOOSE dispatch). exhaust / put-on-draw-top / upgrade / duplicate
+// the card. Precondition (checked by the caller): slot < hand_count and the
+// slot is a legal selection for `kind`.
+//
+// B3.6 (DUPLICATE only): `copies` is the Dual Wield magicNumber
+// (choose_copies_from_flags of the open item), and `prompted` distinguishes a
+// real hand-select resolution from the forced/auto path -- the PROMPTED branch
+// reproduces DualWieldAction's screen bookkeeping (:59-84): the hand is
+// reordered to [other eligibles] + [ineligibles] + [selected], THEN `copies`
+// stat-equivalent clones are appended (the game consumes the original and adds
+// 1+copies fresh makeStatEquivalentCopies at the end -- identical observable
+// state). The FORCED branch (:49-57) appends the clones with NO reorder. Both
+// spill past a full hand to the discard (MakeTempCardInHandAction:71-77).
+void apply_choice_selection(CombatState& state, uint8_t slot, ChoiceKind kind,
+                            int copies = 1, bool prompted = false) noexcept;
 
 // --- Dispatch ----------------------------------------------------------------
 // Execute one popped ActionQueueItem against `state`. One case per Opcode;

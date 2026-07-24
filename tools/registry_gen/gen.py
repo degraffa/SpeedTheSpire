@@ -109,6 +109,20 @@ OPCODES = {
     "SUICIDE": 27,
     "SPAWN_MONSTER": 28,
     "SET_MOVE": 29,
+    # Stage B B3.6 additions (append-only from 30): red uncommon skills.
+    # DOUBLE_BLOCK: Entrench / DoubleYourBlockAction.update (:25-28) -- if the
+    # target has block, addBlock(currentBlock). BLOCK_PER_NON_ATTACK: Second Wind
+    # / BlockPerNonAttackAction.update (:29-42) -- exhaust every non-Attack in
+    # hand (reverse hand order), then one GainBlock per exhausted card.
+    # SPOT_WEAKNESS: SpotWeaknessAction.update (:33-39) -- if the target's intent
+    # deals attack damage (getIntentBaseDmg() >= 0), apply `amount` Strength to
+    # the player. RANDOM_ATTACK_TO_HAND: Infernal Blade / AbstractDungeon.
+    # returnTrulyRandomCardInCombat(ATTACK) (:964-979) -- ONE cardRandomRng draw
+    # over the combat attack pool, copy costs 0 this turn, into the hand.
+    "DOUBLE_BLOCK": 30,
+    "BLOCK_PER_NON_ATTACK": 31,
+    "SPOT_WEAKNESS": 32,
+    "RANDOM_ATTACK_TO_HAND": 33,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -118,16 +132,27 @@ OPCODES = {
 # DISCARD pile and put it on top of the draw pile (Headbutt /
 # DiscardPileToTopOfDeckAction).
 CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
-                "discard_to_draw_top": 3}
+                "discard_to_draw_top": 3,
+                # B3.6 (Dual Wield / DualWieldAction): choose one ATTACK/POWER
+                # hand card and add stat-equivalent copies. Kind 4 needs a third
+                # kind bit; bit 2 is RANDOM, so the high kind bit lives at bit 3
+                # (kind = bits[0..1] | bit3 << 2) -- kinds 0-3 pack unchanged.
+                "duplicate": 4}
 CHOICE_RANDOM_BIT = 1 << 2
+CHOICE_KIND_HIGH_BIT = 1 << 3
+# CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
+# default (1 copy) encodes as 0 and every pre-B3.6 packed extra is byte-identical.
+CHOICE_COPIES_SHIFT = 4
 # StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
 # Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
 # RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
 STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1, "ALL_ENEMY": 2, "RANDOM_ENEMY": 3}
 # CardType: cards.hpp. Stage B B3.3 adds STATUS=2 (Wound, the first status card,
 # created by Wild Strike); B3.9 adds CURSE=3 (the 10 poolable curses + Ascender's
-# Bane). POWER lands with B3.7.
-CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3}
+# Bane). B3.6 appends POWER=4 (no POWER card row exists yet -- the value exists
+# because Dual Wield's eligibility predicate is `type == ATTACK || type == POWER`,
+# DualWieldAction.isDualWieldable:95-97; B3.7 lands the power cards themselves).
+CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3, "POWER": 4}
 # DamageType (interp.hpp DamageType): the DAMAGE opcode's `flags` low byte. A card
 # DAMAGE step defaults to NORMAL (the full applyPowers pipeline); a status/curse's
 # self-inflicted DAMAGE is THORNS (Burn/Decay -- new DamageInfo(player, n, THORNS),
@@ -164,6 +189,10 @@ CARD_FLAGS = {
     "unplayable": 1 << 3,
     "retain": 1 << 4,
     "xcost": 1 << 5,
+    # B3.6: per-INSTANCE runtime bit (never authored in YAML -- listed only so
+    # the mirror stays complete): setCostForTurn marked this instance's cost_now
+    # as a this-turn-only modification; AbstractRoom.endTurn:397-405 resets it.
+    "cost_modified_for_turn": 1 << 6,
 }
 
 # Power hook points (generated sts::registry::Hook) -- MIRROR of the engine's
@@ -465,14 +494,26 @@ def _parse_card_steps(card_name: str, effects, powers: dict[str, int],
             extra = DAMAGE_TYPES[dt]
         elif op == "CHOOSE_CARD":
             # `extra` packs the ChoiceKind + RANDOM bit (interp.hpp make_choose_flags).
+            # B3.6: kind bit 2 lives at extra bit 3 (bit 2 is RANDOM); `copies`
+            # (duplicate kind, Dual Wield magicNumber) packs copies-1 in bits 4-7
+            # so the default 1 leaves every pre-B3.6 extra byte-identical.
             kind = str(step.get("choose", "")).lower()
             if kind not in CHOICE_KINDS:
                 raise fail(f"cards.yaml: card {card_name} CHOOSE_CARD has unknown "
                            f"choose {step.get('choose')!r} "
                            f"(known: {sorted(CHOICE_KINDS)})")
-            extra = CHOICE_KINDS[kind]
+            kv = CHOICE_KINDS[kind]
+            extra = (kv & 0x3) | ((kv >> 2) * CHOICE_KIND_HIGH_BIT)
             if bool(step.get("random", False)):
                 extra |= CHOICE_RANDOM_BIT
+            copies = int(step.get("copies", 1))
+            if copies < 1 or copies > 16:
+                raise fail(f"cards.yaml: card {card_name} CHOOSE_CARD copies "
+                           f"{copies} out of range 1..16")
+            if copies != 1 and kind != "duplicate":
+                raise fail(f"cards.yaml: card {card_name} CHOOSE_CARD 'copies' "
+                           f"is only meaningful for choose: duplicate")
+            extra |= (copies - 1) << CHOICE_COPIES_SHIFT
         elif op == "MAKE_CARD":
             # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24).
             csym = step.get("card")
@@ -565,6 +606,19 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             up_base_cost = base_cost
             up_flags_bits = flags
 
+        # B3.6 on-exhaust trigger program (card.triggerOnExhaust, fired at §5.5
+        # CardGroup.moveToExhaustPile:857 AFTER relics+powers onExhaust). A FULL
+        # base/upgraded pair like `effects`/`upgraded`; absent -> empty (almost
+        # every card). Sentinel is the S1 consumer (addToTop GainEnergyAction 2/3,
+        # Sentinel.java:37-43); steps are queued add_to_top per the Java.
+        ox_steps = _parse_card_steps(c["name"], c.get("on_exhaust"), powers,
+                                     card_ids)
+        if "upgraded_on_exhaust" in c and c["upgraded_on_exhaust"] is not None:
+            up_ox_steps = _parse_card_steps(c["name"], c["upgraded_on_exhaust"],
+                                            powers, card_ids)
+        else:
+            up_ox_steps = list(ox_steps)
+
         # B3.3 card-property columns (NOT per-instance flags -- CardDef-only, so
         # they never touch CardInstance.flags / the combat fixtures). `strike`
         # mirrors CardTags.STRIKE (Perfected Strike's per-Strike count reads it);
@@ -590,7 +644,19 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         if on_remove_max_hp_loss < 0 or on_remove_max_hp_loss > 127:
             raise fail(f"cards.yaml: card {c['name']} has invalid on_remove_max_hp_loss")
 
-        max_steps = max(max_steps, len(steps), len(up_steps))
+        # B3.6 combat-pool membership inputs (Infernal Blade / returnTrulyRandom-
+        # CardInCombat, AbstractDungeon.java:964-979): the pool is every RED
+        # COMMON/UNCOMMON/RARE card (BASIC and STATUS/CURSE never enter the srcX
+        # pools -- CardLibrary.addRedCards pool filter, CardLibrary.java:1153-1161)
+        # minus HEALING-tagged cards (Feed, Reaper -- B3.8 must set `healing: true`
+        # on those rows when they land). color/rarity were documentation-only
+        # before B3.6; the pool builder now reads them.
+        color = str(c.get("color", "")).upper()
+        rarity = str(c.get("rarity", "")).upper()
+        healing = bool(c.get("healing", False))
+
+        max_steps = max(max_steps, len(steps), len(up_steps),
+                        len(ox_steps), len(up_ox_steps))
         rows.append({
             "name": c["name"], "cost": base_cost, "flags": flags,
             "ctype": CARD_TYPES[ctype], "needs_target": needs_target,
@@ -601,6 +667,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "trigger": CARD_TRIGGERS[trig],
             "curse_pool": curse_pool,
             "on_remove_max_hp_loss": on_remove_max_hp_loss,
+            "ox_steps": ox_steps, "up_ox_steps": up_ox_steps,
+            "id": c["id"], "color": color, "rarity": rarity,
+            "healing": healing,
         })
 
     out: list[str] = [BANNER, "#pragma once\n",
@@ -635,7 +704,7 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # Card-flag bit constants (Stage B B3.1): mirror of the engine's CardFlag
     # (types.hpp); cards.hpp static_asserts these equal. Emitted sorted by bit.
     for fname, fval in sorted(CARD_FLAGS.items(), key=lambda kv: kv[1]):
-        out.append(f"inline constexpr uint16_t kCardFlag{fname.capitalize()} "
+        out.append(f"inline constexpr uint16_t kCardFlag{_pascal(fname.upper())} "
                    f"= {fval};")
     out.append("")
     out.append("struct CardEffectStep {")
@@ -666,6 +735,12 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    CardTrigger trigger;           // WHEN effects run (B3.9)")
     out.append("    bool curse_pool;               // CardLibrary.getCurse member (B3.9)")
     out.append("    uint8_t on_remove_max_hp_loss; // master-deck removal hook (B3.9)")
+    out.append("    // B3.6: card.triggerOnExhaust program (CardGroup.")
+    out.append("    // moveToExhaustPile:857 -- Sentinel), base + upgraded rows.")
+    out.append("    uint8_t on_exhaust_step_count;")
+    out.append("    std::array<CardEffectStep, kMaxCardSteps> on_exhaust_steps;")
+    out.append("    uint8_t upgraded_on_exhaust_step_count;")
+    out.append("    std::array<CardEffectStep, kMaxCardSteps> upgraded_on_exhaust_steps;")
     out.append("};\n")
 
     def step_literal(step) -> str:
@@ -700,17 +775,52 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append("    }},")
         trig_name = next(k for k, v in CARD_TRIGGERS.items()
                          if v == r["trigger"])
+        ox_txt = ",\n        ".join(pad(r["ox_steps"]))
+        up_ox_txt = ",\n        ".join(pad(r["up_ox_steps"]))
         out.append(f"    {'true' if r['is_strike'] else 'false'}, "
                    f"{'true' if r['requires_all_attacks'] else 'false'}, "
                    f"CardTrigger::{trig_name.upper()}, "
                    f"{'true' if r['curse_pool'] else 'false'}, "
-                   f"{r['on_remove_max_hp_loss']}}};\n")
+                   f"{r['on_remove_max_hp_loss']},")
+        out.append(f"    {len(r['ox_steps'])},")
+        out.append("    {{")
+        out.append(f"        {ox_txt},")
+        out.append("    }},")
+        out.append(f"    {len(r['up_ox_steps'])},")
+        out.append("    {{")
+        out.append(f"        {up_ox_txt},")
+        out.append("    }}};\n")
 
     poolable_curses = [r for r in rows if r["curse_pool"]]
     out.append(f"inline constexpr int kPoolableCurseCount = {len(poolable_curses)};")
     out.append("inline constexpr std::array<CardId, kPoolableCurseCount> "
                "kPoolableCurses{{")
     for r in poolable_curses:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
+    # B3.6: the Ironclad in-combat ATTACK transform pool (Infernal Blade /
+    # AbstractDungeon.returnTrulyRandomCardInCombat(ATTACK), :964-979): every RED
+    # COMMON/UNCOMMON/RARE ATTACK without the HEALING tag, drawn with ONE
+    # cardRandomRng random(size - 1). MEMBERSHIP is derived from the rows'
+    # color/rarity/type/healing columns, so it self-completes as B3.8's rares
+    # land (B3.8 MUST set `healing: true` on Feed and Reaper -- CardTags.HEALING).
+    # ORDER: the game's pools fill in CardLibrary HashMap iteration order
+    # ("library order", design §5.1); pinning that order needs the B4.5 oracle
+    # capture, so until then the pool is emitted in registry-id order -- a
+    # DOCUMENTED interim deviation recorded in the B3.6 ledger Log. The one-draw
+    # accounting and membership are Java-exact today.
+    attack_pool = [r for r in rows
+                   if r["color"] == "RED"
+                   and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+                   and r["ctype"] == CARD_TYPES["ATTACK"]
+                   and not r["healing"]]
+    attack_pool.sort(key=lambda r: r["id"])
+    out.append(f"inline constexpr int kIroncladAttackPoolCount = "
+               f"{len(attack_pool)};")
+    out.append("inline constexpr std::array<CardId, kIroncladAttackPoolCount> "
+               "kIroncladAttackPool{{")
+    for r in attack_pool:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 
@@ -756,11 +866,15 @@ def _parse_power_hook_steps(power_name: str, hook_name: str, effects,
             raise fail(f"powers.yaml: power {power_name} hook {hook_name} step has "
                        f"unknown target {st!r} (known: {sorted(STEP_TARGETS)})")
         extra = 0
-        if op == "APPLY_POWER":
+        if op in ("APPLY_POWER", "REMOVE_POWER"):
+            # Both pack a PowerId into `extra` (make_apply_power_flags; op_remove_
+            # power reads the same low-16 packing). REMOVE_POWER authoring is the
+            # B3.6 self-removal pattern (NoDrawPower.atEndOfTurn -> RemoveSpecific-
+            # PowerAction on the owner, NoDrawPower.java:33-37).
             pname = step.get("power")
             if pname not in powers:
                 raise fail(f"powers.yaml: power {power_name} hook {hook_name} "
-                           f"APPLY_POWER references unknown power {pname!r}")
+                           f"{op} references unknown power {pname!r}")
             extra = powers[pname]
         steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
     return steps

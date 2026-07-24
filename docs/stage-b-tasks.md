@@ -1153,7 +1153,7 @@ fixture regeneration was needed. Verification: focused registry 14/14 and card
 suite 18/18; full debug 405/405, leak-detecting ASan/UBSan 405/405 with no
 diagnostics, and release 405/405.
 
-### B3.6 `[ ]` ∥ Red uncommons — skills
+### B3.6 `[x]` ∥ Red uncommons — skills
 **Deps:** B3.2 · **Provenance:** cards/red UNCOMMON skills (~13; enumerate)
 **Deliverables:** registry entries incl. Battle Trance (No Draw power),
 Bloodletting/Burning Pact/Seeing Red (resource conversion), Disarm/Shockwave
@@ -1164,7 +1164,82 @@ Wind (exhaust non-attacks for block), Sentinel (on-exhaust energy), Spot
 Weakness (conditional Strength).
 **Acceptance:** tier-2 per card; cardRandomRng draw-count tests for the
 generators; directed script.
-**Log:** —
+**Log:** Done 2026-07-24 on base 01d085a. **Enumeration evidence:** grepping
+every cards/red constructor for `CardRarity.UNCOMMON` x `CardType.SKILL` yields
+exactly **17** members — the deliverable's 16 **plus Rage** (Rage.java:31 is
+`CardType.SKILL`; this ledger's B3.7 deliverable list misfiles it under power
+cards — source wins, Rage lands HERE; B3.7 should skip it). All 17 classes plus
+DualWieldAction / DoubleYourBlockAction / BlockPerNonAttackAction /
+SpotWeaknessAction / ExhaustAllEtherealAction / MakeTempCardInHandAction /
+NoDrawPower / FlameBarrierPower / RagePower / DrawCardAction:69-73 /
+ApplyPowerAction:96-138 / AbstractDungeon.returnTrulyRandomCardInCombat:964-979
+/ AbstractRoom.endTurn:393-408 / AbstractCard.makeStatEquivalentCopy:826-848 /
+resetAttributes:2035-2045 read in full. **Registry:** card ids 51–67 (addRedCards
+order); powers NO_DRAW=24, FLAME_BARRIER=25 (22/23 reserved by the orchestrator
+for B3.17 SPLIT / B3.25 NEXT_TURN_BLOCK); opcodes DOUBLE_BLOCK=30,
+BLOCK_PER_NON_ATTACK=31, SPOT_WEAKNESS=32, RANDOM_ATTACK_TO_HAND=33 (25–29
+reserved for B3.17); ChoiceKind DUPLICATE=4 (kind bit 2 packs at extra bit 3
+above the RANDOM bit, `copies`-1 in bits 4–7 — every pre-B3.6 packed extra is
+byte-identical); CardType POWER=4 appended (Dual Wield eligibility;
+no POWER rows yet); CardFlag COST_MODIFIED_FOR_TURN=1<<6 (per-instance
+setCostForTurn bit, reset by the end-turn sweep + on exhaust); CardDef gains the
+on_exhaust/upgraded_on_exhaust program pair (Sentinel triggerOnExhaust, fired
+LAST in the §5.5 moveToExhaustPile order, addToTop). This branch's manifest:
+cards 50→67, powers 21→23 rows, total 167→186 (deltas +17/+2/+19 vs 01d085a).
+**Infernal Blade:** kIroncladAttackPool generated from color/rarity/type/healing
+columns (RED C/U/R ATTACK minus HEALING) = 25 rows today; membership
+self-completes when B3.8 lands its rares — **B3.8 must set `healing: true` on
+Feed and Reaper** (CardTags.HEALING) or the pool goes wrong. One
+card_random_rng draw per play (tested). DOCUMENTED interim deviation: the
+game fills pools in CardLibrary-HashMap "library order" (design §5.1); this
+pool is emitted in registry-id order until B4.5's oracle capture pins library
+order (one-line fix in gen.py; the B4.6 relicPools-translator deferral is the
+precedent). Also recorded: an IB-generated Blood for Blood that then takes an
+HP-loss event models its cost via cost_now only (a fresh-copy `cost` field does
+not exist per-instance), so the reset-at-end-of-turn restores 4 rather than the
+game's reduced base — unreachable without generating BfB and holding it unplayed
+through the turn; revisit if G7 ever hits it. **Stop-the-line finds (Java vs
+prior code, fixed forward in this commit):** (1) StrengthPower/DexterityPower.
+stackPower REMOVE the slot when a stack lands on exactly 0 (StrengthPower.java:
+48-53 / DexterityPower.java:44-49, queued addToTop) — B3.4's Flex test and
+B3.23's LoseDexterity test asserted a 0-amount residue slot; both tests
+corrected, op_apply_power now queues the removal (Disarm exercises it). (2) A
+negative-amount Strength/Dexterity constructs as PowerType.DEBUFF
+(StrengthPower ctor :37 → updateDescription :81-89), so Disarm IS
+Artifact-nullified/Sadistic-visible — op_apply_power flips is_debuff for
+amount<=0 on those two ids. (3) RAGE (power id 12) completed per its recorded
+B3.2 deferral: rebound from on_play_card(data) to native ON_USE_CARD with the
+ATTACK guard + AT_END_OF_TURN self-removal — the on_use_card timing is
+OBSERVABLE via Body Slam (game reads base==block at use() while Rage's block
+rides the later UseCardAction; tested); the power_hooks ordering probe moved to
+the on_use_card fan-out. (4) NoDraw re-application short-circuits the WHOLE
+ApplyPowerAction before source hooks/Artifact (ApplyPowerAction:102-105);
+NoDraw amount is the -1 marker and the DRAW opcode is hard-gated
+(DrawCardAction:69-73), incl. the start-of-turn 5. Entrench's and Ghostly
+Armor's odd triggerOnEndOfPlayerTurn→ExhaustAllEtherealAction overrides are
+behaviorally subsumed by the existing ethereal sweep (base AbstractCard:
+2176-2179; no S1 on-exhaust-order consumer) — no engine change, noted in YAML.
+Dual Wield reproduces DualWieldAction exactly: ATTACK/POWER eligibility, zero/
+forced/prompted branches, the prompted screen's hand reorder ([other eligibles]
++ [ineligibles] + [selected + copies]), stat-equivalent clones (upgrade count,
+cost_now incl. FOR_TURN bit, misc), hand-cap spill to discard. Second Wind
+exhausts non-Attacks in reverse hand order BEFORE its per-card block gains
+(each card-style, Dexterity/Frail per gain — this.block is applyPowers block);
+Sentinel's energy fires mid-sweep (tested). **Acceptance — new tier-2 suite
+`tests/card_uncommon_skills_test.cpp` (35 cases)**: per-card BASE and UPGRADED
+rows hand-computed from the cited use(); cardRandomRng draw-count tests
+(Infernal Blade one draw; True Grit/Wild Strike unchanged); No Draw
+block/expiry; Dual Wield forced/prompted/copies/mask; Flame Barrier
+fully-blocked reflect + no-Vulnerable-amplification + next-turn expiry; cost-
+for-turn end-of-turn reset; Spot Weakness intent gate both ways; directed
+public advance()/legal_actions() script (Rage → Second Wind exhausting
+Sentinel → Strike). registry_gen_test ManifestCounts 67/23/186 +
+registry_gen_standalone pool/count pins updated; power_hooks Rage probe +
+LoseDexterity and card_skills Flex expectations corrected per (1)/(3).
+Hand-derived from the decompiled Java throughout; no live-oracle capture and
+no fixture regeneration (SCHEMA_VERSION unchanged, CardInstance still 8 B).
+Verification: focused suite 35/35; full **debug 464/464, ASan/UBSan
+(detect_leaks=1) 464/464 with zero diagnostics, release 464/464**.
 
 ### B3.7 `[ ]` ∥ Red uncommons — power cards
 **Deps:** B3.2 · **Provenance:** cards/red UNCOMMON powers (~11; enumerate)
