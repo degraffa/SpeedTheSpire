@@ -79,6 +79,21 @@ std::string read_text(const fs::path& p) {
     return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
+// Copy the real registry into a fresh scratch directory so a test can append a
+// deliberately-bad row without touching registry/*.yaml.
+fs::path clone_registry(const fs::path& scratch, const char* name) {
+    const fs::path dst = scratch / name;
+    fs::remove_all(dst);
+    fs::create_directories(dst);
+    for (const auto& e : fs::directory_iterator(kRegistryDir)) {
+        if (e.path().extension() == ".yaml") {
+            fs::copy_file(e.path(), dst / e.path().filename(),
+                          fs::copy_options::overwrite_existing);
+        }
+    }
+    return dst;
+}
+
 const std::array<const char*, 8> kGenFiles = {
     "sts/registry/ids.hpp", "sts/registry/card_table.hpp",
     "sts/registry/power_table.hpp", "sts/registry/relic_table.hpp",
@@ -891,4 +906,161 @@ TEST(RegistryGen, UpgradedBlockAndFlagsEmitDistinctRow) {
     EXPECT_NE(lit.find("StepTarget::ALL_ENEMY"), std::string::npos) << lit;
     EXPECT_NE(lit.find(", 33, "), std::string::npos)
         << "expected flags word 33 (xcost|exhaust) in: " << lit;
+}
+
+// --- 7. Per-domain op allowlist: no silent mispack --------------------------
+//
+// Before the step-parser unification each domain carried its own copy of the
+// effect-step parser, and an op that had no `extra`-packing branch in THAT copy
+// still passed the OPCODES membership check -- so a relic or potion author who
+// wrote CHOOSE_CARD got `extra = 0` silently, and a MAKE_CARD outside a card
+// program got a CardPile that no queue helper splits out. In a project whose
+// premise is bit-exactness a mispack must be LOUD. These tests pin that: an op
+// the calling domain cannot queue fails generation, naming the domain, the row
+// and the op.
+
+TEST(RegistryGen, UnsupportedOpInRelicDomainFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_relic_op_registry");
+    {
+        // CHOOSE_CARD is completed from the played card's instance at queue time
+        // (card_play.cpp stamps the source pool index into `tgt` for the
+        // discard-source kind); relic_hooks.cpp has no such context, so a relic
+        // may not author it. Pre-fix this row generated `extra = 0` and no error.
+        std::ofstream relics(bad_reg / "relics.yaml", std::ios::app);
+        relics << "\n- id: 900\n  name: SYNTH_BAD_OP_RELIC\n"
+                  "  game_id: \"Synth Bad Op Relic\"\n  tier: EVENT\n"
+                  "  hooks:\n    at_battle_start:\n"
+                  "      - {op: CHOOSE_CARD, target: SELF, amount: 1, "
+                  "choose: exhaust}\n"
+                  "  provenance: \"synthetic unsupported-op negative test\"\n";
+    }
+
+    const fs::path out = scratch / "bad_relic_op_out";
+    const fs::path err = scratch / "bad_relic_op_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "generator should reject CHOOSE_CARD in a relic hook program";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("relics.yaml"), std::string::npos) << msg;       // domain
+    EXPECT_NE(msg.find("SYNTH_BAD_OP_RELIC"), std::string::npos) << msg;  // row
+    EXPECT_NE(msg.find("CHOOSE_CARD"), std::string::npos) << msg;       // op
+    EXPECT_NE(msg.find("does not support"), std::string::npos) << msg;
+}
+
+TEST(RegistryGen, UnsupportedOpInPotionDomainFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_potion_op_registry");
+    {
+        // MAKE_CARD packs the destination CardPile into extra bits 16-23; only
+        // card_play.cpp / monster_dispatch.cpp split it back into the queue
+        // item's `src`, so a potion authoring it would create the card into
+        // pile 0 (HAND) regardless of what the row asked for.
+        std::ofstream potions(bad_reg / "potions.yaml", std::ios::app);
+        potions << "\n- id: 900\n  name: SYNTH_BAD_OP_POTION\n"
+                   "  game_id: \"Synth Bad Op Potion\"\n  rarity: COMMON\n"
+                   "  potency: 1\n"
+                   "  effects:\n"
+                   "    - {op: MAKE_CARD, target: SELF, amount: 1, "
+                   "card: WOUND, pile: DISCARD}\n"
+                   "  provenance: \"synthetic unsupported-op negative test\"\n";
+    }
+
+    const fs::path out = scratch / "bad_potion_op_out";
+    const fs::path err = scratch / "bad_potion_op_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "generator should reject MAKE_CARD in a potion effect program";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("potions.yaml"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("SYNTH_BAD_OP_POTION"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("MAKE_CARD"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("does not support"), std::string::npos) << msg;
+}
+
+TEST(RegistryGen, EngineEmittedOpInCardDomainFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_card_op_registry");
+    {
+        // SUICIDE is emitted natively by the split framework (monster_slime_
+        // large.cpp / monster_slime_boss.cpp) and is pinned in the Opcode enum
+        // only for the cards.hpp drift check -- never authorable.
+        std::ofstream cards(bad_reg / "cards.yaml", std::ios::app);
+        cards << "\n- id: 900\n  name: SYNTH_BAD_OP_CARD\n"
+                 "  game_id: \"SynthBadOp\"\n  type: ATTACK\n  cost: 1\n"
+                 "  target: ENEMY\n"
+                 "  provenance: \"synthetic unsupported-op negative test\"\n"
+                 "  effects:\n"
+                 "    - {op: SUICIDE, target: CARD_TARGET, amount: 0}\n";
+    }
+
+    const fs::path out = scratch / "bad_card_op_out";
+    const fs::path err = scratch / "bad_card_op_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "generator should reject the natively-emitted SUICIDE op in a card";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("cards.yaml"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("SYNTH_BAD_OP_CARD"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("SUICIDE"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("does not support"), std::string::npos) << msg;
+}
+
+// The unification's other half: the packings that used to exist in only ONE
+// domain's copy now apply everywhere the op is allowed. A power hook DAMAGE
+// step's damage_type was ignored before (extra = 0 == NORMAL) even though the
+// card and relic copies honoured it; a relic REMOVE_POWER got no PowerId.
+TEST(RegistryGen, SharedPackingsApplyAcrossDomains) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path reg = clone_registry(scratch, "shared_packing_registry");
+    {
+        std::ofstream powers(reg / "powers.yaml", std::ios::app);
+        powers << "\n- id: 900\n  name: SYNTH_THORNS_POWER\n"
+                  "  game_id: \"SynthThornsPower\"\n  type: BUFF\n"
+                  "  hooks:\n    at_end_of_turn:\n"
+                  "      - {op: DAMAGE, target: SELF, amount: 3, "
+                  "damage_type: THORNS}\n"
+                  "  provenance: \"synthetic cross-domain packing test\"\n";
+    }
+    {
+        std::ofstream relics(reg / "relics.yaml", std::ios::app);
+        relics << "\n- id: 900\n  name: SYNTH_REMOVE_POWER_RELIC\n"
+                  "  game_id: \"Synth Remove Power Relic\"\n  tier: EVENT\n"
+                  "  hooks:\n    at_turn_start:\n"
+                  "      - {op: REMOVE_POWER, target: SELF, amount: 0, "
+                  "power: VULNERABLE}\n"
+                  "  provenance: \"synthetic cross-domain packing test\"\n";
+    }
+
+    const fs::path out = scratch / "shared_packing_out";
+    const fs::path err = scratch / "shared_packing_err.txt";
+    fs::remove_all(out);
+    ASSERT_EQ(run_generator(reg.string(), out.string(), err.string()), 0)
+        << read_text(err);
+
+    // THORNS == DamageType 1 (interp.hpp make_damage_flags), packed into extra.
+    const std::string ptxt = read_text(out / "sts/registry/power_table.hpp");
+    const auto ppos = ptxt.find("kSynthThornsPowerPower");
+    ASSERT_NE(ppos, std::string::npos) << "synthetic power literal missing";
+    const std::string plit = ptxt.substr(ppos, 800);
+    EXPECT_NE(plit.find("{Opcode::DAMAGE, 3, 1, StepTarget::SELF}"),
+              std::string::npos)
+        << "power DAMAGE damage_type must pack like the card/relic copies: "
+        << plit;
+
+    // REMOVE_POWER packs the PowerId in extra's low 16 bits, exactly as
+    // APPLY_POWER does (op_remove_power reads the same packing).
+    const std::string rtxt = read_text(out / "sts/registry/relic_table.hpp");
+    const auto rpos = rtxt.find("kSynthRemovePowerRelicRelic");
+    ASSERT_NE(rpos, std::string::npos) << "synthetic relic literal missing";
+    const std::string rlit = rtxt.substr(rpos, 800);
+    EXPECT_NE(rlit.find("Opcode::REMOVE_POWER"), std::string::npos) << rlit;
+    EXPECT_EQ(rlit.find("{Opcode::REMOVE_POWER, 0, 0,"), std::string::npos)
+        << "relic REMOVE_POWER must carry a PowerId, not extra = 0: " << rlit;
 }
