@@ -14,6 +14,25 @@ set(STS_PYTHON_EXECUTABLE "${Python3_EXECUTABLE}" CACHE INTERNAL "Python for reg
 
 set(REGISTRY_DIR "${CMAKE_SOURCE_DIR}/registry")
 set(REGISTRY_GEN_PY "${CMAKE_CURRENT_SOURCE_DIR}/gen.py")
+# gen.py is only the CLI; the generator lives in the sibling stsgen package.
+# Listed explicitly (not globbed) so adding a module is a deliberate edit, and so
+# editing an emitter re-runs generation -- a missing entry here means stale
+# headers that no build would notice.
+set(REGISTRY_GEN_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/__init__.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/generate.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/loader.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/steps.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/vocab.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/__init__.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/cards.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/encounters.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/ids.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/meta.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/monsters.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/potions.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/powers.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/relics.py")
 set(GEN_OUT_ROOT "${CMAKE_BINARY_DIR}/generated")
 set(STS_REGISTRY_GEN_PY "${REGISTRY_GEN_PY}" CACHE INTERNAL "registry codegen script")
 set(STS_REGISTRY_DIR "${REGISTRY_DIR}" CACHE INTERNAL "registry YAML dir")
@@ -44,7 +63,7 @@ add_custom_command(
     OUTPUT ${GEN_HEADERS}
     COMMAND ${Python3_EXECUTABLE} "${REGISTRY_GEN_PY}"
             --registry "${REGISTRY_DIR}" --out "${GEN_OUT_ROOT}"
-    DEPENDS "${REGISTRY_GEN_PY}" ${REGISTRY_YAML}
+    DEPENDS "${REGISTRY_GEN_PY}" ${REGISTRY_GEN_SOURCES} ${REGISTRY_YAML}
     COMMENT "Generating registry headers from registry/*.yaml"
     VERBATIM)
 
