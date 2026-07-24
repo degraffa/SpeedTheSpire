@@ -186,3 +186,17 @@ each works in its own git worktree under `D:\STS_BG_Mod\_wt\<task>`, runs the
 acceptance itself, then the orchestrator re-verifies, cherry-picks/merges to
 `master`, and updates the ledger — one task = one commit. Model choice:
 **Fable** for larger/ambiguous tasks, **Opus** for established boilerplate.
+
+### Codex/GPT delegation
+
+This project exposes two Codex MCP servers through `.mcp.json`:
+
+- `codex-sol` uses `gpt-5.6-sol` for difficult implementation, debugging,
+  architecture, and review work.
+- `codex-terra` uses `gpt-5.6-terra` for faster, routine work.
+
+Use these tools when the user asks for GPT/Codex input or when a second model's
+independent implementation or review would materially help. Give Codex a
+self-contained task, including relevant paths and acceptance criteria. Codex
+uses the current user's existing Codex authentication; never add credentials
+to this repository.

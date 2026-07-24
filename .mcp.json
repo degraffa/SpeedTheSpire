@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "codex-sol": {
+      "type": "stdio",
+      "command": "C:\\Users\\Alex\\.vscode\\extensions\\openai.chatgpt-26.715.61943-win32-x64\\bin\\windows-x86_64\\codex.exe",
+      "args": [
+        "mcp-server",
+        "-c",
+        "model=gpt-5.6-sol"
+      ]
+    },
+    "codex-terra": {
+      "type": "stdio",
+      "command": "C:\\Users\\Alex\\.vscode\\extensions\\openai.chatgpt-26.715.61943-win32-x64\\bin\\windows-x86_64\\codex.exe",
+      "args": [
+        "mcp-server",
+        "-c",
+        "model=gpt-5.6-terra"
+      ]
+    }
+  }
+}
