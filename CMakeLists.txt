@@ -16,6 +16,7 @@ option(STS_ENABLE_SANITIZERS "Build with ASan/UBSan" OFF)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
+include(StsAddTest)
 
 # xxHash (A2.2): header-only XXH3 for state content hashing (design doc §4.1).
 # Pre-approved as A2.2's sole new dependency by the Stage A working agreements.
