@@ -54,7 +54,10 @@
 //     the left child inserts AT the parent's slot p (parent shifts to p+1) and
 //     the right child at p+2. B3.20's boss fight must recompute indices from
 //     its explicit coordinates (-385/+120 vs the boss's 0) instead of reusing
-//     p/p+2 blindly.
+//     p/p+2 blindly. In the boss descendant layout, Acid L's left medium
+//     (-14) inserts before the dead boss (0), while its right medium (254)
+//     appends after the Acid parent (120); monster_slime_large.cpp derives
+//     those slots from the retained SLIME_BOSS record.
 //   * Actions queued after the spawns must PRE-compute post-insertion slots
 //     (the Java holds object references; this engine holds indices): Spike L's
 //     unconditional trailing RollMoveAction targets the parent at p+1.

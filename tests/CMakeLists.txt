@@ -186,6 +186,19 @@ sts_enable_sanitizers(large_slime_test)
 
 gtest_discover_tests(large_slime_test)
 
+# B3.20: Slime Boss native AI, corrected Slimed-discard Goop Spray, exact
+# split threshold/current-HP large children, full large->medium descendant
+# chain positioning, boss terminal gate, and a public advance() directed script.
+add_executable(slime_boss_test
+    slime_boss_test.cpp
+)
+
+target_link_libraries(slime_boss_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(slime_boss_test)
+sts_enable_sanitizers(slime_boss_test)
+
+gtest_discover_tests(slime_boss_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

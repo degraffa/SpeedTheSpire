@@ -7,6 +7,7 @@ add_library(sts_engine
     monster_louse.cpp
     monster_slime.cpp
     monster_slime_large.cpp
+    monster_slime_boss.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp

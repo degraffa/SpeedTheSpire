@@ -288,6 +288,8 @@ MONSTER_INTENTS = {
     "ATTACK_DEBUFF": 6,  # slime tackle + Slimed (AbstractMonster.Intent.ATTACK_DEBUFF)
     "UNKNOWN": 7,        # large-slime Split telegraph (AbstractMonster.Intent.UNKNOWN;
                          # AcidSlime_L.java:137,146 / SpikeSlime_L.java:124,134)
+    "STRONG_DEBUFF": 8,  # Slime Boss Goop Spray (AbstractMonster.Intent.STRONG_DEBUFF;
+                          # SlimeBoss.java:128,145,188)
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

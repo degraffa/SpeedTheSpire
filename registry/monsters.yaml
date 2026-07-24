@@ -351,3 +351,45 @@
         # WeakPower(player, 2, true) (AcidSlime_L.java:109; WEAK_TURNS=2).
         - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
   ai: native
+
+# --- B3.20: Slime Boss -------------------------------------------------------
+# SlimeBoss.init() consumes one aiRng.random(99), but getMove ignores the value
+# and forces STICKY on the first turn. Every later transition is a direct
+# setMove in takeTurn: STICKY -> PREP_SLAM -> SLAM -> STICKY. The split interrupt
+# and split turn are runtime-dependent native bodies in monster_slime_boss.cpp.
+# Goop Spray creates fresh Slimed directly in the DISCARD pile (the corrected
+# B3.20 ledger destination), 3 below A19 and 5 at A19+.
+
+- id: 11
+  name: SLIME_BOSS
+  game_id: "SlimeBoss"
+  provenance: "SlimeBoss ctor HP/A9 and damage/A4 branches (SlimeBoss.java:84-107), takeTurn Goop/Prep/Slam/Split incl. A19 Slimed discard count (:120-160), damage split interrupt (:172-181), first-turn getMove (:184-191), move ids SLAM=1/PREP_SLAM=2/SPLIT=3/STICKY=4 (:74-81); MakeTempCardInDiscardAction.update (MakeTempCardInDiscardAction.java:41-50); SpawnMonsterAction smart positioning (SpawnMonsterAction.java:28-59); SuicideAction (SuicideAction.java:21-36)"
+  hp:
+    base: {min: 140, max: 140}  # SlimeBoss.java:92 (ascension < 9)
+    a9:   {min: 150, max: 150}  # SlimeBoss.java:89-90 (ascension >= 9)
+  moves:
+    - name: SLAM
+      move_id: 1
+      intent: ATTACK
+      effects:
+        # damage.get(1): slamDmg 35, A4 38 (SlimeBoss.java:94-102,140-145).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 35, a4: 38}}
+    - name: PREP_SLAM
+      move_id: 2
+      intent: UNKNOWN
+      effects:
+        # Presentation-only shout/screen shake, then direct setMove(SLAM).
+        - {op: NOP, target: SELF, amount: 0}
+    - name: SPLIT
+      move_id: 3
+      intent: UNKNOWN
+      effects:
+        # Native CannotLose -> Suicide -> Spike L -> Acid L -> CanLose sequence.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: STICKY
+      move_id: 4
+      intent: STRONG_DEBUFF
+      effects:
+        # MakeTempCardInDiscardAction(new Slimed(), A19 ? 5 : 3), not hand.
+        - {op: MAKE_CARD, target: PLAYER, amount: {base: 3, a19: 5}, card: SLIMED, pile: DISCARD}
+  ai: native

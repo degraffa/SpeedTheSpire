@@ -1550,7 +1550,7 @@ variant flag.
 A18 −2 column; asleep block gain each turn.
 **Log:** —
 
-### B3.20 `[ ]` ∥ Boss: Slime Boss
+### B3.20 `[x]` ∥ Boss: Slime Boss
 **Deps:** B3.17 · **Provenance:** SlimeBoss.java (:89/94/125), Goop Spray /
 split at half
 **Deliverables:** registry entry (native AI), boss split (→ L slimes at
@@ -1558,7 +1558,28 @@ current HP), Slimed discard-pile insertion; boss-fight terminal only when all
 descendants die.
 **Acceptance:** tier-2: split threshold exact, children chain to B3.17
 machinery; A4/A9/A19 columns cited.
-**Log:** —
+**Log:** Done 2026-07-24. Added append-only `MonsterId` 11 `SLIME_BOSS`
+and `MonsterIntent::STRONG_DEBUFF` 8 without opcode, schema, or state-layout
+renumbering. The A20 implementation has fixed 150 HP with no monsterHpRng draw,
+one ignored opening aiRng roll, the deterministic Goop Spray → Preparing → Slam
+cycle, A19 five-Slimed discard insertion, and the exact-half split interrupt.
+The native split preserves the Java CannotLose → Suicide → current-HP Spike L +
+Acid L → CanLose order; the B3.17 descendant positioning was completed so the
+fight terminates only after all four medium-slime descendants die.
+
+Tier-2 coverage pins the A4/A9/A19 columns, fixed-HP and opening-roll behavior,
+lethal versus exact-half split thresholds, the CannotLose window, current-HP
+children, the full large-to-medium chain, terminal semantics, and a public
+`advance()` Goop/Prep/Slam script. Provenance read:
+`SlimeBoss.java:84-107,120-160,172-191`,
+`MakeTempCardInDiscardAction.java:24-31,41-50`,
+`SpawnMonsterAction.java:28-59`, `SuicideAction.java:21-36`,
+`CannotLoseAction`/`CanLoseAction.java:12-15`, relevant
+`AbstractMonster.java` methods, and the B3.17 Acid/Spike large-slime split
+sources. Integrated manifest: cards 75 / powers 27 / monsters 11 / relics 65 /
+potions 33 / encounters 20 / total 231. Verified by running, not inferred, in
+WSL Ubuntu-2404: focused Slime Boss **6/6**, Large Slime **13/13**, RegistryGen
+**17/17**; complete debug **521/521**; leak-detecting ASan/UBSan **521/521**.
 
 ### B3.21 `[ ]` ∥ Boss: The Guardian
 **Deps:** B3.12 · **Provenance:** TheGuardian.java (:97-107/185; mode shift

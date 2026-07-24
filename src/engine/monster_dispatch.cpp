@@ -14,6 +14,7 @@
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle (B3.13)
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns (B3.14)
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework (B3.17)
+#include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split (B3.20)
 
 namespace sts::engine {
 
@@ -69,6 +70,8 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &spike_slime_large_init;
         case MonsterId::ACID_SLIME_LARGE:
             return &acid_slime_large_init;
+        case MonsterId::SLIME_BOSS:
+            return &slime_boss_init;
         default:
             return nullptr;  // not yet implemented (B3.15-B3.22)
     }
@@ -96,6 +99,8 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &spike_slime_large_take_turn;
         case MonsterId::ACID_SLIME_LARGE:
             return &acid_slime_large_take_turn;
+        case MonsterId::SLIME_BOSS:
+            return &slime_boss_take_turn;
         default:
             return &default_monster_turn;  // no-op until the monster's batch lands
     }
@@ -176,6 +181,9 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
         case MonsterId::SPIKE_SLIME_LARGE:
         case MonsterId::ACID_SLIME_LARGE:
             large_slime_on_damaged(state, monster_index);
+            return;
+        case MonsterId::SLIME_BOSS:
+            slime_boss_on_damaged(state, monster_index);
             return;
         default:
             return;  // no damage() override

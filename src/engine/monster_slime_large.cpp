@@ -57,6 +57,28 @@ void queue_roll_move(CombatState& s, uint8_t mi) noexcept {
 // left child at the parent's slot mi (parent shifts to mi+1), right at mi+2.
 void queue_split(CombatState& s, uint8_t mi, MonsterId child_id) noexcept {
     const int16_t child_hp = s.monsters[mi].hp;
+    uint8_t left_slot = mi;
+    uint8_t right_slot = static_cast<uint8_t>(mi + 2);
+
+    // Acid L spawned by Slime Boss sits to the right of the dead boss:
+    // Spike descendants (-519/-385/-251) < Acid-left (-14) < boss (0) <
+    // Acid parent (120) < Acid-right (254). SpawnMonsterAction therefore
+    // inserts Acid-left AT the dead boss's current slot, not at the Acid
+    // parent's slot; after that insertion Acid-right appends at the new end.
+    // The standalone Large Slime encounter has no boss record and keeps the
+    // original mi/mi+2 derivation. This is the B3.20 child-chain positioning
+    // case called out by B3.17's handoff.
+    if (child_id == MonsterId::ACID_SLIME_MEDIUM) {
+        for (uint8_t i = 0; i < s.monster_count; ++i) {
+            if (s.monsters[i].monster_id ==
+                    static_cast<uint16_t>(MonsterId::SLIME_BOSS) &&
+                i < mi) {
+                left_slot = i;
+                right_slot = static_cast<uint8_t>(s.monster_count + 1);
+                break;
+            }
+        }
+    }
 
     ActionQueueItem it{};
     it.opcode = static_cast<uint16_t>(Opcode::CANNOT_LOSE);
@@ -74,12 +96,12 @@ void queue_split(CombatState& s, uint8_t mi, MonsterId child_id) noexcept {
     it = ActionQueueItem{};
     it.opcode = static_cast<uint16_t>(Opcode::SPAWN_MONSTER);
     it.src = mi;
-    it.tgt = mi;  // left child (saveX - 134): inserts at the parent's slot
+    it.tgt = left_slot;
     it.amount = child_hp;
     it.flags = static_cast<uint32_t>(child_id);
     add_to_bottom(s, it);
 
-    it.tgt = static_cast<uint8_t>(mi + 2);  // right child (saveX + 134)
+    it.tgt = right_slot;
     add_to_bottom(s, it);
 
     it = ActionQueueItem{};

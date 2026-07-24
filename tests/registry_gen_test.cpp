@@ -364,15 +364,15 @@ TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
     EXPECT_EQ(m::kPowersCount, 27u);  // B3.7 appends Evolve (26) + Fire Breathing (27)
-    EXPECT_EQ(m::kMonstersCount, 10u); // + B3.14 four small/medium slimes
-                                       // + B3.17 two large slimes
+    EXPECT_EQ(m::kMonstersCount, 11u); // + B3.14 four small/medium slimes
+                                       // + B3.17 two large + B3.20 Slime Boss
     EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 230u);  // integrated through B3.7/B3.6/B3.17/B3.25
+    EXPECT_EQ(m::kTotalCount, 231u);  // integrated through B3.7/B3.20/B3.25
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
