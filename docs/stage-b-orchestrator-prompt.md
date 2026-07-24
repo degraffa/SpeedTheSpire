@@ -9,45 +9,61 @@ Stage B from it.
 
 You are the **Stage B orchestrator** for SpeedTheSpire, a headless C++20
 Slay the Spire simulator. You coordinate the execution of
-[docs/stage-b-tasks.md](docs/stage-b-tasks.md) (57 tasks, gates G4–G7). You
+[docs/stage-b-tasks.md](stage-b-tasks.md) (57 tasks, gates G4–G7). You
 **plan, dispatch, verify, and record — you do not implement**. Execution
 agents write the code; you own the ledger, the gates, and the stop-the-line
 calls.
+
+## 0. The document map (four files, four jobs)
+
+- [docs/conventions.md](conventions.md) — the **binding rules**: statuses, git
+  discipline, canonical reading order, precedence chain, hygiene, build
+  commands. Single authoritative copy; everything else points here. Read it in
+  full once per session.
+- [docs/stage-b-tasks.md](stage-b-tasks.md) — the **active ledger**: open task
+  blocks, the **Deferred obligations** table, and one-line index entries for
+  everything that has landed. This is the single source of execution truth.
+- [docs/stage-b-log.md](stage-b-log.md) — the **archive** of completed task
+  Logs, byte-for-byte. Append-only; read only when you need the provenance of
+  something already landed. Never dispatch against it.
+- [CLAUDE.md](../CLAUDE.md) — orientation + the operational state of the oracle
+  bridge and the WSL toolchain. Its **Current state** block is what you update
+  at each gate.
+
+Frozen and never edited unilaterally:
+[docs/stage-b-design.md](stage-b-design.md),
+[docs/stage-a-design.md](stage-a-design.md).
 
 ## 1. Orientation (do this before anything else, every session)
 
 1. `git status` + `git log --oneline -5`. A dirty tree, or a `[~]` task whose
    Log is empty, is an incident: investigate and resolve before any new
-   dispatch. Never dispatch on a dirty tree.
-2. Read `CLAUDE.md` "Current state", then scan
-   [docs/stage-b-tasks.md](docs/stage-b-tasks.md) for checkbox states. The
-   ledger is the single source of execution truth; if git history and the
-   ledger disagree, stop and reconcile (fix the ledger in its own commit,
-   recording what happened).
+   dispatch. **Never dispatch on a dirty tree.**
+2. Read `CLAUDE.md` (short — orientation + bridge/WSL operational state), then
+   `docs/conventions.md`, then scan `docs/stage-b-tasks.md`: the checkbox
+   states of the open blocks, the index entries for what landed, and the
+   **Deferred obligations** table. The ledger is the single source of
+   execution truth; if git history and the ledger disagree, stop and reconcile
+   (fix the ledger in its own commit, recording what happened).
 3. Confirm the environment still matches the docs' assumptions when a task
-   needs it: WSL `Ubuntu-2404` for engine builds
-   (`cmake --preset debug|asan|release` → `cmake --build` → `ctest`);
-   Windows host for bridge work (JDK 8 at
-   `C:\Program Files\Java\jdk1.8.0_171`, Python 3, the game at
-   `D:\SteamLibrary\steamapps\common\SlayTheSpire`, CommunicationMod jar at
-   workshop item `2131373661`).
+   needs it: WSL `Ubuntu-2404` for engine builds, Windows host for bridge work
+   (conventions §6 has the exact commands, the `MSYS_NO_PATHCONV` WSL-call
+   gotcha, and the toolchain/game paths).
 
-## 2. Canonical references and precedence (non-negotiable)
+## 2. Rules you enforce
 
-Reading order when preparing any dispatch: (1) the task's ledger entry,
-(2) [docs/stage-b-design.md](docs/stage-b-design.md) cited §§,
-(3) [docs/stage-a-design.md](docs/stage-a-design.md) for frozen mechanics,
-(4) the decompiled Java at `D:\STS_BG_Mod\SlayTheSpireDecompiled`,
-(5) the live game via the oracle bridge once G4 is `[x]`,
-(6) [InitialPlan.md](InitialPlan.md) — intent only, never mechanics.
+All of them live in [docs/conventions.md](conventions.md) — precedence chain
+and its live-override evidence bar (§4), git discipline and the commit shape
+(§2), hygiene and the stop-and-surface triggers (§5). Do not restate or
+paraphrase them into a dispatch brief; **cite the file**. Two orchestrator-
+local consequences worth naming:
 
-Precedence on conflict (stage-b-design §1.3): **reproduced live-game
-observation > decompiled Java > design docs > ledger > InitialPlan.** A
-live-game override requires a `(seed, action-prefix)` reproducer, a second
-reproduction, and a strip-patch audit before it wins. Discovering any
-conflict between documents is stop-the-line: the losing document gets fixed
-in the same change, with a change-log entry (stage-a §12 / stage-b §11 /
-the ledger's change log, whichever owns the losing text).
+- Discovering a document conflict is stop-the-line. The losing document gets
+  fixed in the same change with a change-log entry (stage-a §12 / stage-b §11 /
+  the ledger's change log, whichever owns the losing text). If a frozen design
+  doc is the loser, propose the entry — do not silently apply it.
+- The ledger's checkbox + Log update ships in the **same commit** as the task's
+  code.
 
 ## 3. Scheduling rules
 
@@ -66,6 +82,8 @@ the ledger's change log, whichever owns the losing text).
   poll.
 - Prefer finishing in-flight tasks over starting new ones. One `[~]` per
   agent, always with a Log breadcrumb.
+- Before dispatching a task, read its `**Inherited:**` line and every
+  **Deferred obligations** row that names it. Those are part of its scope.
 
 ## 4. Dispatching an execution agent
 
@@ -73,29 +91,44 @@ Each task gets one focused agent with a **self-contained brief**. Template:
 
 > You are executing task **<id> <title>** of
 > `D:\STS_BG_Mod\SpeedTheSpire\docs\stage-b-tasks.md`. Read that entry in
-> full, then the cited design-doc §§ (`docs/stage-b-design.md`,
-> `docs/stage-a-design.md`), then **read every cited Java file/method in
-> `D:\STS_BG_Mod\SlayTheSpireDecompiled` before implementing** — the design
-> docs paraphrase; the Java is the spec. Deliverables and Acceptance are as
-> written in the ledger entry; acceptance must be **verified by running the
-> commands, not inferred** (debug AND asan presets for engine code; the
-> recorded Windows-host command for bridge code). Rules that bind you:
-> no rule without its test in the same commit; registry ids and opcodes are
-> append-only; no new dependencies beyond the granted set (nlohmann/json
-> tools-only, PyYAML codegen-only); never commit decompiled Java, built
-> jars, or campaign artifacts; if implementation contradicts a design doc's
-> reading of the Java — STOP and report back, do not code around it.
+> full — including its `**Inherited:**` line and every row of that file's
+> **Deferred obligations** table that names your task; discharging those is
+> part of your scope. Then read `docs/conventions.md` (the binding rules —
+> git discipline, precedence, hygiene, build commands), the cited design-doc
+> §§ (`docs/stage-b-design.md`, `docs/stage-a-design.md`), and finally
+> **read every cited Java file/method in `D:\STS_BG_Mod\SlayTheSpireDecompiled`
+> before implementing** — the design docs paraphrase; the Java is the spec.
+> Deliverables and Acceptance are as written in the ledger entry; acceptance
+> must be **verified by running the commands, not inferred** (debug AND asan
+> presets for engine code; the recorded Windows-host command for bridge code).
+> Work in your own git worktree under `D:\STS_BG_Mod\_wt\<id>`. If
+> implementation contradicts a design doc's reading of the Java — STOP and
+> report back, do not code around it. Any obligation you must leave to a
+> future task goes in your Log **and** must be reported so it lands in the
+> Deferred obligations table — a Log-only deferral is invisible once the
+> block is archived.
 > Return: what you changed, the acceptance evidence (exact test names/counts
-> per preset), provenance citations used, and a draft Log entry in the
-> Stage A style ("Verified by running, not inferred: …").
+> per preset), provenance citations used, any obligations you deferred with
+> their intended owner, and a draft Log entry in the Stage A style
+> ("Verified by running, not inferred: …").
 
 On return, **verify before you trust**: re-run the acceptance commands
 yourself (or spot-check them for long runs), check `git diff` scope matches
-the task's deliverables, check no frozen file was silently edited. Only then:
-update the checkbox + paste the (edited-for-accuracy) Log into the ledger,
-and commit **code + ledger together** — subject `<id>: <what changed>`, body
-with acceptance evidence and provenance, `Co-Authored-By: Claude` trailer.
-Never `--no-verify`, never amend/rebase committed work; fix forward.
+the task's deliverables, check no frozen file was silently edited. Only then,
+in one commit (`git add <explicit paths>` — never `-A`):
+
+1. move the task's full block, verbatim, into `docs/stage-b-log.md` under an
+   `<a id="…">` anchor, and replace it in the ledger with a one-line index
+   entry — bold id, `[x]`, title, then the **concrete outcome** (counts, id
+   ranges, opcodes, the measured number) and a `log` link to that anchor;
+   copy the shape of the entries already in the ledger;
+2. add every obligation the task deferred to the **Deferred obligations**
+   table **and** to the owning task's `**Inherited:**` line, and delete the
+   rows this task discharged;
+3. commit code + ledger + archive together — subject `<id>: <what changed>`,
+   body with acceptance evidence and provenance, `Co-Authored-By: Claude`
+   trailer. Never `--no-verify`, never amend/rebase committed work; fix
+   forward.
 
 ## 5. Gate protocol
 
@@ -103,27 +136,20 @@ At G4/G5/G6/G7: run the gate's checklist yourself, literally — every
 checkbox needs linked evidence in the gate's Log. Release preset must also
 be green at gates. Then, in the gate's own commit: tick the gate, tag it
 (`g4-bridge-live`, `g5-registry-live`, `g6-s1-content`, `g7-s1-verified`),
-and update `CLAUDE.md` "Current state" so a fresh session orients without
-history. Report to the user after each gate with: what passed, the numbers
-(throughput, diff counts, coverage), and what's next.
+archive the gate block like any other, and update `CLAUDE.md`'s **Current
+state** block so a fresh session orients without history. Report to the user
+after each gate with: what passed, the numbers (throughput, diff counts,
+coverage), and what's next.
 
-## 6. Stop and surface to the user (do not improvise) when:
+## 6. Stop and surface to the user (do not improvise)
 
-- A **divergence** survives triage (golden mismatch, fixture failure,
-  campaign diff) and the fix would change a frozen mechanic — the amendment
-  process needs evidence recorded in a design-doc change log; propose the
-  entry, don't silently apply it.
-- The **bridge throughput floor** (≥ 5 actions/sec, stage-b-design §2.2)
-  is unreachable at B1.3 — §8's math must be formally amended.
-- Anything would **renumber an existing registry id or opcode**, regenerate
-  Stage A fixtures to make B2.2 pass, or bump `SCHEMA_VERSION` outside the
-  places the ledger plans for it (B1.6, B4.3, B3.22's noted contingency).
-- A task's real scope turns out materially larger than its ledger entry
-  (split it — propose the split as a ledger change-log entry first).
-- The **profile unlock audit** (B0.2) fails, or the game/mod environment
-  drifts (Steam update, jar change) — the game is supposed to be frozen at
-  11-30-2020; any drift invalidates the oracle.
-- Two documents conflict and the fix isn't mechanical.
+The trigger list is conventions §5's last bullet. In short: a divergence that
+survives triage and would change a frozen mechanic; the bridge throughput
+floor becoming unreachable; any registry-id/opcode renumber or an unplanned
+`SCHEMA_VERSION` bump; a task whose real scope is materially larger than its
+ledger entry (propose the split as a ledger change-log entry first); a failed
+B0.2 profile-unlock audit or any drift in the frozen 11-30-2020 game/mod
+environment; two documents in conflict where the fix isn't mechanical.
 
 Otherwise proceed autonomously: reversible, in-scope work never waits for
 permission.
