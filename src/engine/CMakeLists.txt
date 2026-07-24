@@ -14,7 +14,21 @@ add_library(sts_engine
     piles.cpp
     card_play.cpp
     power_hooks.cpp
+    # Native power bodies, one TU per registry/powers.yaml batch (see
+    # powers/power_native.hpp). A new power batch adds a file here.
+    powers/powers_b3_2.cpp
+    powers/powers_b3_4.cpp
+    powers/powers_potion_support.cpp
+    powers/powers_b3_6.cpp
+    powers/powers_b3_7.cpp
+    powers/powers_b3_9.cpp
+    powers/powers_b3_25.cpp
     relic_hooks.cpp
+    # Native relic bodies, one TU per relic tier/batch (see
+    # relics/relic_native.hpp). B3.26 (rares+shop) / B3.27 (boss+specials) each
+    # add a file here.
+    relics/relics_b3_24.cpp
+    relics/relics_b3_25.cpp
     relic_pools.cpp
     potions.cpp
     advance.cpp

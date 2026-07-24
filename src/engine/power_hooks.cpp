@@ -12,11 +12,24 @@
 // AbstractRoom.applyEndOfTurnPreCardPowers (:535-539). Power bodies: FeelNoPain/
 // DarkEmbrace/Metallicize/Combust/Rupture/Sadistic/Corruption/Artifact/Rage
 // (cited per-entry in registry/powers.yaml). Design doc §5.2-5.5.
+//
+// The native bodies themselves live in per-batch translation units under
+// src/engine/powers/ (grouped by the registry/powers.yaml batch that introduced
+// them); this file keeps the framework plus the power_native_fn dispatch table,
+// mirroring monster_dispatch.cpp's per-monster TUs + function-pointer switch.
 
 #include "sts/engine/power_hooks.hpp"
 
 #include <cstdint>
 
+#include "powers/power_native.hpp"          // PowerNativeFn, actor_power_list, find_power
+#include "powers/powers_b3_2.hpp"           // B3.2 framework powers
+#include "powers/powers_b3_25.hpp"          // B3.25 relic-applied power
+#include "powers/powers_b3_4.hpp"           // B3.4 (Flex)
+#include "powers/powers_b3_6.hpp"           // B3.6 red-uncommon-skill powers
+#include "powers/powers_b3_7.hpp"           // B3.7 red-uncommon-power cards
+#include "powers/powers_b3_9.hpp"           // B3.9 curse-applied debuff
+#include "powers/powers_potion_support.hpp" // potion-support-powers follow-up
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (Corruption skill check)
 #include "sts/engine/combat_state.hpp"
@@ -70,21 +83,9 @@ void queue_hook_step(CombatState& s, uint8_t owner, const CardEffectStep& step,
     add_to_bottom(s, item);
 }
 
-// The power-slot list for an actor (kActorPlayer -> player_powers; a monster slot
-// -> that monster's powers). Out-of-range -> empty.
-struct PowerListView {
-    PowerSlot* slots;
-    uint8_t count;
-};
-[[nodiscard]] PowerListView actor_power_list(CombatState& s, uint8_t actor) noexcept {
-    if (actor == kActorPlayer) {
-        return PowerListView{s.player_powers, s.player_power_count};
-    }
-    if (actor < kMonsterCap) {
-        return PowerListView{s.monsters[actor].powers, s.monsters[actor].power_count};
-    }
-    return PowerListView{nullptr, 0};
-}
+// (PowerListView / actor_power_list / find_power now live in
+// powers/power_native.hpp -- the native bodies in src/engine/powers/ need them
+// too, so they are shared inline helpers rather than file-local statics.)
 
 // Dispatch one hook over one actor's power list, in power-list == application
 // order (§5.5). Each responding power (a binding for `hook` exists) either runs
@@ -119,19 +120,6 @@ void dispatch_actor_powers(CombatState& s, uint8_t owner, Hook hook,
             }
         }
     }
-}
-
-// Does `actor` currently hold `pid` (with a live slot)? Also returns the slot for
-// mutation (Artifact consume).
-[[nodiscard]] PowerSlot* find_power(CombatState& s, uint8_t actor,
-                                    PowerId pid) noexcept {
-    const PowerListView pv = actor_power_list(s, actor);
-    for (uint8_t i = 0; i < pv.count; ++i) {
-        if (pv.slots[i].power_id == static_cast<uint16_t>(pid)) {
-            return &pv.slots[i];
-        }
-    }
-    return nullptr;
 }
 
 }  // namespace
@@ -357,515 +345,73 @@ bool apply_power_blocked_by_artifact(CombatState& s, uint8_t target,
 }
 
 // --- Native escape hatch -----------------------------------------------------
+//
+// The dispatch table: PowerId -> the native body's function pointer, or nullptr
+// for a power with no per-power-list body. Structure mirrors
+// monster_dispatch.cpp's monster_init_fn (a plain switch, data-oriented, no
+// virtual dispatch); each power batch adds its cases here and a translation unit
+// under src/engine/powers/.
 
-void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
-                          const HookContext& ctx) noexcept {
-    switch (power_id) {
-        case PowerId::SADISTIC: {
-            // SadisticPower.onApplyPower (source side): on applying a DEBUFF to a
-            // DIFFERENT creature that has no Artifact, deal `amount` THORNS damage
-            // to that target. (Shackled excluded; no Shackled power in scope.)
-            if (hook != Hook::ON_APPLY_POWER) {
-                return;
-            }
-            const PowerId applied =
-                static_cast<PowerId>(ctx.applied_power_id);
-            const PowerDef* ap = power_def(applied);
-            const bool is_debuff = ap != nullptr && ap->type == PowerType::DEBUFF;
-            if (!is_debuff || ctx.target == ctx.owner) {
-                return;
-            }
-            if (find_power(s, ctx.target, PowerId::ARTIFACT) != nullptr) {
-                return;  // Artifact target -> Sadistic skips (its own guard)
-            }
-            ActionQueueItem dmg{};
-            dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
-            dmg.src = ctx.owner;         // owner-owned THORNS damage
-            dmg.tgt = ctx.target;
-            dmg.amount = ctx.power_amount;
-            add_to_bottom(s, dmg);       // addToBot (SadisticPower.java:43)
-            return;
-        }
-        case PowerId::DARK_EMBRACE: {
-            // DarkEmbracePower.onExhaust (Java:36-41) first checks
-            // areMonstersBasicallyDead(); an exhaust after combat cannot draw.
-            if (hook != Hook::ON_EXHAUST) {
-                return;
-            }
-            bool any_live = false;
-            for (uint8_t i = 0; i < s.monster_count; ++i) {
-                any_live = any_live || s.monsters[i].hp > 0;
-            }
-            if (!any_live) {
-                return;
-            }
-            ActionQueueItem draw{};
-            draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
-            draw.src = ctx.owner;
-            draw.tgt = ctx.owner;
-            draw.amount = ctx.power_amount;
-            add_to_bottom(s, draw);
-            return;
-        }
-        case PowerId::COMBUST: {
-            // CombustPower.atEndOfTurn (CombustPower.java:39-47): enqueue its
-            // private hpLoss first, then THORNS damage to every enemy. stackPower
-            // increments hpLoss once per reapplication; the player-only card path
-            // persists that hidden counter in CombatState.flags.
-            if (hook != Hook::AT_END_OF_TURN) {
-                return;
-            }
-            bool any_live = false;
-            for (uint8_t i = 0; i < s.monster_count; ++i) {
-                any_live = any_live || s.monsters[i].hp > 0;
-            }
-            if (!any_live) {
-                return;
-            }
-            uint32_t hp_loss =
-                (s.flags & kCombatFlagCombustHpLossMask) >> kCombatFlagCombustHpLossShift;
-            if (hp_loss == 0u) {
-                hp_loss = 1u;  // constructed fixture/direct power application
-            }
-            ActionQueueItem lose{};
-            lose.opcode = static_cast<uint16_t>(Opcode::LOSE_HP);
-            lose.src = ctx.owner;
-            lose.tgt = ctx.owner;
-            lose.amount = static_cast<int32_t>(hp_loss);
-            add_to_bottom(s, lose);
-            ActionQueueItem damage{};
-            damage.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
-            damage.src = ctx.owner;
-            damage.tgt = (ctx.owner == kActorPlayer) ? kActorAllEnemies : kActorPlayer;
-            damage.amount = ctx.power_amount;
-            damage.flags = make_damage_flags(DamageType::THORNS);
-            add_to_bottom(s, damage);
-            return;
-        }
-        case PowerId::RUPTURE: {
-            // RupturePower.wasHPLost: fire ONLY when the HP loss was self-inflicted
-            // (info.owner == owner) -- card HP loss, not unblocked enemy damage.
-            if (hook != Hook::WAS_HP_LOST) {
-                return;
-            }
-            if (ctx.source != ctx.owner || ctx.amount <= 0) {
-                return;  // attribution guard (RupturePower.java:61)
-            }
-            ActionQueueItem gain{};
-            gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-            gain.src = ctx.owner;
-            gain.tgt = ctx.owner;
-            gain.amount = ctx.power_amount;  // +amount Strength
-            gain.flags = make_apply_power_flags(PowerId::STRENGTH);
-            add_to_top(s, gain);             // addToTop (RupturePower.java:63)
-            return;
-        }
-        case PowerId::CORRUPTION: {
-            // CorruptionPower: a played SKILL is redirected to exhaust (onUseCard);
-            // a drawn SKILL costs 0 this turn (onCardDraw). Both key off the card
-            // being a SKILL. The pool index identifies the specific instance.
-            if (ctx.card_pool_index >= kCardPoolCap) {
-                return;
-            }
-            const CardId cid = static_cast<CardId>(ctx.card_id);
-            const CardDef* cd = card_def(cid);
-            if (cd == nullptr || cd->type != CardType::SKILL) {
-                return;
-            }
-            if (hook == Hook::ON_USE_CARD) {
-                // card.exhaustOnUseOnce: mark this instance to exhaust on play.
-                s.card_pool[ctx.card_pool_index].flags |=
-                    card_flag_bit(CardFlag::EXHAUST);
-            } else if (hook == Hook::ON_CARD_DRAW) {
-                s.card_pool[ctx.card_pool_index].cost_now = 0;  // setCostForTurn(0)
-            }
-            return;
-        }
-        case PowerId::LOSE_STRENGTH: {
-            // LoseStrengthPower.atEndOfTurn (LoseStrengthPower.java:40-44): at end
-            // of turn, addToBot ApplyPower(Strength, -amount) then
-            // RemoveSpecificPower(self) -- the "temporary Strength" reversal (Flex).
-            // Both queued (addToBot), so the Strength reduction and the self-removal
-            // resolve on later pump iterations, NOT during this power-list walk.
-            if (hook != Hook::AT_END_OF_TURN) {
-                return;
-            }
-            ActionQueueItem down{};
-            down.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-            down.src = ctx.owner;
-            down.tgt = ctx.owner;
-            down.amount = -ctx.power_amount;  // Strength -amount
-            down.flags = make_apply_power_flags(PowerId::STRENGTH);
-            add_to_bottom(s, down);
-            ActionQueueItem rem{};
-            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
-            rem.src = ctx.owner;
-            rem.tgt = ctx.owner;
-            rem.flags = make_apply_power_flags(PowerId::LOSE_STRENGTH);
-            add_to_bottom(s, rem);
-            return;
-        }
-        case PowerId::THORNS: {
-            // ThornsPower.onAttacked (ThornsPower.java:45-52): reflect `amount`
-            // THORNS damage back to the attacker. op_damage already gated this to a
-            // NORMAL attack from a distinct creature; the owner != attacker guard is
-            // re-checked. THORNS type -> the reflected DAMAGE skips all NORMAL-only
-            // power modifiers, so a Vulnerable attacker does NOT amplify it.
-            if (hook != Hook::ON_ATTACKED || ctx.source == ctx.owner) {
-                return;
-            }
-            ActionQueueItem dmg{};
-            dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
-            dmg.src = ctx.owner;        // the thorns-haver owns the reflected damage
-            dmg.tgt = ctx.source;       // ... dealt to the attacker
-            dmg.amount = ctx.power_amount;
-            dmg.flags = make_damage_flags(DamageType::THORNS);
-            add_to_top(s, dmg);         // addToTop (ThornsPower.java:48)
-            return;
-        }
-        case PowerId::PLATED_ARMOR: {
-            if (hook == Hook::AT_END_OF_TURN_PRE_CARD) {
-                // GainBlockAction(owner, amount) at the §5.4 pre-card phase (the same
-                // slot as Metallicize). A direct GainBlockAction -> kBlockNoPowers, so
-                // Plated Armor block does NOT get Dexterity (PlatedArmorPower.java:72).
-                ActionQueueItem blk{};
-                blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
-                blk.src = ctx.owner;
-                blk.tgt = ctx.owner;
-                blk.amount = ctx.power_amount;
-                blk.flags = kBlockNoPowers;
-                add_to_bottom(s, blk);  // addToBot (PlatedArmorPower.java:72)
-                return;
-            }
-            if (hook == Hook::WAS_HP_LOST) {
-                // Lose 1 stack on a real attack from a distinct creature; NOT on a
-                // THORNS / HP_LOSS / self loss (PlatedArmorPower.java:54-58). The
-                // ReducePowerAction removes the power at 0.
-                if (ctx.damage_type == static_cast<uint8_t>(DamageType::THORNS) ||
-                    ctx.damage_type == static_cast<uint8_t>(DamageType::HP_LOSS) ||
-                    ctx.source == ctx.owner || ctx.amount <= 0) {
-                    return;
-                }
-                PowerSlot* pa = find_power(s, ctx.owner, PowerId::PLATED_ARMOR);
-                if (pa != nullptr) {
-                    pa->amount = static_cast<int16_t>(pa->amount - 1);
-                    if (pa->amount <= 0) {
-                        pa->power_id = static_cast<uint16_t>(PowerId::NONE);
-                    }
-                }
-                return;
-            }
-            return;
-        }
-        case PowerId::REGEN: {
-            // RegenPower.atEndOfTurn -> RegenAction(owner, amount)
-            // (RegenPower.java:35-38, RegenAction.java:34-47): heal `amount` (clamped
-            // to max, only if currentHealth>0) then, for a PLAYER owner, decrement the
-            // stack by 1 (remove at 0). The heal is applied directly -- no HEAL opcode
-            // (the Blood Potion / Burning Blood precedent) and a heal has no queue
-            // interplay with other end-of-turn effects.
-            if (hook != Hook::AT_END_OF_TURN) {
-                return;
-            }
-            int16_t* hp = nullptr;
-            int16_t max_hp = 0;
-            if (ctx.owner == kActorPlayer) {
-                hp = &s.player_hp;
-                max_hp = s.player_max_hp;
-            } else if (ctx.owner < kMonsterCap) {
-                hp = &s.monsters[ctx.owner].hp;
-                max_hp = s.monsters[ctx.owner].max_hp;
-            }
-            if (hp != nullptr && *hp > 0) {
-                int32_t v = static_cast<int32_t>(*hp) + ctx.power_amount;
-                if (v > max_hp) {
-                    v = max_hp;
-                }
-                *hp = static_cast<int16_t>(v);
-            }
-            if (ctx.owner == kActorPlayer) {  // RegenAction decrement is isPlayer-gated
-                PowerSlot* rp = find_power(s, ctx.owner, PowerId::REGEN);
-                if (rp != nullptr) {
-                    rp->amount = static_cast<int16_t>(rp->amount - 1);
-                    if (rp->amount <= 0) {
-                        rp->power_id = static_cast<uint16_t>(PowerId::NONE);
-                    }
-                }
-            }
-            return;
-        }
-        case PowerId::LOSE_DEXTERITY: {
-            // LoseDexterityPower.atEndOfTurn (LoseDexterityPower.java:38-42): addToBot
-            // ApplyPower(Dexterity, -amount) then RemoveSpecificPower(self) -- the
-            // exact mirror of LoseStrength/Flex (id 13). Both queued (addToBot), so the
-            // Dexterity reduction + self-removal resolve on later pump iterations.
-            if (hook != Hook::AT_END_OF_TURN) {
-                return;
-            }
-            ActionQueueItem down{};
-            down.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-            down.src = ctx.owner;
-            down.tgt = ctx.owner;
-            down.amount = -ctx.power_amount;  // Dexterity -amount
-            down.flags = make_apply_power_flags(PowerId::DEXTERITY);
-            add_to_bottom(s, down);
-            ActionQueueItem rem{};
-            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
-            rem.src = ctx.owner;
-            rem.tgt = ctx.owner;
-            rem.flags = make_apply_power_flags(PowerId::LOSE_DEXTERITY);
-            add_to_bottom(s, rem);
-            return;
-        }
-        case PowerId::RITUAL: {
-            // RitualPower has two branches on `onPlayer`; we key it on the OWNER
-            // actor (the potion applies to the PLAYER; the Cultist to ITSELF):
-            //   * atEndOfTurn (RitualPower.java:38-43, isPlayer guard): the
-            //     player/potion Ritual gains `amount` Strength each end of turn.
-            //     Only the player is dispatched AT_END_OF_TURN (dispatch_at_end_of_
-            //     turn), and a monster owner is guarded out here for safety.
-            //   * atEndOfRound (:46-55, !onPlayer + skipFirst): the monster Cultist
-            //     Ritual gains `amount` Strength each round AFTER the first. The
-            //     skipFirst state is the owner monster's kMonsterFlagRitualSkip bit,
-            //     set by the Cultist when it casts Incantation.
-            if (hook == Hook::AT_END_OF_TURN) {
-                if (ctx.owner != kActorPlayer) {
-                    return;  // RitualPower.atEndOfTurn's isPlayer guard
-                }
-                ActionQueueItem up{};
-                up.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-                up.src = ctx.owner;
-                up.tgt = ctx.owner;
-                up.amount = ctx.power_amount;  // +amount Strength
-                up.flags = make_apply_power_flags(PowerId::STRENGTH);
-                add_to_bottom(s, up);          // addToBot (RitualPower.java:41)
-                return;
-            }
-            if (hook == Hook::AT_END_OF_ROUND) {
-                if (ctx.owner == kActorPlayer || ctx.owner >= kMonsterCap) {
-                    return;  // player Ritual is onPlayer -> atEndOfRound no-op
-                }
-                uint16_t& mf = s.monsters[ctx.owner].flags;
-                if ((mf & kMonsterFlagRitualSkip) != 0u) {
-                    mf = static_cast<uint16_t>(mf & ~kMonsterFlagRitualSkip);
-                    return;  // skipFirst: consume, no Strength this round
-                }
-                ActionQueueItem up{};
-                up.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-                up.src = ctx.owner;
-                up.tgt = ctx.owner;
-                up.amount = ctx.power_amount;  // +amount Strength
-                up.flags = make_apply_power_flags(PowerId::STRENGTH);
-                add_to_bottom(s, up);          // addToBot (RitualPower.java:50)
-                return;
-            }
-            return;
-        }
-        case PowerId::FRAIL: {
-            // FrailPower.atEndOfRound (FrailPower.java:42-54): a newly-created,
-            // monster-sourced player instance consumes justApplied without losing
-            // duration. Later rounds reduce one stack and remove at zero. This
-            // dispatcher runs after monster turns and before next-turn setup.
-            if (hook != Hook::AT_END_OF_ROUND || ctx.owner != kActorPlayer) {
-                return;
-            }
-            PowerSlot* fp = find_power(s, kActorPlayer, PowerId::FRAIL);
-            if (fp == nullptr) {
-                s.flags &= ~kCombatFlagFrailJustApplied;
-                return;
-            }
-            if ((s.flags & kCombatFlagFrailJustApplied) != 0u) {
-                s.flags &= ~kCombatFlagFrailJustApplied;
-                return;
-            }
-            ActionQueueItem reduce{};
-            reduce.opcode = static_cast<uint16_t>(Opcode::REDUCE_POWER);
-            reduce.src = ctx.owner;
-            reduce.tgt = ctx.owner;
-            reduce.amount = 1;
-            reduce.flags = make_apply_power_flags(PowerId::FRAIL);
-            add_to_bottom(s, reduce);  // ReducePowerAction, FrailPower.java:52
-            return;
-        }
-        case PowerId::CURL_UP: {
-            // CurlUpPower.onAttacked (CurlUpPower.java:36-46): the FIRST NORMAL,
-            // non-lethal (damageAmount < owner.currentHealth), >0 attack makes the
-            // louse gain `amount` Block, then removes Curl Up (one-shot -- modelled
-            // by the self-removal). op_damage already gated dispatch_on_attacked to
-            // NORMAL src != tgt AFTER decrementBlock, with the post-block damage and
-            // the owner's pre-hit HP, so `ctx.amount` == damageAmount and the owner's
-            // hp is still currentHealth here.
-            if (hook != Hook::ON_ATTACKED) {
-                return;
-            }
-            if (ctx.source == ctx.owner || ctx.amount <= 0 ||
-                ctx.owner >= kMonsterCap) {
-                return;
-            }
-            MonsterState& owner = s.monsters[ctx.owner];
-            if ((owner.flags & kMonsterFlagCurlUpTriggered) != 0u) {
-                return;  // triggered latch flips before queued actions resolve
-            }
-            if (ctx.amount >= owner.hp) {
-                return;  // damageAmount < owner.currentHealth guard (lethal skips)
-            }
-            // CurlUpPower.java:40 sets triggered=true synchronously, before the
-            // GainBlock/RemoveSpecificPower actions it adds to the bottom. This is
-            // observable for queued multi-hit attacks: later hits run while Curl Up
-            // is still present but must not queue another block gain.
-            owner.flags |= kMonsterFlagCurlUpTriggered;
-            ActionQueueItem blk{};
-            blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
-            blk.src = ctx.owner;
-            blk.tgt = ctx.owner;
-            blk.amount = ctx.power_amount;  // Block = Curl Up amount
-            blk.flags = kBlockNoPowers;     // GainBlockAction (direct, no Dexterity)
-            add_to_bottom(s, blk);          // addToBot (CurlUpPower.java:42)
-            ActionQueueItem rem{};
-            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
-            rem.src = ctx.owner;
-            rem.tgt = ctx.owner;
-            rem.flags = make_apply_power_flags(PowerId::CURL_UP);
-            add_to_bottom(s, rem);          // addToBot (CurlUpPower.java:43)
-            return;
-        }
-        case PowerId::NEXT_TURN_BLOCK: {
-            // NextTurnBlockPower.atStartOfTurn (NextTurnBlockPower.java:44-50):
-            // addToBot GainBlockAction(owner, amount) then addToBot
-            // RemoveSpecificPowerAction(self). A direct GainBlockAction -> no
-            // Dexterity (kBlockNoPowers); both queued, so the block lands AFTER
-            // start_of_turn's synchronous block decay -- exactly the game's
-            // "gain Block at the start of your next turn" (Self-Forming Clay).
-            if (hook != Hook::AT_START_OF_TURN) {
-                return;
-            }
-            ActionQueueItem blk{};
-            blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
-            blk.src = ctx.owner;
-            blk.tgt = ctx.owner;
-            blk.amount = ctx.power_amount;
-            blk.flags = kBlockNoPowers;
-            add_to_bottom(s, blk);
-            ActionQueueItem rem{};
-            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
-            rem.src = ctx.owner;
-            rem.tgt = ctx.owner;
-            rem.flags = make_apply_power_flags(PowerId::NEXT_TURN_BLOCK);
-            add_to_bottom(s, rem);
-            return;
-        }
-        case PowerId::RAGE: {
-            // RagePower (B3.6 completes the B3.2 stub). onUseCard (RagePower.
-            // java:41-47): if the played card is an ATTACK, GainBlockAction(
-            // player, amount) -- dispatched at ON_USE_CARD (after the card's own
-            // effects are queued, so the block lands after the attack's damage;
-            // a direct GainBlockAction -> kBlockNoPowers, no Dexterity/Frail).
-            // atEndOfTurn (:49-52): addToBot RemoveSpecificPowerAction(owner,
-            // "Rage") -- Rage lasts one turn.
-            if (hook == Hook::ON_USE_CARD) {
-                const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
-                if (cd == nullptr || cd->type != CardType::ATTACK) {
-                    return;  // the attack-type guard (RagePower.java:42)
-                }
-                ActionQueueItem blk{};
-                blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
-                blk.src = ctx.owner;
-                blk.tgt = ctx.owner;  // owner == the player in every S1 scope
-                blk.amount = ctx.power_amount;
-                blk.flags = kBlockNoPowers;
-                add_to_bottom(s, blk);  // addToBot (RagePower.java:43)
-                return;
-            }
-            if (hook == Hook::AT_END_OF_TURN) {
-                ActionQueueItem rem{};
-                rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
-                rem.src = ctx.owner;
-                rem.tgt = ctx.owner;
-                rem.flags = make_apply_power_flags(PowerId::RAGE);
-                add_to_bottom(s, rem);  // addToBot (RagePower.java:50)
-                return;
-            }
-            return;
-        }
-        case PowerId::FLAME_BARRIER: {
-            // FlameBarrierPower (B3.6). onAttacked (FlameBarrierPower.java:
-            // 53-59): reflect `amount` THORNS damage to a DISTINCT attacker --
-            // op_damage already gated dispatch to NORMAL src != tgt after
-            // decrementBlock (fires whether or not the hit penetrated); the
-            // owner != attacker guard is re-checked. addToTop, THORNS-typed
-            // (skips the NORMAL-only power modifiers -- a Vulnerable attacker
-            // is NOT amplified). atStartOfTurn (:62-64): addToBot
-            // RemoveSpecificPowerAction -- gone at the player's next turn start.
-            if (hook == Hook::ON_ATTACKED) {
-                if (ctx.source == ctx.owner) {
-                    return;
-                }
-                ActionQueueItem dmg{};
-                dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
-                dmg.src = ctx.owner;
-                dmg.tgt = ctx.source;
-                dmg.amount = ctx.power_amount;
-                dmg.flags = make_damage_flags(DamageType::THORNS);
-                add_to_top(s, dmg);  // addToTop (FlameBarrierPower.java:56)
-                return;
-            }
-            if (hook == Hook::AT_START_OF_TURN) {
-                ActionQueueItem rem{};
-                rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
-                rem.src = ctx.owner;
-                rem.tgt = ctx.owner;
-                rem.flags = make_apply_power_flags(PowerId::FLAME_BARRIER);
-                add_to_bottom(s, rem);  // addToBot (FlameBarrierPower.java:63)
-                return;
-            }
-            return;
-        }
-        case PowerId::EVOLVE: {
-            // EvolvePower.onCardDraw: only a STATUS draw triggers, and No Draw
-            // suppresses the response even if the draw was otherwise forced.
-            if (hook != Hook::ON_CARD_DRAW ||
-                find_power(s, ctx.owner, PowerId::NO_DRAW) != nullptr) {
-                return;
-            }
-            const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
-            if (cd == nullptr || cd->type != CardType::STATUS) {
-                return;
-            }
-            ActionQueueItem draw{};
-            draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
-            draw.src = ctx.owner;
-            draw.tgt = ctx.owner;
-            draw.amount = ctx.power_amount;
-            add_to_bottom(s, draw);
-            return;
-        }
-        case PowerId::FIRE_BREATHING: {
-            // FireBreathingPower.onCardDraw: a STATUS or CURSE draw deals its
-            // amount as THORNS damage to every enemy (DamageAllEnemiesAction).
-            if (hook != Hook::ON_CARD_DRAW) {
-                return;
-            }
-            const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
-            if (cd == nullptr ||
-                (cd->type != CardType::STATUS && cd->type != CardType::CURSE)) {
-                return;
-            }
-            ActionQueueItem damage{};
-            damage.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
-            damage.src = ctx.owner;
-            damage.tgt = (ctx.owner == kActorPlayer) ? kActorAllEnemies : kActorPlayer;
-            damage.amount = ctx.power_amount;
-            damage.flags = make_damage_flags(DamageType::THORNS);
-            add_to_bottom(s, damage);
-            return;
-        }
+PowerNativeFn power_native_fn(PowerId id) noexcept {
+    switch (id) {
+        // B3.2 framework powers (powers/powers_b3_2.cpp)
+        case PowerId::SADISTIC:
+            return &power_native_sadistic;
+        case PowerId::DARK_EMBRACE:
+            return &power_native_dark_embrace;
+        case PowerId::COMBUST:
+            return &power_native_combust;
+        case PowerId::RUPTURE:
+            return &power_native_rupture;
+        case PowerId::CORRUPTION:
+            return &power_native_corruption;
+        case PowerId::RAGE:
+            return &power_native_rage;
+        // B3.4 (Flex) (powers/powers_b3_4.cpp)
+        case PowerId::LOSE_STRENGTH:
+            return &power_native_lose_strength;
+        // potion-support-powers follow-up (powers/powers_potion_support.cpp)
+        case PowerId::THORNS:
+            return &power_native_thorns;
+        case PowerId::PLATED_ARMOR:
+            return &power_native_plated_armor;
+        case PowerId::REGEN:
+            return &power_native_regen;
+        case PowerId::LOSE_DEXTERITY:
+            return &power_native_lose_dexterity;
+        case PowerId::RITUAL:
+            return &power_native_ritual;
+        case PowerId::CURL_UP:
+            return &power_native_curl_up;
+        // B3.9 curse-applied debuff (powers/powers_b3_9.cpp)
+        case PowerId::FRAIL:
+            return &power_native_frail;
+        // B3.25 relic-applied power (powers/powers_b3_25.cpp)
+        case PowerId::NEXT_TURN_BLOCK:
+            return &power_native_next_turn_block;
+        // B3.6 red-uncommon-skill powers (powers/powers_b3_6.cpp)
+        case PowerId::FLAME_BARRIER:
+            return &power_native_flame_barrier;
+        // B3.7 red-uncommon-power cards (powers/powers_b3_7.cpp)
+        case PowerId::EVOLVE:
+            return &power_native_evolve;
+        case PowerId::FIRE_BREATHING:
+            return &power_native_fire_breathing;
         case PowerId::ARTIFACT:
             // Artifact's body is the target-side nullify in
             // apply_power_blocked_by_artifact (consumed inside APPLY_POWER); it
             // has no source-side / per-power-list hook body.
-            return;
+            return nullptr;
         default:
-            return;  // an unrecognized native power is a safe no-op
+            return nullptr;  // an unrecognized native power is a safe no-op
+    }
+}
+
+void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
+                          const HookContext& ctx) noexcept {
+    const PowerNativeFn fn = power_native_fn(power_id);
+    if (fn != nullptr) {
+        fn(s, hook, ctx);
     }
 }
 
