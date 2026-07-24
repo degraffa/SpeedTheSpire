@@ -386,6 +386,62 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
             add_to_bottom(s, dmg);       // addToBot (SadisticPower.java:43)
             return;
         }
+        case PowerId::DARK_EMBRACE: {
+            // DarkEmbracePower.onExhaust (Java:36-41) first checks
+            // areMonstersBasicallyDead(); an exhaust after combat cannot draw.
+            if (hook != Hook::ON_EXHAUST) {
+                return;
+            }
+            bool any_live = false;
+            for (uint8_t i = 0; i < s.monster_count; ++i) {
+                any_live = any_live || s.monsters[i].hp > 0;
+            }
+            if (!any_live) {
+                return;
+            }
+            ActionQueueItem draw{};
+            draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+            draw.src = ctx.owner;
+            draw.tgt = ctx.owner;
+            draw.amount = ctx.power_amount;
+            add_to_bottom(s, draw);
+            return;
+        }
+        case PowerId::COMBUST: {
+            // CombustPower.atEndOfTurn (CombustPower.java:39-47): enqueue its
+            // private hpLoss first, then THORNS damage to every enemy. stackPower
+            // increments hpLoss once per reapplication; the player-only card path
+            // persists that hidden counter in CombatState.flags.
+            if (hook != Hook::AT_END_OF_TURN) {
+                return;
+            }
+            bool any_live = false;
+            for (uint8_t i = 0; i < s.monster_count; ++i) {
+                any_live = any_live || s.monsters[i].hp > 0;
+            }
+            if (!any_live) {
+                return;
+            }
+            uint32_t hp_loss =
+                (s.flags & kCombatFlagCombustHpLossMask) >> kCombatFlagCombustHpLossShift;
+            if (hp_loss == 0u) {
+                hp_loss = 1u;  // constructed fixture/direct power application
+            }
+            ActionQueueItem lose{};
+            lose.opcode = static_cast<uint16_t>(Opcode::LOSE_HP);
+            lose.src = ctx.owner;
+            lose.tgt = ctx.owner;
+            lose.amount = static_cast<int32_t>(hp_loss);
+            add_to_bottom(s, lose);
+            ActionQueueItem damage{};
+            damage.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+            damage.src = ctx.owner;
+            damage.tgt = (ctx.owner == kActorPlayer) ? kActorAllEnemies : kActorPlayer;
+            damage.amount = ctx.power_amount;
+            damage.flags = make_damage_flags(DamageType::THORNS);
+            add_to_bottom(s, damage);
+            return;
+        }
         case PowerId::RUPTURE: {
             // RupturePower.wasHPLost: fire ONLY when the HP loss was self-inflicted
             // (info.owner == owner) -- card HP loss, not unblocked enemy damage.
@@ -762,6 +818,45 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
                 add_to_bottom(s, rem);  // addToBot (FlameBarrierPower.java:63)
                 return;
             }
+            return;
+        }
+        case PowerId::EVOLVE: {
+            // EvolvePower.onCardDraw: only a STATUS draw triggers, and No Draw
+            // suppresses the response even if the draw was otherwise forced.
+            if (hook != Hook::ON_CARD_DRAW ||
+                find_power(s, ctx.owner, PowerId::NO_DRAW) != nullptr) {
+                return;
+            }
+            const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+            if (cd == nullptr || cd->type != CardType::STATUS) {
+                return;
+            }
+            ActionQueueItem draw{};
+            draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+            draw.src = ctx.owner;
+            draw.tgt = ctx.owner;
+            draw.amount = ctx.power_amount;
+            add_to_bottom(s, draw);
+            return;
+        }
+        case PowerId::FIRE_BREATHING: {
+            // FireBreathingPower.onCardDraw: a STATUS or CURSE draw deals its
+            // amount as THORNS damage to every enemy (DamageAllEnemiesAction).
+            if (hook != Hook::ON_CARD_DRAW) {
+                return;
+            }
+            const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+            if (cd == nullptr ||
+                (cd->type != CardType::STATUS && cd->type != CardType::CURSE)) {
+                return;
+            }
+            ActionQueueItem damage{};
+            damage.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+            damage.src = ctx.owner;
+            damage.tgt = (ctx.owner == kActorPlayer) ? kActorAllEnemies : kActorPlayer;
+            damage.amount = ctx.power_amount;
+            damage.flags = make_damage_flags(DamageType::THORNS);
+            add_to_bottom(s, damage);
             return;
         }
         case PowerId::ARTIFACT:

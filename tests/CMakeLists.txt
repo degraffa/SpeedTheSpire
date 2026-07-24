@@ -524,3 +524,13 @@ target_link_libraries(status_curse_test PRIVATE sts_engine GTest::gtest_main)
 sts_set_warnings(status_curse_test)
 sts_enable_sanitizers(status_curse_test)
 gtest_discover_tests(status_curse_test)
+
+# B3.7: exact RED/UNCOMMON/POWER roster. Per-power base/upgraded behavior,
+# power-card no-discard path, draw/exhaust trigger ordering, and an advance() script.
+add_executable(card_uncommon_powers_test
+    card_uncommon_powers_test.cpp
+)
+target_link_libraries(card_uncommon_powers_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(card_uncommon_powers_test)
+sts_enable_sanitizers(card_uncommon_powers_test)
+gtest_discover_tests(card_uncommon_powers_test)

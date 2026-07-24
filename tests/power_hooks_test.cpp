@@ -166,6 +166,8 @@ TEST(PowerHooks, OnExhaustFollowsPlayerPowerListOrder) {
     // resolving on ONE exhaust: the sequence == the player power-LIST order
     // (§5.5, application order), not the hook table order.
     CombatState a{};
+    a.monster_count = 1;
+    a.monsters[0].hp = 30;  // DarkEmbracePower ignores post-combat exhausts.
     give_player_power(a, PowerId::FEEL_NO_PAIN, 3);   // applied first
     give_player_power(a, PowerId::DARK_EMBRACE, 1);   // applied second
     dispatch_on_exhaust(a, /*pool_index=*/0, static_cast<uint16_t>(CardId::STRIKE));
@@ -177,6 +179,8 @@ TEST(PowerHooks, OnExhaustFollowsPlayerPowerListOrder) {
 
     // Reverse the application order -> reversed resolution order.
     CombatState b{};
+    b.monster_count = 1;
+    b.monsters[0].hp = 30;
     give_player_power(b, PowerId::DARK_EMBRACE, 1);   // applied first
     give_player_power(b, PowerId::FEEL_NO_PAIN, 3);   // applied second
     dispatch_on_exhaust(b, /*pool_index=*/0, static_cast<uint16_t>(CardId::STRIKE));

@@ -1146,3 +1146,128 @@
     - {op: SPOT_WEAKNESS, target: CARD_TARGET, amount: 3}
   upgraded:
     - {op: SPOT_WEAKNESS, target: CARD_TARGET, amount: 4}
+
+# B3.7 source enumeration: the nine RED / UNCOMMON / POWER constructor rows.
+# Rage is RED / UNCOMMON but its constructor says CardType.SKILL, so it is id 62
+# in B3.6 rather than duplicated here (Rage.java:30-31; source wins).
+
+- id: 68
+  name: COMBUST
+  game_id: "Combust"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Combust.use/upgrade (Combust.java:24-38) -- ApplyPowerAction(CombustPower(p, 1, magic), magic); magic 5, upgradeMagicNumber(2) -> 7."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: COMBUST}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 7, power: COMBUST}
+
+- id: 69
+  name: DARK_EMBRACE
+  game_id: "Dark Embrace"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 2
+  target: SELF
+  flags: []
+  provenance: "DarkEmbrace.use/upgrade (DarkEmbrace.java:23-35) -- ApplyPowerAction(DarkEmbracePower(p, 1), 1); upgradeBaseCost(1)."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: DARK_EMBRACE}
+  upgraded_cost: 1
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: DARK_EMBRACE}
+
+- id: 70
+  name: EVOLVE
+  game_id: "Evolve"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Evolve.use/upgrade (Evolve.java:24-39) -- ApplyPowerAction(EvolvePower(p, magic), magic); magic 1, upgradeMagicNumber(1) -> 2."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: EVOLVE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: EVOLVE}
+
+- id: 71
+  name: FEEL_NO_PAIN
+  game_id: "Feel No Pain"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "FeelNoPain.use/upgrade (FeelNoPain.java:24-38) -- ApplyPowerAction(FeelNoPainPower(p, magic), magic); magic 3, upgradeMagicNumber(1) -> 4."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: FEEL_NO_PAIN}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 4, power: FEEL_NO_PAIN}
+
+- id: 72
+  name: FIRE_BREATHING
+  game_id: "Fire Breathing"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "FireBreathing.use/upgrade (FireBreathing.java:24-38) -- ApplyPowerAction(FireBreathingPower(p, magic), magic); magic 6, upgradeMagicNumber(4) -> 10."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 6, power: FIRE_BREATHING}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 10, power: FIRE_BREATHING}
+
+- id: 73
+  name: INFLAME
+  game_id: "Inflame"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Inflame.use/upgrade (Inflame.java:25-43) -- presentation VFX then ApplyPowerAction(StrengthPower(p, magic), magic); magic 2, upgradeMagicNumber(1) -> 3."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: STRENGTH}
+
+- id: 74
+  name: METALLICIZE
+  game_id: "Metallicize"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Metallicize.use/upgrade (Metallicize.java:24-38) -- ApplyPowerAction(MetallicizePower(p, magic), magic); magic 3, upgradeMagicNumber(1) -> 4."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: METALLICIZE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 4, power: METALLICIZE}
+
+- id: 75
+  name: RUPTURE
+  game_id: "Rupture"
+  color: RED
+  rarity: UNCOMMON
+  type: POWER
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "Rupture.use/upgrade (Rupture.java:24-38) -- ApplyPowerAction(RupturePower(p, magic), magic); magic 1, upgradeMagicNumber(1) -> 2."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: RUPTURE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: RUPTURE}

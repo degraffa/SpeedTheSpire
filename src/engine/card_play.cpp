@@ -167,13 +167,20 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
 // distinct instance). Stage B B3.1 adds the exhaust destination; the skeleton's
 // five cards are all non-exhaust, so the discard path is unchanged for them.
 void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
-                            bool to_exhaust) noexcept {
+                            bool to_exhaust, bool remove_after_use) noexcept {
     for (uint8_t i = 0; i < s.hand_count; ++i) {
         if (s.hand[i] == pool_index) {
             for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.hand_count; ++j) {
                 s.hand[j - 1] = s.hand[j];
             }
             --s.hand_count;
+            // AbstractPlayer.useCard removes POWER cards from their temporary
+            // limbo instead of placing them in discard/exhaust. Keep the pool row
+            // as inert instance storage, but leave it in no pile so it cannot be
+            // redrawn or replayed.
+            if (remove_after_use) {
+                return;
+            }
             if (to_exhaust) {
                 assert(s.exhaust_count < kExhaustCap &&
                        "exhaust overflow (design doc §4.1: hard assert)");
@@ -354,7 +361,8 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     }
     move_card_hand_to_pile(
         s, pool_index,
-        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST));
+        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST),
+        def->type == CardType::POWER);
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
     //    X-cost already consumed all energy above; otherwise deduct the

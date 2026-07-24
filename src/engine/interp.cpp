@@ -431,6 +431,15 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     const uint16_t pid = static_cast<uint16_t>(id);
     for (uint8_t i = 0; i < *count; ++i) {
         if (slots[i].power_id == pid) {
+            if (id == PowerId::COMBUST && tgt == kActorPlayer) {
+                uint32_t hp_loss =
+                    (s.flags & kCombatFlagCombustHpLossMask) >> kCombatFlagCombustHpLossShift;
+                if (hp_loss < 0xFFu) {
+                    ++hp_loss;
+                }
+                s.flags = (s.flags & ~kCombatFlagCombustHpLossMask) |
+                          (hp_loss << kCombatFlagCombustHpLossShift);
+            }
             slots[i].amount = static_cast<int16_t>(slots[i].amount + amount);
             // StrengthPower/DexterityPower.stackPower (:48-53 / :44-49): a stack
             // landing on EXACTLY 0 queues the slot's removal (addToTop
@@ -464,6 +473,10 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // (Shame and Act-1 monsters). Only a NEW instance gets justApplied;
         // stacking returned above and therefore preserves the existing latch.
         s.flags |= kCombatFlagFrailJustApplied;
+    }
+    if (id == PowerId::COMBUST && tgt == kActorPlayer) {
+        s.flags = (s.flags & ~kCombatFlagCombustHpLossMask) |
+                  (1u << kCombatFlagCombustHpLossShift);
     }
     slots[*count].power_id = pid;
     slots[*count].amount = static_cast<int16_t>(amount);
@@ -849,6 +862,9 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
             }
             if (id == PowerId::FRAIL && tgt == kActorPlayer) {
                 s.flags &= ~kCombatFlagFrailJustApplied;
+            }
+            if (id == PowerId::COMBUST && tgt == kActorPlayer) {
+                s.flags &= ~kCombatFlagCombustHpLossMask;
             }
             return;
         }

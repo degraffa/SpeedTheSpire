@@ -96,20 +96,18 @@
   name: DARK_EMBRACE
   game_id: "Dark Embrace"
   type: BUFF
+  native: true
   hooks:
-    on_exhaust:
-      - {op: DRAW, target: SELF, amount: 0}    # draw = power amount
-  provenance: "DarkEmbracePower.onExhaust (DarkEmbracePower.java:36-41) -- DrawCardAction(owner, amount); fires in CardGroup.moveToExhaustPile (CardGroup.java:851-856), stage-a §5.5"
-
+    on_exhaust: []
+  provenance: "DarkEmbracePower.onExhaust (DarkEmbracePower.java:36-41) -- if monsters are not basically dead, addToBot DrawCardAction(owner, amount). Native preserves the combat-live guard before queuing the draw."
 - id: 8
   name: COMBUST
   game_id: "Combust"
   type: BUFF
+  native: true
   hooks:
-    at_end_of_turn:
-      - {op: LOSE_HP, target: SELF, amount: 1}       # fixed hpLoss (base)
-      - {op: DAMAGE, target: ALL_ENEMY, amount: 0}   # damage = power amount
-  provenance: "CombustPower.atEndOfTurn (CombustPower.java:39-47) -- LoseHPAction(owner, hpLoss) then DamageAllEnemiesAction(amount, THORNS); fires via AbstractCreature.applyEndOfTurnTriggers (AbstractCreature.java:548-553). NOTE: the hpLoss ratchet (stackPower ++hpLoss) is a per-instance counter deferred to B3.7; the base program loses 1 HP."
+    at_end_of_turn: []
+  provenance: "CombustPower.atEndOfTurn/stackPower (CombustPower.java:39-54) -- addToBot LoseHPAction(owner, hpLoss), then DamageAllEnemiesAction(amount, THORNS); every reapplication adds damage to amount AND increments the private hpLoss counter by one. Native dispatch keeps the per-player-instance hpLoss counter in CombatState.flags without changing the POD layout."
 
 - id: 9
   name: RUPTURE
@@ -282,3 +280,23 @@
     on_attacked: []             # native: reflect `amount` THORNS damage to a distinct NORMAL attacker (addToTop)
     at_start_of_turn: []        # native: RemoveSpecificPowerAction(self) at the player's next turn start
   provenance: "FlameBarrierPower (FlameBarrierPower.java:32-64): onAttacked (:53-59) -- if info.owner != null && type != THORNS && type != HP_LOSS && info.owner != owner: addToTop DamageAction(info.owner, DamageInfo(owner, amount, THORNS)) -- fires AFTER decrementBlock regardless of whether damage penetrated (AbstractPlayer.damage:1425-1426); the THORNS type skips the NORMAL-only power modifiers (a Vulnerable attacker is not amplified). atStartOfTurn (:62-64) -- addToBot RemoveSpecificPowerAction(player, \"Flame Barrier\"), the §5.2 step-6 pre-draw power phase. stackPower additive (:42-50). Native: the on-attacked body targets ctx.source (no StepTarget encodes the attacker) -- the same shape as THORNS (id 16); the removal is queued addToBot at at_start_of_turn. Applied by the Flame Barrier card."
+
+# --- B3.7 red-uncommon-power cards ------------------------------------------
+
+- id: 26
+  name: EVOLVE
+  game_id: "Evolve"
+  type: BUFF
+  native: true
+  hooks:
+    on_card_draw: []
+  provenance: "EvolvePower.onCardDraw (EvolvePower.java:32-37) -- when the drawn card is STATUS and the owner lacks No Draw, addToBot DrawCardAction(owner, amount). Native because the trigger is conditional on the drawn card type and No Draw presence."
+
+- id: 27
+  name: FIRE_BREATHING
+  game_id: "Fire Breathing"
+  type: BUFF
+  native: true
+  hooks:
+    on_card_draw: []
+  provenance: "FireBreathingPower.onCardDraw (FireBreathingPower.java:34-40) -- when the drawn card is STATUS or CURSE, addToBot DamageAllEnemiesAction(amount, THORNS, FIRE). Native because the trigger is conditional on the drawn card type."

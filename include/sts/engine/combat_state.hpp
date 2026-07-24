@@ -91,6 +91,13 @@ inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
 // is NOT gated (the Java latch only guards the victory branch).
 inline constexpr uint32_t kCombatFlagCannotLose = 1u << 1;
 
+// CombustPower keeps a private hpLoss counter distinct from its visible damage
+// amount. B3.7 stores the player-owned counter in otherwise-reserved CombatState
+// flags: the cards are self-only, and this preserves the frozen PowerSlot/POD
+// layout while reproducing CombustPower.stackPower's +1 hpLoss per application.
+inline constexpr uint32_t kCombatFlagCombustHpLossShift = 8u;
+inline constexpr uint32_t kCombatFlagCombustHpLossMask = 0xFFu << kCombatFlagCombustHpLossShift;
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;

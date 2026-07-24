@@ -22,7 +22,7 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-static_assert(sts::registry::manifest::kCardsCount == 67);  // B3.6: +17 uncommon skills
+static_assert(sts::registry::manifest::kCardsCount == 75);  // B3.7: +8 uncommon power cards (Rage remains B3.6 Skill)
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 static_assert(sts::registry::kIroncladAttackPoolCount == 25);  // B3.6 Infernal Blade pool

@@ -1241,7 +1241,7 @@ no fixture regeneration (SCHEMA_VERSION unchanged, CardInstance still 8 B).
 Verification: focused suite 35/35; full **debug 464/464, ASan/UBSan
 (detect_leaks=1) 464/464 with zero diagnostics, release 464/464**.
 
-### B3.7 `[ ]` ∥ Red uncommons — power cards
+### B3.7 `[x]` ∥ Red uncommons — power cards
 **Deps:** B3.2 · **Provenance:** cards/red UNCOMMON powers (~11; enumerate)
 **Deliverables:** registry entries + their powers: Combust, Dark Embrace,
 Evolve, Feel No Pain, Fire Breathing, Inflame, Metallicize, Rage, Rupture,
@@ -1249,7 +1249,26 @@ plus the power-card play path (card→power, no discard).
 **Acceptance:** tier-2 per power incl. trigger-order interactions (e.g. Feel
 No Pain + Dark Embrace on the same exhaust, list-order resolution per
 stage-a §5.5); directed script.
-**Log:** —
+**Log:** Done 2026-07-24. Source enumeration found eight actual
+RED/UNCOMMON/POWER cards: Combust, Dark Embrace, Evolve, Feel No Pain, Fire
+Breathing, Inflame, Metallicize, and Rupture. Rage is a RED/UNCOMMON
+`CardType.SKILL` already owned by B3.6, so the source roster wins over the
+orientation list. Card ids 68-75 and native power ids 26-27 were appended
+without renumbering. POWER-card play now applies the power and removes the card
+from every pile rather than discarding it. Native hooks implement Combust's
+per-application HP-loss ratchet, Evolve/Fire Breathing draw triggers, and the
+source live-monster/No Draw guards.
+
+Tier-2 tests cover every base/upgraded row, the no-discard path, Combust
+stacking, Evolve and Fire Breathing type filters, Feel No Pain + Dark Embrace
+same-exhaust list order, death/No Draw guards, Metallicize/Rupture, and an
+`advance()` directed script. Provenance read in full: the nine ledger-listed
+card classes (including Rage for its source classification),
+`CombustPower`, `DarkEmbracePower`, `EvolvePower`, `FeelNoPainPower`,
+`FireBreathingPower`, `MetallicizePower`, `RupturePower`, and
+`StrengthPower`. Verified by running, not inferred, in WSL Ubuntu-2404:
+focused B3.7 **12/12**; complete debug **515/515**; leak-detecting
+ASan/UBSan **515/515**.
 
 ### B3.8 `[ ]` ∥ Red rares
 **Deps:** B3.2 · **Provenance:** cards/red RARE (16)
