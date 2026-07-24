@@ -279,8 +279,14 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
 
     // Minimal combat-over check (design doc §5.2 scope note: full death handling
     // is not yet modeled; this just gives the phase transition so pump() cannot
-    // spin).
-    if (s.player_hp <= 0 || !any_monster_alive(s)) {
+    // spin). The all-monsters-dead victory branch is gated on the cannotLose
+    // latch (B3.17): between a splitting slime's SUICIDE and its children's
+    // SPAWN_MONSTER actions no monster is alive, and the game keeps the battle
+    // open exactly because endBattle() checks !cannotLose (AbstractMonster.
+    // updateDeathAnimation:869; CannotLoseAction/CanLoseAction:12-15). Player
+    // death is NOT gated -- the Java latch only guards the victory branch.
+    if (s.player_hp <= 0 ||
+        (!any_monster_alive(s) && (s.flags & kCombatFlagCannotLose) == 0u)) {
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         r.outcome = PumpOutcome::COMBAT_OVER;
         return r;

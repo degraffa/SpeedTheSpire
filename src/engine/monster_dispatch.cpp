@@ -13,6 +13,7 @@
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle (B3.13)
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns (B3.14)
+#include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework (B3.17)
 
 namespace sts::engine {
 
@@ -64,6 +65,10 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &acid_slime_small_init;
         case MonsterId::ACID_SLIME_MEDIUM:
             return &acid_slime_medium_init;
+        case MonsterId::SPIKE_SLIME_LARGE:
+            return &spike_slime_large_init;
+        case MonsterId::ACID_SLIME_LARGE:
+            return &acid_slime_large_init;
         default:
             return nullptr;  // not yet implemented (B3.15-B3.22)
     }
@@ -87,8 +92,93 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &acid_slime_small_take_turn;
         case MonsterId::ACID_SLIME_MEDIUM:
             return &acid_slime_medium_take_turn;
+        case MonsterId::SPIKE_SLIME_LARGE:
+            return &spike_slime_large_take_turn;
+        case MonsterId::ACID_SLIME_LARGE:
+            return &acid_slime_large_take_turn;
         default:
             return &default_monster_turn;  // no-op until the monster's batch lands
+    }
+}
+
+MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
+    switch (id) {
+        case MonsterId::SPIKE_SLIME_LARGE:
+            return &spike_slime_large_roll_move;
+        case MonsterId::ACID_SLIME_LARGE:
+            return &acid_slime_large_roll_move;
+        default:
+            return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
+    }
+}
+
+void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
+    if (monster_index >= kMonsterCap) {
+        return;
+    }
+    const MonsterId id =
+        static_cast<MonsterId>(state.monsters[monster_index].monster_id);
+    const MonsterRollMoveFn fn = monster_roll_move_fn(id);
+    if (fn != nullptr) {
+        fn(state, monster_index);  // no liveness gate (RollMoveAction.java:17-21)
+    }
+}
+
+MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
+    switch (id) {
+        case MonsterId::SPIKE_SLIME_MEDIUM:
+            return &spike_slime_medium_spawn_at_hp;
+        case MonsterId::ACID_SLIME_MEDIUM:
+            return &acid_slime_medium_spawn_at_hp;
+        case MonsterId::SPIKE_SLIME_LARGE:  // B3.20 Slime Boss split children
+            return &spike_slime_large_spawn_at_hp;
+        case MonsterId::ACID_SLIME_LARGE:
+            return &acid_slime_large_spawn_at_hp;
+        default:
+            return nullptr;  // not mid-combat spawnable
+    }
+}
+
+void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
+                           int16_t hp) noexcept {
+    assert(state.monster_count < kMonsterCap &&
+           "spawn_monster_at_slot: monster record overflow (kMonsterCap sized "
+           "for the fully-split Slime Boss, combat_state.hpp)");
+    if (slot > state.monster_count) {
+        slot = state.monster_count;  // defensive clamp (addMonster clamps < 0)
+    }
+    // List-insert: shift records at >= slot up one (MonsterGroup.addMonster,
+    // MonsterGroup.java:35-40). Dead records shift too -- index identity among
+    // ALL records is what smart positioning counted.
+    for (uint8_t i = state.monster_count; i > slot; --i) {
+        state.monsters[i] = state.monsters[i - 1];
+    }
+    state.monsters[slot] = MonsterState{};
+    ++state.monster_count;
+    // Remap pending monster-turn queue entries (the game's monsterQueue holds
+    // object references, immune to list insertion; this engine holds indices).
+    for (uint8_t i = 0; i < state.monster_queue_count; ++i) {
+        if (state.monster_queue[i].monster_index >= slot) {
+            ++state.monster_queue[i].monster_index;
+        }
+    }
+    const MonsterSpawnAtHpFn fn = monster_spawn_at_hp_fn(id);
+    assert(fn != nullptr && "spawn_monster_at_slot: monster is not mid-combat "
+                            "spawnable (monster_spawn_at_hp_fn)");
+    fn(state, slot, hp);  // m.init(): the child's aiRng roll, at resolve time
+}
+
+void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
+    if (monster_index >= kMonsterCap) {
+        return;
+    }
+    switch (static_cast<MonsterId>(state.monsters[monster_index].monster_id)) {
+        case MonsterId::SPIKE_SLIME_LARGE:
+        case MonsterId::ACID_SLIME_LARGE:
+            large_slime_on_damaged(state, monster_index);
+            return;
+        default:
+            return;  // no damage() override
     }
 }
 

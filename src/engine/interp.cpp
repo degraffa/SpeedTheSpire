@@ -15,6 +15,7 @@
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/monster_dispatch.hpp"  // B3.17: on_monster_damaged / roll_monster_move / spawn_monster_at_slot
 #include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
 #include "sts/engine/power_hooks.hpp"   // B3.2 hook dispatch (onGainedBlock/onApplyPower/wasHPLost/onCardDraw)
 #include "sts/engine/powers.hpp"        // power_def / PowerType (APPLY_POWER interception)
@@ -202,6 +203,14 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
     }
+    // Monster damage() override seam (B3.17): the large slimes' split interrupt
+    // wraps super.damage() and runs AFTER it, for EVERY DamageInfo type
+    // (AcidSlime_L.java:142-152 / SpikeSlime_L.java:130-140 -- the guard reads
+    // only resulting state, so a fully-blocked hit still checks). Dispatched by
+    // monster_id; no-op for monsters without an override.
+    if (tgt != kActorPlayer) {
+        on_monster_damaged(s, tgt);
+    }
 }
 
 // LOSE_HP: `tgt` loses `amount` HP directly, bypassing block (LoseHPAction /
@@ -228,6 +237,11 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
                          static_cast<uint8_t>(DamageType::HP_LOSS));
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
+    }
+    // LoseHPAction also routes through creature.damage() (LoseHPAction.java:41),
+    // so the monster damage() override seam fires here too (B3.17).
+    if (tgt != kActorPlayer) {
+        on_monster_damaged(s, tgt);
     }
 }
 
@@ -965,7 +979,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             exhaust_card(s, item.amount);  // piles.cpp
             return;
         case Opcode::ROLL_MOVE:
-            return;  // stub: Jaw Worm rolls inside its MonsterTurnFn
+            // Dispatch to the target's queued-roll body if it registers one
+            // (large slimes, B3.17); a no-op for inline-rolling monsters. NO
+            // liveness gate -- RollMoveAction.update rolls even on a dead
+            // split parent (RollMoveAction.java:17-21).
+            roll_monster_move(s, item.tgt);
+            return;
         case Opcode::MAKE_CARD:
             op_make_card(s, make_card_id_from_flags(item.flags),
                          static_cast<CardPile>(item.src), item.amount,
@@ -1041,6 +1060,47 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // Baked into a plain DAMAGE at queue time (card_play.cpp); never
             // reaches execute in practice. Safe no-op if it somehow does.
             return;
+        case Opcode::CANNOT_LOSE:
+            // CannotLoseAction.update (CannotLoseAction.java:12-15): latch the
+            // room's cannotLose so the pump's all-monsters-dead victory gate
+            // stays closed across the split's suicide-then-spawn window.
+            s.flags |= kCombatFlagCannotLose;
+            return;
+        case Opcode::CAN_LOSE:
+            s.flags &= ~kCombatFlagCannotLose;  // CanLoseAction.java:12-15
+            return;
+        case Opcode::SUICIDE: {
+            // SuicideAction.update (SuicideAction.java:29-36): gold = 0 (no
+            // per-monster gold field), currentHealth = 0, die(relicTrigger).
+            // The split passes triggerRelics == false (flags bit0 clear): no
+            // power onDeath / relic onMonsterDeath dispatch (none exist in the
+            // current roster anyway; the bit records the ctor argument). Block
+            // is NOT cleared -- SuicideAction bypasses damage()'s block-break.
+            if (item.tgt >= kMonsterCap) {
+                return;
+            }
+            s.monsters[item.tgt].hp = 0;
+            return;
+        }
+        case Opcode::SPAWN_MONSTER:
+            // SpawnMonsterAction.update (SpawnMonsterAction.java:42-73):
+            // insert the record at the pre-computed slot and run the child's
+            // init() aiRng roll at RESOLVE time (monster_dispatch.cpp).
+            spawn_monster_at_slot(
+                s, item.tgt, static_cast<MonsterId>(item.flags & 0xFFFFu),
+                static_cast<int16_t>(item.amount));
+            return;
+        case Opcode::SET_MOVE: {
+            // SetMoveAction.update (SetMoveAction.java:52-56) -> setMove:
+            // pushes move history + intent, no liveness check.
+            if (item.tgt >= kMonsterCap) {
+                return;
+            }
+            set_monster_move(s.monsters[item.tgt],
+                             static_cast<uint8_t>(item.amount),
+                             static_cast<MonsterIntent>(item.flags & 0xFFu));
+            return;
+        }
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

@@ -32,10 +32,15 @@
 //     + the JDK LCG -- lives in piles.cpp (shuffle_discard_into_draw); the
 //     dispatch delegates there.
 //
-// (2) ROLL_MOVE is a no-op. Jaw Worm rolls its next move DIRECTLY inside
-//     jaw_worm_take_turn (the MonsterTurnFn callback), not via a queued item;
-//     the opcode exists only for future data-driven monster AI expressed
-//     through the registry (design doc §6).
+// (2) ROLL_MOVE dispatches to the target monster's queued-roll function
+//     (monster_dispatch.hpp roll_monster_move) and is a no-op for monsters
+//     without one. Most natives (Jaw Worm, B3.13/B3.14 monsters) roll DIRECTLY
+//     inside their MonsterTurnFn -- their queues never carry ROLL_MOVE items.
+//     The B3.17 large slimes queue real ROLL_MOVE items because the game's
+//     RollMoveAction resolves AFTER any mid-turn damage interrupt queues its
+//     SetMoveAction (and even on the already-dead split parent --
+//     RollMoveAction.update has no liveness check, RollMoveAction.java:17-21),
+//     so the aiRng draw order is only reproducible by rolling at dequeue time.
 //
 // (3) Opcode NUMBERING: NOP == 0 is reserved as a safe no-op. This is required,
 //     not cosmetic: value-initialized ActionQueueItems (opcode == 0) are pushed
@@ -172,6 +177,32 @@ enum class Opcode : uint16_t {
                               // then source.misc += extra (Rampage 8,+5 / +8).
     EXHAUST_NON_ATTACKS = 24, // exhaust every non-Attack remaining in hand, from
                               // top to bottom (Sever Soul).
+    // --- Stage B B3.17 additions (append-only from 25): split framework ---
+    CANNOT_LOSE = 25,         // set kCombatFlagCannotLose: combat may not end on
+                              // all-monsters-dead while the split sequence is in
+                              // flight (CannotLoseAction.java:12-15; the pump's
+                              // victory gate mirrors AbstractMonster.
+                              // updateDeathAnimation's !cannotLose check, :869).
+    CAN_LOSE = 26,            // clear kCombatFlagCannotLose (CanLoseAction.java:12-15).
+    SUICIDE = 27,             // tgt monster: hp = 0, dying; flags bit0 selects
+                              // relic triggers (SuicideAction.java:29-36 --
+                              // splits pass triggerRelics=false, so bit0 clear;
+                              // gold=0 has no CombatState field). Block is NOT
+                              // cleared (SuicideAction bypasses damage()).
+    SPAWN_MONSTER = 28,       // insert a monster record at slot `tgt` (records at
+                              // >= tgt shift up one; monster_queue indices are
+                              // remapped) with hp = max_hp = `amount` and
+                              // MonsterId in flags low16, then run the spawned
+                              // monster's init() rollMove on ai_rng
+                              // (SpawnMonsterAction.java:42-73; the 4-arg medium
+                              // slime ctor takes newHealth directly -- NO
+                              // monster_hp_rng draw, AcidSlime_M.java:65-66 /
+                              // AbstractMonster.java:139,150).
+    SET_MOVE = 29,            // set monsters[tgt]'s decided move to `amount` with
+                              // intent flags low8 -- pushes move history exactly
+                              // like a direct setMove (SetMoveAction.java:52-56 ->
+                              // AbstractMonster.setMove:431-437). No liveness
+                              // check, matching the Java.
 };
 
 // --- CHOOSE_CARD field encoding (Stage B B3.4) ------------------------------

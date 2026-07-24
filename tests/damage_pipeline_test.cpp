@@ -265,9 +265,11 @@ TEST(InterpOpcode, ExhaustMovesCardFromHandToExhaust) {
     EXPECT_EQ(s.exhaust_count, 1);
 }
 
-// --- ROLL_MOVE is a stubbed no-op -------------------------------------------
-// (SHUFFLE_IN's behavior is covered by piles_test; ROLL_MOVE remains a
-// documented no-op here.)
+// --- ROLL_MOVE without a queued-roll fn is a no-op ----------------------------
+// (SHUFFLE_IN's behavior is covered by piles_test. Since B3.17, ROLL_MOVE
+// dispatches to the target monster's queued-roll function -- registered only by
+// the large slimes; for every inline-rolling monster, Jaw Worm here, it must
+// remain a strict no-op. large_slime_test covers the real-roll path.)
 
 TEST(InterpStub, RollMoveDoesNotMutateState) {
     CombatState s = make_combat();

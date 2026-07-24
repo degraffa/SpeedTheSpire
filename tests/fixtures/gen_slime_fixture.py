@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Independent A20 fixtures for B3.14's four small/medium slimes.
+"""Independent A20 fixtures for B3.14's four small/medium slimes and B3.17's
+two large slimes (move selection only -- no damage, so the split interrupt
+never fires and the tables pin the pure getMove trees).
 
 This is deliberately a second implementation of the decompiled decision trees,
 not shared with the C++ monster module. It emits one TSV per class for 32 fixed
@@ -10,6 +12,7 @@ seed-battery seeds x 20 turns. Regenerate from the repository root with:
 Provenance read in full before authoring:
   SpikeSlime_S.java:42-76; SpikeSlime_M.java:51-117;
   AcidSlime_S.java:45-95; AcidSlime_M.java:56-168;
+  SpikeSlime_L.java:68-94,142-167; AcidSlime_L.java:73-102,154-215;
   AbstractMonster.java:431-491,465-467,712-715,765-775;
   Random.java:53-86 and RandomXS128's nextInt/nextBoolean/nextFloat.
 """
@@ -81,8 +84,13 @@ class Rng:
         return value
 
     def random_boolean_chance(self, chance):
-        # RandomXS128.nextFloat = (nextLong >>> 40) * 2^-24. The result is
-        # exactly representable for the source's 0.5f/0.4f thresholds.
+        # RandomXS128.nextFloat = (nextLong >>> 40) * 2^-24 -- exact in double
+        # (a <= 24-bit integer times a power of two). Passing the Python double
+        # literal (0.5/0.4/0.6) is boolean-equivalent to Java's float compare:
+        # no representable nextFloat value lies strictly between the double
+        # threshold and the rounded float threshold for these constants (0.6f =
+        # 0.60000002384185791 IS a representable nextFloat value, and both
+        # comparisons make `x < threshold` false at equality).
         value = (self._next_long_bits() >> 40) * (2.0 ** -24) < chance
         self.counter += 1
         return value
@@ -115,6 +123,39 @@ def decide_spike_medium(ai, history):
 def decide_acid_small_initial(ai, history):
     ai.random_int(99)  # A17 branch ignores num
     history.append(1 if last_two(history, 1) else 2)
+
+
+def decide_spike_large(ai, history):
+    # SpikeSlime_L.getMove A17 branch (SpikeSlime_L.java:144-155): no booleans.
+    num = ai.random_int(99)
+    if num < 30:
+        move = 4 if last_two(history, 1) else 1
+    elif last_move(history, 4):
+        move = 1
+    else:
+        move = 4
+    history.append(move)
+
+
+def decide_acid_large(ai, history):
+    # AcidSlime_L.getMove A17 branch (AcidSlime_L.java:156-185): 0.6f/0.6f/0.4f
+    # nextFloat tiebreaks.
+    num = ai.random_int(99)
+    if num < 40:
+        if last_two(history, 1):
+            move = 2 if ai.random_boolean_chance(0.6) else 4
+        else:
+            move = 1
+    elif num < 70:
+        if last_two(history, 2):
+            move = 1 if ai.random_boolean_chance(0.6) else 4
+        else:
+            move = 2
+    elif last_move(history, 4):
+        move = 1 if ai.random_boolean_chance(0.4) else 2
+    else:
+        move = 4
+    history.append(move)
 
 
 def decide_acid_medium(ai, history):
@@ -156,34 +197,36 @@ def simulate(seed, hp_lo, hp_hi, variant):
     ai = Rng(seed)
     hp = hp_rng.random_range(hp_lo, hp_hi)
     history = []
-    if variant == "spike_small":
-        decide_spike_small(ai, history)
-    elif variant == "spike_medium":
-        decide_spike_medium(ai, history)
-    elif variant == "acid_small":
-        decide_acid_small_initial(ai, history)
-    else:
-        decide_acid_medium(ai, history)
+    deciders = {
+        "spike_small": decide_spike_small,
+        "spike_medium": decide_spike_medium,
+        "acid_small": decide_acid_small_initial,
+        "acid_medium": decide_acid_medium,
+        "spike_large": decide_spike_large,
+        "acid_large": decide_acid_large,
+    }
+    deciders[variant](ai, history)
 
     turns = []
     for _ in range(NUM_TURNS):
         executed = history[-1]
-        if variant == "spike_small":
-            decide_spike_small(ai, history)
-        elif variant == "spike_medium":
-            decide_spike_medium(ai, history)
-        elif variant == "acid_small":
+        if variant == "acid_small":
             # takeTurn sets the next move directly: Tackle -> Lick, Lick -> Tackle.
             history.append(2 if executed == 1 else 1)
         else:
-            decide_acid_medium(ai, history)
+            # Every other class re-rolls each turn. For the large slimes the
+            # roll is a QUEUED RollMoveAction (resolved when the turn's actions
+            # drain), but with no damage in this battery the drain order is
+            # RNG-equivalent to rolling at the end of takeTurn.
+            deciders[variant](ai, history)
         turns.append((executed, ai.s0, ai.s1, ai.counter))
     return hp, hp_rng, turns
 
 
 def write_variant(here, seeds, variant, hp_lo, hp_hi):
+    task = "B3.17" if "large" in variant else "B3.14"
     lines = [
-        f"# {variant} A20 independent fixture (B3.14).",
+        f"# {variant} A20 independent fixture ({task}).",
         "# seed <label> <seed> <hp> <hp_s0> <hp_s1> <hp_counter>",
         "# turn <K> <executed_move> <ai_s0> <ai_s1> <ai_counter>",
     ]
@@ -208,6 +251,10 @@ def main():
     write_variant(here, seeds, "spike_medium", 29, 34)
     write_variant(here, seeds, "acid_small", 9, 13)
     write_variant(here, seeds, "acid_medium", 29, 34)
+    # B3.17 large slimes: A7+ HP columns at the fixed A20 difficulty
+    # (SpikeSlime_L.java:71 / AcidSlime_L.java:76).
+    write_variant(here, seeds, "spike_large", 67, 73)
+    write_variant(here, seeds, "acid_large", 68, 72)
 
 
 if __name__ == "__main__":

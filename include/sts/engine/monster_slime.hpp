@@ -32,6 +32,16 @@ void spike_slime_medium_init(CombatState& state, uint8_t monster_index) noexcept
 void acid_slime_small_init(CombatState& state, uint8_t monster_index) noexcept;
 void acid_slime_medium_init(CombatState& state, uint8_t monster_index) noexcept;
 
+// B3.17 split-spawn seam: the game's 4-arg medium ctor + init() -- fields set
+// with hp = max_hp = `hp` (NO monster_hp_rng draw; AcidSlime_M.java:65-66 /
+// SpikeSlime_M.java:60-61 pass newHealth straight to super, AbstractMonster.
+// java:139,150), then the one init() aiRng rollMove. A splitting large slime's
+// children spawn through these, so they ARE the existing B3.14 mediums.
+void spike_slime_medium_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                                    int16_t hp) noexcept;
+void acid_slime_medium_spawn_at_hp(CombatState& state, uint8_t monster_index,
+                                   int16_t hp) noexcept;
+
 void spike_slime_small_take_turn(CombatState& state,
                                  uint8_t monster_index) noexcept;
 void spike_slime_medium_take_turn(CombatState& state,

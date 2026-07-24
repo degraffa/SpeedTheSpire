@@ -164,7 +164,17 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_RAMPAGE) ==
             static_cast<uint16_t>(Opcode::DAMAGE_RAMPAGE) &&
         static_cast<uint16_t>(sts::registry::Opcode::EXHAUST_NON_ATTACKS) ==
-            static_cast<uint16_t>(Opcode::EXHAUST_NON_ATTACKS),
+            static_cast<uint16_t>(Opcode::EXHAUST_NON_ATTACKS) &&
+        static_cast<uint16_t>(sts::registry::Opcode::CANNOT_LOSE) ==
+            static_cast<uint16_t>(Opcode::CANNOT_LOSE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::CAN_LOSE) ==
+            static_cast<uint16_t>(Opcode::CAN_LOSE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::SUICIDE) ==
+            static_cast<uint16_t>(Opcode::SUICIDE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::SPAWN_MONSTER) ==
+            static_cast<uint16_t>(Opcode::SPAWN_MONSTER) &&
+        static_cast<uint16_t>(sts::registry::Opcode::SET_MOVE) ==
+            static_cast<uint16_t>(Opcode::SET_MOVE),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

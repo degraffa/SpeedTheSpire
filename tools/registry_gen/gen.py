@@ -91,6 +91,24 @@ OPCODES = {
     "DAMAGE_UPGRADE_SCALE": 22,
     "DAMAGE_RAMPAGE": 23,
     "EXHAUST_NON_ATTACKS": 24,
+    # Stage B B3.17 additions (append-only from 25): the large-slime split
+    # framework's queued actions. CANNOT_LOSE / CAN_LOSE set/clear the room's
+    # cannotLose latch (CannotLoseAction.java:12-15 / CanLoseAction.java:12-15)
+    # so combat cannot terminate between the parent's suicide and the children's
+    # spawns. SUICIDE zeroes the target monster's HP, dying WITHOUT relic
+    # triggers when flags bit0 is clear (SuicideAction.java:29-36,
+    # die(relicTrigger=false)). SPAWN_MONSTER inserts a monster record at slot
+    # `tgt` with `amount` HP and MonsterId in flags low16, then runs the spawned
+    # monster's init() rollMove (SpawnMonsterAction.java:42-73). SET_MOVE re-sets
+    # a monster's decided move (`amount`) + intent (flags low8) at resolve time
+    # (SetMoveAction.java:52-56) -- the split interrupt's queued override. All
+    # five are emitted natively by monster modules, never authored in YAML move
+    # programs, but pinned in the enum for the cards.hpp drift check.
+    "CANNOT_LOSE": 25,
+    "CAN_LOSE": 26,
+    "SUICIDE": 27,
+    "SPAWN_MONSTER": 28,
+    "SET_MOVE": 29,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -236,6 +254,8 @@ MONSTER_INTENTS = {
     "BUFF": 4,       # Cultist Incantation, Louse Strengthen (AbstractMonster.Intent.BUFF)
     "DEBUFF": 5,     # Louse Defensive Weaken (AbstractMonster.Intent.DEBUFF)
     "ATTACK_DEBUFF": 6,  # slime tackle + Slimed (AbstractMonster.Intent.ATTACK_DEBUFF)
+    "UNKNOWN": 7,        # large-slime Split telegraph (AbstractMonster.Intent.UNKNOWN;
+                         # AcidSlime_L.java:137,146 / SpikeSlime_L.java:124,134)
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

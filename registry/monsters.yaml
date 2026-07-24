@@ -272,3 +272,82 @@
       effects:
         - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
   ai: native
+
+# --- B3.17: large slimes + split framework ------------------------------------
+# Both classes read in full. Constructors consume exactly one monsterHpRng draw
+# (setHp) and add SplitPower (amount -1, display-only marker; SplitPower.java:
+# 19-26); AbstractMonster.init consumes the first aiRng random(99) draw. The
+# SPLIT move (byte 3) has NO data program: its takeTurn body is runtime-dependent
+# (CannotLose -> Suicide(no relics) -> 2x SpawnMonsterAction(medium slime at the
+# parent's CURRENT hp) -> CanLose; AcidSlime_L.java:127-138 / SpikeSlime_L.java:
+# 114-125), queued natively by monster_slime_large.cpp -- the NOP placeholder
+# below only records the move id + UNKNOWN intent telegraph (the Louse rolled-
+# bite amount-0 precedent). The damage() interrupt (<= half max HP -> re-
+# telegraph SPLIT + queued SetMoveAction, splitTriggered latch) is native too
+# (AcidSlime_L.java:142-152 / SpikeSlime_L.java:130-140).
+
+- id: 9
+  name: SPIKE_SLIME_LARGE
+  game_id: "SpikeSlime_L"
+  provenance: "SpikeSlime_L ctor HP/damage/SplitPower branches (SpikeSlime_L.java:68-94), takeTurn incl. unconditional trailing RollMoveAction (:96-128), damage interrupt (:130-140), getMove A17 (:142-167), move ids FLAME_TACKLE=1/SPLIT=3/FRAIL_LICK=4 (:59-61); SplitPower ctor amount -1 (SplitPower.java:19-26); SpawnMonsterAction smart positioning (SpawnMonsterAction.java:28-59); SuicideAction (SuicideAction.java:21-36)"
+  hp:
+    base: {min: 64, max: 70}  # SpikeSlime_L.java:73
+    a7:   {min: 67, max: 73}  # SpikeSlime_L.java:71
+  moves:
+    - name: FLAME_TACKLE
+      move_id: 1
+      intent: ATTACK_DEBUFF
+      effects:
+        # damage.get(0): 16, A2 18 (SpikeSlime_L.java:82-86); then 2 Slimed into
+        # the discard (WOUND_COUNT=2; :111, MakeTempCardInDiscardAction).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 16, a2: 18}}
+        - {op: MAKE_CARD, target: PLAYER, amount: 2, card: SLIMED, pile: DISCARD}
+    - name: SPLIT
+      move_id: 3
+      intent: UNKNOWN
+      effects:
+        # Native split sequence (see the block comment above); NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: FRAIL_LICK
+      move_id: 4
+      intent: DEBUFF
+      effects:
+        # FrailPower(player, A17 ? 3 : 2, true) (SpikeSlime_L.java:100-106).
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 2, a17: 3}, power: FRAIL}
+  ai: native
+
+- id: 10
+  name: ACID_SLIME_LARGE
+  game_id: "AcidSlime_L"
+  provenance: "AcidSlime_L ctor HP/damage/SplitPower branches (AcidSlime_L.java:73-102), takeTurn (:104-140; per-case RollMoveAction, NONE in the split case), damage interrupt (:142-152), getMove A17 (:154-215), move ids SLIME_TACKLE=1/NORMAL_TACKLE=2/SPLIT=3/WEAK_LICK=4 (:65-68); SplitPower ctor amount -1 (SplitPower.java:19-26); SpawnMonsterAction smart positioning (SpawnMonsterAction.java:28-59); SuicideAction (SuicideAction.java:21-36)"
+  hp:
+    base: {min: 65, max: 69}  # AcidSlime_L.java:78
+    a7:   {min: 68, max: 72}  # AcidSlime_L.java:76
+  moves:
+    - name: WOUND_TACKLE
+      move_id: 1
+      intent: ATTACK_DEBUFF
+      effects:
+        # damage.get(0): 11, A2 12 (AcidSlime_L.java:88-92); then 2 Slimed into
+        # the discard (WOUND_COUNT=2; :117).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 11, a2: 12}}
+        - {op: MAKE_CARD, target: PLAYER, amount: 2, card: SLIMED, pile: DISCARD}
+    - name: TACKLE
+      move_id: 2
+      intent: ATTACK
+      effects:
+        # damage.get(1): 16, A2 18 (AcidSlime_L.java:89-92,123).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 16, a2: 18}}
+    - name: SPLIT
+      move_id: 3
+      intent: UNKNOWN
+      effects:
+        # Native split sequence (see the block comment above); NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: LICK
+      move_id: 4
+      intent: DEBUFF
+      effects:
+        # WeakPower(player, 2, true) (AcidSlime_L.java:109; WEAK_TURNS=2).
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+  ai: native

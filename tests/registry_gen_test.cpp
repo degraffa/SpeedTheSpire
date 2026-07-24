@@ -323,15 +323,16 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 50u);   // B3.5: prior 39 + 11 red uncommon attacks
-    EXPECT_EQ(m::kPowersCount, 21u);  // 19 + B3.13 Curl Up + B3.9 Frail
-    EXPECT_EQ(m::kMonstersCount, 8u); // + B3.14 four small/medium slimes
+    EXPECT_EQ(m::kPowersCount, 22u);  // 19 + B3.13 Curl Up + B3.9 Frail + B3.17 Split
+    EXPECT_EQ(m::kMonstersCount, 10u); // + B3.14 four small/medium slimes
+                                       // + B3.17 two large slimes
     EXPECT_EQ(m::kRelicsCount, 35u);  // + B4.6 Circlet fallback
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 167u);  // integrated through B3.5/B3.14/B4.6
+    EXPECT_EQ(m::kTotalCount, 170u);  // integrated through B3.5/B3.14/B4.6/B3.17
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -633,6 +634,96 @@ TEST(RegistryGen, SmallAndMediumSlimeTablesMatchJava) {
               sts::engine::make_apply_power_flags(sts::engine::PowerId::WEAK));
 
     EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::ATTACK_DEBUFF), 6);
+}
+
+TEST(RegistryGen, LargeSlimeTablesMatchJava) {
+    namespace r = sts::registry;
+    // Appended ids after 8 (append-only, design doc §4.4); UNKNOWN intent and
+    // the Split marker power are pinned appends too.
+    EXPECT_EQ(static_cast<int>(r::MonsterId::SPIKE_SLIME_LARGE), 9);
+    EXPECT_EQ(static_cast<int>(r::MonsterId::ACID_SLIME_LARGE), 10);
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::UNKNOWN), 7);
+    EXPECT_EQ(static_cast<int>(r::PowerId::SPLIT), 22);
+    EXPECT_EQ(r::monster_from_game_id("SpikeSlime_L"),
+              r::MonsterId::SPIKE_SLIME_LARGE);
+    EXPECT_EQ(r::monster_from_game_id("AcidSlime_L"),
+              r::MonsterId::ACID_SLIME_LARGE);
+    EXPECT_EQ(r::power_game_id(r::PowerId::SPLIT), "Split");
+
+    // HP columns (SpikeSlime_L.java:71-73 / AcidSlime_L.java:76-78).
+    EXPECT_EQ(r::kSpikeSlimeLarge.hp_min(6), 64);
+    EXPECT_EQ(r::kSpikeSlimeLarge.hp_max(6), 70);
+    EXPECT_EQ(r::kSpikeSlimeLarge.hp_min(7), 67);
+    EXPECT_EQ(r::kSpikeSlimeLarge.hp_max(20), 73);
+    EXPECT_EQ(r::kAcidSlimeLarge.hp_min(6), 65);
+    EXPECT_EQ(r::kAcidSlimeLarge.hp_max(6), 69);
+    EXPECT_EQ(r::kAcidSlimeLarge.hp_min(7), 68);
+    EXPECT_EQ(r::kAcidSlimeLarge.hp_max(20), 72);
+    EXPECT_TRUE(r::kSpikeSlimeLarge.ai_native);
+    EXPECT_TRUE(r::kAcidSlimeLarge.ai_native);
+    EXPECT_EQ(r::kSpikeSlimeLarge.roll_count, 0);
+    EXPECT_EQ(r::kAcidSlimeLarge.roll_count, 0);
+
+    // Spike L FLAME_TACKLE: 16/A2 18 + 2 Slimed to discard (SpikeSlime_L.java:
+    // 82-86,108-112); FRAIL_LICK 2/A17 3 (:100-106); SPLIT telegraph UNKNOWN.
+    const r::MonsterMove* spike_tackle =
+        r::kSpikeSlimeLarge.move(r::kSpikeSlimeLargeMoveFlameTackle);
+    ASSERT_NE(spike_tackle, nullptr);
+    EXPECT_EQ(spike_tackle->intent, r::MonsterIntent::ATTACK_DEBUFF);
+    ASSERT_EQ(spike_tackle->effect_count, 2);
+    EXPECT_EQ(spike_tackle->effects[0].amount.at(1), 16);
+    EXPECT_EQ(spike_tackle->effects[0].amount.at(2), 18);
+    EXPECT_EQ(spike_tackle->effects[1].op, r::Opcode::MAKE_CARD);
+    EXPECT_EQ(spike_tackle->effects[1].amount.at(20), 2) << "WOUND_COUNT";
+    EXPECT_EQ(spike_tackle->effects[1].extra & 0xFFFFu,
+              static_cast<uint32_t>(r::CardId::SLIMED));
+    EXPECT_EQ((spike_tackle->effects[1].extra >> 16) & 0xFFu, 2u)
+        << "CardPile::DISCARD";
+    const r::MonsterMove* spike_frail =
+        r::kSpikeSlimeLarge.move(r::kSpikeSlimeLargeMoveFrailLick);
+    ASSERT_NE(spike_frail, nullptr);
+    EXPECT_EQ(spike_frail->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::FRAIL));
+    EXPECT_EQ(spike_frail->effects[0].amount.at(16), 2);
+    EXPECT_EQ(spike_frail->effects[0].amount.at(17), 3);
+    const r::MonsterMove* spike_split =
+        r::kSpikeSlimeLarge.move(r::kSpikeSlimeLargeMoveSplit);
+    ASSERT_NE(spike_split, nullptr);
+    EXPECT_EQ(spike_split->move_id, 3);
+    EXPECT_EQ(spike_split->intent, r::MonsterIntent::UNKNOWN);
+
+    // Acid L WOUND_TACKLE 11/A2 12 + 2 Slimed; TACKLE 16/A2 18; LICK Weak 2;
+    // SPLIT telegraph UNKNOWN (AcidSlime_L.java:88-92,107-138).
+    const r::MonsterMove* acid_wound =
+        r::kAcidSlimeLarge.move(r::kAcidSlimeLargeMoveWoundTackle);
+    ASSERT_NE(acid_wound, nullptr);
+    EXPECT_EQ(acid_wound->effects[0].amount.at(1), 11);
+    EXPECT_EQ(acid_wound->effects[0].amount.at(2), 12);
+    EXPECT_EQ(acid_wound->effects[1].op, r::Opcode::MAKE_CARD);
+    EXPECT_EQ(acid_wound->effects[1].amount.at(20), 2);
+    const r::MonsterMove* acid_tackle =
+        r::kAcidSlimeLarge.move(r::kAcidSlimeLargeMoveTackle);
+    ASSERT_NE(acid_tackle, nullptr);
+    EXPECT_EQ(acid_tackle->effects[0].amount.at(1), 16);
+    EXPECT_EQ(acid_tackle->effects[0].amount.at(2), 18);
+    const r::MonsterMove* acid_lick =
+        r::kAcidSlimeLarge.move(r::kAcidSlimeLargeMoveLick);
+    ASSERT_NE(acid_lick, nullptr);
+    EXPECT_EQ(acid_lick->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::WEAK));
+    EXPECT_EQ(acid_lick->effects[0].amount.at(20), 2) << "WEAK_TURNS";
+    const r::MonsterMove* acid_split =
+        r::kAcidSlimeLarge.move(r::kAcidSlimeLargeMoveSplit);
+    ASSERT_NE(acid_split, nullptr);
+    EXPECT_EQ(acid_split->move_id, 3);
+    EXPECT_EQ(acid_split->intent, r::MonsterIntent::UNKNOWN);
+
+    // The B3.17 split-framework opcodes are pinned appends from 25.
+    EXPECT_EQ(static_cast<uint16_t>(r::Opcode::CANNOT_LOSE), 25);
+    EXPECT_EQ(static_cast<uint16_t>(r::Opcode::CAN_LOSE), 26);
+    EXPECT_EQ(static_cast<uint16_t>(r::Opcode::SUICIDE), 27);
+    EXPECT_EQ(static_cast<uint16_t>(r::Opcode::SPAWN_MONSTER), 28);
+    EXPECT_EQ(static_cast<uint16_t>(r::Opcode::SET_MOVE), 29);
 }
 
 // --- 6d. Duplicate move_id is rejected with a clear error --------------------

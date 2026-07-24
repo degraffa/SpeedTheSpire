@@ -171,6 +171,21 @@ sts_enable_sanitizers(slime_test)
 
 gtest_discover_tests(slime_test)
 
+# B3.17: large slimes + split framework. Independent 32-seed x 20-turn fixtures
+# pin each class's aiRng draw sequence (incl. Acid L's nextFloat tiebreaks);
+# focused tests pin the exact split threshold, child HP/slots, queue state after
+# a split, both interrupt timings, and the cannotLose termination window.
+add_executable(large_slime_test
+    large_slime_test.cpp
+)
+
+target_link_libraries(large_slime_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(large_slime_test PRIVATE STS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+sts_set_warnings(large_slime_test)
+sts_enable_sanitizers(large_slime_test)
+
+gtest_discover_tests(large_slime_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

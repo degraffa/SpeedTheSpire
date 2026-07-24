@@ -121,6 +121,39 @@ void acid_slime_medium_init(CombatState& s, uint8_t mi) noexcept {
     acid_medium_roll(s, s.monsters[mi]);
 }
 
+namespace {
+// B3.17 split-spawn seam (see monster_slime.hpp): the 4-arg ctor sets
+// hp = max_hp = newHealth with NO monster_hp_rng draw (AcidSlime_M.java:65-66 /
+// SpikeSlime_M.java:60-61 -> AbstractMonster.java:139,150); init() then does
+// the single aiRng rollMove (AbstractMonster.java:712-715).
+void spawn_fields_at_hp(CombatState& s, uint8_t mi, MonsterId id,
+                        int16_t hp) noexcept {
+    MonsterState& m = s.monsters[mi];
+    m.monster_id = static_cast<uint16_t>(id);
+    m.hp = hp;
+    m.max_hp = hp;
+    m.block = 0;
+    m.flags = 0;
+    m.power_count = 0;
+    m.pad0 = 0;
+    m.move_history[0] = 0;
+    m.move_history[1] = 0;
+    m.move_history[2] = 0;
+}
+}  // namespace
+
+void spike_slime_medium_spawn_at_hp(CombatState& s, uint8_t mi,
+                                    int16_t hp) noexcept {
+    spawn_fields_at_hp(s, mi, MonsterId::SPIKE_SLIME_MEDIUM, hp);
+    spike_medium_roll(s, s.monsters[mi]);
+}
+
+void acid_slime_medium_spawn_at_hp(CombatState& s, uint8_t mi,
+                                   int16_t hp) noexcept {
+    spawn_fields_at_hp(s, mi, MonsterId::ACID_SLIME_MEDIUM, hp);
+    acid_medium_roll(s, s.monsters[mi]);
+}
+
 void spike_slime_small_take_turn(CombatState& s, uint8_t mi) noexcept {
     queue_monster_move_effects(s, mi, sts::registry::kSpikeSlimeSmall,
                                s.monsters[mi].move_history[0]);

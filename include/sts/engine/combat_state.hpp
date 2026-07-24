@@ -82,6 +82,15 @@ inline constexpr int kPreTurnActionQueueCap = 16;
 // inside the frozen POD without a schema/layout change.
 inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
 
+// CombatState.flags bit for the room's cannotLose latch (B3.17 split framework).
+// Set by the CANNOT_LOSE opcode and cleared by CAN_LOSE (CannotLoseAction.java:
+// 12-15 / CanLoseAction.java:12-15). While set, the pump's all-monsters-dead
+// victory transition is suppressed (AbstractMonster.updateDeathAnimation:869
+// gates endBattle() on !cannotLose), so a splitting slime's suicide cannot end
+// the combat before its children's SPAWN_MONSTER actions resolve. Player death
+// is NOT gated (the Java latch only guards the victory branch).
+inline constexpr uint32_t kCombatFlagCannotLose = 1u << 1;
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;
@@ -177,6 +186,11 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //   * `pad0` -- Louse (Normal/Defensive): the per-instance rolled bite damage
 //     (monsterHpRng draw in the ctor, LouseNormal.java:60). 5..8 fits a byte; the
 //     louse turn reads it for the BITE DamageAction (see monster_louse.cpp).
+//   * `flags` bit kMonsterFlagSplitTriggered -- large slimes (B3.17): the
+//     `splitTriggered` one-shot latch (AcidSlime_L.java:71,150 /
+//     SpikeSlime_L.java:66,138). Set synchronously by the damage() interrupt
+//     the first time currentHealth falls to <= maxHealth/2 so later hits do not
+//     re-queue the split telegraph.
 // These are mutually exclusive across monster types (a Cultist never bites; a
 // Louse never has Ritual), so no field is read under two meanings at once.
 struct MonsterState {
@@ -196,6 +210,9 @@ struct MonsterState {
 // power's next at_end_of_round Strength tick is skipped (RitualPower.java:48-53).
 inline constexpr uint16_t kMonsterFlagRitualSkip = 0x0001u;
 inline constexpr uint16_t kMonsterFlagCurlUpTriggered = 0x0002u;
+// Large slime splitTriggered latch (AcidSlime_L.java:71,145-151 /
+// SpikeSlime_L.java:66,133-139); see the MonsterState comment above.
+inline constexpr uint16_t kMonsterFlagSplitTriggered = 0x0004u;
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,

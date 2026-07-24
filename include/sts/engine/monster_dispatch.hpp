@@ -81,6 +81,49 @@ using MonsterPreBattleFn = void (*)(CombatState& state, uint8_t monster_index);
 // The pre-battle function for a monster id, or nullptr if it has none.
 [[nodiscard]] MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept;
 
+// --- B3.17 split framework seams ---------------------------------------------
+
+// A monster's queued-roll body (RollMoveAction.update -> rollMove; no liveness
+// check, RollMoveAction.java:17-21). Only monsters whose turns QUEUE ROLL_MOVE
+// items (the large slimes: their rolls must resolve after mid-turn interrupt
+// SetMoveActions and even posthumously after a split) register one; monsters
+// that roll inline in their MonsterTurnFn return nullptr and a ROLL_MOVE item
+// targeting them stays a safe no-op.
+using MonsterRollMoveFn = void (*)(CombatState& state, uint8_t monster_index);
+[[nodiscard]] MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept;
+
+// The ROLL_MOVE opcode body: dispatch to the target's queued-roll function if
+// it has one (called by execute_opcode; safe no-op otherwise).
+void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept;
+
+// A monster's spawn-at-fixed-HP init: the game's "construct with newHealth,
+// then init()" pair (NO monster_hp_rng draw -- the 4-arg slime ctors pass
+// newHealth straight through, AbstractMonster.java:139,150 -- then exactly one
+// aiRng rollMove). nullptr == the monster cannot be mid-combat spawned yet.
+using MonsterSpawnAtHpFn = void (*)(CombatState& state, uint8_t monster_index,
+                                    int16_t hp);
+[[nodiscard]] MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept;
+
+// SpawnMonsterAction.update (SpawnMonsterAction.java:42-73) minus presentation:
+// insert a fresh record at `slot` (records at >= slot shift up one -- the game
+// list-inserts and NEVER removes dead records, MonsterGroup.java:35-40), remap
+// monster_queue indices >= slot, ++monster_count (hard assert at kMonsterCap),
+// then run the id's spawn-at-hp init (the child's aiRng roll happens HERE, at
+// resolve time). Pending action_queue items are NOT remapped -- the Java holds
+// object references, so any action queued to resolve after a spawn must
+// pre-compute its post-insertion slot (see monster_slime_large.cpp's trailing
+// ROLL_MOVE). The insertion slot itself is pre-computed at QUEUE time from the
+// smart-positioning drawX rule (monster_slime_large.hpp).
+void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
+                           int16_t hp) noexcept;
+
+// Post-damage monster hook -- the AbstractMonster.damage() override seam, run
+// AFTER a hit fully lands (op_damage / op_lose_hp, ANY damage type: the Java
+// override wraps super.damage() unconditionally, and LoseHPAction also routes
+// through damage(), LoseHPAction.java:41). Dispatches by monster_id; the large
+// slimes' split interrupt is the first consumer. No-op for everyone else.
+void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept;
+
 // The init function for a monster id, or nullptr if not yet implemented.
 [[nodiscard]] MonsterInitFn monster_init_fn(MonsterId id) noexcept;
 

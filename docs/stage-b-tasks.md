@@ -1377,7 +1377,7 @@ doesn't fit the table shape, per design §4.2), gang spawn order from B3.12.
 B3.12 — here per-monster behavior incl. Tsundere's block-ally logic.
 **Log:** —
 
-### B3.17 `[ ]` ∥ Monsters: large slimes + split
+### B3.17 `[x]` ∥ Monsters: large slimes + split
 **Deps:** B3.14 · **Provenance:** AcidSlime_L.java, SpikeSlime_L.java (split
 at ≤ half HP), SlimeBoss split machinery shared reading
 **Deliverables:** split framework (mid-combat monster replacement: L →
@@ -1386,7 +1386,56 @@ L-slime entries with A-columns.
 **Acceptance:** tier-2: split triggers at the exact threshold, children HP =
 parent current HP, intents/queue state after split match the cited Java;
 split during the monster's own turn vs. player turn both covered.
-**Log:** —
+**Log:** Done 2026-07-24. Appended `MonsterId` 9 SPIKE_SLIME_LARGE / 10
+ACID_SLIME_LARGE, `MonsterIntent::UNKNOWN` 7, `PowerId` 22 SPLIT (the ctor's
+display-only marker, amount -1), and opcodes 25-29 CANNOT_LOSE / CAN_LOSE /
+SUICIDE / SPAWN_MONSTER / SET_MOVE -- nothing renumbered, NO schema/layout
+change (the cannotLose latch is CombatState.flags bit 1 and splitTriggered is
+MonsterState.flags 0x0004, both reserved bitfields per the Frail/Curl Up
+precedent; kMonsterCap 7 was already sized for splits at B3.12).
+- **Split semantics (Java-exact):** the damage() override seam fires from
+  op_damage AND op_lose_hp (LoseHPAction routes through damage()) AFTER the hit
+  lands, for EVERY DamageInfo type; trigger iff alive && 2*hp <= max_hp (the
+  float `(float)cur <= (float)max/2.0f` is integer-exact) && nextMove != 3 &&
+  !splitTriggered -> synchronous setMove(SPLIT, UNKNOWN) + a bottom-queued
+  SetMoveAction + one-shot latch (AcidSlime_L.java:142-152 / SpikeSlime_L.java:
+  130-140). The split turn queues CannotLose -> Suicide(this,false) (hp=0, NO
+  relic triggers, block untouched) -> 2x SpawnMonsterAction -> CanLose;
+  children are the UNCHANGED B3.14 mediums, constructed at takeTurn time at the
+  parent's CURRENT hp (= their max, 4-arg ctor, NO monsterHpRng draw) with
+  init()'s single aiRng roll at SPAWN resolve time, in queue order. Slots per
+  smart positioning over the S1 solo layout (saveX∓134, MonsterHelper.java:
+  409-414): left child AT the parent's slot, dead parent shifts to +1
+  (dead-in-place record), right child at +2; monster_queue indices remap on
+  insert, later-queued actions pre-compute post-insert slots (B3.20's boss
+  coords need their own index derivation). Spike L's unconditional trailing
+  RollMoveAction (:127) rolls POSTHUMOUSLY on the dead parent (one wasted aiRng
+  draw, pre-computed slot mi+1); Acid L's split case queues no roll. Own-turn
+  interrupts resolve RollMove-then-SetMove (the wasted roll draws first), and
+  the pump's victory gate honors the cannotLose window, so combat ends only
+  when all descendants are dead.
+- **ROLL_MOVE (opcode 8) is now real:** it dispatches to a per-monster
+  queued-roll fn (large slimes only); inline-rolling monsters keep it a strict
+  no-op (damage_pipeline pin updated). Registry rows carry base/A2/A7/A17
+  columns (Spike L 64-70/67-73 hp, 16/18 tackle, Frail 2/3; Acid L 65-69/68-72
+  hp, 11/12 + 16/18 tackles, Weak 2; 2 Slimed per tackle); the SPLIT move is a
+  NOP-placeholder row (Louse bite precedent) with the sequence native in
+  monster_slime_large.cpp.
+- **Fixtures:** two new committed independent XS128 corpora (32 seeds x 20
+  turns) for Spike/Acid L incl. Acid L's 0.6f/0.4f nextFloat tiebreaks (double
+  vs float threshold proven boolean-equivalent); regeneration preserved all
+  four B3.14 slime fixture SHA-256s byte-for-byte.
+- Provenance: `AcidSlime_L.java:73-215`, `SpikeSlime_L.java:68-181`,
+  `SlimeBoss.java:149-157,171-179` (shared reading),
+  `SpawnMonsterAction.java:28-73`, `SuicideAction.java:21-36`,
+  `CannotLoseAction.java/CanLoseAction.java:12-15`, `RollMoveAction.java:17-21`,
+  `SetMoveAction.java:52-56`, `SplitPower.java:12-32`, `LoseHPAction.java:41`,
+  `AbstractMonster.java:139,150,431-437,465-467,712-715,869,925-951`,
+  `MonsterGroup.java:35-40,90-122`.
+- Verification: focused LargeSlime 12/12, Slime 7/7 (B3.14 unregressed),
+  RegistryGen 17/17; full WSL Debug 441/441; leak-detecting ASan/UBSan 441/441
+  (zero diagnostics); Release 441/441. Manifest now cards 50 / powers 22 /
+  monsters 10 / relics 35 / potions 33 / encounters 20 / total 170.
 
 ### B3.18 `[ ]` ∥ Elites: Gremlin Nob + Sentries
 **Deps:** B3.12 · **Provenance:** GremlinNob.java (:67/72/92-93/133),

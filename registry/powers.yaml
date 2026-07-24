@@ -244,3 +244,9 @@
   hooks:
     at_end_of_round: []     # native: justApplied skip, then decrement/remove
   provenance: "FrailPower (FrailPower.java:22-64): DEBUFF; modifyBlock returns blockAmount*0.75f; a monster-sourced new instance sets justApplied, whose first atEndOfRound clears the latch without decrementing, then later rounds reduce 1/remove at zero. Shame applies new FrailPower(player,1,true) (Shame.java:24-26). Native: card BLOCK's float modify-block pass applies x0.75 and floors once after all powers; direct GainBlockAction items carry kBlockNoPowers and bypass it. CombatState.flags kCombatFlagFrailJustApplied stores the player instance latch without changing the frozen POD layout; stacking an existing instance preserves its latch, matching ApplyPowerAction.stackPower. POWER_ID \"Frail\" (:22)."
+# --- B3.17 large-slime marker ------------------------------------------------
+- id: 22
+  name: SPLIT
+  game_id: "Split"
+  type: BUFF
+  provenance: "SplitPower (SplitPower.java:12-32): display-only marker every large slime (and Slime Boss) constructs with amount -1 (:23); NO combat hooks -- the split behavior itself lives in the monster's damage() override and takeTurn case 3 (AcidSlime_L.java:127-152 / SpikeSlime_L.java:114-140), implemented natively in monster_slime_large.cpp. Registered so the monster's power list (and the oracle join key \"Split\", :14) matches the game state. POWER_ID \"Split\" (:14)."
