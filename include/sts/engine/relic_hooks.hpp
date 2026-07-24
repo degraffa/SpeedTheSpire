@@ -70,9 +70,12 @@ enum class RelicHook : uint8_t {
     WAS_HP_LOST = 11,                // wasHPLost / onLoseHp
     ON_ATTACK = 12,                  // onAttack / onAttackToChangeDamage
     ON_VICTORY = 13,                 // onVictory (combat end)
+    // --- B3.25 additions (append-only, design doc §4.4) ---
+    ON_MONSTER_DEATH = 14,           // onMonsterDeath (AbstractMonster.die:933-937)
+    ON_SHUFFLE = 15,                 // onShuffle (EmptyDeckShuffleAction ctor :37-39)
 };
 
-inline constexpr int kRelicHookCount = 14;
+inline constexpr int kRelicHookCount = 16;
 
 // --- RelicHookContext --------------------------------------------------------
 //
@@ -80,10 +83,25 @@ inline constexpr int kRelicHookCount = 14;
 // given hook are set; the rest are value-init defaults.
 struct RelicHookContext {
     uint16_t card_id = 0;          // CardId of the card involved (play/use/exhaust)
-    uint8_t card_pool_index = 0;   // its pool index (redirects; unused by S1 relics)
+    uint8_t card_pool_index = 0;   // its pool index (Blue Candle exhaust redirect)
     uint8_t card_is_attack = 0;    // 1 if that card is an ATTACK (Nunchaku/Pen Nib)
     int32_t amount = 0;            // event amount: block gained / hp lost
+    uint8_t dead_monster = 0;      // on_monster_death: the dying monster's slot
 };
+
+// Does the player own `id`? Scans the CombatState relic mirror (acquisition
+// order; duplicates irrelevant for a presence test). The engine's hasRelic --
+// the DAMAGE-pipeline (Paper Phrog), card-play (Strike Dummy bake, Blue Candle
+// legality) and pre-victory (Meat on the Bone) sites key off this.
+[[nodiscard]] inline bool player_has_relic(const CombatState& s,
+                                           RelicId id) noexcept {
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        if (s.relics[i].relic_id == static_cast<uint16_t>(id)) {
+            return true;
+        }
+    }
+    return false;
+}
 
 // --- Combat relic view -------------------------------------------------------
 //
@@ -128,6 +146,23 @@ void dispatch_relics_was_hp_lost(CombatState& s, RelicSlot* relics, uint8_t coun
                                  int32_t amount) noexcept;
 void dispatch_relics_on_victory(CombatState& s, RelicSlot* relics,
                                 uint8_t count) noexcept;
+// onMonsterDeath (AbstractMonster.die:933-937): fired when a monster's HP hits 0
+// (the op_damage / op_lose_hp death edge). `dead_monster` is the dying slot;
+// Gremlin Horn's "not the last monster" guard lives in its native body.
+void dispatch_relics_on_monster_death(CombatState& s, RelicSlot* relics,
+                                      uint8_t count,
+                                      uint8_t dead_monster) noexcept;
+// onShuffle (EmptyDeckShuffleAction ctor:37-39): fired when the discard pile is
+// reshuffled into the draw pile (piles.cpp shuffle_discard_into_draw), BEFORE
+// the shuffle itself (the game fires it at action construction). Sundial.
+void dispatch_relics_on_shuffle(CombatState& s, RelicSlot* relics,
+                                uint8_t count) noexcept;
+
+// Meat on the Bone's bespoke pre-victory site (AbstractRoom.endBattle:418-420):
+// fires BEFORE player.onVictory -- i.e. before every relic's onVictory,
+// regardless of acquisition order -- healing 12 when HP is at or below half.
+// Called by run_advance's end_combat ahead of dispatch_relics_on_victory.
+void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept;
 
 // --- Native escape hatch -----------------------------------------------------
 //

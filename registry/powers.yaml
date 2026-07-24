@@ -250,3 +250,13 @@
   game_id: "Split"
   type: BUFF
   provenance: "SplitPower (SplitPower.java:12-32): display-only marker every large slime (and Slime Boss) constructs with amount -1 (:23); NO combat hooks -- the split behavior itself lives in the monster's damage() override and takeTurn case 3 (AcidSlime_L.java:127-152 / SpikeSlime_L.java:114-140), implemented natively in monster_slime_large.cpp. Registered so the monster's power list (and the oracle join key \"Split\", :14) matches the game state. POWER_ID \"Split\" (:14)."
+
+# --- B3.25 relic-applied power (Self-Forming Clay) ----------------------------
+- id: 23
+  name: NEXT_TURN_BLOCK
+  game_id: "Next Turn Block"
+  type: BUFF
+  native: true
+  hooks:
+    at_start_of_turn: []    # native: gain `amount` block (direct GainBlockAction), then self-remove
+  provenance: "NextTurnBlockPower.atStartOfTurn (NextTurnBlockPower.java:44-50) -- addToBot GainBlockAction(owner, owner, amount) then addToBot RemoveSpecificPowerAction(owner, owner, \"Next Turn Block\"); POWER_ID \"Next Turn Block\" (:21); default BUFF (AbstractPower.java:67); stackPower additive (ApplyPowerAction). Native body (power_hooks.cpp): queues a kBlockNoPowers BLOCK(=amount) then REMOVE_POWER, both addToBot -- the block-gain resolves AFTER start-of-turn block decay (GameActionManager.java:353-359 runs synchronously first), matching the game's queued GainBlockAction. Applied by Self-Forming Clay (relics.yaml id 46). (Renumbered 22->23 at integration: 22 was taken by B3.17 SPLIT, which landed on master first.)"

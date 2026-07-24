@@ -33,7 +33,22 @@ struct RelicSpawnContext {
     uint16_t floor = 0;
     bool in_shop = false;
     bool endless = false;
+    // B3.25 deck-content canSpawn gates (the Bottled trio). These carry the
+    // MASTER-DECK facts the Java gates read; fill_deck_spawn_gates computes
+    // them from a RunState. Defaults (false) match the Ironclad starting deck
+    // (all-BASIC, no POWER cards) -- and the Bottled canSpawn checks apply even
+    // in Endless (no Settings.isEndless clause in those canSpawn bodies).
+    bool deck_has_nonbasic_attack = false;  // BottledFlame.canSpawn (:93-99)
+    bool deck_has_nonbasic_skill = false;   // BottledLightning.canSpawn (:93-99)
+    bool deck_has_power = false;            // BottledTornado.canSpawn (:93-95)
 };
+
+// Fill the deck-content gates above from the run's master deck. "Non-basic" ==
+// CardRarity != BASIC; the only BASIC red rows are Strike/Defend/Bash
+// (Strike_Red/Defend_Red/Bash constructors -- CardRarity.BASIC), so the scan
+// keys on type + those three ids. deck_has_power stays false until B3.7 lands
+// POWER-type cards (no POWER CardType exists in the registry yet).
+void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept;
 
 enum class RelicAcquireResult : uint8_t {
     ACQUIRED = 0,

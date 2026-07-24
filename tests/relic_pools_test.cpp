@@ -11,6 +11,7 @@
 #include "sts/engine/cards.hpp"
 #include "sts/engine/relic_pools.hpp"
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/run_deck.hpp"
 
 namespace sts::engine {
 namespace {
@@ -85,6 +86,52 @@ constexpr std::array<RelicId, 33> kOracleSeed3{{
     RelicId::TOY_ORNITHOPTER, RelicId::VAJRA,
 }};
 
+// B3.25: the three live shuffled UNCOMMON pool orders (same b14_accept captures,
+// oracle.relicPools.uncommon). The canonical pre-shuffle pool_order in
+// relics.yaml was derived by inverting the JDK shuffle (relicRng draw #2)
+// against these three arrays -- all three seeds agree on one pre-shuffle order,
+// and re-shuffling it here must reproduce each capture exactly.
+constexpr std::array<RelicId, 30> kOracleUncommonSeed1{{
+    RelicId::TOXIC_EGG, RelicId::ETERNAL_FEATHER, RelicId::SINGING_BOWL,
+    RelicId::QUESTION_CARD, RelicId::SHURIKEN, RelicId::BOTTLED_LIGHTNING,
+    RelicId::PEAR, RelicId::MOLTEN_EGG, RelicId::LETTER_OPENER,
+    RelicId::MUMMIFIED_HAND, RelicId::STRIKE_DUMMY, RelicId::DARKSTONE_PERIAPT,
+    RelicId::MATRYOSHKA, RelicId::FROZEN_EGG, RelicId::ORNAMENTAL_FAN,
+    RelicId::GREMLIN_HORN, RelicId::SUNDIAL, RelicId::BOTTLED_FLAME,
+    RelicId::WHITE_BEAST_STATUE, RelicId::THE_COURIER,
+    RelicId::SELF_FORMING_CLAY, RelicId::HORN_CLEAT, RelicId::BLUE_CANDLE,
+    RelicId::PANTOGRAPH, RelicId::BOTTLED_TORNADO, RelicId::PAPER_PHROG,
+    RelicId::MEAT_ON_THE_BONE, RelicId::KUNAI, RelicId::INK_BOTTLE,
+    RelicId::MERCURY_HOURGLASS,
+}};
+
+constexpr std::array<RelicId, 30> kOracleUncommonSeed2{{
+    RelicId::WHITE_BEAST_STATUE, RelicId::MERCURY_HOURGLASS,
+    RelicId::MEAT_ON_THE_BONE, RelicId::BLUE_CANDLE, RelicId::ETERNAL_FEATHER,
+    RelicId::ORNAMENTAL_FAN, RelicId::BOTTLED_TORNADO, RelicId::SHURIKEN,
+    RelicId::SELF_FORMING_CLAY, RelicId::PEAR, RelicId::THE_COURIER,
+    RelicId::TOXIC_EGG, RelicId::BOTTLED_LIGHTNING, RelicId::QUESTION_CARD,
+    RelicId::KUNAI, RelicId::BOTTLED_FLAME, RelicId::DARKSTONE_PERIAPT,
+    RelicId::MUMMIFIED_HAND, RelicId::LETTER_OPENER, RelicId::SUNDIAL,
+    RelicId::FROZEN_EGG, RelicId::PANTOGRAPH, RelicId::GREMLIN_HORN,
+    RelicId::MOLTEN_EGG, RelicId::INK_BOTTLE, RelicId::PAPER_PHROG,
+    RelicId::MATRYOSHKA, RelicId::SINGING_BOWL, RelicId::HORN_CLEAT,
+    RelicId::STRIKE_DUMMY,
+}};
+
+constexpr std::array<RelicId, 30> kOracleUncommonSeed3{{
+    RelicId::MUMMIFIED_HAND, RelicId::INK_BOTTLE, RelicId::SELF_FORMING_CLAY,
+    RelicId::DARKSTONE_PERIAPT, RelicId::MERCURY_HOURGLASS, RelicId::SHURIKEN,
+    RelicId::BOTTLED_FLAME, RelicId::BOTTLED_LIGHTNING, RelicId::HORN_CLEAT,
+    RelicId::MATRYOSHKA, RelicId::BLUE_CANDLE, RelicId::ETERNAL_FEATHER,
+    RelicId::WHITE_BEAST_STATUE, RelicId::MOLTEN_EGG, RelicId::PAPER_PHROG,
+    RelicId::TOXIC_EGG, RelicId::GREMLIN_HORN, RelicId::LETTER_OPENER,
+    RelicId::QUESTION_CARD, RelicId::BOTTLED_TORNADO, RelicId::SUNDIAL,
+    RelicId::SINGING_BOWL, RelicId::PEAR, RelicId::KUNAI, RelicId::THE_COURIER,
+    RelicId::STRIKE_DUMMY, RelicId::PANTOGRAPH, RelicId::FROZEN_EGG,
+    RelicId::ORNAMENTAL_FAN, RelicId::MEAT_ON_THE_BONE,
+}};
+
 TEST(RelicPools, OracleCommonPoolOrdersMatchThreeLiveSeeds) {
     struct Case {
         int64_t seed;
@@ -104,14 +151,36 @@ TEST(RelicPools, OracleCommonPoolOrdersMatchThreeLiveSeeds) {
         RunState rs{};
         rs.relic_rng = from_seed(c.seed);
         initialize_relic_pools(rs);
+        // B4.6's pinned oracle values, UNCHANGED by B3.25: the common shuffle
+        // consumes relicRng draw #1 and the post-five-draw stream state is
+        // independent of tier contents (all five draws are unconditional).
         expect_pool(rs, RelicPool::COMMON, *c.pool);
         EXPECT_EQ(rs.relic_rng.counter, 5);
         EXPECT_EQ(rs.relic_rng.s0, static_cast<uint64_t>(c.s0));
         EXPECT_EQ(rs.relic_rng.s1, static_cast<uint64_t>(c.s1));
-        for (int p = 1; p < kRelicTierCount; ++p) {
+        for (int p = 2; p < kRelicTierCount; ++p) {
             EXPECT_EQ(rs.relic_pool_count[p], 0)
-                << "tier content belongs to B3.25-B3.27, p=" << p;
+                << "tier content belongs to B3.26-B3.27, p=" << p;
         }
+    }
+}
+
+TEST(RelicPools, OracleUncommonPoolOrdersMatchThreeLiveSeeds) {
+    struct Case {
+        int64_t seed;
+        const std::array<RelicId, 30>* pool;
+    };
+    const Case cases[] = {
+        {1790050543751LL, &kOracleUncommonSeed1},
+        {1790050543752LL, &kOracleUncommonSeed2},
+        {1790050543753LL, &kOracleUncommonSeed3},
+    };
+    for (const Case& c : cases) {
+        RunState rs{};
+        rs.relic_rng = from_seed(c.seed);
+        initialize_relic_pools(rs);
+        expect_pool(rs, RelicPool::UNCOMMON, *c.pool);
+        EXPECT_EQ(rs.relic_rng.counter, 5);
     }
 }
 
@@ -307,6 +376,125 @@ TEST(RelicPools, RunBeginPopulatesCommonPoolWithoutChangingFiveDrawOracle) {
     EXPECT_EQ(rc.run.relics[0].relic_id,
               static_cast<uint16_t>(RelicId::BURNING_BLOOD));
     EXPECT_EQ(rc.run.relics[0].counter, -1);
+    // B3.25: the same run_begin also populates the uncommon pool.
+    expect_pool(rc.run, RelicPool::UNCOMMON, kOracleUncommonSeed1);
+}
+
+// --- B3.25 canSpawn gates -----------------------------------------------------
+
+TEST(RelicPools, UncommonCanSpawnFloorAndShopGates) {
+    // "Settings.isEndless || floorNum <= 48" family (DarkstonePeriapt:44-46,
+    // FrozenEgg2/MoltenEgg2/ToxicEgg2/MeatOnTheBone:53-55, QuestionCard:29-31,
+    // SingingBowl:41-43).
+    const RelicSpawnContext f48{48, false, false};
+    const RelicSpawnContext f49{49, false, false};
+    const RelicSpawnContext f49_endless{49, false, true};
+    for (const RelicId id :
+         {RelicId::DARKSTONE_PERIAPT, RelicId::FROZEN_EGG,
+          RelicId::MEAT_ON_THE_BONE, RelicId::MOLTEN_EGG,
+          RelicId::QUESTION_CARD, RelicId::SINGING_BOWL, RelicId::TOXIC_EGG}) {
+        EXPECT_TRUE(relic_can_spawn(id, f48));
+        EXPECT_FALSE(relic_can_spawn(id, f49));
+        EXPECT_TRUE(relic_can_spawn(id, f49_endless));
+    }
+    // Courier (Courier.java:41-43): floor <= 48 AND not currently in a shop.
+    EXPECT_TRUE(relic_can_spawn(RelicId::THE_COURIER, f48));
+    EXPECT_FALSE(relic_can_spawn(RelicId::THE_COURIER, f49));
+    EXPECT_FALSE(relic_can_spawn(RelicId::THE_COURIER,
+                                 RelicSpawnContext{10, true, false}));
+    // Matryoshka (Matryoshka.java:59-61): floor <= 40.
+    EXPECT_TRUE(relic_can_spawn(RelicId::MATRYOSHKA,
+                                RelicSpawnContext{40, false, false}));
+    EXPECT_FALSE(relic_can_spawn(RelicId::MATRYOSHKA,
+                                 RelicSpawnContext{41, false, false}));
+}
+
+TEST(RelicPools, BottledTrioCanSpawnReadsDeckGatesEvenInEndless) {
+    // BottledFlame/Lightning: any non-BASIC card of the type in the master deck
+    // (the only BASIC red rows are Strike/Defend/Bash). BottledTornado: any
+    // POWER card (none exist until B3.7). No Settings.isEndless clause in any of
+    // the three canSpawn bodies -- the deck gate applies in Endless too.
+    RunState rs{};
+    rs.master_deck_count = 3;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::DEFEND);
+    rs.master_deck[2].card_id = static_cast<uint16_t>(CardId::BASH);
+    RelicSpawnContext ctx{};
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_FLAME, ctx))
+        << "all-basic deck: Bash is BASIC rarity, not bottleable";
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_LIGHTNING, ctx));
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_TORNADO, ctx));
+    ctx.endless = true;
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_FLAME, ctx))
+        << "no endless bypass in the Bottled canSpawn bodies";
+
+    // A non-basic attack (Cleave) unlocks Bottled Flame only.
+    rs.master_deck_count = 4;
+    rs.master_deck[3].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_TRUE(relic_can_spawn(RelicId::BOTTLED_FLAME, ctx));
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_LIGHTNING, ctx));
+
+    // A non-basic skill (Shrug It Off) unlocks Bottled Lightning.
+    rs.master_deck[3].card_id = static_cast<uint16_t>(CardId::SHRUG_IT_OFF);
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_FLAME, ctx));
+    EXPECT_TRUE(relic_can_spawn(RelicId::BOTTLED_LIGHTNING, ctx));
+}
+
+// --- B3.25 acquisition / run-layer effects -------------------------------------
+
+TEST(RelicAcquisition, PearGrantsTenMaxHpAndHeals) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(6);
+    EXPECT_EQ(acquire_relic(rs, misc, RelicId::PEAR),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.max_hp, 90);
+    EXPECT_EQ(rs.hp, 70) << "increaseMaxHp(10, true) heals the gained amount";
+}
+
+TEST(RunDeck, EggsUpgradeOnObtainByTypeAndDarkstoneRewardsCurses) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(7);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::MOLTEN_EGG),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::TOXIC_EGG),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::DARKSTONE_PERIAPT),
+              RelicAcquireResult::ACQUIRED);
+
+    // Molten Egg upgrades an obtained ATTACK...
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    EXPECT_EQ(rs.master_deck[0].upgrade, 1);
+    // ...Toxic Egg an obtained SKILL...
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::SHRUG_IT_OFF));
+    EXPECT_EQ(rs.master_deck[1].upgrade, 1);
+    // ...an already-upgraded obtain stays as-is (canUpgrade && !upgraded)...
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE, /*upgrade=*/1));
+    EXPECT_EQ(rs.master_deck[2].upgrade, 1);
+    // ...and a CURSE is not egg-upgraded but pays out Darkstone's +6 max HP
+    // (increaseMaxHp(6, true): +6 max AND +6 current).
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INJURY));
+    EXPECT_EQ(rs.master_deck[3].upgrade, 0);
+    EXPECT_EQ(rs.max_hp, 86);
+    EXPECT_EQ(rs.hp, 66);
+}
+
+TEST(RunDeck, AddCardWithoutRelicsIsAPlainAppend) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INJURY));
+    EXPECT_EQ(rs.master_deck_count, 2);
+    EXPECT_EQ(rs.master_deck[0].upgrade, 0);
+    EXPECT_EQ(rs.max_hp, 80);
+    EXPECT_EQ(rs.hp, 60);
 }
 
 }  // namespace

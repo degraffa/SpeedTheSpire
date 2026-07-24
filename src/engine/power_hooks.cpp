@@ -289,6 +289,16 @@ void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
     ctx.amount = amount;
     ctx.damage_type = damage_type;
     dispatch_actor_powers(s, victim, Hook::WAS_HP_LOST, ctx);
+    // AbstractPlayer.damage:1445-1449 -- powers' wasHPLost first, THEN the
+    // player's relics' wasHPLost (acquisition order; no source/type guard at the
+    // relic loop -- per-relic guards live in the bodies). Player victim only
+    // (monsters have no relics). No-op with an empty mirror, so the 20 combat
+    // fixtures are unchanged (B3.25 wires the site; B3.24's Centennial Puzzle /
+    // Red Skull and B3.25's Self-Forming Clay become live through it).
+    if (victim == kActorPlayer) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_was_hp_lost(s, rv.relics, rv.count, amount);
+    }
 }
 
 // --- APPLY_POWER interception ------------------------------------------------
@@ -638,6 +648,31 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
             rem.tgt = ctx.owner;
             rem.flags = make_apply_power_flags(PowerId::CURL_UP);
             add_to_bottom(s, rem);          // addToBot (CurlUpPower.java:43)
+            return;
+        }
+        case PowerId::NEXT_TURN_BLOCK: {
+            // NextTurnBlockPower.atStartOfTurn (NextTurnBlockPower.java:44-50):
+            // addToBot GainBlockAction(owner, amount) then addToBot
+            // RemoveSpecificPowerAction(self). A direct GainBlockAction -> no
+            // Dexterity (kBlockNoPowers); both queued, so the block lands AFTER
+            // start_of_turn's synchronous block decay -- exactly the game's
+            // "gain Block at the start of your next turn" (Self-Forming Clay).
+            if (hook != Hook::AT_START_OF_TURN) {
+                return;
+            }
+            ActionQueueItem blk{};
+            blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+            blk.src = ctx.owner;
+            blk.tgt = ctx.owner;
+            blk.amount = ctx.power_amount;
+            blk.flags = kBlockNoPowers;
+            add_to_bottom(s, blk);
+            ActionQueueItem rem{};
+            rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+            rem.src = ctx.owner;
+            rem.tgt = ctx.owner;
+            rem.flags = make_apply_power_flags(PowerId::NEXT_TURN_BLOCK);
+            add_to_bottom(s, rem);
             return;
         }
         case PowerId::ARTIFACT:

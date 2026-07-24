@@ -122,7 +122,48 @@ RelicTier return_random_relic_tier(RunState& rs) noexcept {
     return relic_tier_for_roll(random(rs.relic_rng, 0, 99));
 }
 
+void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept {
+    // BottledFlame/BottledLightning.canSpawn (each :93-99): any master-deck card
+    // of the wanted type whose rarity != BASIC. The only BASIC red rows are
+    // Strike/Defend/Bash (Strike_Red.java/Defend_Red.java/Bash.java ctors --
+    // CardRarity.BASIC), so non-basic == not one of those three ids.
+    // BottledTornado.canSpawn (:93-95): CardHelper.hasCardType(POWER) -- always
+    // false until B3.7 lands POWER-type cards (no POWER CardType in the registry).
+    ctx.deck_has_nonbasic_attack = false;
+    ctx.deck_has_nonbasic_skill = false;
+    ctx.deck_has_power = false;
+    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
+        const CardId cid = static_cast<CardId>(rs.master_deck[i].card_id);
+        if (cid == CardId::STRIKE || cid == CardId::DEFEND ||
+            cid == CardId::BASH) {
+            continue;  // CardRarity.BASIC
+        }
+        const CardDef* def = card_def(cid);
+        if (def == nullptr) {
+            continue;
+        }
+        if (def->type == CardType::ATTACK) {
+            ctx.deck_has_nonbasic_attack = true;
+        } else if (def->type == CardType::SKILL) {
+            ctx.deck_has_nonbasic_skill = true;
+        }
+    }
+}
+
 bool relic_can_spawn(RelicId id, RelicSpawnContext ctx) noexcept {
+    // The Bottled trio's canSpawn has NO Settings.isEndless clause
+    // (BottledFlame/Lightning/Tornado.java:93-99) -- the deck gate applies even
+    // in Endless, so it is checked before the endless early-return.
+    switch (id) {
+        case RelicId::BOTTLED_FLAME:
+            return ctx.deck_has_nonbasic_attack;
+        case RelicId::BOTTLED_LIGHTNING:
+            return ctx.deck_has_nonbasic_skill;
+        case RelicId::BOTTLED_TORNADO:
+            return ctx.deck_has_power;
+        default:
+            break;
+    }
     if (ctx.endless) {
         return true;
     }
@@ -136,13 +177,32 @@ bool relic_can_spawn(RelicId id, RelicSpawnContext ctx) noexcept {
         case RelicId::REGAL_PILLOW:
         case RelicId::POTION_BELT:
             return ctx.floor <= 48;
+        // B3.25 uncommons with the same "Settings.isEndless || floorNum <= 48"
+        // gate (DarkstonePeriapt:44-46, FrozenEgg2:53-55, MeatOnTheBone:53-55,
+        // MoltenEgg2:53-55, QuestionCard:29-31, SingingBowl:41-43,
+        // ToxicEgg2:53-55).
+        case RelicId::DARKSTONE_PERIAPT:
+        case RelicId::FROZEN_EGG:
+        case RelicId::MEAT_ON_THE_BONE:
+        case RelicId::MOLTEN_EGG:
+        case RelicId::QUESTION_CARD:
+        case RelicId::SINGING_BOWL:
+        case RelicId::TOXIC_EGG:
+            return ctx.floor <= 48;
         case RelicId::MAW_BANK:
         case RelicId::SMILING_MASK:
+            return ctx.floor <= 48 && !ctx.in_shop;
+        case RelicId::THE_COURIER:
+            // Courier.canSpawn (Courier.java:41-43): floor <= 48 AND the current
+            // room is not a ShopRoom.
             return ctx.floor <= 48 && !ctx.in_shop;
         case RelicId::PRESERVED_INSECT:
             return ctx.floor <= 52;
         case RelicId::TINY_CHEST:
             return ctx.floor <= 35;
+        case RelicId::MATRYOSHKA:
+            // Matryoshka.canSpawn (Matryoshka.java:59-61): floorNum <= 40.
+            return ctx.floor <= 40;
         default:
             return true;
     }
@@ -241,6 +301,12 @@ RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
         case RelicId::STRAWBERRY:
             rs.max_hp = static_cast<int16_t>(rs.max_hp + 7);
             rs.hp = static_cast<int16_t>(rs.hp + 7);
+            break;
+        case RelicId::PEAR:
+            // Pear.onEquip (Pear.java:29-31): increaseMaxHp(10, true) -- +10 max
+            // AND +10 current (increaseMaxHp heals the gained amount).
+            rs.max_hp = static_cast<int16_t>(rs.max_hp + 10);
+            rs.hp = static_cast<int16_t>(rs.hp + 10);
             break;
         case RelicId::POTION_BELT:
             rs.potion_slots = static_cast<uint8_t>(

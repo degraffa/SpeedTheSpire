@@ -82,7 +82,11 @@ static_assert(
         static_cast<uint8_t>(sts::registry::RelicHook::ON_ATTACK) ==
             static_cast<uint8_t>(RelicHook::ON_ATTACK) &&
         static_cast<uint8_t>(sts::registry::RelicHook::ON_VICTORY) ==
-            static_cast<uint8_t>(RelicHook::ON_VICTORY),
+            static_cast<uint8_t>(RelicHook::ON_VICTORY) &&
+        static_cast<uint8_t>(sts::registry::RelicHook::ON_MONSTER_DEATH) ==
+            static_cast<uint8_t>(RelicHook::ON_MONSTER_DEATH) &&
+        static_cast<uint8_t>(sts::registry::RelicHook::ON_SHUFFLE) ==
+            static_cast<uint8_t>(RelicHook::ON_SHUFFLE),
     "generated sts::registry::RelicHook must stay byte-equal to relic_hooks.hpp's "
     "RelicHook (design doc §4.4; append-only)");
 

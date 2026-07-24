@@ -16,10 +16,14 @@
 //   * StrengthPower.atDamageGive (StrengthPower.java:92-98) -- damage + amount
 //     (float add), NORMAL only.
 //   * VulnerablePower.atDamageReceive (VulnerablePower.java:61-73) -- damage *
-//     1.5f, NORMAL only (the Odd Mushroom 1.25f / Paper Frog 1.75f relic
-//     branches are unreachable in the relic-free skeleton).
+//     1.5f, NORMAL only. The Paper Phrog 1.75f relic branch (:67-69, a
+//     Vulnerable MONSTER hit while the player owns Paper Frog) is LIVE as of
+//     B3.25 -- this retires stage-a A4.1's "unreachable in the relic-free
+//     skeleton" note. The Odd Mushroom 1.25f branch (:64-66, player-side) stays
+//     with its rare-relic owner (B3.26).
 //   * WeakPower.atDamageGive (WeakPower.java:61-70) -- damage * 0.75f, NORMAL
-//     only (the Paper Crane 0.6f branch is unreachable here).
+//     only (the Paper Crane 0.6f branch stays unreachable: Paper Crane is
+//     addGreen/Silent-only, never Ironclad-obtainable in S1).
 //   * AbstractCreature.addBlock -- in the base game only relic
 //     (onPlayerGainedBlock) and power (onGainedBlock) hooks touch block gain;
 //     Strength/Vulnerable/Weak do NOT. The skeleton has neither, so BLOCK is a

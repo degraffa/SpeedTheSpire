@@ -340,5 +340,54 @@ TEST(InterpPumpWiring, PreTurnQueuedEffectAlsoApplies) {
     EXPECT_EQ(s.player_energy, 5);
 }
 
+// --- B3.25 Paper Phrog: the Vulnerable 1.75f relic branch --------------------
+// VulnerablePower.atDamageReceive (VulnerablePower.java:61-73): a NORMAL hit on
+// a Vulnerable MONSTER is x1.75 instead of x1.5 while the player owns Paper
+// Frog (:67-69); a Vulnerable PLAYER keeps x1.5 (the owner.isPlayer guard).
+// This retires stage-a A4.1's "unreachable in the relic-free skeleton" note.
+// Every expected value is hand-computed from the Java formulas.
+
+void give_paper_phrog(CombatState& s) {
+    s.relics[s.relic_count].relic_id =
+        static_cast<uint16_t>(RelicId::PAPER_PHROG);
+    s.relics[s.relic_count].counter = -1;
+    ++s.relic_count;
+}
+
+TEST(PaperPhrog, VulnerableMonsterTakes175InsteadOf150) {
+    CombatState s = make_combat();
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::VULNERABLE, 1);
+    // Without the relic: 6 * 1.5f = 9.0 -> 9 (the frozen A4.1 value).
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 9);
+    // With Paper Phrog: 6 * 1.75f = 10.5 -> floor 10.
+    give_paper_phrog(s);
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 10);
+    // Fractional case: 5 * 1.75f = 8.75 -> floor 8 (vs 5*1.5=7.5 -> 7 without).
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 5), 8);
+}
+
+TEST(PaperPhrog, StacksWithStrengthBeforeTheMultiplier) {
+    // atDamageGive (Strength) runs before atDamageReceive (Vulnerable):
+    // (6 + 2) * 1.75f = 14.0 -> 14.
+    CombatState s = make_combat();
+    add_power(s.player_powers, s.player_power_count, PowerId::STRENGTH, 2);
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::VULNERABLE, 1);
+    give_paper_phrog(s);
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 14);
+}
+
+TEST(PaperPhrog, VulnerablePlayerStillTakes150) {
+    // The Java branch requires the Vulnerable OWNER to be a monster
+    // (!owner.isPlayer, VulnerablePower.java:67); a Vulnerable player hit by a
+    // monster keeps x1.5 even while the player owns Paper Phrog:
+    // 6 * 1.5f = 9.0 -> 9 (the Odd Mushroom 1.25f player branch is B3.26).
+    CombatState s = make_combat();
+    add_power(s.player_powers, s.player_power_count, PowerId::VULNERABLE, 1);
+    give_paper_phrog(s);
+    EXPECT_EQ(compute_damage(s, /*src=*/0, kActorPlayer, 6), 9);
+}
+
 }  // namespace
 }  // namespace sts::engine

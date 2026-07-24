@@ -204,10 +204,12 @@ TEST(RunBegin, RelicRngConsumesFivePoolShuffleDraws) {
     for (int i = 0; i < kRelicTierCount; ++i) (void)random_long(expect);
     EXPECT_EQ(rc.run.relic_rng.counter, kRelicTierCount);  // exactly 5
     EXPECT_TRUE(streams_equal(rc.run.relic_rng, expect));
-    // B4.6 populates the complete registered common pool; B3.25-B3.27 own the
-    // other four tiers. Empty tiers still consumed their shuffle seed above.
+    // B4.6 populated the complete common pool and B3.25 the uncommon pool;
+    // B3.26/B3.27 own rare/shop/boss. Empty tiers still consumed their shuffle
+    // seed above (all five draws are unconditional).
     EXPECT_EQ(rc.run.relic_pool_count[0], 33);
-    for (int t = 1; t < kRelicTierCount; ++t) {
+    EXPECT_EQ(rc.run.relic_pool_count[1], 30);  // B3.25 uncommons
+    for (int t = 2; t < kRelicTierCount; ++t) {
         EXPECT_EQ(rc.run.relic_pool_count[t], 0);
     }
 }

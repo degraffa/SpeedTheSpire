@@ -19,6 +19,7 @@
 #include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
 #include "sts/engine/power_hooks.hpp"   // B3.2 hook dispatch (onGainedBlock/onApplyPower/wasHPLost/onCardDraw)
 #include "sts/engine/powers.hpp"        // power_def / PowerType (APPLY_POWER interception)
+#include "sts/engine/relic_hooks.hpp"   // B3.25: player_has_relic (Paper Phrog) + onMonsterDeath dispatch
 #include "sts/engine/rng_stream.hpp"    // random (DRAW_RANDOM insert position)
 #include "sts/engine/types.hpp"
 
@@ -90,10 +91,21 @@ struct PowerView {
     }
 }
 
-// atDamageReceive: target-owned hooks. VulnerablePower.atDamageReceive (*1.5f).
-[[nodiscard]] float at_damage_receive(float dmg, PowerSlot p) noexcept {
+// atDamageReceive: target-owned hooks. VulnerablePower.atDamageReceive: *1.5f,
+// or *1.75f for a Vulnerable MONSTER when the player owns Paper Phrog
+// (VulnerablePower.java:67-70 -- `!owner.isPlayer && player.hasRelic("Paper
+// Frog")`; live as of B3.25, retiring A4.1's unreachable-branch note). The
+// player-side Odd Mushroom *1.25f branch (:64-66) lands with its rare-relic
+// owner (B3.26). Without Paper Phrog the 1.5f multiply is byte-identical to the
+// pre-B3.25 hook (fixtures unchanged).
+[[nodiscard]] float at_damage_receive(const CombatState& s, uint8_t owner_actor,
+                                      float dmg, PowerSlot p) noexcept {
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::VULNERABLE:
+            if (owner_actor != kActorPlayer &&
+                player_has_relic(s, RelicId::PAPER_PHROG)) {
+                return dmg * 1.75f;                     // VulnerablePower.java:68
+            }
             return dmg * 1.5f;                          // VulnerablePower.java:70
         default:
             return dmg;
@@ -203,6 +215,16 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
     }
+    // Monster death edge -> relics onMonsterDeath (AbstractMonster.die:933-937;
+    // B3.25 Gremlin Horn). Fires once, when this hit drops the monster from
+    // positive HP to 0. Runs BEFORE the damage() override seam below: die() is
+    // called synchronously inside super.damage(), while the override's
+    // post-super check sees isDying and never split-telegraphs a lethal hit.
+    // No-op with an empty relic mirror (fixtures unchanged).
+    if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
+    }
     // Monster damage() override seam (B3.17): the large slimes' split interrupt
     // wraps super.damage() and runs AFTER it, for EVERY DamageInfo type
     // (AcidSlime_L.java:142-152 / SpikeSlime_L.java:130-140 -- the guard reads
@@ -237,6 +259,12 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
                          static_cast<uint8_t>(DamageType::HP_LOSS));
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
+    }
+    // A direct HP loss can also kill a monster -> same die() relic dispatch
+    // (AbstractMonster.die:933-937; B3.25), before the override seam as above.
+    if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
     }
     // LoseHPAction also routes through creature.damage() (LoseHPAction.java:41),
     // so the monster damage() override seam fires here too (B3.17).
@@ -827,7 +855,7 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
             tmp = at_damage_give(tmp, owner.slots[i], strength_mult);
         }
         for (uint8_t i = 0; i < target.count; ++i) {
-            tmp = at_damage_receive(tmp, target.slots[i]);
+            tmp = at_damage_receive(s, tgt, tmp, target.slots[i]);
         }
         tmp = stance_at_damage_receive(s, tmp);
         for (uint8_t i = 0; i < owner.count; ++i) {
@@ -845,7 +873,7 @@ int compute_damage(const CombatState& s, uint8_t src, uint8_t tgt, int base,
         }
         tmp = stance_at_damage_give(s, tmp);
         for (uint8_t i = 0; i < target.count; ++i) {
-            tmp = at_damage_receive(tmp, target.slots[i]);
+            tmp = at_damage_receive(s, tgt, tmp, target.slots[i]);
         }
         for (uint8_t i = 0; i < owner.count; ++i) {
             tmp = at_damage_final_give(tmp, owner.slots[i]);

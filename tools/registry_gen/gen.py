@@ -219,6 +219,9 @@ RELIC_HOOKS = {
     "was_hp_lost": 11,              # wasHPLost / onLoseHp
     "on_attack": 12,                # onAttack / onAttackToChangeDamage
     "on_victory": 13,               # onVictory (combat end)
+    # --- B3.25 additions (append-only, design doc §4.4) ---
+    "on_monster_death": 14,         # onMonsterDeath (AbstractMonster.die:933-937)
+    "on_shuffle": 15,               # onShuffle (EmptyDeckShuffleAction ctor :37-39)
 }
 # RelicTier (AbstractRelic.RelicTier). Pinned/append-only; the translator's relic
 # table joins on it and reward/shop pools gate by it (design doc §5.3).
@@ -953,6 +956,18 @@ def _parse_relic_hook_steps(relic_name: str, hook_name: str, effects,
                 raise fail(f"relics.yaml: relic {relic_name} hook {hook_name} "
                            f"APPLY_POWER references unknown power {pname!r}")
             extra = powers[pname]
+        elif op == "DAMAGE":
+            # `extra` = the DamageType (interp.hpp make_damage_flags), exactly as
+            # in the card table. Default NORMAL (0); a relic's DamageAllEnemies
+            # hit is THORNS (Mercury Hourglass -- createDamageMatrix(n, true) +
+            # DamageType.THORNS, MercuryHourglass.java:37) so it skips the
+            # NORMAL-only power pipeline (no Strength/Vulnerable scaling).
+            dt = str(step.get("damage_type", "NORMAL")).upper()
+            if dt not in DAMAGE_TYPES:
+                raise fail(f"relics.yaml: relic {relic_name} DAMAGE has unknown "
+                           f"damage_type {step.get('damage_type')!r} "
+                           f"(known: {sorted(DAMAGE_TYPES)})")
+            extra = DAMAGE_TYPES[dt]
         steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
     return steps
 

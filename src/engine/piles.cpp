@@ -17,6 +17,7 @@
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/power_hooks.hpp"  // B3.2: onExhaust dispatch (EXHAUST opcode path)
+#include "sts/engine/relic_hooks.hpp"  // B3.25: onShuffle dispatch (Sundial)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -26,6 +27,18 @@ namespace sts::engine {
 void shuffle_discard_into_draw(CombatState& s) noexcept {
     if (s.discard_count == 0) {
         return;  // nothing to reshuffle -- no random_long drawn (matches the game)
+    }
+
+    // Relics onShuffle (EmptyDeckShuffleAction ctor, EmptyDeckShuffleAction.java:
+    // 37-39): fires as the reshuffle action is created -- i.e. BEFORE the shuffle
+    // draw -- and only when a reshuffle actually happens (DrawCardAction only
+    // constructs the action when the discard is non-empty). Sundial counts these
+    // (B3.25); its GainEnergy is QUEUED (addToBot), so the shuffle/draw math
+    // below and shuffle_rng consumption are untouched. No-op without a
+    // responding relic (fixtures byte-identical).
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_shuffle(s, rv.relics, rv.count);
     }
 
     // CardGroup.shuffle(shuffleRng): exactly one shuffleRng.randomLong() seeds a

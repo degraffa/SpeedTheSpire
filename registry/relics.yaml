@@ -36,6 +36,20 @@
 # SneckoSkull (addGreen/Silent), Test5 (unused). RedSkull is the only RED common.
 # Uncommon/rare/boss/shop/special tiers land with B3.25-B3.27.
 #
+# SCOPE (B3.25): + the Ironclad-obtainable UNCOMMON pool (ids 36-65). Enumerated
+# from RelicLibrary.initialize() constructor tiers (each relic file's
+# super(..., RelicTier.UNCOMMON, ...)): 28 shared `add()` uncommons + the 2 red
+# `addRed()` uncommons (PaperFrog, SelfFormingClay). EXCLUDED as NOT
+# Ironclad-obtainable: NinjaScroll + PaperCrane (addGreen/Silent), GoldPlatedCables
+# + SymbioticVirus (addBlue/Defect), TeardropLocket + Duality (addPurple/Watcher);
+# Test1/Test6/DiscerningMonocle (UNCOMMON ctors but never registered in
+# initialize()); DEPRECATEDYin/DEPRECATEDDodecahedron (deprecated pkg, never
+# registered). UNCOMMON pool_order 0..29 is the canonical pre-shuffle
+# RelicLibrary.populateRelicPool order, derived by inverting the JDK shuffle
+# (relicRng draw #2) against the live b14_accept oracle captures for seeds
+# 1790050543751..1790050543753 -- all three seeds agree (relic_pools_test.cpp
+# pins the three shuffled orders).
+#
 # Trigger dispatch fires relics in ACQUISITION ORDER (design doc §4.3 / stage-a
 # trap 8): the framework iterates the relic list index 0..count-1 at each hook site
 # (relic_hooks.cpp). Combat storage of the relic list on CombatState is a B4.3
@@ -368,3 +382,276 @@
   tier: SPECIAL
   initial_counter: 1
   provenance: "AbstractDungeon.returnRandomRelicKey/returnEndRandomRelicKey (AbstractDungeon.java:757-808) -- exhausted rare pool fallback; the boss fallback key 'Red Circlet' also resolves to Circlet because RelicLibrary.initialize does not register RedCirclet and getRelic defaults to Circlet. Circlet constructor/onEquip (Circlet.java:14-28) starts counter=1 and duplicate acquisition increments the owned Circlet counter."
+
+# --- Uncommon (Ironclad-obtainable): combat-live ----------------------------------
+
+- id: 36
+  name: BLUE_CANDLE
+  game_id: "Blue Candle"
+  tier: UNCOMMON
+  pool_order: 4
+  native: true
+  hooks:
+    on_use_card: []           # CURSE played -> lose 1 HP, exhaust it (curse playability lives in legal_actions)
+  provenance: "BlueCandle.onUseCard (BlueCandle.java:39-46) -- if card.type==CURSE: addToBot LoseHPAction(player, player, 1), card.exhaust=true + action.exhaustCard=true. Curse PLAYABILITY is AbstractCard.canUse (AbstractCard.java:920): a CURSE with costForTurn<-1 is playable iff the player has Blue Candle -- modeled in legal_actions (advance.cpp); a played curse runs NO effect program (curse trigger programs are passive, resolve_card_play's ON_PLAY guard)."
+
+- id: 37
+  name: GREMLIN_HORN
+  game_id: "Gremlin Horn"
+  tier: UNCOMMON
+  pool_order: 14
+  native: true
+  hooks:
+    on_monster_death: []      # a monster dies (and others remain) -> +1 energy, draw 1
+  provenance: "GremlinHorn.onMonsterDeath (GremlinHorn.java:50-57) -- if m.currentHealth==0 && !areMonstersBasicallyDead(): addToBot GainEnergyAction(1), addToBot DrawCardAction(player, 1). Fired from AbstractMonster.die (AbstractMonster.java:933-937) over player.relics. The not-last-monster guard is the native body's any-other-monster-alive check."
+
+- id: 38
+  name: HORN_CLEAT
+  game_id: "HornCleat"
+  tier: UNCOMMON
+  pool_order: 15
+  native: true
+  hooks:
+    at_battle_start: []       # arm: counter = 0
+    at_turn_start: []         # ++counter; at turn 2 -> gain 14 block, disarm (once per combat)
+    on_victory: []            # counter = -1 (grayscale cleared; re-armed next battle start)
+  provenance: "HornCleat.atBattleStart (HornCleat.java:31-33) counter=0; atTurnStart (:36-47) -- if !grayscale ++counter; counter==2 -> addToBot GainBlockAction(player, 14), counter=-1, grayscale=true; onVictory (:50-53) counter=-1, grayscale=false. Native: counter<0 encodes the fired/grayscale latch (no ++ once fired), battle start re-arms with 0."
+
+- id: 39
+  name: INK_BOTTLE
+  game_id: "InkBottle"
+  tier: UNCOMMON
+  pool_order: 9
+  initial_counter: 0
+  native: true
+  hooks:
+    on_use_card: []           # ANY card played -> ++counter; the 10th -> draw 1, reset
+  provenance: "InkBottle.onUseCard (InkBottle.java:33-45) -- ++counter (no type filter); counter==10 -> counter=0, addToBot DrawCardAction(1). Constructor counter=0 (InkBottle.java:24); NO onVictory reset -- the counter persists across combats in RunState RelicSlot.counter (stage-a §4.3)."
+
+- id: 40
+  name: KUNAI
+  game_id: "Kunai"
+  tier: UNCOMMON
+  pool_order: 2
+  native: true
+  hooks:
+    at_turn_start: []         # counter = 0 (per-turn attack count)
+    on_use_card: []           # ATTACK played -> ++counter; every 3rd -> +1 Dexterity
+    on_victory: []            # counter = -1
+  provenance: "Kunai.atTurnStart (Kunai.java:35-37) counter=0; onUseCard (:40-50) -- if card.type==ATTACK ++counter; counter%3==0 -> counter=0, addToBot ApplyPowerAction(player, DexterityPower 1); onVictory (:53-55) counter=-1. Dexterity registered (powers.yaml id 14)."
+
+- id: 41
+  name: LETTER_OPENER
+  game_id: "Letter Opener"
+  tier: UNCOMMON
+  pool_order: 17
+  native: true
+  hooks:
+    at_turn_start: []         # counter = 0 (per-turn skill count)
+    on_use_card: []           # SKILL played -> ++counter; every 3rd -> 5 THORNS damage to ALL enemies
+    on_victory: []            # counter = -1
+  provenance: "LetterOpener.atTurnStart (LetterOpener.java:37-39) counter=0; onUseCard (:42-52) -- if card.type==SKILL ++counter; counter%3==0 -> counter=0, addToBot DamageAllEnemiesAction(null, createDamageMatrix(5, true), DamageType.THORNS); onVictory (:55-57) counter=-1. THORNS type skips the NORMAL-only power pipeline (no Strength/Vulnerable scaling)."
+
+- id: 42
+  name: MERCURY_HOURGLASS
+  game_id: "Mercury Hourglass"
+  tier: UNCOMMON
+  pool_order: 27
+  hooks:
+    at_turn_start:
+      - {op: DAMAGE, target: ALL_ENEMY, amount: 3, damage_type: THORNS}
+  provenance: "MercuryHourglass.atTurnStart (MercuryHourglass.java:34-38) -- addToBot DamageAllEnemiesAction(null, createDamageMatrix(3, true), DamageType.THORNS, BLUNT_LIGHT). A DATA hook: flat 3 THORNS to every enemy each turn start (THORNS skips the NORMAL-only power hooks)."
+
+- id: 43
+  name: ORNAMENTAL_FAN
+  game_id: "Ornamental Fan"
+  tier: UNCOMMON
+  pool_order: 12
+  native: true
+  hooks:
+    at_turn_start: []         # counter = 0 (per-turn attack count)
+    on_use_card: []           # ATTACK played -> ++counter; every 3rd -> gain 4 block
+    on_victory: []            # counter = -1
+  provenance: "OrnamentalFan.atTurnStart (OrnamentalFan.java:34-36) counter=0; onUseCard (:39-49) -- if card.type==ATTACK ++counter; counter%3==0 -> counter=0, addToBot GainBlockAction(player, 4) (direct GainBlockAction -> no Dexterity, kBlockNoPowers); onVictory (:52-54) counter=-1."
+
+- id: 44
+  name: SHURIKEN
+  game_id: "Shuriken"
+  tier: UNCOMMON
+  pool_order: 20
+  native: true
+  hooks:
+    at_turn_start: []         # counter = 0 (per-turn attack count)
+    on_use_card: []           # ATTACK played -> ++counter; every 3rd -> +1 Strength
+    on_victory: []            # counter = -1
+  provenance: "Shuriken.atTurnStart (Shuriken.java:35-37) counter=0; onUseCard (:40-50) -- if card.type==ATTACK ++counter; counter%3==0 -> counter=0, addToBot ApplyPowerAction(player, StrengthPower 1); onVictory (:53-55) counter=-1."
+
+- id: 45
+  name: SUNDIAL
+  game_id: "Sundial"
+  tier: UNCOMMON
+  pool_order: 1
+  initial_counter: 0
+  native: true
+  hooks:
+    on_shuffle: []            # every 3rd draw-pile reshuffle -> +2 energy
+  provenance: "Sundial.onShuffle (Sundial.java:45-53) -- ++counter; counter==3 -> counter=0, addToBot GainEnergyAction(2). onEquip counter=0 (:40-42); NO onVictory reset -- persists across combats in RelicSlot.counter. Fired from the EmptyDeckShuffleAction constructor (EmptyDeckShuffleAction.java:37-39) -> the shuffle_discard_into_draw site (piles.cpp)."
+
+- id: 46
+  name: SELF_FORMING_CLAY
+  game_id: "Self Forming Clay"
+  tier: UNCOMMON
+  pool_order: 28
+  native: true
+  hooks:
+    was_hp_lost: []           # lose HP in combat -> +3 Next Turn Block (stacks)
+  provenance: "SelfFormingClay.wasHPLost (SelfFormingClay.java:32-37) -- if room phase COMBAT && damageAmount>0: addToTop ApplyPowerAction(player, NextTurnBlockPower(player, 3)). NEXT_TURN_BLOCK registered (powers.yaml id 23): its atStartOfTurn gains the stacked block then removes itself (NextTurnBlockPower.java:45-50). addRed (RelicLibrary.java:390) -- Ironclad-only."
+
+# --- Uncommon: DAMAGE-pipeline / bespoke-site relics (row only; body lives at the
+#     cited engine site, keyed by player_has_relic) ------------------------------
+
+- id: 47
+  name: PAPER_PHROG
+  game_id: "Paper Frog"
+  tier: UNCOMMON
+  pool_order: 29
+  provenance: "PaperFrog (PaperFrog.java:14-19) -- ID 'Paper Frog', VULN_EFFECTIVENESS=1.75f; the branch lives in VulnerablePower.atDamageReceive (VulnerablePower.java:67-69): a NORMAL hit on a Vulnerable MONSTER is x1.75 instead of x1.5 when the player owns Paper Frog. Implemented in the frozen DAMAGE pipeline's at_damage_receive (interp.cpp), retiring stage-a A4.1's 'unreachable relic branch' note. addRed (RelicLibrary.java:387) -- Ironclad-only."
+
+- id: 48
+  name: STRIKE_DUMMY
+  game_id: "StrikeDummy"
+  tier: UNCOMMON
+  pool_order: 6
+  provenance: "StrikeDummy.atDamageModify (StrikeDummy.java:28-33) -- if card.hasTag(STRIKE): damage + 3.0f. AbstractCard.applyPowers runs relic atDamageModify on float(baseDamage) BEFORE the player-power atDamageGive loop (AbstractCard.java:2229-2237), so the +3 is baked into the queued DAMAGE base at queue time (card_play.cpp, CardDef.is_strike) -- float-exact (int base+3 == float(base)+3.0f)."
+
+- id: 49
+  name: MEAT_ON_THE_BONE
+  game_id: "Meat on the Bone"
+  tier: UNCOMMON
+  pool_order: 22
+  provenance: "MeatOnTheBone.onTrigger (MeatOnTheBone.java:31-39) -- if currentHealth <= maxHealth/2.0 && currentHealth>0: heal 12 (direct p.heal, clamped). Fired from AbstractRoom.endBattle (AbstractRoom.java:418-420) BEFORE player.onVictory -- i.e. before every relic's onVictory regardless of acquisition order -- so it is a bespoke pre-victory site (apply_meat_on_the_bone_pre_victory, wired in run_advance end_combat), not an on_victory binding. canSpawn floor<=48 (:53-55)."
+
+# --- Uncommon: DEFERRED native bodies (row + hook registered; body needs
+#     machinery a later task owns) ------------------------------------------------
+
+- id: 50
+  name: MUMMIFIED_HAND
+  game_id: "Mummified Hand"
+  tier: UNCOMMON
+  pool_order: 24
+  native: true
+  hooks:
+    on_use_card: []           # POWER played -> random hand card costs 0 this turn (DEFERRED: no POWER CardType until B3.7)
+  provenance: "MummifiedHand.onUseCard (MummifiedHand.java:38-72) -- if card.type==POWER: filter hand for cost>0 && costForTurn>0 && !freeToPlayOnce, minus cardQueue members; pick one via cardRandomRng.random(0, n-1) (NO draw when the filtered list is empty); c.setCostForTurn(0). DEFERRED: the registry has no POWER CardType yet (gen.py CARD_TYPES; power cards land B3.7) so the trigger is unrepresentable -- documented no-op native branch until then."
+
+- id: 51
+  name: PANTOGRAPH
+  game_id: "Pantograph"
+  tier: UNCOMMON
+  pool_order: 25
+  native: true
+  hooks:
+    at_battle_start: []       # boss battle -> heal 25 (DEFERRED: no monster EnemyType/BOSS metadata)
+  provenance: "Pantograph.atBattleStart (Pantograph.java:32-40) -- if any monster.type==EnemyType.BOSS: addToTop HealAction(player, 25). DEFERRED: monsters.yaml carries no EnemyType/BOSS metadata and no boss monster rows exist yet (Guardian/Hexaghost/Slime Boss are B3.15-B3.17); documented no-op native branch until the boss batch lands."
+
+# --- Uncommon: acquisition-time / run-layer (no combat trigger; run-layer wiring
+#     noted per row) ---------------------------------------------------------------
+
+- id: 52
+  name: BOTTLED_FLAME
+  game_id: "Bottled Flame"
+  tier: UNCOMMON
+  pool_order: 19
+  provenance: "BottledFlame.onEquip (BottledFlame.java:42-53) -- gridSelect ONE non-basic ATTACK from the master deck; the chosen instance becomes innate (inBottleFlame -> CardGroup.initializeDeck innate collection). DEFERRED at acquisition: needs run-layer acquisition-choice machinery + a per-master-deck-instance bottled/innate flag (RunState schema, B4-owner). canSpawn (BottledFlame.java:93-99): any non-BASIC-rarity ATTACK in the master deck -- RelicSpawnContext.deck_has_nonbasic_attack (relic_pools.cpp)."
+
+- id: 53
+  name: BOTTLED_LIGHTNING
+  game_id: "Bottled Lightning"
+  tier: UNCOMMON
+  pool_order: 13
+  provenance: "BottledLightning.onEquip (BottledLightning.java:42-53) -- gridSelect ONE non-basic SKILL; chosen instance becomes innate (inBottleLightning). DEFERRED at acquisition (same machinery gap as Bottled Flame). canSpawn (BottledLightning.java:93-99): any non-BASIC SKILL in the master deck -- RelicSpawnContext.deck_has_nonbasic_skill."
+
+- id: 54
+  name: BOTTLED_TORNADO
+  game_id: "Bottled Tornado"
+  tier: UNCOMMON
+  pool_order: 0
+  provenance: "BottledTornado.onEquip (BottledTornado.java:42-53) -- gridSelect ONE POWER card; chosen instance becomes innate (inBottleTornado). DEFERRED at acquisition (same machinery gap). canSpawn (BottledTornado.java:93-95): CardHelper.hasCardType(POWER) -- RelicSpawnContext.deck_has_power (always false until B3.7 lands POWER cards)."
+
+- id: 55
+  name: DARKSTONE_PERIAPT
+  game_id: "Darkstone Periapt"
+  tier: UNCOMMON
+  pool_order: 23
+  provenance: "DarkstonePeriapt.onObtainCard (DarkstonePeriapt.java:28-36) -- if card.color==CURSE: player.increaseMaxHp(6, true). LIVE through the run-layer deck-add path (run_deck.hpp add_card_to_master_deck onObtainCard pass; type CURSE == color CURSE for every S1 curse row). canSpawn floor<=48 (:44-46)."
+
+- id: 56
+  name: ETERNAL_FEATHER
+  game_id: "Eternal Feather"
+  tier: UNCOMMON
+  pool_order: 5
+  provenance: "EternalFeather.onEnterRoom (EternalFeather.java:29-35) -- entering a RestRoom heals masterDeck.size()/5*3 (int division). A run-layer rest-room hook; rest rooms are B4.9 -- no combat trigger, row registered for pool/translator completeness."
+
+- id: 57
+  name: FROZEN_EGG
+  game_id: "Frozen Egg 2"
+  tier: UNCOMMON
+  pool_order: 11
+  provenance: "FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50) -- a POWER card is added to the deck upgraded (canUpgrade && !upgraded). Wired in run_deck.hpp add_card_to_master_deck; the POWER branch is inert until B3.7 lands POWER-type cards (no POWER CardType exists). canSpawn floor<=48 (:53-55)."
+
+- id: 58
+  name: MOLTEN_EGG
+  game_id: "Molten Egg 2"
+  tier: UNCOMMON
+  pool_order: 21
+  provenance: "MoltenEgg2.onObtainCard (MoltenEgg2.java:46-50) -- an ATTACK added to the deck is upgraded (canUpgrade && !upgraded). LIVE through run_deck.hpp add_card_to_master_deck's onObtainCard pass. canSpawn floor<=48 (:53-55)."
+
+- id: 59
+  name: TOXIC_EGG
+  game_id: "Toxic Egg 2"
+  tier: UNCOMMON
+  pool_order: 16
+  provenance: "ToxicEgg2.onObtainCard (ToxicEgg2.java:46-50) -- a SKILL added to the deck is upgraded (canUpgrade && !upgraded). LIVE through run_deck.hpp add_card_to_master_deck's onObtainCard pass. canSpawn floor<=48 (:53-55)."
+
+- id: 60
+  name: PEAR
+  game_id: "Pear"
+  tier: UNCOMMON
+  pool_order: 3
+  provenance: "Pear.onEquip (Pear.java:29-31) -- player.increaseMaxHp(10, true): +10 max HP AND +10 current HP on pickup (increaseMaxHp heals the gained amount). An equip-time effect, wired in acquire_relic (relic_pools.cpp; the Strawberry precedent)."
+
+- id: 61
+  name: QUESTION_CARD
+  game_id: "Question Card"
+  tier: UNCOMMON
+  pool_order: 18
+  provenance: "QuestionCard.changeNumberOfCardsInReward (QuestionCard.java:34-36) -- card rewards contain +1 card. A run-layer (combat-reward) modifier, B4.5-owner; no combat trigger. canSpawn floor<=48 (:29-31)."
+
+- id: 62
+  name: SINGING_BOWL
+  game_id: "Singing Bowl"
+  tier: UNCOMMON
+  pool_order: 7
+  provenance: "SingingBowl (SingingBowl.java) -- adds the '+2 max HP' skip option to card rewards (CardRewardScreen bowlButton; HP_AMT=2, SingingBowl.java:20). A run-layer (combat-reward) modifier, B4.5-owner; no combat trigger. canSpawn floor<=48 (:41-43)."
+
+- id: 63
+  name: THE_COURIER
+  game_id: "The Courier"
+  tier: UNCOMMON
+  pool_order: 10
+  provenance: "Courier (Courier.java:16-48) -- ID 'The Courier'; shop prices x0.8 (MULTIPLIER, ShopScreen reads it) and the merchant restocks purchased items (ShopScreen/StoreRelic/StorePotion courier branches). A run-layer (shop) modifier, B4.8-owner; no combat trigger. canSpawn (Courier.java:41-43): floor<=48 && current room is not a ShopRoom."
+
+- id: 64
+  name: WHITE_BEAST_STATUE
+  game_id: "White Beast Statue"
+  tier: UNCOMMON
+  pool_order: 26
+  provenance: "WhiteBeast (WhiteBeast.java:12-18) -- ID 'White Beast Statue'; marker relic: potion drop chance forced to 100% (AbstractRoom.addPotionToRewards's hasRelic('White Beast Statue') branch, AbstractRoom.java:580-608 area). A run-layer (reward/potion-drop) modifier, B4.5-owner; no combat trigger."
+
+- id: 65
+  name: MATRYOSHKA
+  game_id: "Matryoshka"
+  tier: UNCOMMON
+  pool_order: 8
+  initial_counter: 2
+  provenance: "Matryoshka.onChestOpen (Matryoshka.java:30-47) -- the next 2 non-boss chests contain an extra relic (counter 2 -> 0; relicRng.randomBoolean(0.75) picks COMMON vs UNCOMMON for the extra reward; counter -2 == used up). A run-layer (treasure/chest) hook, B4.7-owner; constructor counter=2 (Matryoshka.java:21). canSpawn floor<=40 (:59-61)."

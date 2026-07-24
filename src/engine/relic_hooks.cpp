@@ -180,6 +180,41 @@ void dispatch_relics_on_victory(CombatState& s, RelicSlot* relics,
     dispatch_relic_hook(s, relics, count, RelicHook::ON_VICTORY, RelicHookContext{});
 }
 
+void dispatch_relics_on_monster_death(CombatState& s, RelicSlot* relics,
+                                      uint8_t count,
+                                      uint8_t dead_monster) noexcept {
+    // AbstractMonster.die (AbstractMonster.java:933-937): every player relic's
+    // onMonsterDeath fires when a monster dies. Wired at the op_damage /
+    // op_lose_hp death edge (hp crosses to 0); a no-op without a responding relic.
+    RelicHookContext ctx{};
+    ctx.dead_monster = dead_monster;
+    dispatch_relic_hook(s, relics, count, RelicHook::ON_MONSTER_DEATH, ctx);
+}
+
+void dispatch_relics_on_shuffle(CombatState& s, RelicSlot* relics,
+                                uint8_t count) noexcept {
+    // EmptyDeckShuffleAction constructor (EmptyDeckShuffleAction.java:37-39):
+    // every player relic's onShuffle fires as the reshuffle action is created,
+    // BEFORE the shuffle itself. Wired in piles.cpp shuffle_discard_into_draw.
+    dispatch_relic_hook(s, relics, count, RelicHook::ON_SHUFFLE,
+                        RelicHookContext{});
+}
+
+void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
+    // AbstractRoom.endBattle (AbstractRoom.java:418-420): Meat on the Bone's
+    // onTrigger fires BEFORE player.onVictory (so before Burning Blood's heal,
+    // regardless of acquisition order). MeatOnTheBone.onTrigger
+    // (MeatOnTheBone.java:31-39): heal 12 iff currentHealth <= maxHealth/2.0 and
+    // currentHealth > 0 (hp*2 <= max is the exact integer equivalent).
+    if (!player_has_relic(s, RelicId::MEAT_ON_THE_BONE)) {
+        return;
+    }
+    if (s.player_hp > 0 &&
+        static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
+        heal_player(s, 12);
+    }
+}
+
 // --- Native escape hatch -----------------------------------------------------
 
 void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id,
@@ -309,6 +344,228 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
             }
             return;
 
+        case RelicId::BLUE_CANDLE:
+            // BlueCandle.onUseCard (BlueCandle.java:39-46): a played CURSE loses
+            // the player 1 HP (addToBot LoseHPAction) and exhausts (card.exhaust /
+            // action.exhaustCard -- the instance EXHAUST flag, read by
+            // move_card_hand_to_pile AFTER the fan-out, the Corruption mechanism).
+            if (hook == RelicHook::ON_USE_CARD) {
+                const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+                if (cd == nullptr || cd->type != CardType::CURSE) {
+                    return;
+                }
+                if (ctx.card_pool_index < kCardPoolCap) {
+                    s.card_pool[ctx.card_pool_index].flags |=
+                        card_flag_bit(CardFlag::EXHAUST);
+                }
+                ActionQueueItem hp{};
+                hp.opcode = static_cast<uint16_t>(Opcode::LOSE_HP);
+                hp.src = kActorPlayer;
+                hp.tgt = kActorPlayer;
+                hp.amount = 1;
+                add_to_bottom(s, hp);  // addToBot (BlueCandle.java:42)
+            }
+            return;
+
+        case RelicId::GREMLIN_HORN:
+            // GremlinHorn.onMonsterDeath (GremlinHorn.java:50-57): +1 energy and
+            // draw 1 -- but NOT for the last monster (!areMonstersBasicallyDead():
+            // some OTHER monster must still be alive).
+            if (hook == RelicHook::ON_MONSTER_DEATH) {
+                bool other_alive = false;
+                for (uint8_t m = 0; m < s.monster_count; ++m) {
+                    if (m != ctx.dead_monster && s.monsters[m].hp > 0) {
+                        other_alive = true;
+                        break;
+                    }
+                }
+                if (!other_alive) {
+                    return;
+                }
+                ActionQueueItem e{};
+                e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+                e.src = kActorPlayer;
+                e.tgt = kActorPlayer;
+                e.amount = 1;
+                add_to_bottom(s, e);   // addToBot GainEnergyAction(1) (:54)
+                ActionQueueItem d{};
+                d.opcode = static_cast<uint16_t>(Opcode::DRAW);
+                d.src = kActorPlayer;
+                d.tgt = kActorPlayer;
+                d.amount = 1;
+                add_to_bottom(s, d);   // addToBot DrawCardAction(player, 1) (:55)
+            }
+            return;
+
+        case RelicId::HORN_CLEAT:
+            // HornCleat: atBattleStart arms (counter=0); atTurnStart increments
+            // while armed and fires ONCE at turn 2 (14 block, then counter=-1 ==
+            // the grayscale latch -- no further increments); onVictory clears to
+            // -1 (the next battle start re-arms). HornCleat.java:31-53.
+            if (hook == RelicHook::AT_BATTLE_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::AT_TURN_START) {
+                if (slot.counter >= 0) {  // !grayscale (fired == -1 latch)
+                    ++slot.counter;
+                    if (slot.counter == 2) {
+                        ActionQueueItem blk{};
+                        blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+                        blk.src = kActorPlayer;
+                        blk.tgt = kActorPlayer;
+                        blk.amount = 14;
+                        blk.flags = kBlockNoPowers;  // direct GainBlockAction
+                        add_to_bottom(s, blk);  // addToBot (HornCleat.java:43)
+                        slot.counter = -1;
+                    }
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;  // HornCleat.java:50-53
+            }
+            return;
+
+        case RelicId::INK_BOTTLE:
+            // InkBottle.onUseCard (InkBottle.java:33-45): every card played
+            // counts; the 10th draws 1 and resets. No victory reset -- the counter
+            // persists across combats in the RelicSlot (stage-a §4.3).
+            if (hook == RelicHook::ON_USE_CARD) {
+                ++slot.counter;
+                if (slot.counter == 10) {
+                    slot.counter = 0;
+                    ActionQueueItem d{};
+                    d.opcode = static_cast<uint16_t>(Opcode::DRAW);
+                    d.src = kActorPlayer;
+                    d.tgt = kActorPlayer;
+                    d.amount = 1;
+                    add_to_bottom(s, d);  // addToBot DrawCardAction(1) (:40)
+                }
+            }
+            return;
+
+        case RelicId::KUNAI:
+            // Kunai (Kunai.java:35-55): per-turn attack counter; every 3rd ATTACK
+            // grants 1 Dexterity. atTurnStart resets to 0; onVictory to -1.
+            if (hook == RelicHook::AT_TURN_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::ON_USE_CARD && ctx.card_is_attack) {
+                ++slot.counter;
+                if (slot.counter % 3 == 0) {
+                    slot.counter = 0;
+                    ActionQueueItem gain{};
+                    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                    gain.src = kActorPlayer;
+                    gain.tgt = kActorPlayer;
+                    gain.amount = 1;
+                    gain.flags = make_apply_power_flags(PowerId::DEXTERITY);
+                    add_to_bottom(s, gain);  // addToBot (Kunai.java:47)
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::LETTER_OPENER:
+            // LetterOpener (LetterOpener.java:37-57): per-turn SKILL counter;
+            // every 3rd SKILL deals 5 THORNS damage to ALL enemies (flat -- THORNS
+            // skips the NORMAL-only power pipeline).
+            if (hook == RelicHook::AT_TURN_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::ON_USE_CARD) {
+                const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+                if (cd == nullptr || cd->type != CardType::SKILL) {
+                    return;
+                }
+                ++slot.counter;
+                if (slot.counter % 3 == 0) {
+                    slot.counter = 0;
+                    ActionQueueItem dmg{};
+                    dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+                    dmg.src = kActorPlayer;
+                    dmg.tgt = kActorAllEnemies;
+                    dmg.amount = 5;
+                    dmg.flags = make_damage_flags(DamageType::THORNS);
+                    add_to_bottom(s, dmg);  // addToBot DamageAllEnemies (:49)
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::ORNAMENTAL_FAN:
+            // OrnamentalFan (OrnamentalFan.java:34-54): per-turn attack counter;
+            // every 3rd ATTACK gains 4 block (direct GainBlockAction, no Dexterity).
+            if (hook == RelicHook::AT_TURN_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::ON_USE_CARD && ctx.card_is_attack) {
+                ++slot.counter;
+                if (slot.counter % 3 == 0) {
+                    slot.counter = 0;
+                    ActionQueueItem blk{};
+                    blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+                    blk.src = kActorPlayer;
+                    blk.tgt = kActorPlayer;
+                    blk.amount = 4;
+                    blk.flags = kBlockNoPowers;
+                    add_to_bottom(s, blk);  // addToBot (OrnamentalFan.java:46)
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::SHURIKEN:
+            // Shuriken (Shuriken.java:35-55): per-turn attack counter; every 3rd
+            // ATTACK grants 1 Strength.
+            if (hook == RelicHook::AT_TURN_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::ON_USE_CARD && ctx.card_is_attack) {
+                ++slot.counter;
+                if (slot.counter % 3 == 0) {
+                    slot.counter = 0;
+                    ActionQueueItem gain{};
+                    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                    gain.src = kActorPlayer;
+                    gain.tgt = kActorPlayer;
+                    gain.amount = 1;
+                    gain.flags = make_apply_power_flags(PowerId::STRENGTH);
+                    add_to_bottom(s, gain);  // addToBot (Shuriken.java:47)
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::SUNDIAL:
+            // Sundial.onShuffle (Sundial.java:45-53): every 3rd reshuffle grants 2
+            // energy. onEquip counter=0; NO victory reset (persists across combats).
+            if (hook == RelicHook::ON_SHUFFLE) {
+                ++slot.counter;
+                if (slot.counter == 3) {
+                    slot.counter = 0;
+                    ActionQueueItem e{};
+                    e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+                    e.src = kActorPlayer;
+                    e.tgt = kActorPlayer;
+                    e.amount = 2;
+                    add_to_bottom(s, e);  // addToBot GainEnergyAction(2) (:51)
+                }
+            }
+            return;
+
+        case RelicId::SELF_FORMING_CLAY:
+            // SelfFormingClay.wasHPLost (SelfFormingClay.java:32-37): any positive
+            // in-combat HP loss applies Next Turn Block 3 (addToTop; stacks).
+            // dispatch_relics_was_hp_lost already gates amount > 0.
+            if (hook == RelicHook::WAS_HP_LOST) {
+                ActionQueueItem gain{};
+                gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                gain.src = kActorPlayer;
+                gain.tgt = kActorPlayer;
+                gain.amount = 3;
+                gain.flags = make_apply_power_flags(PowerId::NEXT_TURN_BLOCK);
+                add_to_top(s, gain);  // addToTop (SelfFormingClay.java:35)
+            }
+            return;
+
         // Native relics whose combat body is DEFERRED (a cross-domain dependency
         // not yet available). Each is a documented no-op today; the relic still
         // dispatches (row + hook registered) so the accounting/wiring is in place.
@@ -321,12 +578,20 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
         //   PRESERVED_INSECT -- elite HP scaling (needs room context + HP-scale op).
         //   TOY_ORNITHOPTER is dispatched by run_advance's RunState-owned potion
         //   route (B4.4), not by a CombatState-only hook.
+        //   MUMMIFIED_HAND (B3.25) -- onUseCard POWER -> random hand card costs 0
+        //   this turn (cardRandomRng); DEFERRED: no POWER CardType exists until the
+        //   B3.7 power-card batch, so the trigger condition is unrepresentable.
+        //   PANTOGRAPH (B3.25) -- atBattleStart heal 25 in a BOSS fight; DEFERRED:
+        //   monsters.yaml has no EnemyType/BOSS metadata and no boss rows exist
+        //   yet (Guardian/Hexaghost/Slime Boss are B3.15-B3.17).
         case RelicId::AKABEKO:
         case RelicId::BOOT:
         case RelicId::ART_OF_WAR:
         case RelicId::ANCIENT_TEA_SET:
         case RelicId::PRESERVED_INSECT:
         case RelicId::TOY_ORNITHOPTER:
+        case RelicId::MUMMIFIED_HAND:
+        case RelicId::PANTOGRAPH:
         default:
             return;  // an unrecognized / deferred native relic is a safe no-op
     }

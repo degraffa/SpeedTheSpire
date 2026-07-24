@@ -18,6 +18,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
 #include "sts/engine/power_hooks.hpp"   // B3.2: onPlayCard/onUseCard fan-out + onExhaust
+#include "sts/engine/relic_hooks.hpp"   // B3.25: player_has_relic (Strike Dummy bake)
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
 #include "sts/engine/types.hpp"         // CardId
 
@@ -136,6 +137,24 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         // moves the source to the discard early, but the game keeps it in limbo
         // (AbstractPlayer.useCard:1369-1375; choice_excluded_index).
         item.tgt = source_index;
+    }
+    // Strike Dummy (B3.25): AbstractCard.applyPowers runs relic atDamageModify on
+    // float(baseDamage) BEFORE the player-power atDamageGive loop
+    // (AbstractCard.java:2229-2237); StrikeDummy.atDamageModify (StrikeDummy.java:
+    // 28-33) adds +3.0f for STRIKE-tagged cards. Baked into the queued base at
+    // queue time -- the same applyPowers-at-use timing as DAMAGE_PER_STRIKE above
+    // -- and float-exact (int base+3 == float(base)+3.0f for all card bases). The
+    // gate covers the plain DAMAGE steps of Strike/Pommel/Twin/Wild Strike AND
+    // Perfected Strike's DAMAGE_PER_STRIKE (already rewritten to a DAMAGE whose
+    // `amount` carries the per-Strike bonus -- the game likewise counts first,
+    // then applies atDamageModify). No relic -> byte-identical to pre-B3.25.
+    if (static_cast<Opcode>(item.opcode) == Opcode::DAMAGE) {
+        const CardDef* sd =
+            card_def(static_cast<CardId>(s.card_pool[source_index].card_id));
+        if (sd != nullptr && sd->is_strike &&
+            player_has_relic(s, RelicId::STRIKE_DUMMY)) {
+            item.amount += 3;
+        }
     }
     add_to_bottom(s, item);
 }
@@ -282,7 +301,15 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    loop -- they are NOT applied inline here (matches AbstractCard.use()).
     //    X-cost cards repeat their program energyOnUse times (WhirlwindAction:
     //    for i in [0, energyOnUse) queue the effect), then spend ALL energy.
-    if (is_xcost) {
+    //    ON_PLAY guard (B3.25): a passive status/curse (trigger != ON_PLAY)
+    //    stores its TRIGGER program in `effects` (B3.9); its use() is empty in
+    //    the game (Regret.use is a no-op, Regret.java:28-31 etc.), so playing
+    //    one -- reachable only via Blue Candle's curse playability -- must NOT
+    //    run that program. Previously unreachable (unplayable cards were never
+    //    played), so no behavior change for any existing path.
+    if (def->trigger != CardTrigger::ON_PLAY) {
+        // no queued effects: the card's program belongs to its passive trigger
+    } else if (is_xcost) {
         int energy_on_use = s.player_energy;
         if (energy_on_use < 0) {
             energy_on_use = 0;

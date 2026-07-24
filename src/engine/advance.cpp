@@ -22,6 +22,7 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
 #include "sts/engine/observation.hpp"
+#include "sts/engine/relic_hooks.hpp"       // B3.25: player_has_relic (Blue Candle)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -236,6 +237,18 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
             bool playable = !unplayable && state.player_energy >= c.cost_now &&
                             !normality_locked;
+            // Blue Candle (B3.25; AbstractCard.canUse, AbstractCard.java:920):
+            // a CURSE with costForTurn < -1 IS playable when the player owns
+            // Blue Candle. cost_now is 0 for unplayable rows (gen.py's -2
+            // sentinel), matching the game spending no energy on a curse play.
+            // (The STATUS twin gate at :917 is Medical Kit -- SHOP tier, B3.26.)
+            if (unplayable && !normality_locked) {
+                const CardDef* d = card_def(static_cast<CardId>(c.card_id));
+                if (d != nullptr && d->type == CardType::CURSE &&
+                    player_has_relic(state, RelicId::BLUE_CANDLE)) {
+                    playable = state.player_energy >= c.cost_now;
+                }
+            }
             // Clash's all-attacks canUse predicate (Stage B B3.3).
             if (playable) {
                 const CardDef* d = card_def(static_cast<CardId>(c.card_id));

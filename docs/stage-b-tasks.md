@@ -1641,7 +1641,7 @@ ids 16/14), so both are now DATA at_battle_start APPLY_POWER relics (mirroring
 Vajra), dropped from the deferred native switch, with tier-2 battle-start tests.
 Akabeko (Vigor) / Pen Nib / Boot / the energy-flag + HP-scale relics stay deferred.
 
-### B3.25 `[ ]` ∥ Relics: uncommons
+### B3.25 `[x]` ∥ Relics: uncommons
 **Deps:** B3.24 · **Provenance:** relics/ UNCOMMON, Ironclad-obtainable
 **Deliverables:** registry rows + triggers (Blue Candle, Bottled trio,
 Eternal Feather, Gremlin Horn, Horn Cleat, Ink Bottle, Kunai?, Letter
@@ -1653,7 +1653,97 @@ evidence in the Log).
 **Acceptance:** tier-2 per relic; Paper Phrog's Vulnerable-multiplier branch
 (the stage-a A4.1 "unreachable" note retires here — update that inline
 comment in the same commit).
-**Log:** —
+**Log:** Done 2026-07-24 on base `01d085a`. Verified by running (WSL
+Ubuntu-2404), not inferred — **debug 454/454, leak-detecting ASan/UBSan
+454/454, release 454/454**. Every relic body read in full in the decompiled
+Java before coding (per-row provenance in `registry/relics.yaml`).
+**Batch (30 = 28 shared + 2 red), ids 36-65 (append-only after Circlet=35):**
+enumerated from the constructor tiers (`super(..., RelicTier.UNCOMMON, ...)`)
+of every relic registered by RelicLibrary.initialize(). EXCLUDED as
+non-Ironclad-obtainable, with filter evidence: NinjaScroll + PaperCrane
+(addGreen, RelicLibrary.java:370-371), GoldPlatedCables + SymbioticVirus
+(addBlue, :395/:399), TeardropLocket + Duality (addPurple, :407-408);
+Test1/Test6/DiscerningMonocle (UNCOMMON ctors, never registered in
+initialize()); DEPRECATEDYin/DEPRECATEDDodecahedron (deprecated pkg, never
+registered). PaperFrog + SelfFormingClay are the only RED uncommons
+(addRed, :387/:390). `game_id` join keys are the AbstractRelic ID strings
+(display-name traps: `HornCleat`, `InkBottle`, `StrikeDummy`, `The Courier`,
+`Paper Frog`, `Frozen/Molten/Toxic Egg 2`, `White Beast Statue`,
+`Self Forming Clay`).
+**Pool order (B4.6 compatibility).** Canonical pre-shuffle UNCOMMON
+`pool_order` 0..29 derived by INVERTING the JDK Fisher-Yates (relicRng draw
+#2) against the live b14_accept `oracle.relicPools.uncommon` captures for
+seeds 1790050543751..1790050543753 — all three seeds invert to ONE
+pre-shuffle order (three-way agreement is the correctness proof; the same
+tooling replicated the B4.6 common order first as a control). A new oracle
+test pins all three shuffled uncommon orders; **B4.6's three-seed common
+pins and the post-five-draw relicRng (s0,s1,counter) triples are GREEN
+UNCHANGED** (the five draws are unconditional, so populating a tier cannot
+move them) — only the scaffold "tiers 1-4 empty" placeholder assertions
+(marked "belongs to B3.25-B3.27") narrowed to tiers 2-4.
+**Live combat relics.** Native: Kunai/Shuriken/Ornamental Fan (per-turn
+ATTACK cadence ×3 → Dex/Str/4-block), Letter Opener (SKILL ×3 → 5 THORNS
+AoE), Ink Bottle (any-card ×10 → draw 1; counter persists — no onVictory
+reset), Horn Cleat (turn 2 → 14 block, once per combat; counter<0 encodes
+the grayscale latch), Sundial (every 3rd reshuffle → 2 energy; persists),
+Gremlin Horn (new `on_monster_death` hook 14, wired at the op_damage/
+op_lose_hp death edge with the !areMonstersBasicallyDead guard), Blue
+Candle (curse playability in legal_actions per AbstractCard.canUse:920;
+on_use_card CURSE → LoseHP 1 + instance-EXHAUST redirect; resolve_card_play
+now guards effect programs on trigger==ON_PLAY so a candle-played curse
+runs no trigger program), Self-Forming Clay (wasHPLost → Next Turn Block 3
+addToTop; **powers.yaml id 23 NEXT_TURN_BLOCK** (22 at branch time,
+renumbered at integration — B3.17's SPLIT landed first as 22) native at_start_of_turn
+BLOCK+self-remove). DATA: Mercury Hourglass (at_turn_start DAMAGE 3
+ALL_ENEMY THORNS — gen.py relic steps now accept `damage_type`, mirroring
+the card-step encoding). Bespoke-site rows (no hook bindings): **Paper
+Phrog** — the VulnerablePower.atDamageReceive ×1.75 monster branch
+(VulnerablePower.java:67-69) is live in the frozen pipeline's
+at_damage_receive keyed on player_has_relic; the stage-a A4.1 "unreachable"
+inline note (interp.hpp provenance block) RETIRED in this commit (Odd
+Mushroom ×1.25 stays with B3.26; Paper Crane stays unreachable —
+Silent-only). **Strike Dummy** — atDamageModify +3 baked at queue time for
+CardDef.is_strike DAMAGE steps (AbstractCard.java:2229-2237 runs relic
+atDamageModify on float(baseDamage) BEFORE power atDamageGive; int base+3
+is float-exact). **Meat on the Bone** — bespoke pre-victory site
+(AbstractRoom.endBattle:418-420 fires BEFORE player.onVictory, so before
+Burning Blood regardless of acquisition order): apply_meat_on_the_bone_
+pre_victory, wired in run_advance end_combat.
+**New hook plumbing (append-only):** RelicHook ON_MONSTER_DEATH=14 +
+ON_SHUFFLE=15 (kRelicHookCount 16; gen.py + relics.hpp pins extended);
+onShuffle wired in piles.cpp shuffle_discard_into_draw (EmptyDeckShuffle
+ctor timing — before the shuffle draw, only on a real reshuffle); relic
+wasHPLost wired into power_hooks dispatch_was_hp_lost AFTER player powers
+(AbstractPlayer.damage:1445-1449) — makes B3.24's Centennial Puzzle/Red
+Skull live too; every new site is a no-op with an empty mirror, so the 20
+combat fixtures stay byte-identical (fixture_oracle green, SCHEMA_VERSION
+untouched).
+**Run layer.** acquire_relic: Pear (+10 max/+10 cur, increaseMaxHp(10,true)).
+New `run_deck.hpp add_card_to_master_deck` (the onObtainCard door): Molten/
+Toxic Egg upgrade an un-upgraded ATTACK/SKILL on obtain, Darkstone Periapt
+pays +6 max/+6 cur on a CURSE obtain; Frozen Egg's POWER branch documented
+inert (no POWER CardType until B3.7). canSpawn gates: floor≤48 family
+(Darkstone/FrozenEgg/MeatOnTheBone/MoltenEgg/QuestionCard/SingingBowl/
+ToxicEgg), The Courier floor≤48 && !in_shop, Matryoshka floor≤40, and the
+Bottled trio's deck-content gates (RelicSpawnContext.deck_has_* +
+fill_deck_spawn_gates; checked BEFORE the endless bypass — the Java bottled
+canSpawn has no isEndless clause; non-basic == not Strike/Defend/Bash, the
+only CardRarity.BASIC red rows).
+**Deferred (documented per hygiene; un-deferral owners):** Mummified Hand
+(onUseCard POWER → cardRandomRng 0-cost — no POWER CardType until **B3.7**);
+Pantograph (atBattleStart boss heal 25 — no EnemyType/BOSS monster metadata
+until **B3.15-B3.17**); Bottled trio bottling at acquisition (needs run-layer
+acquisition-choice machinery + a per-master-deck-instance innate flag —
+B4-owner; rows/gates live so pools and B4.7 chests are complete); Eternal
+Feather (rest-room heal, **B4.9**); Question Card/Singing Bowl/White Beast
+Statue (reward-screen modifiers, **B4.5**); The Courier (shop, **B4.8**);
+Matryoshka (chests, **B4.7**). Each is a registered row with a documented
+no-op (native branch or run-layer note) so accounting/wiring is in place.
+**Manifest** (integrated, after B3.17): cards 50 / powers 23
+(+NEXT_TURN_BLOCK=23) / monsters 10 / relics 65 (+30) / potions 33 /
+encounters 20 / **total 201**. Focused: RelicHooks +
+RelicHooksUncommon, RelicPools (incl. the new uncommon three-seed oracle),
+RelicAcquisition, RunDeck, PaperPhrog, RegistryGen — 82/82.
 
 ### B3.26 `[ ]` ∥ Relics: rares + shop
 **Deps:** B3.24 · **Provenance:** relics/ RARE + SHOP, Ironclad-obtainable

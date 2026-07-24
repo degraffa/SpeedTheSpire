@@ -200,8 +200,12 @@ void fill_combat_result(const CombatState& s, StepResult& r) noexcept {
 
 void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
                          StepResult& res) noexcept {
-    // AbstractRoom.endBattle calls player.onVictory for ordinary victory and
-    // Smoke Bomb alike, before the reward screen opens.
+    // AbstractRoom.endBattle (AbstractRoom.java:413-421): Meat on the Bone's
+    // onTrigger fires FIRST (:418-420, heal 12 at <= half HP), THEN
+    // player.onVictory runs every relic's onVictory -- for ordinary victory and
+    // Smoke Bomb alike, before the reward screen opens. The explicit pre-step
+    // keeps Meat ahead of Burning Blood regardless of acquisition order (B3.25).
+    apply_meat_on_the_bone_pre_victory(rc.combat);
     dispatch_relics_on_victory(rc.combat, rc.combat.relics,
                                rc.combat.relic_count);
     fold_back_combat(rc);

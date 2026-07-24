@@ -160,7 +160,7 @@ TEST(RegistryGen, DuplicateRelicPoolOrderFailsWithClearError) {
     }
     {
         std::ofstream relics(bad_reg / "relics.yaml", std::ios::app);
-        relics << "\n- id: 36\n  name: DUPLICATE_POOL_SLOT\n"
+        relics << "\n- id: 66\n  name: DUPLICATE_POOL_SLOT\n"
                   "  game_id: \"Duplicate Pool Slot\"\n  tier: COMMON\n"
                   "  pool_order: 0\n"
                   "  provenance: \"synthetic duplicate for the negative test\"\n";
@@ -283,7 +283,7 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
 TEST(RegistryGen, RelicTableMatchesRegistry) {
     namespace r = sts::registry;
-    EXPECT_EQ(r::manifest::kRelicsCount, 35u);
+    EXPECT_EQ(r::manifest::kRelicsCount, 65u);  // + B3.25's 30 uncommons
 
     // Burning Blood (starter, native on_victory).
     const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
@@ -316,23 +316,64 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
     EXPECT_EQ(r::relic_def(r::RelicId::RED_SKULL)->pool_order, 32);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->pool_order, -1);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->initial_counter, 1);
-    EXPECT_EQ(r::kRelicDefs.size(), 35u);
+    EXPECT_EQ(r::kRelicDefs.size(), 65u);
+
+    // --- B3.25 uncommon rows ------------------------------------------------
+    // Mercury Hourglass (data): atTurnStart DAMAGE 3 to ALL enemies, THORNS-typed
+    // (extra == DamageType::THORNS == 1, the make_damage_flags packing).
+    const r::RelicDef* mh = r::relic_def(r::RelicId::MERCURY_HOURGLASS);
+    ASSERT_NE(mh, nullptr);
+    EXPECT_EQ(mh->tier, r::RelicTier::UNCOMMON);
+    EXPECT_FALSE(mh->native);
+    const auto* mb = mh->hook_binding(r::RelicHook::AT_TURN_START);
+    ASSERT_NE(mb, nullptr);
+    ASSERT_EQ(mb->step_count, 1);
+    EXPECT_EQ(mb->steps[0].op, r::Opcode::DAMAGE);
+    EXPECT_EQ(mb->steps[0].target, r::StepTarget::ALL_ENEMY);
+    EXPECT_EQ(mb->steps[0].amount, 3);
+    EXPECT_EQ(mb->steps[0].extra,
+              sts::engine::make_damage_flags(sts::engine::DamageType::THORNS));
+
+    // Sundial: native on_shuffle (the new B3.25 hook), onEquip counter 0.
+    const r::RelicDef* sun = r::relic_def(r::RelicId::SUNDIAL);
+    ASSERT_NE(sun, nullptr);
+    EXPECT_TRUE(sun->native);
+    EXPECT_NE(sun->hook_binding(r::RelicHook::ON_SHUFFLE), nullptr);
+    EXPECT_EQ(sun->initial_counter, 0);
+
+    // Gremlin Horn: native on_monster_death (the other new B3.25 hook).
+    EXPECT_NE(r::relic_def(r::RelicId::GREMLIN_HORN)
+                  ->hook_binding(r::RelicHook::ON_MONSTER_DEATH),
+              nullptr);
+
+    // Paper Phrog / Strike Dummy / Meat on the Bone: bespoke-site rows, no hook
+    // bindings (pipeline / queue-time / pre-victory bodies).
+    EXPECT_EQ(r::relic_def(r::RelicId::PAPER_PHROG)->hook_count, 0);
+    EXPECT_EQ(r::relic_def(r::RelicId::STRIKE_DUMMY)->hook_count, 0);
+    EXPECT_EQ(r::relic_def(r::RelicId::MEAT_ON_THE_BONE)->hook_count, 0);
+
+    // Derived canonical pre-shuffle pool_order endpoints (three-seed shuffle
+    // inversion; relic_pools_test pins the full shuffled orders).
+    EXPECT_EQ(r::relic_def(r::RelicId::BOTTLED_TORNADO)->pool_order, 0);
+    EXPECT_EQ(r::relic_def(r::RelicId::PAPER_PHROG)->pool_order, 29);
+    EXPECT_EQ(r::relic_def(r::RelicId::MATRYOSHKA)->initial_counter, 2);
 }
 
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 50u);   // B3.5: prior 39 + 11 red uncommon attacks
-    EXPECT_EQ(m::kPowersCount, 22u);  // 19 + B3.13 Curl Up + B3.9 Frail + B3.17 Split
+    EXPECT_EQ(m::kPowersCount, 23u);  // 21 + B3.17 Split (22) + B3.25 Next Turn
+                                      // Block (23, Self-Forming Clay)
     EXPECT_EQ(m::kMonstersCount, 10u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large slimes
-    EXPECT_EQ(m::kRelicsCount, 35u);  // + B4.6 Circlet fallback
+    EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 170u);  // integrated through B3.5/B3.14/B4.6/B3.17
+    EXPECT_EQ(m::kTotalCount, 201u);  // integrated through B3.17 + B3.25
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
