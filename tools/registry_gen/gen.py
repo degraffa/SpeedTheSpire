@@ -84,6 +84,13 @@ OPCODES = {
     "LOSE_HP_PER_HAND": 18,
     "DISCARD_HAND": 19,
     "REDUCE_POWER": 20,
+    # Stage B B3.5 additions (append-only): Dropkick's execute-time Vulnerable
+    # branch; Searing Blow's upgrade-count damage; Rampage's per-instance misc
+    # scaling; Sever Soul's exhaust-all-non-Attacks action.
+    "DROPKICK": 21,
+    "DAMAGE_UPGRADE_SCALE": 22,
+    "DAMAGE_RAMPAGE": 23,
+    "EXHAUST_NON_ATTACKS": 24,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -461,6 +468,10 @@ def _parse_card_steps(card_name: str, effects, powers: dict[str, int],
         elif op == "DAMAGE_PER_STRIKE":
             # +`per` damage per "Strike"-named card (Perfected Strike magicNumber).
             extra = int(step.get("per", 0))
+        elif op in ("DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE"):
+            # Dynamic per-instance damage: `increment` is the first-upgrade
+            # increment (Searing Blow) or post-play misc increment (Rampage).
+            extra = int(step.get("increment", 0))
         steps.append((OPCODES[op], amount, extra, STEP_TARGETS[st]))
     return steps
 

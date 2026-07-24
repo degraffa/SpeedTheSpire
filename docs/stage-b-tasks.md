@@ -1119,7 +1119,7 @@ CHOOSE->upgrade->play script. All hand-computed from the cited Java. Triple-pres
 relics landed) — my power_hooks/action_queue additions are disjoint from B3.24's
 relic wiring. **Suites: debug/asan/release green (baseline + 18 new B3.4 cases).**
 
-### B3.5 `[ ]` ∥ Red uncommons — attacks
+### B3.5 `[x]` ∥ Red uncommons — attacks
 **Deps:** B3.2 · **Provenance:** cards/red UNCOMMON attacks (~12; enumerate)
 **Deliverables:** registry entries incl. Blood for Blood (cost falls per HP
 loss), Carnage (ethereal), Dropkick/Hemokinesis/Uppercut/Pummel/Rampage
@@ -1130,7 +1130,28 @@ document the `CardInstance.upgrade` count encoding here), Sever Soul
 **Acceptance:** tier-2 per card; Searing Blow's multi-upgrade decision
 recorded in the design-doc change log if it touches the schema; directed
 script.
-**Log:** —
+**Log:** Done 2026-07-23. Enumerated the exact 11-card constructor roster:
+Blood for Blood, Carnage, Dropkick, Hemokinesis, Pummel, Rampage, Reckless
+Charge, Searing Blow, Sever Soul, Uppercut, and Whirlwind (Infernal Blade is an
+uncommon Skill and is therefore B3.6). Appended card IDs 40–50 and opcodes
+21–24 without renumbering existing registry values; manifest is cards 50 / total
+162 and deterministic generation remains byte-identical. Implemented the Java
+behavior from the 11 card classes plus `DropkickAction`,
+`ModifyDamageAction`, `MakeTempCardInDrawPileAction`,
+`ExhaustAllNonAttackAction`, `WhirlwindAction`,
+`AbstractPlayer.updateCardsOnDamage`, and `AbstractCard` upgrade/cost handling:
+per-positive-HP-loss Blood for Blood cost updates across hand/discard/draw,
+execute-time Dropkick Vulnerable gating, Rampage per-instance combat scaling,
+Reckless Charge's random Dazed insertion, Sever Soul filtering, and X-cost AOE.
+Searing Blow uses the existing `CardInstance.upgrade` `uint8_t` as its upgrade
+count (damage `12 + 4n + n(n-1)/2`, repeated-upgrade eligibility through 255)
+and Rampage uses the existing combat-only `misc`; `sizeof(CardInstance)` stays
+8, so there is no schema/design-log change. Added 18 tier-2/directed tests,
+including RNG draw count and the public Hemokinesis → reduced Blood for Blood
+script. Hand-derived from the cited decompiled Java; no live-oracle capture or
+fixture regeneration was needed. Verification: focused registry 14/14 and card
+suite 18/18; full debug 405/405, leak-detecting ASan/UBSan 405/405 with no
+diagnostics, and release 405/405.
 
 ### B3.6 `[ ]` ∥ Red uncommons — skills
 **Deps:** B3.2 · **Provenance:** cards/red UNCOMMON skills (~13; enumerate)

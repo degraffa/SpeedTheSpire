@@ -110,6 +110,25 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         item.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
         item.amount = step.amount + static_cast<int32_t>(step.extra) * strikes;
         item.flags = 0;
+    } else if (step.op ==
+               static_cast<decltype(step.op)>(Opcode::DAMAGE_UPGRADE_SCALE)) {
+        // Searing Blow: its stored upgrade COUNT, not a boolean, determines the
+        // permanent base damage. Upgrade k adds (first increment + k), so n
+        // upgrades total amount + n*increment + n*(n-1)/2. Bake at queue time,
+        // the same applyPowers-at-use timing as every ordinary card damage row.
+        const int n = s.card_pool[source_index].upgrade;
+        item.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        item.amount = step.amount + n * static_cast<int32_t>(step.extra) +
+                      (n * (n - 1)) / 2;
+        item.flags = 0;
+    } else if (step.op ==
+               static_cast<decltype(step.op)>(Opcode::DAMAGE_RAMPAGE)) {
+        // Rampage's ModifyDamageAction follows its DamageAction. Preserve that
+        // execute-time order by carrying the source pool index and per-play
+        // increment in flags; the interpreter deals current base+misc first,
+        // then increments only this card instance's misc counter.
+        item.flags = static_cast<uint32_t>(source_index) |
+                     (step.extra << 8u);
     } else if (step.op == static_cast<decltype(step.op)>(Opcode::CHOOSE_CARD) &&
                choice_source_is_discard(choose_kind_from_flags(step.extra))) {
         // Headbutt (discard-source choice): stamp the just-played source card's

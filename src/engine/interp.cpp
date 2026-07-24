@@ -141,6 +141,8 @@ struct PowerView {
 
 // --- Opcode bodies ----------------------------------------------------------
 
+void cards_took_player_damage(CombatState& s) noexcept;
+
 // DAMAGE: compute output via the pipeline, then land it on tgt -- block absorbs
 // first (decrementBlock: block soaks up to its value), remainder hits hp,
 // currentHealth clamped >= 0. (Death/onDeath handling is not yet modeled; the
@@ -195,8 +197,11 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // only self-inflicted (card) HP loss does; Plated Armor's guard also reads the
     // damage `type` (it does not decrement on THORNS/HP_LOSS). No-op without those,
     // so skeleton DAMAGE is unchanged.
-    dispatch_was_hp_lost(s, tgt, src, old_hp - new_hp,
-                         static_cast<uint8_t>(type));
+    const int hp_lost = old_hp - new_hp;
+    dispatch_was_hp_lost(s, tgt, src, hp_lost, static_cast<uint8_t>(type));
+    if (tgt == kActorPlayer && hp_lost > 0) {
+        cards_took_player_damage(s);
+    }
 }
 
 // LOSE_HP: `tgt` loses `amount` HP directly, bypassing block (LoseHPAction /
@@ -218,8 +223,77 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     *hp = static_cast<int16_t>(new_hp);
     // source == victim (self), HP_LOSS type (bypasses block; not a THORNS/NORMAL
     // attack -- so it drives Rupture but not Thorns/Plated Armor's attack guards).
-    dispatch_was_hp_lost(s, tgt, tgt, old_hp - new_hp,
+    const int hp_lost = old_hp - new_hp;
+    dispatch_was_hp_lost(s, tgt, tgt, hp_lost,
                          static_cast<uint8_t>(DamageType::HP_LOSS));
+    if (tgt == kActorPlayer && hp_lost > 0) {
+        cards_took_player_damage(s);
+    }
+}
+
+// Blood for Blood.tookDamage: after each positive in-combat player HP-loss
+// EVENT, updateCost(-1) on every copy in hand/discard/draw (but not exhaust or
+// limbo/cardInUse). The reduction is per event, not per HP point, and clamps at
+// zero. AbstractPlayer.updateCardsOnDamage (AbstractPlayer.java:1518-1530).
+void cards_took_player_damage(CombatState& s) noexcept {
+    auto update = [&](const CardPoolIndex* pile, uint8_t count) noexcept {
+        for (uint8_t i = 0; i < count; ++i) {
+            CardInstance& c = s.card_pool[pile[i]];
+            if (c.card_id == static_cast<uint16_t>(CardId::BLOOD_FOR_BLOOD) &&
+                c.cost_now > 0) {
+                --c.cost_now;
+            }
+        }
+    };
+    update(s.hand, s.hand_count);
+    update(s.discard, s.discard_count);
+    update(s.draw, s.draw_count);
+}
+
+[[nodiscard]] bool actor_has_power(const CombatState& s, uint8_t actor,
+                                   PowerId id) noexcept {
+    const PowerView pv = actor_powers(s, actor);
+    for (uint8_t i = 0; i < pv.count; ++i) {
+        if (pv.slots[i].power_id == static_cast<uint16_t>(id) &&
+            pv.slots[i].amount > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// DropkickAction.update: test Vulnerable when the action resolves. Damage is
+// first; if the condition was true, GainEnergyAction then DrawCardAction follow.
+void op_dropkick(CombatState& s, const ActionQueueItem& item) noexcept {
+    const bool vulnerable = actor_has_power(s, item.tgt, PowerId::VULNERABLE);
+    op_damage(s, item.src, item.tgt, item.amount);
+    if (!vulnerable) {
+        return;
+    }
+    ActionQueueItem energy{};
+    energy.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+    energy.src = kActorPlayer;
+    energy.tgt = kActorPlayer;
+    energy.amount = 1;
+    add_to_bottom(s, energy);
+    ActionQueueItem draw{};
+    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+    draw.src = kActorPlayer;
+    draw.tgt = kActorPlayer;
+    draw.amount = 1;
+    add_to_bottom(s, draw);
+}
+
+// Sever Soul: ExhaustAllNonAttackAction queues ExhaustSpecificCardAction for
+// every non-Attack in hand; top insertion makes the topmost card exhaust first.
+void op_exhaust_non_attacks(CombatState& s) noexcept {
+    for (uint8_t i = s.hand_count; i > 0; --i) {
+        const CardPoolIndex pi = s.hand[static_cast<uint8_t>(i - 1)];
+        const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        if (def != nullptr && def->type != CardType::ATTACK) {
+            exhaust_card(s, pi);
+        }
+    }
 }
 
 // BLOCK: tgt gains `amount` block. CARD block (flags & kBlockNoPowers == 0) runs
@@ -421,8 +495,20 @@ void upgrade_instance(CombatState& s, CardPoolIndex pi) noexcept {
     if (def == nullptr) {
         return;
     }
-    c.upgrade = static_cast<uint8_t>(c.upgrade + 1);
-    c.cost_now = card_cost(*def, c.upgrade);
+    if (c.upgrade == UINT8_MAX) {
+        return;  // the POD encodes the count in u8; never wrap it to base
+    }
+    const CardId id = static_cast<CardId>(c.card_id);
+    ++c.upgrade;
+    if (id == CardId::BLOOD_FOR_BLOOD) {
+        // BloodForBlood.upgrade uses its CURRENT combat-reduced cost: untouched
+        // 4 -> 3, already-reduced n -> max(0,n-1), not a blind reset to 3.
+        if (c.cost_now > 0) {
+            --c.cost_now;
+        }
+    } else {
+        c.cost_now = card_cost(*def, c.upgrade);
+    }
     c.flags = card_flags(*def, c.upgrade);
 }
 
@@ -776,10 +862,13 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
         return false;
     }
     if (kind == ChoiceKind::UPGRADE) {
-        // canUpgrade(): !upgraded (and non-CURSE/STATUS -- every card in scope is
-        // ATTACK/SKILL, so the type guard is vacuously satisfied). `upgrade` is a
-        // count; 0 == not yet upgraded.
-        return s.card_pool[s.hand[slot]].upgrade == 0;
+        // Most cards: canUpgrade() == !upgraded. SearingBlow.canUpgrade always
+        // returns true, so its u8 upgrade count remains eligible until saturated.
+        const CardInstance& c = s.card_pool[s.hand[slot]];
+        if (c.card_id == static_cast<uint16_t>(CardId::SEARING_BLOW)) {
+            return c.upgrade != UINT8_MAX;
+        }
+        return c.upgrade == 0;
     }
     return true;  // EXHAUST / PUT_ON_DRAW_TOP accept any hand card
 }
@@ -914,6 +1003,27 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::REDUCE_POWER:
             op_reduce_power(s, item.tgt,
                             apply_power_id_from_flags(item.flags), item.amount);
+            return;
+        case Opcode::DROPKICK:
+            op_dropkick(s, item);
+            return;
+        case Opcode::DAMAGE_UPGRADE_SCALE:
+            return;  // baked into DAMAGE by card_play.cpp
+        case Opcode::DAMAGE_RAMPAGE: {
+            const auto pi = static_cast<CardPoolIndex>(item.flags & 0xFFu);
+            const int increment = static_cast<int>(item.flags >> 8u);
+            if (pi >= kCardPoolCap) {
+                return;
+            }
+            CardInstance& c = s.card_pool[pi];
+            op_damage(s, item.src, item.tgt,
+                      item.amount + static_cast<int>(c.misc));
+            const int next = static_cast<int>(c.misc) + increment;
+            c.misc = static_cast<uint16_t>(next > UINT16_MAX ? UINT16_MAX : next);
+            return;
+        }
+        case Opcode::EXHAUST_NON_ATTACKS:
+            op_exhaust_non_attacks(s);
             return;
         case Opcode::DAMAGE_BLOCK:
             // Body Slam: base == the player's CURRENT block (read here at execute

@@ -667,3 +667,190 @@
   flags: [ethereal]
   provenance: "AscendersBane (AscendersBane.java:22-25): cost -2 CURSE, CardRarity.SPECIAL, NONE, isEthereal=true; use()/upgrade() no-ops. The A10+ starter curse (the single largest strict-mode unknown-id, 1648 G4 hits) -- added to the deck at ascension 10, cannot be removed. Ethereal -> auto-exhausts each turn in the later DiscardAtEndOfTurnAction sweep. Unremovability is a RUN-LAYER deck-edit rule (B4.4/B4.5), not combat; NOT in the returnRandomCurse pool. Combat behavior = ethereal unplayable curse. No effect program."
   effects: []
+
+# --- B3.5 red uncommon attacks (ids 40-50) ---------------------------------
+# Enumerated from the actual cards/red sources by constructor rarity+type. The
+# 11-card roster is exact; Infernal Blade is an uncommon SKILL, not an attack.
+
+- id: 40
+  name: BLOOD_FOR_BLOOD
+  game_id: "Blood for Blood"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 4
+  target: ENEMY
+  flags: []
+  provenance: "BloodForBlood (BloodForBlood.java:29-64): base cost 4 / damage 18; tookDamage() updateCost(-1), clamped at zero; upgrade uses the card's current combat-reduced cost minus one (or 3 from untouched cost 4) and +4 damage. AbstractPlayer.updateCardsOnDamage (AbstractPlayer.java:1518-1530) calls tookDamage on hand/discard/draw after each positive in-combat HP-loss event."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 18}
+  upgraded_cost: 3
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 22}
+
+- id: 41
+  name: CARNAGE
+  game_id: "Carnage"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: [ethereal]
+  provenance: "Carnage (Carnage.java:29-62): cost 2, baseDamage 20, isEthereal=true; use queues DamageAction; upgradeDamage(8) -> 28."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 20}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 28}
+
+- id: 42
+  name: DROPKICK
+  game_id: "Dropkick"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "Dropkick.use (Dropkick.java:26-57) queues DropkickAction; DropkickAction.update (DropkickAction.java:25-34) checks Vulnerable at action execution, then queues Damage first, followed by GainEnergy(1), Draw(1) when vulnerable. baseDamage 5; upgradeDamage(3) -> 8."
+  effects:
+    - {op: DROPKICK, target: CARD_TARGET, amount: 5}
+  upgraded:
+    - {op: DROPKICK, target: CARD_TARGET, amount: 8}
+
+- id: 43
+  name: HEMOKINESIS
+  game_id: "Hemokinesis"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "Hemokinesis (Hemokinesis.java:32-63): cost 1, baseDamage 15, magic 2; use queues LoseHPAction(player,player,2) then DamageAction; upgradeDamage(5) -> 20."
+  effects:
+    - {op: LOSE_HP, target: SELF, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 15}
+  upgraded:
+    - {op: LOSE_HP, target: SELF, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 20}
+
+- id: 44
+  name: PUMMEL
+  game_id: "Pummel"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: [exhaust]
+  provenance: "Pummel (Pummel.java:30-61): cost 1, damage 2, exhaust; queues magicNumber attacks (4 base), upgradeMagicNumber(1) -> 5 hits."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 2}
+
+- id: 45
+  name: RAMPAGE
+  game_id: "Rampage"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  provenance: "Rampage (Rampage.java:29-58): cost 1, baseDamage 8, magic 5; use queues DamageAction then ModifyDamageAction(this.uuid,magic), which increases this battle instance's base damage. upgradeMagicNumber(3) -> +8 per play. CardInstance.misc stores only the accumulated combat bonus."
+  effects:
+    - {op: DAMAGE_RAMPAGE, target: CARD_TARGET, amount: 8, increment: 5}
+  upgraded:
+    - {op: DAMAGE_RAMPAGE, target: CARD_TARGET, amount: 8, increment: 8}
+
+- id: 46
+  name: RECKLESS_CHARGE
+  game_id: "Reckless Charge"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 0
+  target: ENEMY
+  flags: []
+  provenance: "RecklessCharge (RecklessCharge.java:27-56): cost 0, baseDamage 7; queues DamageAction then MakeTempCardInDrawPileAction(new Dazed,1,randomSpot=true,autoPosition=true); upgradeDamage(3) -> 10."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 7}
+    - {op: MAKE_CARD, card: DAZED, pile: DRAW_RANDOM, amount: 1}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 10}
+    - {op: MAKE_CARD, card: DAZED, pile: DRAW_RANDOM, amount: 1}
+
+- id: 47
+  name: SEARING_BLOW
+  game_id: "Searing Blow"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "SearingBlow (SearingBlow.java:30-64): baseDamage 12; canUpgrade() always true; each upgrade adds 4+timesUpgraded before incrementing timesUpgraded. With upgrade count n, damage = 12 + 4*n + n*(n-1)/2. Existing CardInstance.upgrade u8 is used as the count; no layout/schema change."
+  effects:
+    - {op: DAMAGE_UPGRADE_SCALE, target: CARD_TARGET, amount: 12, increment: 4}
+  upgraded:
+    - {op: DAMAGE_UPGRADE_SCALE, target: CARD_TARGET, amount: 12, increment: 4}
+
+- id: 48
+  name: SEVER_SOUL
+  game_id: "Sever Soul"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "SeverSoul (SeverSoul.java:30-58): queues ExhaustAllNonAttackAction then DamageAction(16); ExhaustAllNonAttackAction (ExhaustAllNonAttackAction.java:27-39) exhausts every non-Attack remaining in hand; upgradeDamage(6) -> 22."
+  effects:
+    - {op: EXHAUST_NON_ATTACKS, target: SELF}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 16}
+  upgraded:
+    - {op: EXHAUST_NON_ATTACKS, target: SELF}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 22}
+
+- id: 49
+  name: UPPERCUT
+  game_id: "Uppercut"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "Uppercut (Uppercut.java:32-62): queues DamageAction(13), Weak, then Vulnerable; magic 1 base, upgradeMagicNumber(1) -> both debuffs 2."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 13}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 1, power: WEAK}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 1, power: VULNERABLE}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 13}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: WEAK}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
+
+- id: 50
+  name: WHIRLWIND
+  game_id: "Whirlwind"
+  color: RED
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: -1
+  target: ALL_ENEMY
+  flags: []
+  provenance: "Whirlwind (Whirlwind.java:24-46) / WhirlwindAction.update (WhirlwindAction.java:40-67): X-cost, multiDamage 5, one DamageAllEnemiesAction per energy spent, then consume all energy; upgradeDamage(3) -> 8. Chemical X is a later relic consumer."
+  effects:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 5}
+  upgraded:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 8}

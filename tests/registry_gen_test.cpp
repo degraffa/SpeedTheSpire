@@ -284,8 +284,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 39u);   // B3.9: 24 + 4 statuses (Burn/Dazed/Slimed/
-                                      // Void) + 11 curses
+    EXPECT_EQ(m::kCardsCount, 50u);   // B3.5: prior 39 + 11 red uncommon attacks
     EXPECT_EQ(m::kPowersCount, 21u);  // 19 + B3.13 Curl Up + B3.9 Frail
     EXPECT_EQ(m::kMonstersCount, 4u); // Jaw Worm + Cultist + two louse variants
     EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
@@ -294,7 +293,7 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 151u);  // B3.13 total 135 + 15 cards + Frail
+    EXPECT_EQ(m::kTotalCount, 162u);  // B3.5: prior 151 + 11 cards
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

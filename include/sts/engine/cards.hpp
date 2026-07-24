@@ -156,7 +156,15 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::DISCARD_HAND) ==
             static_cast<uint16_t>(Opcode::DISCARD_HAND) &&
         static_cast<uint16_t>(sts::registry::Opcode::REDUCE_POWER) ==
-            static_cast<uint16_t>(Opcode::REDUCE_POWER),
+            static_cast<uint16_t>(Opcode::REDUCE_POWER) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DROPKICK) ==
+            static_cast<uint16_t>(Opcode::DROPKICK) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_UPGRADE_SCALE) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_UPGRADE_SCALE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_RAMPAGE) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_RAMPAGE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::EXHAUST_NON_ATTACKS) ==
+            static_cast<uint16_t>(Opcode::EXHAUST_NON_ATTACKS),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

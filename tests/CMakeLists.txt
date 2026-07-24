@@ -448,6 +448,18 @@ sts_set_warnings(card_attacks_test)
 sts_enable_sanitizers(card_attacks_test)
 gtest_discover_tests(card_attacks_test)
 
+# B3.5: the exact 11 Ironclad uncommon attacks. Per-card base/upgraded tier-2
+# behavior plus Blood for Blood cost hooks, Rampage misc scaling, Searing Blow
+# multi-upgrade counts, Sever Soul filtering, and Whirlwind X-cost/AOE.
+add_executable(card_uncommon_attacks_test
+    card_uncommon_attacks_test.cpp
+)
+
+target_link_libraries(card_uncommon_attacks_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(card_uncommon_attacks_test)
+sts_enable_sanitizers(card_uncommon_attacks_test)
+gtest_discover_tests(card_uncommon_attacks_test)
+
 # B3.9 statuses + curses (unplayable gating, end-of-turn triggers vs. §5.4 order,
 # on-draw energy loss, on-other-card-played HP loss, ethereal exhaust, Normality
 # play-cap, Slimed exhaust-on-play). Tier-2 per entry, hand-computed from the Java.

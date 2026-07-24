@@ -161,6 +161,17 @@ enum class Opcode : uint16_t {
                              // PowerId(flags low16) on `tgt`, removing at zero.
                              // Frail queues this at end of round so power-list
                              // iteration completes before the slot can disappear.
+    // --- Stage B B3.5 additions (append-only from 21) ---
+    DROPKICK = 21,            // DropkickAction: if the target has Vulnerable when
+                              // this action executes, damage, then gain 1 energy
+                              // and draw 1; otherwise damage only.
+    DAMAGE_UPGRADE_SCALE = 22,// queue-time dynamic base: amount + sum(extra+i,
+                              // i=0..upgrade-1). Searing Blow uses amount=12,
+                              // extra=4 and the CardInstance upgrade count.
+    DAMAGE_RAMPAGE = 23,      // queue-time dynamic base: amount + source.misc,
+                              // then source.misc += extra (Rampage 8,+5 / +8).
+    EXHAUST_NON_ATTACKS = 24, // exhaust every non-Attack remaining in hand, from
+                              // top to bottom (Sever Soul).
 };
 
 // --- CHOOSE_CARD field encoding (Stage B B3.4) ------------------------------

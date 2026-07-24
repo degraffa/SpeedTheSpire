@@ -22,9 +22,9 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-static_assert(sts::registry::manifest::kCardsCount == 39);  // B3.9: +4 statuses +11 curses
+static_assert(sts::registry::manifest::kCardsCount == 50);  // B3.5: +11 uncommon attacks
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
-static_assert(sts::registry::kMaxCardSteps == 4);  // B3.3: upgraded Sword Boomerang, 4 hits
+static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with
 // nothing but the generated headers in scope.
