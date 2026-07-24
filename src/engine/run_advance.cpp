@@ -235,8 +235,8 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     }
 
     // (2) Map composition game_ids -> MonsterIds; require every member implemented
-    //     (Jaw Worm, Cultist, and both louse variants are live; B3.14-B3.22 add
-    //     the rest). If any is unimplemented
+    //     (Jaw Worm, Cultist, louses, and small/medium slimes are live;
+    //     B3.15-B3.22 add the rest). If any is unimplemented
     //     we have still consumed miscRng exactly as the game would, then park.
     MonsterId ids[kMonsterCap] = {};
     bool all_impl = true;

@@ -286,14 +286,14 @@ TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 50u);   // B3.5: prior 39 + 11 red uncommon attacks
     EXPECT_EQ(m::kPowersCount, 21u);  // 19 + B3.13 Curl Up + B3.9 Frail
-    EXPECT_EQ(m::kMonstersCount, 4u); // Jaw Worm + Cultist + two louse variants
+    EXPECT_EQ(m::kMonstersCount, 8u); // + B3.14 four small/medium slimes
     EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 162u);  // B3.5: prior 151 + 11 cards
+    EXPECT_EQ(m::kTotalCount, 166u);  // integrated B3.5 cards + B3.14 monsters
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -523,6 +523,80 @@ TEST(RegistryGen, LouseTablesMatchJava) {
     EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::DEBUFF), 5);
 }
 
+TEST(RegistryGen, SmallAndMediumSlimeTablesMatchJava) {
+    namespace r = sts::registry;
+    const auto hp = [](const r::MonsterDef& d, int blo, int bhi, int a7lo,
+                       int a7hi) {
+        EXPECT_EQ(d.hp_min(6), blo);
+        EXPECT_EQ(d.hp_max(6), bhi);
+        EXPECT_EQ(d.hp_min(7), a7lo);
+        EXPECT_EQ(d.hp_max(20), a7hi);
+        EXPECT_TRUE(d.ai_native);
+        EXPECT_EQ(d.roll_count, 0);
+    };
+    hp(r::kSpikeSlimeSmall, 10, 14, 11, 15);
+    hp(r::kSpikeSlimeMedium, 28, 32, 29, 34);
+    hp(r::kAcidSlimeSmall, 8, 12, 9, 13);
+    hp(r::kAcidSlimeMedium, 28, 32, 29, 34);
+
+    EXPECT_EQ(static_cast<int>(r::MonsterId::SPIKE_SLIME_SMALL), 5);
+    EXPECT_EQ(static_cast<int>(r::MonsterId::SPIKE_SLIME_MEDIUM), 6);
+    EXPECT_EQ(static_cast<int>(r::MonsterId::ACID_SLIME_SMALL), 7);
+    EXPECT_EQ(static_cast<int>(r::MonsterId::ACID_SLIME_MEDIUM), 8);
+    EXPECT_EQ(r::monster_from_game_id("SpikeSlime_S"),
+              r::MonsterId::SPIKE_SLIME_SMALL);
+    EXPECT_EQ(r::monster_from_game_id("AcidSlime_M"),
+              r::MonsterId::ACID_SLIME_MEDIUM);
+
+    const r::MonsterMove* spike_s =
+        r::kSpikeSlimeSmall.move(r::kSpikeSlimeSmallMoveTackle);
+    ASSERT_NE(spike_s, nullptr);
+    EXPECT_EQ(spike_s->effects[0].amount.at(1), 5);
+    EXPECT_EQ(spike_s->effects[0].amount.at(2), 6);
+
+    const r::MonsterMove* spike_tackle =
+        r::kSpikeSlimeMedium.move(r::kSpikeSlimeMediumMoveFlameTackle);
+    ASSERT_NE(spike_tackle, nullptr);
+    EXPECT_EQ(spike_tackle->intent, r::MonsterIntent::ATTACK_DEBUFF);
+    ASSERT_EQ(spike_tackle->effect_count, 2);
+    EXPECT_EQ(spike_tackle->effects[0].amount.at(1), 8);
+    EXPECT_EQ(spike_tackle->effects[0].amount.at(2), 10);
+    EXPECT_EQ(spike_tackle->effects[1].op, r::Opcode::MAKE_CARD);
+    EXPECT_EQ(spike_tackle->effects[1].extra & 0xFFFFu,
+              static_cast<uint32_t>(r::CardId::SLIMED));
+    EXPECT_EQ((spike_tackle->effects[1].extra >> 16) & 0xFFu, 2u)
+        << "CardPile::DISCARD";
+    const r::MonsterMove* frail =
+        r::kSpikeSlimeMedium.move(r::kSpikeSlimeMediumMoveFrailLick);
+    ASSERT_NE(frail, nullptr);
+    EXPECT_EQ(frail->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::FRAIL));
+
+    const r::MonsterMove* acid_s =
+        r::kAcidSlimeSmall.move(r::kAcidSlimeSmallMoveTackle);
+    ASSERT_NE(acid_s, nullptr);
+    EXPECT_EQ(acid_s->effects[0].amount.at(1), 3);
+    EXPECT_EQ(acid_s->effects[0].amount.at(2), 4);
+    const r::MonsterMove* acid_m_wound =
+        r::kAcidSlimeMedium.move(r::kAcidSlimeMediumMoveWoundTackle);
+    ASSERT_NE(acid_m_wound, nullptr);
+    EXPECT_EQ(acid_m_wound->effects[0].amount.at(1), 7);
+    EXPECT_EQ(acid_m_wound->effects[0].amount.at(2), 8);
+    EXPECT_EQ(acid_m_wound->effects[1].op, r::Opcode::MAKE_CARD);
+    const r::MonsterMove* acid_m_tackle =
+        r::kAcidSlimeMedium.move(r::kAcidSlimeMediumMoveTackle);
+    ASSERT_NE(acid_m_tackle, nullptr);
+    EXPECT_EQ(acid_m_tackle->effects[0].amount.at(1), 10);
+    EXPECT_EQ(acid_m_tackle->effects[0].amount.at(2), 12);
+    const r::MonsterMove* acid_m_lick =
+        r::kAcidSlimeMedium.move(r::kAcidSlimeMediumMoveLick);
+    ASSERT_NE(acid_m_lick, nullptr);
+    EXPECT_EQ(acid_m_lick->effects[0].extra,
+              sts::engine::make_apply_power_flags(sts::engine::PowerId::WEAK));
+
+    EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::ATTACK_DEBUFF), 6);
+}
+
 // --- 6d. Duplicate move_id is rejected with a clear error --------------------
 TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
     const fs::path scratch = fs::path(kScratchDir);
@@ -540,7 +614,7 @@ TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
     }
     {
         std::ofstream monsters(bad_reg / "monsters.yaml", std::ios::app);
-        // id 99: an unused id (real ids 1..4 are JawWorm/Cultist/Louses) so the
+        // id 99: unused (real ids 1..8 include B3.14 slimes), so the
         // parser reaches the duplicate-move_id check rather than an id collision.
         monsters << "\n- id: 99\n  name: BAD_MOVES\n  game_id: \"BadMoves\"\n"
                     "  provenance: \"synthetic duplicate-move_id negative test\"\n"

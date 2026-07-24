@@ -115,6 +115,10 @@ std::string monster_repr(uint16_t v) {
         case MonsterId::CULTIST: n = "CULTIST"; break;
         case MonsterId::LOUSE_NORMAL: n = "LOUSE_NORMAL"; break;
         case MonsterId::LOUSE_DEFENSIVE: n = "LOUSE_DEFENSIVE"; break;
+        case MonsterId::SPIKE_SLIME_SMALL: n = "SPIKE_SLIME_SMALL"; break;
+        case MonsterId::SPIKE_SLIME_MEDIUM: n = "SPIKE_SLIME_MEDIUM"; break;
+        case MonsterId::ACID_SLIME_SMALL: n = "ACID_SLIME_SMALL"; break;
+        case MonsterId::ACID_SLIME_MEDIUM: n = "ACID_SLIME_MEDIUM"; break;
     }
     return named(n, v);
 }

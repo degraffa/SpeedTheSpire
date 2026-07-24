@@ -12,6 +12,7 @@
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn (B3.13)
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle (B3.13)
+#include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns (B3.14)
 
 namespace sts::engine {
 
@@ -34,6 +35,13 @@ void queue_monster_move_effects(CombatState& state, uint8_t mi,
                      : kActorPlayer;
         it.amount = e.amount.at(kMonsterAscension);
         it.flags = e.extra;  // APPLY_POWER: PowerId (make_apply_power_flags packing)
+        if (e.op == sts::registry::Opcode::MAKE_CARD) {
+            // Monster-authored MAKE_CARD uses the same generated packing as card
+            // programs. The interpreter expects CardPile in src and CardId in
+            // flags; tgt remains the player to avoid dynamic enemy fan-out.
+            it.src = static_cast<uint8_t>((e.extra >> 16) & 0xFFu);
+            it.tgt = kActorPlayer;
+        }
         add_to_bottom(state, it);
     }
 }
@@ -48,8 +56,16 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &louse_normal_init;
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_defensive_init;
+        case MonsterId::SPIKE_SLIME_SMALL:
+            return &spike_slime_small_init;
+        case MonsterId::SPIKE_SLIME_MEDIUM:
+            return &spike_slime_medium_init;
+        case MonsterId::ACID_SLIME_SMALL:
+            return &acid_slime_small_init;
+        case MonsterId::ACID_SLIME_MEDIUM:
+            return &acid_slime_medium_init;
         default:
-            return nullptr;  // not yet implemented (B3.14-B3.22)
+            return nullptr;  // not yet implemented (B3.15-B3.22)
     }
 }
 
@@ -63,6 +79,14 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &louse_normal_take_turn;
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_defensive_take_turn;
+        case MonsterId::SPIKE_SLIME_SMALL:
+            return &spike_slime_small_take_turn;
+        case MonsterId::SPIKE_SLIME_MEDIUM:
+            return &spike_slime_medium_take_turn;
+        case MonsterId::ACID_SLIME_SMALL:
+            return &acid_slime_small_take_turn;
+        case MonsterId::ACID_SLIME_MEDIUM:
+            return &acid_slime_medium_take_turn;
         default:
             return &default_monster_turn;  // no-op until the monster's batch lands
     }

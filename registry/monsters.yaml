@@ -182,3 +182,93 @@
         # WeakPower(player, 2, true) -- 2 Weak to the player (LouseDefensive.java:102).
         - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
   ai: native
+
+# --- B3.14: small + medium slimes -------------------------------------------
+# All four classes were read in full. Constructors consume exactly one
+# monsterHpRng draw (setHp), then AbstractMonster.init consumes the first aiRng
+# random(99) draw. Medium tackle moves create a fresh Slimed directly in the
+# discard pile through MakeTempCardInDiscardAction; MAKE_CARD carries that
+# destination as registry data. Selection remains native because AcidSlime_M's
+# history-dependent tree has conditional nextBoolean/nextFloat tie-break draws.
+
+- id: 5
+  name: SPIKE_SLIME_SMALL
+  game_id: "SpikeSlime_S"
+  provenance: "SpikeSlime_S ctor HP/damage branches (SpikeSlime_S.java:42-53), takeTurn (:63-71), getMove (:74-76), move id TACKLE=1 (:40); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:465-467,712-714,765-775)"
+  hp:
+    base: {min: 10, max: 14}  # SpikeSlime_S.java:46
+    a7:   {min: 11, max: 15}  # SpikeSlime_S.java:44
+  moves:
+    - name: TACKLE
+      move_id: 1
+      intent: ATTACK
+      effects:
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a2: 6}}
+  ai: native
+
+- id: 6
+  name: SPIKE_SLIME_MEDIUM
+  game_id: "SpikeSlime_M"
+  provenance: "SpikeSlime_M ctor HP/damage branches (SpikeSlime_M.java:51-68), takeTurn (:76-90), getMove A17 (:93-117), move ids FLAME_TACKLE=1/FRAIL_LICK=4 (:46-47); MakeTempCardInDiscardAction.update (:40-50); FrailPower ctor (:25-41)"
+  hp:
+    base: {min: 28, max: 32}  # SpikeSlime_M.java:56
+    a7:   {min: 29, max: 34}  # SpikeSlime_M.java:54
+  moves:
+    - name: FLAME_TACKLE
+      move_id: 1
+      intent: ATTACK_DEBUFF
+      effects:
+        - {op: DAMAGE, target: PLAYER, amount: {base: 8, a2: 10}}
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: SLIMED, pile: DISCARD}
+    - name: FRAIL_LICK
+      move_id: 4
+      intent: DEBUFF
+      effects:
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: FRAIL}
+  ai: native
+
+- id: 7
+  name: ACID_SLIME_SMALL
+  game_id: "AcidSlime_S"
+  provenance: "AcidSlime_S ctor HP/damage branches (AcidSlime_S.java:45-56), takeTurn direct next-move alternation (:66-80), getMove A17 (:83-89), move ids TACKLE=1/DEBUFF=2 (:41-42); WeakPower ctor (:27-43)"
+  hp:
+    base: {min: 8, max: 12}   # AcidSlime_S.java:49
+    a7:   {min: 9, max: 13}   # AcidSlime_S.java:47
+  moves:
+    - name: TACKLE
+      move_id: 1
+      intent: ATTACK
+      effects:
+        - {op: DAMAGE, target: PLAYER, amount: {base: 3, a2: 4}}
+    - name: LICK
+      move_id: 2
+      intent: DEBUFF
+      effects:
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
+  ai: native
+
+- id: 8
+  name: ACID_SLIME_MEDIUM
+  game_id: "AcidSlime_M"
+  provenance: "AcidSlime_M ctor HP/damage branches (AcidSlime_M.java:56-76), takeTurn (:84-105), getMove A17 (:108-138), move ids WOUND_TACKLE=1/NORMAL_TACKLE=2/WEAK_LICK=4 (:49-51); MakeTempCardInDiscardAction.update (:40-50); WeakPower ctor (:27-43)"
+  hp:
+    base: {min: 28, max: 32}  # AcidSlime_M.java:61
+    a7:   {min: 29, max: 34}  # AcidSlime_M.java:59
+  moves:
+    - name: WOUND_TACKLE
+      move_id: 1
+      intent: ATTACK_DEBUFF
+      effects:
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 8}}
+        - {op: MAKE_CARD, target: PLAYER, amount: 1, card: SLIMED, pile: DISCARD}
+    - name: TACKLE
+      move_id: 2
+      intent: ATTACK
+      effects:
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 12}}
+    - name: LICK
+      move_id: 4
+      intent: DEBUFF
+      effects:
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
+  ai: native

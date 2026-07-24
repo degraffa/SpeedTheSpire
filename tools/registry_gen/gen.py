@@ -235,6 +235,7 @@ MONSTER_INTENTS = {
     "ATTACK_DEFEND": 3,
     "BUFF": 4,       # Cultist Incantation, Louse Strengthen (AbstractMonster.Intent.BUFF)
     "DEBUFF": 5,     # Louse Defensive Weaken (AbstractMonster.Intent.DEBUFF)
+    "ATTACK_DEBUFF": 6,  # slime tackle + Slimed (AbstractMonster.Intent.ATTACK_DEBUFF)
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).
@@ -1270,7 +1271,8 @@ def _parse_amount_tiers(owner: str, raw) -> list[tuple[int, int]]:
     return out
 
 
-def _parse_monster(entry: dict, powers: dict[str, int]) -> dict:
+def _parse_monster(entry: dict, powers: dict[str, int],
+                   cards: dict[str, int]) -> dict:
     name = entry["name"]
     owner = f"monsters.yaml: monster {name}"
 
@@ -1371,6 +1373,20 @@ def _parse_monster(entry: dict, powers: dict[str, int]) -> dict:
                     raise fail(f"{owner}: move {mname} APPLY_POWER references "
                                f"unknown power {pname!r}")
                 extra = powers[pname]
+            elif op == "MAKE_CARD":
+                # Same packed representation as a card-authored MAKE_CARD step:
+                # CardId in bits 0-15, destination CardPile in bits 16-23.
+                # queue_monster_move_effects splits the pile back into item.src.
+                csym = step.get("card")
+                if csym not in cards:
+                    raise fail(f"{owner}: move {mname} MAKE_CARD references "
+                               f"unknown card {csym!r}")
+                pile = str(step.get("pile", "")).upper()
+                if pile not in CARD_PILES:
+                    raise fail(f"{owner}: move {mname} MAKE_CARD has unknown "
+                               f"pile {step.get('pile')!r} "
+                               f"(known: {sorted(CARD_PILES)})")
+                extra = cards[csym] | (CARD_PILES[pile] << 16)
             effects.append({"op": op, "target": tgt, "extra": extra,
                             "amount": amount})
         moves.append({"name": mname, "move_id": mid, "intent": intent,
@@ -1386,7 +1402,8 @@ def _parse_monster(entry: dict, powers: dict[str, int]) -> dict:
 
 
 def emit_monster_table(domains: dict[str, list[dict]]) -> str:
-    monsters = [_parse_monster(e, _power_id_map(domains))
+    monsters = [_parse_monster(e, _power_id_map(domains),
+                               {c["name"]: c["id"] for c in domains["cards"]})
                 for e in domains["monsters"]]
 
     # Array budgets, computed from the data (floor 1 so the header stays valid
@@ -1494,8 +1511,8 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("struct MonsterMoveEffect {")
     out.append("    Opcode op;")
     out.append("    MonsterMoveTarget target;")
-    out.append("    uint32_t extra;      // APPLY_POWER: the PowerId "
-               "(make_apply_power_flags packing)")
+    out.append("    uint32_t extra;      // APPLY_POWER: PowerId; MAKE_CARD: "
+               "CardId | (CardPile << 16)")
     out.append("    TieredStat amount;")
     out.append("};\n")
     out.append("struct MonsterMove {")

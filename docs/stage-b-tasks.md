@@ -1326,13 +1326,36 @@ registry tests pin all A2/A7/A17 columns and stream/timing metadata. Provenance:
 `AbstractMonster.java:431-491,622-678`. Verification: focused
 Cultist/Louse/RegistryGen 29/29; full Debug 359/359; full ASan 359/359.
 
-### B3.14 `[ ]` ∥ Monsters: small/medium slimes
+### B3.14 `[x]` ∥ Monsters: small/medium slimes
 **Deps:** B3.12 · **Provenance:** SpikeSlime_S/M.java, AcidSlime_S/M.java
 **Deliverables:** registry entries with A-columns; Slimed-card attacks
 (status insertion), Frail application (Spike M), lick debuffs.
 **Acceptance:** tier-2 per monster; status cards land in discard per the
 cited actions; aiRng draw counts per turn match hand-derivation.
-**Log:** —
+**Log:** Done 2026-07-23. Appended `MonsterId` 5–8 for Spike Slime S/M and
+Acid Slime S/M plus `MonsterIntent::ATTACK_DEBUFF` 6; no power or opcode IDs
+were added or renumbered. Registry A2/A7 columns pin HP and damage, and the
+generator now validates monster-authored `MAKE_CARD` card/pile operands while
+packing the existing opcode's `CardId | (CardPile << 16)` metadata. Native A20
+AI preserves each decompiled history branch and exact RNG API: all constructors
+draw HP once, all initial rolls consume one `aiRng.random(99)`, Spike S ignores
+that value, Acid S alternates directly with no later AI draws, and Acid M keeps
+its conditional `nextBoolean`/`nextFloat` tie-break draws. Medium tackles queue
+damage before a fresh Slimed in discard; licks apply Frail 1 or Weak 1, including
+Frail's live just-applied latch. Small/Lots of Slimes encounter compositions now
+map through the registry to implemented dispatch hooks. Independent XS128
+fixtures cover all four classes at 32 seeds × 20 turns, checking HP plus every
+move, full AI state, and counters; regeneration preserved all four SHA-256s
+byte-for-byte. Provenance: `SpikeSlime_S.java:42-76`,
+`SpikeSlime_M.java:51-117`, `AcidSlime_S.java:45-95`,
+`AcidSlime_M.java:56-168`, `AbstractMonster.java:431-491,712-715,765-775`,
+`MakeTempCardInDiscardAction.java:24-50`, `FrailPower.java:25-54`, and
+`WeakPower.java:27-60`. Verification: focused Slime 7/7 and RegistryGen 15/15;
+full Debug 395/395; leak-detecting ASan/UBSan 395/395; Release 395/395.
+After integration on top of B3.5, the combined manifest is cards 50 / powers 21 /
+monsters 8 / relics 34 / potions 33 / encounters 20 / total 166; focused Slime
+7/7 and RegistryGen 15/15 remained green, followed by full integrated Debug
+413/413 and leak-detecting ASan/UBSan 413/413.
 
 ### B3.15 `[ ]` ∥ Monsters: slavers + Looter + Fungi Beast
 **Deps:** B3.12 · **Provenance:** SlaverBlue/Red.java, Looter.java,

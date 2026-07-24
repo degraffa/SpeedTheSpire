@@ -158,6 +158,19 @@ sts_enable_sanitizers(louse_test)
 
 gtest_discover_tests(louse_test)
 
+# B3.14: Spike/Acid small+medium slime A20 AI, HP, effects, and encounter wiring.
+# Independent 32-seed x 20-turn fixtures pin each class's aiRng draw sequence.
+add_executable(slime_test
+    slime_test.cpp
+)
+
+target_link_libraries(slime_test PRIVATE sts_engine GTest::gtest_main)
+target_compile_definitions(slime_test PRIVATE STS_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+sts_set_warnings(slime_test)
+sts_enable_sanitizers(slime_test)
+
+gtest_discover_tests(slime_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
