@@ -204,8 +204,10 @@ TEST(RunBegin, RelicRngConsumesFivePoolShuffleDraws) {
     for (int i = 0; i < kRelicTierCount; ++i) (void)random_long(expect);
     EXPECT_EQ(rc.run.relic_rng.counter, kRelicTierCount);  // exactly 5
     EXPECT_TRUE(streams_equal(rc.run.relic_rng, expect));
-    // Pool CONTENTS are B4.6 (relics.yaml empty): counter advanced, pools empty.
-    for (int t = 0; t < kRelicTierCount; ++t) {
+    // B4.6 populates the complete registered common pool; B3.25-B3.27 own the
+    // other four tiers. Empty tiers still consumed their shuffle seed above.
+    EXPECT_EQ(rc.run.relic_pool_count[0], 33);
+    for (int t = 1; t < kRelicTierCount; ++t) {
         EXPECT_EQ(rc.run.relic_pool_count[t], 0);
     }
 }

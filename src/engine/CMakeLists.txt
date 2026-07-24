@@ -13,6 +13,7 @@ add_library(sts_engine
     card_play.cpp
     power_hooks.cpp
     relic_hooks.cpp
+    relic_pools.cpp
     potions.cpp
     advance.cpp
     run_advance.cpp

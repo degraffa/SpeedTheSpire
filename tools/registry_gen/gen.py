@@ -944,12 +944,35 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
     rows = []
     max_hooks = 1        # floor 1 so std::array<RelicHookBinding, N> is valid
     max_hook_steps = 1   # floor 1 likewise
+    pool_tiers = {"COMMON", "UNCOMMON", "RARE", "SHOP", "BOSS"}
+    pool_orders: dict[str, set[int]] = {tier: set() for tier in pool_tiers}
     for r in relics:
         tier = r.get("tier")
         if tier not in RELIC_TIERS:
             raise fail(f"relics.yaml: relic {r['name']} has unsupported tier "
                        f"{tier!r} (known: {sorted(RELIC_TIERS)})")
         native = bool(r.get("native", False))
+        raw_pool_order = r.get("pool_order", -1)
+        if isinstance(raw_pool_order, bool) or not isinstance(raw_pool_order, int):
+            raise fail(f"relics.yaml: relic {r['name']} pool_order must be an "
+                       f"integer, got {raw_pool_order!r}")
+        if tier in pool_tiers:
+            if raw_pool_order < 0:
+                raise fail(f"relics.yaml: pool relic {r['name']} ({tier}) must "
+                           "define a non-negative pool_order")
+            if raw_pool_order in pool_orders[tier]:
+                raise fail(f"relics.yaml: duplicate {tier} pool_order "
+                           f"{raw_pool_order}")
+            pool_orders[tier].add(raw_pool_order)
+        elif raw_pool_order != -1:
+            raise fail(f"relics.yaml: non-pool relic {r['name']} ({tier}) must "
+                       "omit pool_order")
+        raw_initial_counter = r.get("initial_counter", -1)
+        if (isinstance(raw_initial_counter, bool) or
+                not isinstance(raw_initial_counter, int) or
+                raw_initial_counter < -32768 or raw_initial_counter > 32767):
+            raise fail(f"relics.yaml: relic {r['name']} initial_counter must be "
+                       f"an int16, got {raw_initial_counter!r}")
 
         raw_hooks = r.get("hooks") or {}
         if not isinstance(raw_hooks, dict):
@@ -975,7 +998,14 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
             max_hook_steps = max(max_hook_steps, len(steps))
         max_hooks = max(max_hooks, len(bindings))
         rows.append({"name": r["name"], "tier": RELIC_TIERS[tier],
+                     "pool_order": raw_pool_order,
+                     "initial_counter": raw_initial_counter,
                      "native": native, "bindings": bindings})
+
+    for tier, orders in pool_orders.items():
+        if orders and orders != set(range(len(orders))):
+            raise fail(f"relics.yaml: {tier} pool_order values must be contiguous "
+                       f"0..{len(orders) - 1}, got {sorted(orders)}")
 
     out: list[str] = [BANNER, "#pragma once\n",
                       "#include <array>", "#include <cstdint>\n",
@@ -1030,6 +1060,8 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
     out.append("struct RelicDef {")
     out.append("    RelicId id;")
     out.append("    RelicTier tier;")
+    out.append("    int16_t pool_order;       // pre-shuffle RelicLibrary order; -1 = not pooled")
+    out.append("    int16_t initial_counter;  // post-construction/onEquip counter encoding")
     out.append("    bool native;")
     out.append("    uint8_t hook_count;")
     out.append("    std::array<RelicHookBinding, kMaxRelicHooks> hooks;")
@@ -1070,12 +1102,18 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"inline constexpr RelicDef k{_pascal(r['name'])}Relic{{")
         tier_name = next(k for k, v in RELIC_TIERS.items() if v == r["tier"])
         out.append(f"    RelicId::{r['name']}, RelicTier::{tier_name}, "
+                   f"{r['pool_order']}, {r['initial_counter']}, "
                    f"{'true' if r['native'] else 'false'}, "
                    f"{len(r['bindings'])},")
         out.append("    {{")
         out.extend(pad_bindings(r["bindings"]))
         out.append("    }}};\n")
 
+    out.append("inline constexpr std::array<const RelicDef*, "
+               f"{len(rows)}> kRelicDefs{{{{")
+    for r in rows:
+        out.append(f"    &k{_pascal(r['name'])}Relic,")
+    out.append("}};\n")
     out.append("[[nodiscard]] inline const RelicDef* "
                "relic_def(RelicId id) noexcept {")
     out.append("    switch (id) {")

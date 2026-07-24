@@ -1998,7 +1998,7 @@ hand-derivation; stream attribution named tests (trap 13, 18); oracle
 spot-diff: ≥ 3 bridge runs' reward screens zero-diff through the differ.
 **Log:** —
 
-### B4.6 `[ ]` Relic pools + acquisition
+### B4.6 `[x]` Relic pools + acquisition
 **Deps:** B4.3, B3.24 · **Spec:** design §5.3; §10 trap 15 · **Provenance:**
 AbstractDungeon.java:676-819, 1221-1256; RelicLibrary population (read at
 task)
@@ -2009,7 +2009,48 @@ order, trap 8) incl. on-pickup effects.
 **Acceptance:** tier-2: pool orders for fixed relicRng match hand-derived
 shuffles (golden JDK route from A1.2); trap-15 named test (front vs end);
 oracle spot-diff of pool order via the §2.5 block for ≥ 3 seeds.
-**Log:** —
+**Log:** Done 2026-07-23 on base `0dc9bcf`. `relic_pools.hpp/.cpp` now
+populates the five existing fixed-capacity RunState tier pools from generated
+registry metadata and performs the five unconditional relicRng `randomLong`
+draws in Common/Uncommon/Rare/Shop/Boss order, each routed through the JDK-LCG
+shuffle. Front/end removal (including the boss end-path front pop), empty-tier
+cascades, 50/33/17 tier selection, current `canSpawn` floor/shop gates, and the
+failed-front-to-end recheck are live. The generated relic table adds validated,
+contiguous `pool_order`, validated int16 `initial_counter`, and `kRelicDefs`;
+the complete B3.24 common pool's canonical pre-shuffle order is recorded without
+renumbering any existing id. B3.25-B3.27 remain the owners of uncommon,
+rare/shop, and boss rows; their future rows will populate the same generic five-
+tier initializer, while all five shuffle draws already occur even for empty
+tiers. The translator's all-tier `relicPools` field therefore remains deferred
+until those registries land rather than accepting unknown oracle ids.
+
+Acquisition appends before pickup handling and preserves trap-8 ordering;
+ordinary duplicates append, while Circlet duplicates increment the owned
+counter. Initial counters, the fixed-cap fail-without-mutation path, Strawberry,
+Potion Belt, War Paint, and Whetstone pickup effects are wired (the two upgrade
+relics consume one miscRng `randomLong` and use a JDK shuffle). `run_begin` now
+uses this acquisition path for Burning Blood and preserves its Java counter
+`-1`. Exhausted boss returns the Java key `"Red Circlet"`, but
+`RelicLibrary.initialize` does not register `RedCirclet`; the observed
+`RelicLibrary.getRelic` fallback is therefore modeled as ordinary `CIRCLET`, not
+as a fabricated registry id.
+
+Provenance read: `AbstractDungeon.java:676-819,1221-1256`,
+`RelicLibrary.initialize/populateRelicPool/getRelic`,
+`AbstractRelic.instantObtain/obtain`, `Circlet`, `RedCirclet`, and every current
+common relic's `canSpawn`/constructor/`onEquip`. Tier-2 oracle evidence uses the
+live §2.5 `b14_accept` captures for seeds `1790050543751..1790050543753`: all 33
+common ids match the three literal shuffled orders and the post-five-draw
+relicRng `(s0,s1,counter)` triples exactly. Named trap-15, fallback, gate,
+acquisition/capacity, counter, pickup shuffle, and run-begin regressions are
+**14/14**; registry generation (including duplicate pool-order rejection) is
+**15/15** and run lifecycle is **19/19**. Complete WSL Ubuntu-2404 suites are
+**debug 402/402, leak-detecting ASan/UBSan 402/402, release 402/402**.
+After integration on top of B3.5 and B3.14, the combined manifest is cards 50 /
+powers 21 / monsters 8 / relics 35 / potions 33 / encounters 20 / total 167.
+Focused RelicPools 14/14, RegistryGen 16/16, and run lifecycle 19/19 remained
+green; the complete integrated WSL matrix is **debug 428/428, leak-detecting
+ASan/UBSan 428/428, release 428/428**.
 
 ### B4.7 `[ ]` Treasure rooms
 **Deps:** B4.6 · **Spec:** design §5.6; §10 trap 16 · **Provenance:**

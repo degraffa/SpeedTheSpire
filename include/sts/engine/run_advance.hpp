@@ -35,9 +35,8 @@
 //   * Neow blessing options + payouts  -> B4.14 (here: a single "proceed" skip).
 //   * combat REWARD ASSEMBLY (gold/potion/card rolls) -> B4.5 (here: the reward
 //     screen exists as a CHOOSE-proceed state; it assembles nothing).
-//   * relic POOL CONTENTS + acquisition -> B4.6 (here: only the 5 relicRng
-//     pool-shuffle DRAWS that run start consumes, so the stream counter matches;
-//     B4.6 owns the complete tier-pool population).
+//   * relic pools + acquisition are live through B4.6; downstream reward/chest/
+//     shop/Neow tasks decide when to draw/acquire them.
 //   * events / shops / rest sites / treasure rooms -> B4.10 / B4.8 / B4.9 / B4.7
 //     (here: entering one reseeds the floor streams then parks at
 //     ROOM_UNIMPLEMENTED with the stalling RoomType recorded).

@@ -34,6 +34,7 @@ using RelicDef = sts::registry::RelicDef;
 
 using sts::registry::kMaxRelicHooks;
 using sts::registry::kMaxRelicHookSteps;
+using sts::registry::kRelicDefs;
 // NOTE: kRelicHookCount is NOT re-exported here -- the engine already declares its
 // own sts::engine::kRelicHookCount (relic_hooks.hpp), and the drift pin below
 // asserts the generated sts::registry::kRelicHookCount equals it.

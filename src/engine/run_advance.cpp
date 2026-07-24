@@ -28,6 +28,7 @@
 #include "sts/engine/observation.hpp"      // encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
 #include "sts/engine/relic_hooks.hpp"      // dispatch_relics_on_victory
+#include "sts/engine/relic_pools.hpp"      // pool init + acquisition/on-pickup
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
@@ -473,14 +474,9 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     //     (Exordium.java:110-221; generate_monster_lists, B3.12).
     generate_monster_lists(/*act=*/1, rs.monster_rng, rc.lists);
 
-    // (2) relicRng: initializeRelicList's 5 pool-shuffle draws
-    //     (AbstractDungeon.java:1237-1241) -- one randomLong() per tier,
-    //     UNCONDITIONAL (evaluated as the java.util.Random ctor arg regardless of
-    //     pool size). Consumed here so relicRng lands at counter 5 for the oracle;
-    //     the complete pool CONTENTS/order (relic_pools[]) are B4.6.
-    for (int i = 0; i < kRelicTierCount; ++i) {
-        (void)random_long(rs.relic_rng);
-    }
+    // (2) relicRng: initializeRelicList population + five unconditional
+    //     randomLong-seeded JDK shuffles (B4.6, AbstractDungeon.java:1221-1241).
+    initialize_relic_pools(rs);
 
     // (3) mapRng: the act map (Exordium.java:56-57). generate_map seeds mapRng =
     //     Random(seed + actNum) internally; encode both edges and room types plus
@@ -513,9 +509,7 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     // Starting relic: Burning Blood (Ironclad.getStartingRelics, Ironclad.java:86),
     // acquisition index 0 (== trigger order, trap 8). Its onVictory heal fires
     // through the combat mirror at the battle-over fold-back.
-    rs.relics[0].relic_id = static_cast<uint16_t>(RelicId::BURNING_BLOOD);
-    rs.relics[0].counter = 0;
-    rs.relic_count = 1;
+    (void)acquire_relic(rs, rc.combat.misc_rng, RelicId::BURNING_BLOOD);
 
     rc.phase = static_cast<uint8_t>(RunPhase::NEOW);
     rc.cur_x = kNeowColumn;

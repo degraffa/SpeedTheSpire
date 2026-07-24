@@ -144,6 +144,38 @@ TEST(RegistryGen, DuplicateIdFailsWithClearError) {
     EXPECT_NE(msg.find('1'), std::string::npos) << msg;  // the offending id
 }
 
+// B4.6 pool ordering is registry data, so invalid orders must fail at generation
+// time instead of producing a sparse/ambiguous runtime pool.
+TEST(RegistryGen, DuplicateRelicPoolOrderFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = scratch / "bad_pool_order_registry";
+    fs::remove_all(bad_reg);
+    fs::create_directories(bad_reg);
+
+    for (const auto& e : fs::directory_iterator(kRegistryDir)) {
+        if (e.path().extension() == ".yaml") {
+            fs::copy_file(e.path(), bad_reg / e.path().filename(),
+                          fs::copy_options::overwrite_existing);
+        }
+    }
+    {
+        std::ofstream relics(bad_reg / "relics.yaml", std::ios::app);
+        relics << "\n- id: 36\n  name: DUPLICATE_POOL_SLOT\n"
+                  "  game_id: \"Duplicate Pool Slot\"\n  tier: COMMON\n"
+                  "  pool_order: 0\n"
+                  "  provenance: \"synthetic duplicate for the negative test\"\n";
+    }
+
+    const fs::path out = scratch / "bad_pool_order_out";
+    const fs::path err = scratch / "bad_pool_order_err.txt";
+    const int status = run_generator(bad_reg.string(), out.string(), err.string());
+    EXPECT_NE(status, 0) << "generator should fail on duplicate pool_order";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("duplicate COMMON pool_order 0"), std::string::npos) << msg;
+}
+
 // --- 3. Generated enums match the engine's hand enums exactly ---------------
 TEST(RegistryGen, EnumIdsMatchEngine) {
     using sts::engine::CardId;
@@ -243,6 +275,7 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
     EXPECT_EQ(r::relic_from_game_id("Bag of Marbles"), r::RelicId::BAG_OF_MARBLES);
     EXPECT_EQ(r::relic_game_id(r::RelicId::BOOT), "Boot");
     EXPECT_EQ(r::relic_from_game_id("CeramicFish"), r::RelicId::CERAMIC_FISH);
+    EXPECT_EQ(r::relic_from_game_id("Circlet"), r::RelicId::CIRCLET);
     EXPECT_EQ(r::relic_from_game_id("anything"), r::RelicId::NONE);
     EXPECT_TRUE(r::potion_game_id(r::PotionId::NONE).empty());
 }
@@ -250,7 +283,7 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
 TEST(RegistryGen, RelicTableMatchesRegistry) {
     namespace r = sts::registry;
-    EXPECT_EQ(r::manifest::kRelicsCount, 34u);
+    EXPECT_EQ(r::manifest::kRelicsCount, 35u);
 
     // Burning Blood (starter, native on_victory).
     const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
@@ -279,6 +312,11 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 
     // A non-combat relic carries no hook bindings.
     EXPECT_EQ(r::relic_def(r::RelicId::WHETSTONE)->hook_count, 0);
+    EXPECT_EQ(r::relic_def(r::RelicId::WHETSTONE)->pool_order, 0);
+    EXPECT_EQ(r::relic_def(r::RelicId::RED_SKULL)->pool_order, 32);
+    EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->pool_order, -1);
+    EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->initial_counter, 1);
+    EXPECT_EQ(r::kRelicDefs.size(), 35u);
 }
 
 // --- 5. Manifest row counts match the seeded content ------------------------
@@ -287,13 +325,13 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kCardsCount, 50u);   // B3.5: prior 39 + 11 red uncommon attacks
     EXPECT_EQ(m::kPowersCount, 21u);  // 19 + B3.13 Curl Up + B3.9 Frail
     EXPECT_EQ(m::kMonstersCount, 8u); // + B3.14 four small/medium slimes
-    EXPECT_EQ(m::kRelicsCount, 34u);  // B3.24: starter Burning Blood + common pool
+    EXPECT_EQ(m::kRelicsCount, 35u);  // + B4.6 Circlet fallback
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 166u);  // integrated B3.5 cards + B3.14 monsters
+    EXPECT_EQ(m::kTotalCount, 167u);  // integrated through B3.5/B3.14/B4.6
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

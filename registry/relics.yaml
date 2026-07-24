@@ -7,6 +7,11 @@
 #     game_id: "<string>"  the game's relicId string (AbstractRelic ID) --
 #                          translator/oracle join key
 #     tier: STARTER|COMMON|UNCOMMON|RARE|BOSS|SHOP|SPECIAL|EVENT   (RelicTier)
+#     pool_order: <int>    REQUIRED for the five dungeon-pool tiers. Canonical
+#                          pre-shuffle RelicLibrary.populateRelicPool order;
+#                          unique/contiguous within a tier. Omit for non-pool rows.
+#     initial_counter: <int16> OPTIONAL; defaults to AbstractRelic's -1. Encodes
+#                          constructor/onEquip state in RunState RelicSlot.
 #     native: <bool>       OPTIONAL; true -> the relic's hook bodies are handled by
 #                          the native escape hatch (relic_hooks.cpp
 #                          dispatch_native_relic_hook) rather than a data-bound
@@ -56,6 +61,7 @@
   name: ANCHOR
   game_id: "Anchor"
   tier: COMMON
+  pool_order: 30
   hooks:
     at_battle_start:
       - {op: BLOCK, target: SELF, amount: 10}
@@ -65,6 +71,7 @@
   name: BAG_OF_MARBLES
   game_id: "Bag of Marbles"
   tier: COMMON
+  pool_order: 31
   hooks:
     at_battle_start:
       - {op: APPLY_POWER, target: ALL_ENEMY, amount: 1, power: VULNERABLE}
@@ -74,6 +81,7 @@
   name: BAG_OF_PREPARATION
   game_id: "Bag of Preparation"
   tier: COMMON
+  pool_order: 8
   hooks:
     at_battle_start:
       - {op: DRAW, target: SELF, amount: 2}
@@ -83,6 +91,7 @@
   name: BLOOD_VIAL
   game_id: "Blood Vial"
   tier: COMMON
+  pool_order: 2
   native: true
   hooks:
     at_battle_start: []       # heal 2 HP (native; HealAction -> clamps to max HP)
@@ -92,6 +101,7 @@
   name: BRONZE_SCALES
   game_id: "Bronze Scales"
   tier: COMMON
+  pool_order: 24
   hooks:
     at_battle_start:
       - {op: APPLY_POWER, target: SELF, amount: 3, power: THORNS}
@@ -101,6 +111,8 @@
   name: CENTENNIAL_PUZZLE
   game_id: "Centennial Puzzle"
   tier: COMMON
+  pool_order: 19
+  initial_counter: 0
   native: true
   hooks:
     was_hp_lost: []           # first HP loss in combat -> draw 3 (counter flag)
@@ -110,6 +122,8 @@
   name: LANTERN
   game_id: "Lantern"
   tier: COMMON
+  pool_order: 6
+  initial_counter: 0
   native: true
   hooks:
     at_turn_start: []         # +1 energy on the FIRST turn only
@@ -119,6 +133,8 @@
   name: NUNCHAKU
   game_id: "Nunchaku"
   tier: COMMON
+  pool_order: 27
+  initial_counter: 0
   native: true
   hooks:
     on_use_card: []           # ATTACK played -> counter++; every 10th -> +1 energy
@@ -128,6 +144,7 @@
   name: ODDLY_SMOOTH_STONE
   game_id: "Oddly Smooth Stone"
   tier: COMMON
+  pool_order: 22
   hooks:
     at_battle_start:
       - {op: APPLY_POWER, target: SELF, amount: 1, power: DEXTERITY}
@@ -137,6 +154,7 @@
   name: ORICHALCUM
   game_id: "Orichalcum"
   tier: COMMON
+  pool_order: 29
   native: true
   hooks:
     on_player_end_turn: []    # if player has 0 block at end of turn -> gain 6 block
@@ -146,6 +164,8 @@
   name: PEN_NIB
   game_id: "Pen Nib"
   tier: COMMON
+  pool_order: 4
+  initial_counter: 0
   native: true
   hooks:
     on_use_card: []           # ATTACK played -> counter++; 10th attack empowered (double-dmg power DEFERRED)
@@ -155,6 +175,8 @@
   name: RED_SKULL
   game_id: "Red Skull"
   tier: COMMON
+  pool_order: 32
+  initial_counter: 0
   native: true
   hooks:
     was_hp_lost: []           # onBloodied: cross to <=50% HP -> +3 Strength (once, while active)
@@ -164,6 +186,7 @@
   name: VAJRA
   game_id: "Vajra"
   tier: COMMON
+  pool_order: 18
   hooks:
     at_battle_start:
       - {op: APPLY_POWER, target: SELF, amount: 1, power: STRENGTH}
@@ -173,6 +196,8 @@
   name: HAPPY_FLOWER
   game_id: "Happy Flower"
   tier: COMMON
+  pool_order: 21
+  initial_counter: 0
   native: true
   hooks:
     at_turn_start: []         # every 3rd turn-start -> +1 energy
@@ -185,6 +210,7 @@
   name: AKABEKO
   game_id: "Akabeko"
   tier: COMMON
+  pool_order: 5
   native: true
   hooks:
     at_battle_start: []       # apply Vigor 8 -- DEFERRED (Vigor power row is B3.4+/later)
@@ -194,6 +220,7 @@
   name: ANCIENT_TEA_SET
   game_id: "Ancient Tea Set"
   tier: COMMON
+  pool_order: 9
   native: true
   hooks:
     at_turn_start: []         # +2 energy on turn 1 IF entered combat from a campfire (DEFERRED: cross-room flag)
@@ -203,6 +230,7 @@
   name: ART_OF_WAR
   game_id: "Art of War"
   tier: COMMON
+  pool_order: 15
   native: true
   hooks:
     on_use_card: []           # ATTACK played this turn cancels next turn's +1 energy (DEFERRED: cross-turn flags)
@@ -213,6 +241,7 @@
   name: BOOT
   game_id: "Boot"
   tier: COMMON
+  pool_order: 1
   native: true
   hooks:
     on_attack: []             # unblocked attack damage 1..4 raised to 5 (DEFERRED: damage-pipeline hook)
@@ -222,48 +251,57 @@
   name: CERAMIC_FISH
   game_id: "CeramicFish"
   tier: COMMON
+  pool_order: 17
   provenance: "CeramicFish.onObtainCard (CeramicFish.java:40+) -- +9 gold per card added to the deck; a run-layer (reward/gold) hook, no combat trigger."
 
 - id: 21
   name: DREAM_CATCHER
   game_id: "Dream Catcher"
   tier: COMMON
+  pool_order: 26
   provenance: "DreamCatcher.onRest (DreamCatcher.java) -- card reward on resting at a campfire; a run-layer (rest room) hook, no combat trigger."
 
 - id: 22
   name: JUZU_BRACELET
   game_id: "Juzu Bracelet"
   tier: COMMON
+  pool_order: 25
   provenance: "JuzuBracelet (JuzuBracelet.java) -- normal-combat ? rooms cannot roll a monster event; a map/event-layer effect, no combat trigger."
 
 - id: 23
   name: MAW_BANK
   game_id: "MawBank"
   tier: COMMON
+  pool_order: 14
   provenance: "MawBank.onEnterRoom (MawBank.java:31-37) -- +12 gold on entering a non-shop room until you spend gold; a run-layer hook, no combat trigger."
 
 - id: 24
   name: MEAL_TICKET
   game_id: "MealTicket"
   tier: COMMON
+  pool_order: 3
   provenance: "MealTicket.justEnteredRoom (MealTicket.java:32-37) -- heal 15 on entering a shop; a run-layer (shop) hook, no combat trigger."
 
 - id: 25
   name: OMAMORI
   game_id: "Omamori"
   tier: COMMON
+  pool_order: 13
+  initial_counter: 2
   provenance: "Omamori.use (Omamori.java:38-43) -- negates the next 2 curses added (counter 2); a run-layer (curse-gain) hook, no combat trigger."
 
 - id: 26
   name: POTION_BELT
   game_id: "Potion Belt"
   tier: COMMON
+  pool_order: 11
   provenance: "PotionBelt.onEquip (PotionBelt.java:29+) -- +2 potion slots on pickup; an equip-time inventory effect, no combat trigger."
 
 - id: 27
   name: PRESERVED_INSECT
   game_id: "PreservedInsect"
   tier: COMMON
+  pool_order: 12
   native: true
   hooks:
     at_battle_start: []       # elite HP -25% (DEFERRED: needs elite-room context + monster HP scaling)
@@ -273,30 +311,36 @@
   name: REGAL_PILLOW
   game_id: "Regal Pillow"
   tier: COMMON
+  pool_order: 7
   provenance: "RegalPillow (RegalPillow.java) -- +15 HP bonus when resting at a campfire; a run-layer (rest) hook, no combat trigger."
 
 - id: 29
   name: SMILING_MASK
   game_id: "Smiling Mask"
   tier: COMMON
+  pool_order: 10
   provenance: "SmilingMask.onEnterRoom (SmilingMask.java:31+) -- shop card-remove service fixed at 50 gold; a run-layer (shop) hook, no combat trigger."
 
 - id: 30
   name: STRAWBERRY
   game_id: "Strawberry"
   tier: COMMON
+  pool_order: 20
   provenance: "Strawberry.onEquip (Strawberry.java:29+) -- +7 max HP on pickup; an equip-time effect, no combat trigger."
 
 - id: 31
   name: TINY_CHEST
   game_id: "Tiny Chest"
   tier: COMMON
+  pool_order: 28
+  initial_counter: 0
   provenance: "TinyChest (TinyChest.java) -- every 4th ? room becomes a treasure room; a map-layer effect, no combat trigger."
 
 - id: 32
   name: TOY_ORNITHOPTER
   game_id: "Toy Ornithopter"
   tier: COMMON
+  pool_order: 16
   native: true
   hooks:
     on_use_card: []           # structural placeholder; B4.4 dispatches RunState-owned potion use directly
@@ -306,10 +350,21 @@
   name: WAR_PAINT
   game_id: "War Paint"
   tier: COMMON
+  pool_order: 23
   provenance: "WarPaint.onEquip (WarPaint.java:36+) -- upgrade up to 2 random Skills on pickup; an equip-time deck effect, no combat trigger."
 
 - id: 34
   name: WHETSTONE
   game_id: "Whetstone"
   tier: COMMON
+  pool_order: 0
   provenance: "Whetstone.onEquip (Whetstone.java:36+) -- upgrade up to 2 random Attacks on pickup; an equip-time deck effect, no combat trigger."
+
+# --- Pool-exhaustion fallbacks (not members of any shuffled pool) -------------
+
+- id: 35
+  name: CIRCLET
+  game_id: "Circlet"
+  tier: SPECIAL
+  initial_counter: 1
+  provenance: "AbstractDungeon.returnRandomRelicKey/returnEndRandomRelicKey (AbstractDungeon.java:757-808) -- exhausted rare pool fallback; the boss fallback key 'Red Circlet' also resolves to Circlet because RelicLibrary.initialize does not register RedCirclet and getRelic defaults to Circlet. Circlet constructor/onEquip (Circlet.java:14-28) starts counter=1 and duplicate acquisition increments the owned Circlet counter."
