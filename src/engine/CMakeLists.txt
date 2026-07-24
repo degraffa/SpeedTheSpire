@@ -11,10 +11,31 @@ add_library(sts_engine
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
+    # Opcode bodies, one TU per behavioural domain (see interp/interp_ops.hpp).
+    # interp.cpp keeps only the dynamic-target fan-out + the execute_opcode
+    # switch; a new opcode adds its body to the domain TU that owns it.
+    interp/interp_damage.cpp
+    interp/interp_block.cpp
+    interp/interp_powers.cpp
+    interp/interp_cards.cpp
     piles.cpp
     card_play.cpp
     power_hooks.cpp
+    # Native power bodies, one TU per registry/powers.yaml batch (see
+    # powers/power_native.hpp). A new power batch adds a file here.
+    powers/powers_b3_2.cpp
+    powers/powers_b3_4.cpp
+    powers/powers_potion_support.cpp
+    powers/powers_b3_6.cpp
+    powers/powers_b3_7.cpp
+    powers/powers_b3_9.cpp
+    powers/powers_b3_25.cpp
     relic_hooks.cpp
+    # Native relic bodies, one TU per relic tier/batch (see
+    # relics/relic_native.hpp). B3.26 (rares+shop) / B3.27 (boss+specials) each
+    # add a file here.
+    relics/relics_b3_24.cpp
+    relics/relics_b3_25.cpp
     relic_pools.cpp
     potions.cpp
     advance.cpp
