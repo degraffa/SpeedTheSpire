@@ -27,6 +27,9 @@
 #include <gtest/gtest.h>
 
 #include "sts/diff/trace.hpp"
+#include "sts/engine/action_queue.hpp"
+#include "sts/engine/interp.hpp"
+#include "sts/engine/power_hooks.hpp"
 #include "sts/translate/translate.hpp"
 
 namespace {
@@ -59,6 +62,48 @@ void expect_stream(const engine::RngStream& s, int32_t counter, int64_t s0, int6
     EXPECT_EQ(s.counter, counter) << name << ".counter";
     EXPECT_EQ(s.s0, static_cast<uint64_t>(s0)) << name << ".s0";
     EXPECT_EQ(s.s1, static_cast<uint64_t>(s1)) << name << ".s1";
+}
+
+tr::TranslatedRun translate_with_player_power(const std::string& power_json,
+                                              const std::string& source) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    if (lines.size() < 3u) {
+        ADD_FAILURE() << "golden corpus lacks combat record";
+        return {};
+    }
+    std::string combat = lines[2];
+    const std::string anchor =
+        "\"powers\":[{\"id\":\"Vulnerable\",\"name\":\"Vulnerable\",\"amount\":0}]";
+    const auto pos = combat.find(anchor);
+    if (pos == std::string::npos) {
+        ADD_FAILURE() << "player-power anchor missing from golden combat record";
+        return {};
+    }
+    combat.replace(pos, anchor.size(), "\"powers\":[" + power_json + "]");
+    return tr::translate_lines({lines[0], combat}, source);
+}
+
+uint32_t combust_hp_loss(const engine::CombatState& s) {
+    return (s.flags & engine::kCombatFlagCombustHpLossMask) >>
+           engine::kCombatFlagCombustHpLossShift;
+}
+
+void execute_player_power_opcode(engine::CombatState& s, engine::Opcode opcode,
+                                 engine::PowerId id, int32_t amount = 0) {
+    engine::ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(opcode);
+    item.src = engine::kActorPlayer;
+    item.tgt = engine::kActorPlayer;
+    item.amount = amount;
+    item.flags = engine::make_apply_power_flags(id);
+    engine::execute_opcode(s, item);
+}
+
+void drain_actions(engine::CombatState& s) {
+    engine::ActionQueueItem item{};
+    while (engine::pop_action_front(s, item)) {
+        engine::execute_opcode(s, item);
+    }
 }
 
 // --- Acceptance 1: oracle fields bit-for-bit ------------------------------
@@ -401,4 +446,112 @@ TEST(Translator, DebugIntentAnchorsOnMoveId) {
         << "display-derived intent/move_adjusted_damage must not affect CombatState";
 }
 
+// --- B3.7 fix-forward: CombustPower private hpLoss survives oracle import ---
+
+TEST(Translator, CombustBaseAndStackedHpLossImportIntoReservedFlags) {
+    struct Case {
+        const char* power_json;
+        int16_t amount;
+        uint32_t hp_loss;
+    };
+    const Case cases[] = {
+        {R"({"id":"Combust","name":"Combust","amount":5,"misc":1})", 5, 1u},
+        {R"({"id":"Combust","name":"Combust","amount":12,"misc":2})", 12, 2u},
+    };
+
+    for (const Case& tc : cases) {
+        SCOPED_TRACE(tc.power_json);
+        tr::TranslatedRun run = translate_with_player_power(tc.power_json, "combust-import");
+        ASSERT_EQ(run.records.size(), 1u);
+        const engine::CombatState& s = run.records[0].combat;
+        ASSERT_EQ(s.player_power_count, 1);
+        EXPECT_EQ(s.player_powers[0].power_id,
+                  static_cast<uint16_t>(engine::PowerId::COMBUST));
+        EXPECT_EQ(s.player_powers[0].amount, tc.amount);
+        EXPECT_EQ(combust_hp_loss(s), tc.hp_loss);
+    }
+}
+
+TEST(Translator, ImportedStackedCombustReapplicationAndEndTurnUseImportedHpLoss) {
+    tr::TranslatedRun run = translate_with_player_power(
+        R"({"id":"Combust","name":"Combust","amount":12,"misc":2})",
+        "combust-reapply");
+    ASSERT_EQ(run.records.size(), 1u);
+    engine::CombatState s = run.records[0].combat;
+
+    execute_player_power_opcode(s, engine::Opcode::APPLY_POWER,
+                                engine::PowerId::COMBUST, 7);
+    ASSERT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(s.player_powers[0].amount, 19);
+    EXPECT_EQ(combust_hp_loss(s), 3u);
+
+    engine::dispatch_at_end_of_turn(s);
+    ASSERT_EQ(s.action_count, 2);
+    drain_actions(s);
+    EXPECT_EQ(s.player_hp, 65);      // imported 2, then stackPower ++ -> 3
+    EXPECT_EQ(s.monsters[0].hp, 21); // imported 12 + reapplied 7
+}
+
+TEST(Translator, ImportedCombustRemoveThenReapplyResetsHpLoss) {
+    tr::TranslatedRun run = translate_with_player_power(
+        R"({"id":"Combust","name":"Combust","amount":15,"misc":3})",
+        "combust-reset");
+    ASSERT_EQ(run.records.size(), 1u);
+    engine::CombatState s = run.records[0].combat;
+
+    execute_player_power_opcode(s, engine::Opcode::REMOVE_POWER,
+                                engine::PowerId::COMBUST);
+    EXPECT_EQ(s.player_power_count, 0);
+    EXPECT_EQ(combust_hp_loss(s), 0u);
+
+    execute_player_power_opcode(s, engine::Opcode::APPLY_POWER,
+                                engine::PowerId::COMBUST, 5);
+    ASSERT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(s.player_powers[0].amount, 5);
+    EXPECT_EQ(combust_hp_loss(s), 1u);
+
+    engine::dispatch_at_end_of_turn(s);
+    drain_actions(s);
+    EXPECT_EQ(s.player_hp, 67);
+    EXPECT_EQ(s.monsters[0].hp, 35);
+}
+
+TEST(Translator, CombustHpLossImportFailsLoudlyOnMissingOrInvalidMisc) {
+    struct Case {
+        const char* power_json;
+        const char* expected_error;
+    };
+    const Case cases[] = {
+        {R"({"id":"Combust","name":"Combust","amount":5})", "missing required field"},
+        {R"({"id":"Combust","name":"Combust","amount":5,"misc":0})", "must be in [1, 255]"},
+        {R"({"id":"Combust","name":"Combust","amount":5,"misc":-1})", "must be in [1, 255]"},
+        {R"({"id":"Combust","name":"Combust","amount":5,"misc":256})", "must be in [1, 255]"},
+        {R"({"id":"Combust","name":"Combust","amount":5,"misc":"1"})", "expected integer"},
+    };
+
+    for (const Case& tc : cases) {
+        SCOPED_TRACE(tc.power_json);
+        try {
+            (void)translate_with_player_power(tc.power_json, "combust-invalid");
+            FAIL() << "expected TranslateError for invalid Combust misc/hpLoss";
+        } catch (const tr::TranslateError& e) {
+            EXPECT_NE(std::string(e.what()).find("combat_state.player.powers[0].misc"),
+                      std::string::npos) << e.what();
+            EXPECT_NE(std::string(e.what()).find(tc.expected_error),
+                      std::string::npos) << e.what();
+        }
+    }
+}
+
+TEST(Translator, NonCombustPowerMiscRemainsDeferred) {
+    tr::TranslatedRun baseline = translate_with_player_power(
+        R"({"id":"Vulnerable","name":"Vulnerable","amount":0})",
+        "non-combust-baseline");
+    tr::TranslatedRun with_misc = translate_with_player_power(
+        R"({"id":"Vulnerable","name":"Vulnerable","amount":0,"misc":9})",
+        "non-combust-misc");
+    ASSERT_EQ(with_misc.records.size(), 1u);
+    EXPECT_EQ(combust_hp_loss(with_misc.records[0].combat), 0u);
+    EXPECT_EQ(with_misc.stats.deferred, baseline.stats.deferred + 1u);
+}
 }  // namespace

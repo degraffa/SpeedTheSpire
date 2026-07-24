@@ -222,7 +222,7 @@ private:
 }
 
 [[nodiscard]] eng::PowerSlot parse_power(const json& j, const std::string& path,
-                                         Ctx& ctx) {
+                                         Ctx& ctx, uint32_t* player_combat_flags) {
     FieldReader fr(j, path, ctx);
     eng::PowerSlot ps{};
     ps.power_id = static_cast<uint16_t>(
@@ -235,7 +235,29 @@ private:
     fr.ignore("name");
     fr.defer("damage");        // optional intent damage (§3.14)
     fr.defer("card");          // optional nested card (Nightmare etc.)
-    fr.defer("misc");          // optional first-present bookkeeping value
+    if (ps.power_id == static_cast<uint16_t>(eng::PowerId::COMBUST) &&
+        player_combat_flags != nullptr) {
+        // GameStateConverter's first-present `misc` field is CombustPower's
+        // private hpLoss for this specific player-owned power. B3.7 stores that
+        // counter in reserved CombatState.flags bits; no other power `misc`
+        // field is claimed here.
+        const int64_t hp_loss =
+            as_i64(fr.require("misc"), ctx, path + ".misc");
+        constexpr uint32_t kMaxCombustHpLoss =
+            eng::kCombatFlagCombustHpLossMask >> eng::kCombatFlagCombustHpLossShift;
+        if (hp_loss < 1 || hp_loss > static_cast<int64_t>(kMaxCombustHpLoss)) {
+            throw TranslateError(
+                loc(ctx) + " Combust misc/hpLoss at " + path +
+                ".misc must be in [1, " + std::to_string(kMaxCombustHpLoss) +
+                "] to fit CombatState.flags");
+        }
+        *player_combat_flags =
+            (*player_combat_flags & ~eng::kCombatFlagCombustHpLossMask) |
+            (static_cast<uint32_t>(hp_loss) << eng::kCombatFlagCombustHpLossShift);
+        fr.mapped();
+    } else {
+        fr.defer("misc");      // other optional first-present bookkeeping values
+    }
     fr.defer("just_applied");
     fr.finish();
     return ps;
@@ -243,7 +265,8 @@ private:
 
 // Parse a powers list into a fixed slot array + count. Loud on overflow.
 void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
-                  eng::PowerSlot* slots, uint8_t& count) {
+                  eng::PowerSlot* slots, uint8_t& count,
+                  uint32_t* player_combat_flags = nullptr) {
     if (!arr.is_array()) throw TranslateError(loc(ctx) + " expected array at " + path);
     if (arr.size() > eng::kPowerCap) {
         throw TranslateError(loc(ctx) + " " + path + " has " +
@@ -252,7 +275,8 @@ void parse_powers(const json& arr, const std::string& path, Ctx& ctx,
     }
     count = 0;
     for (std::size_t i = 0; i < arr.size(); ++i) {
-        slots[count++] = parse_power(arr[i], path + "[" + std::to_string(i) + "]", ctx);
+        slots[count++] = parse_power(arr[i], path + "[" + std::to_string(i) + "]",
+                                     ctx, player_combat_flags);
     }
 }
 
@@ -323,7 +347,8 @@ void parse_player(const json& j, const std::string& path, Ctx& ctx,
         fr.mapped();
     }
     if (const json* pw = fr.take("powers")) {
-        parse_powers(*pw, path + ".powers", ctx, cs.player_powers, cs.player_power_count);
+        parse_powers(*pw, path + ".powers", ctx, cs.player_powers,
+                     cs.player_power_count, &cs.flags);
         fr.mapped();
     }
     fr.defer("orbs");  // §3.18; Ironclad has no orbs, no schema storage

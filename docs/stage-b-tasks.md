@@ -1270,6 +1270,21 @@ card classes (including Rage for its source classification),
 focused B3.7 **12/12**; complete debug **515/515**; leak-detecting
 ASan/UBSan **515/515**.
 
+**Fix-forward — Combust oracle import (2026-07-24):** Independent review found
+that `GameStateConverter.convertCreaturePowersToJson` exports Combust's private
+`hpLoss` through semantic power `misc`, while the translator deferred every
+power `misc` value. Imported stacked Combust snapshots therefore lost their
+per-turn HP-loss counter and subsequent applications stacked from the fallback.
+The translator now maps only player-owned Combust `misc` into the reserved
+combat-flag field, requiring an integer in `[1,255]`; all other power `misc`
+fields remain deferred. Five regressions cover base/stacked import,
+reapplication plus end-turn behavior, remove→reapply reset, fail-loud validation
+for missing/type/range errors, and non-Combust deferral. Provenance:
+`GameStateConverter.java` power reflection, `PROTOCOL.md` §3.14, and
+`CombustPower.java` constructor/`stackPower`/`atEndOfTurn`. Verified by running,
+not inferred: focused translator **16/16**, focused B3.7 **12/12**, complete
+debug **526/526**, and leak-detecting ASan/UBSan **526/526**. No schema, layout,
+or ID change.
 ### B3.8 `[ ]` ∥ Red rares
 **Deps:** B3.2 · **Provenance:** cards/red RARE (16)
 **Deliverables:** registry entries: Barricade, Berserk, Bludgeon, Brutality,
