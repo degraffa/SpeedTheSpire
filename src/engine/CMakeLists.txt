@@ -14,6 +14,7 @@ add_library(sts_engine
     relic_hooks.cpp
     potions.cpp
     advance.cpp
+    run_advance.cpp
 )
 
 target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)

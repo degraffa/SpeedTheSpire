@@ -299,8 +299,8 @@
   tier: COMMON
   native: true
   hooks:
-    on_use_card: []           # heal 5 when a potion is used (DEFERRED: potion-use hook is B3.23)
-  provenance: "ToyOrnithopter.onUsePotion (ToyOrnithopter.java:32-37) -- addToBot HealAction(player, 5) on potion use. The potion-use trigger lands with B3.23 potions; native body deferred (listed on on_use_card as the nearest structural site)."
+    on_use_card: []           # structural placeholder; B4.4 dispatches RunState-owned potion use directly
+  provenance: "ToyOrnithopter.onUsePotion (ToyOrnithopter.java:32-37) -- heal 5 after potion use, in combat or outside it; live through B4.4's run/combat potion route."
 
 - id: 33
   name: WAR_PAINT

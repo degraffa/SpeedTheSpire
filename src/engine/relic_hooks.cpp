@@ -319,7 +319,8 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
         //   BOOT           -- onAttack damage floor; a DAMAGE-pipeline modifier.
         //   ART_OF_WAR / ANCIENT_TEA_SET -- cross-turn/cross-room energy flags.
         //   PRESERVED_INSECT -- elite HP scaling (needs room context + HP-scale op).
-        //   TOY_ORNITHOPTER  -- heal on potion use (potion trigger is B3.23).
+        //   TOY_ORNITHOPTER is dispatched by run_advance's RunState-owned potion
+        //   route (B4.4), not by a CombatState-only hook.
         case RelicId::AKABEKO:
         case RelicId::BOOT:
         case RelicId::ART_OF_WAR:

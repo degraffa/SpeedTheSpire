@@ -95,7 +95,11 @@ void dispatch_native_potion(CombatState& state, PotionId id, int potency,
 // (`rng.counter` advances by exactly that many); returns the chosen PotionId.
 // The Ironclad pool is PotionId 1..33 in pool order (potions.yaml id ordering),
 // so the drawn index i maps to PotionId(i+1).
-[[nodiscard]] PotionId return_random_potion(RngStream& potion_rng) noexcept;
+// `limited=true` is Entropic Brew's overload: its Java loop deliberately
+// discards the first candidate and rejects Fruit Juice thereafter in addition
+// to the rarity check (AbstractDungeon.java:829-850).
+[[nodiscard]] PotionId return_random_potion(RngStream& potion_rng,
+                                            bool limited = false) noexcept;
 
 // The tier a d100 roll (0..99) selects, via the 65/25/10 gate
 // (PotionHelper.POTION_COMMON_CHANCE / POTION_UNCOMMON_CHANCE). Exposed so the

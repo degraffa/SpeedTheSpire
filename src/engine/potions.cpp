@@ -117,11 +117,10 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
     }
 }
 
-PotionId return_random_potion(RngStream& potion_rng) noexcept {
-    // AbstractDungeon.returnRandomPotion(false): a d100 tier roll, then reject-
-    // sample getRandomPotion() until the rolled potion's rarity matches the
-    // tier. limited == false, so the "Fruit Juice" spam guard is inert (the
-    // loop's only exit condition is the rarity match).
+PotionId return_random_potion(RngStream& potion_rng, bool limited) noexcept {
+    // AbstractDungeon.returnRandomPotion(limited): a d100 tier roll, then
+    // reject-sample getRandomPotion(). The limited Entropic Brew form discards
+    // the first candidate and rejects Fruit Juice thereafter.
     const int roll = random(potion_rng, 0, 99);
     const PotionRarity tier = potion_tier_for_roll(roll);
 
@@ -133,8 +132,14 @@ PotionId return_random_potion(RngStream& potion_rng) noexcept {
     };
 
     PotionId temp = draw();
-    while (potion_def(temp)->rarity != tier) {
+    bool spam_check = limited;
+    while (spam_check ? true : potion_def(temp)->rarity != tier) {
+        spam_check = limited;
         temp = draw();
+        if (limited ? temp == PotionId::FRUIT_JUICE : false) {
+            continue;
+        }
+        spam_check = false;
     }
     return temp;
 }

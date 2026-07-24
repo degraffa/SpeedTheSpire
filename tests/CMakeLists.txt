@@ -229,6 +229,19 @@ sts_enable_sanitizers(encounters_test)
 
 gtest_discover_tests(encounters_test)
 
+# B4.4: run-level advance + room lifecycle -- run_begin Neow-pending stream state,
+# trap-7 floor reseed, run-combat entry == combat_begin, full floor cycle, map
+# choice legality + non-combat routing + heterogeneous batch advance.
+add_executable(run_advance_test
+    run_advance_test.cpp
+)
+
+target_link_libraries(run_advance_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(run_advance_test)
+sts_enable_sanitizers(run_advance_test)
+
+gtest_discover_tests(run_advance_test)
+
 # A6.1: diff harness -- trace format + field-by-field differ + reproducer +
 # fixture oracle (design doc §8, §9). Links diff_harness (tools/diff_harness),
 # which PUBLIC-links sts_engine, so this test reaches both the harness API and

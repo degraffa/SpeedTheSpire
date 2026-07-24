@@ -1853,7 +1853,7 @@ floats are set at `run_begin`; the relic pools are shuffled at dungeon init (5
 relicRng draws) into `relic_pools[]`; the combat relic mirror is filled from
 `RunState.relics` at combat spawn and folded back after.
 
-### B4.4 `[ ]` Run-level advance + room lifecycle
+### B4.4 `[x]` Run-level advance + room lifecycle
 **Deps:** B4.3, B3.12 · **Spec:** stage-a §3.4 (floor reseed), §7 (one enum,
 all phases) · **Provenance:** AbstractDungeon.java:1747-1751 (reseed after
 increment, trap 7), 1766-1770 (eventRng duplicate quirk); room
@@ -1868,7 +1868,76 @@ combat-reward/proceed screens as CHOOSE states.
 (map pick → combat → rewards → next floor, stream counters checked at each
 boundary); floor-reseed trap test at run level; batch `advance()`
 heterogeneity (mixed run/combat phases in one batch) green in asan.
-**Log:** —
+**Log:** Done 2026-07-23. Verified by running in the isolated
+`b44-room-lifecycle` worktree at base `481f65b`: **debug 363/363, asan
+363/363**; the B4.4 task slice is 19/19 in both presets (344 baseline + 19 new).
+After semantic integration on top of B3.13 and B3.9, the focused
+`run_advance_test` is **19/19**, and the complete WSL Ubuntu-2404 matrix is
+**debug 387/387, leak-detecting ASan/UBSan 387/387, release 387/387**.
+Integration restored B3.9's post-shuffle Innate partition in run-created
+combats and invokes B3.13 pre-battle actions after group spawn; the named
+two-louse regression pins six monsterHpRng draws, both Curl Up powers, drained
+queues, WAITING_ON_USER, and Writhe in the opening hand.
+- **Public run API/state machine:** `RunController` is a trivially-copyable
+  snapshot containing persistent `RunState`, the live `CombatState`, generated
+  B3.12 encounter lists/cursors, map position, `RunPhase`, and
+  `RunCombatOutcome`. `advance`/`legal_actions` overload on RunController (the
+  stage-a §7 one-name/all-phases contract); NEOW, MAP_CHOICE, COMBAT,
+  COMBAT_REWARD, ROOM_UNIMPLEMENTED, and RUN_OVER dispatch independently in a
+  heterogeneous batch. CHOOSE drives Neow-proceed, legal map edges, combat card
+  choices, and reward/proceed; PLAY_CARD/END_TURN delegate to combat.
+- **run_begin:** initializes the base Ironclad sheet/deck/Burning Blood and a
+  Neow-pending floor-0 state; all run streams + Neow stream start from `seed`,
+  B3.12 consumes monsterRng into encounter lists, the five unconditional relic
+  pool-shuffle seeds consume relicRng exactly 5x (B4.6 owns pool contents), and
+  B4.1/B4.2 populate map edges/rooms + the post-generateMap mapRng. A11 is live
+  through `potion_slot_count` (A20=2), per B4.3's explicit handoff; A6/A10/A14
+  remain B4.15's literal owner. The committed live-oracle floor-0 triple test
+  pins monsterRng/relicRng/mapRng bit-for-bit.
+- **room/combat lifecycle:** `next_room_transition` removes the room's encounter
+  cursor on exit, increments floor, THEN reseeds all five floor streams from
+  `(seed,floor)` (trap 7), enters the chosen node, and spawns implemented groups
+  through B3.13. Combat construction mirrors `combat_begin` byte-for-byte for
+  Jaw Worm, including deck shuffle, B3.9 Innate ordering, spawn/AI order, and the
+  B4.3 relic mirror; Cultist/louse groups run their pre-battle actions before
+  player control.
+  On kill or Smoke Bomb escape, `AbstractRoom.endBattle`-equivalent victory
+  relics fire before fold-back; hp/max-hp and relic counters copy back, while
+  gold/potions/master-deck remain canonical in RunState throughout combat.
+  Kill vs Smoke Bomb is explicit in `RunCombatOutcome`; the smoked screen is a
+  no-reward CHOOSE/proceed state, not a kill. Death alone terminates the run.
+- **USE_POTION both layers:** RunState slot masks include target grids in combat
+  and the legal non-combat Fruit Juice/Entropic Brew overrides. Successful use
+  consumes the positional slot; data/native combat effects route through
+  `use_potion` + the normal pump. Fruit Juice mutates persistent/live hp and
+  max-hp; Entropic Brew performs `potion_slots` **limited** identity rolls before
+  destroying its slot, including Java's discard-first/Fruit-Juice rejection
+  quirk, then fills available slots; Toy Ornithopter now triggers in combat and
+  outside it. Smoke Bomb rejects bosses, leaves monsters alive, consumes its
+  slot, fires victory hooks, and opens the smoked proceed state.
+- **Acceptance tests:** full floor cycle Neow -> legal map pick -> B3.12 combat ->
+  kill reward/proceed -> floor 2 checks every run/floor stream boundary plus
+  gold/potions/deck/relic fold-back ownership; named post-increment floor reseed;
+  run-combat equivalence; Fruit Juice/Entropic/Toy/target-potion/Smoke Bomb;
+  live floor-0 oracle triples; and one allocation-free batch simultaneously
+  stepping NEOW CHOOSE, MAP CHOOSE, combat PLAY_CARD/END_TURN, and run-layer
+  USE_POTION under ASan.
+- **Provenance read in full:** AbstractDungeon.nextRoomTransition
+  (AbstractDungeon.java:1687-1813, including eventRng duplicate/commit semantics),
+  AbstractRoom.update/endBattle (AbstractRoom.java:220-445), ProceedButton.update
+  (ProceedButton.java:79-171), CombatRewardScreen.open/openCombat
+  (CombatRewardScreen.java:229-305), AbstractPotion.canUse + PotionPopUp.update
+  / TopPanel.destroyPotion, FruitJuice.java, EntropicBrew.java,
+  ObtainPotionAction.java/ObtainPotionEffect.java, SmokeBomb.java + the player
+  escape timer, MonsterGroup escape predicates, and ToyOrnithopter.java.
+- **Downstream boundaries (not B4.4 seams):** B4.5 owns reward assembly/claims;
+  B4.6 owns populated relic pools; B4.7-B4.10 own non-combat room content and
+  B4.10 owns the ?-room eventRng duplicate roll; B4.14 owns Neow choices/payouts;
+  B4.15 owns the remaining A20 setup modifiers. Unimplemented monster groups
+  park after consuming their B3.12 composition draws until B3.14-B3.22 land;
+  enemy self-escape/stolen-gold mechanics remain B3.15's explicit owner. No
+  schema change or fixture regeneration: RunState/CombatState layouts are
+  unchanged.
 
 ### B4.5 `[ ]` Combat rewards
 **Deps:** B4.4, B3.3-B3.11 (full card pool for oracle acceptance) · **Spec:**
