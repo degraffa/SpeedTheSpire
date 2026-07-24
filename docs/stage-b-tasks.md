@@ -1535,7 +1535,7 @@ A18 −2 column; asleep block gain each turn.
 **Deps:** B3.17 · **Provenance:** SlimeBoss.java (:89/94/125), Goop Spray /
 split at half
 **Deliverables:** registry entry (native AI), boss split (→ L slimes at
-current HP), Slimed hand insertion; boss-fight terminal only when all
+current HP), Slimed discard-pile insertion; boss-fight terminal only when all
 descendants die.
 **Acceptance:** tier-2: split threshold exact, children chain to B3.17
 machinery; A4/A9/A19 columns cited.
@@ -2495,6 +2495,12 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-24 — B3.20 deliverable corrected after the execution agent's
+  stop-the-line source check. The ledger said Slime Boss's Goop Spray inserts
+  Slimed into the hand, but `SlimeBoss.takeTurn()` queues
+  `MakeTempCardInDiscardAction` (3 copies below A19, 5 at A19+) and that action
+  emits `ShowCardAndAddToDiscardEffect`. The ledger is the losing document;
+  "hand insertion" is mechanically corrected to "discard-pile insertion."
 - 2026-07-22 — B1.1 acceptance amended (ledger is the losing document; fixed
   in the same change per the working agreement). "Reproduces B0.2's captured
   run byte-for-byte" is unsatisfiable as written: the B0.2 capture is
