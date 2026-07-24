@@ -11,6 +11,13 @@ add_library(sts_engine
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
+    # Opcode bodies, one TU per behavioural domain (see interp/interp_ops.hpp).
+    # interp.cpp keeps only the dynamic-target fan-out + the execute_opcode
+    # switch; a new opcode adds its body to the domain TU that owns it.
+    interp/interp_damage.cpp
+    interp/interp_block.cpp
+    interp/interp_powers.cpp
+    interp/interp_cards.cpp
     piles.cpp
     card_play.cpp
     power_hooks.cpp
