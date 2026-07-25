@@ -99,6 +99,17 @@ bool combat_potion_legal(const RunController& rc, uint8_t slot,
     if (def == nullptr || id == PotionId::FAIRY_POTION) {
         return false;
     }
+    // A potion whose USE is not implemented must NOT be offered. RunState.potions
+    // is populated from real captures by the oracle translator (parse_potions,
+    // tools/oracle_bridge/translator/src/translate.cpp) for ANY potion with a
+    // registry row, so an imported state can hold a still-deferred potion. With
+    // only the row-exists + phase checks above, USE_POTION would be legal, the
+    // slot would be cleared and NOTHING would happen -- a wrong answer, not a
+    // missing feature. Registry-driven (potion_use_implemented, potions.hpp), so
+    // it re-opens by itself as potions get implemented.
+    if (!potion_use_implemented(id)) {
+        return false;
+    }
     if (id == PotionId::SMOKE_BOMB &&
         rc.room_type == static_cast<uint8_t>(RoomType::Boss)) {
         return false;  // SmokeBomb.canUse rejects bosses.

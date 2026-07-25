@@ -63,9 +63,43 @@ void queue_use_step(CombatState& s, const CardEffectStep& step,
 
 // --- Public ------------------------------------------------------------------
 
+bool potion_use_implemented(PotionId id) noexcept {
+    const PotionDef* def = potion_def(id);
+    if (def == nullptr) {
+        return false;
+    }
+    if (!def->native) {
+        // Registry-driven and self-healing: a data effect program always runs,
+        // so un-deferring a potion in registry/potions.yaml is enough.
+        return true;
+    }
+    // The `native` rows, i.e. the ones that mean hand-written code. KEEP THIS
+    // LIST NEXT TO THE BODIES IT DESCRIBES -- dispatch_native_potion's switch is
+    // directly below, and the run-layer three are named with their site.
+    switch (id) {
+        case PotionId::BLOOD_POTION:           // dispatch_native_potion, below
+        case PotionId::BLESSING_OF_THE_FORGE:  // dispatch_native_potion, below
+        case PotionId::FRUIT_JUICE:            // run layer: use_fruit_juice
+        case PotionId::ENTROPIC_BREW:          // run layer: use_entropic_brew
+        case PotionId::SMOKE_BOMB:             // run layer: step_potion's escape
+            return true;
+        default:
+            // DEFERRED: no body anywhere. FAIRY_POTION lands here too, which is
+            // correct -- it is never USED (AbstractPotion.isThrown false, it
+            // triggers on death), and combat_potion_legal rejects it by name.
+            return false;
+    }
+}
+
 bool use_potion(CombatState& s, PotionId id, uint8_t target) noexcept {
     const PotionDef* def = potion_def(id);
     if (def == nullptr) {
+        return false;
+    }
+    if (!potion_use_implemented(id)) {
+        // Fail loud rather than silently consume the slot for no effect. The
+        // run layer's legality gate should already have kept this action off the
+        // mask; this is the second line of defence for a direct caller.
         return false;
     }
     if (def->native) {
@@ -150,11 +184,19 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
         // opcode, NOT a missing power row). Cost randomization: SNECKO_OIL.
-        // Run-layer mutation (B4.x): FRUIT_JUICE, ENTROPIC_BREW. Combat escape
-        // (B3.15) / out-of-combat revive: SMOKE_BOMB, FAIRY_POTION.
+        // Out-of-combat revive: FAIRY_POTION (never USED at all).
+        // IMPLEMENTED, but at the RUN layer, so they never arrive here:
+        // FRUIT_JUICE, ENTROPIC_BREW (max-HP / slot mutation) and SMOKE_BOMB
+        // (the combat escape) -- run_advance's step_potion intercepts all three
+        // ahead of use_potion. potion_use_implemented names them so the legality
+        // gate still offers them.
         default:
-            // No combat-state change until the dependency lands. Not reachable
-            // for a data potion (use_potion routes those through queue_use_step).
+            // UNREACHABLE from use_potion: a data potion goes through
+            // queue_use_step, an implemented native has a case above, and a
+            // DEFERRED native is now refused before dispatch
+            // (potion_use_implemented). Left as a safe no-op for a direct
+            // caller rather than an assert, since the run-layer three above are
+            // legitimate direct-call arguments with nothing to do in combat.
             break;
     }
 }

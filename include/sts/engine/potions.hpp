@@ -74,16 +74,51 @@ using sts::registry::potion_def;
 // substituting `target` for CARD_TARGET steps (the used-on monster; ignored for
 // self-target potions). A `native` potion is routed to dispatch_native_potion
 // instead. Effects are QUEUED, not applied inline (matching AbstractPotion.use's
-// addToBot) -- they resolve through the pump. Returns false (queues nothing) if
-// `id` has no registry row.
+// addToBot) -- they resolve through the pump.
+//
+// Returns FALSE, queuing and mutating nothing, when `id` has no registry row OR
+// when potion_use_implemented(id) is false. The second case is the important
+// one: a deferred potion must FAIL, not quietly do nothing, because the caller
+// (run_advance's step_potion) treats a false return as "the use did not happen"
+// and therefore does NOT consume the slot. Silently swallowing the potion would
+// be a wrong answer, not a missing feature.
 bool use_potion(CombatState& state, PotionId id, uint8_t target) noexcept;
 
+// --- Implemented-ness gate (the potion legality trap) -------------------------
+//
+// Is this potion's USE actually implemented ANYWHERE in the engine -- as a data
+// effect program, as a combat native body (dispatch_native_potion), or as a
+// run-layer native body (run_advance.cpp's step_potion)?
+//
+// WHY THIS EXISTS. Held potions do not only come from the engine's own drops:
+// the oracle translator fills RunState.potions[] straight from real captures
+// (tools/oracle_bridge/translator/src/translate.cpp, parse_potions) for ANY
+// potion with a registry row. The legality gate used to ask only "is there a
+// registry row, and is the phase right", so an imported state holding a
+// still-deferred potion would have offered USE_POTION as a legal action and
+// then consumed the slot for no effect. That is a WRONG ANSWER. Only the
+// missing `replay` generalisation keeps it unreachable today.
+//
+// SELF-HEALING. The answer is derived from the registry wherever it can be: a
+// non-`native` row is a data program and always runs, so the moment a deferred
+// potion is un-deferred in registry/potions.yaml (drop `native: true`, add
+// `effects:`) it becomes legal with no code change here. Only `native` rows --
+// which by definition mean hand-written code -- need naming, and that list
+// lives next to the switch that implements them (potions.cpp) so it cannot
+// drift away from the bodies it describes.
+[[nodiscard]] bool potion_use_implemented(PotionId id) noexcept;
+
 // The native USE escape hatch (B3.2 convention). Handles potions whose effect
-// the opcode set cannot express. Implemented today: BLOOD_POTION (percent heal).
-// Every other native potion's body is DEFERRED to its dependency (a potion-
-// granted power in powers.yaml, an in-combat CHOOSE verb, recursive play, a
-// run-layer mutation, or the combat-escape path) and is currently a documented
-// no-op -- see potions.cpp and the B3.23 Log. Exposed for the tier-2 test.
+// the opcode set cannot express, or which the generator's potion domain cannot
+// author. Implemented here today: BLOOD_POTION (percent heal) and
+// BLESSING_OF_THE_FORGE (the Armaments+ CHOOSE_CARD item). FRUIT_JUICE,
+// ENTROPIC_BREW and SMOKE_BOMB are implemented at the RUN layer instead
+// (run_advance.cpp intercepts them before use_potion), so a direct combat-layer
+// call for those three is a documented no-op. Every remaining native potion's
+// body is DEFERRED to its dependency (an in-combat CHOOSE verb, recursive play,
+// cost randomization, the out-of-combat revive) -- and use_potion now REFUSES
+// those rather than no-op'ing, see potion_use_implemented. Exposed for the
+// tier-2 test.
 void dispatch_native_potion(CombatState& state, PotionId id, int potency,
                             uint8_t target) noexcept;
 

@@ -6,12 +6,15 @@
 // SCOPE. Potions whose USE the frozen opcode set + an already-registered power
 // (Strength/Vulnerable/Weak/Artifact/Metallicize) express are DATA programs and
 // are checked end-to-end (queue -> pump -> effect). BLOOD_POTION's percent heal
-// is a native body and is checked directly. The remaining native potions grant
-// powers not yet in powers.yaml (B3.4) or need verbs owned by other tasks
-// (in-combat CHOOSE = B3.4, recursive play, run-layer mutation, combat escape);
-// their bodies are DEFERRED (potions.cpp), so here they are checked at the
-// registry level -- correct rarity/potency/native flag -- with the runtime
-// effect landing with its dependency (B3.23 Log).
+// is a native body and is checked directly, as is BLESSING_OF_THE_FORGE's
+// Armaments+ CHOOSE_CARD queue. The remaining native potions need verbs the
+// engine does not have yet (an in-combat card-CHOOSE screen, recursive play,
+// cost randomization, the out-of-combat revive); their bodies are DEFERRED
+// (potions.cpp), so here they are checked at the registry level -- correct
+// rarity/potency/native flag -- with the runtime effect landing alongside its
+// verb. A deferred potion is now REFUSED by use_potion rather than no-op'd, and the
+// implemented-ness gate that drives run-layer legality is checked here too
+// (potion_use_implemented).
 
 #include <cstdint>
 
@@ -379,15 +382,60 @@ TEST(Potions, RarityAndPotencyTable) {
     }
 }
 
-TEST(Potions, DeferredNativePotionIsNoOpInCombat) {
-    // A still-deferred native potion (Duplication -- blocked on the recursive-play
-    // opcode) must not touch combat state until its dependency lands.
+// --- The implemented-ness gate (potion legality trap) ------------------------
+
+TEST(Potions, DeferredNativePotionIsRefusedNotSilentlyNoOped) {
+    // A still-deferred native potion (Duplication -- blocked on the recursive-
+    // play opcode) must FAIL rather than quietly do nothing: run_advance's
+    // step_potion reads the false return as "the use did not happen" and keeps
+    // the slot, so the player can never burn a potion for no effect.
     CombatState s = MakeCombat();
     const CombatState before = s;
-    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    EXPECT_FALSE(potion_use_implemented(PotionId::DUPLICATION_POTION));
+    EXPECT_FALSE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_power_count, before.player_power_count);
     EXPECT_EQ(s.player_hp, before.player_hp);
+}
+
+TEST(Potions, ImplementedNessIsRegistryDrivenForDataPotions) {
+    // Every non-`native` row is a data effect program and therefore runs -- this
+    // is the self-healing half of the gate: un-deferring a potion in
+    // registry/potions.yaml makes it legal with no code change.
+    for (int i = 1; i <= kPotionPoolSize; ++i) {
+        const PotionId id = static_cast<PotionId>(i);
+        const PotionDef* d = potion_def(id);
+        ASSERT_NE(d, nullptr);
+        if (!d->native) {
+            EXPECT_TRUE(potion_use_implemented(id))
+                << "data potion id " << i << " must be usable";
+        }
+    }
+    EXPECT_FALSE(potion_use_implemented(PotionId::NONE));
+}
+
+TEST(Potions, ImplementedAndDeferredNativeRosters) {
+    // The `native` rows are the hand-written ones, so they are named explicitly.
+    for (PotionId id : {PotionId::BLOOD_POTION, PotionId::BLESSING_OF_THE_FORGE,
+                        PotionId::FRUIT_JUICE, PotionId::ENTROPIC_BREW,
+                        PotionId::SMOKE_BOMB}) {
+        EXPECT_TRUE(potion_use_implemented(id))
+            << "native id " << static_cast<int>(id) << " has a body";
+    }
+    // The card-CHOOSE group, recursive play, cost randomization, and the
+    // out-of-combat revive are all still deferred.
+    for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
+                        PotionId::SKILL_POTION, PotionId::POWER_POTION,
+                        PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
+                        PotionId::LIQUID_MEMORIES, PotionId::DISTILLED_CHAOS,
+                        PotionId::DUPLICATION_POTION, PotionId::SNECKO_OIL,
+                        PotionId::FAIRY_POTION}) {
+        EXPECT_FALSE(potion_use_implemented(id))
+            << "deferred id " << static_cast<int>(id) << " must not be usable";
+        CombatState s = MakeCombat();
+        EXPECT_FALSE(use_potion(s, id, 0));
+        EXPECT_EQ(s.action_count, 0);
+    }
 }
 
 // --- A11 potion-slot count (design §5.4; AbstractPlayer.java:211-213) ---------

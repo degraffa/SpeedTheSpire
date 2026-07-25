@@ -488,6 +488,67 @@ TEST(RunPotion, SmokeBombEscapeIsNotAKillAndOpensProceedChoice) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
+// --- The potion legality trap -------------------------------------------------
+//
+// RunState.potions[] is populated from real captures by the oracle translator
+// (parse_potions, tools/oracle_bridge/translator/src/translate.cpp) for ANY
+// potion with a registry row, while the legality gate used to check only "row
+// exists + phase". An imported state holding a still-deferred potion would have
+// offered USE_POTION, consumed the slot and done nothing -- a wrong answer, not
+// a missing feature. The gate now asks potion_use_implemented(), so a deferred
+// potion is never offered and, if a caller forces the action anyway, the slot
+// survives.
+
+TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
+    RunController rc = enter_jaw_worm_combat();
+    for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
+                        PotionId::SKILL_POTION, PotionId::POWER_POTION,
+                        PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
+                        PotionId::LIQUID_MEMORIES, PotionId::SNECKO_OIL,
+                        PotionId::DISTILLED_CHAOS,
+                        PotionId::DUPLICATION_POTION}) {
+        rc.run.potions[0] = static_cast<uint16_t>(id);
+        RunActionMask mask{};
+        legal_actions(rc, mask);
+        EXPECT_FALSE(mask.can_use_potion[0])
+            << "deferred potion id " << static_cast<int>(id)
+            << " must not be a legal action";
+    }
+}
+
+TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
+    RunController rc = enter_jaw_worm_combat();
+    for (PotionId id : {PotionId::BLOCK_POTION,           // data program
+                        PotionId::FIRE_POTION,            // data program, targeted
+                        PotionId::BLOOD_POTION,           // combat native
+                        PotionId::BLESSING_OF_THE_FORGE,  // combat native
+                        PotionId::SMOKE_BOMB}) {          // run-layer native
+        rc.run.potions[0] = static_cast<uint16_t>(id);
+        RunActionMask mask{};
+        legal_actions(rc, mask);
+        EXPECT_TRUE(mask.can_use_potion[0])
+            << "implemented potion id " << static_cast<int>(id)
+            << " must stay legal";
+    }
+}
+
+TEST(RunPotion, ForcingADeferredPotionKeepsTheSlot) {
+    // Belt and braces: even if a caller submits the action the mask refused,
+    // the slot is not consumed and combat state is untouched.
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ELIXIR);
+    const int hp_before = rc.combat.monsters[0].hp;
+    const int16_t player_hp_before = rc.combat.player_hp;
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::ELIXIR))
+        << "the slot must survive an illegal use";
+    EXPECT_EQ(rc.combat.monsters[0].hp, hp_before);
+    EXPECT_EQ(rc.combat.player_hp, player_hp_before);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+}
+
 // =============================================================================
 // Full floor cycle
 // =============================================================================
