@@ -32,7 +32,12 @@ namespace {
 [[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
     // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
     // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
-    static_assert(sts::registry::manifest::kPowersCount == 40,
+    // Checked for the two monster powers added alongside the slavers and the
+    // Fungi Beast, neither of which needs a case:
+    // EntanglePower overrides only playApplyPowerSfx / updateDescription /
+    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // updateDescription / onDeath (SporeCloudPower.java:28-42).
+    static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so.");
     // Checked for the Guardian's two powers, neither needs a case: ModeShiftPower

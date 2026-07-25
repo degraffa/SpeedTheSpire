@@ -189,6 +189,23 @@ sts_add_test(guardian_test)
 # DRAW COUNT is what the RNG cases pin.
 sts_add_test(hexaghost_test)
 
+# The two Act-1 slavers -- the A7 HP column and the A2/A17 damage/debuff columns,
+# the Blue Slaver's d40-crossed-with-history tree, the Red Slaver's forced
+# opening Stab plus its once-per-combat Entangle latch, and Entangled itself:
+# the ATTACK-only legality veto (AbstractCard.hasEnoughEnergy:872-875) and the
+# end-of-player-turn self-removal. Two independent 32-seed x 20-turn fixtures pin
+# the aiRng draw sequence AND the roll-driven move each turn, since both getMove
+# overrides read the rolled num.
+sts_add_test(slaver_test FIXTURES)
+
+# The Fungi Beast -- the A7 HP column, the flat 6 Bite, the A17 Strength column,
+# the pre-battle Spore Cloud, and the ON-DEATH TRIGGER ORDERING it introduces:
+# with two beasts the first death releases 2 Vulnerable and the last releases
+# none, because AbstractMonster.die sets isDying before walking the power list
+# and SporeCloudPower.onDeath bails on isBattleEnding. One independent 32-seed x
+# 20-turn fixture pins the roll-driven d60 move tree.
+sts_add_test(fungi_beast_test FIXTURES)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

@@ -202,6 +202,30 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // (the combat escape) -- run_advance's step_potion intercepts all three
         // ahead of use_potion. potion_use_implemented names them so the legality
         // gate still offers them.
+        //
+        // SMOKE BOMB HAS NO COMBAT-LAYER BODY ON PURPOSE, and the reason is worth
+        // knowing before anyone "finishes" it here. SmokeBomb.use (SmokeBomb.java:
+        // 37-48) does not act on the monsters at all: in RoomPhase.COMBAT it marks
+        // the room smoked and sets the PLAYER's isEscaping + a 2.5s escapeTimer,
+        // and it is the timer expiring (AbstractPlayer.java:2282-2290) that ends
+        // the battle. Ending a combat that still has live monsters is a property
+        // of the pump, not of an opcode: pump_step recomputes the phase from
+        // `player_hp <= 0 || !any_monster_alive(s)` at the top of EVERY step
+        // (action_queue.cpp), so a COMBAT_OVER written by an opcode is overwritten
+        // on the next iteration. That is why the working implementation is the
+        // run-layer one, which sets the phase and then does not re-pump. A real
+        // combat-layer escape -- for the potion and for a self-escaping monster
+        // alike -- needs that liveness predicate to know about escaping, which is
+        // the same single change both halves are waiting on.
+        //
+        // A SECOND, SEPARATE GAP, recorded where the next reader will look:
+        // SmokeBomb.canUse (:50-62) rejects the potion when any monster in the
+        // group is `type == EnemyType.BOSS` (or has BackAttack, an Act-3 power).
+        // It never asks the ROOM. combat_potion_legal (run_advance.cpp) tests
+        // `room_type == RoomType::Boss` instead. The two agree everywhere in
+        // Act 1, and `enemy_type` is now a live registry column with a
+        // MonsterDef::is_boss() accessor (the same one Pantograph reads), so the
+        // exact test is available whenever run_advance.cpp is open.
         default:
             // UNREACHABLE from use_potion: a data potion goes through
             // queue_use_step, an implemented native has a case above, and a

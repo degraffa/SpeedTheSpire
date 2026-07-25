@@ -494,3 +494,37 @@
   # (interp_damage.cpp) nor modifyBlock (interp_block.cpp) -- its ONLY override is
   # onCardDraw -- so none of those four needed a case.
   provenance: "ConfusionPower.onCardDraw (ConfusionPower.java:38-48) -- if card.cost >= 0: newCost = AbstractDungeon.cardRandomRng.random(3) (INCLUSIVE 0..3, stage-a trap 3), and if newCost != cost set BOTH card.cost and card.costForTurn to it and mark isCostModified; freeToPlayOnce = false either way. The DRAW IS UNCONDITIONAL within the cost >= 0 branch -- it happens before the != comparison, so a card that rolls its own cost still consumes one draw; a card with cost < 0 (X-cost, or an unplayable curse/status) consumes NONE. Applied only by SneckoEye.atPreBattle (SneckoEye.java:39-43); the ctor (:23-31) takes no amount, hence stack: none. POWER_ID \"Confusion\" (:18)."
+
+# --- B3.15 monster-applied powers (ids 73-74) ---------------------------------
+# Both names were searched for in this file before being appended: neither
+# "Entangled" nor "Spore Cloud" had a row, and the generator's duplicate-name
+# check would have rejected a re-add anyway (the B3.19 Metallicize incident).
+# Ids 73-74 come out of the block this task owns; 47 and 54-58 stay permanent
+# gaps and are never backfilled.
+#
+# Checked, not assumed, against both count-guarded switch families: NEITHER power
+# overrides atDamageGive / atDamageReceive / atDamageFinalReceive
+# (interp_damage.cpp) nor modifyBlock (interp_block.cpp). EntanglePower declares
+# only playApplyPowerSfx / updateDescription / atEndOfTurn (EntanglePower.java:
+# 32-53) and SporeCloudPower only updateDescription / onDeath
+# (SporeCloudPower.java:28-42), so none of those four switches needed a case --
+# only their kPowersCount guards moved.
+
+- id: 73
+  name: ENTANGLE
+  game_id: "Entangled"
+  type: DEBUFF
+  stack: none
+  hooks:
+    at_end_of_turn:
+      - {op: REMOVE_POWER, target: SELF, power: ENTANGLE}
+  provenance: "EntanglePower (EntanglePower.java:14-53): POWER_ID \"Entangled\" (:16), ctor takes NO amount and fixes this.amount = 1 with isTurnBased = true and type = DEBUFF (:20-30) -- hence stack: none, the SneckoEye/Confusion precedent. atEndOfTurn(isPlayer) (:50-53) -- `if (isPlayer) addToBot(new RemoveSpecificPowerAction(owner, owner, POWER_ID))`, i.e. it lasts exactly the one player turn it was applied before. The isPlayer guard needs no expression here: dispatch_at_end_of_turn walks the PLAYER's powers only (applyEndOfTurnTriggers, power_hooks.hpp), and the Red Slaver is the only S1 applier and applies it to the player (SlaverRed.java:89). THE ATTACK LOCK IS NOT A HOOK: AbstractCard.hasEnoughEnergy (AbstractCard.java:872-875) refuses any ATTACK-type card while the player hasPower(\"Entangled\"), so it is a legality predicate, spelled at the legal-actions site next to Normality's and Velvet Choker's vetoes (advance.cpp) -- and, like them, applied AFTER the Medical Kit / Blue Candle unplayable escape hatches, because :872 sits inside hasEnoughEnergy, which canUse reaches last (:923)."
+
+- id: 74
+  name: SPORE_CLOUD
+  game_id: "Spore Cloud"
+  type: BUFF
+  native: true
+  hooks:
+    on_death: []              # native: unless the battle is already ending, addToTop 2 Vulnerable onto the player
+  provenance: "SporeCloudPower (SporeCloudPower.java:14-42): POWER_ID \"Spore Cloud\" (:16), default type BUFF (AbstractPower.java:67), amount is the Vulnerable stack the owner will release (FungiBeast constructs it with 2, FungiBeast.java:77). onDeath (:35-42) -- `if (AbstractDungeon.getCurrRoom().isBattleEnding()) return;` then addToTop ApplyPowerAction(player, null, new VulnerablePower(player, amount, true), amount). NATIVE for two reasons a data program cannot express: (1) the battle-ending guard -- AbstractRoom.isBattleEnding (AbstractRoom.java:628-635) is isBattleOver || MonsterGroup.areMonstersBasicallyDead (:90-95), and AbstractMonster.die sets isDying BEFORE walking the power list (AbstractMonster.java:741-746), so the LAST monster's Spore Cloud releases NOTHING while an earlier one's does; (2) addToTop, not addToBot. This is the first consumer of Hook::ON_DEATH, whose dispatch site is the monster-death edge in op_damage / op_lose_hp (interp_damage.cpp) -- powers' onDeath BEFORE relics' onMonsterDeath, the order die() runs them in (:741-750)."

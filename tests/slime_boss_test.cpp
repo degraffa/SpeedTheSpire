@@ -428,6 +428,12 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "TheGuardian.java:94 -- this.type = EnemyType.BOSS"},
         {MonsterId::HEXAGHOST,          MonsterEnemyType::BOSS,
          "Hexaghost.java:98 -- this.type = EnemyType.BOSS"},
+        {MonsterId::SLAVER_BLUE,        MonsterEnemyType::NORMAL,
+         "SlaverBlue.java -- no this.type assignment (ctor :48-67)"},
+        {MonsterId::SLAVER_RED,         MonsterEnemyType::NORMAL,
+         "SlaverRed.java -- no this.type assignment (ctor :58-78)"},
+        {MonsterId::FUNGI_BEAST,        MonsterEnemyType::NORMAL,
+         "FungiBeast.java -- no this.type assignment (ctor :54-73)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);
