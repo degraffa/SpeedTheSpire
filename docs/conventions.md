@@ -289,7 +289,40 @@ release asset (`URL` + `URL_HASH`); that took the same dependency to 1.9 MB.
 
 ---
 
-## 7. Verification discipline (learned the hard way)
+## 7. The rule of two — document once, eliminate on recurrence
+
+**First time a trap is hit: write it down** (below, symptom first, with the
+incident behind it).
+
+**Second time the same trap is hit — by anyone, including a different agent, or
+the orchestrator — the documentation has failed.** A trap that recurs after
+being documented is evidence that reading is not a sufficient control. The
+second occurrence is not another note; it is a **task**, owned by the
+orchestrator, to make the trap structurally impossible or self-announcing.
+
+Preference order for the elimination:
+
+1. **Remove the footgun.** Delete the sharp edge, or replace the hand-rolled
+   thing with a committed helper nobody has to get right twice
+   (`tools/wsl_run.sh`, `tools/bench_ab.sh`).
+2. **Fail loudly at the point of the mistake**, with a message that names the
+   fix — an assert, a link error, a `noTestsAction: error`, a generated table
+   whose missing entry will not link.
+3. **Automate the check** — CI, a pre-commit hook, a test that greps for the
+   forbidden shape.
+4. **Only if none of the above apply**: strengthen the doc *and* put a pointer
+   at the exact site where the mistake gets made.
+
+An elimination is a real commit, not a paragraph. Record it in the trap's entry
+below so the history stays visible: `ELIMINATED <date>: <how>`.
+
+**Corollary — count honestly.** "I hit it, then an agent hit it" is two. The
+point is not blame; it is that a trap surviving one documented encounter will
+survive the next reader too.
+
+---
+
+## 8. Traps already hit (verification discipline)
 
 **Re-derive numbers from the tree, never from a document.** Test counts in task
 Logs are correct only on the day they are written. A stale count (454, when the
