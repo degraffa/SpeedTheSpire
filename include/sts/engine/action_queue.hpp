@@ -191,6 +191,12 @@ void pump(CombatState& state,
 // MetallicizePower.java:38-42) -- would otherwise trigger once before the player
 // has taken a single turn.
 //
+// The post-draw POWER pass is omitted for the same reason: the combat-start block
+// carries applyStartOfTurnPostDrawRelics (AbstractRoom.java:254) but no
+// applyStartOfTurnPostDrawPowers line, and the game calls that only from step 6
+// (GameActionManager.java:363). A PLAYER power binding atStartOfTurnPostDraw
+// (Brutality, Demon Form) therefore does not fire on turn 1.
+//
 // The pre-battle actions queued by usePreBattleAction drain FIRST, because
 // AbstractRoom.update only lets waitTimer reach 0 (and the turn-1 block run) once
 // the action queue is empty (AbstractRoom.java:229-235).
