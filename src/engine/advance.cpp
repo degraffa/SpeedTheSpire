@@ -234,17 +234,20 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         }
     }
 
-    // Blue Candle's presence is a property of the player, not of a hand slot, so
-    // the relic-mirror scan is resolved AT MOST ONCE per legal_actions call and
-    // reused by every slot (it used to re-scan per unplayable curse). It resolves
-    // LAZILY rather than unconditionally above this loop ON PURPOSE: the relic
-    // mirror sits in a part of CombatState that legal_actions never otherwise
-    // reads, and touching it on every call measured ~20% SLOWER on bench_advance
-    // (an extra cold cache line per state across a 10k-state batch) because the
-    // common hand holds no unplayable curse at all. Do not "simplify" this into
-    // an unconditional hoist without re-running that benchmark.
-    bool blue_candle_scanned = false;
+    // Blue Candle's and Medical Kit's presence is a property of the player, not
+    // of a hand slot, so the relic-mirror scan is resolved AT MOST ONCE per
+    // legal_actions call and reused by every slot (it used to re-scan per
+    // unplayable curse). It resolves LAZILY rather than unconditionally above
+    // this loop ON PURPOSE: the relic mirror sits in a part of CombatState that
+    // legal_actions never otherwise reads, and touching it on every call measured
+    // ~20% SLOWER on bench_advance (an extra cold cache line per state across a
+    // 10k-state batch) because the common hand holds no unplayable card at all.
+    // Do not "simplify" this into an unconditional hoist without re-running that
+    // benchmark. The two relics share ONE latch so the mirror is walked once, not
+    // twice, when a hand holds both a curse and a status.
+    bool unplayable_relics_scanned = false;
     bool has_blue_candle = false;
+    bool has_medical_kit = false;
 
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
@@ -262,19 +265,23 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
             bool playable = !unplayable && state.player_energy >= c.cost_now &&
                             !normality_locked;
-            // Blue Candle (AbstractCard.canUse, AbstractCard.java:920):
-            // a CURSE with costForTurn < -1 IS playable when the player owns
-            // Blue Candle. cost_now is 0 for unplayable rows (gen.py's -2
-            // sentinel), matching the game spending no energy on a curse play.
-            // (The STATUS twin gate at :917 is Medical Kit, a SHOP-tier relic;
-            // registry/relics.yaml has no SHOP rows, so it cannot fire.)
+            // AbstractCard.canUse (AbstractCard.java:916-922) carries TWO relic
+            // escape hatches for otherwise-unplayable cards, one per card type:
+            //   :917  a STATUS with costForTurn < -1 IS playable with Medical Kit
+            //   :920  a CURSE  with costForTurn < -1 IS playable with Blue Candle
+            // cost_now is 0 for unplayable rows (the generator's -2 sentinel),
+            // matching the game spending no energy on such a play.
             if (unplayable && !normality_locked && def != nullptr &&
-                def->type == CardType::CURSE) {
-                if (!blue_candle_scanned) {
+                (def->type == CardType::CURSE || def->type == CardType::STATUS)) {
+                if (!unplayable_relics_scanned) {
                     has_blue_candle = player_has_relic(state, RelicId::BLUE_CANDLE);
-                    blue_candle_scanned = true;
+                    has_medical_kit = player_has_relic(state, RelicId::MEDICAL_KIT);
+                    unplayable_relics_scanned = true;
                 }
-                if (has_blue_candle) {
+                const bool unlocked = def->type == CardType::CURSE
+                                          ? has_blue_candle
+                                          : has_medical_kit;
+                if (unlocked) {
                     playable = state.player_energy >= c.cost_now;
                 }
             }

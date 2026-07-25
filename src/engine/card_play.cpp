@@ -327,6 +327,15 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         if (energy_on_use < 0) {
             energy_on_use = 0;
         }
+        // Chemical X (ChemicalX.java:12-30, BOOST = 2): every X-cost action --
+        // WhirlwindAction.update, SkewerAction.update -- computes its repetition
+        // count as energyOnUse + 2 while the relic is owned, while the energy
+        // actually SPENT in step 6 below is still the un-boosted energyOnUse.
+        // The boost is applied AFTER the negative clamp, exactly as the Java
+        // adds it to an already-clamped energyOnUse.
+        if (player_has_relic(s, RelicId::CHEMICAL_X)) {
+            energy_on_use += 2;
+        }
         for (int rep = 0; rep < energy_on_use; ++rep) {
             for (uint8_t k = 0; k < eff.count; ++k) {
                 queue_effect_step(s, eff.steps[k], resolved_target, pool_index);
@@ -360,10 +369,20 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         queue_card_trigger_program(
             s, card_effect_steps(*od, s.card_pool[pi].upgrade), /*add_top=*/true);
     }
-    move_card_hand_to_pile(
-        s, pool_index,
-        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST),
-        def->type == CardType::POWER);
+    // Strange Spoon (UseCardAction.java:109-131): a play that WOULD exhaust and
+    // is not a POWER rolls ONE cardRandomRng.randomBoolean() while the relic is
+    // owned; on true ("spoonProc") the card goes to the discard pile instead.
+    // The roll is guarded by exhaustCard FIRST, so a non-exhausting play consumes
+    // no RNG at all -- that guard order is RNG-visible and is reproduced exactly.
+    bool to_exhaust =
+        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST);
+    if (to_exhaust && def->type != CardType::POWER &&
+        player_has_relic(s, RelicId::STRANGE_SPOON) &&
+        random_boolean(s.card_random_rng)) {
+        to_exhaust = false;
+    }
+    move_card_hand_to_pile(s, pool_index, to_exhaust,
+                           def->type == CardType::POWER);
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
     //    X-cost already consumed all energy above; otherwise deduct the

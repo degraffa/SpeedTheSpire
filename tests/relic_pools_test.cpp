@@ -158,10 +158,10 @@ TEST(RelicPools, OracleCommonPoolOrdersMatchThreeLiveSeeds) {
         EXPECT_EQ(rs.relic_rng.counter, 5);
         EXPECT_EQ(rs.relic_rng.s0, static_cast<uint64_t>(c.s0));
         EXPECT_EQ(rs.relic_rng.s1, static_cast<uint64_t>(c.s1));
-        for (int p = 2; p < kRelicTierCount; ++p) {
-            EXPECT_EQ(rs.relic_pool_count[p], 0)
-                << "tier content belongs to B3.26-B3.27, p=" << p;
-        }
+        // BOSS is the one tier still without rows; every other pool is
+        // populated, and the stream state asserted above is unchanged by that
+        // -- all five shuffle draws are unconditional.
+        EXPECT_EQ(rs.relic_pool_count[kBoss], 0);
     }
 }
 
@@ -182,6 +182,136 @@ TEST(RelicPools, OracleUncommonPoolOrdersMatchThreeLiveSeeds) {
         expect_pool(rs, RelicPool::UNCOMMON, *c.pool);
         EXPECT_EQ(rs.relic_rng.counter, 5);
     }
+}
+
+// The three live shuffled RARE and SHOP pool orders (same b14_accept captures,
+// oracle.relicPools.rare / .shop). The canonical pre-shuffle pool_order in
+// relics.yaml was recovered by inverting the JDK shuffle -- relicRng draw #3 for
+// RARE and #4 for SHOP -- against TEN captures (STS00001..STS00010); all ten
+// agree on one pre-shuffle order, and running the SAME inversion against the
+// already-landed UNCOMMON pool reproduces its committed pool_order exactly,
+// which is what validates the method rather than merely fitting it. Re-shuffling
+// the recovered order here must reproduce each capture.
+constexpr std::array<RelicId, 28> kOracleRareSeed1{{
+    RelicId::MAGIC_FLOWER, RelicId::FOSSILIZED_HELIX, RelicId::OLD_COIN,
+    RelicId::DEAD_BRANCH, RelicId::CHAMPION_BELT, RelicId::PEACE_PIPE,
+    RelicId::CHARONS_ASHES, RelicId::INCENSE_BURNER,
+    RelicId::TUNGSTEN_ROD, RelicId::UNCEASING_TOP, RelicId::GIRYA,
+    RelicId::ICE_CREAM, RelicId::POCKETWATCH, RelicId::CAPTAINS_WHEEL,
+    RelicId::CALIPERS, RelicId::DU_VU_DOLL, RelicId::THREAD_AND_NEEDLE,
+    RelicId::GINGER, RelicId::SHOVEL, RelicId::STONE_CALENDAR,
+    RelicId::TURNIP, RelicId::GAMBLING_CHIP, RelicId::WING_BOOTS,
+    RelicId::PRAYER_WHEEL, RelicId::BIRD_FACED_URN, RelicId::TORII,
+    RelicId::LIZARD_TAIL, RelicId::MANGO,
+}};
+
+constexpr std::array<RelicId, 28> kOracleRareSeed2{{
+    RelicId::PRAYER_WHEEL, RelicId::TUNGSTEN_ROD, RelicId::CAPTAINS_WHEEL,
+    RelicId::TURNIP, RelicId::SHOVEL, RelicId::ICE_CREAM, RelicId::TORII,
+    RelicId::PEACE_PIPE, RelicId::CHAMPION_BELT, RelicId::MAGIC_FLOWER,
+    RelicId::GAMBLING_CHIP, RelicId::LIZARD_TAIL, RelicId::GINGER,
+    RelicId::CALIPERS, RelicId::DEAD_BRANCH, RelicId::WING_BOOTS,
+    RelicId::INCENSE_BURNER, RelicId::STONE_CALENDAR,
+    RelicId::POCKETWATCH, RelicId::GIRYA, RelicId::MANGO,
+    RelicId::FOSSILIZED_HELIX, RelicId::THREAD_AND_NEEDLE,
+    RelicId::BIRD_FACED_URN, RelicId::UNCEASING_TOP, RelicId::OLD_COIN,
+    RelicId::DU_VU_DOLL, RelicId::CHARONS_ASHES,
+}};
+
+constexpr std::array<RelicId, 28> kOracleRareSeed3{{
+    RelicId::GINGER, RelicId::SHOVEL, RelicId::MANGO, RelicId::DU_VU_DOLL,
+    RelicId::STONE_CALENDAR, RelicId::GAMBLING_CHIP,
+    RelicId::BIRD_FACED_URN, RelicId::CHARONS_ASHES,
+    RelicId::MAGIC_FLOWER, RelicId::WING_BOOTS, RelicId::TURNIP,
+    RelicId::UNCEASING_TOP, RelicId::PEACE_PIPE, RelicId::CALIPERS,
+    RelicId::POCKETWATCH, RelicId::CHAMPION_BELT, RelicId::ICE_CREAM,
+    RelicId::CAPTAINS_WHEEL, RelicId::PRAYER_WHEEL,
+    RelicId::THREAD_AND_NEEDLE, RelicId::GIRYA, RelicId::FOSSILIZED_HELIX,
+    RelicId::INCENSE_BURNER, RelicId::TUNGSTEN_ROD, RelicId::OLD_COIN,
+    RelicId::LIZARD_TAIL, RelicId::DEAD_BRANCH, RelicId::TORII,
+}};
+
+constexpr std::array<RelicId, 17> kOracleShopSeed1{{
+    RelicId::ORRERY, RelicId::LEES_WAFFLE, RelicId::TOOLBOX,
+    RelicId::CAULDRON, RelicId::SLING_OF_COURAGE, RelicId::ORANGE_PELLETS,
+    RelicId::CLOCKWORK_SOUVENIR, RelicId::MEMBERSHIP_CARD,
+    RelicId::PRISMATIC_SHARD, RelicId::THE_ABACUS, RelicId::FROZEN_EYE,
+    RelicId::STRANGE_SPOON, RelicId::MEDICAL_KIT, RelicId::DOLLYS_MIRROR,
+    RelicId::HAND_DRILL, RelicId::CHEMICAL_X, RelicId::BRIMSTONE,
+}};
+
+constexpr std::array<RelicId, 17> kOracleShopSeed2{{
+    RelicId::ORANGE_PELLETS, RelicId::FROZEN_EYE,
+    RelicId::SLING_OF_COURAGE, RelicId::DOLLYS_MIRROR,
+    RelicId::HAND_DRILL, RelicId::PRISMATIC_SHARD, RelicId::BRIMSTONE,
+    RelicId::STRANGE_SPOON, RelicId::ORRERY, RelicId::CLOCKWORK_SOUVENIR,
+    RelicId::TOOLBOX, RelicId::THE_ABACUS, RelicId::CAULDRON,
+    RelicId::MEDICAL_KIT, RelicId::CHEMICAL_X, RelicId::MEMBERSHIP_CARD,
+    RelicId::LEES_WAFFLE,
+}};
+
+constexpr std::array<RelicId, 17> kOracleShopSeed3{{
+    RelicId::MEDICAL_KIT, RelicId::ORRERY, RelicId::TOOLBOX,
+    RelicId::MEMBERSHIP_CARD, RelicId::CLOCKWORK_SOUVENIR,
+    RelicId::ORANGE_PELLETS, RelicId::LEES_WAFFLE,
+    RelicId::PRISMATIC_SHARD, RelicId::THE_ABACUS, RelicId::BRIMSTONE,
+    RelicId::SLING_OF_COURAGE, RelicId::CAULDRON, RelicId::CHEMICAL_X,
+    RelicId::HAND_DRILL, RelicId::DOLLYS_MIRROR, RelicId::STRANGE_SPOON,
+    RelicId::FROZEN_EYE,
+}};
+
+TEST(RelicPools, OracleRarePoolOrdersMatchThreeLiveSeeds) {
+    struct Case {
+        int64_t seed;
+        const std::array<RelicId, 28>* pool;
+    };
+    const Case cases[] = {
+        {1790050543751LL, &kOracleRareSeed1},
+        {1790050543752LL, &kOracleRareSeed2},
+        {1790050543753LL, &kOracleRareSeed3},
+    };
+    for (const Case& c : cases) {
+        RunState rs{};
+        rs.relic_rng = from_seed(c.seed);
+        initialize_relic_pools(rs);
+        expect_pool(rs, RelicPool::RARE, *c.pool);
+        EXPECT_EQ(rs.relic_rng.counter, 5);
+    }
+}
+
+TEST(RelicPools, OracleShopPoolOrdersMatchThreeLiveSeeds) {
+    struct Case {
+        int64_t seed;
+        const std::array<RelicId, 17>* pool;
+    };
+    const Case cases[] = {
+        {1790050543751LL, &kOracleShopSeed1},
+        {1790050543752LL, &kOracleShopSeed2},
+        {1790050543753LL, &kOracleShopSeed3},
+    };
+    for (const Case& c : cases) {
+        RunState rs{};
+        rs.relic_rng = from_seed(c.seed);
+        initialize_relic_pools(rs);
+        expect_pool(rs, RelicPool::SHOP, *c.pool);
+        EXPECT_EQ(rs.relic_rng.counter, 5);
+    }
+}
+
+// Shop stock pops the END of the SHOP pool while a reward/chest draw pops the
+// FRONT (AbstractDungeon.java:704-808) -- the trap-15 asymmetry, checked here on
+// a REAL tier rather than a synthetic three-relic pool, because the two ends of
+// a 17-row live pool are what a shop actually reads.
+TEST(RelicPools, ShopTierPopsOppositeEndsOfTheLivePool) {
+    RunState rs{};
+    rs.relic_rng = from_seed(1790050543751LL);
+    initialize_relic_pools(rs);
+    RelicSpawnContext ctx{};
+    EXPECT_EQ(return_random_relic_key(rs, RelicTier::SHOP, ctx),
+              kOracleShopSeed1.front());
+    EXPECT_EQ(return_end_random_relic_key(rs, RelicTier::SHOP, ctx),
+              kOracleShopSeed1.back());
+    EXPECT_EQ(rs.relic_pool_count[static_cast<int>(RelicPool::SHOP)], 15);
 }
 
 TEST(RelicPools, InitializesAllFiveWithFiveDrawsEvenWhenFourAreEmpty) {

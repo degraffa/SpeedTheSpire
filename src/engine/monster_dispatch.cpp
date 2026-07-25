@@ -10,6 +10,7 @@
 
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
+#include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
@@ -94,6 +95,16 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             // 439-441). lagavulin_init_awake is the "Lagavulin Event" ctor and has
             // no encounter to spawn it yet.
             return &lagavulin_init;
+        case MonsterId::GREMLIN_WARRIOR:
+            return &gremlin_warrior_init;
+        case MonsterId::GREMLIN_THIEF:
+            return &gremlin_thief_init;
+        case MonsterId::GREMLIN_FAT:
+            return &gremlin_fat_init;
+        case MonsterId::GREMLIN_TSUNDERE:
+            return &gremlin_tsundere_init;
+        case MonsterId::GREMLIN_WIZARD:
+            return &gremlin_wizard_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -131,6 +142,16 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &sentry_take_turn;
         case MonsterId::LAGAVULIN:
             return &lagavulin_take_turn;
+        case MonsterId::GREMLIN_WARRIOR:
+            return &gremlin_warrior_take_turn;
+        case MonsterId::GREMLIN_THIEF:
+            return &gremlin_thief_take_turn;
+        case MonsterId::GREMLIN_FAT:
+            return &gremlin_fat_take_turn;
+        case MonsterId::GREMLIN_TSUNDERE:
+            return &gremlin_tsundere_take_turn;
+        case MonsterId::GREMLIN_WIZARD:
+            return &gremlin_wizard_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -138,7 +159,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 14,
+    static_assert(sts::registry::manifest::kMonstersCount == 19,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     switch (id) {
@@ -146,6 +167,11 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             return &spike_slime_large_roll_move;
         case MonsterId::ACID_SLIME_LARGE:
             return &acid_slime_large_roll_move;
+        // GremlinFat is the only gremlin whose takeTurn ends in a real
+        // RollMoveAction (GremlinFat.java:80); the other four re-telegraph with a
+        // direct setMove or a queued SetMoveAction and roll nothing.
+        case MonsterId::GREMLIN_FAT:
+            return &gremlin_fat_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -164,7 +190,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 14,
+    static_assert(sts::registry::manifest::kMonstersCount == 19,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -213,7 +239,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 14,
+    static_assert(sts::registry::manifest::kMonstersCount == 19,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
@@ -248,7 +274,7 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 14,
+    static_assert(sts::registry::manifest::kMonstersCount == 19,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -296,11 +322,20 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::SLIME_BOSS:
             return nullptr;
 
+        // GremlinWarrior.usePreBattleAction (GremlinWarrior.java:63-70) is the
+        // real thing: addToBottom ApplyPowerAction(self, AngryPower(self,
+        // ascension >= 17 ? 2 : 1)). It draws no RNG. None of the other four
+        // gremlins declares the method (they inherit the empty base body), so
+        // they fall through to the default below.
+        case MonsterId::GREMLIN_WARRIOR:
+            return &gremlin_warrior_use_pre_battle_action;
+
         default:
-            // Checked, not assumed: of the 14 registry monsters only JawWorm,
-            // LouseNormal, LouseDefensive, SlimeBoss, Sentry and Lagavulin
-            // declare the method at all. The other eight (Cultist, GremlinNob,
-            // the four small/medium slimes, the two large slimes) inherit
+            // Checked, not assumed: of the 19 registry monsters only JawWorm,
+            // LouseNormal, LouseDefensive, SlimeBoss, Sentry, Lagavulin and
+            // GremlinWarrior declare the method at all. The other twelve
+            // (Cultist, GremlinNob, the four small/medium slimes, the two large
+            // slimes, and the Thief / Fat / Tsundere / Wizard gremlins) inherit
             // AbstractMonster's empty body
             // (AbstractMonster.java:953-954), so there is genuinely nothing to
             // run for them.

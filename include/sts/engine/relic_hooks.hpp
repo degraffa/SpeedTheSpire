@@ -72,9 +72,10 @@ enum class RelicHook : uint8_t {
     // --- Later additions (append-only, design doc §4.4) ---
     ON_MONSTER_DEATH = 14,           // onMonsterDeath (AbstractMonster.die:933-937)
     ON_SHUFFLE = 15,                 // onShuffle (EmptyDeckShuffleAction ctor :37-39)
+    ON_BLOCK_BROKEN = 16,            // onBlockBroken (AbstractCreature.brokeBlock:159-167)
 };
 
-inline constexpr int kRelicHookCount = 16;
+inline constexpr int kRelicHookCount = 17;
 
 // --- RelicHookContext --------------------------------------------------------
 //
@@ -86,6 +87,10 @@ struct RelicHookContext {
     uint8_t card_is_attack = 0;    // 1 if that card is an ATTACK (Nunchaku/Pen Nib)
     int32_t amount = 0;            // event amount: block gained / hp lost
     uint8_t dead_monster = 0;      // on_monster_death: the dying monster's slot
+    // on_block_broken: the monster whose block was reduced to zero. brokeBlock
+    // only fires the relic fan-out for AbstractMonster victims
+    // (AbstractCreature.java:159-167), so this is always a monster slot.
+    uint8_t block_broken_monster = 0;
 };
 
 // Does the player own `id`? Scans the CombatState relic mirror (acquisition
@@ -132,6 +137,11 @@ void dispatch_relics_at_battle_start(CombatState& s, RelicSlot* relics,
                                      uint8_t count) noexcept;
 void dispatch_relics_at_turn_start(CombatState& s, RelicSlot* relics,
                                    uint8_t count) noexcept;
+// applyStartOfTurnPostDrawRelics (GameActionManager.java:361-362): queued AFTER
+// the start-of-turn DrawCardAction, so anything it queues resolves after the
+// draw. Pocketwatch and Gambling Chip bind it.
+void dispatch_relics_at_turn_start_post_draw(CombatState& s, RelicSlot* relics,
+                                             uint8_t count) noexcept;
 void dispatch_relics_on_player_end_turn(CombatState& s, RelicSlot* relics,
                                         uint8_t count) noexcept;
 void dispatch_relics_on_use_card(CombatState& s, RelicSlot* relics, uint8_t count,
@@ -157,6 +167,21 @@ void dispatch_relics_on_monster_death(CombatState& s, RelicSlot* relics,
 // the shuffle itself (the game fires it at action construction). Sundial.
 void dispatch_relics_on_shuffle(CombatState& s, RelicSlot* relics,
                                 uint8_t count) noexcept;
+// onBlockBroken (AbstractCreature.brokeBlock:159-167): fired from decrementBlock
+// when a MONSTER's positive block is reduced to exactly zero by an incoming hit.
+// The player's own broken block does NOT fire it (the `this instanceof
+// AbstractMonster` guard). Hand Drill.
+void dispatch_relics_on_block_broken(CombatState& s, RelicSlot* relics,
+                                     uint8_t count, uint8_t monster) noexcept;
+
+// The player's single in-combat heal seam: HealAction / AbstractPlayer.heal run
+// every owned relic's onPlayerHeal over the amount before it lands, and Magic
+// Flower is the only S1 relic that overrides it -- MathUtils.round(amount *
+// 1.5f) while the room phase is COMBAT (MagicFlower.java:728-735). Every relic,
+// power and potion heal inside a combat goes through here so the modifier cannot
+// be forgotten at one site; the no-Magic-Flower path is byte-identical to a plain
+// clamped heal.
+void heal_player_with_relics(CombatState& s, int32_t amount) noexcept;
 
 // Meat on the Bone's bespoke pre-victory site (AbstractRoom.endBattle:418-420):
 // fires BEFORE player.onVictory -- i.e. before every relic's onVictory,

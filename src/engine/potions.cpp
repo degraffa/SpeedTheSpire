@@ -14,6 +14,7 @@
 #include "sts/engine/cards.hpp"         // CardEffectStep
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
+#include "sts/engine/relic_hooks.hpp"   // heal_player_with_relics (Magic Flower)
 #include "sts/engine/rng_stream.hpp"    // random (potionRng draws)
 #include "sts/engine/types.hpp"         // PotionId
 #include "sts/registry/manifest.hpp"    // generated kPotionsCount
@@ -130,14 +131,15 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             // game's float math exactly: (int)((float)maxHealth *
             // ((float)potency / 100.0f)) (BloodPotion.java:43). heal() clamps to
             // [0, maxHealth]. potency is the heal PERCENT (20).
+            // Routed through the shared in-combat heal seam so Magic Flower's
+            // x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:728-735 --
+            // the relic hooks AbstractPlayer.heal, so it sees EVERY heal in a
+            // combat room, not only relic-sourced ones). Without the relic the
+            // seam is the same clamped add this used to spell inline.
             const float ratio = static_cast<float>(potency) / 100.0f;
             const int heal = static_cast<int>(
                 static_cast<float>(s.player_max_hp) * ratio);
-            int hp = static_cast<int>(s.player_hp) + heal;
-            if (hp > s.player_max_hp) {
-                hp = s.player_max_hp;
-            }
-            s.player_hp = static_cast<int16_t>(hp);
+            heal_player_with_relics(s, heal);
             break;
         }
         case PotionId::BLESSING_OF_THE_FORGE: {

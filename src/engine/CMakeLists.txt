@@ -11,6 +11,7 @@ add_library(sts_engine
     monster_slime_large.cpp
     monster_slime_boss.cpp
     monster_lagavulin.cpp
+    monster_gremlin.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -27,6 +28,7 @@ add_library(sts_engine
     # Native power bodies, ONE TU PER POWER, each named for its power (see
     # powers/power_native.hpp). A new native power adds a file here.
     powers/power_anger.cpp
+    powers/power_angry.cpp
     powers/power_artifact.cpp
     powers/power_combust.cpp
     powers/power_corruption.cpp
@@ -49,10 +51,12 @@ add_library(sts_engine
     relic_hooks.cpp
     # Native relic combat bodies, one TU per RelicTier (see
     # relics/relic_native.hpp), matching the relic_pickup_* split below. The
-    # RARE / SHOP / BOSS tiers each add a file here when they land.
+    # BOSS tier adds a file here when it lands.
     relics/relics_starter.cpp
     relics/relics_common.cpp
     relics/relics_uncommon.cpp
+    relics/relics_rare.cpp
+    relics/relics_shop.cpp
     relic_pools.cpp
     # The master deck's obtain-time relic pass; holds the generated
     # STS_REGISTRY_RELIC_ON_OBTAIN_CARD dispatch table.
@@ -63,6 +67,8 @@ add_library(sts_engine
     # up a tier adds a file here and edits no existing switch.
     relics/relic_pickup_common.cpp
     relics/relic_pickup_uncommon.cpp
+    relics/relic_pickup_rare.cpp
+    relics/relic_pickup_shop.cpp
     potions.cpp
     advance.cpp
     run_advance.cpp

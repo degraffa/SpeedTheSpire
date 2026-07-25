@@ -385,6 +385,20 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
     return static_cast<int>(static_cast<double>(value) + 16384.0) - 16384;
 }
 
+// --- libGDX MathUtils.round (MathUtils.java:233-235) ------------------------
+// The sibling of the floor above, replicated with the same bias trick and the
+// same float->double promotion order: `(int)((double)value + 16384.5) - 16384`.
+// It is a half-up round for |value| < 16384, NOT the C `std::round`'s
+// half-away-from-zero. Two callers, from different layers: Magic Flower's
+// in-combat heal multiplier (MagicFlower.java:732, relic_hooks.cpp) and the
+// run-setup 90 %-of-max HP rewrite (run_advance.hpp run_setup_hp, where 90 % of
+// 75 lands on exactly 67.5f and the half-up tie is what makes an ascension-20
+// Ironclad 68/75). `constexpr` for that second caller, which is itself
+// constexpr; the promotion order and bias are unchanged.
+[[nodiscard]] constexpr int mathutils_round(float value) noexcept {
+    return static_cast<int>(static_cast<double>(value) + 16384.5) - 16384;
+}
+
 // --- DAMAGE pipeline (pure) -------------------------------------------------
 // Runs DamageInfo.applyPowers (design doc §5.5) for an attack from `src_actor`
 // onto `tgt_actor` with `base_damage`, returning the floored, clamped(>=0)

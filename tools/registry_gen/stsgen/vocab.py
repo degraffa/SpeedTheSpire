@@ -224,6 +224,10 @@ RELIC_HOOKS = {
     # --- B3.25 additions (append-only, design doc §4.4) ---
     "on_monster_death": 14,         # onMonsterDeath (AbstractMonster.die:933-937)
     "on_shuffle": 15,               # onShuffle (EmptyDeckShuffleAction ctor :37-39)
+    # onBlockBroken (AbstractCreature.brokeBlock:159-167) -- fired ONLY when the
+    # creature whose block was reduced to zero is an AbstractMonster, reached from
+    # decrementBlock (:169-183). Hand Drill.
+    "on_block_broken": 16,
 }
 # RelicTier (AbstractRelic.RelicTier). Pinned/append-only; the translator's relic
 # table joins on it and reward/shop pools gate by it (design doc §5.3).
@@ -267,6 +271,10 @@ MONSTER_INTENTS = {
                           # Lagavulin.java:144,225)
     "STUN": 10,          # Lagavulin's woken-by-damage turn (AbstractMonster.Intent.STUN;
                           # Lagavulin.java:202)
+    "DEFEND": 11,        # Gremlin Tsundere Protect (AbstractMonster.Intent.DEFEND;
+                          # GremlinTsundere.java:84,124) -- a pure block gain, with
+                          # no attack and no buff, so none of DEFEND_BUFF (2) or
+                          # ATTACK_DEFEND (3) is the same telegraph.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

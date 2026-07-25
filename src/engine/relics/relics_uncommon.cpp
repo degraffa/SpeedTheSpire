@@ -409,7 +409,7 @@ void relic_native_pantograph(CombatState& s, RelicHook hook,
         if (def == nullptr || !def->is_boss()) {
             continue;  // `if (m.type != EnemyType.BOSS) continue;` (:34)
         }
-        heal_player(s, 25);  // addToTop HealAction(player, 25) (:36)
+        heal_player_with_relics(s, 25);  // addToTop HealAction(player, 25) (:36)
         return;              // (:38) -- first BOSS member only
     }
 }
