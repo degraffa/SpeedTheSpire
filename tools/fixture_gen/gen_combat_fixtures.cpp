@@ -819,10 +819,14 @@ std::vector<Fixture> all_fixtures() {
                  {Play(3), Play(2), End(), Play(0), End()},
                  "Bash + Pommel into Vulnerable; two turns, monster Bellow turn 2"});
 
-    // 13 -- Bash + Strike + Strike into Vulnerable; monster low.
+    // 13 -- Three attacks into Vulnerable, SPLIT ACROSS THE TURN BOUNDARY.
+    // Bash (2E) + Pommel (1E) is the whole 3-energy turn; the third attack is
+    // next turn's Strike, landing into the Vulnerable that does not decay in the
+    // skeleton. See the derivation notes for why this is not a one-turn script.
     f.push_back({"fixt13_r21_triple", "r21",
-                 {Play(2), Play(0), Play(2), End()},
-                 "Bash 8 + Vuln, Strike 9, Pommel 13 (into Vuln); Chomp 12"});
+                 {Play(2), Play(3), End(), Play(2), End()},
+                 "Bash 8 + Vuln, Pommel 13 (into Vuln); turn 2 Strike 9 into the "
+                 "same Vuln, then a Bellow + reshuffle"});
 
     // 14 -- Pommel then Strikes.
     f.push_back({"fixt14_r23_pommel_strikes", "r23",
