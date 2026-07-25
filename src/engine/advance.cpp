@@ -178,7 +178,8 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
             const uint8_t excluded = choice_excluded_index(front);
             out.choice_pending = true;
-            out.choice_from_discard = choice_source_is_discard(kind);
+            out.choice_from_discard = choice_source(kind) == ChoiceSource::DISCARD;
+            out.choice_from_exhaust = choice_source(kind) == ChoiceSource::EXHAUST;
             out.can_end_turn = false;
             // can_choose[i] over the kind's SOURCE pile: hand slots for the hand
             // kinds, discard slots for discard-to-draw-top (Headbutt). For a large
@@ -195,6 +196,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
 
     out.choice_pending = false;
     out.choice_from_discard = false;
+    out.choice_from_exhaust = false;
 
     // Clash (canUse): playable only when EVERY card in hand is an Attack
     // (Clash.java:184-194). Computed once and applied to any hand card whose
@@ -373,7 +375,8 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
     }
     return m.can_end_turn == fresh.can_end_turn &&
            m.choice_pending == fresh.choice_pending &&
-           m.choice_from_discard == fresh.choice_from_discard;
+           m.choice_from_discard == fresh.choice_from_discard &&
+           m.choice_from_exhaust == fresh.choice_from_exhaust;
 }
 #endif
 

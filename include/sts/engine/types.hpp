@@ -89,6 +89,15 @@ using RelicId = sts::registry::RelicId;
 //                 (AbstractRoom.endTurn:397-405 resets costForTurn = cost on
 //                 every draw/discard/hand card) and on exhaust
 //                 (ExhaustCardEffect.update:41-43 resetAttributes).
+//   PURGE_ON_USE -- (per-INSTANCE runtime bit, never authored in YAML)
+//                 AbstractCard.purgeOnUse: the instance is DESTROYED when it
+//                 resolves. UseCardAction.update tests it FIRST and returns
+//                 before the discard / exhaust branches (UseCardAction.java:
+//                 89-94), so the card lands in no pile at all. Set on the
+//                 temporary limbo copy a replay power creates
+//                 (DoubleTapPower.onUseCard, DoubleTapPower.java:59) and re-read
+//                 by that same power's guard (`!card.purgeOnUse`, :44), which is
+//                 what stops a replayed copy from being replayed again.
 enum class CardFlag : uint16_t {
     NONE       = 0,
     EXHAUST    = 1u << 0,
@@ -98,6 +107,7 @@ enum class CardFlag : uint16_t {
     RETAIN     = 1u << 4,
     XCOST      = 1u << 5,
     COST_MODIFIED_FOR_TURN = 1u << 6,
+    PURGE_ON_USE = 1u << 7,
 };
 
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {

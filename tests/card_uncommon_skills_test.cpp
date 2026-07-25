@@ -196,19 +196,32 @@ TEST(CardUncommonSkillsRegistry, DualWieldChooseFlagsAndSentinelProgramPins) {
 
 TEST(CardUncommonSkillsRegistry, IroncladAttackPoolMembership) {
     // returnTrulyRandomCardInCombat(ATTACK): RED C/U/R attacks minus HEALING.
-    // With B3.8's three non-healing rares (Bludgeon/Fiend Fire/Immolate) not yet
-    // landed, the derived pool holds the 14 commons + 11 uncommons; membership
-    // self-completes from the color/rarity/type columns when B3.8 lands.
-    EXPECT_EQ(kIroncladAttackPoolCount, 25);
+    // 14 commons + 11 uncommons + the THREE non-healing rare attacks. The rare
+    // batch adds FIVE attack rows, but Feed and Reaper carry CardTags.HEALING
+    // (Feed.java:38, Reaper.java:37) and the pool builder subtracts exactly those
+    // two -- so this count, and the four membership flags below, are the
+    // observable proof that the healing column is set on those two rows and only
+    // on those two.
+    EXPECT_EQ(kIroncladAttackPoolCount, 28);
     EXPECT_EQ(kIroncladAttackPool[0], CardId::POMMEL_STRIKE);  // lowest id (5)
-    EXPECT_EQ(kIroncladAttackPool[24], CardId::WHIRLWIND);     // highest id (50)
+    EXPECT_EQ(kIroncladAttackPool[27], CardId::IMMOLATE);      // highest id (86)
     bool has_basic = false;
     bool has_skill = false;
+    bool has_bludgeon = false;
+    bool has_fiend_fire = false;
+    bool has_immolate = false;
+    bool has_feed = false;
+    bool has_reaper = false;
     for (int i = 0; i < kIroncladAttackPoolCount; ++i) {
         const CardId id = kIroncladAttackPool[static_cast<unsigned>(i)];
         if (id == CardId::STRIKE || id == CardId::BASH || id == CardId::DEFEND) {
             has_basic = true;  // BASIC rarity never enters the srcX pools
         }
+        has_bludgeon = has_bludgeon || id == CardId::BLUDGEON;
+        has_fiend_fire = has_fiend_fire || id == CardId::FIEND_FIRE;
+        has_immolate = has_immolate || id == CardId::IMMOLATE;
+        has_feed = has_feed || id == CardId::FEED;
+        has_reaper = has_reaper || id == CardId::REAPER;
         const CardDef* d = card_def(id);
         ASSERT_NE(d, nullptr);
         if (d->type != CardType::ATTACK) {
@@ -217,6 +230,11 @@ TEST(CardUncommonSkillsRegistry, IroncladAttackPoolMembership) {
     }
     EXPECT_FALSE(has_basic);
     EXPECT_FALSE(has_skill);
+    EXPECT_TRUE(has_bludgeon);
+    EXPECT_TRUE(has_fiend_fire);
+    EXPECT_TRUE(has_immolate);
+    EXPECT_FALSE(has_feed) << "CardTags.HEALING excludes Feed";
+    EXPECT_FALSE(has_reaper) << "CardTags.HEALING excludes Reaper";
 }
 
 // ===========================================================================

@@ -184,7 +184,11 @@ void fill_campfire_relic_count(const RunState& rs,
 void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept {
     // Keyed to CARDS, not relics: the gates are a scan over the master deck, and
     // both of their hard-coded card facts live here rather than in the registry.
-    static_assert(sts::registry::manifest::kCardsCount == 75,
+    // Checked for the sixteen red RARE rows: none is CardRarity.BASIC (the BASIC
+    // set is still exactly Strike/Defend/Bash), and five of them ARE POWER-type
+    // (Barricade, Brutality, Corruption, Demon Form, Juggernaut), which only
+    // widens the already-live Bottled Tornado gate.
+    static_assert(sts::registry::manifest::kCardsCount == 91,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

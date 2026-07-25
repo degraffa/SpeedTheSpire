@@ -35,6 +35,7 @@ add_library(sts_engine
     powers/power_corruption.cpp
     powers/power_curl_up.cpp
     powers/power_dark_embrace.cpp
+    powers/power_double_tap.cpp
     powers/power_evolve.cpp
     powers/power_fire_breathing.cpp
     powers/power_flame_barrier.cpp

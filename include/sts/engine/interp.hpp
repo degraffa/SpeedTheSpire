@@ -236,7 +236,77 @@ enum class Opcode : uint16_t {
                               // with cost_now 0 for THIS turn only
                               // (COST_MODIFIED_FOR_TURN) into the hand
                               // (MakeTempCardInHandAction hand-cap spill).
+    // --- Replay, conditional damage, heal (append-only from 34) ---
+    PLAY_CARD = 34,           // the GENERAL recursive-play verb: queue a card
+                              // instance to be auto-played, free of energy cost.
+                              // `flags` (kPlayCard* below) select the source (a
+                              // card-pool index in `amount`, or the top of the
+                              // draw pile), whether a stat-equivalent COPY is
+                              // played instead of the instance itself, and the
+                              // played instance's disposition (purge / forced
+                              // exhaust). `tgt` is the monster it is played at,
+                              // or kActorRandomEnemy to roll one card_random_rng
+                              // target at execute time. PLAY_TOP_DRAW (13) is the
+                              // older Havoc-specific form and is left as it is
+                              // (opcodes are append-only).
+    DAMAGE_FEED = 35,         // FeedAction.update (:34-47): damage tgt through the
+                              // full pipeline; if the hit LEFT the target dead,
+                              // increaseMaxHp(`amount`, false) on the player --
+                              // max HP += amount, then a heal of the same amount
+                              // through the relic heal seam
+                              // (AbstractCreature.increaseMaxHp:199-208).
+    FIEND_FIRE = 36,          // FiendFireAction.update (:32-46): read the hand size
+                              // n at EXECUTE, addToTop n DAMAGE(`amount`) items,
+                              // then addToTop n random single-card hand exhausts --
+                              // so the exhausts resolve first and the damage after.
+    DOUBLE_STRENGTH = 37,     // LimitBreakAction.update (:27-32): if the player
+                              // HAS a Strength power, addToTop APPLY_POWER
+                              // Strength == its current amount (a doubling; a
+                              // NEGATIVE Strength doubles too).
+    VAMPIRE_DAMAGE_ALL = 38,  // VampireDamageAllEnemiesAction.update (:53-77):
+                              // damage every live monster in slot order for
+                              // `amount` base, sum the HP each ACTUALLY lost
+                              // (lastDamageTaken, AbstractMonster.java:669), and
+                              // addToBot a HEAL of that sum when it is positive.
+    HEAL = 39,                // HealAction.update (:30-34): tgt (the player) heals
+                              // `amount`, routed through heal_player_with_relics
+                              // so the onPlayerHeal relic pass (Magic Flower)
+                              // cannot be skipped. Queued rather than applied
+                              // inline wherever the Java queues a HealAction.
 };
+
+// --- PLAY_CARD field encoding ------------------------------------------------
+// The general "play this card again / play the next card off the deck" verb.
+//   * `amount` -> the SOURCE card-pool index, unless kPlayCardFromDrawTop.
+//   * `tgt`    -> the monster the play targets, or kActorRandomEnemy (one
+//                 card_random_rng draw at execute, getRandomMonster).
+//   * `flags`  -> the bits below.
+// The played instance is always free: the game reaches this path with
+// `isInAutoplay` / `ignoreEnergyTotal` set, and AbstractPlayer.useCard's energy
+// deduction is skipped for an autoplayed card (AbstractPlayer.java:1378), so the
+// instance's cost_now is zeroed before it is queued.
+//
+// Play a stat-equivalent COPY of the source instead of the source instance
+// (AbstractCard.makeSameInstanceOf, DoubleTapPower.java:50). Without it the
+// source instance itself is played.
+inline constexpr uint32_t kPlayCardCopy = 1u << 0;
+// The played instance carries CardFlag::PURGE_ON_USE -- destroyed when it
+// resolves, landing in no pile (UseCardAction.java:89-94). The replay copies use
+// this; a card played off the deck does not.
+inline constexpr uint32_t kPlayCardPurge = 1u << 1;
+// Force the played instance to exhaust (card.exhaustOnUseOnce, the `exhausts`
+// argument of PlayTopCardAction, PlayTopCardAction.java:48).
+inline constexpr uint32_t kPlayCardExhaust = 1u << 2;
+// Source is the TOP OF THE DRAW PILE rather than `amount`: reshuffle the discard
+// in when the draw pile is empty, give up when both are empty
+// (PlayTopCardAction.update:33-43). This is the bit a start-of-turn "play the top
+// card of your draw pile" power authors; it needs no card instance, so it is the
+// only form a YAML effect program can express.
+inline constexpr uint32_t kPlayCardFromDrawTop = 1u << 3;
+// Insert in FRONT of the card queue (addCardQueueItem(item, true) --
+// GameActionManager.java:102-108, which lands at index 1 behind the
+// currently-resolving head) instead of at the back.
+inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
 
 // --- CHOOSE_CARD field encoding ---------------------------------------------
 // The blocking hand-card select verb. `amount` carries how many cards to select;
@@ -268,11 +338,36 @@ enum class ChoiceKind : uint8_t {
     // (DualWieldAction.java:95-97); the PROMPTED resolution also reproduces the
     // hand-order shuffle of the select screen (see apply_choice_selection).
     DUPLICATE = 4,
+    // The source pile is the EXHAUST pile: choose one exhausted card and return
+    // it to the hand (ExhumeAction.update:38-113). Eligibility drops every copy
+    // of the source card itself (the action lifts them out of the grid, :74-80)
+    // and the whole choice is dead while the hand is full (:40-43). A returned
+    // SKILL costs 0 for the turn while Corruption is up (:57-59, :94-96).
+    EXHAUST_TO_HAND = 5,
 };
+
+// Which pile a CHOOSE_CARD of this kind selects from. `arg0` of a CHOOSE action
+// indexes THIS pile, not always the hand.
+enum class ChoiceSource : uint8_t {
+    HAND = 0,
+    DISCARD = 1,
+    EXHAUST = 2,
+};
+
+[[nodiscard]] constexpr ChoiceSource choice_source(ChoiceKind k) noexcept {
+    switch (k) {
+        case ChoiceKind::DISCARD_TO_DRAW_TOP:
+            return ChoiceSource::DISCARD;
+        case ChoiceKind::EXHAUST_TO_HAND:
+            return ChoiceSource::EXHAUST;
+        default:
+            return ChoiceSource::HAND;
+    }
+}
 
 // Does a CHOOSE_CARD of this kind select from the discard pile (vs. the hand)?
 [[nodiscard]] constexpr bool choice_source_is_discard(ChoiceKind k) noexcept {
-    return k == ChoiceKind::DISCARD_TO_DRAW_TOP;
+    return choice_source(k) == ChoiceSource::DISCARD;
 }
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;

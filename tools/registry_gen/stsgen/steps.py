@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CHOICE_COPIES_SHIFT,
                     CHOICE_KIND_HIGH_BIT, CHOICE_KINDS, CHOICE_RANDOM_BIT,
-                    DAMAGE_TYPES, OPCODES, STEP_TARGETS, fail)
+                    DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
 # Which ops a domain MAY author is a property of the queueing helper that turns a
@@ -39,6 +39,15 @@ GENERAL_OPS = frozenset({
     "DISCARD_HAND", "DROPKICK", "DAMAGE_BLOCK", "DAMAGE_STR_MULT",
     "EXHAUST_NON_ATTACKS", "DOUBLE_BLOCK", "BLOCK_PER_NON_ATTACK",
     "SPOT_WEAKNESS", "RANDOM_ATTACK_TO_HAND",
+    # Red-rare verbs whose operands are all literals or execute-time reads:
+    # DAMAGE_FEED (base damage + the max-HP amount in `extra`), FIEND_FIRE
+    # (per-hit base; the hand size is read at execute), DOUBLE_STRENGTH (no
+    # operand), VAMPIRE_DAMAGE_ALL (base damage), HEAL (a literal heal).
+    # PLAY_CARD is here for the DRAW-TOP source form -- the only one a YAML
+    # author can name; its COPY form's operand is a runtime card-pool index, so
+    # that form is emitted natively, never authored (see interp.hpp kPlayCard*).
+    "DAMAGE_FEED", "FIEND_FIRE", "DOUBLE_STRENGTH", "VAMPIRE_DAMAGE_ALL",
+    "HEAL", "PLAY_CARD",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -231,6 +240,31 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
     if op == "DAMAGE_PER_STRIKE":
         # +`per` damage per "Strike"-named card (Perfected Strike magicNumber).
         return int(step.get("per", 0))
+
+    if op == "DAMAGE_FEED":
+        # `extra` = the max-HP gained when the hit leaves the target dead
+        # (Feed's magicNumber -> FeedAction.increaseHpAmount, FeedAction.java:28).
+        return int(step.get("max_hp", 0))
+
+    if op == "PLAY_CARD":
+        # `extra` = the kPlayCard* bit set (interp.hpp), authored as a list of
+        # names. `copy` is rejected: its source is a runtime card-pool index that
+        # no YAML author can name, so that form is emitted natively.
+        bits = 0
+        for name in (step.get("play") or []):
+            key = str(name).lower()
+            if key not in PLAY_CARD_FLAGS:
+                raise fail(f"{owner} PLAY_CARD has unknown play flag {name!r} "
+                           f"(known: {sorted(PLAY_CARD_FLAGS)})")
+            if key == "copy":
+                raise fail(f"{owner} PLAY_CARD cannot author 'copy': the copied "
+                           f"instance is a runtime card-pool index, so that form "
+                           f"is emitted by engine code, not by a YAML program")
+            bits |= PLAY_CARD_FLAGS[key]
+        if (bits & PLAY_CARD_FLAGS["from_draw_top"]) == 0:
+            raise fail(f"{owner} PLAY_CARD must author 'from_draw_top': it is the "
+                       f"only source a YAML program can name")
+        return bits
 
     if op in ("DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE"):
         # Dynamic per-instance damage: `increment` is the first-upgrade

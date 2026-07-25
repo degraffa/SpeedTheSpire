@@ -211,6 +211,28 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::RANDOM_ATTACK_TO_HAND:
             op_random_attack_to_hand(s);
             return;
+        case Opcode::PLAY_CARD:
+            // The general recursive-play verb. `amount` is the source card-pool
+            // index (ignored for the draw-top source), `flags` the kPlayCard* set.
+            op_play_card(s, item.tgt, item.amount, item.flags);
+            return;
+        case Opcode::DAMAGE_FEED:
+            // Feed: `flags` carries the max-HP gained when the hit kills.
+            op_damage_feed(s, item.src, item.tgt, item.amount,
+                           static_cast<int>(item.flags));
+            return;
+        case Opcode::FIEND_FIRE:
+            op_fiend_fire(s, item.tgt, item.amount);
+            return;
+        case Opcode::DOUBLE_STRENGTH:
+            op_double_strength(s);
+            return;
+        case Opcode::VAMPIRE_DAMAGE_ALL:
+            op_vampire_damage_all(s, item.amount);
+            return;
+        case Opcode::HEAL:
+            op_heal(s, item.tgt, item.amount);
+            return;
         case Opcode::DAMAGE_BLOCK:
             // Body Slam: base == the player's CURRENT block (read here at execute
             // time), then the normal DamageInfo pipeline (Strength/Vulnerable still

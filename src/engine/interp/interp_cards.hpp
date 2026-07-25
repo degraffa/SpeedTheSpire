@@ -35,4 +35,16 @@ void op_exhaust_non_attacks(CombatState& s) noexcept;
 // RANDOM_ATTACK_TO_HAND (Infernal Blade).
 void op_random_attack_to_hand(CombatState& s) noexcept;
 
+// PLAY_CARD -- the general recursive-play verb (interp.hpp Opcode::PLAY_CARD and
+// its kPlayCard* flag set). Shared by the queued opcode and by the SYNCHRONOUS
+// call site a replay power needs: DoubleTapPower.onUseCard enqueues its copy
+// inside the UseCardAction constructor (DoubleTapPower.java:60 ->
+// AbstractPlayer.useCard:1370), not through a queued action, so its native body
+// calls this directly rather than queuing an item.
+void op_play_card(CombatState& s, uint8_t target, int source_index,
+                  uint32_t flags) noexcept;
+
+// FIEND_FIRE -- exhaust the hand one random card at a time, then hit `base` times.
+void op_fiend_fire(CombatState& s, uint8_t target, int base) noexcept;
+
 }  // namespace sts::engine

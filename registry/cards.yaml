@@ -1271,3 +1271,271 @@
     - {op: APPLY_POWER, target: SELF, amount: 1, power: RUPTURE}
   upgraded:
     - {op: APPLY_POWER, target: SELF, amount: 2, power: RUPTURE}
+
+# --- Red RARE (ids 76-91) -----------------------------------------------------
+# Enumerated from source: the sixteen cards/red/*.java whose constructor passes
+# CardRarity.RARE. Rows are in that (alphabetical file) order. Every use(),
+# constructor and the action/power class each one reaches was read in full before
+# encoding; the citation on each row names the lines the numbers came from.
+#
+# Feed and Reaper carry `healing: true` -- the CardTags.HEALING their constructors
+# add (Feed.java:38, Reaper.java:37). It is not decoration: the generated
+# kIroncladAttackPool (the Infernal Blade / returnTrulyRandomCardInCombat(ATTACK)
+# pool) is built from color/rarity/type MINUS the healing column, so without these
+# two flags the other rare attacks would land in the pool alongside two cards the
+# game excludes.
+
+- id: 76
+  name: BARRICADE
+  game_id: "Barricade"
+  color: RED
+  rarity: RARE
+  type: POWER
+  cost: 3
+  target: SELF
+  flags: []
+  provenance: "Barricade (Barricade.java:21-49): cost 3, upgradeBaseCost(2) -> 2, no magic number; use (:31-41) scans p.powers for its own ID and queues ApplyPowerAction(BarricadePower(p)) ONLY when absent. BarricadePower's ctor amount is -1 (BarricadePower.java:22), a marker rather than a magnitude. The already-present guard is reproduced at the APPLY_POWER site (interp/interp_powers.cpp) because an effect program has no conditional; the skipped ApplyPowerAction's only other side effects -- the source onApplyPower fan-out and the Artifact nullify -- are both DEBUFF-gated (SadisticPower.java:39, ApplyPowerAction.java:131) and Barricade is a BUFF, so nothing observable differs."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: -1, power: BARRICADE}
+  upgraded_cost: 2
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: -1, power: BARRICADE}
+
+- id: 77
+  name: BERSERK
+  game_id: "Berserk"
+  color: RED
+  rarity: RARE
+  type: POWER
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Berserk (Berserk.java:21-48): cost 0, magic 2, upgradeMagicNumber(-1) -> 1; use (:32-34) queues ApplyPowerAction(VulnerablePower(p, magic, false), magic) on the PLAYER first, then ApplyPowerAction(BerserkPower(p, 1), 1) -- the Berserk stack is the literal 1 in BOTH rows, only the self-Vulnerable shrinks on upgrade."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: VULNERABLE}
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: BERSERK}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: VULNERABLE}
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: BERSERK}
+
+- id: 78
+  name: BLUDGEON
+  game_id: "Bludgeon"
+  color: RED
+  rarity: RARE
+  type: ATTACK
+  cost: 3
+  target: ENEMY
+  flags: []
+  provenance: "Bludgeon (Bludgeon.java:26-56): cost 3, baseDamage 32, upgradeDamage(10) -> 42; use (:37-43) is a VFXAction and a WaitAction (both presentation) then DamageAction(m, damage)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 32}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 42}
+
+- id: 79
+  name: BRUTALITY
+  game_id: "Brutality"
+  color: RED
+  rarity: RARE
+  type: POWER
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Brutality (Brutality.java:20-47): cost 0; use (:30-32) queues ApplyPowerAction(BrutalityPower(p, 1), 1) -- amount 1 in BOTH rows. upgrade (:35-42) changes no number at all: it sets isInnate = true, which is the `innate` flag on the upgraded row."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: BRUTALITY}
+  upgraded_flags: [innate]
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: BRUTALITY}
+
+- id: 80
+  name: CORRUPTION
+  game_id: "Corruption"
+  color: RED
+  rarity: RARE
+  type: POWER
+  cost: 3
+  target: SELF
+  flags: []
+  provenance: "Corruption (Corruption.java:26-65): cost 3, upgradeBaseCost(2) -> 2; use (:37-52) is four VFXActions and an SFXAction (all presentation) then, ONLY when p.powers does not already carry the ID, ApplyPowerAction(CorruptionPower(p)). CorruptionPower's ctor amount is -1 (CorruptionPower.java:27). The POWER itself is registry id 11 (its hook bodies landed with the hook framework); this row is the card that creates it. The already-present guard is reproduced at the APPLY_POWER site, same as Barricade. The energy half of the power -- AbstractPlayer.useCard:1378 skips energy.use for a SKILL while the player has Corruption -- lives at the card-play site, NOT in the drawn-card cost rewrite, because a SKILL already in hand when Corruption lands keeps its displayed cost (so it still needs the energy to be LEGAL, AbstractCard.hasEnoughEnergy:862-893, which has no Corruption branch) and yet costs nothing to play."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: -1, power: CORRUPTION}
+  upgraded_cost: 2
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: -1, power: CORRUPTION}
+
+- id: 81
+  name: DEMON_FORM
+  game_id: "Demon Form"
+  color: RED
+  rarity: RARE
+  type: POWER
+  cost: 3
+  target: NONE
+  flags: []
+  provenance: "DemonForm (DemonForm.java:20-47): cost 3, CardTarget.NONE, magic 2, upgradeMagicNumber(1) -> 3; use (:30-33) queues ApplyPowerAction(DemonFormPower(p, magic), magic)."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: DEMON_FORM}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: DEMON_FORM}
+
+- id: 82
+  name: DOUBLE_TAP
+  game_id: "Double Tap"
+  color: RED
+  rarity: RARE
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: []
+  provenance: "DoubleTap (DoubleTap.java:20-49): cost 1, CardType.SKILL, magic 1, upgradeMagicNumber(1) -> 2; use (:30-33) queues ApplyPowerAction(DoubleTapPower(p, magic), magic)."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: DOUBLE_TAP}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: DOUBLE_TAP}
+
+- id: 83
+  name: EXHUME
+  game_id: "Exhume"
+  color: RED
+  rarity: RARE
+  type: SKILL
+  cost: 1
+  target: NONE
+  flags: [exhaust]
+  provenance: "Exhume (Exhume.java:19-46): cost 1, exhaust, upgradeBaseCost(0) -> 0; use (:30-32) queues ExhumeAction(upgrade = false) -- the upgrade is a COST change only, the action behaves identically in both rows. ExhumeAction.update (ExhumeAction.java:38-113): return immediately when the hand already holds 10 cards (:40-43) or the exhaust pile is empty (:45-48); with exactly one exhausted card, take it with no screen unless it is an Exhume (:49-68); otherwise lift every Exhume copy out of the pile (:74-80), give up if nothing is left (:81-86), else open a one-pick grid select (:87) and move the pick to the hand (:91-102). A moved SKILL gets setCostForTurn(-9) while the player has Corruption (:57-59 and :94-96) -- free for the turn. Encoded as the CHOOSE_CARD verb with the exhaust-pile source: eligibility drops Exhume copies and is empty while the hand is full, so all three early-outs collapse into `no eligible card -> nothing happens`, and a single eligible card auto-resolves rather than prompting (identical final state, one fewer screen)."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, amount: 1, choose: exhaust_to_hand}
+  upgraded_cost: 0
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, amount: 1, choose: exhaust_to_hand}
+
+- id: 84
+  name: FEED
+  game_id: "Feed"
+  color: RED
+  rarity: RARE
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: [exhaust]
+  healing: true  # CardTags.HEALING (Feed.java:38) -- keeps it out of kIroncladAttackPool
+  provenance: "Feed (Feed.java:26-59): cost 1, baseDamage 10, upgradeDamage(2) -> 12, magic 3, upgradeMagicNumber(1) -> 4, exhaust, tags.add(CardTags.HEALING); use (:40-45) is a VFXAction then FeedAction(m, damage, magic). FeedAction.update (FeedAction.java:34-47): target.damage(info) -- the ordinary pipeline -- then, if the target ended up dead (isDying || currentHealth <= 0) and is neither halfDead nor a Minion, player.increaseMaxHp(magic, false). increaseMaxHp (AbstractCreature.java:199-208) raises maxHealth by the amount and THEN heals by the same amount, which runs the onPlayerHeal relic pass (Magic Flower) -- so the gain goes through the shared heal seam, not a raw HP write. halfDead and the Minion power have no S1 Act-1 producer, so those two guards are constant-false here."
+  effects:
+    - {op: DAMAGE_FEED, target: CARD_TARGET, amount: 10, max_hp: 3}
+  upgraded:
+    - {op: DAMAGE_FEED, target: CARD_TARGET, amount: 12, max_hp: 4}
+
+- id: 85
+  name: FIEND_FIRE
+  game_id: "Fiend Fire"
+  color: RED
+  rarity: RARE
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: [exhaust]
+  provenance: "FiendFire (FiendFire.java:20-48): cost 2, baseDamage 7, upgradeDamage(3) -> 10, exhaust; use (:32-34) queues FiendFireAction(m, damage). FiendFireAction.update (FiendFireAction.java:32-46): count = hand.size() read at EXECUTE, then addToTop count DamageActions, then addToTop count ExhaustAction(1, isRandom = true, ...) -- the second addToTop loop lands in FRONT, so the whole hand is exhausted one random card at a time and only then does the damage land, count times. Fiend Fire itself is NOT in that count: AbstractPlayer.useCard removes the played card from the hand synchronously (:1374), before the queued action resolves."
+  effects:
+    - {op: FIEND_FIRE, target: CARD_TARGET, amount: 7}
+  upgraded:
+    - {op: FIEND_FIRE, target: CARD_TARGET, amount: 10}
+
+- id: 86
+  name: IMMOLATE
+  game_id: "Immolate"
+  color: RED
+  rarity: RARE
+  type: ATTACK
+  cost: 2
+  target: ALL_ENEMY
+  flags: []
+  provenance: "Immolate (Immolate.java:25-45): cost 2, baseDamage 21, upgradeDamage(7) -> 28, isMultiDamage, CardTarget.ALL_ENEMY; use (:37-40) queues DamageAllEnemiesAction(multiDamage) then MakeTempCardInDiscardAction(new Burn(), 1) -- a BASE Burn into the discard pile, in that order."
+  effects:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 21}
+    - {op: MAKE_CARD, target: SELF, amount: 1, card: BURN, pile: DISCARD}
+  upgraded:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 28}
+    - {op: MAKE_CARD, target: SELF, amount: 1, card: BURN, pile: DISCARD}
+
+- id: 87
+  name: IMPERVIOUS
+  game_id: "Impervious"
+  color: RED
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: SELF
+  flags: [exhaust]
+  provenance: "Impervious (Impervious.java:20-46): cost 2, baseBlock 30, upgradeBlock(10) -> 40, exhaust; use (:31-33) queues GainBlockAction(p, block) -- a card block, so Dexterity/Frail modify it."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 30}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 40}
+
+- id: 88
+  name: JUGGERNAUT
+  game_id: "Juggernaut"
+  color: RED
+  rarity: RARE
+  type: POWER
+  cost: 2
+  target: SELF
+  flags: []
+  provenance: "Juggernaut (Juggernaut.java:20-47): cost 2, magic 5, upgradeMagicNumber(2) -> 7; use (:30-33) queues ApplyPowerAction(JuggernautPower(p, magic), magic)."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: JUGGERNAUT}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 7, power: JUGGERNAUT}
+
+- id: 89
+  name: LIMIT_BREAK
+  game_id: "Limit Break"
+  color: RED
+  rarity: RARE
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: [exhaust]
+  provenance: "LimitBreak (LimitBreak.java:19-46): cost 1, exhaust; upgrade (:38-45) changes no number -- it CLEARS exhaust, which is the empty `upgraded_flags` on the upgraded row. use (:26-28) queues LimitBreakAction. LimitBreakAction.update (LimitBreakAction.java:26-33): only when p.hasPower(\"Strength\"), addToTop ApplyPowerAction(p, p, StrengthPower(p, strAmt), strAmt) with strAmt = the CURRENT Strength amount -- a doubling, read at execute time. hasPower is a presence test, so a negative Strength doubles the penalty too."
+  effects:
+    - {op: DOUBLE_STRENGTH, target: SELF, amount: 0}
+  upgraded_flags: []
+  upgraded:
+    - {op: DOUBLE_STRENGTH, target: SELF, amount: 0}
+
+- id: 90
+  name: OFFERING
+  game_id: "Offering"
+  color: RED
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: [exhaust]
+  provenance: "Offering (Offering.java:19-52): cost 0, exhaust, magic 3, upgradeMagicNumber(2) -> 5; use (:31-40) is a VFXAction (presentation) then LoseHPAction(p, p, 6) -- a FIXED 6 in both rows -- then GainEnergyAction(2), then DrawCardAction(p, magic), in that order. The HP loss is DamageType.HP_LOSS (LoseHPAction.java:41): it bypasses block and fires wasHPLost with source == self, so Rupture sees it."
+  effects:
+    - {op: LOSE_HP, target: SELF, amount: 6}
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+    - {op: DRAW, target: SELF, amount: 3}
+  upgraded:
+    - {op: LOSE_HP, target: SELF, amount: 6}
+    - {op: GAIN_ENERGY, target: SELF, amount: 2}
+    - {op: DRAW, target: SELF, amount: 5}
+
+- id: 91
+  name: REAPER
+  game_id: "Reaper"
+  color: RED
+  rarity: RARE
+  type: ATTACK
+  cost: 2
+  target: ALL_ENEMY
+  flags: [exhaust]
+  healing: true  # CardTags.HEALING (Reaper.java:37) -- keeps it out of kIroncladAttackPool
+  provenance: "Reaper (Reaper.java:25-56): cost 2, baseDamage 4, upgradeDamage(1) -> 5, isMultiDamage, exhaust, CardTarget.ALL_ENEMY, tags.add(CardTags.HEALING); use (:36-39) is a VFXAction then VampireDamageAllEnemiesAction(p, multiDamage). That action (VampireDamageAllEnemiesAction.java:53-77) damages every non-dying, non-escaping monster in group order, sums each target's lastDamageTaken -- the HP it ACTUALLY lost, min(post-block damage, its HP before the hit), AbstractMonster.java:669 -- and, when the sum is positive, addToBot HealAction(player, sum). The heal is QUEUED, not applied inline, so it is encoded as a queued HEAL that routes through the onPlayerHeal relic seam (Magic Flower)."
+  effects:
+    - {op: VAMPIRE_DAMAGE_ALL, target: SELF, amount: 4}
+  upgraded:
+    - {op: VAMPIRE_DAMAGE_ALL, target: SELF, amount: 5}

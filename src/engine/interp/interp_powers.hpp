@@ -25,4 +25,7 @@ void op_reduce_power(CombatState& s, uint8_t tgt, PowerId id,
 // SPOT_WEAKNESS.
 void op_spot_weakness(CombatState& s, uint8_t tgt, int amount) noexcept;
 
+// DOUBLE_STRENGTH (Limit Break).
+void op_double_strength(CombatState& s) noexcept;
+
 }  // namespace sts::engine

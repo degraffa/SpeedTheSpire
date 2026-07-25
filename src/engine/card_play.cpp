@@ -161,6 +161,27 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     add_to_bottom(s, item);
 }
 
+// AbstractPlayer.useCard's energy skip (AbstractPlayer.java:1378): the deduction
+// is skipped entirely when the player has Corruption and the played card is a
+// SKILL. This is SEPARATE from CorruptionPower.onCardDraw's setCostForTurn(0),
+// which only reaches cards drawn AFTER the power lands -- a SKILL already in hand
+// keeps its displayed cost, so it still has to be affordable to be legal
+// (AbstractCard.hasEnoughEnergy:862-893 has no Corruption branch) and yet spends
+// nothing. Without this, playing such a SKILL would charge for it twice over.
+[[nodiscard]] bool corruption_makes_free(const CombatState& s,
+                                         const CardDef& def) noexcept {
+    if (def.type != CardType::SKILL) {
+        return false;
+    }
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::CORRUPTION)) {
+            return true;  // hasPower is a presence test; the slot amount is -1
+        }
+    }
+    return false;
+}
+
 // Move the played card (pool index) from hand to its destination pile. A card
 // with the EXHAUST flag goes to the exhaust pile (AbstractCard.exhaust /
 // UseCardAction), otherwise to discard (AbstractPlayer.useCard ->
@@ -352,7 +373,8 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    hand. Corruption's onUseCard may redirect a SKILL to exhaust here, so the
     //    exhaust destination is re-read from the instance flags AFTER the fan-out
     //    (not the pre-fan-out snapshot). EXHAUST -> exhaust pile, else discard.
-    dispatch_on_use_card(s, pool_index, s.card_pool[pool_index].card_id);
+    dispatch_on_use_card(s, pool_index, s.card_pool[pool_index].card_id,
+                         resolved_target);
     // hand.triggerOnOtherCardPlayed(c) (AbstractPlayer.useCard:1371-1373): fired
     // AFTER c.use() + the UseCardAction fan-out, BEFORE the card leaves the hand,
     // on every OTHER hand card. Pain (trigger ON_OTHER_CARD_PLAYED) addToTop's a
@@ -381,8 +403,14 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         random_boolean(s.card_random_rng)) {
         to_exhaust = false;
     }
-    move_card_hand_to_pile(s, pool_index, to_exhaust,
-                           def->type == CardType::POWER);
+    // AbstractPlayer.useCard removes a POWER card from limbo rather than placing
+    // it in a pile (:1374 + UseCardAction.java:95-108), and UseCardAction's FIRST
+    // branch does the same for a purgeOnUse instance (:89-94) -- the replay copy a
+    // Double Tap creates, which is destroyed instead of landing anywhere.
+    const bool remove_after_use =
+        def->type == CardType::POWER ||
+        has_card_flag(s.card_pool[pool_index].flags, CardFlag::PURGE_ON_USE);
+    move_card_hand_to_pile(s, pool_index, to_exhaust, remove_after_use);
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
     //    X-cost already consumed all energy above; otherwise deduct the
@@ -390,7 +418,7 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    (SET_COST) is honored.
     if (is_xcost) {
         s.player_energy = 0;
-    } else {
+    } else if (!corruption_makes_free(s, *def)) {
         s.player_energy =
             static_cast<int16_t>(s.player_energy - static_cast<int16_t>(cost_now));
     }

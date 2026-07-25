@@ -22,10 +22,13 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-static_assert(sts::registry::manifest::kCardsCount == 75);  // B3.7: +8 uncommon power cards (Rage remains B3.6 Skill)
+static_assert(sts::registry::manifest::kCardsCount == 91);  // + the 16 red RARE rows
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
-static_assert(sts::registry::kIroncladAttackPoolCount == 25);  // B3.6 Infernal Blade pool
+// Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only
+// THREE pool members: Feed and Reaper carry CardTags.HEALING, which
+// returnTrulyRandomCardInCombat excludes (AbstractDungeon.java:964-979).
+static_assert(sts::registry::kIroncladAttackPoolCount == 28);
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with
 // nothing but the generated headers in scope.
