@@ -85,6 +85,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Question Card / Singing Bowl / White Beast Statue (reward-screen modifiers) | B3.25 | B4.5 | rows + canSpawn gates live, effects are documented no-ops |
 | Emit `kIroncladAttackPool` in CardLibrary HashMap **library order** instead of registry-id order | B3.6 | B4.5 | documented interim deviation; a one-line `gen.py` fix once B4.5's oracle capture pins library order |
 | Card-pool removal bookkeeping storage, if the dupe loop needs it | B4.3 | B4.5 | B4.3 added no storage — design §2.5's note is "add if pools mutate" |
+| **Route card acquisition through `add_card_to_master_deck`, never a direct `rs.master_deck[]` write** | audit 2026-07-25 | B4.5 | `add_card_to_master_deck` / `remove_master_deck_card` (`run_deck.hpp`) and the generated `dispatch_relics_on_obtain_card` have **zero production callers** — the only master-deck write is the starting-deck bulk init in `run_advance.cpp`, which bypasses the door. Nothing walks through it yet because rewards do not exist, so this is correct today, **but** copying that bulk-write pattern for reward cards would silently kill every `onObtainCard` relic: Ceramic Fish (9 gold), Molten / Toxic / Frozen Egg (upgrade on obtain), Darkstone Periapt (+6 max HP). Same applies to Parasite removal via `remove_master_deck_card`. A test that obtains a card through the run layer with Ceramic Fish equipped and asserts the gold gain is the cheapest guard. |
 | Matryoshka (chest relic) | B3.25 | B4.7 | floor≤40 canSpawn gate live, effect deferred |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
 | Eternal Feather (rest-room heal) | B3.25 | B4.9 | row live, effect deferred |
@@ -350,7 +351,13 @@ modifiers) — deferred by B3.25. Card-pool removal bookkeeping storage, *if* th
 loop needs it — deferred by B4.3. Pin the CardLibrary HashMap **library order** for
 `kIroncladAttackPool` from an oracle capture (a one-line `gen.py` fix; registry-id
 order is a documented interim deviation) — deferred by B3.6. Reward-screen
-`screen_state` translation — deferred by B1.5/B4.3.
+`screen_state` translation — deferred by B1.5/B4.3. **Take a card into the deck
+only through `add_card_to_master_deck`** (`run_deck.hpp`), never by writing
+`rs.master_deck[]` directly the way the starting-deck init in `run_advance.cpp`
+does — that door fires the `onObtainCard` relics (Ceramic Fish, the three eggs,
+Darkstone Periapt) and currently has no production caller at all, so a direct
+write would silently disable all of them; use `remove_master_deck_card` for the
+Parasite side — flagged by the hook audit.
 **Log:** —
 
 - **B4.6** `[x]` Relic pools + acquisition — `relic_pools.hpp/.cpp`: 5 unconditional relicRng shuffles (JDK-LCG route), front/end pop, 50/33/17 tier roll, canSpawn re-check + Circlet fallback, acquisition in trap-8 order with pickup effects; 3-seed live-oracle pool + `(s0,s1,counter)` match; 428/428 ×3 · [log](stage-b-log.md#b46)
