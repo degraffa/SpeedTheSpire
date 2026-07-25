@@ -112,6 +112,12 @@ sts_add_test(elite_test FIXTURES)
 # `Lagavulin(false)` ctor variant.
 sts_add_test(lagavulin_test)
 
+# B3.21: The Guardian -- the A9/A19 registry columns, the forced opening Charge
+# Up, both move cycles, the mode flip at the exact cumulative-damage threshold
+# INCLUDING its per-cycle growth, Sharp Hide on attack plays, and the Spot
+# Weakness ATTACK_BUFF classification this task's Twin Slam telegraph uncovered.
+sts_add_test(guardian_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
