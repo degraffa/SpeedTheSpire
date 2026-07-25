@@ -6,11 +6,21 @@ on:
 
 jobs:
   build-and-test:
+    name: ${{ matrix.preset }}
     runs-on: ubuntu-latest
+    # The release preset is LTO across ~40 executables; it is much slower than
+    # debug. A ceiling here turns a pathological run into a failure in an hour
+    # instead of letting it sit on a runner for the 6h default.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        sanitize: [false, true]
+        # Driven straight from CMakePresets.json so CI and local builds cannot
+        # drift: these are the same three configurations a developer runs.
+        # Previously CI hand-rolled its own `cmake -S . -B build -G Ninja -D...`
+        # line covering only Debug +/- sanitizers, so the release/LTO preset was
+        # never built anywhere in CI and LTO-only breakage was invisible.
+        preset: [debug, asan, release]
     steps:
       - uses: actions/checkout@v4
 
@@ -19,14 +29,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build python3-yaml
 
+      # Without this every job re-fetches all four FetchContent dependencies on
+      # every run (3 jobs x every push). Two scopes are cached:
+      #   .cache/deps            - the shared xxHash + nlohmann checkouts
+      #                            (STS_SHARED_DEP_CACHE, source-only by design)
+      #   build/<preset>/_deps/*-src, *-subbuild
+      #                          - googletest and benchmark, which keep a
+      #                            per-build-tree _deps
+      # Only *-src and *-subbuild are cached, never *-build: -subbuild holds the
+      # ExternalProject stamps that let CMake skip the download, -src holds the
+      # checkout, and -build holds compiled objects we deliberately do NOT want
+      # to carry across runs (that is the same instrumented-artifact hazard the
+      # root CMakeLists documents for STS_SHARED_DEP_CACHE).
+      #
+      # The key covers every file that declares a dependency, so bumping a
+      # pinned tag misses the cache and refetches. A stale restore-keys hit is
+      # safe rather than wrong: the stamps record the old GIT_TAG/URL_HASH, so
+      # CMake re-runs the download step instead of using the wrong source.
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/deps
+            build/${{ matrix.preset }}/_deps/*-src
+            build/${{ matrix.preset }}/_deps/*-subbuild
+          key: sts-deps-${{ runner.os }}-${{ matrix.preset }}-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'benchmarks/CMakeLists.txt', 'tools/oracle_bridge/translator/CMakeLists.txt') }}
+          restore-keys: |
+            sts-deps-${{ runner.os }}-${{ matrix.preset }}-
+
+      # STS_BUILD_BENCHMARKS defaults OFF (it costs configure time that no test
+      # run needs). CI passes it explicitly so the benchmark sources keep their
+      # compile coverage -- CI is the only thing that builds them. Removing this
+      # flag silently drops that coverage; see the option in CMakeLists.txt.
       - name: Configure
-        run: |
-          cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug \
-            -DSTS_ENABLE_SANITIZERS=${{ matrix.sanitize && 'ON' || 'OFF' }}
+        run: cmake --preset ${{ matrix.preset }} -DSTS_BUILD_BENCHMARKS=ON
 
       - name: Build
-        run: cmake --build build --parallel
+        run: cmake --build --preset ${{ matrix.preset }}
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --preset ${{ matrix.preset }}

@@ -11,18 +11,53 @@
 # translator's consumer today is the WSL gtest translator_test.
 
 include(FetchContent)
-FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.11.3
-)
 # Populate the source only (no add_subdirectory of nlohmann's own CMake), then
 # expose its single-header include dir as an INTERFACE target -- same "no
-# sub-build, include-only" shape the root uses for xxHash.
-FetchContent_GetProperties(nlohmann_json)
-if(NOT nlohmann_json_POPULATED)
-    FetchContent_Populate(nlohmann_json)
-endif()
+# sub-build, include-only" shape the root uses for xxHash. Having no build tree
+# is what keeps the grant honest AND what qualifies this checkout for the root's
+# shared dependency cache (see STS_SHARED_DEP_CACHE).
+#
+# SOURCE_SUBDIR is how that is enforced: FetchContent_MakeAvailable() only calls
+# add_subdirectory() when <src>/<SOURCE_SUBDIR>/CMakeLists.txt exists, and the
+# docs (CMake >= 3.18) explicitly bless pointing it at a directory that does not
+# exist "to avoid adding a project that contains a CMakeLists.txt file in its
+# top directory". It is inert in the ExternalProject sub-build that performs the
+# populate, so it changes nothing about what is fetched.
+#
+# This is also what replaced the deprecated single-argument
+# FetchContent_Populate() -- policy CMP0169 (CMake 3.30) deprecates that form
+# and it is slated to become an error. The dev env is pinned at 3.28, where both
+# forms work; only this one keeps working.
+#
+# Source: the upstream v3.11.3 `include.zip` release asset, not a git clone.
+# We consume exactly one file out of this dependency
+# (single_include/nlohmann/json.hpp) and never its history, but cloning it was
+# by a wide margin the project's largest fetch. Measured on this machine:
+#
+#   git clone (previous)              278 MB   (264 MB of it .git)
+#   git clone + GIT_SHALLOW ON        186 MB   (172 MB of it .git)
+#   include.zip release asset         293 KB download / 1.8 MB extracted
+#
+# GIT_SHALLOW barely helps because CMake's ExternalProject hard-codes
+# `clone --depth 1 --no-single-branch`, so it still fetches the tip of all 31
+# branches and 57 tags rather than just the pinned one; CMake exposes no knob to
+# make it single-branch. The release asset sidesteps that entirely.
+#
+# The asset's single_include/nlohmann/json.hpp is byte-identical to the one the
+# clone produced (sha256 9bea4c80..., verified against the previous checkout),
+# and the zip preserves the single_include/ layout, so the include directory
+# below is unchanged. URL_HASH pins the artifact by content, which is a stronger
+# guarantee than a git tag (tags are mutable; a release asset's bytes are not).
+FetchContent_Declare(
+    nlohmann_json
+    URL      https://github.com/nlohmann/json/releases/download/v3.11.3/include.zip
+    URL_HASH SHA256=a22461d13119ac5c78f205d3df1db13403e58ce1bb1794edc9313677313f4a9d
+    # Belt-and-braces: the asset has no top-level CMakeLists.txt today, so
+    # MakeAvailable populates and stops on its own. Keeping the guard means the
+    # "no sub-build" invariant does not silently depend on that staying true.
+    SOURCE_SUBDIR sts-populate-only-do-not-add-subdirectory
+)
+FetchContent_MakeAvailable(nlohmann_json)
 add_library(nlohmann_json INTERFACE)
 # SYSTEM so the third-party header does not trip our -Wconversion/-Wshadow wall.
 target_include_directories(nlohmann_json SYSTEM INTERFACE "${nlohmann_json_SOURCE_DIR}/single_include")
