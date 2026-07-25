@@ -26,6 +26,8 @@
 #include "sts/engine/powers.hpp"
 #include "sts/engine/relic_hooks.hpp"
 #include "sts/engine/relics.hpp"
+#include "sts/engine/rng_stream.hpp"  // from_seed / random (Mummified Hand's draw)
+#include "sts/engine/run_deck.hpp"    // add_card_to_master_deck (egg onObtainCard)
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
 
@@ -795,12 +797,158 @@ TEST(RelicHooksUncommon, MeatOnTheBoneHealsTwelveAtHalfBeforeOnVictory) {
     EXPECT_EQ(s3.player_hp, 20) << "10 + 12 clamps to max 20";
 }
 
+// --- Mummified Hand: a POWER play zeroes one random hand card's turn cost ------
+//
+// MummifiedHand.onUseCard (MummifiedHand.java:38-72). The acceptance points are
+// (a) only a POWER play triggers it (:39), (b) the eligibility filter
+// cost > 0 && costForTurn > 0 (:44), (c) the just-played card is NOT a candidate
+// (AbstractPlayer.useCard:1374 pulls it out of the hand before the queued
+// UseCardAction runs), (d) EXACTLY ONE cardRandomRng draw when a candidate
+// exists (:61) and ZERO when none does (:56-64) -- the stream-desync guard --
+// and (e) the discount is this-turn-only (setCostForTurn -> isCostModifiedForTurn,
+// AbstractCard.java:2001-2011).
+
+// Play `pi` as a card through the full §5.3 path (queue -> resolve), which is
+// what fires the relic onUseCard fan-out (power_hooks.cpp).
+void play_card(CombatState& s, CardPoolIndex pi) {
+    CardQueueItem q{};
+    q.card_index = pi;
+    q.target = 0;
+    resolve_card_play(s, q);
+}
+
+TEST(RelicHooksUncommonMummifiedHand, PowerPlayZeroesOneRandomEligibleHandCard) {
+    CombatState s = MakeState();
+    seed_card(s, 0, CardId::INFLAME);  // the played POWER
+    seed_card(s, 1, CardId::BASH);     // cost 2 -- eligible
+    seed_card(s, 2, CardId::CLEAVE);   // cost 1 -- eligible
+    s.hand[0] = 0; s.hand[1] = 1; s.hand[2] = 2;
+    s.hand_count = 3;
+    mirror_relic(s, RelicId::MUMMIFIED_HAND);
+
+    // Hand-derive the pick over an identical stream: two candidates, in hand
+    // order (pool 1, pool 2), so random(0, 1) selects between them.
+    RngStream ref = from_seed(2024);
+    const int32_t expected = random(ref, 0, 1);
+    s.card_random_rng = from_seed(2024);
+
+    play_card(s, 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, 1)
+        << "exactly one cardRandomRng draw (MummifiedHand.java:61)";
+    const CardPoolIndex picked = static_cast<CardPoolIndex>(1 + expected);
+    const CardPoolIndex other = static_cast<CardPoolIndex>(2 - expected);
+    EXPECT_EQ(s.card_pool[picked].cost_now, 0) << "setCostForTurn(0)";
+    EXPECT_TRUE(has_card_flag(s.card_pool[picked].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN))
+        << "the discount is this-turn-only (AbstractCard.java:2007-2009)";
+    const CardDef* od = card_def(static_cast<CardId>(s.card_pool[other].card_id));
+    ASSERT_NE(od, nullptr);
+    EXPECT_EQ(s.card_pool[other].cost_now, card_cost(*od, 0))
+        << "only ONE card is discounted";
+}
+
+TEST(RelicHooksUncommonMummifiedHand, PlayedPowerIsNotItsOwnCandidate) {
+    // The engine dispatches onUseCard while the source card is still in hand
+    // (card_play.cpp step 5 precedes move_card_hand_to_pile); the Java's hand
+    // no longer holds it. With nothing else in hand there is NO candidate, so
+    // no draw happens and the power keeps its cost.
+    CombatState s = MakeState();
+    seed_card(s, 0, CardId::INFLAME);
+    s.hand[0] = 0;
+    s.hand_count = 1;
+    mirror_relic(s, RelicId::MUMMIFIED_HAND);
+    s.card_random_rng = from_seed(7);
+    const int32_t before = s.card_random_rng.counter;
+
+    dispatch_relics_on_use_card(s, s.relics, s.relic_count,
+                                static_cast<uint16_t>(CardId::INFLAME), 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, before)
+        << "empty candidate list draws nothing (MummifiedHand.java:56-64)";
+    const CardDef* d = card_def(CardId::INFLAME);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(s.card_pool[0].cost_now, card_cost(*d, 0));
+}
+
+TEST(RelicHooksUncommonMummifiedHand, IneligibleHandConsumesNoCardRandomRngDraw) {
+    // cost == 0 (Injury: the game's -2 sentinel -> UNPLAYABLE, base_cost 0) and
+    // costForTurn == 0 (an already-discounted instance) are both filtered out
+    // (:44), leaving an empty list -- and therefore no draw at all.
+    CombatState s = MakeState();
+    seed_card(s, 0, CardId::INFLAME);
+    seed_card(s, 1, CardId::INJURY);
+    seed_card(s, 2, CardId::DEFEND);
+    s.card_pool[2].cost_now = 0;  // costForTurn already 0
+    s.hand[0] = 0; s.hand[1] = 1; s.hand[2] = 2;
+    s.hand_count = 3;
+    mirror_relic(s, RelicId::MUMMIFIED_HAND);
+    s.card_random_rng = from_seed(11);
+    const int32_t before = s.card_random_rng.counter;
+
+    dispatch_relics_on_use_card(s, s.relics, s.relic_count,
+                                static_cast<uint16_t>(CardId::INFLAME), 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, before);
+    EXPECT_EQ(s.card_pool[1].cost_now, 0);
+    EXPECT_EQ(s.card_pool[2].cost_now, 0);
+    EXPECT_FALSE(has_card_flag(s.card_pool[2].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+TEST(RelicHooksUncommonMummifiedHand, CardQueueMembersAreExcluded) {
+    // MummifiedHand.java:50-54 removes every cardQueue member from the
+    // candidate list. Parking Cleave in the cardQueue leaves Bash as the only
+    // candidate -- still ONE draw (random(0, 0) is called for a non-empty list).
+    CombatState s = MakeState();
+    seed_card(s, 0, CardId::INFLAME);
+    seed_card(s, 1, CardId::BASH);
+    seed_card(s, 2, CardId::CLEAVE);
+    s.hand[0] = 0; s.hand[1] = 1; s.hand[2] = 2;
+    s.hand_count = 3;
+    CardQueueItem pending{};
+    pending.card_index = 2;
+    add_card_to_queue_bottom(s, pending);
+    mirror_relic(s, RelicId::MUMMIFIED_HAND);
+    s.card_random_rng = from_seed(5);
+
+    dispatch_relics_on_use_card(s, s.relics, s.relic_count,
+                                static_cast<uint16_t>(CardId::INFLAME), 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, 1);
+    EXPECT_EQ(s.card_pool[1].cost_now, 0) << "Bash was the only candidate";
+    EXPECT_EQ(s.card_pool[2].cost_now, card_cost(*card_def(CardId::CLEAVE), 0))
+        << "the queued card is untouched";
+}
+
+TEST(RelicHooksUncommonMummifiedHand, DiscountRevertsAtEndOfTurn) {
+    // isCostModifiedForTurn -> AbstractRoom.endTurn:397-405 restores costForTurn.
+    CombatState s = MakeState();
+    seed_card(s, 0, CardId::INFLAME);
+    seed_card(s, 1, CardId::BASH);
+    s.hand[0] = 0; s.hand[1] = 1;
+    s.hand_count = 2;
+    mirror_relic(s, RelicId::MUMMIFIED_HAND);
+    s.card_random_rng = from_seed(3);
+
+    dispatch_relics_on_use_card(s, s.relics, s.relic_count,
+                                static_cast<uint16_t>(CardId::INFLAME), 0);
+    ASSERT_EQ(s.card_pool[1].cost_now, 0);
+
+    reset_cost_for_turn(s, 1);
+    EXPECT_EQ(s.card_pool[1].cost_now, card_cost(*card_def(CardId::BASH), 0));
+    EXPECT_FALSE(has_card_flag(s.card_pool[1].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
 // --- Deferred / run-layer uncommons are combat no-ops --------------------------
 
 TEST(RelicHooksUncommon, DeferredAndRunLayerUncommonsAreCombatNoOps) {
     CombatState s = MakeState();
     Relics r;
-    r.add(RelicId::MUMMIFIED_HAND);    // DEFERRED: no POWER CardType until B3.7
+    // Mummified Hand's body is implemented; it stays in this list because its
+    // POWER gate (MummifiedHand.java:39) must leave the Strike play below inert.
+    r.add(RelicId::MUMMIFIED_HAND);
     r.add(RelicId::PANTOGRAPH);        // DEFERRED: no EnemyType/BOSS metadata
     r.add(RelicId::BOTTLED_FLAME);     // acquisition-choice machinery (run layer)
     r.add(RelicId::QUESTION_CARD);     // reward-layer modifier (B4.5)
@@ -815,6 +963,43 @@ TEST(RelicHooksUncommon, DeferredAndRunLayerUncommonsAreCombatNoOps) {
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_hp, 70) << "no accidental heal/state change";
     EXPECT_EQ(r.slots[6].counter, 2) << "Matryoshka's chest counter untouched";
+}
+
+// --- Frozen Egg upgrades an obtained POWER card -------------------------------
+//
+// FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50): `c.type == POWER &&
+// c.canUpgrade() && !c.upgraded -> c.upgrade()`. Identical in shape to
+// MoltenEgg2/ToxicEgg2 (:46-50), which gate on ATTACK / SKILL respectively.
+
+TEST(RunDeckFrozenEgg, UpgradesAnObtainedPowerAndLeavesOtherTypesAlone) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    rs.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::FROZEN_EGG), 0};
+    rs.relic_count = 1;
+
+    // A POWER obtain arrives upgraded.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INFLAME));
+    EXPECT_EQ(rs.master_deck[0].upgrade, 1);
+    // ATTACK / SKILL obtains are Molten/Toxic Egg's business, not Frozen Egg's.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    EXPECT_EQ(rs.master_deck[1].upgrade, 0);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::SHRUG_IT_OFF));
+    EXPECT_EQ(rs.master_deck[2].upgrade, 0);
+    // An already-upgraded POWER is left alone (the !c.upgraded guard).
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::METALLICIZE, /*upgrade=*/1));
+    EXPECT_EQ(rs.master_deck[3].upgrade, 1);
+    // No HP side effect -- that is Darkstone Periapt's CURSE branch.
+    EXPECT_EQ(rs.max_hp, 80);
+    EXPECT_EQ(rs.hp, 60);
+}
+
+TEST(RunDeckFrozenEgg, WithoutTheRelicPowersAreObtainedUnupgraded) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INFLAME));
+    EXPECT_EQ(rs.master_deck[0].upgrade, 0);
 }
 
 }  // namespace

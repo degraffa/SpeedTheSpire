@@ -6,12 +6,15 @@
 // SCOPE. Potions whose USE the frozen opcode set + an already-registered power
 // (Strength/Vulnerable/Weak/Artifact/Metallicize) express are DATA programs and
 // are checked end-to-end (queue -> pump -> effect). BLOOD_POTION's percent heal
-// is a native body and is checked directly. The remaining native potions grant
-// powers not yet in powers.yaml (B3.4) or need verbs owned by other tasks
-// (in-combat CHOOSE = B3.4, recursive play, run-layer mutation, combat escape);
-// their bodies are DEFERRED (potions.cpp), so here they are checked at the
-// registry level -- correct rarity/potency/native flag -- with the runtime
-// effect landing with its dependency (B3.23 Log).
+// is a native body and is checked directly, as is BLESSING_OF_THE_FORGE's
+// Armaments+ CHOOSE_CARD queue. The remaining native potions need verbs the
+// engine does not have yet (an in-combat card-CHOOSE screen, recursive play,
+// cost randomization, the out-of-combat revive); their bodies are DEFERRED
+// (potions.cpp), so here they are checked at the registry level -- correct
+// rarity/potency/native flag -- with the runtime effect landing alongside its
+// verb. A deferred potion is now REFUSED by use_potion rather than no-op'd, and the
+// implemented-ness gate that drives run-layer legality is checked here too
+// (potion_use_implemented).
 
 #include <cstdint>
 
@@ -210,6 +213,74 @@ TEST(Potions, BloodPotionHealClampsToMaxHp) {
     EXPECT_EQ(s.player_hp, 80);  // 70 + 16 = 86, clamped to 80
 }
 
+// --- NATIVE with body: Blessing of the Forge (Armaments+ in a bottle) ---------
+//
+// BlessingOfTheForge.use (BlessingOfTheForge.java:43-47) addToBot's
+// ArmamentsAction(true); its armamentsPlus branch (ArmamentsAction.java:34-44)
+// upgrades every canUpgrade() hand card with no select screen. That is exactly
+// the CHOOSE_CARD{upgrade, amount 99} program Armaments+ authors, so the potion
+// queues one and the interpreter's forced path does the rest.
+
+void seed_hand_card(CombatState& s, uint8_t pi, CardId id, uint8_t upgrade = 0) {
+    const CardDef* def = card_def(id);
+    ASSERT_NE(def, nullptr);
+    s.card_pool[pi].card_id = static_cast<uint16_t>(id);
+    s.card_pool[pi].upgrade = upgrade;
+    s.card_pool[pi].cost_now = card_cost(*def, upgrade);
+    s.card_pool[pi].flags = card_flags(*def, upgrade);
+    s.hand[s.hand_count++] = pi;
+}
+
+// NOTE (pre-existing, reported separately; NOT introduced here): the engine's
+// UPGRADE eligibility (choice_slot_eligible, src/engine/interp/interp_cards.cpp)
+// tests only !upgraded, while AbstractCard.canUpgrade (AbstractCard.java:672-680)
+// also rejects CURSE and STATUS. Every CHOOSE_CARD{upgrade} consumer shares that
+// gap -- Armaments and Armaments+ already reach it with a curse or status in
+// hand -- so these tests deliberately assert only the behaviour this potion
+// owns and do not pin the divergent curse/status case either way.
+
+TEST(Potions, BlessingOfTheForgeUpgradesEveryUpgradeableHandCard) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+    seed_hand_card(s, 2, CardId::BASH, /*upgrade=*/1);  // already upgraded
+    seed_hand_card(s, 3, CardId::CLEAVE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::BLESSING_OF_THE_FORGE, 0));
+    ASSERT_EQ(s.action_count, 1) << "one queued ArmamentsAction-equivalent";
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(item.flags), ChoiceKind::UPGRADE);
+    EXPECT_FALSE(choose_is_random(item.flags));
+    EXPECT_FALSE(choice_requires_user(s, item))
+        << "armamentsPlus opens no hand-select screen";
+
+    drain_actions(s);
+    EXPECT_EQ(s.card_pool[0].upgrade, 1);
+    EXPECT_EQ(s.card_pool[1].upgrade, 1);
+    EXPECT_EQ(s.card_pool[2].upgrade, 1) << "already upgraded: unchanged";
+    EXPECT_EQ(s.card_pool[3].upgrade, 1);
+    EXPECT_EQ(s.hand_count, 4) << "upgrading in place never moves a card";
+    // The upgrade re-seeds the instance from the registry's upgraded row.
+    EXPECT_EQ(s.card_pool[1].cost_now, card_cost(*card_def(CardId::DEFEND), 1));
+}
+
+TEST(Potions, BlessingOfTheForgeWithNothingUpgradeableIsInert) {
+    // ArmamentsAction's armamentsPlus branch simply finds no canUpgrade() card
+    // and finishes; no prompt, no other effect (getPotency is 0).
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE, /*upgrade=*/1);
+    seed_hand_card(s, 1, CardId::DEFEND, /*upgrade=*/1);
+    ASSERT_TRUE(use_potion(s, PotionId::BLESSING_OF_THE_FORGE, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item));
+    drain_actions(s);
+    EXPECT_EQ(s.card_pool[0].upgrade, 1);
+    EXPECT_EQ(s.card_pool[1].upgrade, 1);
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.player_hp, 80) << "no other side effect (potency 0)";
+}
+
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
 // Powers registered by the potion-support-powers follow-up (Dexterity, Lose
 // Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
@@ -311,15 +382,60 @@ TEST(Potions, RarityAndPotencyTable) {
     }
 }
 
-TEST(Potions, DeferredNativePotionIsNoOpInCombat) {
-    // A still-deferred native potion (Duplication -- blocked on the recursive-play
-    // opcode) must not touch combat state until its dependency lands.
+// --- The implemented-ness gate (potion legality trap) ------------------------
+
+TEST(Potions, DeferredNativePotionIsRefusedNotSilentlyNoOped) {
+    // A still-deferred native potion (Duplication -- blocked on the recursive-
+    // play opcode) must FAIL rather than quietly do nothing: run_advance's
+    // step_potion reads the false return as "the use did not happen" and keeps
+    // the slot, so the player can never burn a potion for no effect.
     CombatState s = MakeCombat();
     const CombatState before = s;
-    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    EXPECT_FALSE(potion_use_implemented(PotionId::DUPLICATION_POTION));
+    EXPECT_FALSE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_power_count, before.player_power_count);
     EXPECT_EQ(s.player_hp, before.player_hp);
+}
+
+TEST(Potions, ImplementedNessIsRegistryDrivenForDataPotions) {
+    // Every non-`native` row is a data effect program and therefore runs -- this
+    // is the self-healing half of the gate: un-deferring a potion in
+    // registry/potions.yaml makes it legal with no code change.
+    for (int i = 1; i <= kPotionPoolSize; ++i) {
+        const PotionId id = static_cast<PotionId>(i);
+        const PotionDef* d = potion_def(id);
+        ASSERT_NE(d, nullptr);
+        if (!d->native) {
+            EXPECT_TRUE(potion_use_implemented(id))
+                << "data potion id " << i << " must be usable";
+        }
+    }
+    EXPECT_FALSE(potion_use_implemented(PotionId::NONE));
+}
+
+TEST(Potions, ImplementedAndDeferredNativeRosters) {
+    // The `native` rows are the hand-written ones, so they are named explicitly.
+    for (PotionId id : {PotionId::BLOOD_POTION, PotionId::BLESSING_OF_THE_FORGE,
+                        PotionId::FRUIT_JUICE, PotionId::ENTROPIC_BREW,
+                        PotionId::SMOKE_BOMB}) {
+        EXPECT_TRUE(potion_use_implemented(id))
+            << "native id " << static_cast<int>(id) << " has a body";
+    }
+    // The card-CHOOSE group, recursive play, cost randomization, and the
+    // out-of-combat revive are all still deferred.
+    for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
+                        PotionId::SKILL_POTION, PotionId::POWER_POTION,
+                        PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
+                        PotionId::LIQUID_MEMORIES, PotionId::DISTILLED_CHAOS,
+                        PotionId::DUPLICATION_POTION, PotionId::SNECKO_OIL,
+                        PotionId::FAIRY_POTION}) {
+        EXPECT_FALSE(potion_use_implemented(id))
+            << "deferred id " << static_cast<int>(id) << " must not be usable";
+        CombatState s = MakeCombat();
+        EXPECT_FALSE(use_potion(s, id, 0));
+        EXPECT_EQ(s.action_count, 0);
+    }
 }
 
 // --- A11 potion-slot count (design §5.4; AbstractPlayer.java:211-213) ---------
