@@ -203,6 +203,46 @@ MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -lc 'cd /mnt/d/STS_BG_Mod/SpeedThe
 A cold WSL start can fail with `0x800705aa` under memory pressure — retry
 after freeing RAM.
 
+#### `fatal: not a git repository: …/.git/worktrees/<name>` — git inside WSL
+
+**Symptom:** any `git` command run *inside* WSL against a worktree created from
+Windows dies immediately with
+
+```
+fatal: not a git repository: 'D:/STS_BG_Mod/SpeedTheSpire/.git/worktrees/<name>'
+```
+
+even though the directory exists and `git status` works fine from the Windows
+side.
+
+**Cause:** `git worktree add` writes the linked worktree's `.git` file as a
+*Windows-style* path (`gitdir: D:/STS_BG_Mod/SpeedTheSpire/.git/worktrees/…`).
+WSL's git cannot resolve `D:/…`; it needs `/mnt/d/…`. Nothing is corrupt.
+
+**Rule:** **run every `git` command from the Windows side** — `git -C
+D:/STS_BG_Mod/_wt/<name> …`. Send only builds and tests through WSL. Do not
+"fix" the `.git` file to a `/mnt/` path: that breaks the Windows side, which is
+where commits are made.
+
+#### `D:` is DrvFs — every file reports mode 777
+
+**Symptom:** `find /mnt/d/… -type f -executable` (or `-perm`, `test -x`, `[ -x
+… ]`, `find … -executable -delete`) matches **every file** under `/mnt/d`, not
+just executables. A cleanup one-liner built on that predicate looks correct in
+review and silently destroys unrelated files.
+
+**Cause:** `D:\` is mounted as DrvFs, which has no Unix permission bits and
+reports mode 777 for everything, directories and text files alike.
+
+**Real incident:** an agent on this effort used an `-executable` predicate to
+prune stray binaries and silently wiped its own `build/debug` CTest files;
+the failure surfaced later as a confusing "no tests found".
+
+**Rule:** **never use an executable-bit or permission predicate on anything
+under `/mnt/d`.** Select by path, name, or extension instead (`-name '*.o'`,
+an explicit path list), and never combine a `-perm`/`-executable` predicate
+with `-delete`.
+
 ### Bridge-side components
 
 The fork jar (JDK 8, `tools/oracle_bridge/build_fork.ps1`) and the Python

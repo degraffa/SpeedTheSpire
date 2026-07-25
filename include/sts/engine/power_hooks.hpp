@@ -16,7 +16,7 @@
 //   * §5.3 card-play fan-out (GameActionManager.java:222-245): player powers ->
 //     each monster's powers -> relics(acq order) -> stance -> blights -> hand
 //     cards -> discard cards -> draw cards. (No S1 POWER overrides onPlayCard --
-//     ArbstractPower base only; the fan-out's power stages are player+monster,
+//     AbstractPower base only; the fan-out's power stages are player+monster,
 //     the relic/card stages are structural extension points that light up with
 //     relics (B3.24+) and card-level hooks (curses, B3.9).)
 //   * UseCardAction fan-out (UseCardAction.java:41-64) -- DIFFERENT order:

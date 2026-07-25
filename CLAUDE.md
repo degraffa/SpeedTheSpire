@@ -46,6 +46,17 @@ provenance). [docs/stage-a-design.md](docs/stage-a-design.md) and
   has no test-preset — it builds tests into `build/release`, run them with
   `ctest --test-dir build/release`). A cold WSL start can fail with
   `0x800705aa` under memory pressure — retry after freeing RAM.
+- **Two more WSL/`D:` traps that have each cost an agent real time** — full
+  symptom/cause/rule write-ups in
+  [conventions §6](docs/conventions.md#calling-wsl-from-the-windows-host-hard-won--read-before-scripting-it):
+  1. `git` run **inside** WSL against a Windows-created worktree fails with
+     `fatal: not a git repository: …/.git/worktrees/<name>` — the worktree's
+     `.git` file holds a `D:/…` path WSL cannot resolve. Run git from Windows;
+     send only builds/tests through WSL.
+  2. `D:` is a DrvFs mount where **every file reports mode 777**, so `find
+     -executable` / `-perm` predicates match *everything* (one agent wiped its
+     own build dir's CTest files this way). Never use permission predicates
+     under `/mnt/d`.
 
 ## Current state
 

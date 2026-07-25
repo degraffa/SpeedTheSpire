@@ -76,6 +76,8 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Pantograph atBattleStart boss heal 25 | B3.25 | B3.15 | needs EnemyType/BOSS monster metadata; named "B3.15-B3.17", and B3.16/B3.17/B3.20 landed without it |
 | Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15, B3.16, B3.18, B3.19, B3.21, B3.22 | run-created combats with an unimplemented group cannot play out |
 | Odd Mushroom ×1.25 Vulnerable branch | B3.25 | B3.26 | Paper Phrog's ×1.75 twin retired at B3.25; Odd Mushroom is the rare-tier one |
+| Calipers branch of the start-of-turn block decay (loses 15 instead of zeroing) | A3.1 | B3.26 | Stage A left the branch structural (`action_queue.cpp` `has_calipers = false`); B3.26's deliverables already say "Calipers — retiring A3.1's structural branch". Barricade is the separate row above (B3.8); the third branch, Blur, is Silent-only and out of S1 scope |
+| Ice Cream — the only S1 consumer of the `EnergyManager.recharge()` SET-to-constant simplification | A4.3 | B3.26 | Stage A set energy to `kIroncladBaseEnergy` unconditionally each turn, exact only because no skeleton relic/power reaches the Ice Cream / Conserve branches (stage-a design §12, `action_queue.hpp`); B3.26's deliverables and acceptance already name it |
 | RARE + SHOP relic `pool_order` rows | B4.6, B3.25 | B3.26 | the five-tier initializer is generic and already draws for empty tiers; only rows are missing. Also narrows B3.25's "tiers empty" scaffold assertions |
 | BOSS relic `pool_order` rows | B4.6, B3.25 | B3.27 | as above |
 | Translator `relicPools` un-deferral (all 5 tiers) | B1.5, B4.3, B4.6 | B3.27 | RunState storage exists since B4.3; blocked on a complete `relics.yaml` (a fail-loud join would throw). Lands once B3.26 **and** B3.27 rows exist |
@@ -619,6 +621,18 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
   `MakeTempCardInDiscardAction` (3 copies below A19, 5 at A19+) and that action
   emits `ShowCardAndAddToDiscardEffect`. The ledger is the losing document;
   "hand insertion" is mechanically corrected to "discard-pile insertion."
+- 2026-07-24 — **recorded retroactively** (the correction landed with B3.6 on
+  2026-07-24 but no change-log entry was written at the time; added here during
+  the Stage A archive pass). B3.6 deliverable corrected after the execution
+  agent's stop-the-line source check. Grepping every `cards/red` constructor for
+  `CardRarity.UNCOMMON` × `CardType.SKILL` yields **17** members — B3.6's
+  deliverable list of 16 **plus Rage**, because `Rage.java:31` is
+  `CardType.SKILL`, while this ledger's B3.7 deliverable list misfiled Rage
+  under the uncommon POWER cards. The ledger is the losing document; Rage is
+  mechanically moved to **B3.6** and struck from B3.7. B3.7's own source
+  enumeration then found eight RED/UNCOMMON/POWER cards (Combust, Dark Embrace,
+  Evolve, Feel No Pain, Fire Breathing, Inflame, Metallicize, Rupture) and
+  skipped Rage, so both Logs agree.
 - 2026-07-22 — B1.1 acceptance amended (ledger is the losing document; fixed
   in the same change per the working agreement). "Reproduces B0.2's captured
   run byte-for-byte" is unsatisfiable as written: the B0.2 capture is
