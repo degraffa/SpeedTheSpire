@@ -364,3 +364,14 @@
   hooks:
     on_use_card: []             # native: a played SKILL gives the OWNER `amount` Strength
   provenance: "AngerPower.onUseCard (AngerPower.java:39-45) -- if card.type == SKILL: addToTop ApplyPowerAction(owner, owner, StrengthPower(owner, amount), amount), then flash. POWER_ID \"Anger\" (:20); no type assignment, so the AbstractPower default BUFF applies (AbstractPower.java:67). The monster power-list stage of the UseCardAction fan-out is what reaches it (UseCardAction.java:60-65 -- monsters LAST, after player powers and relics). Native for the SKILL-type guard, and because the Strength is queued addToTop rather than addToBot. Applied by GremlinNob's Bellow, amount 2 below A18 and 3 at A18+ (GremlinNob.java:92-96)."
+
+# --- B3.16 gremlin-gang monster power (ids 28-39 belong to other batches) -----
+
+- id: 40
+  name: ANGRY
+  game_id: "Angry"
+  type: BUFF
+  native: true
+  hooks:
+    on_attacked: []             # native: gain `amount` Strength on any real hit taken
+  provenance: "AngryPower.onAttacked (AngryPower.java:34-41) -- if info.owner != null && damageAmount > 0 && info.type != HP_LOSS && info.type != THORNS: addToTop ApplyPowerAction(owner, owner, StrengthPower(owner, amount)); returns damageAmount unchanged. Constructor takes attackAmount into this.amount and sets isPostActionPower (:24-32, presentation-order only); no type assignment, so AbstractPower's BUFF default stands (AbstractPower.java:67). POWER_ID \"Angry\" (:19). Applied only by GremlinWarrior.usePreBattleAction (GremlinWarrior.java:63-70) with amount A17 ? 2 : 1. Native (guard + addToTop): op_damage dispatches ON_ATTACKED only for NORMAL damage with src != tgt, which already implies info.owner != null and type NORMAL, so the body re-checks the one remaining guard (damageAmount > 0 -- POST-block damage, the value dispatch_on_attacked carries) and queues APPLY_POWER Strength = the Angry stack on the owner with add_to_top."

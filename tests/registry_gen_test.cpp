@@ -380,23 +380,26 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
-    EXPECT_EQ(m::kPowersCount, 30u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 31u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
                                       // + B3.26's Buffer (28) and Intangible (29),
                                       // both applied by a rare relic, not by a card
-    EXPECT_EQ(m::kMonstersCount, 14u); // + B3.14 four small/medium slimes
+                                      // + B3.16's Angry (40), the Gremlin Warrior's
+                                      // pre-battle power; 30-39 are other batches
+    EXPECT_EQ(m::kMonstersCount, 19u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
                                        // Lagavulin (15)
+                                       // + B3.16 five gremlins (ids 16-20)
     EXPECT_EQ(m::kRelicsCount, 111u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
-    EXPECT_EQ(m::kTotalCount, 303u);  // 75 + 30 + 14 + 111 + 33 + 0 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 309u);  // 75 + 31 + 19 + 111 + 33 + 0 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

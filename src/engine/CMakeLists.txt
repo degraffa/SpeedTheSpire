@@ -11,6 +11,7 @@ add_library(sts_engine
     monster_slime_large.cpp
     monster_slime_boss.cpp
     monster_lagavulin.cpp
+    monster_gremlin.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -27,6 +28,7 @@ add_library(sts_engine
     # Native power bodies, ONE TU PER POWER, each named for its power (see
     # powers/power_native.hpp). A new native power adds a file here.
     powers/power_anger.cpp
+    powers/power_angry.cpp
     powers/power_artifact.cpp
     powers/power_combust.cpp
     powers/power_corruption.cpp

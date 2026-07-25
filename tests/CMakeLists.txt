@@ -85,6 +85,13 @@ sts_add_test(slime_test FIXTURES)
 # a split, both interrupt timings, and the cannotLose termination window.
 sts_add_test(large_slime_test FIXTURES)
 
+# B3.16: the five Act-1 gremlins. Independent 32-seed x 20-turn fixtures pin each
+# class's monsterHpRng/aiRng draw sequence, plus a separate 4-gremlin battery for
+# the Tsundere's aiRng block-target pick; focused tests cover Angry, the
+# block-an-ally / aliveCount branches, Fat's queued RollMoveAction and the
+# wizard's charge cycle.
+sts_add_test(gremlin_test FIXTURES)
+
 # B3.20: Slime Boss native AI, corrected Slimed-discard Goop Spray, exact
 # split threshold/current-HP large children, full large->medium descendant
 # chain positioning, boss terminal gate, and a public advance() directed script.

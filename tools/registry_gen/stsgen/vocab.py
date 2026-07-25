@@ -271,6 +271,10 @@ MONSTER_INTENTS = {
                           # Lagavulin.java:144,225)
     "STUN": 10,          # Lagavulin's woken-by-damage turn (AbstractMonster.Intent.STUN;
                           # Lagavulin.java:202)
+    "DEFEND": 11,        # Gremlin Tsundere Protect (AbstractMonster.Intent.DEFEND;
+                          # GremlinTsundere.java:84,124) -- a pure block gain, with
+                          # no attack and no buff, so none of DEFEND_BUFF (2) or
+                          # ATTACK_DEFEND (3) is the same telegraph.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

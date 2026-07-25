@@ -42,7 +42,7 @@ namespace {
 // matters -- a new power cannot land without someone looking at this switch.
 [[nodiscard]] float at_damage_give(float dmg, PowerSlot p,
                                    int strength_mult = 1) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 30,
+    static_assert(sts::registry::manifest::kPowersCount == 31,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -70,7 +70,7 @@ namespace {
 // to a relic-free hook (fixtures unchanged).
 [[nodiscard]] float at_damage_receive(const CombatState& s, uint8_t owner_actor,
                                       float dmg, PowerSlot p) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 30,
+    static_assert(sts::registry::manifest::kPowersCount == 31,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -105,7 +105,7 @@ namespace {
 // type-agnostic guard in AbstractPlayer.damage (:1397-1399) is what catches
 // those two; see op_damage below.
 [[nodiscard]] float at_damage_final_receive(float dmg, PowerSlot p) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 30,
+    static_assert(sts::registry::manifest::kPowersCount == 31,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {

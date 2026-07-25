@@ -413,6 +413,17 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "Sentry.java:61 -- this.type = EnemyType.ELITE"},
         {MonsterId::LAGAVULIN,          MonsterEnemyType::ELITE,
          "Lagavulin.java:75 -- this.type = EnemyType.ELITE"},
+        {MonsterId::GREMLIN_WARRIOR,    MonsterEnemyType::NORMAL,
+         "GremlinWarrior.java -- no this.type assignment (the ELITE gremlin is "
+         "GremlinNob, a different class)"},
+        {MonsterId::GREMLIN_THIEF,      MonsterEnemyType::NORMAL,
+         "GremlinThief.java -- no this.type assignment"},
+        {MonsterId::GREMLIN_FAT,        MonsterEnemyType::NORMAL,
+         "GremlinFat.java -- no this.type assignment"},
+        {MonsterId::GREMLIN_TSUNDERE,   MonsterEnemyType::NORMAL,
+         "GremlinTsundere.java -- no this.type assignment"},
+        {MonsterId::GREMLIN_WIZARD,     MonsterEnemyType::NORMAL,
+         "GremlinWizard.java -- no this.type assignment"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);
