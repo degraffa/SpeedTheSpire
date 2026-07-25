@@ -85,14 +85,33 @@ in [docs/stage-b-tasks.md](docs/stage-b-tasks.md); **do not restate it here.**
 
 The current test count is **not** restated here, or anywhere outside a landed
 task's own Log — re-derive it with `ctest -N | tail -1`.
-`tools/check_stale_counts.sh` (also a CI job) fails the build if a committed
-file starts asserting one again; conventions §8 has the scope.
+`tools/check_stale_counts.sh` fails the build if a committed file starts
+asserting one again, and `tools/check_doc_links.sh` fails it if a markdown link
+or `#anchor` stops resolving — a section number is a value nothing re-derives
+either. Both run as steps of the `stale-numbers` CI job, and both are meant to
+be run by hand first; conventions §8 has the scope of each.
 
 Execution pattern: one sub-agent per task with a self-contained brief, each in
 its own git worktree under `D:\STS_BG_Mod\_wt\<task>`, running its own
 acceptance; the orchestrator re-verifies and lands it on `master` — one task =
 one commit. Model choice: **Fable** for larger/ambiguous tasks, **Opus** for
 established boilerplate.
+
+**Open and retire those worktrees with `tools/task_worktree.sh`** (or
+`tools\task_worktree.cmd` from PowerShell), not by hand:
+
+```bash
+tools/task_worktree.sh create <task>   # refuses a dirty repo; prints the base sha to quote
+tools/task_worktree.sh list            # branch / in-master / dirty, per worktree
+tools/task_worktree.sh land <task>     # remove -> branch -d -> prune, in that order
+```
+
+It exists because both halves of that lifecycle failed after being written
+down: a brief was written against an uncommitted edit the dispatched agent
+could not see, and landed worktrees piled up until `git worktree list` was
+unreadable. Full write-up in
+[conventions §8](docs/conventions.md#8-traps-already-hit-verification-discipline).
+Run it from Windows — it refuses under WSL, for the gitdir reason above.
 
 ### Oracle bridge — operational state (read before touching the bridge)
 
