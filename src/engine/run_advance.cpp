@@ -255,10 +255,16 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         return false;
     }
 
-    // (2) Map composition game_ids -> MonsterIds; require every member implemented
-    //     (Jaw Worm, Cultist, louses, and small/medium slimes are live;
-    //     the rest of the roster is unimplemented). If any is unimplemented
-    //     we have still consumed miscRng exactly as the game would, then park.
+    // (2) Map composition game_ids -> MonsterIds; require every member implemented.
+    //     "Implemented" is asked of the dispatch table, never of a list kept here:
+    //     a member is live iff monster_init_fn(id) returns non-null, which is true
+    //     exactly when monster_dispatch.cpp has a case for it. The game has no
+    //     counterpart to this gate -- MonsterHelper.getEncounter
+    //     (MonsterHelper.java:389) constructs a real AbstractMonster for every
+    //     member -- so the gate exists only to park what this engine has not
+    //     translated yet, and it retires itself as cases land. If any member is
+    //     unimplemented we have still consumed miscRng exactly as the game would,
+    //     then park.
     MonsterId ids[kMonsterCap] = {};
     bool all_impl = true;
     for (uint8_t i = 0; i < grp.count; ++i) {
