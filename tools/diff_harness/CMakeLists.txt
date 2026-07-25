@@ -16,7 +16,11 @@ add_library(diff_harness STATIC
 )
 
 target_include_directories(diff_harness PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_link_libraries(diff_harness PUBLIC sts_engine)
+# registry_generated is already reachable transitively (sts_engine links it
+# PUBLIC), but differ.cpp includes sts/registry/game_ids.hpp directly to render
+# enum ids by name, so the dependency is named here too -- same as the other
+# direct consumer, tools/oracle_bridge/translator.
+target_link_libraries(diff_harness PUBLIC sts_engine registry_generated)
 target_compile_features(diff_harness PUBLIC cxx_std_20)
 
 sts_set_warnings(diff_harness)

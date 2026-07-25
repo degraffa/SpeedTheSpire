@@ -42,8 +42,10 @@ namespace sts::diff {
 
 // One named field divergence. All three are human-readable strings: `field_name`
 // is a debuggable path (e.g. "player.hp", "monsters[0].hp", "hand[3]",
-// "shuffle_rng.s0"); the reprs render enum values by name where known
-// (e.g. "VULNERABLE(2)") and fall back to the raw number otherwise.
+// "shuffle_rng.s0"); the reprs render id-enum values as `game_id(number)`
+// (e.g. "Vulnerable(2)", "Inflame(73)") using the tables the registry generator
+// emits, so they track the registry automatically. A value the registry does
+// not know still renders, as "UNKNOWN(n)"; the zero sentinel renders "NONE(0)".
 struct FieldDiff {
     std::string field_name;
     std::string expected_repr;
