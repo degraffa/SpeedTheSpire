@@ -352,6 +352,20 @@ Logs are correct only on the day they are written. A stale count (454, when the
 tree was at 526) was copied out of a Log into four separate task briefs before
 anyone checked. `ctest -N | tail -1` is the source of truth.
 
+> **ELIMINATED 2026-07-25: `tools/check_stale_counts.sh`, run by hand and by a
+> `stale-numbers` CI job on every push.** It fails when a committed file asserts
+> a pass count — an equal `<N>/<N>` ratio on a line that also talks about tests,
+> an `<N>/<M> tests` count, or "all *N* tests pass" in prose. It reads tracked
+> *and* untracked-but-not-ignored files, so it catches the number before you
+> stage it; `--help` lists the patterns. Deliberately **not** scanned:
+> `docs/stage-*-log.md` (append-only archives of past runs), and the `[x]` /
+> `[!]` lines of `docs/stage-*-tasks.md` (a landed entry recording what was
+> green when it landed is history, and §2 requires it) — but `[ ]` and `[~]`
+> lines *are* scanned, because a pending task brief quoting a count is exactly
+> the incident above. A line carrying `stale-count-ok` is skipped; that hatch is
+> for prose about a past incident, not for new claims. If it fires on a file you
+> are editing, the number is already a liability: delete it and cite `ctest -N`.
+
 **Benchmark A/B must be interleaved.** This box drifts by more than the effects
 being measured. Two separate measurements this project has taken were wrong
 until re-run as interleaved A/B/A/B pairs — one reported a spurious −1.4%, the

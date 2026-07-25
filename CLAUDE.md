@@ -82,9 +82,11 @@ work is Phase B3 (combat content) and Phase B4 (run layer).
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md); **do not restate it here.**
-The newest task Log there also carries the current test count (526/526 gtest
-cases, debug + asan, at `61e8e11`); the ledger is authoritative, any number in
-this file is advisory.
+
+The current test count is **not** restated here, or anywhere outside a landed
+task's own Log — re-derive it with `ctest -N | tail -1`.
+`tools/check_stale_counts.sh` (also a CI job) fails the build if a committed
+file starts asserting one again; conventions §8 has the scope.
 
 Execution pattern: one sub-agent per task with a self-contained brief, each in
 its own git worktree under `D:\STS_BG_Mod\_wt\<task>`, running its own
