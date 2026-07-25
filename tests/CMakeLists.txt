@@ -118,6 +118,16 @@ sts_add_test(lagavulin_test)
 # Weakness ATTACK_BUFF classification this task's Twin Slam telegraph uncovered.
 sts_add_test(guardian_test)
 
+# B3.22: Hexaghost -- the A9 HP column and the A4/A19 stat columns, the forced
+# two-turn ACTIVATE/DIVIDER opener, Divider's player-HP-derived base pinned
+# against the formula at Hexaghost.java:151, the 7-long orb-count cycle
+# hand-derived across 16 turns, the orb count modelled in spare MonsterState
+# flag bits, Inferno's BurnIncreaseAction (existing Burns upgraded in draw and
+# discard, three more added) and the Sear Burn that is upgraded from the turn
+# after the first Inferno. getMove never reads its rolled `num`, so the aiRng
+# DRAW COUNT is what the RNG cases pin.
+sts_add_test(hexaghost_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

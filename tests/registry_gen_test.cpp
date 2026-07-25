@@ -391,19 +391,22 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.16's Angry (40), the Gremlin Warrior's
                                       // pre-battle power; 30-39 are other batches
                                       // + B3.21's Mode Shift (45) + Sharp Hide (46)
-    EXPECT_EQ(m::kMonstersCount, 20u); // + B3.14 four small/medium slimes
+    EXPECT_EQ(m::kMonstersCount, 21u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
                                        // Lagavulin (15)
                                        // + B3.16 five gremlins (ids 16-20)
                                        // + B3.21 The Guardian (id 21)
+                                       // + B3.22 Hexaghost (id 22); powers
+                                       // unchanged -- it applies only the
+                                       // pre-existing Strength row
     EXPECT_EQ(m::kRelicsCount, 111u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
-    EXPECT_EQ(m::kTotalCount, 312u);  // 75 + 33 + 20 + 111 + 33 + 0 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 313u);  // 75 + 33 + 21 + 111 + 33 + 0 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

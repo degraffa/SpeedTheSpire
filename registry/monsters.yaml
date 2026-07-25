@@ -813,3 +813,94 @@
   ai: native   # Two-mode state machine keyed on cumulative damage taken, with a
                # per-flip growing threshold; see monster_guardian.cpp. getMove
                # (:226-232) runs only at init and consumes the one aiRng draw.
+
+# --- B3.22: Hexaghost --------------------------------------------------------
+# The whole class was read. Two of the six moves carry NO data program and are
+# marked with an explicit NOP (the loader requires a non-empty effects list, and
+# an explicit NOP is a recorded decision rather than an omission):
+#   * ACTIVATE is pure state change -- it opens the fight by lighting all six
+#     orbs and computing Divider's base damage (Hexaghost.java:148-155);
+#   * DIVIDER's six hits are PLAYER-HP-DERIVED and so cannot be a tier column.
+# See monster_hexaghost.cpp for both, and for the burn-upgrade latch that makes
+# SEAR's created Burn upgraded after the first Inferno.
+- id: 22
+  name: HEXAGHOST
+  game_id: "Hexaghost"
+  provenance: "Hexaghost ctor HP A9 branch + the A19/A4/base stat chain (Hexaghost.java:96-128), createOrbs (:136-143 -- six PRESENTATION orbs, not monsters), takeTurn dispatch and the six move bodies (:145-216), getMove (:218-254 -- selection keyed on orbActiveCount; the rolled `num` is never read), changeState Activate / Activate Orb / Deactivate (:256-292), move ids DIVIDER=1/TACKLE=2/INFLAME=3/SEAR=4/ACTIVATE=5/INFERNO=6 (:79-84); ID (:53); Burn.java:31-35,56-64 (magicNumber 2, upgrade -> 4); BurnIncreaseAction.java:25-51; MakeTempCardInDiscardAction; StrengthPower; AbstractMonster.java:99,431-437,465-467"
+  enemy_type: BOSS   # Hexaghost.java:98
+  hp:
+    # setHp(int): a FIXED sheet, no monsterHpRng draw (Hexaghost.java:102-106).
+    base: {min: 250, max: 250}  # HP (:59), ascension < 9
+    a9:   {min: 264, max: 264}  # A_2_HP (:60) -- the field NAME is misleading;
+                                # the branch is `>= 9` (:102).
+  moves:
+    - name: DIVIDER
+      move_id: 1               # Hexaghost.java:79
+      intent: ATTACK           # the ACTIVATE turn's setMove (:153)
+      effects:
+        # NO data program. damage.get(2).base is assigned at the ACTIVATE turn
+        # as `AbstractDungeon.player.currentHealth / 12 + 1` (:151) and then
+        # dealt as SIX separate DamageActions (:157-165) -- a per-combat value
+        # read off the PLAYER, so no ascension column can express it. The
+        # native module computes it and queues the six hits
+        # (monster_hexaghost.cpp).
+        - {op: NOP, target: SELF, amount: 0}
+    - name: TACKLE
+      move_id: 2               # Hexaghost.java:80
+      intent: ATTACK           # getMove orbActiveCount 1 / 4 (:230,242)
+      effects:
+        # fireTackleCount == 2 separate DamageActions of damage.get(0) ==
+        # fireTackleDmg (:64,68,76,173-174). Two hits, NOT one 10/12 hit: each
+        # runs the DamageInfo pipeline on its own, so per-hit block absorption
+        # and Vulnerable rounding differ from a single doubled hit.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a4: 6}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a4: 6}}
+    - name: INFLAME
+      move_id: 3               # Hexaghost.java:81
+      intent: DEFEND_BUFF      # getMove orbActiveCount 3 (:238)
+      effects:
+        # GainBlockAction(this, this, strengthenBlockAmt == 12) -- no ascension
+        # branch (:72,193). A direct GainBlockAction, so no card applyPowers.
+        - {op: BLOCK, target: SELF, amount: 12}
+        # StrengthPower(this, strAmount) on ITSELF: 2, or 3 at A19+
+        # (:66,70,108,113,119,194).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 2, a19: 3}, power: STRENGTH}
+    - name: SEAR
+      move_id: 4               # Hexaghost.java:82
+      intent: ATTACK_DEBUFF    # getMove orbActiveCount 0 / 2 / 5 (:226,234,246)
+      effects:
+        # damage.get(1) == searDmg 6, no ascension branch (:62,123,181).
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+        # MakeTempCardInDiscardAction(new Burn(), searBurnCount) -- 1, or 2 at
+        # A19+ (:65,69,109,114,120,182-186). The created Burn is UPGRADED once
+        # `burnUpgraded` is set (:183-185), which is a per-combat latch and not
+        # a tier column: the native module re-queues this step with the
+        # MAKE_CARD upgraded bit set. See monster_hexaghost.cpp.
+        - {op: MAKE_CARD, target: PLAYER, amount: {base: 1, a19: 2}, card: BURN, pile: DISCARD}
+    - name: ACTIVATE
+      move_id: 5               # Hexaghost.java:83
+      intent: UNKNOWN          # getMove's forced opener (:222)
+      effects:
+        # NO data program. The turn is a ChangeStateAction("Activate") that
+        # lights all six orbs, the Divider base-damage assignment, and a direct
+        # setMove(DIVIDER) (:148-155). All native.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: INFERNO
+      move_id: 6               # Hexaghost.java:84
+      intent: ATTACK_DEBUFF    # getMove orbActiveCount 6 (:250) / changeState (:280)
+      effects:
+        # infernoHits == 6 separate DamageActions of damage.get(3) ==
+        # infernoDmg -- 2, or 3 from A4 (:63,67,78,116,121,127,201-203).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 2, a4: 3}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 2, a4: 3}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 2, a4: 3}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 2, a4: 3}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 2, a4: 3}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 2, a4: 3}}
+        # BurnIncreaseAction (:204) is NOT expressible here: it upgrades the
+        # Burns ALREADY in the draw and discard piles before adding three more.
+        # Native, and folded into the queued roll -- see monster_hexaghost.cpp.
+  ai: native   # Move selection is a 7-long orb-count cycle with a one-off
+               # two-turn opener; getMove (:218-254) never reads its rolled
+               # `num`, but every RollMoveAction still consumes an aiRng draw.
+               # See monster_hexaghost.cpp.

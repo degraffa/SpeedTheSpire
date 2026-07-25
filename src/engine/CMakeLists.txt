@@ -13,6 +13,7 @@ add_library(sts_engine
     monster_lagavulin.cpp
     monster_gremlin.cpp
     monster_guardian.cpp
+    monster_hexaghost.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
