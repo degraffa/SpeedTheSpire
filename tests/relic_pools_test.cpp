@@ -551,6 +551,111 @@ TEST(RunDeck, EggsUpgradeOnObtainByTypeAndDarkstoneRewardsCurses) {
     EXPECT_EQ(rs.hp, 66);
 }
 
+// --- generated pickup dispatch --------------------------------------------------
+//
+// The per-relic canSpawn/onEquip switches are now generated from
+// registry/relics.yaml `pickup:` (STS_REGISTRY_RELIC_CAN_SPAWN /
+// STS_REGISTRY_RELIC_ON_EQUIP, expanded in relic_pools.cpp). These pin the
+// framework-level guarantees the hand-written switches used to provide inline.
+
+TEST(RelicPickupDispatch, RelicWithoutACanSpawnRowAlwaysSpawns) {
+    // AbstractRelic.canSpawn's base body is `return true`; a row that does not
+    // list `pickup: can_spawn` has no handler, and the dispatch must fall back to
+    // that default in EVERY context -- late floor, in a shop, endless or not.
+    // This is what the old switch's `default: return true` gave, and it is what
+    // keeps the relicRng draw order stable.
+    for (const RelicId id : {RelicId::ANCHOR, RelicId::BURNING_BLOOD,
+                             RelicId::HAPPY_FLOWER, RelicId::SUNDIAL,
+                             RelicId::NUNCHAKU, RelicId::CIRCLET}) {
+        EXPECT_TRUE(relic_can_spawn(id, RelicSpawnContext{1, false, false}));
+        EXPECT_TRUE(relic_can_spawn(id, RelicSpawnContext{999, true, false}));
+        EXPECT_TRUE(relic_can_spawn(id, RelicSpawnContext{999, true, true}));
+    }
+}
+
+TEST(RelicPickupDispatch, ShopGatedRelicsStayGatedInEndless) {
+    // MawBank.canSpawn (MawBank.java:56-58), SmilingMask.canSpawn
+    // (SmilingMask.java:41-43) and Courier.canSpawn (Courier.java:41-43) are all
+    //   (Settings.isEndless || floorNum <= 48) && !(getCurrRoom() instanceof ShopRoom)
+    // -- endless bypasses the FLOOR clause only. The hand-written switch this
+    // replaced hoisted `if (endless) return true;` ahead of the whole family, so
+    // it answered true for these three inside a shop during Endless. Per-relic
+    // bodies that spell the Java in full fix that; `endless` has no producer in
+    // the engine (only tests set it), so no reachable state moved.
+    for (const RelicId id : {RelicId::MAW_BANK, RelicId::SMILING_MASK,
+                             RelicId::THE_COURIER}) {
+        EXPECT_TRUE(relic_can_spawn(id, RelicSpawnContext{48, false, false}));
+        EXPECT_FALSE(relic_can_spawn(id, RelicSpawnContext{49, false, false}));
+        EXPECT_FALSE(relic_can_spawn(id, RelicSpawnContext{10, true, false}))
+            << "the shop clause is not floor-dependent";
+        // Endless lifts the floor gate...
+        EXPECT_TRUE(relic_can_spawn(id, RelicSpawnContext{999, false, true}));
+        // ...but never the shop gate.
+        EXPECT_FALSE(relic_can_spawn(id, RelicSpawnContext{999, true, true}))
+            << "endless bypasses the floor clause only, not `!(ShopRoom)`";
+        EXPECT_FALSE(relic_can_spawn(id, RelicSpawnContext{10, true, true}));
+    }
+}
+
+TEST(RelicPickupDispatch, DeferredOnEquipHandlersAreNoOpsAndDrawNoRng) {
+    // The Bottled trio's bottling screen (BottledFlame.java:42-52 and siblings)
+    // and the eggs' reward-screen preview pass (FrozenEgg2.java:31-38 and
+    // siblings) are registered `pickup: on_equip` with EXPLICIT empty bodies --
+    // under the generated dispatch a deferral cannot be expressed by omission,
+    // because a listed surface with no definition fails to link. Pin that those
+    // bodies really are inert: acquisition appends the slot and changes nothing
+    // else, and in particular consumes no miscRng draw.
+    for (const RelicId id : {RelicId::BOTTLED_FLAME, RelicId::BOTTLED_LIGHTNING,
+                             RelicId::BOTTLED_TORNADO, RelicId::FROZEN_EGG,
+                             RelicId::MOLTEN_EGG, RelicId::TOXIC_EGG}) {
+        RunState rs{};
+        rs.hp = 60;
+        rs.max_hp = 80;
+        rs.potion_slots = 3;
+        rs.master_deck_count = 1;
+        rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+        RngStream misc = from_seed(11);
+        const RngStream before = misc;
+
+        ASSERT_EQ(acquire_relic(rs, misc, id), RelicAcquireResult::ACQUIRED);
+
+        EXPECT_EQ(rs.relic_count, 1);
+        EXPECT_EQ(rs.relics[0].relic_id, static_cast<uint16_t>(id));
+        EXPECT_EQ(rs.hp, 60);
+        EXPECT_EQ(rs.max_hp, 80);
+        EXPECT_EQ(rs.potion_slots, 3);
+        EXPECT_EQ(rs.master_deck[0].upgrade, 0);
+        EXPECT_EQ(misc.counter, before.counter)
+            << "a deferred onEquip must not consume miscRng";
+        EXPECT_EQ(misc.s0, before.s0);
+        EXPECT_EQ(misc.s1, before.s1);
+    }
+}
+
+TEST(RelicPickupDispatch, CounterOnlyOnEquipIsCarriedByInitialCounterNotAHandler) {
+    // HappyFlower/TinyChest/Sundial's onEquip is nothing but `this.counter = 0`,
+    // and Circlet's is `this.flash()`. Those rows deliberately do NOT list
+    // `pickup: on_equip` -- the counter seeding is the row's initial_counter,
+    // applied by acquire_relic itself. Pin that the seeding still happens with no
+    // handler in play, so the exclusion rule documented in relics.yaml stays
+    // honest.
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(12);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::HAPPY_FLOWER),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::TINY_CHEST),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::SUNDIAL),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.relics[0].counter, 0);  // HappyFlower.java:49-51
+    EXPECT_EQ(rs.relics[1].counter, 0);  // TinyChest.java:30-32
+    EXPECT_EQ(rs.relics[2].counter, 0);  // Sundial.java:40-42
+    EXPECT_EQ(rs.hp, 60);
+    EXPECT_EQ(rs.max_hp, 80);
+}
+
 TEST(RunDeck, AddCardWithoutRelicsIsAPlainAppend) {
     RunState rs{};
     rs.hp = 60;

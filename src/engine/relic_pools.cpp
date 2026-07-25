@@ -1,3 +1,27 @@
+// Relic dungeon pools + RunState acquisition. See relic_pools.hpp for the Java
+// provenance of the pool mechanics themselves.
+//
+// The per-relic PICKUP behaviour that used to live here as hand-written switches
+// (a 24-case canSpawn gate and a 5-case onEquip switch) is now GENERATED from
+// registry/relics.yaml `pickup:`. Each row that overrides a surface contributes
+// one X(<RelicId>, <handler>) entry to STS_REGISTRY_RELIC_CAN_SPAWN /
+// STS_REGISTRY_RELIC_ON_EQUIP (generated relic_table.hpp, reached via
+// sts/engine/relics.hpp); this file expands each list twice -- once for the
+// extern declarations, once for the id -> handler switch -- exactly as
+// relic_hooks.cpp does for combat bodies. The handlers live in per-tier
+// translation units under src/engine/relics/.
+//
+// The point is that filling in a tier no longer edits this file: each tier adds
+// registry rows, a relic_pickup_<tier>.cpp and a CMakeLists line. This was the
+// last shared per-relic switch on the pickup side, so two people bringing up
+// different tiers no longer contend for one source line.
+//
+// Because each handler is odr-used by the switch below, a row that LISTS a
+// surface but whose body nobody wrote is an undefined reference at link time
+// rather than a silently missing case. That matters most for canSpawn: the old
+// `default: return true` answered "no gate" for a forgotten relic, which is not
+// a no-op but a changed relicRng draw order.
+
 #include "sts/engine/relic_pools.hpp"
 
 #include <algorithm>
@@ -5,6 +29,7 @@
 #include <limits>
 #include <span>
 
+#include "relics/relic_pickup.hpp"  // RelicCanSpawnSig/Fn, RelicOnEquipSig/Fn
 #include "sts/engine/cards.hpp"
 #include "sts/engine/rng_jdk.hpp"
 
@@ -64,27 +89,10 @@ void remove_owned_from_pools(RunState& rs) noexcept {
     }
 }
 
-void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
-                          CardType wanted) noexcept {
-    uint16_t candidates[kMasterDeckCap]{};
-    uint16_t count = 0;
-    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
-        const CardInstance& card = rs.master_deck[i];
-        const CardDef* def = card_def(static_cast<CardId>(card.card_id));
-        if (def != nullptr && def->type == wanted && card.upgrade == 0) {
-            candidates[count++] = i;
-        }
-    }
-
-    // Collections.shuffle evaluates miscRng.randomLong() as the Random ctor arg
-    // even when the filtered list has fewer than two cards.
-    JdkRandom jdk(random_long(misc_rng));
-    jdk_shuffle(std::span<uint16_t>(candidates, count), jdk);
-    const uint16_t take = count < 2 ? count : 2;
-    for (uint16_t i = 0; i < take; ++i) {
-        rs.master_deck[candidates[i]].upgrade = 1;
-    }
-}
+// (upgrade_random_cards -- WarPaint/Whetstone's shared body -- moved to
+// relics/relic_pickup.hpp when those two onEquip handlers left this file; more
+// than one tier's TU needs it, so it is a shared inline helper rather than a
+// file-local static, mirroring heal_player in relics/relic_native.hpp.)
 
 }  // namespace
 
@@ -160,62 +168,40 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     }
 }
 
+// --- canSpawn: generated per-relic predicate dispatch -------------------------
+//
+// Each handler spells its Java canSpawn body IN FULL, including the
+// `Settings.isEndless ||` disjunct where the Java has one. The switch this
+// replaced instead hoisted a single `if (ctx.endless) return true;` between two
+// case blocks, which forced the Bottled trio (whose bodies have no isEndless
+// clause at all) to be special-cased ahead of it, and got MawBank/SmilingMask/
+// Courier wrong in Endless -- their Java is `(isEndless || floor <= 48) && !shop`,
+// so endless bypasses the floor clause but never the shop clause. Per-relic
+// bodies make that structural question disappear. `endless` has no producer in
+// the engine today (RelicSpawnContext defaults it false and nothing but tests
+// sets it), so no reachable state changes.
+
+#define STS_RELIC_CAN_SPAWN_DECL(ID, FN) extern RelicCanSpawnSig FN;
+STS_REGISTRY_RELIC_CAN_SPAWN(STS_RELIC_CAN_SPAWN_DECL)
+#undef STS_RELIC_CAN_SPAWN_DECL
+
+RelicCanSpawnFn relic_can_spawn_fn(RelicId id) noexcept {
+    switch (id) {
+#define STS_RELIC_CAN_SPAWN_CASE(ID, FN) \
+    case RelicId::ID:                    \
+        return &FN;
+        STS_REGISTRY_RELIC_CAN_SPAWN(STS_RELIC_CAN_SPAWN_CASE)
+#undef STS_RELIC_CAN_SPAWN_CASE
+        default:
+            return nullptr;  // no canSpawn override on this row
+    }
+}
+
 bool relic_can_spawn(RelicId id, RelicSpawnContext ctx) noexcept {
-    // The Bottled trio's canSpawn has NO Settings.isEndless clause
-    // (BottledFlame/Lightning/Tornado.java:93-99) -- the deck gate applies even
-    // in Endless, so it is checked before the endless early-return.
-    switch (id) {
-        case RelicId::BOTTLED_FLAME:
-            return ctx.deck_has_nonbasic_attack;
-        case RelicId::BOTTLED_LIGHTNING:
-            return ctx.deck_has_nonbasic_skill;
-        case RelicId::BOTTLED_TORNADO:
-            return ctx.deck_has_power;
-        default:
-            break;
-    }
-    if (ctx.endless) {
-        return true;
-    }
-    switch (id) {
-        case RelicId::ANCIENT_TEA_SET:
-        case RelicId::CERAMIC_FISH:
-        case RelicId::DREAM_CATCHER:
-        case RelicId::JUZU_BRACELET:
-        case RelicId::MEAL_TICKET:
-        case RelicId::OMAMORI:
-        case RelicId::REGAL_PILLOW:
-        case RelicId::POTION_BELT:
-            return ctx.floor <= 48;
-        // B3.25 uncommons with the same "Settings.isEndless || floorNum <= 48"
-        // gate (DarkstonePeriapt:44-46, FrozenEgg2:53-55, MeatOnTheBone:53-55,
-        // MoltenEgg2:53-55, QuestionCard:29-31, SingingBowl:41-43,
-        // ToxicEgg2:53-55).
-        case RelicId::DARKSTONE_PERIAPT:
-        case RelicId::FROZEN_EGG:
-        case RelicId::MEAT_ON_THE_BONE:
-        case RelicId::MOLTEN_EGG:
-        case RelicId::QUESTION_CARD:
-        case RelicId::SINGING_BOWL:
-        case RelicId::TOXIC_EGG:
-            return ctx.floor <= 48;
-        case RelicId::MAW_BANK:
-        case RelicId::SMILING_MASK:
-            return ctx.floor <= 48 && !ctx.in_shop;
-        case RelicId::THE_COURIER:
-            // Courier.canSpawn (Courier.java:41-43): floor <= 48 AND the current
-            // room is not a ShopRoom.
-            return ctx.floor <= 48 && !ctx.in_shop;
-        case RelicId::PRESERVED_INSECT:
-            return ctx.floor <= 52;
-        case RelicId::TINY_CHEST:
-            return ctx.floor <= 35;
-        case RelicId::MATRYOSHKA:
-            // Matryoshka.canSpawn (Matryoshka.java:59-61): floorNum <= 40.
-            return ctx.floor <= 40;
-        default:
-            return true;
-    }
+    const RelicCanSpawnFn fn = relic_can_spawn_fn(id);
+    // AbstractRelic.canSpawn's base implementation is `return true` -- a relic
+    // without an override always spawns.
+    return fn == nullptr || fn(ctx);
 }
 
 RelicId return_random_relic_key(RunState& rs, RelicTier tier,
@@ -307,31 +293,38 @@ RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
     slot.relic_id = static_cast<uint16_t>(id);
     slot.counter = def->initial_counter;
 
-    switch (id) {
-        case RelicId::STRAWBERRY:
-            rs.max_hp = static_cast<int16_t>(rs.max_hp + 7);
-            rs.hp = static_cast<int16_t>(rs.hp + 7);
-            break;
-        case RelicId::PEAR:
-            // Pear.onEquip (Pear.java:29-31): increaseMaxHp(10, true) -- +10 max
-            // AND +10 current (increaseMaxHp heals the gained amount).
-            rs.max_hp = static_cast<int16_t>(rs.max_hp + 10);
-            rs.hp = static_cast<int16_t>(rs.hp + 10);
-            break;
-        case RelicId::POTION_BELT:
-            rs.potion_slots = static_cast<uint8_t>(
-                std::min<int>(kPotionCap, static_cast<int>(rs.potion_slots) + 2));
-            break;
-        case RelicId::WAR_PAINT:
-            upgrade_random_cards(rs, misc_rng, CardType::SKILL);
-            break;
-        case RelicId::WHETSTONE:
-            upgrade_random_cards(rs, misc_rng, CardType::ATTACK);
-            break;
-        default:
-            break;
+    // AbstractRelic.instantObtain/obtain (AbstractRelic.java:219-291) append in
+    // acquisition order and THEN call onEquip, so the handler sees its own slot
+    // already present and counter-seeded.
+    const RelicOnEquipFn fn = relic_on_equip_fn(id);
+    if (fn != nullptr) {
+        fn(rs, misc_rng, slot);
     }
     return RelicAcquireResult::ACQUIRED;
+}
+
+// --- onEquip: generated per-relic action dispatch -----------------------------
+//
+// An onEquip that only initializes the relic's OWN counter (HappyFlower/
+// TinyChest/Sundial `this.counter = 0`) is already modelled by the row's
+// initial_counter and is deliberately not a handler; nor is a purely cosmetic
+// one (Circlet.onEquip is `this.flash()`). See the `pickup:` documentation in
+// registry/relics.yaml for that rule.
+
+#define STS_RELIC_ON_EQUIP_DECL(ID, FN) extern RelicOnEquipSig FN;
+STS_REGISTRY_RELIC_ON_EQUIP(STS_RELIC_ON_EQUIP_DECL)
+#undef STS_RELIC_ON_EQUIP_DECL
+
+RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept {
+    switch (id) {
+#define STS_RELIC_ON_EQUIP_CASE(ID, FN) \
+    case RelicId::ID:                   \
+        return &FN;
+        STS_REGISTRY_RELIC_ON_EQUIP(STS_RELIC_ON_EQUIP_CASE)
+#undef STS_RELIC_ON_EQUIP_CASE
+        default:
+            return nullptr;  // no onEquip override on this row
+    }
 }
 
 }  // namespace sts::engine
