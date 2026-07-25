@@ -22,14 +22,11 @@
 
 #include <cstdint>
 
-#include "powers/power_native.hpp"          // PowerNativeFn, actor_power_list, find_power
-#include "powers/powers_b3_2.hpp"           // B3.2 framework powers
-#include "powers/powers_b3_25.hpp"          // B3.25 relic-applied power
-#include "powers/powers_b3_4.hpp"           // B3.4 (Flex)
-#include "powers/powers_b3_6.hpp"           // B3.6 red-uncommon-skill powers
-#include "powers/powers_b3_7.hpp"           // B3.7 red-uncommon-power cards
-#include "powers/powers_b3_9.hpp"           // B3.9 curse-applied debuff
-#include "powers/powers_potion_support.hpp" // potion-support-powers follow-up
+// The per-batch power headers (powers_b3_2.hpp, ...) are deliberately NOT
+// included: the generated STS_REGISTRY_NATIVE_POWERS expansion below declares
+// every native body itself, so this file has no per-batch dependency and a new
+// power batch never edits it.
+#include "powers/power_native.hpp"      // PowerNativeSig/Fn, actor_power_list, find_power
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (Corruption skill check)
 #include "sts/engine/combat_state.hpp"
@@ -346,64 +343,44 @@ bool apply_power_blocked_by_artifact(CombatState& s, uint8_t target,
 
 // --- Native escape hatch -----------------------------------------------------
 //
-// The dispatch table: PowerId -> the native body's function pointer, or nullptr
-// for a power with no per-power-list body. Structure mirrors
+// The dispatch table -- PowerId -> the native body's function pointer -- is
+// GENERATED from registry/powers.yaml. Every row marked `native: true` becomes
+// one X(<PowerId>, <handler>) entry of STS_REGISTRY_NATIVE_POWERS (generated
+// power_table.hpp, reached via sts/engine/powers.hpp), the handler name derived
+// from the row name by the frozen convention: PowerId::COMBUST ->
+// power_native_combust. We expand that one list twice: once for the extern
+// declarations, once for the switch. Structure still mirrors
 // monster_dispatch.cpp's monster_init_fn (a plain switch, data-oriented, no
-// virtual dispatch); each power batch adds its cases here and a translation unit
-// under src/engine/powers/.
+// virtual dispatch) -- but a power batch no longer edits this file at all: it
+// adds a registry row, a translation unit under src/engine/powers/, and a
+// CMakeLists line.
+//
+// Why the extern declarations are generated here rather than #include'd from the
+// per-batch headers: each handler is odr-used by the switch below, so a row
+// marked `native: true` whose body NOBODY WROTE is an undefined reference at
+// link time instead of a silently missing case. (That is the whole point: the
+// old hand-written switch answered `default: return nullptr` for a forgotten
+// power, so the power just quietly did nothing.) The declarations use
+// PowerNativeSig, so a body whose signature drifts also fails to link.
+//
+// Corollary: a power deliberately registered native with NO per-power-list body
+// cannot be expressed by omission -- it must define an explicit empty body in
+// its batch TU, which is a written-down decision rather than a hole. Artifact is
+// the one such power today (powers/powers_b3_2.cpp).
+
+#define STS_POWER_NATIVE_DECL(ID, FN) extern PowerNativeSig FN;
+STS_REGISTRY_NATIVE_POWERS(STS_POWER_NATIVE_DECL)
+#undef STS_POWER_NATIVE_DECL
 
 PowerNativeFn power_native_fn(PowerId id) noexcept {
     switch (id) {
-        // B3.2 framework powers (powers/powers_b3_2.cpp)
-        case PowerId::SADISTIC:
-            return &power_native_sadistic;
-        case PowerId::DARK_EMBRACE:
-            return &power_native_dark_embrace;
-        case PowerId::COMBUST:
-            return &power_native_combust;
-        case PowerId::RUPTURE:
-            return &power_native_rupture;
-        case PowerId::CORRUPTION:
-            return &power_native_corruption;
-        case PowerId::RAGE:
-            return &power_native_rage;
-        // B3.4 (Flex) (powers/powers_b3_4.cpp)
-        case PowerId::LOSE_STRENGTH:
-            return &power_native_lose_strength;
-        // potion-support-powers follow-up (powers/powers_potion_support.cpp)
-        case PowerId::THORNS:
-            return &power_native_thorns;
-        case PowerId::PLATED_ARMOR:
-            return &power_native_plated_armor;
-        case PowerId::REGEN:
-            return &power_native_regen;
-        case PowerId::LOSE_DEXTERITY:
-            return &power_native_lose_dexterity;
-        case PowerId::RITUAL:
-            return &power_native_ritual;
-        case PowerId::CURL_UP:
-            return &power_native_curl_up;
-        // B3.9 curse-applied debuff (powers/powers_b3_9.cpp)
-        case PowerId::FRAIL:
-            return &power_native_frail;
-        // B3.25 relic-applied power (powers/powers_b3_25.cpp)
-        case PowerId::NEXT_TURN_BLOCK:
-            return &power_native_next_turn_block;
-        // B3.6 red-uncommon-skill powers (powers/powers_b3_6.cpp)
-        case PowerId::FLAME_BARRIER:
-            return &power_native_flame_barrier;
-        // B3.7 red-uncommon-power cards (powers/powers_b3_7.cpp)
-        case PowerId::EVOLVE:
-            return &power_native_evolve;
-        case PowerId::FIRE_BREATHING:
-            return &power_native_fire_breathing;
-        case PowerId::ARTIFACT:
-            // Artifact's body is the target-side nullify in
-            // apply_power_blocked_by_artifact (consumed inside APPLY_POWER); it
-            // has no source-side / per-power-list hook body.
-            return nullptr;
+#define STS_POWER_NATIVE_CASE(ID, FN) \
+    case PowerId::ID:                 \
+        return &FN;
+        STS_REGISTRY_NATIVE_POWERS(STS_POWER_NATIVE_CASE)
+#undef STS_POWER_NATIVE_CASE
         default:
-            return nullptr;  // an unrecognized native power is a safe no-op
+            return nullptr;  // a non-native / unrecognized power has no body
     }
 }
 

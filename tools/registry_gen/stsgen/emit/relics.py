@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..loader import power_id_map
 from ..steps import RELIC_DOMAIN, padded_step_literals, parse_steps
 from ..vocab import BANNER, RELIC_HOOKS, RELIC_TIERS, fail, pascal
+from .powers import native_dispatch_macro
 
 
 def emit_relic_table(domains: dict[str, list[dict]]) -> str:
@@ -189,5 +190,8 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
     out.append("        default: return nullptr;")
     out.append("    }")
     out.append("}\n")
-    out.append("}  // namespace sts::registry")
+    out.append("}  // namespace sts::registry\n")
+    out.extend(native_dispatch_macro(
+        rows, "STS_REGISTRY_NATIVE_RELICS", "relic_native_",
+        "relic", "relic_hooks.cpp"))
     return "\n".join(out) + "\n"

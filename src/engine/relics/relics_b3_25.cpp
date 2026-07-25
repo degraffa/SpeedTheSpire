@@ -251,4 +251,34 @@ void relic_native_self_forming_clay(CombatState& s, RelicHook hook,
     }
 }
 
+// --- DEFERRED combat bodies --------------------------------------------------
+//
+// These two B3.25 uncommons are registered `native: true` with their hook
+// inventory but have NO combat body yet: each depends on registry content that
+// does not exist at this point in the build order. They are DELIBERATELY EMPTY
+// definitions, not omissions -- the dispatch table generated from
+// registry/relics.yaml (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp)
+// odr-uses a handler for every `native: true` row, so a relic whose body nobody
+// wrote is an UNDEFINED REFERENCE at link time rather than a silent no-op.
+// Behaviour is unchanged from the old `default: return nullptr;` grouping: a
+// no-op call instead of a skipped null call.
+
+// MummifiedHand.onUseCard (MummifiedHand.java:38-72) -- when a POWER card is
+// played, filter the hand for cost > 0 && costForTurn > 0 && !freeToPlayOnce
+// minus cardQueue members, pick one via cardRandomRng.random(0, n-1) (no draw
+// when the filtered list is empty) and setCostForTurn(0). DEFERRED: the registry
+// has no POWER CardType yet (power cards land in B3.7), so the trigger condition
+// is unrepresentable.
+void relic_native_mummified_hand(CombatState& /*s*/, RelicHook /*hook*/,
+                                 RelicSlot& /*slot*/,
+                                 const RelicHookContext& /*ctx*/) noexcept {}
+
+// Pantograph.atBattleStart (Pantograph.java:32-40) -- if any monster.type ==
+// EnemyType.BOSS, addToTop HealAction(player, 25). DEFERRED: monsters.yaml
+// carries no EnemyType/BOSS metadata and no boss rows exist yet
+// (Guardian/Hexaghost/Slime Boss are B3.15-B3.17).
+void relic_native_pantograph(CombatState& /*s*/, RelicHook /*hook*/,
+                             RelicSlot& /*slot*/,
+                             const RelicHookContext& /*ctx*/) noexcept {}
+
 }  // namespace sts::engine

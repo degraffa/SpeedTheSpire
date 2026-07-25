@@ -20,6 +20,7 @@
 // The generator is invoked out-of-process via the same Python interpreter CMake
 // found; paths arrive as compile definitions.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdio>
@@ -1063,4 +1064,99 @@ TEST(RegistryGen, SharedPackingsApplyAcrossDomains) {
     EXPECT_NE(rlit.find("Opcode::REMOVE_POWER"), std::string::npos) << rlit;
     EXPECT_EQ(rlit.find("{Opcode::REMOVE_POWER, 0, 0,"), std::string::npos)
         << "relic REMOVE_POWER must carry a PowerId, not extra = 0: " << rlit;
+}
+
+// --- 7. Native dispatch lists ------------------------------------------------
+//
+// The native power/relic dispatch tables used to be hand-written switches in
+// power_hooks.cpp / relic_hooks.cpp. They are now generated: every registry row
+// marked `native: true` contributes one X(<Id>, <handler>) entry to
+// STS_REGISTRY_NATIVE_POWERS / STS_REGISTRY_NATIVE_RELICS, and the hook TUs
+// expand that list into both the extern declarations and the id -> handler
+// switch. These tests pin the two properties the engine relies on:
+//
+//   * COVERAGE  -- the list is exactly the set of `native: true` rows. Not a
+//                  subset (a missing row would be a silently dead power/relic)
+//                  and not a superset (a non-native row must never route to the
+//                  escape hatch).
+//   * NAMING    -- the handler symbol is `<domain>_native_<lowercased row name>`.
+//                  The convention is load-bearing: the generated declaration is
+//                  what odr-uses the body, so a body defined under any other
+//                  name fails to link.
+//
+// (The link-error property itself is a build-level property, not observable from
+// inside a test binary that has already linked; it is exercised by deliberately
+// marking a row native with no body and confirming the undefined reference.)
+
+namespace {
+
+std::string ascii_lower(const std::string& s) {
+    std::string out = s;
+    for (char& c : out) {
+        if (c >= 'A' && c <= 'Z') { c = static_cast<char>(c - 'A' + 'a'); }
+    }
+    return out;
+}
+
+// Every enum value a scoped id enum can hold is far below this; power/relic ids
+// are small and dense, so a linear probe over the id space enumerates the rows.
+constexpr int kIdProbeLimit = 1024;
+
+}  // namespace
+
+TEST(RegistryGen, NativePowerDispatchListCoversExactlyNativeRows) {
+    std::vector<int> from_macro;
+#define STS_TEST_NATIVE_POWER(ID, FN) \
+    from_macro.push_back(static_cast<int>(sts::registry::PowerId::ID));
+    STS_REGISTRY_NATIVE_POWERS(STS_TEST_NATIVE_POWER)
+#undef STS_TEST_NATIVE_POWER
+
+    std::vector<int> from_table;
+    for (int i = 0; i < kIdProbeLimit; ++i) {
+        const sts::registry::PowerDef* d =
+            sts::registry::power_def(static_cast<sts::registry::PowerId>(i));
+        if (d != nullptr && d->native) { from_table.push_back(i); }
+    }
+    ASSERT_FALSE(from_table.empty()) << "no native power rows -- probe is wrong";
+
+    std::sort(from_macro.begin(), from_macro.end());
+    std::sort(from_table.begin(), from_table.end());
+    EXPECT_EQ(from_macro, from_table)
+        << "STS_REGISTRY_NATIVE_POWERS must list exactly the `native: true` "
+           "powers.yaml rows";
+}
+
+TEST(RegistryGen, NativeRelicDispatchListCoversExactlyNativeRows) {
+    std::vector<int> from_macro;
+#define STS_TEST_NATIVE_RELIC(ID, FN) \
+    from_macro.push_back(static_cast<int>(sts::registry::RelicId::ID));
+    STS_REGISTRY_NATIVE_RELICS(STS_TEST_NATIVE_RELIC)
+#undef STS_TEST_NATIVE_RELIC
+
+    std::vector<int> from_table;
+    for (const sts::registry::RelicDef* d : sts::registry::kRelicDefs) {
+        if (d->native) { from_table.push_back(static_cast<int>(d->id)); }
+    }
+    ASSERT_FALSE(from_table.empty()) << "no native relic rows -- probe is wrong";
+
+    std::sort(from_macro.begin(), from_macro.end());
+    std::sort(from_table.begin(), from_table.end());
+    EXPECT_EQ(from_macro, from_table)
+        << "STS_REGISTRY_NATIVE_RELICS must list exactly the `native: true` "
+           "relics.yaml rows";
+}
+
+TEST(RegistryGen, NativeDispatchHandlerNamesFollowTheRowNameConvention) {
+    // PowerId::COMBUST -> power_native_combust; RelicId::BLUE_CANDLE ->
+    // relic_native_blue_candle. Stringize both halves of each X() entry and
+    // check the derivation, so a generator change that renames handlers is
+    // caught here rather than as an undefined reference in the engine link.
+#define STS_TEST_POWER_NAME(ID, FN) \
+    EXPECT_EQ(std::string(#FN), "power_native_" + ascii_lower(#ID));
+    STS_REGISTRY_NATIVE_POWERS(STS_TEST_POWER_NAME)
+#undef STS_TEST_POWER_NAME
+#define STS_TEST_RELIC_NAME(ID, FN) \
+    EXPECT_EQ(std::string(#FN), "relic_native_" + ascii_lower(#ID));
+    STS_REGISTRY_NATIVE_RELICS(STS_TEST_RELIC_NAME)
+#undef STS_TEST_RELIC_NAME
 }

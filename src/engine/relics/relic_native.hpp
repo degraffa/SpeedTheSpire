@@ -8,10 +8,12 @@
 // not-yet-implemented ids).
 //
 // Each native relic's body is a free function with the RelicNativeFn signature,
-// declared in its batch header (relics_b3_24.hpp, relics_b3_25.hpp, ...). Adding
+// declared in its batch header (relics_b3_24.hpp, relics_b3_25.hpp, ...). The
+// dispatch table itself is now GENERATED from registry/relics.yaml (the
+// STS_REGISTRY_NATIVE_RELICS X-macro in the generated relic_table.hpp), so adding
 // a relic batch (B3.26 rares+shop, B3.27 boss+specials) is: one new .cpp, one new
-// header, one CMakeLists line, one table line -- no edits to the files an earlier
-// batch owns.
+// header, one CMakeLists line -- and NO edit to relic_hooks.cpp or to any file an
+// earlier batch owns. That is what makes B3.26 and B3.27 genuinely parallel.
 
 #include <cstdint>
 
@@ -25,11 +27,20 @@ namespace sts::engine {
 // One native relic's hook body. `slot` is the responding relic's live slot
 // (counter mutation writes here); the body inspects `hook` and returns without
 // queuing anything for the hooks it does not answer.
-using RelicNativeFn = void (*)(CombatState& s, RelicHook hook, RelicSlot& slot,
-                               const RelicHookContext& ctx) noexcept;
+//
+// RelicNativeSig is the FUNCTION type (RelicNativeFn is a pointer to it); the
+// generated dispatch table declares each handler as `extern RelicNativeSig fn;`,
+// which both spells the declaration once and pins every native body to exactly
+// this signature (a mismatched definition mangles differently -> link error).
+using RelicNativeSig = void(CombatState& s, RelicHook hook, RelicSlot& slot,
+                            const RelicHookContext& ctx) noexcept;
+using RelicNativeFn = RelicNativeSig*;
 
-// The dispatch table (relic_hooks.cpp): the native body for `id`, or nullptr for
-// a relic whose combat body is DEFERRED / an unrecognized id.
+// The dispatch table (relic_hooks.cpp, generated from registry/relics.yaml): the
+// native body for `id`, or nullptr for a non-native / unrecognized id. A native
+// relic whose combat body is DEFERRED maps to its explicit empty body (defined in
+// the batch TU that registered it), not to nullptr -- see the
+// STS_REGISTRY_NATIVE_RELICS expansion in relic_hooks.cpp.
 [[nodiscard]] RelicNativeFn relic_native_fn(RelicId id) noexcept;
 
 // Heal the player by `n`, clamped to max HP (HealAction semantics). No HEAL opcode

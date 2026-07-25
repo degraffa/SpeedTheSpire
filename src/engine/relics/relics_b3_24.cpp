@@ -152,4 +152,71 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
     }
 }
 
+// --- DEFERRED combat bodies --------------------------------------------------
+//
+// These six B3.24 commons are registered `native: true` with their hook
+// inventory (so the row, the pool accounting and the acquisition-order wiring
+// are all in place) but have NO combat body yet: each needs something the engine
+// does not model at this point in the build order. They are DELIBERATELY EMPTY
+// definitions, not omissions.
+//
+// Why a definition at all: the dispatch table is generated from
+// registry/relics.yaml (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp)
+// and odr-uses a handler for every `native: true` row, so a relic whose body
+// nobody wrote is an UNDEFINED REFERENCE at link time -- never a silent no-op.
+// Deferral is therefore a decision that must be written down here, with its
+// reason, instead of being indistinguishable from an oversight. Behaviour is
+// identical to the old hand-written `case ...: default: return nullptr;` group:
+// dispatch_native_relic_hook either skipped a null pointer or now calls a body
+// that does nothing. Filling one in later is a local edit -- no table to touch.
+//
+// (BRONZE_SCALES / ODDLY_SMOOTH_STONE were un-deferred by the potion-support-
+// powers follow-up: Thorns/Dexterity are registered, so both became DATA
+// at_battle_start APPLY_POWER relics and never route here at all.)
+
+// Akabeko.atBattleStart (Akabeko.java:31-35) -- addToTop ApplyPowerAction(
+// VigorPower 8). DEFERRED: no Vigor row in registry/powers.yaml yet (B3.4 owns
+// it), so the effect is unrepresentable.
+void relic_native_akabeko(CombatState& /*s*/, RelicHook /*hook*/,
+                          RelicSlot& /*slot*/,
+                          const RelicHookContext& /*ctx*/) noexcept {}
+
+// AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter == -2, gain
+// 2 energy on the first turn; onEnterRestRoom (:77-80) arms it. DEFERRED: the
+// armed flag is cross-ROOM state owned by the run layer, not CombatState.
+void relic_native_ancient_tea_set(CombatState& /*s*/, RelicHook /*hook*/,
+                                  RelicSlot& /*slot*/,
+                                  const RelicHookContext& /*ctx*/) noexcept {}
+
+// ArtOfWar.onUseCard / atTurnStart (ArtOfWar.java:76-83, 64-74) -- +1 energy at
+// turn start if no ATTACK was played last turn. DEFERRED: needs two independent
+// flags (firstTurn + gainEnergyNext), i.e. multi-bit per-relic state beyond the
+// single RelicSlot.counter.
+void relic_native_art_of_war(CombatState& /*s*/, RelicHook /*hook*/,
+                             RelicSlot& /*slot*/,
+                             const RelicHookContext& /*ctx*/) noexcept {}
+
+// Boot.onAttackToChangeDamage (Boot.java:30-38) -- if owner != null and the type
+// is neither HP_LOSS nor THORNS and 0 < dmg < 5, return 5. DEFERRED: this is a
+// DAMAGE-pipeline modifier, and the pipeline (interp.cpp op_damage) is
+// float-exact and frozen; it is not a hook-queue effect.
+void relic_native_boot(CombatState& /*s*/, RelicHook /*hook*/,
+                       RelicSlot& /*slot*/,
+                       const RelicHookContext& /*ctx*/) noexcept {}
+
+// PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an ELITE
+// room, set every monster's HP to 75%. DEFERRED: needs room-type context (absent
+// from CombatState) plus a monster-HP scaling opcode.
+void relic_native_preserved_insect(CombatState& /*s*/, RelicHook /*hook*/,
+                                   RelicSlot& /*slot*/,
+                                   const RelicHookContext& /*ctx*/) noexcept {}
+
+// Toy Ornithopter -- heal 5 on potion use. NOT deferred for lack of modelling:
+// it is dispatched on the RunState-owned potion route in run_advance (B4.4), not
+// from a CombatState-only relic hook, so this combat-side entry stays empty by
+// design.
+void relic_native_toy_ornithopter(CombatState& /*s*/, RelicHook /*hook*/,
+                                  RelicSlot& /*slot*/,
+                                  const RelicHookContext& /*ctx*/) noexcept {}
+
 }  // namespace sts::engine
