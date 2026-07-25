@@ -602,6 +602,28 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **an out-of-range hand slot is now a hard generation failure**
+  in `tools/fixture_gen/gen_combat_fixtures.cpp`, the twin of the affordability
+  abort added the day before and the mechanism behind the fixt16 correction
+  recorded below. A `Play(n)` whose slot is outside the current hand aborts
+  generation, naming the fixture, the action index, the slot and the hand size,
+  and writes nothing.
+  Worth stating why this needed a check at all, because it is *not* the fixt13
+  case. An unaffordable play produced a state the game cannot reach, and the
+  `advance()` legality guard eventually contradicted it. An out-of-range play
+  produces a state the game reaches perfectly well — `queue_card_play` refuses
+  the index, `advance()` no-ops the action, the reference simulator mirrors that
+  no-op, and the trace is **correct**. The zero-diff check therefore cannot ever
+  fire on one: both implementations agree, accurately, that nothing happened.
+  What is wrong is not the trace but the fixture's *claim* — its name, and the
+  coverage table's row — and no amount of differential testing looks at those.
+  The only place the defect is visible is authoring time, which is where the
+  check now lives.
+  Safe to add because the corpus has exactly one violator and it was fixed
+  first: generation reports **20/20** with the check in place, and every one of
+  the 20 traces is byte-identical to before it. Demonstrated by reintroducing
+  the old fixt16 script, observing the abort (exit 3, no trace written), and
+  reverting.
 - 2026-07-25 — **a second frozen Stage A golden vector was corrected** — again
   beyond the zero-diff-in-meaning regeneration conventions §5 sanctions, so it
   is recorded here rather than only in a task Log.

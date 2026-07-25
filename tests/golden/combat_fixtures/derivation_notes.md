@@ -29,6 +29,12 @@ Java **without** re-deriving the RNG.
   a discount, and energy never goes negative (`EnergyPanel.useEnergy` clamps at
   0, EnergyPanel.java:71-74). **The generator enforces this at generation time**
   and aborts on a script that overspends; see the fixt13 note below.
+- **A `Play` must name a slot that exists.** `queue_card_play` refuses an index
+  past the hand and `advance()` no-ops the action, so an out-of-range slot is
+  invisible to the zero-diff check — the reference simulator does nothing too,
+  and the two agree perfectly about a fixture that stopped doing what its name
+  says. The generator therefore **aborts generation** on one, naming the fixture,
+  the action index, the slot and the hand size; see the fixt16 note below.
 - **End of turn discards the hand.** `DiscardAtEndOfTurnAction` moves every
   ordinary (non-ethereal, non-Retain) hand card to the discard pile before the
   monster acts, so the hand does **not** persist across turns — each turn plays

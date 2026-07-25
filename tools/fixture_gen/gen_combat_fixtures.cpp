@@ -39,6 +39,11 @@
 //       the abort in play_card. Re-derived from the Java here, not asked of the
 //       engine's legal_actions(), for the reason in the constraint above: an
 //       oracle that borrows the predicate under test cannot contradict it.
+//   * Playable SLOT. A Play naming an index outside the current hand is also a
+//       hard generation failure (the second abort in play_card), for a related
+//       but distinct reason: the engine no-ops such an action and so would this
+//       simulator, so the two agree at zero diffs on a fixture that has quietly
+//       stopped doing what its name says.
 //   * Damage pipeline (DamageInfo.applyPowers, design doc §5.5): float accumulate,
 //       floor ONCE at end. Player attack into monster = floor(base * 1.5^[Vuln]).
 //       Monster attack into player = base + monsterStrength (player carries no
@@ -408,10 +413,49 @@ struct RefSim {
         // pumps a COMBAT_OVER state to an immediate no-op). Fixtures never script
         // past the killing action, so this only guards --dump exploration.
         if (phase == CombatPhase::COMBAT_OVER) return;
-        // Out-of-range hand index: queue_card_play returns false and the pump does
-        // nothing (card_play.cpp) -- mirror that no-op instead of reading past the
-        // hand (a mis-scripted index must be caught by the diff, not by UB here).
-        if (hand_index < 0 || hand_index >= static_cast<int>(hand.size())) return;
+        // AN OUT-OF-RANGE HAND SLOT IS A HARD STOP, NOT A NO-OP.
+        //
+        // This is the affordability rule's twin, and it is here for a subtler
+        // version of the same reason. queue_card_play refuses an index past the
+        // hand (`hand_index >= s.hand_count`, card_play.cpp) and advance() turns
+        // the action into a documented no-op, so mirroring that no-op here does
+        // produce a trace the engine agrees with -- perfectly, at zero diffs.
+        // That agreement is the trap: BOTH implementations correctly do nothing,
+        // so the cross-check cannot distinguish "this script's last action was
+        // deliberately inert" from "this script no longer does what it says".
+        // The fixture keeps its name, its coverage claim and its green test while
+        // silently exercising none of it.
+        //
+        // (That is exactly what happened to fixt16_r29_monster_death, whose final
+        // Play named slot 3 of a three-card hand: the fight stopped mid-combat
+        // with the monster on 17/43 and the corpus went on claiming monster-death
+        // coverage. The drift was mechanical -- the scripts predate the
+        // end-of-turn hand discard, so every turn-2 slot came to name a different
+        // card -- which is why the failure has to be raised at authoring time,
+        // when --dump can still show what the hand really holds.)
+        //
+        // Deliberately inert actions are not a thing this corpus needs; if one
+        // ever is, it should be spelled with its own verb rather than smuggled in
+        // as an index typo.
+        if (hand_index < 0 || hand_index >= static_cast<int>(hand.size())) {
+            std::fprintf(stderr,
+                "FIXTURE BUG: %s action %d plays hand[%d], but the hand holds %d "
+                "card(s) at that point.\n"
+                "  queue_card_play refuses an index past the hand and advance() "
+                "no-ops the action, so this play does NOTHING -- and the reference "
+                "simulator agreeing that it does nothing is why the zero-diff check "
+                "would not catch it. The fixture would keep asserting whatever its "
+                "name and the coverage table claim.\n"
+                "  Re-author the script against the LIVE hand: run "
+                "'gen_combat_fixtures --dump %s', which prints the hand after every "
+                "action. Remember that a play shifts later cards down, that a draw "
+                "appends to the end, and that the end-of-turn discard empties the "
+                "hand entirely -- turn 2 is dealt a fresh five. No trace was "
+                "written.\n",
+                fixture.c_str(), step, hand_index, static_cast<int>(hand.size()),
+                fixture.c_str());
+            std::exit(3);
+        }
         const int pool = hand[static_cast<size_t>(hand_index)];
         const CardId id = pool_card_id(pool);
         const int cost = pool_cost(pool);
@@ -662,16 +706,18 @@ void run_dump(const Fixture& f, const std::vector<SeedData>& all) {
     int idx = 0;
     for (const ScriptAction& a : f.actions) {
         if (a.verb == ActionVerb::PLAY_CARD) {
-            // Bounds-check before naming the card: play_card treats an
-            // out-of-range index as the same no-op the engine's queue_card_play
-            // does, but this line runs FIRST and used to index the hand vector
-            // unconditionally -- so a mis-scripted index read past the end just
-            // to print a label. Say so instead; a script that names an empty slot
-            // is doing nothing, and the dump is where that should be visible.
+            // Bounds-check before naming the card: this line runs BEFORE
+            // play_card and used to index the hand vector unconditionally, so a
+            // mis-scripted index read past the end just to print a label. Print
+            // the slot's status instead. play_card aborts on an out-of-range
+            // index, so this label is the last thing the dump prints -- which is
+            // the point: --dump is the tool you reach for to find out WHY
+            // generation refused the script, and it shows the offending slot next
+            // to the hand that does not contain it.
             const bool in_hand = static_cast<size_t>(a.hand_index) < g.hand.size();
             std::printf("  -> action %d PLAY hand[%d]=%s\n", idx, a.hand_index,
                         in_hand ? pool_short(g.hand[a.hand_index])
-                                : "<OUT OF RANGE -- no-op>");
+                                : "<OUT OF RANGE -- generation aborts>");
             g.play_card(a.hand_index, a.target, f.name, idx);
         } else {
             std::printf("  -> action %d END_TURN\n", idx);
