@@ -36,19 +36,28 @@ provenance). [docs/stage-a-design.md](docs/stage-a-design.md) and
   source), `tools/registry_gen/` (PyYAML codegen), `tools/oracle_bridge/`
   (vendored fork source, `PROTOCOL.md`, `driver/`, `translator/`),
   `tools/diff_harness/`, `tools/fixture_gen/`.
-- **WSL-call gotcha (bit us repeatedly):** the harness's Git-Bash layer mangles
-  `$VAR` and bare `/mnt/...` args forwarded to `wsl`. Run multi-line WSL work
-  from a script file: `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash
-  /mnt/c/.../script.sh`. For engine builds/tests:
-  `MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -lc 'cd
-  /mnt/d/STS_BG_Mod/SpeedTheSpire && cmake --preset debug && cmake --build
-  --preset debug && ctest --preset debug'` (also `asan`; the `release` preset
-  has no test-preset — it builds tests into `build/release`, run them with
-  `ctest --test-dir build/release`). A cold WSL start can fail with
-  `0x800705aa` under memory pressure — retry after freeing RAM.
+- **Calling WSL from the Windows host — use `tools/wsl_run.sh`, never hand-roll
+  the `wsl` line:**
+  ```bash
+  tools/wsl_run.sh debug asan release   # configure + build + test each, one summary
+  tools/wsl_run.sh --script tools/bench_ab.sh A B   # run a script inside WSL
+  ```
+  (`tools\wsl_run.cmd` is the same entry point for cmd/PowerShell callers; both
+  work unchanged from inside WSL.) **Why it exists:** the harness's Git-Bash
+  layer mangles `$VAR` and bare `/mnt/...` arguments forwarded to `wsl` — `wsl
+  -d Ubuntu-2404 -- bash -c 'printf "[%s]" "$1"' _ x` prints `[]`, because the
+  boundary substitutes `$1` before WSL's bash sees it. A hand-rolled invocation
+  therefore loses shell variables silently; an orchestrator loop over the three
+  presets returned three empty results exactly that way. The helper forwards a
+  fixed argv, keeps every line of shell code in a file on the WSL side, and
+  refuses an argument containing `$` instead of running a mangled command. Full
+  write-up in
+  [conventions §6](docs/conventions.md#calling-wsl-from-the-windows-host--use-toolswsl_runsh).
+  A cold WSL start can fail with `0x800705aa` under memory pressure — retry
+  after freeing RAM.
 - **Two more WSL/`D:` traps that have each cost an agent real time** — full
   symptom/cause/rule write-ups in
-  [conventions §6](docs/conventions.md#calling-wsl-from-the-windows-host-hard-won--read-before-scripting-it):
+  [conventions §6](docs/conventions.md#calling-wsl-from-the-windows-host--use-toolswsl_runsh):
   1. `git` run **inside** WSL against a Windows-created worktree fails with
      `fatal: not a git repository: …/.git/worktrees/<name>` — the worktree's
      `.git` file holds a `D:/…` path WSL cannot resolve. Run git from Windows;

@@ -213,21 +213,44 @@ error` so this fails loudly instead; do not remove it. This was found by
 accident, not by design — assume any *new* test target is not running until you
 have seen its name in `ctest -N`.
 
-### Calling WSL from the Windows host (hard-won — read before scripting it)
+### Calling WSL from the Windows host — use `tools/wsl_run.sh`
 
-The harness's Git-Bash layer mangles `$VAR` and bare `/mnt/...` arguments
-forwarded to `wsl`. **Run multi-line WSL work from a script file:**
-
-```bash
-MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash /mnt/c/.../script.sh
-```
-
-For a one-shot build/test:
+**ELIMINATED 2026-07-25: `tools/wsl_run.sh` (+ `tools/wsl_run.cmd` for
+cmd/PowerShell callers) is now the sanctioned form. It crosses the boundary
+once, correctly, and refuses arguments it cannot carry; hand-rolled `wsl`
+invocations are no longer the documented workaround.**
 
 ```bash
-MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -lc 'cd /mnt/d/STS_BG_Mod/SpeedTheSpire \
-  && cmake --preset debug && cmake --build --preset debug && ctest --preset debug'
+tools/wsl_run.sh debug                  # configure + build + test one preset
+tools/wsl_run.sh debug asan release     # all three, one PASS/FAIL summary at the end
+tools/wsl_run.sh release -DSTS_BUILD_BENCHMARKS=ON
+tools/wsl_run.sh --script tools/bench_ab.sh A B   # run a script file inside WSL
 ```
+
+The same command line works from Git-Bash, from cmd/PowerShell (via the
+`.cmd`), and from inside WSL. Each worktree runs its own copy against its own
+tree, so there is no path to edit.
+
+**Why it exists — the trap it removes.** The harness's Git-Bash layer mangles
+`$VAR` and bare `/mnt/...` arguments forwarded to `wsl`. The `$VAR` half is the
+dangerous one, because it fails *silently*:
+
+```bash
+MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -c 'printf "[%s]" "$1"' _ x
+# prints []  -- the boundary substituted $1 before WSL's bash ever saw the string
+```
+
+An orchestrator loop over `for p in debug asan release` lost its variable that
+way and returned three empty results that looked like runs. The old workaround
+("run multi-line work from a script file") was correct and was still hand-rolled
+at every call site, which is why the trap kept firing — §7.
+
+`wsl_run.sh` never interpolates across the boundary: it forwards a fixed argv,
+re-executes itself inside WSL where all the shell code lives, sets
+`MSYS_NO_PATHCONV=1` itself, derives its own `/mnt/<drive>/...` path from its
+location, and **exits 2 on any argument containing `$`** rather than run a
+command that has quietly lost a word. It also always builds before it tests, so
+the `_NOT_BUILT` trap above cannot be reached through it.
 
 A cold WSL start can fail with `0x800705aa` under memory pressure — retry
 after freeing RAM.
