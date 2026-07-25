@@ -83,6 +83,27 @@ work is Phase B3 (combat content) and Phase B4 (run layer).
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md); **do not restate it here.**
 
+**The build is no longer WSL-only.** Six presets: `debug`/`asan`/`release`
+(WSL, GCC) and `win-debug`/`win-asan`/`win-release` (Windows, clang-cl + Ninja).
+They are byte-identical — the 20 fixture traces hash the same under GCC, Clang
+and clang-cl, including the LTO release build — so either host is authoritative.
+WSL is **optional, including for sanitizers**: ASan *and* UBSan both work under
+clang-cl. `cl.exe` is not a substitute — it has no `-Wconversion` /
+`-Wsign-conversion` at any level, and it silently ignores `/fsanitize=undefined`
+(warning D9002, exit 0), producing a build that looks instrumented but is not.
+Two things to know before touching the build: the floating-point contract is
+pinned in `cmake/StsFloatingPoint.cmake`, and **adding `-march=native` or any
+fast-math flag would change damage numbers** — baseline x86-64 having no FMA
+instruction is the only reason contraction was never biting. And
+`tools/wsl_run.sh` now draws its build `-j` from a machine-wide token pool, so
+concurrent agents cannot oversubscribe the box. conventions §6 carries the
+Windows traps and the compiler-cache setup.
+
+**Combat start is not step 6** — [stage-a-design.md](docs/stage-a-design.md)
+§5.2a. Three separate divergences were fixed from that one documentation gap,
+none of them caught by a failing test. Read it before assuming turn 1 and turn N
+run the same sequence.
+
 The current test count is **not** restated here, or anywhere outside a landed
 task's own Log — re-derive it with `ctest -N | tail -1`.
 `tools/check_stale_counts.sh` fails the build if a committed file starts
