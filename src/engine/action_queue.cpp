@@ -268,30 +268,32 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
         const RelicView rv = player_relics(s);
         dispatch_relics_at_turn_start_post_draw(s, rv.relics, rv.count);
     }
-    // The POWER phase is a known asymmetry, deliberately left UNGATED here: the
-    // combat-start block calls applyStartOfTurnPowers (AbstractRoom.java:256) but
-    // has no applyStartOfTurnPostDrawPowers line, so strictly this call belongs to
-    // step 6 alone (GameActionManager.java:363). It long predates the TurnStart
-    // split above.
+    // The POWER phase, by contrast, is kSubsequentTurn ONLY. The two halves of
+    // "post draw" are NOT a pair the game keeps together: the combat-start block
+    // carries the relic line (AbstractRoom.java:254) and calls
+    // applyStartOfTurnPowers (:256), but it has no applyStartOfTurnPostDrawPowers
+    // line at all. GameActionManager.java:363 -- inside the step-6 branch, right
+    // after the post-draw relics at :362 -- is the whole game's only call to it
+    // (grep-confirmed: two occurrences in the reference tree, the other being the
+    // definition, AbstractCreature.java:541-545).
     //
-    // THE HOOK IS NO LONGER UNBOUND. This comment used to justify the asymmetry
-    // by "no registered power binds the post-draw hook"; that stopped being true
-    // when the red rares landed. BrutalityPower.atStartOfTurnPostDraw
-    // (BrutalityPower.java:34-39) and DemonFormPower.atStartOfTurnPostDraw
-    // (DemonFormPower.java:32-36) both bind it, so the call now has live bodies
-    // behind it on this side of the gate.
+    // Running it at combat start gave every power that binds
+    // atStartOfTurnPostDraw and is present before the player acts one free
+    // trigger -- exactly the shape of the end-of-round pass gated at the top of
+    // this function. BrutalityPower.atStartOfTurnPostDraw (BrutalityPower.java:
+    // 34-39) and DemonFormPower.atStartOfTurnPostDraw (DemonFormPower.java:32-36)
+    // both bind the hook, so turn 1 would have run one extra draw plus HP loss,
+    // or one extra Strength gain, that AbstractRoom's turn-1 block does not
+    // contain.
     //
-    // It remains UNOBSERVABLE, which is why it is still not gated here: both
-    // powers are applied only by playing their card, so neither can be on the
-    // player when begin_first_turn runs -- nothing in the pre-battle pass or the
-    // relic mirror grants either one. The divergence would become real the moment
-    // something does (a relic or run-layer carry-over), and at that point turn 1
-    // would silently run one extra Strength gain, or one extra draw plus HP loss,
-    // that AbstractRoom's turn-1 block does not contain. Gating it to
-    // kSubsequentTurn is the faithful reading of the Java and is inert today, but
-    // it is a behaviour change that wants its own test rather than a silent edit
-    // folded into an integration -- so it is recorded here, accurately, instead.
-    dispatch_at_start_of_turn_post_draw(s);
+    // Inert for all landed content -- both powers are applied only by playing
+    // their card, so neither can be on the player when begin_first_turn runs, and
+    // nothing in the pre-battle pass or the relic mirror grants either -- which is
+    // why no fixture moves. combat_start_test constructs the state directly to
+    // make the divergence observable anyway.
+    if (when == TurnStart::kSubsequentTurn) {
+        dispatch_at_start_of_turn_post_draw(s);
+    }
     // EnableEndTurnButtonAction (line 364) is modeled by step 7 handing control
     // back to the player once the queued DrawCard has drained; no separate item.
 }

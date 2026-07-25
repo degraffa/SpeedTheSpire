@@ -30,6 +30,27 @@
 // (:74-76); MonsterGroup.applyEndOfTurnPowers (MonsterGroup.java:290-304);
 // AbstractCreature.applyEndOfTurnTriggers (AbstractCreature.java:547-553);
 // MetallicizePower.java:19-42; Lagavulin.java:60-66,102-114,116-174,212-227.
+//
+// THE SECOND DEFECT THIS PINS, same shape, other end of the sequence. The
+// combat-start block and step 6 also disagree about the post-draw POWER pass.
+// AbstractRoom's turn-1 block calls applyStartOfTurnRelics (:253),
+// applyStartOfTurnPostDrawRelics (:254), applyStartOfTurnCards (:255),
+// applyStartOfTurnPowers (:256) and applyStartOfTurnOrbs (:257) -- and there is
+// NO applyStartOfTurnPostDrawPowers line among them. The game's only call to it
+// is GameActionManager.java:363, in the step-6 branch (grep over the whole
+// reference tree: two occurrences, the other being the definition,
+// AbstractCreature.applyStartOfTurnPostDrawPowers, AbstractCreature.java:
+// 541-545). Note that the relic and power halves are NOT a pair: the relic half
+// really is on both sides, which is why only the power half is gated.
+//
+// THE REPRODUCER IS NOT REACHABLE THROUGH THE RUN LAYER, and that is precisely
+// why the divergence survived. The only two powers that bind
+// atStartOfTurnPostDraw are Brutality (BrutalityPower.java:34-39 -- draw amount,
+// then lose that much HP) and Demon Form (DemonFormPower.java:32-36 -- gain
+// amount Strength), and both are applied only by playing their card, so neither
+// can be on the player when the turn-1 block runs. The two tests below therefore
+// CONSTRUCT the state with the power already present, which is the only way to
+// observe it, and count the triggers across turns 1, 2 and 3.
 
 #include "sts/engine/action_queue.hpp"
 
@@ -48,6 +69,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/powers.hpp"
 #include "sts/engine/run_state.hpp"  // kMapCols
 #include "sts/engine/types.hpp"
 
@@ -145,6 +167,115 @@ TEST(CombatStart, LagavulinArmourTicksOncePerCompletedRound) {
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.turn, 3);
     EXPECT_EQ(rc.combat.monsters[0].block, static_cast<int16_t>(3 * kArmor));
+}
+
+// =============================================================================
+// The regression test: a post-draw start-of-turn PLAYER power at combat start
+// =============================================================================
+
+// A combat assembled directly in the state, so a power can already be on the
+// player when begin_first_turn runs. The run layer cannot produce that for
+// either post-draw power (both need their card played), so this is the only way
+// the extra dispatch is observable at all.
+CombatState make_constructed_combat() {
+    CombatState s{};
+    s.player_hp = 70;
+    s.player_max_hp = 80;
+    s.monster_count = 1;
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[0].hp = 100;
+    s.monsters[0].max_hp = 100;
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    // Deep enough that no turn below reshuffles: 3 turns x (5 + at most 1) < 20.
+    for (int i = 0; i < 20; ++i) {
+        const CardDef* def = card_def(CardId::STRIKE);
+        EXPECT_NE(def, nullptr);
+        const auto pi = static_cast<CardPoolIndex>(i);
+        s.card_pool[pi].card_id = static_cast<uint16_t>(CardId::STRIKE);
+        s.card_pool[pi].cost_now = card_cost(*def, 0);
+        s.card_pool[pi].flags = card_flags(*def, 0);
+        s.draw[s.draw_count++] = pi;
+    }
+    return s;
+}
+
+void give_player_power(CombatState& s, PowerId id, int16_t amount) {
+    s.player_powers[s.player_power_count] =
+        PowerSlot{static_cast<uint16_t>(id), amount};
+    ++s.player_power_count;
+}
+
+const PowerSlot* player_power(const CombatState& s, PowerId id) {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) {
+            return &s.player_powers[i];
+        }
+    }
+    return nullptr;
+}
+
+// Close a round: the end-turn sentinel, then drain through step 6 (no monster AI,
+// so nothing else touches the player).
+void end_turn(CombatState& s) {
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, default_monster_turn);
+}
+
+// Demon Form counts its own triggers: Strength is a running total, so the stack
+// after N turns IS the number of times the post-draw pass ran. Base amount 2
+// (DemonForm.java:27).
+TEST(CombatStart, DemonFormGrantsNoStrengthOnTurnOne) {
+    CombatState s = make_constructed_combat();
+    give_player_power(s, PowerId::DEMON_FORM, 2);
+
+    begin_first_turn(s);
+
+    ASSERT_EQ(s.turn, 1);
+    ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(kStartOfTurnDrawCount));
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
+        << "the turn-1 block (AbstractRoom.java:253-257) has no "
+           "applyStartOfTurnPostDrawPowers line -- Demon Form must not have "
+           "triggered before the player has acted";
+
+    // Turn 2 is the FIRST trigger: step 6 does carry the line
+    // (GameActionManager.java:363).
+    end_turn(s);
+    ASSERT_EQ(s.turn, 2);
+    const PowerSlot* str = player_power(s, PowerId::STRENGTH);
+    ASSERT_NE(str, nullptr);
+    EXPECT_EQ(str->amount, 2) << "exactly one post-draw trigger by turn 2";
+
+    end_turn(s);
+    ASSERT_EQ(s.turn, 3);
+    ASSERT_NE(player_power(s, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 4)
+        << "one trigger per completed round thereafter";
+}
+
+// The other binder, and a different mechanism: Brutality queues DrawCardAction
+// then LoseHPAction (BrutalityPower.java:34-39), so its trigger shows in the hand
+// size and the HP, not in a power stack. Base amount 1 (Brutality.java:31).
+TEST(CombatStart, BrutalityNeitherDrawsNorCostsHpOnTurnOne) {
+    CombatState s = make_constructed_combat();
+    give_player_power(s, PowerId::BRUTALITY, 1);
+    const int16_t hp_before = s.player_hp;
+
+    begin_first_turn(s);
+
+    ASSERT_EQ(s.turn, 1);
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(kStartOfTurnDrawCount))
+        << "turn 1 draws gameHandSize and nothing more "
+           "(AbstractRoom.java:242, :253-257)";
+    EXPECT_EQ(s.player_hp, hp_before)
+        << "no post-draw power pass on turn 1 means no HP_LOSS on turn 1";
+
+    end_turn(s);
+    ASSERT_EQ(s.turn, 2);
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(kStartOfTurnDrawCount + 1))
+        << "step 6's post-draw pass draws Brutality's extra card";
+    EXPECT_EQ(s.player_hp, static_cast<int16_t>(hp_before - 1))
+        << "and charges exactly one HP for it, once";
 }
 
 // =============================================================================
