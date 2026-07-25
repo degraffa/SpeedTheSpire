@@ -63,6 +63,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| **Combat start runs an end-of-round pass the game never runs** | B3.19 | **IN PROGRESS — `fix-combat-start`** | `combat_begin` (`advance.cpp:156-159`) and `enter_combat` (`run_advance.cpp:351-354`) prime turn 1 with `turn_has_ended = 1` and pump, routing through `start_of_turn` → `dispatch_at_end_of_round` before the player's first turn. The game cannot reach that branch: `AbstractRoom.java:236-243` sets the flag then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`). **Measured**: a sleeping Lagavulin has 16 block on turn 1 instead of 8. A fix must touch **both** entry points |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
@@ -74,7 +75,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Enemy self-escape + stolen-gold return rules | B4.4 | B3.15 | B4.4 names B3.15 as the explicit owner |
 | Smoke Bomb combat-escape potion body | B3.23 | B3.15 | B4.4 landed the run-level half (rejects bosses, no-reward proceed); the combat-escape path is still B3.15's |
 | Pantograph atBattleStart boss heal 25 | B3.25 | B3.15 | needs EnemyType/BOSS monster metadata; named "B3.15-B3.17", and B3.16/B3.17/B3.20 landed without it |
-| Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15, B3.16, B3.18, B3.19, B3.21, B3.22 | run-created combats with an unimplemented group cannot play out |
+| Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15, B3.16, B3.21, B3.22 | run-created combats with an unimplemented group cannot play out. **B3.18 and B3.19 discharged their share by construction** (Gremlin Nob, 3 Sentries, Lagavulin) — the gate is `monster_init_fn(id) == nullptr`, i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. The remaining owners inherit the same free discharge |
 | Odd Mushroom ×1.25 Vulnerable branch | B3.25 | B3.26 | Paper Phrog's ×1.75 twin retired at B3.25; Odd Mushroom is the rare-tier one |
 | Calipers branch of the start-of-turn block decay (loses 15 instead of zeroing) | A3.1 | B3.26 | Stage A left the branch structural (`action_queue.cpp` `has_calipers = false`); B3.26's deliverables already say "Calipers — retiring A3.1's structural branch". Barricade is the separate row above (B3.8); the third branch, Blur, is Silent-only and out of S1 scope |
 | Ice Cream — the only S1 consumer of the `EnergyManager.recharge()` SET-to-constant simplification | A4.3 | B3.26 | Stage A set energy to `kIroncladBaseEnergy` unconditionally each turn, exact only because no skeleton relic/power reaches the Ice Cream / Conserve branches (stage-a design §12, `action_queue.hpp`); B3.26's deliverables and acceptance already name it |
@@ -84,15 +85,13 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | B4.4 `[x]` | B1.6 scoped itself to "adapter + format only" and named B4.4; B4.4's Log records run-combat equivalence but no `replay` generalization |
 | Question Card / Singing Bowl / White Beast Statue (reward-screen modifiers) | B3.25 | B4.5 | rows + canSpawn gates live, effects are documented no-ops |
 | Emit `kIroncladAttackPool` in CardLibrary HashMap **library order** instead of registry-id order | B3.6 | B4.5 | documented interim deviation; a one-line `gen.py` fix once B4.5's oracle capture pins library order |
-| Card-pool removal bookkeeping storage, if the dupe loop needs it | B4.3 | B4.5 | B4.3 added no storage — design §2.5's note is "add if pools mutate" |
-| **Route card acquisition through `add_card_to_master_deck`, never a direct `rs.master_deck[]` write** | audit 2026-07-25 | B4.5 | `add_card_to_master_deck` / `remove_master_deck_card` (`run_deck.hpp`) and the generated `dispatch_relics_on_obtain_card` have **zero production callers** — the only master-deck write is the starting-deck bulk init in `run_advance.cpp`, which bypasses the door. Nothing walks through it yet because rewards do not exist, so this is correct today, **but** copying that bulk-write pattern for reward cards would silently kill every `onObtainCard` relic: Ceramic Fish (9 gold), Molten / Toxic / Frozen Egg (upgrade on obtain), Darkstone Periapt (+6 max HP). Same applies to Parasite removal via `remove_master_deck_card`. A test that obtains a card through the run layer with Ceramic Fish equipped and asserts the gold gain is the cheapest guard. |
+| **Route card acquisition through `add_card_to_master_deck`, never a direct `rs.master_deck[]` write** | audit 2026-07-25 | B4.5 | `add_card_to_master_deck` (`run_deck.hpp`) has **exactly one** production caller since B4.15 — the A10 Ascender's Bane insert, where the `onObtainCard` pass is provably empty and a named test pins that; `remove_master_deck_card` and the generated `dispatch_relics_on_obtain_card` still have **zero**, and the other master-deck write is the starting-deck bulk init in `run_advance.cpp`, which bypasses the door. No *relic* effect walks through it yet because rewards do not exist, so this is correct today, **but** copying that bulk-write pattern for reward cards would silently kill every `onObtainCard` relic: Ceramic Fish (9 gold), Molten / Toxic / Frozen Egg (upgrade on obtain), Darkstone Periapt (+6 max HP). Same applies to Parasite removal via `remove_master_deck_card`. A test that obtains a card through the run layer with Ceramic Fish equipped and asserts the gold gain is the cheapest guard. |
 | Matryoshka (chest relic) | B3.25 | B4.7 | floor≤40 canSpawn gate live, effect deferred |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
 | Eternal Feather (rest-room heal) | B3.25 | B4.9 | row live, effect deferred |
 | Translator `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets | B1.5, B4.3 | B4.10 | storage exists since B4.3; needs `events.yaml` + the canonical list order (B4.10-B4.13) |
 | ?-room `eventRng` duplicate roll | B4.4 | B4.10 | B4.4 names B4.10 as owner |
 | Translator `screen_state` content (event / reward / shop / grid / map screens) | B1.5, B4.3 | B4.5, B4.8, B4.10, B4.14 | structurally consumed today (a new/renamed key still fails loud), not mapped |
-| A6 / A10 / A14 run-setup modifiers | B4.4 | B4.15 | B4.4 landed A11 only (`potion_slot_count`); B4.15 is the "literal owner" |
 | `b14_accept2` obtain-race capture-fidelity triage | B1.3 | B5.2 | flagged explicitly by B1.3; B1.4's acceptance is unaffected |
 | Infernal-Blade-generated Blood for Blood cost model (`cost_now` only; end-of-turn reset restores 4, not the game's reduced base) | B3.6 | G7 | judged unreachable — "revisit if G7 ever hits it" |
 | Bottled trio bottling at acquisition (run-layer acquisition-choice machinery + a per-master-deck-instance innate flag) | B3.25 | UNASSIGNED — named "B4-owner" | rows + deck-content gates live so pools and B4.7 chests are complete |
@@ -111,6 +110,46 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Bit-exact oracle for the raw monsterRng monster / elite / boss lists | B3.12 | UNASSIGNED | B3.12 pinned the algorithm + determinism, not a golden list; B4.4's floor-0 triple pins stream state only. Natural home is B5.2's campaign automation |
 | `RETAIN` `CardFlag` end-of-turn sweep | B3.1 | UNASSIGNED — "first content consumer" | ETHEREAL (B3.5/B3.6) and INNATE (B3.9) discharged; no S1 Ironclad card uses Retain |
 | `gen.py` step-authoring for `SET_COST` | B3.1 | UNASSIGNED — "first card consumer" | `MAKE_CARD`'s half was discharged at B3.3; candidates are B3.8 (Corruption) and B3.27 (Snecko Eye) |
+| `lagavulin_init_awake` has no production caller | B3.19 | UNASSIGNED — Lagavulin Event owner | implemented and tested; the event that would build `Lagavulin(false)` does not exist |
+| Gremlin move-99 escape (`EscapeAction` body **and** the `deathReact`/`escapeNext` trigger, landed together) | B3.16 | UNASSIGNED — Act-2 owner | unreachable in Act 1: `escapeNext()` has no caller in the decompiled tree; the only `deathReact()` call is `BanditBear.java:131` |
+| `run_advance.cpp` file-header comment (~line 7) enumerates a stale monster roster | integration-11 | UNASSIGNED — next `run_advance.cpp` toucher | same rot as the step-(2) comment fixed in `5f96ec4`; conventions §8's "comment asserting X does not exist yet" class |
+| `a20.yaml` row 4 cites `tackleDmg = 10`, a dead `DamageInfo` | integration-11 | B4.15 follow-up | literally accurate (`SlimeBoss.java:94-96`) but `tackleDmg` is `damage.get(0)` and SlimeBoss never reads it — only `damage.get(1)` at `:137`/`:144`. `monsters.yaml` is right to omit it. Not a document conflict |
+
+## Shared namespaces — allocation now in force
+
+A conventions §7 **rule-of-two** observation, recorded here rather than inside
+any one task block because both namespaces are contended across concurrent
+worktrees: contention for them **stopped one task dead** and produced a
+**silent off-limits edit** in another. A worktree cannot see its siblings, so
+"take the next free number" is not a safe local decision — the orchestrator
+allocates first.
+
+**1. Registry ids are append-only, and gaps are legal.** The loader
+(`tools/registry_gen/stsgen/loader.py`) requires an id that is an integer,
+`>= 1`, unique and appended — it does **not** require contiguity, and no
+emitted table is a dense id-indexed array, so a gap costs nothing at runtime.
+Two gaps are live today and both are correct: `MonsterId` 14 is unallocated
+(B3.18 took 12/13, B3.19 took 15), and `PowerId::ANGER` is 33 against a
+28-row power table. **Never renumber to close a gap.** Renumbering an existing
+id is stop-the-line (conventions §5, design §4.4) and would cost a design-doc
+change-log entry plus a schema-version bump — never worth a cosmetic tidy.
+(Note the one place contiguity *is* required and is a different thing:
+`relics.yaml` `pool_order` within a tier.)
+
+**2. `MonsterIntent` values in `tools/registry_gen/stsgen/vocab.py` are a
+shared namespace and need orchestrator allocation before use.** The generator
+rejects an unknown intent, so a monster task needing a new telegraph *must*
+edit `vocab.py` — a file otherwise off-limits to content tasks. B3.19 hit
+exactly that and took the edit. Claim the number in the task brief; do not
+pick one locally.
+
+| Intent | Value | Owner |
+|---|---|---|
+| `SLEEP` | 9 | B3.19 — landed |
+| `STUN` | 10 | B3.19 — landed |
+| `DEFEND` | 11 | B3.16 |
+| `ATTACK_BUFF` | 12 | B3.21 |
+| *(reserved)* | 13–16 | B3.22 |
 
 ---
 
@@ -232,30 +271,8 @@ composition draws and then park; deferred by B4.4.
 **Log:** —
 
 - **B3.17** `[x]` Monsters: large slimes + split — monster ids 9-10 (large slimes), `PowerId::SPLIT`=22, opcodes 25-29 (`CANNOT_LOSE`/`CAN_LOSE`/`SUICIDE`/`SPAWN_MONSTER`/`SET_MOVE`); the Java-exact split framework; 441/441 ×3 · [log](stage-b-log.md#b317)
-
-### B3.18 `[ ]` ∥ Elites: Gremlin Nob + Sentries
-**Deps:** B3.12 · **Provenance:** GremlinNob.java (:67/72/92-93/133),
-Sentry.java (Artifact, Dazed insertion, alternating pattern)
-**Deliverables:** registry entries with A3/A8/A18 columns; Artifact power
-(debuff negation — a general power, lands here); Nob's skill-anger trigger.
-**Acceptance:** tier-2: Nob Anger triggers on skill plays only (A18 column
-cited); Sentry alternating moves by position; 3-Sentry spawn from B3.12.
-**Inherited:** un-park these elites — run-created combats currently consume the B3.12
-composition draws and then park; deferred by B4.4.
-**Log:** —
-
-### B3.19 `[ ]` ∥ Elite: Lagavulin
-**Deps:** B3.12 · **Provenance:** Lagavulin.java (:77/82/83; asleep/stun/
-metallicize wake logic)
-**Deliverables:** registry entry (native AI per design §4.2 budget —
-sleep-wake state machine), Metallicize power, the elite `Lagavulin(true)`
-variant flag.
-**Acceptance:** tier-2: wakes on damage or turn 3, debuff move cadence,
-A18 −2 column; asleep block gain each turn.
-**Inherited:** un-park this elite — run-created combats currently consume the B3.12
-composition draws and then park; deferred by B4.4.
-**Log:** —
-
+- **B3.18** `[x]` Elites: Gremlin Nob + Sentries — monster ids 12 GREMLIN_NOB / 13 SENTRY (both ELITE) + `PowerId::ANGER`=33; Artifact needed **no** new row (B3.2's id 4, the nullify already at the APPLY_POWER site — Sentry only grants the stack); 3 independent 32-seed × 20-turn fixtures pin the Nob's A18 history tree and the Sentry in an even and an odd slot; registering the two init fns un-parked the Gremlin Nob and 3 Sentries encounters by construction; Sentry's animation-only `damage()` is an explicit empty `on_monster_damaged` case, not a `default:`; union 641/641 ×3 · [log](stage-b-log.md#b318)
+- **B3.19** `[x]` Elite: Lagavulin — monster id 15 LAGAVULIN (ELITE), native sleep/wake machine; **no new power id** (Metallicize was already id 5 — now the first MONSTER-owned power to bind an end-of-turn hook, and the generator's duplicate-name check caught the re-add); `MonsterIntent` SLEEP=9 / STUN=10; `on_monster_damaged` gains `hp_lost` so absorbed damage cannot wake it; armour stands at 8/16/24 because monster block never decays in this build; un-parked the Lagavulin encounter by construction; union 641/641 ×3 · [log](stage-b-log.md#b319)
 - **B3.20** `[x]` Boss: Slime Boss — monster id 11 + `MonsterIntent::STRONG_DEBUFF`=8; fixed 150 HP, Goop→Prep→Slam cycle, exact-half split chaining into B3.17's large slimes; 521/521 debug + asan · [log](stage-b-log.md#b320)
 
 ### B3.21 `[ ]` ∥ Boss: The Guardian
@@ -334,30 +351,50 @@ B4.6; once B3.26 **and** this task land, un-defer the translator's all-tier
 - **B4.4** `[x]` Run-level advance + room lifecycle — `RunController` + `run_begin` / `next_room_transition` (floor++ then reseed, trap 7); NEOW/MAP/COMBAT/REWARD/RUN_OVER phases in one heterogeneous batch; USE_POTION at both layers; combat spawn + fold-back; +19 tests, 387/387 ×3 · [log](stage-b-log.md#b44)
 
 ### B4.5 `[ ]` Combat rewards
-**Deps:** B4.4, B3.3-B3.11 (full card pool for oracle acceptance) · **Spec:**
+**Deps:** B4.4, B3.3-B3.9 (the RED reward pool) · **Spec:**
 design §5.6 · **Provenance:** AbstractRoom.java:291-296, 314-325, 580-617,
 108-109, 148-177; AbstractDungeon.java:1423-1498, 1597-1624
+**Deps note** (amended 2026-07-25 from a read-only scout; every citation
+verified — see the change log): **B3.10 and B3.11 removed.** The combat
+card-reward pool is **RED-only** (`Ironclad.getCardPool` →
+`CardLibrary.addRedCards`, `CardLibrary.java:1157`); colorless reaches the
+player through the shop and Neow, and the only caller of
+`getColorlessRewardCards()` is `RewardItem(CardColor)` →
+`SensoryStone.java:121`, an Act-3 event. **B3.8 stays and is promoted from a
+coverage dep to a hard mechanical blocker:** `cards.yaml` has **zero RARE
+rows**, so `rareCardPool` would be empty and `getCard(RARE)` would index an
+empty list — and RARE is reachable as soon as pity reaches 2.
 **Deliverables:** gold rolls (boss=miscRng ±5 ×0.75@A13, elite/normal=
 treasureRng — trap 18), potion drop (40 % + blizzardPotionMod ratchet, trap
-family), card rewards (3 cards, `cardRng.random(99)+cardBlizzRandomizer` vs
-3/37/60, pity reset/growth, no-duplicate re-roll — read the dupe loop at
-task, upgrade chance 0 in Act 1), colorless handling, reward-screen CHOOSE
-flow incl. skip.
+family), card rewards (3 cards, `cardRng.random(99)+cardBlizzRandomizer`
+against thresholds **`< 3` / `< 40`** — widths 3/37/60, `AbstractRoom.java:158,
+167`, confirmed at `AbstractDungeon.java:1606-1615`; coding the widths as
+thresholds is wrong by 3 points on every reward — pity reset/growth,
+no-duplicate re-roll — read the dupe loop at task, upgrade chance 0 in Act 1
+— **the `randomBoolean` draw still happens** (`Random.java:79-82`); only
+`c.rarity != RARE` short-circuits it, `AbstractDungeon.java:1470`), **confirm
+colorless is unreachable from a combat reward** with the citation above
+(re-scoped from "colorless handling"), reward-screen CHOOSE flow incl. skip.
 **Acceptance:** tier-2: pity dynamics across scripted reward sequences match
 hand-derivation; stream attribution named tests (trap 13, 18); oracle
-spot-diff: ≥ 3 bridge runs' reward screens zero-diff through the differ.
+spot-diff: ≥ 3 bridge runs' reward screens zero-diff through the differ —
+where "reward screens zero-diff" means the **post-claim `RunState`** (gold,
+potions, deck, pity, counters). **No new storage and no schema bump.**
+Diffing the *offer* would need tools-side differ work or `RunState` growth
+(an unplanned `SCHEMA_VERSION` bump is stop-the-line, conventions §5) and is
+explicitly **not** what this acceptance asks for.
 **Inherited:** Question Card / Singing Bowl / White Beast Statue (reward-screen
-modifiers) — deferred by B3.25. Card-pool removal bookkeeping storage, *if* the dupe
-loop needs it — deferred by B4.3. Pin the CardLibrary HashMap **library order** for
+modifiers) — deferred by B3.25. Pin the CardLibrary HashMap **library order** for
 `kIroncladAttackPool` from an oracle capture (a one-line `gen.py` fix; registry-id
 order is a documented interim deviation) — deferred by B3.6. Reward-screen
 `screen_state` translation — deferred by B1.5/B4.3. **Take a card into the deck
 only through `add_card_to_master_deck`** (`run_deck.hpp`), never by writing
 `rs.master_deck[]` directly the way the starting-deck init in `run_advance.cpp`
 does — that door fires the `onObtainCard` relics (Ceramic Fish, the three eggs,
-Darkstone Periapt) and currently has no production caller at all, so a direct
-write would silently disable all of them; use `remove_master_deck_card` for the
-Parasite side — flagged by the hook audit.
+Darkstone Periapt), and its only production caller today is B4.15's A10 curse
+(where the pass is provably empty), so a direct write for reward cards would
+silently disable all of them; use `remove_master_deck_card` for the Parasite
+side — flagged by the hook audit.
 **Log:** —
 
 - **B4.6** `[x]` Relic pools + acquisition — `relic_pools.hpp/.cpp`: 5 unconditional relicRng shuffles (JDK-LCG route), front/end pop, 50/33/17 tier roll, canSpawn re-check + Circlet fallback, acquisition in trap-8 order with pickup effects; 3-seed live-oracle pool + `(s0,s1,counter)` match; 428/428 ×3 · [log](stage-b-log.md#b46)
@@ -469,22 +506,7 @@ hand-derivation draw-for-draw; oracle spot-diff of the Neow screen across
 **Inherited:** Neow `screen_state` translation — deferred by B1.5/B4.3.
 **Log:** —
 
-### B4.15 `[ ]` A20 run-setup modifiers + negative freezes
-**Deps:** B4.3 · **Spec:** design §6 · **Provenance:**
-AbstractDungeon.java:2582-2600; AbstractPlayer.java:211-213;
-Ironclad.java:113-115, 168-170
-**Deliverables:** `a20.yaml` complete (every §6 row, numbers filled from the
-cited lines read in this task); run-setup application order at `run_begin`
-(A6 90 % HP, A10 curse, A11 slot, A14 −5 — exact order per
-`dungeonTransitionSetup`); tier-2 negative tests pinning the §6 "no such
-modifier" list (campfire heal, potion chance, normal/elite gold, rarity,
-A12-in-Act-1).
-**Acceptance:** tier-2 per row incl. the negatives; a20 manifest complete vs
-design §6's table (every row implemented or explicitly N/A-for-S1 with
-reason).
-**Inherited:** A6 / A10 / A14 run-setup modifiers — B4.4 landed A11 only
-(`potion_slot_count`) and names this task their literal owner.
-**Log:** —
+- **B4.15** `[x]` A20 run-setup modifiers + negative freezes — `registry/a20.yaml` populated to one row per ascension level 1..20 (`id == level`), each IMPLEMENTED or N/A-for-S1-with-reason, machine-checked by `A20Manifest.EveryRowCarriesScopeProvenanceAndAnS1Status`; run-setup order corrected to **A11 → (A5) → A14 → A6 → A10 → starting deck**, so A14's max-HP loss precedes A6's 90 % rewrite and an A20 Ironclad is **68/75, not 72/75** (matches the G4 oracle capture); Ascender's Bane lands at master-deck **index 0**, ahead of the five Strikes, routed through `add_card_to_master_deck`; retires the A6/A10/A14 deferred-obligation row; union 641/641 ×3 · [log](stage-b-log.md#b415)
 
 ### G6 `[ ]` **Gate: S1 rules complete (M3)** — tag `g6-s1-content`
 **Deps:** all B3.*, all B4.*
@@ -609,6 +631,100 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **proposed, NOT applied: split B4.5 into B4.5a / B4.5b.**
+  Recorded here for the orchestrator to accept or reject; this ledger pass did
+  not split or renumber anything, because a task's real scope turning out
+  larger than its entry is a stop-and-surface trigger (conventions §5) and
+  renumbering is not a scout's call. The seam is B3.8. **B4.5a** — gold rolls,
+  potion drop + the `blizzardPotionMod` ratchet, the elite relic-tier roll,
+  reward assembly order, the CHOOSE/skip flow, pity arithmetic, and routing
+  acquisition through `add_card_to_master_deck` — is startable **today,
+  without B3.8**: none of it draws a card. **B4.5b** — the `getCard(rarity)`
+  draw, the three generated pool tables, the CardLibrary library-order pin,
+  the no-dupe end-to-end test and the oracle spot-diff — is gated on B3.8 by
+  the hard blocker recorded in B4.5's Deps note (an empty `rareCardPool`
+  indexed on the first RARE roll). The value of the split is that B4.5a
+  unblocks B4.8 (Shop) work that only needs the reward *plumbing*.
+- 2026-07-25 — **B4.5 amended from a read-only scout; every citation verified
+  against `D:\STS_BG_Mod\SlayTheSpireDecompiled` before it was written here.**
+  Six changes, all to an open task's brief, none to a frozen document:
+  1. **Deps** — B3.10 and B3.11 removed, B3.3-B3.11 becomes B3.3-B3.9. The
+     combat card-reward pool is RED-only (`Ironclad.getCardPool` →
+     `CardLibrary.addRedCards`, `CardLibrary.java:1157`), and the only caller
+     of `getColorlessRewardCards()` is `RewardItem(CardColor)` →
+     `SensoryStone.java:121`, an Act-3 event. This *agrees with* frozen design
+     §5.1's "the 72 red non-basics are the reward pool; colorless enters via
+     the shop's 2 colorless slots and Neow" — the ledger was the drifted
+     document, not the design doc.
+  2. **Deps** — B3.8 promoted from a coverage dep to a **hard mechanical
+     blocker**: `cards.yaml` has zero RARE rows, so `rareCardPool` is empty
+     and `getCard(RARE)` indexes an empty list the first time pity reaches 2.
+  3. **Deliverables** — "colorless handling" re-scoped to "confirm colorless
+     is unreachable from a combat reward, with the citation".
+  4. **Deliverables** — `vs 3/37/60` reworded to thresholds **`< 3` / `< 40`**
+     (widths 3/37/60), `AbstractRoom.java:158, 167`, confirmed at
+     `AbstractDungeon.java:1606-1615`. Coding the widths as thresholds is
+     wrong by 3 points on **every** reward. Design §5.6's "against 3/37/60" is
+     the widths and is not contradicted.
+  5. **Deliverables** — "upgrade chance 0 in Act 1" now records that the
+     `randomBoolean` draw **still happens** (`Random.java:79-82`); only
+     `c.rarity != RARE` short-circuits it (`AbstractDungeon.java:1470`). A
+     stream-attribution trap, not a value change.
+  6. **Acceptance** — "reward screens zero-diff through the differ" is now
+     explicitly the **post-claim `RunState`** (gold/potions/deck/pity/
+     counters): no new storage, no schema bump. Diffing the *offer* would need
+     tools-side differ work or `RunState` growth, and an unplanned
+     `SCHEMA_VERSION` bump is stop-the-line (conventions §5).
+  Also **discharged by construction and deleted from the Deferred obligations
+  table**: *"Card-pool removal bookkeeping storage, if the dupe loop needs
+  it"* (deferred by B4.3). The dupe loop re-rolls without mutating, because
+  `CardGroup.getRandomCard(boolean)` is a pure indexed read
+  (`CardGroup.java:502-508`) — there is nothing to book-keep.
+- 2026-07-25 — **ledger/history reconciliation after the three-branch union
+  (`5f96ec4`).** B3.18 (`3ce0467`, merged `db9f6a7`), B4.15 (`d13d29e`,
+  `372168d`) and B3.19 (`8396190`, `cd3e7fa`) were on `master` while this
+  ledger still showed them `[ ]` — history and the ledger disagreeing, which
+  conventions §2 calls an incident. All three blocks are now archived verbatim
+  in [stage-b-log.md](stage-b-log.md) (`#b318`, `#b319`, `#b415`) with their
+  Logs filled, and appear here as one-line index entries. The union built
+  green on debug, asan **and** release. Landed manifest, regenerated by
+  `tools/registry_gen/gen.py` rather than summed — the three branches' own
+  claimed totals of 234 / 251 / 232 were mutually inconsistent: cards 75 /
+  powers 28 / monsters 14 / relics 65 / potions 33 / events 0 / encounters 20
+  / a20 20 / **total 255**.
+  Three corrections ride along, each with the ledger as the losing document
+  (conventions §4):
+  - **B4.15's Deliverables line gave the wrong run-setup order.** It said
+    "(A6 90 % HP, A10 curse, A11 slot, A14 −5 — exact order per
+    `dungeonTransitionSetup`)". The real order is **A11 → (A5) → A14 → A6 →
+    A10 → starting deck**: `AbstractPlayer.<init>` (`:211-213`) runs before
+    the dungeon exists, and inside `dungeonTransitionSetup`
+    (`AbstractDungeon.java:2562-2604`) the max-HP loss (`:2591-2593`)
+    **precedes** the 90 %-of-max rewrite (`:2594-2596`), so an ascension-20
+    Ironclad is **68/75, not 72/75** — confirmed against the committed G4
+    oracle capture. Frozen design §6 is a table of modifiers with citations,
+    not an application order, and its own line numbers agree; nothing frozen
+    needed changing. The archived block keeps the original wording verbatim;
+    the correction lives in its Log and here.
+  - **The master-deck-door obligation row's "zero production callers" is now
+    false.** B4.15 routes the A10 curse through `add_card_to_master_deck`, so
+    that function has exactly one production caller (with a named test pinning
+    that its `onObtainCard` pass is empty there). `remove_master_deck_card`
+    and `dispatch_relics_on_obtain_card` still have none, and the obligation
+    on B4.5 is unchanged.
+  - **The un-park obligation row is narrowed, not closed.** B3.18 and B3.19
+    discharged their share **by construction** — the gate is
+    `monster_init_fn(id) == nullptr`, so registering an init fn un-parks the
+    group with no shared code site edited. Remaining owners: B3.15, B3.16,
+    B3.21, B3.22. The A6/A10/A14 row is deleted outright, discharged by B4.15.
+  A new **Shared namespaces** subsection sits under the obligations table,
+  recording that registry ids are append-only **with legal gaps that must
+  never be renumbered** (`MonsterId` 14 is unallocated; `PowerId::ANGER` is 33
+  against a 28-row table), and that `MonsterIntent` in
+  `tools/registry_gen/stsgen/vocab.py` is a shared namespace needing
+  orchestrator allocation before use — a conventions §7 rule-of-two
+  observation, written because contention for it stopped one task dead and
+  produced a silent off-limits edit (B3.19's `vocab.py` addition) in another.
 - 2026-07-25 — **terminal-outcome coverage is now pinned by a test**,
   `FixtureOracle.CorpusCoversBothTerminalOutcomes`. The corpus must contain at
   least one fight ending in monster death and at least one ending in player

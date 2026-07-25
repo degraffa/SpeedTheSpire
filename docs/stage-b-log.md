@@ -1441,6 +1441,126 @@ precedent; kMonsterCap 7 was already sized for splits at B3.12).
   (zero diagnostics); Release 441/441. Manifest now cards 50 / powers 22 /
   monsters 10 / relics 35 / potions 33 / encounters 20 / total 170.
 
+<a id="b318"></a>
+
+### B3.18 `[x]` ∥ Elites: Gremlin Nob + Sentries
+**Deps:** B3.12 · **Provenance:** GremlinNob.java (:67/72/92-93/133),
+Sentry.java (Artifact, Dazed insertion, alternating pattern)
+**Deliverables:** registry entries with A3/A8/A18 columns; Artifact power
+(debuff negation — a general power, lands here); Nob's skill-anger trigger.
+**Acceptance:** tier-2: Nob Anger triggers on skill plays only (A18 column
+cited); Sentry alternating moves by position; 3-Sentry spawn from B3.12.
+**Inherited:** un-park these elites — run-created combats currently consume the B3.12
+composition draws and then park; deferred by B4.4.
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan` from
+the Windows host, both presets PASS; the integrated union at `5f96ec4` is
+**641/641 ×3** across debug, asan and release, zero NOT_BUILT lines). Landed as
+commit `3ce0467`, merged at `db9f6a7`. Appended `MonsterId` 12 GREMLIN_NOB / 13
+SENTRY (both `enemy_type` ELITE) and `PowerId::ANGER` = 33, with native modules
+`monster_gremlin_nob.cpp` / `monster_sentry.cpp` / `powers/power_anger.cpp` and
+the tier-2 `elite_test` suite (20 named cases, each confirmed present by name in
+`ctest -N` under both presets).
+- **Artifact needed no new row.** It landed at B3.2 as power id 4, and its whole
+  effect is the DEBUFF nullify already live at the APPLY_POWER site
+  (`interp/interp_powers.cpp`; `ArtifactPower.java:34-44` +
+  `ApplyPowerAction.java:131-138`), so Sentry's `usePreBattleAction` only grants
+  the stack and draws no RNG (`Sentry.java:79-82`).
+- **Three independent 32-seed × 20-turn fixtures** pin the Nob's A18 history
+  tree (`GremlinNob.java:126-170` — forced first Bellow, then a pure history
+  tree: `!lastMove(2) && !lastMoveBefore(2)` → Skull Bash, else `lastTwoMoves(1)`
+  → Skull Bash, else Bull Rush; the drawn num is read only by the sub-A18
+  `num < 33` test at :152) and the Sentry in an **even** and an **odd** slot
+  (`Sentry.java:134-150` — the first move is keyed on
+  `getMonsters().monsters.lastIndexOf(this) % 2 == 0`, then strict alternation,
+  so the "3 Sentries" group opens Bolt / Beam / Bolt).
+- **Registering the two init fns un-parked the Gremlin Nob and 3 Sentries
+  encounters as a side effect.** The parking gate is
+  `monster_init_fn(id) == nullptr` — it asks the dispatch switch directly — so
+  **no shared code site was edited**. The ledger's un-park obligation row is
+  narrowed accordingly, not deleted: the other groups still park.
+- **Sentry's `damage()` override is spine animation only**
+  (`Sentry.java:115-122`), so it is recorded as an **explicit empty**
+  `on_monster_damaged` case rather than left to `default:` — conventions §8: a
+  `default:` there turns a missing implementation into a silent no-op.
+- Ascension columns, read in full: Nob `setHp` (85,90) at A8 else (82,86)
+  (`GremlinNob.java:67-71`), rushDmg 16/14 + bashDmg 8/6 at A3 (:72-80), Bellow
+  applying `AngerPower(this, 3)` at A18 else 2 (:92-96), every `takeTurn` case
+  ending in an unconditional `RollMoveAction` (:112); Sentry `setHp` (39,45) at
+  A8 else (38,42) (:62-66), beamDmg 10/9 at A3 (:67), dazedAmt 3/2 at A18 (:68),
+  Bolt queueing `MakeTempCardInDiscardAction(new Dazed(), dazedAmt)` into the
+  **discard** pile (:96). `AngerPower.java:39-45` fires on SKILL only, reached
+  through the monster-power stage of the `UseCardAction` fan-out
+  (`UseCardAction.java:60-65` — monsters last).
+- Integrated manifest at `5f96ec4`, **regenerated** by
+  `tools/registry_gen/gen.py` rather than summed — the three branches' own
+  claimed totals of 234 / 251 / 232 were mutually inconsistent: cards 75 /
+  powers 28 / monsters 14 / relics 65 / potions 33 / events 0 / encounters 20 /
+  a20 20 / **total 255**.
+
+<a id="b319"></a>
+
+### B3.19 `[x]` ∥ Elite: Lagavulin
+**Deps:** B3.12 · **Provenance:** Lagavulin.java (:77/82/83; asleep/stun/
+metallicize wake logic)
+**Deliverables:** registry entry (native AI per design §4.2 budget —
+sleep-wake state machine), Metallicize power, the elite `Lagavulin(true)`
+variant flag.
+**Acceptance:** tier-2: wakes on damage or turn 3, debuff move cadence,
+A18 −2 column; asleep block gain each turn.
+**Inherited:** un-park this elite — run-created combats currently consume the B3.12
+composition draws and then park; deferred by B4.4.
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan`, both
+presets PASS; the integrated union at `5f96ec4` is **641/641 ×3** across debug,
+asan and release). Landed as commit `8396190`, merged at `cd3e7fa`. Appended
+`MonsterId` 15 LAGAVULIN (`enemy_type` ELITE) with the native sleep/wake state
+machine in `monster_lagavulin.{hpp,cpp}` — move selection is native because
+`Lagavulin.getMove` never reads its `rollMove` argument, while the move effects
+(Siphon Soul's Dexterity-then-Strength, the Strong Attack) stay registry data
+with base/A3/A8/A18 columns. Tier-2 `lagavulin_test`, 8 named cases.
+- **No new power id.** Metallicize was already registry id 5 carrying exactly
+  the `at_end_of_turn_pre_card` BLOCK(=stack) binding this needs, and the
+  generator's **duplicate-name check caught the attempt to re-add it**. It is
+  now the **first MONSTER-owned power to bind an end-of-turn hook**;
+  `power_hooks.cpp` already dispatched that hook over live monsters, so the only
+  change there was the row's provenance and a stale comment
+  (`MetallicizePower.java:19-42`).
+- `MonsterIntent` gains **SLEEP = 9** and **STUN = 10** (append-only) — the
+  telegraphs set at `Lagavulin.java:144/202/225`. **Off-limits edit accepted:**
+  `tools/registry_gen/stsgen/vocab.py` gained the two names because the
+  generator rejects an unknown intent. That namespace is now orchestrator-
+  allocated — see the ledger's shared-namespace subsection.
+- **`on_monster_damaged` now carries `hp_lost`.** The wake test is
+  `currentHealth != previousHealth` (`Lagavulin.java:201`), so a hit the
+  sleeping armour fully absorbs must **not** wake it. The B3.17 slime split
+  interrupts read only resulting state and ignore the new argument.
+- **Monster block never decays in this build**, which is what makes the armour
+  stand at 8 / 16 / 24: `MonsterGroup.applyPreTurnLogic`
+  (`MonsterGroup.java:98-105`) has exactly one caller,
+  `MonsterStartTurnAction.java:22`, and that action is never constructed.
+- **The Lagavulin encounter un-parked by construction** — the gate is
+  `monster_init_fn(id) == nullptr`, so registering the init fn un-parks it with
+  no shared code site edited.
+- Provenance (`Lagavulin.java` read in full): :54-58 move bytes, :60-66
+  STRONG_ATK_DMG / DEBUFF_AMT / ARMOR_AMT, :73-100 ctor (ELITE :75, `setHp` A8
+  :77-81, attackDmg A3 :82, debuff A18 :83, the `!asleep` branch :88-91),
+  :102-114 `usePreBattleAction`, :116-174 `takeTurn` (the third idle is the one
+  turn that queues no `RollMoveAction`), :176-195 `changeState("OPEN")` and its
+  `!isDying` guard, :197-210 `damage()`, :212-227 `getMove`. Also
+  `MetallicizePower.java:19-42`, `AbstractCreature.java:548-553`,
+  `MonsterGroup.java:98-105,290-304`, `ReducePowerAction.java:35-53`,
+  `SetMoveAction.java:52-56`,
+  `AbstractMonster.java:431-437,465-491,712-715,765-775`,
+  `MonsterHelper.java:439-441` (the elite `Lagavulin(true)`) and :445-447 (the
+  event's `Lagavulin(false)`, implemented as `lagavulin_init_awake`).
+- Two obligations handed forward to the ledger's table: `lagavulin_init_awake`
+  has **no production caller** (the event that would build `Lagavulin(false)`
+  does not exist), and `combat_begin` / `enter_combat` prime turn 1 with an
+  end-of-round pass **the game never runs** — measured here as a sleeping
+  Lagavulin holding 16 block on turn 1 instead of 8.
+- Integrated manifest at `5f96ec4` (regenerated, not summed): cards 75 / powers
+  28 / monsters 14 / relics 65 / potions 33 / events 0 / encounters 20 / a20 20
+  / **total 255**.
+
 <a id="b320"></a>
 
 ### B3.20 `[x]` ∥ Boss: Slime Boss
@@ -2149,4 +2269,84 @@ powers 21 / monsters 8 / relics 35 / potions 33 / encounters 20 / total 167.
 Focused RelicPools 14/14, RegistryGen 16/16, and run lifecycle 19/19 remained
 green; the complete integrated WSL matrix is **debug 428/428, leak-detecting
 ASan/UBSan 428/428, release 428/428**.
+
+<a id="b415"></a>
+
+### B4.15 `[x]` A20 run-setup modifiers + negative freezes
+**Deps:** B4.3 · **Spec:** design §6 · **Provenance:**
+AbstractDungeon.java:2582-2600; AbstractPlayer.java:211-213;
+Ironclad.java:113-115, 168-170
+**Deliverables:** `a20.yaml` complete (every §6 row, numbers filled from the
+cited lines read in this task); run-setup application order at `run_begin`
+(A6 90 % HP, A10 curse, A11 slot, A14 −5 — exact order per
+`dungeonTransitionSetup`); tier-2 negative tests pinning the §6 "no such
+modifier" list (campfire heal, potion chance, normal/elite gold, rarity,
+A12-in-Act-1).
+**Acceptance:** tier-2 per row incl. the negatives; a20 manifest complete vs
+design §6's table (every row implemented or explicitly N/A-for-S1 with
+reason).
+**Inherited:** A6 / A10 / A14 run-setup modifiers — B4.4 landed A11 only
+(`potion_slot_count`) and names this task their literal owner.
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan` from
+the Windows host, both presets PASS; the integrated union at `5f96ec4` is
+**641/641 ×3** across debug, asan and release). Landed as commit `d13d29e`,
+merged at `372168d`. `registry/a20.yaml` goes from empty to **one row per
+ascension level 1..20**, `id == level`, each carrying scope, mechanic, a
+provenance citation read in this task, and an S1 status of IMPLEMENTED or
+N/A-FOR-S1-with-reason — machine-checked by
+`A20Manifest.EveryRowCarriesScopeProvenanceAndAnS1Status`, alongside
+`A20Manifest.ExactlyOneRowPerAscensionLevelWithIdEqualToLevel`. New target
+`a20_modifiers_test`, 15 named cases confirmed present via `ctest -N -R '^A20'`
+in **both** presets.
+- **The application order is not the one this task's Deliverables line gave.**
+  It is **A11 → (A5) → A14 → A6 → A10 → starting deck**.
+  `AbstractPlayer.<init>` (`AbstractPlayer.java:211-213`) runs before the
+  dungeon exists, so the potion-slot loss is first; then
+  `dungeonTransitionSetup` (`AbstractDungeon.java:2562-2604`) runs the
+  between-act heal (:2582-2586, a no-op at full HP but positioned ahead of the
+  rest), then `decreaseMaxHealth(getAscensionMaxHPLoss())` (**:2591-2593** +
+  `Ironclad.java:168-170` → 5, `AbstractCreature.java:211-223` clamping current
+  HP), **then** `currentHealth = MathUtils.round(maxHealth * 0.9f)`
+  (**:2594-2596**). A14's max-HP loss therefore **precedes** A6's 90 %-of-max
+  rewrite, and the 90 % is taken of the **already-reduced** max: an
+  ascension-20 Ironclad is **68/75, not 72/75**, matching the committed G4
+  oracle capture (`skeleton_sample.jsonl`, IRONCLAD, ascension 20: max_hp 75,
+  current_hp 68). Pinned by
+  `A20RunSetup.A6RunsAfterA14SoNinetyPercentIsOfTheReducedMax`. The ledger's
+  Deliverables wording was the losing document; the correction is recorded in
+  the ledger's change log.
+- **A second ordering fact no document recorded:** `AbstractDungeon.<init>`
+  calls `dungeonTransitionSetup` (**:287**) *before* `initializeStarterDeck`
+  (**:295-296**), so `masterDeck.addToTop(new AscendersBane())` (:2597-2600)
+  appends the A10 curse to an **empty** master deck — **Ascender's Bane is
+  index 0, ahead of the five Strikes**, which changes the combat-start shuffle
+  input. (`CardGroup.addToTop`, `CardGroup.java:455-457`, is an ArrayList
+  append; `addToBottom` :459-461 is the head insert.) Pinned by
+  `A20RunSetup.A10PutsAscendersBaneAtMasterDeckIndexZero`.
+- **The curse routes through `add_card_to_master_deck` (`run_deck.hpp`)** — the
+  sanctioned master-deck door — not the starting-deck bulk write. Its
+  `onObtainCard` pass is **provably empty** at run setup (no relic is equipped
+  yet at that point in `run_begin`, and the game's own call site is a raw
+  `CardGroup` insert that never reaches `obtainCard`), and that is pinned by a
+  named test,
+  `A20RunSetup.A10CurseGoesThroughTheDoorButTheObtainPassChangesNothing`, which
+  would catch a Ceramic Fish / Darkstone Periapt / Egg regression.
+- **Negative freeze.** The §6 negatives have no S1 mechanism to exercise, so
+  they are frozen where adding one would leave a mark: a sweep of `run_begin`
+  over ascension 0..20 asserting that **only** max HP, current HP, potion slots
+  and the master deck move, plus registry tests pinning the row set and each
+  written no-such-modifier statement with its citation. Citations: campfire heal
+  (`RestOption.java:25`), potion-drop chance (`AbstractRoom.java:580-607`),
+  normal and elite combat gold (`AbstractRoom.java:324` / :316), card-reward
+  rarity (`AbstractDungeon.java:1597-1603`), the Act-1 upgraded-card no-op
+  (`Exordium.java:107`), the Act-3-only double boss
+  (`ProceedButton.java:100-104`, `AbstractMonster.java:1058-1060`).
+- Also updated: `run_advance_test`'s base-sheet and `combat_begin`-equivalence
+  tests for the moved sheet (the equivalence test now levels HP explicitly, so
+  it stays about the combat-construction sequence), `registry_gen_test`'s a20
+  and total manifest counts, and `advance.hpp`'s now-stale note claiming the
+  run-setup modifiers are not applied.
+- Integrated manifest at `5f96ec4` (regenerated by `tools/registry_gen/gen.py`,
+  not summed): cards 75 / powers 28 / monsters 14 / relics 65 / potions 33 /
+  events 0 / encounters 20 / a20 20 / **total 255**.
 
