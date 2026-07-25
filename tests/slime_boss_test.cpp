@@ -424,6 +424,8 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "GremlinTsundere.java -- no this.type assignment"},
         {MonsterId::GREMLIN_WIZARD,     MonsterEnemyType::NORMAL,
          "GremlinWizard.java -- no this.type assignment"},
+        {MonsterId::THE_GUARDIAN,       MonsterEnemyType::BOSS,
+         "TheGuardian.java:94 -- this.type = EnemyType.BOSS"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

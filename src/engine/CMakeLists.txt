@@ -12,6 +12,7 @@ add_library(sts_engine
     monster_slime_boss.cpp
     monster_lagavulin.cpp
     monster_gremlin.cpp
+    monster_guardian.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -47,6 +48,7 @@ add_library(sts_engine
     powers/power_ritual.cpp
     powers/power_rupture.cpp
     powers/power_sadistic.cpp
+    powers/power_sharp_hide.cpp
     powers/power_thorns.cpp
     relic_hooks.cpp
     # Native relic combat bodies, one TU per RelicTier (see

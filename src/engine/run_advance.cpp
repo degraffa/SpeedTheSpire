@@ -19,7 +19,7 @@
 #include <span>
 #include <string_view>
 
-#include "sts/engine/action_queue.hpp"     // pump
+#include "sts/engine/action_queue.hpp"     // pump / begin_first_turn
 #include "sts/engine/cards.hpp"            // card_def / card_cost / card_flags
 #include "sts/engine/encounters.hpp"       // generate_monster_lists / resolve_encounter
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
@@ -346,12 +346,12 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     }
     s.relic_count = rc.run.relic_count;
 
-    // (9) Prime the turn-1 invariants and pump once into WAITING_ON_USER (same
-    //     mechanism combat_begin uses; see its implementation note).
-    s.turn = 0;
-    s.monster_attacks_queued = 1;
-    s.turn_has_ended = 1;
-    pump(s, dispatch_monster_turn);
+    // (9) The game's turn-1 block, into WAITING_ON_USER. Literally the same
+    //     function combat_begin (advance.cpp) calls, so the two combat-construction
+    //     paths cannot disagree about how a combat starts; the derivation of why
+    //     turn 1 is not getNextAction step 6 is on the declaration in
+    //     action_queue.hpp.
+    begin_first_turn(s, dispatch_monster_turn);
 
     // (10) applyStartOfCombatLogic -> every relic's atBattleStart, in acquisition
     //      order (AbstractPlayer.applyStartOfCombatLogic,
@@ -374,13 +374,22 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     //
     //      Placing it BEFORE the pump would not merely reorder, it would silently
     //      cancel effects. This engine folds Java's turn-1 block into
-    //      start_of_turn (action_queue.cpp), and start_of_turn SETS player_energy
-    //      and ZEROES player_block (the loseBlock of GameActionManager.java:352-359,
-    //      which the turn-1 block does not actually run) before it queues the draw.
-    //      Anything queued ahead of the pump executes ahead of start_of_turn, so
-    //      Anchor's 10 block (Anchor.atBattleStart, Anchor.java:32-36) would be
-    //      granted and then wiped by that reset -- a relic that fires and does
+    //      start_of_turn (action_queue.cpp), which SETS player_energy before it
+    //      queues the draw. Anything queued ahead of the pump executes ahead of
+    //      start_of_turn, so an atBattleStart relic that grants ENERGY would be
+    //      paid out and then overwritten by that SET -- a relic that fires and does
     //      nothing, the same class of dead effect as never firing at all.
+    //
+    //      This paragraph used to make the same argument about player_block and
+    //      Anchor's 10 (Anchor.atBattleStart, Anchor.java:32-36), citing the
+    //      loseBlock of GameActionManager.java:352-359 "which the turn-1 block does
+    //      not actually run". That reading was right, and the code has now caught
+    //      up with it: the block decay is gated to TurnStart::kSubsequentTurn, so it
+    //      no longer runs at combat start and no longer threatens Anchor. The energy
+    //      SET above is genuinely every-turn (AbstractRoom.java:241's
+    //      GainEnergyAndEnableControlsAction), so the ordering requirement stands on
+    //      that half alone -- and on plain faithfulness to AbstractRoom.java:245,
+    //      where applyStartOfCombatLogic follows the queued draw.
     //
     //      Known deviation, currently unobservable: the addToTop bodies
     //      (BloodVial.java:33, Vajra.java:33, BronzeScales.java:32,

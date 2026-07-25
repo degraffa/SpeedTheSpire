@@ -112,6 +112,12 @@ sts_add_test(elite_test FIXTURES)
 # `Lagavulin(false)` ctor variant.
 sts_add_test(lagavulin_test)
 
+# B3.21: The Guardian -- the A9/A19 registry columns, the forced opening Charge
+# Up, both move cycles, the mode flip at the exact cumulative-damage threshold
+# INCLUDING its per-cycle growth, Sharp Hide on attack plays, and the Spot
+# Weakness ATTACK_BUFF classification this task's Twin Slam telegraph uncovered.
+sts_add_test(guardian_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
@@ -147,6 +153,13 @@ sts_add_test(encounters_test)
 # trap-7 floor reseed, run-combat entry == combat_begin, full floor cycle, map
 # choice legality + non-combat routing + heterogeneous batch advance.
 sts_add_test(run_advance_test)
+
+# How a combat STARTS: the turn-1 block (begin_first_turn) must not run
+# getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
+# paths (combat_begin, enter_combat) must keep going through it. The reproducer
+# is a sleeping Lagavulin's Metallicize; the by-construction half scans the two
+# source files, so it needs STS_SOURCE_ROOT like no_task_ids_test does.
+sts_add_test(combat_start_test DEFS STS_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
 
 # A6.1: diff harness -- trace format + field-by-field differ + reproducer +
 # fixture oracle (design doc §8, §9). Links diff_harness (tools/diff_harness),

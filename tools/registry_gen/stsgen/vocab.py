@@ -272,9 +272,16 @@ MONSTER_INTENTS = {
     "STUN": 10,          # Lagavulin's woken-by-damage turn (AbstractMonster.Intent.STUN;
                           # Lagavulin.java:202)
     "DEFEND": 11,        # Gremlin Tsundere Protect (AbstractMonster.Intent.DEFEND;
-                          # GremlinTsundere.java:84,124) -- a pure block gain, with
-                          # no attack and no buff, so none of DEFEND_BUFF (2) or
-                          # ATTACK_DEFEND (3) is the same telegraph.
+                          # GremlinTsundere.java:84,124) and The Guardian's Charge Up
+                          # (TheGuardian.java:215,228) -- one Intent constant, two
+                          # users. A pure block gain, with no attack and no buff, so
+                          # neither DEFEND_BUFF (2) nor ATTACK_DEFEND (3) is the same
+                          # telegraph; Charge Up is a bare GainBlockAction
+                          # (TheGuardian.java:219).
+    "ATTACK_BUFF": 12,   # The Guardian's Twin Slam (AbstractMonster.Intent.ATTACK_BUFF;
+                          # TheGuardian.java:204). A DISTINCT Intent constant from
+                          # ATTACK_DEFEND=3; the "buff" is the queued return to
+                          # Offensive Mode (TheGuardian.java:194).
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).
