@@ -10,8 +10,10 @@
 
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
+#include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
+#include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
@@ -82,6 +84,10 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &acid_slime_large_init;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_init;
+        case MonsterId::GREMLIN_NOB:
+            return &gremlin_nob_init;
+        case MonsterId::SENTRY:
+            return &sentry_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -113,6 +119,10 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &acid_slime_large_take_turn;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_take_turn;
+        case MonsterId::GREMLIN_NOB:
+            return &gremlin_nob_take_turn;
+        case MonsterId::SENTRY:
+            return &sentry_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -120,7 +130,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 13,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     switch (id) {
@@ -146,7 +156,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 13,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -194,7 +204,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 }
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 13,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
@@ -208,13 +218,22 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
         case MonsterId::SLIME_BOSS:
             slime_boss_on_damaged(state, monster_index);
             return;
+
+        // Sentry.damage (Sentry.java:115-122) DOES override damage(), but its
+        // whole body after super.damage() is the "hit" spine animation, gated on
+        // a non-THORNS hit with output > 0. Nothing there touches combat state or
+        // draws RNG, so an empty hook is the complete translation. Spelled as a
+        // case rather than left to `default:` so the omission is checkable.
+        case MonsterId::SENTRY:
+            return;
+
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 13,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -222,6 +241,9 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)
+
+        case MonsterId::SENTRY:
+            return &sentry_use_pre_battle_action;  // Artifact 1 (no RNG draw)
 
         // The two monsters below DO override usePreBattleAction; both are
         // deliberately nullptr here, and the reasons differ. They are spelled out
@@ -255,10 +277,11 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return nullptr;
 
         default:
-            // Checked, not assumed: of the 11 registry monsters only JawWorm,
-            // LouseNormal, LouseDefensive and SlimeBoss declare the method at
-            // all. The other seven (Cultist, the four small/medium slimes, the
-            // two large slimes) inherit AbstractMonster's empty body
+            // Checked, not assumed: of the 13 registry monsters only JawWorm,
+            // LouseNormal, LouseDefensive, SlimeBoss and Sentry declare the
+            // method at all. The other eight (Cultist, GremlinNob, the four
+            // small/medium slimes, the two large slimes) inherit
+            // AbstractMonster's empty body
             // (AbstractMonster.java:953-954), so there is genuinely nothing to
             // run for them.
             //

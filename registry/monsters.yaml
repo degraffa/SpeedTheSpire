@@ -419,3 +419,81 @@
         # MakeTempCardInDiscardAction(new Slimed(), A19 ? 5 : 3), not hand.
         - {op: MAKE_CARD, target: PLAYER, amount: {base: 3, a19: 5}, card: SLIMED, pile: DISCARD}
   ai: native
+
+# --- Act-1 elites: Gremlin Nob + Sentry ---------------------------------------
+# Both classes read in full. Each constructor consumes exactly one monsterHpRng
+# draw (setHp(min,max)) and AbstractMonster.init consumes one aiRng random(99).
+# ASCENSION THRESHOLDS -- the A_2_* static field NAMES in both files are
+# misleading; the live branches are what these columns key on:
+#   GremlinNob.java:67 setHp  -> ascension >= 8   (A_2_HP_MIN/MAX are the A8 pair)
+#   GremlinNob.java:72 damage -> ascension >= 3   (A_2_BASH_DMG/A_2_RUSH_DMG)
+#   GremlinNob.java:92 Anger  -> ascension >= 18
+#   Sentry.java:62    setHp   -> ascension >= 8
+#   Sentry.java:67    beamDmg -> ascension >= 3
+#   Sentry.java:68    dazedAmt-> ascension >= 18
+# Selection is native for both (monster_gremlin_nob.*, monster_sentry.*): the Nob's
+# A18 getMove is a lastMove/lastMoveBefore/lastTwoMoves history tree and the
+# Sentry's opening move keys on its POSITION in the monster group, neither of
+# which is an ai_table shape. Move *effects* are the data below.
+
+- id: 12
+  name: GREMLIN_NOB
+  game_id: "GremlinNob"
+  provenance: "GremlinNob ctor setHp/damage branches (GremlinNob.java:60-84), takeTurn (:86-113), getMove (:126-170), move ids BULL_RUSH=1/SKULL_BASH=2/BELLOW=3 (:49-51), DEBUFF_AMT 2 (:46,103), ANGRY_LEVEL 2 / A18 3 (:52,92-96); canVuln is the 2-arg ctor's `true` (:56-58), the ctor MonsterHelper's \"Gremlin Nob\" group uses (MonsterHelper.java:436-438); ID (:33)"
+  enemy_type: ELITE   # GremlinNob.java:63
+  hp:
+    base: {min: 82, max: 86}   # GremlinNob.java:70 (ascension < 8)
+    a8:   {min: 85, max: 90}   # GremlinNob.java:68 (ascension >= 8)
+  moves:
+    - name: BULL_RUSH
+      move_id: 1               # GremlinNob.java:49
+      intent: ATTACK
+      effects:
+        # damage.get(0) == rushDmg: 14, 16 from A3 (GremlinNob.java:43,45,73-77,79).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 14, a3: 16}}
+    - name: SKULL_BASH
+      move_id: 2               # GremlinNob.java:50
+      intent: ATTACK_DEBUFF    # canVuln branch (GremlinNob.java:136,144,154,162)
+      effects:
+        # damage.get(1) == bashDmg: 6, 8 from A3 (GremlinNob.java:42,44,73-77,80).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a3: 8}}
+        # VulnerablePower(player, DEBUFF_AMT=2, true) -- only when canVuln, which
+        # every reachable encounter sets (GremlinNob.java:102-103).
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+    - name: BELLOW
+      move_id: 3               # GremlinNob.java:51
+      intent: BUFF
+      effects:
+        # AngerPower(this, 2), or 3 at A18 (GremlinNob.java:92-96). Applied to
+        # SELF: each SKILL the player plays gives the Nob that much Strength.
+        - {op: APPLY_POWER, target: SELF, amount: {base: 2, a18: 3}, power: ANGER}
+  ai: native   # getMove (GremlinNob.java:126-170): usedBellow forces BELLOW once,
+               # then the A18 branch is a pure history tree (num drawn but unused)
+               # and the sub-A18 branch is a d33 on the drawn num.
+
+- id: 13
+  name: SENTRY
+  game_id: "Sentry"
+  provenance: "Sentry ctor setHp/beamDmg/dazedAmt branches (Sentry.java:59-77), usePreBattleAction ArtifactPower(this,1) (:79-82), takeTurn (:84-113), getMove position-keyed first move + alternation (:134-150), move ids BOLT=3/BEAM=4 (:51-52), DAZED_AMT 2 / A_18_DAZED_AMT 3 (:55-56); ID (:41)"
+  enemy_type: ELITE   # Sentry.java:61
+  hp:
+    base: {min: 38, max: 42}   # Sentry.java:65 (ascension < 8)
+    a8:   {min: 39, max: 45}   # Sentry.java:63 (ascension >= 8)
+  moves:
+    - name: BOLT
+      move_id: 3               # Sentry.java:51
+      intent: DEBUFF           # Sentry.java:138
+      effects:
+        # MakeTempCardInDiscardAction(new Dazed(), dazedAmt) -- fresh Dazed copies
+        # straight into the DISCARD pile, 2 below A18 and 3 at A18+ (Sentry.java:96).
+        - {op: MAKE_CARD, target: PLAYER, amount: {base: 2, a18: 3}, card: DAZED, pile: DISCARD}
+    - name: BEAM
+      move_id: 4               # Sentry.java:52
+      intent: ATTACK           # Sentry.java:140,148
+      effects:
+        # damage.get(0) == beamDmg: 9, 10 from A3 (Sentry.java:67,69,108).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 9, a3: 10}}
+  ai: native   # getMove (Sentry.java:134-150): the FIRST move is decided by the
+               # monster's index in the group (even -> Bolt, odd -> Beam), then it
+               # strictly alternates on lastMove. num drawn each roll, never used.
+               # usePreBattleAction's Artifact 1 is queued by the native module.
