@@ -60,6 +60,13 @@
 //     the run-start monsterRng draw order (via generate_monster_lists).
 //   * MonsterRoom.onPlayerEntry (MonsterRoom.java:53-61): getMonsterForRoomCreation
 //     -> getEncounter(monsterList.get(0)) -> monsters.init().
+//   * AbstractRoom.update turn-1 combat-start block (AbstractRoom.java:236-258):
+//     the opening DrawCardAction is queued (:242) BEFORE
+//     applyStartOfCombatLogic (:245) fires every relic's atBattleStart
+//     (AbstractPlayer.java:1892-1901), which is why enter_combat dispatches that
+//     hook after its turn-1 pump rather than before it. The separate pre-draw
+//     hook (applyStartOfCombatPreDrawLogic, :241) has no registered relic and so
+//     no call site yet. Full reasoning at the dispatch in run_advance.cpp.
 //   * AbstractRoom.update battle-over (:277-357): the lifecycle transition points
 //     (COMPLETE -> reward screen); the reward ASSEMBLY is not modelled.
 
