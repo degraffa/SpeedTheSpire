@@ -42,19 +42,19 @@
       "name": "debug",
       "configurePreset": "debug",
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "execution": { "noTestsAction": "error", "jobs": 8 }
     },
     {
       "name": "asan",
       "configurePreset": "asan",
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "execution": { "noTestsAction": "error", "jobs": 8 }
     },
     {
       "name": "release",
       "configurePreset": "release",
       "output": { "outputOnFailure": true },
-      "execution": { "noTestsAction": "error" }
+      "execution": { "noTestsAction": "error", "jobs": 8 }
     }
   ]
 }

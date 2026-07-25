@@ -165,10 +165,18 @@ sts_add_test(fixture_oracle_test
 # (types.hpp enums / cards.hpp CardDef) so the later migration is a zero-change
 # swap. registry_gen_standalone.cpp includes ONLY the generated headers, proving
 # they compile standalone; the main TU also links sts_engine as the oracle.
+#
+# MAKE_DIRS creates the scratch root at CONFIGURE time. This target's 24 gtest
+# cases become 24 independent ctest entries, so under -j they would otherwise
+# all race to fs::create_directories() the same root on first use. Each case
+# writes distinctly-named subdirectories under it (det_a/det_b, bad_registry,
+# bad_out, upgrade_*, ... -- audited: no name is used by two cases), so the
+# subdirectories themselves do not collide and the cases can run concurrently.
 sts_add_test(registry_gen_test
     SOURCES registry_gen_test.cpp registry_gen_standalone.cpp
     LIBS sts_engine registry_generated
     DEPENDS registry_gen_headers
+    MAKE_DIRS registry_gen_scratch
     DEFS
         STS_PYTHON_EXECUTABLE="${STS_PYTHON_EXECUTABLE}"
         STS_REGISTRY_GEN_PY="${STS_REGISTRY_GEN_PY}"
@@ -194,12 +202,17 @@ sts_add_test(translator_test
 # exercises the file-based adapter for both state kinds + unknown-seed/prefix.
 # Links oracle_translator (which PUBLIC-links diff_harness, so the v2 trace API
 # and the adapter are reachable); nlohmann stays PRIVATE to the translator.
+#
+# Scratch directory is oracle_adapter_scratch, NOT translator_scratch: this
+# target and translator_test used to share one directory, which races once ctest
+# runs in parallel (one ctest entry per gtest case => concurrent processes).
+# sts_add_test now refuses a second claim on the same name at configure time.
 sts_add_test(oracle_adapter_test
     LIBS oracle_translator
-    MAKE_DIRS translator_scratch
+    MAKE_DIRS oracle_adapter_scratch
     DEFS
         STS_ORACLE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus"
-        STS_TRANSLATOR_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/translator_scratch")
+        STS_TRANSLATOR_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/oracle_adapter_scratch")
 
 # B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
 # corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign

@@ -63,7 +63,36 @@ function(sts_add_test name)
         target_compile_definitions(${name} PRIVATE ${ARG_DEFS})
     endif()
 
+    # A scratch directory belongs to exactly one test target, and configure fails
+    # loudly if two ever claim the same one.
+    #
+    # WHY: gtest_discover_tests registers one ctest entry PER GTEST CASE, so a
+    # single test binary becomes dozens of independent processes. Once ctest runs
+    # with -j (it now does -- see the test presets), two targets sharing a scratch
+    # directory are two sets of concurrent processes writing the same tree. That
+    # failure is intermittent, which conventions.md §5 calls the worst kind, and
+    # it would surface as a mysterious flake in a suite whose entire job is to be
+    # deterministic.
+    #
+    # translator_test and oracle_adapter_test both declared MAKE_DIRS
+    # translator_scratch, resolving to one directory. Audited before splitting
+    # them: their filenames happened not to overlap (rt_a/rt_b/rb.trace vs
+    # adapter_translated.bin), so no data race existed *yet* -- the hazard was
+    # latent, one added filename away from real, and invisible at both call sites
+    # because neither mentions the other. Hence a configure-time error rather
+    # than a comment: this is the shape conventions.md §7 says to make
+    # structurally impossible instead of documenting again.
     foreach(dir IN LISTS ARG_MAKE_DIRS)
+        get_property(_owner GLOBAL PROPERTY STS_SCRATCH_OWNER_${dir})
+        if(_owner AND NOT _owner STREQUAL "${name}")
+            message(FATAL_ERROR
+                "sts_add_test(${name}): scratch directory '${dir}' is already "
+                "claimed by test target '${_owner}'. Two targets sharing a "
+                "scratch directory race once ctest runs in parallel. Give this "
+                "one its own directory name (and update the *_SCRATCH compile "
+                "definition that points at it).")
+        endif()
+        set_property(GLOBAL PROPERTY STS_SCRATCH_OWNER_${dir} "${name}")
         file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${dir}")
     endforeach()
 
