@@ -10,7 +10,13 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 option(STS_BUILD_TESTS "Build unit tests" ON)
-option(STS_BUILD_BENCHMARKS "Build benchmarks" ON)
+# Default OFF: benchmarks are not part of any test run, but building them means
+# fetching and building google-benchmark, which measured 50.9s vs 21.2s of
+# configure time. Almost every local build is test-focused and pays that for
+# nothing. Turn it on explicitly (-DSTS_BUILD_BENCHMARKS=ON) to build or run
+# them. CI passes it explicitly on every job so the benchmark sources keep their
+# compile coverage -- do not remove it there without replacing that coverage.
+option(STS_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(STS_ENABLE_SANITIZERS "Build with ASan/UBSan" OFF)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")

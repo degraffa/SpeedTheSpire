@@ -23,7 +23,8 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Debug \
-            -DSTS_ENABLE_SANITIZERS=${{ matrix.sanitize && 'ON' || 'OFF' }}
+            -DSTS_ENABLE_SANITIZERS=${{ matrix.sanitize && 'ON' || 'OFF' }} \
+            -DSTS_BUILD_BENCHMARKS=ON
 
       - name: Build
         run: cmake --build build --parallel
