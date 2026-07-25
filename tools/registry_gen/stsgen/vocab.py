@@ -263,6 +263,11 @@ MONSTER_INTENTS = {
                          # AcidSlime_L.java:137,146 / SpikeSlime_L.java:124,134)
     "STRONG_DEBUFF": 8,  # Slime Boss Goop Spray (AbstractMonster.Intent.STRONG_DEBUFF;
                           # SlimeBoss.java:128,145,188)
+    # 9 and 10 are reserved for the sleep/stun telegraphs.
+    "DEFEND": 11,        # Gremlin Tsundere Protect (AbstractMonster.Intent.DEFEND;
+                          # GremlinTsundere.java:84,124) -- a pure block gain, with
+                          # no attack and no buff, so none of DEFEND_BUFF (2) or
+                          # ATTACK_DEFEND (3) is the same telegraph.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

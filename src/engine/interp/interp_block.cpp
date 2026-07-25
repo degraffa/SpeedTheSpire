@@ -30,7 +30,7 @@ namespace {
 // touch block gain), so -Wswitch-enum would only add noise. The static_assert is
 // what makes a new power impossible to add without re-reading this switch.
 [[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 27,
+    static_assert(sts::registry::manifest::kPowersCount == 28,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {

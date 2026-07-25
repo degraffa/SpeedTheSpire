@@ -419,3 +419,155 @@
         # MakeTempCardInDiscardAction(new Slimed(), A19 ? 5 : 3), not hand.
         - {op: MAKE_CARD, target: PLAYER, amount: {base: 3, a19: 5}, card: SLIMED, pile: DISCARD}
   ai: native
+
+# --- B3.16: the gremlin gang (monster ids 12-15 belong to other batches) ------
+# All five classes read in full. Shared shape:
+#   * every ctor calls setHp(min, max) -> exactly one monster_hp_rng draw
+#     (AbstractMonster.java:765-775), then AbstractMonster.init() calls rollMove
+#     -> exactly one ai_rng.random(99) draw (AbstractMonster.java:705-715).
+#   * NONE of the five overrides damage(), so none registers a post-damage hook.
+#   * Move 99 (ESCAPE) is DELIBERATELY ABSENT from every row below. Its two
+#     triggers are escapeNext() (AbstractMonster.java:908-910) and deathReact()
+#     (:912-913): in the whole decompiled tree the only caller of either is
+#     BanditBear.java:131 (m.deathReact()), an Act-2 "Bandits" encounter. Act 1's
+#     Gremlin Gang (MonsterHelper.spawnGremlins, MonsterHelper.java:737-765) has
+#     no caller for either, so the escape branch of every gremlin takeTurn is
+#     unreachable in this Exordium-only registry and the `if (escapeNext)` guard
+#     always takes the else. Whoever adds Act 2 must add BOTH halves: the move-99
+#     rows here (with an ESCAPE intent and the EscapeAction body) AND the
+#     deathReact/escapeNext trigger, because the re-telegraph changes what the
+#     gang shows the player.
+# Ascension: the engine's fixed S1 difficulty is A20, so every A2/A7/A17 column
+# below is the live one; the base columns are recorded for completeness.
+
+- id: 16
+  name: GREMLIN_WARRIOR
+  game_id: "GremlinWarrior"
+  provenance: "GremlinWarrior ctor setHp/damage branches (GremlinWarrior.java:45-61), usePreBattleAction Angry (:63-70), takeTurn (:72-93), getMove (:129-132), escapeNext/deathReact (:121-141), move id SCRATCH=1 (:39); AngryPower ctor/onAttacked (AngryPower.java:24-41); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 20, max: 24}   # GremlinWarrior.java:51 (ascension < 7)
+    a7:   {min: 21, max: 25}   # GremlinWarrior.java:49 (ascension >= 7)
+  moves:
+    - name: SCRATCH
+      move_id: 1               # GremlinWarrior.java:39
+      intent: ATTACK
+      effects:
+        # damage.get(0): 4, or 5 from A2 (GremlinWarrior.java:53-57).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 4, a2: 5}}
+  ai: native   # getMove is unconditional Scratch (:130-132); takeTurn re-asserts
+               # it through a QUEUED SetMoveAction (:82), never a RollMoveAction,
+               # so the only ai_rng draw is init's (its value is discarded).
+               # usePreBattleAction's Angry stack (A17 ? 2 : 1) is queued by
+               # monster_gremlin.cpp: the schema's tier columns scale HP ranges,
+               # roll ranges and move-effect amounts, and a pre-battle power
+               # amount is none of those.
+
+- id: 17
+  name: GREMLIN_THIEF
+  game_id: "GremlinThief"
+  provenance: "GremlinThief ctor setHp/thiefDamage branches (GremlinThief.java:44-57), takeTurn (:59-80), getMove (:116-119), escapeNext/deathReact (:108-128), move id PUNCTURE=1 (:37); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 10, max: 14}   # GremlinThief.java:50 (ascension < 7)
+    a7:   {min: 11, max: 15}   # GremlinThief.java:48 (ascension >= 7)
+  moves:
+    - name: PUNCTURE
+      move_id: 1               # GremlinThief.java:37
+      intent: ATTACK
+      effects:
+        # thiefDamage = A2 ? 10 : 9 (GremlinThief.java:52-53).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 9, a2: 10}}
+  ai: native   # getMove is unconditional Puncture (:117-118); takeTurn re-asserts
+               # it through a QUEUED SetMoveAction (:66), never a RollMoveAction.
+
+- id: 18
+  name: GREMLIN_FAT
+  game_id: "GremlinFat"
+  provenance: "GremlinFat ctor setHp/damage branches (GremlinFat.java:48-64), takeTurn incl. the trailing RollMoveAction (:66-91), getMove (:129-132), escapeNext/deathReact (:121-141), move id BLUNT=2 (:46); WeakPower ctor (WeakPower.java:27-43); FrailPower ctor (FrailPower.java:25-41); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 13, max: 17}   # GremlinFat.java:54 (ascension < 7)
+    a7:   {min: 14, max: 18}   # GremlinFat.java:52 (ascension >= 7)
+  moves:
+    - name: BLUNT
+      move_id: 2               # GremlinFat.java:46
+      intent: ATTACK_DEBUFF
+      effects:
+        # damage.get(0): 4, or 5 from A2 (GremlinFat.java:56-60).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 4, a2: 5}}
+        # WeakPower(player, 1, true) (GremlinFat.java:72; WEAK_AMT = 1, :45).
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: WEAK}
+        # The A17-ONLY FrailPower(player, 1, true) (:73-75) is NOT a row here:
+        # a tier column scales an amount, it cannot add or drop a STEP, and an
+        # APPLY_POWER of amount 0 would land a real 0-stack power rather than
+        # nothing. monster_gremlin.cpp queues it behind an explicit ascension
+        # gate, immediately after this program, in the Java's addToBottom order.
+  ai: native   # getMove is unconditional Blunt (:130-131), but takeTurn ends in a
+               # QUEUED RollMoveAction (:80) -- so Fat draws one ai_rng.random(99)
+               # per turn (value discarded) as well as init's, and registers a
+               # monster_roll_move_fn.
+
+- id: 19
+  name: GREMLIN_TSUNDERE
+  game_id: "GremlinTsundere"
+  provenance: "GremlinTsundere ctor setHp/blockAmt/bashDmg branches (GremlinTsundere.java:49-67), takeTurn Protect/Bash (:69-107), getMove (:122-125), escapeNext/deathReact (:114-134), move ids PROTECT=1/BASH=2 (:46-47); GainBlockRandomMonsterAction.update (GainBlockRandomMonsterAction.java:27-42); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 12, max: 15}   # GremlinTsundere.java:59 (ascension < 7)
+    a7:   {min: 13, max: 17}   # GremlinTsundere.java:53,56 (>= 7 and >= 17 agree)
+  moves:
+    - name: PROTECT
+      move_id: 1               # GremlinTsundere.java:46
+      intent: DEFEND
+      effects:
+        # GainBlockRandomMonsterAction(this, blockAmt) (:73). blockAmt: 7 base
+        # (:60), 8 from A7 (:57), 11 from A17 (:54). The TARGET is a runtime
+        # ai_rng pick over the OTHER live monsters, so target: SELF here is not a
+        # placeholder -- it is literally the action's own fallback when that list
+        # is empty (target = validMonsters.isEmpty() ? this.source : ...,
+        # GainBlockRandomMonsterAction.java:35). monster_gremlin.cpp reads this
+        # tiered amount and retargets when a valid ally exists.
+        - {op: BLOCK, target: SELF, amount: {base: 7, a7: 8, a17: 11}}
+    - name: BASH
+      move_id: 2               # GremlinTsundere.java:47
+      intent: ATTACK
+      effects:
+        # bashDmg = A2 ? 8 : 6 (GremlinTsundere.java:62-63).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a2: 8}}
+  ai: native   # Selection is entirely inside takeTurn, never a RollMoveAction:
+               # after Protect it counts the non-dying/non-escaping monsters
+               # (INCLUDING itself) and repeats Protect while that count > 1,
+               # else switches to Bash (:74-88); after Bash it re-asserts Bash
+               # through a QUEUED SetMoveAction (:97). init's single
+               # ai_rng.random(99) is drawn and discarded (getMove forces
+               # Protect); the per-Protect ai_rng draw is the block target.
+
+- id: 20
+  name: GREMLIN_WIZARD
+  game_id: "GremlinWizard"
+  provenance: "GremlinWizard ctor setHp/damage branches (GremlinWizard.java:47-64), takeTurn charge/cast (:66-106), getMove (:142-145), escapeNext/deathReact (:134-154), move ids DOPE_MAGIC=1/CHARGE=2 (:44-45), currentCharge init 1 / CHARGE_LIMIT 3 (:42-43); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 21, max: 25}   # GremlinWizard.java:54 (ascension < 7)
+    a7:   {min: 22, max: 26}   # GremlinWizard.java:52 (ascension >= 7)
+  moves:
+    - name: DOPE_MAGIC
+      move_id: 1               # GremlinWizard.java:44
+      intent: ATTACK
+      effects:
+        # damage.get(0): 25, or 30 from A2 (GremlinWizard.java:56-60).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 25, a2: 30}}
+    - name: CHARGE
+      move_id: 2               # GremlinWizard.java:45
+      intent: UNKNOWN
+      effects:
+        # The charge turn queues only presentation (TextAboveCreatureAction,
+        # :71); the ++currentCharge counter is synchronous per-instance state
+        # kept in MonsterState.pad0 by monster_gremlin.cpp. NOP placeholder, the
+        # large-slime SPLIT / Slime Boss PREP_SLAM precedent.
+        - {op: NOP, target: SELF, amount: 0}
+  ai: native   # No RollMoveAction anywhere: getMove forces Charge (:144) and every
+               # later transition is a direct setMove or a queued SetMoveAction
+               # inside takeTurn, so init's discarded ai_rng.random(99) is the
+               # wizard's ONLY ai_rng draw for the whole combat.
