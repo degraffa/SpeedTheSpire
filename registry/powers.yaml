@@ -331,3 +331,34 @@
   hooks:
     on_card_draw: []
   provenance: "FireBreathingPower.onCardDraw (FireBreathingPower.java:34-40) -- when the drawn card is STATUS or CURSE, addToBot DamageAllEnemiesAction(amount, THORNS, FIRE). Native because the trigger is conditional on the drawn card type."
+
+# --- B3.21 The Guardian's two powers (ids 45-46) -------------------------------
+# Allocated out of a reserved 45-47 block while sibling batches held 28-44. Id 47
+# is left PERMANENTLY UNUSED: gaps are legal (the loader requires ids unique,
+# >= 1 and append-only, NOT contiguous) and no generated table is a dense
+# id-indexed array -- so 47 must never be backfilled.
+
+- id: 45
+  name: MODE_SHIFT
+  game_id: "Mode Shift"
+  type: BUFF
+  # No hook bindings, and deliberately NOT native: ModeShiftPower overrides only
+  # updateDescription (ModeShiftPower.java:27-30) -- it has no combat hook at all.
+  # Its `amount` is the REMAINING damage the Guardian absorbs before flipping to
+  # Defensive Mode, and it is mutated from OUTSIDE the power, by the monster's
+  # damage() override (TheGuardian.java:281-284) -- exactly as SplitPower (id 22)
+  # is a marker whose behaviour lives in the monster module. Registered so the
+  # Guardian's power list (and the oracle join key "Mode Shift") matches the game.
+  # Checked, not assumed, against both count-guarded switches: it overrides
+  # neither atDamageGive/atDamageReceive (interp_damage.cpp) nor modifyBlock
+  # (interp_block.cpp), so neither needed a case.
+  provenance: "ModeShiftPower (ModeShiftPower.java:11-31): the ctor takes the owner's current dmgThreshold as `amount` (:18-25) and updateDescription is its ONLY override -- no combat hooks. Applied to itself by TheGuardian.usePreBattleAction (TheGuardian.java:129) and again on every return to Offensive Mode (:254); removed on entering Defensive Mode (:238). The amount is decremented by each point of HP the Guardian loses while open (TheGuardian.java:281-284). POWER_ID \"Mode Shift\" (:13)."
+
+- id: 46
+  name: SHARP_HIDE
+  game_id: "Sharp Hide"
+  type: BUFF
+  native: true
+  hooks:
+    on_use_card: []           # native: a played ATTACK reflects `amount` THORNS at the player
+  provenance: "SharpHidePower.onUseCard (SharpHidePower.java:43-49) -- if card.type == ATTACK: addToBot DamageAction(player, DamageInfo(owner, amount, THORNS)). Native because the trigger is conditional on the played card's TYPE (the RagePower.onUseCard shape, id 12). Dispatched at ON_USE_CARD, where power_hooks.cpp already fans out to MONSTER powers last (UseCardAction.java:41-64) -- the Guardian is the owner, so NO shared dispatch site changed. The THORNS type skips the NORMAL-only power modifiers, so a Vulnerable player is not amplified and the Guardian's Strength does not scale it (interp.hpp DamageType). Applied to itself by TheGuardian.useCloseUp -- thornsDamage 3, or 4 at A19+ (TheGuardian.java:74,185-189) -- and removed at the end of Twin Slam (:197). Default type BUFF (AbstractPower.java:67); POWER_ID \"Sharp Hide\" (:24)."

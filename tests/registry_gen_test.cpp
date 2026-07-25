@@ -379,16 +379,22 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
-    EXPECT_EQ(m::kPowersCount, 27u);  // B3.7 appends Evolve (26) + Fire Breathing (27)
-    EXPECT_EQ(m::kMonstersCount, 11u); // + B3.14 four small/medium slimes
+    // Counts are ROW counts, not max ids: B3.21 appends Mode Shift (45) and
+    // Sharp Hide (46) out of a reserved block, leaving id 47 and the 28-44 range
+    // to other batches, so 27 + 2 == 29 rows.
+    EXPECT_EQ(m::kPowersCount, 29u);  // B3.7 Evolve (26) + Fire Breathing (27);
+                                      // B3.21 Mode Shift (45) + Sharp Hide (46)
+    EXPECT_EQ(m::kMonstersCount, 12u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
+                                       // + B3.21 The Guardian (id 21)
     EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 231u);  // integrated through B3.7/B3.20/B3.25
+    EXPECT_EQ(m::kTotalCount, 234u);  // 231 + The Guardian's monster row and
+                                      // its Mode Shift / Sharp Hide powers
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

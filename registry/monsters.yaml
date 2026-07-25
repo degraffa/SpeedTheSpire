@@ -419,3 +419,104 @@
         # MakeTempCardInDiscardAction(new Slimed(), A19 ? 5 : 3), not hand.
         - {op: MAKE_CARD, target: PLAYER, amount: {base: 3, a19: 5}, card: SLIMED, pile: DISCARD}
   ai: native
+
+# --- B3.21: The Guardian -----------------------------------------------------
+# TheGuardian.java read in full. The class is a two-mode state machine, not a
+# move-selection tree: getMove (:226-232) runs ONCE, at init, and every later
+# transition is a direct setMove inside a takeTurn body or inside changeState.
+# The two cycles are
+#   offensive  CHARGE_UP -> FIERCE_BASH -> VENT_STEAM -> WHIRLWIND -> (loop)
+#   defensive  CLOSE_UP  -> ROLL_ATTACK -> TWIN_SLAM   -> WHIRLWIND -> (offensive)
+# and the flip between them is driven by CUMULATIVE damage taken while open, not
+# by the move list: TheGuardian.damage (:275-292) accumulates dmgTaken and, on
+# reaching dmgThreshold, queues the Defensive-Mode change of state. The threshold
+# is NOT a constant -- changeState "Defensive Mode" adds dmgThresholdIncrease = 10
+# (:61,245) on EVERY flip, so at the engine's fixed A20 the thresholds run
+# 40, 50, 60, ... That growth, the mode latches and the Offensive-Mode return are
+# native (monster_guardian.cpp); the move EFFECTS below are data.
+#
+# Id 21 was allocated out of a reserved block while sibling batches held 12-20,
+# so ids 12-20 are absent from this file. Gaps are legal and expected -- the
+# loader requires ids unique / >= 1 / append-only, never contiguous.
+
+- id: 21
+  name: THE_GUARDIAN
+  game_id: "TheGuardian"
+  provenance: "TheGuardian ctor HP/threshold A9+A19 and damage A4 branches (TheGuardian.java:92-120), usePreBattleAction ModeShift+ResetThreshold (:122-132), takeTurn dispatch (:134-169), the six move bodies (:171-223), getMove (:226-232), changeState Defensive/Offensive/ResetThreshold (:234-273), damage() threshold accumulator (:275-292), move ids CLOSE_UP=1/FIERCE_BASH=2/ROLL_ATTACK=3/TWIN_SLAM=4/WHIRLWIND=5/CHARGE_UP=6/VENT_STEAM=7 (:78-84); ID (:47); ModeShiftPower.java:11-31; SharpHidePower.java:22-50"
+  enemy_type: BOSS   # TheGuardian.java:94
+  hp:
+    # setHp(int): a FIXED sheet, no monsterHpRng draw. The ctor branches
+    # DESCENDING (:97-106), so A19+ and A9+ share 250 HP and only the mode-shift
+    # threshold differs between them -- which is why the a19 column repeats 250
+    # rather than being omitted.
+    base: {min: 240, max: 240}  # TheGuardian.java:104-105 (ascension < 9)
+    a9:   {min: 250, max: 250}  # TheGuardian.java:100-101 (ascension 9..18)
+    a19:  {min: 250, max: 250}  # TheGuardian.java:97-98  (ascension >= 19)
+  moves:
+    - name: CLOSE_UP
+      move_id: 1               # TheGuardian.java:78
+      intent: BUFF             # changeState "Defensive Mode" (:246)
+      effects:
+        # SharpHidePower(this, thornsDamage): thornsDamage 3 (:74), or
+        # thornsDamage + 1 == 4 at A19+ (:185-189). Applied to ITSELF.
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a19: 4}, power: SHARP_HIDE}
+    - name: FIERCE_BASH
+      move_id: 2               # TheGuardian.java:79
+      intent: ATTACK           # useChargeUp's setMove (:222)
+      effects:
+        # damage.get(0): fierceBashDamage 32, or 36 from A4 (:63-64,107-114).
+        # The A_2_* field NAME is misleading -- the branch is `>= 4` (:107).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 32, a4: 36}}
+    - name: ROLL_ATTACK
+      move_id: 3               # TheGuardian.java:80
+      intent: ATTACK           # useCloseUp's setMove (:190)
+      effects:
+        # damage.get(1): rollDamage 9, or 10 from A4 (:65-66,107-115). Same
+        # misleading A_2_* naming as Fierce Bash; the branch is `>= 4`.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 9, a4: 10}}
+    - name: TWIN_SLAM
+      move_id: 4               # TheGuardian.java:81
+      intent: ATTACK_BUFF      # useRollAttack's setMove (:204)
+      effects:
+        # useTwinSmash (:193-199) queues, in order: ChangeState(OFFENSIVE_MODE),
+        # two DamageActions of damage.get(3) == twinSlamDamage 8 (:69), then
+        # RemoveSpecificPowerAction("Sharp Hide"). The change of state is native
+        # (it re-applies Mode Shift at the GROWN threshold and drops the
+        # Defensive-Mode block); the three items below are its data half, and the
+        # native module appends the Offensive-Mode items AFTER them so the final
+        # resolution order matches the Java exactly. See monster_guardian.cpp.
+        - {op: DAMAGE, target: PLAYER, amount: 8}
+        - {op: DAMAGE, target: PLAYER, amount: 8}
+        # amount is unused by REMOVE_POWER (the PowerId rides in `extra`), but
+        # the monster-move parser requires every step to carry one.
+        - {op: REMOVE_POWER, target: SELF, amount: 0, power: SHARP_HIDE}
+    - name: WHIRLWIND
+      move_id: 5               # TheGuardian.java:82
+      intent: ATTACK           # useVentSteam (:180) / useTwinSmash (:198)
+      effects:
+        # whirlwindCount == 4 separate DamageActions of damage.get(2) ==
+        # whirlwindDamage 5 (:68,71,207-214) -- an unrolled loop, NOT one
+        # 20-damage hit: each hit runs the DamageInfo pipeline on its own, so
+        # per-hit block absorption and Vulnerable rounding differ from a single
+        # 20-damage hit.
+        - {op: DAMAGE, target: PLAYER, amount: 5}
+        - {op: DAMAGE, target: PLAYER, amount: 5}
+        - {op: DAMAGE, target: PLAYER, amount: 5}
+        - {op: DAMAGE, target: PLAYER, amount: 5}
+    - name: CHARGE_UP
+      move_id: 6               # TheGuardian.java:83
+      intent: DEFEND           # useWhirlwind (:215) / getMove (:228)
+      effects:
+        # GainBlockAction(this, this, blockAmount) -- blockAmount 9, no ascension
+        # branch (:73,219). A direct GainBlockAction, so no card applyPowers.
+        - {op: BLOCK, target: SELF, amount: 9}
+    - name: VENT_STEAM
+      move_id: 7               # TheGuardian.java:84
+      intent: STRONG_DEBUFF    # useFierceBash's setMove (:174)
+      effects:
+        # VENT_DEBUFF == 2, applied Weak FIRST then Vulnerable (:75,177-181).
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+  ai: native   # Two-mode state machine keyed on cumulative damage taken, with a
+               # per-flip growing threshold; see monster_guardian.cpp. getMove
+               # (:226-232) runs only at init and consumes the one aiRng draw.

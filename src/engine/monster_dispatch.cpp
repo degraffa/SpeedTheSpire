@@ -10,6 +10,7 @@
 
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
+#include "sts/engine/monster_guardian.hpp" // The Guardian's mode state machine
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
@@ -82,6 +83,8 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &acid_slime_large_init;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_init;
+        case MonsterId::THE_GUARDIAN:
+            return &guardian_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -113,6 +116,8 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &acid_slime_large_take_turn;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_take_turn;
+        case MonsterId::THE_GUARDIAN:
+            return &guardian_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -120,9 +125,12 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
+    // Checked for The Guardian: it queues none. getMove (TheGuardian.java:
+    // 226-232) runs only from init's rollMove; every later transition is a
+    // direct setMove, so no ROLL_MOVE item ever targets it.
     switch (id) {
         case MonsterId::SPIKE_SLIME_LARGE:
             return &spike_slime_large_roll_move;
@@ -146,10 +154,12 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
+    // Checked for The Guardian: nothing spawns it mid-combat. It is a solo boss
+    // encounter (encounters.yaml "The Guardian") and neither splits nor summons.
     switch (id) {
         case MonsterId::SPIKE_SLIME_MEDIUM:
             return &spike_slime_medium_spawn_at_hp;
@@ -194,7 +204,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 }
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
@@ -208,13 +218,21 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
         case MonsterId::SLIME_BOSS:
             slime_boss_on_damaged(state, monster_index);
             return;
+        // TheGuardian.damage (TheGuardian.java:275-292) -- unlike the split
+        // interrupts above, this override reads the SIZE of the hit
+        // (`tmpHealth - currentHealth`), not the resulting HP. It reconstructs
+        // that delta from its own HP baseline (monster_guardian.hpp); if this
+        // hook ever carries the lost HP as an argument, that is what it wants.
+        case MonsterId::THE_GUARDIAN:
+            guardian_on_damaged(state, monster_index);
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -222,6 +240,13 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)
+
+        // TheGuardian.usePreBattleAction (TheGuardian.java:122-132) is the one
+        // pre-battle override with real combat content: past the BGM/ambiance
+        // and UnlockTracker lines it applies ModeShiftPower(this, dmgThreshold)
+        // to itself and resets the damage accumulator. No RNG.
+        case MonsterId::THE_GUARDIAN:
+            return &guardian_use_pre_battle_action;
 
         // The two monsters below DO override usePreBattleAction; both are
         // deliberately nullptr here, and the reasons differ. They are spelled out
@@ -255,10 +280,10 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return nullptr;
 
         default:
-            // Checked, not assumed: of the 11 registry monsters only JawWorm,
-            // LouseNormal, LouseDefensive and SlimeBoss declare the method at
-            // all. The other seven (Cultist, the four small/medium slimes, the
-            // two large slimes) inherit AbstractMonster's empty body
+            // Checked, not assumed: of the 12 registry monsters only JawWorm,
+            // LouseNormal, LouseDefensive, SlimeBoss and TheGuardian declare the
+            // method at all. The other seven (Cultist, the four small/medium
+            // slimes, the two large slimes) inherit AbstractMonster's empty body
             // (AbstractMonster.java:953-954), so there is genuinely nothing to
             // run for them.
             //

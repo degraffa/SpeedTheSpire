@@ -196,14 +196,26 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //     (CurlUpPower.java:25,38-43). Set synchronously by onAttacked before its
 //     queued GainBlock/RemoveSpecificPower actions resolve, preventing a queued
 //     multi-hit attack from triggering more than once; cleared on power removal.
-//   * `pad0` -- Louse (Normal/Defensive): the per-instance rolled bite damage
-//     (monsterHpRng draw in the ctor, LouseNormal.java:60). 5..8 fits a byte; the
-//     louse turn reads it for the BITE DamageAction (see monster_louse.cpp).
+//   * `pad0` -- MONSTER-TYPE-SCOPED SCRATCH, with NO single global layout. Each
+//     monster module owns the WHOLE byte and subdivides it (or does not) as it
+//     needs, because no record is ever two monster types at once. Read it only
+//     after checking `monster_id`, and do not treat another monster's
+//     subdivision as a constraint on yours. Current interpretations:
+//       - Louse (Normal/Defensive): the per-instance rolled bite damage
+//         (monsterHpRng draw in the ctor, LouseNormal.java:60). 5..8 fits a byte;
+//         the louse turn reads it for the BITE DamageAction (monster_louse.cpp).
+//       - The Guardian: the HP baseline its Mode Shift accumulator measures
+//         cumulative damage from -- a WHOLE-byte value, not a packed pair. The
+//         Guardian's fixed 240/250 HP sheet (TheGuardian.java:97-106) fits
+//         uint8_t's 0..255 with room to spare. See monster_guardian.cpp.
 //   * `flags` bit kMonsterFlagSplitTriggered -- large slimes: the
 //     `splitTriggered` one-shot latch (AcidSlime_L.java:71,150 /
 //     SpikeSlime_L.java:66,138). Set synchronously by the damage() interrupt
 //     the first time currentHealth falls to <= maxHealth/2 so later hits do not
 //     re-queue the split telegraph.
+//   * `flags` bits kMonsterFlagGuardian* -- The Guardian: the two mode latches
+//     plus the count of Defensive-Mode flips so far, which is what makes the
+//     mode-shift threshold GROW (TheGuardian.java:61,245).
 // These are mutually exclusive across monster types (a Cultist never bites; a
 // Louse never has Ritual), so no field is read under two meanings at once.
 struct MonsterState {
@@ -215,7 +227,7 @@ struct MonsterState {
     uint8_t move_history[3];          // last 3 move ids, [0] = most recent
     uint8_t intent;                   // telegraphed next move id
     uint8_t power_count;              // live length of powers[]
-    uint8_t pad0;                     // per-monster aux byte (Louse bite dmg; else 0)
+    uint8_t pad0;                     // monster-type-scoped scratch byte (see above)
     PowerSlot powers[kPowerCap];
 };
 
@@ -226,6 +238,32 @@ inline constexpr uint16_t kMonsterFlagCurlUpTriggered = 0x0002u;
 // Large slime splitTriggered latch (AcidSlime_L.java:71,145-151 /
 // SpikeSlime_L.java:66,133-139); see the MonsterState comment above.
 inline constexpr uint16_t kMonsterFlagSplitTriggered = 0x0004u;
+
+// Bits 0x0008 / 0x0010 / 0x0020 are RESERVED (Lagavulin, landing on its own
+// branch); this batch was allocated from 0x0040 up rather than appending into
+// them.
+//
+// The Guardian (TheGuardian.java, see monster_guardian.hpp). Two latches and a
+// counter, all read only by monster_guardian.cpp:
+//   * OPEN               -- `isOpen` (:76,248,262): Offensive Mode, the only
+//                           mode in which damage accumulates toward a shift.
+//   * CLOSE_UP_TRIGGERED -- `closeUpTriggered` (:77,263,289): set SYNCHRONOUSLY
+//                           the instant the threshold is reached, so the hits
+//                           still queued behind a multi-hit attack cannot
+//                           trigger a second flip before the queued change of
+//                           state resolves and clears `isOpen`.
+//   * SHIFT_COUNT        -- how many times Defensive Mode has been entered. The
+//                           threshold is dmgThreshold + 10 * this
+//                           (dmgThresholdIncrease, :61,245), which is what makes
+//                           the flip point GROW each cycle. Three bits (0..7) is
+//                           ample: at A20 the thresholds run 40, 50, 60, 70 ...,
+//                           so reaching an 8th flip would need 40+50+...+110 ==
+//                           600 cumulative damage against a 250 HP sheet. The
+//                           increment saturates rather than wrapping.
+inline constexpr uint16_t kMonsterFlagGuardianOpen = 0x0040u;
+inline constexpr uint16_t kMonsterFlagGuardianCloseUpTriggered = 0x0080u;
+inline constexpr uint16_t kMonsterFlagGuardianShiftShift = 8u;
+inline constexpr uint16_t kMonsterFlagGuardianShiftMask = 0x0700u;
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,

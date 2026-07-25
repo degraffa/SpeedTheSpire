@@ -263,6 +263,16 @@ MONSTER_INTENTS = {
                          # AcidSlime_L.java:137,146 / SpikeSlime_L.java:124,134)
     "STRONG_DEBUFF": 8,  # Slime Boss Goop Spray (AbstractMonster.Intent.STRONG_DEBUFF;
                           # SlimeBoss.java:128,145,188)
+    # 9 and 10 are RESERVED (Lagavulin's SLEEP/STUN, landing on its own branch);
+    # this batch was allocated 11-12 rather than appending into them.
+    "DEFEND": 11,        # The Guardian's Charge Up (AbstractMonster.Intent.DEFEND;
+                          # TheGuardian.java:215,228). A DISTINCT Intent constant
+                          # from DEFEND_BUFF=2: Charge Up buffs nothing, it is a
+                          # bare GainBlockAction (TheGuardian.java:219).
+    "ATTACK_BUFF": 12,   # The Guardian's Twin Slam (AbstractMonster.Intent.ATTACK_BUFF;
+                          # TheGuardian.java:204). A DISTINCT Intent constant from
+                          # ATTACK_DEFEND=3; the "buff" is the queued return to
+                          # Offensive Mode (TheGuardian.java:194).
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

@@ -213,9 +213,16 @@ void op_spot_weakness(CombatState& s, uint8_t tgt, int amount) noexcept {
     }
     const MonsterIntent intent =
         static_cast<MonsterIntent>(s.monsters[tgt].intent);
+    // Every AbstractMonster.Intent variant a monster can be given a non-negative
+    // baseDamage with -- the ATTACK* family (AbstractMonster.java:451-463: the
+    // damage-carrying setMove overloads store baseDamage, the others leave it
+    // at -1). ATTACK_BUFF is the fourth member: The Guardian telegraphs Twin
+    // Slam with it (TheGuardian.java:204), and while this predicate omitted it
+    // Spot Weakness silently paid out nothing against that telegraphed attack.
     const bool attacks = intent == MonsterIntent::ATTACK ||
                          intent == MonsterIntent::ATTACK_DEFEND ||
-                         intent == MonsterIntent::ATTACK_DEBUFF;
+                         intent == MonsterIntent::ATTACK_DEBUFF ||
+                         intent == MonsterIntent::ATTACK_BUFF;
     if (!attacks) {
         return;
     }
