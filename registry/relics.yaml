@@ -12,12 +12,44 @@
 #                          unique/contiguous within a tier. Omit for non-pool rows.
 #     initial_counter: <int16> OPTIONAL; defaults to AbstractRelic's -1. Encodes
 #                          constructor/onEquip state in RunState RelicSlot.
-#     native: <bool>       OPTIONAL; true -> the relic's hook bodies are handled by
-#                          the native escape hatch (relic_hooks.cpp
-#                          dispatch_native_relic_hook) rather than a data-bound
-#                          effect program -- for counter/conditional/heal relics.
-#                          A native relic still LISTS the hooks it responds to (with
-#                          an empty program) so the framework routes them.
+#     native: <bool>       OPTIONAL; true -> the relic's hook BODIES are hand-written
+#                          C++ rather than a data-bound effect program -- for
+#                          counter/conditional/heal relics. This flag is not prose:
+#                          the dispatch table is GENERATED from this file. Each
+#                          `native: true` row emits one X(<NAME>, relic_native_
+#                          <name>) entry of the STS_REGISTRY_NATIVE_RELICS X-macro
+#                          in the generated relic_table.hpp
+#                          (tools/registry_gen/stsgen/emit/relics.py, sharing
+#                          powers.py's native_dispatch_macro). relic_hooks.cpp
+#                          expands that one list TWICE -- once for the extern
+#                          declarations, once for the RelicId -> handler switch
+#                          behind dispatch_native_relic_hook -- so the table is a
+#                          projection of the registry, never a hand-maintained
+#                          switch. That is what makes relic batches parallel-safe:
+#                          a new batch adds rows here plus a translation unit under
+#                          src/engine/relics/ and never edits relic_hooks.cpp.
+#                          Handler names follow the frozen convention: the row name
+#                          lowercased, e.g. BLUE_CANDLE -> relic_native_blue_candle.
+#                          LINK ERROR, NEVER A SILENT NO-OP: the handler is odr-used
+#                          at the expansion site, so a row marked native whose body
+#                          nobody wrote is an UNDEFINED REFERENCE at link time (the
+#                          old hand-written switch answered `default: return nullptr`
+#                          and quietly did nothing -- that failure mode is gone). The
+#                          declarations use RelicNativeSig, so a body whose signature
+#                          drifts also fails to link.
+#                          DELIBERATE-NO-OP CONVENTION: "native, but the combat body
+#                          is DEFERRED" can no longer be expressed by omission. Such
+#                          a relic must define an EXPLICIT EMPTY handler in its batch
+#                          translation unit (src/engine/relics/relics_b3_*.cpp),
+#                          carrying the reason and the Java citation in the comment
+#                          above it. That empty definition IS the record of the
+#                          decision -- see the "DEFERRED combat bodies" sections of
+#                          relics_b3_24.cpp / relics_b3_25.cpp.
+#                          A native relic still LISTS the hooks it responds to, each
+#                          with an EMPTY program, so the framework routes them. The
+#                          generator enforces both directions and fails loud: a hook
+#                          with steps AND `native: true` is an error, and a hook with
+#                          an empty program on a row that is NOT native is an error.
 #     hooks:               OPTIONAL; RelicHook -> effect program (reusing the
 #                          CardEffectStep shape). Each key is a RelicHook name
 #                          (relic_hooks.hpp); the value is a list of
