@@ -33,6 +33,12 @@
 //       Strike 1E: DAMAGE 6.            Defend 1E: BLOCK 5.
 //       Bash   2E: DAMAGE 8, Vulnerable 2 (same target, damage BEFORE Vulnerable).
 //       Shrug  1E: BLOCK 8, DRAW 1.     Pommel 1E: DAMAGE 9, DRAW 1.
+//   * Affordability (AbstractCard.hasEnoughEnergy, AbstractCard.java:888;
+//       Ironclad's 3 energy/turn, Ironclad.java:68). A script that cannot pay for
+//       its own turn is a HARD generation failure -- see card_is_affordable and
+//       the abort in play_card. Re-derived from the Java here, not asked of the
+//       engine's legal_actions(), for the reason in the constraint above: an
+//       oracle that borrows the predicate under test cannot contradict it.
 //   * Damage pipeline (DamageInfo.applyPowers, design doc §5.5): float accumulate,
 //       floor ONCE at end. Player attack into monster = floor(base * 1.5^[Vuln]).
 //       Monster attack into player = base + monsterStrength (player carries no
@@ -108,7 +114,12 @@ CardId pool_card_id(int idx) {
     if (idx == 10) return CardId::SHRUG_IT_OFF;
     return CardId::POMMEL_STRIKE;
 }
-uint8_t pool_cost(int idx) { return (idx == 9) ? 2 : 1; }  // Bash costs 2
+// costForTurn for a pool slot. Signed on purpose: -1 is the game's X-cost
+// sentinel (AbstractCard.cost / costForTurn, AbstractCard.java:75-76), and the
+// affordability rule below reads it as a number, exactly as the Java does. No
+// skeleton card is X-cost, so this never returns -1 today; a future X-cost card
+// must return -1 here rather than 0, or the rule silently changes meaning.
+int pool_cost(int idx) { return (idx == 9) ? 2 : 1; }  // Bash costs 2
 const char* pool_short(int idx) {
     switch (pool_card_id(idx)) {
         case CardId::STRIKE: return "Strike";
@@ -119,6 +130,60 @@ const char* pool_short(int idx) {
         default: return "?";
     }
 }
+
+// Energy the player gets at the start of every turn: the Ironclad's
+// `new EnergyManager(3)` (Ironclad.java:68), SET (not added) each turn by
+// EnergyManager.recharge -> EnergyPanel.setEnergy (EnergyManager.java:25-41,
+// EnergyPanel.java:52-57). Ice Cream / Conserve are the only branches that make
+// it additive and neither exists in the skeleton.
+constexpr int kTurnEnergy = 3;
+
+// --- Affordability ----------------------------------------------------------
+//
+// Whether the player may legally play a card at all, re-derived HERE from the
+// Java rather than borrowed from the engine. This generator is the independent
+// oracle for the golden traces: if it asked the engine's legal_actions() what is
+// playable, an engine bug in that predicate would be copied into the expected
+// states and the cross-check would agree with the thing it is meant to check.
+// The rule below is therefore read straight out of the decompiled source and
+// expressed in this file's own vocabulary (its `energy` counter and its
+// pool_cost table), touching no gameplay header.
+//
+// AbstractCard.hasEnoughEnergy (AbstractCard.java:862-893) is the gate; its
+// energy clause is line 888:
+//
+//     EnergyPanel.totalCount >= this.costForTurn || this.freeToPlay()
+//         || this.isInAutoplay
+//
+// Three things that clause quietly settles:
+//
+//  * X-cost cards. `cost == -1` is the X-cost sentinel, and costForTurn carries
+//    it (AbstractCard.java:75-76). `totalCount >= -1` is true for every legal
+//    energy value, so an X-cost card is ALWAYS affordable -- it is not charged
+//    through this path at all. AbstractPlayer.useCard snapshots the pool into
+//    energyOnUse instead (AbstractPlayer.java:1363-1365) and its spend at
+//    :1378-1380 is skipped because `costForTurn <= 0`. Writing the comparison
+//    exactly as the Java writes it is what makes that case fall out for free;
+//    "cost > energy is illegal" would have wrongly rejected it.
+//  * Free plays. freeToPlay() (AbstractCard.java:2057-2062) is freeToPlayOnce,
+//    or FreeAttackPower on an ATTACK; isInAutoplay is the auto-play flag. Both
+//    bypass the energy comparison entirely, and useCard:1378 likewise spends
+//    nothing for them. The skeleton has no source of either -- no relic, no
+//    power, no autoplay -- so `free` is constant false here. It is still a named
+//    parameter so that adding such a card means setting the flag, not
+//    rediscovering the rule.
+//  * A 0-cost card is affordable at 0 energy, which `>=` gives directly.
+//
+// Note what the game does when the gate is bypassed: EnergyPanel.useEnergy
+// clamps at zero (EnergyPanel.java:71-74). So negative energy is not merely
+// unreachable through the gate -- there is no path to it at all, and a trace
+// recording it describes a state the game cannot represent.
+bool card_is_affordable(int energy, int cost_for_turn, bool free) {
+    return energy >= cost_for_turn || free;
+}
+
+// Nothing in the skeleton grants freeToPlayOnce / FreeAttackPower / autoplay.
+constexpr bool kSkeletonFreePlay = false;
 
 // Jaw Worm A20 stat constants (monster_jaw_worm.hpp; JawWorm.java ascension>=17).
 constexpr int kChompDmg = 12;
@@ -289,8 +354,8 @@ struct RefSim {
         mv_hist[0] = kMoveChomp; mv_hist[1] = 0; mv_hist[2] = 0;
         m_intent = kIntentAttack;
 
-        // start of turn 1: energy 3, ++turn, block decay, draw opening 5.
-        energy = 3;
+        // start of turn 1: refill energy, ++turn, block decay, draw opening 5.
+        energy = kTurnEnergy;
         turn = 1;
         cards_played = 0;
         block = 0;
@@ -333,7 +398,11 @@ struct RefSim {
         return base;
     }
 
-    void play_card(int hand_index, int target /*monster slot, always 0*/) {
+    // `fixture` / `step` are diagnostics only: they name the script and the
+    // action index in the abort message below, so an unplayable script points at
+    // itself instead of at a state diff twenty minutes later.
+    void play_card(int hand_index, int target /*monster slot, always 0*/,
+                   const std::string& fixture, int step) {
         (void)target;
         // A terminal state absorbs no further actions (the engine's advance()
         // pumps a COMBAT_OVER state to an immediate no-op). Fixtures never script
@@ -345,11 +414,49 @@ struct RefSim {
         if (hand_index < 0 || hand_index >= static_cast<int>(hand.size())) return;
         const int pool = hand[static_cast<size_t>(hand_index)];
         const CardId id = pool_card_id(pool);
+        const int cost = pool_cost(pool);
+
+        // AFFORDABILITY IS A HARD STOP, NOT A CLAMP AND NOT A SKIP.
+        //
+        // An unaffordable play is not something the game can do: hasEnoughEnergy
+        // (AbstractCard.java:888) refuses it before useCard ever runs, so there is
+        // no sequence of inputs that reaches the state this script describes.
+        // Silently clamping the energy at 0, or silently dropping the action,
+        // would each still WRITE a trace -- a golden vector asserting an outcome
+        // the game never produces, which is how a bad script becomes a permanent
+        // false expectation that the engine is then measured against. The only
+        // safe time to catch it is authoring time, so this aborts generation and
+        // writes nothing.
+        //
+        // (This is exactly the defect that put a 4-energy turn -- Bash 2 + Strike
+        // 1 + Pommel 1 against a 3-energy budget -- into fixt13_r21_triple, whose
+        // recorded expectation therefore contained player_energy == -1. Both this
+        // generator and the engine were missing the check, so the two "independent"
+        // implementations agreed on a state neither could legally reach.)
+        if (!card_is_affordable(energy, cost, kSkeletonFreePlay)) {
+            std::fprintf(stderr,
+                "FIXTURE BUG: %s action %d plays hand[%d] = %s (pool %d, cost %d) "
+                "with only %d energy available.\n"
+                "  AbstractCard.hasEnoughEnergy (AbstractCard.java:888) refuses this "
+                "play, so the state it would produce is unreachable and must not "
+                "become a golden vector.\n"
+                "  Rescript the fixture inside the %d-energy turn budget "
+                "(Ironclad.java:68) -- splitting the turn is legal, exceeding the "
+                "budget is not. No trace was written.\n",
+                fixture.c_str(), step, hand_index, pool_short(pool), pool, cost,
+                energy, kTurnEnergy);
+            std::exit(3);
+        }
 
         ++cards_played;
         hand.erase(hand.begin() + hand_index);
         discard.push_back(pool);
-        energy -= pool_cost(pool);
+        // AbstractPlayer.useCard's spend (AbstractPlayer.java:1378-1380) is
+        // skipped for costForTurn <= 0 / free / autoplay cards; every skeleton
+        // card has cost 1 or 2 and none is free, so the unconditional subtraction
+        // is that branch. It stays unconditional here rather than growing a
+        // never-taken `if` -- the gate above is what keeps it honest.
+        energy -= cost;
 
         // Effects in addToBot order. On a monster kill, the pump halts before any
         // LATER effect of the same card resolves -- so kills must be single-effect
@@ -451,7 +558,7 @@ struct RefSim {
 
         // start-of-turn: reset counters, energy, block decay, ++turn, draw 5.
         cards_played = 0;
-        energy = 3;
+        energy = kTurnEnergy;   // SET, not added (EnergyManager.recharge)
         turn_has_ended = 0;
         ++turn;
         block = 0;                 // player block decays AFTER the monster's hit
@@ -465,7 +572,7 @@ struct RefSim {
         // card pool (deck order, never mutates).
         for (int i = 0; i < kDeckSize; ++i) {
             s.card_pool[i].card_id = static_cast<uint16_t>(pool_card_id(i));
-            s.card_pool[i].cost_now = pool_cost(i);
+            s.card_pool[i].cost_now = static_cast<uint8_t>(pool_cost(i));
         }
         s.phase = static_cast<uint8_t>(phase);
         s.turn = static_cast<uint16_t>(turn);
@@ -555,9 +662,17 @@ void run_dump(const Fixture& f, const std::vector<SeedData>& all) {
     int idx = 0;
     for (const ScriptAction& a : f.actions) {
         if (a.verb == ActionVerb::PLAY_CARD) {
+            // Bounds-check before naming the card: play_card treats an
+            // out-of-range index as the same no-op the engine's queue_card_play
+            // does, but this line runs FIRST and used to index the hand vector
+            // unconditionally -- so a mis-scripted index read past the end just
+            // to print a label. Say so instead; a script that names an empty slot
+            // is doing nothing, and the dump is where that should be visible.
+            const bool in_hand = static_cast<size_t>(a.hand_index) < g.hand.size();
             std::printf("  -> action %d PLAY hand[%d]=%s\n", idx, a.hand_index,
-                        pool_short(g.hand[a.hand_index]));
-            g.play_card(a.hand_index, a.target);
+                        in_hand ? pool_short(g.hand[a.hand_index])
+                                : "<OUT OF RANGE -- no-op>");
+            g.play_card(a.hand_index, a.target, f.name, idx);
         } else {
             std::printf("  -> action %d END_TURN\n", idx);
             g.end_turn();
@@ -578,15 +693,17 @@ bool write_fixture(const Fixture& f, const std::vector<SeedData>& all) {
     std::vector<Action> actions;
     states.push_back(g.snapshot());  // record[0] = initial
 
+    int idx = 0;
     for (const ScriptAction& a : f.actions) {
         if (a.verb == ActionVerb::PLAY_CARD) {
             actions.push_back(make_action(ActionVerb::PLAY_CARD, a.hand_index, a.target, 0));
-            g.play_card(a.hand_index, a.target);
+            g.play_card(a.hand_index, a.target, f.name, idx);
         } else {
             actions.push_back(make_action(ActionVerb::END_TURN, 0, 0, 0));
             g.end_turn();
         }
         states.push_back(g.snapshot());
+        ++idx;
     }
 
     const std::string path = std::string(STS_FIXTURE_OUT_DIR) + "/" + f.name + ".trace";
