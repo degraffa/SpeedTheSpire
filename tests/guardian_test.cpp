@@ -127,7 +127,8 @@ TEST(GuardianRegistry, NativeEntryIntentsAndAscensionColumnsMatchJava) {
         << "allocated from a reserved block; ids 12-20 are a legal gap";
     EXPECT_EQ(static_cast<int>(r::PowerId::MODE_SHIFT), 45);
     EXPECT_EQ(static_cast<int>(r::PowerId::SHARP_HIDE), 46);
-    // Appended above Lagavulin's reserved SLEEP=9 / STUN=10 rather than into them.
+    // Appended above Lagavulin's SLEEP=9 / STUN=10 rather than into them; ids
+    // are unique and append-only, never required to be contiguous.
     EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::DEFEND), 11);
     EXPECT_EQ(static_cast<uint8_t>(r::MonsterIntent::ATTACK_BUFF), 12);
 
@@ -335,6 +336,113 @@ TEST(GuardianModeShift, FlipsAtExactCumulativeThresholdWithPerCycleGrowth) {
     EXPECT_EQ(g.move_history[0], kCloseUp);
     EXPECT_EQ(guardian_mode_shift_threshold(g), kA20Threshold + 20)
         << "and it grows again: 40 -> 50 -> 60";
+}
+
+// Walk the defensive cycle (Close Up -> Roll Attack -> Twin Slam) back to
+// Offensive Mode. Twin Slam is what re-opens the Guardian and re-applies Mode
+// Shift at the GROWN threshold (TheGuardian.java:194,253-266).
+void walk_defensive_cycle_back_to_offensive(CombatState& s) {
+    ASSERT_EQ(s.monsters[0].move_history[0], kCloseUp);
+    take_one_turn(s);  // CLOSE_UP  -> telegraph Roll Attack
+    take_one_turn(s);  // ROLL      -> telegraph Twin Slam
+    take_one_turn(s);  // TWIN_SLAM -> back to Offensive Mode
+    ASSERT_EQ(s.monsters[0].move_history[0], kWhirlwind);
+}
+
+// The acceptance names the thresholds "40, 50, 60 ...", so DRIVE all three
+// flips rather than only asserting that the third threshold computes to 60:
+// dmgThresholdIncrease is applied on EVERY Defensive-Mode entry
+// (TheGuardian.java:61,245), so the growth has to compound, not fire once.
+// Each cycle also proves the accumulator restarts: N-1 damage must not flip.
+TEST(GuardianModeShift, ThreeFlipsRequireFortyThenFiftyThenSixty) {
+    CombatState s = make_guardian_state(21015);
+    MonsterState& g = s.monsters[0];
+
+    const int32_t thresholds[] = {kA20Threshold, kA20Threshold + 10,
+                                  kA20Threshold + 20};  // 40, 50, 60
+    int32_t cumulative = 0;
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        const int32_t need = thresholds[cycle];
+        SCOPED_TRACE(testing::Message() << "cycle " << cycle << ", threshold " << need);
+
+        // The opener is Charge Up; every later cycle re-enters at Whirlwind,
+        // where Twin Slam rejoins the offensive cycle (:198).
+        EXPECT_EQ(g.move_history[0], cycle == 0 ? kChargeUp : kWhirlwind);
+        EXPECT_EQ(guardian_mode_shift_threshold(g), need);
+        const PowerSlot* ms = find_monster_power(s, 0, PowerId::MODE_SHIFT);
+        ASSERT_NE(ms, nullptr);
+        EXPECT_EQ(ms->amount, need) << "Mode Shift is applied AT the threshold";
+
+        hit_guardian(s, need - 1);
+        EXPECT_NE(g.move_history[0], kCloseUp) << "one short of the threshold";
+        EXPECT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT)->amount, 1);
+
+        hit_guardian(s, 1);  // the exact cumulative threshold
+        EXPECT_EQ(g.move_history[0], kCloseUp);
+        EXPECT_EQ(g.block, 20) << "DEFENSIVE_BLOCK (:72,240)";
+        EXPECT_EQ(find_monster_power(s, 0, PowerId::MODE_SHIFT), nullptr);
+
+        cumulative += need;
+        EXPECT_EQ(g.hp, kA20Hp - cumulative);
+        EXPECT_EQ(guardian_mode_shift_threshold(g), need + 10)
+            << "dmgThresholdIncrease compounds on every flip (:61,245)";
+
+        walk_defensive_cycle_back_to_offensive(s);
+    }
+    EXPECT_EQ(cumulative, 150) << "40 + 50 + 60";
+    EXPECT_EQ(g.hp, kA20Hp - 150);
+    EXPECT_EQ(guardian_mode_shift_threshold(g), kA20Threshold + 30)
+        << "the fourth window would need 70";
+}
+
+// The one window the accumulator is deliberately NOT derived from
+// ModeShiftPower.amount. changeState "Offensive Mode" sets isOpen SYNCHRONOUSLY
+// (:262) but only QUEUES the new ModeShiftPower and the "Reset Threshold" that
+// zeroes dmgTaken (:254-255). A player with Thorns reflects into that gap --
+// Java counts it into dmgTaken and then DISCARDS it when Reset Threshold
+// resolves, so the next window must still need the FULL grown threshold.
+TEST(GuardianModeShift, ThornsReflectedIntoTheReopenGapIsDiscarded) {
+    CombatState s = make_guardian_state(21016);
+    MonsterState& g = s.monsters[0];
+
+    hit_guardian(s, kA20Threshold);  // flip 1: threshold grows to 50
+    ASSERT_EQ(g.move_history[0], kCloseUp);
+    take_one_turn(s);  // CLOSE_UP -> telegraph Roll Attack
+    take_one_turn(s);  // ROLL     -> telegraph Twin Slam
+    ASSERT_EQ(g.move_history[0], kTwinSlam);
+
+    // Thorns 5: each of Twin Slam's two hits reflects 5 back at the Guardian,
+    // and ThornsPower.onAttacked adds to the TOP (power_thorns.cpp), so both
+    // land inside the gap -- after isOpen is set, before Mode Shift is applied.
+    s.player_powers[s.player_power_count].power_id =
+        static_cast<uint16_t>(PowerId::THORNS);
+    s.player_powers[s.player_power_count].amount = 5;
+    ++s.player_power_count;
+
+    // In ordinary play the DEFENSIVE_BLOCK of 20 is still up when Twin Slam
+    // swings (it is dropped by the LoseBlockAction queued AFTER the slams,
+    // :256-258), so it absorbs both reflects and no HP is lost -- in which case
+    // Java's `tmpHealth > currentHealth` guard means nothing accumulates
+    // either, and the gate under test never has to do anything. Clear it so the
+    // reflect actually reaches HP, which is the case the gate exists for.
+    g.block = 0;
+
+    const int16_t hp_before_twin_slam = g.hp;
+    take_one_turn(s);  // TWIN_SLAM
+
+    EXPECT_EQ(hp_before_twin_slam - g.hp, 10) << "two 5-point reflects landed";
+    const PowerSlot* ms = find_monster_power(s, 0, PowerId::MODE_SHIFT);
+    ASSERT_NE(ms, nullptr);
+    EXPECT_EQ(ms->amount, kA20Threshold + 10)
+        << "the reflected 10 is DISCARDED by Reset Threshold, not counted";
+
+    // And the discard is real, not just cosmetic on the power: the next window
+    // still takes the full 50.
+    s.player_power_count = 0;  // drop Thorns so later hits are plain damage
+    hit_guardian(s, 49);
+    EXPECT_EQ(g.move_history[0], kWhirlwind) << "49 < 50 even after the reflect";
+    hit_guardian(s, 1);
+    EXPECT_EQ(g.move_history[0], kCloseUp);
 }
 
 // One hit larger than the threshold must flip exactly once, and a multi-hit

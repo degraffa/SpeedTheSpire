@@ -48,6 +48,15 @@
 //     dmgTaken and then DISCARDS it when Reset Threshold resolves. Gluing the
 //     baseline while the power is absent reproduces that discard, which is why
 //     this engine needs no queued "reset threshold" action.
+//     The one place the two models could part company: Java re-tests
+//     `dmgTaken >= dmgThreshold` on each of those reflected hits (:285), so a
+//     SINGLE reflect at or above the whole grown threshold would flip Java
+//     straight back to Defensive Mode before the discard ever ran. That needs
+//     >= 40 reflected damage from one hit against a 250 HP sheet, and each
+//     reflect source queues its own hit: the largest in Ironclad S1 content is
+//     upgraded Flame Barrier's 6 (cards.yaml FLAME_BARRIER), with Bronze
+//     Scales' Thorns 3 behind it. Unreachable rather than merely unlikely --
+//     revisit if a bigger single reflect ever lands.
 // Deriving dmgTaken from ModeShiftPower.amount ALONE would not work: in that
 // same window the power does not exist, so its amount cannot record the reflect
 // damage that Java is (transiently) counting.

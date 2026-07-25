@@ -239,9 +239,9 @@ inline constexpr uint16_t kMonsterFlagCurlUpTriggered = 0x0002u;
 // SpikeSlime_L.java:66,133-139); see the MonsterState comment above.
 inline constexpr uint16_t kMonsterFlagSplitTriggered = 0x0004u;
 
-// Bits 0x0008 / 0x0010 / 0x0020 are RESERVED (Lagavulin, landing on its own
-// branch); this batch was allocated from 0x0040 up rather than appending into
-// them.
+// Bits 0x0008 / 0x0010 / 0x0020 belong to Lagavulin's three sleep/wake booleans
+// and are not free; this batch was allocated from 0x0040 up rather than
+// appending into them. A gap in this bitfield is legal -- nothing indexes it.
 //
 // The Guardian (TheGuardian.java, see monster_guardian.hpp). Two latches and a
 // counter, all read only by monster_guardian.cpp:
