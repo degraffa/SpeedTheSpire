@@ -39,6 +39,11 @@
 //       the abort in play_card. Re-derived from the Java here, not asked of the
 //       engine's legal_actions(), for the reason in the constraint above: an
 //       oracle that borrows the predicate under test cannot contradict it.
+//   * Playable SLOT. A Play naming an index outside the current hand is also a
+//       hard generation failure (the second abort in play_card), for a related
+//       but distinct reason: the engine no-ops such an action and so would this
+//       simulator, so the two agree at zero diffs on a fixture that has quietly
+//       stopped doing what its name says.
 //   * Damage pipeline (DamageInfo.applyPowers, design doc §5.5): float accumulate,
 //       floor ONCE at end. Player attack into monster = floor(base * 1.5^[Vuln]).
 //       Monster attack into player = base + monsterStrength (player carries no
@@ -73,6 +78,9 @@
 //   gen_combat_fixtures            -> writes every *.trace under STS_FIXTURE_OUT_DIR
 //   gen_combat_fixtures --dump NAME-> prints the human-readable turn-by-turn trace
 //                                     for one fixture (used to author/verify scripts)
+//   gen_combat_fixtures --dumpall  -> the same for every fixture, in order; this is
+//                                     the source of truth the derivation notes and
+//                                     their coverage table are checked against
 
 #include <cstdint>
 #include <cstdio>
@@ -408,10 +416,49 @@ struct RefSim {
         // pumps a COMBAT_OVER state to an immediate no-op). Fixtures never script
         // past the killing action, so this only guards --dump exploration.
         if (phase == CombatPhase::COMBAT_OVER) return;
-        // Out-of-range hand index: queue_card_play returns false and the pump does
-        // nothing (card_play.cpp) -- mirror that no-op instead of reading past the
-        // hand (a mis-scripted index must be caught by the diff, not by UB here).
-        if (hand_index < 0 || hand_index >= static_cast<int>(hand.size())) return;
+        // AN OUT-OF-RANGE HAND SLOT IS A HARD STOP, NOT A NO-OP.
+        //
+        // This is the affordability rule's twin, and it is here for a subtler
+        // version of the same reason. queue_card_play refuses an index past the
+        // hand (`hand_index >= s.hand_count`, card_play.cpp) and advance() turns
+        // the action into a documented no-op, so mirroring that no-op here does
+        // produce a trace the engine agrees with -- perfectly, at zero diffs.
+        // That agreement is the trap: BOTH implementations correctly do nothing,
+        // so the cross-check cannot distinguish "this script's last action was
+        // deliberately inert" from "this script no longer does what it says".
+        // The fixture keeps its name, its coverage claim and its green test while
+        // silently exercising none of it.
+        //
+        // (That is exactly what happened to fixt16_r29_monster_death, whose final
+        // Play named slot 3 of a three-card hand: the fight stopped mid-combat
+        // with the monster on 17/43 and the corpus went on claiming monster-death
+        // coverage. The drift was mechanical -- the scripts predate the
+        // end-of-turn hand discard, so every turn-2 slot came to name a different
+        // card -- which is why the failure has to be raised at authoring time,
+        // when --dump can still show what the hand really holds.)
+        //
+        // Deliberately inert actions are not a thing this corpus needs; if one
+        // ever is, it should be spelled with its own verb rather than smuggled in
+        // as an index typo.
+        if (hand_index < 0 || hand_index >= static_cast<int>(hand.size())) {
+            std::fprintf(stderr,
+                "FIXTURE BUG: %s action %d plays hand[%d], but the hand holds %d "
+                "card(s) at that point.\n"
+                "  queue_card_play refuses an index past the hand and advance() "
+                "no-ops the action, so this play does NOTHING -- and the reference "
+                "simulator agreeing that it does nothing is why the zero-diff check "
+                "would not catch it. The fixture would keep asserting whatever its "
+                "name and the coverage table claim.\n"
+                "  Re-author the script against the LIVE hand: run "
+                "'gen_combat_fixtures --dump %s', which prints the hand after every "
+                "action. Remember that a play shifts later cards down, that a draw "
+                "appends to the end, and that the end-of-turn discard empties the "
+                "hand entirely -- turn 2 is dealt a fresh five. No trace was "
+                "written.\n",
+                fixture.c_str(), step, hand_index, static_cast<int>(hand.size()),
+                fixture.c_str());
+            std::exit(3);
+        }
         const int pool = hand[static_cast<size_t>(hand_index)];
         const CardId id = pool_card_id(pool);
         const int cost = pool_cost(pool);
@@ -662,16 +709,18 @@ void run_dump(const Fixture& f, const std::vector<SeedData>& all) {
     int idx = 0;
     for (const ScriptAction& a : f.actions) {
         if (a.verb == ActionVerb::PLAY_CARD) {
-            // Bounds-check before naming the card: play_card treats an
-            // out-of-range index as the same no-op the engine's queue_card_play
-            // does, but this line runs FIRST and used to index the hand vector
-            // unconditionally -- so a mis-scripted index read past the end just
-            // to print a label. Say so instead; a script that names an empty slot
-            // is doing nothing, and the dump is where that should be visible.
+            // Bounds-check before naming the card: this line runs BEFORE
+            // play_card and used to index the hand vector unconditionally, so a
+            // mis-scripted index read past the end just to print a label. Print
+            // the slot's status instead. play_card aborts on an out-of-range
+            // index, so this label is the last thing the dump prints -- which is
+            // the point: --dump is the tool you reach for to find out WHY
+            // generation refused the script, and it shows the offending slot next
+            // to the hand that does not contain it.
             const bool in_hand = static_cast<size_t>(a.hand_index) < g.hand.size();
             std::printf("  -> action %d PLAY hand[%d]=%s\n", idx, a.hand_index,
                         in_hand ? pool_short(g.hand[a.hand_index])
-                                : "<OUT OF RANGE -- no-op>");
+                                : "<OUT OF RANGE -- generation aborts>");
             g.play_card(a.hand_index, a.target, f.name, idx);
         } else {
             std::printf("  -> action %d END_TURN\n", idx);
@@ -838,11 +887,24 @@ std::vector<Fixture> all_fixtures() {
                  {Play(1), Play(0), End(), Play(0), Play(0), End()},
                  "Shrug + Strike, then two more; monster Chomp/Thrash across turns"});
 
-    // 16 -- MONSTER DEATH: Bash for Vulnerable turn 1, finish with Strikes on
-    // turn 2 (killing blow is a single-effect Strike so no queued item lingers).
+    // 16 -- MONSTER DEATH: Bash for Vulnerable turn 1, finish on turn 2 with the
+    // killing blow a single-effect Strike, so nothing is left queued behind it.
+    //
+    // The turn-2 slots are the ones --dump prints, not the ones a turn-1 hand
+    // would suggest: the end-of-turn discard empties the hand, so turn 2 plays
+    // out of the five cards drawn at its start -- Shrug10 Defend8 Strike3 Defend6
+    // Pommel11 -- against a monster on 26 HP that still carries Bash's
+    // Vulnerable. That hand holds one Strike, so 3x Strike cannot reach 26; the
+    // Vulnerable-boosted Pommel (13) opens instead and its DRAW 1 pulls Strike0
+    // off the top of the draw pile, which is what makes the second 9 available.
+    // 13 + 9 + 9 = 31 >= 26 inside the 3-energy budget, and the lethal card is a
+    // Strike -- a Pommel or Bash kill would strand its trailing DRAW/Vulnerable
+    // item in the queue when the pump halts at COMBAT_OVER (see killed_note).
     f.push_back({"fixt16_r29_monster_death", "r29",
-                 {Play(0), Play(0), End(), Play(1), Play(1), Play(3)},
-                 "MONSTER DEATH: Bash+Strike into Vuln, then 3 Strikes; Strike kills"});
+                 {Play(0), Play(0), End(), Play(4), Play(2), Play(3)},
+                 "MONSTER DEATH: Bash 8 + Vuln then Strike 9 on turn 1; turn 2 "
+                 "Pommel 13 (draws the lethal Strike) + Strike 9 + Strike 9 into "
+                 "the same Vuln kills the monster; single-effect Strike is lethal"});
 
     // 17 -- PLAYER DEATH: never block; Bellow-stacked Strength escalates the
     // monster's attacks until a Chomp (single effect) kills on turn 9.
@@ -866,10 +928,15 @@ std::vector<Fixture> all_fixtures() {
                  {Play(1), Play(0), End(), Play(0), Play(0), End(), Play(0), End()},
                  "Multi-turn Defends vs escalating monster (Thrash/Bellow)"});
 
-    // 20 -- Bash + attacks over two turns into a Vulnerable, Strength-buffed foe.
+    // 20 -- Bash + attacks over two turns into a Vulnerable foe, ending on a
+    // reshuffle. r18's moves are Chomp/Thrash/Chomp: the monster never Bellows,
+    // so it never gains Strength. This is the Vulnerable-ONLY counterpart to the
+    // Strength+Vulnerable overlap fixtures (12, 13, 18, 19) -- the description
+    // used to claim the overlap, which --dump shows it never reaches.
     f.push_back({"fixt20_r18_bash_two_turns", "r18",
                  {Play(1), Play(0), End(), Play(0), Play(0), End()},
-                 "Bash Vuln turn 1; attacks turn 2 while monster gains Strength"});
+                 "Bash Vuln turn 1; Defend + a Vuln-boosted Strike turn 2 vs a "
+                 "Thrash; monster stays Vulnerable-only (never Bellows)"});
 
     return f;
 }

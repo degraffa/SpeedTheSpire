@@ -602,6 +602,89 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **terminal-outcome coverage is now pinned by a test**,
+  `FixtureOracle.CorpusCoversBothTerminalOutcomes`. The corpus must contain at
+  least one fight ending in monster death and at least one ending in player
+  death, and both are classified from the **replayed terminal `CombatState`** —
+  the engine driven through each fixture's own recorded actions — never from a
+  file name. Renaming a file cannot satisfy it; neutering a script cannot pass
+  it.
+  This is the actual lesson of the two fixture corrections below. The zero-diff
+  oracle compares two implementations against each other and is silent whenever
+  they agree, and two implementations agree very readily about an action that
+  does nothing. The coverage claim therefore lived nowhere executable — in a
+  file name and a markdown row — and went stale without anything turning red.
+  A guarantee that nothing asserts is a guarantee that will drift.
+  Two smaller corrections ride along, both found with `--dumpall` and neither
+  changing any trace: fixt20's coverage description claimed the monster "gains
+  Strength", which r18's Chomp/Thrash/Chomp sequence never does — it never
+  Bellows, so it stays Vulnerable-only, and it is now described as the
+  Vulnerable-only counterpart to the overlap fixtures. And `--dumpall` is now
+  documented in the generator's USAGE block, since the derivation notes name it
+  as their source of truth.
+- 2026-07-25 — **an out-of-range hand slot is now a hard generation failure**
+  in `tools/fixture_gen/gen_combat_fixtures.cpp`, the twin of the affordability
+  abort added the day before and the mechanism behind the fixt16 correction
+  recorded below. A `Play(n)` whose slot is outside the current hand aborts
+  generation, naming the fixture, the action index, the slot and the hand size,
+  and writes nothing.
+  Worth stating why this needed a check at all, because it is *not* the fixt13
+  case. An unaffordable play produced a state the game cannot reach, and the
+  `advance()` legality guard eventually contradicted it. An out-of-range play
+  produces a state the game reaches perfectly well — `queue_card_play` refuses
+  the index, `advance()` no-ops the action, the reference simulator mirrors that
+  no-op, and the trace is **correct**. The zero-diff check therefore cannot ever
+  fire on one: both implementations agree, accurately, that nothing happened.
+  What is wrong is not the trace but the fixture's *claim* — its name, and the
+  coverage table's row — and no amount of differential testing looks at those.
+  The only place the defect is visible is authoring time, which is where the
+  check now lives.
+  Safe to add because the corpus has exactly one violator and it was fixed
+  first: generation reports **20/20** with the check in place, and every one of
+  the 20 traces is byte-identical to before it. Demonstrated by reintroducing
+  the old fixt16 script, observing the abort (exit 3, no trace written), and
+  reverting.
+- 2026-07-25 — **a second frozen Stage A golden vector was corrected** — again
+  beyond the zero-diff-in-meaning regeneration conventions §5 sanctions, so it
+  is recorded here rather than only in a task Log.
+  `tests/golden/combat_fixtures/fixt16_r29_monster_death.trace` was named for
+  monster death and **did not kill the monster**. Its script ended
+  `… End(), Play(1), Play(1), Play(3)`; turn 2 deals a five-card hand, two plays
+  leave three cards, and the final `Play(3)` therefore named an **empty slot**.
+  `queue_card_play` (`src/engine/card_play.cpp`) rejects an index `>= hand_count`
+  and `advance()` no-ops the action, the reference simulator mirrored that no-op,
+  and the trace ended at `WAITING_ON_USER` with the monster alive on 17/43. The
+  description was wrong in the same way — it claimed "then 3 Strikes" where the
+  realized turn-2 plays were Defend then Strike.
+  **Root cause — the same hand-index drift as fixt13, and the same blind spot.**
+  The scripts were authored against a generator that did not yet discard the hand
+  at end of turn, so every turn-2 slot silently came to name a different card.
+  Nothing failed: an out-of-range play is a *documented no-op* on both sides, so
+  the two independent implementations agreed that nothing happened and the
+  zero-diff check passed. The corpus advertised monster-death coverage it did not
+  have — a coverage claim that went stale in silence, which is the more general
+  defect here than either individual script.
+  **Fix.** fixt16 was re-authored empirically against
+  `gen_combat_fixtures --dump`: turn 1 is unchanged (Bash 8 + Vulnerable, then a
+  Vulnerable-boosted Strike 9, monster 43→26); turn 2 plays the hand it is
+  actually dealt — Pommel 13, whose DRAW 1 pulls the second Strike into hand,
+  then Strike 9 and Strike 9 — reaching `COMBAT_OVER` with the monster at 0/43
+  inside the 3-energy budget. The killing blow stays a single-effect **Strike**
+  so the pump halts with an empty queue. Only fixt16's trace changed; the other
+  19 were proven byte-identical by sha256. Two follow-on commits on the same
+  branch close the mechanism behind the defect rather than this one instance of
+  it — see the two entries above.
+  **Also corrected: the derivation notes.** The previous change left a scoped
+  accuracy warning naming fixt01, fixt08 and fixt18 as having wrong printed
+  arithmetic. Re-deriving every entry against `--dumpall` showed the warning
+  itself understated the problem — **fixt12, fixt15, fixt19 and fixt20 were wrong
+  too** — and that the coverage table had four independent errors (it credited
+  fixt15 with a Pommel Strike it never plays, credited fixt20 with a
+  Strength/Vulnerable overlap its monster never reaches, and missed both a Bash
+  and three reshuffles). Every entry and every table row is now re-derived from
+  the traces and the warning is gone. **No trace was wrong — only the prose
+  about it**, which is why this is a notes fix and not a second vector
+  correction.
 - 2026-07-25 — **a frozen Stage A golden vector was corrected**, which goes
   beyond the zero-diff-in-meaning regeneration conventions §5 sanctions, so it
   is recorded here rather than only in a task Log.
