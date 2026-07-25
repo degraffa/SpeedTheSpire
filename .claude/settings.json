@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -qE '(worktree[[:space:]]+(add|remove)\\b|branch[[:space:]]+(-d|-D|--delete)[[:space:]])' && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Use tools/task_worktree.sh, not the raw git worktree/branch verbs (conventions.md section 2). create <task> refuses a dirty base and prints the base sha to quote in the brief; land <task> removes the worktree BEFORE deleting the branch (the reverse order fails) and refuses when the branch is not contained in master; list shows which worktrees are safe to delete. If you genuinely need the raw verb, say so and it can be run outside this project.\"}}' || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
