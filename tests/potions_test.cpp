@@ -231,13 +231,10 @@ void seed_hand_card(CombatState& s, uint8_t pi, CardId id, uint8_t upgrade = 0) 
     s.hand[s.hand_count++] = pi;
 }
 
-// NOTE (pre-existing, reported separately; NOT introduced here): the engine's
-// UPGRADE eligibility (choice_slot_eligible, src/engine/interp/interp_cards.cpp)
-// tests only !upgraded, while AbstractCard.canUpgrade (AbstractCard.java:672-680)
-// also rejects CURSE and STATUS. Every CHOOSE_CARD{upgrade} consumer shares that
-// gap -- Armaments and Armaments+ already reach it with a curse or status in
-// hand -- so these tests deliberately assert only the behaviour this potion
-// owns and do not pin the divergent curse/status case either way.
+// choice_slot_eligible (src/engine/interp/interp_cards.cpp) now implements
+// AbstractCard.canUpgrade (AbstractCard.java:672-680) in full -- CURSE and
+// STATUS are rejected before the !upgraded test -- so the curse/status case this
+// note previously left unpinned is asserted below.
 
 TEST(Potions, BlessingOfTheForgeUpgradesEveryUpgradeableHandCard) {
     CombatState s = MakeCombat();
@@ -279,6 +276,45 @@ TEST(Potions, BlessingOfTheForgeWithNothingUpgradeableIsInert) {
     EXPECT_EQ(s.card_pool[1].upgrade, 1);
     EXPECT_EQ(s.hand_count, 2);
     EXPECT_EQ(s.player_hp, 80) << "no other side effect (potency 0)";
+}
+
+TEST(Potions, BlessingOfTheForgeSkipsCursesAndStatuses) {
+    // armamentsPlus upgrades every canUpgrade() card (ArmamentsAction.java:36-44);
+    // a curse or a status is never one of them (AbstractCard.java:672-680).
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::WRITHE);  // CURSE (innate -- opens in hand)
+    seed_hand_card(s, 2, CardId::WOUND);   // STATUS
+    seed_hand_card(s, 3, CardId::DEFEND);
+
+    ASSERT_TRUE(use_potion(s, PotionId::BLESSING_OF_THE_FORGE, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item));
+
+    drain_actions(s);
+    EXPECT_EQ(s.card_pool[0].upgrade, 1);
+    EXPECT_EQ(s.card_pool[1].upgrade, 0) << "a curse is not upgradeable";
+    EXPECT_EQ(s.card_pool[2].upgrade, 0) << "a status is not upgradeable";
+    EXPECT_EQ(s.card_pool[3].upgrade, 1);
+    EXPECT_EQ(s.hand_count, 4);
+}
+
+TEST(Potions, BlessingOfTheForgeWithOnlyCursesAndStatusesIsInert) {
+    // The eligible count is ZERO, not 3 -- the forced sweep finds nothing and the
+    // potion is a no-op (and, per choice_requires_user, still opens no screen).
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::WRITHE);
+    seed_hand_card(s, 1, CardId::WOUND);
+    seed_hand_card(s, 2, CardId::SLIMED);
+
+    ASSERT_TRUE(use_potion(s, PotionId::BLESSING_OF_THE_FORGE, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item));
+    drain_actions(s);
+    for (uint8_t i = 0; i < 3; ++i) {
+        EXPECT_EQ(s.card_pool[i].upgrade, 0) << "pool row " << int{i};
+    }
+    EXPECT_EQ(s.hand_count, 3);
 }
 
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------

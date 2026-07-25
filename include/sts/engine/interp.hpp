@@ -429,11 +429,14 @@ inline constexpr uint8_t kNoChoiceExclusion = 255;
 
 // Is slot `slot` of the kind's SOURCE pile (hand, or discard for
 // discard-to-draw-top) a legal selection for a CHOOSE_CARD of the given kind?
-// UPGRADE requires an un-upgraded card (AbstractCard.canUpgrade: !upgraded, and
-// non-CURSE/STATUS -- every card in scope is ATTACK/SKILL); EXHAUST /
+// UPGRADE mirrors AbstractCard.canUpgrade (AbstractCard.java:672-680): a CURSE
+// or a STATUS is never eligible (Writhe / Wound / Burn / Slimed all reach the
+// hand in combat), otherwise the card must be un-upgraded; Searing Blow
+// overrides canUpgrade to always-true (SearingBlow.java:58-60) and so stays
+// eligible when already upgraded. EXHAUST /
 // PUT_ON_DRAW_TOP accept any hand card; DISCARD_TO_DRAW_TOP accepts any discard
 // card except `excluded` (the just-played source, in limbo in the game);
-// DUPLICATE (B3.6, Dual Wield) accepts ATTACK or POWER hand cards only
+// DUPLICATE (Dual Wield) accepts ATTACK or POWER hand cards only
 // (DualWieldAction.isDualWieldable:95-97).
 [[nodiscard]] bool choice_slot_eligible(
     const CombatState& state, uint8_t slot, ChoiceKind kind,

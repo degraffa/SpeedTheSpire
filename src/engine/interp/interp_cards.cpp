@@ -464,11 +464,32 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
         return false;
     }
     if (kind == ChoiceKind::UPGRADE) {
-        // Most cards: canUpgrade() == !upgraded. SearingBlow.canUpgrade always
-        // returns true, so its u8 upgrade count remains eligible until saturated.
+        // AbstractCard.canUpgrade (AbstractCard.java:672-680) in order:
+        //   type == CURSE  -> false
+        //   type == STATUS -> false
+        //   otherwise      -> !upgraded
+        // SearingBlow.canUpgrade (SearingBlow.java:58-60) OVERRIDES the whole
+        // base method with `return true`, so it is tested FIRST here -- an
+        // override runs instead of, not after, the base body. (Searing Blow is
+        // an ATTACK, so the type rejections would not have fired for it either
+        // way; the ordering is written to mirror Java dispatch, not to rely on
+        // that coincidence.) Its unbounded timesUpgraded is a u8 here, so the
+        // only extra guard is saturation.
         const CardInstance& c = s.card_pool[s.hand[slot]];
         if (c.card_id == static_cast<uint16_t>(CardId::SEARING_BLOW)) {
             return c.upgrade != UINT8_MAX;
+        }
+        // Curses and statuses are never upgrade targets. This is reachable in
+        // combat: Writhe is an innate curse that opens in hand, and Wound /
+        // Burn / Slimed enter hand mid-combat. Beyond mis-targeting, the
+        // eligible COUNT feeds choice_requires_user / op_choose_card's
+        // forced-vs-prompted branch (ArmamentsAction.java:46-60 counts exactly
+        // the canUpgrade() cards), so an inflated count would change whether a
+        // hand-select screen opens at all.
+        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+        if (def == nullptr || def->type == CardType::CURSE ||
+            def->type == CardType::STATUS) {
+            return false;
         }
         return c.upgrade == 0;
     }
