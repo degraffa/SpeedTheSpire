@@ -23,7 +23,8 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
 #include "sts/engine/observation.hpp"
-#include "sts/engine/relic_hooks.hpp"       // player_has_relic (Blue Candle)
+#include "relics/relics_boss.hpp"           // kVelvetChokerPlayLimit
+#include "sts/engine/relic_hooks.hpp"       // player_has_relic (Blue Candle) + atPreBattle
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -139,6 +140,25 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     // for the skeleton group and the 20 fixtures stay byte-identical.
     use_pre_battle_actions(state);
 
+    // -- applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of
+    //    preBattlePrep (:1607). It runs BEFORE the turn-1 block below, which is
+    //    the entire reason atPreBattle is a distinct hook from atBattleStart:
+    //    Snecko Eye's Confusion has to be on the player before the opening
+    //    DrawCardAction, or the first hand escapes the cost roll. Nothing is
+    //    drained here -- what this queues sits at the front of the queue that
+    //    begin_first_turn's own pump() drains, exactly as in the game, where
+    //    preBattlePrep's actions resolve before AbstractRoom's waitTimer ticks
+    //    (AbstractRoom.java:229-235).
+    //
+    //    A no-op (and byte-identical) without a responding relic: the combat
+    //    relic mirror is empty for this entry point, so the 20 fixtures are
+    //    unchanged. The RUN entry point (run_advance.cpp enter_combat) does not
+    //    yet carry this call -- see the deferral recorded with the batch. --
+    {
+        const RelicView rv = player_relics(state);
+        dispatch_relics_at_pre_battle(state, rv.relics, rv.count);
+    }
+
     // -- The game's turn-1 block (AbstractRoom.java:236-258). begin_first_turn
     //    (action_queue.cpp) owns it for BOTH combat-construction paths -- this one
     //    and enter_combat (run_advance.cpp) -- so the two cannot drift. It still
@@ -226,6 +246,33 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         }
     }
 
+    // Velvet Choker (boss relic): a canPlay veto on EVERY card once six have been
+    // played this turn (VelvetChoker.canPlay:77-84, reached from
+    // AbstractCard.hasEnoughEnergy's relic fan-out, AbstractCard.java:876-879).
+    // Structurally the Normality lock above, with the counter living on the relic
+    // instead of on the card.
+    //
+    // THE CHEAP GATE IS EXACT, not an approximation. The relic's counter is reset
+    // to 0 at battle start and at every turn start and incremented once per
+    // onPlayCard, clamped at 6 (relics/relics_boss.cpp) -- the same event and the
+    // same reset points as cards_played_this_turn (action_queue.cpp
+    // start_of_turn). So `cards_played_this_turn >= 6` holds exactly when a held
+    // Velvet Choker's counter has reached its limit, and the relic-mirror walk --
+    // the cold cache line the Blue Candle note below is about -- is paid only
+    // after a six-card turn, which is rare. The counter itself is still what the
+    // veto reads, so the relic remains the authority.
+    bool velvet_choker_locked = false;
+    if (state.cards_played_this_turn >= kVelvetChokerPlayLimit) {
+        for (uint8_t i = 0; i < state.relic_count; ++i) {
+            if (state.relics[i].relic_id ==
+                    static_cast<uint16_t>(RelicId::VELVET_CHOKER) &&
+                state.relics[i].counter >= kVelvetChokerPlayLimit) {
+                velvet_choker_locked = true;
+                break;
+            }
+        }
+    }
+
     // Blue Candle's and Medical Kit's presence is a property of the player, not
     // of a hand slot, so the relic-mirror scan is resolved AT MOST ONCE per
     // legal_actions call and reused by every slot (it used to re-scan per
@@ -280,6 +327,17 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // Clash's all-attacks canUse predicate.
             if (playable && def != nullptr && def->requires_all_attacks &&
                 !all_hand_attacks) {
+                playable = false;
+            }
+            // Velvet Choker's veto is applied LAST, after the Medical Kit / Blue
+            // Candle escape hatches, because that is where canUse puts it:
+            // :917/:920 return false early for the unplayable status/curse, and
+            // everything that survives them ends at
+            // `cardPlayable(m) && hasEnoughEnergy()` (AbstractCard.java:923) --
+            // and hasEnoughEnergy is the method that runs the relics' canPlay
+            // fan-out. So a curse the player CAN play thanks to Blue Candle is
+            // still vetoed by a spent Velvet Choker.
+            if (velvet_choker_locked) {
                 playable = false;
             }
             out.can_play[i] = playable;

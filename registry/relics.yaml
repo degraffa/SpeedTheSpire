@@ -1222,3 +1222,346 @@
   game_id: "Odd Mushroom"
   tier: SPECIAL
   provenance: "OddMushroom (OddMushroom.java:12-28) -- ID 'Odd Mushroom', VULN_EFFECTIVENESS = 1.25f; a SPECIAL-tier relic in no dungeon pool. The branch lives in VulnerablePower.atDamageReceive (VulnerablePower.java:61-73): a NORMAL hit on a Vulnerable PLAYER is x1.25 instead of x1.5 when the player owns Odd Mushroom. The Odd Mushroom test comes FIRST in the Java, before Paper Frog's monster-side x1.75, and the two are mutually exclusive by the owner.isPlayer test. Implemented in the frozen DAMAGE pipeline's at_damage_receive (interp/interp_damage.cpp), retiring that site's 'lands with its rare-relic tier' note. Acquisition is event-driven and owned by the event layer."
+
+# --- Boss (Ironclad-obtainable) ---------------------------------------------------
+#
+# SCOPE: the Ironclad-obtainable BOSS pool -- 22 rows, ids 112-133. Enumerated from
+# RelicLibrary.initialize() (RelicLibrary.java:229-403) filtered to
+# RelicTier.BOSS per-file: 19 shared `add()` boss relics plus the three
+# `addRed()` ones (BlackBlood, MarkOfPain, RunicCube). EXCLUDED as NOT
+# Ironclad-obtainable: HoveringKite / RingOfTheSerpent / WristBlade (addGreen,
+# Silent), FrozenCore / Inserter / NuclearBattery (addBlue, Defect), HolyWater /
+# VioletLotus (addPurple, Watcher). The count and membership match the live
+# oracle's `relicPools.boss` exactly for all ten b14_accept captures
+# (STS00001..STS00010).
+#
+# S1 REACHABILITY: this pool is drawn only through Neow's category-3 boss-relic
+# swap (NeowReward.getRewardOptions case 3 -> NeowRewardType.BOSS_RELIC ->
+# returnRandomRelic(BOSS), NeowReward.java:123-127, :242-246) -- the frozen scope
+# decision in design 5.6. The FIVE relicRng shuffles run unconditionally at
+# dungeon init whether or not the pool is ever drawn from, so the row set and its
+# pool_order are RNG-visible on every seed.
+#
+# BOSS pool_order 0..21 is the canonical PRE-shuffle
+# RelicLibrary.populateRelicPool order, recovered by inverting the JDK shuffle
+# (relicRng randomLong draw #5 -- COMMON, UNCOMMON, RARE, SHOP, BOSS in
+# AbstractDungeon.initializeRelicList order, AbstractDungeon.java:1237-1241)
+# against those ten captures; all ten agree, and the SAME inversion reproduces
+# the already-committed COMMON, UNCOMMON, RARE and SHOP pool_order exactly, which
+# is what validates the method rather than merely fitting it.
+#
+# ENERGY MASTER -- one deferral shared by ten of these rows. Ten boss relics do
+# `++AbstractDungeon.player.energy.energyMaster` in onEquip (Fusion Hammer,
+# Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu,
+# Philosopher's Stone, Coffee Dripper, Mark of Pain), and Slaver's Collar does it
+# conditionally in beforeEnergyPrep. The engine has NO energyMaster field: the
+# per-turn recharge reads the kIroncladBaseEnergy constant
+# (EnergyManager.recharge, EnergyManager.java:25-40 -> action_queue.cpp
+# start_of_turn). Deriving the master from the owned relic list needs no storage,
+# but its single consumer is that one line inside start_of_turn, which this batch
+# does not own. Each affected row's pool slot, canSpawn gate and relicRng draw are
+# LIVE; only the +1 is inert.
+
+- id: 112
+  name: FUSION_HAMMER
+  game_id: "Fusion Hammer"
+  tier: BOSS
+  pool_order: 0
+  provenance: "FusionHammer (FusionHammer.java:18-68) -- onEquip ++energyMaster (:46-49), canUseCampfireOption disables SmithOption (:56-63). A marker row: the energy half is the shared energyMaster deferral above; the smith lock is a rest-room concern owned by the campfire layer. Row, pool slot and relicRng draw are live."
+
+- id: 113
+  name: VELVET_CHOKER
+  game_id: "Velvet Choker"
+  tier: BOSS
+  pool_order: 1
+  native: true
+  hooks:
+    at_battle_start: []       # counter = 0
+    at_turn_start: []         # counter = 0
+    on_play_card: []          # counter++ while < 6
+    on_victory: []            # counter = -1
+  provenance: "VelvetChoker (VelvetChoker.java:18-94): atBattleStart/atTurnStart counter = 0 (:57-65); onPlayCard -- if counter < 6 then ++counter (:67-75); canPlay -- false once counter >= 6 (:77-84); onVictory counter = -1 (:86-89). The canPlay veto is AbstractCard.hasEnoughEnergy's relic fan-out (AbstractCard.java:876-879), modeled in legal_actions (advance.cpp) beside Blue Candle's and Medical Kit's gates. onEquip ++energyMaster (:47-50) is the shared deferral above."
+
+- id: 114
+  name: RUNIC_DOME
+  game_id: "Runic Dome"
+  tier: BOSS
+  pool_order: 2
+  provenance: "RunicDome (RunicDome.java:16-57) -- onEquip ++energyMaster (:44-47) and NOTHING else; the 'you can no longer see enemy intents' half is purely an OBSERVATION concern, read at AbstractMonster.updateIntent/renderIntent (AbstractMonster.java:258, :749) as a negated player.hasRelic test. The engine's observation encoder is what would hide the intent; no simulated outcome depends on it. Deliberate no-op: the row, its pool slot and its relicRng draw are live."
+
+- id: 115
+  name: SLAVERS_COLLAR
+  game_id: "SlaversCollar"
+  tier: BOSS
+  pool_order: 3
+  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called by name from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1591): if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, ++energyMaster and begin the pulse; onVictory undoes it while pulsing (:59-65). DEFERRED for the same reason as Sling of Courage: eliteTrigger is per-ROOM state and CombatState carries no elite/boss marker. Row, pool slot and relicRng draw are live."
+
+- id: 116
+  name: SNECKO_EYE
+  game_id: "Snecko Eye"
+  tier: BOSS
+  pool_order: 4
+  native: true
+  hooks:
+    at_pre_battle: []         # apply Confusion to the player before the opening draw
+  provenance: "SneckoEye.atPreBattle (SneckoEye.java:39-43) -- addToBot ApplyPowerAction(player, player, ConfusionPower(player)). Fired from AbstractPlayer.applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of preBattlePrep (:1607) and therefore BEFORE the opening DrawCardAction -- which is what makes the very first hand cost-randomised. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is the RNG-visible half: exactly one cardRandomRng.random(3) per drawn card whose cost >= 0, in draw order (powers.yaml CONFUSION). onEquip masterHandSize += 2 (:29-32) is DEFERRED with the energyMaster group -- gameHandSize is read at the same start-of-turn line (kStartOfTurnDrawCount, action_queue.cpp)."
+
+- id: 117
+  name: PANDORAS_BOX
+  game_id: "Pandora's Box"
+  tier: BOSS
+  pool_order: 5
+  pickup:
+    on_equip: true
+  provenance: "PandorasBox.onEquip (PandorasBox.java:47-70) -- remove every STARTER_STRIKE / STARTER_DEFEND card from the master deck, then draw that many AbstractDungeon.returnTrulyRandomCard() replacements. DEFERRED: returnTrulyRandomCard draws over the WHOLE colour pool (commons, uncommons AND rares) and needs the same generated all-red combat pool Dead Branch is waiting on (relics_rare.cpp), plus the CardTags.STARTER_* membership the registry does not carry. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+
+- id: 118
+  name: CURSED_KEY
+  game_id: "Cursed Key"
+  tier: BOSS
+  pool_order: 6
+  provenance: "CursedKey (CursedKey.java:16-79) -- onEquip ++energyMaster (:66-69); onChestOpen, for a NON-boss chest, obtains AbstractDungeon.returnRandomCurse() (:50-56). The chest half is a treasure-room concern (B4.7's onChestOpen surface, which Matryoshka and N'loth's Mask also wait on); the energy half is the shared energyMaster deferral. Row, pool slot and relicRng draw are live."
+
+- id: 119
+  name: BUSTED_CROWN
+  game_id: "Busted Crown"
+  tier: BOSS
+  pool_order: 7
+  provenance: "BustedCrown (BustedCrown.java:16-60) -- onEquip ++energyMaster (:40-43); changeNumberOfCardsInReward returns numberOfCards - 2 (:45-48), read by RewardItem (RewardItem.java:308-310). The reward-count half is B4.5's (combat rewards do not exist yet); the energy half is the shared deferral. Row, pool slot and relicRng draw are live."
+
+- id: 120
+  name: ECTOPLASM
+  game_id: "Ectoplasm"
+  tier: BOSS
+  pool_order: 8
+  pickup:
+    can_spawn: true
+  provenance: "Ectoplasm (Ectoplasm.java:16-60) -- canSpawn: AbstractDungeon.actNum <= 1 (:50-53), the ONLY act-gated canSpawn in the S1 relic set; onEquip ++energyMaster (:38-41). The 'can no longer gain gold' half is a marker read by AbstractPlayer.gainGold (AbstractPlayer.java:719-724): with Ectoplasm owned the method returns BEFORE the += and before the relics' onGainGold fan-out. That is live -- every run-layer gold gain routes through gain_gold (relics/relic_pickup.hpp)."
+
+- id: 121
+  name: TINY_HOUSE
+  game_id: "Tiny House"
+  tier: BOSS
+  pool_order: 9
+  pickup:
+    on_equip: true
+  provenance: "TinyHouse.onEquip (TinyHouse.java:24-60) -- Collections.shuffle(upgradableCards, new Random(miscRng.randomLong())) then upgrade the first, increaseMaxHp(5, true), addGoldToRewards(50), addPotionToRewards(PotionHelper.getRandomPotion(miscRng)), and open the combat-reward screen. DEFERRED WHOLE, not in part: the body consumes miscRng TWICE (the shuffle seed and the potion identity roll, itself a rejection-sampling loop -- potions.cpp / trap 14), and both draws sit inside a reward-screen flow that does not exist until B4.5. A partial that took the upgrade and the max HP but skipped either draw would desync miscRng, which is worse than an inert relic. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+
+- id: 122
+  name: SOZU
+  game_id: "Sozu"
+  tier: BOSS
+  pool_order: 10
+  provenance: "Sozu (Sozu.java:16-58) -- onEquip ++energyMaster (:44-47) and nothing else; the 'can no longer obtain potions' half is a marker read at the potion-obtain sites (ObtainPotionAction.update, ObtainPotionAction.java:29-36 -- with Sozu owned the potion is simply not obtained; also RewardItem.java:276 and EntropicBrew.java:43). Every one of those sites is run-layer (rewards / shop / events), none of which exists yet. Row, pool slot and relicRng draw are live."
+
+- id: 123
+  name: PHILOSOPHERS_STONE
+  game_id: "Philosopher's Stone"
+  tier: BOSS
+  pool_order: 11
+  native: true
+  hooks:
+    at_battle_start: []       # +1 Strength to every monster (direct addPower, not queued)
+  provenance: "PhilosopherStone.atBattleStart (PhilosopherStone.java:41-48) -- for each monster addToTop RelicAboveCreatureAction (cosmetic) and m.addPower(new StrengthPower(m, 1)) DIRECTLY, then AbstractDungeon.onModifyPower(). The power add is SYNCHRONOUS (AbstractCreature.addPower), not an ApplyPowerAction, so it lands before anything else queued at battle start. onSpawnMonster (:50-53) gives a spawned monster the same +1; the SPAWN_MONSTER opcode has no relic fan-out, so that half is deferred to the split/spawn owner. onEquip ++energyMaster (:55-58) is the shared deferral."
+
+- id: 124
+  name: ASTROLABE
+  game_id: "Astrolabe"
+  tier: BOSS
+  pool_order: 12
+  pickup:
+    on_equip: true
+  provenance: "Astrolabe.onEquip (Astrolabe.java:29-51) -- open a 3-card grid select over the purgeable master deck, then transform + upgrade each pick (giveCards :57-71, AbstractDungeon.transformCard(card, true, miscRng)). DEFERRED: needs the run-layer grid-select screen and transformCard, neither of which exists; transformCard is miscRng-consuming, so a partial would desync. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+
+- id: 125
+  name: BLACK_STAR
+  game_id: "Black Star"
+  tier: BOSS
+  pool_order: 13
+  provenance: "BlackStar (BlackStar.java:16-52) -- a marker relic whose overrides are pulse cosmetics only (onEnterRoom :26-34, onVictory :36-43). The behaviour lives in MonsterRoomElite.java:87: with Black Star owned an elite room adds a SECOND relic reward. A B4.5 (combat rewards) concern; row, pool slot and relicRng draw are live."
+
+- id: 126
+  name: SACRED_BARK
+  game_id: "SacredBark"
+  tier: BOSS
+  pool_order: 14
+  provenance: "SacredBark.onEquip (SacredBark.java:20-25) -- re-run initializeData() on every held potion; the doubling itself is AbstractPotion.initializeData's SacredBark branch (AbstractPotion.java:643), which doubles each potion's potency. potions.yaml stores a single potency per row and use_potion reads it directly (potions.cpp), so this is a potion-layer modifier with no relic-side hook. Row, pool slot and relicRng draw are live."
+
+- id: 127
+  name: EMPTY_CAGE
+  game_id: "Empty Cage"
+  tier: BOSS
+  pool_order: 15
+  pickup:
+    on_equip: true
+  provenance: "EmptyCage.onEquip (EmptyCage.java:28-52) -- open a 2-card grid select over the purgeable master deck and remove both (deleteCards :62-75). DEFERRED: needs the run-layer grid-select screen. No RNG is consumed either way. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+
+- id: 128
+  name: RUNIC_PYRAMID
+  game_id: "Runic Pyramid"
+  tier: BOSS
+  pool_order: 16
+  provenance: "RunicPyramid (RunicPyramid.java:16-30) -- a marker relic with no overrides at all. The behaviour lives in DiscardAtEndOfTurnAction.update (DiscardAtEndOfTurnAction.java:35-40): the end-of-turn discard loop is SKIPPED entirely when the player owns it. The ETHEREAL sweep is NOT skipped -- it runs through triggerOnEndOfPlayerTurn (:41-45), outside the guarded block. Implemented at discard_hand_at_end_of_turn (piles.cpp)."
+
+- id: 129
+  name: CALLING_BELL
+  game_id: "Calling Bell"
+  tier: BOSS
+  pool_order: 17
+  pickup:
+    on_equip: true
+  provenance: "CallingBell.onEquip (CallingBell.java:27-36) -- add a Curse of the Bell to the master deck, then (update :38-54) offer one COMMON + one UNCOMMON + one RARE relic through returnRandomScreenlessRelic. DEFERRED: the three pool draws are relicRng-consuming and land on a combat-reward screen that does not exist (B4.5); Curse of the Bell has no cards.yaml row. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+
+- id: 130
+  name: COFFEE_DRIPPER
+  game_id: "Coffee Dripper"
+  tier: BOSS
+  pool_order: 18
+  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). The rest lock is a campfire-layer concern (the rest room's heal option, design 5.6); the energy half is the shared energyMaster deferral. Row, pool slot and relicRng draw are live."
+
+- id: 131
+  name: BLACK_BLOOD
+  game_id: "Black Blood"
+  tier: BOSS
+  pool_order: 19
+  native: true
+  hooks:
+    on_victory: []            # heal 12 at combat end (Burning Blood's upgrade)
+  pickup:
+    can_spawn: true
+  provenance: "BlackBlood.onVictory (BlackBlood.java:24-31) -- addToTop RelicAboveCreatureAction then, while currentHealth > 0, p.heal(12). Routed through the shared player-heal seam so Magic Flower's x1.5 applies exactly where it applies for Burning Blood. canSpawn (:33-36) -- player.hasRelic('Burning Blood'): the Ironclad ALWAYS starts with Burning Blood (Ironclad.getStartingRelics, Ironclad.java:113-115), so the gate is true on a fresh run and only closes if the starter is traded away."
+
+- id: 132
+  name: MARK_OF_PAIN
+  game_id: "Mark of Pain"
+  tier: BOSS
+  pool_order: 20
+  native: true
+  hooks:
+    at_battle_start: []       # 2 Wounds shuffled into the draw pile
+  provenance: "MarkOfPain.atBattleStart (MarkOfPain.java:26-31) -- addToBot RelicAboveCreatureAction then addToBot MakeTempCardInDrawPileAction(new Wound(), 2, true, true): amount 2, randomSpot true, so each copy is inserted at CardGroup.addToRandomSpot's cardRandomRng.random(size-1) position. Native rather than DATA only because a relic step carries no card field; the body queues one MAKE_CARD(WOUND, DRAW_RANDOM, 2) item, whose per-copy random-spot draws are exactly the Java's. onEquip ++energyMaster (:33-36) is the shared deferral."
+
+- id: 133
+  name: RUNIC_CUBE
+  game_id: "Runic Cube"
+  tier: BOSS
+  pool_order: 21
+  native: true
+  hooks:
+    was_hp_lost: []           # any in-combat HP loss > 0 -> draw 1
+  provenance: "RunicCube.wasHPLost (RunicCube.java:24-31) -- if the room phase is COMBAT and damageAmount > 0: addToTop DrawCardAction(player, 1) then addToTop RelicAboveCreatureAction. The relic fan-out only fires inside a combat, so the phase test is already satisfied at the engine's wasHPLost site; the amount > 0 test is not, and is reproduced from ctx.amount."
+
+# --- Special: the Act-1-event-reachable SPECIAL tier ------------------------------
+#
+# SCOPE: ids 134-142, the nine SPECIAL-tier relics an Ironclad can obtain in Act 1,
+# alongside the two already registered (Circlet id 35, Odd Mushroom id 111). No
+# SPECIAL relic is a member of any shuffled dungeon pool, so none carries a
+# pool_order and none is relicRng-visible; they are acquired by an event or by Neow.
+#
+# The full registered SPECIAL set is 18 rows (RelicLibrary.initialize; RedCirclet
+# is never registered, so getRelic falls back to Circlet -- the note on id 35).
+# Reachability was resolved per relic against the S1 event set: Exordium's 11
+# eventList entries + 6 shrineList entries (Exordium.java:223-246) and the shared
+# specialOneTimeEventList (AbstractDungeon.java:1340-1358) filtered by
+# AbstractDungeon.getShrine's per-event act gates (:1882-1942).
+#
+# EXCLUDED, each with the gate that excludes it:
+#   Bloody Idol        ForgottenAltar.java:106-111; 'Forgotten Altar' is in
+#                      TheCity.initializeEventList (TheCity.java:192), not Exordium's.
+#   Enchiridion        CursedTome.java:147-148; 'Cursed Tome' is TheCity's
+#                      (TheCity.java:190).
+#   Nilry's Codex      CursedTome.java:150-151; same event, same gate.
+#   Necronomicon       CursedTome.java:144-145; same event, same gate.
+#   Mutagenic Strength DrugDealer.java:73; 'Drug Dealer' is TheCity's (TheCity.java:191).
+#   N'loth's Gift      Nloth.java:61-84; the N'loth specialOneTimeEvent is act-gated
+#                      to TheCity in getShrine (AbstractDungeon.java:1917-1921) AND
+#                      requires relics.size() >= 2.
+#   Red Mask           MaskedBandits.java:75 (TheCity.java:194) and TombRedMask.java:34
+#                      ('Tomb of Lord Red Mask', TheBeyond.java:185).
+#   Mark of the Bloom  MindBloom.java:101-102; 'MindBloom' is TheBeyond's
+#                      (TheBeyond.java:181).
+#   RedCirclet         never registered by RelicLibrary.initialize at all.
+#
+# INCLUDED, each with its Act-1 source:
+#   Golden Idol        GoldenIdolEvent.java:77-78; 'Golden Idol' is Exordium's
+#                      (Exordium.java:228), with no floor gate in getEvent.
+#   Neow's Lament      NeowReward.activate case 14 (NeowReward.java:247-250), the
+#                      THREE_ENEMY_KILL payout -- a category-1 option and the
+#                      first-run mini reward (NeowReward.java:57-62, :101-105).
+#   Spirit Poop        Bonfire.java:122-123; 'Bonfire Elementals' is a
+#                      specialOneTimeEvent with NO act gate in getShrine.
+#   Warped Tongs       AccursedBlacksmith.java:86-87; 'Accursed Blacksmith' is a
+#                      specialOneTimeEvent with NO act gate in getShrine.
+#   Cultist Mask,      all five from FaceTrader.getRandomFace (FaceTrader.java:96-118),
+#   Face of Cleric,    one miscRng-shuffled pick among the faces not already owned;
+#   Gremlin Mask,      'FaceTrader' is gated to TheCity OR Exordium
+#   N'loth's Mask,     (AbstractDungeon.java:1902-1906), so Act 1 IS in scope.
+#   Ssserpent Head
+
+- id: 134
+  name: GOLDEN_IDOL
+  game_id: "Golden Idol"
+  tier: SPECIAL
+  provenance: "GoldenIdol (GoldenIdol.java:12-27) -- a marker relic with no overrides; MULTIPLIER = 0.25f is read by RewardItem (RewardItem.java:117) to raise gold rewards by 25%. A B4.5 (combat rewards) concern. It is also an event gate in its own right -- getEvent's 'The Moai Head' clause (AbstractDungeon.java:1961) -- but that event is TheBeyond's."
+
+- id: 135
+  name: NEOWS_LAMENT
+  game_id: "NeowsBlessing"
+  tier: SPECIAL
+  initial_counter: 3
+  native: true
+  hooks:
+    at_battle_start: []       # first 3 combats: every enemy's HP set to 1
+  provenance: "NeowsLament.atBattleStart (NeowsLament.java:26-45) -- while counter > 0: --counter, and if it reached 0 call setCounter(-2) (:47-53, the used-up marker); then set every monster's currentHealth to 1 DIRECTLY (no damage pipeline, no death check -- the monsters are simply at 1 HP when the player's first turn begins). Constructor counter = 3 (:20-23). NOTE the game_id is NeowsBlessing, not the class name -- the translator joins on that string."
+
+- id: 136
+  name: SPIRIT_POOP
+  game_id: "Spirit Poop"
+  tier: SPECIAL
+  provenance: "SpiritPoop (SpiritPoop.java:12-25) -- a marker relic with NO overrides and no gameplay effect anywhere: its single read is GameOverScreen.java:334, a death-screen flavour line. Deliberate no-op with nothing deferred behind it; the row exists so the translator can join the id and so the Bonfire Elementals event has something to grant."
+
+- id: 137
+  name: WARPED_TONGS
+  game_id: "WarpedTongs"
+  tier: SPECIAL
+  native: true
+  hooks:
+    at_turn_start_post_draw: []   # DEFERRED body: upgrade a random hand card
+  provenance: "WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:24-29) -- addToBot RelicAboveCreatureAction then addToBot UpgradeRandomCardAction. DEFERRED: UpgradeRandomCardAction.update (UpgradeRandomCardAction.java:28-50) is RNG-VISIBLE and has no opcode -- it filters the hand to canUpgrade() and type != STATUS and, ONLY when that subset is non-empty, calls CardGroup.shuffle() with NO argument, i.e. one shuffleRng.randomLong() (CardGroup.java:561-563), then upgrades group[0]. CHOOSE_CARD's RANDOM+UPGRADE path is NOT the same thing: it draws a different stream and applies a different eligibility filter, so reusing it would silently move shuffleRng. The hook binding is registered so the queue position (behind the start-of-turn draw) is already correct when the opcode lands; explicit empty native body (relics/relics_special.cpp)."
+
+- id: 138
+  name: CULTIST_MASK
+  game_id: "CultistMask"
+  tier: SPECIAL
+  provenance: "CultistMask.atBattleStart (CultistMask.java:26-32) -- addToBot RelicAboveCreatureAction, SFXAction and TalkAction. Every one of those is presentation: no state is read or written. The row therefore binds NO hook at all rather than binding at_battle_start to an empty body -- there is nothing deferred behind it."
+
+- id: 139
+  name: FACE_OF_CLERIC
+  game_id: "FaceOfCleric"
+  tier: SPECIAL
+  native: true
+  hooks:
+    on_victory: []            # +1 max HP after every combat (and +1 current)
+  provenance: "FaceOfCleric.onVictory (FaceOfCleric.java:22-26) -- increaseMaxHp(1, true). AbstractPlayer.increaseMaxHp(amount, heal) raises maxHealth and, with heal set, heals the same amount, so both current and max HP rise by 1. Max HP is a CombatState mirror folded back into RunState at end_combat (run_advance.cpp fold_back_combat), so writing it here persists across the run."
+
+- id: 140
+  name: GREMLIN_MASK
+  game_id: "GremlinMask"
+  tier: SPECIAL
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 1, power: WEAK}
+  provenance: "GremlinMask.atBattleStart (GremlinMask.java:26-32) -- addToBot RelicAboveCreatureAction then addToBot ApplyPowerAction(player, player, WeakPower(player, 1, false), 1). A DATA hook: WEAK is registered (powers.yaml id 3) and the step is queued addToBot exactly as the Java queues it. The false is WeakPower's justApplied flag, which only affects the end-of-round decrement of a debuff applied BY a monster; a self-applied Weak decrements normally."
+
+- id: 141
+  name: NLOTHS_MASK
+  game_id: "NlothsMask"
+  tier: SPECIAL
+  initial_counter: 1
+  provenance: "NlothsMask.onChestOpenAfter (NlothsMask.java:23-33) -- for a NON-boss chest, while counter > 0: --counter, remove one relic from the chest's rewards, and setCounter(-2) once it hits 0 (:35-41). Constructor counter = 1 (:19-22). A treasure-room hook (B4.7's onChestOpen surface, shared with Matryoshka and Cursed Key); the row and its counter seed are live."
+
+- id: 142
+  name: SSSERPENT_HEAD
+  game_id: "SsserpentHead"
+  tier: SPECIAL
+  provenance: "SsserpentHead.onEnterRoom (SsserpentHead.java:24-30) -- entering an EventRoom gains 50 gold (GOLD_AMT = 50). A run-layer (?-room) hook owned by the event layer, B4.10-B4.13; the gold itself would route through gain_gold (relics/relic_pickup.hpp) so Ectoplasm's suppression applies. The row is live."

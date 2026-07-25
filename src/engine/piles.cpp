@@ -157,6 +157,22 @@ void discard_hand_at_end_of_turn(CombatState& s) noexcept {
         }
     }
 
+    // Runic Pyramid (boss relic): the discard loop below is SKIPPED ENTIRELY.
+    // DiscardAtEndOfTurnAction.java:35-40 guards the whole
+    //     for (i < tempSize) addToTop(new DiscardAction(...))
+    // block with `!player.hasRelic("Runic Pyramid") && !player.hasPower(
+    // "Equilibrium")`. The Equilibrium half is Defect-only and has no registry
+    // row, so only the relic clause is live.
+    //
+    // The ETHEREAL sweep above is deliberately OUTSIDE this guard, exactly as in
+    // the Java: ethereal cards exhaust through triggerOnEndOfPlayerTurn (:41-45),
+    // which runs unconditionally AFTER the guarded block. A Runic Pyramid
+    // therefore keeps its hand but still loses its Ethereals; skipping both would
+    // silently hand the player free Ethereals every turn.
+    if (player_has_relic(s, RelicId::RUNIC_PYRAMID)) {
+        return;
+    }
+
     // DiscardAction repeatedly takes hand.getTopCard(), represented by the tail.
     // RETAIN cards are the cards DiscardAtEndOfTurnAction moves aside first.
     for (uint8_t i = s.hand_count; i > 0; --i) {

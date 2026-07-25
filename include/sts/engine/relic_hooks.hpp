@@ -133,6 +133,15 @@ void dispatch_relic_hook(CombatState& s, RelicSlot* relics, uint8_t count,
 // --- Per-hook entry points (mirror the frozen call sites) --------------------
 // Each fills the relevant RelicHookContext fields and calls dispatch_relic_hook.
 
+// atPreBattle (AbstractPlayer.applyPreCombatLogic, AbstractPlayer.java:
+// 1885-1890): the LAST line of preBattlePrep (:1607), and therefore BEFORE the
+// turn-1 block queues its opening DrawCardAction (AbstractRoom.java:236-258).
+// That ordering is the whole point of the hook -- Snecko Eye's Confusion has to
+// be on the player before the first card is drawn, or the first hand escapes the
+// cost roll. Fired by combat_begin (advance.cpp) ahead of begin_first_turn.
+void dispatch_relics_at_pre_battle(CombatState& s, RelicSlot* relics,
+                                   uint8_t count) noexcept;
+
 void dispatch_relics_at_battle_start(CombatState& s, RelicSlot* relics,
                                      uint8_t count) noexcept;
 void dispatch_relics_at_turn_start(CombatState& s, RelicSlot* relics,

@@ -158,10 +158,10 @@ TEST(RelicPools, OracleCommonPoolOrdersMatchThreeLiveSeeds) {
         EXPECT_EQ(rs.relic_rng.counter, 5);
         EXPECT_EQ(rs.relic_rng.s0, static_cast<uint64_t>(c.s0));
         EXPECT_EQ(rs.relic_rng.s1, static_cast<uint64_t>(c.s1));
-        // BOSS is the one tier still without rows; every other pool is
-        // populated, and the stream state asserted above is unchanged by that
-        // -- all five shuffle draws are unconditional.
-        EXPECT_EQ(rs.relic_pool_count[kBoss], 0);
+        // Every tier is populated now. The stream state asserted above is
+        // unchanged by that -- all five shuffle draws are unconditional, which
+        // is exactly why the last tier could land without moving relicRng.
+        EXPECT_EQ(rs.relic_pool_count[kBoss], 22);
     }
 }
 
@@ -275,6 +275,72 @@ TEST(RelicPools, OracleRarePoolOrdersMatchThreeLiveSeeds) {
         rs.relic_rng = from_seed(c.seed);
         initialize_relic_pools(rs);
         expect_pool(rs, RelicPool::RARE, *c.pool);
+        EXPECT_EQ(rs.relic_rng.counter, 5);
+    }
+}
+
+// The three live shuffled BOSS pool orders (same b14_accept captures,
+// oracle.relicPools.boss). The canonical pre-shuffle pool_order in relics.yaml
+// was recovered by inverting the JDK shuffle -- relicRng draw #5, the LAST of
+// the five in AbstractDungeon.initializeRelicList's Common/Uncommon/Rare/Shop/
+// Boss order (AbstractDungeon.java:1237-1241) -- against TEN captures
+// (STS00001..STS00010); all ten agree on one pre-shuffle order. What VALIDATES
+// the inversion rather than merely fitting it: running the identical procedure
+// against draws #1..#4 reproduces the already-committed COMMON, UNCOMMON, RARE
+// and SHOP pool_order exactly, id for id. Re-shuffling the recovered BOSS order
+// here must reproduce each capture.
+//
+// This pool is drawn from ONLY through Neow's category-3 boss-relic swap
+// (design 5.6), but its shuffle is unconditional, so these arrays are pinned on
+// every seed whether or not the player ever takes that option.
+constexpr std::array<RelicId, 22> kOracleBossSeed1{{
+    RelicId::EMPTY_CAGE, RelicId::ASTROLABE, RelicId::PANDORAS_BOX,
+    RelicId::BLACK_BLOOD, RelicId::SLAVERS_COLLAR, RelicId::FUSION_HAMMER,
+    RelicId::TINY_HOUSE, RelicId::SACRED_BARK, RelicId::VELVET_CHOKER,
+    RelicId::RUNIC_DOME, RelicId::PHILOSOPHERS_STONE, RelicId::RUNIC_CUBE,
+    RelicId::COFFEE_DRIPPER, RelicId::CALLING_BELL, RelicId::RUNIC_PYRAMID,
+    RelicId::ECTOPLASM, RelicId::MARK_OF_PAIN, RelicId::CURSED_KEY,
+    RelicId::BUSTED_CROWN, RelicId::SOZU, RelicId::BLACK_STAR,
+    RelicId::SNECKO_EYE,
+}};
+
+constexpr std::array<RelicId, 22> kOracleBossSeed2{{
+    RelicId::BLACK_BLOOD, RelicId::MARK_OF_PAIN, RelicId::ECTOPLASM,
+    RelicId::PANDORAS_BOX, RelicId::EMPTY_CAGE, RelicId::CALLING_BELL,
+    RelicId::BUSTED_CROWN, RelicId::SLAVERS_COLLAR, RelicId::SOZU,
+    RelicId::SACRED_BARK, RelicId::VELVET_CHOKER, RelicId::TINY_HOUSE,
+    RelicId::SNECKO_EYE, RelicId::FUSION_HAMMER, RelicId::RUNIC_PYRAMID,
+    RelicId::COFFEE_DRIPPER, RelicId::BLACK_STAR, RelicId::CURSED_KEY,
+    RelicId::RUNIC_CUBE, RelicId::ASTROLABE, RelicId::RUNIC_DOME,
+    RelicId::PHILOSOPHERS_STONE,
+}};
+
+constexpr std::array<RelicId, 22> kOracleBossSeed3{{
+    RelicId::SNECKO_EYE, RelicId::BUSTED_CROWN, RelicId::BLACK_STAR,
+    RelicId::MARK_OF_PAIN, RelicId::EMPTY_CAGE, RelicId::RUNIC_PYRAMID,
+    RelicId::SOZU, RelicId::SLAVERS_COLLAR, RelicId::TINY_HOUSE,
+    RelicId::VELVET_CHOKER, RelicId::CALLING_BELL, RelicId::RUNIC_DOME,
+    RelicId::FUSION_HAMMER, RelicId::SACRED_BARK,
+    RelicId::PHILOSOPHERS_STONE, RelicId::ASTROLABE, RelicId::CURSED_KEY,
+    RelicId::BLACK_BLOOD, RelicId::RUNIC_CUBE, RelicId::ECTOPLASM,
+    RelicId::COFFEE_DRIPPER, RelicId::PANDORAS_BOX,
+}};
+
+TEST(RelicPools, OracleBossPoolOrdersMatchThreeLiveSeeds) {
+    struct Case {
+        int64_t seed;
+        const std::array<RelicId, 22>* pool;
+    };
+    const Case cases[] = {
+        {1790050543751LL, &kOracleBossSeed1},
+        {1790050543752LL, &kOracleBossSeed2},
+        {1790050543753LL, &kOracleBossSeed3},
+    };
+    for (const Case& c : cases) {
+        RunState rs{};
+        rs.relic_rng = from_seed(c.seed);
+        initialize_relic_pools(rs);
+        expect_pool(rs, RelicPool::BOSS, *c.pool);
         EXPECT_EQ(rs.relic_rng.counter, 5);
     }
 }

@@ -481,3 +481,16 @@
     on_gained_block:
       - {op: DAMAGE, target: RANDOM_ENEMY, amount: 0, damage_type: THORNS}
   provenance: "JuggernautPower.onGainedBlock (JuggernautPower.java:34-40) -- if blockAmount > 0: addToBot DamageRandomEnemyAction(DamageInfo(owner, amount, THORNS)); POWER_ID \"Juggernaut\" (:20); default type BUFF (AbstractPower.java:67); stackPower additive. The blockAmount > 0 guard is already the dispatch gate (dispatch_on_gained_block returns on a non-positive gain, mirroring AbstractCreature.addBlock:429), so the binding is a plain data program. DamageRandomEnemyAction.update (:17-23) picks getRandomMonster(null, true, cardRandomRng) -- ONE card_random_rng draw over the LIVE monsters, exactly the RANDOM_ENEMY step target's execute-time resolution. THORNS type: the reflected damage skips the NORMAL-only power hooks, so the player's Strength does NOT scale it and a Vulnerable target is NOT amplified (interp.hpp DamageType). Applied by the Juggernaut card, amount 5 base / 7 upgraded (Juggernaut.java:19,24,31). Checked against both count-guarded switch families: Juggernaut READS a block gain but does not modify one (no modifyBlock override) and hooks no atDamage* pass, so neither needed a case."
+- id: 59
+  name: CONFUSION
+  game_id: "Confusion"
+  type: DEBUFF
+  stack: none
+  native: true
+  hooks:
+    on_card_draw: []          # native: one cardRandomRng.random(3) per drawn card with cost >= 0
+  # Checked, not assumed, against both count-guarded switches: Confusion overrides
+  # neither atDamageGive / atDamageReceive / atDamageFinalReceive
+  # (interp_damage.cpp) nor modifyBlock (interp_block.cpp) -- its ONLY override is
+  # onCardDraw -- so none of those four needed a case.
+  provenance: "ConfusionPower.onCardDraw (ConfusionPower.java:38-48) -- if card.cost >= 0: newCost = AbstractDungeon.cardRandomRng.random(3) (INCLUSIVE 0..3, stage-a trap 3), and if newCost != cost set BOTH card.cost and card.costForTurn to it and mark isCostModified; freeToPlayOnce = false either way. The DRAW IS UNCONDITIONAL within the cost >= 0 branch -- it happens before the != comparison, so a card that rolls its own cost still consumes one draw; a card with cost < 0 (X-cost, or an unplayable curse/status) consumes NONE. Applied only by SneckoEye.atPreBattle (SneckoEye.java:39-43); the ctor (:23-31) takes no amount, hence stack: none. POWER_ID \"Confusion\" (:18)."

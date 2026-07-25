@@ -181,6 +181,66 @@ TEST(Translator, OracleFieldsLandBitForBit) {
     EXPECT_GT(run.stats.deferred, 0u);
 }
 
+// The relicPools un-deferral (§2.5 #8). Storage has existed since schema v3; the
+// blocker was a COMPLETE registry/relics.yaml, because join_relic is fail-loud --
+// one unregistered game_id in any of the five arrays aborts the whole
+// translation. The golden's oracle block carries all five real arrays (copied
+// from a live capture), so this test only passes once every tier's rows exist.
+//
+// The mapping is BY NAME, not by the JSON object's key order (which the oracle
+// emits as uncommon/shop/boss/common/rare). Asserting a specific relic in each
+// tier's slot is what catches a positional read that would transpose the pools.
+TEST(Translator, RelicPoolsLandInTheirTierSlots) {
+    tr::TranslatedRun run = tr::translate_file(sample_path());
+    ASSERT_EQ(run.records.size(), 2u);
+    for (const tr::TranslatedRecord& rec : run.records) {
+        const engine::RunState& rs = rec.run;
+        // The Ironclad-obtainable pool sizes, per tier index (0=Common..4=Boss).
+        EXPECT_EQ(rs.relic_pool_count[0], 33);
+        EXPECT_EQ(rs.relic_pool_count[1], 30);
+        EXPECT_EQ(rs.relic_pool_count[2], 28);
+        EXPECT_EQ(rs.relic_pool_count[3], 17);
+        EXPECT_EQ(rs.relic_pool_count[4], 22);
+        // Front of each shuffled tier, verbatim from the capture.
+        EXPECT_EQ(rs.relic_pools[0][0],
+                  static_cast<uint16_t>(engine::RelicId::STRAWBERRY));
+        EXPECT_EQ(rs.relic_pools[1][0],
+                  static_cast<uint16_t>(engine::RelicId::TOXIC_EGG));
+        EXPECT_EQ(rs.relic_pools[2][0],
+                  static_cast<uint16_t>(engine::RelicId::MAGIC_FLOWER));
+        EXPECT_EQ(rs.relic_pools[3][0],
+                  static_cast<uint16_t>(engine::RelicId::ORRERY));
+        EXPECT_EQ(rs.relic_pools[4][0],
+                  static_cast<uint16_t>(engine::RelicId::EMPTY_CAGE));
+        // End of the boss tier: the shop pop takes the END, so both ends matter.
+        EXPECT_EQ(rs.relic_pools[4][21],
+                  static_cast<uint16_t>(engine::RelicId::SNECKO_EYE));
+        EXPECT_EQ(rs.relic_pools[3][16],
+                  static_cast<uint16_t>(engine::RelicId::BRIMSTONE));
+        // Nothing beyond each tier's count was written.
+        for (int t = 0; t < engine::kRelicTierCount; ++t) {
+            for (int i = rs.relic_pool_count[t]; i < engine::kRelicPoolCap; ++i) {
+                EXPECT_EQ(rs.relic_pools[t][i], 0u) << "tier " << t << " slot " << i;
+            }
+        }
+    }
+}
+
+// An unregistered relic id anywhere in relicPools must ABORT the translation, not
+// silently drop the entry -- that fail-loud join is exactly why this key waited
+// for a complete registry rather than landing tier by tier.
+TEST(Translator, UnknownRelicInAPoolIsRefused) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    std::string tampered = lines[1];
+    const std::string anchor = "\"boss\":[";
+    auto pos = tampered.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    tampered.insert(pos + anchor.size(), "\"Not A Relic\",");
+    EXPECT_THROW(tr::translate_lines({lines[0], tampered}, "badpool"),
+                 tr::TranslateError);
+}
+
 // B4.3: when the oracle DOES carry neowRng (floor-0 / Neow dumps), it maps into
 // RunState.neow_rng as the 14th stream (§2.5 #2). The golden's in-dungeon dumps
 // omit it, so inject one into the run-level record's streams block and confirm

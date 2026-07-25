@@ -53,7 +53,9 @@ namespace {
     // damage pipeline; Juggernaut (:34-45) only READS a block gain. Demon Form is
     // the one that looks like a case and is not -- it GRANTS Strength, whose own
     // case below already does the scaling.
-    static_assert(sts::registry::manifest::kPowersCount == 39,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -89,7 +91,9 @@ namespace {
     // (Barricade / Berserk / Brutality / Demon Form / Double Tap / Juggernaut --
     // their only overrides are updateDescription plus one lifecycle hook each),
     // so none needed a case.
-    static_assert(sts::registry::manifest::kPowersCount == 39,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -133,7 +137,9 @@ namespace {
     // stale while fixing the other two. Update all three together.
     // Checked for the six red-rare powers: none overrides atDamageFinalReceive,
     // so none needed a case.
-    static_assert(sts::registry::manifest::kPowersCount == 39,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {

@@ -118,6 +118,16 @@ void dispatch_relic_hook(CombatState& s, RelicSlot* relics, uint8_t count,
 
 // --- Per-hook entry points ---------------------------------------------------
 
+void dispatch_relics_at_pre_battle(CombatState& s, RelicSlot* relics,
+                                   uint8_t count) noexcept {
+    // applyPreCombatLogic (AbstractPlayer.java:1885-1890), reached from the last
+    // line of preBattlePrep (:1607) -- i.e. before AbstractRoom's turn-1 block
+    // runs at all, so anything queued here resolves ahead of the opening draw.
+    // Snecko Eye is the only S1 row that binds it.
+    dispatch_relic_hook(s, relics, count, RelicHook::AT_PRE_BATTLE,
+                        RelicHookContext{});
+}
+
 void dispatch_relics_at_battle_start(CombatState& s, RelicSlot* relics,
                                      uint8_t count) noexcept {
     dispatch_relic_hook(s, relics, count, RelicHook::AT_BATTLE_START,
