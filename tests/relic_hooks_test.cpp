@@ -26,6 +26,7 @@
 #include "sts/engine/powers.hpp"
 #include "sts/engine/relic_hooks.hpp"
 #include "sts/engine/relics.hpp"
+#include "sts/engine/run_deck.hpp"    // add_card_to_master_deck (egg onObtainCard)
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
 
@@ -815,6 +816,43 @@ TEST(RelicHooksUncommon, DeferredAndRunLayerUncommonsAreCombatNoOps) {
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_hp, 70) << "no accidental heal/state change";
     EXPECT_EQ(r.slots[6].counter, 2) << "Matryoshka's chest counter untouched";
+}
+
+// --- Frozen Egg upgrades an obtained POWER card -------------------------------
+//
+// FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50): `c.type == POWER &&
+// c.canUpgrade() && !c.upgraded -> c.upgrade()`. Identical in shape to
+// MoltenEgg2/ToxicEgg2 (:46-50), which gate on ATTACK / SKILL respectively.
+
+TEST(RunDeckFrozenEgg, UpgradesAnObtainedPowerAndLeavesOtherTypesAlone) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    rs.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::FROZEN_EGG), 0};
+    rs.relic_count = 1;
+
+    // A POWER obtain arrives upgraded.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INFLAME));
+    EXPECT_EQ(rs.master_deck[0].upgrade, 1);
+    // ATTACK / SKILL obtains are Molten/Toxic Egg's business, not Frozen Egg's.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    EXPECT_EQ(rs.master_deck[1].upgrade, 0);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::SHRUG_IT_OFF));
+    EXPECT_EQ(rs.master_deck[2].upgrade, 0);
+    // An already-upgraded POWER is left alone (the !c.upgraded guard).
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::METALLICIZE, /*upgrade=*/1));
+    EXPECT_EQ(rs.master_deck[3].upgrade, 1);
+    // No HP side effect -- that is Darkstone Periapt's CURSE branch.
+    EXPECT_EQ(rs.max_hp, 80);
+    EXPECT_EQ(rs.hp, 60);
+}
+
+TEST(RunDeckFrozenEgg, WithoutTheRelicPowersAreObtainedUnupgraded) {
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INFLAME));
+    EXPECT_EQ(rs.master_deck[0].upgrade, 0);
 }
 
 }  // namespace

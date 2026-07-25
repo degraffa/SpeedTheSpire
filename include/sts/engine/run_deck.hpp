@@ -22,8 +22,8 @@ namespace sts::engine {
 //   * MOLTEN_EGG  -- an un-upgraded ATTACK is added upgraded
 //     (MoltenEgg2.onObtainCard, MoltenEgg2.java:46-50: canUpgrade && !upgraded).
 //   * TOXIC_EGG   -- likewise for a SKILL (ToxicEgg2.java:46-50).
-//   * FROZEN_EGG  -- likewise for a POWER (FrozenEgg2.java:46-50); inert until
-//     B3.7 lands POWER-type cards (no POWER CardType exists in the registry).
+//   * FROZEN_EGG  -- likewise for a POWER (FrozenEgg2.onObtainCard,
+//     FrozenEgg2.java:46-50: type == POWER && canUpgrade && !upgraded).
 //   * DARKSTONE_PERIAPT -- a CURSE grants +6 max HP, healing the gained amount
 //     (DarkstonePeriapt.onObtainCard, DarkstonePeriapt.java:28-36:
 //     increaseMaxHp(6, true); color CURSE == type CURSE for every S1 curse row).
@@ -55,8 +55,9 @@ namespace sts::engine {
                 }
                 break;
             case RelicId::FROZEN_EGG:
-                // FrozenEgg2.java:46-50 upgrades a POWER-type obtain; no POWER
-                // CardType exists until B3.7 -- documented no-op branch.
+                if (def->type == CardType::POWER && c.upgrade == 0) {
+                    c.upgrade = 1;  // FrozenEgg2.java:46-50
+                }
                 break;
             case RelicId::DARKSTONE_PERIAPT:
                 if (def->type == CardType::CURSE) {
