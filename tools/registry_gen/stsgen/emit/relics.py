@@ -7,6 +7,102 @@ from ..steps import RELIC_DOMAIN, padded_step_literals, parse_steps
 from ..vocab import BANNER, RELIC_HOOKS, RELIC_TIERS, fail, pascal
 from .powers import native_dispatch_macro
 
+# The out-of-combat ("pickup") dispatch surfaces a relic row may override, in
+# emission order. Unlike `hooks:` these are NOT combat hook points: they are the
+# run-layer seams a relic can sit on, and they differ from each other in shape --
+# `can_spawn` is a PREDICATE consulted while drawing from a pool (and is therefore
+# RNG-visible: it decides whether a drawn id is kept or re-drawn), the other two
+# are ACTIONS that mutate RunState. They get one X-macro each rather than one
+# merged surface precisely because the signatures and defaults differ.
+#
+#   key -> (macro name, handler prefix, consuming translation unit, note)
+PICKUP_SURFACES = {
+    "can_spawn": ("STS_REGISTRY_RELIC_CAN_SPAWN", "relic_can_spawn_",
+                  "relic_pools.cpp", None),
+    "on_equip": ("STS_REGISTRY_RELIC_ON_EQUIP", "relic_on_equip_",
+                 "relic_pools.cpp", None),
+    "on_obtain_card": ("STS_REGISTRY_RELIC_ON_OBTAIN_CARD",
+                       "relic_on_obtain_card_", "run_deck.hpp",
+                       "NOT YET CONSUMED -- run_deck.hpp still hand-rolls this "
+                       "switch; wiring it is staged behind the change that owns "
+                       "that header. Until then the list is declarative only, "
+                       "and the link-error guarantee below does not yet bite."),
+}
+
+
+def parse_pickup(r: dict) -> set[str]:
+    """The set of pickup surfaces relic row `r` overrides.
+
+    `pickup:` is a mapping of surface -> true. There is deliberately no `false`
+    spelling: absence is the only way to say "no override", so the row cannot
+    carry two representations of the same fact. A surface listed here MUST have a
+    native handler (the generated dispatch table odr-uses it), which is what makes
+    a forgotten body a link error rather than a silently skipped case.
+    """
+    raw = r.get("pickup")
+    if raw is None:
+        return set()
+    if not isinstance(raw, dict):
+        raise fail(f"relics.yaml: relic {r['name']} 'pickup' must be a mapping of "
+                   f"surface -> true, got {type(raw).__name__}")
+    if not raw:
+        raise fail(f"relics.yaml: relic {r['name']} has an empty 'pickup' mapping "
+                   f"-- omit the key entirely instead")
+    surfaces = set()
+    for key, value in raw.items():
+        if key not in PICKUP_SURFACES:
+            raise fail(f"relics.yaml: relic {r['name']} has unknown pickup surface "
+                       f"{key!r} (known: {sorted(PICKUP_SURFACES)})")
+        if value is not True:
+            raise fail(f"relics.yaml: relic {r['name']} pickup {key} must be "
+                       f"literally `true`, got {value!r} -- omit the key to mean "
+                       f"'no override' (there is no false spelling)")
+        surfaces.add(key)
+    return surfaces
+
+
+def pickup_dispatch_macro(rows: list[dict], surface: str) -> list[str]:
+    """The dispatch list for one pickup surface, as an X-macro.
+
+    Same shape and the same guarantee as powers.py's native_dispatch_macro (which
+    keys on `native: true`), but keyed on one `pickup:` surface and with its own
+    handler-name prefix, so the three surfaces stay separate dispatch tables. The
+    handler name is derived from the row name by the frozen convention
+    (``WAR_PAINT`` -> ``relic_on_equip_war_paint``).
+    """
+    macro, prefix, consumer, note = PICKUP_SURFACES[surface]
+    listed = [r for r in rows if surface in r["pickup"]]
+    lines = [
+        "// Pickup dispatch list: one entry per relic row whose `pickup:` lists",
+        f"// {surface}, X(RELIC_ID, handler). {consumer} expands this for the",
+        "// extern declarations AND for the id -> handler switch, so the table is a",
+        "// projection of the registry instead of a hand-maintained switch.",
+        "//",
+        "// The handler is odr-used at the expansion site, so a row that lists the",
+        "// surface but whose body nobody wrote is an UNDEFINED REFERENCE at link",
+        "// time -- never a silent no-op. A relic whose override is deliberately",
+        "// DEFERRED still lists the surface and defines an explicit empty body in",
+        "// its tier translation unit, carrying the deferral reason and citation.",
+    ]
+    if note is not None:
+        lines.append("//")
+        words, line = note.split(), "//"
+        for word in words:
+            if len(line) + len(word) + 1 > 78:
+                lines.append(line)
+                line = "//"
+            line += " " + word
+        lines.append(line)
+    if not listed:
+        lines.append(f"#define {macro}(X)")
+        return lines
+    entries = [f"    X({r['name']}, {prefix}{r['name'].lower()})" for r in listed]
+    width = max(len(e) for e in entries) + 1
+    body = [f"{e:<{width}}\\" for e in entries[:-1]] + [entries[-1]]
+    lines.append(f"#define {macro}(X) \\")
+    lines.extend(body)
+    return lines
+
 
 def emit_relic_table(domains: dict[str, list[dict]]) -> str:
     relics = domains["relics"]
@@ -76,7 +172,8 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
         rows.append({"name": r["name"], "tier": RELIC_TIERS[tier],
                      "pool_order": raw_pool_order,
                      "initial_counter": raw_initial_counter,
-                     "native": native, "bindings": bindings})
+                     "native": native, "bindings": bindings,
+                     "pickup": parse_pickup(r)})
 
     for tier, orders in pool_orders.items():
         if orders and orders != set(range(len(orders))):
@@ -194,4 +291,7 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
     out.extend(native_dispatch_macro(
         rows, "STS_REGISTRY_NATIVE_RELICS", "relic_native_",
         "relic", "relic_hooks.cpp"))
+    for surface in PICKUP_SURFACES:
+        out.append("")
+        out.extend(pickup_dispatch_macro(rows, surface))
     return "\n".join(out) + "\n"

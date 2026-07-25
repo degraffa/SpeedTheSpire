@@ -37,6 +37,12 @@ add_library(sts_engine
     relics/relics_b3_24.cpp
     relics/relics_b3_25.cpp
     relic_pools.cpp
+    # Native relic PICKUP bodies (canSpawn / onEquip), one TU per RelicTier (see
+    # relics/relic_pickup.hpp). Dispatched from relic_pools.cpp through the
+    # generated STS_REGISTRY_RELIC_CAN_SPAWN / _ON_EQUIP macros, so bringing up a
+    # tier adds a file here and edits no existing switch.
+    relics/relic_pickup_common.cpp
+    relics/relic_pickup_uncommon.cpp
     potions.cpp
     advance.cpp
     run_advance.cpp

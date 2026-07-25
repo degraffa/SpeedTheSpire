@@ -59,6 +59,39 @@
 #                          out over the player's enemies at execute time). Unlike
 #                          powers, a relic step's amount is ALWAYS a literal (relics
 #                          carry no stack amount).
+#     pickup:              OPTIONAL; the OUT-OF-COMBAT (run-layer) surfaces this
+#                          relic OVERRIDES, one key per surface, value always
+#                          `true` (omit the key to mean "no override" -- there is
+#                          no `false` spelling). Each listed key means a native
+#                          handler for that surface exists in the relic's tier
+#                          translation unit under src/engine/relics/; the handler
+#                          is odr-used by the generated dispatch table, so a key
+#                          with no handler is a LINK ERROR, never a silent no-op
+#                          (the same guarantee `native:`+`hooks:` gives combat).
+#                            can_spawn:      AbstractRelic.canSpawn override
+#                                            -> relic_can_spawn_<name>, consulted
+#                                            during pool draws (relic_pools.cpp).
+#                                            RNG-VISIBLE: a wrong gate changes the
+#                                            relicRng draw order.
+#                            on_equip:       instantObtain/onEquip RunState effect
+#                                            -> relic_on_equip_<name>, run by
+#                                            acquire_relic after the slot append.
+#                            on_obtain_card: onObtainCard effect -> handler
+#                                            relic_on_obtain_card_<name>. The macro
+#                                            is emitted but NOT YET CONSUMED (the
+#                                            run_deck.hpp switch still hand-rolls
+#                                            it), so these keys are declarative
+#                                            only until that wiring lands.
+#                          Derive participation from the relic's Java, NOT from
+#                          what the engine currently implements. An onEquip that
+#                          only initializes the relic's own counter is ALREADY
+#                          modelled by `initial_counter` and does NOT take the key
+#                          (HappyFlower/TinyChest/Sundial `this.counter = 0`);
+#                          neither does a purely cosmetic one (Circlet.onEquip is
+#                          `this.flash()`). An override the engine has DEFERRED
+#                          still takes the key -- its handler is an explicit empty
+#                          body carrying the deferral reason and citation, so the
+#                          deferral is on the record in code rather than a hole.
 #     provenance: "<Class.method (File.java:line) -- read in full>"
 #
 # SCOPE (B3.24): Burning Blood (Ironclad starter) + the Ironclad-obtainable COMMON
@@ -270,6 +303,8 @@
   native: true
   hooks:
     at_turn_start: []         # +2 energy on turn 1 IF entered combat from a campfire (DEFERRED: cross-room flag)
+  pickup:
+    can_spawn: true
   provenance: "AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter==-2 gain 2 energy on first turn; onEnterRestRoom arms it (:77-80). Needs a cross-room armed flag (run layer); native body deferred."
 
 - id: 18
@@ -298,6 +333,9 @@
   game_id: "CeramicFish"
   tier: COMMON
   pool_order: 17
+  pickup:
+    can_spawn: true
+    on_obtain_card: true
   provenance: "CeramicFish.onObtainCard (CeramicFish.java:40+) -- +9 gold per card added to the deck; a run-layer (reward/gold) hook, no combat trigger."
 
 - id: 21
@@ -305,6 +343,8 @@
   game_id: "Dream Catcher"
   tier: COMMON
   pool_order: 26
+  pickup:
+    can_spawn: true
   provenance: "DreamCatcher.onRest (DreamCatcher.java) -- card reward on resting at a campfire; a run-layer (rest room) hook, no combat trigger."
 
 - id: 22
@@ -312,6 +352,8 @@
   game_id: "Juzu Bracelet"
   tier: COMMON
   pool_order: 25
+  pickup:
+    can_spawn: true
   provenance: "JuzuBracelet (JuzuBracelet.java) -- normal-combat ? rooms cannot roll a monster event; a map/event-layer effect, no combat trigger."
 
 - id: 23
@@ -319,6 +361,8 @@
   game_id: "MawBank"
   tier: COMMON
   pool_order: 14
+  pickup:
+    can_spawn: true
   provenance: "MawBank.onEnterRoom (MawBank.java:31-37) -- +12 gold on entering a non-shop room until you spend gold; a run-layer hook, no combat trigger."
 
 - id: 24
@@ -326,6 +370,8 @@
   game_id: "MealTicket"
   tier: COMMON
   pool_order: 3
+  pickup:
+    can_spawn: true
   provenance: "MealTicket.justEnteredRoom (MealTicket.java:32-37) -- heal 15 on entering a shop; a run-layer (shop) hook, no combat trigger."
 
 - id: 25
@@ -334,6 +380,8 @@
   tier: COMMON
   pool_order: 13
   initial_counter: 2
+  pickup:
+    can_spawn: true
   provenance: "Omamori.use (Omamori.java:38-43) -- negates the next 2 curses added (counter 2); a run-layer (curse-gain) hook, no combat trigger."
 
 - id: 26
@@ -341,6 +389,9 @@
   game_id: "Potion Belt"
   tier: COMMON
   pool_order: 11
+  pickup:
+    can_spawn: true
+    on_equip: true
   provenance: "PotionBelt.onEquip (PotionBelt.java:29+) -- +2 potion slots on pickup; an equip-time inventory effect, no combat trigger."
 
 - id: 27
@@ -351,6 +402,8 @@
   native: true
   hooks:
     at_battle_start: []       # elite HP -25% (DEFERRED: needs elite-room context + monster HP scaling)
+  pickup:
+    can_spawn: true
   provenance: "PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an elite room set each monster HP to 75%. Needs room-type context + a monster-HP scale op; native body deferred."
 
 - id: 28
@@ -358,6 +411,8 @@
   game_id: "Regal Pillow"
   tier: COMMON
   pool_order: 7
+  pickup:
+    can_spawn: true
   provenance: "RegalPillow (RegalPillow.java) -- +15 HP bonus when resting at a campfire; a run-layer (rest) hook, no combat trigger."
 
 - id: 29
@@ -365,6 +420,8 @@
   game_id: "Smiling Mask"
   tier: COMMON
   pool_order: 10
+  pickup:
+    can_spawn: true
   provenance: "SmilingMask.onEnterRoom (SmilingMask.java:31+) -- shop card-remove service fixed at 50 gold; a run-layer (shop) hook, no combat trigger."
 
 - id: 30
@@ -372,6 +429,8 @@
   game_id: "Strawberry"
   tier: COMMON
   pool_order: 20
+  pickup:
+    on_equip: true
   provenance: "Strawberry.onEquip (Strawberry.java:29+) -- +7 max HP on pickup; an equip-time effect, no combat trigger."
 
 - id: 31
@@ -380,6 +439,8 @@
   tier: COMMON
   pool_order: 28
   initial_counter: 0
+  pickup:
+    can_spawn: true
   provenance: "TinyChest (TinyChest.java) -- every 4th ? room becomes a treasure room; a map-layer effect, no combat trigger."
 
 - id: 32
@@ -397,6 +458,8 @@
   game_id: "War Paint"
   tier: COMMON
   pool_order: 23
+  pickup:
+    on_equip: true
   provenance: "WarPaint.onEquip (WarPaint.java:36+) -- upgrade up to 2 random Skills on pickup; an equip-time deck effect, no combat trigger."
 
 - id: 34
@@ -404,6 +467,8 @@
   game_id: "Whetstone"
   tier: COMMON
   pool_order: 0
+  pickup:
+    on_equip: true
   provenance: "Whetstone.onEquip (Whetstone.java:36+) -- upgrade up to 2 random Attacks on pickup; an equip-time deck effect, no combat trigger."
 
 # --- Pool-exhaustion fallbacks (not members of any shuffled pool) -------------
@@ -561,6 +626,8 @@
   game_id: "Meat on the Bone"
   tier: UNCOMMON
   pool_order: 22
+  pickup:
+    can_spawn: true
   provenance: "MeatOnTheBone.onTrigger (MeatOnTheBone.java:31-39) -- if currentHealth <= maxHealth/2.0 && currentHealth>0: heal 12 (direct p.heal, clamped). Fired from AbstractRoom.endBattle (AbstractRoom.java:418-420) BEFORE player.onVictory -- i.e. before every relic's onVictory regardless of acquisition order -- so it is a bespoke pre-victory site (apply_meat_on_the_bone_pre_victory, wired in run_advance end_combat), not an on_victory binding. canSpawn floor<=48 (:53-55)."
 
 # --- Uncommon: DEFERRED native bodies (row + hook registered; body needs
@@ -573,8 +640,8 @@
   pool_order: 24
   native: true
   hooks:
-    on_use_card: []           # POWER played -> random hand card costs 0 this turn (DEFERRED: no POWER CardType until B3.7)
-  provenance: "MummifiedHand.onUseCard (MummifiedHand.java:38-72) -- if card.type==POWER: filter hand for cost>0 && costForTurn>0 && !freeToPlayOnce, minus cardQueue members; pick one via cardRandomRng.random(0, n-1) (NO draw when the filtered list is empty); c.setCostForTurn(0). DEFERRED: the registry has no POWER CardType yet (gen.py CARD_TYPES; power cards land B3.7) so the trigger is unrepresentable -- documented no-op native branch until then."
+    on_use_card: []           # POWER played -> random hand card costs 0 this turn
+  provenance: "MummifiedHand.onUseCard (MummifiedHand.java:38-72) -- if card.type==POWER: filter hand for cost>0 && costForTurn>0 && !freeToPlayOnce, minus cardQueue members; pick one via cardRandomRng.random(0, n-1) (NO draw when the filtered list is empty); c.setCostForTurn(0). The registry has carried POWER-type card rows since B3.7, so the trigger IS representable -- the outstanding gap is the native body itself, not the card type."
 
 - id: 51
   name: PANTOGRAPH
@@ -594,6 +661,9 @@
   game_id: "Bottled Flame"
   tier: UNCOMMON
   pool_order: 19
+  pickup:
+    can_spawn: true
+    on_equip: true
   provenance: "BottledFlame.onEquip (BottledFlame.java:42-53) -- gridSelect ONE non-basic ATTACK from the master deck; the chosen instance becomes innate (inBottleFlame -> CardGroup.initializeDeck innate collection). DEFERRED at acquisition: needs run-layer acquisition-choice machinery + a per-master-deck-instance bottled/innate flag (RunState schema, B4-owner). canSpawn (BottledFlame.java:93-99): any non-BASIC-rarity ATTACK in the master deck -- RelicSpawnContext.deck_has_nonbasic_attack (relic_pools.cpp)."
 
 - id: 53
@@ -601,6 +671,9 @@
   game_id: "Bottled Lightning"
   tier: UNCOMMON
   pool_order: 13
+  pickup:
+    can_spawn: true
+    on_equip: true
   provenance: "BottledLightning.onEquip (BottledLightning.java:42-53) -- gridSelect ONE non-basic SKILL; chosen instance becomes innate (inBottleLightning). DEFERRED at acquisition (same machinery gap as Bottled Flame). canSpawn (BottledLightning.java:93-99): any non-BASIC SKILL in the master deck -- RelicSpawnContext.deck_has_nonbasic_skill."
 
 - id: 54
@@ -608,6 +681,9 @@
   game_id: "Bottled Tornado"
   tier: UNCOMMON
   pool_order: 0
+  pickup:
+    can_spawn: true
+    on_equip: true
   provenance: "BottledTornado.onEquip (BottledTornado.java:42-53) -- gridSelect ONE POWER card; chosen instance becomes innate (inBottleTornado). DEFERRED at acquisition (same machinery gap). canSpawn (BottledTornado.java:93-95): CardHelper.hasCardType(POWER) -- RelicSpawnContext.deck_has_power (always false until B3.7 lands POWER cards)."
 
 - id: 55
@@ -615,6 +691,9 @@
   game_id: "Darkstone Periapt"
   tier: UNCOMMON
   pool_order: 23
+  pickup:
+    can_spawn: true
+    on_obtain_card: true
   provenance: "DarkstonePeriapt.onObtainCard (DarkstonePeriapt.java:28-36) -- if card.color==CURSE: player.increaseMaxHp(6, true). LIVE through the run-layer deck-add path (run_deck.hpp add_card_to_master_deck onObtainCard pass; type CURSE == color CURSE for every S1 curse row). canSpawn floor<=48 (:44-46)."
 
 - id: 56
@@ -629,13 +708,21 @@
   game_id: "Frozen Egg 2"
   tier: UNCOMMON
   pool_order: 11
-  provenance: "FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50) -- a POWER card is added to the deck upgraded (canUpgrade && !upgraded). Wired in run_deck.hpp add_card_to_master_deck; the POWER branch is inert until B3.7 lands POWER-type cards (no POWER CardType exists). canSpawn floor<=48 (:53-55)."
+  pickup:
+    can_spawn: true
+    on_equip: true
+    on_obtain_card: true
+  provenance: "FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50) -- a POWER card is added to the deck upgraded (canUpgrade && !upgraded). Wired in run_deck.hpp add_card_to_master_deck; the registry has carried POWER-type card rows since B3.7, so the branch is reachable. canSpawn floor<=48 (:53-55). onEquip (:31-38) re-previews the cards already offered on the combat-reward screen -- a reward-screen concern, and the reward screen does not exist yet, so the handler is an explicit no-op."
 
 - id: 58
   name: MOLTEN_EGG
   game_id: "Molten Egg 2"
   tier: UNCOMMON
   pool_order: 21
+  pickup:
+    can_spawn: true
+    on_equip: true
+    on_obtain_card: true
   provenance: "MoltenEgg2.onObtainCard (MoltenEgg2.java:46-50) -- an ATTACK added to the deck is upgraded (canUpgrade && !upgraded). LIVE through run_deck.hpp add_card_to_master_deck's onObtainCard pass. canSpawn floor<=48 (:53-55)."
 
 - id: 59
@@ -643,6 +730,10 @@
   game_id: "Toxic Egg 2"
   tier: UNCOMMON
   pool_order: 16
+  pickup:
+    can_spawn: true
+    on_equip: true
+    on_obtain_card: true
   provenance: "ToxicEgg2.onObtainCard (ToxicEgg2.java:46-50) -- a SKILL added to the deck is upgraded (canUpgrade && !upgraded). LIVE through run_deck.hpp add_card_to_master_deck's onObtainCard pass. canSpawn floor<=48 (:53-55)."
 
 - id: 60
@@ -650,6 +741,8 @@
   game_id: "Pear"
   tier: UNCOMMON
   pool_order: 3
+  pickup:
+    on_equip: true
   provenance: "Pear.onEquip (Pear.java:29-31) -- player.increaseMaxHp(10, true): +10 max HP AND +10 current HP on pickup (increaseMaxHp heals the gained amount). An equip-time effect, wired in acquire_relic (relic_pools.cpp; the Strawberry precedent)."
 
 - id: 61
@@ -657,6 +750,8 @@
   game_id: "Question Card"
   tier: UNCOMMON
   pool_order: 18
+  pickup:
+    can_spawn: true
   provenance: "QuestionCard.changeNumberOfCardsInReward (QuestionCard.java:34-36) -- card rewards contain +1 card. A run-layer (combat-reward) modifier, B4.5-owner; no combat trigger. canSpawn floor<=48 (:29-31)."
 
 - id: 62
@@ -664,6 +759,8 @@
   game_id: "Singing Bowl"
   tier: UNCOMMON
   pool_order: 7
+  pickup:
+    can_spawn: true
   provenance: "SingingBowl (SingingBowl.java) -- adds the '+2 max HP' skip option to card rewards (CardRewardScreen bowlButton; HP_AMT=2, SingingBowl.java:20). A run-layer (combat-reward) modifier, B4.5-owner; no combat trigger. canSpawn floor<=48 (:41-43)."
 
 - id: 63
@@ -671,6 +768,8 @@
   game_id: "The Courier"
   tier: UNCOMMON
   pool_order: 10
+  pickup:
+    can_spawn: true
   provenance: "Courier (Courier.java:16-48) -- ID 'The Courier'; shop prices x0.8 (MULTIPLIER, ShopScreen reads it) and the merchant restocks purchased items (ShopScreen/StoreRelic/StorePotion courier branches). A run-layer (shop) modifier, B4.8-owner; no combat trigger. canSpawn (Courier.java:41-43): floor<=48 && current room is not a ShopRoom."
 
 - id: 64
@@ -686,4 +785,6 @@
   tier: UNCOMMON
   pool_order: 8
   initial_counter: 2
+  pickup:
+    can_spawn: true
   provenance: "Matryoshka.onChestOpen (Matryoshka.java:30-47) -- the next 2 non-boss chests contain an extra relic (counter 2 -> 0; relicRng.randomBoolean(0.75) picks COMMON vs UNCOMMON for the extra reward; counter -2 == used up). A run-layer (treasure/chest) hook, B4.7-owner; constructor counter=2 (Matryoshka.java:21). canSpawn floor<=40 (:59-61)."
