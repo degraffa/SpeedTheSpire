@@ -117,8 +117,12 @@ void dispatch_on_play_card(CombatState& state, uint16_t card_id,
 // cards -> monster powers). `played_pool_index` is the played card's pool row so
 // a native body (Corruption) can redirect it (e.g. set its EXHAUST flag). Returns
 // nothing; redirects mutate state directly.
+// `target` is the monster the card was played at (kActorPlayer for a self/none
+// card) -- the `action.target` a replay power reads to aim its copy
+// (DoubleTapPower.java:46-49).
 void dispatch_on_use_card(CombatState& state, uint8_t played_pool_index,
-                          uint16_t card_id) noexcept;
+                          uint16_t card_id,
+                          uint8_t target = kActorPlayer) noexcept;
 
 // --- Single-source hooks (player-power list order == §5.5) ------------------
 

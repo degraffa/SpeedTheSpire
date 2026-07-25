@@ -24,4 +24,14 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept;
 // DROPKICK.
 void op_dropkick(CombatState& s, const ActionQueueItem& item) noexcept;
 
+// DAMAGE_FEED (Feed): damage, then the max-HP gain when the hit left tgt dead.
+void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
+                    int max_hp_gain) noexcept;
+
+// VAMPIRE_DAMAGE_ALL (Reaper): hit every live monster, then queue the summed heal.
+void op_vampire_damage_all(CombatState& s, int base) noexcept;
+
+// HEAL: the queued HealAction, routed through the onPlayerHeal relic seam.
+void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept;
+
 }  // namespace sts::engine

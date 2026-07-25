@@ -379,10 +379,11 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 91u);   // B3.7: prior 67 + 8 red uncommon POWER cards
+                                      // + the 16 red RARE cards (ids 76-91)
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 33u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 39u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -391,6 +392,10 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.16's Angry (40), the Gremlin Warrior's
                                       // pre-battle power; 30-39 are other batches
                                       // + B3.21's Mode Shift (45) + Sharp Hide (46)
+                                      // + the six red-rare card powers (48-53);
+                                      // 47 stays a permanent gap, and Corruption
+                                      // needed no new row (it is the id 11 the
+                                      // hook framework already registered)
     EXPECT_EQ(m::kMonstersCount, 20u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
@@ -403,7 +408,7 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
-    EXPECT_EQ(m::kTotalCount, 312u);  // 75 + 33 + 20 + 111 + 33 + 0 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 334u);  // 91 + 39 + 20 + 111 + 33 + 0 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

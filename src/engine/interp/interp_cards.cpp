@@ -8,6 +8,7 @@
 
 #include <cstdint>
 
+#include "interp_ops.hpp"               // actor_powers (the Corruption presence test)
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
@@ -22,6 +23,90 @@ namespace sts::engine {
 namespace {
 
 // --- CHOOSE_CARD helpers -----------------------------------------------------
+
+// The pile a CHOOSE_CARD of `kind` selects from. A choice's slot index -- the
+// arg0 of a CHOOSE action, and the loop bound of every eligibility scan -- indexes
+// THIS pile: the hand for most kinds, the discard pile for Headbutt, the exhaust
+// pile for Exhume.
+[[nodiscard]] uint8_t choice_pile_count(const CombatState& s,
+                                        ChoiceKind k) noexcept {
+    switch (choice_source(k)) {
+        case ChoiceSource::DISCARD:
+            return s.discard_count;
+        case ChoiceSource::EXHAUST:
+            return s.exhaust_count;
+        case ChoiceSource::HAND:
+        default:
+            return s.hand_count;
+    }
+}
+[[nodiscard]] const CardPoolIndex* choice_pile_cards(const CombatState& s,
+                                                     ChoiceKind k) noexcept {
+    switch (choice_source(k)) {
+        case ChoiceSource::DISCARD:
+            return s.discard;
+        case ChoiceSource::EXHAUST:
+            return s.exhaust;
+        case ChoiceSource::HAND:
+        default:
+            return s.hand;
+    }
+}
+
+// Does the player currently carry `id`? A PRESENCE test (AbstractCreature.
+// hasPower), deliberately NOT amount-gated: Corruption lives in its slot with
+// amount -1 (CorruptionPower.java:27).
+[[nodiscard]] bool player_carries_power(const CombatState& s,
+                                        PowerId id) noexcept {
+    const PowerView pv = actor_powers(s, kActorPlayer);
+    for (uint8_t i = 0; i < pv.count; ++i) {
+        if (pv.slots[i].power_id == static_cast<uint16_t>(id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// AbstractCard.setCostForTurn (AbstractCard.java:2001-2011): assign, clamp a
+// negative sentinel to 0, and mark the instance cost-modified-for-turn whenever
+// the new value differs from the card's own base cost (so the end-turn sweep
+// restores it). ExhumeAction reaches a card this way.
+void set_cost_for_turn(CombatState& s, CardPoolIndex pi, int amount) noexcept {
+    CardInstance& c = s.card_pool[pi];
+    const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+    if (def == nullptr) {
+        return;
+    }
+    if (amount < 0) {
+        amount = 0;  // setCostForTurn clamps at zero (:2004-2006)
+    }
+    c.cost_now = static_cast<uint8_t>(amount);
+    if (static_cast<uint8_t>(amount) != card_cost(*def, c.upgrade)) {
+        c.flags = static_cast<uint16_t>(
+            c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+    }
+}
+
+// ExhumeAction's "return the picked card to the hand" body (ExhumeAction.java:
+// 54-66 forced / :92-102 prompted): addToHand, then -- while the player has
+// Corruption and the card is a SKILL -- setCostForTurn(-9), i.e. free this turn;
+// then removeCard from the exhaust pile.
+void exhaust_slot_to_hand(CombatState& s, uint8_t slot) noexcept {
+    if (slot >= s.exhaust_count || s.hand_count >= kHandCap) {
+        return;
+    }
+    const CardPoolIndex pi = s.exhaust[slot];
+    for (uint8_t j = static_cast<uint8_t>(slot + 1); j < s.exhaust_count; ++j) {
+        s.exhaust[j - 1] = s.exhaust[j];
+    }
+    --s.exhaust_count;
+    s.hand[s.hand_count++] = pi;
+    const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+    if (def != nullptr && def->type == CardType::SKILL &&
+        player_carries_power(s, PowerId::CORRUPTION)) {
+        set_cost_for_turn(s, pi, 0);
+    }
+}
 
 // Remove hand slot `slot` from the hand (shifting the tail down) and return the
 // card's pool index. Precondition: slot < hand_count.
@@ -110,9 +195,7 @@ void clone_card_to_hand(CombatState& s, CardPoolIndex src_pi) noexcept {
 // the prompted screen bookkeeping lives in apply_choice_selection.
 void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
                           int copies = 1) noexcept {
-    const uint8_t src_count =
-        choice_source_is_discard(kind) ? s.discard_count : s.hand_count;
-    if (slot >= src_count) {
+    if (slot >= choice_pile_count(s, kind)) {
         return;
     }
     switch (kind) {
@@ -143,6 +226,9 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             }
             break;
         }
+        case ChoiceKind::EXHAUST_TO_HAND:
+            exhaust_slot_to_hand(s, slot);
+            break;
     }
 }
 
@@ -151,8 +237,7 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
 // just-played source card from a discard-source count).
 [[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind,
                                  uint8_t excluded) noexcept {
-    const uint8_t src_count =
-        choice_source_is_discard(kind) ? s.discard_count : s.hand_count;
+    const uint8_t src_count = choice_pile_count(s, kind);
     int n = 0;
     for (uint8_t i = 0; i < src_count; ++i) {
         if (choice_slot_eligible(s, i, kind, excluded)) {
@@ -267,7 +352,6 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
     if (need <= 0) {
         return;
     }
-    const bool from_discard = choice_source_is_discard(kind);
     const uint8_t excluded = choice_excluded_index(item);
     const int eligible = count_eligible(s, kind, excluded);
     if (eligible <= need) {
@@ -280,8 +364,8 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
         // discard-source choice has need == 1).
         CardPoolIndex picked[kHandCap];
         int m = 0;
-        const uint8_t sc = from_discard ? s.discard_count : s.hand_count;
-        const CardPoolIndex* src_pile = from_discard ? s.discard : s.hand;
+        const uint8_t sc = choice_pile_count(s, kind);
+        const CardPoolIndex* src_pile = choice_pile_cards(s, kind);
         for (uint8_t i = 0; i < sc && m < kHandCap; ++i) {
             if (choice_slot_eligible(s, i, kind, excluded)) {
                 picked[m++] = src_pile[i];
@@ -289,8 +373,8 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
         }
         for (int k = 0; k < m; ++k) {
             // Re-find the slot each time (earlier applies may have shifted the pile).
-            const uint8_t sc2 = from_discard ? s.discard_count : s.hand_count;
-            const CardPoolIndex* sp2 = from_discard ? s.discard : s.hand;
+            const uint8_t sc2 = choice_pile_count(s, kind);
+            const CardPoolIndex* sp2 = choice_pile_cards(s, kind);
             for (uint8_t i = 0; i < sc2; ++i) {
                 if (sp2[i] == picked[k]) {
                     apply_choice_to_slot(s, i, kind,
@@ -368,6 +452,117 @@ void op_play_top_draw(CombatState& s, int exclude) noexcept {
     q.target = target;
     add_card_to_queue_top(s, q);
     restore_source();
+}
+
+// PLAY_CARD -- the general recursive-play verb. Three Java sites share this
+// shape and differ only in the flags:
+//   * DoubleTapPower.onUseCard (DoubleTapPower.java:43-66) -- makeSameInstanceOf
+//     the just-played ATTACK into limbo, purgeOnUse = true, then
+//     addCardQueueItem(..., inFrontOfQueue = true) with autoplay and
+//     ignoreEnergyTotal: kPlayCardCopy | kPlayCardPurge | kPlayCardQueueFront.
+//   * PlayTopCardAction.update (PlayTopCardAction.java:33-66) -- the top card of
+//     the draw pile, reshuffling an empty draw pile first, optionally forced to
+//     exhaust: kPlayCardFromDrawTop [| kPlayCardExhaust].
+//   * a start-of-turn "play the top card of your draw pile" power: the same
+//     draw-top form with no exhaust.
+// `target` is the monster the play is aimed at. kActorRandomEnemy is accepted and
+// rolls one card_random_rng getRandomMonster draw HERE, before the pile checks --
+// matching Havoc, where getRandomMonster is evaluated as the action's argument.
+// A QUEUED PLAY_CARD never arrives with that sentinel (execute_opcode resolves
+// dynamic targets before the switch, taking the same single draw); the branch is
+// for the direct callers, which pass a concrete target today.
+// The played instance is put in the hand so resolve_card_play's hand->pile move
+// finds it; a purge instance leaves the hand again as it resolves and lands in
+// no pile, which is what the game's limbo does.
+void op_play_card(CombatState& s, uint8_t target, int source_index,
+                  uint32_t flags) noexcept {
+    const uint8_t resolved =
+        (target == kActorRandomEnemy) ? roll_random_target(s) : target;
+    CardPoolIndex pi = 0;
+    if ((flags & kPlayCardFromDrawTop) != 0u) {
+        if (s.draw_count == 0 && s.discard_count == 0) {
+            return;  // deckSize + discardSize == 0 -> nothing to play (:34-36)
+        }
+        if (s.draw_count == 0) {
+            shuffle_discard_into_draw(s);  // EmptyDeckShuffleAction (:38-43)
+            if (s.draw_count == 0) {
+                return;
+            }
+        }
+        pi = s.draw[s.draw_count - 1];  // getTopCard
+        --s.draw_count;
+    } else {
+        if (source_index < 0 || source_index >= kCardPoolCap) {
+            return;
+        }
+        pi = static_cast<CardPoolIndex>(source_index);
+    }
+    if ((flags & kPlayCardCopy) != 0u) {
+        // makeSameInstanceOf: a fresh instance of the SAME card at the same
+        // upgrade level, with the source's per-instance state (cost_now, flags,
+        // misc) carried over -- the shape clone_card_to_hand already implements,
+        // minus its hand insertion (this copy is placed below, and its cost and
+        // disposition flags are rewritten first).
+        int slot = -1;
+        for (int i = 0; i < kCardPoolCap; ++i) {
+            if (s.card_pool[i].card_id == static_cast<uint16_t>(CardId::NONE)) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            return;  // pool exhausted (defensive; 160-row cap, design §4.2)
+        }
+        s.card_pool[slot] = s.card_pool[pi];
+        pi = static_cast<CardPoolIndex>(slot);
+    }
+    s.card_pool[pi].cost_now = 0;  // autoplay: useCard skips energy.use (:1378)
+    if ((flags & kPlayCardPurge) != 0u) {
+        s.card_pool[pi].flags = static_cast<uint16_t>(
+            s.card_pool[pi].flags | card_flag_bit(CardFlag::PURGE_ON_USE));
+    }
+    if ((flags & kPlayCardExhaust) != 0u) {
+        s.card_pool[pi].flags = static_cast<uint16_t>(
+            s.card_pool[pi].flags | card_flag_bit(CardFlag::EXHAUST));
+    }
+    if (s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = pi;
+    }
+    CardQueueItem q{};
+    q.card_index = pi;
+    q.target = resolved;
+    if ((flags & kPlayCardQueueFront) != 0u) {
+        add_card_to_queue_top(s, q);
+    } else {
+        add_card_to_queue_bottom(s, q);
+    }
+}
+
+// FIEND_FIRE (FiendFireAction.update, FiendFireAction.java:32-46): count =
+// hand.size() at EXECUTE time; addToTop `count` DamageActions, then addToTop
+// `count` ExhaustAction(1, isRandom = true) -- the SECOND addToTop loop lands in
+// front, so the random exhausts all resolve before the first hit. Both loops
+// preserve their internal order because each pushes onto the front in turn, which
+// reverses an already-uniform list into itself.
+void op_fiend_fire(CombatState& s, uint8_t target, int base) noexcept {
+    const int count = static_cast<int>(s.hand_count);
+    for (int i = 0; i < count; ++i) {
+        ActionQueueItem dmg{};
+        dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+        dmg.src = kActorPlayer;
+        dmg.tgt = target;
+        dmg.amount = base;
+        add_to_top(s, dmg);
+    }
+    for (int i = 0; i < count; ++i) {
+        ActionQueueItem ex{};
+        ex.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+        ex.src = kActorPlayer;
+        ex.tgt = kActorPlayer;
+        ex.amount = 1;
+        ex.flags = make_choose_flags(ChoiceKind::EXHAUST, /*random=*/true);
+        add_to_top(s, ex);
+    }
 }
 
 // SET_COST: set card_pool[src].cost_now = amount (the cost-modifier
@@ -454,6 +649,22 @@ void op_random_attack_to_hand(CombatState& s) noexcept {
 
 bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
                           uint8_t excluded) noexcept {
+    if (kind == ChoiceKind::EXHAUST_TO_HAND) {
+        // Exhume. Three of ExhumeAction's early-outs collapse into eligibility:
+        //   * a FULL hand kills the whole action (ExhumeAction.java:40-43), so no
+        //     slot is eligible while hand_count == kHandCap;
+        //   * an EMPTY exhaust pile ends it (:45-48) -- no slots to be eligible;
+        //   * every Exhume copy is lifted out of the grid before the select opens
+        //     (:74-80) and put back afterwards (:105), and the one-card branch
+        //     likewise refuses when that one card is an Exhume (:50-53).
+        // With no eligible slot the choice resolves to nothing, which is exactly
+        // what all three early-outs do.
+        if (s.hand_count >= kHandCap || slot >= s.exhaust_count) {
+            return false;
+        }
+        return s.card_pool[s.exhaust[slot]].card_id !=
+               static_cast<uint16_t>(CardId::EXHUME);
+    }
     if (choice_source_is_discard(kind)) {
         // Discard-to-draw-top: any discard card is a legal pick
         // (DiscardPileToTopOfDeckAction has no eligibility filter) EXCEPT the

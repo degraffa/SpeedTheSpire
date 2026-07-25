@@ -299,6 +299,13 @@ sts_add_test(status_curse_test)
 # power-card no-discard path, draw/exhaust trigger ordering, and an advance() script.
 sts_add_test(card_uncommon_powers_test)
 
+# B3.8: exact RED/RARE roster (16 cards). Per-card base/upgraded behaviour, the
+# start-of-turn block persistence Barricade introduces, the general
+# recursive-play verb (Double Tap's replay and its draw-top form), Exhume's
+# exhaust-pile choice, Feed/Reaper healing through the relic seam, and an
+# advance() script.
+sts_add_test(card_rares_test)
+
 # B4.15: ascension modifier table (design §6) -- the implemented run-setup + map
 # rows, their application ORDER, and the frozen "no such modifier" negatives.
 # Reads registry/a20.yaml directly (STS_REGISTRY_DIR) because that file is the

@@ -204,7 +204,19 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::SPOT_WEAKNESS) ==
             static_cast<uint16_t>(Opcode::SPOT_WEAKNESS) &&
         static_cast<uint16_t>(sts::registry::Opcode::RANDOM_ATTACK_TO_HAND) ==
-            static_cast<uint16_t>(Opcode::RANDOM_ATTACK_TO_HAND),
+            static_cast<uint16_t>(Opcode::RANDOM_ATTACK_TO_HAND) &&
+        static_cast<uint16_t>(sts::registry::Opcode::PLAY_CARD) ==
+            static_cast<uint16_t>(Opcode::PLAY_CARD) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_FEED) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_FEED) &&
+        static_cast<uint16_t>(sts::registry::Opcode::FIEND_FIRE) ==
+            static_cast<uint16_t>(Opcode::FIEND_FIRE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DOUBLE_STRENGTH) ==
+            static_cast<uint16_t>(Opcode::DOUBLE_STRENGTH) &&
+        static_cast<uint16_t>(sts::registry::Opcode::VAMPIRE_DAMAGE_ALL) ==
+            static_cast<uint16_t>(Opcode::VAMPIRE_DAMAGE_ALL) &&
+        static_cast<uint16_t>(sts::registry::Opcode::HEAL) ==
+            static_cast<uint16_t>(Opcode::HEAL),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
@@ -223,7 +235,9 @@ static_assert(
         sts::registry::kCardFlagRetain == card_flag_bit(CardFlag::RETAIN) &&
         sts::registry::kCardFlagXcost == card_flag_bit(CardFlag::XCOST) &&
         sts::registry::kCardFlagCostModifiedForTurn ==
-            card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN),
+            card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &&
+        sts::registry::kCardFlagPurgeOnUse ==
+            card_flag_bit(CardFlag::PURGE_ON_USE),
     "generated kCardFlag* must stay byte-equal to types.hpp's CardFlag "
     "(append-only; mirrored in gen.py CARD_FLAGS)");
 
