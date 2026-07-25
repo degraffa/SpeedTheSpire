@@ -15,9 +15,9 @@
 #include "sts/engine/cards.hpp"             // CardId (Blood for Blood cost update)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
-#include "sts/engine/monster_dispatch.hpp"  // B3.17: on_monster_damaged
-#include "sts/engine/power_hooks.hpp"       // B3.2 hook dispatch (wasHPLost/onAttacked)
-#include "sts/engine/relic_hooks.hpp"       // B3.25: player_has_relic (Paper Phrog) + onMonsterDeath dispatch
+#include "sts/engine/monster_dispatch.hpp"  // on_monster_damaged (split interrupt)
+#include "sts/engine/power_hooks.hpp"       // power hook dispatch (wasHPLost/onAttacked)
+#include "sts/engine/relic_hooks.hpp"       // player_has_relic (Paper Phrog) + onMonsterDeath dispatch
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -32,7 +32,7 @@ namespace {
 // WeakPower.atDamageGive (*0.75f). Others pass through. `strength_mult` scales the
 // Strength contribution (Heavy Blade counts Strength x magicNumber by temporarily
 // multiplying strength.amount before applyPowers; HeavyBlade.java:426-435). The
-// default 1 is bit-identical to the pre-B3.3 hook: float(amount) * 1.0f == float(
+// default 1 is bit-identical to an unmultiplied hook: float(amount) * 1.0f == float(
 // amount), so every non-Heavy-Blade damage number is unchanged.
 [[nodiscard]] float at_damage_give(float dmg, PowerSlot p,
                                    int strength_mult = 1) noexcept {
@@ -50,10 +50,11 @@ namespace {
 // atDamageReceive: target-owned hooks. VulnerablePower.atDamageReceive: *1.5f,
 // or *1.75f for a Vulnerable MONSTER when the player owns Paper Phrog
 // (VulnerablePower.java:67-70 -- `!owner.isPlayer && player.hasRelic("Paper
-// Frog")`; live as of B3.25, retiring A4.1's unreachable-branch note). The
+// Frog")`; live, because Paper Phrog is a registered relic -- this is no longer
+// the unreachable branch the relic-free skeleton documented). The
 // player-side Odd Mushroom *1.25f branch (:64-66) lands with its rare-relic
-// owner (B3.26). Without Paper Phrog the 1.5f multiply is byte-identical to the
-// pre-B3.25 hook (fixtures unchanged).
+// tier, which has no registry rows yet. Without Paper Phrog the 1.5f multiply is
+// byte-identical to a relic-free hook (fixtures unchanged).
 [[nodiscard]] float at_damage_receive(const CombatState& s, uint8_t owner_actor,
                                       float dmg, PowerSlot p) noexcept {
     switch (static_cast<PowerId>(p.power_id)) {
@@ -141,7 +142,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // applyPowers hook is `if (type == NORMAL)` in the Java): a Vulnerable attacker
     // does NOT amplify reflected Thorns, and player Strength/Weak do not scale it.
     // NORMAL damage runs the full DamageInfo.applyPowers pipeline, carrying the
-    // B3.3 strength multiplier (Heavy-Blade-style attacks).
+    // Strength multiplier (Heavy-Blade-style attacks).
     const int out = (type == DamageType::NORMAL)
                         ? compute_damage(s, src, tgt, base, strength_mult)
                         : (base < 0 ? 0 : base);
@@ -187,7 +188,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         cards_took_player_damage(s);
     }
     // Monster death edge -> relics onMonsterDeath (AbstractMonster.die:933-937;
-    // B3.25 Gremlin Horn). Fires once, when this hit drops the monster from
+    // Gremlin Horn). Fires once, when this hit drops the monster from
     // positive HP to 0. Runs BEFORE the damage() override seam below: die() is
     // called synchronously inside super.damage(), while the override's
     // post-super check sees isDying and never split-telegraphs a lethal hit.
@@ -196,7 +197,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         const RelicView rv = player_relics(s);
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
     }
-    // Monster damage() override seam (B3.17): the large slimes' split interrupt
+    // Monster damage() override seam: the large slimes' split interrupt
     // wraps super.damage() and runs AFTER it, for EVERY DamageInfo type
     // (AcidSlime_L.java:142-152 / SpikeSlime_L.java:130-140 -- the guard reads
     // only resulting state, so a fully-blocked hit still checks). Dispatched by
@@ -232,13 +233,13 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         cards_took_player_damage(s);
     }
     // A direct HP loss can also kill a monster -> same die() relic dispatch
-    // (AbstractMonster.die:933-937; B3.25), before the override seam as above.
+    // (AbstractMonster.die:933-937), before the override seam as above.
     if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
         const RelicView rv = player_relics(s);
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
     }
     // LoseHPAction also routes through creature.damage() (LoseHPAction.java:41),
-    // so the monster damage() override seam fires here too (B3.17).
+    // so the monster damage() override seam fires here too.
     if (tgt != kActorPlayer) {
         on_monster_damaged(s, tgt);
     }

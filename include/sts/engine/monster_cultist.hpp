@@ -1,6 +1,6 @@
 #pragma once
 
-// Cultist monster module (B3.13). Stats/move-effects are DATA from
+// Cultist monster module. Stats/move-effects are DATA from
 // registry/monsters.yaml (generated kCultist); move *selection* is the native
 // getMove below (design §4.2), matching the jaw_worm_* split.
 //

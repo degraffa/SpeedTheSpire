@@ -48,7 +48,7 @@ void dispatch_relics_on_obtain_card(RunState& run, CardInstance& card,
 
 // Removes one master-deck row, preserving order. Returns false for an invalid
 // row without changing the run. The generated per-card removal field is zero
-// for every B3.9 card except Parasite.
+// for every poolable curse except Parasite.
 [[nodiscard]] inline bool remove_master_deck_card(RunState& run,
                                                    uint16_t index) noexcept {
     if (index >= run.master_deck_count) {

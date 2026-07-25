@@ -1,4 +1,4 @@
-// Large slime native AI, split turn, and damage interrupt (B3.17). See
+// Large slime native AI, split turn, and damage interrupt. See
 // monster_slime_large.hpp for provenance and the frozen split semantics.
 
 #include "sts/engine/monster_slime_large.hpp"
@@ -66,8 +66,8 @@ void queue_split(CombatState& s, uint8_t mi, MonsterId child_id) noexcept {
     // inserts Acid-left AT the dead boss's current slot, not at the Acid
     // parent's slot; after that insertion Acid-right appends at the new end.
     // The standalone Large Slime encounter has no boss record and keeps the
-    // original mi/mi+2 derivation. This is the B3.20 child-chain positioning
-    // case called out by B3.17's handoff.
+    // original mi/mi+2 derivation. This is the child-chain positioning case: a
+    // large slime that is ITSELF a Slime Boss split child.
     if (child_id == MonsterId::ACID_SLIME_MEDIUM) {
         for (uint8_t i = 0; i < s.monster_count; ++i) {
             if (s.monsters[i].monster_id ==

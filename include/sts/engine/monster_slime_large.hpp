@@ -1,6 +1,6 @@
 #pragma once
 
-// Large slime monster modules + the split framework's native bodies (B3.17).
+// Large slime monster modules + the split framework's native bodies.
 // HP and non-split move effects are generated registry data; history-dependent
 // getMove selection, the split turn's queued action sequence, and the damage()
 // interrupt are native. The fixed S1 difficulty is A20, so move selection
@@ -49,12 +49,12 @@
 //     as a dead record, and combat cannot end inside the CannotLose window.
 //   * Slots: SpawnMonsterAction smart positioning counts records with drawX <
 //     child.drawX. Children spawn at saveX-134 / saveX+134; in every S1 layout
-//     that fields a large slime pre-B3.20 (the solo "Large Slime" encounter,
-//     MonsterHelper.java:409-414) all other records are the parent itself, so
-//     the left child inserts AT the parent's slot p (parent shifts to p+1) and
-//     the right child at p+2. B3.20's boss fight must recompute indices from
-//     its explicit coordinates (-385/+120 vs the boss's 0) instead of reusing
-//     p/p+2 blindly. In the boss descendant layout, Acid L's left medium
+//     that fields a large slime as the STARTING group (the solo "Large Slime"
+//     encounter, MonsterHelper.java:409-414) all other records are the parent
+//     itself, so the left child inserts AT the parent's slot p (parent shifts
+//     to p+1) and the right child at p+2. The Slime Boss fight must recompute
+//     indices from its explicit coordinates (-385/+120 vs the boss's 0) instead
+//     of reusing p/p+2 blindly. In the boss descendant layout, Acid L's left medium
 //     (-14) inserts before the dead boss (0), while its right medium (254)
 //     appends after the Acid parent (120); monster_slime_large.cpp derives
 //     those slots from the retained SLIME_BOSS record.
@@ -96,7 +96,7 @@ void acid_slime_large_roll_move(CombatState& state,
                                 uint8_t monster_index) noexcept;
 
 // Split-spawn init at a fixed HP (the 4-arg ctor + init(): NO monster_hp_rng
-// draw, SplitPower added, one ai_rng rollMove). B3.20's Slime Boss split spawns
+// draw, SplitPower added, one ai_rng rollMove). The Slime Boss split spawns
 // large slimes through these.
 void spike_slime_large_spawn_at_hp(CombatState& state, uint8_t monster_index,
                                    int16_t hp) noexcept;
@@ -104,7 +104,7 @@ void acid_slime_large_spawn_at_hp(CombatState& state, uint8_t monster_index,
                                   int16_t hp) noexcept;
 
 // The shared damage() interrupt (both classes; SlimeBoss differs only in
-// lacking the splitTriggered latch, which its own B3.20 module will handle).
+// lacking the splitTriggered latch, which monster_slime_boss.cpp handles).
 // Called by op_damage / op_lose_hp AFTER the hit fully lands (the Java override
 // runs after super.damage()).
 void large_slime_on_damaged(CombatState& state, uint8_t monster_index) noexcept;

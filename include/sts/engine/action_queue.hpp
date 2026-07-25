@@ -58,7 +58,7 @@ inline constexpr uint16_t kOpcodeDrawCard = 4;
 // indices"). 0xFF cannot alias a monster slot (0..4).
 inline constexpr uint8_t kActorPlayer = 0xFF;
 
-// Dynamic-target sentinels for an ActionQueueItem's `tgt` (Stage B B3.1). They
+// Dynamic-target sentinels for an ActionQueueItem's `tgt`. They
 // cannot alias a monster slot (0..4) or the player (0xFF). execute_opcode
 // resolves them at EXECUTE time (not enqueue), matching the game's per-action
 // resolution of AoE / random targets:

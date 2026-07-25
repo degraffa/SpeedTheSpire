@@ -1,7 +1,7 @@
 #pragma once
 
 // Relic registry -- re-export of the GENERATED relic hook->effect-program table
-// (Stage B design §4.3, §5.3; B3.24). The constexpr `RelicDef` table is emitted by
+// (Stage B design §4.3, §5.3). The constexpr `RelicDef` table is emitted by
 // tools/registry_gen/gen.py from registry/relics.yaml into
 // <build>/generated/sts/registry/relic_table.hpp; this header aliases it into
 // sts::engine so the relic-hook framework (relic_hooks.cpp) consumes it unchanged.

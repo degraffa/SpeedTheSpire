@@ -22,9 +22,9 @@
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/monster_dispatch.hpp"  // B3.17: roll_monster_move / spawn_monster_at_slot
+#include "sts/engine/monster_dispatch.hpp"  // roll_monster_move / spawn_monster_at_slot
 #include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
-#include "sts/engine/power_hooks.hpp"   // B3.2 hook dispatch (onCardDraw)
+#include "sts/engine/power_hooks.hpp"   // power hook dispatch (onCardDraw)
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -78,7 +78,7 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                            apply_power_id_from_flags(item.flags), item.amount);
             return;
         case Opcode::DRAW: {
-            // B3.6 (DrawCardAction.update:69-73): while the player has No Draw,
+            // DrawCardAction.update:69-73: while the player has No Draw,
             // a DrawCardAction ends immediately -- NOTHING is drawn (any amount,
             // including the start-of-turn 5; the power self-removes at end of
             // turn before the next start-of-turn draw). The check ignores the
@@ -133,7 +133,7 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::ROLL_MOVE:
             // Dispatch to the target's queued-roll body if it registers one
-            // (large slimes, B3.17); a no-op for inline-rolling monsters. NO
+            // (large slimes); a no-op for inline-rolling monsters. NO
             // liveness gate -- RollMoveAction.update rolls even on a dead
             // split parent (RollMoveAction.java:17-21).
             roll_monster_move(s, item.tgt);

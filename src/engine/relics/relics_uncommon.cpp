@@ -1,4 +1,4 @@
-// B3.25 uncommon relics -- native hook bodies (moved verbatim out of
+// UNCOMMON-tier relics -- native hook bodies (moved verbatim out of
 // relic_hooks.cpp's escape-hatch switch; see relic_native.hpp for the split's
 // rationale). Parameters a body does not read are left unnamed to keep -Wextra
 // quiet; the signature is the uniform RelicNativeFn.
@@ -364,9 +364,16 @@ void relic_native_mummified_hand(CombatState& s, RelicHook hook,
 // UNDEFINED REFERENCE at link time rather than a silent no-op.
 
 // Pantograph.atBattleStart (Pantograph.java:32-40) -- if any monster.type ==
-// EnemyType.BOSS, addToTop HealAction(player, 25). DEFERRED: monsters.yaml
-// carries no EnemyType/BOSS metadata and no boss rows exist yet
-// (Guardian/Hexaghost/Slime Boss are B3.15-B3.17).
+// EnemyType.BOSS, addToTop HealAction(player, 25). DEFERRED: registry/
+// monsters.yaml carries no EnemyType/BOSS column, so there is no DATA-DRIVEN
+// way to ask "is this a boss fight?".
+//
+// This relic IS now reachable: SLIME_BOSS is a live monster row and the Slime
+// Boss fight is playable, so the heal is a real 25 HP that the engine does not
+// grant. Implementing it against a hard-coded MonsterId list would work today
+// but would have to be revisited for every boss added; the intended fix is the
+// EnemyType column. Until then this is a KNOWN DIVERGENCE, not a no-op.
+// (See docs/stage-b-tasks.md's deferred-obligations table.)
 void relic_native_pantograph(CombatState& /*s*/, RelicHook /*hook*/,
                              RelicSlot& /*slot*/,
                              const RelicHookContext& /*ctx*/) noexcept {}

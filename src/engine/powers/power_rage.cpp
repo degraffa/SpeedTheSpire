@@ -15,7 +15,7 @@ namespace sts::engine {
 
 void power_native_rage(CombatState& s, Hook hook,
                        const HookContext& ctx) noexcept {
-    // RagePower (B3.6 completes the B3.2 stub). onUseCard (RagePower.
+    // RagePower.onUseCard (RagePower.
     // java:41-47): if the played card is an ATTACK, GainBlockAction(
     // player, amount) -- dispatched at ON_USE_CARD (after the card's own
     // effects are queued, so the block lands after the attack's damage;

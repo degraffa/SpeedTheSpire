@@ -14,9 +14,9 @@
 #include "sts/engine/card_play.hpp"  // resolve_card_play wired into pump_step step 3
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"  // execute_opcode wired into pump_step
-#include "sts/engine/piles.hpp"   // B3.6: reset_cost_for_turn (end-turn sweep)
-#include "sts/engine/power_hooks.hpp"  // B3.2: start/end-of-turn power dispatch
-#include "sts/engine/relic_hooks.hpp"  // B3.24: start/end-of-turn relic dispatch
+#include "sts/engine/piles.hpp"   // reset_cost_for_turn (end-turn sweep)
+#include "sts/engine/power_hooks.hpp"  // start/end-of-turn power dispatch
+#include "sts/engine/relic_hooks.hpp"  // start/end-of-turn relic dispatch
 
 namespace sts::engine {
 
@@ -82,17 +82,17 @@ void monster_queue_pop_front(CombatState& s) noexcept {
 // can attach without moving the call site.
 void call_end_of_turn_actions(CombatState& s) noexcept {
     // Frozen §5.4 order (GameActionManager.callEndOfTurnActions:369-377):
-    //   applyEndOfTurnRelics -> relics onPlayerEndTurn (acq order; Orichalcum), B3.24
+    //   applyEndOfTurnRelics -> relics onPlayerEndTurn (acq order; Orichalcum)
     //   applyEndOfTurnPreCardPowers             -- Metallicize (atEndOfTurnPreEndTurnCards)
     //   TriggerEndOfTurnOrbsAction               -- no orbs
-    //   hand cards triggerOnEndOfTurnForPlayingCard -- Burn/Regret/Decay (card-level, B3.9)
+    //   hand cards triggerOnEndOfTurnForPlayingCard -- Burn/Regret/Decay (card-level)
     //   stance.onEndOfTurn                       -- stanceless
     // then applyEndOfTurnTriggers (Combust atEndOfTurn) fires via the queued
     // discard sequence (AbstractCreature.java:548-553) -- AFTER the pre-card
     // powers and hand triggers. All queue via add_to_bottom, so call order ==
     // resolution order: Metallicize block lands before Combust's HP loss/damage.
     {
-        const RelicView rv = player_relics(s);  // applyEndOfTurnRelics (B3.24)
+        const RelicView rv = player_relics(s);  // applyEndOfTurnRelics
         dispatch_relics_on_player_end_turn(s, rv.relics, rv.count);
     }
     dispatch_at_end_of_turn_pre_card(s);   // Metallicize
@@ -123,7 +123,7 @@ void start_of_turn(CombatState& s) noexcept {
     s.cards_played_this_turn = 0;               // player.cardsPlayedThisTurn = 0
     // orbsChanneledThisTurn.clear() -- no orbs.
     // applyStartOfTurnRelics -> relics atTurnStart (acq order; Happy Flower, Lantern,
-    // B3.24). PreDrawCards -- card-level hooks not in scope.
+    // relics). PreDrawCards -- card-level hooks not in scope.
     {
         const RelicView rv = player_relics(s);
         dispatch_relics_at_turn_start(s, rv.relics, rv.count);
@@ -281,7 +281,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     // Minimal combat-over check (design doc §5.2 scope note: full death handling
     // is not yet modeled; this just gives the phase transition so pump() cannot
     // spin). The all-monsters-dead victory branch is gated on the cannotLose
-    // latch (B3.17): between a splitting slime's SUICIDE and its children's
+    // latch: between a splitting slime's SUICIDE and its children's
     // SPAWN_MONSTER actions no monster is alive, and the game keeps the battle
     // open exactly because endBattle() checks !cannotLose (AbstractMonster.
     // updateDeathAnimation:869; CannotLoseAction/CanLoseAction:12-15). Player
@@ -298,7 +298,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     //    through the effect interpreter via execute_opcode (NOP/unrecognized
     //    opcodes are safe no-ops, so a value-init'd item still drains harmlessly).
     if (s.action_count > 0) {
-        // Stage B B3.4 CHOOSE-in-combat: a CHOOSE_CARD at the front that needs a
+        // CHOOSE-in-combat: a CHOOSE_CARD at the front that needs a
         // real player prompt (choice_requires_user) BLOCKS the pump -- leave it at
         // the head and hand control back to the player (the "hand card select
         // screen" is open). advance(CHOOSE, hand_slot) resolves one selection and
@@ -339,7 +339,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         if (is_end_turn_sentinel(head)) {
             s.turn_has_ended = 1;              // (endTurn(): turnHasEnded = true)
             s.monster_attacks_queued = 0;      // prime step 4 (see hpp note (2))
-            // B3.6 (AbstractRoom.endTurn:397-405): the moment the turn ends,
+            // AbstractRoom.endTurn:397-405: the moment the turn ends,
             // every draw/discard/hand card's costForTurn resets to its cost --
             // SYNCHRONOUSLY, before any queued end-of-turn action resolves. Only
             // COST_MODIFIED_FOR_TURN rows (Infernal Blade's setCostForTurn(0)

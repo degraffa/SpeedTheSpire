@@ -1,7 +1,7 @@
 #pragma once
 
 // Power registry -- re-export of the GENERATED power hook->effect-program table
-// (Stage B design §4.3; B3.2). The constexpr `PowerDef` table is emitted by
+// (Stage B design §4.3). The constexpr `PowerDef` table is emitted by
 // tools/registry_gen/gen.py from registry/powers.yaml into
 // <build>/generated/sts/registry/power_table.hpp; this header aliases it into
 // sts::engine so the hook framework (power_hooks.cpp) consumes it unchanged.

@@ -142,8 +142,8 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // post-`continue` body would model a rarity filter the Java does not have.
     // The two are indistinguishable today (no BASIC red row is a POWER), but the
     // faithful structure is the one that stays correct if that ever changes.
-    // B3.7 landed 8 POWER-type cards (Combust/Dark Embrace/Evolve/Feel No Pain/
-    // Fire Breathing/Inflame/Metallicize/Rupture), so this gate is now live.
+    // The registry has 8 POWER-type cards (Combust/Dark Embrace/Evolve/Feel No
+    // Pain/Fire Breathing/Inflame/Metallicize/Rupture), so this gate is live.
     ctx.deck_has_nonbasic_attack = false;
     ctx.deck_has_nonbasic_skill = false;
     ctx.deck_has_power = false;

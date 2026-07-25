@@ -1,11 +1,11 @@
 #pragma once
 
-// Native bodies for the B3.25 uncommon relics (registry/relics.yaml tier
-// UNCOMMON), including the two whose combat body is DEFERRED (Mummified Hand,
-// Pantograph). Those two are DELIBERATELY EMPTY definitions rather than
-// omissions: the generated dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses
+// Native bodies for the UNCOMMON-tier relics (registry/relics.yaml tier
+// UNCOMMON), including the one whose combat body is DEFERRED (Pantograph).
+// That one is a DELIBERATELY EMPTY definition rather than an
+// omission: the generated dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses
 // a handler for EVERY `native: true` row, so a forgotten body is a link error.
-// "Deferred" therefore has to be written down -- and it is, at each empty
+// "Deferred" therefore has to be written down -- and it is, at the empty
 // definition in relics_uncommon.cpp, together with its reason.
 
 #include "sts/engine/combat_state.hpp"
@@ -36,9 +36,10 @@ void relic_native_self_forming_clay(CombatState& s, RelicHook hook,
                                     RelicSlot& slot,
                                     const RelicHookContext& ctx) noexcept;
 
-// --- DEFERRED combat bodies (deliberately empty; see relics_uncommon.cpp) -----
 void relic_native_mummified_hand(CombatState& s, RelicHook hook, RelicSlot& slot,
                                  const RelicHookContext& ctx) noexcept;
+
+// --- DEFERRED combat body (deliberately empty; see relics_uncommon.cpp) ------
 void relic_native_pantograph(CombatState& s, RelicHook hook, RelicSlot& slot,
                              const RelicHookContext& ctx) noexcept;
 

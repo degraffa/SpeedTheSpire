@@ -1,6 +1,6 @@
 #pragma once
 
-// run_advance.hpp -- the RUN-LEVEL batch API (Stage B, task B4.4). This is the
+// run_advance.hpp -- the RUN-LEVEL batch API. This is the
 // layer ABOVE combat: run_begin() builds the Neow-pending initial run state,
 // advance()/legal_actions() drive the floor loop (map choice -> room
 // entry -> combat -> reward/proceed -> next floor), and next_room_transition()
@@ -11,8 +11,8 @@
 // RunState-owned slot inventory into the combat potion interpreter.
 //
 // WHY A SEPARATE CONTROLLER STRUCT (not RunState). RunState is the SAVE-PARITY
-// persistent state (schema-versioned, hashed, traced -- B4.3 sized it at 2184 B
-// and its layout is FROZEN). The transient "where am I in the screen/room flow"
+// persistent state (schema-versioned, hashed, traced -- 2184 B, and its layout
+// is FROZEN). The transient "where am I in the screen/room flow"
 // bookkeeping (current map column, run phase, the live combat, the generated
 // encounter lists + their consumption cursors) is NOT save state -- the game
 // derives it -- so it lives here in RunController, which embeds a RunState by
@@ -20,33 +20,34 @@
 // giving the run loop the state it needs. RunController is trivially copyable
 // (POD) so a heterogeneous batch of them steps with no allocation.
 //
-// SCOPE / HONEST BOUNDARIES (B4.4 is the run-layer critical path; the room
-// CONTENT tasks are downstream). What is LIVE here:
+// SCOPE / HONEST BOUNDARIES. This layer is the run-loop critical path; ROOM
+// CONTENT is largely not modelled yet. What is LIVE here:
 //   * run start RNG order (monsterRng lists, relicRng pool-shuffle draws, mapRng
 //     map) -> the Neow-pending stream state.
 //   * the floor loop + trap-7 reseed at every floor entry.
-//   * monster-room combat entry via the B3.12 encounter framework + fold-back.
+//   * monster-room combat entry via the encounter framework (encounters.hpp)
+//     + fold-back.
 //   * combat-reward / proceed / map-choice screens as CHOOSE states, with kill
 //     and Smoke Bomb escape distinguished.
 //   * potion-slot legality/consumption in combat plus Fruit Juice / Entropic
 //     Brew run mutations outside combat.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * Neow blessing options + payouts  -> B4.14 (here: a single "proceed" skip).
-//   * combat REWARD ASSEMBLY (gold/potion/card rolls) -> B4.5 (here: the reward
-//     screen exists as a CHOOSE-proceed state; it assembles nothing).
-//   * relic pools + acquisition are live through B4.6; downstream reward/chest/
-//     shop/Neow tasks decide when to draw/acquire them.
-//   * events / shops / rest sites / treasure rooms -> B4.10 / B4.8 / B4.9 / B4.7
-//     (here: entering one reseeds the floor streams then parks at
+//   * Neow blessing options + payouts: not modelled (here: a single "proceed"
+//     skip, so the stream state stays right even though no blessing applies).
+//   * combat REWARD ASSEMBLY (gold/potion/card rolls): not modelled (here: the
+//     reward screen exists as a CHOOSE-proceed state; it assembles nothing).
+//   * relic POOLS and acquisition are live; what has no owner yet is the
+//     downstream decision of WHEN to draw/acquire (reward, chest, shop, Neow).
+//   * events / shops / rest sites / treasure rooms: no room content (here:
+//     entering one reseeds the floor streams then parks at
 //     ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
-//   * A20 run-setup HP/curse modifiers (A6/A10/A14) -> B4.15 (here: base
-//     Ironclad sheet). A11 potion slots are live because B4.3 explicitly handed
-//     its populated field to this task.
-//   * monsters beyond Jaw Worm/Cultist/louses -> B3.14-B3.22 (here: an encounter
-//     whose members
-//     are not all implemented resolves its composition (miscRng, as the game
-//     does) then parks at ROOM_UNIMPLEMENTED rather than asserting in spawn_group).
+//   * the A6 / A10 / A14 run-setup HP+curse modifiers: not applied (here: the
+//     base Ironclad sheet). A11 potion slots ARE applied.
+//   * monsters outside the implemented roster (see monster_dispatch.hpp): an
+//     encounter whose members are not all implemented resolves its composition
+//     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
+//     than asserting in spawn_group.
 //
 // Provenance (read in full from D:\STS_BG_Mod\SlayTheSpireDecompiled):
 //   * AbstractDungeon.nextRoomTransition  (AbstractDungeon.java:1687-1813): the
@@ -56,11 +57,11 @@
 //   * AbstractDungeon.initializeRelicList (AbstractDungeon.java:1221-1256): 5
 //     unconditional relicRng.randomLong() pool-shuffle draws.
 //   * Exordium ctor / generateMonsters / initializeBoss (Exordium.java:36-221):
-//     the run-start monsterRng draw order (via generate_monster_lists, B3.12).
+//     the run-start monsterRng draw order (via generate_monster_lists).
 //   * MonsterRoom.onPlayerEntry (MonsterRoom.java:53-61): getMonsterForRoomCreation
 //     -> getEncounter(monsterList.get(0)) -> monsters.init().
 //   * AbstractRoom.update battle-over (:277-357): the lifecycle transition points
-//     (COMPLETE -> reward screen); the reward ASSEMBLY is B4.5.
+//     (COMPLETE -> reward screen); the reward ASSEMBLY is not modelled.
 
 #include <cstdint>
 #include <span>
@@ -81,10 +82,10 @@ namespace sts::engine {
 // of CombatPhase). The value-init default is NONE.
 enum class RunPhase : uint8_t {
     NONE = 0,
-    NEOW = 1,              // floor 0, Neow blessing pending (content: B4.14).
+    NEOW = 1,              // floor 0, Neow blessing pending (no blessing content).
     MAP_CHOICE = 2,        // choosing the next map node (an outgoing edge).
     COMBAT = 3,            // inside a combat; delegates to the embedded CombatState.
-    COMBAT_REWARD = 4,     // post-combat reward/proceed screen (assembly: B4.5).
+    COMBAT_REWARD = 4,     // post-combat reward/proceed screen (assembles nothing).
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // player dead (loss) -- terminal.
 };
@@ -122,7 +123,7 @@ struct RunController {
     uint8_t room_type;      // current RoomType (also identifies an unimplemented stall).
     uint8_t combat_outcome; // RunCombatOutcome; meaningful on reward/run-over.
 
-    // The run's generated encounter-key lists (monsterRng, B3.12) + per-list
+    // The run's generated encounter-key lists (monsterRng) + per-list
     // consumption cursors. A monster room uses monster_list[monster_cursor], an
     // elite uses elite_list[elite_cursor], the boss uses boss_list[boss_cursor];
     // the cursor advances when the room is LEFT (nextRoomTransition remove(0)).
@@ -173,7 +174,8 @@ static_assert(std::is_trivially_copyable_v<RunActionMask>);
 //
 // Character sheet is the BASE Ironclad sheet (80/80 HP, 99 gold, 5 Strike / 4
 // Defend / 1 Bash); potion slots apply A11. The remaining A20 run-setup
-// modifiers (A6/A10/A14) are B4.15's documented seam.
+// modifiers (A6 90% HP, A10 starting curse, A14 -5 max HP) are NOT applied --
+// see the scope note at the top of this header.
 [[nodiscard]] RunController run_begin(int64_t seed, uint8_t ascension) noexcept;
 
 // Fill `out` with the current run-level legal actions for `rc` (see RunActionMask).
@@ -190,8 +192,9 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept;
 void advance(std::span<RunController> runs, std::span<const Action> actions,
              std::span<StepResult> results) noexcept;
 
-// Compatibility spellings for the in-progress B4.4 branch. They are thin
-// wrappers over the public overloads above, not a second implementation.
+// Compatibility spellings (run_-prefixed) for callers that predate the
+// overload set. They are thin wrappers over the public overloads above, not a
+// second implementation.
 inline void run_legal_actions(const RunController& rc,
                               RunActionMask& out) noexcept {
     legal_actions(rc, out);

@@ -15,7 +15,7 @@ namespace sts::engine {
 
 [[nodiscard]] inline CardId return_random_curse(RngStream& card_rng) noexcept {
     static_assert(kPoolableCurseCount == 10,
-                  "B3.9: CardLibrary.getCurse pool has ten ordinary curses");
+                  "CardLibrary.getCurse pool has ten ordinary curses");
     const auto index = static_cast<std::size_t>(
         random(card_rng, static_cast<int32_t>(kPoolableCurseCount - 1)));
     return kPoolableCurses[index];

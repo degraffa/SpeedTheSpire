@@ -1,6 +1,6 @@
 #pragma once
 
-// Encounter framework (design doc §5.2, B3.12): the two RNG-driven halves of
+// Encounter framework (design doc §5.2): the two RNG-driven halves of
 // "what monsters does this combat hold".
 //
 //   1. generate_monster_lists() -- the RUN-scoped monsterRng pool draw
@@ -88,7 +88,7 @@ struct MonsterLists {
 // Generate the act's monster lists from `monster_rng` (the run-scoped stream), in
 // the exact Exordium draw order: weak (3), first-strong (exclusion loop) + strong
 // (12), elites (10), then one randomLong() seeding the boss-list shuffle. `act`
-// selects the pool rows (only act 1 is populated in B3.12). Pure over
+// selects the pool rows (only act 1 is populated). Pure over
 // `monster_rng` (advances it by the full draw sequence).
 void generate_monster_lists(int32_t act, RngStream& monster_rng,
                             MonsterLists& out) noexcept;

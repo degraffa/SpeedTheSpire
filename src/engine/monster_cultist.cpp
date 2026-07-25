@@ -1,4 +1,4 @@
-// Cultist AI + monster turn (B3.13). Move selection (getMove) is native code;
+// Cultist AI + monster turn. Move selection (getMove) is native code;
 // stats and move-effect programs come from the generated monster table
 // (registry/monsters.yaml). See monster_cultist.hpp for provenance, scope, and
 // the draw-counting convention.

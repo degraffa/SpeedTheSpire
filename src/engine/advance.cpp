@@ -22,7 +22,7 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
 #include "sts/engine/observation.hpp"
-#include "sts/engine/relic_hooks.hpp"       // B3.25: player_has_relic (Blue Candle)
+#include "sts/engine/relic_hooks.hpp"       // player_has_relic (Blue Candle)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -51,7 +51,7 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
         state.card_pool[i].card_id = static_cast<uint16_t>(deck[i]);
         state.card_pool[i].upgrade = 0;
         state.card_pool[i].cost_now = card_cost(*def, 0);
-        // Seed per-instance flags from the registry (Stage B B3.1: exhaust/
+        // Seed per-instance flags from the registry (exhaust/
         // ethereal/innate/unplayable/retain/xcost). The skeleton deck is all
         // base cards with no flags, so this is 0 for every skeleton card.
         state.card_pool[i].flags = card_flags(*def, 0);
@@ -116,7 +116,7 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     state.player_max_hp = 80;
     state.player_block = 0;
 
-    // -- Monster group (B3.12): the skeleton's fixed encounter is a single Jaw
+    // -- Monster group: this entry point's fixed encounter is a single Jaw
     //    Worm (design doc §9), spawned through the generalized spawn_group /
     //    monster-dispatch path rather than a hard-wired jaw_worm_init call. For a
     //    single Jaw Worm this is byte-identical to the old path (spawn_group sets
@@ -127,7 +127,7 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     static constexpr MonsterId kSkeletonGroup[] = {MonsterId::JAW_WORM};
     spawn_group(state, kSkeletonGroup);
     // usePreBattleAction phase (the player's preBattlePrep, AFTER all ctors+init;
-    // B3.13's monster_hp_rng curl-up seam). Jaw Worm has none, so this is a no-op
+    // the monster_hp_rng curl-up seam). Jaw Worm has none, so this is a no-op
     // for the skeleton group and the 20 fixtures stay byte-identical.
     use_pre_battle_actions(state);
 
@@ -161,14 +161,14 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
 
     // Zero the (hand_slot x target) grid up front so every early-return path
     // (CHOOSE-pending, not-waiting) leaves it well-defined; the main loop fills
-    // the rows for enemy-target cards (B3.12).
+    // the rows for enemy-target cards.
     for (int i = 0; i < kHandCap; ++i) {
         for (int t = 0; t < kMonsterCap; ++t) {
             out.can_play_target[i][t] = false;
         }
     }
 
-    // CHOOSE-in-combat (Stage B B3.4): if the head of the action queue is an open
+    // CHOOSE-in-combat: if the head of the action queue is an open
     // CHOOSE_CARD that needs a selection, the player is choosing a hand card. The
     // ONLY legal actions are CHOOSE(hand_slot) over the eligible slots -- no
     // play/end-turn while the hand-select screen is open (mandatory single-selects
@@ -248,17 +248,18 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // guards for it, so an unknown card is simply never playable.
             const CardDef* def = card_def(static_cast<CardId>(c.card_id));
             // UNPLAYABLE (statuses/curses) is never a legal play regardless of
-            // energy (Stage B B3.1). Otherwise affordability: energy >= cost_now
+            // energy. Otherwise affordability: energy >= cost_now
             // (X-cost cards carry cost_now 0, so they are always affordable,
             // matching costForTurn == -1).
             const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
             bool playable = !unplayable && state.player_energy >= c.cost_now &&
                             !normality_locked;
-            // Blue Candle (B3.25; AbstractCard.canUse, AbstractCard.java:920):
+            // Blue Candle (AbstractCard.canUse, AbstractCard.java:920):
             // a CURSE with costForTurn < -1 IS playable when the player owns
             // Blue Candle. cost_now is 0 for unplayable rows (gen.py's -2
             // sentinel), matching the game spending no energy on a curse play.
-            // (The STATUS twin gate at :917 is Medical Kit -- SHOP tier, B3.26.)
+            // (The STATUS twin gate at :917 is Medical Kit, a SHOP-tier relic;
+            // registry/relics.yaml has no SHOP rows, so it cannot fire.)
             if (unplayable && !normality_locked && def != nullptr &&
                 def->type == CardType::CURSE) {
                 if (!blue_candle_scanned) {
@@ -269,13 +270,13 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
                     playable = state.player_energy >= c.cost_now;
                 }
             }
-            // Clash's all-attacks canUse predicate (Stage B B3.3).
+            // Clash's all-attacks canUse predicate.
             if (playable && def != nullptr && def->requires_all_attacks &&
                 !all_hand_attacks) {
                 playable = false;
             }
             out.can_play[i] = playable;
-            // Per-target legality (B3.12): an enemy-target (needs_target) card is
+            // Per-target legality: an enemy-target (needs_target) card is
             // legal only against a LIVE monster slot. Self/all/none/random cards
             // ignore the declared target, so their grid row stays all-false and
             // can_play[i] alone carries their legality.
@@ -343,7 +344,7 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 pump(s, dispatch_monster_turn);
                 break;
             case ActionVerb::CHOOSE: {
-                // Stage B B3.4: resolve one selection on the open CHOOSE_CARD at
+                // Resolve one selection on the open CHOOSE_CARD at
                 // the head of the action queue. arg0 = the chosen hand slot. Ignored
                 // (documented no-op) unless a choice is actually pending and the slot
                 // is a legal selection -- an illegal CHOOSE cannot corrupt state.
@@ -365,7 +366,7 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                                           choice_excluded_index(front))) {
                     break;  // illegal selection -- no-op
                 }
-                // B3.6: DUPLICATE carries its clone count in the packed flags
+                // DUPLICATE carries its clone count in the packed flags
                 // (Dual Wield magicNumber) and, being a REAL prompt here, takes
                 // the prompted-resolution branch (the hand-select screen's
                 // reorder bookkeeping, DualWieldAction.java:59-84).

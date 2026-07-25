@@ -14,7 +14,7 @@ namespace sts::engine {
 
 void power_native_flame_barrier(CombatState& s, Hook hook,
                                 const HookContext& ctx) noexcept {
-    // FlameBarrierPower (B3.6). onAttacked (FlameBarrierPower.java:
+    // FlameBarrierPower.onAttacked (FlameBarrierPower.java:
     // 53-59): reflect `amount` THORNS damage to a DISTINCT attacker --
     // op_damage already gated dispatch to NORMAL src != tgt after
     // decrementBlock (fires whether or not the hit penetrated); the

@@ -1,10 +1,11 @@
 #pragma once
 
-// Act-map PATH generation (Stage B, task B4.1). Re-expresses the game's
+// Act-map PATH generation. Re-expresses the game's
 // MapGenerator random walk, bit-for-bit on the `mapRng` stream, producing the
 // node/edge graph of one act's map. Room-type ASSIGNMENT (the quotas + the
-// trap-12 Collections.shuffle + the placement rules) is a SEPARATE task (B4.2)
-// and is deliberately NOT done here; this file stops after path generation, at
+// trap-12 Collections.shuffle + the placement rules) lives SEPARATELY in
+// map_rooms.hpp and is deliberately NOT done here; this file stops after path
+// generation, at
 // the exact `mapRng` state the game reaches before RoomTypeAssigner runs.
 //
 // Provenance (read in full from D:\STS_BG_Mod\SlayTheSpireDecompiled before
@@ -25,7 +26,7 @@
 //
 // ORIENTATION (see docs scoping report §0). This file works entirely in the
 // GAME's map semantics: 15 floors (rows, y = 0..14) x 7 columns (x = 0..6),
-// `MAP_HEIGHT=15 / MAP_WIDTH=7` (AbstractDungeon.java:210-211). As of B4.3 the
+// `MAP_HEIGHT=15 / MAP_WIDTH=7` (AbstractDungeon.java:210-211). The
 // RunState storage is game-native too (kMapRows=15 floors / kMapCols=7 columns),
 // so `run_state_map_index` below is now the plain row-major index
 // `floor*kMapCols + col`. It is retained (rather than inlined) so the encode call
@@ -60,12 +61,12 @@ namespace sts::engine {
 inline constexpr int kGameMapFloors = 15;   // MAP_HEIGHT: rows y = 0..14
 inline constexpr int kGameMapCols = 7;      // MAP_WIDTH:  cols x = 0..6
 
-// As of B4.3 the RunState map storage is game-native, so the game dims here ARE
+// The RunState map storage is game-native, so the game dims here ARE
 // the RunState dims. Pin it so a future accidental transpose of either breaks
 // the build rather than silently corrupting the encode/index.
 static_assert(kGameMapFloors == kMapRows && kGameMapCols == kMapCols,
               "RunState map dims must match the game map orientation "
-              "(15 floors x 7 cols) after the B4.3 reorientation");
+              "(15 floors x 7 cols)");
 
 inline constexpr int kMapPathDensity = 6;   // MAP_PATH_DENSITY (6 walks)
 inline constexpr int kBossCol = 3;          // hardcoded boss column (:140)
@@ -87,8 +88,8 @@ inline constexpr uint8_t kEdgeCenter = 0x2;  // -> (x,   y+1)
 inline constexpr uint8_t kEdgeRight = 0x4;   // -> (x+1, y+1)
 inline constexpr uint8_t kEdgeBoss = 0x8;    // -> boss (row 14 only)
 
-// RunState.map[] index for GAME node (x = col 0..6, y = floor 0..14). Post-B4.3
-// this is the plain row-major index into the game-native 15x7 grid:
+// RunState.map[] index for GAME node (x = col 0..6, y = floor 0..14). This is
+// the plain row-major index into the game-native 15x7 grid:
 // `floor*kMapCols + col`. (kGameMapCols == kMapCols by the static_assert above,
 // so this is byte-identical to the pre-rename `y*7 + x` -- no map bytes moved.)
 [[nodiscard]] constexpr int run_state_map_index(int x, int y) noexcept {
@@ -141,8 +142,8 @@ struct GeneratedMap {
         return nodes[y][x];
     }
 
-    // True iff node (x,y) has an outgoing edge to (dst_x, dst_y). For B4.1
-    // verification against the oracle's dumped "children" list.
+    // True iff node (x,y) has an outgoing edge to (dst_x, dst_y). Used to verify
+    // against the oracle's dumped "children" list.
     [[nodiscard]] constexpr bool has_child(int x, int y, int dst_x, int dst_y) const noexcept {
         const GenNode& n = at(x, y);
         for (int i = 0; i < n.edge_count; ++i) {
@@ -408,7 +409,7 @@ constexpr void generate_map_graph(GeneratedMap& g, bool ancestor_bug = true,
     detail::filter_redundant_row0_edges(g);
 }
 
-// Full B4.1 entry point over game semantics: seed mapRng for the act and run
+// Full path-generation entry point over game semantics: seed mapRng for the act and run
 // path generation. act_num is 1..4 (S1 = act 1). Returns the working graph;
 // callers that only need RunState use generate_map_paths below.
 [[nodiscard]] constexpr GeneratedMap generate_map(int64_t run_seed, int act_num,
@@ -421,9 +422,8 @@ constexpr void generate_map_graph(GeneratedMap& g, bool ancestor_bug = true,
 }
 
 // Encode a generated graph's edges into RunState.map[] and store the post-path
-// mapRng. `room_type` is left as-is (B4.2 assigns it). Uses the documented
-// game-oriented index convention (run_state_map_index) so B4.3's rename is
-// mechanical.
+// mapRng. `room_type` is left as-is (map_rooms.hpp assigns it). Uses the
+// documented game-oriented index convention (run_state_map_index).
 constexpr void encode_paths_into_run_state(const GeneratedMap& g, RunState& rs) noexcept {
     for (int y = 0; y < kGameMapFloors; ++y) {
         for (int x = 0; x < kGameMapCols; ++x) {
@@ -448,10 +448,11 @@ constexpr void encode_paths_into_run_state(const GeneratedMap& g, RunState& rs) 
     rs.map_rng = g.rng;
 }
 
-// B4.1 deliverable: generate the act map's paths into RunState. Reads
+// Generate the act map's paths into RunState. Reads
 // rs.run_seed / rs.act, seeds mapRng, runs path generation, writes the edge
 // adjacency + the post-path mapRng back into rs. Room types remain untouched
-// (B4.2). Returns the working graph for callers/tests that want the rich form.
+// (see map_rooms.hpp). Returns the working graph for callers/tests that want
+// the rich form.
 constexpr GeneratedMap generate_map_paths(RunState& rs) noexcept {
     GeneratedMap g = generate_map(rs.run_seed, static_cast<int>(rs.act));
     encode_paths_into_run_state(g, rs);

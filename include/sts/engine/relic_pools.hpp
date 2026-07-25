@@ -1,6 +1,6 @@
 #pragma once
 
-// Relic dungeon pools + RunState acquisition (Stage B B4.6).
+// Relic dungeon pools + RunState acquisition.
 //
 // Provenance:
 //   AbstractDungeon.initializeRelicList (AbstractDungeon.java:1221-1256):
@@ -33,7 +33,7 @@ struct RelicSpawnContext {
     uint16_t floor = 0;
     bool in_shop = false;
     bool endless = false;
-    // B3.25 deck-content canSpawn gates (the Bottled trio). These carry the
+    // Deck-content canSpawn gates (the Bottled trio). These carry the
     // MASTER-DECK facts the Java gates read; fill_deck_spawn_gates computes
     // them from a RunState. Defaults (false) match the Ironclad starting deck
     // (all-BASIC, no POWER cards) -- and the Bottled canSpawn checks apply even
@@ -50,9 +50,9 @@ struct RelicSpawnContext {
 // (Strike_Red/Defend_Red/Bash constructors -- CardRarity.BASIC), so the scan
 // keys on type + those three ids. deck_has_power is NOT rarity-filtered:
 // CardHelper.hasCardType (CardHelper.java:80-86) is a plain type scan, so any
-// POWER-type card in the master deck sets it. B3.7 landed 8 POWER cards
+// POWER-type card in the master deck sets it. The registry has 8 POWER cards
 // (Combust/Dark Embrace/Evolve/Feel No Pain/Fire Breathing/Inflame/
-// Metallicize/Rupture), so the Bottled Tornado gate can now open.
+// Metallicize/Rupture), so the Bottled Tornado gate can open.
 void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept;
 
 enum class RelicAcquireResult : uint8_t {

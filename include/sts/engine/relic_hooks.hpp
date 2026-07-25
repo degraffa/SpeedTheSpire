@@ -1,9 +1,9 @@
 #pragma once
 
-// Relic-hook framework (Stage B B3.24) -- the relic side of the combat hook
-// dispatch. B3.2 built the POWER hook framework and left the relic dispatch
-// stages as ordered structural call sites ("relics onPlayCard (acq order) -- none
-// yet (B3.24+)"). This layer is the first relic consumer: it answers "when a game
+// Relic-hook framework -- the relic side of the combat hook
+// dispatch. The POWER hook framework (power_hooks.hpp) left the relic dispatch
+// stages as ordered structural call sites with nothing to call; this layer
+// fills them. It answers "when a game
 // event fires (combat starts, a turn starts/ends, a card is played/exhausted, HP
 // is lost, combat is won, ...), which of the player's relics respond, IN WHAT
 // ORDER, and what do they queue?"
@@ -30,16 +30,15 @@
 // (AbstractRelic.java:492-620). The generated sts::registry::RelicHook mirrors the
 // enum below; relics.hpp pins the two byte-equal.
 //
-// COMBAT STORAGE SEAM (LIVE as of B4.3): CombatState now carries the relic mirror
+// COMBAT STORAGE SEAM (LIVE): CombatState carries the relic mirror
 // (CombatState.relics / relic_count, an additive schema-v3 field), so
 // player_relics() returns {s.relics, s.relic_count} and the dispatch sites wired
 // into power_hooks.cpp / action_queue.cpp are LIVE. The mirror is value-init empty
-// until a run populates it (the run-level fold-back is B4.4), so the 20 combat
-// fixtures carry a zeroed mirror and their dispatch stays a no-op -- the fixtures
-// were regenerated for the struct-size growth (zeroed relic bytes only, B4.3 Log).
+// until a run populates it (run_advance.cpp's enter_combat does the fold), so
+// the 20 combat fixtures carry a zeroed mirror and their dispatch stays a no-op.
 // The acquisition-order dispatch and per-relic combat behaviour are proven by
-// relic_hooks_test.cpp (which builds relic lists directly and, as of B4.3, also
-// exercises player_relics() against a populated mirror).
+// relic_hooks_test.cpp, which builds relic lists directly and also exercises
+// player_relics() against a populated mirror.
 
 #include <cstdint>
 
@@ -70,7 +69,7 @@ enum class RelicHook : uint8_t {
     WAS_HP_LOST = 11,                // wasHPLost / onLoseHp
     ON_ATTACK = 12,                  // onAttack / onAttackToChangeDamage
     ON_VICTORY = 13,                 // onVictory (combat end)
-    // --- B3.25 additions (append-only, design doc §4.4) ---
+    // --- Later additions (append-only, design doc §4.4) ---
     ON_MONSTER_DEATH = 14,           // onMonsterDeath (AbstractMonster.die:933-937)
     ON_SHUFFLE = 15,                 // onShuffle (EmptyDeckShuffleAction ctor :37-39)
 };
@@ -105,10 +104,10 @@ struct RelicHookContext {
 
 // --- Combat relic view -------------------------------------------------------
 //
-// The player's relics in acquisition order. LIVE as of B4.3: returns
+// The player's relics in acquisition order. LIVE: returns
 // {s.relics, s.relic_count} over the CombatState relic mirror (the additive
-// schema-v3 field). The mirror is value-init empty until a run populates it (the
-// run-level fold-back is B4.4), so a state with no relics -- e.g. the 20 combat
+// schema-v3 field). The mirror is value-init empty until a run populates it
+// (run_advance.cpp's enter_combat), so a state with no relics -- e.g. the 20 combat
 // fixtures -- yields a count-0 view and the wired dispatch sites stay no-ops there.
 struct RelicView {
     RelicSlot* relics;

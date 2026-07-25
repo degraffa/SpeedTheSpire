@@ -11,10 +11,10 @@
 // declared in its tier header (relics_starter.hpp, relics_common.hpp,
 // relics_uncommon.hpp, ...). The dispatch table itself is now GENERATED from
 // registry/relics.yaml (the STS_REGISTRY_NATIVE_RELICS X-macro in the generated
-// relic_table.hpp), so adding a relic tier (B3.26 rares+shop, B3.27
-// boss+specials) is: one new .cpp, one new header, one CMakeLists line -- and NO
-// edit to relic_hooks.cpp or to any file an earlier tier owns. That is what makes
-// B3.26 and B3.27 genuinely parallel.
+// relic_table.hpp), so adding a relic tier (rares+shop, boss+specials) is: one
+// new .cpp, one new header, one CMakeLists line -- and NO edit to
+// relic_hooks.cpp or to any file an earlier tier owns. That is what makes the
+// remaining tiers genuinely parallel.
 
 #include <cstdint>
 
@@ -45,7 +45,7 @@ using RelicNativeFn = RelicNativeSig*;
 [[nodiscard]] RelicNativeFn relic_native_fn(RelicId id) noexcept;
 
 // Heal the player by `n`, clamped to max HP (HealAction semantics). No HEAL opcode
-// exists (and none is added for B3.24); a pure heal has no queue-ordering interplay
+// exists; a pure heal has no queue-ordering interplay
 // with other S1 relic effects, so it is applied directly at dispatch time.
 inline void heal_player(CombatState& s, int32_t n) noexcept {
     int32_t hp = static_cast<int32_t>(s.player_hp) + n;

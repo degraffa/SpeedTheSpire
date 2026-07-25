@@ -1,8 +1,8 @@
 #pragma once
 
-// Act-map ROOM-TYPE assignment (Stage B, task B4.2). Re-expresses the tail of
-// AbstractDungeon.generateMap that runs AFTER path generation (B4.1,
-// map_gen.hpp): the room-type quotas, the trap-12 direct-XS128
+// Act-map ROOM-TYPE assignment. Re-expresses the tail of
+// AbstractDungeon.generateMap that runs AFTER path generation
+// (map_gen.hpp): the room-type quotas, the trap-12 direct-XS128
 // Collections.shuffle of the room list, the placement rules (row gates,
 // parent/sibling exclusions, monster fill), the three fixed rows (0/8/14), and
 // the post-assignment setEmeraldElite draw. It consumes a fully path-generated
@@ -43,7 +43,7 @@
 //     nextInt(bound) -> the raw (s0,s1) advance by exactly (size-1) next_long
 //     draws but the wrapper `counter` does NOT advance. This is the OPPOSITE of
 //     deck/pool shuffles (JDK-LCG, rng_jdk.hpp). See xs128_room_shuffle below.
-//   setEmeraldElite (B4.1 live-oracle finding, stage-b-tasks.md B4.1 Log):
+//   setEmeraldElite (a live-oracle finding, not read off the decompiled source):
 //     on the fully-unlocked A20 profile the guard
 //     `Settings.isFinalActAvailable && !hasEmeraldKey` (AbstractDungeon.java:543)
 //     PASSES, so mapRng.random(0, eliteNodes.size()-1) (:551) FIRES exactly once
@@ -72,7 +72,7 @@ namespace sts::engine {
 
 // Room-kind id written into RunState.MapNode.room_type (a u8). None(0) is the
 // value-initialized "unassigned / no room" state (matches Java room==null).
-// FINALIZED by B4.3 (schema v3): these are THE RunState.MapNode.room_type
+// FINALIZED (schema v3): these are THE RunState.MapNode.room_type
 // encoding, append-only (never renumber; new room kinds get the next value).
 enum class RoomType : uint8_t {
     None = 0,
@@ -390,7 +390,7 @@ namespace detail {
     return ra;
 }
 
-// Convenience: path generation (B4.1) + room assignment (B4.2) from a run seed.
+// Convenience: path generation (map_gen.hpp) + room assignment from a run seed.
 // act_num is 1..4 (S1 = act 1); ascension gates the elite x1.6 branch (A20 = 20).
 [[nodiscard]] constexpr RoomAssignment generate_map_rooms(int64_t run_seed,
                                                         int act_num,
@@ -400,9 +400,9 @@ namespace detail {
 }
 
 // Encode an assigned room grid into RunState.MapNode.room_type (u8) and store the
-// end-of-generateMap mapRng. Uses map_gen.hpp's game-oriented index convention so
-// B4.3's schema-v2 rename stays mechanical. (B4.3 owns the final RunState
-// population; this mirror is provided for continuity with B4.1's edge encoding.)
+// end-of-generateMap mapRng. Uses map_gen.hpp's game-oriented index convention.
+// (run_advance.cpp owns the final RunState population; this mirror exists for
+// continuity with map_gen.hpp's edge encoding.)
 constexpr void encode_rooms_into_run_state(const RoomAssignment& ra,
                                            RunState& rs) noexcept {
     for (int y = 0; y < kGameMapFloors; ++y) {

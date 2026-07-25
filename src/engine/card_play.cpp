@@ -17,9 +17,9 @@
 #include "sts/engine/cards.hpp"         // CardDef, card_def
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
-#include "sts/engine/piles.hpp"         // B3.6: reset_cost_for_turn (exhaust reset)
-#include "sts/engine/power_hooks.hpp"   // B3.2: onPlayCard/onUseCard fan-out + onExhaust
-#include "sts/engine/relic_hooks.hpp"   // B3.25: player_has_relic (Strike Dummy bake)
+#include "sts/engine/piles.hpp"         // reset_cost_for_turn (exhaust reset)
+#include "sts/engine/power_hooks.hpp"   // onPlayCard/onUseCard fan-out + onExhaust
+#include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strike Dummy bake)
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
 #include "sts/engine/types.hpp"         // CardId
 
@@ -68,8 +68,8 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     item.src = kActorPlayer;
     // Where the step lands. SELF -> the player; CARD_TARGET -> the card's
     // resolved monster (declared or the card-level random roll); ALL_ENEMY /
-    // RANDOM_ENEMY -> the execute-time fan-out / per-hit-roll sentinels (Stage B
-    // B3.1; execute_opcode resolves them against the then-live monsters).
+    // RANDOM_ENEMY -> the execute-time fan-out / per-hit-roll sentinels
+    // (execute_opcode resolves them against the then-live monsters).
     switch (step.target) {
         case StepTarget::SELF:
             item.tgt = kActorPlayer;
@@ -95,7 +95,7 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     if (step.op == static_cast<decltype(step.op)>(Opcode::PLAY_TOP_DRAW)) {
         item.amount = source_index;
     } else if (step.op == static_cast<decltype(step.op)>(Opcode::MAKE_CARD)) {
-        // MAKE_CARD (Stage B B3.3 authoring): the step's `extra` packs the created
+        // MAKE_CARD authoring: the step's `extra` packs the created
         // CardId (bits 0-15), the destination CardPile (bits 16-23), and an
         // upgraded-copy flag (bit 24). The interpreter reads the CardId + upgrade
         // bit from the item's `flags` and the CardPile from `src`, so split them
@@ -139,7 +139,7 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         // (AbstractPlayer.useCard:1369-1375; choice_excluded_index).
         item.tgt = source_index;
     }
-    // Strike Dummy (B3.25): AbstractCard.applyPowers runs relic atDamageModify on
+    // Strike Dummy: AbstractCard.applyPowers runs relic atDamageModify on
     // float(baseDamage) BEFORE the player-power atDamageGive loop
     // (AbstractCard.java:2229-2237); StrikeDummy.atDamageModify (StrikeDummy.java:
     // 28-33) adds +3.0f for STRIKE-tagged cards. Baked into the queued base at
@@ -148,7 +148,8 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     // gate covers the plain DAMAGE steps of Strike/Pommel/Twin/Wild Strike AND
     // Perfected Strike's DAMAGE_PER_STRIKE (already rewritten to a DAMAGE whose
     // `amount` carries the per-Strike bonus -- the game likewise counts first,
-    // then applies atDamageModify). No relic -> byte-identical to pre-B3.25.
+    // then applies atDamageModify). Without the relic this is a no-op, so the
+    // queued base is byte-identical to a relic-free play.
     if (static_cast<Opcode>(item.opcode) == Opcode::DAMAGE) {
         const CardDef* sd =
             card_def(static_cast<CardId>(s.card_pool[source_index].card_id));
@@ -164,8 +165,8 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
 // with the EXHAUST flag goes to the exhaust pile (AbstractCard.exhaust /
 // UseCardAction), otherwise to discard (AbstractPlayer.useCard ->
 // moveToDiscardPile). Locating by pool index is unambiguous (each pool row is a
-// distinct instance). Stage B B3.1 adds the exhaust destination; the skeleton's
-// five cards are all non-exhaust, so the discard path is unchanged for them.
+// distinct instance). `to_exhaust` selects the exhaust destination; a card
+// without the EXHAUST flag takes the discard path.
 void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
                             bool to_exhaust, bool remove_after_use) noexcept {
     for (uint8_t i = 0; i < s.hand_count; ++i) {
@@ -186,7 +187,7 @@ void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
                        "exhaust overflow (design doc §4.1: hard assert)");
                 s.exhaust[s.exhaust_count] = pool_index;
                 ++s.exhaust_count;
-                // B3.6: an exhausted card's this-turn-only cost reverts
+                // An exhausted card's this-turn-only cost reverts
                 // (ExhaustCardEffect.update:41-43 resetAttributes).
                 reset_cost_for_turn(s, pool_index);
                 // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card
@@ -206,7 +207,7 @@ void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
     // caller/queue_card_play only ever queues a card that was in hand).
 }
 
-// --- B3.9 card-level trigger programs ---------------------------------------
+// --- Card-level trigger programs (statuses / curses) -------------------------
 // A passive status/curse (trigger != ON_PLAY) runs its `effects`/`upgraded`
 // program at a hook site instead of on play. Every in-scope trigger step is
 // SELF/player-targeted (Burn/Decay self-DAMAGE, Doubt/Shame self-APPLY_POWER,
@@ -299,7 +300,7 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     const uint8_t resolved_target = resolve_play_target(s, *def, item.target);
 
     // Per-instance runtime data: the upgrade level selects which of the two
-    // effect programs runs (Stage B B3.1 two-row lookup); the instance flags
+    // effect programs runs (the base/upgraded two-row lookup); the instance flags
     // (seeded from the registry at combat_begin / card creation) drive X-cost
     // and the exhaust destination.
     const uint8_t upgrade = s.card_pool[pool_index].upgrade;
@@ -313,8 +314,8 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    loop -- they are NOT applied inline here (matches AbstractCard.use()).
     //    X-cost cards repeat their program energyOnUse times (WhirlwindAction:
     //    for i in [0, energyOnUse) queue the effect), then spend ALL energy.
-    //    ON_PLAY guard (B3.25): a passive status/curse (trigger != ON_PLAY)
-    //    stores its TRIGGER program in `effects` (B3.9); its use() is empty in
+    //    ON_PLAY guard: a passive status/curse (trigger != ON_PLAY)
+    //    stores its TRIGGER program in `effects`; its use() is empty in
     //    the game (Regret.use is a no-op, Regret.java:28-31 etc.), so playing
     //    one -- reachable only via Blue Candle's curse playability -- must NOT
     //    run that program. Previously unreachable (unplayable cards were never
@@ -376,7 +377,7 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     }
 }
 
-// --- B3.9 card-level trigger dispatch (public) -------------------------------
+// --- Card-level trigger dispatch (public) ------------------------------------
 
 void dispatch_card_on_draw(CombatState& s, uint8_t pool_index) noexcept {
     // AbstractPlayer.draw():1642 c.triggerWhenDrawn() -- fired per drawn card,

@@ -17,10 +17,11 @@
 //     (float add), NORMAL only.
 //   * VulnerablePower.atDamageReceive (VulnerablePower.java:61-73) -- damage *
 //     1.5f, NORMAL only. The Paper Phrog 1.75f relic branch (:67-69, a
-//     Vulnerable MONSTER hit while the player owns Paper Frog) is LIVE as of
-//     B3.25 -- this retires stage-a A4.1's "unreachable in the relic-free
-//     skeleton" note. The Odd Mushroom 1.25f branch (:64-66, player-side) stays
-//     with its rare-relic owner (B3.26).
+//     Vulnerable MONSTER hit while the player owns Paper Frog) is LIVE: Paper
+//     Phrog is a registered UNCOMMON relic, so this is no longer the
+//     unreachable branch the relic-free skeleton documented. The Odd Mushroom
+//     1.25f branch (:64-66, player-side) IS still unreachable -- Odd Mushroom
+//     is RARE-tier and registry/relics.yaml has no RARE rows yet.
 //   * WeakPower.atDamageGive (WeakPower.java:61-70) -- damage * 0.75f, NORMAL
 //     only (the Paper Crane 0.6f branch stays unreachable: Paper Crane is
 //     addGreen/Silent-only, never Ironclad-obtainable in S1).
@@ -38,9 +39,10 @@
 //
 // (2) ROLL_MOVE dispatches to the target monster's queued-roll function
 //     (monster_dispatch.hpp roll_monster_move) and is a no-op for monsters
-//     without one. Most natives (Jaw Worm, B3.13/B3.14 monsters) roll DIRECTLY
-//     inside their MonsterTurnFn -- their queues never carry ROLL_MOVE items.
-//     The B3.17 large slimes queue real ROLL_MOVE items because the game's
+//     without one. Most natives (Jaw Worm, Cultist, louses, small/medium
+//     slimes) roll DIRECTLY inside their MonsterTurnFn -- their queues never
+//     carry ROLL_MOVE items. The LARGE slimes queue real ROLL_MOVE items
+//     because the game's
 //     RollMoveAction resolves AFTER any mid-turn damage interrupt queues its
 //     SetMoveAction (and even on the already-dead split parent --
 //     RollMoveAction.update has no liveness check, RollMoveAction.java:17-21),
@@ -54,11 +56,11 @@
 //     kOpcodeDrawCard mirrors Opcode::DRAW and is static_assert'd equal in
 //     action_queue.cpp. Design doc §6 names the opcode SET but assigns no
 //     numeric values, so the numbering is an implementation choice, not a doc
-//     conflict. Stage B B3.1 appends MAKE_CARD == 9 and SET_COST == 10 (the
-//     append-from-9 rule); gen.py's OPCODES and the cards.hpp drift pin are
-//     extended to cover them.
+//     conflict. MAKE_CARD == 9 and SET_COST == 10 were the first appends under
+//     the append-from-9 rule; gen.py's OPCODES and the cards.hpp drift pin
+//     cover them.
 //
-// (4) DYNAMIC TARGETS (Stage B B3.1). An item's `tgt` may be a sentinel
+// (4) DYNAMIC TARGETS. An item's `tgt` may be a sentinel
 //     kActorAllEnemies / kActorRandomEnemy (action_queue.hpp). execute_opcode
 //     resolves them at EXECUTE time -- fanning the op out over the currently-
 //     live monsters (AoE, one DamageInfo per target) or rolling a single
@@ -111,14 +113,14 @@ enum class Opcode : uint16_t {
     SHUFFLE_IN = 6,   // reshuffle discard -> draw (implemented in piles.cpp)
     EXHAUST = 7,      // move card-pool-index `amount` from hand to exhaust
     ROLL_MOVE = 8,    // no-op: Jaw Worm rolls its own next move in its MonsterTurnFn
-    // --- Stage B B3.1 additions (append-only from 9, design doc §4.4) ---
+    // --- Card creation + cost modification (append-only from 9, design §4.4) ---
     MAKE_CARD = 9,    // create `amount` copies of CardId(flags low16) into pile(src)
     SET_COST = 10,    // set card_pool[src].cost_now = `amount` (temporary cost modifier)
-    // --- Stage B B3.2 addition (append-only) ---
+    // --- Direct HP loss (append-only) ---
     LOSE_HP = 11,     // tgt loses `amount` HP directly (bypasses block; HP_LOSS
                        // type). Fires wasHPLost with source == tgt (self). The
                        // firing site for the Rupture attribution (power_hooks).
-    // --- Stage B B3.4 additions (append-only from 12) ---
+    // --- Hand selection, play-from-draw, power removal (append-only from 12) ---
     CHOOSE_CARD = 12, // player-selected (or random / forced) hand-card manipulation:
                        // exhaust / put-on-draw-top / upgrade. `amount` = number of
                        // cards to select; `flags` = the ChoiceKind + RANDOM bit
@@ -138,7 +140,7 @@ enum class Opcode : uint16_t {
     REMOVE_POWER = 14, // remove PowerId(flags low16) from `tgt`'s power list
                         // (RemoveSpecificPowerAction). Used by LoseStrengthPower's
                         // end-of-turn self-removal (Flex).
-    // --- Stage B B3.3 additions (append-only from 15): dynamic-base attack damage.
+    // --- Dynamic-base attack damage (append-only from 15) ------------------
     DAMAGE_BLOCK = 15,  // src (player) attacks tgt for base == player_block, read
                          // at EXECUTE time, then the normal DamageInfo pipeline
                          // (Body Slam; BodySlam.java:96 baseDamage = p.currentBlock).
@@ -152,7 +154,7 @@ enum class Opcode : uint16_t {
                              // it is in limbo at applyPowers-at-use time. This opcode
                              // therefore never reaches execute_opcode (a safe no-op if
                              // it somehow does); it exists only as the table encoding.
-    // --- Stage B B3.9 addition (append-only from 18) ---
+    // --- End-of-turn hand/power sweeps (append-only from 18) ---
     LOSE_HP_PER_HAND = 18,  // `tgt` loses HP == the current hand size, bypassing
                              // block (HP_LOSS type). Regret's end-of-turn self-loss
                              // (Regret.java:35-38: magicNumber = player.hand.size()
@@ -170,7 +172,7 @@ enum class Opcode : uint16_t {
                              // PowerId(flags low16) on `tgt`, removing at zero.
                              // Frail queues this at end of round so power-list
                              // iteration completes before the slot can disappear.
-    // --- Stage B B3.5 additions (append-only from 21) ---
+    // --- Queue-time dynamic damage + hand exhaust (append-only from 21) ---
     DROPKICK = 21,            // DropkickAction: if the target has Vulnerable when
                               // this action executes, damage, then gain 1 energy
                               // and draw 1; otherwise damage only.
@@ -181,7 +183,7 @@ enum class Opcode : uint16_t {
                               // then source.misc += extra (Rampage 8,+5 / +8).
     EXHAUST_NON_ATTACKS = 24, // exhaust every non-Attack remaining in hand, from
                               // top to bottom (Sever Soul).
-    // --- Stage B B3.17 additions (append-only from 25): split framework ---
+    // --- Monster split framework (append-only from 25) ---
     CANNOT_LOSE = 25,         // set kCombatFlagCannotLose: combat may not end on
                               // all-monsters-dead while the split sequence is in
                               // flight (CannotLoseAction.java:12-15; the pump's
@@ -207,7 +209,7 @@ enum class Opcode : uint16_t {
                               // like a direct setMove (SetMoveAction.java:52-56 ->
                               // AbstractMonster.setMove:431-437). No liveness
                               // check, matching the Java.
-    // --- Stage B B3.6 additions (append-only from 30) ------------------------
+    // --- Block manipulation + in-combat card generation (append-only from 30) -
     DOUBLE_BLOCK = 30,        // Entrench / DoubleYourBlockAction.update (:24-30):
                               // if tgt has block, addBlock(currentBlock) -- a
                               // direct addBlock (kBlockNoPowers path: no card
@@ -236,31 +238,31 @@ enum class Opcode : uint16_t {
                               // (MakeTempCardInHandAction hand-cap spill).
 };
 
-// --- CHOOSE_CARD field encoding (Stage B B3.4; B3.6 extends) -----------------
+// --- CHOOSE_CARD field encoding ---------------------------------------------
 // The blocking hand-card select verb. `amount` carries how many cards to select;
 // `flags` (the step's `extra`) packs the manipulation kind and the RANDOM bit:
 //   * bits [0..1] -> ChoiceKind low bits (what to do with each selected card).
 //   * bit  [2]    -> RANDOM: pick with card_random_rng instead of prompting the
 //                    player (ExhaustAction.isRandom -- True Grit base).
-//   * bit  [3]    -> (B3.6) ChoiceKind bit 2 -- the high kind bit lives ABOVE the
+//   * bit  [3]    -> ChoiceKind bit 2 -- the high kind bit lives ABOVE the
 //                    RANDOM bit so kinds 0..3 keep their original packed bytes
 //                    (append-only). kind = bits[0..1] | bit3 << 2.
-//   * bits [4..7] -> (B3.6) `copies` - 1 for the DUPLICATE kind (Dual Wield
+//   * bits [4..7] -> `copies` - 1 for the DUPLICATE kind (Dual Wield
 //                    magicNumber: 1 base / 2 upgraded). Storing copies-1 keeps
-//                    the default (1 copy) at 0, so every pre-B3.6 extra is
-//                    byte-identical.
+//                    the default (1 copy) at 0, so an extra authored before
+//                    DUPLICATE existed stays byte-identical.
 // MIRRORED in tools/registry_gen/gen.py (CHOICE_KINDS + the bit layout) so a
 // CHOOSE_CARD effect step authored in cards.yaml packs an identical `extra`.
 enum class ChoiceKind : uint8_t {
     EXHAUST = 0,         // move each selected hand card to the exhaust pile
     PUT_ON_DRAW_TOP = 1, // move each selected hand card to the top of the draw pile
     UPGRADE = 2,         // upgrade each selected hand card in place (upgrade++)
-    // Stage B B3.3: the source pile is the DISCARD pile, not the hand. Choose a
+    // The source pile is the DISCARD pile, not the hand. Choose a
     // card from the discard pile and put it on top of the draw pile (Headbutt /
     // DiscardPileToTopOfDeckAction: forced when discard has <= 1 card, a real
     // gridSelect prompt when >= 2). All other kinds source from the hand.
     DISCARD_TO_DRAW_TOP = 3,
-    // Stage B B3.6 (Dual Wield / DualWieldAction): choose one ATTACK-or-POWER
+    // Dual Wield / DualWieldAction: choose one ATTACK-or-POWER
     // hand card and add `copies` stat-equivalent clones of it to the hand (hand
     // cap spills to discard). Eligibility is the isDualWieldable predicate
     // (DualWieldAction.java:95-97); the PROMPTED resolution also reproduces the
@@ -296,7 +298,7 @@ inline constexpr uint32_t kChoiceCopiesShift = 4;
     return static_cast<int>((flags >> kChoiceCopiesShift) & 0xFu) + 1;
 }
 
-// --- MAKE_CARD field encoding (Stage B B3.1) --------------------------------
+// --- MAKE_CARD field encoding -----------------------------------------------
 // Card creation into a pile (MakeTempCardInHand/Discard, ShuffleIntoDrawPile).
 // The status/created card is allocated into a free card_pool row and its pool
 // index inserted into the destination pile.
@@ -343,7 +345,7 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
     return static_cast<PowerId>(static_cast<uint16_t>(flags & 0xFFFFu));
 }
 
-// --- DAMAGE damage-type encoding (discharges B3.2's deferred DAMAGE type item) -
+// --- DAMAGE damage-type encoding ---------------------------------------------
 // DamageInfo.DamageType, carried in the DAMAGE opcode's `flags` low byte. The
 // skeleton damage pipeline's power hooks are ALL NORMAL-gated in the Java
 // (StrengthPower/WeakPower.atDamageGive, VulnerablePower.atDamageReceive each
@@ -402,7 +404,7 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
                                  uint8_t tgt_actor, int base_damage,
                                  int strength_mult) noexcept;
 
-// --- CHOOSE_CARD queries (Stage B B3.4) -------------------------------------
+// --- CHOOSE_CARD queries -----------------------------------------------------
 // Shared by the pump (block-or-auto decision), legal_actions (which hand slots
 // the player may CHOOSE), and advance (validating a CHOOSE action). Pure reads.
 
@@ -454,7 +456,7 @@ inline constexpr uint8_t kNoChoiceExclusion = 255;
 // the card. Precondition (checked by the caller): slot < hand_count and the
 // slot is a legal selection for `kind`.
 //
-// B3.6 (DUPLICATE only): `copies` is the Dual Wield magicNumber
+// DUPLICATE only: `copies` is the Dual Wield magicNumber
 // (choose_copies_from_flags of the open item), and `prompted` distinguishes a
 // real hand-select resolution from the forced/auto path -- the PROMPTED branch
 // reproduces DualWieldAction's screen bookkeeping (:59-84): the hand is

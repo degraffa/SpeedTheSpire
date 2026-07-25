@@ -1,9 +1,12 @@
 #pragma once
 
-// Native bodies for the B3.24 common relics (registry/relics.yaml tier COMMON),
-// including the six whose combat body is DEFERRED
-// (Akabeko / Ancient Tea Set / Art of War / Boot / Preserved Insect / Toy
-// Ornithopter). Those six are DELIBERATELY EMPTY definitions rather than
+// Native bodies for the COMMON-tier relics (registry/relics.yaml tier COMMON).
+// Six have an EMPTY combat body: five are DEFERRED (Akabeko / Ancient Tea Set /
+// Art of War / Boot / Preserved Insect) and Toy Ornithopter is empty because it
+// is LIVE somewhere else -- it fires on the run-level potion route, not from a
+// combat hook.
+//
+// The empty bodies are DELIBERATE definitions rather than
 // omissions: the generated dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses
 // a handler for EVERY `native: true` row, so a forgotten body is a link error.
 // "Deferred" therefore has to be written down -- and it is, at each empty

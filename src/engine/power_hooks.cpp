@@ -32,7 +32,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags, CardPile
 #include "sts/engine/powers.hpp"        // power_def, PowerDef, PowerType
-#include "sts/engine/relic_hooks.hpp"   // relic dispatch (B3.24; the acq-order sites)
+#include "sts/engine/relic_hooks.hpp"   // relic dispatch (the acquisition-order sites)
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -132,18 +132,18 @@ void dispatch_on_play_card(CombatState& s, uint16_t card_id,
     // powers -> relics(acq order) -> stance -> blights -> hand -> discard -> draw
     // cards. Powers are the player+monster stages; the relic/stance/blight/card
     // stages are structural extension points (no S1 power overrides onPlayCard --
-    // AbstractPower base only) that light up with relics (B3.24+) and card-level
-    // hooks (curses, B3.9). Their call sites live here, in order, empty for now.
+    // AbstractPower base only). The relic stage is live; stance, blights and the
+    // card-level stages are call sites kept in order and empty for now.
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_PLAY_CARD, ctx);
     for (uint8_t m = 0; m < s.monster_count; ++m) {
         dispatch_actor_powers(s, m, Hook::ON_PLAY_CARD, ctx);
     }
-    // relics onPlayCard (acquisition order), AFTER player+monster powers (B3.24).
+    // relics onPlayCard (acquisition order), AFTER player+monster powers.
     const RelicView rv = player_relics(s);
     dispatch_relics_on_play_card(s, rv.relics, rv.count, card_id);
     // stance.onPlayCard              -- stanceless skeleton
     // blights onPlayCard             -- none
-    // hand / discard / draw cards onPlayCard -- card-level hooks (B3.9)
+    // hand / discard / draw cards onPlayCard -- card-level hooks (not modelled)
 }
 
 void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
@@ -157,7 +157,7 @@ void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
     // exhaust here.
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_USE_CARD, ctx);
     // player relics onUseCard (acquisition order), AFTER player powers and BEFORE
-    // monster powers -- the UseCardAction.java:41-64 order (B3.24). Nunchaku/Pen Nib
+    // monster powers -- the UseCardAction.java:41-64 order. Nunchaku/Pen Nib
     // count attacks here.
     const RelicView rv = player_relics(s);
     dispatch_relics_on_use_card(s, rv.relics, rv.count, card_id, played_pool_index);
@@ -177,11 +177,11 @@ void dispatch_on_exhaust(CombatState& s, uint8_t pool_index,
     // CardGroup.moveToExhaustPile:851-857 -- relics onExhaust -> player powers
     // onExhaust (list order) -> card.triggerOnExhaust. Feel No Pain + Dark Embrace
     // sequence is decided by the player power-list order here (§5.5).
-    // relics onExhaust FIRST (acquisition order), before player powers (B3.24).
+    // relics onExhaust FIRST (acquisition order), before player powers.
     const RelicView rv = player_relics(s);
     dispatch_relics_on_exhaust(s, rv.relics, rv.count, card_id);
     dispatch_actor_powers(s, kActorPlayer, Hook::ON_EXHAUST, ctx);
-    // card.triggerOnExhaust (B3.6): the exhausted card's own on_exhaust program,
+    // card.triggerOnExhaust: the exhausted card's own on_exhaust program,
     // LAST in the §5.5 order. Sentinel addToTop's its GainEnergyAction
     // (Sentinel.java:37-43) -- steps are queued add_to_top, in REVERSE program
     // order so a multi-step program still resolves first-step-first (every S1
@@ -225,10 +225,11 @@ void dispatch_at_end_of_turn(CombatState& s) noexcept {
 void dispatch_at_end_of_round(CombatState& s) noexcept {
     // MonsterGroup.applyEndOfTurnPowers (MonsterGroup.java:290-304), in order:
     //   (1) each LIVE monster: applyEndOfTurnTriggers -> monster powers'
-    //       atEndOfTurnPreEndTurnCards(false) + atEndOfTurn(false). No B3.13
-    //       monster power binds these (Metallicize is B3.19; the Cultist's RITUAL
-    //       guards atEndOfTurn on isPlayer -> no-op for a monster owner). Call
-    //       sites kept for faithful ordering / future powers.
+    //       atEndOfTurnPreEndTurnCards(false) + atEndOfTurn(false). NO currently
+    //       implemented monster power binds these (no monster carries
+    //       Metallicize yet; the Cultist's RITUAL guards atEndOfTurn on isPlayer
+    //       -> no-op for a monster owner). Call sites kept for faithful ordering
+    //       and for the powers that will bind them.
     //   (2) player powers atEndOfRound (a player-owner Ritual is onPlayer -> its
     //       atEndOfRound is a no-op; guarded in the native body).
     //   (3) each LIVE monster: its powers atEndOfRound -- the Cultist Ritual
@@ -269,7 +270,7 @@ void dispatch_on_gained_block(CombatState& s, uint8_t actor,
     ctx.amount = amount;
     // player relics onPlayerGainedBlock -> the actor's powers onGainedBlock
     // (Juggernaut). Relics fire FIRST (acquisition order), only on the player's own
-    // block gain (AbstractCreature.addBlock:426-433; B3.24).
+    // block gain (AbstractCreature.addBlock:426-433).
     if (actor == kActorPlayer) {
         const RelicView rv = player_relics(s);
         dispatch_relics_on_gained_block(s, rv.relics, rv.count, amount);
@@ -301,8 +302,8 @@ void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
     // player's relics' wasHPLost (acquisition order; no source/type guard at the
     // relic loop -- per-relic guards live in the bodies). Player victim only
     // (monsters have no relics). No-op with an empty mirror, so the 20 combat
-    // fixtures are unchanged (B3.25 wires the site; B3.24's Centennial Puzzle /
-    // Red Skull and B3.25's Self-Forming Clay become live through it).
+    // fixtures are unchanged. Centennial Puzzle, Red Skull and Self-Forming Clay
+    // all become live through this site once a run supplies the relics.
     if (victim == kActorPlayer) {
         const RelicView rv = player_relics(s);
         dispatch_relics_was_hp_lost(s, rv.relics, rv.count, amount);
@@ -337,7 +338,7 @@ bool apply_power_blocked_by_artifact(CombatState& s, uint8_t target,
     art->amount = static_cast<int16_t>(art->amount - 1);
     // (A 0-stack Artifact slot is left in place; the game removes it, but a
     // 0-amount slot reads as "no charges" for future checks -- amount<=0 above --
-    // and the pump has no power-GC pass yet. B3.24 relic/power removal handles GC.)
+    // and the pump has no power-GC pass yet. REMOVE_POWER handles real removal.)
     return true;
 }
 
