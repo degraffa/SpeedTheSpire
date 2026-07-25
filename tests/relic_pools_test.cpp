@@ -132,6 +132,73 @@ constexpr std::array<RelicId, 30> kOracleUncommonSeed3{{
     RelicId::ORNAMENTAL_FAN, RelicId::MEAT_ON_THE_BONE,
 }};
 
+// B3.26: three live shuffled RARE and SHOP orders. Captain's Wheel appears in
+// the rare source enumeration even though the task prose omitted it. Inverting
+// all six captures produced one canonical pool_order per tier; re-shuffling the
+// registry rows below reproduces the captures exactly.
+constexpr std::array<RelicId, 28> kOracleRareSeed1{{
+    RelicId::MAGIC_FLOWER, RelicId::FOSSILIZED_HELIX, RelicId::OLD_COIN,
+    RelicId::DEAD_BRANCH, RelicId::CHAMPION_BELT, RelicId::PEACE_PIPE,
+    RelicId::CHARONS_ASHES, RelicId::INCENSE_BURNER, RelicId::TUNGSTEN_ROD,
+    RelicId::UNCEASING_TOP, RelicId::GIRYA, RelicId::ICE_CREAM,
+    RelicId::POCKETWATCH, RelicId::CAPTAINS_WHEEL, RelicId::CALIPERS,
+    RelicId::DU_VU_DOLL, RelicId::THREAD_AND_NEEDLE, RelicId::GINGER,
+    RelicId::SHOVEL, RelicId::STONE_CALENDAR, RelicId::TURNIP,
+    RelicId::GAMBLING_CHIP, RelicId::WING_BOOTS, RelicId::PRAYER_WHEEL,
+    RelicId::BIRD_FACED_URN, RelicId::TORII, RelicId::LIZARD_TAIL,
+    RelicId::MANGO,
+}};
+constexpr std::array<RelicId, 28> kOracleRareSeed2{{
+    RelicId::PRAYER_WHEEL, RelicId::TUNGSTEN_ROD, RelicId::CAPTAINS_WHEEL,
+    RelicId::TURNIP, RelicId::SHOVEL, RelicId::ICE_CREAM, RelicId::TORII,
+    RelicId::PEACE_PIPE, RelicId::CHAMPION_BELT, RelicId::MAGIC_FLOWER,
+    RelicId::GAMBLING_CHIP, RelicId::LIZARD_TAIL, RelicId::GINGER,
+    RelicId::CALIPERS, RelicId::DEAD_BRANCH, RelicId::WING_BOOTS,
+    RelicId::INCENSE_BURNER, RelicId::STONE_CALENDAR, RelicId::POCKETWATCH,
+    RelicId::GIRYA, RelicId::MANGO, RelicId::FOSSILIZED_HELIX,
+    RelicId::THREAD_AND_NEEDLE, RelicId::BIRD_FACED_URN,
+    RelicId::UNCEASING_TOP, RelicId::OLD_COIN, RelicId::DU_VU_DOLL,
+    RelicId::CHARONS_ASHES,
+}};
+constexpr std::array<RelicId, 28> kOracleRareSeed3{{
+    RelicId::GINGER, RelicId::SHOVEL, RelicId::MANGO, RelicId::DU_VU_DOLL,
+    RelicId::STONE_CALENDAR, RelicId::GAMBLING_CHIP,
+    RelicId::BIRD_FACED_URN, RelicId::CHARONS_ASHES, RelicId::MAGIC_FLOWER,
+    RelicId::WING_BOOTS, RelicId::TURNIP, RelicId::UNCEASING_TOP,
+    RelicId::PEACE_PIPE, RelicId::CALIPERS, RelicId::POCKETWATCH,
+    RelicId::CHAMPION_BELT, RelicId::ICE_CREAM, RelicId::CAPTAINS_WHEEL,
+    RelicId::PRAYER_WHEEL, RelicId::THREAD_AND_NEEDLE, RelicId::GIRYA,
+    RelicId::FOSSILIZED_HELIX, RelicId::INCENSE_BURNER,
+    RelicId::TUNGSTEN_ROD, RelicId::OLD_COIN, RelicId::LIZARD_TAIL,
+    RelicId::DEAD_BRANCH, RelicId::TORII,
+}};
+
+constexpr std::array<RelicId, 17> kOracleShopSeed1{{
+    RelicId::ORRERY, RelicId::LEES_WAFFLE, RelicId::TOOLBOX,
+    RelicId::CAULDRON, RelicId::SLING_OF_COURAGE, RelicId::ORANGE_PELLETS,
+    RelicId::CLOCKWORK_SOUVENIR, RelicId::MEMBERSHIP_CARD,
+    RelicId::PRISMATIC_SHARD, RelicId::THE_ABACUS, RelicId::FROZEN_EYE,
+    RelicId::STRANGE_SPOON, RelicId::MEDICAL_KIT, RelicId::DOLLYS_MIRROR,
+    RelicId::HAND_DRILL, RelicId::CHEMICAL_X, RelicId::BRIMSTONE,
+}};
+constexpr std::array<RelicId, 17> kOracleShopSeed2{{
+    RelicId::ORANGE_PELLETS, RelicId::FROZEN_EYE,
+    RelicId::SLING_OF_COURAGE, RelicId::DOLLYS_MIRROR, RelicId::HAND_DRILL,
+    RelicId::PRISMATIC_SHARD, RelicId::BRIMSTONE, RelicId::STRANGE_SPOON,
+    RelicId::ORRERY, RelicId::CLOCKWORK_SOUVENIR, RelicId::TOOLBOX,
+    RelicId::THE_ABACUS, RelicId::CAULDRON, RelicId::MEDICAL_KIT,
+    RelicId::CHEMICAL_X, RelicId::MEMBERSHIP_CARD, RelicId::LEES_WAFFLE,
+}};
+constexpr std::array<RelicId, 17> kOracleShopSeed3{{
+    RelicId::MEDICAL_KIT, RelicId::ORRERY, RelicId::TOOLBOX,
+    RelicId::MEMBERSHIP_CARD, RelicId::CLOCKWORK_SOUVENIR,
+    RelicId::ORANGE_PELLETS, RelicId::LEES_WAFFLE,
+    RelicId::PRISMATIC_SHARD, RelicId::THE_ABACUS, RelicId::BRIMSTONE,
+    RelicId::SLING_OF_COURAGE, RelicId::CAULDRON, RelicId::CHEMICAL_X,
+    RelicId::HAND_DRILL, RelicId::DOLLYS_MIRROR, RelicId::STRANGE_SPOON,
+    RelicId::FROZEN_EYE,
+}};
+
 TEST(RelicPools, OracleCommonPoolOrdersMatchThreeLiveSeeds) {
     struct Case {
         int64_t seed;
@@ -158,10 +225,8 @@ TEST(RelicPools, OracleCommonPoolOrdersMatchThreeLiveSeeds) {
         EXPECT_EQ(rs.relic_rng.counter, 5);
         EXPECT_EQ(rs.relic_rng.s0, static_cast<uint64_t>(c.s0));
         EXPECT_EQ(rs.relic_rng.s1, static_cast<uint64_t>(c.s1));
-        for (int p = 2; p < kRelicTierCount; ++p) {
-            EXPECT_EQ(rs.relic_pool_count[p], 0)
-                << "tier content belongs to B3.26-B3.27, p=" << p;
-        }
+        EXPECT_EQ(rs.relic_pool_count[static_cast<int>(RelicPool::BOSS)], 0)
+            << "boss content belongs to B3.27";
     }
 }
 
@@ -184,6 +249,27 @@ TEST(RelicPools, OracleUncommonPoolOrdersMatchThreeLiveSeeds) {
     }
 }
 
+TEST(RelicPools, OracleRareAndShopOrdersMatchThreeLiveSeeds) {
+    struct Case {
+        int64_t seed;
+        const std::array<RelicId, 28>* rare;
+        const std::array<RelicId, 17>* shop;
+    };
+    const Case cases[] = {
+        {1790050543751LL, &kOracleRareSeed1, &kOracleShopSeed1},
+        {1790050543752LL, &kOracleRareSeed2, &kOracleShopSeed2},
+        {1790050543753LL, &kOracleRareSeed3, &kOracleShopSeed3},
+    };
+    for (const Case& c : cases) {
+        RunState rs{};
+        rs.relic_rng = from_seed(c.seed);
+        initialize_relic_pools(rs);
+        expect_pool(rs, RelicPool::RARE, *c.rare);
+        expect_pool(rs, RelicPool::SHOP, *c.shop);
+        EXPECT_EQ(rs.relic_rng.counter, 5);
+    }
+}
+
 TEST(RelicPools, InitializesAllFiveWithFiveDrawsEvenWhenFourAreEmpty) {
     RunState rs{};
     rs.relic_rng = from_seed(77);
@@ -193,6 +279,8 @@ TEST(RelicPools, InitializesAllFiveWithFiveDrawsEvenWhenFourAreEmpty) {
     }
     initialize_relic_pools(rs);
     EXPECT_EQ(rs.relic_pool_count[kCommon], 33);
+    EXPECT_EQ(rs.relic_pool_count[static_cast<int>(RelicPool::RARE)], 28);
+    EXPECT_EQ(rs.relic_pool_count[static_cast<int>(RelicPool::SHOP)], 17);
     EXPECT_EQ(rs.relic_rng.counter, 5);
     EXPECT_EQ(rs.relic_rng.s0, expected.s0);
     EXPECT_EQ(rs.relic_rng.s1, expected.s1);
@@ -495,6 +583,105 @@ TEST(RunDeck, AddCardWithoutRelicsIsAPlainAppend) {
     EXPECT_EQ(rs.master_deck[0].upgrade, 0);
     EXPECT_EQ(rs.max_hp, 80);
     EXPECT_EQ(rs.hp, 60);
+}
+
+// --- B3.26 rare/shop run-layer behavior -------------------------------------
+
+TEST(RelicAcquisitionRareShop, MangoOldCoinWaffleAndWingBootsAreExact) {
+    RunState rs{};
+    rs.hp = 50;
+    rs.max_hp = 80;
+    rs.gold = 99;
+    RngStream misc = from_seed(8);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::MANGO),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.hp, 64);
+    EXPECT_EQ(rs.max_hp, 94);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::OLD_COIN),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.gold, 399);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::LEES_WAFFLE),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.max_hp, 101);
+    EXPECT_EQ(rs.hp, 101) << "Waffle heals to full after +7 max HP";
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::WING_BOOTS),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.relics[3].counter, 3);
+}
+
+TEST(RunDeckRare, DuVuDollTracksEveryCurseAddAndRemove) {
+    RunState rs{};
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INJURY));
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::STRIKE));
+    RngStream misc = from_seed(9);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::DU_VU_DOLL),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(rs.relic_count, 1);
+    EXPECT_EQ(rs.relics[0].counter, 1) << "onEquip scans the existing deck";
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::REGRET));
+    EXPECT_EQ(rs.relics[0].counter, 2);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    EXPECT_EQ(rs.relics[0].counter, 2);
+    ASSERT_TRUE(remove_master_deck_card(rs, 0));  // remove Injury
+    EXPECT_EQ(rs.relics[0].counter, 1);
+    ASSERT_TRUE(remove_master_deck_card(rs, 2));  // remove Cleave
+    EXPECT_EQ(rs.relics[0].counter, 1);
+}
+
+TEST(RelicPoolsRare, FloorShopAndCampfireSpawnGatesAreExact) {
+    EXPECT_TRUE(relic_can_spawn(
+        RelicId::OLD_COIN, RelicSpawnContext{48, false, false}));
+    EXPECT_FALSE(relic_can_spawn(
+        RelicId::OLD_COIN, RelicSpawnContext{49, false, false}));
+    EXPECT_FALSE(relic_can_spawn(
+        RelicId::OLD_COIN, RelicSpawnContext{10, true, false}));
+    EXPECT_FALSE(relic_can_spawn(
+        RelicId::OLD_COIN, RelicSpawnContext{99, true, true}));
+    EXPECT_TRUE(relic_can_spawn(
+        RelicId::OLD_COIN, RelicSpawnContext{99, false, true}));
+    EXPECT_TRUE(relic_can_spawn(
+        RelicId::PRAYER_WHEEL, RelicSpawnContext{48, false, false}));
+    EXPECT_FALSE(relic_can_spawn(
+        RelicId::PRAYER_WHEEL, RelicSpawnContext{49, false, false}));
+    EXPECT_TRUE(relic_can_spawn(
+        RelicId::WING_BOOTS, RelicSpawnContext{40, false, false}));
+    EXPECT_FALSE(relic_can_spawn(
+        RelicId::WING_BOOTS, RelicSpawnContext{41, false, false}));
+    EXPECT_TRUE(relic_can_spawn(
+        RelicId::WING_BOOTS, RelicSpawnContext{99, false, true}));
+
+    RelicSpawnContext camp{};
+    camp.floor = 47;
+    camp.campfire_relic_count = 1;
+    for (RelicId id : {RelicId::GIRYA, RelicId::PEACE_PIPE,
+                       RelicId::SHOVEL}) {
+        EXPECT_TRUE(relic_can_spawn(id, camp));
+        camp.campfire_relic_count = 2;
+        EXPECT_FALSE(relic_can_spawn(id, camp));
+        camp.campfire_relic_count = 1;
+        camp.floor = 48;
+        EXPECT_FALSE(relic_can_spawn(id, camp));
+        camp.floor = 47;
+        camp.endless = true;
+        camp.campfire_relic_count = 2;
+        EXPECT_FALSE(relic_can_spawn(id, camp))
+            << "Endless bypasses floor only, never the two-relic cap";
+        camp.campfire_relic_count = 1;
+        EXPECT_TRUE(relic_can_spawn(id, camp));
+        camp.endless = false;
+    }
+}
+
+TEST(RelicPoolsRare, FillSpawnContextCountsCampfireRelics) {
+    RunState rs{};
+    rs.relics[0].relic_id = static_cast<uint16_t>(RelicId::GIRYA);
+    rs.relics[1].relic_id = static_cast<uint16_t>(RelicId::SHOVEL);
+    rs.relics[2].relic_id = static_cast<uint16_t>(RelicId::ANCHOR);
+    rs.relic_count = 3;
+    RelicSpawnContext ctx{};
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_EQ(ctx.campfire_relic_count, 2);
+    EXPECT_FALSE(relic_can_spawn(RelicId::PEACE_PIPE, ctx));
 }
 
 }  // namespace

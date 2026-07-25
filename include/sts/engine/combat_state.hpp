@@ -91,6 +91,24 @@ inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
 // is NOT gated (the Java latch only guards the victory branch).
 inline constexpr uint32_t kCombatFlagCannotLose = 1u << 1;
 
+// Run-room context needed by combat-only relics. Set by run_advance when the
+// encounter came from an Elite room; standalone combat_begin leaves it clear.
+// Sling of Courage reads this atBattleStart. Append-only reserved-header bit:
+// no CombatState layout/schema change.
+inline constexpr uint32_t kCombatFlagElite = 1u << 2;
+
+// Private AbstractRelic fields that affect combat belong in CombatState, not in
+// RelicSlot.counter: the oracle serializes every relic's public counter. These
+// bits mirror GamblingChip.activated and OrangePellets' three card-type
+// booleans while leaving their Java-visible counters at -1.
+inline constexpr uint32_t kCombatFlagGamblingChipArmed = 1u << 3;
+inline constexpr uint32_t kCombatFlagOrangePelletsAttack = 1u << 4;
+inline constexpr uint32_t kCombatFlagOrangePelletsSkill = 1u << 5;
+inline constexpr uint32_t kCombatFlagOrangePelletsPower = 1u << 6;
+inline constexpr uint32_t kCombatFlagOrangePelletsMask =
+    kCombatFlagOrangePelletsAttack | kCombatFlagOrangePelletsSkill |
+    kCombatFlagOrangePelletsPower;
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;

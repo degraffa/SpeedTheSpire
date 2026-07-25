@@ -199,6 +199,40 @@ void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
     // caller/queue_card_play only ever queues a card that was in hand).
 }
 
+// UseCardAction is a later queued action. Exhausting plays remain in limbo until
+// it resolves so Strange Spoon's RNG and onExhaust triggers occur after the
+// card's queued effects, exactly as in the game.
+void move_card_hand_to_limbo(CombatState& s,
+                             CardPoolIndex pool_index) noexcept {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.hand[i] != pool_index) {
+            continue;
+        }
+        for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.hand_count; ++j) {
+            s.hand[j - 1] = s.hand[j];
+        }
+        --s.hand_count;
+        assert(s.limbo_count < kLimboCap);
+        s.limbo[s.limbo_count++] = pool_index;
+        return;
+    }
+}
+
+[[nodiscard]] bool remove_card_from_limbo(CombatState& s,
+                                           CardPoolIndex pool_index) noexcept {
+    for (uint8_t i = 0; i < s.limbo_count; ++i) {
+        if (s.limbo[i] != pool_index) {
+            continue;
+        }
+        for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.limbo_count; ++j) {
+            s.limbo[j - 1] = s.limbo[j];
+        }
+        --s.limbo_count;
+        return true;
+    }
+    return false;
+}
+
 // --- B3.9 card-level trigger programs ---------------------------------------
 // A passive status/curse (trigger != ON_PLAY) runs its `effects`/`upgraded`
 // program at a hook site instead of on play. Every in-scope trigger step is
@@ -229,6 +263,35 @@ void queue_card_trigger_program(CombatState& s, CardEffectView eff,
 }  // namespace
 
 // --- Public ------------------------------------------------------------------
+
+void finalize_exhausting_card_play(CombatState& s,
+                                   CardPoolIndex pool_index) noexcept {
+    if (!remove_card_from_limbo(s, pool_index)) {
+        return;
+    }
+    const CardDef* def = card_def(
+        static_cast<CardId>(s.card_pool[pool_index].card_id));
+    bool to_exhaust = true;
+    // UseCardAction.update: Spoon rolls here, after every earlier card effect,
+    // and only for a non-POWER play that would exhaust.
+    if (def != nullptr && def->type != CardType::POWER &&
+        player_has_relic(s, RelicId::STRANGE_SPOON) &&
+        random_boolean(s.card_random_rng)) {
+        to_exhaust = false;
+    }
+    s.card_pool[pool_index].flags = static_cast<uint16_t>(
+        s.card_pool[pool_index].flags &
+        ~card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE));
+    if (to_exhaust) {
+        assert(s.exhaust_count < kExhaustCap);
+        s.exhaust[s.exhaust_count++] = pool_index;
+        reset_cost_for_turn(s, pool_index);
+        dispatch_on_exhaust(s, pool_index, s.card_pool[pool_index].card_id);
+    } else {
+        assert(s.discard_count < kDiscardCap);
+        s.discard[s.discard_count++] = pool_index;
+    }
+}
 
 bool queue_card_play(CombatState& s, uint8_t hand_index, uint8_t target) noexcept {
     if (hand_index >= s.hand_count) {
@@ -300,6 +363,7 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     const uint8_t cost_now = s.card_pool[pool_index].cost_now;
     const CardEffectView eff = card_effect_steps(*def, upgrade);
     const bool is_xcost = has_card_flag(inst_flags, CardFlag::XCOST);
+    const bool autoplay = has_card_flag(inst_flags, CardFlag::AUTOPLAY);
 
     // 4. c.use(): QUEUE the card's effect actions via add_to_bottom, in the
     //    card's addToBot order. Effects resolve later through the pump priority
@@ -318,6 +382,11 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         int energy_on_use = s.player_energy;
         if (energy_on_use < 0) {
             energy_on_use = 0;
+        }
+        // Chemical X adds two effect repetitions without changing the energy
+        // actually spent (WhirlwindAction/SkewerAction).
+        if (player_has_relic(s, RelicId::CHEMICAL_X)) {
+            energy_on_use += 2;
         }
         for (int rep = 0; rep < energy_on_use; ++rep) {
             for (uint8_t k = 0; k < eff.count; ++k) {
@@ -352,15 +421,32 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         queue_card_trigger_program(
             s, card_effect_steps(*od, s.card_pool[pi].upgrade), /*add_top=*/true);
     }
-    move_card_hand_to_pile(
-        s, pool_index,
-        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST));
+    const bool to_exhaust =
+        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST) ||
+        has_card_flag(s.card_pool[pool_index].flags,
+                      CardFlag::EXHAUST_ON_USE_ONCE);
+    s.card_pool[pool_index].flags = static_cast<uint16_t>(
+        s.card_pool[pool_index].flags & ~card_flag_bit(CardFlag::AUTOPLAY));
+    if (to_exhaust) {
+        ActionQueueItem finish{};
+        finish.opcode = static_cast<uint16_t>(Opcode::FINALIZE_CARD);
+        finish.src = kActorPlayer;
+        finish.tgt = kActorPlayer;
+        finish.amount = pool_index;
+        add_to_bottom(s, finish);
+        move_card_hand_to_limbo(s, pool_index);
+    } else {
+        move_card_hand_to_pile(s, pool_index, false);
+    }
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
     //    X-cost already consumed all energy above; otherwise deduct the
     //    per-instance runtime cost (card_pool[...].cost_now), so a cost modifier
     //    (SET_COST) is honored.
-    if (is_xcost) {
+    if (autoplay) {
+        // PlayTopCardAction's freeToPlayOnce leaves energy untouched. X-cost
+        // still used the current energy above to determine repetitions.
+    } else if (is_xcost) {
         s.player_energy = 0;
     } else {
         s.player_energy =

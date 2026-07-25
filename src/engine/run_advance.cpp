@@ -132,7 +132,9 @@ void use_fruit_juice(RunController& rc, uint8_t slot) noexcept {
     const int amount = potion_def(PotionId::FRUIT_JUICE)->potency;
     if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
         rc.combat.player_max_hp = static_cast<int16_t>(rc.combat.player_max_hp + amount);
-        rc.combat.player_hp = static_cast<int16_t>(rc.combat.player_hp + amount);
+        // increaseMaxHp(amount, true) raises max first, then calls heal(amount):
+        // Magic Flower therefore modifies Fruit Juice's combat heal.
+        heal_player_with_relics(rc.combat, amount);
         rc.run.max_hp = rc.combat.player_max_hp;
     } else {
         rc.run.max_hp = static_cast<int16_t>(rc.run.max_hp + amount);
@@ -172,11 +174,7 @@ void dispatch_run_relics_on_use_potion(RunController& rc) noexcept {
             continue;
         }
         if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
-            int hp = static_cast<int>(rc.combat.player_hp) + 5;
-            if (hp > rc.combat.player_max_hp) {
-                hp = rc.combat.player_max_hp;
-            }
-            rc.combat.player_hp = static_cast<int16_t>(hp);
+            heal_player_with_relics(rc.combat, 5);
         } else {
             int hp = static_cast<int>(rc.run.hp) + 5;
             if (hp > rc.run.max_hp) {
@@ -323,6 +321,12 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         s.relics[i] = rc.run.relics[i];
     }
     s.relic_count = rc.run.relic_count;
+    if (room == RoomType::Elite) {
+        s.flags |= kCombatFlagElite;
+    }
+    // AbstractPlayer.preBattlePrep -> relic.atPreBattle, after the combat relic
+    // mirror exists and before AbstractRoom's opening hook/draw sequence.
+    dispatch_relics_at_pre_battle(s, s.relics, s.relic_count);
 
     // (9) Prime the turn-1 invariants and pump once into WAITING_ON_USER (same
     //     mechanism combat_begin uses; see its implementation note).

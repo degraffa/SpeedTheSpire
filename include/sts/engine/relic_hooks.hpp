@@ -73,9 +73,12 @@ enum class RelicHook : uint8_t {
     // --- B3.25 additions (append-only, design doc §4.4) ---
     ON_MONSTER_DEATH = 14,           // onMonsterDeath (AbstractMonster.die:933-937)
     ON_SHUFFLE = 15,                 // onShuffle (EmptyDeckShuffleAction ctor :37-39)
+    // --- B3.26 additions (append-only) ---
+    ON_BLOCK_BROKEN = 16,            // onBlockBroken (Hand Drill)
+    ON_REFRESH_HAND = 17,            // onRefreshHand (Unceasing Top)
 };
 
-inline constexpr int kRelicHookCount = 16;
+inline constexpr int kRelicHookCount = 18;
 
 // --- RelicHookContext --------------------------------------------------------
 //
@@ -85,8 +88,10 @@ struct RelicHookContext {
     uint16_t card_id = 0;          // CardId of the card involved (play/use/exhaust)
     uint8_t card_pool_index = 0;   // its pool index (Blue Candle exhaust redirect)
     uint8_t card_is_attack = 0;    // 1 if that card is an ATTACK (Nunchaku/Pen Nib)
+    uint8_t card_type = 0xFFu;     // CardType for constructed/native type guards
     int32_t amount = 0;            // event amount: block gained / hp lost
     uint8_t dead_monster = 0;      // on_monster_death: the dying monster's slot
+    uint8_t target_actor = 0xFFu;  // CARD_TARGET data step target (0xFF=player)
 };
 
 // Does the player own `id`? Scans the CombatState relic mirror (acquisition
@@ -130,8 +135,14 @@ void dispatch_relic_hook(CombatState& s, RelicSlot* relics, uint8_t count,
 
 void dispatch_relics_at_battle_start(CombatState& s, RelicSlot* relics,
                                      uint8_t count) noexcept;
+void dispatch_relics_at_pre_battle(CombatState& s, RelicSlot* relics,
+                                   uint8_t count) noexcept;
+void dispatch_relics_at_battle_start_pre_draw(CombatState& s, RelicSlot* relics,
+                                              uint8_t count) noexcept;
 void dispatch_relics_at_turn_start(CombatState& s, RelicSlot* relics,
                                    uint8_t count) noexcept;
+void dispatch_relics_at_turn_start_post_draw(CombatState& s, RelicSlot* relics,
+                                             uint8_t count) noexcept;
 void dispatch_relics_on_player_end_turn(CombatState& s, RelicSlot* relics,
                                         uint8_t count) noexcept;
 void dispatch_relics_on_use_card(CombatState& s, RelicSlot* relics, uint8_t count,
@@ -140,6 +151,8 @@ void dispatch_relics_on_play_card(CombatState& s, RelicSlot* relics, uint8_t cou
                                   uint16_t card_id) noexcept;
 void dispatch_relics_on_exhaust(CombatState& s, RelicSlot* relics, uint8_t count,
                                 uint16_t card_id) noexcept;
+void dispatch_relics_on_card_draw(CombatState& s, RelicSlot* relics,
+                                  uint8_t count, uint16_t card_id) noexcept;
 void dispatch_relics_on_gained_block(CombatState& s, RelicSlot* relics,
                                      uint8_t count, int32_t amount) noexcept;
 void dispatch_relics_was_hp_lost(CombatState& s, RelicSlot* relics, uint8_t count,
@@ -157,6 +170,14 @@ void dispatch_relics_on_monster_death(CombatState& s, RelicSlot* relics,
 // the shuffle itself (the game fires it at action construction). Sundial.
 void dispatch_relics_on_shuffle(CombatState& s, RelicSlot* relics,
                                 uint8_t count) noexcept;
+void dispatch_relics_on_block_broken(CombatState& s, RelicSlot* relics,
+                                     uint8_t count, uint8_t monster) noexcept;
+void dispatch_relics_on_refresh_hand(CombatState& s, RelicSlot* relics,
+                                     uint8_t count) noexcept;
+
+// HealAction-compatible direct heal, including Magic Flower's 50% modifier.
+// Shared by relics, powers, and potions so every player heal uses one seam.
+void heal_player_with_relics(CombatState& s, int32_t amount) noexcept;
 
 // Meat on the Bone's bespoke pre-victory site (AbstractRoom.endBattle:418-420):
 // fires BEFORE player.onVictory -- i.e. before every relic's onVictory,

@@ -123,6 +123,10 @@ OPCODES = {
     "BLOCK_PER_NON_ATTACK": 31,
     "SPOT_WEAKNESS": 32,
     "RANDOM_ATTACK_TO_HAND": 33,
+    # B3.26 native actions: delayed UseCardAction destination (Strange Spoon)
+    # and queued HealAction (Bird-Faced Urn). Never authored in card YAML.
+    "FINALIZE_CARD": 34,
+    "HEAL": 35,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -137,7 +141,10 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # hand card and add stat-equivalent copies. Kind 4 needs a third
                 # kind bit; bit 2 is RANDOM, so the high kind bit lives at bit 3
                 # (kind = bits[0..1] | bit3 << 2) -- kinds 0-3 pack unchanged.
-                "duplicate": 4}
+                "duplicate": 4,
+                # B3.26 Gambling Chip optional hand discard. This kind is
+                # emitted natively, but remains pinned with the engine ABI.
+                "discard": 5}
 CHOICE_RANDOM_BIT = 1 << 2
 CHOICE_KIND_HIGH_BIT = 1 << 3
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
@@ -153,6 +160,31 @@ STEP_TARGETS = {"SELF": 0, "CARD_TARGET": 1, "ALL_ENEMY": 2, "RANDOM_ENEMY": 3}
 # because Dual Wield's eligibility predicate is `type == ATTACK || type == POWER`,
 # DualWieldAction.isDualWieldable:95-97; B3.7 lands the power cards themselves).
 CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3, "POWER": 4}
+
+# Exact RED source-pool order used by returnTrulyRandomCardInCombat. CardLibrary
+# registers into a Java HashMap; AbstractDungeon builds each rarity pool with
+# CardGroup.addToBottom (index 0), so the observed common, uncommon, then rare
+# order is the reverse of each HashMap iteration. This independent source list
+# was reproduced from CardLibrary.addRedCards under the game's JDK semantics;
+# it replaces the earlier registry-id-order approximation and self-completes as
+# B3.7/B3.8 append the remaining rows.
+IRONCLAD_SOURCE_CARD_NAMES = (
+    "SWORD_BOOMERANG", "PERFECTED_STRIKE", "HEAVY_BLADE", "WILD_STRIKE",
+    "HEADBUTT", "HAVOC", "ARMAMENTS", "CLOTHESLINE", "TWIN_STRIKE",
+    "POMMEL_STRIKE", "THUNDERCLAP", "CLASH", "SHRUG_IT_OFF", "TRUE_GRIT",
+    "BODY_SLAM", "IRON_WAVE", "FLEX", "WARCRY", "CLEAVE", "ANGER",
+    "EVOLVE", "UPPERCUT", "GHOSTLY_ARMOR", "FIRE_BREATHING", "DROPKICK",
+    "CARNAGE", "BLOODLETTING", "RUPTURE", "SECOND_WIND", "SEARING_BLOW",
+    "BATTLE_TRANCE", "SENTINEL", "ENTRENCH", "RAGE", "FEEL_NO_PAIN",
+    "DISARM", "SEEING_RED", "DARK_EMBRACE", "COMBUST", "WHIRLWIND",
+    "SEVER_SOUL", "RAMPAGE", "SHOCKWAVE", "METALLICIZE", "BURNING_PACT",
+    "PUMMEL", "FLAME_BARRIER", "BLOOD_FOR_BLOOD", "INTIMIDATE",
+    "HEMOKINESIS", "RECKLESS_CHARGE", "INFERNAL_BLADE", "DUAL_WIELD",
+    "POWER_THROUGH", "INFLAME", "SPOT_WEAKNESS", "DOUBLE_TAP",
+    "DEMON_FORM", "BLUDGEON", "FEED", "LIMIT_BREAK", "CORRUPTION",
+    "BARRICADE", "FIEND_FIRE", "BERSERK", "IMPERVIOUS", "JUGGERNAUT",
+    "BRUTALITY", "REAPER", "EXHUME", "OFFERING", "IMMOLATE",
+)
 # DamageType (interp.hpp DamageType): the DAMAGE opcode's `flags` low byte. A card
 # DAMAGE step defaults to NORMAL (the full applyPowers pipeline); a status/curse's
 # self-inflicted DAMAGE is THORNS (Burn/Decay -- new DamageInfo(player, n, THORNS),
@@ -193,6 +225,8 @@ CARD_FLAGS = {
     # the mirror stays complete): setCostForTurn marked this instance's cost_now
     # as a this-turn-only modification; AbstractRoom.endTurn:397-405 resets it.
     "cost_modified_for_turn": 1 << 6,
+    "autoplay": 1 << 7,
+    "exhaust_on_use_once": 1 << 8,
 }
 
 # Power hook points (generated sts::registry::Hook) -- MIRROR of the engine's
@@ -251,6 +285,9 @@ RELIC_HOOKS = {
     # --- B3.25 additions (append-only, design doc §4.4) ---
     "on_monster_death": 14,         # onMonsterDeath (AbstractMonster.die:933-937)
     "on_shuffle": 15,               # onShuffle (EmptyDeckShuffleAction ctor :37-39)
+    # --- B3.26 additions (append-only) ---
+    "on_block_broken": 16,           # onBlockBroken (AbstractCreature.decrementBlock)
+    "on_refresh_hand": 17,           # onRefreshHand (GameActionManager.update)
 }
 # RelicTier (AbstractRelic.RelicTier). Pinned/append-only; the translator's relic
 # table joins on it and reward/shop pools gate by it (design doc §5.3).
@@ -810,17 +847,48 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # capture, so until then the pool is emitted in registry-id order -- a
     # DOCUMENTED interim deviation recorded in the B3.6 ledger Log. The one-draw
     # accounting and membership are Java-exact today.
+    # B3.26 retires that historical interim note: source_rank below is the
+    # independently reproduced CardLibrary/JDK order and is now exact.
+    source_rank = {name: i for i, name in
+                   enumerate(IRONCLAD_SOURCE_CARD_NAMES)}
     attack_pool = [r for r in rows
                    if r["color"] == "RED"
                    and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
                    and r["ctype"] == CARD_TYPES["ATTACK"]
                    and not r["healing"]]
-    attack_pool.sort(key=lambda r: r["id"])
+    missing_attack = [r["name"] for r in attack_pool
+                      if r["name"] not in source_rank]
+    if missing_attack:
+        raise fail("cards.yaml: RED combat ATTACK rows missing from exact "
+                   f"CardLibrary source order: {missing_attack}")
+    attack_pool.sort(key=lambda r: source_rank[r["name"]])
     out.append(f"inline constexpr int kIroncladAttackPoolCount = "
                f"{len(attack_pool)};")
     out.append("inline constexpr std::array<CardId, kIroncladAttackPoolCount> "
                "kIroncladAttackPool{{")
     for r in attack_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
+    # B3.26: Dead Branch's in-combat card pool. AbstractDungeon.
+    # returnTrulyRandomCardInCombat selects every RED COMMON/UNCOMMON/RARE card,
+    # excluding CardTags.HEALING, with one cardRandomRng draw. Keep membership
+    # generator-derived for the same reason as kIroncladAttackPool above.
+    combat_pool = [r for r in rows
+                   if r["color"] == "RED"
+                   and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+                   and not r["healing"]]
+    missing_combat = [r["name"] for r in combat_pool
+                      if r["name"] not in source_rank]
+    if missing_combat:
+        raise fail("cards.yaml: RED combat rows missing from exact CardLibrary "
+                   f"source order: {missing_combat}")
+    combat_pool.sort(key=lambda r: source_rank[r["name"]])
+    out.append(f"inline constexpr int kIroncladCombatCardPoolCount = "
+               f"{len(combat_pool)};")
+    out.append("inline constexpr std::array<CardId, kIroncladCombatCardPoolCount> "
+               "kIroncladCombatCardPool{{")
+    for r in combat_pool:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 

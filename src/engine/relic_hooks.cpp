@@ -18,6 +18,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
 #include "sts/engine/relics.hpp"        // relic_def, RelicDef, RelicHookBinding
+#include "sts/engine/rng_stream.hpp"    // random (Dead Branch)
 #include "sts/engine/run_state.hpp"     // RelicSlot
 #include "sts/engine/types.hpp"
 
@@ -29,7 +30,8 @@ namespace {
 // player-owned). Unlike power hooks, a relic step's amount is ALWAYS a literal
 // (relics carry no stack amount). SELF -> player; ALL_ENEMY/RANDOM_ENEMY -> the
 // player's enemies (fanned out at execute time). Queued addToBot.
-void queue_relic_step(CombatState& s, const CardEffectStep& step) noexcept {
+void queue_relic_step(CombatState& s, const CardEffectStep& step,
+                      const RelicHookContext& ctx, bool add_top) noexcept {
     ActionQueueItem item{};
     item.opcode = static_cast<uint16_t>(step.op);
     item.src = kActorPlayer;
@@ -44,6 +46,8 @@ void queue_relic_step(CombatState& s, const CardEffectStep& step) noexcept {
             item.tgt = kActorRandomEnemy;
             break;
         case StepTarget::CARD_TARGET:
+            item.tgt = ctx.target_actor;
+            break;
         default:
             item.tgt = kActorPlayer;
             break;
@@ -55,21 +59,69 @@ void queue_relic_step(CombatState& s, const CardEffectStep& step) noexcept {
         // so it does NOT get Dexterity -- flag op_block to skip the modifyBlock pass.
         item.flags |= kBlockNoPowers;
     }
-    add_to_bottom(s, item);
+    if (add_top) {
+        add_to_top(s, item);
+    } else {
+        add_to_bottom(s, item);
+    }
 }
 
-// Heal the player by `n`, clamped to max HP (HealAction semantics). No HEAL opcode
-// exists (and none is added for B3.24); a pure heal has no queue-ordering interplay
-// with other S1 relic effects, so it is applied directly at dispatch time.
-void heal_player(CombatState& s, int32_t n) noexcept {
-    int32_t hp = static_cast<int32_t>(s.player_hp) + n;
+// Queue direction is part of each Java hook rather than the effect payload.
+// These data-bound B3.26 hooks call addToTop; all other generated relic steps
+// currently call addToBot. Brimstone's steps are authored in construction order
+// (monsters, then player), so repeated top insertion resolves player first.
+[[nodiscard]] bool relic_step_adds_to_top(RelicId id,
+                                          RelicHook hook) noexcept {
+    if (hook == RelicHook::AT_BATTLE_START) {
+        return id == RelicId::THREAD_AND_NEEDLE ||
+               id == RelicId::CLOCKWORK_SOUVENIR;
+    }
+    if (hook == RelicHook::ON_EXHAUST) {
+        return id == RelicId::CHARONS_ASHES;
+    }
+    if (hook == RelicHook::AT_TURN_START) {
+        return id == RelicId::BRIMSTONE;
+    }
+    return false;
+}
+
+[[nodiscard]] bool any_monster_alive(const CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        if (s.monsters[i].hp > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool player_has_power(const CombatState& s, PowerId id) noexcept {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id) &&
+            (id == PowerId::NO_DRAW || s.player_powers[i].amount > 0)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
+
+void heal_player_with_relics(CombatState& s, int32_t amount) noexcept {
+    if (amount <= 0) {
+        return;
+    }
+    // MagicFlower.onPlayerHeal: MathUtils.round(amount * 1.5f). For a positive
+    // integer amount, (3*n+1)/2 is exactly that float result without precision
+    // loss; apply it before HealAction's max-HP clamp.
+    if (player_has_relic(s, RelicId::MAGIC_FLOWER)) {
+        amount = (3 * amount + 1) / 2;
+    }
+    int32_t hp = static_cast<int32_t>(s.player_hp) + amount;
     if (hp > s.player_max_hp) {
         hp = s.player_max_hp;
     }
     s.player_hp = static_cast<int16_t>(hp);
 }
-
-}  // namespace
 
 // --- player_relics: the combat relic view (live as of B4.3) ------------------
 
@@ -108,7 +160,8 @@ void dispatch_relic_hook(CombatState& s, RelicSlot* relics, uint8_t count,
             dispatch_native_relic_hook(s, hook, rid, relics[i], ctx);
         } else {
             for (uint8_t k = 0; k < b->step_count; ++k) {
-                queue_relic_step(s, b->steps[k]);
+                queue_relic_step(s, b->steps[k], ctx,
+                                 relic_step_adds_to_top(rid, hook));
             }
         }
     }
@@ -122,9 +175,29 @@ void dispatch_relics_at_battle_start(CombatState& s, RelicSlot* relics,
                         RelicHookContext{});
 }
 
+void dispatch_relics_at_pre_battle(CombatState& s, RelicSlot* relics,
+                                   uint8_t count) noexcept {
+    dispatch_relic_hook(s, relics, count, RelicHook::AT_PRE_BATTLE,
+                        RelicHookContext{});
+}
+
+void dispatch_relics_at_battle_start_pre_draw(CombatState& s,
+                                              RelicSlot* relics,
+                                              uint8_t count) noexcept {
+    dispatch_relic_hook(s, relics, count, RelicHook::AT_BATTLE_START_PRE_DRAW,
+                        RelicHookContext{});
+}
+
 void dispatch_relics_at_turn_start(CombatState& s, RelicSlot* relics,
                                    uint8_t count) noexcept {
     dispatch_relic_hook(s, relics, count, RelicHook::AT_TURN_START,
+                        RelicHookContext{});
+}
+
+void dispatch_relics_at_turn_start_post_draw(CombatState& s,
+                                             RelicSlot* relics,
+                                             uint8_t count) noexcept {
+    dispatch_relic_hook(s, relics, count, RelicHook::AT_TURN_START_POST_DRAW,
                         RelicHookContext{});
 }
 
@@ -141,6 +214,7 @@ void dispatch_relics_on_use_card(CombatState& s, RelicSlot* relics, uint8_t coun
     ctx.card_pool_index = pool_index;
     const CardDef* cd = card_def(static_cast<CardId>(card_id));
     ctx.card_is_attack = (cd != nullptr && cd->type == CardType::ATTACK) ? 1 : 0;
+    ctx.card_type = cd == nullptr ? 0xFFu : static_cast<uint8_t>(cd->type);
     dispatch_relic_hook(s, relics, count, RelicHook::ON_USE_CARD, ctx);
 }
 
@@ -156,6 +230,13 @@ void dispatch_relics_on_exhaust(CombatState& s, RelicSlot* relics, uint8_t count
     RelicHookContext ctx{};
     ctx.card_id = card_id;
     dispatch_relic_hook(s, relics, count, RelicHook::ON_EXHAUST, ctx);
+}
+
+void dispatch_relics_on_card_draw(CombatState& s, RelicSlot* relics,
+                                  uint8_t count, uint16_t card_id) noexcept {
+    RelicHookContext ctx{};
+    ctx.card_id = card_id;
+    dispatch_relic_hook(s, relics, count, RelicHook::ON_CARD_DRAW, ctx);
 }
 
 void dispatch_relics_on_gained_block(CombatState& s, RelicSlot* relics,
@@ -200,6 +281,19 @@ void dispatch_relics_on_shuffle(CombatState& s, RelicSlot* relics,
                         RelicHookContext{});
 }
 
+void dispatch_relics_on_block_broken(CombatState& s, RelicSlot* relics,
+                                     uint8_t count, uint8_t monster) noexcept {
+    RelicHookContext ctx{};
+    ctx.target_actor = monster;
+    dispatch_relic_hook(s, relics, count, RelicHook::ON_BLOCK_BROKEN, ctx);
+}
+
+void dispatch_relics_on_refresh_hand(CombatState& s, RelicSlot* relics,
+                                     uint8_t count) noexcept {
+    dispatch_relic_hook(s, relics, count, RelicHook::ON_REFRESH_HAND,
+                        RelicHookContext{});
+}
+
 void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
     // AbstractRoom.endBattle (AbstractRoom.java:418-420): Meat on the Bone's
     // onTrigger fires BEFORE player.onVictory (so before Burning Blood's heal,
@@ -211,7 +305,7 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
     }
     if (s.player_hp > 0 &&
         static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
-        heal_player(s, 12);
+        heal_player_with_relics(s, 12);
     }
 }
 
@@ -224,14 +318,14 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
         case RelicId::BURNING_BLOOD:
             // BurningBlood.onVictory: heal 6 at combat end (clamped to max HP).
             if (hook == RelicHook::ON_VICTORY) {
-                heal_player(s, 6);
+                heal_player_with_relics(s, 6);
             }
             return;
 
         case RelicId::BLOOD_VIAL:
             // BloodVial.atBattleStart: heal 2 (clamped).
             if (hook == RelicHook::AT_BATTLE_START) {
-                heal_player(s, 2);
+                heal_player_with_relics(s, 2);
             }
             return;
 
@@ -566,6 +660,244 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
             }
             return;
 
+        // --- B3.26 rare relics -------------------------------------------------
+        case RelicId::BIRD_FACED_URN:
+            // BirdFacedUrn.onUseCard: a POWER card queues HealAction(2) at top.
+            // Keep it queued: later addToTop listeners such as Pain must resolve
+            // ahead of this heal, and Magic Flower applies when HEAL executes.
+            if (hook == RelicHook::ON_USE_CARD) {
+                if (ctx.card_type == static_cast<uint8_t>(CardType::POWER)) {
+                    ActionQueueItem heal{};
+                    heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+                    heal.src = kActorPlayer;
+                    heal.tgt = kActorPlayer;
+                    heal.amount = 2;
+                    add_to_top(s, heal);
+                }
+            }
+            return;
+
+        case RelicId::CAPTAINS_WHEEL:
+            // CaptainsWheel: arm at battle start; turn 3 gains 18 direct block
+            // once, then grays out. The opening atTurnStart is turn 1.
+            if (hook == RelicHook::AT_BATTLE_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::AT_TURN_START && slot.counter >= 0) {
+                ++slot.counter;
+                if (slot.counter == 3) {
+                    ActionQueueItem blk{};
+                    blk.opcode = static_cast<uint16_t>(Opcode::BLOCK);
+                    blk.src = kActorPlayer;
+                    blk.tgt = kActorPlayer;
+                    blk.amount = 18;
+                    blk.flags = kBlockNoPowers;
+                    add_to_bottom(s, blk);
+                    slot.counter = -1;
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::DEAD_BRANCH:
+            // DeadBranch.onExhaust constructs the random card immediately (one
+            // cardRandomRng draw), then queues MakeTempCardInHandAction. It does
+            // nothing after the encounter is basically dead.
+            if (hook == RelicHook::ON_EXHAUST && any_monster_alive(s)) {
+                static_assert(kIroncladCombatCardPoolCount > 0);
+                const int32_t pick = random(
+                    s.card_random_rng, kIroncladCombatCardPoolCount - 1);
+                const CardId made = kIroncladCombatCardPool[
+                    static_cast<unsigned>(pick)];
+                ActionQueueItem mk{};
+                mk.opcode = static_cast<uint16_t>(Opcode::MAKE_CARD);
+                mk.src = static_cast<uint8_t>(CardPile::HAND);
+                mk.tgt = kActorPlayer;
+                mk.amount = 1;
+                mk.flags = make_make_card_flags(static_cast<uint16_t>(made));
+                add_to_bottom(s, mk);
+            }
+            return;
+
+        case RelicId::DU_VU_DOLL:
+            // The run-layer deck transaction keeps counter == curse count.
+            if (hook == RelicHook::AT_BATTLE_START && slot.counter > 0) {
+                ActionQueueItem gain{};
+                gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                gain.src = kActorPlayer;
+                gain.tgt = kActorPlayer;
+                gain.amount = slot.counter;
+                gain.flags = make_apply_power_flags(PowerId::STRENGTH);
+                add_to_top(s, gain);  // DuVuDoll.atBattleStart: addToTop
+            }
+            return;
+
+        case RelicId::GAMBLING_CHIP:
+            // GamblingChipAction: arm before the opening draw, then queue an
+            // optional (zero-to-all) hand discard choice after it. The public
+            // relic counter stays -1; `activated` is a private Java boolean.
+            if (hook == RelicHook::AT_BATTLE_START_PRE_DRAW) {
+                s.flags |= kCombatFlagGamblingChipArmed;
+            } else if (hook == RelicHook::AT_TURN_START_POST_DRAW &&
+                       (s.flags & kCombatFlagGamblingChipArmed) != 0u) {
+                ActionQueueItem choose{};
+                choose.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+                choose.src = kActorPlayer;
+                choose.tgt = kActorPlayer;
+                choose.amount = 0;  // selected count; confirmation queues Draw N
+                choose.flags = make_choose_flags(ChoiceKind::DISCARD, false) |
+                               kChoiceOptionalBit;
+                add_to_bottom(s, choose);
+                s.flags &= ~kCombatFlagGamblingChipArmed;
+            }
+            return;
+
+        case RelicId::GIRYA:
+            if (hook == RelicHook::AT_BATTLE_START && slot.counter > 0) {
+                ActionQueueItem gain{};
+                gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                gain.src = kActorPlayer;
+                gain.tgt = kActorPlayer;
+                gain.amount = slot.counter;
+                gain.flags = make_apply_power_flags(PowerId::STRENGTH);
+                add_to_top(s, gain);  // Girya.atBattleStart: addToTop
+            }
+            return;
+
+        case RelicId::INCENSE_BURNER:
+            if (hook == RelicHook::AT_TURN_START) {
+                ++slot.counter;
+                if (slot.counter >= 6) {
+                    slot.counter = 0;
+                    ActionQueueItem intangible{};
+                    intangible.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                    intangible.src = kActorPlayer;
+                    intangible.tgt = kActorPlayer;
+                    intangible.amount = 1;
+                    intangible.flags = make_apply_power_flags(PowerId::INTANGIBLE);
+                    add_to_bottom(s, intangible);
+                }
+            }
+            return;
+
+        case RelicId::POCKETWATCH:
+            // Negative counter is the first-turn latch; nonnegative values are
+            // cards played in the preceding turn. This avoids a schema field.
+            if (hook == RelicHook::AT_BATTLE_START) {
+                slot.counter = -1;
+            } else if (hook == RelicHook::ON_PLAY_CARD) {
+                if (slot.counter >= 0 && slot.counter < INT16_MAX) {
+                    ++slot.counter;
+                }
+            } else if (hook == RelicHook::AT_TURN_START_POST_DRAW) {
+                if (slot.counter < 0) {
+                    slot.counter = 0;  // opening turn: explicitly skipped
+                } else {
+                    if (slot.counter <= 3) {
+                        ActionQueueItem draw{};
+                        draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+                        draw.src = kActorPlayer;
+                        draw.tgt = kActorPlayer;
+                        draw.amount = 3;
+                        add_to_bottom(s, draw);
+                    }
+                    slot.counter = 0;
+                }
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::STONE_CALENDAR:
+            if (hook == RelicHook::AT_BATTLE_START) {
+                slot.counter = 0;
+            } else if (hook == RelicHook::AT_TURN_START && slot.counter >= 0) {
+                ++slot.counter;
+            } else if (hook == RelicHook::ON_PLAYER_END_TURN &&
+                       slot.counter == 7) {
+                ActionQueueItem dmg{};
+                dmg.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+                dmg.src = kActorPlayer;
+                dmg.tgt = kActorAllEnemies;
+                dmg.amount = 52;
+                dmg.flags = make_damage_flags(DamageType::THORNS);
+                add_to_bottom(s, dmg);
+            } else if (hook == RelicHook::ON_VICTORY) {
+                slot.counter = -1;
+            }
+            return;
+
+        case RelicId::UNCEASING_TOP:
+            // Java's canDraw/isActive fields are private booleans; its public
+            // counter remains -1. The equivalent live-turn predicate is fully
+            // derivable from combat state at the true idle boundary.
+            if (hook == RelicHook::ON_REFRESH_HAND && s.turn > 0 &&
+                       s.turn_has_ended == 0 &&
+                       s.hand_count == 0 &&
+                       (s.draw_count > 0 || s.discard_count > 0) &&
+                       !player_has_power(s, PowerId::NO_DRAW)) {
+                ActionQueueItem draw{};
+                draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+                draw.src = kActorPlayer;
+                draw.tgt = kActorPlayer;
+                draw.amount = 1;
+                add_to_bottom(s, draw);
+            }
+            return;
+
+        // --- B3.26 shop relics -------------------------------------------------
+        case RelicId::MEDICAL_KIT:
+            if (hook == RelicHook::ON_USE_CARD) {
+                const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+                if (cd != nullptr && cd->type == CardType::STATUS &&
+                    ctx.card_pool_index < kCardPoolCap) {
+                    s.card_pool[ctx.card_pool_index].flags |=
+                        card_flag_bit(CardFlag::EXHAUST);
+                }
+            }
+            return;
+
+        case RelicId::ORANGE_PELLETS:
+            // The Java relic uses three private static booleans; preserve its
+            // oracle-visible public counter (-1) and store them in reserved
+            // combat flags. The third type queues RemoveDebuffsAction.
+            if (hook == RelicHook::AT_TURN_START) {
+                s.flags &= ~kCombatFlagOrangePelletsMask;
+            } else if (hook == RelicHook::ON_USE_CARD) {
+                const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+                if (cd != nullptr && cd->type == CardType::ATTACK) {
+                    s.flags |= kCombatFlagOrangePelletsAttack;
+                } else if (cd != nullptr && cd->type == CardType::SKILL) {
+                    s.flags |= kCombatFlagOrangePelletsSkill;
+                } else if (cd != nullptr && cd->type == CardType::POWER) {
+                    s.flags |= kCombatFlagOrangePelletsPower;
+                }
+                if ((s.flags & kCombatFlagOrangePelletsMask) ==
+                    kCombatFlagOrangePelletsMask) {
+                    s.flags &= ~kCombatFlagOrangePelletsMask;
+                    ActionQueueItem remove{};
+                    remove.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+                    remove.src = kActorPlayer;
+                    remove.tgt = kActorPlayer;
+                    remove.flags = make_apply_power_flags(PowerId::NONE);
+                    add_to_bottom(s, remove);
+                }
+            }
+            return;
+
+        case RelicId::SLING_OF_COURAGE:
+            if (hook == RelicHook::AT_BATTLE_START &&
+                (s.flags & kCombatFlagElite) != 0u) {
+                ActionQueueItem gain{};
+                gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+                gain.src = kActorPlayer;
+                gain.tgt = kActorPlayer;
+                gain.amount = 2;
+                gain.flags = make_apply_power_flags(PowerId::STRENGTH);
+                add_to_top(s, gain);
+            }
+            return;
+
         // Native relics whose combat body is DEFERRED (a cross-domain dependency
         // not yet available). Each is a documented no-op today; the relic still
         // dispatches (row + hook registered) so the accounting/wiring is in place.
@@ -592,6 +924,7 @@ void dispatch_native_relic_hook(CombatState& s, RelicHook hook, RelicId relic_id
         case RelicId::TOY_ORNITHOPTER:
         case RelicId::MUMMIFIED_HAND:
         case RelicId::PANTOGRAPH:
+        case RelicId::TOOLBOX:
         default:
             return;  // an unrecognized / deferred native relic is a safe no-op
     }

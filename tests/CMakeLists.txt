@@ -456,6 +456,19 @@ sts_enable_sanitizers(relic_hooks_test)
 
 gtest_discover_tests(relic_hooks_test)
 
+# B3.26 rare + shop relics: source-complete 28/17 roster, generated pool order,
+# combat hooks/counters, damage and ApplyPower pipeline sites, Ice Cream energy
+# carry, shop-card interactions, and explicit cross-domain deferred boundaries.
+add_executable(relic_rares_shop_test
+    relic_rares_shop_test.cpp
+)
+
+target_link_libraries(relic_rares_shop_test PRIVATE sts_engine GTest::gtest_main)
+sts_set_warnings(relic_rares_shop_test)
+sts_enable_sanitizers(relic_rares_shop_test)
+
+gtest_discover_tests(relic_rares_shop_test)
+
 # B4.6: five relic-pool JDK shuffles, front/end pop (trap 15), tier gate,
 # canSpawn/fallback behavior, and RunState acquisition/on-pickup effects.
 add_executable(relic_pools_test

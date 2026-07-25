@@ -181,6 +181,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             const uint8_t excluded = choice_excluded_index(front);
             out.choice_pending = true;
             out.choice_from_discard = choice_source_is_discard(kind);
+            out.choice_can_confirm = choose_is_optional(front.flags);
             out.can_end_turn = false;
             // can_choose[i] over the kind's SOURCE pile: hand slots for the hand
             // kinds, discard slots for discard-to-draw-top (Headbutt). For a large
@@ -197,6 +198,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
 
     out.choice_pending = false;
     out.choice_from_discard = false;
+    out.choice_can_confirm = false;
 
     // Clash (canUse): playable only when EVERY card in hand is an Attack
     // (Clash.java:184-194). Computed once and applied to any hand card whose
@@ -246,6 +248,9 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
                 const CardDef* d = card_def(static_cast<CardId>(c.card_id));
                 if (d != nullptr && d->type == CardType::CURSE &&
                     player_has_relic(state, RelicId::BLUE_CANDLE)) {
+                    playable = state.player_energy >= c.cost_now;
+                } else if (d != nullptr && d->type == CardType::STATUS &&
+                           player_has_relic(state, RelicId::MEDICAL_KIT)) {
                     playable = state.player_energy >= c.cost_now;
                 }
             }
@@ -343,6 +348,22 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 }
                 const ChoiceKind kind = choose_kind_from_flags(front.flags);
                 const uint8_t slot = action_arg0(a);
+                if (slot == kChoiceConfirmSlot &&
+                    choose_is_optional(front.flags)) {
+                    const int32_t draw_count = front.amount;
+                    ActionQueueItem consumed{};
+                    (void)pop_action_front(s, consumed);
+                    if (draw_count > 0) {
+                        ActionQueueItem draw{};
+                        draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+                        draw.src = kActorPlayer;
+                        draw.tgt = kActorPlayer;
+                        draw.amount = draw_count;
+                        add_to_bottom(s, draw);
+                    }
+                    pump(s, dispatch_monster_turn);
+                    break;
+                }
                 // arg0 indexes the kind's SOURCE pile (hand, or discard for
                 // discard-to-draw-top). choice_slot_eligible checks the bound and
                 // the discard source-card exclusion.
@@ -360,7 +381,11 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
                 // One card selected: decrement the remaining count. When it hits 0
                 // (or no eligible cards remain), the next pump pops the now-satisfied
                 // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.
-                front.amount -= 1;
+                if (choose_is_optional(front.flags)) {
+                    front.amount += 1;  // number discarded; drawn on confirmation
+                } else {
+                    front.amount -= 1;
+                }
                 pump(s, dispatch_monster_turn);
                 break;
             }

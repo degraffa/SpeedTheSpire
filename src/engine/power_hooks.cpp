@@ -520,7 +520,9 @@ void dispatch_native_hook(CombatState& s, Hook hook, PowerId power_id,
                 hp = &s.monsters[ctx.owner].hp;
                 max_hp = s.monsters[ctx.owner].max_hp;
             }
-            if (hp != nullptr && *hp > 0) {
+            if (ctx.owner == kActorPlayer && hp != nullptr && *hp > 0) {
+                heal_player_with_relics(s, ctx.power_amount);
+            } else if (hp != nullptr && *hp > 0) {
                 int32_t v = static_cast<int32_t>(*hp) + ctx.power_amount;
                 if (v > max_hp) {
                     v = max_hp;

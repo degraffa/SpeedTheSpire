@@ -6,6 +6,7 @@
 #include <span>
 
 #include "sts/engine/cards.hpp"
+#include "sts/engine/run_deck.hpp"  // refresh_du_vu_doll_counter
 #include "sts/engine/rng_jdk.hpp"
 
 namespace sts::engine {
@@ -132,6 +133,14 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     ctx.deck_has_nonbasic_attack = false;
     ctx.deck_has_nonbasic_skill = false;
     ctx.deck_has_power = false;
+    ctx.campfire_relic_count = 0;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        const RelicId id = static_cast<RelicId>(rs.relics[i].relic_id);
+        if (id == RelicId::GIRYA || id == RelicId::PEACE_PIPE ||
+            id == RelicId::SHOVEL) {
+            ++ctx.campfire_relic_count;
+        }
+    }
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         const CardId cid = static_cast<CardId>(rs.master_deck[i].card_id);
         if (cid == CardId::STRIKE || cid == CardId::DEFEND ||
@@ -163,6 +172,17 @@ bool relic_can_spawn(RelicId id, RelicSpawnContext ctx) noexcept {
             return ctx.deck_has_power;
         default:
             break;
+    }
+    // Endless bypasses these relics' floor limits, not their independent room
+    // or owned-campfire-relic predicates.
+    if ((id == RelicId::MAW_BANK || id == RelicId::SMILING_MASK ||
+         id == RelicId::THE_COURIER || id == RelicId::OLD_COIN) &&
+        ctx.in_shop) {
+        return false;
+    }
+    if ((id == RelicId::GIRYA || id == RelicId::PEACE_PIPE ||
+         id == RelicId::SHOVEL) && ctx.campfire_relic_count >= 2) {
+        return false;
     }
     if (ctx.endless) {
         return true;
@@ -203,6 +223,16 @@ bool relic_can_spawn(RelicId id, RelicSpawnContext ctx) noexcept {
         case RelicId::MATRYOSHKA:
             // Matryoshka.canSpawn (Matryoshka.java:59-61): floorNum <= 40.
             return ctx.floor <= 40;
+        case RelicId::OLD_COIN:
+            return ctx.floor <= 48 && !ctx.in_shop;
+        case RelicId::PRAYER_WHEEL:
+            return ctx.floor <= 48;
+        case RelicId::WING_BOOTS:
+            return ctx.floor <= 40;
+        case RelicId::GIRYA:
+        case RelicId::PEACE_PIPE:
+        case RelicId::SHOVEL:
+            return ctx.floor < 48;
         default:
             return true;
     }
@@ -307,6 +337,20 @@ RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
             // AND +10 current (increaseMaxHp heals the gained amount).
             rs.max_hp = static_cast<int16_t>(rs.max_hp + 10);
             rs.hp = static_cast<int16_t>(rs.hp + 10);
+            break;
+        case RelicId::MANGO:
+            rs.max_hp = static_cast<int16_t>(rs.max_hp + 14);
+            rs.hp = static_cast<int16_t>(rs.hp + 14);
+            break;
+        case RelicId::OLD_COIN:
+            rs.gold += 300;
+            break;
+        case RelicId::LEES_WAFFLE:
+            rs.max_hp = static_cast<int16_t>(rs.max_hp + 7);
+            rs.hp = rs.max_hp;
+            break;
+        case RelicId::DU_VU_DOLL:
+            refresh_du_vu_doll_counter(rs);
             break;
         case RelicId::POTION_BELT:
             rs.potion_slots = static_cast<uint8_t>(

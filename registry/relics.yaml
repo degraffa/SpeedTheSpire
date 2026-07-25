@@ -655,3 +655,418 @@
   pool_order: 8
   initial_counter: 2
   provenance: "Matryoshka.onChestOpen (Matryoshka.java:30-47) -- the next 2 non-boss chests contain an extra relic (counter 2 -> 0; relicRng.randomBoolean(0.75) picks COMMON vs UNCOMMON for the extra reward; counter -2 == used up). A run-layer (treasure/chest) hook, B4.7-owner; constructor counter=2 (Matryoshka.java:21). canSpawn floor<=40 (:59-61)."
+
+# --- Rare (Ironclad-obtainable, B3.26) -----------------------------------------
+# 25 shared add() rows + Champion Belt, Charon's Ashes, and Magic Flower from
+# addRed(). Captain's Wheel is source-enumerated though omitted from task prose.
+# pool_order 0..27 was inverted from three live relicRng/JDK-shuffle captures.
+
+- id: 66
+  name: BIRD_FACED_URN
+  game_id: "Bird Faced Urn"
+  tier: RARE
+  pool_order: 2
+  native: true
+  hooks:
+    on_use_card: []
+  provenance: "BirdFacedUrn.onUseCard (BirdFacedUrn.java:35-42) -- POWER played: addToTop HealAction(player,2); native type guard + Magic Flower-aware heal."
+
+- id: 67
+  name: CALIPERS
+  game_id: "Calipers"
+  tier: RARE
+  pool_order: 11
+  provenance: "Calipers marker (Calipers.java whole file), read by GameActionManager start-of-turn block decay (:353-359): lose 15 Block instead of all Block; action_queue.cpp."
+
+- id: 68
+  name: CAPTAINS_WHEEL
+  game_id: "CaptainsWheel"
+  tier: RARE
+  pool_order: 22
+  native: true
+  hooks:
+    at_battle_start: []
+    at_turn_start: []
+    on_victory: []
+  provenance: "CaptainsWheel.atBattleStart/atTurnStart/onVictory (CaptainsWheel.java:31-58) -- arm at 0; turn 3 addToBot 18 Block then disarm; victory reset."
+
+- id: 69
+  name: CHAMPION_BELT
+  game_id: "Champion Belt"
+  tier: RARE
+  pool_order: 27
+  provenance: "ApplyPowerAction.update (:96-137) + ChampionsBelt.onTrigger (ChampionsBelt.java:31-35) -- after source-power hooks, player-sourced Vulnerable against a live non-Artifact monster addToBot Weak 1; op_apply_power."
+
+- id: 70
+  name: CHARONS_ASHES
+  game_id: "Charon's Ashes"
+  tier: RARE
+  pool_order: 26
+  hooks:
+    on_exhaust:
+      - {op: DAMAGE, target: ALL_ENEMY, amount: 3, damage_type: THORNS}
+  provenance: "CharonsAshes.onExhaust (CharonsAshes.java:36-41) -- addToTop DamageAllEnemiesAction 3 THORNS whenever a card exhausts."
+
+- id: 71
+  name: DEAD_BRANCH
+  game_id: "Dead Branch"
+  tier: RARE
+  pool_order: 15
+  native: true
+  hooks:
+    on_exhaust: []
+  provenance: "DeadBranch.onExhaust (DeadBranch.java:30-37) -- if monsters remain, ONE cardRandomRng draw over returnTrulyRandomCardInCombat and add a base copy to hand; generated all-red combat pool."
+
+- id: 72
+  name: DU_VU_DOLL
+  game_id: "Du-Vu Doll"
+  tier: RARE
+  pool_order: 16
+  initial_counter: 0
+  native: true
+  hooks:
+    at_battle_start: []
+  provenance: "DuVuDoll.onEquip/onMasterDeckChange/atBattleStart (DuVuDoll.java:39-83) -- counter is master-deck CURSE count; battle start addToTop applies that much Strength."
+
+- id: 73
+  name: FOSSILIZED_HELIX
+  game_id: "FossilizedHelix"
+  tier: RARE
+  pool_order: 23
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 1, power: BUFFER}
+  provenance: "FossilizedHelix.atBattleStart (FossilizedHelix.java:32-38) -- addToBot BufferPower 1; Buffer cancellation is in interp.cpp."
+
+- id: 74
+  name: GAMBLING_CHIP
+  game_id: "Gambling Chip"
+  tier: RARE
+  pool_order: 20
+  native: true
+  hooks:
+    at_battle_start_pre_draw: []
+    at_turn_start_post_draw: []
+  provenance: "GamblingChip.java:33-48 + GamblingChipAction whole file -- private activated flag arms before opening draw; optional CHOOSE discards zero-to-all cards and confirmation draws the same count. Public counter remains -1."
+
+- id: 75
+  name: GINGER
+  game_id: "Ginger"
+  tier: RARE
+  pool_order: 0
+  provenance: "ApplyPowerAction.update (ApplyPowerAction.java:119-124) -- Ginger rejects player Weak before Artifact; implemented in op_apply_power."
+
+- id: 76
+  name: GIRYA
+  game_id: "Girya"
+  tier: RARE
+  pool_order: 14
+  initial_counter: 0
+  native: true
+  hooks:
+    at_battle_start: []
+  provenance: "Girya.atBattleStart/canSpawn/addCampfireOption (Girya.java:35-67) -- addToTop Strength equal to lift counter; outside Endless floor<48 and always fewer than two campfire relics. Lift is B4.9-owned."
+
+- id: 77
+  name: ICE_CREAM
+  game_id: "Ice Cream"
+  tier: RARE
+  pool_order: 10
+  provenance: "IceCream.java whole file marker; EnergyManager.recharge (EnergyManager.java:53-67) adds base energy to retained energy (cap 999) instead of setting to base; action_queue.cpp."
+
+- id: 78
+  name: INCENSE_BURNER
+  game_id: "Incense Burner"
+  tier: RARE
+  pool_order: 19
+  initial_counter: 0
+  native: true
+  hooks:
+    at_turn_start: []
+  provenance: "IncenseBurner.onEquip/atTurnStart (IncenseBurner.java:34-47) -- counter 0; every sixth turn reset and addToBot IntangiblePlayerPower 1."
+
+- id: 79
+  name: LIZARD_TAIL
+  game_id: "Lizard Tail"
+  tier: RARE
+  pool_order: 12
+  provenance: "AbstractPlayer.damage (:1483-1498) + LizardTail.onTrigger (:34-43) -- once at counter -1, lethal damage heals maxHP/2 (min 1, Magic Flower-aware) and sets -2."
+
+- id: 80
+  name: MAGIC_FLOWER
+  game_id: "Magic Flower"
+  tier: RARE
+  pool_order: 25
+  provenance: "MagicFlower.onPlayerHeal (MagicFlower.java:31-37) -- in combat MathUtils.round(healAmount*1.5f); centralized combat-heal helper."
+
+- id: 81
+  name: MANGO
+  game_id: "Mango"
+  tier: RARE
+  pool_order: 18
+  provenance: "Mango.onEquip (Mango.java:34-36) -- increaseMaxHp(14,true): +14 max and current HP; acquire_relic."
+
+- id: 82
+  name: OLD_COIN
+  game_id: "Old Coin"
+  tier: RARE
+  pool_order: 1
+  provenance: "OldCoin.onEquip/canSpawn (OldCoin.java:35-44) -- +300 gold; outside Endless floor<=48 and not in ShopRoom; acquire_relic/relic_can_spawn."
+
+- id: 83
+  name: PEACE_PIPE
+  game_id: "Peace Pipe"
+  tier: RARE
+  pool_order: 21
+  provenance: "PeacePipe.canSpawn/addCampfireOption (PeacePipe.java:35-55) -- floor<48 and fewer than two Girya/Peace Pipe/Shovel; spawn live, Toke B4.9-owned."
+
+- id: 84
+  name: POCKETWATCH
+  game_id: "Pocketwatch"
+  tier: RARE
+  pool_order: 17
+  native: true
+  hooks:
+    at_battle_start: []
+    at_turn_start_post_draw: []
+    on_play_card: []
+    on_victory: []
+  provenance: "Pocketwatch.atBattleStart/atTurnStartPostDraw/onPlayCard/onVictory (Pocketwatch.java:35-65) -- skip opening turn, then draw 3 when <=3 cards were played last turn; sign encodes firstTurn."
+
+- id: 85
+  name: PRAYER_WHEEL
+  game_id: "Prayer Wheel"
+  tier: RARE
+  pool_order: 13
+  provenance: "PrayerWheel.canSpawn (PrayerWheel.java:36-38) -- Endless or floor<=48; B4.5 Combat rewards owns the extra normal-combat card reward."
+
+- id: 86
+  name: SHOVEL
+  game_id: "Shovel"
+  tier: RARE
+  pool_order: 6
+  provenance: "Shovel.canSpawn/addCampfireOption (Shovel.java:34-53) -- outside Endless floor<48 and always fewer than two campfire relics; spawn live, B4.9 Campfire owns Dig."
+
+- id: 87
+  name: STONE_CALENDAR
+  game_id: "StoneCalendar"
+  tier: RARE
+  pool_order: 5
+  native: true
+  hooks:
+    at_battle_start: []
+    at_turn_start: []
+    on_player_end_turn: []
+    on_victory: []
+  provenance: "StoneCalendar.atBattleStart/atTurnStart/onPlayerEndTurn/onVictory (StoneCalendar.java:38-67) -- on end of turn 7 addToBot 52 THORNS damage to all enemies, once."
+
+- id: 88
+  name: THREAD_AND_NEEDLE
+  game_id: "Thread and Needle"
+  tier: RARE
+  pool_order: 8
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 4, power: PLATED_ARMOR}
+  provenance: "ThreadAndNeedle.atBattleStart (ThreadAndNeedle.java:32-36) -- addToTop PlatedArmorPower 4."
+
+- id: 89
+  name: TORII
+  game_id: "Torii"
+  tier: RARE
+  pool_order: 4
+  provenance: "Torii.onAttacked (Torii.java:32-39) -- after Block, NORMAL non-THORNS/non-HP_LOSS damage 2..5 becomes 1; player damage pipeline."
+
+- id: 90
+  name: TUNGSTEN_ROD
+  game_id: "TungstenRod"
+  tier: RARE
+  pool_order: 24
+  provenance: "TungstenRod.onLoseHpLast (TungstenRod.java:29-35) -- final positive HP loss reduced by 1, after Buffer/Torii; DAMAGE and LOSE_HP sites."
+
+- id: 91
+  name: TURNIP
+  game_id: "Turnip"
+  tier: RARE
+  pool_order: 9
+  provenance: "ApplyPowerAction.update (ApplyPowerAction.java:125-130) -- Turnip rejects player Frail before Artifact; op_apply_power."
+
+- id: 92
+  name: UNCEASING_TOP
+  game_id: "Unceasing Top"
+  tier: RARE
+  pool_order: 3
+  native: true
+  hooks:
+    at_pre_battle: []
+    at_turn_start: []
+    on_refresh_hand: []
+    on_victory: []
+  provenance: "UnceasingTop.atPreBattle/atTurnStart/onRefreshHand (UnceasingTop.java:33-55) -- when actions and hand are empty in a live turn, drawable cards and no No Draw queue Draw 1; pump idle seam."
+
+- id: 93
+  name: WING_BOOTS
+  game_id: "WingedGreaves"
+  tier: RARE
+  pool_order: 7
+  initial_counter: 3
+  provenance: "WingBoots constructor/canSpawn (WingBoots.java:18-43) -- 3 path-jump charges; Endless or floor<=40. B4.4 Floor transitions owns map-jump consumption."
+
+# --- Shop (Ironclad-obtainable, B3.26) -----------------------------------------
+# 16 shared SHOP rows + Ironclad-only Brimstone; off-color Twisted Funnel,
+# Runic Capacitor, and Melange excluded. pool_order 0..16 comes from the same
+# three live oracle inversions as the rare pool.
+
+- id: 94
+  name: THE_ABACUS
+  game_id: "TheAbacus"
+  tier: SHOP
+  pool_order: 11
+  hooks:
+    on_shuffle:
+      - {op: BLOCK, target: SELF, amount: 6}
+  provenance: "Abacus.onShuffle (Abacus.java:32-37) -- addToBot direct GainBlockAction(player,6)."
+
+- id: 95
+  name: BRIMSTONE
+  game_id: "Brimstone"
+  tier: SHOP
+  pool_order: 16
+  hooks:
+    at_turn_start:
+      - {op: APPLY_POWER, target: ALL_ENEMY, amount: 1, power: STRENGTH}
+      - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+  provenance: "Brimstone.atTurnStart (Brimstone.java:33-40) -- addToTop per-monster Strength 1, then addToTop player Strength 2; player resolves first."
+
+- id: 96
+  name: CAULDRON
+  game_id: "Cauldron"
+  tier: SHOP
+  pool_order: 13
+  provenance: "Cauldron.onEquip (Cauldron.java:31-48) -- B4.8 Shop owns acquisition and its five-potion choice, reusing B4.5 reward-screen choice mechanics. Row and pool live."
+
+- id: 97
+  name: CHEMICAL_X
+  game_id: "Chemical X"
+  tier: SHOP
+  pool_order: 3
+  provenance: "WhirlwindAction.update (WhirlwindAction.java:42-62) and SkewerAction.update (:38-54) -- X-cost effect uses energyOnUse+2 while spending current energy; card_play.cpp."
+
+- id: 98
+  name: CLOCKWORK_SOUVENIR
+  game_id: "ClockworkSouvenir"
+  tier: SHOP
+  pool_order: 9
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 1, power: ARTIFACT}
+  provenance: "ClockworkSouvenir.atBattleStart (ClockworkSouvenir.java:30-34) -- addToTop ArtifactPower 1."
+
+- id: 99
+  name: DOLLYS_MIRROR
+  game_id: "DollysMirror"
+  tier: SHOP
+  pool_order: 6
+  provenance: "DollysMirror.onEquip/update (DollysMirror.java:35-67) -- B4.8 Shop owns acquisition UI: choose one master-deck card and obtain a stat-equivalent unbottled copy."
+
+- id: 100
+  name: FROZEN_EYE
+  game_id: "Frozen Eye"
+  tier: SHOP
+  pool_order: 10
+  provenance: "FrozenEye.java whole file -- observation/UI marker permitting ordered draw-pile inspection; hidden state is already ordered, so no combat mutation."
+
+- id: 101
+  name: HAND_DRILL
+  game_id: "HandDrill"
+  tier: SHOP
+  pool_order: 1
+  hooks:
+    on_block_broken:
+      - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
+  provenance: "AbstractCreature.brokeBlock/decrementBlock (:159-183) + HandDrill.onBlockBroken (HandDrill.java:31-35) -- breaking monster Block queues Vulnerable 2."
+
+- id: 102
+  name: MEDICAL_KIT
+  game_id: "Medical Kit"
+  tier: SHOP
+  pool_order: 12
+  native: true
+  hooks:
+    on_use_card: []
+  provenance: "AbstractCard.canUse (:914-924) + MedicalKit.onUseCard (MedicalKit.java:37-44) -- STATUS cards become playable and exhaust after use; legal_actions + native redirect."
+
+- id: 103
+  name: MEMBERSHIP_CARD
+  game_id: "Membership Card"
+  tier: SHOP
+  pool_order: 15
+  provenance: "MembershipCard.java:17-42 -- ShopScreen price multiplier 0.5; B4.8 Shop owns price calculation. Row/pool live."
+
+- id: 104
+  name: ORANGE_PELLETS
+  game_id: "OrangePellets"
+  tier: SHOP
+  pool_order: 7
+  native: true
+  hooks:
+    at_turn_start: []
+    on_use_card: []
+  provenance: "OrangePellets.atTurnStart/onUseCard (OrangePellets.java:36-61) + RemoveDebuffsAction whole file -- three private booleans track attack+skill+power and queue removal of every player DEBUFF, then reset; public counter stays -1."
+
+- id: 105
+  name: ORRERY
+  game_id: "Orrery"
+  tier: SHOP
+  pool_order: 5
+  provenance: "Orrery.onEquip (Orrery.java:29-37) -- B4.8 Shop owns acquisition and opens four choices using B4.5 Combat rewards card-reward assembly. Row/pool live."
+
+- id: 106
+  name: PRISMATIC_SHARD
+  game_id: "PrismaticShard"
+  tier: SHOP
+  pool_order: 8
+  provenance: "PrismaticShard.onEquip (PrismaticShard.java:36-41) + reward-pool marker -- B4.5 Combat rewards owns cross-color reward generation; the represented S1 combat state has no orb-capacity consumer."
+
+- id: 107
+  name: SLING_OF_COURAGE
+  game_id: "Sling"
+  tier: SHOP
+  pool_order: 0
+  native: true
+  hooks:
+    at_battle_start: []
+  provenance: "Sling.atBattleStart (Sling.java:31-38) -- elite-trigger room addToTop Strength 2; run combat carries elite context in an append-only flag."
+
+- id: 108
+  name: STRANGE_SPOON
+  game_id: "Strange Spoon"
+  tier: SHOP
+  pool_order: 14
+  provenance: "UseCardAction.update (UseCardAction.java:109-130) -- played non-POWER card that would exhaust consumes one cardRandomRng.randomBoolean; true sends it to discard."
+
+- id: 109
+  name: TOOLBOX
+  game_id: "Toolbox"
+  tier: SHOP
+  pool_order: 2
+  native: true
+  hooks:
+    at_battle_start_pre_draw: []
+  provenance: "Toolbox.atBattleStartPreDraw (Toolbox.java:30-34) -- choose one of three random colorless cards before opening draw. Hook timing is registered; B3.10/B3.11 own the missing colorless rows and B4.5 owns choose-one-of-three reward-style screen mechanics."
+
+- id: 110
+  name: LEES_WAFFLE
+  game_id: "Lee's Waffle"
+  tier: SHOP
+  pool_order: 4
+  provenance: "Waffle.onEquip (Waffle.java:31-34) -- increaseMaxHp(7,false), then heal to full; acquire_relic."
+
+# Event-special dependency explicitly assigned to B3.26 by the damage-pipeline
+# ledger: it is not a rare/shop pool member, but its Vulnerable branch must land
+# with the relic batch that owns Vulnerable receive modifiers.
+- id: 111
+  name: ODD_MUSHROOM
+  game_id: "Odd Mushroom"
+  tier: SPECIAL
+  provenance: "VulnerablePower.atDamageReceive (VulnerablePower.java:64-66) -- while the player owns Odd Mushroom, player-side Vulnerable multiplies NORMAL damage by 1.25 instead of 1.5; interp.cpp. Event acquisition remains B3.27/B4.11-owned."

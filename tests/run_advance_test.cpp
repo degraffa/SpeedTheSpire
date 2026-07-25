@@ -204,14 +204,14 @@ TEST(RunBegin, RelicRngConsumesFivePoolShuffleDraws) {
     for (int i = 0; i < kRelicTierCount; ++i) (void)random_long(expect);
     EXPECT_EQ(rc.run.relic_rng.counter, kRelicTierCount);  // exactly 5
     EXPECT_TRUE(streams_equal(rc.run.relic_rng, expect));
-    // B4.6 populated the complete common pool and B3.25 the uncommon pool;
-    // B3.26/B3.27 own rare/shop/boss. Empty tiers still consumed their shuffle
-    // seed above (all five draws are unconditional).
+    // B4.6 populated the complete common pool, B3.25 the uncommon pool, and
+    // B3.26 the rare/shop pools. The still-empty boss tier also consumed its
+    // shuffle seed above (all five draws are unconditional).
     EXPECT_EQ(rc.run.relic_pool_count[0], 33);
     EXPECT_EQ(rc.run.relic_pool_count[1], 30);  // B3.25 uncommons
-    for (int t = 2; t < kRelicTierCount; ++t) {
-        EXPECT_EQ(rc.run.relic_pool_count[t], 0);
-    }
+    EXPECT_EQ(rc.run.relic_pool_count[2], 28);  // B3.26 rares
+    EXPECT_EQ(rc.run.relic_pool_count[3], 17);  // B3.26 shop
+    EXPECT_EQ(rc.run.relic_pool_count[4], 0);   // B3.27 boss
 }
 
 TEST(RunBegin, MapRngAtEndOfGenerateMapAndMapPopulated) {
@@ -430,6 +430,29 @@ TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     step(rc, make_action(ActionVerb::USE_POTION, 0));
     EXPECT_EQ(rc.run.max_hp, 85);
     EXPECT_EQ(rc.run.hp, 60);  // Fruit Juice +5, then Toy Ornithopter +5.
+}
+
+TEST(RunPotion, CombatFruitJuiceAndToyHealsAreMagicFlowerModified) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.combat.player_hp = 40;
+    rc.combat.player_max_hp = 80;
+    rc.run.hp = 40;
+    rc.run.max_hp = 80;
+    rc.run.relics[1] =
+        RelicSlot{static_cast<uint16_t>(RelicId::MAGIC_FLOWER), -1};
+    rc.run.relics[2] =
+        RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), -1};
+    rc.run.relic_count = 3;
+    rc.combat.relics[1] = rc.run.relics[1];
+    rc.combat.relics[2] = rc.run.relics[2];
+    rc.combat.relic_count = 3;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_EQ(rc.combat.player_max_hp, 85);
+    EXPECT_EQ(rc.run.max_hp, 85);
+    EXPECT_EQ(rc.combat.player_hp, 56)
+        << "Fruit Juice 5->8, then Toy Ornithopter 5->8";
 }
 
 TEST(RunPotion, EntropicBrewUsesLimitedDrawsThenFillsOpenedSlots) {

@@ -160,7 +160,7 @@ TEST(RegistryGen, DuplicateRelicPoolOrderFailsWithClearError) {
     }
     {
         std::ofstream relics(bad_reg / "relics.yaml", std::ios::app);
-        relics << "\n- id: 66\n  name: DUPLICATE_POOL_SLOT\n"
+        relics << "\n- id: 112\n  name: DUPLICATE_POOL_SLOT\n"
                   "  game_id: \"Duplicate Pool Slot\"\n  tier: COMMON\n"
                   "  pool_order: 0\n"
                   "  provenance: \"synthetic duplicate for the negative test\"\n";
@@ -283,7 +283,7 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
 TEST(RegistryGen, RelicTableMatchesRegistry) {
     namespace r = sts::registry;
-    EXPECT_EQ(r::manifest::kRelicsCount, 65u);  // + B3.25's 30 uncommons
+    EXPECT_EQ(r::manifest::kRelicsCount, 111u);  // + rare/shop and Odd Mushroom
 
     // Burning Blood (starter, native on_victory).
     const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
@@ -316,7 +316,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
     EXPECT_EQ(r::relic_def(r::RelicId::RED_SKULL)->pool_order, 32);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->pool_order, -1);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->initial_counter, 1);
-    EXPECT_EQ(r::kRelicDefs.size(), 65u);
+    EXPECT_EQ(r::kRelicDefs.size(), 111u);
 
     // --- B3.25 uncommon rows ------------------------------------------------
     // Mercury Hourglass (data): atTurnStart DAMAGE 3 to ALL enemies, THORNS-typed
@@ -357,24 +357,41 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
     EXPECT_EQ(r::relic_def(r::RelicId::BOTTLED_TORNADO)->pool_order, 0);
     EXPECT_EQ(r::relic_def(r::RelicId::PAPER_PHROG)->pool_order, 29);
     EXPECT_EQ(r::relic_def(r::RelicId::MATRYOSHKA)->initial_counter, 2);
+
+    // --- B3.26 rare/shop rows ----------------------------------------------
+    const r::RelicDef* branch = r::relic_def(r::RelicId::DEAD_BRANCH);
+    ASSERT_NE(branch, nullptr);
+    EXPECT_EQ(branch->tier, r::RelicTier::RARE);
+    EXPECT_TRUE(branch->native);
+    EXPECT_NE(branch->hook_binding(r::RelicHook::ON_EXHAUST), nullptr);
+    const r::RelicDef* drill = r::relic_def(r::RelicId::HAND_DRILL);
+    ASSERT_NE(drill, nullptr);
+    EXPECT_EQ(drill->tier, r::RelicTier::SHOP);
+    const auto* db = drill->hook_binding(r::RelicHook::ON_BLOCK_BROKEN);
+    ASSERT_NE(db, nullptr);
+    ASSERT_EQ(db->step_count, 1);
+    EXPECT_EQ(db->steps[0].target, r::StepTarget::CARD_TARGET);
+    EXPECT_NE(r::relic_def(r::RelicId::UNCEASING_TOP)
+                  ->hook_binding(r::RelicHook::ON_REFRESH_HAND),
+              nullptr);
+    EXPECT_EQ(r::relic_def(r::RelicId::ODD_MUSHROOM)->tier,
+              r::RelicTier::SPECIAL);
 }
 
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 67u);   // B3.6: prior 50 + 17 red uncommon skills
-    EXPECT_EQ(m::kPowersCount, 25u);  // 21 + B3.17 Split (22) + B3.25 Next Turn
-                                      // Block (23) + B3.6 No Draw (24) +
-                                      // Flame Barrier (25)
+    EXPECT_EQ(m::kPowersCount, 27u);  // + B3.26 Buffer / Intangible
     EXPECT_EQ(m::kMonstersCount, 10u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large slimes
-    EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
+    EXPECT_EQ(m::kRelicsCount, 111u); // + Odd Mushroom dependency row
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 220u);  // integrated through B3.6/B3.17/B3.25
+    EXPECT_EQ(m::kTotalCount, 268u);  // integrated through B3.26
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

@@ -26,6 +26,10 @@ static_assert(sts::registry::manifest::kCardsCount == 67);  // B3.6: +17 uncommo
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 static_assert(sts::registry::kIroncladAttackPoolCount == 25);  // B3.6 Infernal Blade pool
+static_assert(sts::registry::kIroncladCombatCardPoolCount == 48);  // Dead Branch
+static_assert(sts::registry::manifest::kPowersCount == 27);
+static_assert(sts::registry::manifest::kRelicsCount == 111);
+static_assert(sts::registry::kRelicHookCount == 18);
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with
 // nothing but the generated headers in scope.
@@ -48,6 +52,9 @@ static_assert(sts::registry::kAnchorRelic.hooks[0].hook ==
               sts::registry::RelicHook::AT_BATTLE_START);
 static_assert(sts::registry::kAnchorRelic.hooks[0].steps[0].amount == 10);
 static_assert(sts::registry::kWhetstoneRelic.hook_count == 0);  // non-combat
+static_assert(sts::registry::kDeadBranchRelic.native);
+static_assert(sts::registry::kHandDrillRelic.hooks[0].hook ==
+              sts::registry::RelicHook::ON_BLOCK_BROKEN);
 
 // Monster table (B2.2): the constexpr tier lookups evaluate at compile time
 // with nothing but the generated headers in scope.

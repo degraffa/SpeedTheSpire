@@ -106,6 +106,10 @@ struct PowerView {
                 player_has_relic(s, RelicId::PAPER_PHROG)) {
                 return dmg * 1.75f;                     // VulnerablePower.java:68
             }
+            if (owner_actor == kActorPlayer &&
+                player_has_relic(s, RelicId::ODD_MUSHROOM)) {
+                return dmg * 1.25f;                     // VulnerablePower.java:65
+            }
             return dmg * 1.5f;                          // VulnerablePower.java:70
         default:
             return dmg;
@@ -137,7 +141,14 @@ struct PowerView {
 [[nodiscard]] float at_damage_final_give(float dmg, PowerSlot /*p*/) noexcept {
     return dmg;
 }
-[[nodiscard]] float at_damage_final_receive(float dmg, PowerSlot /*p*/) noexcept {
+[[nodiscard]] float at_damage_final_receive(float dmg, PowerSlot p) noexcept {
+    // IntangiblePlayerPower.atDamageFinalReceive: NORMAL incoming damage above
+    // one becomes one before decrementBlock. HP_LOSS bypasses compute_damage;
+    // THORNS likewise does not run the NORMAL applyPowers pipeline.
+    if (static_cast<PowerId>(p.power_id) == PowerId::INTANGIBLE &&
+        p.amount > 0 && dmg > 1.0f) {
+        return 1.0f;
+    }
     return dmg;
 }
 
@@ -155,6 +166,34 @@ struct PowerView {
 // --- Opcode bodies ----------------------------------------------------------
 
 void cards_took_player_damage(CombatState& s) noexcept;
+[[nodiscard]] bool actor_has_power(const CombatState& s, uint8_t actor,
+                                   PowerId id) noexcept;
+
+void try_lizard_tail(CombatState& s) noexcept {
+    if (s.player_hp > 0) {
+        return;
+    }
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        RelicSlot& slot = s.relics[i];
+        if (slot.relic_id != static_cast<uint16_t>(RelicId::LIZARD_TAIL) ||
+            slot.counter != -1) {
+            continue;
+        }
+        slot.counter = -2;  // used-up grayscale encoding
+        int amount = s.player_max_hp / 2;
+        if (amount < 1) {
+            amount = 1;
+        }
+        heal_player_with_relics(s, amount);
+        return;
+    }
+}
+
+[[nodiscard]] int tungsten_adjust(const CombatState& s, int amount) noexcept {
+    return amount > 0 && player_has_relic(s, RelicId::TUNGSTEN_ROD)
+               ? amount - 1
+               : amount;
+}
 
 // DAMAGE: compute output via the pipeline, then land it on tgt -- block absorbs
 // first (decrementBlock: block soaks up to its value), remainder hits hp,
@@ -180,15 +219,50 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         return;
     }
     int dmg = out;
+    // AbstractPlayer.damage has a final Intangible guard independent of
+    // DamageInfo.applyPowers, so THORNS and HP_LOSS are capped too.
+    if (tgt == kActorPlayer && dmg > 1 &&
+        actor_has_power(s, kActorPlayer, PowerId::INTANGIBLE)) {
+        dmg = 1;
+    }
     int block = *blk;
-    if (dmg >= block) {
-        dmg -= block;
-        block = 0;
-    } else {
-        block -= dmg;
-        dmg = 0;
+    const int old_block = block;
+    if (type != DamageType::HP_LOSS) {
+        if (dmg >= block) {
+            dmg -= block;
+            block = 0;
+        } else {
+            block -= dmg;
+            dmg = 0;
+        }
     }
     *blk = static_cast<int16_t>(block);
+    // AbstractCreature.decrementBlock -> brokeBlock: Hand Drill fires only when
+    // a monster's positive block is reduced exactly to zero.
+    if (tgt != kActorPlayer && old_block > 0 && block == 0) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_block_broken(s, rv.relics, rv.count, tgt);
+    }
+    // BufferPower.onAttackedToChangeDamage runs after block and before the
+    // victim's onAttacked callbacks. It consumes one stack via a top-queued
+    // ReducePowerAction even though this hit's remaining damage becomes zero.
+    if (tgt == kActorPlayer && dmg > 0) {
+        for (uint8_t i = 0; i < s.player_power_count; ++i) {
+            if (s.player_powers[i].power_id ==
+                    static_cast<uint16_t>(PowerId::BUFFER) &&
+                s.player_powers[i].amount > 0) {
+                ActionQueueItem reduce{};
+                reduce.opcode = static_cast<uint16_t>(Opcode::REDUCE_POWER);
+                reduce.src = kActorPlayer;
+                reduce.tgt = kActorPlayer;
+                reduce.amount = 1;
+                reduce.flags = make_apply_power_flags(PowerId::BUFFER);
+                add_to_top(s, reduce);
+                dmg = 0;
+                break;
+            }
+        }
+    }
     // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire on a
     // NORMAL attack from a DISTINCT attacker -- AFTER decrementBlock and REGARDLESS
     // of whether damage penetrated (Thorns reflects even a fully-blocked hit). A
@@ -197,6 +271,16 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // unless a power binds ON_ATTACKED, so skeleton/relic-free DAMAGE is unchanged.
     if (type == DamageType::NORMAL && src != tgt) {
         dispatch_on_attacked(s, tgt, src, dmg);
+    }
+    // Relic receive modifiers follow the victim power callbacks in acquisition
+    // order. Torii changes only NORMAL damage 2..5 to one; Tungsten Rod is the
+    // final onLoseHpLast modifier for every positive player HP loss.
+    if (tgt == kActorPlayer && type == DamageType::NORMAL &&
+        dmg >= 2 && dmg <= 5 && player_has_relic(s, RelicId::TORII)) {
+        dmg = 1;
+    }
+    if (tgt == kActorPlayer) {
+        dmg = tungsten_adjust(s, dmg);
     }
     const int old_hp = *hp;
     int new_hp = old_hp - dmg;
@@ -214,6 +298,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     dispatch_was_hp_lost(s, tgt, src, hp_lost, static_cast<uint8_t>(type));
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
+        try_lizard_tail(s);
     }
     // Monster death edge -> relics onMonsterDeath (AbstractMonster.die:933-937;
     // B3.25 Gremlin Horn). Fires once, when this hit drops the monster from
@@ -242,35 +327,10 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     if (amount <= 0) {
         return;
     }
-    int16_t* hp = actor_hp(s, tgt);
-    if (hp == nullptr) {
-        return;
-    }
-    const int old_hp = *hp;
-    int new_hp = old_hp - amount;
-    if (new_hp < 0) {
-        new_hp = 0;
-    }
-    *hp = static_cast<int16_t>(new_hp);
-    // source == victim (self), HP_LOSS type (bypasses block; not a THORNS/NORMAL
-    // attack -- so it drives Rupture but not Thorns/Plated Armor's attack guards).
-    const int hp_lost = old_hp - new_hp;
-    dispatch_was_hp_lost(s, tgt, tgt, hp_lost,
-                         static_cast<uint8_t>(DamageType::HP_LOSS));
-    if (tgt == kActorPlayer && hp_lost > 0) {
-        cards_took_player_damage(s);
-    }
-    // A direct HP loss can also kill a monster -> same die() relic dispatch
-    // (AbstractMonster.die:933-937; B3.25), before the override seam as above.
-    if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
-        const RelicView rv = player_relics(s);
-        dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
-    }
-    // LoseHPAction also routes through creature.damage() (LoseHPAction.java:41),
-    // so the monster damage() override seam fires here too (B3.17).
-    if (tgt != kActorPlayer) {
-        on_monster_damaged(s, tgt);
-    }
+    // LoseHPAction routes through creature.damage() with HP_LOSS. Reuse the
+    // receive pipeline so Intangible, Buffer, Tungsten, death, and HP-loss hooks
+    // retain Java ordering while decrementBlock is skipped for this type.
+    op_damage(s, tgt, tgt, amount, 1, DamageType::HP_LOSS);
 }
 
 // Blood for Blood.tookDamage: after each positive in-combat player HP-loss
@@ -388,6 +448,15 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (id == PowerId::NONE) {
         return;
     }
+    const auto target_dead = [&]() noexcept {
+        if (tgt == kActorPlayer) {
+            return s.player_hp <= 0;
+        }
+        return tgt >= s.monster_count || s.monsters[tgt].hp <= 0;
+    };
+    if (target_dead()) {
+        return;  // ApplyPowerAction.update: dead/isEscaping precheck
+    }
     // B3.6 (ApplyPowerAction.update:102-105): applying No Draw to a target that
     // ALREADY has No Draw is a whole-action no-op -- it short-circuits BEFORE the
     // source onApplyPower hooks and the Artifact nullify, and never stacks.
@@ -410,10 +479,33 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     const bool is_debuff =
         (applied_def != nullptr && applied_def->type == PowerType::DEBUFF) ||
         negative_stat_flip;
-    // (1) source-side onApplyPower (fires before the power lands).
+    // ApplyPowerAction.update: source power hooks precede relic interception.
     dispatch_on_apply_power_source(s, src, tgt, static_cast<uint16_t>(id),
                                    is_debuff);
-    // (2) target-side Artifact nullify: a consumed Artifact stack blocks the debuff.
+    // Champion Belt queues Weak with addToBot only if Artifact was absent at
+    // trigger time (ChampionsBelt.onTrigger / ApplyPowerAction.java:111).
+    if (src == kActorPlayer && tgt != kActorPlayer &&
+        id == PowerId::VULNERABLE && amount > 0 &&
+        player_has_relic(s, RelicId::CHAMPION_BELT) &&
+        !actor_has_power(s, tgt, PowerId::ARTIFACT)) {
+        ActionQueueItem weak{};
+        weak.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        weak.src = kActorPlayer;
+        weak.tgt = tgt;
+        weak.amount = 1;
+        weak.flags = make_apply_power_flags(PowerId::WEAK);
+        add_to_bottom(s, weak);
+    }
+    if (target_dead()) {
+        return;  // hooks may have changed target liveness
+    }
+    // Ginger/Turnip reject player Weak/Frail after source hooks, before Artifact.
+    if (tgt == kActorPlayer &&
+        ((id == PowerId::WEAK && player_has_relic(s, RelicId::GINGER)) ||
+         (id == PowerId::FRAIL && player_has_relic(s, RelicId::TURNIP)))) {
+        return;
+    }
+    // Target-side Artifact nullify: a consumed Artifact stack blocks the debuff.
     if (apply_power_blocked_by_artifact(s, tgt, is_debuff)) {
         return;
     }
@@ -670,6 +762,13 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             }
             break;
         }
+        case ChoiceKind::DISCARD: {
+            const CardPoolIndex pi = remove_from_hand(s, slot);
+            if (s.discard_count < kDiscardCap) {
+                s.discard[s.discard_count++] = pi;
+            }
+            break;
+        }
     }
 }
 
@@ -694,6 +793,9 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
 // eligible count is <= the amount to select). Faithful to ExhaustAction /
 // PutOnDeckAction / ArmamentsAction's no-screen branches.
 void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
+    if (choose_is_optional(item.flags)) {
+        return;  // the pump blocks until explicit kChoiceConfirmSlot
+    }
     const ChoiceKind kind = choose_kind_from_flags(item.flags);
     const bool is_random = choose_is_random(item.flags);
     const int need = item.amount;
@@ -807,8 +909,9 @@ void op_play_top_draw(CombatState& s, int exclude) noexcept {
     // free (autoplay does not pay energy). Put it in hand so resolve_card_play's
     // hand->pile move finds it, then queue its play at the front of the cardQueue
     // (NewQueueCardAction -> the normal §5.3 resolve).
-    s.card_pool[pi].flags |= card_flag_bit(CardFlag::EXHAUST);
-    s.card_pool[pi].cost_now = 0;
+    s.card_pool[pi].flags |=
+        card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE) |
+        card_flag_bit(CardFlag::AUTOPLAY);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = pi;
     }
@@ -831,6 +934,34 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
         slots = s.monsters[tgt].powers;
         count = &s.monsters[tgt].power_count;
     } else {
+        return;
+    }
+    // Orange Pellets' RemoveDebuffsAction sentinel. Resolve against the live
+    // power list (rather than snapshotting at card-use time), so debuffs queued
+    // earlier by the triggering card are removed too.
+    if (id == PowerId::NONE && tgt == kActorPlayer) {
+        uint8_t i = 0;
+        while (i < *count) {
+            const PowerId pid = static_cast<PowerId>(slots[i].power_id);
+            const PowerDef* def = power_def(pid);
+            const bool dynamic_stat_debuff =
+                (pid == PowerId::STRENGTH || pid == PowerId::DEXTERITY) &&
+                slots[i].amount <= 0;
+            const bool debuff = dynamic_stat_debuff ||
+                                (def != nullptr && def->type == PowerType::DEBUFF);
+            if (!debuff) {
+                ++i;
+                continue;
+            }
+            if (pid == PowerId::FRAIL) {
+                s.flags &= ~kCombatFlagFrailJustApplied;
+            }
+            for (uint8_t j = static_cast<uint8_t>(i + 1); j < *count; ++j) {
+                slots[j - 1] = slots[j];
+            }
+            --*count;
+            slots[*count] = PowerSlot{};
+        }
         return;
     }
     const uint16_t pid = static_cast<uint16_t>(id);
@@ -1122,6 +1253,9 @@ bool choice_requires_user(const CombatState& s,
     if (static_cast<Opcode>(item.opcode) != Opcode::CHOOSE_CARD) {
         return false;
     }
+    if (choose_is_optional(item.flags)) {
+        return true;  // zero-to-all selection closes only on explicit confirm
+    }
     if (item.amount <= 0 || choose_is_random(item.flags)) {
         return false;  // nothing left to pick / auto-rolled -- never blocks
     }
@@ -1247,6 +1381,9 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                 // Void queues its energy loss before the power onCardDraw fan-out.
                 dispatch_card_on_draw(s, pi);
                 dispatch_on_card_draw(s, pi, s.card_pool[pi].card_id);
+                const RelicView rv = player_relics(s);
+                dispatch_relics_on_card_draw(s, rv.relics, rv.count,
+                                             s.card_pool[pi].card_id);
             }
             return;
         }
@@ -1338,6 +1475,17 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::RANDOM_ATTACK_TO_HAND:
             op_random_attack_to_hand(s);
+            return;
+        case Opcode::FINALIZE_CARD:
+            if (item.amount >= 0 && item.amount < kCardPoolCap) {
+                finalize_exhausting_card_play(
+                    s, static_cast<CardPoolIndex>(item.amount));
+            }
+            return;
+        case Opcode::HEAL:
+            if (item.tgt == kActorPlayer) {
+                heal_player_with_relics(s, item.amount);
+            }
             return;
         case Opcode::DAMAGE_BLOCK:
             // Body Slam: base == the player's CURRENT block (read here at execute

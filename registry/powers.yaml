@@ -282,3 +282,21 @@
     on_attacked: []             # native: reflect `amount` THORNS damage to a distinct NORMAL attacker (addToTop)
     at_start_of_turn: []        # native: RemoveSpecificPowerAction(self) at the player's next turn start
   provenance: "FlameBarrierPower (FlameBarrierPower.java:32-64): onAttacked (:53-59) -- if info.owner != null && type != THORNS && type != HP_LOSS && info.owner != owner: addToTop DamageAction(info.owner, DamageInfo(owner, amount, THORNS)) -- fires AFTER decrementBlock regardless of whether damage penetrated (AbstractPlayer.damage:1425-1426); the THORNS type skips the NORMAL-only power modifiers (a Vulnerable attacker is not amplified). atStartOfTurn (:62-64) -- addToBot RemoveSpecificPowerAction(player, \"Flame Barrier\"), the §5.2 step-6 pre-draw power phase. stackPower additive (:42-50). Native: the on-attacked body targets ctx.source (no StepTarget encodes the attacker) -- the same shape as THORNS (id 16); the removal is queued addToBot at at_start_of_turn. Applied by the Flame Barrier card."
+
+# --- B3.26 rare-relic powers ----------------------------------------------------
+
+- id: 26
+  name: BUFFER
+  game_id: "Buffer"
+  type: BUFF
+  native: true
+  provenance: "BufferPower.onAttackedToChangeDamage (BufferPower.java:40-47) -- after Block, any positive remaining damage queues ReducePower(Buffer,1) at top and becomes 0. Bespoke damage-pipeline site in interp.cpp; stackPower is additive (:27-31)."
+
+- id: 27
+  name: INTANGIBLE
+  game_id: "IntangiblePlayer"
+  type: BUFF
+  hooks:
+    at_end_of_round:
+      - {op: REDUCE_POWER, target: SELF, amount: 1, power: INTANGIBLE}
+  provenance: "IntangiblePlayerPower.atDamageFinalReceive/atEndOfRound (IntangiblePlayerPower.java:36-55) -- incoming damage above 1 becomes 1 before Block; at round end reduce 1/remove at zero. Damage cap is the bespoke player-damage site; duration is a queued REDUCE_POWER hook."

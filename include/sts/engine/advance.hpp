@@ -107,6 +107,11 @@ struct ActionMask {
     bool choice_pending;
     bool can_choose[kHandCap];
 
+    // Optional multi-select (Gambling Chip): CHOOSE(kChoiceConfirmSlot) is legal
+    // even with zero selected cards and closes the screen. False for mandatory
+    // card choices and when no combat choice is open.
+    bool choice_can_confirm;
+
     // --- Discard-source CHOOSE (Stage B B3.3: Headbutt) ---
     // A DISCARD_TO_DRAW_TOP choice selects from the DISCARD pile, not the hand.
     // When `choice_from_discard` is true, the CHOOSE action arg0 is a DISCARD slot

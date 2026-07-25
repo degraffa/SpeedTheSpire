@@ -14,6 +14,7 @@
 #include "sts/engine/cards.hpp"         // CardEffectStep
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
+#include "sts/engine/relic_hooks.hpp"   // heal_player_with_relics (Magic Flower)
 #include "sts/engine/rng_stream.hpp"    // random (potionRng draws)
 #include "sts/engine/types.hpp"         // PotionId
 
@@ -89,11 +90,7 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             const float ratio = static_cast<float>(potency) / 100.0f;
             const int heal = static_cast<int>(
                 static_cast<float>(s.player_max_hp) * ratio);
-            int hp = static_cast<int>(s.player_hp) + heal;
-            if (hp > s.player_max_hp) {
-                hp = s.player_max_hp;
-            }
-            s.player_hp = static_cast<int16_t>(hp);
+            heal_player_with_relics(s, heal);
             break;
         }
         // --- Deferred native bodies (land with their dependency; B3.23 Log) ---

@@ -234,6 +234,11 @@ enum class Opcode : uint16_t {
                               // with cost_now 0 for THIS turn only
                               // (COST_MODIFIED_FOR_TURN) into the hand
                               // (MakeTempCardInHandAction hand-cap spill).
+    // --- Stage B B3.26 additions (append-only from 34) ---------------------
+    FINALIZE_CARD = 34,       // UseCardAction pile decision after card effects;
+                              // amount = played card pool index (Strange Spoon)
+    HEAL = 35,                // queued HealAction; amount is base heal before
+                              // Magic Flower, target is the player
 };
 
 // --- CHOOSE_CARD field encoding (Stage B B3.4; B3.6 extends) -----------------
@@ -266,6 +271,10 @@ enum class ChoiceKind : uint8_t {
     // (DualWieldAction.java:95-97); the PROMPTED resolution also reproduces the
     // hand-order shuffle of the select screen (see apply_choice_selection).
     DUPLICATE = 4,
+    // B3.26 (Gambling Chip): move a selected hand card to discard. The
+    // optional-selection bit lets the player confirm after zero-to-all picks;
+    // confirmation then draws exactly the selected count.
+    DISCARD = 5,
 };
 
 // Does a CHOOSE_CARD of this kind select from the discard pile (vs. the hand)?
@@ -276,6 +285,8 @@ enum class ChoiceKind : uint8_t {
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
 inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;
 inline constexpr uint32_t kChoiceCopiesShift = 4;
+inline constexpr uint32_t kChoiceOptionalBit = 1u << 8;
+inline constexpr uint8_t kChoiceConfirmSlot = UINT8_MAX;
 
 [[nodiscard]] constexpr uint32_t make_choose_flags(ChoiceKind kind, bool random,
                                                    int copies = 1) noexcept {
@@ -290,6 +301,9 @@ inline constexpr uint32_t kChoiceCopiesShift = 4;
 }
 [[nodiscard]] constexpr bool choose_is_random(uint32_t flags) noexcept {
     return (flags & kChoiceRandomBit) != 0u;
+}
+[[nodiscard]] constexpr bool choose_is_optional(uint32_t flags) noexcept {
+    return (flags & kChoiceOptionalBit) != 0u;
 }
 // The DUPLICATE kind's copy count (1-based; bits [4..7] store copies - 1).
 [[nodiscard]] constexpr int choose_copies_from_flags(uint32_t flags) noexcept {

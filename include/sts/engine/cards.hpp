@@ -64,6 +64,10 @@ using sts::registry::kPoolableCurses;
 // pool-order note in gen.py (registry-id order until B4.5 pins library order).
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
+// B3.26: Dead Branch / returnTrulyRandomCardInCombat() pool. Like the attack
+// pool, this is generator-derived from RED common/uncommon/rare non-healing rows.
+using sts::registry::kIroncladCombatCardPoolCount;
+using sts::registry::kIroncladCombatCardPool;
 
 // --- The card table (generated from registry/cards.yaml) ---------------------
 // Each entry mirrors its use()'s addToBot order exactly; provenance is cited
@@ -203,7 +207,11 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::SPOT_WEAKNESS) ==
             static_cast<uint16_t>(Opcode::SPOT_WEAKNESS) &&
         static_cast<uint16_t>(sts::registry::Opcode::RANDOM_ATTACK_TO_HAND) ==
-            static_cast<uint16_t>(Opcode::RANDOM_ATTACK_TO_HAND),
+            static_cast<uint16_t>(Opcode::RANDOM_ATTACK_TO_HAND) &&
+        static_cast<uint16_t>(sts::registry::Opcode::FINALIZE_CARD) ==
+            static_cast<uint16_t>(Opcode::FINALIZE_CARD) &&
+        static_cast<uint16_t>(sts::registry::Opcode::HEAL) ==
+            static_cast<uint16_t>(Opcode::HEAL),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
@@ -222,7 +230,10 @@ static_assert(
         sts::registry::kCardFlagRetain == card_flag_bit(CardFlag::RETAIN) &&
         sts::registry::kCardFlagXcost == card_flag_bit(CardFlag::XCOST) &&
         sts::registry::kCardFlagCostModifiedForTurn ==
-            card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN),
+            card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &&
+        sts::registry::kCardFlagAutoplay == card_flag_bit(CardFlag::AUTOPLAY) &&
+        sts::registry::kCardFlagExhaustOnUseOnce ==
+            card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE),
     "generated kCardFlag* must stay byte-equal to types.hpp's CardFlag "
     "(append-only; mirrored in gen.py CARD_FLAGS)");
 

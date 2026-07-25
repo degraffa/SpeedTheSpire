@@ -41,6 +41,7 @@ struct RelicSpawnContext {
     bool deck_has_nonbasic_attack = false;  // BottledFlame.canSpawn (:93-99)
     bool deck_has_nonbasic_skill = false;   // BottledLightning.canSpawn (:93-99)
     bool deck_has_power = false;            // BottledTornado.canSpawn (:93-95)
+    uint8_t campfire_relic_count = 0;        // Girya/Peace Pipe/Shovel owned
 };
 
 // Fill the deck-content gates above from the run's master deck. "Non-basic" ==

@@ -15,6 +15,26 @@
 
 namespace sts::engine {
 
+// Du-Vu Doll's onMasterDeckChange cache. Recompute from the canonical deck so
+// every add/remove path is robust even if a prior caller constructed RunState
+// manually (the deck cap is tiny, and these transactions are run-layer events).
+inline void refresh_du_vu_doll_counter(RunState& run) noexcept {
+    int16_t curses = 0;
+    for (uint16_t i = 0; i < run.master_deck_count; ++i) {
+        const CardDef* def = card_def(
+            static_cast<CardId>(run.master_deck[i].card_id));
+        if (def != nullptr && def->type == CardType::CURSE) {
+            ++curses;
+        }
+    }
+    for (uint8_t i = 0; i < run.relic_count; ++i) {
+        if (run.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::DU_VU_DOLL)) {
+            run.relics[i].counter = curses;
+        }
+    }
+}
+
 // Append one card to the master deck and run the relics' onObtainCard pass
 // (AbstractCard obtain -> for each player relic r.onObtainCard(card), in
 // acquisition order). Returns false (no mutation) when the deck is full or the
@@ -70,6 +90,7 @@ namespace sts::engine {
                 break;
         }
     }
+    refresh_du_vu_doll_counter(run);
     return true;
 }
 
@@ -100,6 +121,7 @@ namespace sts::engine {
             run.hp = run.max_hp;
         }
     }
+    refresh_du_vu_doll_counter(run);
     return true;
 }
 

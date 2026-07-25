@@ -202,6 +202,7 @@ TEST(CultistPump, RitualStrengthRampsWithSkipFirst) {
     cultist_init(s, 0);
     s.player_hp = 30000;   // survive the ramping Dark Strikes
     s.player_max_hp = 30000;
+    s.turn = 1;            // player is ending round 1, not entering combat
     s.monster_attacks_queued = 1;
     s.turn_has_ended = 0;
     s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);

@@ -89,6 +89,12 @@ bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noe
 // index of the played card.
 void resolve_card_play(CombatState& state, const CardQueueItem& item) noexcept;
 
+// Resolve the delayed UseCardAction destination for a played card that would
+// exhaust. Called by Opcode::FINALIZE_CARD after all earlier card effects; this
+// is where Strange Spoon rolls and where onExhaust listeners fire.
+void finalize_exhausting_card_play(CombatState& state,
+                                   CardPoolIndex pool_index) noexcept;
+
 // --- B3.9 card-level passive triggers ----------------------------------------
 // Status/curse cards whose CardDef.trigger != ON_PLAY run their effect program at
 // a passive hook rather than on play (they are unplayable). Both are no-ops when

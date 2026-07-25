@@ -99,6 +99,11 @@ enum class CardFlag : uint16_t {
     RETAIN     = 1u << 4,
     XCOST      = 1u << 5,
     COST_MODIFIED_FOR_TURN = 1u << 6,
+    // Runtime-only play metadata. AUTOPLAY means the queued play spends no
+    // energy (Havoc/NewQueueCardAction); EXHAUST_ON_USE_ONCE mirrors the
+    // one-shot field without turning a normally non-exhaust card intrinsic.
+    AUTOPLAY = 1u << 7,
+    EXHAUST_ON_USE_ONCE = 1u << 8,
 };
 
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {
