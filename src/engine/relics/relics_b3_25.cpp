@@ -11,6 +11,7 @@
 #include "sts/engine/cards.hpp"         // card_def, CardType (curse/skill checks)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
+#include "sts/engine/rng_stream.hpp"    // random (Mummified Hand's cardRandomRng draw)
 #include "sts/engine/run_state.hpp"     // RelicSlot
 #include "sts/engine/types.hpp"
 
@@ -251,27 +252,116 @@ void relic_native_self_forming_clay(CombatState& s, RelicHook hook,
     }
 }
 
+void relic_native_mummified_hand(CombatState& s, RelicHook hook,
+                                 RelicSlot& /*slot*/,
+                                 const RelicHookContext& ctx) noexcept {
+    // MummifiedHand.onUseCard (MummifiedHand.java:38-72). Playing a POWER card
+    // (:39) discounts one random OTHER hand card to 0 for the turn.
+    //
+    // The Java, line by line:
+    //   :43-49  groupCopy = every hand card with
+    //             cost > 0 && costForTurn > 0 && !freeToPlayOnce
+    //   :50-54  minus every card currently sitting in actionManager.cardQueue
+    //   :56-64  if groupCopy is EMPTY the method falls through with c == null --
+    //           NO cardRandomRng draw happens at all. Getting this wrong
+    //           desynchronises the shared cardRandomRng stream, so the empty
+    //           case returns before the draw below.
+    //   :61     c = groupCopy.get(cardRandomRng.random(0, size - 1))
+    //   :67     c.setCostForTurn(0)
+    if (hook != RelicHook::ON_USE_CARD) {
+        return;
+    }
+    const CardDef* played = card_def(static_cast<CardId>(ctx.card_id));
+    if (played == nullptr || played->type != CardType::POWER) {
+        return;  // MummifiedHand.java:39
+    }
+
+    CardPoolIndex candidates[kHandCap];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < s.hand_count && n < kHandCap; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+
+        // THE PLAYED CARD ITSELF. AbstractPlayer.useCard removes it from the
+        // hand (:1374) BEFORE the UseCardAction it queued at :1371 ever
+        // executes, so the Java's hand.group cannot contain it when this hook
+        // fires. The engine collapses UseCardAction into resolve_card_play and
+        // dispatches onUseCard BEFORE move_card_hand_to_pile (card_play.cpp
+        // step 5), so here the source card IS still in the hand -- exclude it
+        // explicitly. Same limbo/cardInUse correction count_strikes_excluding
+        // (Perfected Strike) and choice_excluded_index (Headbutt) already make.
+        if (pi == ctx.card_pool_index) {
+            continue;
+        }
+
+        // THE cardQueue EXCLUSION (:50-54). The brief's prior audit called this
+        // analogue-less; it is not. CombatState carries a real cardQueue
+        // (s.card_queue / card_queue_count, design §5.1) and PLAY_TOP_DRAW
+        // (Havoc) genuinely parks a card in the HAND while its play sits queued
+        // (interp_cards.cpp op_play_top_draw), which is exactly the state the
+        // Java loop guards against. So implement it rather than document it
+        // away. It is currently belt-and-braces -- op_play_top_draw also sets
+        // that card's cost_now to 0, so the costForTurn > 0 filter below
+        // already rejects it -- but it is one loop, and it keeps the engine
+        // correct if a future queue-a-hand-card verb (Duplication) lands.
+        bool queued = false;
+        for (uint8_t q = 0; q < s.card_queue_count; ++q) {
+            if (s.card_queue[q].card_index == pi) {
+                queued = true;
+                break;
+            }
+        }
+        if (queued) {
+            continue;
+        }
+
+        const CardInstance& inst = s.card_pool[pi];
+        const CardDef* cd = card_def(static_cast<CardId>(inst.card_id));
+        if (cd == nullptr) {
+            continue;
+        }
+        // c.cost > 0 (:44). gen.py maps the game's sentinel costs onto flags
+        // with base_cost 0 -- X-cost (Java cost -1, the XCOST flag) and
+        // unplayable statuses/curses (Java cost -2, the UNPLAYABLE flag) both
+        // land at base_cost 0 -- so the single `> 0` test rejects exactly what
+        // the Java rejects.
+        if (card_cost(*cd, inst.upgrade) == 0) {
+            continue;
+        }
+        // c.costForTurn > 0 (:44) -- the per-instance runtime cost.
+        if (inst.cost_now == 0) {
+            continue;
+        }
+        // !c.freeToPlayOnce (:44) has NO engine analogue: the flag is set only
+        // on a card the game is in the act of auto-playing (GameActionManager
+        // :216-218, AbstractPlayer:1366-1368) and is never observable on a card
+        // resting in hand in S1 scope. The cost_now > 0 test above already
+        // rejects every free-this-turn instance the engine can produce.
+        candidates[n++] = pi;
+    }
+
+    if (n == 0) {
+        return;  // :56-64 -- no candidate, and crucially NO cardRandomRng draw.
+    }
+    const int32_t pick = random(s.card_random_rng, 0, n - 1);  // :61
+    CardInstance& chosen = s.card_pool[candidates[pick]];
+    // setCostForTurn(0) (:67 -> AbstractCard.java:2001-2011): costForTurn = 0
+    // and, because the new value differs from cost (every candidate has
+    // cost > 0), isCostModifiedForTurn = true -- so the discount reverts in the
+    // end-of-turn sweep (reset_cost_for_turn, AbstractRoom.endTurn:397-405).
+    chosen.cost_now = 0;
+    chosen.flags = static_cast<uint16_t>(
+        chosen.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
 // --- DEFERRED combat bodies --------------------------------------------------
 //
-// These two B3.25 uncommons are registered `native: true` with their hook
-// inventory but have NO combat body yet: each depends on registry content that
-// does not exist at this point in the build order. They are DELIBERATELY EMPTY
-// definitions, not omissions -- the dispatch table generated from
-// registry/relics.yaml (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp)
-// odr-uses a handler for every `native: true` row, so a relic whose body nobody
-// wrote is an UNDEFINED REFERENCE at link time rather than a silent no-op.
-// Behaviour is unchanged from the old `default: return nullptr;` grouping: a
-// no-op call instead of a skipped null call.
-
-// MummifiedHand.onUseCard (MummifiedHand.java:38-72) -- when a POWER card is
-// played, filter the hand for cost > 0 && costForTurn > 0 && !freeToPlayOnce
-// minus cardQueue members, pick one via cardRandomRng.random(0, n-1) (no draw
-// when the filtered list is empty) and setCostForTurn(0). DEFERRED: the registry
-// has no POWER CardType yet (power cards land in B3.7), so the trigger condition
-// is unrepresentable.
-void relic_native_mummified_hand(CombatState& /*s*/, RelicHook /*hook*/,
-                                 RelicSlot& /*slot*/,
-                                 const RelicHookContext& /*ctx*/) noexcept {}
+// A relic registered `native: true` with its hook inventory but with NO combat
+// body yet, because it needs registry content that does not exist (the specific
+// missing content is named per relic below). It is a DELIBERATELY EMPTY
+// definition, not an omission -- the dispatch table generated from relics.yaml
+// (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp) odr-uses a handler
+// for every `native: true` row, so a relic whose body nobody wrote is an
+// UNDEFINED REFERENCE at link time rather than a silent no-op.
 
 // Pantograph.atBattleStart (Pantograph.java:32-40) -- if any monster.type ==
 // EnemyType.BOSS, addToTop HealAction(player, 25). DEFERRED: monsters.yaml
