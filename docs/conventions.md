@@ -69,6 +69,16 @@ G5 (design §3.2: bridge first, then registry migration, then mass content).
   list` became noise, so a worktree that genuinely still held uncommitted work
   was indistinguishable from ten that did not. Cleanup at landing keeps that
   list short enough to read.
+
+  > **ELIMINATED 2026-07-25: `tools/task_worktree.sh` runs the whole lifecycle
+  > in the order above, so the three commands are no longer typed by hand.**
+  > Full write-up in [§8](#8-traps-already-hit-verification-discipline).
+  >
+  > ```bash
+  > tools/task_worktree.sh create <task>   # refuses a dirty repo; prints the base sha
+  > tools/task_worktree.sh list            # branch / in-master / dirty, per worktree
+  > tools/task_worktree.sh land <task>     # remove -> branch -d -> prune, in that order
+  > ```
 - **One task = one commit**, made at task completion. Gates always get their
   own commit. The ledger's checkbox + Log update goes **in the same commit** as
   the task's code — history and ledger never disagree.
@@ -96,7 +106,9 @@ G5 (design §3.2: bridge first, then registry migration, then mass content).
 - **Session-start ritual** for any agent: `git status` + `git log --oneline
   -5`. A dirty tree, or a `[~]` task whose Log is empty, is an **incident** —
   investigate and resolve it before any new work. **Never dispatch on a dirty
-  tree.**
+  tree** — `tools/task_worktree.sh create` refuses to build a worktree while the
+  repo is dirty, and prints the base commit sha for the brief to quote, so use
+  it rather than `git worktree add`.
 
 ---
 
@@ -398,6 +410,32 @@ anyone checked. `ctest -N | tail -1` is the source of truth.
 > for prose about a past incident, not for new claims. If it fires on a file you
 > are editing, the number is already a liability: delete it and cite `ctest -N`.
 
+**A section number or an anchor in prose is the same kind of value.** Nothing
+re-derives it either. A task brief cited `§7`/`§8` of this file at a revision
+where those sections did not exist; separately, an agent hand-updated
+CLAUDE.md's `#calling-wsl-from-the-windows-host--use-toolswsl_runsh` anchor with
+nothing checking it. Renaming a heading breaks every link into it **silently** —
+GitHub renders a dead `#anchor` as an ordinary link that scrolls nowhere.
+
+> **ELIMINATED 2026-07-25: `tools/check_doc_links.sh`, run by hand and as a
+> second step of the `stale-numbers` CI job.** It resolves every inline
+> `[text](target)` link in every markdown file — the path, relative to the
+> linking file, against what git says exists; and the `#anchor`, against the
+> target's actual headings (slugged the way GitHub slugs them, `-1`/`-2` for
+> repeats) and its explicit `<a id="…">` anchors. Links inside fenced code
+> blocks and external `scheme:` targets are skipped. It reads tracked *and*
+> untracked-but-not-ignored files, so a broken link is caught before it is
+> staged. Deliberately **not** scanned as a source:
+> `tools/oracle_bridge/communicationmod-oracle/` (vendored upstream — its links
+> are not ours to repair, so a failure there could only be silenced), though it
+> is still indexed as a *target*. `docs/stage-a-log.md` and `docs/stage-b-log.md`
+> **are** scanned: both resolve completely today, and pre-excluding a file that
+> passes only guarantees nobody notices when it stops. A line carrying `link-ok`
+> is skipped — that hatch is for an append-only Log that must record a reference
+> to something since moved, not for a link you cannot be bothered to fix. **If
+> it fires because the target genuinely vanished, the doc may be what needs
+> restoring; do not repoint the link until you know which.**
+
 **Benchmark A/B must be interleaved.** This box drifts by more than the effects
 being measured. Two separate measurements this project has taken were wrong
 until re-run as interleaved A/B/A/B pairs — one reported a spurious −1.4%, the
@@ -434,6 +472,35 @@ anything on `master` — both tools report the work as unlanded. To check whethe
 a branch's work is in: match its commit subject's task id against `git log
 master --grep`. Do not delete a branch on the strength of `--merged` alone. Also
 remove a worktree *before* deleting its branch; the reverse order fails.
+
+**A brief is only meaningful at a revision, and a worktree outlives its task.**
+Two halves of one lifecycle, each of which failed after being written down.
+*Dispatch:* a worktree was created for an agent while this file had an
+uncommitted edit, so the brief cited a section that did not exist at the agent's
+base commit and cost a round trip — §2 already said "never dispatch on a dirty
+tree", and quoting `master` rather than a sha means the brief describes a moving
+target. *Retirement:* landed worktrees piled up to 16.3 GB across 11 directories
+until `git worktree list` was unreadable, and the `remove` → `branch -d` →
+`prune` order kept being got wrong.
+
+> **ELIMINATED 2026-07-25: `tools/task_worktree.sh` (+ `tools/task_worktree.cmd`
+> for cmd/PowerShell callers) is now the sanctioned way to open and retire a
+> task worktree.** `create <task>` **refuses while the repo is dirty**, printing
+> what is dirty and why it matters, and on success prints the base commit sha to
+> quote in the brief. `land <task>` does the removal in the load-bearing order
+> and **refuses first** if the tree has uncommitted changes or if the branch is
+> not contained in `master` — the same condition `git branch -d` refuses on,
+> checked before anything is destroyed rather than halfway through. There is
+> deliberately **no `-D` or `--force` path**: if it refuses, read the reason (the
+> cherry-picked-landing case above is real, and its answer is `git log master
+> --grep`, not `-D`). `list` prints every worktree with its branch, whether that
+> branch is in `master`, and whether the tree is dirty — the "which of these can
+> I delete" question that used to be answered by hand.
+>
+> Run it from the **Windows host**; it refuses under WSL, where git cannot read
+> a linked worktree's `gitdir: D:/…` (§6). That is also why the `.cmd` shim
+> resolves Git-for-Windows' own `bash.exe` rather than the `bash` on the
+> PowerShell `PATH`, which is WSL's.
 
 **A comment asserting "X does not exist yet" is a bug signal.** Two real defects
 were found this way, not by a failing test: a spawn gate hard-coded `false`
