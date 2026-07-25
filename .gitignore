@@ -4,6 +4,10 @@ build-*/
 out/
 cmake-build-*/
 
+# Shared FetchContent checkout cache (STS_DEP_CACHE_DIR, top-level CMakeLists.txt):
+# third-party sources cloned once and reused by every preset. Never committed.
+.cache/
+
 # Code-generated registry headers (tools/registry_gen/gen.py). Emitted under the
 # build tree; this defends against a stray run that targets the source root.
 generated/
