@@ -36,10 +36,39 @@ G5 (design §3.2: bridge first, then registry migration, then mass content).
 
 ## 2. Git discipline
 
-- Integration happens on `master` (local repo, no remote; if a remote appears,
-  push tags too). Execution agents work in their own git worktree under
+- Integration happens on `master`. The remote is `origin`
+  (github.com/degraffa/SpeedTheSpire) — push `master` **and tags** after
+  landing. Execution agents work in their own git worktree under
   `D:\STS_BG_Mod\_wt\<task>` on a task branch; the orchestrator verifies, then
   lands the work on `master`.
+- **A worktree is deleted as part of landing, not "later".** Once a task's
+  branch is merged and pushed, remove its worktree and delete its branch in the
+  same step that lands it. A worktree is scaffolding for one task; it stops
+  being useful the moment the work is on `master`.
+
+  ```bash
+  git worktree remove D:/STS_BG_Mod/_wt/<task>   # FIRST -- see order below
+  git branch -d <task>                            # -d, never -D
+  git worktree prune
+  ```
+
+  Three things that matter here:
+  - **Order is load-bearing.** `git branch -d` fails while a worktree still
+    references the branch (`cannot delete branch '<x>' used by worktree at …`).
+    Remove the worktree first.
+  - **Use `-d`, never `-D`.** `-d` refuses to delete a branch whose work is not
+    contained in `master`, which is the last safety net against discarding
+    unlanded work. If `-d` refuses, do **not** reach for `-D` — find out why.
+  - **Deliberately kept worktrees are fine; forgotten ones are not.** A
+    worktree holding uncommitted work for a still-open task is legitimate (it
+    should be known and named). What this rule prevents is accumulation nobody
+    is tracking.
+
+  Why it is a rule: landed-task worktrees were once allowed to pile up to
+  **16.3 GB across 11 directories**, and — worse than the disk — `git worktree
+  list` became noise, so a worktree that genuinely still held uncommitted work
+  was indistinguishable from ten that did not. Cleanup at landing keeps that
+  list short enough to read.
 - **One task = one commit**, made at task completion. Gates always get their
   own commit. The ledger's checkbox + Log update goes **in the same commit** as
   the task's code — history and ledger never disagree.
