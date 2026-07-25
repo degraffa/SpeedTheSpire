@@ -141,6 +141,13 @@ sts_add_test(encounters_test)
 # choice legality + non-combat routing + heterogeneous batch advance.
 sts_add_test(run_advance_test)
 
+# How a combat STARTS: the turn-1 block (begin_first_turn) must not run
+# getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
+# paths (combat_begin, enter_combat) must keep going through it. The reproducer
+# is a sleeping Lagavulin's Metallicize; the by-construction half scans the two
+# source files, so it needs STS_SOURCE_ROOT like no_task_ids_test does.
+sts_add_test(combat_start_test DEFS STS_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+
 # A6.1: diff harness -- trace format + field-by-field differ + reproducer +
 # fixture oracle (design doc §8, §9). Links diff_harness (tools/diff_harness),
 # which PUBLIC-links sts_engine, so this test reaches both the harness API and

@@ -139,24 +139,14 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     // for the skeleton group and the 20 fixtures stay byte-identical.
     use_pre_battle_actions(state);
 
-    // -- Prime the pump's turn-1 invariants so the FIRST pump() call takes the
-    //    start-of-turn branch (step 6) WITHOUT first misfiring the monster-turn
-    //    branch (step 4/5). Study of pump_step's priority order (action_queue.cpp)
-    //    shows the branch it lands on given empty queues depends on two flags:
-    //      * monster_attacks_queued == 1  -> step 4 is skipped, so no monster
-    //        turn is queued before the player has had turn 1 (this is exactly the
-    //        invariant "monster_attacks_queued stays true through the player's
-    //        turn"; the flag is cleared only at the end-turn sentinel).
-    //      * turn_has_ended == 1          -> step 6 (start_of_turn) fires,
-    //        running the opening-hand draw, energy refill, and ++turn (0 -> 1).
-    //    With both set and every queue empty, one pump() call runs: step 6
-    //    start_of_turn -> step 1 executes the queued DrawCard(5) -> step 7
-    //    WAITING_ON_USER. This REUSES the exact turn-N machinery instead of
-    //    hand-rolling turn-1 setup (design intent: reuse, don't duplicate). --
-    state.turn = 0;                   // start_of_turn's ++turn lands on 1
-    state.monster_attacks_queued = 1;
-    state.turn_has_ended = 1;
-    pump(state, dispatch_monster_turn);
+    // -- The game's turn-1 block (AbstractRoom.java:236-258). begin_first_turn
+    //    (action_queue.cpp) owns it for BOTH combat-construction paths -- this one
+    //    and enter_combat (run_advance.cpp) -- so the two cannot drift. It still
+    //    REUSES the exact turn-N start-of-turn machinery (design intent: reuse,
+    //    don't duplicate); what it does not reuse is getNextAction's step-6
+    //    end-of-round pass, which the game cannot reach on turn 1. See the
+    //    declaration in action_queue.hpp for the full derivation. --
+    begin_first_turn(state, dispatch_monster_turn);
     // Post: phase == WAITING_ON_USER, turn == 1, energy == kIroncladBaseEnergy,
     // hand_count == kStartOfTurnDrawCount (5), draw_count == n - 5.
 

@@ -112,14 +112,30 @@ void call_end_of_turn_actions(CombatState& s) noexcept {
     // All no-op unless a hook-bearing power is present (fixtures unchanged).
 }
 
+// Which of the game's two call sites is running the start-of-turn sequence.
+// They are NOT the same sequence: the combat-start block (AbstractRoom.java:
+// 236-258) omits the end-of-round pass that getNextAction's step 6 opens with --
+// see begin_first_turn below for why the game can never reach step 6 on turn 1.
+enum class TurnStart : uint8_t {
+    kCombatStart,      // AbstractRoom.update turn-1 block (AbstractRoom.java:236-258)
+    kSubsequentTurn,   // getNextAction step 6 (GameActionManager.java:329-366)
+};
+
 // Start-of-turn sequence (design doc §5.2 step 6; GameActionManager.java:
 // 329-366). Stubs are named where a future subsystem would attach.
-void start_of_turn(CombatState& s) noexcept {
+void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // monsters.applyEndOfTurnPowers() (GameActionManager.java:331) -- the
     // atEndOfRound dispatch (monster atEndOfTurn -> player atEndOfRound -> monster
     // atEndOfRound). The Cultist's Ritual Strength ramp fires here. No-op unless a
     // power binds these hooks, so jaw-worm-only fixtures are byte-identical.
-    dispatch_at_end_of_round(s);
+    //
+    // It belongs to step 6 ALONE. The combat-start block has no counterpart line,
+    // so a round has to have ended for this to run -- running it while priming
+    // turn 1 gives every power that binds an end-of-round hook and is present at
+    // combat start one free trigger before the player acts.
+    if (when == TurnStart::kSubsequentTurn) {
+        dispatch_at_end_of_round(s);
+    }
     s.cards_played_this_turn = 0;               // player.cardsPlayedThisTurn = 0
     // orbsChanneledThisTurn.clear() -- no orbs.
     // applyStartOfTurnRelics -> relics atTurnStart (acq order; Happy Flower, Lantern,
@@ -176,6 +192,35 @@ void start_of_turn(CombatState& s) noexcept {
 }
 
 }  // namespace
+
+// --- Combat start ------------------------------------------------------------
+
+void begin_first_turn(CombatState& s, MonsterTurnFn take_turn) noexcept {
+    // clear() (GameActionManager.java:431-433) opens a combat at turn 1 with
+    // turnHasEnded false; monsterAttacksQueued is true from its field initializer
+    // (GameActionManager.java:76) and only endTurn clears it. Here turn starts at
+    // 0 so the shared sequence's ++turn lands it on 1.
+    s.turn = 0;
+    s.monster_attacks_queued = 1;
+    // Deliberately NOT 1: with turnHasEnded false the pump below cannot take the
+    // step-6 branch, which is exactly the game's situation on turn 1.
+    s.turn_has_ended = 0;
+
+    // AbstractRoom.java:229-235 -- while anything is queued, update() drains it and
+    // waitTimer does not tick, so usePreBattleAction's actions resolve BEFORE the
+    // turn-1 block. monsterAttacksQueued is already true, so step 4 cannot queue a
+    // monster turn ahead of the player.
+    pump(s, take_turn);
+    if (s.phase == static_cast<uint8_t>(CombatPhase::COMBAT_OVER)) {
+        return;
+    }
+
+    // The turn-1 block itself (AbstractRoom.java:236-258): the SAME start-of-turn
+    // machinery every later turn runs, minus the end-of-round pass -- energy,
+    // start-of-turn relics/powers, ++turn, the opening DrawCardAction.
+    start_of_turn(s, TurnStart::kCombatStart);
+    pump(s, take_turn);  // resolve the queued opening draw -> WAITING_ON_USER
+}
 
 // --- Monster-turn extension point -------------------------------------------
 
@@ -389,7 +434,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
 
     // 6. else if turnHasEnded and monsters alive -> start-of-turn sequence.
     if (s.turn_has_ended && any_monster_alive(s)) {
-        start_of_turn(s);
+        start_of_turn(s, TurnStart::kSubsequentTurn);
         r.outcome = PumpOutcome::STARTED_TURN;
         return r;
     }

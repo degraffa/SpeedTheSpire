@@ -19,7 +19,7 @@
 #include <span>
 #include <string_view>
 
-#include "sts/engine/action_queue.hpp"     // pump
+#include "sts/engine/action_queue.hpp"     // pump / begin_first_turn
 #include "sts/engine/cards.hpp"            // card_def / card_cost / card_flags
 #include "sts/engine/encounters.hpp"       // generate_monster_lists / resolve_encounter
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
@@ -346,12 +346,12 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     }
     s.relic_count = rc.run.relic_count;
 
-    // (9) Prime the turn-1 invariants and pump once into WAITING_ON_USER (same
-    //     mechanism combat_begin uses; see its implementation note).
-    s.turn = 0;
-    s.monster_attacks_queued = 1;
-    s.turn_has_ended = 1;
-    pump(s, dispatch_monster_turn);
+    // (9) The game's turn-1 block, into WAITING_ON_USER. Literally the same
+    //     function combat_begin (advance.cpp) calls, so the two combat-construction
+    //     paths cannot disagree about how a combat starts; the derivation of why
+    //     turn 1 is not getNextAction step 6 is on the declaration in
+    //     action_queue.hpp.
+    begin_first_turn(s, dispatch_monster_turn);
 
     // (10) applyStartOfCombatLogic -> every relic's atBattleStart, in acquisition
     //      order (AbstractPlayer.applyStartOfCombatLogic,
