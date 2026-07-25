@@ -3,9 +3,8 @@
 // Master-deck editing hooks. Parasite.java:onRemoveFromMasterDeck calls
 // AbstractCreature.decreaseMaxHealth(3); this helper makes that effect part of
 // the actual removal transaction rather than a combat-only card special case.
-// B3.25 adds the ADD-side transaction: obtaining a card fires every owned
-// relic's onObtainCard in acquisition order (the egg upgrades + Darkstone
-// Periapt), so future reward/shop/event card grants route through one door.
+// The ADD-side transaction fires every owned relic's onObtainCard in acquisition
+// order, so future reward/shop/event card grants route through one door.
 
 #include <cstdint>
 
@@ -15,18 +14,19 @@
 
 namespace sts::engine {
 
-// Append one card to the master deck and run the relics' onObtainCard pass
-// (AbstractCard obtain -> for each player relic r.onObtainCard(card), in
-// acquisition order). Returns false (no mutation) when the deck is full or the
-// id has no registry row. B3.25 bodies:
-//   * MOLTEN_EGG  -- an un-upgraded ATTACK is added upgraded
-//     (MoltenEgg2.onObtainCard, MoltenEgg2.java:46-50: canUpgrade && !upgraded).
-//   * TOXIC_EGG   -- likewise for a SKILL (ToxicEgg2.java:46-50).
-//   * FROZEN_EGG  -- likewise for a POWER (FrozenEgg2.onObtainCard,
-//     FrozenEgg2.java:46-50: type == POWER && canUpgrade && !upgraded).
-//   * DARKSTONE_PERIAPT -- a CURSE grants +6 max HP, healing the gained amount
-//     (DarkstonePeriapt.onObtainCard, DarkstonePeriapt.java:28-36:
-//     increaseMaxHp(6, true); color CURSE == type CURSE for every S1 curse row).
+// The relics' onObtainCard pass over a just-appended master-deck row: every owned
+// relic, in ACQUISITION order (design §4.3 / stage-a trap 8), gets its
+// onObtainCard body run against `card`. Defined in run_deck.cpp, where the
+// RelicId -> handler table is GENERATED from registry/relics.yaml `pickup:
+// on_obtain_card` -- the per-relic bodies live in per-tier translation units
+// under src/engine/relics/, not in this header, so adding a relic with an
+// obtain-time effect neither edits a shared switch nor rebuilds this header's
+// consumers.
+void dispatch_relics_on_obtain_card(RunState& run, CardInstance& card,
+                                    const CardDef& def) noexcept;
+
+// Append one card to the master deck and run that pass. Returns false (no
+// mutation) when the deck is full or the id has no registry row.
 [[nodiscard]] inline bool add_card_to_master_deck(RunState& run, CardId id,
                                                   uint8_t upgrade = 0) noexcept {
     if (run.master_deck_count >= kMasterDeckCap) {
@@ -42,35 +42,7 @@ namespace sts::engine {
     c.upgrade = upgrade;
     ++run.master_deck_count;
 
-    for (uint8_t i = 0; i < run.relic_count; ++i) {  // acquisition order (trap 8)
-        switch (static_cast<RelicId>(run.relics[i].relic_id)) {
-            case RelicId::MOLTEN_EGG:
-                if (def->type == CardType::ATTACK && c.upgrade == 0) {
-                    c.upgrade = 1;  // MoltenEgg2.java:46-50
-                }
-                break;
-            case RelicId::TOXIC_EGG:
-                if (def->type == CardType::SKILL && c.upgrade == 0) {
-                    c.upgrade = 1;  // ToxicEgg2.java:46-50
-                }
-                break;
-            case RelicId::FROZEN_EGG:
-                if (def->type == CardType::POWER && c.upgrade == 0) {
-                    c.upgrade = 1;  // FrozenEgg2.java:46-50
-                }
-                break;
-            case RelicId::DARKSTONE_PERIAPT:
-                if (def->type == CardType::CURSE) {
-                    // increaseMaxHp(6, true): +6 max AND +6 current (heals the
-                    // gained amount; DarkstonePeriapt.java:34).
-                    run.max_hp = static_cast<int16_t>(run.max_hp + 6);
-                    run.hp = static_cast<int16_t>(run.hp + 6);
-                }
-                break;
-            default:
-                break;
-        }
-    }
+    dispatch_relics_on_obtain_card(run, c, *def);
     return true;
 }
 

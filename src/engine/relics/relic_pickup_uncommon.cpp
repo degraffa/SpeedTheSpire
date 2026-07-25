@@ -133,9 +133,8 @@ void relic_on_equip_bottled_tornado(RunState& /*rs*/, RngStream& /*misc_rng*/,
 // on the current reward screen shows its upgraded form the moment the egg is
 // picked up. That is a reward-SCREEN concern -- neither the screen nor its
 // RewardItem list exists yet -- not a RunState mutation at acquisition: the
-// actual upgrade-on-obtain is onObtainCard, which run_deck.hpp handles. Nothing
-// to do here until the reward screen lands; when it does, the preview pass goes
-// here.
+// actual upgrade-on-obtain is onObtainCard, defined below. Nothing to do here
+// until the reward screen lands; when it does, the preview pass goes here.
 void relic_on_equip_frozen_egg(RunState& /*rs*/, RngStream& /*misc_rng*/,
                                RelicSlot& /*slot*/) noexcept {}
 
@@ -146,5 +145,61 @@ void relic_on_equip_molten_egg(RunState& /*rs*/, RngStream& /*misc_rng*/,
 // ToxicEgg2.onEquip (ToxicEgg2.java:31-38) -- identical preview pass, SKILLs.
 void relic_on_equip_toxic_egg(RunState& /*rs*/, RngStream& /*misc_rng*/,
                               RelicSlot& /*slot*/) noexcept {}
+
+// --- onObtainCard ------------------------------------------------------------
+//
+// The three eggs share one body but for the CardType. `canUpgrade() && !upgraded`
+// is modelled as `card.upgrade == 0`: the registry's cards are single-upgrade, so
+// "not yet upgraded" and "can still be upgraded" are the same test. A card handed
+// in already upgraded is left alone, which is what the Java's !upgraded gives.
+
+void relic_on_obtain_card_molten_egg(RunState& /*rs*/, CardInstance& card,
+                                     const CardDef& def) noexcept {
+    // MoltenEgg2.onObtainCard (MoltenEgg2.java:46-50): ATTACK -> upgrade().
+    if (def.type == CardType::ATTACK && card.upgrade == 0) {
+        card.upgrade = 1;
+    }
+}
+
+void relic_on_obtain_card_toxic_egg(RunState& /*rs*/, CardInstance& card,
+                                    const CardDef& def) noexcept {
+    // ToxicEgg2.onObtainCard (ToxicEgg2.java:46-50): SKILL -> upgrade().
+    if (def.type == CardType::SKILL && card.upgrade == 0) {
+        card.upgrade = 1;
+    }
+}
+
+void relic_on_obtain_card_frozen_egg(RunState& /*rs*/, CardInstance& card,
+                                     const CardDef& def) noexcept {
+    // FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50): POWER -> upgrade().
+    if (def.type == CardType::POWER && card.upgrade == 0) {
+        card.upgrade = 1;
+    }
+}
+
+void relic_on_obtain_card_darkstone_periapt(RunState& rs, CardInstance& /*card*/,
+                                            const CardDef& def) noexcept {
+    // DarkstonePeriapt.onObtainCard (DarkstonePeriapt.java:28-36): a CURSE grants
+    // increaseMaxHp(6, true) -- +6 max AND +6 current (heals the gained amount,
+    // DarkstonePeriapt.java:34). The ModHelper "Hoarder" daily-mod branch
+    // (:30-33) triples the gain; daily mods are out of scope, and ModHelper state
+    // does not exist, so only the unmodded :34 call is modelled.
+    //
+    // FAITHFULNESS NOTE: the Java keys on `card.color == CardColor.CURSE`, not on
+    // the card TYPE. This tests the type instead, because CardDef has no color
+    // column -- `color` exists in registry/cards.yaml but is consumed at
+    // generation time (card-pool membership) and never emitted into the struct.
+    // The two are not merely equal in our data: every curse in the game is
+    // constructed with `CardType.CURSE, CardColor.CURSE` together in one super()
+    // call (Regret.java:29, AscendersBane.java:24, Parasite.java:25 -- all eleven
+    // curse rows), so no card can satisfy one and not the other. Keying on color
+    // literally would mean adding a color column to CardDef and regenerating the
+    // whole card table for zero behavioural difference, so the type test stays
+    // and this note records why.
+    if (def.type == CardType::CURSE) {
+        rs.max_hp = static_cast<int16_t>(rs.max_hp + 6);
+        rs.hp = static_cast<int16_t>(rs.hp + 6);
+    }
+}
 
 }  // namespace sts::engine

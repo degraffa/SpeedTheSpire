@@ -666,6 +666,84 @@ TEST(RunDeck, AddCardWithoutRelicsIsAPlainAppend) {
     EXPECT_EQ(rs.master_deck[0].upgrade, 0);
     EXPECT_EQ(rs.max_hp, 80);
     EXPECT_EQ(rs.hp, 60);
+    EXPECT_EQ(rs.gold, 0) << "no relic owned, so no obtain-time gold";
+}
+
+TEST(RunDeck, CeramicFishGainsNineGoldPerObtainedCard) {
+    // CeramicFish.onObtainCard (CeramicFish.java:40-42): gainGold(9) for ANY
+    // obtained card -- no type, rarity or upgrade condition. This body was
+    // MISSING from the hand-written obtain switch entirely; the generated table
+    // is keyed on the registry row, which lists the surface.
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(21);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CERAMIC_FISH),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(rs.gold, 0) << "picking the relic up grants nothing by itself";
+
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));      // ATTACK
+    EXPECT_EQ(rs.gold, 9);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::SHRUG_IT_OFF));  // SKILL
+    EXPECT_EQ(rs.gold, 18);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INFLAME));     // POWER
+    EXPECT_EQ(rs.gold, 27);
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INJURY));      // CURSE
+    EXPECT_EQ(rs.gold, 36);
+    // An already-upgraded obtain still pays: the Java has no upgrade condition.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE, /*upgrade=*/1));
+    EXPECT_EQ(rs.gold, 45);
+    // ...and the fish touches nothing else.
+    EXPECT_EQ(rs.hp, 60);
+    EXPECT_EQ(rs.max_hp, 80);
+}
+
+TEST(RunDeck, ObtainPassRunsOncePerOwnedRelicSlot) {
+    // The Java fan-out is `for (AbstractRelic r : player.relics) r.onObtainCard(c)`
+    // -- per SLOT, in acquisition order, and ordinary duplicate ids stay distinct
+    // (AbstractRelic.instantObtain/obtain, AbstractRelic.java:219-291). Two Ceramic
+    // Fish therefore pay twice. This pins the loop, not just the handler.
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(22);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CERAMIC_FISH),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CERAMIC_FISH),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(rs.relic_count, 2);
+
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    EXPECT_EQ(rs.gold, 18) << "one gainGold per owned slot";
+}
+
+TEST(RunDeck, ObtainHandlersComposeAcrossRelicsOnOneCard) {
+    // Every owned relic's onObtainCard sees the same card, in acquisition order,
+    // and later relics observe earlier edits. Molten Egg upgrades the ATTACK,
+    // Ceramic Fish pays out on the same obtain, and Darkstone Periapt stays quiet
+    // because the card is not a CURSE.
+    RunState rs{};
+    rs.hp = 60;
+    rs.max_hp = 80;
+    RngStream misc = from_seed(23);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::MOLTEN_EGG),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CERAMIC_FISH),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::DARKSTONE_PERIAPT),
+              RelicAcquireResult::ACQUIRED);
+
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::CLEAVE));
+    EXPECT_EQ(rs.master_deck[0].upgrade, 1);  // MoltenEgg2.java:46-50
+    EXPECT_EQ(rs.gold, 9);                    // CeramicFish.java:40-42
+    EXPECT_EQ(rs.max_hp, 80) << "Darkstone pays on CURSE only";
+
+    // Now a curse: Darkstone fires, the egg does not, the fish still does.
+    ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INJURY));
+    EXPECT_EQ(rs.master_deck[1].upgrade, 0);
+    EXPECT_EQ(rs.gold, 18);
+    EXPECT_EQ(rs.max_hp, 86);  // DarkstonePeriapt.java:34
+    EXPECT_EQ(rs.hp, 66);
 }
 
 }  // namespace
