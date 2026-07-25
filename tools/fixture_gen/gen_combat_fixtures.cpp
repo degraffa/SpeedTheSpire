@@ -838,11 +838,24 @@ std::vector<Fixture> all_fixtures() {
                  {Play(1), Play(0), End(), Play(0), Play(0), End()},
                  "Shrug + Strike, then two more; monster Chomp/Thrash across turns"});
 
-    // 16 -- MONSTER DEATH: Bash for Vulnerable turn 1, finish with Strikes on
-    // turn 2 (killing blow is a single-effect Strike so no queued item lingers).
+    // 16 -- MONSTER DEATH: Bash for Vulnerable turn 1, finish on turn 2 with the
+    // killing blow a single-effect Strike, so nothing is left queued behind it.
+    //
+    // The turn-2 slots are the ones --dump prints, not the ones a turn-1 hand
+    // would suggest: the end-of-turn discard empties the hand, so turn 2 plays
+    // out of the five cards drawn at its start -- Shrug10 Defend8 Strike3 Defend6
+    // Pommel11 -- against a monster on 26 HP that still carries Bash's
+    // Vulnerable. That hand holds one Strike, so 3x Strike cannot reach 26; the
+    // Vulnerable-boosted Pommel (13) opens instead and its DRAW 1 pulls Strike0
+    // off the top of the draw pile, which is what makes the second 9 available.
+    // 13 + 9 + 9 = 31 >= 26 inside the 3-energy budget, and the lethal card is a
+    // Strike -- a Pommel or Bash kill would strand its trailing DRAW/Vulnerable
+    // item in the queue when the pump halts at COMBAT_OVER (see killed_note).
     f.push_back({"fixt16_r29_monster_death", "r29",
-                 {Play(0), Play(0), End(), Play(1), Play(1), Play(3)},
-                 "MONSTER DEATH: Bash+Strike into Vuln, then 3 Strikes; Strike kills"});
+                 {Play(0), Play(0), End(), Play(4), Play(2), Play(3)},
+                 "MONSTER DEATH: Bash 8 + Vuln then Strike 9 on turn 1; turn 2 "
+                 "Pommel 13 (draws the lethal Strike) + Strike 9 + Strike 9 into "
+                 "the same Vuln kills the monster; single-effect Strike is lethal"});
 
     // 17 -- PLAYER DEATH: never block; Bellow-stacked Strength escalates the
     // monster's attacks until a Chomp (single effect) kills on turn 9.

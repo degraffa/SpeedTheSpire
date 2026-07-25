@@ -602,6 +602,47 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **a second frozen Stage A golden vector was corrected** — again
+  beyond the zero-diff-in-meaning regeneration conventions §5 sanctions, so it
+  is recorded here rather than only in a task Log.
+  `tests/golden/combat_fixtures/fixt16_r29_monster_death.trace` was named for
+  monster death and **did not kill the monster**. Its script ended
+  `… End(), Play(1), Play(1), Play(3)`; turn 2 deals a five-card hand, two plays
+  leave three cards, and the final `Play(3)` therefore named an **empty slot**.
+  `queue_card_play` (`src/engine/card_play.cpp`) rejects an index `>= hand_count`
+  and `advance()` no-ops the action, the reference simulator mirrored that no-op,
+  and the trace ended at `WAITING_ON_USER` with the monster alive on 17/43. The
+  description was wrong in the same way — it claimed "then 3 Strikes" where the
+  realized turn-2 plays were Defend then Strike.
+  **Root cause — the same hand-index drift as fixt13, and the same blind spot.**
+  The scripts were authored against a generator that did not yet discard the hand
+  at end of turn, so every turn-2 slot silently came to name a different card.
+  Nothing failed: an out-of-range play is a *documented no-op* on both sides, so
+  the two independent implementations agreed that nothing happened and the
+  zero-diff check passed. The corpus advertised monster-death coverage it did not
+  have — a coverage claim that went stale in silence, which is the more general
+  defect here than either individual script.
+  **Fix.** fixt16 was re-authored empirically against
+  `gen_combat_fixtures --dump`: turn 1 is unchanged (Bash 8 + Vulnerable, then a
+  Vulnerable-boosted Strike 9, monster 43→26); turn 2 plays the hand it is
+  actually dealt — Pommel 13, whose DRAW 1 pulls the second Strike into hand,
+  then Strike 9 and Strike 9 — reaching `COMBAT_OVER` with the monster at 0/43
+  inside the 3-energy budget. The killing blow stays a single-effect **Strike**
+  so the pump halts with an empty queue. Only fixt16's trace changed; the other
+  19 were proven byte-identical by sha256. Two follow-on commits on the same
+  branch close the mechanism behind the defect rather than this one instance of
+  it — see the two entries above.
+  **Also corrected: the derivation notes.** The previous change left a scoped
+  accuracy warning naming fixt01, fixt08 and fixt18 as having wrong printed
+  arithmetic. Re-deriving every entry against `--dumpall` showed the warning
+  itself understated the problem — **fixt12, fixt15, fixt19 and fixt20 were wrong
+  too** — and that the coverage table had four independent errors (it credited
+  fixt15 with a Pommel Strike it never plays, credited fixt20 with a
+  Strength/Vulnerable overlap its monster never reaches, and missed both a Bash
+  and three reshuffles). Every entry and every table row is now re-derived from
+  the traces and the warning is gone. **No trace was wrong — only the prose
+  about it**, which is why this is a notes fix and not a second vector
+  correction.
 - 2026-07-25 — **a frozen Stage A golden vector was corrected**, which goes
   beyond the zero-diff-in-meaning regeneration conventions §5 sanctions, so it
   is recorded here rather than only in a task Log.
