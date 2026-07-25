@@ -105,10 +105,11 @@ struct RelicHookContext {
 
 // --- Combat relic view -------------------------------------------------------
 //
-// The player's relics in acquisition order. RETURNS AN EMPTY VIEW today: CombatState
-// has no relic mirror yet (that additive field is B4.3's schema-owned change). When
-// it lands, this returns {s.relics, s.relic_count}. The wired dispatch sites call
-// this, so they are pure no-ops until then (fixtures byte-identical).
+// The player's relics in acquisition order. LIVE as of B4.3: returns
+// {s.relics, s.relic_count} over the CombatState relic mirror (the additive
+// schema-v3 field). The mirror is value-init empty until a run populates it (the
+// run-level fold-back is B4.4), so a state with no relics -- e.g. the 20 combat
+// fixtures -- yields a count-0 view and the wired dispatch sites stay no-ops there.
 struct RelicView {
     RelicSlot* relics;
     uint8_t count;
