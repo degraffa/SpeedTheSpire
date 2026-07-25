@@ -14,6 +14,7 @@
 #include "sts/engine/piles.hpp"         // exhaust_card
 #include "sts/engine/power_hooks.hpp"   // dispatch_on_gained_block
 #include "sts/engine/types.hpp"
+#include "sts/registry/manifest.hpp"    // generated kPowersCount
 
 namespace sts::engine {
 
@@ -25,7 +26,13 @@ namespace {
 // Iterate in power-list order and floor once after all modifiers, matching
 // AbstractCard.applyPowersToBlock. Applied by op_block for CARD block only
 // (power/relic/potion block sets kBlockNoPowers).
+// The `default: return blk` below is a deliberate subset (most powers do not
+// touch block gain), so -Wswitch-enum would only add noise. The static_assert is
+// what makes a new power impossible to add without re-reading this switch.
 [[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
+    static_assert(sts::registry::manifest::kPowersCount == 27,
+                  "new power: does it override modifyBlock (block-gain scaling, "
+                  "as Dexterity and Frail do)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::DEXTERITY: {
             const float m = blk + static_cast<float>(p.amount);

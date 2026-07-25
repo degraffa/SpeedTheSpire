@@ -23,12 +23,20 @@
 
 #include "sts/diff/oracle.hpp"
 #include "sts/diff/trace.hpp"
+#include "sts/engine/index_cast.hpp"  // as_index (signed record index -> subscript)
 #include "sts/translate/translate.hpp"
 
 namespace {
 
 using namespace sts;
+using sts::engine::as_index;
 namespace tr = sts::translate;
+
+// The indices here are a loop counter over `recs` plus the two record positions
+// that loop finds. Those two are sentinel -1 until found, and are ASSERT_GE'd
+// non-negative before any use -- so as_index (index_cast.hpp) is exact, and its
+// assert re-checks the invariant: an edit that drops the ASSERT_GE trips the
+// assert instead of subscripting at SIZE_MAX.
 
 std::string sample_path() {
     return std::string(STS_ORACLE_CORPUS_DIR) + "/skeleton_sample.jsonl";
@@ -61,7 +69,7 @@ TEST(TranslatedCampaignAdapter, ServesBothKindsForPrefixAndRejectsUnknownSeed) {
     int combat_index = -1;
     int run_index = -1;
     for (int i = 0; i < static_cast<int>(recs.size()); ++i) {
-        if (recs[i].kind == diff::StateKind::COMBAT) combat_index = i;
+        if (recs[as_index(i)].kind == diff::StateKind::COMBAT) combat_index = i;
         else run_index = i;
     }
     ASSERT_GE(combat_index, 0) << "sample must contain a COMBAT dump";
@@ -76,14 +84,14 @@ TEST(TranslatedCampaignAdapter, ServesBothKindsForPrefixAndRejectsUnknownSeed) {
 
     // A prefix of k zero-bit actions selects record[k] (the translated action
     // bits are all 0, so a default-constructed Action prefix matches).
-    auto zero_prefix = [](int k) { return std::vector<engine::Action>(static_cast<std::size_t>(k)); };
+    auto zero_prefix = [](int k) { return std::vector<engine::Action>(as_index(k)); };
 
     // COMBAT record served by query(), and byte-equal to the translated combat.
     {
         engine::CombatState out{};
         const std::vector<engine::Action> p = zero_prefix(combat_index);
         ASSERT_TRUE(oracle.query(run.seed, std::span<const engine::Action>(p), out));
-        EXPECT_EQ(std::memcmp(&out, &recs[combat_index].combat, sizeof(engine::CombatState)), 0);
+        EXPECT_EQ(std::memcmp(&out, &recs[as_index(combat_index)].combat, sizeof(engine::CombatState)), 0);
         // Wrong-kind: this index is not a RUN record.
         engine::RunState rout{};
         EXPECT_FALSE(oracle.query_run(run.seed, std::span<const engine::Action>(p), rout));
@@ -94,7 +102,7 @@ TEST(TranslatedCampaignAdapter, ServesBothKindsForPrefixAndRejectsUnknownSeed) {
         engine::RunState out{};
         const std::vector<engine::Action> p = zero_prefix(run_index);
         ASSERT_TRUE(oracle.query_run(run.seed, std::span<const engine::Action>(p), out));
-        EXPECT_EQ(std::memcmp(&out, &recs[run_index].run, sizeof(engine::RunState)), 0);
+        EXPECT_EQ(std::memcmp(&out, &recs[as_index(run_index)].run, sizeof(engine::RunState)), 0);
         // The RunState carries the translated run-scoped streams (verify a couple
         // survive the translate -> v2 -> adapter round-trip, non-zero state).
         EXPECT_NE(out.card_rng.s0, 0u);

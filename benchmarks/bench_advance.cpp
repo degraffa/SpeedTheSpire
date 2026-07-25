@@ -32,6 +32,7 @@
 
 #include "sts/engine/advance.hpp"
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/index_cast.hpp"  // as_index (signed choice index -> subscript)
 #include "sts/engine/types.hpp"
 
 namespace {
@@ -80,22 +81,27 @@ constexpr std::size_t kBatch = 10000;
 Action PickFromMask(const ActionMask& mask, std::mt19937& rng) {
     // At most kHandCap plays + 1 end-turn.
     std::array<Action, kHandCap + 1> choices{};
+    // `count` stays signed so the arithmetic is untouched; as_index carries it
+    // into std::array's size_type subscript. count only grows from 0, to at most
+    // kHandCap + 1, and pick draws from [0, count - 1], so as_index is exact at
+    // all three sites. It is constexpr and its assert compiles out under NDEBUG,
+    // so the release binary this benchmark actually measures is unaffected.
     int count = 0;
     for (int i = 0; i < kHandCap; ++i) {
         if (mask.can_play[i]) {
             // Single monster in the skeleton -> target slot 0.
-            choices[count++] =
+            choices[as_index(count++)] =
                 make_action(ActionVerb::PLAY_CARD, static_cast<uint8_t>(i), 0, 0);
         }
     }
     if (mask.can_end_turn) {
-        choices[count++] = make_action(ActionVerb::END_TURN);
+        choices[as_index(count++)] = make_action(ActionVerb::END_TURN);
     }
     if (count == 0) {
         return make_action(ActionVerb::END_TURN);
     }
     std::uniform_int_distribution<int> pick(0, count - 1);
-    return choices[pick(rng)];
+    return choices[as_index(pick(rng))];
 }
 
 #ifndef STS_BENCH_REUSE_MASK

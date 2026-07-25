@@ -16,6 +16,7 @@
 #include "sts/engine/interp.hpp"        // Opcode
 #include "sts/engine/rng_stream.hpp"    // random (potionRng draws)
 #include "sts/engine/types.hpp"         // PotionId
+#include "sts/registry/manifest.hpp"    // generated kPotionsCount
 
 namespace sts::engine {
 
@@ -76,6 +77,11 @@ bool potion_use_implemented(PotionId id) noexcept {
     // The `native` rows, i.e. the ones that mean hand-written code. KEEP THIS
     // LIST NEXT TO THE BODIES IT DESCRIBES -- dispatch_native_potion's switch is
     // directly below, and the run-layer three are named with their site.
+    static_assert(sts::registry::manifest::kPotionsCount == 33,
+                  "new potion: if its row is native:true it must be listed here "
+                  "AND have a body (dispatch_native_potion below, or the run "
+                  "layer). Falling through to the default means use_potion "
+                  "silently refuses it.");
     switch (id) {
         case PotionId::BLOOD_POTION:           // dispatch_native_potion, below
         case PotionId::BLESSING_OF_THE_FORGE:  // dispatch_native_potion, below
@@ -114,6 +120,10 @@ bool use_potion(CombatState& s, PotionId id, uint8_t target) noexcept {
 
 void dispatch_native_potion(CombatState& s, PotionId id, int potency,
                             uint8_t /*target*/) noexcept {
+    static_assert(sts::registry::manifest::kPotionsCount == 33,
+                  "new potion: if it is native AND resolves in combat, its "
+                  "use() body belongs in this switch. Native run-layer potions "
+                  "(Fruit Juice, Entropic Brew, Smoke Bomb) do not.");
     switch (id) {
         case PotionId::BLOOD_POTION: {
             // HealAction(player, floor(maxHealth * potency/100)). Replicate the

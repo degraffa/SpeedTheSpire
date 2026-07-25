@@ -21,6 +21,13 @@
 // rather than a silently missing case. That matters most for canSpawn: the old
 // `default: return true` answered "no gate" for a forgotten relic, which is not
 // a no-op but a changed relicRng draw order.
+//
+// That link error is also why relic_can_spawn_fn and relic_on_equip_fn carry NO
+// static_assert on kRelicsCount, while other deliberate-subset switches in this
+// file do. Their case lists are expanded from the generated X-macros, so they
+// track the registry automatically and a missing body already fails the build --
+// a strictly stronger guarantee than a count that a reader can re-bless. Adding
+// a count assertion there would only add a number to keep up to date.
 
 #include "sts/engine/relic_pools.hpp"
 
@@ -32,11 +39,30 @@
 #include "relics/relic_pickup.hpp"  // RelicCanSpawnSig/Fn, RelicOnEquipSig/Fn
 #include "sts/engine/cards.hpp"
 #include "sts/engine/rng_jdk.hpp"
+#include "sts/registry/manifest.hpp"  // generated kRelicsCount / kCardsCount
 
 namespace sts::engine {
 namespace {
 
+// Deliberately 5 of the 8 generated tiers: STARTER, SPECIAL and EVENT relics
+// have no dungeon pool, so `default: -1` means "not poolable" and is load-bearing.
+//
+// Note what this switch is keyed to. Adding a RELIC cannot invalidate it -- only
+// adding a TIER can, and a new tier would fall silently into the default. So the
+// pin here is on the generated RelicTier enum, not on a manifest row count: the
+// count assertions elsewhere in this file guard the row-count axis, and this one
+// guards the tier axis. Two other switches ask the same question and must be
+// revisited with it: the empty-pool fallback ladders in return_random_relic_key
+// and return_end_random_relic_key below.
 int pool_index(RelicTier tier) noexcept {
+    static_assert(static_cast<int>(RelicTier::EVENT) == 7 &&
+                      kRelicTierCount == 5,
+                  "new RelicTier: decide whether it gets a dungeon pool. If it "
+                  "does, it needs a RelicPool slot, a bump of kRelicTierCount, "
+                  "and a case in BOTH empty-pool fallback ladders "
+                  "(return_random_relic_key / return_end_random_relic_key); if "
+                  "it does not, it belongs in this default with the other "
+                  "non-poolable tiers.");
     switch (tier) {
         case RelicTier::COMMON: return static_cast<int>(RelicPool::COMMON);
         case RelicTier::UNCOMMON: return static_cast<int>(RelicPool::UNCOMMON);
@@ -97,6 +123,12 @@ void remove_owned_from_pools(RunState& rs) noexcept {
 }  // namespace
 
 void initialize_relic_pools(RunState& rs) noexcept {
+    static_assert(sts::registry::manifest::kRelicsCount == 65,
+                  "new relic: it joins its tier's dungeon pool at its "
+                  "pool_order, which fixes the relicRng shuffle order for that "
+                  "tier. Confirm the row's tier is poolable, that pool_order is "
+                  "contiguous and unique within the tier, and that the tier "
+                  "still fits kRelicPoolCap.");
     for (int p = 0; p < kRelicTierCount; ++p) {
         std::fill_n(rs.relic_pools[p], kRelicPoolCap, uint16_t{0});
         rs.relic_pool_count[p] = 0;
@@ -131,6 +163,14 @@ RelicTier return_random_relic_tier(RunState& rs) noexcept {
 }
 
 void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept {
+    // Keyed to CARDS, not relics: the gates are a scan over the master deck, and
+    // both of their hard-coded card facts live here rather than in the registry.
+    static_assert(sts::registry::manifest::kCardsCount == 75,
+                  "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
+                  "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
+                  "row would wrongly satisfy the Bottled Flame/Lightning "
+                  "non-basic gates. Is it a POWER? Then it also feeds Bottled "
+                  "Tornado's rarity-agnostic gate.");
     // BottledFlame/BottledLightning.canSpawn (each :93-99): any master-deck card
     // of the wanted type whose rarity != BASIC. The only BASIC red rows are
     // Strike/Defend/Bash (Strike_Red.java/Defend_Red.java/Bash.java ctors --

@@ -15,6 +15,7 @@
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
+#include "sts/registry/manifest.hpp"           // generated kMonstersCount
 
 namespace sts::engine {
 
@@ -48,8 +49,17 @@ void queue_monster_move_effects(CombatState& state, uint8_t mi,
     }
 }
 
+// Every MonsterId in the registry has a module, so this switch is exhaustive and
+// carries no `default:`: -Wswitch (via -Wall) is what tells you a newly generated
+// enumerator needs an init function here, instead of the silent nullptr a
+// `default:` used to hand back. The trailing return is NOT the old default -- it
+// is unreachable for any declared id, and exists because callers reach this
+// through `static_cast<MonsterId>(state.monsters[i].monster_id)`, so a corrupt
+// record can present a value that is in no case label at all.
 MonsterInitFn monster_init_fn(MonsterId id) noexcept {
     switch (id) {
+        case MonsterId::NONE:
+            break;  // the empty-slot sentinel (ids.hpp), never a spawnable monster
         case MonsterId::JAW_WORM:
             return &jaw_worm_init;
         case MonsterId::CULTIST:
@@ -72,13 +82,15 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &acid_slime_large_init;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_init;
-        default:
-            return nullptr;  // this monster has no module yet
     }
+    return nullptr;  // NONE, or an id no case label covers (see above)
 }
 
+// Exhaustive for the same reason as monster_init_fn; see that comment.
 MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
     switch (id) {
+        case MonsterId::NONE:
+            break;  // the empty-slot sentinel (ids.hpp), never a spawnable monster
         case MonsterId::JAW_WORM:
             return &jaw_worm_take_turn;
         case MonsterId::CULTIST:
@@ -101,12 +113,16 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &acid_slime_large_take_turn;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_take_turn;
-        default:
-            return &default_monster_turn;  // no-op until the monster's module lands
     }
+    // dispatch_monster_turn calls the result unconditionally, so this must be a
+    // live no-op rather than nullptr.
+    return &default_monster_turn;  // NONE, or an id no case label covers
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 11,
+                  "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
+                  "than rolling inline)? Only then does it register here.");
     switch (id) {
         case MonsterId::SPIKE_SLIME_LARGE:
             return &spike_slime_large_roll_move;
@@ -130,6 +146,10 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 11,
+                  "new monster: can anything spawn it mid-combat (a split, a "
+                  "summon)? Only then does it need a spawn-at-fixed-HP init "
+                  "here; spawn_monster_at_slot hard-asserts without one.");
     switch (id) {
         case MonsterId::SPIKE_SLIME_MEDIUM:
             return &spike_slime_medium_spawn_at_hp;
@@ -174,6 +194,9 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 }
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 11,
+                  "new monster: does its Java class override damage()? Only "
+                  "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
         return;
     }
@@ -191,12 +214,60 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 11,
+                  "new monster: does it override usePreBattleAction? Read the "
+                  "method and either register it here or add an explicit "
+                  "nullptr case recording why it needs no engine behaviour.");
     switch (id) {
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)
+
+        // The two monsters below DO override usePreBattleAction; both are
+        // deliberately nullptr here, and the reasons differ. They are spelled out
+        // as cases rather than left to the `default:` so the omission is a
+        // recorded decision that a reader can check, not an invisible hole.
+
+        // JawWorm.usePreBattleAction (JawWorm.java:112-118) queues Strength
+        // (bellowStr) + Block (bellowBlock) before turn 1, but ONLY when
+        // hardMode is set. hardMode comes solely from the 3-arg ctor
+        // (JawWorm.java:75-80), used only by the "Jaw Worm Horde" group
+        // (MonsterHelper.java:549-550), which only TheBeyond.generateStrongEnemies
+        // schedules (TheBeyond.java:109) -- Act 3. The 2-arg ctor the Exordium
+        // "Jaw Worm" encounter uses (MonsterHelper.java:397-398) delegates with
+        // hard=false (JawWorm.java:71-73). The registry is Exordium-only, so no
+        // reachable encounter sets hardMode and there is no divergence today.
+        //
+        // Whoever adds Act 3 must implement BOTH halves: hardMode also clears
+        // firstMove (JawWorm.java:78-80), which skips the forced opening Chomp
+        // that getMove would otherwise play (JawWorm.java:150-151). The
+        // pre-battle powers are the visible half; the move-selection change is
+        // the one that silently shifts the ai_rng sequence.
+        case MonsterId::JAW_WORM:
+            return nullptr;
+
+        // SlimeBoss.usePreBattleAction (SlimeBoss.java:109-117) is entirely
+        // presentation and meta-progression: unsilence BGM, fade ambiance, play
+        // the boss track, UnlockTracker.markBossAsSeen("SLIME"). It touches no
+        // combat state and draws no RNG, so a headless simulator has nothing to
+        // reproduce -- this nullptr is the complete, correct translation.
+        case MonsterId::SLIME_BOSS:
+            return nullptr;
+
         default:
-            return nullptr;  // no pre-battle action
+            // Checked, not assumed: of the 11 registry monsters only JawWorm,
+            // LouseNormal, LouseDefensive and SlimeBoss declare the method at
+            // all. The other seven (Cultist, the four small/medium slimes, the
+            // two large slimes) inherit AbstractMonster's empty body
+            // (AbstractMonster.java:953-954), so there is genuinely nothing to
+            // run for them.
+            //
+            // The sibling hook AbstractMonster.useUniversalPreBattleAction
+            // (:956-968, called from MonsterGroup.java:78) is likewise absent by
+            // design: every branch in it is gated on a daily-run modifier
+            // ("Lethality", "Time Dilation") or on player blights, none of which
+            // exist in the A20 runs this engine simulates.
+            return nullptr;
     }
 }
 
@@ -214,7 +285,8 @@ void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept 
     for (uint8_t i = 0; i < group.size(); ++i) {
         const MonsterInitFn init = monster_init_fn(group[i]);
         assert(init != nullptr &&
-               "spawn_group: this monster has no module yet");
+               "spawn_group: no init fn for this id -- every registry monster "
+               "has one, so this is MonsterId::NONE or a corrupt id");
         init(state, i);
     }
 }

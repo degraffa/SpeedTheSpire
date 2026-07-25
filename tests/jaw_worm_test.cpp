@@ -37,6 +37,7 @@
 
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/index_cast.hpp"  // as_index (signed turn counter -> subscript)
 #include "sts/engine/monster_jaw_worm.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -49,6 +50,10 @@ namespace sts::engine {
 namespace {
 
 constexpr int kNumTurns = 20;
+
+// Both turn loops below run 0..kNumTurns over `c.turns`, whose size is asserted
+// to be exactly kNumTurns when the fixture is parsed, so as_index's conversion
+// (index_cast.hpp) is exact at both sites.
 
 // One turn's expected record from the fixture.
 struct TurnRow {
@@ -188,7 +193,7 @@ TEST(JawWormFixture, DirectLoopMatchesFixture) {
         EXPECT_EQ(s.monster_hp_rng.counter, c.hp_counter) << c.label;
 
         for (int k = 0; k < kNumTurns; ++k) {
-            const TurnRow& row = c.turns[k];
+            const TurnRow& row = c.turns[as_index(k)];
             // The move about to be executed on turn k+1 is the current head.
             const uint8_t executed = s.monsters[0].move_history[0];
             EXPECT_EQ(executed, row.move)
@@ -234,7 +239,7 @@ TEST(JawWormPump, EndTurnDrivenMatchesFixture) {
     EXPECT_EQ(s.monsters[0].hp, c.hp) << c.label;
 
     for (int k = 0; k < kNumTurns; ++k) {
-        const TurnRow& row = c.turns[k];
+        const TurnRow& row = c.turns[as_index(k)];
         const uint8_t executed = s.monsters[0].move_history[0];
         EXPECT_EQ(executed, row.move) << c.label << " turn " << row.turn;
 
