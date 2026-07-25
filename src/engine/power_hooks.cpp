@@ -22,10 +22,10 @@
 
 #include <cstdint>
 
-// The per-batch power headers (powers_b3_2.hpp, ...) are deliberately NOT
+// The per-power headers (power_combust.hpp, ...) are deliberately NOT
 // included: the generated STS_REGISTRY_NATIVE_POWERS expansion below declares
-// every native body itself, so this file has no per-batch dependency and a new
-// power batch never edits it.
+// every native body itself, so this file has no per-power dependency and a new
+// power never edits it.
 #include "powers/power_native.hpp"      // PowerNativeSig/Fn, actor_power_list, find_power
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (Corruption skill check)
@@ -365,8 +365,8 @@ bool apply_power_blocked_by_artifact(CombatState& s, uint8_t target,
 //
 // Corollary: a power deliberately registered native with NO per-power-list body
 // cannot be expressed by omission -- it must define an explicit empty body in
-// its batch TU, which is a written-down decision rather than a hole. Artifact is
-// the one such power today (powers/powers_b3_2.cpp).
+// its own TU, which is a written-down decision rather than a hole. Artifact is
+// the one such power today (powers/power_artifact.cpp).
 
 #define STS_POWER_NATIVE_DECL(ID, FN) extern PowerNativeSig FN;
 STS_REGISTRY_NATIVE_POWERS(STS_POWER_NATIVE_DECL)

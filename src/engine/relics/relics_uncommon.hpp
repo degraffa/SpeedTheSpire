@@ -6,7 +6,7 @@
 // omissions: the generated dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses
 // a handler for EVERY `native: true` row, so a forgotten body is a link error.
 // "Deferred" therefore has to be written down -- and it is, at each empty
-// definition in relics_b3_25.cpp, together with its reason.
+// definition in relics_uncommon.cpp, together with its reason.
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/relic_hooks.hpp"  // RelicHook, RelicHookContext
@@ -36,7 +36,7 @@ void relic_native_self_forming_clay(CombatState& s, RelicHook hook,
                                     RelicSlot& slot,
                                     const RelicHookContext& ctx) noexcept;
 
-// --- DEFERRED combat bodies (deliberately empty; see relics_b3_25.cpp) -------
+// --- DEFERRED combat bodies (deliberately empty; see relics_uncommon.cpp) -----
 void relic_native_mummified_hand(CombatState& s, RelicHook hook, RelicSlot& slot,
                                  const RelicHookContext& ctx) noexcept;
 void relic_native_pantograph(CombatState& s, RelicHook hook, RelicSlot& slot,

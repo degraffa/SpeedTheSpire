@@ -1,11 +1,10 @@
-// B3.9 curse-applied debuff -- native hook body (moved verbatim out of
-// power_hooks.cpp's escape-hatch switch; see power_native.hpp for the split's
-// rationale).
+// Frail -- native power-hook body. One translation unit per power;
+// see power_native.hpp for the dispatch plumbing and
+// power_frail.hpp for what this power does.
 
-#include "powers_b3_9.hpp"
+#include "power_frail.hpp"
 
 #include <cstdint>
-
 #include "power_native.hpp"             // find_power
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / kActor*
 #include "sts/engine/combat_state.hpp"

@@ -1,7 +1,10 @@
 #pragma once
 
-// Native body for the B3.4 (Flex) power (registry/powers.yaml id 13,
-// "--- B3.4 (Flex): temporary-Strength reversal power ---").
+// Lose Strength -- native power-hook body (registry/powers.yaml id 13,
+// PowerId::LOSE_STRENGTH).
+//
+// At end of turn, subtract `amount` Strength and remove itself -- the
+// temporary-Strength reversal behind Flex.
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/power_hooks.hpp"  // Hook, HookContext

@@ -18,10 +18,10 @@
 
 #include <cstdint>
 
-// The per-batch relic headers (relics_b3_24.hpp, ...) are deliberately NOT
+// The per-tier relic headers (relics_common.hpp, ...) are deliberately NOT
 // included: the generated STS_REGISTRY_NATIVE_RELICS expansion below declares
-// every native body itself, so this file has no per-batch dependency and a new
-// relic batch (B3.26, B3.27) never edits it.
+// every native body itself, so this file has no per-tier dependency and a new
+// relic tier (B3.26, B3.27) never edits it.
 #include "relics/relic_native.hpp"      // RelicNativeSig/Fn, heal_player
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (attack check)
@@ -250,8 +250,8 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
 // where the handler would live. The deferred set today (unchanged behaviour --
 // each is a no-op call instead of a skipped null call) is:
 //   AKABEKO / ART_OF_WAR / ANCIENT_TEA_SET / BOOT / PRESERVED_INSECT /
-//   TOY_ORNITHOPTER   -> relics/relics_b3_24.cpp
-//   MUMMIFIED_HAND / PANTOGRAPH -> relics/relics_b3_25.cpp
+//   TOY_ORNITHOPTER   -> relics/relics_common.cpp
+//   PANTOGRAPH        -> relics/relics_uncommon.cpp
 // (BRONZE_SCALES / ODDLY_SMOOTH_STONE were un-deferred by the potion-support-
 // powers follow-up: Thorns/Dexterity are registered, so both are DATA
 // at_battle_start APPLY_POWER relics and never route here.)

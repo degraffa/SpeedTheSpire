@@ -21,21 +21,34 @@ add_library(sts_engine
     piles.cpp
     card_play.cpp
     power_hooks.cpp
-    # Native power bodies, one TU per registry/powers.yaml batch (see
-    # powers/power_native.hpp). A new power batch adds a file here.
-    powers/powers_b3_2.cpp
-    powers/powers_b3_4.cpp
-    powers/powers_potion_support.cpp
-    powers/powers_b3_6.cpp
-    powers/powers_b3_7.cpp
-    powers/powers_b3_9.cpp
-    powers/powers_b3_25.cpp
+    # Native power bodies, ONE TU PER POWER, each named for its power (see
+    # powers/power_native.hpp). A new native power adds a file here.
+    powers/power_artifact.cpp
+    powers/power_combust.cpp
+    powers/power_corruption.cpp
+    powers/power_curl_up.cpp
+    powers/power_dark_embrace.cpp
+    powers/power_evolve.cpp
+    powers/power_fire_breathing.cpp
+    powers/power_flame_barrier.cpp
+    powers/power_frail.cpp
+    powers/power_lose_dexterity.cpp
+    powers/power_lose_strength.cpp
+    powers/power_next_turn_block.cpp
+    powers/power_plated_armor.cpp
+    powers/power_rage.cpp
+    powers/power_regen.cpp
+    powers/power_ritual.cpp
+    powers/power_rupture.cpp
+    powers/power_sadistic.cpp
+    powers/power_thorns.cpp
     relic_hooks.cpp
-    # Native relic bodies, one TU per relic tier/batch (see
-    # relics/relic_native.hpp). B3.26 (rares+shop) / B3.27 (boss+specials) each
-    # add a file here.
-    relics/relics_b3_24.cpp
-    relics/relics_b3_25.cpp
+    # Native relic combat bodies, one TU per RelicTier (see
+    # relics/relic_native.hpp), matching the relic_pickup_* split below. The
+    # RARE / SHOP / BOSS tiers each add a file here when they land.
+    relics/relics_starter.cpp
+    relics/relics_common.cpp
+    relics/relics_uncommon.cpp
     relic_pools.cpp
     # The master deck's obtain-time relic pass; holds the generated
     # STS_REGISTRY_RELIC_ON_OBTAIN_CARD dispatch table.

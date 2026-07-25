@@ -3,7 +3,7 @@
 // rationale). Parameters a body does not read are left unnamed to keep -Wextra
 // quiet; the signature is the uniform RelicNativeFn.
 
-#include "relics_b3_25.hpp"
+#include "relics_uncommon.hpp"
 
 #include <cstdint>
 

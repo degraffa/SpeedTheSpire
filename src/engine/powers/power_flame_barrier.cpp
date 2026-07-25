@@ -1,11 +1,10 @@
-// B3.6 red-uncommon-skill powers -- native hook bodies (moved verbatim out of
-// power_hooks.cpp's escape-hatch switch; see power_native.hpp for the split's
-// rationale).
+// Flame Barrier -- native power-hook body. One translation unit per power;
+// see power_native.hpp for the dispatch plumbing and
+// power_flame_barrier.hpp for what this power does.
 
-#include "powers_b3_6.hpp"
+#include "power_flame_barrier.hpp"
 
 #include <cstdint>
-
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
