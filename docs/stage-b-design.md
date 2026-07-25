@@ -944,3 +944,26 @@ Continuing stage-a §10's numbering:
   `path-gen + 0 (shuffle) + 1 (emerald)`. Evidence + the named tests are in the
   B4.1 ledger Log (docs/stage-b-tasks.md) and `tests/map_gen_test.cpp`
   (`PathGenCounterMatchesOracleMinusEmerald`, `HandDerivedPathDrawCountSingleSeed`).
+- v0.1.4 (2026-07-24) — `CombatState` size budget raised 4096 → **8192** bytes
+  (§4.2). **Decision made by the project owner on 2026-07-24**; this entry
+  records it. **What changed:** only the ceiling — the
+  `static_assert(sizeof(CombatState) <= N)` in
+  `include/sts/engine/combat_state.hpp`, plus its two regression-guard mirrors
+  in `tests/state_test.cpp` and `tests/action_queue_test.cpp`. **Why:** headroom
+  was exhausted. Measured `sizeof(CombatState)` is **3896 B**, leaving ~200 B
+  under the old 4 KB ceiling, while the most recent capacity bump on its own
+  (`kMonsterCap` 5 → 7) cost 224 B. With B3.26/B3.27 (relics) and B4.5–B4.15
+  still to land, the next routine capacity bump would have tripped the assert
+  mid-task, in an agent with no authority to move a frozen budget. **8192 was
+  chosen for parity with `RunState`'s existing 8 KB ceiling**
+  (`include/sts/engine/run_state.hpp:213`). **`sizeof(CombatState)` is
+  unchanged at 3896 B** — no field, offset, or array capacity moved; this raises
+  a ceiling, it does not alter layout. Consequently **`SCHEMA_VERSION` was NOT
+  bumped** and no golden fixture was regenerated: debug/asan/release all green
+  and `FixtureOracle.AllFixturesReplayWithZeroDiffs` byte-identical across the
+  change. The considered alternative — trimming the POD layout to stay under
+  4 KB — was rejected precisely because it *would* have been a schema +
+  fixture-regeneration change. **Note (not fixed here, this document is
+  frozen):** the §4.2 heading in `docs/stage-a-design.md:213` still reads
+  "budget ≤ 4 KB", and `docs/stage-a-tasks.md` / `docs/stage-b-log.md` carry
+  historical `≤ 4096` statements that were true when written.

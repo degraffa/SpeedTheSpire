@@ -1,9 +1,11 @@
 #pragma once
 
 // CombatState -- the full in-combat game state (design doc §4.2), budget
-// <= 4096 bytes. This is the struct the batch API's advance() steps (design doc
-// §7) and the diff harness snapshots (design doc §8). It is derived from
-// RunState at combat start and folded back at combat end; the two never alias
+// <= 8192 bytes (see the static_assert at the bottom of this file for why the
+// original 4 KB figure was raised). This is the struct the batch API's advance()
+// steps (design doc §7) and the diff harness snapshots (design doc §8). It is
+// derived from RunState at combat start and folded back at combat end; the two
+// never alias
 // (design doc §4.4). A full RunState->CombatState derivation is not yet
 // implemented; this struct is the storage shape.
 //
@@ -338,7 +340,24 @@ struct CombatState {
 static_assert(std::is_trivially_copyable_v<CombatState>,
               "CombatState must be trivially copyable (design doc §4.1: "
               "snapshot = memcpy)");
-static_assert(sizeof(CombatState) <= 4096,
-              "CombatState exceeds its 4 KB budget (design doc §4.2)");
+// Size budget (design doc §4.2, raised 4096 -> 8192 by the project owner on
+// 2026-07-24; recorded in stage-b-design.md §11).
+//
+// Actual sizeof(CombatState) at the time of the change: 3896 B. Under the old
+// 4096 ceiling that left ~200 B of headroom, while the most recent capacity
+// bump alone (kMonsterCap 5 -> 7) cost 224 B. B3.26/B3.27 relics and B4.5-B4.15
+// are still to land, so the next routine capacity bump would have tripped this
+// assert mid-task, with no authority to move a frozen budget.
+//
+// 8192 == RunState's existing ceiling (run_state.hpp:213), so the two budgets
+// are now at parity. Raising the ceiling is deliberately the cheap option: it
+// changes no field, no offset, and no serialized layout, so SCHEMA_VERSION is
+// NOT bumped and no golden fixture is regenerated. The alternative (trimming
+// the POD layout to fit) would have been a schema + fixture change -- exactly
+// the stop-the-line class of change this avoids.
+//
+// This is a CEILING, not a target. sizeof(CombatState) is unchanged at 3896 B.
+static_assert(sizeof(CombatState) <= 8192,
+              "CombatState exceeds its 8 KB budget (design doc §4.2)");
 
 }  // namespace sts::engine

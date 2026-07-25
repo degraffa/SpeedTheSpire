@@ -2,7 +2,7 @@
 // (design doc §4.1-§4.3).
 //
 //   * is_trivially_copyable<CombatState> / <RunState>          -- §4.1
-//   * sizeof(CombatState) <= 4096, sizeof(RunState) <= 8192    -- §4.2/§4.3
+//   * sizeof(CombatState) <= 8192, sizeof(RunState) <= 8192    -- §4.2/§4.3
 //   * snapshot = memcpy round-trip is hash-equal (and byte-equal)
 //   * two value-initialized states hash-equal (padding determinism, §4.1)
 //
@@ -26,7 +26,7 @@ namespace {
 
 static_assert(std::is_trivially_copyable_v<CombatState>);
 static_assert(std::is_trivially_copyable_v<RunState>);
-static_assert(sizeof(CombatState) <= 4096);
+static_assert(sizeof(CombatState) <= 8192);
 static_assert(sizeof(RunState) <= 8192);
 
 TEST(StateLayout, TriviallyCopyable) {
@@ -35,7 +35,7 @@ TEST(StateLayout, TriviallyCopyable) {
 }
 
 TEST(StateLayout, SizeWithinBudget) {
-    EXPECT_LE(sizeof(CombatState), 4096u);
+    EXPECT_LE(sizeof(CombatState), 8192u);
     EXPECT_LE(sizeof(RunState), 8192u);
 }
 

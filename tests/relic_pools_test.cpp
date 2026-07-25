@@ -412,8 +412,8 @@ TEST(RelicPools, UncommonCanSpawnFloorAndShopGates) {
 TEST(RelicPools, BottledTrioCanSpawnReadsDeckGatesEvenInEndless) {
     // BottledFlame/Lightning: any non-BASIC card of the type in the master deck
     // (the only BASIC red rows are Strike/Defend/Bash). BottledTornado: any
-    // POWER card (none exist until B3.7). No Settings.isEndless clause in any of
-    // the three canSpawn bodies -- the deck gate applies in Endless too.
+    // POWER card, any rarity. No Settings.isEndless clause in any of the three
+    // canSpawn bodies -- the deck gate applies in Endless too.
     RunState rs{};
     rs.master_deck_count = 3;
     rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
@@ -441,6 +441,72 @@ TEST(RelicPools, BottledTrioCanSpawnReadsDeckGatesEvenInEndless) {
     fill_deck_spawn_gates(rs, ctx);
     EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_FLAME, ctx));
     EXPECT_TRUE(relic_can_spawn(RelicId::BOTTLED_LIGHTNING, ctx));
+}
+
+TEST(RelicPools, BottledTornadoSpawnsOnAnyPowerCardInMasterDeck) {
+    // BottledTornado.canSpawn (BottledTornado.java:93-95) delegates to
+    // CardHelper.hasCardType(AbstractCard.CardType.POWER)
+    // (CardHelper.java:80-86): a plain scan of masterDeck.group for `c.type ==
+    // POWER`, with NO CardRarity clause -- unlike BottledFlame/BottledLightning
+    // (:93-99), which explicitly skip `rarity == CardRarity.BASIC`. So a POWER
+    // card of ANY rarity opens the gate. B3.7 landed 8 POWER cards, so this is
+    // reachable; before B3.7 fill_deck_spawn_gates hard-wired it to false.
+    RunState rs{};
+    rs.master_deck_count = 4;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::DEFEND);
+    rs.master_deck[2].card_id = static_cast<uint16_t>(CardId::BASH);
+    rs.master_deck[3].card_id = static_cast<uint16_t>(CardId::INFLAME);
+    RelicSpawnContext ctx{};
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_TRUE(ctx.deck_has_power)
+        << "a POWER card in the master deck must set the Tornado gate";
+    EXPECT_TRUE(relic_can_spawn(RelicId::BOTTLED_TORNADO, ctx));
+    // The POWER row must not leak into the Flame/Lightning gates.
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_FLAME, ctx));
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_LIGHTNING, ctx));
+    // No endless bypass either way.
+    ctx.endless = true;
+    EXPECT_TRUE(relic_can_spawn(RelicId::BOTTLED_TORNADO, ctx));
+
+    // Every B3.7 POWER row opens the gate on its own.
+    for (const CardId cid : {CardId::COMBUST, CardId::DARK_EMBRACE,
+                             CardId::EVOLVE, CardId::FEEL_NO_PAIN,
+                             CardId::FIRE_BREATHING, CardId::INFLAME,
+                             CardId::METALLICIZE, CardId::RUPTURE}) {
+        RunState one{};
+        one.master_deck_count = 1;
+        one.master_deck[0].card_id = static_cast<uint16_t>(cid);
+        RelicSpawnContext c{};
+        fill_deck_spawn_gates(one, c);
+        EXPECT_TRUE(c.deck_has_power)
+            << "POWER card id " << static_cast<int>(cid);
+        EXPECT_TRUE(relic_can_spawn(RelicId::BOTTLED_TORNADO, c));
+    }
+}
+
+TEST(RelicPools, BottledTornadoStaysGatedOnAllBasicAndNonPowerDecks) {
+    // The all-BASIC Ironclad starting deck has no POWER card, so the gate
+    // stays shut -- and so does a deck of non-BASIC ATTACK/SKILL rows.
+    RunState rs{};
+    rs.master_deck_count = 3;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::DEFEND);
+    rs.master_deck[2].card_id = static_cast<uint16_t>(CardId::BASH);
+    RelicSpawnContext ctx{};
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_FALSE(ctx.deck_has_power);
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_TORNADO, ctx));
+
+    rs.master_deck_count = 5;
+    rs.master_deck[3].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[4].card_id = static_cast<uint16_t>(CardId::SHRUG_IT_OFF);
+    fill_deck_spawn_gates(rs, ctx);
+    EXPECT_FALSE(ctx.deck_has_power)
+        << "non-BASIC ATTACK/SKILL rows must not set the POWER gate";
+    EXPECT_TRUE(ctx.deck_has_nonbasic_attack);
+    EXPECT_TRUE(ctx.deck_has_nonbasic_skill);
+    EXPECT_FALSE(relic_can_spawn(RelicId::BOTTLED_TORNADO, ctx));
 }
 
 // --- B3.25 acquisition / run-layer effects -------------------------------------

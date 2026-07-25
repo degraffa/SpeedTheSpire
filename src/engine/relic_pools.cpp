@@ -127,20 +127,30 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // of the wanted type whose rarity != BASIC. The only BASIC red rows are
     // Strike/Defend/Bash (Strike_Red.java/Defend_Red.java/Bash.java ctors --
     // CardRarity.BASIC), so non-basic == not one of those three ids.
-    // BottledTornado.canSpawn (:93-95): CardHelper.hasCardType(POWER) -- always
-    // false until B3.7 lands POWER-type cards (no POWER CardType in the registry).
+    // BottledTornado.canSpawn (:93-95) is NOT that shape: it delegates to
+    // CardHelper.hasCardType(POWER) (CardHelper.java:80-86), a plain type scan
+    // over masterDeck.group with NO rarity clause at all. The POWER gate is
+    // therefore computed BEFORE the BASIC skip below -- folding it into the
+    // post-`continue` body would model a rarity filter the Java does not have.
+    // The two are indistinguishable today (no BASIC red row is a POWER), but the
+    // faithful structure is the one that stays correct if that ever changes.
+    // B3.7 landed 8 POWER-type cards (Combust/Dark Embrace/Evolve/Feel No Pain/
+    // Fire Breathing/Inflame/Metallicize/Rupture), so this gate is now live.
     ctx.deck_has_nonbasic_attack = false;
     ctx.deck_has_nonbasic_skill = false;
     ctx.deck_has_power = false;
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         const CardId cid = static_cast<CardId>(rs.master_deck[i].card_id);
-        if (cid == CardId::STRIKE || cid == CardId::DEFEND ||
-            cid == CardId::BASH) {
-            continue;  // CardRarity.BASIC
-        }
         const CardDef* def = card_def(cid);
         if (def == nullptr) {
             continue;
+        }
+        if (def->type == CardType::POWER) {
+            ctx.deck_has_power = true;  // rarity-agnostic, per CardHelper
+        }
+        if (cid == CardId::STRIKE || cid == CardId::DEFEND ||
+            cid == CardId::BASH) {
+            continue;  // CardRarity.BASIC
         }
         if (def->type == CardType::ATTACK) {
             ctx.deck_has_nonbasic_attack = true;

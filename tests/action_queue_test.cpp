@@ -72,8 +72,8 @@ void probe_monster_turn(CombatState& s, uint8_t mi) noexcept {
 
 TEST(ActionQueueLayout, PreTurnRingPresentWithinBudget) {
     // pre_turn_actions + turn_has_ended fit inside the CombatState size budget.
-    static_assert(sizeof(CombatState) <= 4096,
-                  "CombatState must stay within its 4 KB budget after the "
+    static_assert(sizeof(CombatState) <= 8192,
+                  "CombatState must stay within its 8 KB budget after the "
                   "preTurnActions gap-fix");
     CombatState s{};
     EXPECT_EQ(s.pre_turn_count, 0);
