@@ -24,6 +24,7 @@ include(CompilerWarnings)
 include(Sanitizers)
 include(StsAddTest)
 include(StsFloatingPoint)
+include(StsCompilerCache)
 
 # Pin the floating-point contract BEFORE any add_subdirectory / FetchContent, so
 # it covers every target in the tree including the header-only float code that
@@ -31,6 +32,11 @@ include(StsFloatingPoint)
 # why this one is directory-wide while sts_set_warnings is deliberately not, and
 # tests/fp_contract_test.cpp for the control that proves it took effect.
 sts_apply_fp_contract()
+
+# Also before any target is created: the compiler launcher is read at
+# target-creation time, so setting it here is what lets it reach the
+# FetchContent dependencies (googletest) as well as our own targets.
+sts_setup_compiler_cache()
 
 include(FetchContent)
 

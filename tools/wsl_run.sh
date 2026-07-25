@@ -20,11 +20,38 @@
 # `--script` takes a path relative to the repo root (or an absolute `/mnt/...`
 # path); everything after it is passed to that script untouched.
 #
-# Env: STS_WSL_DISTRO (default Ubuntu-2404), STS_JOBS (default 6).
+# Env: STS_WSL_DISTRO (default Ubuntu-2404), STS_JOBS (default: see below),
+#      STS_TEST_JOBS (default: same as STS_JOBS).
+#
+# PARALLELISM, AND WHY IT IS GATED ACROSS INVOCATIONS
+#
+# This repo is worked by SEVERAL AGENTS AT ONCE, each in its own worktree, each
+# running its own copy of this script. Nothing any single invocation knows tells
+# it how many siblings exist, so a per-invocation job count is guaranteed to
+# oversubscribe: the old fixed `STS_JOBS:-6` became 24 build jobs on a 16-core
+# box as soon as four agents were active, and each of them thought it was being
+# modest.
+#
+# So the job count is not a constant here. It is drawn from a machine-wide token
+# pool under /dev/shm (flock, one lock file per token), sized to the core count
+# and shared by every concurrent wsl_run.sh on the box. An invocation takes what
+# is free, down to a floor of 2 so it can never deadlock behind its siblings, and
+# releases on exit -- including on Ctrl-C, via the trap. A caller that passes
+# STS_JOBS explicitly still gets exactly that number: the override is preserved
+# deliberately, because bisecting a build problem sometimes needs -j1.
+#
+# The gate prints what it took and what it waited for, because an agent staring
+# at a silent terminal cannot tell "waiting for cores" from "hung" -- and a
+# hang is what it would report.
+#
+# ctest ALSO runs in parallel now. It never did: the build got -j and the tests
+# did not, so ~640 test binaries (gtest_discover_tests registers one ctest entry
+# per gtest CASE) were launched strictly serially. That is process-launch bound,
+# not CPU bound, which is why the test job count is allowed to exceed the build
+# token count.
 set -euo pipefail
 
 distro=${STS_WSL_DISTRO:-Ubuntu-2404}
-jobs=${STS_JOBS:-6}
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd)
 
 usage() {  # print the header comment block, minus its leading '# '
@@ -83,13 +110,70 @@ for arg in "$@"; do
 done
 [ ${#presets[@]} -gt 0 ] || usage
 
+# ------------------------------------------------------- machine-wide job gate
+# One lock file per build token, in /dev/shm so the pool is per-boot and cannot
+# survive as a stale on-disk artifact. flock -n either takes a token now or
+# moves on; fds stay open for the life of this process and the kernel releases
+# every one of them on exit, so a killed agent cannot leak a token. That is the
+# property a counter file or a PID list would not have.
+cores=$(nproc)
+pool_dir=/dev/shm/sts_build_tokens
+held_fds=()
+mkdir -p "$pool_dir" 2>/dev/null || pool_dir=
+
+# Sets the global `acquired`. It must NOT be called in a command substitution:
+# $(...) runs in a subshell, that subshell exits as soon as the substitution
+# completes, and the kernel then drops every lock it held -- so the gate would
+# hand out full parallelism to every caller while appearing to work. That is
+# not hypothetical: it was the first implementation here, and three concurrent
+# invocations each reported -j15 on a 16-core box (45 jobs total) before the
+# demo caught it. The locks have to be held by the shell that owns the build.
+acquire_tokens() {
+    local want=$1 i fd
+    acquired=0
+    [ -n "$pool_dir" ] || { acquired=$want; return; }
+    for ((i = 0; i < want; i++)); do
+        exec {fd}>"$pool_dir/$i" 2>/dev/null || break
+        if flock -n "$fd"; then
+            acquired=$((acquired + 1))
+            held_fds+=("$fd")   # kept open for the life of this process
+        else
+            exec {fd}>&-        # someone else holds this token; stop asking
+        fi
+    done
+}
+
+if [ -n "${STS_JOBS:-}" ]; then
+    jobs=$STS_JOBS
+    echo "wsl_run: STS_JOBS=$jobs (explicit override; the machine-wide gate is bypassed)"
+else
+    # Leave one core for the rest of the box; floor of 2 so an invocation that
+    # arrives when every token is taken still makes progress rather than
+    # deadlocking behind its siblings.
+    acquire_tokens "$((cores > 1 ? cores - 1 : 1))"
+    jobs=$acquired
+    if [ "$jobs" -lt 2 ]; then
+        jobs=2
+        echo "wsl_run: build -j$jobs (every token held by a concurrent wsl_run;" \
+             "running at the floor rather than waiting)"
+    else
+        echo "wsl_run: build -j$jobs of $cores cores (machine-wide gate;" \
+             "concurrent wsl_run invocations share this pool)"
+    fi
+fi
+
+# Tests are process-launch bound rather than CPU bound -- ~640 short-lived
+# binaries -- so they are allowed past the build gate.
+test_jobs=${STS_TEST_JOBS:-$((cores > 1 ? cores : 1))}
+echo "wsl_run: ctest -j$test_jobs"
+
 summary=() failed=0
 for preset in "${presets[@]}"; do
     echo "=== wsl_run: $preset ==="
     log=$(mktemp)
     if cmake --preset "$preset" ${cmake_args[@]+"${cmake_args[@]}"} \
         && cmake --build --preset "$preset" -- -j"$jobs" \
-        && ctest --preset "$preset" 2>&1 | tee "$log"
+        && ctest --preset "$preset" --parallel "$test_jobs" 2>&1 | tee "$log"
     then
         # `cmake --build` before every ctest is mandatory (conventions §6): the
         # build above is what stops discovery reporting <name>_NOT_BUILT.
