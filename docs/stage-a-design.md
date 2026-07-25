@@ -290,6 +290,43 @@ SFX, ShakeScreen, ShowMoveName, IntentFlash, Wait) are **not emitted at all**;
 the frozen rule for in/out scope: an action is in scope iff it mutates
 gameplay state or its queue position can reorder something that does.
 
+### 5.2a Combat start is NOT step 6
+
+§5.2 describes `getNextAction` only. The game has a **second** start-of-turn
+call site — the turn-1 block of `AbstractRoom.update` (`AbstractRoom.java:236-258`)
+— and it runs a strictly *smaller* sequence. Step 6 is unreachable on turn 1:
+the block sets `turnHasEnded = true` and immediately queues
+`GainEnergyAndEnableControlsAction`, whose `update` clears the flag again
+(`GainEnergyAndEnableControlsAction.java:35`) while the queue is still non-empty,
+so `getNextAction` takes step 1 and step 6's test is already false when reached.
+
+Three step-6 items have **no** turn-1 counterpart:
+
+1. `monsters.applyEndOfTurnPowers` (`GameActionManager.java:331`).
+2. The block-decay paragraph, including the Barricade/Blur skip and the
+   Calipers lose-15 branch (`:353-359`) — the turn-1 block has no `loseBlock`
+   line of any kind.
+3. `applyStartOfTurnPostDrawPowers` (`:363`), whose only other occurrence in the
+   reference tree is its definition (`AbstractCreature.java:541-545`).
+
+`applyStartOfTurnPostDrawRelics` is deliberately **not** in that list: the
+turn-1 block carries it at `AbstractRoom.java:254`. The two post-draw halves are
+asymmetric, and reading them as a pair is the mistake this section exists to
+prevent.
+
+Energy differs by **route**, not by presence: turn 1 gains energy through
+`GainEnergyAndEnableControlsAction` (`:241`) onto a panel `prep()` has just
+zeroed, so `EnergyManager.recharge`'s additive carry — and therefore its Ice
+Cream branch — is unreachable on turn 1. `++turn`, `cardsPlayedThisTurn = 0`
+and `loseBlock` likewise have no counterpart, because `GameActionManager.clear()`
+(`:420-435`) already set `turn = 1` on fresh state.
+
+Expressed in the engine as a `TurnStart` parameter (`kCombatStart` /
+`kSubsequentTurn`) on `start_of_turn` (`action_queue.cpp`), so turn 1 reuses the
+turn-N machinery rather than duplicating it. Not a change to any frozen
+mechanic: §5.2's step-6 text is accurate as far as it goes, and this section
+records only what §5.2 was silent about.
+
 ### 5.3 Card-play hook order (lines 214-249)
 
 When a card play resolves from `cardQueue` (and unless `dontTriggerOnUseCard`):
@@ -446,6 +483,23 @@ Non-freezing amendments (additive storage fixes and source-vs-paraphrase
 corrections found during Stage A execution). None change frozen mechanics; each
 cites the provenance that outranks the losing document (§1 precedence:
 decompiled Java > this design doc > the task ledger).
+
+- **Stage B — combat start is not step 6 (§5.2 was silent; new §5.2a).** §5.2
+  enumerated `getNextAction`'s priority order and said nothing about the game's
+  other start-of-turn call site, the turn-1 block of `AbstractRoom.update`
+  (`AbstractRoom.java:236-258`). The engine primed turn 1 by setting
+  `turn_has_ended = 1` and pumping, which reused step 6 wholesale — but the game
+  cannot reach step 6 on turn 1, because `GainEnergyAndEnableControlsAction`
+  clears the flag before the queue empties (`:35`). **Three separate divergences
+  were fixed from this one gap**, each found by re-deriving from the Java rather
+  than by a failing test: the end-of-round pass (a sleeping Lagavulin held 16
+  block on turn 1 instead of 8 — measured), the block-decay branch (Barricade
+  and Calipers both belong to step 6 only), and `applyStartOfTurnPostDrawPowers`
+  (inert until B3.8 registered Brutality and Demon Form as its first binders).
+  §5.2a records the three exceptions, the deliberate asymmetry of the two
+  post-draw halves, and the energy route. Additive documentation of what §5.2
+  omitted; no frozen mechanic changed, and all 20 combat fixtures replay
+  zero-diff across every fix. Owner-approved 2026-07-25.
 
 - **A2.2 — RunState stream count (§3.4 vs §4.3).** §4.3's prose "8 run-scoped
   streams + mapRng" over-counts §3.4's authoritative 7-row run-scoped inventory
