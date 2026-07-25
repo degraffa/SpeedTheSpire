@@ -179,9 +179,75 @@ static_assert(std::is_trivially_copyable_v<StepResult>,
 // After pumping, results[i] is filled: terminal/reward from the post-pump state
 // and encode_observation(states[i], results[i].obs).
 //
+// EVERY action is checked against legal_actions() before it is dispatched, for
+// every verb: an action the mask does not report as legal is a no-op that cannot
+// mutate the state (see the gate's comment in advance.cpp for why that is a
+// memory-safety property and not a tidiness rule). This overload builds that
+// mask itself, once per state per step.
+//
 // NO heap allocation anywhere in the loop -- the spans are iterated directly, no
 // std::vector / new. (encode_observation is itself allocation-free.)
 void advance(std::span<CombatState> states, std::span<const Action> actions,
              std::span<StepResult> results) noexcept;
+
+// The same step, with the legality mask supplied by the caller.
+//
+// WHY IT EXISTS. A search loop that picks its action by calling legal_actions()
+// already holds the mask advance() is about to rebuild. Rebuilding it is the
+// dominant cost of the legality gate: the gate exactly DOUBLES the mask work for
+// such a caller, and that is what it costs. Handing the mask in removes the
+// second build. It is a pure throughput option -- the guard is NOT relaxed, and
+// the three-span overload above keeps working and keeps building its own mask.
+//
+// MEASURED (tools/bench_ab.sh, interleaved, 7 pairs, Release+LTO, bench_advance
+// over a 10k-state batch; bench_advance_mask is the same benchmark driving this
+// overload). In the all-states-live regime the guard's cost was originally
+// quoted in (25 fixed iterations):
+//     pre-guard advance()          4.35 M steps/s
+//     guarded, mask rebuilt        3.13 M steps/s   (the cost)
+//     guarded, mask supplied       4.32-4.46 M steps/s
+// so the overload is +38.0% over the rebuilding form (95% band +33.2%..+42.9%)
+// and back level with the pre-guard baseline, +2.4% (95% band +1.6%..+3.3%).
+// The guard's throughput cost is fully recovered without touching the guard.
+// Over a default 3-second run, where most states have gone terminal and a
+// rejected action skips the pump entirely, the same swap is +84.3% (9.52 ->
+// 17.53 M steps/s): the cheaper the step, the more the redundant mask dominates.
+//
+// EXACT EQUIVALENCE. Both overloads dispatch through one shared step function,
+// so this is the same code with the same guard, differing only in where the mask
+// came from. For any state s and action a,
+//     ActionMask m; legal_actions(s, m);
+//     advance({&s,1}, {&a,1}, {&r,1}, {&m,1})
+// leaves s and r byte-identical to advance({&s,1}, {&a,1}, {&r,1}).
+//
+// THE CALLER'S CONTRACT -- masks[i] MUST equal what legal_actions(states[i], m)
+// would produce for states[i] AS IT IS ON ENTRY, i.e. before this call mutates
+// it. Practically: build the mask from the state you are about to step, use it
+// to choose the action, pass both, and do not reuse it for a later step.
+//
+// WHAT HAPPENS IF IT DOES NOT. The guard believes the mask. A mask that is
+// stale, belongs to another state, or is default-constructed is not detected in
+// a Release build, and the consequences are asymmetric:
+//   * A mask that is too PERMISSIVE (reports an action the state does not
+//     actually allow) admits an illegal action into the pump. That is precisely
+//     the failure the guard was added to prevent -- e.g. an END_TURN on a
+//     terminal or choice-blocked state appends an end-turn sentinel to a card
+//     queue nothing will drain, and past kCardQueueCap appends it writes off the
+//     end of the array into its neighbours (combat_state.hpp). Silent memory
+//     corruption, not an exception.
+//   * A mask that is too RESTRICTIVE silently drops legal actions: the step
+//     becomes a no-op, the state stalls, and a search loop can spin without
+//     progressing.
+// Debug and asan builds do NOT accept this on trust: they assert that the
+// supplied mask matches a freshly computed one, so a violated contract fails
+// loudly in the presets tests run under. Release builds skip the check -- that
+// is the entire point of the overload -- so a caller that only ever runs Release
+// gets no diagnosis. Develop against debug.
+//
+// masks is parallel to states/actions/results and must have the same length
+// (asserted, as with the other three).
+void advance(std::span<CombatState> states, std::span<const Action> actions,
+             std::span<StepResult> results,
+             std::span<const ActionMask> masks) noexcept;
 
 }  // namespace sts::engine

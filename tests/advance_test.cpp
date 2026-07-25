@@ -6,6 +6,8 @@
 //     per-state hashes.
 //   * combat_begin sanity: a freshly-begun combat has sane invariants.
 //   * legal_actions sanity: affordability + phase gating.
+//   * The mask-accepting advance() overload: byte-for-byte equivalent to the
+//     mask-building one, and it rejects exactly the same illegal actions.
 //
 // Why raw hash comparison (no scratch normalization, unlike cards_test): every
 // pair compared here shares an identical byte history -- both sides start from
@@ -17,6 +19,7 @@
 // state with a different byte history.)
 
 #include <cstdint>
+#include <cstring>    // std::memcmp (whole-StepResult comparison)
 #include <iterator>   // std::size
 #include <span>
 #include <vector>
@@ -584,6 +587,175 @@ TEST(AdvanceGuard, OpenChoiceScreenAbsorbsEndTurnsAndPlaysWithoutQueueingWork) {
     EXPECT_FALSE(m2.choice_pending) << "the selection must still resolve normally";
     EXPECT_TRUE(m2.can_end_turn);
     EXPECT_EQ(s.exhaust_count, 1);
+}
+
+// --- The mask-accepting advance() overload -----------------------------------
+//
+// A caller that used legal_actions() to choose its action already holds the mask
+// the three-span advance() would rebuild; the four-span overload takes it
+// instead. The overload is a throughput option ONLY -- it must not weaken the
+// guard, so these tests pin both halves of that: identical results on legal
+// actions, and identical refusals on illegal ones.
+//
+// The contract (advance.hpp) is that the supplied mask matches the state as it
+// stands on entry. Debug and ASan builds assert it, which is why no test here
+// feeds a deliberately wrong mask: doing so would abort the binary, which is the
+// documented behaviour, not a diagnosable failure.
+
+// One step of a batch-of-1 through the mask overload, building the mask the way
+// a caller is required to.
+void Step1Masked(CombatState& s, Action a, StepResult& r) {
+    ActionMask m{};
+    legal_actions(s, m);
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(&a, 1),
+            std::span<StepResult>(&r, 1), std::span<const ActionMask>(&m, 1));
+}
+
+TEST(AdvanceMaskOverload, IsByteIdenticalToTheMaskBuildingOverloadOverManySteps) {
+    const std::vector<CardId> deck = SkeletonDeck();
+    constexpr int N = 128;
+    constexpr int kSteps = 8;
+
+    std::vector<CombatState> plain;
+    plain.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        plain.push_back(
+            combat_begin(SeedFor(i + 900), /*floor=*/1, std::span<const CardId>(deck)));
+    }
+    std::vector<CombatState> masked = plain;  // byte-identical starting points
+
+    std::vector<Action> actions(N);
+    std::vector<ActionMask> masks(N);
+    std::vector<StepResult> r_plain(N);
+    std::vector<StepResult> r_masked(N);
+
+    for (int step = 0; step < kSteps; ++step) {
+        // Actions are chosen from the PLAIN batch and reused verbatim on the
+        // masked one; the two batches only stay in lockstep if the overloads
+        // agree, which is the property under test.
+        for (int i = 0; i < N; ++i) {
+            actions[i] = PickMixedAction(plain[i], step * 17 + i);
+            legal_actions(masked[i], masks[i]);
+        }
+
+        advance(std::span<CombatState>(plain), std::span<const Action>(actions),
+                std::span<StepResult>(r_plain));
+        advance(std::span<CombatState>(masked), std::span<const Action>(actions),
+                std::span<StepResult>(r_masked), std::span<const ActionMask>(masks));
+
+        for (int i = 0; i < N; ++i) {
+            ASSERT_EQ(hash_state(plain[i]), hash_state(masked[i]))
+                << "step " << step << " entry " << i << ": states diverged";
+            ASSERT_EQ(r_plain[i].terminal, r_masked[i].terminal)
+                << "step " << step << " entry " << i << ": terminal flag";
+            ASSERT_EQ(r_plain[i].reward, r_masked[i].reward)
+                << "step " << step << " entry " << i << ": reward";
+            // The observation is part of the result, so it is compared too --
+            // "exactly equivalent" has to mean the whole StepResult.
+            ASSERT_EQ(0, std::memcmp(&r_plain[i].obs, &r_masked[i].obs,
+                                     sizeof(ObsBuffer)))
+                << "step " << step << " entry " << i << ": observation";
+        }
+    }
+}
+
+TEST(AdvanceMaskOverload, TerminalStateAbsorbsEndTurnsFarPastTheCardQueueCap) {
+    bool reached = false;
+    CombatState s = PlayToTerminal(0xB0A710D, reached);
+    ASSERT_TRUE(reached) << "fight did not go terminal inside the step budget";
+
+    const CombatState before = s;
+    const uint64_t hash_before = hash_state(s);
+
+    // The exact shape that used to overflow card_queue, now driven through the
+    // overload: the guard must hold when the caller owns the mask, or the
+    // overload has quietly bought throughput with the bug the guard removed.
+    StepResult r{};
+    for (int i = 0; i < kOverflowSteps; ++i) {
+        Step1Masked(s, make_action(ActionVerb::END_TURN), r);
+        ASSERT_EQ(s.card_queue_count, 0) << "sentinel queued at step " << i;
+        ASSERT_TRUE(r.terminal);
+    }
+    ExpectNeighboursUnchanged(before, s);
+    EXPECT_EQ(hash_state(s), hash_before);
+}
+
+TEST(AdvanceMaskOverload, OpenChoiceScreenAbsorbsIllegalActionsAndStillResolves) {
+    // A LIVE state with a hand-select screen open: phase is WAITING_ON_USER, so
+    // only the mask distinguishes legal from illegal here.
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::TRUE_GRIT, /*upgrade=*/1);
+    AddToHand(s, CardId::STRIKE);
+    AddToHand(s, CardId::DEFEND);
+
+    StepResult r{};
+    Step1Masked(s, make_action(ActionVerb::PLAY_CARD, 0, 0, 0), r);
+
+    ActionMask m{};
+    legal_actions(s, m);
+    ASSERT_TRUE(m.choice_pending) << "expected an open hand-select screen";
+    ASSERT_FALSE(r.terminal) << "this state is LIVE";
+
+    const CombatState before = s;
+    const uint64_t hash_before = hash_state(s);
+
+    for (int i = 0; i < kOverflowSteps; ++i) {
+        Step1Masked(s, make_action(ActionVerb::END_TURN), r);
+        ASSERT_EQ(s.card_queue_count, 0) << "END_TURN queued behind a choice at " << i;
+        Step1Masked(s, make_action(ActionVerb::PLAY_CARD, 0, 0, 0), r);
+        ASSERT_EQ(s.card_queue_count, 0) << "PLAY_CARD queued behind a choice at " << i;
+    }
+    ExpectNeighboursUnchanged(before, s);
+    EXPECT_EQ(hash_state(s), hash_before);
+
+    // ...and the legal selection still goes through: the overload blocks the
+    // illegal actions, not the prompt.
+    Step1Masked(s, make_action(ActionVerb::CHOOSE, 0, 0, 0), r);
+    ActionMask m2{};
+    legal_actions(s, m2);
+    EXPECT_FALSE(m2.choice_pending);
+    EXPECT_TRUE(m2.can_end_turn);
+    EXPECT_EQ(s.exhaust_count, 1);
+}
+
+TEST(AdvanceMaskOverload, HeterogeneousBatchMixesLegalAndIllegalPerEntry) {
+    // Batch entries are independent, and the mask is per entry: a rejected
+    // action at index i must not disturb index j. Half the batch gets a legal
+    // action, half gets an out-of-range hand slot.
+    const std::vector<CardId> deck = SkeletonDeck();
+    constexpr int N = 64;
+
+    std::vector<CombatState> batch;
+    batch.reserve(N);
+    for (int i = 0; i < N; ++i) {
+        batch.push_back(
+            combat_begin(SeedFor(i + 1300), /*floor=*/1, std::span<const CardId>(deck)));
+    }
+    const std::vector<CombatState> before = batch;
+
+    std::vector<Action> actions(N);
+    std::vector<ActionMask> masks(N);
+    std::vector<StepResult> results(N);
+    for (int i = 0; i < N; ++i) {
+        legal_actions(batch[i], masks[i]);
+        actions[i] = (i % 2 == 0)
+                         ? make_action(ActionVerb::END_TURN)
+                         : make_action(ActionVerb::PLAY_CARD,
+                                       static_cast<uint8_t>(kHandCap), 0, 0);
+    }
+
+    advance(std::span<CombatState>(batch), std::span<const Action>(actions),
+            std::span<StepResult>(results), std::span<const ActionMask>(masks));
+
+    for (int i = 0; i < N; ++i) {
+        if (i % 2 == 0) {
+            EXPECT_NE(hash_state(batch[i]), hash_state(before[i]))
+                << "entry " << i << ": a legal END_TURN did nothing";
+        } else {
+            EXPECT_EQ(hash_state(batch[i]), hash_state(before[i]))
+                << "entry " << i << ": an out-of-range play mutated the state";
+        }
+    }
 }
 
 }  // namespace

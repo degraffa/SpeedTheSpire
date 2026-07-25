@@ -355,6 +355,171 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
     return target < kMonsterCap && mask.can_play_target[slot][target];
 }
 
+#ifndef NDEBUG
+// Does `m` say what legal_actions() would say about `s` right now?
+//
+// Only compiled into Debug/ASan builds, where it backs the mask-accepting
+// overload's contract assert. Field-wise rather than std::memcmp: ActionMask is
+// all-bool today and so has no padding, but that is a property of the current
+// field list, not a guarantee, and a memcmp would start reporting phantom
+// mismatches the day a wider field is added.
+[[nodiscard]] bool mask_matches_state(const CombatState& s,
+                                      const ActionMask& m) noexcept {
+    ActionMask fresh{};
+    legal_actions(s, fresh);
+    for (int i = 0; i < kHandCap; ++i) {
+        if (m.can_play[i] != fresh.can_play[i]) return false;
+        if (m.can_choose[i] != fresh.can_choose[i]) return false;
+        for (int t = 0; t < kMonsterCap; ++t) {
+            if (m.can_play_target[i][t] != fresh.can_play_target[i][t]) return false;
+        }
+    }
+    return m.can_end_turn == fresh.can_end_turn &&
+           m.choice_pending == fresh.choice_pending &&
+           m.choice_from_discard == fresh.choice_from_discard;
+}
+#endif
+
+// ONE state, ONE action, ONE already-built mask -- the whole of a step.
+//
+// Both advance() overloads route through this, which is what makes "the
+// mask-accepting overload has identical guard semantics" a structural fact
+// rather than a claim to re-verify: there is a single dispatch and a single
+// gate, and the overloads differ only in who built the mask they hand it.
+void step_one(CombatState& s, Action a, const ActionMask& mask,
+              StepResult& result) noexcept {
+    // THE LEGALITY GATE -- one for EVERY verb, not just CHOOSE.
+    //
+    // advance()'s contract is that an action which is not legal for the
+    // state's current phase is a no-op that cannot mutate state. CHOOSE used
+    // to be the only verb that honoured it; PLAY_CARD and END_TURN did not,
+    // and that was a memory-corruption bug, not a cosmetic one. A batch API
+    // is normally driven by keeping the batch uniform and stepping finished
+    // combats rather than compacting them, so a terminal state gets fed
+    // END_TURN over and over. pump_step (action_queue.cpp) short-circuits to
+    // COMBAT_OVER before it ever reaches the card-queue step, so every one of
+    // those sentinels was appended and NONE was ever drained: 16 steps filled
+    // card_queue and the 17th ran off the end of it, into card_queue_count /
+    // pad_cardq / monster_queue / monster_attacks_queued / the relic mirror
+    // (combat_state.hpp). The same holds with a hand-select screen open --
+    // pump blocks on the CHOOSE_CARD at the action-queue head, so the card
+    // queue is not drained there either and a live (non-terminal) state
+    // overflows just as readily.
+    //
+    // WHY THE GUARD DELEGATES TO legal_actions() instead of testing
+    // `phase == WAITING_ON_USER` itself: legal_actions() is the function that
+    // decides what a caller may send, and a guard that re-derives its own
+    // version of that decision is free to disagree with it. It would here,
+    // immediately -- while a hand-select screen is open the phase IS
+    // WAITING_ON_USER, yet legal_actions() reports can_end_turn == false and
+    // can_play all-false, so a phase-only guard would still admit the
+    // END_TURN that overflows the card queue. "Not terminal" is weaker still.
+    // Reading the mask is the only formulation with no second copy of the
+    // rule to drift: any future gate added to legal_actions() (a new curse, a
+    // new phase, a new relic veto) is inherited here for free, and the mask
+    // and the dispatch cannot disagree because there is only one of them.
+    //
+    // COST, measured, not guessed (bench_advance, Release+LTO, 10k-state
+    // batch, 25 fixed iterations so every state is still LIVE): 2.09 ms ->
+    // 2.86 ms per batch step, 4.37M -> 3.21M steps/s. That is the worst case
+    // by construction -- the benchmark's policy already calls
+    // legal_actions() to pick its action, so this gate exactly DOUBLES the
+    // mask work on the hot path, and nothing else in the step is expensive
+    // enough to dilute it. (Over a full 3s run the same binary reports
+    // 10.5M steps/s, because most states are terminal by then and a rejected
+    // action skips the pump entirely.)
+    //
+    // It is paid deliberately: a guard that cannot drift is worth more than a
+    // mask rebuild, and the alternative on offer was silent memory
+    // corruption. The cost is also RECOVERABLE now, without weakening
+    // anything: the four-span advance() overload takes the caller's
+    // already-computed mask (a policy has one in hand by construction) and
+    // feeds it to this very function, so a search loop pays for the mask
+    // once. In the same all-live regime that measured 3.21M above, the
+    // overload runs at 4.32-4.46M -- level with the 4.35M pre-guard baseline
+    // (advance.hpp has the interleaved A/B). What is NOT on offer is a
+    // hand-rolled phase test in here: that would trade the cost back for
+    // exactly the drift this replaced.
+
+    switch (action_verb(a)) {
+        case ActionVerb::PLAY_CARD:
+            // arg0 = hand index, arg1 = target monster slot (types.hpp).
+            // queue_card_play enqueues; pump resolves the play + any monster
+            // turn triggered by an end-of-turn (none here, mid-turn play).
+            if (!play_is_legal(mask, action_arg0(a), action_arg1(a))) {
+                break;  // illegal play -- documented no-op
+            }
+            queue_card_play(s, action_arg0(a), action_arg1(a));
+            pump(s, dispatch_monster_turn);
+            break;
+        case ActionVerb::END_TURN:
+            if (!mask.can_end_turn) {
+                break;  // illegal end-turn -- documented no-op
+            }
+            add_card_to_queue_bottom(s, make_end_turn_sentinel());
+            pump(s, dispatch_monster_turn);
+            break;
+        case ActionVerb::CHOOSE: {
+            // Resolve one selection on the open CHOOSE_CARD at
+            // the head of the action queue. arg0 = the chosen hand slot. Ignored
+            // (documented no-op) unless a choice is actually pending and the slot
+            // is a legal selection -- an illegal CHOOSE cannot corrupt state.
+            //
+            // choice_pending IS the "a real prompt is open" chain this case
+            // used to spell out for itself (waiting AND action_count > 0 AND
+            // the head is a CHOOSE_CARD AND choice_requires_user); reading it
+            // off the mask keeps that chain in one place.
+            if (!mask.choice_pending) {
+                break;
+            }
+            ActionQueueItem& front = s.action_queue[s.action_head];
+            const ChoiceKind kind = choose_kind_from_flags(front.flags);
+            const uint8_t slot = action_arg0(a);
+            // arg0 indexes the kind's SOURCE pile (hand, or discard for
+            // discard-to-draw-top). choice_slot_eligible checks the bound and
+            // the discard source-card exclusion.
+            //
+            // This is the ONE place the guard reads a predicate rather than
+            // the mask, and it is still the same single source of truth:
+            // choice_slot_eligible is the very function legal_actions() calls
+            // to fill can_choose[]. can_choose[] cannot be used directly here
+            // because it is deliberately NARROWER than the rule -- it only
+            // reflects the first kHandCap slots, while a discard-source choice
+            // may legally name a discard slot beyond that (advance.hpp,
+            // "Discard-source CHOOSE"). Gating on the array would reject legal
+            // selections; gating on the function it is built from does not.
+            if (!choice_slot_eligible(s, slot, kind,
+                                      choice_excluded_index(front))) {
+                break;  // illegal selection -- no-op
+            }
+            // DUPLICATE carries its clone count in the packed flags
+            // (Dual Wield magicNumber) and, being a REAL prompt here, takes
+            // the prompted-resolution branch (the hand-select screen's
+            // reorder bookkeeping, DualWieldAction.java:59-84).
+            apply_choice_selection(s, slot, kind,
+                                   choose_copies_from_flags(front.flags),
+                                   /*prompted=*/true);
+            // One card selected: decrement the remaining count. When it hits 0
+            // (or no eligible cards remain), the next pump pops the now-satisfied
+            // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.
+            front.amount -= 1;
+            pump(s, dispatch_monster_turn);
+            break;
+        }
+        case ActionVerb::USE_POTION:
+        default:
+            // Out of scope for the combat-only entry point: potions belong to
+            // the run (the belt lives in RunState), so the run overload of
+            // advance() handles USE_POTION before it ever delegates a combat
+            // step down here -- and it gates it on its own RunActionMask the
+            // same way this switch gates the combat verbs (run_advance.cpp
+            // step_potion). Here it is an UNCONDITIONAL no-op, which honours
+            // the contract trivially: no state is touched on any path.
+            break;
+    }
+    fill_result(s, result);
+}
+
 }  // namespace
 
 void advance(std::span<CombatState> states, std::span<const Action> actions,
@@ -364,136 +529,38 @@ void advance(std::span<CombatState> states, std::span<const Action> actions,
            "advance(): states/actions/results must be equal-length spans");
 
     for (std::size_t i = 0; i < states.size(); ++i) {
-        CombatState& s = states[i];
-        const Action a = actions[i];
-
-        // THE LEGALITY GATE -- one for EVERY verb, not just CHOOSE.
-        //
-        // advance()'s contract is that an action which is not legal for the
-        // state's current phase is a no-op that cannot mutate state. CHOOSE used
-        // to be the only verb that honoured it; PLAY_CARD and END_TURN did not,
-        // and that was a memory-corruption bug, not a cosmetic one. A batch API
-        // is normally driven by keeping the batch uniform and stepping finished
-        // combats rather than compacting them, so a terminal state gets fed
-        // END_TURN over and over. pump_step (action_queue.cpp) short-circuits to
-        // COMBAT_OVER before it ever reaches the card-queue step, so every one of
-        // those sentinels was appended and NONE was ever drained: 16 steps filled
-        // card_queue and the 17th ran off the end of it, into card_queue_count /
-        // pad_cardq / monster_queue / monster_attacks_queued / the relic mirror
-        // (combat_state.hpp). The same holds with a hand-select screen open --
-        // pump blocks on the CHOOSE_CARD at the action-queue head, so the card
-        // queue is not drained there either and a live (non-terminal) state
-        // overflows just as readily.
-        //
-        // WHY THE GUARD DELEGATES TO legal_actions() instead of testing
-        // `phase == WAITING_ON_USER` itself: legal_actions() is the function that
-        // decides what a caller may send, and a guard that re-derives its own
-        // version of that decision is free to disagree with it. It would here,
-        // immediately -- while a hand-select screen is open the phase IS
-        // WAITING_ON_USER, yet legal_actions() reports can_end_turn == false and
-        // can_play all-false, so a phase-only guard would still admit the
-        // END_TURN that overflows the card queue. "Not terminal" is weaker still.
-        // Reading the mask is the only formulation with no second copy of the
-        // rule to drift: any future gate added to legal_actions() (a new curse, a
-        // new phase, a new relic veto) is inherited here for free, and the mask
-        // and the dispatch cannot disagree because there is only one of them.
-        //
-        // COST, measured, not guessed (bench_advance, Release+LTO, 10k-state
-        // batch, 25 fixed iterations so every state is still LIVE): 2.09 ms ->
-        // 2.86 ms per batch step, 4.37M -> 3.21M steps/s. That is the worst case
-        // by construction -- the benchmark's policy already calls
-        // legal_actions() to pick its action, so this gate exactly DOUBLES the
-        // mask work on the hot path, and nothing else in the step is expensive
-        // enough to dilute it. (Over a full 3s run the same binary reports
-        // 10.5M steps/s, because most states are terminal by then and a rejected
-        // action skips the pump entirely.)
-        //
-        // It is paid deliberately: a guard that cannot drift is worth more than a
-        // mask rebuild, and the alternative on offer was silent memory
-        // corruption. If it ever matters, the fix is an advance() overload that
-        // takes the caller's already-computed mask (the policy has one in hand),
-        // NOT a hand-rolled phase test in here -- that trades the cost back for
-        // exactly the drift this replaced.
+        // No caller mask on this path, so build one per state. See step_one's
+        // gate comment for what it costs and the overload below for how a caller
+        // that already has the mask avoids paying it twice.
         ActionMask mask{};
-        legal_actions(s, mask);
+        legal_actions(states[i], mask);
+        step_one(states[i], actions[i], mask, results[i]);
+    }
+}
 
-        switch (action_verb(a)) {
-            case ActionVerb::PLAY_CARD:
-                // arg0 = hand index, arg1 = target monster slot (types.hpp).
-                // queue_card_play enqueues; pump resolves the play + any monster
-                // turn triggered by an end-of-turn (none here, mid-turn play).
-                if (!play_is_legal(mask, action_arg0(a), action_arg1(a))) {
-                    break;  // illegal play -- documented no-op
-                }
-                queue_card_play(s, action_arg0(a), action_arg1(a));
-                pump(s, dispatch_monster_turn);
-                break;
-            case ActionVerb::END_TURN:
-                if (!mask.can_end_turn) {
-                    break;  // illegal end-turn -- documented no-op
-                }
-                add_card_to_queue_bottom(s, make_end_turn_sentinel());
-                pump(s, dispatch_monster_turn);
-                break;
-            case ActionVerb::CHOOSE: {
-                // Resolve one selection on the open CHOOSE_CARD at
-                // the head of the action queue. arg0 = the chosen hand slot. Ignored
-                // (documented no-op) unless a choice is actually pending and the slot
-                // is a legal selection -- an illegal CHOOSE cannot corrupt state.
-                //
-                // choice_pending IS the "a real prompt is open" chain this case
-                // used to spell out for itself (waiting AND action_count > 0 AND
-                // the head is a CHOOSE_CARD AND choice_requires_user); reading it
-                // off the mask keeps that chain in one place.
-                if (!mask.choice_pending) {
-                    break;
-                }
-                ActionQueueItem& front = s.action_queue[s.action_head];
-                const ChoiceKind kind = choose_kind_from_flags(front.flags);
-                const uint8_t slot = action_arg0(a);
-                // arg0 indexes the kind's SOURCE pile (hand, or discard for
-                // discard-to-draw-top). choice_slot_eligible checks the bound and
-                // the discard source-card exclusion.
-                //
-                // This is the ONE place the guard reads a predicate rather than
-                // the mask, and it is still the same single source of truth:
-                // choice_slot_eligible is the very function legal_actions() calls
-                // to fill can_choose[]. can_choose[] cannot be used directly here
-                // because it is deliberately NARROWER than the rule -- it only
-                // reflects the first kHandCap slots, while a discard-source choice
-                // may legally name a discard slot beyond that (advance.hpp,
-                // "Discard-source CHOOSE"). Gating on the array would reject legal
-                // selections; gating on the function it is built from does not.
-                if (!choice_slot_eligible(s, slot, kind,
-                                          choice_excluded_index(front))) {
-                    break;  // illegal selection -- no-op
-                }
-                // DUPLICATE carries its clone count in the packed flags
-                // (Dual Wield magicNumber) and, being a REAL prompt here, takes
-                // the prompted-resolution branch (the hand-select screen's
-                // reorder bookkeeping, DualWieldAction.java:59-84).
-                apply_choice_selection(s, slot, kind,
-                                       choose_copies_from_flags(front.flags),
-                                       /*prompted=*/true);
-                // One card selected: decrement the remaining count. When it hits 0
-                // (or no eligible cards remain), the next pump pops the now-satisfied
-                // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.
-                front.amount -= 1;
-                pump(s, dispatch_monster_turn);
-                break;
-            }
-            case ActionVerb::USE_POTION:
-            default:
-                // Out of scope for the combat-only entry point: potions belong to
-                // the run (the belt lives in RunState), so the run overload of
-                // advance() handles USE_POTION before it ever delegates a combat
-                // step down here -- and it gates it on its own RunActionMask the
-                // same way this loop gates the combat verbs (run_advance.cpp
-                // step_potion). Here it is an UNCONDITIONAL no-op, which honours
-                // the contract trivially: no state is touched on any path.
-                break;
-        }
-        fill_result(s, results[i]);
+void advance(std::span<CombatState> states, std::span<const Action> actions,
+             std::span<StepResult> results,
+             std::span<const ActionMask> masks) noexcept {
+    assert(states.size() == actions.size() &&
+           actions.size() == results.size() &&
+           actions.size() == masks.size() &&
+           "advance(): states/actions/results/masks must be equal-length spans");
+
+    for (std::size_t i = 0; i < states.size(); ++i) {
+        // THE CALLER'S CONTRACT, CHECKED WHERE CHECKING IS FREE. masks[i] must
+        // be what legal_actions() would produce for states[i] as it stands right
+        // now (advance.hpp spells out what a violation costs -- a too-permissive
+        // mask walks an illegal action into the pump, which is the memory
+        // corruption the guard exists to stop). Debug and ASan builds recompute
+        // and compare, so a stale or mismatched mask aborts in the presets the
+        // suite actually runs under; Release trusts the caller, which is the
+        // whole reason this overload exists. The recomputation is inside the
+        // assert's own expression, so NDEBUG removes it entirely rather than
+        // leaving a computed-and-discarded mask behind.
+        assert(mask_matches_state(states[i], masks[i]) &&
+               "advance(): supplied ActionMask does not match its CombatState -- "
+               "rebuild it from the state you are about to step");
+        step_one(states[i], actions[i], masks[i], results[i]);
     }
 }
 
