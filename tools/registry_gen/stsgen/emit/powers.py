@@ -161,5 +161,49 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
     out.append("        default: return nullptr;")
     out.append("    }")
     out.append("}\n")
-    out.append("}  // namespace sts::registry")
+    out.append("}  // namespace sts::registry\n")
+    out.extend(native_dispatch_macro(
+        rows, "STS_REGISTRY_NATIVE_POWERS", "power_native_",
+        "power", "power_hooks.cpp"))
     return "\n".join(out) + "\n"
+
+
+def native_dispatch_macro(rows: list[dict], macro: str, prefix: str,
+                          domain: str, consumer: str) -> list[str]:
+    """The native-body dispatch list for `rows`, as an X-macro.
+
+    Shared by the power and relic emitters. Every row marked ``native: true``
+    contributes one ``X(<ID>, <handler>)`` entry, the handler name derived from
+    the row name by the frozen convention (``COMBUST`` -> ``power_native_combust``).
+    The consuming translation unit expands the list twice -- once for the extern
+    declarations, once for the ``<Id> -> handler`` switch -- so the table is a
+    projection of the registry rather than a hand-maintained list.
+
+    An X-macro (rather than a constexpr array of function pointers) because the
+    handler signature is an *engine* type (CombatState/Hook/...), and these
+    generated headers must keep compiling standalone, with no engine include
+    (tests/registry_gen_standalone.cpp). Tokens are namespace-free, so the
+    consumer expands them inside sts::engine.
+    """
+    native = [r for r in rows if r["native"]]
+    lines = [
+        f"// Native-body dispatch list: one entry per `native: true` {domain} row,",
+        f"// X({domain.upper()}_ID, handler). {consumer} expands this for the extern",
+        "// declarations AND for the id -> handler switch, so the dispatch table is",
+        "// generated from the registry instead of hand-maintained.",
+        "//",
+        "// The handler is odr-used at the expansion site, so a row marked native",
+        "// whose body nobody wrote is an UNDEFINED REFERENCE at link time -- never a",
+        f"// silent no-op. A {domain} that is deliberately registered native with no",
+        "// body yet must say so in code, by defining an explicit empty body in its",
+        "// batch translation unit.",
+    ]
+    if not native:
+        lines.append(f"#define {macro}(X)")
+        return lines
+    entries = [f"    X({r['name']}, {prefix}{r['name'].lower()})" for r in native]
+    width = max(len(e) for e in entries) + 1
+    body = [f"{e:<{width}}\\" for e in entries[:-1]] + [entries[-1]]
+    lines.append(f"#define {macro}(X) \\")
+    lines.extend(body)
+    return lines

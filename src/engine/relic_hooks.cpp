@@ -18,9 +18,11 @@
 
 #include <cstdint>
 
-#include "relics/relic_native.hpp"      // RelicNativeFn, heal_player
-#include "relics/relics_b3_24.hpp"      // B3.24 starter + common relics
-#include "relics/relics_b3_25.hpp"      // B3.25 uncommon relics
+// The per-batch relic headers (relics_b3_24.hpp, ...) are deliberately NOT
+// included: the generated STS_REGISTRY_NATIVE_RELICS expansion below declares
+// every native body itself, so this file has no per-batch dependency and a new
+// relic batch (B3.26, B3.27) never edits it.
+#include "relics/relic_native.hpp"      // RelicNativeSig/Fn, heal_player
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (attack check)
 #include "sts/engine/combat_state.hpp"
@@ -218,84 +220,55 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
 
 // --- Native escape hatch -----------------------------------------------------
 //
-// The dispatch table: RelicId -> the native body's function pointer, or nullptr
-// for a relic whose combat body is DEFERRED. Structure mirrors
+// The dispatch table -- RelicId -> the native body's function pointer -- is
+// GENERATED from registry/relics.yaml. Every row marked `native: true` becomes
+// one X(<RelicId>, <handler>) entry of STS_REGISTRY_NATIVE_RELICS (generated
+// relic_table.hpp, reached via sts/engine/relics.hpp), the handler name derived
+// from the row name by the frozen convention: RelicId::BLUE_CANDLE ->
+// relic_native_blue_candle. We expand that one list twice: once for the extern
+// declarations, once for the switch. Structure still mirrors
 // monster_dispatch.cpp's monster_init_fn (a plain switch, data-oriented, no
-// virtual dispatch); each relic batch adds its cases here and a translation unit
-// under src/engine/relics/.
+// virtual dispatch) -- but a relic batch no longer edits this file at all: it
+// adds registry rows, a translation unit under src/engine/relics/, and a
+// CMakeLists line. That is what makes B3.26 (rares+shop) and B3.27
+// (boss+specials) genuinely parallel-safe: they no longer share this table.
+//
+// Why the extern declarations are generated here rather than #include'd from the
+// per-batch headers: each handler is odr-used by the switch below, so a relic
+// marked `native: true` whose body NOBODY WROTE is an undefined reference at
+// link time instead of a silently missing case. (The old hand-written switch
+// answered `default: return nullptr` for a forgotten relic, so it quietly did
+// nothing -- exactly the failure this shape removes.) The declarations use
+// RelicNativeSig, so a body whose signature drifts also fails to link.
+//
+// Corollary: "native, but the combat body is DEFERRED" cannot be expressed by
+// omission any more -- a deferred relic must define an EXPLICIT empty body in
+// the batch TU that registered it, with the deferral reason written at that
+// definition. That is a decision on the record rather than a hole, and it is why
+// no new registry/relics.yaml field is needed to distinguish "native, handler
+// expected" from "native, deliberately no handler yet": the distinction lives
+// where the handler would live. The deferred set today (unchanged behaviour --
+// each is a no-op call instead of a skipped null call) is:
+//   AKABEKO / ART_OF_WAR / ANCIENT_TEA_SET / BOOT / PRESERVED_INSECT /
+//   TOY_ORNITHOPTER   -> relics/relics_b3_24.cpp
+//   MUMMIFIED_HAND / PANTOGRAPH -> relics/relics_b3_25.cpp
+// (BRONZE_SCALES / ODDLY_SMOOTH_STONE were un-deferred by the potion-support-
+// powers follow-up: Thorns/Dexterity are registered, so both are DATA
+// at_battle_start APPLY_POWER relics and never route here.)
+
+#define STS_RELIC_NATIVE_DECL(ID, FN) extern RelicNativeSig FN;
+STS_REGISTRY_NATIVE_RELICS(STS_RELIC_NATIVE_DECL)
+#undef STS_RELIC_NATIVE_DECL
 
 RelicNativeFn relic_native_fn(RelicId id) noexcept {
     switch (id) {
-        // B3.24 starter + commons (relics/relics_b3_24.cpp)
-        case RelicId::BURNING_BLOOD:
-            return &relic_native_burning_blood;
-        case RelicId::BLOOD_VIAL:
-            return &relic_native_blood_vial;
-        case RelicId::CENTENNIAL_PUZZLE:
-            return &relic_native_centennial_puzzle;
-        case RelicId::ORICHALCUM:
-            return &relic_native_orichalcum;
-        case RelicId::NUNCHAKU:
-            return &relic_native_nunchaku;
-        case RelicId::PEN_NIB:
-            return &relic_native_pen_nib;
-        case RelicId::HAPPY_FLOWER:
-            return &relic_native_happy_flower;
-        case RelicId::LANTERN:
-            return &relic_native_lantern;
-        case RelicId::RED_SKULL:
-            return &relic_native_red_skull;
-
-        // B3.25 uncommons (relics/relics_b3_25.cpp)
-        case RelicId::BLUE_CANDLE:
-            return &relic_native_blue_candle;
-        case RelicId::GREMLIN_HORN:
-            return &relic_native_gremlin_horn;
-        case RelicId::HORN_CLEAT:
-            return &relic_native_horn_cleat;
-        case RelicId::INK_BOTTLE:
-            return &relic_native_ink_bottle;
-        case RelicId::KUNAI:
-            return &relic_native_kunai;
-        case RelicId::LETTER_OPENER:
-            return &relic_native_letter_opener;
-        case RelicId::ORNAMENTAL_FAN:
-            return &relic_native_ornamental_fan;
-        case RelicId::SHURIKEN:
-            return &relic_native_shuriken;
-        case RelicId::SUNDIAL:
-            return &relic_native_sundial;
-        case RelicId::SELF_FORMING_CLAY:
-            return &relic_native_self_forming_clay;
-
-        // Native relics whose combat body is DEFERRED (a cross-domain dependency
-        // not yet available). Each is a documented no-op today; the relic still
-        // dispatches (row + hook registered) so the accounting/wiring is in place.
-        //   (BRONZE_SCALES / ODDLY_SMOOTH_STONE un-deferred by the potion-support-
-        //    powers follow-up: Thorns/Dexterity now registered, so both are DATA
-        //    at_battle_start APPLY_POWER relics -- they no longer route here.)
-        //   AKABEKO        -- apply Vigor at battle start; Vigor power row is later.
-        //   BOOT           -- onAttack damage floor; a DAMAGE-pipeline modifier.
-        //   ART_OF_WAR / ANCIENT_TEA_SET -- cross-turn/cross-room energy flags.
-        //   PRESERVED_INSECT -- elite HP scaling (needs room context + HP-scale op).
-        //   TOY_ORNITHOPTER is dispatched by run_advance's RunState-owned potion
-        //   route (B4.4), not by a CombatState-only hook.
-        //   MUMMIFIED_HAND (B3.25) -- onUseCard POWER -> random hand card costs 0
-        //   this turn (cardRandomRng); DEFERRED: no POWER CardType exists until the
-        //   B3.7 power-card batch, so the trigger condition is unrepresentable.
-        //   PANTOGRAPH (B3.25) -- atBattleStart heal 25 in a BOSS fight; DEFERRED:
-        //   monsters.yaml has no EnemyType/BOSS metadata and no boss rows exist
-        //   yet (Guardian/Hexaghost/Slime Boss are B3.15-B3.17).
-        case RelicId::AKABEKO:
-        case RelicId::BOOT:
-        case RelicId::ART_OF_WAR:
-        case RelicId::ANCIENT_TEA_SET:
-        case RelicId::PRESERVED_INSECT:
-        case RelicId::TOY_ORNITHOPTER:
-        case RelicId::MUMMIFIED_HAND:
-        case RelicId::PANTOGRAPH:
+#define STS_RELIC_NATIVE_CASE(ID, FN) \
+    case RelicId::ID:                 \
+        return &FN;
+        STS_REGISTRY_NATIVE_RELICS(STS_RELIC_NATIVE_CASE)
+#undef STS_RELIC_NATIVE_CASE
         default:
-            return nullptr;  // an unrecognized / deferred native relic is a safe no-op
+            return nullptr;  // a non-native / unrecognized relic has no body
     }
 }
 

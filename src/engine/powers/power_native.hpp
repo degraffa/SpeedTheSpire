@@ -8,9 +8,11 @@
 // not-yet-implemented ids).
 //
 // Each native power's body is a free function with the PowerNativeFn signature,
-// declared in its batch header (powers_b3_2.hpp, ...). Adding a power batch is:
-// one new .cpp, one new header, one CMakeLists line, one table line -- no edits
-// to the files an earlier batch owns.
+// declared in its batch header (powers_b3_2.hpp, ...). The dispatch table itself
+// is now GENERATED from registry/powers.yaml (the STS_REGISTRY_NATIVE_POWERS
+// X-macro in the generated power_table.hpp), so adding a power batch is: one new
+// .cpp, one new header, one CMakeLists line -- and NO edit to power_hooks.cpp or
+// to any file an earlier batch owns.
 
 #include <cstdint>
 
@@ -23,11 +25,19 @@ namespace sts::engine {
 // One native power's hook body. `ctx.owner` is the power's owner actor and
 // `ctx.power_amount` its stack amount; the body inspects `hook` and returns
 // without queuing anything for the hooks it does not answer.
-using PowerNativeFn = void (*)(CombatState& s, Hook hook,
-                               const HookContext& ctx) noexcept;
+//
+// PowerNativeSig is the FUNCTION type (PowerNativeFn is a pointer to it); the
+// generated dispatch table declares each handler as `extern PowerNativeSig fn;`,
+// which both spells the declaration once and pins every native body to exactly
+// this signature (a mismatched definition mangles differently -> link error).
+using PowerNativeSig = void(CombatState& s, Hook hook,
+                            const HookContext& ctx) noexcept;
+using PowerNativeFn = PowerNativeSig*;
 
-// The dispatch table (power_hooks.cpp): the native body for `id`, or nullptr for
-// a power with no native body (Artifact) / an unrecognized id.
+// The dispatch table (power_hooks.cpp, generated from registry/powers.yaml): the
+// native body for `id`, or nullptr for a non-native / unrecognized id. A native
+// row with a deliberately empty body (Artifact) maps to that empty body, not to
+// nullptr -- see the STS_REGISTRY_NATIVE_POWERS expansion in power_hooks.cpp.
 [[nodiscard]] PowerNativeFn power_native_fn(PowerId id) noexcept;
 
 // The power-slot list for an actor (kActorPlayer -> player_powers; a monster slot

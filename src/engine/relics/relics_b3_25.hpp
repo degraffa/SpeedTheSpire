@@ -1,9 +1,12 @@
 #pragma once
 
 // Native bodies for the B3.25 uncommon relics (registry/relics.yaml tier
-// UNCOMMON). The B3.25 uncommons whose combat body is DEFERRED (Mummified Hand,
-// Pantograph) have no entry here -- relic_native_fn maps them to nullptr and
-// documents each deferral at that table entry.
+// UNCOMMON), including the two whose combat body is DEFERRED (Mummified Hand,
+// Pantograph). Those two are DELIBERATELY EMPTY definitions rather than
+// omissions: the generated dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses
+// a handler for EVERY `native: true` row, so a forgotten body is a link error.
+// "Deferred" therefore has to be written down -- and it is, at each empty
+// definition in relics_b3_25.cpp, together with its reason.
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/relic_hooks.hpp"  // RelicHook, RelicHookContext
@@ -32,5 +35,11 @@ void relic_native_sundial(CombatState& s, RelicHook hook, RelicSlot& slot,
 void relic_native_self_forming_clay(CombatState& s, RelicHook hook,
                                     RelicSlot& slot,
                                     const RelicHookContext& ctx) noexcept;
+
+// --- DEFERRED combat bodies (deliberately empty; see relics_b3_25.cpp) -------
+void relic_native_mummified_hand(CombatState& s, RelicHook hook, RelicSlot& slot,
+                                 const RelicHookContext& ctx) noexcept;
+void relic_native_pantograph(CombatState& s, RelicHook hook, RelicSlot& slot,
+                             const RelicHookContext& ctx) noexcept;
 
 }  // namespace sts::engine
