@@ -38,8 +38,25 @@ constexpr std::size_t kBatch = 10000;
 
 // Pick a random legal Action for `s` using `rng` (harness RNG). Collects the
 // legal choices (each playable hand slot + END_TURN) and picks one uniformly.
-// If the state is terminal / has no legal play, returns END_TURN (a harmless
-// no-op-ish action that keeps the loop uniform).
+//
+// When the mask offers nothing -- which is what a TERMINAL state looks like,
+// and every state ends up there long before a 3s run is over -- this returns
+// END_TURN and keeps feeding it. That is deliberate, and it is deliberately NOT
+// compacted away: this is the batch-API usage pattern that matters (keep the
+// batch uniform, keep stepping finished combats) and it is exactly the pattern
+// that used to corrupt memory. advance() appended an end-turn sentinel to
+// card_queue without checking legality, while pump_step short-circuits to
+// COMBAT_OVER before it ever reaches the card-queue step, so nothing drained it:
+// kCardQueueCap steps filled the array and the next one wrote past its end
+// (assert in Debug, silent neighbour corruption in Release). advance() now
+// rejects an action its own legal_actions() does not report, so feeding a
+// terminal state is genuinely a no-op -- and this loop is the only place in the
+// tree that exercises it at scale, since CI builds the benchmarks but never runs
+// them. Keeping the terminal states in the batch is therefore the point of the
+// harness, not an oversight: a re-broken guard aborts this binary.
+//
+// (The comment this replaces called it "a harmless no-op-ish action that keeps
+// the loop uniform". It was neither harmless nor a no-op.)
 Action RandomLegalAction(const CombatState& s, std::mt19937& rng) {
     ActionMask mask{};
     legal_actions(s, mask);
