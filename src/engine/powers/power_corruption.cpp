@@ -28,7 +28,17 @@ void power_native_corruption(CombatState& s, Hook hook,
         s.card_pool[ctx.card_pool_index].flags |=
             card_flag_bit(CardFlag::EXHAUST);
     } else if (hook == Hook::ON_CARD_DRAW) {
-        s.card_pool[ctx.card_pool_index].cost_now = 0;  // setCostForTurn(0)
+        // setCostForTurn(0) (AbstractCard.java:2001-2011): assign, and mark the
+        // instance cost-modified-for-turn when the new value differs from the
+        // card's own base cost, so the end-turn sweep restores it
+        // (AbstractRoom.endTurn:397-405 -> resetAttributes:2035-2045). Without the
+        // mark the free cost would outlive the turn.
+        CardInstance& c = s.card_pool[ctx.card_pool_index];
+        c.cost_now = 0;
+        if (card_cost(*cd, c.upgrade) != 0) {
+            c.flags = static_cast<uint16_t>(
+                c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+        }
     }
 }
 

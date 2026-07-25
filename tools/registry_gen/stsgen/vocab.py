@@ -96,6 +96,26 @@ OPCODES = {
     "BLOCK_PER_NON_ATTACK": 31,
     "SPOT_WEAKNESS": 32,
     "RANDOM_ATTACK_TO_HAND": 33,
+    # Red-rare additions (append-only from 34). PLAY_CARD is the GENERAL
+    # recursive-play verb -- queue a card instance to be auto-played free of
+    # energy cost; its `flags` (interp.hpp kPlayCard*) choose the source (a
+    # runtime card-pool index, or the top of the draw pile), whether a
+    # stat-equivalent COPY is played (DoubleTapPower.java:50-60), and the played
+    # instance's disposition. Only the draw-top form is authorable in YAML: the
+    # copy form's operand is a runtime pool index. DAMAGE_FEED: FeedAction.update
+    # (:34-47) -- damage, then increaseMaxHp if the hit left the target dead.
+    # FIEND_FIRE: FiendFireAction.update (:32-46) -- hand-size-many random
+    # exhausts, then hand-size-many hits. DOUBLE_STRENGTH: LimitBreakAction.update
+    # (:27-32) -- addToTop Strength == the current Strength stack.
+    # VAMPIRE_DAMAGE_ALL: VampireDamageAllEnemiesAction.update (:53-77) -- hit
+    # every live monster, then heal the summed HP actually lost. HEAL: the queued
+    # HealAction, routed through the onPlayerHeal relic seam.
+    "PLAY_CARD": 34,
+    "DAMAGE_FEED": 35,
+    "FIEND_FIRE": 36,
+    "DOUBLE_STRENGTH": 37,
+    "VAMPIRE_DAMAGE_ALL": 38,
+    "HEAL": 39,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -110,7 +130,12 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # hand card and add stat-equivalent copies. Kind 4 needs a third
                 # kind bit; bit 2 is RANDOM, so the high kind bit lives at bit 3
                 # (kind = bits[0..1] | bit3 << 2) -- kinds 0-3 pack unchanged.
-                "duplicate": 4}
+                "duplicate": 4,
+                # Exhume / ExhumeAction: the source pile is the EXHAUST pile --
+                # choose one exhausted card and return it to the hand
+                # (ExhumeAction.update:38-113). Kind 5 packs as 1 | the high kind
+                # bit, so kinds 0-3 stay byte-identical.
+                "exhaust_to_hand": 5}
 CHOICE_RANDOM_BIT = 1 << 2
 CHOICE_KIND_HIGH_BIT = 1 << 3
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
@@ -152,6 +177,18 @@ CARD_TRIGGERS = {"on_play": 0, "end_of_turn": 1, "on_draw": 2,
 CARD_PILES = {"HAND": 0, "DRAW": 1, "DISCARD": 2, "DRAW_RANDOM": 3}
 CARD_MAKE_UPGRADED_BIT = 1 << 24
 
+# PLAY_CARD `extra` bits -- MIRROR of interp.hpp's kPlayCard* constants. A step
+# authors them as a list, e.g. `{op: PLAY_CARD, play: [from_draw_top]}`. `copy`
+# names a runtime card-pool source and so is only ever set by engine code; it is
+# listed here to keep the mirror complete.
+PLAY_CARD_FLAGS = {
+    "copy": 1 << 0,
+    "purge": 1 << 1,
+    "exhaust": 1 << 2,
+    "from_draw_top": 1 << 3,
+    "queue_front": 1 << 4,
+}
+
 # CardFlag bits -- MIRROR of include/sts/engine/types.hpp CardFlag (append-only).
 # YAML `flags:` names are lower-case; cards.hpp static_asserts the emitted
 # kCardFlag* constants equal the engine's CardFlag values.
@@ -166,6 +203,11 @@ CARD_FLAGS = {
     # the mirror stays complete): setCostForTurn marked this instance's cost_now
     # as a this-turn-only modification; AbstractRoom.endTurn:397-405 resets it.
     "cost_modified_for_turn": 1 << 6,
+    # Per-INSTANCE runtime bit (never authored in YAML -- listed only so the
+    # mirror stays complete): AbstractCard.purgeOnUse, the replay copy that is
+    # destroyed when it resolves instead of going to a pile
+    # (UseCardAction.java:89-94, DoubleTapPower.java:59).
+    "purge_on_use": 1 << 7,
 }
 
 # Power hook points (generated sts::registry::Hook) -- MIRROR of the engine's

@@ -83,6 +83,33 @@ using RelicOnObtainCardFn = RelicOnObtainCardSig*;
 [[nodiscard]] RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnObtainCardFn relic_on_obtain_card_fn(RelicId id) noexcept;
 
+// AbstractPlayer.gainGold (AbstractPlayer.java:719-737), the ONE door every
+// run-layer gold gain goes through:
+//
+//     if (hasRelic("Ectoplasm")) { flash(); return; }        // NO gold at all
+//     if (amount <= 0) { log } else { gold += amount; relics' onGainGold(); }
+//
+// Two things live here rather than at each producer. (1) ECTOPLASM SUPPRESSES THE
+// GAIN ENTIRELY -- it returns before the `+=`, so a producer that writes
+// `rs.gold +=` directly silently ignores a registered boss relic; that is why
+// relic_pickup_rare.cpp's Old Coin note asked for this helper "when the boss tier
+// lands". (2) the relics' onGainGold fan-out belongs beside the write; no
+// registered S1 relic overrides onGainGold (checked across relics/: only
+// BloodyIdol and Maw Bank do, neither of which is an S1 row), so the fan-out is
+// an empty pass today and is named rather than written.
+//
+// Non-positive amounts are NOT added, matching the Java's else-branch.
+inline void gain_gold(RunState& rs, int32_t amount) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id == static_cast<uint16_t>(RelicId::ECTOPLASM)) {
+            return;
+        }
+    }
+    if (amount > 0) {
+        rs.gold += amount;
+    }
+}
+
 // Upgrade up to two random not-yet-upgraded master-deck cards of `wanted`
 // (WarPaint.onEquip WarPaint.java:36-59 / Whetstone.onEquip Whetstone.java:36-59
 // -- identical bodies but for the CardType). Shared by both handlers, and inline

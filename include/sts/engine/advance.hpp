@@ -126,6 +126,15 @@ struct ActionMask {
     // >= kHandCap are still legal and validated by advance against discard_count).
     // `choice_from_discard` is false for hand-source choices and when idle.
     bool choice_from_discard;
+
+    // --- Exhaust-source CHOOSE (Exhume) ---
+    // An EXHAUST_TO_HAND choice selects from the EXHAUST pile. When
+    // `choice_from_exhaust` is true, the CHOOSE action arg0 is an EXHAUST slot,
+    // and `can_choose[i]` reflects the first min(exhaust_count, kHandCap) exhaust
+    // slots on the same convenience terms as `choice_from_discard` above. The two
+    // flags are mutually exclusive, and both are false for a hand-source choice
+    // and when idle.
+    bool choice_from_exhaust;
 };
 
 static_assert(std::is_trivially_copyable_v<ActionMask>,

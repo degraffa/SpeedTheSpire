@@ -198,10 +198,9 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
 
     // Block decay (GameActionManager.java:353-359). Barricade/Blur keep block;
     // Calipers loses 15 (AbstractCreature.loseBlock(int), clamped at 0) instead
-    // of zeroing. Calipers is a registered relic, so its branch is LIVE; the
-    // other two are powers with no registry row yet, so their branch structure is
-    // present but only the default path runs. Blur is Silent-only and out of S1
-    // scope; Barricade is the remaining gap.
+    // of zeroing. Calipers is a registered relic and Barricade is now a
+    // registered power, so both of those branches are LIVE; Blur is Silent-only
+    // and out of S1 scope, so its branch structure is present and never taken.
     //
     // kSubsequentTurn ONLY. This whole paragraph is step 6's; the combat-start
     // block (AbstractRoom.java:236-258) has no loseBlock line of any kind, which
@@ -213,9 +212,28 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // fix exists to remove, and it would come alive the moment anything grants
     // block before turn 1 (a Barricade-like power, or an atBattleStart block
     // relic) -- at which point turn 1 would silently eat it.
+    //
+    // BARRICADE SITS ON THIS SIDE OF THE TURN-1 GATE, with Calipers, and the Java
+    // leaves no choice: the whole `if (!hasPower("Barricade") && !hasPower("Blur"))
+    // { if (!hasRelic("Calipers")) loseBlock(); else loseBlock(15); }` paragraph is
+    // GameActionManager.java:353-359, inside getNextAction's step-6 branch, and the
+    // combat-start block (AbstractRoom.java:236-258) contains no loseBlock line of
+    // any kind. Barricade is not a rule that ADDS something at turn start; it is a
+    // guard on a decay that only step 6 performs, so on the combat-start side there
+    // is nothing for it to guard. Putting it on the other side of the gate would
+    // also be unobservable-by-construction and therefore untestable.
     if (when == TurnStart::kSubsequentTurn) {
-        const bool has_barricade = false;  // future: player has Barricade power
-        const bool has_blur = false;       // future: player has Blur power
+        // hasPower is a PRESENCE test: BarricadePower's amount is the -1 marker
+        // its ctor sets (BarricadePower.java:22), never a positive stack.
+        bool has_barricade = false;
+        for (uint8_t i = 0; i < s.player_power_count; ++i) {
+            if (s.player_powers[i].power_id ==
+                static_cast<uint16_t>(PowerId::BARRICADE)) {
+                has_barricade = true;
+                break;
+            }
+        }
+        const bool has_blur = false;       // Silent-only; no registry row in S1
         const bool has_calipers = player_has_relic(s, RelicId::CALIPERS);
         if (!has_barricade && !has_blur) {
             if (!has_calipers) {
@@ -254,9 +272,25 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // combat-start block calls applyStartOfTurnPowers (AbstractRoom.java:256) but
     // has no applyStartOfTurnPostDrawPowers line, so strictly this call belongs to
     // step 6 alone (GameActionManager.java:363). It long predates the TurnStart
-    // split above and is inert -- no registered power binds the post-draw hook --
-    // so changing it is a behaviour question that wants its own test, not a
-    // silent edit. Recorded here rather than changed or ignored.
+    // split above.
+    //
+    // THE HOOK IS NO LONGER UNBOUND. This comment used to justify the asymmetry
+    // by "no registered power binds the post-draw hook"; that stopped being true
+    // when the red rares landed. BrutalityPower.atStartOfTurnPostDraw
+    // (BrutalityPower.java:34-39) and DemonFormPower.atStartOfTurnPostDraw
+    // (DemonFormPower.java:32-36) both bind it, so the call now has live bodies
+    // behind it on this side of the gate.
+    //
+    // It remains UNOBSERVABLE, which is why it is still not gated here: both
+    // powers are applied only by playing their card, so neither can be on the
+    // player when begin_first_turn runs -- nothing in the pre-battle pass or the
+    // relic mirror grants either one. The divergence would become real the moment
+    // something does (a relic or run-layer carry-over), and at that point turn 1
+    // would silently run one extra Strength gain, or one extra draw plus HP loss,
+    // that AbstractRoom's turn-1 block does not contain. Gating it to
+    // kSubsequentTurn is the faithful reading of the Java and is inert today, but
+    // it is a behaviour change that wants its own test rather than a silent edit
+    // folded into an integration -- so it is recorded here, accurately, instead.
     dispatch_at_start_of_turn_post_draw(s);
     // EnableEndTurnButtonAction (line 364) is modeled by step 7 handing control
     // back to the player once the queued DrawCard has drained; no separate item.

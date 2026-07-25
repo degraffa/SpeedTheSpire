@@ -98,5 +98,10 @@ jobs:
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
 
+      # gtest_discover_tests registers one ctest entry per gtest CASE, so this is
+      # ~640 short-lived process launches -- launch-bound, not CPU-bound, which
+      # is why the job count is nproc rather than nproc-1. The test presets carry
+      # a conservative default (8) for a bare `ctest --preset`; this overrides it
+      # with what the runner actually has.
       - name: Test
-        run: ctest --preset ${{ matrix.preset }}
+        run: ctest --preset ${{ matrix.preset }} --parallel "$(nproc)"

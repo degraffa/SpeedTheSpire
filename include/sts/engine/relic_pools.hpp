@@ -49,6 +49,16 @@ struct RelicSpawnContext {
     // fill_campfire_relic_count; a draw that does not fill it sees 0, which is
     // the fresh-run answer.
     uint8_t campfire_relic_count = 0;
+    // Ectoplasm.canSpawn (Ectoplasm.java:50-53): `actNum <= 1` -- the only
+    // act-gated canSpawn in the S1 relic set. Default 1 because S1 IS Act 1
+    // (design §6); RunState.act is the producer when a caller has one.
+    uint8_t act = 1;
+    // BlackBlood.canSpawn (BlackBlood.java:33-36): hasRelic("Burning Blood").
+    // Default TRUE, not false -- the Ironclad ALWAYS starts with Burning Blood
+    // (Ironclad.getStartingRelics, Ironclad.java:113-115), so `true` is the
+    // fresh-run answer in exactly the way `0` is for campfire_relic_count.
+    // Filled by fill_boss_spawn_gates.
+    bool has_burning_blood = true;
 };
 
 // Count the owned Girya / Peace Pipe / Shovel relics into `ctx`. It lives beside
@@ -57,6 +67,13 @@ struct RelicSpawnContext {
 // bodies must not each re-scan RunState.
 void fill_campfire_relic_count(const RunState& rs,
                                RelicSpawnContext& ctx) noexcept;
+
+// Fill the BOSS-tier gates from the run: `act` from RunState.act and
+// `has_burning_blood` from the owned relic list (BlackBlood.canSpawn). Separate
+// from fill_campfire_relic_count for the same reason that one is separate from
+// fill_deck_spawn_gates -- canSpawn bodies are PURE predicates over the context
+// and must not re-scan RunState themselves.
+void fill_boss_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept;
 
 // Fill the deck-content gates above from the run's master deck. "Non-basic" ==
 // CardRarity != BASIC; the only BASIC red rows are Strike/Defend/Bash

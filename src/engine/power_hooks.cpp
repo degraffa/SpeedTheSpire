@@ -147,10 +147,14 @@ void dispatch_on_play_card(CombatState& s, uint16_t card_id,
 }
 
 void dispatch_on_use_card(CombatState& s, uint8_t played_pool_index,
-                          uint16_t card_id) noexcept {
+                          uint16_t card_id, uint8_t target) noexcept {
     HookContext ctx{};
     ctx.card_id = card_id;
     ctx.card_pool_index = played_pool_index;
+    // action.target -- the monster the card was played at. Double Tap aims its
+    // replay copy at it (DoubleTapPower.java:46-49); a self/none card carries
+    // kActorPlayer, which is what the game's null target becomes here.
+    ctx.target = target;
     // UseCardAction.java:41-64 order -- DISTINCT from onPlayCard: player powers ->
     // player relics -> hand -> discard -> draw cards -> monster powers (monsters
     // LAST). Corruption (native, player power) redirects the played SKILL to

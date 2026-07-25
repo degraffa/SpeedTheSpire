@@ -30,13 +30,23 @@ namespace {
 // touch block gain), so -Wswitch-enum would only add noise. The static_assert is
 // what makes a new power impossible to add without re-reading this switch.
 [[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so.");
     // Checked for the Guardian's two powers, neither needs a case: ModeShiftPower
     // overrides only updateDescription (ModeShiftPower.java:27-30) and
     // SharpHidePower only updateDescription + onUseCard (SharpHidePower.java:
     // 38-49). Neither touches block gain.
+    // Checked for the six red-rare powers. Two of them look like block cases and
+    // neither is: BARRICADE does not SCALE a block gain, it suppresses the
+    // start-of-turn DECAY, which is a branch in the start-of-turn sequence
+    // (GameActionManager.java:353-359) and not a modifyBlock override --
+    // BarricadePower overrides only updateDescription (BarricadePower.java:27-30);
+    // and JUGGERNAUT only READS the gain in onGainedBlock (JuggernautPower.java:
+    // 34-40), which fires AFTER this pass and returns nothing. The other four
+    // (Berserk / Brutality / Demon Form / Double Tap) touch no block path at all.
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::DEXTERITY: {
             const float m = blk + static_cast<float>(p.amount);

@@ -46,7 +46,16 @@ namespace {
     // overrides only updateDescription (ModeShiftPower.java:27-30) and
     // SharpHidePower only updateDescription + onUseCard (SharpHidePower.java:
     // 38-49). Sharp Hide QUEUES damage, but it does not scale anyone else's.
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for the six red-rare powers, none needs a case: Barricade
+    // (BarricadePower.java:27-30) and Berserk (BerserkPower.java:27-42) override
+    // only updateDescription (+ atStartOfTurn); Brutality (:29-39), Demon Form
+    // (:27-36) and Double Tap (:37-73) hook the turn/card lifecycle, not the
+    // damage pipeline; Juggernaut (:34-45) only READS a block gain. Demon Form is
+    // the one that looks like a case and is not -- it GRANTS Strength, whose own
+    // case below already does the scaling.
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -78,7 +87,13 @@ namespace {
     // (ModeShiftPower.java:27-30 / SharpHidePower.java:38-49). In particular
     // Mode Shift does NOT reduce incoming damage -- it only counts it
     // (TheGuardian.java:281-284), which is why it needs no hook at all.
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for the six red-rare powers: none overrides atDamageReceive
+    // (Barricade / Berserk / Brutality / Demon Form / Double Tap / Juggernaut --
+    // their only overrides are updateDescription plus one lifecycle hook each),
+    // so none needed a case.
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -120,7 +135,11 @@ namespace {
     // the youngest of the three (it arrived with Intangible), so a branch cut
     // before Intangible landed will not conflict here and will leave this count
     // stale while fixing the other two. Update all three together.
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for the six red-rare powers: none overrides atDamageFinalReceive,
+    // so none needed a case.
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 40,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -428,6 +447,69 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     if (tgt != kActorPlayer) {
         on_monster_damaged(s, tgt, hp_lost);
     }
+}
+
+// DAMAGE_FEED (FeedAction.update, FeedAction.java:34-47): the ordinary damage
+// pipeline, then -- ONLY if the hit LEFT the target dead -- the player's
+// increaseMaxHp(amount, false). The Java condition is
+//     !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
+// i.e. gain when the target is dying-or-at-zero and is neither halfDead nor a
+// Minion. Neither halfDead nor MinionPower has an S1 Act-1 producer (no monster
+// sets halfDead and there is no Minion power row), so those two terms are
+// constant-false here and the test is "did this hit take it to zero".
+// increaseMaxHp (AbstractCreature.java:199-208) is maxHealth += amount FOLLOWED BY
+// heal(amount, true), so the heal runs the onPlayerHeal relic pass -- it goes
+// through heal_player_with_relics, never a raw HP write. The heal is SYNCHRONOUS
+// (a direct heal() call, not a queued HealAction), unlike Reaper's.
+void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
+                    int max_hp_gain) noexcept {
+    if (tgt >= kMonsterCap) {
+        return;
+    }
+    op_damage(s, src, tgt, base);
+    if (s.monsters[tgt].hp > 0 || max_hp_gain <= 0) {
+        return;
+    }
+    s.player_max_hp = static_cast<int16_t>(s.player_max_hp + max_hp_gain);
+    heal_player_with_relics(s, max_hp_gain);
+}
+
+// VAMPIRE_DAMAGE_ALL (VampireDamageAllEnemiesAction.update, :53-77): damage every
+// monster that is not dying/escaping, in GROUP (slot) order, accumulating each
+// target's lastDamageTaken -- min(post-block damage, its HP before the hit),
+// AbstractMonster.java:669, which is exactly the HP it lost. When the sum is
+// positive the action addToBot's HealAction(player, sum), so the heal is QUEUED
+// and resolves after anything the hits themselves queued at the front.
+void op_vampire_damage_all(CombatState& s, int base) noexcept {
+    int healed = 0;
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        if (s.monsters[i].hp <= 0) {
+            continue;  // isDying || currentHealth <= 0 || isEscaping (:60)
+        }
+        const int16_t before = s.monsters[i].hp;
+        op_damage(s, kActorPlayer, i, base);
+        healed += before - s.monsters[i].hp;
+    }
+    if (healed <= 0) {
+        return;
+    }
+    ActionQueueItem heal{};
+    heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+    heal.src = kActorPlayer;
+    heal.tgt = kActorPlayer;
+    heal.amount = healed;
+    add_to_bottom(s, heal);  // addToBot HealAction(source, source, healAmount) (:72)
+}
+
+// HEAL (HealAction.update, HealAction.java:30-34 -> AbstractCreature.heal): the
+// player's heal, routed through heal_player_with_relics so the onPlayerHeal relic
+// pass (Magic Flower) applies and the result is clamped to max HP. A monster
+// target is a no-op: no S1 effect heals one, and the relic pass is player-only.
+void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
+    if (tgt != kActorPlayer || amount <= 0) {
+        return;
+    }
+    heal_player_with_relics(s, amount);
 }
 
 // DropkickAction.update: test Vulnerable when the action resolves. Damage is

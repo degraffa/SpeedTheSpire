@@ -36,6 +36,40 @@ namespace {
     return false;
 }
 
+// Presence, NOT magnitude: does `actor` have a slot for `id` at all? Barricade
+// and Corruption both live with amount -1 (BarricadePower.java:22 /
+// CorruptionPower.java:27), so the amount-gated actor_carries_power above would
+// answer "no" for either of them.
+[[nodiscard]] bool actor_has_power_slot(const CombatState& s, uint8_t actor,
+                                        PowerId id) noexcept {
+    const PowerView pv = actor_powers(s, actor);
+    for (uint8_t i = 0; i < pv.count; ++i) {
+        if (pv.slots[i].power_id == static_cast<uint16_t>(id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// The "the player already has this, do nothing" guard two RARE POWER cards spell
+// out in their own use(): Barricade.use (Barricade.java:32-40) and
+// Corruption.use (Corruption.java:43-51) both scan p.powers for their own ID and
+// queue the ApplyPowerAction only when it is absent. A registry effect program
+// has no conditional, so the guard lives here instead, at the apply.
+//
+// Moving it from use()-time to apply-time is observably identical: the two side
+// effects a skipped ApplyPowerAction would also have skipped -- the source
+// onApplyPower fan-out (Sadistic) and the target Artifact nullify -- are both
+// gated on the applied power being a DEBUFF (SadisticPower.java:39,
+// ApplyPowerAction.java:131), and both of these are BUFFs.
+[[nodiscard]] bool apply_is_a_no_op_repeat(const CombatState& s, uint8_t tgt,
+                                           PowerId id) noexcept {
+    if (id != PowerId::BARRICADE && id != PowerId::CORRUPTION) {
+        return false;
+    }
+    return actor_has_power_slot(s, tgt, id);
+}
+
 }  // namespace
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
@@ -63,6 +97,12 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
                 return;
             }
         }
+    }
+    // Barricade / Corruption: the CARD refuses to queue a second application at
+    // all (see apply_is_a_no_op_repeat), so a repeat lands nowhere and stacks
+    // nothing -- their slot amount stays the -1 marker their ctors set.
+    if (apply_is_a_no_op_repeat(s, tgt, id)) {
+        return;
     }
     const PowerDef* applied_def = power_def(id);
     // The applied instance's PowerType. Strength/Dexterity flip to DEBUFF when
@@ -242,6 +282,30 @@ void op_reduce_power(CombatState& s, uint8_t tgt, PowerId id,
         if (slots[i].amount <= 0) {
             op_remove_power(s, tgt, id);
         }
+        return;
+    }
+}
+
+// DOUBLE_STRENGTH (LimitBreakAction.update, LimitBreakAction.java:26-33): when
+// the player HAS a Strength power, addToTop ApplyPowerAction(player, player,
+// StrengthPower(player, strAmt), strAmt) with strAmt read from the slot at
+// execute time -- a doubling. `hasPower` is a bare presence test, so a NEGATIVE
+// Strength is doubled too (Limit Break after a Disarm deepens the penalty), and a
+// slot sitting at exactly 0 while its queued removal is still pending applies 0.
+// addToTop, not addToBot: the doubled Strength jumps the queue.
+void op_double_strength(CombatState& s) noexcept {
+    const PowerView pv = actor_powers(s, kActorPlayer);
+    for (uint8_t i = 0; i < pv.count; ++i) {
+        if (pv.slots[i].power_id != static_cast<uint16_t>(PowerId::STRENGTH)) {
+            continue;
+        }
+        ActionQueueItem up{};
+        up.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        up.src = kActorPlayer;
+        up.tgt = kActorPlayer;
+        up.amount = pv.slots[i].amount;
+        up.flags = make_apply_power_flags(PowerId::STRENGTH);
+        add_to_top(s, up);
         return;
     }
 }

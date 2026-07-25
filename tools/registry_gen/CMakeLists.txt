@@ -6,7 +6,50 @@
 # this directory is added before src/engine and sts_engine links
 # registry_generated.
 
+# On Windows, CMake will happily select a Microsoft Store Python, and it is
+# almost never the interpreter the developer installed PyYAML into -- a Store
+# Python is sandboxed with its own site-packages. Two directories are involved
+# and BOTH have to go: %LOCALAPPDATA%\Microsoft\WindowsApps holds the alias
+# stubs, while the real executable lives under a versioned directory in
+# C:\Program Files\WindowsApps, which is what CMake actually selected here.
+# CMAKE_IGNORE_PATH matches whole directories rather than patterns, so the
+# versioned ones are globbed.
+if(WIN32)
+    if(DEFINED ENV{LOCALAPPDATA})
+        list(APPEND CMAKE_IGNORE_PATH "$ENV{LOCALAPPDATA}/Microsoft/WindowsApps")
+    endif()
+    if(DEFINED ENV{ProgramW6432})
+        file(GLOB _sts_store_pythons
+            "$ENV{ProgramW6432}/WindowsApps/PythonSoftwareFoundation.Python*")
+        foreach(_p IN LISTS _sts_store_pythons)
+            if(IS_DIRECTORY "${_p}")
+                list(APPEND CMAKE_IGNORE_PATH "${_p}")
+            endif()
+        endforeach()
+    endif()
+endif()
+
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+# The codegen needs PyYAML, and "an interpreter exists" does not imply "that
+# interpreter can import yaml". Checking here turns a confusing mid-build
+# failure -- a Python traceback inside a ninja rule, several hundred lines into
+# the log, reported as a failure to generate nine header files -- into a
+# configure-time message that names the interpreter and the fix. This fired for
+# real on Windows, where CMake picked the Store Python 3.9 while PyYAML was
+# installed in C:\Python39.
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import yaml"
+    RESULT_VARIABLE _sts_yaml_rc
+    OUTPUT_QUIET ERROR_QUIET)
+if(NOT _sts_yaml_rc EQUAL 0)
+    message(FATAL_ERROR
+        "The registry codegen needs PyYAML, and the selected interpreter cannot "
+        "import it:\n    ${Python3_EXECUTABLE}\n"
+        "Install it there (\"${Python3_EXECUTABLE}\" -m pip install pyyaml), or "
+        "point CMake at an interpreter that has it:\n"
+        "    cmake --preset <preset> -DPython3_EXECUTABLE=<path-to-python>")
+endif()
 
 # Expose the interpreter to sibling scopes (tests/) so registry_gen_test can spawn
 # the same Python for its determinism / duplicate-id checks.

@@ -405,3 +405,92 @@
   hooks:
     on_use_card: []           # native: a played ATTACK reflects `amount` THORNS at the player
   provenance: "SharpHidePower.onUseCard (SharpHidePower.java:43-49) -- if card.type == ATTACK: addToBot DamageAction(player, DamageInfo(owner, amount, THORNS)). Native because the trigger is conditional on the played card's TYPE (the RagePower.onUseCard shape, id 12). Dispatched at ON_USE_CARD, where power_hooks.cpp already fans out to MONSTER powers last (UseCardAction.java:41-64) -- the Guardian is the owner, so NO shared dispatch site changed. The THORNS type skips the NORMAL-only power modifiers, so a Vulnerable player is not amplified and the Guardian's Strength does not scale it (interp.hpp DamageType). Applied to itself by TheGuardian.useCloseUp -- thornsDamage 3, or 4 at A19+ (TheGuardian.java:74,185-189) -- and removed at the end of Twin Slam (:197). Default type BUFF (AbstractPower.java:67); POWER_ID \"Sharp Hide\" (:24)."
+
+# --- Red RARE card powers (ids 48-53) -----------------------------------------
+# Numbering starts at 48, not 47: the block above reserved id 47 PERMANENTLY
+# UNUSED, and a gap is legal (the loader wants ids unique, >= 1 and append-only,
+# not contiguous). Backfilling it would contradict that note, so it stays a gap.
+#
+# The six powers the sixteen red rares create. Corruption is NOT here: it landed
+# with the hook framework as id 11, and only its CARD was missing. Each row was
+# checked against the two count-guarded switch families before being written --
+# modify_block (interp/interp_block.cpp) and atDamageGive / atDamageReceive /
+# atDamageFinalReceive (interp/interp_damage.cpp) -- and the finding is recorded
+# per row, because a power that needed a case and did not get one is a silent
+# wrong number, not a compile error.
+
+- id: 48
+  name: BARRICADE
+  game_id: "Barricade"
+  type: BUFF
+  # No hook bindings, and deliberately NOT native. BarricadePower overrides ONLY
+  # updateDescription (BarricadePower.java:27-30) -- it has no combat hook at all,
+  # exactly like SplitPower (22) and ModeShiftPower (45). Its whole effect is a
+  # PRESENCE test made somewhere else: the start-of-turn block-decay guard
+  # (GameActionManager.java:353) skips loseBlock() while the player has it, which
+  # is a branch in the start-of-turn sequence (src/engine/action_queue.cpp), not a
+  # queued action. Checked against both count-guarded switch families: it
+  # overrides neither modifyBlock nor any atDamage* pass, so neither needed a case.
+  # The slot amount is -1 (a marker, not a magnitude), so every presence test for
+  # it must ask "is the slot there", never "is the amount positive".
+  provenance: "BarricadePower (BarricadePower.java:11-31): POWER_ID \"Barricade\" (:13); ctor sets amount = -1 (:22) and default type BUFF (AbstractPower.java:67); updateDescription is its ONLY override. The behaviour is the guard at GameActionManager.getNextAction step 6 (:353-359): `if (!player.hasPower(\"Barricade\") && !player.hasPower(\"Blur\")) { ... loseBlock() ... }`. Applied by the Barricade card, which first checks that the player does not already have it (Barricade.java:32-40) -- that guard is reproduced at the APPLY_POWER site (interp/interp_powers.cpp) because a card effect program cannot express a condition."
+
+- id: 49
+  name: BERSERK
+  game_id: "Berserk"
+  type: BUFF
+  hooks:
+    at_start_of_turn:
+      - {op: GAIN_ENERGY, target: SELF, amount: 0}   # energy = the power amount
+  provenance: "BerserkPower.atStartOfTurn (BerserkPower.java:38-42) -- addToBot GainEnergyAction(amount); POWER_ID \"Berserk\" (:15); default type BUFF (AbstractPower.java:67); stackPower additive. The hook is the pre-draw §5.2 step-6 phase (applyStartOfTurnPowers, GameActionManager.java:345), which runs BEFORE the energy recharge: recharge() happens inside the PlayerTurnEffect the step-6 DrawCardAction CONSTRUCTS (:361 -> DrawCardAction.java:32-34), so the queued GainEnergyAction resolves onto the already-recharged total and the turn's energy is base + amount. Applied by the Berserk card with amount 1 (Berserk.java:34). Checked against both count-guarded switch families: BerserkPower overrides only updateDescription + atStartOfTurn, so neither modifyBlock nor any atDamage* pass needed a case."
+
+- id: 50
+  name: BRUTALITY
+  game_id: "Brutality"
+  type: BUFF
+  hooks:
+    at_start_of_turn_post_draw:
+      - {op: DRAW, target: SELF, amount: 0}      # draw = the power amount
+      - {op: LOSE_HP, target: SELF, amount: 0}   # then lose that many HP
+  provenance: "BrutalityPower.atStartOfTurnPostDraw (BrutalityPower.java:34-39) -- addToBot DrawCardAction(owner, amount) then addToBot LoseHPAction(owner, owner, amount), in that order; POWER_ID \"Brutality\" (:15); default type BUFF (AbstractPower.java:67); stackPower additive. The HP loss is DamageType.HP_LOSS (LoseHPAction.java:41), so it bypasses block and fires wasHPLost with source == owner -- it is a Rupture trigger. Applied by the Brutality card with amount 1 (Brutality.java:31). Checked against both count-guarded switch families: no atDamage* or modifyBlock override, so neither needed a case."
+
+- id: 51
+  name: DEMON_FORM
+  game_id: "Demon Form"
+  type: BUFF
+  hooks:
+    at_start_of_turn_post_draw:
+      - {op: APPLY_POWER, target: SELF, amount: 0, power: STRENGTH}
+  provenance: "DemonFormPower.atStartOfTurnPostDraw (DemonFormPower.java:32-36) -- addToBot ApplyPowerAction(owner, owner, StrengthPower(owner, amount), amount); POWER_ID \"Demon Form\" (:15); default type BUFF (AbstractPower.java:67); stackPower additive, so a second Demon Form ramps by the sum. Applied by the Demon Form card, amount 2 base / 3 upgraded (DemonForm.java:27,32,39). Checked against both count-guarded switch families: Demon Form GRANTS Strength but does not itself hook the damage pipeline (its only overrides are updateDescription and atStartOfTurnPostDraw), so neither atDamageGive nor modifyBlock needed a case -- the Strength it applies is already handled by PowerId::STRENGTH's existing case."
+
+- id: 52
+  name: DOUBLE_TAP
+  game_id: "Double Tap"
+  type: BUFF
+  native: true
+  hooks:
+    on_use_card: []      # native: replay a played, non-purge ATTACK; then --amount
+    at_end_of_turn: []   # native: RemoveSpecificPowerAction(self)
+  provenance: "DoubleTapPower (DoubleTapPower.java:21-74): POWER_ID \"Double Tap\" (:23); default type BUFF (AbstractPower.java:67); stackPower additive. onUseCard (:43-66) -- if !card.purgeOnUse && card.type == ATTACK && amount > 0: makeSameInstanceOf the played card into limbo, purgeOnUse = true, then addCardQueueItem(CardQueueItem(copy, m, card.energyOnUse, ignoreEnergyTotal = true, autoplay = true), inFrontOfQueue = true) -- so the copy is enqueued SYNCHRONOUSLY inside the UseCardAction constructor (AbstractPlayer.useCard:1370), not through a queued action; then --amount, and at zero addToBot RemoveSpecificPowerAction. atEndOfTurn (:68-73) -- if isPlayer, addToBot RemoveSpecificPowerAction(owner). Native for the type/purge/amount guards and the synchronous card-queue insertion; the enqueue itself is the shared PLAY_CARD verb's body (interp.hpp Opcode::PLAY_CARD, kPlayCardCopy | kPlayCardPurge | kPlayCardQueueFront). Applied by the Double Tap card, amount 1 base / 2 upgraded (DoubleTap.java:27,32,38). Checked against both count-guarded switch families: no atDamage* or modifyBlock override, so neither needed a case."
+
+- id: 53
+  name: JUGGERNAUT
+  game_id: "Juggernaut"
+  type: BUFF
+  hooks:
+    on_gained_block:
+      - {op: DAMAGE, target: RANDOM_ENEMY, amount: 0, damage_type: THORNS}
+  provenance: "JuggernautPower.onGainedBlock (JuggernautPower.java:34-40) -- if blockAmount > 0: addToBot DamageRandomEnemyAction(DamageInfo(owner, amount, THORNS)); POWER_ID \"Juggernaut\" (:20); default type BUFF (AbstractPower.java:67); stackPower additive. The blockAmount > 0 guard is already the dispatch gate (dispatch_on_gained_block returns on a non-positive gain, mirroring AbstractCreature.addBlock:429), so the binding is a plain data program. DamageRandomEnemyAction.update (:17-23) picks getRandomMonster(null, true, cardRandomRng) -- ONE card_random_rng draw over the LIVE monsters, exactly the RANDOM_ENEMY step target's execute-time resolution. THORNS type: the reflected damage skips the NORMAL-only power hooks, so the player's Strength does NOT scale it and a Vulnerable target is NOT amplified (interp.hpp DamageType). Applied by the Juggernaut card, amount 5 base / 7 upgraded (Juggernaut.java:19,24,31). Checked against both count-guarded switch families: Juggernaut READS a block gain but does not modify one (no modifyBlock override) and hooks no atDamage* pass, so neither needed a case."
+- id: 59
+  name: CONFUSION
+  game_id: "Confusion"
+  type: DEBUFF
+  stack: none
+  native: true
+  hooks:
+    on_card_draw: []          # native: one cardRandomRng.random(3) per drawn card with cost >= 0
+  # Checked, not assumed, against both count-guarded switches: Confusion overrides
+  # neither atDamageGive / atDamageReceive / atDamageFinalReceive
+  # (interp_damage.cpp) nor modifyBlock (interp_block.cpp) -- its ONLY override is
+  # onCardDraw -- so none of those four needed a case.
+  provenance: "ConfusionPower.onCardDraw (ConfusionPower.java:38-48) -- if card.cost >= 0: newCost = AbstractDungeon.cardRandomRng.random(3) (INCLUSIVE 0..3, stage-a trap 3), and if newCost != cost set BOTH card.cost and card.costForTurn to it and mark isCostModified; freeToPlayOnce = false either way. The DRAW IS UNCONDITIONAL within the cost >= 0 branch -- it happens before the != comparison, so a card that rolls its own cost still consumes one draw; a card with cost < 0 (X-cost, or an unplayable curse/status) consumes NONE. Applied only by SneckoEye.atPreBattle (SneckoEye.java:39-43); the ctor (:23-31) takes no amount, hence stack: none. POWER_ID \"Confusion\" (:18)."
