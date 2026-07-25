@@ -18,18 +18,86 @@ include(CompilerWarnings)
 include(Sanitizers)
 include(StsAddTest)
 
+include(FetchContent)
+
+# ---------------------------------------------------------------------------
+# Shared FetchContent checkout cache
+#
+# Every preset configures into its own build tree, so by default each of debug,
+# asan and release re-clones every FetchContent dependency into <build>/_deps --
+# up to 12 clones for one full three-preset cycle, and the clones dominate a
+# clean configure.
+#
+# FETCHCONTENT_BASE_DIR can move those checkouts to a shared location, but it
+# moves the dependency's *build* tree with it: SOURCE_DIR and BINARY_DIR are
+# both baked in at FetchContent_Declare() time from whatever FETCHCONTENT_BASE_DIR
+# is in effect, so a single shared base dir puts <cache>/<dep>-build in every
+# preset. Measured on CMake 3.28.3: an asan tree and a release tree configured
+# with a common FETCHCONTENT_BASE_DIR both emit
+#   <cache>/googletest-build/googletest/CMakeFiles/gtest.dir/src/gtest-all.cc.o
+# and the same collision for benchmark -- i.e. an ASan-instrumented libgtest.so
+# would land at the exact path the release link line reads. That is the one
+# outcome a build cache must never have, and CMake offers no supported way to
+# redirect only the source dir of a dependency declared in another directory.
+#
+# So the cache is scoped to the dependencies that have *no sub-build at all*:
+# xxHash and nlohmann/json are populated only (never add_subdirectory'd) and are
+# consumed as INTERFACE include directories, compiled by our own targets with
+# our own flags. Sharing their checkouts therefore cannot carry a build artifact
+# -- let alone a sanitizer-instrumented one -- between presets. They are also
+# ~290 MB of the ~315 MB fetched, so they are the bulk of the cost.
+#
+# googletest and benchmark keep a private per-build-tree _deps. They are
+# declared in tests/ and benchmarks/, which stay on the default base dir.
+option(STS_SHARED_DEP_CACHE
+    "Share the sub-build-free FetchContent checkouts (xxHash, nlohmann/json) across build trees" ON)
+set(STS_DEP_CACHE_DIR "${CMAKE_SOURCE_DIR}/.cache/deps" CACHE PATH
+    "Location of the shared FetchContent checkout cache (see STS_SHARED_DEP_CACHE)")
+
+if(STS_SHARED_DEP_CACHE)
+    file(MAKE_DIRECTORY "${STS_DEP_CACHE_DIR}")
+    # Two presets configured at the same time (an agent running debug and asan
+    # in parallel, a CI matrix sharing a checkout) would otherwise both drive git
+    # into the same working tree. GUARD PROCESS is an OS-level lock released when
+    # this cmake process exits, so it cannot go stale; the loser simply waits.
+    file(LOCK "${STS_DEP_CACHE_DIR}/.configure.lock"
+        GUARD PROCESS TIMEOUT 900 RESULT_VARIABLE _sts_dep_cache_lock)
+    if(NOT _sts_dep_cache_lock STREQUAL "0")
+        message(WARNING
+            "Could not lock the shared dependency cache at ${STS_DEP_CACHE_DIR} "
+            "(${_sts_dep_cache_lock}); falling back to a private per-build-tree _deps.")
+        set(STS_SHARED_DEP_CACHE OFF)
+    endif()
+endif()
+
+# include(FetchContent) sets FETCHCONTENT_BASE_DIR as a cache variable pointing at
+# ${CMAKE_BINARY_DIR}/_deps. Setting a *normal* variable of the same name shadows
+# it here and in every add_subdirectory() below; unset() drops the shadow and
+# reveals the per-build-tree default again. Both macros must bracket every
+# declare/populate of a shared dependency -- nothing else.
+macro(sts_shared_deps_begin)
+    if(STS_SHARED_DEP_CACHE)
+        set(FETCHCONTENT_BASE_DIR "${STS_DEP_CACHE_DIR}")
+    endif()
+endmacro()
+macro(sts_shared_deps_end)
+    unset(FETCHCONTENT_BASE_DIR)
+endmacro()
+
 # xxHash (A2.2): header-only XXH3 for state content hashing (design doc §4.1).
 # Pre-approved as A2.2's sole new dependency by the Stage A working agreements.
 # The repo's top-level has no CMakeLists, so FetchContent only populates the
 # source tree; we expose it as an INTERFACE (include-only) target and let
-# state_hash.cpp compile it with XXH_INLINE_ALL. No sub-build, no link step.
-include(FetchContent)
+# state_hash.cpp compile it with XXH_INLINE_ALL. No sub-build, no link step --
+# which is exactly why its checkout is safe to share (see above).
+sts_shared_deps_begin()
 FetchContent_Declare(
     xxhash
     GIT_REPOSITORY https://github.com/Cyan4973/xxHash.git
     GIT_TAG v0.8.2
 )
 FetchContent_MakeAvailable(xxhash)
+sts_shared_deps_end()
 add_library(xxhash INTERFACE)
 target_include_directories(xxhash INTERFACE ${xxhash_SOURCE_DIR})
 
@@ -55,7 +123,15 @@ if(STS_BUILD_TESTS)
     # B1.5: JSON->schema translator (campaign JSONL -> RunState/CombatState). Links
     # diff_harness (write_trace) + nlohmann/json (tools-only grant, PRIVATE); its
     # consumer is the WSL translator_test gtest.
+    #
+    # Bracketed by the shared-checkout macros because this directory's only
+    # FetchContent use is nlohmann/json, which it populates *without* an
+    # add_subdirectory (single-header, exposed as an INTERFACE include dir), so it
+    # has no build tree to share. At 279 MB of clone it is the single most
+    # expensive dependency in the project.
+    sts_shared_deps_begin()
     add_subdirectory(tools/oracle_bridge/translator)
+    sts_shared_deps_end()
 endif()
 
 if(STS_BUILD_TESTS)
