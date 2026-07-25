@@ -19,6 +19,7 @@
 #include "sts/engine/power_hooks.hpp"       // power hook dispatch (wasHPLost/onAttacked)
 #include "sts/engine/relic_hooks.hpp"       // player_has_relic (Paper Phrog) + onMonsterDeath dispatch
 #include "sts/engine/types.hpp"
+#include "sts/registry/manifest.hpp"        // generated kPowersCount
 
 namespace sts::engine {
 
@@ -34,8 +35,18 @@ namespace {
 // multiplying strength.amount before applyPowers; HeavyBlade.java:426-435). The
 // default 1 is bit-identical to an unmultiplied hook: float(amount) * 1.0f == float(
 // amount), so every non-Heavy-Blade damage number is unchanged.
+// The `default: return dmg` below is a deliberate subset, not an oversight: most
+// powers do not touch this hook. -Wswitch-enum would flag all 27 here and is not
+// enabled (it fires ~629 times across the tree and most of those sites should
+// not be exhaustive). This static_assert buys the property that actually
+// matters -- a new power cannot land without someone looking at this switch.
 [[nodiscard]] float at_damage_give(float dmg, PowerSlot p,
                                    int strength_mult = 1) noexcept {
+    static_assert(sts::registry::manifest::kPowersCount == 27,
+                  "new power: does it override atDamageGive (attacker-side "
+                  "damage scaling, as Strength and Weak do)? Add a case here if "
+                  "so. Check atDamageFinalGive below in the same pass -- it is "
+                  "still a pass-through because no power overrides it yet.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::STRENGTH:                        // StrengthPower.java:96
             return dmg + static_cast<float>(p.amount) *
@@ -57,6 +68,11 @@ namespace {
 // byte-identical to a relic-free hook (fixtures unchanged).
 [[nodiscard]] float at_damage_receive(const CombatState& s, uint8_t owner_actor,
                                       float dmg, PowerSlot p) noexcept {
+    static_assert(sts::registry::manifest::kPowersCount == 27,
+                  "new power: does it override atDamageReceive (target-side "
+                  "damage scaling, as Vulnerable does)? Add a case here if so. "
+                  "Check atDamageFinalReceive below in the same pass -- it is "
+                  "still a pass-through because no power overrides it yet.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::VULNERABLE:
             if (owner_actor != kActorPlayer &&

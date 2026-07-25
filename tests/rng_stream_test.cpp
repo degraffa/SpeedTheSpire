@@ -12,6 +12,7 @@
 // tests/golden, so this binary resolves golden files regardless of the CWD
 // ctest launches it from.
 
+#include "sts/engine/index_cast.hpp"  // as_index (signed loop counter -> byte offset)
 #include "sts/engine/rng_stream.hpp"
 
 #include <bit>
@@ -276,8 +277,11 @@ TEST(RngStreamGolden, FloorAndActDerivationMatchGoldenSet5) {
             const RngStream got = sts::engine::floor_stream(entry.seed, floor);
             EXPECT_EQ(got.counter, 0);
             for (int slot = 0; slot < kStreamsPerFloor; ++slot) {
+                // `floor` runs from 1 and `slot` from 0, so both index
+                // expressions are non-negative and as_index is exact.
                 const size_t off =
-                    (static_cast<size_t>(floor - 1) * kStreamsPerFloor + slot) * kRec;
+                    (sts::engine::as_index(floor - 1) * kStreamsPerFloor +
+                     sts::engine::as_index(slot)) * kRec;
                 const uint64_t exp_s0 =
                     static_cast<uint64_t>(ReadBigEndianI64(&bytes[off]));
                 const uint64_t exp_s1 =
@@ -295,7 +299,7 @@ TEST(RngStreamGolden, FloorAndActDerivationMatchGoldenSet5) {
             EXPECT_EQ(got.counter, 0);
             const size_t off =
                 (static_cast<size_t>(kFloors) * kStreamsPerFloor +
-                 static_cast<size_t>(act - 1)) * kRec;
+                 sts::engine::as_index(act - 1)) * kRec;  // act runs from 1
             const uint64_t exp_s0 =
                 static_cast<uint64_t>(ReadBigEndianI64(&bytes[off]));
             const uint64_t exp_s1 =

@@ -30,12 +30,17 @@
 #include "sts/engine/advance.hpp"
 #include "sts/engine/cards.hpp"          // card_def / card_cost / card_flags
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/index_cast.hpp"     // as_index (signed loop counter -> subscript)
 #include "sts/engine/monster_jaw_worm.hpp"  // kJawWormHpMin/Max, MonsterIntent
 #include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
 namespace {
+
+// Every subscript below wraps its index in as_index (index_cast.hpp). Each one
+// is a counter running 0..N over a container holding exactly N elements, so the
+// conversion is exact; the index arithmetic itself stays signed and unchanged.
 
 // The M1 skeleton deck (design doc §9): 5x Strike, 4x Defend, 1x Bash,
 // 1x Shrug It Off, 1x Pommel Strike = 12 cards.
@@ -194,8 +199,8 @@ TEST(AdvanceBatch, MixedActionsAdvanceIndependently) {
     std::vector<Action> actions(N);
     bool saw_play = false, saw_end = false;
     for (int i = 0; i < N; ++i) {
-        actions[i] = PickMixedAction(originals[i], i);
-        const ActionVerb v = action_verb(actions[i]);
+        actions[as_index(i)] = PickMixedAction(originals[as_index(i)], i);
+        const ActionVerb v = action_verb(actions[as_index(i)]);
         saw_play = saw_play || (v == ActionVerb::PLAY_CARD);
         saw_end = saw_end || (v == ActionVerb::END_TURN);
     }
@@ -212,12 +217,12 @@ TEST(AdvanceBatch, MixedActionsAdvanceIndependently) {
     // Each state, run in isolation (batch-of-1) from the SAME original + action,
     // must reach the byte-identical state (proves no cross-state interference).
     for (int i = 0; i < N; ++i) {
-        CombatState single = originals[i];
+        CombatState single = originals[as_index(i)];
         StepResult single_result{};
         advance(std::span<CombatState>(&single, 1),
-                std::span<const Action>(&actions[i], 1),
+                std::span<const Action>(&actions[as_index(i)], 1),
                 std::span<StepResult>(&single_result, 1));
-        EXPECT_EQ(hash_state(batch[i]), hash_state(single))
+        EXPECT_EQ(hash_state(batch[as_index(i)]), hash_state(single))
             << "batch entry " << i << " diverged from its single-state reference";
     }
 }
@@ -235,7 +240,7 @@ TEST(AdvanceBatch, SameBatchTwiceIsIdentical) {
             combat_begin(SeedFor(i), /*floor=*/2, std::span<const CardId>(deck)));
     }
     std::vector<Action> actions(N);
-    for (int i = 0; i < N; ++i) actions[i] = PickMixedAction(originals[i], i);
+    for (int i = 0; i < N; ++i) actions[as_index(i)] = PickMixedAction(originals[as_index(i)], i);
 
     std::vector<CombatState> run1 = originals;
     std::vector<CombatState> run2 = originals;
@@ -247,10 +252,10 @@ TEST(AdvanceBatch, SameBatchTwiceIsIdentical) {
             std::span<StepResult>(r2));
 
     for (int i = 0; i < N; ++i) {
-        EXPECT_EQ(hash_state(run1[i]), hash_state(run2[i]))
+        EXPECT_EQ(hash_state(run1[as_index(i)]), hash_state(run2[as_index(i)]))
             << "state " << i << " differs between two identical batch runs";
-        EXPECT_EQ(r1[i].terminal, r2[i].terminal) << i;
-        EXPECT_EQ(r1[i].reward, r2[i].reward) << i;
+        EXPECT_EQ(r1[as_index(i)].terminal, r2[as_index(i)].terminal) << i;
+        EXPECT_EQ(r1[as_index(i)].reward, r2[as_index(i)].reward) << i;
     }
 }
 
@@ -274,19 +279,19 @@ TEST(AdvanceBatch, IndependenceHoldsOverMultipleSteps) {
     std::vector<StepResult> results(N);
 
     for (int step = 0; step < kSteps; ++step) {
-        for (int i = 0; i < N; ++i) actions[i] = PickMixedAction(batch[i], step * 31 + i);
+        for (int i = 0; i < N; ++i) actions[as_index(i)] = PickMixedAction(batch[as_index(i)], step * 31 + i);
 
         advance(std::span<CombatState>(batch), std::span<const Action>(actions),
                 std::span<StepResult>(results));
 
         for (int i = 0; i < N; ++i) {
             StepResult sr{};
-            advance(std::span<CombatState>(&singles[i], 1),
-                    std::span<const Action>(&actions[i], 1),
+            advance(std::span<CombatState>(&singles[as_index(i)], 1),
+                    std::span<const Action>(&actions[as_index(i)], 1),
                     std::span<StepResult>(&sr, 1));
         }
         for (int i = 0; i < N; ++i) {
-            ASSERT_EQ(hash_state(batch[i]), hash_state(singles[i]))
+            ASSERT_EQ(hash_state(batch[as_index(i)]), hash_state(singles[as_index(i)]))
                 << "step " << step << " entry " << i << " diverged";
         }
     }
@@ -634,8 +639,8 @@ TEST(AdvanceMaskOverload, IsByteIdenticalToTheMaskBuildingOverloadOverManySteps)
         // masked one; the two batches only stay in lockstep if the overloads
         // agree, which is the property under test.
         for (int i = 0; i < N; ++i) {
-            actions[i] = PickMixedAction(plain[i], step * 17 + i);
-            legal_actions(masked[i], masks[i]);
+            actions[as_index(i)] = PickMixedAction(plain[as_index(i)], step * 17 + i);
+            legal_actions(masked[as_index(i)], masks[as_index(i)]);
         }
 
         advance(std::span<CombatState>(plain), std::span<const Action>(actions),
@@ -644,15 +649,15 @@ TEST(AdvanceMaskOverload, IsByteIdenticalToTheMaskBuildingOverloadOverManySteps)
                 std::span<StepResult>(r_masked), std::span<const ActionMask>(masks));
 
         for (int i = 0; i < N; ++i) {
-            ASSERT_EQ(hash_state(plain[i]), hash_state(masked[i]))
+            ASSERT_EQ(hash_state(plain[as_index(i)]), hash_state(masked[as_index(i)]))
                 << "step " << step << " entry " << i << ": states diverged";
-            ASSERT_EQ(r_plain[i].terminal, r_masked[i].terminal)
+            ASSERT_EQ(r_plain[as_index(i)].terminal, r_masked[as_index(i)].terminal)
                 << "step " << step << " entry " << i << ": terminal flag";
-            ASSERT_EQ(r_plain[i].reward, r_masked[i].reward)
+            ASSERT_EQ(r_plain[as_index(i)].reward, r_masked[as_index(i)].reward)
                 << "step " << step << " entry " << i << ": reward";
             // The observation is part of the result, so it is compared too --
             // "exactly equivalent" has to mean the whole StepResult.
-            ASSERT_EQ(0, std::memcmp(&r_plain[i].obs, &r_masked[i].obs,
+            ASSERT_EQ(0, std::memcmp(&r_plain[as_index(i)].obs, &r_masked[as_index(i)].obs,
                                      sizeof(ObsBuffer)))
                 << "step " << step << " entry " << i << ": observation";
         }
@@ -737,8 +742,8 @@ TEST(AdvanceMaskOverload, HeterogeneousBatchMixesLegalAndIllegalPerEntry) {
     std::vector<ActionMask> masks(N);
     std::vector<StepResult> results(N);
     for (int i = 0; i < N; ++i) {
-        legal_actions(batch[i], masks[i]);
-        actions[i] = (i % 2 == 0)
+        legal_actions(batch[as_index(i)], masks[as_index(i)]);
+        actions[as_index(i)] = (i % 2 == 0)
                          ? make_action(ActionVerb::END_TURN)
                          : make_action(ActionVerb::PLAY_CARD,
                                        static_cast<uint8_t>(kHandCap), 0, 0);
@@ -749,10 +754,10 @@ TEST(AdvanceMaskOverload, HeterogeneousBatchMixesLegalAndIllegalPerEntry) {
 
     for (int i = 0; i < N; ++i) {
         if (i % 2 == 0) {
-            EXPECT_NE(hash_state(batch[i]), hash_state(before[i]))
+            EXPECT_NE(hash_state(batch[as_index(i)]), hash_state(before[as_index(i)]))
                 << "entry " << i << ": a legal END_TURN did nothing";
         } else {
-            EXPECT_EQ(hash_state(batch[i]), hash_state(before[i]))
+            EXPECT_EQ(hash_state(batch[as_index(i)]), hash_state(before[as_index(i)]))
                 << "entry " << i << ": an out-of-range play mutated the state";
         }
     }

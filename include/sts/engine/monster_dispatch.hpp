@@ -6,10 +6,12 @@
 // each acting monster's own turn function by its id (the "Stage B generalizes the
 // MonsterTurnFn per the monster registry" note in advance.hpp/action_queue.hpp).
 //
-// Each monster module registers its init/turn in the switches below. The S1
-// roster is not complete: an unimplemented monster returns nullptr from
-// monster_init_fn (so spawn_group hard-asserts rather than spawning a blank)
-// and default_monster_turn from monster_turn_fn (a live no-op).
+// Each monster module registers its init/turn in the switches below. Every
+// MonsterId in the registry now has a module, so those two switches are
+// exhaustive and carry no `default:` -- adding an enumerator makes -Wswitch
+// name them. Their trailing returns (nullptr / default_monster_turn) exist only
+// for an id that matches no case at all, which a valid monster record cannot
+// produce; they are not a "not implemented yet" path.
 
 #include <cstdint>
 #include <span>
@@ -68,8 +70,9 @@ void queue_monster_move_effects(CombatState& state, uint8_t mi,
                                 uint8_t move) noexcept;
 
 // A monster's spawn-time init: set id, roll HP (monster_hp_rng), do the first
-// rollMove (ai_rng) -- the jaw_worm_init shape, generalized. nullptr == the
-// monster's module has not landed yet.
+// rollMove (ai_rng) -- the jaw_worm_init shape, generalized. Every registry
+// monster has one; nullptr comes back only for MonsterId::NONE or an id outside
+// the enum.
 using MonsterInitFn = void (*)(CombatState& state, uint8_t monster_index);
 
 // A monster's usePreBattleAction (design §5.2; AbstractMonster.usePreBattleAction),
@@ -124,11 +127,13 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 // slimes' split interrupt is the first consumer. No-op for everyone else.
 void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept;
 
-// The init function for a monster id, or nullptr if not yet implemented.
+// The init function for a monster id; nullptr only for NONE / an id outside the
+// enum (see the exhaustiveness note at the top of this file).
 [[nodiscard]] MonsterInitFn monster_init_fn(MonsterId id) noexcept;
 
-// The turn function for a monster id; default_monster_turn (no-op) if not yet
-// implemented.
+// The turn function for a monster id; default_monster_turn (a live no-op) only
+// for NONE / an id outside the enum. Never nullptr -- dispatch_monster_turn
+// calls the result unconditionally.
 [[nodiscard]] MonsterTurnFn monster_turn_fn(MonsterId id) noexcept;
 
 // MonsterTurnFn-compatible step-5 hook: dispatch to the acting monster's own turn
@@ -143,7 +148,8 @@ void dispatch_monster_turn(CombatState& state, uint8_t monster_index) noexcept;
 // all init() (ai_rng)" ordering: monster_hp_rng sees the HP rolls in spawn order,
 // ai_rng sees the rollMoves in spawn order. (usePreBattleAction -- a later
 // monster_hp_rng phase, e.g. Louse curl-up -- is the separate
-// use_pre_battle_actions seam below.) An unimplemented monster hard-asserts.
+// use_pre_battle_actions seam below.) An id with no init fn -- NONE, or a corrupt
+// record -- hard-asserts rather than spawning a blank.
 void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept;
 
 // Run every live monster's usePreBattleAction in spawn order (design §5.2: the
