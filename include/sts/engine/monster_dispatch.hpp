@@ -125,7 +125,13 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 // override wraps super.damage() unconditionally, and LoseHPAction also routes
 // through damage(), LoseHPAction.java:41). Dispatches by monster_id; the large
 // slimes' split interrupt is the first consumer. No-op for everyone else.
-void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept;
+//
+// `hp_lost` is the HP the hit actually removed (0 when block ate all of it) --
+// the `currentHealth != previousHealth` an override can test. The slimes' split
+// interrupts read only resulting state and ignore it; Lagavulin's wake needs it,
+// because a hit fully absorbed by its sleeping armour must NOT wake it.
+void on_monster_damaged(CombatState& state, uint8_t monster_index,
+                        int32_t hp_lost) noexcept;
 
 // The init function for a monster id; nullptr only for NONE / an id outside the
 // enum (see the exhaustiveness note at the top of this file).

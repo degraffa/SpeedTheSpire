@@ -263,6 +263,10 @@ MONSTER_INTENTS = {
                          # AcidSlime_L.java:137,146 / SpikeSlime_L.java:124,134)
     "STRONG_DEBUFF": 8,  # Slime Boss Goop Spray (AbstractMonster.Intent.STRONG_DEBUFF;
                           # SlimeBoss.java:128,145,188)
+    "SLEEP": 9,          # Lagavulin's dormant turns (AbstractMonster.Intent.SLEEP;
+                          # Lagavulin.java:144,225)
+    "STUN": 10,          # Lagavulin's woken-by-damage turn (AbstractMonster.Intent.STUN;
+                          # Lagavulin.java:202)
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

@@ -217,9 +217,11 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // wraps super.damage() and runs AFTER it, for EVERY DamageInfo type
     // (AcidSlime_L.java:142-152 / SpikeSlime_L.java:130-140 -- the guard reads
     // only resulting state, so a fully-blocked hit still checks). Dispatched by
-    // monster_id; no-op for monsters without an override.
+    // monster_id; no-op for monsters without an override. hp_lost is what
+    // Lagavulin's `currentHealth != previousHealth` wake test reads, so a hit
+    // its block fully absorbed passes 0 here.
     if (tgt != kActorPlayer) {
-        on_monster_damaged(s, tgt);
+        on_monster_damaged(s, tgt, hp_lost);
     }
 }
 
@@ -255,9 +257,10 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
     }
     // LoseHPAction also routes through creature.damage() (LoseHPAction.java:41),
-    // so the monster damage() override seam fires here too.
+    // so the monster damage() override seam fires here too. LOSE_HP bypasses
+    // block, so hp_lost is the whole amount unless the monster died first.
     if (tgt != kActorPlayer) {
-        on_monster_damaged(s, tgt);
+        on_monster_damaged(s, tgt, hp_lost);
     }
 }
 

@@ -411,6 +411,8 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "GremlinNob.java:63 -- this.type = EnemyType.ELITE"},
         {MonsterId::SENTRY,             MonsterEnemyType::ELITE,
          "Sentry.java:61 -- this.type = EnemyType.ELITE"},
+        {MonsterId::LAGAVULIN,          MonsterEnemyType::ELITE,
+         "Lagavulin.java:75 -- this.type = EnemyType.ELITE"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

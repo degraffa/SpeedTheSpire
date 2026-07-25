@@ -112,7 +112,7 @@
   hooks:
     at_end_of_turn_pre_card:
       - {op: BLOCK, target: SELF, amount: 0}   # block = power amount
-  provenance: "MetallicizePower.atEndOfTurnPreEndTurnCards (MetallicizePower.java:39-42) -- GainBlockAction(owner, amount); fires in AbstractRoom.applyEndOfTurnPreCardPowers (AbstractRoom.java:535-539), stage-a §5.4"
+  provenance: "MetallicizePower.atEndOfTurnPreEndTurnCards (MetallicizePower.java:39-42) -- GainBlockAction(owner, amount); fires in AbstractRoom.applyEndOfTurnPreCardPowers (AbstractRoom.java:535-539), stage-a §5.4. A MONSTER owner reaches the SAME hook down a different path: MonsterGroup.applyEndOfTurnPowers (MonsterGroup.java:290-295) -> AbstractCreature.applyEndOfTurnTriggers (:548-553) calls atEndOfTurnPreEndTurnCards(false) for every non-player creature, which is how a sleeping Lagavulin's armour grows 8 a round (Lagavulin.java:107 applies it at ARMOR_AMT 8; :188 sheds all 8 with a ReducePowerAction when the shell opens). power_hooks.cpp already dispatches this hook over live monsters, so the monster owner needed no framework change."
 
 - id: 6
   name: FEEL_NO_PAIN

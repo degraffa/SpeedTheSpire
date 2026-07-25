@@ -225,11 +225,11 @@ void dispatch_at_end_of_turn(CombatState& s) noexcept {
 void dispatch_at_end_of_round(CombatState& s) noexcept {
     // MonsterGroup.applyEndOfTurnPowers (MonsterGroup.java:290-304), in order:
     //   (1) each LIVE monster: applyEndOfTurnTriggers -> monster powers'
-    //       atEndOfTurnPreEndTurnCards(false) + atEndOfTurn(false). NO currently
-    //       implemented monster power binds these (no monster carries
-    //       Metallicize yet; the Cultist's RITUAL guards atEndOfTurn on isPlayer
-    //       -> no-op for a monster owner). Call sites kept for faithful ordering
-    //       and for the powers that will bind them.
+    //       atEndOfTurnPreEndTurnCards(false) + atEndOfTurn(false). This is where
+    //       a SLEEPING Lagavulin's Metallicize gains its block each round
+    //       (Lagavulin.java:107 applies it; MetallicizePower.java:38-42 binds
+    //       AT_END_OF_TURN_PRE_CARD). The Cultist's RITUAL guards atEndOfTurn on
+    //       isPlayer, so it stays a no-op for a monster owner.
     //   (2) player powers atEndOfRound (a player-owner Ritual is onPlayer -> its
     //       atEndOfRound is a no-op; guarded in the native body).
     //   (3) each LIVE monster: its powers atEndOfRound -- the Cultist Ritual
