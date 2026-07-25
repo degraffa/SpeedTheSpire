@@ -25,6 +25,31 @@ namespace sts::engine {
 void dispatch_relics_on_obtain_card(RunState& run, CardInstance& card,
                                     const CardDef& def) noexcept;
 
+// AbstractRelic.onMasterDeckChange, fired from every master-deck edit. Du-Vu
+// Doll is the only S1 override (DuVuDoll.java:321-332): its counter is the
+// number of CURSE-type cards in the master deck, RECOMPUTED from scratch each
+// time rather than adjusted by the delta -- which is what the Java does, and is
+// also what keeps a RunState assembled by hand (tests, the fixture loader)
+// consistent without a separate seeding step. Inline rather than a generated
+// dispatch surface: one relic does not justify a fourth pickup table, and the
+// row's `pickup: on_equip` already covers the acquisition-time half.
+inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
+    int16_t curses = 0;
+    for (uint16_t i = 0; i < run.master_deck_count; ++i) {
+        const CardDef* def =
+            card_def(static_cast<CardId>(run.master_deck[i].card_id));
+        if (def != nullptr && def->type == CardType::CURSE) {
+            ++curses;
+        }
+    }
+    for (uint8_t i = 0; i < run.relic_count; ++i) {
+        if (run.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::DU_VU_DOLL)) {
+            run.relics[i].counter = curses;
+        }
+    }
+}
+
 // Append one card to the master deck and run that pass. Returns false (no
 // mutation) when the deck is full or the id has no registry row.
 [[nodiscard]] inline bool add_card_to_master_deck(RunState& run, CardId id,
@@ -43,6 +68,7 @@ void dispatch_relics_on_obtain_card(RunState& run, CardInstance& card,
     ++run.master_deck_count;
 
     dispatch_relics_on_obtain_card(run, c, *def);
+    dispatch_relics_on_master_deck_change(run);
     return true;
 }
 
@@ -73,6 +99,7 @@ void dispatch_relics_on_obtain_card(RunState& run, CardInstance& card,
             run.hp = run.max_hp;
         }
     }
+    dispatch_relics_on_master_deck_change(run);
     return true;
 }
 

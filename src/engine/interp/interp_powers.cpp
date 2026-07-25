@@ -13,9 +13,30 @@
 #include "sts/engine/monster_dispatch.hpp"  // MonsterIntent (SPOT_WEAKNESS intent gate)
 #include "sts/engine/power_hooks.hpp"       // power hook dispatch (onApplyPower)
 #include "sts/engine/powers.hpp"            // power_def / PowerType (APPLY_POWER interception)
+#include "sts/engine/relic_hooks.hpp"       // player_has_relic (Champion Belt/Ginger/Turnip)
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
+
+namespace {
+
+// Non-consuming "does `actor` carry `id` with a live stack?". Deliberately
+// distinct from apply_power_blocked_by_artifact, which SPENDS an Artifact stack:
+// Champion Belt's gate only ASKS the question (ApplyPowerAction.java:111), and
+// answering it must not consume anything.
+[[nodiscard]] bool actor_carries_power(const CombatState& s, uint8_t actor,
+                                       PowerId id) noexcept {
+    const PowerView pv = actor_powers(s, actor);
+    for (uint8_t i = 0; i < pv.count; ++i) {
+        if (pv.slots[i].power_id == static_cast<uint16_t>(id) &&
+            pv.slots[i].amount > 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
 // slot of the same id, else appends a new slot (hard cap kPowerCap -- overflow
@@ -57,7 +78,34 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     // (1) source-side onApplyPower (fires before the power lands).
     dispatch_on_apply_power_source(s, src, tgt, static_cast<uint16_t>(id),
                                    is_debuff);
-    // (2) target-side Artifact nullify: a consumed Artifact stack blocks the debuff.
+    // (2) Champion Belt (ApplyPowerAction.java:111-113 -> ChampionsBelt.onTrigger,
+    // ChampionsBelt.java:172-176): the player owns it, the source IS the player,
+    // target != source, the applied power is Vulnerable, and the target does NOT
+    // already have Artifact -> addToBot ApplyPowerAction(target, player, Weak 1).
+    // The Artifact test is READ-ONLY and happens HERE, before step (4) spends the
+    // stack, so a Vulnerable that Artifact is about to eat grants no Weak.
+    if (id == PowerId::VULNERABLE && src == kActorPlayer && tgt != src &&
+        player_has_relic(s, RelicId::CHAMPION_BELT) &&
+        !actor_carries_power(s, tgt, PowerId::ARTIFACT)) {
+        ActionQueueItem weak{};
+        weak.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        weak.src = kActorPlayer;
+        weak.tgt = tgt;
+        weak.amount = 1;
+        weak.flags = make_apply_power_flags(PowerId::WEAK);
+        add_to_bottom(s, weak);
+    }
+    // (3) Ginger / Turnip (ApplyPowerAction.java:119-124 and :125-130): each
+    // returns from update() WITHOUT applying when the player owns the relic and
+    // the PLAYER is the target of Weakened / Frail respectively. Both sit after
+    // the source hooks and BEFORE the Artifact nullify, so the rejected debuff
+    // does not spend an Artifact stack.
+    if (tgt == kActorPlayer &&
+        ((id == PowerId::WEAK && player_has_relic(s, RelicId::GINGER)) ||
+         (id == PowerId::FRAIL && player_has_relic(s, RelicId::TURNIP)))) {
+        return;
+    }
+    // (4) target-side Artifact nullify: a consumed Artifact stack blocks the debuff.
     if (apply_power_blocked_by_artifact(s, tgt, is_debuff)) {
         return;
     }

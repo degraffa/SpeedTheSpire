@@ -788,3 +788,437 @@
   pickup:
     can_spawn: true
   provenance: "Matryoshka.onChestOpen (Matryoshka.java:30-47) -- the next 2 non-boss chests contain an extra relic (counter 2 -> 0; relicRng.randomBoolean(0.75) picks COMMON vs UNCOMMON for the extra reward; counter -2 == used up). A run-layer (treasure/chest) hook, B4.7-owner; constructor counter=2 (Matryoshka.java:21). canSpawn floor<=40 (:59-61)."
+
+# --- Rare (Ironclad-obtainable) --------------------------------------------------
+#
+# SCOPE: the Ironclad-obtainable RARE pool -- 28 rows, ids 66-93. Enumerated from
+# the live oracle's `relicPools.rare` (b14_accept captures STS00001..STS00010),
+# which is RelicLibrary.populateRelicPool's output after AbstractDungeon's init
+# shuffle. 25 shared `add()` rares plus Champion Belt, Charon's Ashes and Magic
+# Flower from `addRed()` (RelicLibrary.java:382-402). RARE pool_order 0..27 is the
+# canonical PRE-shuffle order, recovered by inverting the JDK shuffle (relicRng
+# randomLong draw #3 -- COMMON, UNCOMMON, RARE, SHOP, BOSS in RelicPool order)
+# against those ten captures; all ten agree, and the same inversion reproduces the
+# already-landed UNCOMMON order exactly, which is what validates the method.
+
+- id: 66
+  name: GINGER
+  game_id: "Ginger"
+  tier: RARE
+  pool_order: 0
+  provenance: "Ginger (Ginger.java:473-489) -- a marker relic with no overrides at all; the behaviour lives in ApplyPowerAction.update (ApplyPowerAction.java:119-124): if the player owns Ginger and the target is the player and the power is 'Weakened', the action returns without applying -- AFTER the source-side onApplyPower fan-out and BEFORE the Artifact nullify. Implemented at op_apply_power (interp/interp_powers.cpp)."
+
+- id: 67
+  name: OLD_COIN
+  game_id: "Old Coin"
+  tier: RARE
+  pool_order: 1
+  pickup:
+    can_spawn: true
+    on_equip: true
+  provenance: "OldCoin.onEquip (OldCoin.java:812-816) -- player.gainGold(300). canSpawn (:818-821) -- (Settings.isEndless || floorNum <= 48) && !(getCurrRoom() instanceof ShopRoom); endless bypasses the floor clause only, never the shop clause (the MawBank/Courier shape)."
+
+- id: 68
+  name: BIRD_FACED_URN
+  game_id: "Bird Faced Urn"
+  tier: RARE
+  pool_order: 2
+  native: true
+  hooks:
+    on_use_card: []           # POWER played -> heal 2 (addToTop; Magic Flower-aware)
+  provenance: "BirdFacedUrn.onUseCard (BirdFacedUrn.java:33-40) -- if card.type == POWER: addToTop HealAction(player, player, 2). Native: the type guard plus a direct heal, routed through the shared player-heal seam so Magic Flower's x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:728-735)."
+
+- id: 69
+  name: UNCEASING_TOP
+  game_id: "Unceasing Top"
+  tier: RARE
+  pool_order: 3
+  provenance: "UnceasingTop.onRefreshHand (UnceasingTop.java:1331-1338) -- with the action queue empty, the hand empty, the turn not ended, canDraw armed (set atTurnStart :1321-1325, cleared atPreBattle :1316-1319), no No Draw power, no screen up, room phase COMBAT, not disabledUntilTurnEnds, and at least one card in draw+discard: addToBot DrawCardAction(player, 1). DEFERRED: onRefreshHand has NO dispatch site -- the per-frame refreshHandLayout seam the game fires it from does not exist in the engine (the pump hands control back to the player at its idle boundary instead, action_queue.cpp pump_step step 7), and adding a RelicHook value nothing ever fires would be inert code. The row, its pool slot and its relicRng draw are live."
+
+- id: 70
+  name: TORII
+  game_id: "Torii"
+  tier: RARE
+  pool_order: 4
+  provenance: "Torii.onAttacked (Torii.java:1197-1205) -- if info.owner != null && type != HP_LOSS && type != THORNS && 1 < damageAmount <= 5: return 1. A player-damage-pipeline modifier: AbstractPlayer.damage runs the relics' onAttacked loop (AbstractPlayer.java:1430-1432) AFTER the victim powers' onAttacked (Thorns/Flame Barrier) and BEFORE onLoseHpLast (Tungsten Rod). Implemented at that point of op_damage (interp/interp_damage.cpp), keyed by player_has_relic."
+
+- id: 71
+  name: STONE_CALENDAR
+  game_id: "StoneCalendar"
+  tier: RARE
+  pool_order: 5
+  native: true
+  hooks:
+    at_battle_start: []       # counter = 0
+    at_turn_start: []         # ++counter
+    on_player_end_turn: []    # counter == 7 -> 52 THORNS to all enemies, once
+    on_victory: []            # counter = -1
+  provenance: "StoneCalendar (StoneCalendar.java:1083-1116): atBattleStart counter=0; atTurnStart ++counter; onPlayerEndTurn -- if counter == 7 addToBot DamageAllEnemiesAction(createDamageMatrix(52, true), THORNS) and grayscale=true; onVictory counter=-1. The `counter == 7` equality (not >=) plus the unconditional ++ is what makes it fire exactly once: turn 8's increment moves the counter past 7. THORNS skips the NORMAL-only power pipeline (no Strength/Vulnerable scaling)."
+
+- id: 72
+  name: SHOVEL
+  game_id: "Shovel"
+  tier: RARE
+  pool_order: 6
+  pickup:
+    can_spawn: true
+  provenance: "Shovel.canSpawn (Shovel.java:1024-1035) -- false when floorNum >= 48 && !Settings.isEndless, then a count over the owned relics of PeacePipe/Shovel/Girya instances: spawns only while that count < 2. addCampfireOption (:1037-1040) adds DigOption -- the campfire Dig itself is a rest-room concern; the spawn gate is live here because it is relicRng-visible."
+
+- id: 73
+  name: WING_BOOTS
+  game_id: "WingedGreaves"
+  tier: RARE
+  pool_order: 7
+  initial_counter: 3
+  pickup:
+    can_spawn: true
+  provenance: "WingBoots constructor (WingBoots.java:1364-1367) -- counter = 3 path-jump charges; setCounter(-2) marks it used up (:1374-1381). canSpawn (:1383-1386) -- Settings.isEndless || floorNum <= 40. Charge consumption is a map/path-choice effect owned by the floor-transition layer; the row, its counter seed and its spawn gate are live."
+
+- id: 74
+  name: THREAD_AND_NEEDLE
+  game_id: "Thread and Needle"
+  tier: RARE
+  pool_order: 8
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 4, power: PLATED_ARMOR}
+  provenance: "ThreadAndNeedle.atBattleStart (ThreadAndNeedle.java:1154-1159) -- addToTop ApplyPowerAction(player, player, PlatedArmorPower 4). A DATA hook: PLATED_ARMOR is registered (powers.yaml id 17). Queued addToBot like every other at_battle_start relic step (the battle-start dispatch runs with an empty action queue, so top and bottom coincide -- the Vajra / Bronze Scales / Oddly Smooth Stone precedent)."
+
+- id: 75
+  name: TURNIP
+  game_id: "Turnip"
+  tier: RARE
+  pool_order: 9
+  provenance: "Turnip (Turnip.java:1265-1281) -- a marker relic with no overrides; the behaviour lives in ApplyPowerAction.update (ApplyPowerAction.java:125-130): if the player owns Turnip and the target is the player and the power is 'Frail', the action returns without applying -- after the source hooks, before the Artifact nullify. Implemented at op_apply_power (interp/interp_powers.cpp)."
+
+- id: 76
+  name: ICE_CREAM
+  game_id: "Ice Cream"
+  tier: RARE
+  pool_order: 10
+  provenance: "IceCream (IceCream.java:574-590) -- a marker relic; the behaviour lives in EnergyManager.recharge (EnergyManager.java:25-40): with Ice Cream owned the turn's energy is EnergyPanel.addEnergy(energyMaster) -- ADD, capped at 999 by EnergyPanel.addEnergy (EnergyPanel.java:59-68) -- instead of EnergyPanel.setEnergy(energyMaster). This retires stage-a's SET-to-constant simplification: action_queue.cpp's start_of_turn now carries the conditional carry-over, and the no-relic branch is byte-identical to the old unconditional SET."
+
+- id: 77
+  name: CALIPERS
+  game_id: "Calipers"
+  tier: RARE
+  pool_order: 11
+  provenance: "Calipers (Calipers.java:60-77) -- a marker relic (BLOCK_LOSS = 15) read by GameActionManager's start-of-turn block decay (GameActionManager.java:353-359): with neither Barricade nor Blur, the player loses ALL block unless Calipers is owned, in which case loseBlock(15). This retires the structural `has_calipers = false` stage-a left in action_queue.cpp."
+
+- id: 78
+  name: LIZARD_TAIL
+  game_id: "Lizard Tail"
+  tier: RARE
+  pool_order: 12
+  provenance: "LizardTail.onTrigger (LizardTail.java:680-690) -- heal maxHealth/2 (minimum 1, integer division), then setCounter(-2) which marks it used up (:672-678). Fired from AbstractPlayer.damage (AbstractPlayer.java:1487-1493) when currentHealth < 1, the player has no Mark of the Bloom and no Fairy Potion, and the owned Lizard Tail's counter is still -1: currentHealth is set to 0 first and the method RETURNS, so the death branch never runs. The constructor leaves counter at AbstractRelic's -1 (armed), so no initial_counter override is needed. Implemented at the player-death edge of op_damage / op_lose_hp; the heal routes through the shared seam so Magic Flower applies."
+
+- id: 79
+  name: PRAYER_WHEEL
+  game_id: "Prayer Wheel"
+  tier: RARE
+  pool_order: 13
+  pickup:
+    can_spawn: true
+  provenance: "PrayerWheel.canSpawn (PrayerWheel.java:986-989) -- Settings.isEndless || floorNum <= 48. The extra normal-combat card reward is a combat-reward-screen modifier owned by the rewards layer; no combat trigger."
+
+- id: 80
+  name: GIRYA
+  game_id: "Girya"
+  tier: RARE
+  pool_order: 14
+  initial_counter: 0
+  native: true
+  hooks:
+    at_battle_start: []       # Strength equal to the lift counter (0 -> nothing)
+  pickup:
+    can_spawn: true
+  provenance: "Girya (Girya.java:519-559): constructor counter = 0; atBattleStart -- if counter != 0 addToTop ApplyPowerAction(player, player, StrengthPower(counter), counter). canSpawn -- false when floorNum >= 48 && !isEndless, then the shared PeacePipe/Shovel/Girya owned-count < 2 gate. addCampfireOption adds LiftOption(counter < 3); the campfire Lift that raises the counter is a rest-room concern, so the counter stays 0 today and the battle-start branch is a live no-op until it lands."
+
+- id: 81
+  name: DEAD_BRANCH
+  game_id: "Dead Branch"
+  tier: RARE
+  pool_order: 15
+  native: true
+  hooks:
+    on_exhaust: []            # DEFERRED body: needs the all-red combat card pool
+  provenance: "DeadBranch.onExhaust (DeadBranch.java:259-266) -- if !areMonstersBasicallyDead(): addToBot MakeTempCardInHandAction(AbstractDungeon.returnTrulyRandomCardInCombat().makeCopy(), false). DEFERRED: returnTrulyRandomCardInCombat() with NO type filter (AbstractDungeon.java:964-979) draws one cardRandomRng pick over the whole colour pool -- commons + uncommons + rares, not the ATTACK-only pool RANDOM_ATTACK_TO_HAND uses -- so it needs a second generated combat pool and is RNG-visible. Explicit empty native body (relics/relics_rare.cpp) rather than an omitted one, so the deferral sits where the implementation goes."
+
+- id: 82
+  name: DU_VU_DOLL
+  game_id: "Du-Vu Doll"
+  tier: RARE
+  pool_order: 16
+  initial_counter: 0
+  native: true
+  hooks:
+    at_battle_start: []       # Strength equal to the master deck's CURSE count
+  pickup:
+    on_equip: true
+  provenance: "DuVuDoll (DuVuDoll.java:303-354): onEquip (:334-345) and onMasterDeckChange (:321-332) both recompute counter as the number of CURSE-type cards in the master deck; atBattleStart (:347-354) -- if counter > 0 addToTop ApplyPowerAction(player, player, StrengthPower(counter), counter). The onEquip recount READS RunState (it is not the `this.counter = 0` shape initial_counter already models), so it takes the pickup key; the onMasterDeckChange recount is wired into run_deck.hpp's add and remove paths."
+
+- id: 83
+  name: POCKETWATCH
+  game_id: "Pocketwatch"
+  tier: RARE
+  pool_order: 17
+  native: true
+  hooks:
+    at_battle_start: []          # counter = 0, firstTurn = true
+    on_play_card: []             # ++counter (cards played THIS turn)
+    at_turn_start_post_draw: []  # <= 3 played last turn and not the opening turn -> draw 3
+    on_victory: []               # counter = -1
+  provenance: "Pocketwatch (Pocketwatch.java:917-946): atBattleStart counter=0 and firstTurn=true; onPlayCard ++counter (and stops the pulse past 3); atTurnStartPostDraw -- if counter <= 3 && !firstTurn addToBot DrawCardAction(player, 3), ELSE firstTurn = false; then counter = 0 unconditionally; onVictory counter = -1. Native: `firstTurn` is a private boolean the oracle never serializes, so it is encoded in the SIGN of the public counter (negative == the opening turn's armed state, the magnitude still the play count) rather than in a second field."
+
+- id: 84
+  name: MANGO
+  game_id: "Mango"
+  tier: RARE
+  pool_order: 18
+  pickup:
+    on_equip: true
+  provenance: "Mango.onEquip (Mango.java:771-774) -- player.increaseMaxHp(14, true): +14 max HP AND +14 current HP (increaseMaxHp heals the gained amount when the flag is set, AbstractCreature.java:199+). An equip-time effect, wired in acquire_relic -- the Pear / Strawberry precedent."
+
+- id: 85
+  name: INCENSE_BURNER
+  game_id: "Incense Burner"
+  tier: RARE
+  pool_order: 19
+  initial_counter: 0
+  native: true
+  hooks:
+    at_turn_start: []         # every 6th turn start -> Intangible 1
+  provenance: "IncenseBurner (IncenseBurner.java:623-637): onEquip counter = 0; atTurnStart -- counter = (counter == -1 ? counter + 2 : counter + 1), then at 6 reset to 0 and addToBot ApplyPowerAction(player, null, IntangiblePlayerPower 1). The -1 special case is the unset/save-loaded counter path and is reproduced exactly rather than normalized away. INTANGIBLE is registered (powers.yaml id 29)."
+
+- id: 86
+  name: GAMBLING_CHIP
+  game_id: "Gambling Chip"
+  tier: RARE
+  pool_order: 20
+  native: true
+  hooks:
+    at_turn_start_post_draw: []  # DEFERRED body: needs an optional multi-select screen
+  provenance: "GamblingChip (GamblingChip.java:426-453): atBattleStartPreDraw clears a PRIVATE `activated` flag; atTurnStartPostDraw -- if !activated, set it and addToBot GamblingChipAction(player), which opens a hand-select screen discarding ZERO-to-all chosen cards and then draws exactly as many as were discarded. DEFERRED: the engine's CHOOSE_CARD screen has no OPTIONAL multi-select with an explicit confirm (every existing ChoiceKind selects a mandatory fixed count), and adding one changes the public ActionMask surface the observation and translator layers join on. Explicit empty native body (relics/relics_rare.cpp). Only atTurnStartPostDraw is bound: atBattleStartPreDraw has no dispatch site, and an unfired hook would be inert code."
+
+- id: 87
+  name: PEACE_PIPE
+  game_id: "Peace Pipe"
+  tier: RARE
+  pool_order: 21
+  pickup:
+    can_spawn: true
+  provenance: "PeacePipe.canSpawn (PeacePipe.java:862-873) -- false when floorNum >= 48 && !Settings.isEndless, then the shared PeacePipe/Shovel/Girya owned-count < 2 gate (byte-identical bodies in all three files). addCampfireOption (:875-878) adds TokeOption; the campfire Toke is a rest-room concern, and the spawn gate is live here because it is relicRng-visible."
+
+- id: 88
+  name: CAPTAINS_WHEEL
+  game_id: "CaptainsWheel"
+  tier: RARE
+  pool_order: 22
+  native: true
+  hooks:
+    at_battle_start: []       # counter = 0
+    at_turn_start: []         # ++counter while armed; turn 3 -> 18 block, then latch
+    on_victory: []            # counter = -1
+  provenance: "CaptainsWheel (CaptainsWheel.java:110-133): atBattleStart counter = 0; atTurnStart -- if !grayscale ++counter, and at counter == 3 addToBot GainBlockAction(player, player, 18), counter = -1, grayscale = true; onVictory counter = -1, grayscale = false. Native: counter < 0 encodes the grayscale latch (no further increments) -- the Horn Cleat shape. The direct GainBlockAction takes no Dexterity (kBlockNoPowers)."
+
+- id: 89
+  name: FOSSILIZED_HELIX
+  game_id: "FossilizedHelix"
+  tier: RARE
+  pool_order: 23
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 1, power: BUFFER}
+  provenance: "FossilizedHelix.atBattleStart (FossilizedHelix.java:392-398) -- addToBot ApplyPowerAction(player, player, BufferPower 1). A DATA hook: BUFFER is registered (powers.yaml id 28) and its damage cancellation is the bespoke onAttackedToChangeDamage site in interp/interp_damage.cpp."
+
+- id: 90
+  name: TUNGSTEN_ROD
+  game_id: "TungstenRod"
+  tier: RARE
+  pool_order: 24
+  provenance: "TungstenRod.onLoseHpLast (TungstenRod.java:1238-1245) -- if damageAmount > 0 return damageAmount - 1. AbstractPlayer.damage runs the relics' onLoseHpLast loop (AbstractPlayer.java:1433-1435) LAST -- after Buffer (onAttackedToChangeDamage) and after Torii (relics onAttacked) -- and BEFORE the `if (damageAmount > 0)` block, so a 1-damage hit becomes 0 and no wasHPLost fires at all. Implemented at that point of op_damage AND of op_lose_hp: LoseHPAction routes through creature.damage() with DamageType.HP_LOSS (LoseHPAction.java:41), which runs this same method body."
+
+- id: 91
+  name: MAGIC_FLOWER
+  game_id: "Magic Flower"
+  tier: RARE
+  pool_order: 25
+  provenance: "MagicFlower.onPlayerHeal (MagicFlower.java:728-735) -- while the current room's phase is COMBAT, MathUtils.round(healAmount * 1.5f); outside combat the heal is unchanged. AbstractPlayer.heal runs every relic's onPlayerHeal before applying. Implemented as one shared in-combat heal seam (heal_player_with_relics, relic_hooks.cpp) that every combat heal routes through -- Burning Blood, Blood Vial, Meat on the Bone, Bird Faced Urn, Lizard Tail."
+
+- id: 92
+  name: CHARONS_ASHES
+  game_id: "Charon's Ashes"
+  tier: RARE
+  pool_order: 26
+  native: true
+  hooks:
+    on_exhaust: []            # 3 THORNS to all enemies, addToTop
+  provenance: "CharonsAshes.onExhaust (CharonsAshes.java:219-227) -- addToTop DamageAllEnemiesAction(createDamageMatrix(3, true), DamageType.THORNS). Native rather than DATA purely for the queue END: a data-bound relic step is always addToBot, and on_exhaust fires mid-resolution (unlike at_battle_start, where top and bottom coincide), so the addToTop is load-bearing. THORNS skips the NORMAL-only power pipeline."
+
+- id: 93
+  name: CHAMPION_BELT
+  game_id: "Champion Belt"
+  tier: RARE
+  pool_order: 27
+  provenance: "ChampionsBelt.onTrigger (ChampionsBelt.java:172-176) -- addToBot ApplyPowerAction(target, player, WeakPower(target, 1, false), 1). Fired from ApplyPowerAction.update (ApplyPowerAction.java:111-113): the player owns Champion Belt, the source is the player, target != source, the applied power is 'Vulnerable', and the target does NOT already have Artifact -- checked AFTER the source-side onApplyPower fan-out and BEFORE the Artifact nullify, so a Vulnerable that Artifact is about to eat grants no Weak. Implemented at op_apply_power (interp/interp_powers.cpp)."
+
+# --- Shop (Ironclad-obtainable) --------------------------------------------------
+#
+# SCOPE: the Ironclad-obtainable SHOP pool -- 17 rows, ids 94-110, enumerated from
+# the same ten live `relicPools.shop` captures: 16 shared SHOP relics plus the
+# Ironclad-only Brimstone (RelicLibrary.addRed). SHOP pool_order 0..16 comes from
+# the same JDK-shuffle inversion (relicRng randomLong draw #4). Shop stock pops the
+# END of this pool, reward/chest draws pop the FRONT (AbstractDungeon.java:704-808).
+
+- id: 94
+  name: SLING_OF_COURAGE
+  game_id: "Sling"
+  tier: SHOP
+  pool_order: 0
+  native: true
+  hooks:
+    at_battle_start: []       # DEFERRED body: needs the room's eliteTrigger flag
+  provenance: "Sling.atBattleStart (Sling.java:1030-1038) -- if getCurrRoom().eliteTrigger: addToTop ApplyPowerAction(player, player, StrengthPower 2). DEFERRED: eliteTrigger is per-ROOM state the run layer sets when an elite encounter begins, and CombatState carries no elite marker; producing one is a run-layer change. Explicit empty native body (relics/relics_shop.cpp) so the deferral sits where the implementation will go."
+
+- id: 95
+  name: HAND_DRILL
+  game_id: "HandDrill"
+  tier: SHOP
+  pool_order: 1
+  native: true
+  hooks:
+    on_block_broken: []       # a monster's block is reduced to 0 -> Vulnerable 2
+  provenance: "HandDrill.onBlockBroken (HandDrill.java:31-35) -- addToBot ApplyPowerAction(m, player, VulnerablePower(m, 2, false), 2). Fired from AbstractCreature.brokeBlock (AbstractCreature.java:159-167), which runs the player's relics' onBlockBroken ONLY when the creature whose block broke is an AbstractMonster; brokeBlock is reached from decrementBlock (:169-183) exactly when currentBlock > 0 and damageAmount >= currentBlock. Native (not DATA): the queued power targets the monster whose block broke, and no StepTarget encodes it. RelicHook::ON_BLOCK_BROKEN = 16 (append-only, design doc §4.4)."
+
+- id: 96
+  name: TOOLBOX
+  game_id: "Toolbox"
+  tier: SHOP
+  pool_order: 2
+  provenance: "Toolbox.atBattleStartPreDraw (Toolbox.java:1024-1028) -- addToBot ChooseOneColorless(), a choose-one-of-three over the COLORLESS card pool, before the opening draw. DEFERRED on two counts: no colorless card rows exist yet, and atBattleStartPreDraw has no dispatch site (the engine's opening turn draws without a pre-draw relic phase). Registering an unfired hook would be inert code, so the row carries none; the row, its pool slot and its relicRng draw are live."
+
+- id: 97
+  name: CHEMICAL_X
+  game_id: "Chemical X"
+  tier: SHOP
+  pool_order: 3
+  provenance: "ChemicalX (ChemicalX.java:12-30) -- a marker relic (BOOST = 2) read by every X-cost card's action: WhirlwindAction.update and SkewerAction.update each compute the effect count as energyOnUse + (player.hasRelic('Chemical X') ? 2 : 0) while the energy actually SPENT is still energyOnUse. Implemented at resolve_card_play's X-cost repetition count (card_play.cpp), which is where energy_on_use is already read."
+
+- id: 98
+  name: LEES_WAFFLE
+  game_id: "Lee's Waffle"
+  tier: SHOP
+  pool_order: 4
+  pickup:
+    on_equip: true
+  provenance: "Waffle.onEquip (Waffle.java:1300-1303) -- player.increaseMaxHp(7, false) then player.heal(maxHealth). The `false` means increaseMaxHp does NOT heal the gained amount; the explicit heal-to-full afterwards makes the distinction invisible today, but the two calls are reproduced separately so the shape survives a future partial-heal modifier."
+
+- id: 99
+  name: ORRERY
+  game_id: "Orrery"
+  tier: SHOP
+  pool_order: 5
+  provenance: "Orrery.onEquip (Orrery.java:1270-1276) -- addCardToRewards() four times, then opens the combat-reward screen. DEFERRED: card-reward assembly and the reward screen are owned by the rewards layer; NOTE for that owner, the four addCardToRewards calls are cardRng-visible. The row, its pool slot and its relicRng draw are live."
+
+- id: 100
+  name: DOLLYS_MIRROR
+  game_id: "DollysMirror"
+  tier: SHOP
+  pool_order: 6
+  provenance: "DollysMirror.onEquip/update (DollysMirror.java:1160-1195) -- gridSelect one master-deck card, then obtain a makeStatEquivalentCopy with the three bottle flags cleared. DEFERRED: acquisition-time grid-select machinery (the same gap the Bottled trio's onEquip carries) is a run-layer concern; the row and its pool slot are live."
+
+- id: 101
+  name: ORANGE_PELLETS
+  game_id: "OrangePellets"
+  tier: SHOP
+  pool_order: 7
+  native: true
+  hooks:
+    at_turn_start: []         # clear the attack/skill/power latches
+    on_use_card: []           # DEFERRED body: needs a remove-all-debuffs action
+  provenance: "OrangePellets (OrangePellets.java:1218-1250): atTurnStart clears three PRIVATE booleans (ATTACK/SKILL/POWER); onUseCard sets the one matching the played card's type and, once all three are set, addToBot RemoveDebuffsAction(player) and clears them again. The public counter stays -1 throughout. DEFERRED: RemoveDebuffsAction removes EVERY DEBUFF-type power from the player, enumerated when the ACTION resolves, and no opcode expresses that (REMOVE_POWER names one PowerId chosen at queue time). Explicit empty native body (relics/relics_shop.cpp)."
+
+- id: 102
+  name: PRISMATIC_SHARD
+  game_id: "PrismaticShard"
+  tier: SHOP
+  pool_order: 8
+  provenance: "PrismaticShard.onEquip (PrismaticShard.java:1236-1241) -- sets masterMaxOrbs = 1 for a non-Defect player; its real effect is the reward-pool marker AbstractDungeon reads to offer cards from ALL character colours. DELIBERATE NO-OP: no character other than the Ironclad exists, so the cross-colour reward pool has nothing to draw from, and orbs are out of scope (the combat state has no orb slots). The row, its absent canSpawn gate and its pool membership are EXACT AND LIVE -- it occupies a SHOP pool slot and consumes relicRng draws, so omitting it would desync the stream. Only the reward effect is inert -- the Matryoshka / The Courier / Eternal Feather pattern."
+
+- id: 103
+  name: CLOCKWORK_SOUVENIR
+  game_id: "ClockworkSouvenir"
+  tier: SHOP
+  pool_order: 9
+  hooks:
+    at_battle_start:
+      - {op: APPLY_POWER, target: SELF, amount: 1, power: ARTIFACT}
+  provenance: "ClockworkSouvenir.atBattleStart (ClockworkSouvenir.java:30-34) -- addToTop ApplyPowerAction(player, player, ArtifactPower 1). A DATA hook: ARTIFACT is registered (powers.yaml id 4)."
+
+- id: 104
+  name: FROZEN_EYE
+  game_id: "Frozen Eye"
+  tier: SHOP
+  pool_order: 10
+  provenance: "FrozenEye (FrozenEye.java:12-27) -- a marker relic with no overrides; the game reads it in the draw-pile view screen, which then shows the pile in true order instead of shuffled. The engine's draw pile is ALREADY stored in true order and the observation layer never randomizes it, so there is no state to change: the correct implementation is the absence of one. The row, its pool slot and its relicRng draw are live."
+
+- id: 105
+  name: THE_ABACUS
+  game_id: "TheAbacus"
+  tier: SHOP
+  pool_order: 11
+  hooks:
+    on_shuffle:
+      - {op: BLOCK, target: SELF, amount: 6}
+  provenance: "Abacus.onShuffle (Abacus.java:18-22) -- addToBot GainBlockAction(player, player, 6). A DATA hook queued addToBot exactly as the Java does; a relic BLOCK step carries kBlockNoPowers (a direct GainBlockAction takes no Dexterity). onShuffle fires from the EmptyDeckShuffleAction constructor (EmptyDeckShuffleAction.java:37-39) -- the same site Sundial uses (piles.cpp shuffle_discard_into_draw)."
+
+- id: 106
+  name: MEDICAL_KIT
+  game_id: "Medical Kit"
+  tier: SHOP
+  pool_order: 12
+  native: true
+  hooks:
+    on_use_card: []           # STATUS played -> exhaust it
+  provenance: "MedicalKit.onUseCard (MedicalKit.java:1153-1159) -- if card.type == STATUS: card.exhaust = true and action.exhaustCard = true. PLAYABILITY is AbstractCard.canUse (AbstractCard.java:914-924): an unplayable STATUS with costForTurn < -1 is playable iff the player has Medical Kit -- modeled in legal_actions (advance.cpp), the same shape Blue Candle uses for curses. A played status runs NO effect program (the ON_PLAY trigger guard in resolve_card_play)."
+
+- id: 107
+  name: CAULDRON
+  game_id: "Cauldron"
+  tier: SHOP
+  pool_order: 13
+  provenance: "Cauldron.onEquip (Cauldron.java:1075-1092) -- addPotionToRewards(PotionHelper.getRandomPotion()) five times, then opens the combat-reward screen with the card reward removed. DEFERRED: the reward screen and shop acquisition are owned by the run layer; NOTE for that owner, the five getRandomPotion() calls are potionRng-visible. The row, its pool slot and its relicRng draw are live."
+
+- id: 108
+  name: STRANGE_SPOON
+  game_id: "Strange Spoon"
+  tier: SHOP
+  pool_order: 14
+  provenance: "StrangeSpoon (StrangeSpoon.java:12-30) -- a marker relic (DISCARD_CHANCE = 50) read by UseCardAction.update: a played card that would exhaust, and is not a POWER, instead goes to the discard pile when cardRandomRng.randomBoolean() is true. RNG-VISIBLE: it consumes exactly one cardRandomRng boolean per exhausting non-POWER play while owned. Implemented at resolve_card_play's exhaust decision (card_play.cpp)."
+
+- id: 109
+  name: MEMBERSHIP_CARD
+  game_id: "Membership Card"
+  tier: SHOP
+  pool_order: 15
+  provenance: "MembershipCard (MembershipCard.java:1198-1215) -- MULTIPLIER = 0.5f, read by ShopScreen's price calculation; onEnterRoom only sets the pulse animation. A run-layer (shop) price modifier; no combat trigger. The row, its pool slot and its relicRng draw are live."
+
+- id: 110
+  name: BRIMSTONE
+  game_id: "Brimstone"
+  tier: SHOP
+  pool_order: 16
+  native: true
+  hooks:
+    at_turn_start: []         # +2 Strength to the player, +1 to every monster
+  provenance: "Brimstone.atTurnStart (Brimstone.java:44-51) -- addToBot RelicAboveCreatureAction, then addToTop ApplyPowerAction(player, player, StrengthPower 2), then addToTop ApplyPowerAction(m, m, StrengthPower 1) for each monster in slot order. Native, not DATA, because the queue END is load-bearing and the resulting RESOLUTION order is the reverse of the call order: successive addToTop pushes leave the LAST monster first, the earlier monsters after it, and the player's +2 last. The body reproduces the addToTop calls in Java order rather than encoding the reversed result."
+
+# --- Event-special: the rare-tier half of the Vulnerable receive modifier ---------
+# Not a rare/shop pool member. Its row lands here because its damage-pipeline
+# branch is the twin of Paper Phrog's, which landed with the uncommon batch.
+
+- id: 111
+  name: ODD_MUSHROOM
+  game_id: "Odd Mushroom"
+  tier: SPECIAL
+  provenance: "OddMushroom (OddMushroom.java:12-28) -- ID 'Odd Mushroom', VULN_EFFECTIVENESS = 1.25f; a SPECIAL-tier relic in no dungeon pool. The branch lives in VulnerablePower.atDamageReceive (VulnerablePower.java:61-73): a NORMAL hit on a Vulnerable PLAYER is x1.25 instead of x1.5 when the player owns Odd Mushroom. The Odd Mushroom test comes FIRST in the Java, before Paper Frog's monster-side x1.75, and the two are mutually exclusive by the owner.isPlayer test. Implemented in the frozen DAMAGE pipeline's at_damage_receive (interp/interp_damage.cpp), retiring that site's 'lands with its rare-relic tier' note. Acquisition is event-driven and owned by the event layer."

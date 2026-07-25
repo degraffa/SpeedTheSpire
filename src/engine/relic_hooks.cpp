@@ -130,6 +130,15 @@ void dispatch_relics_at_turn_start(CombatState& s, RelicSlot* relics,
                         RelicHookContext{});
 }
 
+void dispatch_relics_at_turn_start_post_draw(CombatState& s, RelicSlot* relics,
+                                             uint8_t count) noexcept {
+    // applyStartOfTurnPostDrawRelics (GameActionManager.java:361-362): fired
+    // AFTER the start-of-turn DrawCardAction has been queued, so a relic that
+    // queues here lands behind the draw. Pocketwatch / Gambling Chip.
+    dispatch_relic_hook(s, relics, count, RelicHook::AT_TURN_START_POST_DRAW,
+                        RelicHookContext{});
+}
+
 void dispatch_relics_on_player_end_turn(CombatState& s, RelicSlot* relics,
                                         uint8_t count) noexcept {
     dispatch_relic_hook(s, relics, count, RelicHook::ON_PLAYER_END_TURN,
@@ -202,6 +211,34 @@ void dispatch_relics_on_shuffle(CombatState& s, RelicSlot* relics,
                         RelicHookContext{});
 }
 
+void dispatch_relics_on_block_broken(CombatState& s, RelicSlot* relics,
+                                     uint8_t count, uint8_t monster) noexcept {
+    // AbstractCreature.brokeBlock (AbstractCreature.java:159-167): every player
+    // relic's onBlockBroken fires when the creature whose block just hit zero is
+    // an AbstractMonster. decrementBlock (:169-183) reaches brokeBlock exactly
+    // when the victim had positive block and the incoming damage was >= it.
+    RelicHookContext ctx{};
+    ctx.block_broken_monster = monster;
+    dispatch_relic_hook(s, relics, count, RelicHook::ON_BLOCK_BROKEN, ctx);
+}
+
+void heal_player_with_relics(CombatState& s, int32_t amount) noexcept {
+    // AbstractPlayer.heal runs every owned relic's onPlayerHeal over the amount
+    // before it lands. Magic Flower is the only S1 override
+    // (MagicFlower.onPlayerHeal, MagicFlower.java:728-735): inside a COMBAT-phase
+    // room the amount becomes MathUtils.round(amount * 1.5f). Everything reached
+    // through this function is by construction in combat (it takes a
+    // CombatState), so the room-phase test is satisfied by the call site.
+    //
+    // MathUtils.round is mirrored bit-for-bit by mathutils_round (interp.hpp),
+    // including the float multiply happening before the float->double promotion.
+    int32_t healed = amount;
+    if (healed > 0 && player_has_relic(s, RelicId::MAGIC_FLOWER)) {
+        healed = mathutils_round(static_cast<float>(healed) * 1.5f);
+    }
+    heal_player(s, healed);
+}
+
 void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
     // AbstractRoom.endBattle (AbstractRoom.java:418-420): Meat on the Bone's
     // onTrigger fires BEFORE player.onVictory (so before Burning Blood's heal,
@@ -213,7 +250,7 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
     }
     if (s.player_hp > 0 &&
         static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
-        heal_player(s, 12);
+        heal_player_with_relics(s, 12);
     }
 }
 
@@ -251,6 +288,8 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
 //   AKABEKO / ART_OF_WAR / ANCIENT_TEA_SET / BOOT / PRESERVED_INSECT /
 //   TOY_ORNITHOPTER   -> relics/relics_common.cpp
 //   PANTOGRAPH        -> relics/relics_uncommon.cpp
+//   DEAD_BRANCH / GAMBLING_CHIP            -> relics/relics_rare.cpp
+//   SLING_OF_COURAGE / ORANGE_PELLETS      -> relics/relics_shop.cpp
 // (BRONZE_SCALES / ODDLY_SMOOTH_STONE were un-deferred by the potion-support-
 // powers follow-up: Thorns/Dexterity are registered, so both are DATA
 // at_battle_start APPLY_POWER relics and never route here.)

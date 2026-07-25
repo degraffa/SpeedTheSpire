@@ -21,7 +21,7 @@ void relic_native_blood_vial(CombatState& s, RelicHook hook,
                              const RelicHookContext& /*ctx*/) noexcept {
     // BloodVial.atBattleStart: heal 2 (clamped).
     if (hook == RelicHook::AT_BATTLE_START) {
-        heal_player(s, 2);
+        heal_player_with_relics(s, 2);
     }
 }
 

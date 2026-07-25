@@ -79,6 +79,7 @@
 #include "sts/engine/advance.hpp"       // ActionMask, StepResult, combat advance/legal_actions
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"    // MonsterLists
+#include "sts/engine/interp.hpp"        // mathutils_round (run_setup_hp)
 #include "sts/engine/map_rooms.hpp"     // RoomType
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
@@ -213,13 +214,11 @@ inline constexpr int kIroncladBaseGold = 99;
 // Ironclad.getAscensionMaxHPLoss (Ironclad.java:168-170).
 inline constexpr int kIroncladAscensionMaxHpLoss = 5;
 
-// libGDX MathUtils.round (MathUtils.java:233-235), replicated exactly -- the twin
-// of interp.hpp's mathutils_floor. NOT std::round: this is a floor of (v + 0.5)
-// via the 16384 bias, so exact .5 cases go UP and negatives round differently.
-// 90 % of 75 lands on exactly 67.5f, so the tie behaviour is load-bearing here.
-[[nodiscard]] constexpr int mathutils_round(float value) noexcept {
-    return static_cast<int>(static_cast<double>(value) + 16384.5) - 16384;
-}
+// libGDX MathUtils.round (MathUtils.java:233-235) is `mathutils_round`, defined
+// once in interp.hpp beside its twin mathutils_floor. NOT std::round: it is a
+// floor of (v + 0.5) via the 16384 bias, so exact .5 cases go UP and negatives
+// round differently. 90 % of 75 lands on exactly 67.5f, so the tie behaviour is
+// load-bearing here -- see run_setup_hp below.
 
 // Ironclad max HP after the run-setup max-HP loss, and the current HP after the
 // 90 %-of-max rewrite that follows it. Pure, so the tier-2 rows can be checked

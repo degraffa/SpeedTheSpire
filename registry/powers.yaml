@@ -332,6 +332,25 @@
     on_card_draw: []
   provenance: "FireBreathingPower.onCardDraw (FireBreathingPower.java:34-40) -- when the drawn card is STATUS or CURSE, addToBot DamageAllEnemiesAction(amount, THORNS, FIRE). Native because the trigger is conditional on the drawn card type."
 
+# --- Rare/shop relic-granted powers (ids 28-29) --------------------------------
+# Both are applied by a relic, not by a card: Fossilized Helix grants Buffer at
+# battle start and Incense Burner grants Intangible every sixth turn.
+
+- id: 28
+  name: BUFFER
+  game_id: "Buffer"
+  type: BUFF
+  provenance: "BufferPower (BufferPower.java:13-47): POWER_ID \"Buffer\"; default BUFF (AbstractPower.java:67); stackPower additive (:30-33). onAttackedToChangeDamage (:44-47) -- returns 0 unconditionally and, when damageAmount > 0, addToTop ReducePowerAction(owner, owner, \"Buffer\", 1). Like Strength/Vulnerable/Weak this is a DAMAGE-pipeline power with no queued hook program: the body is the bespoke onAttackedToChangeDamage site in interp/interp_damage.cpp, which sits AFTER decrementBlock and BEFORE the victim's onAttacked fan-out (AbstractPlayer.damage:1412-1415 vs :1425-1431). Applied by Fossilized Helix (relics.yaml FOSSILIZED_HELIX)."
+
+- id: 29
+  name: INTANGIBLE
+  game_id: "IntangiblePlayer"
+  type: BUFF
+  hooks:
+    at_end_of_round:
+      - {op: REDUCE_POWER, target: SELF, amount: 1, power: INTANGIBLE}
+  provenance: "IntangiblePlayerPower (IntangiblePlayerPower.java:14-55): POWER_ID \"IntangiblePlayer\", BUFF, priority 75. atEndOfRound (:51-55) -- amount 0 -> RemoveSpecificPowerAction, else addToBot ReducePowerAction(owner, owner, POWER_ID, 1); the REDUCE_POWER opcode already removes the slot at <= 0 (interp_powers.cpp op_reduce_power), and ApplyPowerAction never lands amount 0, so the two Java branches collapse to one step. The DAMAGE CAP is bespoke and lives at TWO sites, matching the Java: atDamageFinalReceive (:44-49) inside DamageInfo.applyPowers, and the separate pre-decrementBlock guard in AbstractPlayer.damage (:1397-1399, `damageAmount > 1 && hasPower(\"IntangiblePlayer\")`) which also caps THORNS and HP_LOSS because those skip applyPowers. Applied by Incense Burner (relics.yaml INCENSE_BURNER)."
+
 # --- Act-1 elite monster power (Gremlin Nob's Bellow) -------------------------
 # Artifact, the Sentry's pre-battle power, is NOT a new row: it landed with the
 # B3.2 framework as id 4, and its whole effect is the APPLY_POWER-site nullify
