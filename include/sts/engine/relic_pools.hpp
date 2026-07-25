@@ -40,14 +40,19 @@ struct RelicSpawnContext {
     // in Endless (no Settings.isEndless clause in those canSpawn bodies).
     bool deck_has_nonbasic_attack = false;  // BottledFlame.canSpawn (:93-99)
     bool deck_has_nonbasic_skill = false;   // BottledLightning.canSpawn (:93-99)
-    bool deck_has_power = false;            // BottledTornado.canSpawn (:93-95)
+    // BottledTornado.canSpawn (:93-95) -> CardHelper.hasCardType(POWER)
+    // (CardHelper.java:80-86): any POWER-type master-deck card, ANY rarity.
+    bool deck_has_power = false;
 };
 
 // Fill the deck-content gates above from the run's master deck. "Non-basic" ==
 // CardRarity != BASIC; the only BASIC red rows are Strike/Defend/Bash
 // (Strike_Red/Defend_Red/Bash constructors -- CardRarity.BASIC), so the scan
-// keys on type + those three ids. deck_has_power stays false until B3.7 lands
-// POWER-type cards (no POWER CardType exists in the registry yet).
+// keys on type + those three ids. deck_has_power is NOT rarity-filtered:
+// CardHelper.hasCardType (CardHelper.java:80-86) is a plain type scan, so any
+// POWER-type card in the master deck sets it. B3.7 landed 8 POWER cards
+// (Combust/Dark Embrace/Evolve/Feel No Pain/Fire Breathing/Inflame/
+// Metallicize/Rupture), so the Bottled Tornado gate can now open.
 void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept;
 
 enum class RelicAcquireResult : uint8_t {
