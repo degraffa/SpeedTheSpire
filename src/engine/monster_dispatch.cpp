@@ -13,6 +13,7 @@
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
 #include "sts/engine/monster_guardian.hpp" // The Guardian's mode state machine
+#include "sts/engine/monster_hexaghost.hpp"  // Hexaghost orb-count cycle
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
@@ -108,6 +109,8 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &gremlin_wizard_init;
         case MonsterId::THE_GUARDIAN:
             return &guardian_init;
+        case MonsterId::HEXAGHOST:
+            return &hexaghost_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -157,6 +160,8 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &gremlin_wizard_take_turn;
         case MonsterId::THE_GUARDIAN:
             return &guardian_take_turn;
+        case MonsterId::HEXAGHOST:
+            return &hexaghost_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -164,12 +169,15 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 20,
+    static_assert(sts::registry::manifest::kMonstersCount == 21,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for The Guardian: it queues none. getMove (TheGuardian.java:
     // 226-232) runs only from init's rollMove; every later transition is a
     // direct setMove, so no ROLL_MOVE item ever targets it.
+    // Checked for Hexaghost: it queues one on FIVE of its six move bodies
+    // (Hexaghost.java:167,176,188,196,209); only the ACTIVATE opener
+    // re-telegraphs with a direct setMove (:153).
     switch (id) {
         case MonsterId::SPIKE_SLIME_LARGE:
             return &spike_slime_large_roll_move;
@@ -180,6 +188,12 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
         // direct setMove or a queued SetMoveAction and roll nothing.
         case MonsterId::GREMLIN_FAT:
             return &gremlin_fat_roll_move;
+        // Hexaghost's queued roll also carries the ChangeStateAction that
+        // immediately precedes it, and Inferno's BurnIncreaseAction ahead of
+        // that -- the whole run is atomic in the Java queue
+        // (monster_hexaghost.hpp).
+        case MonsterId::HEXAGHOST:
+            return &hexaghost_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -198,12 +212,15 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 20,
+    static_assert(sts::registry::manifest::kMonstersCount == 21,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
     // Checked for The Guardian: nothing spawns it mid-combat. It is a solo boss
     // encounter (encounters.yaml "The Guardian") and neither splits nor summons.
+    // Same for Hexaghost: a solo boss encounter (encounters.yaml "Hexaghost")
+    // whose six orbs are rendering objects, not monster records
+    // (HexaghostOrb.java:19-59) -- nothing is ever spawned mid-combat.
     switch (id) {
         case MonsterId::SPIKE_SLIME_MEDIUM:
             return &spike_slime_medium_spawn_at_hp;
@@ -249,7 +266,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 20,
+    static_assert(sts::registry::manifest::kMonstersCount == 21,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
@@ -290,13 +307,20 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         case MonsterId::THE_GUARDIAN:
             guardian_on_damaged(state, monster_index);
             return;
+
+        // Hexaghost does NOT override damage() (Hexaghost.java declares
+        // takeTurn/getMove/changeState/die/update/render and nothing else), so
+        // there is genuinely no hook to register. Spelled as a case for the
+        // same reason as Sentry above.
+        case MonsterId::HEXAGHOST:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 20,
+    static_assert(sts::registry::manifest::kMonstersCount == 21,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -319,6 +343,15 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         // to itself and resets the damage accumulator. No RNG.
         case MonsterId::THE_GUARDIAN:
             return &guardian_use_pre_battle_action;
+
+        // Hexaghost.usePreBattleAction (Hexaghost.java:130-134) is entirely
+        // meta-progression and presentation: UnlockTracker.markBossAsSeen
+        // ("GHOST") and a BGM precache. It touches no combat state and draws no
+        // RNG, so -- as with the Slime Boss below -- this nullptr is the
+        // complete, correct translation. Spelled as a case rather than left to
+        // the `default:` so the omission is checkable.
+        case MonsterId::HEXAGHOST:
+            return nullptr;
 
         // The two monsters below DO override usePreBattleAction; both are
         // deliberately nullptr here, and the reasons differ. They are spelled out
@@ -360,12 +393,12 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return &gremlin_warrior_use_pre_battle_action;
 
         default:
-            // Checked, not assumed: of the 20 registry monsters only JawWorm,
+            // Checked, not assumed: of the 21 registry monsters only JawWorm,
             // LouseNormal, LouseDefensive, SlimeBoss, Sentry, Lagavulin,
-            // GremlinWarrior and TheGuardian declare the method at all. The
-            // other twelve (Cultist, GremlinNob, the four small/medium slimes,
-            // the two large slimes, and the Thief / Fat / Tsundere / Wizard
-            // gremlins) inherit AbstractMonster's empty body
+            // GremlinWarrior, TheGuardian and Hexaghost declare the method at
+            // all. The other twelve (Cultist, GremlinNob, the four small/medium
+            // slimes, the two large slimes, and the Thief / Fat / Tsundere /
+            // Wizard gremlins) inherit AbstractMonster's empty body
             // (AbstractMonster.java:953-954), so there is genuinely nothing to
             // run for them.
             //

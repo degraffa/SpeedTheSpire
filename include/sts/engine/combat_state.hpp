@@ -216,6 +216,11 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //         cumulative damage from -- a WHOLE-byte value, not a packed pair. The
 //         Guardian's fixed 240/250 HP sheet (TheGuardian.java:97-106) fits
 //         uint8_t's 0..255 with room to spare. See monster_guardian.cpp.
+//       - Hexaghost: the Divider per-hit base damage, computed on the ACTIVATE
+//         turn as `player.currentHealth / 12 + 1` (Hexaghost.java:151) and
+//         spent by the six hits of the NEXT turn (:157-165). Another WHOLE-byte
+//         value: it saturates at 255, which needs a player above 3047 HP to
+//         reach. See monster_hexaghost.cpp.
 //   * `flags` bit kMonsterFlagSplitTriggered -- large slimes: the
 //     `splitTriggered` one-shot latch (AcidSlime_L.java:71,150 /
 //     SpikeSlime_L.java:66,138). Set synchronously by the damage() interrupt
@@ -229,6 +234,10 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //   * `flags` bits kMonsterFlagGuardian* -- The Guardian: the two mode latches
 //     plus the count of Defensive-Mode flips so far, which is what makes the
 //     mode-shift threshold GROW (TheGuardian.java:61,245).
+//   * `flags` bits kMonsterFlagHexaghostOrb* / *BurnUpgraded -- Hexaghost:
+//     `orbActiveCount` (the ONLY thing its six presentation orbs contribute to
+//     combat state) and the `burnUpgraded` latch (Hexaghost.java:92-93). See
+//     monster_hexaghost.hpp for why the orbs need no records of their own.
 // These are mutually exclusive across monster types (a Cultist never bites; a
 // Louse never has Ritual), so no field is read under two meanings at once.
 struct MonsterState {
@@ -287,6 +296,23 @@ inline constexpr uint16_t kMonsterFlagGuardianOpen = 0x0040u;
 inline constexpr uint16_t kMonsterFlagGuardianCloseUpTriggered = 0x0080u;
 inline constexpr uint16_t kMonsterFlagGuardianShiftShift = 8u;
 inline constexpr uint16_t kMonsterFlagGuardianShiftMask = 0x0700u;
+
+// Hexaghost (Hexaghost.java, see monster_hexaghost.hpp). Bits 0x0001..0x0700
+// are taken by the five monsters above, so this batch was allocated from 0x0800
+// up; 0x8000 is left free.
+//   * ORB_COUNT     -- `orbActiveCount` (:93), the whole combat-relevant residue
+//                      of the six presentation orbs. getMove switches on it
+//                      (:224-252) and nothing else reads it. Its range is 0..6:
+//                      changeState "Activate" sets 6 (:268), "Activate Orb"
+//                      increments and stops the cycle at 6 (:278-280), and
+//                      "Deactivate" resets to 0 (:289) -- so three bits hold it
+//                      exactly, with 7 unreachable.
+//   * BURN_UPGRADED -- `burnUpgraded` (:92,205-207): a one-shot set by the first
+//                      Inferno, after which every Burn Sear creates is upgraded
+//                      (:183-185). Never cleared.
+inline constexpr uint16_t kMonsterFlagHexaghostOrbShift = 11u;
+inline constexpr uint16_t kMonsterFlagHexaghostOrbMask = 0x3800u;
+inline constexpr uint16_t kMonsterFlagHexaghostBurnUpgraded = 0x4000u;
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,
