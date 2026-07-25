@@ -96,6 +96,46 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             s.player_hp = static_cast<int16_t>(hp);
             break;
         }
+        case PotionId::BLESSING_OF_THE_FORGE: {
+            // BlessingOfTheForge.use (BlessingOfTheForge.java:43-47): addToBot
+            // ArmamentsAction(true) -- and nothing else -- when the current
+            // room phase is COMBAT (:44). ArmamentsAction's armamentsPlus
+            // branch (ArmamentsAction.java:34-44) upgrades EVERY hand card with
+            // canUpgrade(), with NO hand-select screen and no potency term.
+            //
+            // That is Armaments+ exactly (registry/cards.yaml:124,
+            // {op: CHOOSE_CARD, choose: upgrade, amount: 99}): op_choose_card's
+            // forced branch applies the manipulation to ALL eligible cards when
+            // eligible <= amount, and choice_requires_user is false for the same
+            // reason, so 99 never blocks the pump. No new machinery -- but the
+            // potion cannot be authored as a data program, because CHOOSE_CARD
+            // sits in the generator's CARD_CONTEXT op group and the potion
+            // domain only admits GENERAL ops (tools/registry_gen/stsgen/
+            // steps.py). Hence this native branch, which queues the identical
+            // item by hand.
+            //
+            // KNOWN SHARED GAP (pre-existing, not introduced here, and NOT this
+            // task's file to fix): choice_slot_eligible's UPGRADE arm
+            // (interp/interp_cards.cpp) tests only !upgraded, while
+            // AbstractCard.canUpgrade (AbstractCard.java:672-680) also rejects
+            // CURSE and STATUS. Every CHOOSE_CARD{upgrade} consumer inherits it
+            // -- Armaments and Armaments+ already do -- so this potion is no
+            // worse than the card, and one fix at the eligibility predicate
+            // corrects all three.
+            //
+            // The COMBAT gate at :44 is the run layer's: a potion USE is only
+            // offered in RunPhase::COMBAT (combat_potion_legal) or via the
+            // two-potion out-of-combat whitelist (noncombat_potion_legal), and
+            // this potion is not on that whitelist.
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+            item.src = kActorPlayer;
+            item.tgt = kActorPlayer;  // hand-source choice: no exclusion index
+            item.amount = 99;         // >= any hand size -> forced "upgrade all"
+            item.flags = make_choose_flags(ChoiceKind::UPGRADE, /*random=*/false);
+            add_to_bottom(s, item);   // addToBot (BlessingOfTheForge.java:45)
+            break;
+        }
         // --- Deferred native bodies (land with their dependency; B3.23 Log) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
@@ -104,7 +144,9 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // longer route here (use_potion sends them through queue_use_step).
         // Still native + DEFERRED, each on a verb owned elsewhere:
         // In-combat card CHOOSE (B3.4): ELIXIR, ATTACK/SKILL/POWER/COLORLESS_
-        // POTION, GAMBLERS_BREW, LIQUID_MEMORIES, BLESSING_OF_THE_FORGE.
+        // POTION, GAMBLERS_BREW, LIQUID_MEMORIES. (BLESSING_OF_THE_FORGE is no
+        // longer among them -- it needed only the already-live CHOOSE_CARD
+        // UPGRADE kind and is implemented above.)
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
         // opcode, NOT a missing power row). Cost randomization: SNECKO_OIL.

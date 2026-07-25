@@ -35,7 +35,8 @@
 # Cultist) are now DATA APPLY_POWER programs, un-deferred here with their effect
 # tests. Potions still `native: true` and DEFERRED need a verb owned elsewhere:
 # in-combat card CHOOSE = B3.4 (Elixir, Attack/Skill/Power/Colorless, Gamblers Brew,
-# Liquid Memories, Blessing of the Forge); RECURSIVE PLAY = a later opcode
+# Liquid Memories -- Blessing of the Forge is NO LONGER among them: it needs only
+# the already-live CHOOSE_CARD UPGRADE kind); RECURSIVE PLAY = a later opcode
 # (Distilled Chaos, Duplication); cost randomization (Snecko Oil); run-layer max-HP
 # / potion-slot mutation = B4.x (Fruit Juice, Entropic Brew); combat escape = B3.15
 # (Smoke Bomb); out-of-combat revive (Fairy). Every row still carries its real
@@ -225,9 +226,13 @@
   game_id: "BlessingOfTheForge"
   rarity: COMMON
   potency: 0
-  # Upgrade every upgradeable card in hand for the combat -> in-combat upgrade verb (B3.4 Armaments). Deferred native.
+  # Upgrade every upgradeable card in hand for the combat. IMPLEMENTED (native,
+  # potions.cpp): queues the same CHOOSE_CARD{upgrade, amount 99} Armaments+
+  # authors, whose forced branch upgrades all eligible with no prompt. It stays
+  # `native` rather than becoming a data program because CHOOSE_CARD is a
+  # CARD_CONTEXT op and the potion domain admits only GENERAL ops (gen steps.py).
   native: true
-  provenance: "BlessingOfTheForge.use (BlessingOfTheForge.java:43), getPotency (:50) -- upgrade all cards in hand this combat"
+  provenance: "BlessingOfTheForge.use (BlessingOfTheForge.java:43-47), getPotency (:50) -- COMBAT-gated addToBot ArmamentsAction(true); ArmamentsAction.update armamentsPlus branch (ArmamentsAction.java:34-44) upgrades every canUpgrade() hand card with no select screen"
 
 - id: 20
   name: REGEN_POTION

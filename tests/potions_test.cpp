@@ -210,6 +210,74 @@ TEST(Potions, BloodPotionHealClampsToMaxHp) {
     EXPECT_EQ(s.player_hp, 80);  // 70 + 16 = 86, clamped to 80
 }
 
+// --- NATIVE with body: Blessing of the Forge (Armaments+ in a bottle) ---------
+//
+// BlessingOfTheForge.use (BlessingOfTheForge.java:43-47) addToBot's
+// ArmamentsAction(true); its armamentsPlus branch (ArmamentsAction.java:34-44)
+// upgrades every canUpgrade() hand card with no select screen. That is exactly
+// the CHOOSE_CARD{upgrade, amount 99} program Armaments+ authors, so the potion
+// queues one and the interpreter's forced path does the rest.
+
+void seed_hand_card(CombatState& s, uint8_t pi, CardId id, uint8_t upgrade = 0) {
+    const CardDef* def = card_def(id);
+    ASSERT_NE(def, nullptr);
+    s.card_pool[pi].card_id = static_cast<uint16_t>(id);
+    s.card_pool[pi].upgrade = upgrade;
+    s.card_pool[pi].cost_now = card_cost(*def, upgrade);
+    s.card_pool[pi].flags = card_flags(*def, upgrade);
+    s.hand[s.hand_count++] = pi;
+}
+
+// NOTE (pre-existing, reported separately; NOT introduced here): the engine's
+// UPGRADE eligibility (choice_slot_eligible, src/engine/interp/interp_cards.cpp)
+// tests only !upgraded, while AbstractCard.canUpgrade (AbstractCard.java:672-680)
+// also rejects CURSE and STATUS. Every CHOOSE_CARD{upgrade} consumer shares that
+// gap -- Armaments and Armaments+ already reach it with a curse or status in
+// hand -- so these tests deliberately assert only the behaviour this potion
+// owns and do not pin the divergent curse/status case either way.
+
+TEST(Potions, BlessingOfTheForgeUpgradesEveryUpgradeableHandCard) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+    seed_hand_card(s, 2, CardId::BASH, /*upgrade=*/1);  // already upgraded
+    seed_hand_card(s, 3, CardId::CLEAVE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::BLESSING_OF_THE_FORGE, 0));
+    ASSERT_EQ(s.action_count, 1) << "one queued ArmamentsAction-equivalent";
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(item.flags), ChoiceKind::UPGRADE);
+    EXPECT_FALSE(choose_is_random(item.flags));
+    EXPECT_FALSE(choice_requires_user(s, item))
+        << "armamentsPlus opens no hand-select screen";
+
+    drain_actions(s);
+    EXPECT_EQ(s.card_pool[0].upgrade, 1);
+    EXPECT_EQ(s.card_pool[1].upgrade, 1);
+    EXPECT_EQ(s.card_pool[2].upgrade, 1) << "already upgraded: unchanged";
+    EXPECT_EQ(s.card_pool[3].upgrade, 1);
+    EXPECT_EQ(s.hand_count, 4) << "upgrading in place never moves a card";
+    // The upgrade re-seeds the instance from the registry's upgraded row.
+    EXPECT_EQ(s.card_pool[1].cost_now, card_cost(*card_def(CardId::DEFEND), 1));
+}
+
+TEST(Potions, BlessingOfTheForgeWithNothingUpgradeableIsInert) {
+    // ArmamentsAction's armamentsPlus branch simply finds no canUpgrade() card
+    // and finishes; no prompt, no other effect (getPotency is 0).
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE, /*upgrade=*/1);
+    seed_hand_card(s, 1, CardId::DEFEND, /*upgrade=*/1);
+    ASSERT_TRUE(use_potion(s, PotionId::BLESSING_OF_THE_FORGE, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item));
+    drain_actions(s);
+    EXPECT_EQ(s.card_pool[0].upgrade, 1);
+    EXPECT_EQ(s.card_pool[1].upgrade, 1);
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.player_hp, 80) << "no other side effect (potency 0)";
+}
+
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
 // Powers registered by the potion-support-powers follow-up (Dexterity, Lose
 // Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
