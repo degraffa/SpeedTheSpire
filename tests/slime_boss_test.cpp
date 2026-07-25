@@ -12,6 +12,7 @@
 // descendant behavior is the B3.17 Java corpus cited by monster_slime_large.hpp.
 
 #include <cstdint>
+#include <iterator>  // std::size (enemy_type row-count gate)
 #include <span>
 
 #include "gtest/gtest.h"
@@ -361,6 +362,73 @@ TEST(SlimeBossDirectedScript, AdvanceCyclesGoopPrepSlamWithA20Values) {
     EXPECT_EQ(count_card_in_discard(s, CardId::SLIMED), 10);
     EXPECT_EQ(s.ai_rng.counter, ai_after_init)
         << "all post-opener transitions are direct setMove, no more AI rolls";
+}
+
+
+// --- registry/monsters.yaml enemy_type column (AbstractMonster.type) ----------
+//
+// AbstractMonster declares `public EnemyType type = EnemyType.NORMAL;`
+// (AbstractMonster.java:99); a monster is anything else only if its class
+// assigns this.type. Across the whole Exordium roster that is: SlimeBoss.java:86,
+// TheGuardian.java:94 and Hexaghost.java:98 (BOSS), and GremlinNob.java:63,
+// Lagavulin.java:75 and Sentry.java:61 (ELITE). Every other class -- every row
+// the registry currently carries except SLIME_BOSS -- leaves the field at its
+// NORMAL initializer.
+//
+// This is the column Pantograph reads (Pantograph.java:32-40 scans the monster
+// group for a BOSS-typed member; it never asks the ROOM whether it is a boss
+// room). Pinning the whole column, plus the row count, means a new monster row
+// cannot land without someone classifying it: adding row 12 fails the count
+// assertion below, and the author has to go read the class's ctor to fix it.
+
+TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
+    using sts::registry::MonsterEnemyType;
+    struct Row { MonsterId id; MonsterEnemyType type; const char* java; };
+    static constexpr Row kRows[] = {
+        {MonsterId::JAW_WORM,           MonsterEnemyType::NORMAL,
+         "JawWorm.java -- no this.type assignment (AbstractMonster.java:99)"},
+        {MonsterId::CULTIST,            MonsterEnemyType::NORMAL,
+         "Cultist.java -- no this.type assignment"},
+        {MonsterId::LOUSE_NORMAL,       MonsterEnemyType::NORMAL,
+         "LouseNormal.java -- no this.type assignment"},
+        {MonsterId::LOUSE_DEFENSIVE,    MonsterEnemyType::NORMAL,
+         "LouseDefensive.java -- no this.type assignment"},
+        {MonsterId::SPIKE_SLIME_SMALL,  MonsterEnemyType::NORMAL,
+         "SpikeSlime_S.java -- no this.type assignment"},
+        {MonsterId::SPIKE_SLIME_MEDIUM, MonsterEnemyType::NORMAL,
+         "SpikeSlime_M.java -- no this.type assignment"},
+        {MonsterId::ACID_SLIME_SMALL,   MonsterEnemyType::NORMAL,
+         "AcidSlime_S.java -- no this.type assignment"},
+        {MonsterId::ACID_SLIME_MEDIUM,  MonsterEnemyType::NORMAL,
+         "AcidSlime_M.java -- no this.type assignment"},
+        {MonsterId::SPIKE_SLIME_LARGE,  MonsterEnemyType::NORMAL,
+         "SpikeSlime_L.java -- no this.type assignment"},
+        {MonsterId::ACID_SLIME_LARGE,   MonsterEnemyType::NORMAL,
+         "AcidSlime_L.java -- no this.type assignment"},
+        {MonsterId::SLIME_BOSS,         MonsterEnemyType::BOSS,
+         "SlimeBoss.java:86 -- this.type = EnemyType.BOSS"},
+    };
+    for (const Row& row : kRows) {
+        const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);
+        ASSERT_NE(def, nullptr) << row.java;
+        EXPECT_EQ(def->enemy_type, row.type) << row.java;
+        EXPECT_EQ(def->is_boss(), row.type == MonsterEnemyType::BOSS) << row.java;
+    }
+
+    // Row-count gate: the table above must stay TOTAL over the registry. A new
+    // monster row lands here first, and whoever adds it must read its ctor for
+    // the EnemyType rather than inheriting a silent NORMAL default.
+    uint16_t rows = 0;
+    for (uint16_t raw = 1; raw < 4096; ++raw) {
+        if (sts::registry::monster_def(static_cast<MonsterId>(raw)) != nullptr) {
+            ++rows;
+        }
+    }
+    EXPECT_EQ(rows, static_cast<uint16_t>(std::size(kRows)))
+        << "registry/monsters.yaml gained a row -- classify its enemy_type from "
+           "the monster class's ctor and add it to kRows above";
+    // MonsterId::NONE is the empty-slot sentinel and has no row.
+    EXPECT_EQ(sts::registry::monster_def(MonsterId::NONE), nullptr);
 }
 
 }  // namespace

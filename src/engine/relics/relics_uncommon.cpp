@@ -7,6 +7,7 @@
 
 #include <cstdint>
 
+#include "relic_native.hpp"             // heal_player (HealAction clamp)
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (curse/skill checks)
 #include "sts/engine/combat_state.hpp"
@@ -14,6 +15,7 @@
 #include "sts/engine/rng_stream.hpp"    // random (Mummified Hand's cardRandomRng draw)
 #include "sts/engine/run_state.hpp"     // RelicSlot
 #include "sts/engine/types.hpp"
+#include "sts/registry/monster_table.hpp"  // monster_def, MonsterDef::is_boss
 
 namespace sts::engine {
 
@@ -353,29 +355,63 @@ void relic_native_mummified_hand(CombatState& s, RelicHook hook,
         chosen.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
 }
 
-// --- DEFERRED combat bodies --------------------------------------------------
-//
-// A relic registered `native: true` with its hook inventory but with NO combat
-// body yet, because it needs registry content that does not exist (the specific
-// missing content is named per relic below). It is a DELIBERATELY EMPTY
-// definition, not an omission -- the dispatch table generated from relics.yaml
-// (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp) odr-uses a handler
-// for every `native: true` row, so a relic whose body nobody wrote is an
-// UNDEFINED REFERENCE at link time rather than a silent no-op.
-
-// Pantograph.atBattleStart (Pantograph.java:32-40) -- if any monster.type ==
-// EnemyType.BOSS, addToTop HealAction(player, 25). DEFERRED: registry/
-// monsters.yaml carries no EnemyType/BOSS column, so there is no DATA-DRIVEN
-// way to ask "is this a boss fight?".
-//
-// This relic IS now reachable: SLIME_BOSS is a live monster row and the Slime
-// Boss fight is playable, so the heal is a real 25 HP that the engine does not
-// grant. Implementing it against a hard-coded MonsterId list would work today
-// but would have to be revisited for every boss added; the intended fix is the
-// EnemyType column. Until then this is a KNOWN DIVERGENCE, not a no-op.
-// (See docs/stage-b-tasks.md's deferred-obligations table.)
-void relic_native_pantograph(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_pantograph(CombatState& s, RelicHook hook,
                              RelicSlot& /*slot*/,
-                             const RelicHookContext& /*ctx*/) noexcept {}
+                             const RelicHookContext& /*ctx*/) noexcept {
+    // Pantograph.atBattleStart (Pantograph.java:32-40):
+    //
+    //     for (AbstractMonster m : AbstractDungeon.getMonsters().monsters) {
+    //         if (m.type != AbstractMonster.EnemyType.BOSS) continue;
+    //         this.flash();
+    //         this.addToTop(new HealAction(player, player, 25, 0.0f));
+    //         this.addToTop(new RelicAboveCreatureAction(player, this));
+    //         return;
+    //     }
+    //
+    // WHAT IT KEYS ON: the MONSTER's EnemyType, not the room. Pantograph never
+    // touches AbstractRoom / MonsterRoomBoss -- it scans the live monster group
+    // for a BOSS-typed member. That distinction is observable: a boss-typed
+    // monster met outside a boss room still triggers it, and a boss room whose
+    // group somehow held no BOSS-typed monster would not. So the metadata this
+    // needs is per-MONSTER (AbstractMonster.type, AbstractMonster.java:99),
+    // which is why it now lives in registry/monsters.yaml as `enemy_type` and
+    // reaches here as MonsterDef::is_boss() -- no hard-coded MonsterId list, and
+    // The Guardian / Hexaghost light up the moment their rows land.
+    //
+    // TIMING: atBattleStart, not onEquip (which Pantograph does not override --
+    // the tier/sound-only ctor at :22-24 is its whole equip behaviour) and not
+    // atBattleStartPreDraw (the separate AbstractRelic hook at :503; Pantograph
+    // overrides :32 atBattleStart). RelicHook::AT_BATTLE_START is the engine's
+    // pinned mirror of exactly that hook.
+    //
+    // ONCE, NOT PER BOSS: the Java `return`s inside the loop after the first
+    // BOSS-typed member, so a hypothetical two-boss group heals 25 total, not
+    // 50. The break below is that `return`.
+    //
+    // AMOUNT AND CLAMP: HEAL_AMT is 25 (Pantograph.java:20, and the literal 25
+    // passed at :36). The heal goes through HealAction -> AbstractCreature.heal
+    // (HealAction.java:31-33 -> AbstractCreature.java:386-417), whose only S1
+    // modifiers are the Endless-mode FullBelly blight halving (:387-389, not S1)
+    // and the relic/power onPlayerHeal / onHeal fan-out (:393-399, no S1 relic or
+    // power binds either); what DOES apply is the clamp to maxHealth (:401-403).
+    // heal_player is exactly that clamp -- the same call Blood Vial's
+    // atBattleStart body makes (relics_common.cpp), and like it the heal is
+    // applied directly rather than queued: the Java addToTop pair is a
+    // RelicAboveCreatureAction (pure VFX) plus a duration-0 HealAction, and a
+    // pure clamped heal has no queue-ordering interplay with any other S1
+    // battle-start effect.
+    if (hook != RelicHook::AT_BATTLE_START) {
+        return;
+    }
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        const sts::registry::MonsterDef* def = sts::registry::monster_def(
+            static_cast<MonsterId>(s.monsters[i].monster_id));
+        if (def == nullptr || !def->is_boss()) {
+            continue;  // `if (m.type != EnemyType.BOSS) continue;` (:34)
+        }
+        heal_player(s, 25);  // addToTop HealAction(player, 25) (:36)
+        return;              // (:38) -- first BOSS member only
+    }
+}
 
 }  // namespace sts::engine

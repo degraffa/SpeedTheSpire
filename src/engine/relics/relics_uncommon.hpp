@@ -1,12 +1,15 @@
 #pragma once
 
 // Native bodies for the UNCOMMON-tier relics (registry/relics.yaml tier
-// UNCOMMON), including the one whose combat body is DEFERRED (Pantograph).
-// That one is a DELIBERATELY EMPTY definition rather than an
-// omission: the generated dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses
-// a handler for EVERY `native: true` row, so a forgotten body is a link error.
-// "Deferred" therefore has to be written down -- and it is, at the empty
-// definition in relics_uncommon.cpp, together with its reason.
+// UNCOMMON). Every row in this tier now has a real combat body. The generated
+// dispatch table (STS_REGISTRY_NATIVE_RELICS) odr-uses a handler for EVERY
+// `native: true` row, so a forgotten body is a link error, not a silent no-op.
+//
+// Pantograph was this tier's last DEFERRED body, and is deferred no longer:
+// registry/monsters.yaml now carries the `enemy_type` column (AbstractMonster
+// .type, AbstractMonster.java:99), so "is this a boss fight?" is a data question
+// answered by MonsterDef::is_boss(). See the body in relics_uncommon.cpp for the
+// Java it mirrors and for why the test is on the MONSTER, not on the room.
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/relic_hooks.hpp"  // RelicHook, RelicHookContext
@@ -39,7 +42,6 @@ void relic_native_self_forming_clay(CombatState& s, RelicHook hook,
 void relic_native_mummified_hand(CombatState& s, RelicHook hook, RelicSlot& slot,
                                  const RelicHookContext& ctx) noexcept;
 
-// --- DEFERRED combat body (deliberately empty; see relics_uncommon.cpp) ------
 void relic_native_pantograph(CombatState& s, RelicHook hook, RelicSlot& slot,
                              const RelicHookContext& ctx) noexcept;
 
