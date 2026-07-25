@@ -10,10 +10,38 @@
 #                          additive amount stacking, AbstractPower.stackPower's
 #                          this.amount += stackAmount; `none` == non-stacking marker
 #                          for a later bespoke consumer). Optional (default intensity).
-#     native: true         (optional) the power's hooks are handled by the native
-#                          escape hatch (power_hooks.cpp dispatch_native_hook) rather
-#                          than by a data-bound effect program -- for the irreducibly
-#                          bespoke powers (guards, counters, interception, redirects).
+#     native: true         (optional) the power's hook BODIES are hand-written C++
+#                          rather than a data-bound effect program -- for the
+#                          irreducibly bespoke powers (guards, counters,
+#                          interception, redirects). This flag is not prose: the
+#                          dispatch table is GENERATED from this file. Each
+#                          `native: true` row emits one X(<NAME>, power_native_
+#                          <name>) entry of the STS_REGISTRY_NATIVE_POWERS X-macro
+#                          in the generated power_table.hpp
+#                          (tools/registry_gen/stsgen/emit/powers.py,
+#                          native_dispatch_macro). power_hooks.cpp expands that one
+#                          list TWICE -- once for the extern declarations, once for
+#                          the PowerId -> handler switch behind
+#                          dispatch_native_hook -- so the table is a projection of
+#                          the registry, never a hand-maintained switch, and a new
+#                          power batch does not edit power_hooks.cpp at all.
+#                          Handler names follow the frozen convention: the row name
+#                          lowercased, e.g. COMBUST -> power_native_combust.
+#                          LINK ERROR, NEVER A SILENT NO-OP: the handler is odr-used
+#                          at the expansion site, so a row marked native whose body
+#                          nobody wrote is an UNDEFINED REFERENCE at link time (the
+#                          old hand-written switch answered `default: return nullptr`
+#                          and quietly did nothing -- that failure mode is gone).
+#                          The declarations use the shared handler signature, so a
+#                          body whose signature drifts also fails to link.
+#                          DELIBERATE-NO-OP CONVENTION: a power registered native on
+#                          purpose with NO behaviour must define an EXPLICIT EMPTY
+#                          handler in its batch translation unit
+#                          (src/engine/powers/powers_b3_*.cpp), carrying the reason
+#                          and the Java citation in the comment above it. That empty
+#                          definition IS the record of the decision -- see
+#                          power_native_artifact (powers_b3_2.cpp), whose whole
+#                          effect lives at the APPLY_POWER site instead.
 #     hooks:               (optional) hook -> effect program bindings (B3.2). Each
 #                          key is a Hook name (power_hooks.hpp); the value is a list
 #                          of {op, target, amount[, power]} steps queued (addToBot)
@@ -25,9 +53,12 @@
 #                          usual stack-scaled effect: block N, draw N, damage N);
 #                          a NON-zero amount is a literal (e.g. Combust's fixed
 #                          1-HP loss). A `native:`
-#                          power still LISTS the hooks it responds to here (with an
-#                          empty program) so the framework knows which hooks to route
-#                          to the native switch.
+#                          power still LISTS the hooks it responds to here, each
+#                          with an EMPTY program, so the framework knows which hooks
+#                          to route to the generated native dispatch. The generator
+#                          enforces both directions and fails loud: a hook with
+#                          steps AND `native: true` is an error, and a hook with an
+#                          empty program on a row that is NOT native is an error.
 #     provenance: "<Class.method (File.java:line) -- read in full>"
 #
 # The framework (B3.2) dispatches these hooks through the pump in the frozen

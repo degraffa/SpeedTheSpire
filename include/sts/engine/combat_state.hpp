@@ -6,8 +6,10 @@
 // steps (design doc §7) and the diff harness snapshots (design doc §8). It is
 // derived from RunState at combat start and folded back at combat end; the two
 // never alias
-// (design doc §4.4). A full RunState->CombatState derivation is not yet
-// implemented; this struct is the storage shape.
+// (design doc §4.4). The RunState->CombatState derivation is LIVE as of B4.4:
+// enter_combat (src/engine/run_advance.cpp) mirrors combat_begin but seeds the
+// player sheet (hp/max_hp) and the relic mirror from the run. combat_begin
+// (advance.hpp) remains the standalone entry point that takes no RunState.
 //
 // Design doc §4.1 principles enforced here:
 //   * trivially copyable, no pointers, no heap -- snapshot is a memcpy;
@@ -71,8 +73,10 @@ inline constexpr int kCardQueueCap = 16;
 inline constexpr int kMonsterQueueCap = 5;
 // preTurnActions capacity (design doc §5.1). `addToTurnStart` prepends only
 // start-of-next-turn relic/power actions here, a handful per turn in the
-// skeleton's scope, so 16 is generous headroom (16 * 12 B = 192 B, well inside
-// CombatState's ~784 B of remaining 4 KB budget). Sized to match the main
+// skeleton's scope, so 16 is generous headroom (16 * 12 B = 192 B, comfortably
+// inside CombatState's size budget -- a CEILING of 8192 B against an actual
+// sizeof of 3896 B; see the static_assert at the bottom of this file, and note
+// the ceiling was raised from 4096 on 2026-07-24). Sized to match the main
 // action ring's element type/idiom rather than trimmed to a tight bound.
 inline constexpr int kPreTurnActionQueueCap = 16;
 

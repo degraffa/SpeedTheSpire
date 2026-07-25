@@ -50,12 +50,20 @@ namespace sts::engine {
 // card pool with cost_now = the registry base cost (cards.hpp). The deck is
 // shuffled into the draw pile via one shuffle_rng draw + JDK Fisher-Yates.
 //
-// PLACEHOLDER STATS (design doc §11: the exact Ironclad A20 starting HP is
-// "deferred to Stage B ... numbers not restated here without a source read").
-// combat_begin uses hp == max_hp == 80, matching the convention the rest of the
-// test suite already uses (cards_test.cpp / jaw_worm_test.cpp). Exact real-game
-// provenance for the starting-HP number is deliberately deferred; it plugs in
-// here (and in a future RunState->CombatState derivation) without an API change.
+// STARTING HP (sourced; the earlier "PLACEHOLDER STATS / provenance deferred per
+// design doc §11" note here is OBSOLETE). combat_begin uses hp == max_hp == 80,
+// and that number now has provenance: it is the Ironclad's CharSelectInfo sheet
+// (Ironclad.java:114), sourced at B4.4 -- not a convention borrowed from the
+// tests awaiting a source read.
+//
+// combat_begin is the STANDALONE entry point: it takes no RunState, so it
+// applies that base sheet as a DEFAULT. The run layer does not go through the
+// default -- run_advance.cpp's enter_combat mirrors combat_begin step for step
+// but seeds player_hp / player_max_hp from rc.run.hp / rc.run.max_hp, which
+// start_run set from the same CharSelectInfo sheet (run_advance.cpp). So the two
+// paths agree at floor 1 and diverge correctly once the run has taken damage.
+// The A20 run-setup modifiers that move the starting sheet (A6 90% HP, A14 -5
+// max) are RunState-level and land at B4.15; they do not change this default.
 [[nodiscard]] CombatState combat_begin(int64_t run_seed, int32_t floor,
                                        std::span<const CardId> deck) noexcept;
 
@@ -138,7 +146,9 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept;
 // REWARD (placeholder, NOT a frozen design). The real reward shaping is
 // training-loop scope, wildly out of scope for M1. This is a minimal, honest,
 // non-crashing scheme for the batch smoke test:
-//   +1.0f  win  -- the sole monster's hp reached 0 (and the player is alive)
+//   +1.0f  win  -- EVERY monster's hp reached 0 (and the player is alive; the
+//                  single-monster wording here predates B3.12's multi-monster
+//                  groups -- fill_result in advance.cpp scans all of them)
 //   -1.0f  loss -- player_hp reached 0
 //    0.0f  otherwise (combat ongoing)
 // terminal == (all monsters dead) || (player dead).

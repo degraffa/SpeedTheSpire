@@ -11,7 +11,11 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 # against ~9.5s shared (3 reps each, same machine, same session). BUILD_SHARED_LIBS
 # is a plain variable set only across the MakeAvailable call, so it applies to
 # googletest's subdirectory and nothing else -- sts_engine and the tools stay
-# static. Verified to leave debug, asan and release at 526/526.
+# static. The link mode is behaviour-neutral: it was verified to leave the
+# debug, asan and release suites at a full pass with the pass COUNT unchanged.
+# The count itself is deliberately NOT restated here -- it moves with every
+# content task, and a number frozen in a comment is a liability (this line has
+# already been wrong twice). `ctest --preset debug` is the live figure.
 set(BUILD_SHARED_LIBS ON)
 FetchContent_MakeAvailable(googletest)
 unset(BUILD_SHARED_LIBS)
