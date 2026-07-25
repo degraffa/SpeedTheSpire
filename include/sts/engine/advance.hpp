@@ -59,11 +59,13 @@ namespace sts::engine {
 // combat_begin is the STANDALONE entry point: it takes no RunState, so it
 // applies that base sheet as a DEFAULT. The run layer does not go through the
 // default -- run_advance.cpp's enter_combat mirrors combat_begin step for step
-// but seeds player_hp / player_max_hp from rc.run.hp / rc.run.max_hp, which
-// start_run set from the same CharSelectInfo sheet (run_advance.cpp). So the two
-// paths agree at floor 1 and diverge correctly once the run has taken damage.
-// The A20 run-setup modifiers that move the starting sheet (A6 90% HP, A14 -5
-// max) are RunState-level and are not applied; they do not change this default.
+// but seeds player_hp / player_max_hp from rc.run.hp / rc.run.max_hp. Those match
+// the CharSelectInfo sheet only up to ascension 5: the run-setup ascension
+// modifiers (the max-HP loss and the 90 %-of-max current HP -- run_advance.hpp)
+// move them, so an ascension-20 run enters its first combat at 68/75. This
+// default is deliberately NOT ascension-aware, because combat_begin has no
+// ascension to be aware of; a caller that wants a run's real sheet builds the
+// combat through the run layer.
 [[nodiscard]] CombatState combat_begin(int64_t run_seed, int32_t floor,
                                        std::span<const CardId> deck) noexcept;
 

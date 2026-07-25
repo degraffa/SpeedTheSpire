@@ -258,6 +258,13 @@ sts_add_test(status_curse_test)
 # power-card no-discard path, draw/exhaust trigger ordering, and an advance() script.
 sts_add_test(card_uncommon_powers_test)
 
+# B4.15: ascension modifier table (design §6) -- the implemented run-setup + map
+# rows, their application ORDER, and the frozen "no such modifier" negatives.
+# Reads registry/a20.yaml directly (STS_REGISTRY_DIR) because that file is the
+# rules-as-data home of the table and generates no C++ beyond a row count, so the
+# negative freeze has to be pinned against the YAML itself.
+sts_add_test(a20_modifiers_test DEFS STS_REGISTRY_DIR="${STS_REGISTRY_DIR}")
+
 # Hygiene guard: fails if an execution-plan task id (B3.6 / A4.1 shape)
 # reappears in src/ or include/. Scans the SOURCE tree at run time rather than
 # anything it links, so a new comment is caught without recompiling the engine;

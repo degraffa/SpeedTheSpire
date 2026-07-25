@@ -18,8 +18,10 @@
 
 #include "sts/engine/run_advance.hpp"
 
+#include <cstddef>
 #include <cstring>
 #include <initializer_list>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -237,16 +239,21 @@ TEST(RunBegin, MapRngAtEndOfGenerateMapAndMapPopulated) {
 TEST(RunBegin, BaseSheetAndStartingRelicAndDeck) {
     RunController rc = run_begin(kSeed, kA20);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::NEOW));
-    EXPECT_EQ(rc.run.hp, 80);
-    EXPECT_EQ(rc.run.max_hp, 80);
+    // The run-setup ascension modifiers are live (a20_modifiers_test owns their
+    // rows, thresholds and order): at ascension 20 the sheet is 68/75 with one
+    // potion slot lost and the starting curse ahead of the starter cards.
+    EXPECT_EQ(rc.run.hp, 68);
+    EXPECT_EQ(rc.run.max_hp, 75);
     EXPECT_EQ(rc.run.gold, 99);
     EXPECT_EQ(rc.run.act, 1);
     EXPECT_EQ(rc.run.floor, 0);
-    EXPECT_EQ(rc.run.potion_slots, 2);  // A11 applies at A20 (B4.3 handoff).
-    EXPECT_EQ(rc.run.master_deck_count, 10);
-    // 5 Strike, 4 Defend, 1 Bash in order.
+    EXPECT_EQ(rc.run.potion_slots, 2);
+    EXPECT_EQ(rc.run.master_deck_count, 11);
+    EXPECT_EQ(static_cast<CardId>(rc.run.master_deck[0].card_id),
+              CardId::ASCENDERS_BANE);
+    // 5 Strike, 4 Defend, 1 Bash behind it.
     int strikes = 0, defends = 0, bashes = 0;
-    for (int i = 0; i < 10; ++i) {
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
         switch (static_cast<CardId>(rc.run.master_deck[i].card_id)) {
             case CardId::STRIKE: ++strikes; break;
             case CardId::DEFEND: ++defends; break;
@@ -357,6 +364,13 @@ TEST(RunCombat, MatchesCombatBeginForJawWormFloor) {
     // relic list; the mirror is exercised separately.
     rc.run.relic_count = 0;
     rc.run.relics[0] = RelicSlot{};
+    // combat_begin is the STANDALONE entry point and applies the base Ironclad
+    // sheet (80/80, advance.hpp), while the run layer seeds HP from the run --
+    // which now carries the run-setup ascension modifiers. Level the sheet so
+    // this test stays about the combat-construction SEQUENCE; the modifiers
+    // themselves have their own suite.
+    rc.run.hp = 80;
+    rc.run.max_hp = 80;
 
     step(rc, kProceed);
     uint8_t x = first_start_column(rc);
@@ -364,10 +378,16 @@ TEST(RunCombat, MatchesCombatBeginForJawWormFloor) {
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
         << "floor-1 Jaw Worm room should enter combat";
 
-    // combat_begin over the same seed/floor/deck must be byte-identical.
-    CardId deck[10];
-    for (int i = 0; i < 10; ++i) deck[i] = static_cast<CardId>(rc.run.master_deck[i].card_id);
-    CombatState ref = combat_begin(seed, 1, std::span<const CardId>(deck, 10));
+    // combat_begin over the same seed/floor/deck must be byte-identical. The deck
+    // is read out of the run rather than rebuilt, so it carries whatever the
+    // run-setup ascension modifiers put there (at ascension 20, the curse first).
+    const std::size_t deck_n = rc.run.master_deck_count;
+    std::vector<CardId> deck;
+    deck.reserve(deck_n);
+    for (std::size_t i = 0; i < deck_n; ++i) {
+        deck.push_back(static_cast<CardId>(rc.run.master_deck[i].card_id));
+    }
+    CombatState ref = combat_begin(seed, 1, std::span<const CardId>(deck));
 
     EXPECT_EQ(std::memcmp(&rc.combat, &ref, sizeof(CombatState)), 0)
         << "run-combat entry drifted from combat_begin for a single Jaw Worm";
@@ -463,7 +483,7 @@ TEST(RunCombatBattleStart, NoBattleStartRelicLeavesTheOpeningStateUntouched) {
     ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
     EXPECT_EQ(rc.combat.hand_count, 5);
     EXPECT_EQ(rc.combat.player_block, 0);
-    EXPECT_EQ(rc.combat.player_hp, 80);
+    EXPECT_EQ(rc.combat.player_hp, 68);  // the ascension-20 run-setup sheet
 }
 
 // Burning Blood binds only onVictory (registry/relics.yaml), so holding it must
@@ -552,8 +572,15 @@ TEST(RunCombatBattleStart, BloodVialHealsIntoTheStartingHpOfTheCombat) {
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.player_hp, 52);
 
-    // At full HP the HealAction clamps and the combat starts at max.
-    RunController full = enter_jaw_worm_holding({RelicId::BLOOD_VIAL});
+    // At full HP the HealAction clamps and the combat starts at max. The run
+    // does not begin at full HP any more (the run-setup 90 %-of-max rewrite), so
+    // top it up explicitly rather than relying on the starting sheet.
+    RunController full = run_begin(find_jaw_worm_seed(), kA20);
+    set_run_relics(full, {RelicId::BLOOD_VIAL});
+    full.run.hp = full.run.max_hp;
+    step(full, kProceed);
+    step(full, make_action(ActionVerb::CHOOSE, first_start_column(full)));
+    ASSERT_EQ(full.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(full.combat.player_hp, full.combat.player_max_hp);
 }
 
@@ -968,7 +995,7 @@ TEST(BatchHeterogeneity, MixedPhasesStepIndependently) {
     EXPECT_TRUE(runs[2].phase == static_cast<uint8_t>(RunPhase::COMBAT) ||
                 runs[2].phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
     EXPECT_EQ(runs[3].run.hp, 65);
-    EXPECT_EQ(runs[3].run.max_hp, 85);
+    EXPECT_EQ(runs[3].run.max_hp, 80);  // Fruit Juice +5 over the ascension-20 75
     EXPECT_EQ(runs[3].run.potions[0], static_cast<uint16_t>(PotionId::NONE));
 }
 

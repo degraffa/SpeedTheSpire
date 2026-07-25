@@ -387,8 +387,8 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
-    EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 231u);  // integrated through B3.7/B3.20/B3.25
+    EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
+    EXPECT_EQ(m::kTotalCount, 251u);  // integrated through B3.7/B3.20/B3.25/B4.15
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
