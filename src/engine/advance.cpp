@@ -256,7 +256,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     // Medical Kit / Blue Candle unplayable escape hatches -- an ATTACK is not a
     // curse or a status, so the two never interact today, but the ordering is
     // what the Java says. The power removes itself at the end of the player's
-    // turn (EntanglePower.atEndOfTurn:50-53, a data hook), so the lock is exactly
+    // turn (EntanglePower.atEndOfTurn:41-46, a data hook), so the lock is exactly
     // one turn long.
     bool entangled = false;
     for (uint8_t i = 0; i < state.player_power_count; ++i) {

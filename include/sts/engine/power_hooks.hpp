@@ -185,14 +185,14 @@ void dispatch_was_hp_lost(CombatState& state, uint8_t victim, uint8_t source,
                           int32_t amount, uint8_t damage_type = 0) noexcept;
 
 // onDeath (AbstractMonster.die: `if (currentHealth <= 0 && triggerRelics) for
-// (AbstractPower p : this.powers) p.onDeath();`, AbstractMonster.java:741-746):
+// (AbstractPower p : this.powers) p.onDeath();`, AbstractMonster.java:928-932):
 // the DYING actor's own powers fire, in power-list == application order, at the
 // moment its HP reaches 0 -- BEFORE the relics' onMonsterDeath fan-out die() runs
-// immediately after (:747-750). Dispatched from the monster-death edge of
+// immediately after (:933-937). Dispatched from the monster-death edge of
 // op_damage / op_lose_hp (interp_damage.cpp), the same edge
 // dispatch_relics_on_monster_death already fires from.
 //
-// TWO THINGS THE JAVA PINS HERE. `isDying` is set BEFORE the power walk (:743),
+// TWO THINGS THE JAVA PINS HERE. `isDying` is set BEFORE the power walk (:927),
 // so a body that asks "is the battle ending?" sees this monster as already
 // counted -- which is what makes the LAST Fungi Beast's Spore Cloud release
 // nothing while an earlier one's releases Vulnerable. And the walk is gated on

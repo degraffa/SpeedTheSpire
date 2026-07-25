@@ -386,7 +386,7 @@ TEST(Entangle, LocksAttacksOnlyWhileHeld) {
     }
 }
 
-// EntanglePower.atEndOfTurn (EntanglePower.java:50-53): addToBot a
+// EntanglePower.atEndOfTurn (EntanglePower.java:41-46): addToBot a
 // RemoveSpecificPowerAction, so the lock lasts exactly the turn it was applied
 // on. dispatch_at_end_of_turn is applyEndOfTurnTriggers, the player-powers-only
 // walk -- which is also why the Java's `if (isPlayer)` guard needs no expression.
@@ -406,7 +406,7 @@ TEST(Entangle, RemovesItselfAtTheEndOfThePlayerTurn) {
 }
 
 // The registry row itself: a DEBUFF (so Artifact nullifies it) that does not
-// stack (EntanglePower's ctor takes no amount, EntanglePower.java:20-30).
+// stack (EntanglePower's ctor takes no amount, EntanglePower.java:20-29).
 TEST(Entangle, IsANonStackingDebuff) {
     const PowerDef* def = power_def(PowerId::ENTANGLE);
     ASSERT_NE(def, nullptr);

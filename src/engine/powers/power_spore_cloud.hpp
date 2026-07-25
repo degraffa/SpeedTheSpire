@@ -13,7 +13,7 @@
 //       monsters.areMonstersBasicallyDead()`, and areMonstersBasicallyDead
 //       (MonsterGroup.java:90-95) is "every monster isDying || isEscaping".
 //       AbstractMonster.die sets isDying BEFORE walking the power list
-//       (AbstractMonster.java:741-746), so the dying beast counts itself. With
+//       (AbstractMonster.java:928-932), so the dying beast counts itself. With
 //       two Fungi Beasts the FIRST death releases 2 Vulnerable and the SECOND
 //       releases none -- kill order is observable, which is the whole point of
 //       pinning the on-death trigger ordering.

@@ -11,7 +11,7 @@
 //
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled), both read in full:
 //   SlaverBlue.java:27-136; SlaverRed.java:32-173;
-//   EntanglePower.java:14-53; AbstractMonster.java:431-491,705-715,765-775.
+//   EntanglePower.java:15-47; AbstractMonster.java:431-491,705-715,765-775.
 //
 // THREE THINGS WORTH KNOWING BEFORE READING THE BODIES
 //

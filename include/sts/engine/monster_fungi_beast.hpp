@@ -9,7 +9,7 @@
 //
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled), read in full:
 //   FungiBeast.java:29-134; SporeCloudPower.java:14-42;
-//   AbstractMonster.java:431-491,705-715,741-750,765-775.
+//   AbstractMonster.java:431-491,705-715,765-775,925-937.
 //
 // THREE THINGS WORTH KNOWING BEFORE READING THE BODIES
 //

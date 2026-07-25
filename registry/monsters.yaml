@@ -977,7 +977,7 @@
 - id: 24
   name: SLAVER_RED
   game_id: "SlaverRed"
-  provenance: "SlaverRed ctor setHp/damage branches (SlaverRed.java:58-78), takeTurn incl. the trailing RollMoveAction (:80-111), getMove (:138-166), move ids STAB=1/ENTANGLE=2/SCRAPE=3 (:50-52), stabDmg 13 / A2 14 (:43-44,65-71), scrapeDmg 8 / A2 9 (:45-46,65-71), VULN_AMT 1 / A17 VULN_AMT+1 (:49,102-107), usedEntangle/firstTurn latches (:55-56,77,90,140-141); ID (:34); EntanglePower ctor amount 1 (EntanglePower.java:20-30); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  provenance: "SlaverRed ctor setHp/damage branches (SlaverRed.java:58-78), takeTurn incl. the trailing RollMoveAction (:80-111), getMove (:138-166), move ids STAB=1/ENTANGLE=2/SCRAPE=3 (:50-52), stabDmg 13 / A2 14 (:43-44,65-71), scrapeDmg 8 / A2 9 (:45-46,65-71), VULN_AMT 1 / A17 VULN_AMT+1 (:49,102-107), usedEntangle/firstTurn latches (:55-56,77,90,140-141); ID (:34); EntanglePower ctor amount 1 (EntanglePower.java:20-29); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
   enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 46, max: 50}   # SlaverRed.java:63 (ascension < 7)
@@ -994,7 +994,7 @@
       intent: STRONG_DEBUFF    # setMove(ENTANGLE_NAME, 2, Intent.STRONG_DEBUFF) (:146)
       effects:
         # ApplyPowerAction(player, this, new EntanglePower(player)) (:89). The
-        # ctor takes no amount and fixes this.amount = 1 (EntanglePower.java:22),
+        # ctor takes no amount and fixes this.amount = 1 (EntanglePower.java:24),
         # so the applied stack is a literal 1 at every ascension. The ChangeState
         # "Use Net" and the EntangleEffect VFX either side of it (:85-88) are
         # presentation.

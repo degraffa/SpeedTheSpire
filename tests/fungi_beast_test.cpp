@@ -277,7 +277,7 @@ TEST(FungiBeast, PreBattleAppliesSporeCloudTwoWithoutDrawing) {
 // Vulnerable onto the player UNLESS AbstractRoom.isBattleEnding()
 // (AbstractRoom.java:628-635 -> MonsterGroup.areMonstersBasicallyDead:90-95).
 // AbstractMonster.die sets isDying BEFORE walking the power list
-// (AbstractMonster.java:741-746), so the dying beast counts itself: with two
+// (AbstractMonster.java:928-932), so the dying beast counts itself: with two
 // beasts the FIRST death releases and the SECOND does not.
 
 CombatState MakeTwoBeasts() {
@@ -326,7 +326,7 @@ TEST(SporeCloud, SoloBeastReleasesNothing) {
 }
 
 // The powers' onDeath loop runs BEFORE the relics' onMonsterDeath loop
-// (AbstractMonster.die:741-750). With no relic in the mirror the observable
+// (AbstractMonster.die:925-937). With no relic in the mirror the observable
 // half is that the release happens at the death edge at all -- and that a hit
 // which does NOT kill leaves the power silent.
 TEST(SporeCloud, OnlyFiresOnTheHitThatKills) {

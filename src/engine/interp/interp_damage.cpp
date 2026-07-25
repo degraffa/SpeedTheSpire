@@ -58,7 +58,7 @@ namespace {
     // Checked for the two monster powers added alongside the slavers and the
     // Fungi Beast, neither of which needs a case:
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
-    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
     static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override atDamageGive (attacker-side "
@@ -101,7 +101,7 @@ namespace {
     // Checked for the two monster powers added alongside the slavers and the
     // Fungi Beast, neither of which needs a case:
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
-    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
     static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override atDamageReceive (target-side "
@@ -152,7 +152,7 @@ namespace {
     // Checked for the two monster powers added alongside the slavers and the
     // Fungi Beast, neither of which needs a case:
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
-    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
     static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override atDamageFinalReceive (the last "
@@ -392,12 +392,12 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
     }
     // Monster death edge -> the dying monster's OWN powers' onDeath, then relics
-    // onMonsterDeath (AbstractMonster.die:741-750; Spore Cloud and Gremlin Horn).
+    // onMonsterDeath (AbstractMonster.die:925-937; Spore Cloud and Gremlin Horn).
     // Fires once, when this hit drops the monster from positive HP to 0. The two
-    // loops run in die()'s order -- powers first (:743-746), relics second
-    // (:747-750) -- and both AFTER the HP write, so a power that asks "is the
+    // loops run in die()'s order -- powers first (:928-932), relics second
+    // (:933-937) -- and both AFTER the HP write, so a power that asks "is the
     // battle ending?" sees this monster as already dying, exactly as the Java's
-    // `isDying = true` at :743 arranges. Runs BEFORE the damage() override seam
+    // `isDying = true` at :927 arranges. Runs BEFORE the damage() override seam
     // below: die() is called synchronously inside super.damage(), while the
     // override's post-super check sees isDying and never split-telegraphs a
     // lethal hit. No-op with an empty relic mirror and no ON_DEATH power
@@ -457,7 +457,7 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
     }
     // A direct HP loss can also kill a monster -> the same die() power-then-relic
-    // dispatch (AbstractMonster.die:741-750), before the override seam as above.
+    // dispatch (AbstractMonster.die:925-937), before the override seam as above.
     if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
         dispatch_on_death(s, tgt);
         const RelicView rv = player_relics(s);

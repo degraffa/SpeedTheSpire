@@ -40,7 +40,7 @@ void power_native_spore_cloud(CombatState& s, Hook hook,
         return;
     }
     // The dying beast's own HP is already 0 at the dispatch site, and die() sets
-    // isDying before the power walk (AbstractMonster.java:743), so it counts
+    // isDying before the power walk (AbstractMonster.java:927), so it counts
     // itself here exactly as the Java does. The LAST monster's Spore Cloud
     // therefore releases nothing.
     if (battle_is_ending(s)) {

@@ -267,7 +267,7 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // (powers/power_spore_cloud.cpp) and Gremlin Horn binds
             // onMonsterDeath -- and both are correctly silent here, exactly as
             // AbstractMonster.die(false) skips both loops (AbstractMonster.java:
-            // 741-750). Block is NOT cleared -- SuicideAction bypasses damage()'s
+            // 925-937). Block is NOT cleared -- SuicideAction bypasses damage()'s
             // block-break.
             if (item.tgt >= kMonsterCap) {
                 return;

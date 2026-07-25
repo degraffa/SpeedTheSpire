@@ -650,8 +650,8 @@
   pool_order: 25
   native: true
   hooks:
-    at_battle_start: []       # boss battle -> heal 25 (DEFERRED: no monster EnemyType/BOSS metadata)
-  provenance: "Pantograph.atBattleStart (Pantograph.java:32-40) -- if any monster.type==EnemyType.BOSS: addToTop HealAction(player, 25). DEFERRED: monsters.yaml carries no EnemyType/BOSS metadata and no boss monster rows exist yet (Guardian/Hexaghost/Slime Boss are B3.15-B3.17); documented no-op native branch until the boss batch lands."
+    at_battle_start: []       # native: boss in the group -> heal 25 (relic_native_pantograph)
+  provenance: "Pantograph.atBattleStart (Pantograph.java:32-40) -- walks AbstractDungeon.getMonsters().monsters and, on the FIRST monster whose type is EnemyType.BOSS (:33-34), flashes, addToTop HealAction(player, player, 25, 0.0f) and addToTop RelicAboveCreatureAction, then RETURNS (:35-38) -- so the heal fires at most once no matter how many boss rows the group holds. HEAL_AMT is the literal 25 (:20, and again at :36). IMPLEMENTED, and native rather than data: the body is relic_native_pantograph (src/engine/relics/relics_uncommon.cpp), which the data program cannot express because it is a group walk with a first-match early return. IT KEYS ON THE MONSTER'S enemy_type COLUMN (registry/monsters.yaml), NEVER ON THE ROOM -- Pantograph references no AbstractRoom / MonsterRoomBoss at all, so an elite fight is an ordinary fight to it. Timing is atBattleStart, not atBattleStartPreDraw (the separate AbstractRelic hook Pantograph does not override) and not onEquip. Pinned by RelicHooksPantograph.HealsTwentyFiveAtBossBattleStart, .HealIsClampedToMaxHp, .DoesNotHealInANormalFight and .EliteEnemyTypeIsNotABossFight (tests/relic_hooks_test.cpp). at_battle_start stays [] because the behaviour lives in the native body, not because anything is deferred."
 
 # --- Uncommon: acquisition-time / run-layer (no combat trigger; run-layer wiring
 #     noted per row) ---------------------------------------------------------------
