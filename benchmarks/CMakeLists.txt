@@ -24,3 +24,19 @@ add_executable(bench_advance
 
 target_link_libraries(bench_advance PRIVATE sts_engine benchmark::benchmark)
 sts_set_warnings(bench_advance)
+
+# The B side of the advance() legality-guard A/B: the SAME benchmark source
+# driving the mask-accepting advance() overload, so the policy's mask is built
+# once per step instead of twice. Separate executable because tools/bench_ab.sh
+# compares two binaries under one shared filter and needs exactly one
+# items_per_second reading from each:
+#   tools/wsl_run.sh --script tools/bench_ab.sh \
+#       build/release/benchmarks/bench_advance \
+#       build/release/benchmarks/bench_advance_mask
+add_executable(bench_advance_mask
+    bench_advance.cpp
+)
+
+target_link_libraries(bench_advance_mask PRIVATE sts_engine benchmark::benchmark)
+target_compile_definitions(bench_advance_mask PRIVATE STS_BENCH_REUSE_MASK)
+sts_set_warnings(bench_advance_mask)

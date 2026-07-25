@@ -602,6 +602,48 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **a frozen Stage A golden vector was corrected**, which goes
+  beyond the zero-diff-in-meaning regeneration conventions §5 sanctions, so it
+  is recorded here rather than only in a task Log.
+  `tests/golden/combat_fixtures/fixt13_r21_triple.trace` asserted a state the
+  game cannot reach. Its script played Bash (2) + Strike (1) + Pommel Strike (1)
+  in a single turn — **4 energy against the Ironclad's 3**
+  (`new EnergyManager(3)`, Ironclad.java:68) — and the trace duly recorded
+  `player_energy == -1`. The game has no path to that value:
+  `AbstractCard.hasEnoughEnergy` (AbstractCard.java:888) refuses the third card
+  before it is ever used, and `EnergyPanel.useEnergy` clamps at zero
+  (EnergyPanel.java:71-74).
+  **Root cause — the cross-check was independent in the wrong dimension.**
+  `tools/fixture_gen/gen_combat_fixtures.cpp` subtracted the card's cost with no
+  affordability test, and the engine's `advance()` did not gate playability
+  either, so the reference simulator and the engine agreed on an illegal state.
+  The two implementations were genuinely independent in damage math, pile
+  mechanics and RNG, and that is what the fixture corpus was built to check —
+  but neither expressed the *playability* precondition, so no amount of
+  differential testing could see it. The `advance()` legality guard on
+  `advance-guard` added that precondition to one side and the disagreement
+  surfaced immediately, as a `FixtureOracle` failure.
+  **Fix.** The affordability rule is re-derived from the Java **in the
+  generator** (not delegated to the engine's `legal_actions()`, which would
+  re-couple the oracle to the code under test) and is a **hard generation-time
+  abort** naming the fixture, action index, card, cost and available energy — an
+  unplayable script now fails at authoring instead of becoming a golden vector.
+  All 20 scripts were audited against it: 19 pass, fixt13 was the only failure.
+  fixt13 was rescripted to Bash + Pommel on turn 1 and the third attack on turn
+  2, preserving all three attacks, all three damage figures and the same final
+  monster HP; only fixt13's trace changed and the other 19 were proven
+  byte-identical.
+  **Two related findings, surfaced and NOT acted on** (both are corpus
+  decisions): (1) `fixt16_r29_monster_death` no longer kills the monster — its
+  final action names hand slot 3 of a three-card hand, an out-of-range index
+  both implementations no-op, so the corpus does not actually cover monster
+  death despite the coverage table claiming it; (2)
+  `tests/golden/combat_fixtures/derivation_notes.md` still described the
+  skeleton as having no end-of-turn hand discard, which is false, so its
+  multi-turn narration names cards that are no longer in hand. The false
+  mechanic statement and a scoped accuracy warning were fixed in this change;
+  re-deriving the affected per-fixture arithmetic (fixt01, fixt08, fixt18) and
+  re-authoring fixt16 remain open.
 - 2026-07-24 — **document restructure (no mechanic changed).** This ledger was
   2,576 lines; the 33 completed task blocks (146,303 B of Log text) moved
   byte-for-byte to [stage-b-log.md](stage-b-log.md) and are represented here by

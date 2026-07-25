@@ -8,11 +8,35 @@ checked, after **every** action, against the real engine (`combat_begin` +
 (ledger A6.2). This document lets a human re-verify the numbers against the cited
 Java **without** re-deriving the RNG.
 
+> **Accuracy warning — the per-fixture narration below predates the end-of-turn
+> hand discard.** The Model section's "no end-of-turn hand discard" claim was
+> false: `end_turn` in the generator has discarded the hand for some time, and
+> the checked-in traces (and the engine, which agrees with them at zero diffs)
+> both do. Every multi-turn entry therefore names the wrong cards for its
+> second and later turns — the hand it describes is one that no longer exists,
+> so its pile counts, and in places its damage arithmetic, do not match the
+> trace beside it. Known-wrong: **fixt01** (turn-2 hand size), **fixt08** and
+> **fixt18** (turn-2 cards and damage, and the size of the reshuffled discard).
+> The single-turn entries and every turn-1 line are unaffected.
+> The authority is `gen_combat_fixtures --dump <name>`, which prints the real
+> turn-by-turn state; re-deriving the affected entries against it is an open
+> item, recorded in the ledger's change log.
+
 ## Model (re-derived from the spec, cited)
 
 - **Player:** 80 HP (placeholder per design §11), 3 energy/turn, opening hand 5.
-  The skeleton has **no end-of-turn hand discard**, so the hand persists across
-  turns and fills toward the cap of 10 (established by `cards_test`).
+  Energy is **SET** to 3 at the start of every turn, never added (the Ironclad's
+  `new EnergyManager(3)`, Ironclad.java:68, applied by `EnergyManager.recharge`
+  → `EnergyPanel.setEnergy`, EnergyManager.java:25-41). A turn therefore buys at
+  most 3 energy of cards. A card the player cannot pay for is refused outright
+  by `AbstractCard.hasEnoughEnergy` (AbstractCard.java:888) — it is not played at
+  a discount, and energy never goes negative (`EnergyPanel.useEnergy` clamps at
+  0, EnergyPanel.java:71-74). **The generator enforces this at generation time**
+  and aborts on a script that overspends; see the fixt13 note below.
+- **End of turn discards the hand.** `DiscardAtEndOfTurnAction` moves every
+  ordinary (non-ethereal, non-Retain) hand card to the discard pile before the
+  monster acts, so the hand does **not** persist across turns — each turn plays
+  out of the 5 cards drawn at its start.
 - **Cards** (`cards.hpp`; Strike_Red/Defend_Red/Bash/ShrugItOff/PommelStrike.java):
   - Strike 1E → DAMAGE 6
   - Defend 1E → BLOCK 5
@@ -115,11 +139,30 @@ r15: mon HP 46; hand `Strike4 Defend8 Pommel11 Bash9 Shrug10`; moves C,B,T,…
 - T2: **Strike** (hand[0]) → into Vuln `9`, mon 25→16.
 - **END**: monster T2 = **Bellow** → Str 5, block 9 (mon now Vuln 2 **and** Str 5).
 
-## fixt13_r21_triple — Bash + Strike + Pommel into Vuln (4 actions)
+## fixt13_r21_triple — three attacks into Vuln, across a turn boundary (5 actions)
 r21: mon HP 42; hand `Strike4 Shrug10 Bash9 Defend7 Pommel11`; moves C,B,T,…
-- T1: **Bash** (hand[2]) → 8, mon 42→34, **Vuln 2**. **Strike** (hand[0]) → `9`, mon 34→25.
-  **Pommel** (hand[2]) → `13`, mon 25→12, draw. energy 3→0.
-- **END**: **Chomp** 12 → HP 80→68.
+- T1: **Bash** (hand[2]) → 8 (before Vuln), mon 42→34, **Vuln 2**. energy 3→1.
+  **Pommel** (hand[3]) → into Vuln `floor(9×1.5)=13`, mon 34→21, draw 1. energy 1→**0**.
+- **END**: **Chomp** 12 → HP 80→68. Hand (4) discarded; start T2 draws 5 (draw 6→1).
+  Monster keeps **Vuln 2** — nothing decays it in the skeleton.
+- T2: **Strike** (hand[2]) → into the same Vuln `9`, mon 21→**12**. energy 3→2.
+- **END**: monster T2 = **Bellow** → **Str 5**, +9 block. Start T3: the 1-card draw
+  pile is exhausted mid-draw → **RESHUFFLE** the 11-card discard (`shuffle_rng`
+  1→2) → draw 4 more. HP stays 68.
+
+> **This fixture was corrected.** It previously scripted Bash + Strike + Pommel
+> in **one** turn — 2 + 1 + 1 = **4 energy against a 3-energy budget** — and its
+> recorded expectation contained `player_energy == -1`, a value the game cannot
+> produce (`hasEnoughEnergy` refuses the third card; `useEnergy` clamps at 0).
+> The generator had no affordability check and neither did the engine, so the
+> two "independent" implementations agreed on an unreachable state and the
+> cross-check passed. The `advance()` legality guard exposed it by refusing the
+> unaffordable play. The rescript keeps all three attacks and all three damage
+> figures (8 / 13 / 9) and lands the monster on the same **12 HP** the old
+> script intended; only the turn boundary moved, between the second and third
+> attack instead of after it. Both Vuln-boosted hits are preserved, and the
+> split adds a turn boundary and a mid-draw reshuffle the old script did not
+> cover.
 
 ## fixt14_r23_pommel_strikes — Pommel + 2 Strikes (4 actions)
 r23: mon HP 44; hand `Defend5 Pommel11 Strike0 Strike3 Strike2`; moves C,B,C,…
@@ -194,10 +237,22 @@ r18: mon HP 45; hand `Strike0 Bash9 Defend8 Strike4 Shrug10`; moves C,T,C,…
 | **Bash** | 05,07,09,12,13,16,18,20 |
 | **Shrug It Off** | 04,06,10,11,15 |
 | **Pommel Strike** | 03,06,09,11,12,13,14,15 |
-| **Reshuffle** (`shuffle_rng` draws twice) | 08, 18, 19 |
+| **Reshuffle** (`shuffle_rng` draws twice) | 08, 13, 18, 19 |
 | **Player death** (`player_hp ≤ 0`) | 17 |
-| **Monster death** (`monsters[0].hp ≤ 0`) | 16 |
-| **Bellow-Strength + Vulnerable concurrent** | 18 (also 12, 20) |
+| **Monster death** (`monsters[0].hp ≤ 0`) | 16 — **NOT ACTUALLY COVERED, see below** |
+| **Bellow-Strength + Vulnerable concurrent** | 18 (also 12, 13, 20) |
+
+> **The monster-death row is currently a false claim.** fixt16's last scripted
+> action is `Play(3)` against a **three-card** hand: an out-of-range slot, which
+> both the generator and `advance()` treat as a no-op, so the trace ends with the
+> monster alive at 17 HP and the phase still `WAITING_ON_USER` — never
+> `COMBAT_OVER`. The fixture passes its zero-diff check because the two
+> implementations agree that nothing happens; it simply does not exercise what
+> its name says. Same origin as the fixt13 defect: the scripts were authored
+> against a generator that did not yet discard the hand at end of turn, so every
+> turn-2 hand index now names a different card. Re-authoring it is a corpus
+> decision and is deliberately **not** done here; `gen_combat_fixtures --dump
+> fixt16_r29_monster_death` shows the drift.
 
 All 20 traces replay through the real engine (`combat_begin` + `advance`) with a
 zero `DiffReport` at every action, in both the `debug` and `asan` presets.
