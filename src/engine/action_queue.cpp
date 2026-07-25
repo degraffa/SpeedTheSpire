@@ -272,9 +272,25 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // combat-start block calls applyStartOfTurnPowers (AbstractRoom.java:256) but
     // has no applyStartOfTurnPostDrawPowers line, so strictly this call belongs to
     // step 6 alone (GameActionManager.java:363). It long predates the TurnStart
-    // split above and is inert -- no registered power binds the post-draw hook --
-    // so changing it is a behaviour question that wants its own test, not a
-    // silent edit. Recorded here rather than changed or ignored.
+    // split above.
+    //
+    // THE HOOK IS NO LONGER UNBOUND. This comment used to justify the asymmetry
+    // by "no registered power binds the post-draw hook"; that stopped being true
+    // when the red rares landed. BrutalityPower.atStartOfTurnPostDraw
+    // (BrutalityPower.java:34-39) and DemonFormPower.atStartOfTurnPostDraw
+    // (DemonFormPower.java:32-36) both bind it, so the call now has live bodies
+    // behind it on this side of the gate.
+    //
+    // It remains UNOBSERVABLE, which is why it is still not gated here: both
+    // powers are applied only by playing their card, so neither can be on the
+    // player when begin_first_turn runs -- nothing in the pre-battle pass or the
+    // relic mirror grants either one. The divergence would become real the moment
+    // something does (a relic or run-layer carry-over), and at that point turn 1
+    // would silently run one extra Strength gain, or one extra draw plus HP loss,
+    // that AbstractRoom's turn-1 block does not contain. Gating it to
+    // kSubsequentTurn is the faithful reading of the Java and is inert today, but
+    // it is a behaviour change that wants its own test rather than a silent edit
+    // folded into an integration -- so it is recorded here, accurately, instead.
     dispatch_at_start_of_turn_post_draw(s);
     // EnableEndTurnButtonAction (line 364) is modeled by step 7 handing control
     // back to the player once the queued DrawCard has drained; no separate item.
