@@ -5,6 +5,21 @@
 #     name: <SYMBOL>       generated enum symbol (MonsterId::<SYMBOL>)
 #     game_id: "<string>"  the game's monster ID string -- translator/oracle join key
 #     provenance: "<Class.method (File.java:line) -- read in full>"
+#     enemy_type: <SYMBOL> AbstractMonster.type -- NORMAL | ELITE | BOSS.
+#                          OPTIONAL, defaulting to NORMAL because that is the
+#                          Java's own field initializer (`public EnemyType type =
+#                          EnemyType.NORMAL;`, AbstractMonster.java:99); a monster
+#                          class is non-NORMAL only if it assigns this.type
+#                          (SlimeBoss.java:86 / TheGuardian.java:94 /
+#                          Hexaghost.java:98 set BOSS; GremlinNob.java:63 /
+#                          Lagavulin.java:75 / Sentry.java:61 set ELITE). Every
+#                          row states it explicitly anyway, and a table test pins
+#                          the whole column plus the row count, so a new row
+#                          cannot land unclassified. This is what lets a relic ask
+#                          "is this a boss fight?" from data: Pantograph
+#                          (Pantograph.java:32-40) scans the MONSTER group for a
+#                          BOSS-typed member -- it keys on monster type, not on
+#                          the room being MonsterRoomBoss.
 #     hp:                  per-ascension-tier HP range columns (design doc B §4.2/§6):
 #       base: {min: , max: }     ascension 0+ column (mandatory)
 #       a<N>: {min: , max: }     ascension >= N column(s), ascending
@@ -44,6 +59,7 @@
   name: JAW_WORM
   game_id: "JawWorm"
   provenance: "JawWorm ctor setHp/stat branches (JawWorm.java:79-104), takeTurn (JawWorm.java:120-146), getMove (JawWorm.java:148-184); ID (JawWorm.java:38)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 40, max: 44}   # JawWorm.java:83-84 (ascension < 7)
     a7:   {min: 42, max: 46}   # JawWorm.java:81-82 (ascension >= 7)
@@ -87,6 +103,7 @@
   name: CULTIST
   game_id: "Cultist"
   provenance: "Cultist ctor setHp/ritual branches (Cultist.java:57-75), takeTurn (Cultist.java:82-109), getMove (Cultist.java:145-153), move ids DARK_STRIKE=1/INCANTATION=3 (Cultist.java:53-54), ATTACK_DMG 6 (:47,67), RITUAL_AMT A2?4:3 (:50-51,66), A17 ritualAmount+1 (:95-99); ID (Cultist.java:32)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 48, max: 54}   # Cultist.java:61-62 (ascension < 7)
     a7:   {min: 50, max: 56}   # Cultist.java:59-60 (ascension >= 7)
@@ -112,6 +129,7 @@
   name: LOUSE_NORMAL
   game_id: "FuzzyLouseNormal"
   provenance: "LouseNormal ctor setHp+bite (LouseNormal.java:50-62), usePreBattleAction curl-up (:64-73), takeTurn (:75-104), getMove (:128-153), move ids BITE=3/STRENGTHEN=4 (:41-42), STR_AMOUNT 3 / A17 4 (:48,95-100); bite = monsterHpRng.random(A2?6-8:5-7) IN THE CTOR after setHp (:60); ID (:31)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 10, max: 15}   # LouseNormal.java:57-58 (ascension < 7)
     a7:   {min: 11, max: 16}   # LouseNormal.java:55-56 (ascension >= 7)
@@ -151,6 +169,7 @@
   name: LOUSE_DEFENSIVE
   game_id: "FuzzyLouseDefensive"
   provenance: "LouseDefensive ctor setHp+bite (LouseDefensive.java:53-65), usePreBattleAction curl-up (:67-76), takeTurn (:78-107), getMove (:131-156), move ids BITE=3/WEAKEN=4 (:44-45), WEAK_AMT 2 (:51,102); bite = monsterHpRng.random(A2?6-8:5-7) IN THE CTOR after setHp (:63); ID (:35)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 11, max: 17}   # LouseDefensive.java:61-62 (ascension < 7)
     a7:   {min: 12, max: 18}   # LouseDefensive.java:59-60 (ascension >= 7)
@@ -195,6 +214,7 @@
   name: SPIKE_SLIME_SMALL
   game_id: "SpikeSlime_S"
   provenance: "SpikeSlime_S ctor HP/damage branches (SpikeSlime_S.java:42-53), takeTurn (:63-71), getMove (:74-76), move id TACKLE=1 (:40); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:465-467,712-714,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 10, max: 14}  # SpikeSlime_S.java:46
     a7:   {min: 11, max: 15}  # SpikeSlime_S.java:44
@@ -210,6 +230,7 @@
   name: SPIKE_SLIME_MEDIUM
   game_id: "SpikeSlime_M"
   provenance: "SpikeSlime_M ctor HP/damage branches (SpikeSlime_M.java:51-68), takeTurn (:76-90), getMove A17 (:93-117), move ids FLAME_TACKLE=1/FRAIL_LICK=4 (:46-47); MakeTempCardInDiscardAction.update (:40-50); FrailPower ctor (:25-41)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 28, max: 32}  # SpikeSlime_M.java:56
     a7:   {min: 29, max: 34}  # SpikeSlime_M.java:54
@@ -231,6 +252,7 @@
   name: ACID_SLIME_SMALL
   game_id: "AcidSlime_S"
   provenance: "AcidSlime_S ctor HP/damage branches (AcidSlime_S.java:45-56), takeTurn direct next-move alternation (:66-80), getMove A17 (:83-89), move ids TACKLE=1/DEBUFF=2 (:41-42); WeakPower ctor (:27-43)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 8, max: 12}   # AcidSlime_S.java:49
     a7:   {min: 9, max: 13}   # AcidSlime_S.java:47
@@ -251,6 +273,7 @@
   name: ACID_SLIME_MEDIUM
   game_id: "AcidSlime_M"
   provenance: "AcidSlime_M ctor HP/damage branches (AcidSlime_M.java:56-76), takeTurn (:84-105), getMove A17 (:108-138), move ids WOUND_TACKLE=1/NORMAL_TACKLE=2/WEAK_LICK=4 (:49-51); MakeTempCardInDiscardAction.update (:40-50); WeakPower ctor (:27-43)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 28, max: 32}  # AcidSlime_M.java:61
     a7:   {min: 29, max: 34}  # AcidSlime_M.java:59
@@ -290,6 +313,7 @@
   name: SPIKE_SLIME_LARGE
   game_id: "SpikeSlime_L"
   provenance: "SpikeSlime_L ctor HP/damage/SplitPower branches (SpikeSlime_L.java:68-94), takeTurn incl. unconditional trailing RollMoveAction (:96-128), damage interrupt (:130-140), getMove A17 (:142-167), move ids FLAME_TACKLE=1/SPLIT=3/FRAIL_LICK=4 (:59-61); SplitPower ctor amount -1 (SplitPower.java:19-26); SpawnMonsterAction smart positioning (SpawnMonsterAction.java:28-59); SuicideAction (SuicideAction.java:21-36)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 64, max: 70}  # SpikeSlime_L.java:73
     a7:   {min: 67, max: 73}  # SpikeSlime_L.java:71
@@ -320,6 +344,7 @@
   name: ACID_SLIME_LARGE
   game_id: "AcidSlime_L"
   provenance: "AcidSlime_L ctor HP/damage/SplitPower branches (AcidSlime_L.java:73-102), takeTurn (:104-140; per-case RollMoveAction, NONE in the split case), damage interrupt (:142-152), getMove A17 (:154-215), move ids SLIME_TACKLE=1/NORMAL_TACKLE=2/SPLIT=3/WEAK_LICK=4 (:65-68); SplitPower ctor amount -1 (SplitPower.java:19-26); SpawnMonsterAction smart positioning (SpawnMonsterAction.java:28-59); SuicideAction (SuicideAction.java:21-36)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 65, max: 69}  # AcidSlime_L.java:78
     a7:   {min: 68, max: 72}  # AcidSlime_L.java:76
@@ -364,6 +389,7 @@
   name: SLIME_BOSS
   game_id: "SlimeBoss"
   provenance: "SlimeBoss ctor HP/A9 and damage/A4 branches (SlimeBoss.java:84-107), takeTurn Goop/Prep/Slam/Split incl. A19 Slimed discard count (:120-160), damage split interrupt (:172-181), first-turn getMove (:184-191), move ids SLAM=1/PREP_SLAM=2/SPLIT=3/STICKY=4 (:74-81); MakeTempCardInDiscardAction.update (MakeTempCardInDiscardAction.java:41-50); SpawnMonsterAction smart positioning (SpawnMonsterAction.java:28-59); SuicideAction (SuicideAction.java:21-36)"
+  enemy_type: BOSS   # SlimeBoss.java:86
   hp:
     base: {min: 140, max: 140}  # SlimeBoss.java:92 (ascension < 9)
     a9:   {min: 150, max: 150}  # SlimeBoss.java:89-90 (ascension >= 9)

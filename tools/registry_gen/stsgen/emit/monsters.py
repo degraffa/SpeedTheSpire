@@ -14,6 +14,22 @@ from ..vocab import (BANNER, MONSTER_INTENTS, MONSTER_MOVE_TARGETS,
                      MONSTER_ROLL_STREAMS, MONSTER_ROLL_TIMINGS, IDENT_RE,
                      TIER_RE, fail, pascal, tier_threshold)
 
+# AbstractMonster.EnemyType (AbstractMonster.java:99 declares the field with
+# `public EnemyType type = EnemyType.NORMAL;` -- NORMAL is the Java's own
+# field-initializer default, which is why the yaml key is optional and why
+# omitting it means exactly what a Java monster class that never assigns
+# `this.type` means). Only the classes that assign it are non-NORMAL:
+# GremlinNob.java:63 / Lagavulin.java:75 / Sentry.java:61 set ELITE;
+# SlimeBoss.java:86 / TheGuardian.java:94 / Hexaghost.java:98 set BOSS.
+#
+# Values are pinned and append-only, like every other generated enum
+# (design doc §4.4).
+MONSTER_ENEMY_TYPES = {
+    "NORMAL": 0,
+    "ELITE": 1,
+    "BOSS": 2,
+}
+
 
 def parse_tiers(owner: str, what: str, raw) -> list[tuple[int, dict]]:
     """Parse a per-ascension-tier column mapping ({base: ..., aN: ...}) into a
@@ -163,8 +179,17 @@ def parse_monster(entry: dict, powers: dict[str, int],
         raise fail(f"{owner}: 'ai' must be 'native' (ai tables are a later "
                    f"task), got {ai!r}")
 
+    # AbstractMonster.type. Optional, defaulting to NORMAL because that is the
+    # Java field initializer (AbstractMonster.java:99); an unknown spelling is a
+    # hard error rather than a silent demotion to NORMAL, so a typo cannot
+    # quietly turn a boss into a normal monster.
+    enemy_type = entry.get("enemy_type", "NORMAL")
+    if enemy_type not in MONSTER_ENEMY_TYPES:
+        raise fail(f"{owner}: unknown enemy_type {enemy_type!r} "
+                   f"(known: {sorted(MONSTER_ENEMY_TYPES)})")
+
     return {'name': name, 'hp': hp_tiers, 'rolls': rolls, 'moves': moves,
-            'ai_native': True}
+            'ai_native': True, 'enemy_type': enemy_type}
 
 
 def emit_monster_table(domains: dict[str, list[dict]]) -> str:
@@ -221,6 +246,28 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     for iname, val in sorted(MONSTER_INTENTS.items(), key=lambda kv: kv[1]):
         out.append(f"static_assert(static_cast<uint8_t>(MonsterIntent::{iname}) "
                    f"== {val}, \"MonsterIntent::{iname} is pinned to {val} "
+                   f"(append-only, never renumber)\");")
+    out.append("")
+    out.append("// AbstractMonster.EnemyType -- what KIND of fight this monster "
+               "makes it.")
+    out.append("// The Java default is NORMAL (AbstractMonster.java:99); only "
+               "classes that")
+    out.append("// assign this.type are otherwise (SlimeBoss.java:86 -> BOSS). "
+               "Relics that")
+    out.append("// key on the fight being a boss fight read the MONSTER's type, "
+               "not the room's:")
+    out.append("// Pantograph.atBattleStart (Pantograph.java:32-40) scans the "
+               "monster group for")
+    out.append("// any m.type == EnemyType.BOSS. Values are pinned and "
+               "append-only.")
+    out.append("enum class MonsterEnemyType : uint8_t {")
+    for ename, val in sorted(MONSTER_ENEMY_TYPES.items(), key=lambda kv: kv[1]):
+        out.append(f"    {ename} = {val},")
+    out.append("};")
+    for ename, val in sorted(MONSTER_ENEMY_TYPES.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>("
+                   f"MonsterEnemyType::{ename}) == {val}, "
+                   f"\"MonsterEnemyType::{ename} is pinned to {val} "
                    f"(append-only, never renumber)\");")
     out.append("")
     out.append("// Where a move-effect step lands: the acting monster itself, "
@@ -323,6 +370,7 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("    uint8_t move_count;")
     out.append("    std::array<MonsterMove, kMaxMonsterMoves> moves;")
     out.append("    bool ai_native;      // move selection lives in engine code")
+    out.append("    MonsterEnemyType enemy_type;  // AbstractMonster.type")
     out.append("    [[nodiscard]] constexpr int32_t hp_min(int32_t ascension) "
                "const noexcept {")
     out.append("        int32_t value = hp[0].hp_min;")
@@ -355,6 +403,9 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
     out.append("    [[nodiscard]] constexpr const MonsterRollDef* "
                "roll(uint8_t index) const noexcept {")
     out.append("        return index < roll_count ? &rolls[index] : nullptr;")
+    out.append("    }")
+    out.append("    [[nodiscard]] constexpr bool is_boss() const noexcept {")
+    out.append("        return enemy_type == MonsterEnemyType::BOSS;")
     out.append("    }")
     out.append("};\n")
 
@@ -422,7 +473,8 @@ def emit_monster_table(domains: dict[str, list[dict]]) -> str:
             out.extend(eff_rows)
             out.append("         }}},")
         out.append("    }},")
-        out.append(f"    {'true' if m['ai_native'] else 'false'}}};\n")
+        out.append(f"    {'true' if m['ai_native'] else 'false'}, "
+                   f"MonsterEnemyType::{m['enemy_type']}}};\n")
 
     out.append("[[nodiscard]] inline const MonsterDef* "
                "monster_def(MonsterId id) noexcept {")

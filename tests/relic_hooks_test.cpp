@@ -30,6 +30,7 @@
 #include "sts/engine/run_deck.hpp"    // add_card_to_master_deck (egg onObtainCard)
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
+#include "sts/registry/monster_table.hpp"  // MonsterDef::is_boss (Pantograph)
 
 namespace sts::engine {
 namespace {
@@ -1000,6 +1001,117 @@ TEST(RunDeckFrozenEgg, WithoutTheRelicPowersAreObtainedUnupgraded) {
     rs.max_hp = 80;
     ASSERT_TRUE(add_card_to_master_deck(rs, CardId::INFLAME));
     EXPECT_EQ(rs.master_deck[0].upgrade, 0);
+}
+
+// --- Pantograph: heal 25 at the start of a BOSS fight -------------------------
+//
+// Pantograph.atBattleStart (Pantograph.java:32-40) walks the monster group and,
+// on the FIRST member with m.type == EnemyType.BOSS, addToTop a
+// HealAction(player, player, 25, 0.0f), then returns (:36-38). HEAL_AMT is 25
+// (Pantograph.java:20). The test is on the MONSTER's EnemyType, never on the
+// room: Pantograph does not reference AbstractRoom / MonsterRoomBoss at all. The
+// engine answers that question from registry data -- registry/monsters.yaml's
+// `enemy_type` column (AbstractMonster.java:99's `type` field) reaching
+// MonsterDef::is_boss().
+
+TEST(RelicHooksPantograph, HealsTwentyFiveAtBossBattleStart) {
+    CombatState s = MakeState();          // hp 70 / max 80, one monster
+    s.player_max_hp = 100;                // headroom so the full 25 lands
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    Relics r; r.add(RelicId::PANTOGRAPH);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.player_hp, 95);           // 70 + 25
+    EXPECT_EQ(s.action_count, 0) << "the heal is applied directly, not queued";
+}
+
+// The clamp is AbstractCreature.heal's `if (currentHealth > maxHealth)
+// currentHealth = maxHealth;` (AbstractCreature.java:401-403), reached through
+// HealAction.update (HealAction.java:31-33). Nothing else touches the amount in
+// S1 scope: the FullBelly halving is Endless-only (:387-389) and no S1 relic or
+// power binds onPlayerHeal / onHeal (:393-399).
+TEST(RelicHooksPantograph, HealIsClampedToMaxHp) {
+    Relics r; r.add(RelicId::PANTOGRAPH);
+    CombatState s = MakeState();          // max 80
+    s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    s.player_hp = 75;                     // 75 + 25 = 100 > max 80
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.player_hp, 80);
+    // A full-HP player gains nothing at all.
+    CombatState full = MakeState();
+    full.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    full.player_hp = full.player_max_hp;
+    dispatch_relics_at_battle_start(full, r.slots, r.count);
+    EXPECT_EQ(full.player_hp, full.player_max_hp);
+}
+
+// `if (m.type != EnemyType.BOSS) continue;` (Pantograph.java:34): an ordinary
+// fight falls out of the loop having done nothing.
+TEST(RelicHooksPantograph, DoesNotHealInANormalFight) {
+    CombatState s = MakeState(/*monster_count=*/2);  // Jaw Worm + Cultist
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::CULTIST);
+    Relics r; r.add(RelicId::PANTOGRAPH);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.player_hp, 70) << "no BOSS-typed monster -> no heal";
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// An ELITE fight is, to Pantograph, an ordinary fight: the Java compares against
+// BOSS specifically, so ELITE takes the same `continue` branch NORMAL does. No
+// ELITE-typed monster row exists yet (GremlinNob.java:63 / Lagavulin.java:75 /
+// Sentry.java:61 are the three Exordium elites, none implemented), so this pins
+// the discriminator those rows will meet: is_boss() is BOSS-only, not "anything
+// above NORMAL".
+TEST(RelicHooksPantograph, EliteEnemyTypeIsNotABossFight) {
+    sts::registry::MonsterDef elite = sts::registry::kSlimeBoss;
+    elite.enemy_type = sts::registry::MonsterEnemyType::ELITE;
+    EXPECT_FALSE(elite.is_boss());
+    sts::registry::MonsterDef normal = sts::registry::kSlimeBoss;
+    normal.enemy_type = sts::registry::MonsterEnemyType::NORMAL;
+    EXPECT_FALSE(normal.is_boss());
+    EXPECT_TRUE(sts::registry::kSlimeBoss.is_boss());
+}
+
+// Mixed group: the boss need not be first, and Pantograph fires exactly once
+// (the Java `return` at :38, not a heal per boss-typed member).
+TEST(RelicHooksPantograph, HealsOnceForABossFoundLaterInTheGroup) {
+    Relics r; r.add(RelicId::PANTOGRAPH);
+    CombatState s = MakeState(/*monster_count=*/3);
+    s.player_max_hp = 100;
+    s.monsters[2].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.player_hp, 95);  // 70 + 25 -- one heal, not three
+
+    // Two BOSS-typed members still heal 25 total, not 50.
+    CombatState two = MakeState(/*monster_count=*/2);
+    two.player_max_hp = 100;
+    two.player_hp = 40;
+    two.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    two.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    dispatch_relics_at_battle_start(two, r.slots, r.count);
+    EXPECT_EQ(two.player_hp, 65);
+}
+
+// Pantograph binds atBattleStart and nothing else -- it overrides neither
+// onEquip (the ctor at Pantograph.java:22-24 is its whole equip behaviour) nor
+// atBattleStartPreDraw (the separate AbstractRelic hook). Dispatching the other
+// hooks through the public entry points must leave HP untouched, which pins both
+// the registry hook inventory and the body's own hook guard.
+TEST(RelicHooksPantograph, OnlyRespondsToAtBattleStart) {
+    Relics r; r.add(RelicId::PANTOGRAPH);
+    CombatState turn = MakeState();
+    turn.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    dispatch_relics_at_turn_start(turn, r.slots, r.count);
+    EXPECT_EQ(turn.player_hp, 70);
+
+    CombatState end = MakeState();
+    end.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    dispatch_relics_on_player_end_turn(end, r.slots, r.count);
+    EXPECT_EQ(end.player_hp, 70);
+
+    CombatState win = MakeState();
+    win.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    dispatch_relics_on_victory(win, r.slots, r.count);
+    EXPECT_EQ(win.player_hp, 70);
 }
 
 }  // namespace
