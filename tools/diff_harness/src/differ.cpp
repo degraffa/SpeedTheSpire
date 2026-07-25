@@ -4,12 +4,14 @@
 #include <cstring>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
+#include "sts/registry/game_ids.hpp"  // generated: the id -> game_id tables
 
 namespace sts::diff {
 
@@ -61,15 +63,53 @@ void cmp_f(DiffReport& r, const std::string& name, float e, float a) {
     }
 }
 
-// --- enum reprs: "NAME(n)" when known, bare "n" otherwise -------------------
+// --- enum reprs: "NAME(n)", driven by the generated registry tables ---------
+//
+// Every id enum (CardId/PowerId/MonsterId/RelicId/PotionId) is generated from
+// registry/*.yaml, and the same generator emits the matching id -> string
+// table into the build tree as sts/registry/game_ids.hpp. The reprs below read
+// that table rather than restating it, so they cannot fall behind the registry:
+// the hand-written switches they replace had drifted to 6 of ~76 cards, 4 of
+// ~27 powers and 8 of ~11 monsters, and every id past the end printed as a
+// bare integer -- exactly the values a human is trying to identify when a
+// golden fixture or an oracle campaign diverges.
+//
+// The string shown is the registry's *game id* ("Shrug It Off", "Inflame",
+// "SpikeSlime_L"), not the C++ enum symbol ("SHRUG_IT_OFF"). It is the only
+// complete table the generator emits, and it is the exact spelling carried by
+// the oracle's captured JSON, so a divergence line can be grepped straight
+// against a capture. The numeric is always kept alongside it, so the raw value
+// that the trace stores (and that triage greps for) is still in the output.
+//
+// This is presentation only: the trace container is a binary struct dump
+// (trace.cpp), these strings never reach it, and no comparison decision is
+// made from a repr.
 
-std::string named(const char* name, unsigned long long v) {
-    if (name != nullptr) return std::string(name) + "(" + std::to_string(v) + ")";
-    return std::to_string(v);
+// Renders "NAME(n)". `name` is what the generated accessor returned, which is
+// empty for BOTH the zero sentinel and any value outside the enum, so the two
+// are distinguished here. An unknown id -- from a newer schema, or plain
+// garbage -- still renders rather than crashing: a differ is a debugging tool
+// and must survive whatever it is handed.
+std::string named(std::string_view name, unsigned long long v) {
+    std::string out;
+    if (!name.empty()) {
+        out.assign(name);
+    } else {
+        out.assign(v == 0 ? "NONE" : "UNKNOWN");
+    }
+    out += '(';
+    out += std::to_string(v);
+    out += ')';
+    return out;
 }
 
+// CombatPhase is hand-written engine API (combat_state.hpp), not registry
+// content, so there is no generated table to drive it from and it keeps an
+// explicit switch. All four enumerators are listed, so the switch is
+// exhaustive; an out-of-range byte leaves `n` empty and falls to named()'s
+// unknown form.
 std::string phase_repr(uint8_t v) {
-    const char* n = nullptr;
+    std::string_view n;
     switch (static_cast<CombatPhase>(v)) {
         case CombatPhase::NONE: n = "NONE"; break;
         case CombatPhase::WAITING_ON_USER: n = "WAITING_ON_USER"; break;
@@ -80,47 +120,23 @@ std::string phase_repr(uint8_t v) {
 }
 
 std::string power_repr(uint16_t v) {
-    const char* n = nullptr;
-    switch (static_cast<PowerId>(v)) {
-        case PowerId::NONE: n = "NONE"; break;
-        case PowerId::STRENGTH: n = "STRENGTH"; break;
-        case PowerId::VULNERABLE: n = "VULNERABLE"; break;
-        case PowerId::WEAK: n = "WEAK"; break;
-        // The B3.2 framework powers (Artifact..Rage) have no named repr here yet;
-        // they fall through to the raw-value form (named() below). The fixtures
-        // carry only the three skeleton powers.
-        default: break;
-    }
-    return named(n, v);
+    return named(registry::power_game_id(static_cast<registry::PowerId>(v)), v);
 }
 
 std::string card_repr(uint16_t v) {
-    const char* n = nullptr;
-    switch (static_cast<CardId>(v)) {
-        case CardId::NONE: n = "NONE"; break;
-        case CardId::STRIKE: n = "STRIKE"; break;
-        case CardId::DEFEND: n = "DEFEND"; break;
-        case CardId::BASH: n = "BASH"; break;
-        case CardId::SHRUG_IT_OFF: n = "SHRUG_IT_OFF"; break;
-        case CardId::POMMEL_STRIKE: n = "POMMEL_STRIKE"; break;
-    }
-    return named(n, v);
+    return named(registry::card_game_id(static_cast<registry::CardId>(v)), v);
 }
 
 std::string monster_repr(uint16_t v) {
-    const char* n = nullptr;
-    switch (static_cast<MonsterId>(v)) {
-        case MonsterId::NONE: n = "NONE"; break;
-        case MonsterId::JAW_WORM: n = "JAW_WORM"; break;
-        case MonsterId::CULTIST: n = "CULTIST"; break;
-        case MonsterId::LOUSE_NORMAL: n = "LOUSE_NORMAL"; break;
-        case MonsterId::LOUSE_DEFENSIVE: n = "LOUSE_DEFENSIVE"; break;
-        case MonsterId::SPIKE_SLIME_SMALL: n = "SPIKE_SLIME_SMALL"; break;
-        case MonsterId::SPIKE_SLIME_MEDIUM: n = "SPIKE_SLIME_MEDIUM"; break;
-        case MonsterId::ACID_SLIME_SMALL: n = "ACID_SLIME_SMALL"; break;
-        case MonsterId::ACID_SLIME_MEDIUM: n = "ACID_SLIME_MEDIUM"; break;
-    }
-    return named(n, v);
+    return named(registry::monster_game_id(static_cast<registry::MonsterId>(v)), v);
+}
+
+std::string relic_repr(uint16_t v) {
+    return named(registry::relic_game_id(static_cast<registry::RelicId>(v)), v);
+}
+
+std::string potion_repr(uint16_t v) {
+    return named(registry::potion_game_id(static_cast<registry::PotionId>(v)), v);
 }
 
 void cmp_phase(DiffReport& r, const std::string& name, uint8_t e, uint8_t a) {
@@ -137,6 +153,14 @@ void cmp_card_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a)
 
 void cmp_monster_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a) {
     if (e != a) push(r, name, monster_repr(e), monster_repr(a));
+}
+
+void cmp_relic_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a) {
+    if (e != a) push(r, name, relic_repr(e), relic_repr(a));
+}
+
+void cmp_potion_id(DiffReport& r, const std::string& name, uint16_t e, uint16_t a) {
+    if (e != a) push(r, name, potion_repr(e), potion_repr(a));
 }
 
 // --- composite helpers ------------------------------------------------------
@@ -436,11 +460,12 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
             const bool ein = i < e.relic_count;
             const bool ain = i < a.relic_count;
             if (ein && ain) {
-                cmp_u(r, b + ".relic_id", e.relics[i].relic_id, a.relics[i].relic_id);
+                cmp_relic_id(r, b + ".relic_id", e.relics[i].relic_id,
+                             a.relics[i].relic_id);
                 cmp_i(r, b + ".counter", e.relics[i].counter, a.relics[i].counter);
             } else {
                 auto repr = [](const RelicSlot& s) {
-                    return "{relic_id=" + std::to_string(s.relic_id) + ",counter=" +
+                    return "{relic_id=" + relic_repr(s.relic_id) + ",counter=" +
                            std::to_string(s.counter) + "}";
                 };
                 push(r, b, ein ? repr(e.relics[i]) : std::string("(absent)"),
@@ -451,7 +476,8 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
 
     // -- potions (5 positional slots; PotionId per slot, NONE == empty) --
     for (int i = 0; i < kPotionCap; ++i) {
-        cmp_u(r, "potions[" + std::to_string(i) + "]", e.potions[i], a.potions[i]);
+        cmp_potion_id(r, "potions[" + std::to_string(i) + "]", e.potions[i],
+                      a.potions[i]);
     }
 
     // -- map grid (flattened row-major; placeholder encoding until B4.x) --
@@ -488,6 +514,9 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
 
     // relic-pool orders, all 5 tiers: per-tier count + live members [0, count).
     // Order is load-bearing (front/end pop, trap 15), so compared positionally.
+    // The members are RelicIds, so they render as names; the numeric stays
+    // inside the repr, so an equal pair still compares equal and a differing
+    // pair still differs -- the comparison is unchanged, only the rendering.
     for (int t = 0; t < kRelicTierCount; ++t) {
         const std::string tb = "relic_pool[" + std::to_string(t) + "]";
         cmp_u(r, tb + ".count", e.relic_pool_count[t], a.relic_pool_count[t]);
@@ -496,8 +525,8 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
             const std::string b = tb + "[" + std::to_string(i) + "]";
             const bool ein = i < e.relic_pool_count[t];
             const bool ain = i < a.relic_pool_count[t];
-            std::string ev = ein ? std::to_string(e.relic_pools[t][i]) : std::string("(absent)");
-            std::string av = ain ? std::to_string(a.relic_pools[t][i]) : std::string("(absent)");
+            std::string ev = ein ? relic_repr(e.relic_pools[t][i]) : std::string("(absent)");
+            std::string av = ain ? relic_repr(a.relic_pools[t][i]) : std::string("(absent)");
             if (ev != av) push(r, b, std::move(ev), std::move(av));
         }
     }

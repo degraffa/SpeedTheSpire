@@ -1218,5 +1218,143 @@ TEST(CommunicationModOracle, QueryBothKindsAndNegativeCases) {
     EXPECT_FALSE(oracle.query(seed, std::span<const Action>(divergent), combat_out));
 }
 
+// =============================================================================
+// Registry-driven enum rendering in the diff report
+// =============================================================================
+//
+// The reprs read the id -> game_id tables the registry generator emits
+// (sts/registry/game_ids.hpp), so they cover the whole registry rather than the
+// handful of ids a hand-written switch happened to list. These tests pin the
+// two properties that matter for triage: an id well past the original
+// hand-written set renders by name, and an id the registry does not know still
+// renders (a differ must survive garbage and ids from a newer schema).
+//
+// The assertions are on the *repr* strings only. Which fields are compared and
+// what counts as a difference is asserted by the field-group tests above and is
+// untouched by naming.
+
+// The expected/actual reprs of the single diff whose field_name is exactly
+// `field`, or a marker string if there is no such diff.
+std::string ReprOf(const DiffReport& r, const std::string& field) {
+    for (const FieldDiff& d : r.diffs) {
+        if (d.field_name == field) return d.expected_repr + " -> " + d.actual_repr;
+    }
+    return "(no diff named " + field + ")";
+}
+
+TEST(DifferEnumNames, CardsBeyondTheOriginalHandWrittenSetRenderByName) {
+    // Inflame (73) and Heavy Blade (17) are both far past the six ids the old
+    // hand-written switch covered; before the registry tables drove the reprs
+    // they printed as bare integers.
+    CombatState base = MakeBase();
+    CombatState mut = base;
+    base.card_pool[0].card_id = static_cast<uint16_t>(CardId::INFLAME);
+    mut.card_pool[0].card_id = static_cast<uint16_t>(CardId::HEAVY_BLADE);
+
+    const DiffReport r = diff_states(base, mut);
+    EXPECT_EQ(ReprOf(r, "card_pool[0].card_id"), "Inflame(73) -> Heavy Blade(17)")
+        << r.to_string();
+}
+
+TEST(DifferEnumNames, PowersMonstersRenderByName) {
+    CombatState base = MakeBase();
+    CombatState mut = base;
+    // Corruption / Plated Armor: neither was in the four powers the old switch
+    // named.
+    base.player_powers[0].power_id = static_cast<uint16_t>(PowerId::CORRUPTION);
+    mut.player_powers[0].power_id = static_cast<uint16_t>(PowerId::PLATED_ARMOR);
+    // Slime Boss / Spike Slime (L): both past the eight monsters it named.
+    base.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    mut.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::SPIKE_SLIME_LARGE);
+
+    const DiffReport r = diff_states(base, mut);
+    EXPECT_EQ(ReprOf(r, "player_powers[0].power_id"),
+              "Corruption(11) -> Plated Armor(17)")
+        << r.to_string();
+    EXPECT_EQ(ReprOf(r, "monsters[0].monster_id"),
+              "SlimeBoss(11) -> SpikeSlime_L(9)")
+        << r.to_string();
+}
+
+TEST(DifferEnumNames, RelicsAndPotionsRenderByName) {
+    // Relic and potion slots had no repr at all before: they went through the
+    // plain integer compare.
+    RunState base = MakeBaseRun();
+    RunState mut = base;
+    mut.relics[0].relic_id = static_cast<uint16_t>(registry::RelicId::AKABEKO);
+    mut.potions[0] = static_cast<uint16_t>(registry::PotionId::FIRE_POTION);
+    mut.relic_pools[0][0] = static_cast<uint16_t>(registry::RelicId::VAJRA);
+
+    const DiffReport r = diff_run_states(base, mut);
+    EXPECT_EQ(ReprOf(r, "relics[0].relic_id"), "Burning Blood(1) -> Akabeko(16)")
+        << r.to_string();
+    EXPECT_EQ(ReprOf(r, "potions[0]"), "BloodPotion(1) -> Fire Potion(8)")
+        << r.to_string();
+    EXPECT_EQ(ReprOf(r, "relic_pool[0][0]"), "Orichalcum(11) -> Vajra(14)")
+        << r.to_string();
+}
+
+TEST(DifferEnumNames, UnknownAndSentinelIdsStillRender) {
+    // An id from a newer schema (or plain corruption) must render, not crash and
+    // not assert: 60000 is far outside every generated enum. The numeric is kept
+    // so triage can still grep the raw value.
+    CombatState base = MakeBase();
+    CombatState mut = base;
+    base.card_pool[0].card_id = uint16_t{60000};
+    mut.card_pool[0].card_id = static_cast<uint16_t>(CardId::NONE);
+    base.player_powers[0].power_id = uint16_t{60001};
+    mut.player_powers[0].power_id = static_cast<uint16_t>(PowerId::NONE);
+    base.monsters[0].monster_id = uint16_t{60002};
+    mut.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::NONE);
+    base.phase = uint8_t{200};  // no such CombatPhase
+
+    const DiffReport r = diff_states(base, mut);
+    EXPECT_EQ(ReprOf(r, "card_pool[0].card_id"), "UNKNOWN(60000) -> NONE(0)")
+        << r.to_string();
+    EXPECT_EQ(ReprOf(r, "player_powers[0].power_id"), "UNKNOWN(60001) -> NONE(0)")
+        << r.to_string();
+    EXPECT_EQ(ReprOf(r, "monsters[0].monster_id"), "UNKNOWN(60002) -> NONE(0)")
+        << r.to_string();
+    EXPECT_EQ(ReprOf(r, "phase"), "UNKNOWN(200) -> WAITING_ON_USER(1)")
+        << r.to_string();
+
+    RunState rbase = MakeBaseRun();
+    RunState rmut = rbase;
+    rmut.relics[0].relic_id = uint16_t{60003};
+    rmut.potions[0] = uint16_t{60004};
+    const DiffReport rr = diff_run_states(rbase, rmut);
+    EXPECT_EQ(ReprOf(rr, "relics[0].relic_id"), "Burning Blood(1) -> UNKNOWN(60003)")
+        << rr.to_string();
+    EXPECT_EQ(ReprOf(rr, "potions[0]"), "BloodPotion(1) -> UNKNOWN(60004)")
+        << rr.to_string();
+}
+
+TEST(DifferEnumNames, NamingDoesNotChangeWhichFieldsDiffer) {
+    // Guard on the invariant this work was bounded by: renaming a value must not
+    // add, drop or merge a diff. Two card ids that both render by name still
+    // produce exactly one diff, and two equal ids still produce none -- including
+    // for the pool lists whose members are compared as rendered strings.
+    RunState base = MakeBaseRun();
+    RunState same = base;
+    EXPECT_TRUE(diff_run_states(base, same).empty());
+
+    RunState mut = base;
+    mut.relic_pools[0][1] = static_cast<uint16_t>(registry::RelicId::ANCHOR);
+    const DiffReport r = diff_run_states(base, mut);
+    EXPECT_EQ(r.size(), 1u) << r.to_string();
+    EXPECT_TRUE(r.mentions("relic_pool[0][1]")) << r.to_string();
+
+    // Two distinct UNKNOWN ids must still read as two distinct values, so a
+    // divergence between them is not swallowed.
+    RunState u1 = base;
+    RunState u2 = base;
+    u1.relic_pools[0][1] = uint16_t{60005};
+    u2.relic_pools[0][1] = uint16_t{60006};
+    const DiffReport ru = diff_run_states(u1, u2);
+    EXPECT_EQ(ru.size(), 1u) << ru.to_string();
+    EXPECT_EQ(ReprOf(ru, "relic_pool[0][1]"), "UNKNOWN(60005) -> UNKNOWN(60006)")
+        << ru.to_string();
+}
+
 }  // namespace
 }  // namespace sts::diff
