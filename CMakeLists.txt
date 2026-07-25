@@ -23,6 +23,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(CompilerWarnings)
 include(Sanitizers)
 include(StsAddTest)
+include(StsFloatingPoint)
+
+# Pin the floating-point contract BEFORE any add_subdirectory / FetchContent, so
+# it covers every target in the tree including the header-only float code that
+# is compiled with each consumer's flags. See cmake/StsFloatingPoint.cmake for
+# why this one is directory-wide while sts_set_warnings is deliberately not, and
+# tests/fp_contract_test.cpp for the control that proves it took effect.
+sts_apply_fp_contract()
 
 include(FetchContent)
 

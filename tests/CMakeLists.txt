@@ -280,6 +280,16 @@ sts_add_test(card_uncommon_powers_test)
 # negative freeze has to be pinned against the YAML itself.
 sts_add_test(a20_modifiers_test DEFS STS_REGISTRY_DIR="${STS_REGISTRY_DIR}")
 
+# Floating-point contract guard: proves cmake/StsFloatingPoint.cmake's
+# -ffp-contract=off (and the MSVC/clang-cl equivalents) actually took effect on
+# whatever toolchain is building, by computing a fused and an unfused form of
+# `a + b * c` and asserting the compiler emitted the unfused one. Every case
+# first asserts its inputs still distinguish the two forms, so the guard cannot
+# decay into a vacuous pass. The damage pipeline (interp_damage.cpp:52) and
+# rng_stream's random(start,end) both have the fusable shape, so a regression
+# here moves committed fixtures and breaks cross-toolchain bit-identity.
+sts_add_test(fp_contract_test)
+
 # Hygiene guard: fails if an execution-plan task id (B3.6 / A4.1 shape)
 # reappears in src/ or include/. Scans the SOURCE tree at run time rather than
 # anything it links, so a new comment is caught without recompiling the engine;
