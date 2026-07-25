@@ -1,6 +1,6 @@
 #pragma once
 
-// Potion registry + USE mechanics (design doc §5.4; task B3.23). Two pieces:
+// Potion registry + USE mechanics (design doc §5.4). Two pieces:
 //
 //   1. Re-export of the GENERATED potion table (registry/potions.yaml ->
 //      tools/registry_gen/gen.py -> <build>/generated/sts/registry/
@@ -15,15 +15,15 @@
 //      (dispatch_native_potion, potions.cpp). Effects resolve later through the
 //      normal pump priority order.
 //
-// LAYER BOUNDARY (B4.3 seam). Potion-SLOT storage -- the held-potion inventory
-// and the A11 "one fewer slot" count -- is RunState, and that FIELD lands in
-// B4.3 (RunState population, schema v2). This module deliberately does NOT touch
+// LAYER BOUNDARY. Potion-SLOT storage -- the held-potion inventory
+// and the A11 "one fewer slot" count -- lives in RunState, not here. This module
+// deliberately does NOT touch
 // RunState or CombatState layout: use_potion() takes the PotionId directly (the
 // run layer looks it up in the slot inventory and hands it here), and the slot
-// COUNT is exposed as the pure function potion_slot_count() below so B4.3 can
-// store what this computes without this task depending on the field existing.
-// The run-level USE_POTION/discard action wiring is B4.4 (advance/legal_actions,
-// "USE_POTION both layers"); discarding a potion has no combat effect (it is a
+// COUNT is exposed as the pure function potion_slot_count() below, so the run
+// layer stores what this computes.
+// The run-level USE_POTION/discard action wiring lives in run_advance.cpp;
+// discarding a potion has no combat effect (it is a
 // pure run-state slot removal), so there is no combat-layer discard function --
 // use_potion is the only combat verb.
 //
@@ -63,8 +63,8 @@ using sts::registry::potion_def;
 
 // --- Potion-slot count (A11 seam; design §5.4, AbstractPlayer.java:211-213) ---
 // Base 3 potion slots, minus one at ascension >= 11. Pure -- the RunState field
-// that STORES this lands in B4.3; this is the derivation both this task's test
-// and B4.3 use. At the S1 A20 bracket this returns 2.
+// that STORES this is RunState.potion_slots; this is the derivation it and its
+// tests use. At the S1 A20 bracket this returns 2.
 [[nodiscard]] constexpr int potion_slot_count(int ascension_level) noexcept {
     return ascension_level >= 11 ? 2 : 3;
 }
@@ -108,7 +108,8 @@ bool use_potion(CombatState& state, PotionId id, uint8_t target) noexcept;
 // drift away from the bodies it describes.
 [[nodiscard]] bool potion_use_implemented(PotionId id) noexcept;
 
-// The native USE escape hatch (B3.2 convention). Handles potions whose effect
+// The native USE escape hatch (the same convention as the power/relic natives).
+// Handles potions whose effect
 // the opcode set cannot express, or which the generator's potion domain cannot
 // author. Implemented here today: BLOOD_POTION (percent heal) and
 // BLESSING_OF_THE_FORGE (the Armaments+ CHOOSE_CARD item). FRUIT_JUICE,

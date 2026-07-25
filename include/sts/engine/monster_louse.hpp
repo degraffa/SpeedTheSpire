@@ -1,6 +1,6 @@
 #pragma once
 
-// Louse monster modules (B3.13): LouseNormal + LouseDefensive. Structurally
+// Louse monster modules: LouseNormal + LouseDefensive. Structurally
 // identical AI (LouseNormal.java / LouseDefensive.java differ only in move 4:
 // Strengthen(+Strength, BUFF) vs Weaken(+Weak to player, DEBUFF)); one shared
 // getMove/turn parameterised on the def + move-4 intent. Stats/effects are DATA

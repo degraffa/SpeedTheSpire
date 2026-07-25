@@ -11,7 +11,7 @@
 
 namespace sts::engine {
 
-// APPLY_POWER (see the definition for the B3.2 Sadistic/Artifact interception).
+// APPLY_POWER (see the definition for the Sadistic/Artifact interception).
 void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
                     int amount) noexcept;
 

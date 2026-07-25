@@ -21,7 +21,7 @@ namespace sts::engine {
 
 namespace {
 
-// --- CHOOSE_CARD helpers (Stage B B3.4) -------------------------------------
+// --- CHOOSE_CARD helpers -----------------------------------------------------
 
 // Remove hand slot `slot` from the hand (shifting the tail down) and return the
 // card's pool index. Precondition: slot < hand_count.
@@ -76,7 +76,7 @@ void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
     }
 }
 
-// B3.6 (Dual Wield): add one stat-equivalent clone of pool instance `src_pi` to
+// Dual Wield: add one stat-equivalent clone of pool instance `src_pi` to
 // the hand, spilling to the discard when the hand is full (MakeTempCardInHand-
 // Action.update:71-77). makeStatEquivalentCopy (AbstractCard.java:826-848)
 // preserves the upgrade count, cost/costForTurn (cost_now + the FOR_TURN bit in
@@ -182,7 +182,7 @@ bool discard_remove(CombatState& s, CardPoolIndex idx) noexcept {
 
 // --- Opcode bodies ----------------------------------------------------------
 
-// MAKE_CARD: create `count` copies of `id` into `pile` (Stage B B3.1). Each copy
+// MAKE_CARD: create `count` copies of `id` into `pile`. Each copy
 // takes a free card_pool row (card_id == NONE); a new instance's cost_now/flags
 // come from the registry (base, upgrade 0). Provenance: MakeTempCardInHandAction
 // (:64-82, incl. the hand-full -> discard spill), MakeTempCardInDiscardAction,
@@ -370,10 +370,10 @@ void op_play_top_draw(CombatState& s, int exclude) noexcept {
     restore_source();
 }
 
-// SET_COST: set card_pool[src].cost_now = amount (Stage B B3.1 cost-modifier
+// SET_COST: set card_pool[src].cost_now = amount (the cost-modifier
 // write path). Clamped to the u8 cost_now range. The "temporary" (per-turn
 // reset) and "which card / under what condition" logic belongs to the consumer
-// (a power hook -- B3.2 -- or a CHOOSE selection); this is the write primitive.
+// (a power hook or a CHOOSE selection); this is the write primitive.
 //
 // CURRENTLY UNREACHABLE (verified at the cleanup-interp refactor): nothing
 // queues Opcode::SET_COST -- no site in src/ builds such an item, and no
@@ -381,7 +381,7 @@ void op_play_top_draw(CombatState& s, int exclude) noexcept {
 // index (`src`) that a YAML author has no way to name. The opcode is retained
 // (opcodes are append-only) and the body stays live for the deferred SET_COST
 // authoring obligation. It becomes reachable as soon as a C++ consumer that
-// already holds a pool index -- a power hook (the B3.2 cost-modifier path) or a
+// already holds a pool index -- a power hook (the cost-modifier path) or a
 // CHOOSE selection -- queues the item.
 void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept {
     if (pool_index >= kCardPoolCap) {
@@ -450,7 +450,7 @@ void op_random_attack_to_hand(CombatState& s) noexcept {
     }
 }
 
-// --- Public: CHOOSE_CARD queries (Stage B B3.4) ------------------------------
+// --- Public: CHOOSE_CARD queries ---------------------------------------------
 
 bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
                           uint8_t excluded) noexcept {

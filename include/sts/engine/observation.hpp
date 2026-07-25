@@ -39,7 +39,7 @@ namespace sts::engine {
 // Hand and monster slot counts mirror CombatState's own capacities so the
 // observation is a fixed-width array regardless of the live hand/monster count.
 inline constexpr int kObsHandCap = kHandCap;        // 10
-inline constexpr int kObsMonsterCap = kMonsterCap;  // == kMonsterCap (7 as of B3.12)
+inline constexpr int kObsMonsterCap = kMonsterCap;  // == kMonsterCap (7)
 
 // Per-monster power slots carried in the observation. Deliberately MUCH smaller
 // than CombatState's full 24-slot per-monster power array: replicating all 24
@@ -133,7 +133,7 @@ static_assert(std::is_trivially_copyable_v<ObsBuffer>,
 static_assert(sizeof(ObsBuffer) == 240,
               "ObsBuffer size changed -- update the layout comment and, if this "
               "reflects a CombatState field change, SCHEMA_VERSION");
-// 188 -> 240 at B3.12: kObsMonsterCap tracks kMonsterCap (5 -> 7), so the
+// 188 -> 240 when kMonsterCap grew: kObsMonsterCap tracks it (5 -> 7), so the
 // per-monster ObsMonster block grew by 2 slots (2 * 26 B). This mirrors the
 // CombatState kMonsterCap growth (SCHEMA_VERSION 3 -> 4).
 

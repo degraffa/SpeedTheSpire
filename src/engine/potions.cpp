@@ -1,4 +1,4 @@
-// Potion USE mechanics -- see potions.hpp for the full provenance, the B4.3
+// Potion USE mechanics -- see potions.hpp for the full provenance, the
 // layer-boundary seam (slot storage/count is RunState, not here), and the
 // data-program-vs-native convention.
 //
@@ -170,14 +170,14 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             add_to_bottom(s, item);   // addToBot (BlessingOfTheForge.java:45)
             break;
         }
-        // --- Deferred native bodies (land with their dependency; B3.23 Log) ---
+        // --- Deferred native bodies (each lands with its dependency) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
         // their powers were registered by the potion-support-powers follow-up
         // (powers.yaml ids 14-19; Steroid reuses LoseStrength id 13) -- so they no
         // longer route here (use_potion sends them through queue_use_step).
         // Still native + DEFERRED, each on a verb owned elsewhere:
-        // In-combat card CHOOSE (B3.4): ELIXIR, ATTACK/SKILL/POWER/COLORLESS_
+        // In-combat card CHOOSE: ELIXIR, ATTACK/SKILL/POWER/COLORLESS_
         // POTION, GAMBLERS_BREW, LIQUID_MEMORIES. (BLESSING_OF_THE_FORGE is no
         // longer among them -- it needed only the already-live CHOOSE_CARD
         // UPGRADE kind and is implemented above.)

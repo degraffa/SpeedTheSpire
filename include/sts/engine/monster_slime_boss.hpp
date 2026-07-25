@@ -1,6 +1,6 @@
 #pragma once
 
-// Slime Boss native AI and split machinery (B3.20).
+// Slime Boss native AI and split machinery.
 //
 // Provenance (D:\STS_BG_Mod\SlayTheSpireDecompiled; files read in full):
 //   SlimeBoss.java:84-107 (ctor: fixed 140 HP, A9 150; damage table 9/35,

@@ -257,3 +257,9 @@ sts_add_test(status_curse_test)
 # B3.7: exact RED/UNCOMMON/POWER roster. Per-power base/upgraded behavior,
 # power-card no-discard path, draw/exhaust trigger ordering, and an advance() script.
 sts_add_test(card_uncommon_powers_test)
+
+# Hygiene guard: fails if an execution-plan task id (B3.6 / A4.1 shape)
+# reappears in src/ or include/. Scans the SOURCE tree at run time rather than
+# anything it links, so a new comment is caught without recompiling the engine;
+# the allowlist mechanism and the reasoning live in the test file's header.
+sts_add_test(no_task_ids_test DEFS STS_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")

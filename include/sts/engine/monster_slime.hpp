@@ -1,6 +1,6 @@
 #pragma once
 
-// Small/medium slime monster modules (B3.14). HP and move effects are generated
+// Small/medium slime monster modules. HP and move effects are generated
 // registry data; history-dependent getMove selection is native. The fixed S1
 // difficulty is A20, so each function follows the cited A17 normal-monster AI
 // branch while still resolving HP/damage from the base/A2/A7 table columns.
@@ -32,11 +32,11 @@ void spike_slime_medium_init(CombatState& state, uint8_t monster_index) noexcept
 void acid_slime_small_init(CombatState& state, uint8_t monster_index) noexcept;
 void acid_slime_medium_init(CombatState& state, uint8_t monster_index) noexcept;
 
-// B3.17 split-spawn seam: the game's 4-arg medium ctor + init() -- fields set
+// Split-spawn seam: the game's 4-arg medium ctor + init() -- fields set
 // with hp = max_hp = `hp` (NO monster_hp_rng draw; AcidSlime_M.java:65-66 /
 // SpikeSlime_M.java:60-61 pass newHealth straight to super, AbstractMonster.
 // java:139,150), then the one init() aiRng rollMove. A splitting large slime's
-// children spawn through these, so they ARE the existing B3.14 mediums.
+// children spawn through these, so they ARE the ordinary mediums above.
 void spike_slime_medium_spawn_at_hp(CombatState& state, uint8_t monster_index,
                                     int16_t hp) noexcept;
 void acid_slime_medium_spawn_at_hp(CombatState& state, uint8_t monster_index,

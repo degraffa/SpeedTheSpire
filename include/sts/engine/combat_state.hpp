@@ -6,7 +6,7 @@
 // steps (design doc §7) and the diff harness snapshots (design doc §8). It is
 // derived from RunState at combat start and folded back at combat end; the two
 // never alias
-// (design doc §4.4). The RunState->CombatState derivation is LIVE as of B4.4:
+// (design doc §4.4). The RunState->CombatState derivation is LIVE:
 // enter_combat (src/engine/run_advance.cpp) mirrors combat_begin but seeds the
 // player sheet (hp/max_hp) and the relic mirror from the run. combat_begin
 // (advance.hpp) remains the standalone entry point that takes no RunState.
@@ -43,7 +43,7 @@
 #include "sts/engine/schema.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
-#include "sts/engine/run_state.hpp"  // RelicSlot, kRelicCap (combat relic mirror, B4.3)
+#include "sts/engine/run_state.hpp"  // RelicSlot, kRelicCap (combat relic mirror)
 
 namespace sts::engine {
 
@@ -56,7 +56,7 @@ inline constexpr int kDrawCap = 128;
 inline constexpr int kDiscardCap = 128;
 inline constexpr int kExhaustCap = 128;
 inline constexpr int kLimboCap = 8;
-// kMonsterCap grew 5 -> 7 at B3.12 (multi-monster combat + encounter framework).
+// kMonsterCap grew 5 -> 7 for multi-monster combat + the encounter framework.
 // The largest INITIAL S1 group is 5 (Lots of Slimes), but mid-combat splits retain
 // dead records in place (SuicideAction/die() never remove from MonsterGroup.monsters,
 // SuicideAction.java:29-34 / AbstractMonster.java:925-951): Slime Boss fully split =
@@ -64,7 +64,7 @@ inline constexpr int kLimboCap = 8;
 // index-parity opener and SpawnMonsterAction smart-positioning read list indices
 // among ALL (incl. dead) records, so index identity must be stable -- growing the
 // cap (rather than compacting dead records) preserves it. Sized once here so the
-// framework is correct for B3.17/B3.20 (scoping report §1.5/§6). Budget: MonsterState
+// framework covers the worst split case above (scoping report §1.5/§6). Budget: MonsterState
 // is 112 B, so 7 slots = 784 B; sizeof(CombatState) 3672 -> 3896, inside the 4 KB
 // ceiling (static_assert below). This is a schema change -> SCHEMA_VERSION 3 -> 4.
 inline constexpr int kMonsterCap = 7;
@@ -88,7 +88,7 @@ inline constexpr int kPreTurnActionQueueCap = 16;
 // inside the frozen POD without a schema/layout change.
 inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
 
-// CombatState.flags bit for the room's cannotLose latch (B3.17 split framework).
+// CombatState.flags bit for the room's cannotLose latch (monster split framework).
 // Set by the CANNOT_LOSE opcode and cleared by CAN_LOSE (CannotLoseAction.java:
 // 12-15 / CanLoseAction.java:12-15). While set, the pump's all-monsters-dead
 // victory transition is suppressed (AbstractMonster.updateDeathAnimation:869
@@ -98,7 +98,7 @@ inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
 inline constexpr uint32_t kCombatFlagCannotLose = 1u << 1;
 
 // CombustPower keeps a private hpLoss counter distinct from its visible damage
-// amount. B3.7 stores the player-owned counter in otherwise-reserved CombatState
+// amount. The player-owned counter lives in otherwise-reserved CombatState
 // flags: the cards are self-only, and this preserves the frozen PowerSlot/POD
 // layout while reproducing CombustPower.stackPower's +1 hpLoss per application.
 inline constexpr uint32_t kCombatFlagCombustHpLossShift = 8u;
@@ -188,7 +188,7 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 // (parallels the pile counts); empty slots also read PowerId::NONE.
 //
 // PER-MONSTER-TYPE fields (`flags`, `pad0`) carry monster-specific meaning,
-// interpreted only by that monster's native module (B3.13+):
+// interpreted only by that monster's native module:
 //   * `flags` bit kMonsterFlagRitualSkip -- Cultist: the RitualPower's `skipFirst`
 //     (RitualPower.java:19,46-55). Set when the Cultist casts Incantation; the
 //     RITUAL native at_end_of_round body consumes it to skip the first tick.
@@ -199,7 +199,7 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //   * `pad0` -- Louse (Normal/Defensive): the per-instance rolled bite damage
 //     (monsterHpRng draw in the ctor, LouseNormal.java:60). 5..8 fits a byte; the
 //     louse turn reads it for the BITE DamageAction (see monster_louse.cpp).
-//   * `flags` bit kMonsterFlagSplitTriggered -- large slimes (B3.17): the
+//   * `flags` bit kMonsterFlagSplitTriggered -- large slimes: the
 //     `splitTriggered` one-shot latch (AcidSlime_L.java:71,150 /
 //     SpikeSlime_L.java:66,138). Set synchronously by the damage() interrupt
 //     the first time currentHealth falls to <= maxHealth/2 so later hits do not
@@ -303,7 +303,7 @@ struct CombatState {
     uint8_t pad_cardq;                // explicit padding
 
     // -- monster queue (design doc §5.1: monsters awaiting turn). Cap stays 5
-    //    even though kMonsterCap grew to 7 (B3.12): queueMonsters only enqueues
+    //    even though kMonsterCap grew to 7: queueMonsters only enqueues
     //    LIVE monsters (MonsterGroup.queueMonsters skips dead/escaped,
     //    MonsterGroup.java:117-122), and the max simultaneously-alive S1 group is
     //    5 (Lots of Slimes). Splits raise the RECORD count past 5 but not the live
@@ -314,14 +314,14 @@ struct CombatState {
     uint8_t monster_queue_count;
     uint8_t monster_attacks_queued;   // design doc §5.2 step 4 flag (0/1)
 
-    // -- combat relic mirror (B4.3, orchestrator-approved addition beyond the
-    //    block's literal RunState list; see the B4.3 Log). The player's relics in
+    // -- combat relic mirror: an addition beyond design §4.3's literal RunState
+    //    list. The player's relics in
     //    acquisition order (== trigger order, trap 8), mirrored from RunState.relics
     //    at combat_begin so in-combat relic hooks (relic_hooks.hpp player_relics)
-    //    read the live list instead of the empty view B3.24 left as a seam. The
-    //    RUN-LEVEL fold-back (populating/refreshing this across combats) is B4.4's
-    //    (its deliverable lists "relic counters"); this is only the storage the
-    //    dispatch reads. Capacity == kRelicCap (== RunState.relics) so the fold is
+    //    read a live list rather than an empty view. This field is only the
+    //    STORAGE the dispatch reads; the run-level fold-back that populates and
+    //    refreshes it across combats lives in run_advance.cpp
+    //    (enter_combat). Capacity == kRelicCap (== RunState.relics) so the fold is
     //    a plain array copy; kRelicCap = 40 covers S1 A20 runs (which can
     //    accumulate ~30+ relics) with margin. Value-init leaves it empty, so the
     //    20 combat fixtures carry a zeroed mirror (dispatch stays a no-op there). --
@@ -349,9 +349,10 @@ static_assert(std::is_trivially_copyable_v<CombatState>,
 //
 // Actual sizeof(CombatState) at the time of the change: 3896 B. Under the old
 // 4096 ceiling that left ~200 B of headroom, while the most recent capacity
-// bump alone (kMonsterCap 5 -> 7) cost 224 B. B3.26/B3.27 relics and B4.5-B4.15
-// are still to land, so the next routine capacity bump would have tripped this
-// assert mid-task, with no authority to move a frozen budget.
+// bump alone (kMonsterCap 5 -> 7) cost 224 B. The remaining relic tiers and the
+// unbuilt run-layer content are still to land, so the next routine capacity bump
+// would have tripped this assert mid-task, with no authority to move a frozen
+// budget.
 //
 // 8192 == RunState's existing ceiling (run_state.hpp:213), so the two budgets
 // are now at parity. Raising the ceiling is deliberately the cheap option: it

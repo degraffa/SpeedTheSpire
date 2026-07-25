@@ -1,4 +1,4 @@
-// Slime Boss native AI and split machinery (B3.20). See the public header for
+// Slime Boss native AI and split machinery. See the public header for
 // the full Java provenance and queue/RNG contract.
 
 #include "sts/engine/monster_slime_boss.hpp"

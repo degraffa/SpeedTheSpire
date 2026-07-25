@@ -75,7 +75,7 @@ void op_block(CombatState& s, uint8_t tgt, int amount, uint32_t flags) noexcept 
     dispatch_on_gained_block(s, tgt, gain);
 }
 
-// --- B3.6 red-uncommon-skill opcode bodies -----------------------------------
+// --- Block-manipulation opcode bodies ----------------------------------------
 
 // DOUBLE_BLOCK (Entrench / DoubleYourBlockAction.update:24-30): if tgt has
 // block, addBlock(currentBlock). A direct addBlock -- no card applyPowers, so

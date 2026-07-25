@@ -1,9 +1,9 @@
-// B3.24 starter + common relics -- native hook bodies (moved verbatim out of
+// COMMON-tier relics -- native hook bodies (moved verbatim out of
 // relic_hooks.cpp's escape-hatch switch; see relic_native.hpp for the split's
 // rationale). Parameters a body does not read are left unnamed to keep -Wextra
 // quiet; the signature is the uniform RelicNativeFn.
 
-#include "relics_b3_24.hpp"
+#include "relics_common.hpp"
 
 #include <cstdint>
 
@@ -15,15 +15,6 @@
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
-
-void relic_native_burning_blood(CombatState& s, RelicHook hook,
-                                RelicSlot& /*slot*/,
-                                const RelicHookContext& /*ctx*/) noexcept {
-    // BurningBlood.onVictory: heal 6 at combat end (clamped to max HP).
-    if (hook == RelicHook::ON_VICTORY) {
-        heal_player(s, 6);
-    }
-}
 
 void relic_native_blood_vial(CombatState& s, RelicHook hook,
                              RelicSlot& /*slot*/,
@@ -86,10 +77,10 @@ void relic_native_nunchaku(CombatState& s, RelicHook hook, RelicSlot& slot,
 void relic_native_pen_nib(CombatState& /*s*/, RelicHook hook, RelicSlot& slot,
                           const RelicHookContext& ctx) noexcept {
     // PenNib.onUseCard: counts ATTACKs; the 10th is empowered (double
-    // damage) then the counter resets. The double-damage PenNib power is
-    // DEFERRED (not yet in powers.yaml, B3.4); the COUNTER is live here so
-    // the accounting is correct when the power lands. counter persists in
-    // the RelicSlot (stage-a §4.3).
+    // damage) then the counter resets. The double-damage PenNibPower has no
+    // registry/powers.yaml row, so the empowerment is DEFERRED; the COUNTER is
+    // live here so the accounting is already correct when the power lands.
+    // counter persists in the RelicSlot (design §4.3).
     if (hook == RelicHook::ON_USE_CARD && ctx.card_is_attack) {
         ++slot.counter;
         if (slot.counter >= 10) {
@@ -154,10 +145,11 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 // --- DEFERRED combat bodies --------------------------------------------------
 //
-// These six B3.24 commons are registered `native: true` with their hook
+// These six commons are registered `native: true` with their hook
 // inventory (so the row, the pool accounting and the acquisition-order wiring
-// are all in place) but have NO combat body yet: each needs something the engine
-// does not model at this point in the build order. They are DELIBERATELY EMPTY
+// are all in place) but have NO combat body. Five are genuinely DEFERRED, each
+// needing something the engine does not model; the sixth (Toy Ornithopter) is
+// live on the run-level potion route instead. They are DELIBERATELY EMPTY
 // definitions, not omissions.
 //
 // Why a definition at all: the dispatch table is generated from
@@ -175,46 +167,55 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
 // at_battle_start APPLY_POWER relics and never route here at all.)
 
 // Akabeko.atBattleStart (Akabeko.java:31-35) -- addToTop ApplyPowerAction(
-// VigorPower 8). DEFERRED: no Vigor row in registry/powers.yaml yet (B3.4 owns
-// it), so the effect is unrepresentable.
+// VigorPower 8). DEFERRED: registry/powers.yaml has no VIGOR row, so the power
+// this relic applies cannot be named -- the effect is unrepresentable.
 void relic_native_akabeko(CombatState& /*s*/, RelicHook /*hook*/,
                           RelicSlot& /*slot*/,
                           const RelicHookContext& /*ctx*/) noexcept {}
 
 // AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter == -2, gain
-// 2 energy on the first turn; onEnterRestRoom (:77-80) arms it. DEFERRED: the
-// armed flag is cross-ROOM state owned by the run layer, not CombatState.
+// 2 energy on the first turn; onEnterRestRoom (:77-80) arms it. DEFERRED
+// because there is nowhere to ARM it from: rest rooms are not implemented
+// (entering one parks at ROOM_UNIMPLEMENTED, run_advance.cpp), so
+// onEnterRestRoom never fires. NOTE: the armed flag itself is no longer the
+// obstacle -- RelicSlot.counter survives across rooms, because fold_back_combat
+// copies each combat counter back into RunState.relics at combat end.
 void relic_native_ancient_tea_set(CombatState& /*s*/, RelicHook /*hook*/,
                                   RelicSlot& /*slot*/,
                                   const RelicHookContext& /*ctx*/) noexcept {}
 
 // ArtOfWar.onUseCard / atTurnStart (ArtOfWar.java:76-83, 64-74) -- +1 energy at
-// turn start if no ATTACK was played last turn. DEFERRED: needs two independent
-// flags (firstTurn + gainEnergyNext), i.e. multi-bit per-relic state beyond the
-// single RelicSlot.counter.
+// turn start if no ATTACK was played last turn. DEFERRED: it needs two
+// independent per-relic flags (firstTurn + gainEnergyNext). RelicSlot.counter
+// is a signed 16-bit field and could carry both as bits, so this is a missing
+// DECISION about how a relic encodes multi-flag state, not missing storage.
 void relic_native_art_of_war(CombatState& /*s*/, RelicHook /*hook*/,
                              RelicSlot& /*slot*/,
                              const RelicHookContext& /*ctx*/) noexcept {}
 
 // Boot.onAttackToChangeDamage (Boot.java:30-38) -- if owner != null and the type
 // is neither HP_LOSS nor THORNS and 0 < dmg < 5, return 5. DEFERRED: this is a
-// DAMAGE-pipeline modifier, and the pipeline (interp.cpp op_damage) is
-// float-exact and frozen; it is not a hook-queue effect.
+// DAMAGE-pipeline modifier, and the pipeline (interp/interp_damage.cpp
+// op_damage) is float-exact and frozen; it is not a hook-queue effect.
 void relic_native_boot(CombatState& /*s*/, RelicHook /*hook*/,
                        RelicSlot& /*slot*/,
                        const RelicHookContext& /*ctx*/) noexcept {}
 
 // PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an ELITE
-// room, set every monster's HP to 75%. DEFERRED: needs room-type context (absent
-// from CombatState) plus a monster-HP scaling opcode.
+// room, set every monster's HP to 75%. DEFERRED: a relic hook is handed only a
+// CombatState, and CombatState carries no room kind -- so the body cannot tell
+// an elite fight from an ordinary one. (Elite ROOMS do exist: RunController
+// tracks room_type, and run_advance.cpp enters elite combats. Discharging this
+// needs that fact plumbed into the combat hook, plus a monster-HP scaling
+// opcode.)
 void relic_native_preserved_insect(CombatState& /*s*/, RelicHook /*hook*/,
                                    RelicSlot& /*slot*/,
                                    const RelicHookContext& /*ctx*/) noexcept {}
 
-// Toy Ornithopter -- heal 5 on potion use. NOT deferred for lack of modelling:
-// it is dispatched on the RunState-owned potion route in run_advance (B4.4), not
-// from a CombatState-only relic hook, so this combat-side entry stays empty by
-// design.
+// Toy Ornithopter -- heal 5 on potion use. NOT deferred and NOT missing: it is
+// LIVE, dispatched on the RunState-owned potion route
+// (dispatch_run_relics_on_use_potion, run_advance.cpp) rather than from a
+// CombatState-only relic hook, so this combat-side entry is empty by design.
 void relic_native_toy_ornithopter(CombatState& /*s*/, RelicHook /*hook*/,
                                   RelicSlot& /*slot*/,
                                   const RelicHookContext& /*ctx*/) noexcept {}

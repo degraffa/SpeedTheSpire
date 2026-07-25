@@ -1,4 +1,4 @@
-// The RUN-LEVEL batch API implementation (Stage B, task B4.4). See
+// The RUN-LEVEL batch API implementation. See
 // run_advance.hpp for the design, scope boundaries, and provenance.
 //
 // The combat construction (enter_combat) deliberately MIRRORS combat_begin
@@ -41,7 +41,7 @@ namespace {
 // 5 Strike, 4 Defend, 1 Bash, in that order (the order is load-bearing -- it is
 // the pre-shuffle master-deck order the combat-start shuffle_rng permutes). The
 // A10 AscendersBane curse is NOT added here (curse content + the A10 modifier are
-// B4.15); documented in run_advance.hpp's scope note.
+// not applied); documented in run_advance.hpp's scope note.
 constexpr CardId kIroncladStartDeck[] = {
     CardId::STRIKE, CardId::STRIKE, CardId::STRIKE, CardId::STRIKE, CardId::STRIKE,
     CardId::DEFEND, CardId::DEFEND, CardId::DEFEND, CardId::DEFEND,
@@ -215,7 +215,7 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
     // onTrigger fires FIRST (:418-420, heal 12 at <= half HP), THEN
     // player.onVictory runs every relic's onVictory -- for ordinary victory and
     // Smoke Bomb alike, before the reward screen opens. The explicit pre-step
-    // keeps Meat ahead of Burning Blood regardless of acquisition order (B3.25).
+    // keeps Meat ahead of Burning Blood regardless of acquisition order.
     apply_meat_on_the_bone_pre_victory(rc.combat);
     dispatch_relics_on_victory(rc.combat, rc.combat.relics,
                                rc.combat.relic_count);
@@ -241,7 +241,7 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     CombatState s{};                              // value-init: byte-clean scratch
     reseed_floor_streams(s, seed, floor);
 
-    // (1) Composition (miscRng): MonsterHelper.getEncounter (B3.12 resolver).
+    // (1) Composition (miscRng): MonsterHelper.getEncounter (encounters.hpp).
     ResolvedGroup grp{};
     if (!resolve_encounter(enc_key, s.misc_rng, grp) || grp.count == 0) {
         rc.combat = s;
@@ -252,7 +252,7 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 
     // (2) Map composition game_ids -> MonsterIds; require every member implemented
     //     (Jaw Worm, Cultist, louses, and small/medium slimes are live;
-    //     B3.15-B3.22 add the rest). If any is unimplemented
+    //     the rest of the roster is unimplemented). If any is unimplemented
     //     we have still consumed miscRng exactly as the game would, then park.
     MonsterId ids[kMonsterCap] = {};
     bool all_impl = true;
@@ -298,7 +298,7 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         jdk_shuffle(std::span<CardPoolIndex>(s.draw, static_cast<std::size_t>(n)), jr);
     }
     // CardGroup.initializeDeck collects Innate cards after the one shuffle and
-    // puts them on top. This must match combat_begin, including B3.9's Writhe.
+    // puts them on top. This must match combat_begin, including Writhe.
     CardPoolIndex innate[kDrawCap]{};
     uint8_t innate_count = 0;
     uint8_t normal_count = 0;
@@ -325,10 +325,10 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     spawn_group(s, std::span<const MonsterId>(ids, grp.count));
 
     // (7) Monster pre-battle actions run after every member is spawned and
-    //     before turn 1. B3.13 louses roll and apply Curl Up here.
+    //     before turn 1. Louses roll and apply Curl Up here.
     use_pre_battle_actions(s);
 
-    // (8) Combat relic mirror: RunState.relics -> CombatState.relics (B4.3 seam,
+    // (8) Combat relic mirror: RunState.relics -> CombatState.relics (the seam,
     //     filled at combat spawn per its Log; folded back at combat end).
     for (uint8_t i = 0; i < rc.run.relic_count; ++i) {
         s.relics[i] = rc.run.relics[i];
@@ -351,7 +351,7 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 
 // onPlayerEntry dispatch for the room just entered (AbstractDungeon.java:1800).
 // Combat rooms build the combat via the encounter framework; every other room
-// kind is not yet implemented (B4.7-B4.10) so it reseeds the floor streams (for
+// kind is not yet implemented, so it reseeds the floor streams (for
 // oracle-reseed visibility) and parks at ROOM_UNIMPLEMENTED.
 void on_player_entry(RunController& rc, RoomType room) noexcept {
     const int64_t seed = rc.run.run_seed;
@@ -395,7 +395,7 @@ void on_player_entry(RunController& rc, RoomType room) noexcept {
         case RoomType::Treasure:
         case RoomType::None:
         default:
-            stall(room);  // B4.7-B4.10 room content
+            stall(room);  // no room content for this kind yet
             break;
     }
 }
@@ -486,11 +486,11 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     rs.blizzard_potion_mod = 0;
 
     // (1) monsterRng: generateMonsters + initializeBoss -> the encounter lists
-    //     (Exordium.java:110-221; generate_monster_lists, B3.12).
+    //     (Exordium.java:110-221; generate_monster_lists).
     generate_monster_lists(/*act=*/1, rs.monster_rng, rc.lists);
 
     // (2) relicRng: initializeRelicList population + five unconditional
-    //     randomLong-seeded JDK shuffles (B4.6, AbstractDungeon.java:1221-1241).
+    //     randomLong-seeded JDK shuffles (AbstractDungeon.java:1221-1241).
     initialize_relic_pools(rs);
 
     // (3) mapRng: the act map (Exordium.java:56-57). generate_map seeds mapRng =
@@ -503,7 +503,8 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
 
     // Base Ironclad sheet (CharSelectInfo: 80/80 HP, 99 gold; Ironclad.java:114).
     // A11 potion slots are live here through potion_slot_count(). The remaining
-    // A20 run-setup modifiers (A6 90% HP, A10 curse, A14 -5 max) are B4.15.
+    // The A20 run-setup modifiers (A6 90% HP, A10 curse, A14 -5 max) are NOT
+    // applied -- see run_advance.hpp's scope note.
     rs.hp = 80;
     rs.max_hp = 80;
     rs.gold = 99;
@@ -700,7 +701,7 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
     }
     switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW: {
-            // The Neow blessing itself is B4.14; here CHOOSE simply proceeds onto
+            // The Neow blessing itself is not modelled; here CHOOSE proceeds onto
             // the map (blessing skipped, documented).
             if (action_verb(a) == ActionVerb::CHOOSE) {
                 rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
@@ -740,7 +741,7 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
         }
 
         case RunPhase::COMBAT_REWARD: {
-            // Rewards are assembled by B4.5; here CHOOSE proceeds back to the map.
+            // Nothing assembles rewards yet; here CHOOSE proceeds back to the map.
             if (action_verb(a) == ActionVerb::CHOOSE) {
                 rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
             }

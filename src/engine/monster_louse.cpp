@@ -1,4 +1,4 @@
-// Louse AI + monster turn + curl-up pre-battle (B3.13). Move selection is native;
+// Louse AI + monster turn + curl-up pre-battle. Move selection is native;
 // stats/effects come from the generated table. See monster_louse.hpp for
 // provenance, scope, and the draw-counting convention.
 

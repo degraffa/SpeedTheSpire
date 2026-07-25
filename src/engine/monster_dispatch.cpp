@@ -1,7 +1,7 @@
-// Monster init/turn dispatch + spawn (B3.12; extended B3.13). See
+// Monster init/turn dispatch + spawn. See
 // monster_dispatch.hpp for the scope/rationale. The dispatch tables are a plain
-// switch on MonsterId (data-oriented, no virtual dispatch); each monster batch
-// (B3.13+) adds its case.
+// switch on MonsterId (data-oriented, no virtual dispatch); each new monster
+// module adds its case.
 
 #include "sts/engine/monster_dispatch.hpp"
 
@@ -9,12 +9,12 @@
 #include <cstddef>
 
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
-#include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn (B3.13)
+#include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
-#include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle (B3.13)
-#include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns (B3.14)
-#include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework (B3.17)
-#include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split (B3.20)
+#include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
+#include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
+#include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
+#include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
 
 namespace sts::engine {
 
@@ -73,7 +73,7 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
         case MonsterId::SLIME_BOSS:
             return &slime_boss_init;
         default:
-            return nullptr;  // not yet implemented (B3.15-B3.22)
+            return nullptr;  // this monster has no module yet
     }
 }
 
@@ -102,7 +102,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
         case MonsterId::SLIME_BOSS:
             return &slime_boss_take_turn;
         default:
-            return &default_monster_turn;  // no-op until the monster's batch lands
+            return &default_monster_turn;  // no-op until the monster's module lands
     }
 }
 
@@ -135,7 +135,7 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
             return &spike_slime_medium_spawn_at_hp;
         case MonsterId::ACID_SLIME_MEDIUM:
             return &acid_slime_medium_spawn_at_hp;
-        case MonsterId::SPIKE_SLIME_LARGE:  // B3.20 Slime Boss split children
+        case MonsterId::SPIKE_SLIME_LARGE:  // Slime Boss split children
             return &spike_slime_large_spawn_at_hp;
         case MonsterId::ACID_SLIME_LARGE:
             return &acid_slime_large_spawn_at_hp;
@@ -214,7 +214,7 @@ void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept 
     for (uint8_t i = 0; i < group.size(); ++i) {
         const MonsterInitFn init = monster_init_fn(group[i]);
         assert(init != nullptr &&
-               "spawn_group: monster not yet implemented (lands in B3.14-B3.22)");
+               "spawn_group: this monster has no module yet");
         init(state, i);
     }
 }

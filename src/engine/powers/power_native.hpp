@@ -2,17 +2,18 @@
 
 // Native power-hook plumbing (internal to src/engine -- NOT public API). The
 // native escape hatch used to be one 500-line switch in power_hooks.cpp; it is
-// now per-batch translation units under src/engine/powers/ plus the dispatch
+// now ONE TRANSLATION UNIT PER POWER under src/engine/powers/ plus the dispatch
 // table in power_hooks.cpp, mirroring the monster_dispatch.cpp split (per-monster
 // TUs + a switch returning function pointers, `default: return nullptr` for the
 // not-yet-implemented ids).
 //
 // Each native power's body is a free function with the PowerNativeFn signature,
-// declared in its batch header (powers_b3_2.hpp, ...). The dispatch table itself
-// is now GENERATED from registry/powers.yaml (the STS_REGISTRY_NATIVE_POWERS
-// X-macro in the generated power_table.hpp), so adding a power batch is: one new
-// .cpp, one new header, one CMakeLists line -- and NO edit to power_hooks.cpp or
-// to any file an earlier batch owns.
+// declared in the header named for that power (power_combust.hpp declares
+// power_native_combust, and so on). The dispatch table itself is GENERATED from
+// registry/powers.yaml (the STS_REGISTRY_NATIVE_POWERS X-macro in the generated
+// power_table.hpp), so adding a power is: one new .cpp, one new header, one
+// CMakeLists line -- and NO edit to power_hooks.cpp or to any other power's
+// files.
 
 #include <cstdint>
 

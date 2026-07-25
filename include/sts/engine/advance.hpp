@@ -53,7 +53,7 @@ namespace sts::engine {
 // STARTING HP (sourced; the earlier "PLACEHOLDER STATS / provenance deferred per
 // design doc §11" note here is OBSOLETE). combat_begin uses hp == max_hp == 80,
 // and that number now has provenance: it is the Ironclad's CharSelectInfo sheet
-// (Ironclad.java:114), sourced at B4.4 -- not a convention borrowed from the
+// (Ironclad.java:114) -- not a convention borrowed from the
 // tests awaiting a source read.
 //
 // combat_begin is the STANDALONE entry point: it takes no RunState, so it
@@ -63,7 +63,7 @@ namespace sts::engine {
 // start_run set from the same CharSelectInfo sheet (run_advance.cpp). So the two
 // paths agree at floor 1 and diverge correctly once the run has taken damage.
 // The A20 run-setup modifiers that move the starting sheet (A6 90% HP, A14 -5
-// max) are RunState-level and land at B4.15; they do not change this default.
+// max) are RunState-level and are not applied; they do not change this default.
 [[nodiscard]] CombatState combat_begin(int64_t run_seed, int32_t floor,
                                        std::span<const CardId> deck) noexcept;
 
@@ -74,11 +74,11 @@ namespace sts::engine {
 // call but leaves the type's shape to the implementation; this is that shape.
 //
 // can_play[i] is per-hand-slot playability (affordability + not-unplayable +
-// phase gate); can_play_target[i][t] is the B3.12 multi-monster (hand_slot x
+// phase gate); can_play_target[i][t] is the multi-monster (hand_slot x
 // target) grid for enemy-targeted cards. Together with can_end_turn / the CHOOSE
 // fields they enumerate every legal action.
 //
-// TARGETING (B3.12): a card with `needs_target` (an enemy-target Attack) is legal
+// TARGETING: a card with `needs_target` (an enemy-target Attack) is legal
 // only against a LIVE monster slot; can_play_target[i][t] is true iff hand slot i
 // is playable AND card_def(hand[i]).needs_target AND t < monster_count AND
 // monsters[t].hp > 0. Self / all-enemy / no-target / random-target cards ignore
@@ -104,7 +104,7 @@ struct ActionMask {
     // choose to end the turn), and illegal otherwise.
     bool can_end_turn;
 
-    // --- CHOOSE-in-combat (Stage B B3.4) ---
+    // --- CHOOSE-in-combat ---
     // When a CHOOSE_CARD is open at the head of the action queue and needs a real
     // selection (choice_requires_user), the player is choosing a hand card, NOT
     // playing/ending: `choice_pending` is true, `can_play`/`can_end_turn` are all
@@ -115,7 +115,7 @@ struct ActionMask {
     bool choice_pending;
     bool can_choose[kHandCap];
 
-    // --- Discard-source CHOOSE (Stage B B3.3: Headbutt) ---
+    // --- Discard-source CHOOSE (Headbutt) ---
     // A DISCARD_TO_DRAW_TOP choice selects from the DISCARD pile, not the hand.
     // When `choice_from_discard` is true, the CHOOSE action arg0 is a DISCARD slot
     // (every discard card is eligible -- DiscardPileToTopOfDeckAction has no
@@ -147,7 +147,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept;
 // training-loop scope, wildly out of scope for M1. This is a minimal, honest,
 // non-crashing scheme for the batch smoke test:
 //   +1.0f  win  -- EVERY monster's hp reached 0 (and the player is alive; the
-//                  single-monster wording here predates B3.12's multi-monster
+//                  single-monster wording here predates the multi-monster
 //                  groups -- fill_result in advance.cpp scans all of them)
 //   -1.0f  loss -- player_hp reached 0
 //    0.0f  otherwise (combat ongoing)

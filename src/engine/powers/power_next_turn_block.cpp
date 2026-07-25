@@ -1,11 +1,10 @@
-// B3.25 relic-applied power (Self-Forming Clay) -- native hook body (moved
-// verbatim out of power_hooks.cpp's escape-hatch switch; see power_native.hpp
-// for the split's rationale).
+// Next Turn Block -- native power-hook body. One translation unit per power;
+// see power_native.hpp for the dispatch plumbing and
+// power_next_turn_block.hpp for what this power does.
 
-#include "powers_b3_25.hpp"
+#include "power_next_turn_block.hpp"
 
 #include <cstdint>
-
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / kActor*
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags

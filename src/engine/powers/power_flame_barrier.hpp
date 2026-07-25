@@ -1,8 +1,10 @@
 #pragma once
 
-// Native bodies for the B3.6 red-uncommon-skill powers (registry/powers.yaml
-// ids 24-25, "--- B3.6 red-uncommon-skill powers (ids 24-25) ---"). No Draw
-// (id 24) is a pure marker power read by other bodies, so it has no entry here.
+// Flame Barrier -- native power-hook body (registry/powers.yaml id 25,
+// PowerId::FLAME_BARRIER).
+//
+// Reflects `amount` THORNS damage at each distinct attacker; removed at the
+// owner's next turn start.
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/power_hooks.hpp"  // Hook, HookContext

@@ -11,7 +11,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"            // Opcode, make_apply_power_flags
 #include "sts/engine/monster_dispatch.hpp"  // MonsterIntent (SPOT_WEAKNESS intent gate)
-#include "sts/engine/power_hooks.hpp"       // B3.2 hook dispatch (onApplyPower)
+#include "sts/engine/power_hooks.hpp"       // power hook dispatch (onApplyPower)
 #include "sts/engine/powers.hpp"            // power_def / PowerType (APPLY_POWER interception)
 #include "sts/engine/types.hpp"
 
@@ -22,7 +22,7 @@ namespace sts::engine {
 // is a silent no-op here rather than an assert, since a malformed item must not
 // crash; real card play never overflows 24 skeleton powers).
 //
-// B3.2 interception (ApplyPowerAction.java:106-138): (1) the SOURCE's powers'
+// Interception (ApplyPowerAction.java:106-138): (1) the SOURCE's powers'
 // onApplyPower fire FIRST (Sadistic queues damage on a debuffed target); (2) if
 // the TARGET has Artifact and the applied power is a DEBUFF, one Artifact stack is
 // consumed and the power does NOT land. Both are no-ops without Sadistic/Artifact,
@@ -32,7 +32,7 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     if (id == PowerId::NONE) {
         return;
     }
-    // B3.6 (ApplyPowerAction.update:102-105): applying No Draw to a target that
+    // ApplyPowerAction.update:102-105: applying No Draw to a target that
     // ALREADY has No Draw is a whole-action no-op -- it short-circuits BEFORE the
     // source onApplyPower hooks and the Artifact nullify, and never stacks.
     if (id == PowerId::NO_DRAW) {

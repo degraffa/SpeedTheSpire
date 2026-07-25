@@ -1,12 +1,10 @@
-// B3.7 red-uncommon-power cards' powers -- native hook bodies (moved verbatim
-// out of power_hooks.cpp's escape-hatch switch; see power_native.hpp for the
-// split's rationale).
+// Fire Breathing -- native power-hook body. One translation unit per power;
+// see power_native.hpp for the dispatch plumbing and
+// power_fire_breathing.hpp for what this power does.
 
-#include "powers_b3_7.hpp"
+#include "power_fire_breathing.hpp"
 
 #include <cstdint>
-
-#include "power_native.hpp"             // find_power
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType
 #include "sts/engine/combat_state.hpp"
@@ -14,26 +12,6 @@
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
-
-void power_native_evolve(CombatState& s, Hook hook,
-                         const HookContext& ctx) noexcept {
-    // EvolvePower.onCardDraw: only a STATUS draw triggers, and No Draw
-    // suppresses the response even if the draw was otherwise forced.
-    if (hook != Hook::ON_CARD_DRAW ||
-        find_power(s, ctx.owner, PowerId::NO_DRAW) != nullptr) {
-        return;
-    }
-    const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
-    if (cd == nullptr || cd->type != CardType::STATUS) {
-        return;
-    }
-    ActionQueueItem draw{};
-    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
-    draw.src = ctx.owner;
-    draw.tgt = ctx.owner;
-    draw.amount = ctx.power_amount;
-    add_to_bottom(s, draw);
-}
 
 void power_native_fire_breathing(CombatState& s, Hook hook,
                                  const HookContext& ctx) noexcept {

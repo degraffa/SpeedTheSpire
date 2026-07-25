@@ -36,7 +36,7 @@ namespace sts::engine {
 // content tasks.
 using CardType = sts::registry::CardType;
 
-// When a card's effect program runs (Stage B B3.9). ON_PLAY is the played-card
+// When a card's effect program runs. ON_PLAY is the played-card
 // path (every ATTACK/SKILL + the playable Slimed status); the unplayable
 // statuses/curses instead run their program at a passive hook -- END_OF_TURN
 // (Burn/Decay/Doubt/Regret/Shame), ON_DRAW (Void), ON_OTHER_CARD_PLAYED (Pain).
@@ -58,10 +58,11 @@ using CardDef = sts::registry::CardDef;
 using sts::registry::kMaxCardSteps;
 using sts::registry::kPoolableCurseCount;
 using sts::registry::kPoolableCurses;
-// B3.6: the Ironclad in-combat ATTACK transform pool (Infernal Blade /
+// The Ironclad in-combat ATTACK transform pool (Infernal Blade /
 // returnTrulyRandomCardInCombat(ATTACK), AbstractDungeon.java:964-979). Derived
 // by the generator from the rows' color/rarity/type/healing columns; see the
-// pool-order note in gen.py (registry-id order until B4.5 pins library order).
+// pool-order note in gen.py (registry-id order; the game's CardLibrary HashMap
+// order is a known, documented deviation until an oracle capture pins it).
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
 
@@ -79,16 +80,16 @@ using sts::registry::kPommelStrike;
 // registry row (a defensive guard; card_play asserts a real card was played).
 using sts::registry::card_def;
 
-// --- Upgrade plumbing (Stage B B3.1: two-row lookup by the `upgrade` bit) -----
+// --- Upgrade plumbing (two-row lookup by the `upgrade` bit) ------------------
 // The generated CardDef carries BOTH a base program (steps/step_count/base_cost/
 // flags) and an upgraded program (upgraded_steps/upgraded_step_count/
 // upgraded_cost/upgraded_flags). A card with no `upgraded:` block in the YAML
 // gets an upgraded program byte-identical to its base (so an upgraded instance
 // of an as-yet-un-upgraded card behaves like base -- safe default; the real
-// upgraded content lands per-card in B3.3+). `upgrade` is a COUNT
+// upgraded content is authored per-card). `upgrade` is a COUNT
 // (CardInstance.upgrade, u8): 0 == base, >0 == upgraded. (Infinitely-upgradeable
-// Searing Blow, which needs the count rather than a bit, is B3.5's schema call
-// per the scoping report -- storage is already a u8 count.)
+// Searing Blow needs the count rather than a bit -- storage is already a u8
+// count, so it is covered.)
 
 // The effect steps (pointer + count) for a card at the given upgrade level.
 struct CardEffectView {
@@ -114,7 +115,7 @@ struct CardEffectView {
     return upgrade > 0 ? def.upgraded_flags : def.flags;
 }
 
-// B3.6: the card's triggerOnExhaust program at the given upgrade level
+// The card's triggerOnExhaust program at the given upgrade level
 // (CardGroup.moveToExhaustPile:857 fires card.triggerOnExhaust AFTER the relic
 // and power onExhaust hooks; Sentinel is the S1 consumer -- addToTop
 // GainEnergyAction 2/3, Sentinel.java:37-43). Empty (count 0) for every card
@@ -211,7 +212,7 @@ static_assert(kBash.steps[1].extra == make_apply_power_flags(PowerId::VULNERABLE
               "generated APPLY_POWER `extra` must use the make_apply_power_flags "
               "packing (interp.hpp)");
 
-// Card-flag bit constants (Stage B B3.1): the generated header emits kCardFlag*
+// Card-flag bit constants: the generated header emits kCardFlag*
 // mirroring gen.py's CARD_FLAGS; pin them byte-equal to the engine's CardFlag
 // (types.hpp) so the codegen vocabulary cannot drift from the interpreter's.
 static_assert(

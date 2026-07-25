@@ -1,15 +1,15 @@
 #pragma once
 
-// Per-MonsterId init/turn dispatch + multi-monster spawn (B3.12). Generalizes the
-// M1 skeleton's hard-wired single-Jaw-Worm seam: combat_begin now spawns an
+// Per-MonsterId init/turn dispatch + multi-monster spawn. Generalizes the
+// skeleton's hard-wired single-Jaw-Worm seam: combat_begin now spawns an
 // arbitrary monster GROUP, and the pump's step-5 monster-turn hook dispatches to
 // each acting monster's own turn function by its id (the "Stage B generalizes the
 // MonsterTurnFn per the monster registry" note in advance.hpp/action_queue.hpp).
 //
-// B3.12 ships JAW_WORM only; the rest of the S1 roster lands in B3.13-B3.22, each
-// registering its init/turn here. An unimplemented monster returns nullptr from
-// monster_init_fn (spawn_group hard-asserts) and default_monster_turn from
-// monster_turn_fn (a live no-op, never reached in-combat pre-B3.13).
+// Each monster module registers its init/turn in the switches below. The S1
+// roster is not complete: an unimplemented monster returns nullptr from
+// monster_init_fn (so spawn_group hard-asserts rather than spawning a blank)
+// and default_monster_turn from monster_turn_fn (a live no-op).
 
 #include <cstdint>
 #include <span>
@@ -69,7 +69,7 @@ void queue_monster_move_effects(CombatState& state, uint8_t mi,
 
 // A monster's spawn-time init: set id, roll HP (monster_hp_rng), do the first
 // rollMove (ai_rng) -- the jaw_worm_init shape, generalized. nullptr == the
-// monster's module has not landed yet (B3.13+).
+// monster's module has not landed yet.
 using MonsterInitFn = void (*)(CombatState& state, uint8_t monster_index);
 
 // A monster's usePreBattleAction (design §5.2; AbstractMonster.usePreBattleAction),
@@ -81,7 +81,7 @@ using MonsterPreBattleFn = void (*)(CombatState& state, uint8_t monster_index);
 // The pre-battle function for a monster id, or nullptr if it has none.
 [[nodiscard]] MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept;
 
-// --- B3.17 split framework seams ---------------------------------------------
+// --- Monster split framework seams -------------------------------------------
 
 // A monster's queued-roll body (RollMoveAction.update -> rollMove; no liveness
 // check, RollMoveAction.java:17-21). Only monsters whose turns QUEUE ROLL_MOVE
@@ -142,8 +142,8 @@ void dispatch_monster_turn(CombatState& state, uint8_t monster_index) noexcept;
 // same PER-STREAM sequences as the game's phased "all ctors (monster_hp_rng) then
 // all init() (ai_rng)" ordering: monster_hp_rng sees the HP rolls in spawn order,
 // ai_rng sees the rollMoves in spawn order. (usePreBattleAction -- a later
-// monster_hp_rng phase, e.g. Louse curl-up -- is a separate seam for B3.13; no
-// B3.12 monster has one.) An unimplemented monster hard-asserts.
+// monster_hp_rng phase, e.g. Louse curl-up -- is the separate
+// use_pre_battle_actions seam below.) An unimplemented monster hard-asserts.
 void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept;
 
 // Run every live monster's usePreBattleAction in spawn order (design §5.2: the

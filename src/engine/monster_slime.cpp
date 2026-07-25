@@ -1,4 +1,4 @@
-// Small/medium slime native AI and turns (B3.14). See monster_slime.hpp for
+// Small/medium slime native AI and turns. See monster_slime.hpp for
 // provenance and exact per-stream draw accounting.
 
 #include "sts/engine/monster_slime.hpp"
@@ -122,7 +122,7 @@ void acid_slime_medium_init(CombatState& s, uint8_t mi) noexcept {
 }
 
 namespace {
-// B3.17 split-spawn seam (see monster_slime.hpp): the 4-arg ctor sets
+// Split-spawn seam (see monster_slime.hpp): the 4-arg ctor sets
 // hp = max_hp = newHealth with NO monster_hp_rng draw (AcidSlime_M.java:65-66 /
 // SpikeSlime_M.java:60-61 -> AbstractMonster.java:139,150); init() then does
 // the single aiRng rollMove (AbstractMonster.java:712-715).

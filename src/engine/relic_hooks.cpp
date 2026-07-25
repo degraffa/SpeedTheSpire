@@ -1,8 +1,7 @@
 // Relic-hook framework -- acquisition-order dispatch + the native escape hatch.
 // See relic_hooks.hpp for the full hook inventory, the acquisition-order rule
 // (stage-a trap 8), the relic-vs-power interleave at each call site, and the
-// combat-storage seam (player_relics() reads CombatState's relic mirror, live as
-// of B4.3).
+// combat-storage seam (player_relics() reads CombatState's relic mirror).
 //
 // Provenance (each relic body read in full in the decompiled Java before coding):
 // registry/relics.yaml carries the per-relic citation. Hook sites:
@@ -18,10 +17,10 @@
 
 #include <cstdint>
 
-// The per-batch relic headers (relics_b3_24.hpp, ...) are deliberately NOT
+// The per-tier relic headers (relics_common.hpp, ...) are deliberately NOT
 // included: the generated STS_REGISTRY_NATIVE_RELICS expansion below declares
-// every native body itself, so this file has no per-batch dependency and a new
-// relic batch (B3.26, B3.27) never edits it.
+// every native body itself, so this file has no per-tier dependency and a new
+// relic tier never edits it.
 #include "relics/relic_native.hpp"      // RelicNativeSig/Fn, heal_player
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/cards.hpp"         // card_def, CardType (attack check)
@@ -74,13 +73,13 @@ void queue_relic_step(CombatState& s, const CardEffectStep& step) noexcept {
 
 }  // namespace
 
-// --- player_relics: the combat relic view (live as of B4.3) ------------------
+// --- player_relics: the combat relic view -----------------------------------
 
 RelicView player_relics(CombatState& s) noexcept {
-    // B4.3 gave CombatState its relic mirror (s.relics / s.relic_count), so the
-    // wired dispatch sites (power_hooks.cpp / action_queue.cpp) now read the live
+    // CombatState carries the relic mirror (s.relics / s.relic_count), so the
+    // wired dispatch sites (power_hooks.cpp / action_queue.cpp) read the live
     // acquisition-ordered list. It is empty (relic_count == 0) until a run
-    // populates it -- the run-level fold-back is B4.4 -- so states with no relics
+    // populates it (run_advance.cpp's enter_combat), so states with no relics
     // (the 20 combat fixtures) still dispatch nothing.
     return RelicView{s.relics, s.relic_count};
 }
@@ -230,8 +229,8 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
 // monster_dispatch.cpp's monster_init_fn (a plain switch, data-oriented, no
 // virtual dispatch) -- but a relic batch no longer edits this file at all: it
 // adds registry rows, a translation unit under src/engine/relics/, and a
-// CMakeLists line. That is what makes B3.26 (rares+shop) and B3.27
-// (boss+specials) genuinely parallel-safe: they no longer share this table.
+// CMakeLists line. That is what makes the remaining tiers (rares+shop,
+// boss+specials) genuinely parallel-safe: they no longer share this table.
 //
 // Why the extern declarations are generated here rather than #include'd from the
 // per-batch headers: each handler is odr-used by the switch below, so a relic
@@ -250,8 +249,8 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
 // where the handler would live. The deferred set today (unchanged behaviour --
 // each is a no-op call instead of a skipped null call) is:
 //   AKABEKO / ART_OF_WAR / ANCIENT_TEA_SET / BOOT / PRESERVED_INSECT /
-//   TOY_ORNITHOPTER   -> relics/relics_b3_24.cpp
-//   MUMMIFIED_HAND / PANTOGRAPH -> relics/relics_b3_25.cpp
+//   TOY_ORNITHOPTER   -> relics/relics_common.cpp
+//   PANTOGRAPH        -> relics/relics_uncommon.cpp
 // (BRONZE_SCALES / ODDLY_SMOOTH_STONE were un-deferred by the potion-support-
 // powers follow-up: Thorns/Dexterity are registered, so both are DATA
 // at_battle_start APPLY_POWER relics and never route here.)

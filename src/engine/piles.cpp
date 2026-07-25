@@ -15,10 +15,10 @@
 #include <cstdint>
 #include <span>
 
-#include "sts/engine/cards.hpp"        // B3.6: card_cost (reset_cost_for_turn)
+#include "sts/engine/cards.hpp"        // card_cost (reset_cost_for_turn)
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/power_hooks.hpp"  // B3.2: onExhaust dispatch (EXHAUST opcode path)
-#include "sts/engine/relic_hooks.hpp"  // B3.25: onShuffle dispatch (Sundial)
+#include "sts/engine/power_hooks.hpp"  // onExhaust dispatch (EXHAUST opcode path)
+#include "sts/engine/relic_hooks.hpp"  // onShuffle dispatch (Sundial)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -50,7 +50,7 @@ void shuffle_discard_into_draw(CombatState& s) noexcept {
     // 37-39): fires as the reshuffle action is created -- i.e. BEFORE the shuffle
     // draw -- and only when a reshuffle actually happens (DrawCardAction only
     // constructs the action when the discard is non-empty). Sundial counts these
-    // (B3.25); its GainEnergy is QUEUED (addToBot), so the shuffle/draw math
+    // (Sundial); its GainEnergy is QUEUED (addToBot), so the shuffle/draw math
     // below and shuffle_rng consumption are untouched. No-op without a
     // responding relic (fixtures byte-identical).
     {
@@ -133,7 +133,7 @@ void exhaust_card(CombatState& s, int pool_index) noexcept {
                 s.exhaust[s.exhaust_count] = idx;
                 ++s.exhaust_count;
             }
-            // B3.6: an exhausted card's this-turn-only cost reverts
+            // An exhausted card's this-turn-only cost reverts
             // (ExhaustCardEffect.update:41-43 resetAttributes -> costForTurn =
             // cost). Restore cost_now from the registry row and clear the bit.
             reset_cost_for_turn(s, idx);
