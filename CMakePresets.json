@@ -57,6 +57,16 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_INTERPROCEDURAL_OPTIMIZATION": "ON"
       }
+    },
+    {
+      "name": "win-asan",
+      "inherits": "win-base",
+      "displayName": "Windows Debug + ASan/UBSan (clang-cl)",
+      "binaryDir": "${sourceDir}/build/win-asan",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "STS_ENABLE_SANITIZERS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -64,7 +74,8 @@
     { "name": "release", "configurePreset": "release" },
     { "name": "asan", "configurePreset": "asan" },
     { "name": "win-debug", "configurePreset": "win-debug" },
-    { "name": "win-release", "configurePreset": "win-release" }
+    { "name": "win-release", "configurePreset": "win-release" },
+    { "name": "win-asan", "configurePreset": "win-asan" }
   ],
   "testPresets": [
     {
@@ -88,6 +99,12 @@
     {
       "name": "win-debug",
       "configurePreset": "win-debug",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error", "jobs": 8 }
+    },
+    {
+      "name": "win-asan",
+      "configurePreset": "win-asan",
       "output": { "outputOnFailure": true },
       "execution": { "noTestsAction": "error", "jobs": 8 }
     },

@@ -59,6 +59,11 @@ sts_apply_fp_contract()
 # FetchContent dependencies (googletest) as well as our own targets.
 sts_setup_compiler_cache()
 
+# Windows sanitizer mechanics (/RTC1 strip + ASan runtime DLL staging). No-op on
+# POSIX and when sanitizers are off. Must run after CMAKE_RUNTIME_OUTPUT_DIRECTORY
+# is set above, since it copies the DLL there.
+sts_prepare_sanitizer_runtime()
+
 include(FetchContent)
 
 # ---------------------------------------------------------------------------
