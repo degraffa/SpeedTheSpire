@@ -195,8 +195,23 @@ cmake --build --preset debug
 ctest --preset debug
 ```
 
-`release` has **no test preset** — it builds the tests into `build/release`;
-run them with `ctest --test-dir build/release`.
+All three have test presets, so `ctest --preset release` works. (It did not
+until 2026-07-25; older notes telling you to use `ctest --test-dir
+build/release` are stale, though that form still works.)
+
+#### Two ways the test suite lies to you
+
+**`cmake --build` before every `ctest`.** Test discovery is `PRE_TEST`, so a
+test whose binary is missing or stale is reported as `<name>_NOT_BUILT (Not
+Run)` — a *failure line that is not a real failure*. Running `ctest` against a
+tree you have not just built produces a confusing red result that has nothing
+to do with the code.
+
+**`ctest` exits 0 on an empty test set.** A configuration that registers zero
+tests reports success. All three presets now set `execution.noTestsAction:
+error` so this fails loudly instead; do not remove it. This was found by
+accident, not by design — assume any *new* test target is not running until you
+have seen its name in `ctest -N`.
 
 ### Calling WSL from the Windows host (hard-won — read before scripting it)
 
@@ -256,6 +271,69 @@ the failure surfaced later as a confusing "no tests found".
 under `/mnt/d`.** Select by path, name, or extension instead (`-name '*.o'`,
 an explicit path list), and never combine a `-perm`/`-executable` predicate
 with `-delete`.
+
+#### FetchContent traps
+
+**A shared `FETCHCONTENT_BASE_DIR` shares *build* trees, not just sources.**
+`FetchContent_Declare` bakes both `SOURCE_DIR` and `BINARY_DIR` from the base
+dir in effect, so pointing every preset at one base dir makes `asan` and
+`release` emit the *same* object paths — an ASan-instrumented `libgtest.so`
+landing exactly where the release link line reads. `STS_SHARED_DEP_CACHE`
+therefore shares only the deps with **no sub-build** (xxHash, nlohmann). Do not
+"simplify" it into a single base dir.
+
+**`GIT_SHALLOW ON` is not a small clone.** CMake hard-codes `clone --depth 1
+--no-single-branch`, so it still fetches every branch tip and tag — nlohmann
+measured 278 MB → 186 MB, not the ~2 MB you would expect. Prefer a pinned
+release asset (`URL` + `URL_HASH`); that took the same dependency to 1.9 MB.
+
+---
+
+## 7. Verification discipline (learned the hard way)
+
+**Re-derive numbers from the tree, never from a document.** Test counts in task
+Logs are correct only on the day they are written. A stale count (454, when the
+tree was at 526) was copied out of a Log into four separate task briefs before
+anyone checked. `ctest -N | tail -1` is the source of truth.
+
+**Benchmark A/B must be interleaved.** This box drifts by more than the effects
+being measured. Two separate measurements this project has taken were wrong
+until re-run as interleaved A/B/A/B pairs — one reported a spurious −1.4%, the
+other a spurious 5.1s saving that a direct measurement showed to be noise. Build
+both binaries, alternate them, and report the pair-wise delta with a noise
+estimate. If load makes a number untrustworthy, **say it is unmeasured** rather
+than publishing it.
+
+**`git branch --merged` and `git cherry` both lie here.** Integration edits the
+ledger while cherry-picking, so a landed branch's patch-id no longer matches
+anything on `master` — both tools report the work as unlanded. To check whether
+a branch's work is in: match its commit subject's task id against `git log
+master --grep`. Do not delete a branch on the strength of `--merged` alone. Also
+remove a worktree *before* deleting its branch; the reverse order fails.
+
+**A comment asserting "X does not exist yet" is a bug signal.** Two real defects
+were found this way, not by a failing test: a spawn gate hard-coded `false`
+under a comment reading "always false until POWER cards land" — and they had
+landed; and a relic handler left empty for the same reason. When you meet a
+comment that justifies inert code by a missing prerequisite, **check whether the
+prerequisite arrived**. Prefer comments that describe the mechanism and cite the
+Java, because those go stale visibly; a comment naming a task id goes stale
+silently.
+
+**`default:` in a dispatch switch turns a missing implementation into a silent
+no-op.** Every registry-driven dispatch surface is now a generated table whose
+entries are `extern` declarations, so an unimplemented row is a **link error**
+instead of a shrug. When adding a new dispatch surface, reproduce that property
+and *demonstrate* it (add a row with no body, capture the linker error, revert)
+rather than assuming it holds.
+
+**Hoisting a lookup out of a loop can be slower.** Moving a relic-array scan
+above a hand loop measured ~22% slower on `bench_advance`: the relic mirror is a
+region of `CombatState` the loop otherwise never touches, so the hoist dragged a
+cold cache line into every call, while the original paid it almost never. Cache
+behaviour beats instruction count here — measure before "optimising".
+
+---
 
 ### Bridge-side components
 
