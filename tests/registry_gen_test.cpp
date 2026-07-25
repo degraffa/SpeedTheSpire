@@ -64,9 +64,28 @@ std::string quote(const std::string& s) { return "\"" + s + "\""; }
 // stderr into `err_file`. Returns the process exit status.
 int run_generator(const std::string& registry_dir, const std::string& out_dir,
                   const std::string& err_file) {
-    const std::string cmd = quote(kPython) + " " + quote(kGenPy) +
-                            " --registry " + quote(registry_dir) + " --out " +
-                            quote(out_dir) + " 2> " + quote(err_file);
+    std::string cmd = quote(kPython) + " " + quote(kGenPy) +
+                      " --registry " + quote(registry_dir) + " --out " +
+                      quote(out_dir) + " 2> " + quote(err_file);
+#ifdef _WIN32
+    // std::system() on Windows runs `cmd.exe /C <string>`, and cmd has a quoting
+    // rule with no POSIX analogue: when the string starts with a quote, it strips
+    // the FIRST and LAST quote in the whole string and treats what remains as the
+    // command. Every path here is quoted (they contain spaces -- "C:\Program
+    // Files\..."), so the string always starts with one, and cmd tore the line
+    // apart:
+    //
+    //   The filename, directory name, or volume label syntax is incorrect.
+    //
+    // which surfaced as all 9 RegistryGen cases failing on Windows with a
+    // generator exit status of 1 and no other explanation.
+    //
+    // The documented fix is an extra enclosing pair (`cmd /C ""a b" "c d""`):
+    // the outer pair is what gets stripped, leaving the inner quoting intact.
+    // Deliberately not applied on POSIX, where /bin/sh would treat the extra
+    // quotes as part of the program name.
+    cmd = "\"" + cmd + "\"";
+#endif
     return std::system(cmd.c_str());
 }
 
