@@ -216,6 +216,14 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //         cumulative damage from -- a WHOLE-byte value, not a packed pair. The
 //         Guardian's fixed 240/250 HP sheet (TheGuardian.java:97-106) fits
 //         uint8_t's 0..255 with room to spare. See monster_guardian.cpp.
+//       - Red Slaver: BIT FLAGS, not a counter -- bit 0 is
+//         SlaverRed.usedEntangle (SlaverRed.java:55,90), the once-per-combat
+//         latch its getMove reads at :145 and :149. Its sibling latch
+//         `firstTurn` (:56,140-141) needs no storage: it is true only during the
+//         init() rollMove, which is a distinct entry point here. This is the
+//         first pad0 user to subdivide the byte into flags rather than treat it
+//         as one value, which is exactly what "no single global layout" above
+//         permits. See monster_slaver.hpp/.cpp.
 //       - Hexaghost: the Divider per-hit base damage, computed on the ACTIVATE
 //         turn as `player.currentHealth / 12 + 1` (Hexaghost.java:151) and
 //         spent by the six hits of the NEXT turn (:157-165). Another WHOLE-byte

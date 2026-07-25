@@ -904,3 +904,145 @@
                # two-turn opener; getMove (:218-254) never reads its rolled
                # `num`, but every RollMoveAction still consumes an aiRng draw.
                # See monster_hexaghost.cpp.
+
+# --- B3.15: the two slavers + Fungi Beast ------------------------------------
+# SlaverBlue.java, SlaverRed.java and FungiBeast.java read in full. Shared shape:
+#   * every ctor calls setHp(min, max) -> exactly one monster_hp_rng draw
+#     (AbstractMonster.java:765-775), then AbstractMonster.init() calls rollMove
+#     -> exactly one ai_rng.random(99) draw (AbstractMonster.java:705-715).
+#   * ALL THREE takeTurn bodies end in a QUEUED RollMoveAction (SlaverBlue.java:89,
+#     SlaverRed.java:110, FungiBeast.java:97), so each draws one further
+#     ai_rng.random(99) per turn AT DEQUEUE TIME and each registers a
+#     monster_roll_move_fn. Unlike Lagavulin / Slime Boss / Hexaghost, all three
+#     getMove overrides READ that `num`, so the rolled value selects the move and
+#     the tier-2 fixtures pin the roll-driven branch rather than a draw count.
+#   * playSfx / playDeathSfx in all three files roll MathUtils.random, the libgdx
+#     global generator -- NOT one of the game's seeded streams -- so they move
+#     nothing this engine models. (Contrast Mugger.java:139,149, the Act-2 twin of
+#     the Looter, which rolls aiRng for the same sound.)
+#   * NEITHER SLAVER overrides damage() or usePreBattleAction. FungiBeast
+#     overrides damage() (FungiBeast.java:126-133) but the whole body past
+#     super.damage() is the "Hit" spine animation, so its on_monster_damaged case
+#     is explicitly empty (the Sentry precedent).
+# Ascension: the engine's fixed S1 difficulty is A20, so every A2/A7/A17 column
+# below is the live one; the base columns are recorded for completeness. As
+# elsewhere in this file the A_2_* static field NAMES are misleading -- the
+# columns key on the `if (ascensionLevel >= N)` branches, which are 7 for HP and
+# 2 for damage in all three classes.
+#
+# THE LOOTER IS DELIBERATELY ABSENT, and its absence is a finding rather than an
+# omission. Its escape move (Looter.java:126-133 -> EscapeAction ->
+# AbstractMonster.escape, AbstractMonster.java:915-919) IS reachable in Act 1:
+# unlike the gremlins' move 99 it needs no escapeNext()/deathReact() caller
+# (AbstractMonster.java:908-913), it is simply where its own takeTurn state
+# machine ends -- Mug, Mug, then a 50/50 into Smoke Bomb or Lunge, and Smoke Bomb
+# always telegraphs Escape. But an escaped monster is one that is STILL ALIVE and
+# no longer in the fight, and the engine's single liveness signal is hp > 0; the
+# Java's is `isDying || isEscaping` (MonsterGroup.areMonstersBasicallyDead,
+# MonsterGroup.java:90-95, and queueMonsters' isDeadOrEscaped, :117-122). Making
+# escape a terminal state distinct from a kill therefore means teaching the
+# pump's liveness predicate about it, which lives in a file this task does not
+# own. The Looter lands with that predicate rather than half-implemented here.
+
+- id: 23
+  name: SLAVER_BLUE
+  game_id: "SlaverBlue"
+  provenance: "SlaverBlue ctor setHp/damage branches (SlaverBlue.java:48-67), takeTurn incl. the trailing RollMoveAction (:69-90), getMove (:110-129), move ids STAB=1/RAKE=4 (:45-46), stabDmg 12 / A2 13 (:38-39,55-61), rakeDmg 7 / A2 8 (:40-41,55-61), weakAmt 1 / A17 weakAmt+1 (:44,81-86); ID (:29); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 46, max: 50}   # SlaverBlue.java:53 (ascension < 7)
+    a7:   {min: 48, max: 52}   # SlaverBlue.java:51 (ascension >= 7)
+  moves:
+    - name: STAB
+      move_id: 1               # SlaverBlue.java:45
+      intent: ATTACK
+      effects:
+        # damage.get(0) == stabDmg: 12, or 13 from A2 (SlaverBlue.java:55-61,62).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 12, a2: 13}}
+    - name: RAKE
+      move_id: 4               # SlaverBlue.java:46
+      intent: ATTACK_DEBUFF    # getMove's Intent.ATTACK_DEBUFF (:118,125)
+      effects:
+        # damage.get(1) == rakeDmg: 7, or 8 from A2 (SlaverBlue.java:55-61,63).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 8}}
+        # WeakPower(player, weakAmt, true) -- weakAmt is 1, and the A17 branch
+        # applies weakAmt + 1 == 2 (SlaverBlue.java:44,81-86). Unlike GremlinFat's
+        # A17-only Frail this IS an amount branch, so a tier column expresses it.
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 1, a17: 2}, power: WEAK}
+  ai: native   # getMove (SlaverBlue.java:110-129) READS num: `num >= 40 &&
+               # !lastTwoMoves(STAB)` -> Stab; otherwise the A17 branch takes Rake
+               # unless the last move WAS Rake, in which case Stab. A d100 crossed
+               # with the move history -- not an ai_table shape.
+
+- id: 24
+  name: SLAVER_RED
+  game_id: "SlaverRed"
+  provenance: "SlaverRed ctor setHp/damage branches (SlaverRed.java:58-78), takeTurn incl. the trailing RollMoveAction (:80-111), getMove (:138-166), move ids STAB=1/ENTANGLE=2/SCRAPE=3 (:50-52), stabDmg 13 / A2 14 (:43-44,65-71), scrapeDmg 8 / A2 9 (:45-46,65-71), VULN_AMT 1 / A17 VULN_AMT+1 (:49,102-107), usedEntangle/firstTurn latches (:55-56,77,90,140-141); ID (:34); EntanglePower ctor amount 1 (EntanglePower.java:20-29); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 46, max: 50}   # SlaverRed.java:63 (ascension < 7)
+    a7:   {min: 48, max: 52}   # SlaverRed.java:61 (ascension >= 7)
+  moves:
+    - name: STAB
+      move_id: 1               # SlaverRed.java:50
+      intent: ATTACK
+      effects:
+        # damage.get(0) == stabDmg: 13, or 14 from A2 (SlaverRed.java:65-71,72).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 13, a2: 14}}
+    - name: ENTANGLE
+      move_id: 2               # SlaverRed.java:51
+      intent: STRONG_DEBUFF    # setMove(ENTANGLE_NAME, 2, Intent.STRONG_DEBUFF) (:146)
+      effects:
+        # ApplyPowerAction(player, this, new EntanglePower(player)) (:89). The
+        # ctor takes no amount and fixes this.amount = 1 (EntanglePower.java:24),
+        # so the applied stack is a literal 1 at every ascension. The ChangeState
+        # "Use Net" and the EntangleEffect VFX either side of it (:85-88) are
+        # presentation.
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: ENTANGLE}
+    - name: SCRAPE
+      move_id: 3               # SlaverRed.java:52
+      intent: ATTACK_DEBUFF    # getMove's Intent.ATTACK_DEBUFF (:155,162)
+      effects:
+        # damage.get(1) == scrapeDmg: 8, or 9 from A2 (SlaverRed.java:65-71,73).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 8, a2: 9}}
+        # VulnerablePower(player, VULN_AMT, true); VULN_AMT is 1 and the A17
+        # branch applies VULN_AMT + 1 == 2 (SlaverRed.java:49,102-107).
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 1, a17: 2}, power: VULNERABLE}
+  ai: native   # getMove (SlaverRed.java:138-166) is a d100 crossed with TWO
+               # per-instance latches: `firstTurn` forces the opening Stab
+               # (:140-143) and `usedEntangle` gates both the `num >= 75` Entangle
+               # branch and the `num >= 55` Stab branch (:145-152). firstTurn needs
+               # no storage (init IS the only place it is true); usedEntangle lives
+               # in MonsterState.pad0, the monster-type-scoped scratch byte. See
+               # monster_slaver.cpp.
+
+- id: 25
+  name: FUNGI_BEAST
+  game_id: "FungiBeast"
+  provenance: "FungiBeast ctor setHp/strAmt branches (FungiBeast.java:54-73), usePreBattleAction SporeCloudPower(this,2) (:75-78), takeTurn incl. the trailing RollMoveAction (:80-98), getMove (:100-113), damage() animation-only override (:126-133), move ids BITE=1/GROW=2 (:50-51), BITE_DMG 6 (:47,63,66), GROW_STR 3 / A_2_GROW_STR 4 / A17 strAmt+1 (:48-49,61-67,90-94), VULN_AMT 2 (:52,77); ID (:31); SporeCloudPower ctor/onDeath (SporeCloudPower.java:16-42); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 22, max: 28}   # FungiBeast.java:59 (ascension < 7)
+    a7:   {min: 24, max: 28}   # FungiBeast.java:57 (ascension >= 7)
+  moves:
+    - name: BITE
+      move_id: 1               # FungiBeast.java:50
+      intent: ATTACK
+      effects:
+        # damage.get(0) == biteDamage: 6 in BOTH ascension branches
+        # (FungiBeast.java:63,66) -- no tier column, the A2 branch sets the same 6.
+        - {op: DAMAGE, target: PLAYER, amount: 6}
+    - name: GROW
+      move_id: 2               # FungiBeast.java:51
+      intent: BUFF             # setMove(MOVES[0], 2, Intent.BUFF) (:104,111)
+      effects:
+        # StrengthPower(this, strAmt) on ITSELF: strAmt is 3, or 4 from A2
+        # (:62,65), and the A17 branch applies strAmt + 1 == 5 (:90-94).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a2: 4, a17: 5}, power: STRENGTH}
+  ai: native   # getMove (FungiBeast.java:100-113) READS num as a d100 crossed
+               # with the move history: below 60 it bites unless the last two
+               # moves were both Bite (then Grow); at 60+ it grows unless the last
+               # move was Grow (then Bite). usePreBattleAction's Spore Cloud (a
+               # fixed 2, no ascension branch) is queued by monster_fungi_beast.cpp
+               # -- a pre-battle power amount is not one of the schema's tier
+               # columns (the GremlinWarrior/Angry precedent).

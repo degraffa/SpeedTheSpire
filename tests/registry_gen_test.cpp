@@ -404,7 +404,7 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + the 16 red RARE cards (ids 76-91)
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 40u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 42u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -420,7 +420,12 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.27's Confusion (59), applied by the
                                       // Snecko Eye boss relic, not by a card;
                                       // 54-58 are another batch's gap
-    EXPECT_EQ(m::kMonstersCount, 21u); // + B3.14 four small/medium slimes
+                                      // + B3.15's Entangle (73) and Spore Cloud
+                                      // (74), both monster-applied: the Red
+                                      // Slaver's net and the Fungi Beast's
+                                      // on-death release; 60-72 are other
+                                      // batches' block
+    EXPECT_EQ(m::kMonstersCount, 24u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
                                        // Lagavulin (15)
@@ -429,6 +434,12 @@ TEST(RegistryGen, ManifestCounts) {
                                        // + B3.22 Hexaghost (id 22); powers
                                        // unchanged -- it applies only the
                                        // pre-existing Strength row
+                                       // + B3.15's Blue Slaver (23), Red Slaver
+                                       // (24) and Fungi Beast (25). The Looter
+                                       // is NOT among them -- see the block
+                                       // comment in registry/monsters.yaml for
+                                       // why its escape lands with the pump's
+                                       // liveness predicate
     EXPECT_EQ(m::kRelicsCount, 142u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
                                        // + B3.27's 22 boss + 9 Act-1 event specials
     EXPECT_EQ(m::kPotionsCount, 33u);
@@ -436,7 +447,7 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
-    EXPECT_EQ(m::kTotalCount, 367u);  // 91 + 40 + 21 + 142 + 33 + 0 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 372u);  // 91 + 42 + 24 + 142 + 33 + 0 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

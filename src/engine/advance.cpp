@@ -246,6 +246,27 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         }
     }
 
+    // Entangled (the Red Slaver's net, SlaverRed.java:89): while the player holds
+    // it, no ATTACK-type card may be played. AbstractCard.hasEnoughEnergy:872-875
+    // -- `if (player.hasPower("Entangled") && this.type == CardType.ATTACK)
+    // return false` -- so this is a legality predicate, not a power hook, and it
+    // belongs here beside Normality's and Velvet Choker's vetoes. Its POSITION in
+    // canUse is load-bearing and matches theirs: :872 sits inside
+    // hasEnoughEnergy, which canUse reaches LAST (:923), so it applies AFTER the
+    // Medical Kit / Blue Candle unplayable escape hatches -- an ATTACK is not a
+    // curse or a status, so the two never interact today, but the ordering is
+    // what the Java says. The power removes itself at the end of the player's
+    // turn (EntanglePower.atEndOfTurn:41-46, a data hook), so the lock is exactly
+    // one turn long.
+    bool entangled = false;
+    for (uint8_t i = 0; i < state.player_power_count; ++i) {
+        if (state.player_powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::ENTANGLE)) {
+            entangled = true;
+            break;
+        }
+    }
+
     // Velvet Choker (boss relic): a canPlay veto on EVERY card once six have been
     // played this turn (VelvetChoker.canPlay:77-84, reached from
     // AbstractCard.hasEnoughEnergy's relic fan-out, AbstractCard.java:876-879).
@@ -337,6 +358,13 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // and hasEnoughEnergy is the method that runs the relics' canPlay
             // fan-out. So a curse the player CAN play thanks to Blue Candle is
             // still vetoed by a spent Velvet Choker.
+            // Entangled's ATTACK veto sits in hasEnoughEnergy at :872, one line
+            // above the relic canPlay fan-out Velvet Choker rides (:876-879), so
+            // it is applied here -- after the escape hatches, just before the
+            // relic veto.
+            if (entangled && def != nullptr && def->type == CardType::ATTACK) {
+                playable = false;
+            }
             if (velvet_choker_locked) {
                 playable = false;
             }

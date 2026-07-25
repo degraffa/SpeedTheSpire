@@ -314,6 +314,14 @@ void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
     }
 }
 
+void dispatch_on_death(CombatState& s, uint8_t actor) noexcept {
+    // AbstractMonster.die(triggerRelics) (AbstractMonster.java:928-932): the
+    // dying creature's OWN powers, in power-list == application order. The caller
+    // is the monster-death edge in interp_damage.cpp, which fires this before
+    // dispatch_relics_on_monster_death -- the order die() runs the two loops in.
+    dispatch_actor_powers(s, actor, Hook::ON_DEATH, HookContext{});
+}
+
 // --- APPLY_POWER interception ------------------------------------------------
 
 void dispatch_on_apply_power_source(CombatState& s, uint8_t source,

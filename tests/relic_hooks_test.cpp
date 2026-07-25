@@ -950,7 +950,13 @@ TEST(RelicHooksUncommon, DeferredAndRunLayerUncommonsAreCombatNoOps) {
     // Mummified Hand's body is implemented; it stays in this list because its
     // POWER gate (MummifiedHand.java:39) must leave the Strike play below inert.
     r.add(RelicId::MUMMIFIED_HAND);
-    r.add(RelicId::PANTOGRAPH);        // DEFERRED: no EnemyType/BOSS metadata
+    // Pantograph is NOT deferred any more -- relics_uncommon.cpp carries its
+    // body and RelicHooksPantograph.HealsTwentyFiveAtBossBattleStart pins it. It
+    // stays in this list for the same reason as Mummified Hand: its GATE must
+    // leave this fixture inert. MakeState's group is Jaw Worms, whose enemy_type
+    // is NORMAL (AbstractMonster.java:99), so the BOSS scan at
+    // Pantograph.java:33-34 finds nothing and queues no heal.
+    r.add(RelicId::PANTOGRAPH);
     r.add(RelicId::BOTTLED_FLAME);     // acquisition-choice machinery (run layer)
     r.add(RelicId::QUESTION_CARD);     // reward-layer modifier (B4.5)
     r.add(RelicId::THE_COURIER);       // shop-layer modifier (B4.8)
