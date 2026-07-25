@@ -171,6 +171,20 @@ it.
 
 ## 6. Build and test
 
+### Where a new header goes
+
+`include/sts/engine/` is the engine's **published surface** — it is the only
+include directory `sts_engine` exposes (`src/engine/CMakeLists.txt`,
+`target_include_directories(... PUBLIC ...)`). Put a header there only if
+something outside the library includes it (a test, a tool, a future consumer).
+That is why the per-monster headers live there: ten test files include them.
+
+A header whose only consumers are other `.cpp` files in `sts_engine` is
+**internal** and lives beside them, under `src/engine/<module>/` — as with
+`interp/`, `powers/`, `relics/`. Putting internal helpers in the public
+directory advertises them as supported API. If a test later needs one, move
+that header up deliberately rather than pre-emptively.
+
 Engine work builds and tests in **WSL Ubuntu-2404** (default distro, on `E:`;
 GCC 13 / Clang 18 / CMake 3.28 / Ninja; user `alex`, passwordless sudo).
 Presets: `debug`, `asan`, `release`.
