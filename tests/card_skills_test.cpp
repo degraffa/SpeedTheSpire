@@ -501,5 +501,134 @@ TEST(CardSkillsDirected, ArmamentsUpgradeTakesEffectOnLaterPlay) {
     EXPECT_EQ(str->amount, 4) << "the upgraded Flex applies +4 Strength, not +2";
 }
 
+// ===========================================================================
+// UPGRADE eligibility == AbstractCard.canUpgrade (AbstractCard.java:672-680)
+// ===========================================================================
+//
+// canUpgrade rejects CardType.CURSE and CardType.STATUS before it ever looks at
+// `upgraded`. Both are reachable in combat: Writhe is innate (opens in hand) and
+// Wound / Burn / Slimed enter hand mid-combat, while Armaments, Armaments+ and
+// Blessing of the Forge all drive a CHOOSE_CARD{UPGRADE}. Searing Blow overrides
+// canUpgrade with an unconditional `return true` (SearingBlow.java:58-60).
+
+TEST(CardSkillsUpgradeEligibility, CurseInHandIsNotAnUpgradeTarget) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::WRITHE);  // slot 0: CardType.CURSE
+    ASSERT_EQ(card_def(CardId::WRITHE)->type, CardType::CURSE);
+    EXPECT_FALSE(choice_slot_eligible(s, 0, ChoiceKind::UPGRADE))
+        << "canUpgrade returns false for a CURSE regardless of `upgraded`";
+}
+
+TEST(CardSkillsUpgradeEligibility, StatusInHandIsNotAnUpgradeTarget) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::WOUND);   // slot 0: unplayable STATUS
+    AddToHand(s, CardId::BURN);    // slot 1: STATUS with an end-of-turn program
+    AddToHand(s, CardId::SLIMED);  // slot 2: the ONE playable STATUS
+    for (uint8_t slot = 0; slot < 3; ++slot) {
+        ASSERT_EQ(card_def(static_cast<CardId>(s.card_pool[s.hand[slot]].card_id))
+                      ->type,
+                  CardType::STATUS);
+        EXPECT_FALSE(choice_slot_eligible(s, slot, ChoiceKind::UPGRADE))
+            << "slot " << int{slot} << ": canUpgrade rejects every STATUS, "
+            << "including the playable one";
+    }
+}
+
+TEST(CardSkillsUpgradeEligibility, UnupgradedAttackIsAnUpgradeTargetButUpgradedIsNot) {
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::STRIKE);                 // slot 0: upgrade 0
+    AddToHand(s, CardId::BASH, /*upgrade=*/1);    // slot 1: already upgraded
+    EXPECT_TRUE(choice_slot_eligible(s, 0, ChoiceKind::UPGRADE));
+    EXPECT_FALSE(choice_slot_eligible(s, 1, ChoiceKind::UPGRADE))
+        << "the base canUpgrade tail is !upgraded";
+}
+
+TEST(CardSkillsUpgradeEligibility, SearingBlowStaysEligibleWhileAlreadyUpgraded) {
+    // SearingBlow.canUpgrade OVERRIDES the base method, so the CURSE/STATUS
+    // rejections never run for it -- and it is an ATTACK anyway. Its unbounded
+    // timesUpgraded is a u8 in the engine, so only saturation stops it.
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::SEARING_BLOW, /*upgrade=*/0);
+    AddToHand(s, CardId::SEARING_BLOW, /*upgrade=*/3);
+    AddToHand(s, CardId::SEARING_BLOW, /*upgrade=*/UINT8_MAX);
+    ASSERT_EQ(card_def(CardId::SEARING_BLOW)->type, CardType::ATTACK);
+    EXPECT_TRUE(choice_slot_eligible(s, 0, ChoiceKind::UPGRADE));
+    EXPECT_TRUE(choice_slot_eligible(s, 1, ChoiceKind::UPGRADE))
+        << "canUpgrade is always true for Searing Blow";
+    EXPECT_FALSE(choice_slot_eligible(s, 2, ChoiceKind::UPGRADE))
+        << "u8 saturation is the only engine-side bound";
+}
+
+TEST(CardSkillsUpgradeEligibility, ArmamentsForcesWhenCurseAndStatusPadTheHand) {
+    // THE forced-vs-prompted boundary. Base Armaments selects amount 1; the
+    // prompt opens iff the eligible count exceeds it (ArmamentsAction.java:46-60
+    // counts exactly the canUpgrade() cards). Hand after the play holds ONE
+    // upgradeable card plus a curse, a status and an already-upgraded card. With
+    // curses/statuses counted the eligible set would be 3 and a screen would open;
+    // with canUpgrade honored it is 1, so the upgrade is forced onto that card.
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS);                            // slot 0
+    const CardPoolIndex strike = AddToHand(s, CardId::STRIKE);  // the sole eligible
+    const CardPoolIndex writhe = AddToHand(s, CardId::WRITHE);  // CURSE
+    const CardPoolIndex wound = AddToHand(s, CardId::WOUND);    // STATUS
+    const CardPoolIndex bash = AddToHand(s, CardId::BASH, /*upgrade=*/1);
+
+    Play(s, 0);
+
+    ActionMask m{};
+    legal_actions(s, m);
+    EXPECT_FALSE(m.choice_pending)
+        << "exactly one canUpgrade() card -> ArmamentsAction's forced branch";
+    EXPECT_EQ(s.player_block, 5);
+    EXPECT_EQ(s.card_pool[strike].upgrade, 1);
+    EXPECT_EQ(s.card_pool[writhe].upgrade, 0) << "a curse is never upgraded";
+    EXPECT_EQ(s.card_pool[wound].upgrade, 0) << "a status is never upgraded";
+    EXPECT_EQ(s.card_pool[bash].upgrade, 1) << "already upgraded: untouched";
+}
+
+TEST(CardSkillsUpgradeEligibility, ArmamentsPromptMaskExcludesCurseAndStatusSlots) {
+    // Two upgradeable cards -> a real prompt; the curse/status slots must not be
+    // offered in can_choose[] even though the screen is open.
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS);  // slot 0
+    AddToHand(s, CardId::STRIKE);     // -> post-play slot 0
+    AddToHand(s, CardId::WRITHE);     // -> post-play slot 1 (CURSE)
+    AddToHand(s, CardId::DEFEND);     // -> post-play slot 2
+    AddToHand(s, CardId::WOUND);      // -> post-play slot 3 (STATUS)
+
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));
+
+    ActionMask m{};
+    legal_actions(s, m);
+    ASSERT_TRUE(m.choice_pending) << "two eligible vs amount 1 -> the screen opens";
+    EXPECT_TRUE(m.can_choose[0]);
+    EXPECT_FALSE(m.can_choose[1]) << "curse slot is not selectable";
+    EXPECT_TRUE(m.can_choose[2]);
+    EXPECT_FALSE(m.can_choose[3]) << "status slot is not selectable";
+}
+
+TEST(CardSkillsUpgradeEligibility, ArmamentsPlusSkipsCurseAndStatusInTheForcedSweep) {
+    // Armaments+ (amount 99) always takes the forced branch
+    // (ArmamentsAction.java:36-44: upgrade every canUpgrade() card, no screen).
+    // The sweep must touch the attacks/skills only.
+    CombatState s = MakeCombat();
+    AddToHand(s, CardId::ARMAMENTS, /*upgrade=*/1);            // slot 0
+    const CardPoolIndex a = AddToHand(s, CardId::STRIKE);
+    const CardPoolIndex curse = AddToHand(s, CardId::WRITHE);
+    const CardPoolIndex b = AddToHand(s, CardId::DEFEND);
+    const CardPoolIndex status = AddToHand(s, CardId::SLIMED);
+
+    Play(s, 0);
+
+    ActionMask m{};
+    legal_actions(s, m);
+    EXPECT_FALSE(m.choice_pending) << "upgrade-all never prompts";
+    EXPECT_EQ(s.card_pool[a].upgrade, 1);
+    EXPECT_EQ(s.card_pool[b].upgrade, 1);
+    EXPECT_EQ(s.card_pool[curse].upgrade, 0);
+    EXPECT_EQ(s.card_pool[status].upgrade, 0);
+    EXPECT_EQ(s.hand_count, 4) << "upgrading in place never moves a card";
+}
+
 }  // namespace
 }  // namespace sts::engine
