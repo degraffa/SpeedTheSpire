@@ -43,7 +43,20 @@ struct RelicSpawnContext {
     // BottledTornado.canSpawn (:93-95) -> CardHelper.hasCardType(POWER)
     // (CardHelper.java:80-86): any POWER-type master-deck card, ANY rarity.
     bool deck_has_power = false;
+    // Girya / PeacePipe / Shovel canSpawn (Girya.java:538-549 and the two
+    // byte-identical siblings): the number of OWNED relics that are one of those
+    // three -- each spawns only while that count is < 2. Filled by
+    // fill_campfire_relic_count; a draw that does not fill it sees 0, which is
+    // the fresh-run answer.
+    uint8_t campfire_relic_count = 0;
 };
+
+// Count the owned Girya / Peace Pipe / Shovel relics into `ctx`. It lives beside
+// fill_deck_spawn_gates rather than inside the three canSpawn bodies because
+// canSpawn is a PURE predicate over the context (relics/relic_pickup.hpp) -- the
+// bodies must not each re-scan RunState.
+void fill_campfire_relic_count(const RunState& rs,
+                               RelicSpawnContext& ctx) noexcept;
 
 // Fill the deck-content gates above from the run's master deck. "Non-basic" ==
 // CardRarity != BASIC; the only BASIC red rows are Strike/Defend/Bash

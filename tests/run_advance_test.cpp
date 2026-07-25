@@ -208,14 +208,15 @@ TEST(RunBegin, RelicRngConsumesFivePoolShuffleDraws) {
     for (int i = 0; i < kRelicTierCount; ++i) (void)random_long(expect);
     EXPECT_EQ(rc.run.relic_rng.counter, kRelicTierCount);  // exactly 5
     EXPECT_TRUE(streams_equal(rc.run.relic_rng, expect));
-    // B4.6 populated the complete common pool and B3.25 the uncommon pool;
-    // B3.26/B3.27 own rare/shop/boss. Empty tiers still consumed their shuffle
-    // seed above (all five draws are unconditional).
-    EXPECT_EQ(rc.run.relic_pool_count[0], 33);
-    EXPECT_EQ(rc.run.relic_pool_count[1], 30);  // B3.25 uncommons
-    for (int t = 2; t < kRelicTierCount; ++t) {
-        EXPECT_EQ(rc.run.relic_pool_count[t], 0);
-    }
+    // Four of the five Ironclad-obtainable pools are populated; only BOSS is
+    // still empty, and an empty tier still consumed its shuffle seed above (all
+    // five draws are unconditional, which is why the stream state above is
+    // unchanged by any tier gaining rows).
+    EXPECT_EQ(rc.run.relic_pool_count[0], 33);  // COMMON
+    EXPECT_EQ(rc.run.relic_pool_count[1], 30);  // UNCOMMON
+    EXPECT_EQ(rc.run.relic_pool_count[2], 28);  // RARE
+    EXPECT_EQ(rc.run.relic_pool_count[3], 17);  // SHOP
+    EXPECT_EQ(rc.run.relic_pool_count[4], 0);   // BOSS -- still unpopulated
 }
 
 TEST(RunBegin, MapRngAtEndOfGenerateMapAndMapPopulated) {

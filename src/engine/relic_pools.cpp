@@ -123,7 +123,7 @@ void remove_owned_from_pools(RunState& rs) noexcept {
 }  // namespace
 
 void initialize_relic_pools(RunState& rs) noexcept {
-    static_assert(sts::registry::manifest::kRelicsCount == 65,
+    static_assert(sts::registry::manifest::kRelicsCount == 111,
                   "new relic: it joins its tier's dungeon pool at its "
                   "pool_order, which fixes the relicRng shuffle order for that "
                   "tier. Confirm the row's tier is poolable, that pool_order is "
@@ -160,6 +160,25 @@ void initialize_relic_pools(RunState& rs) noexcept {
 
 RelicTier return_random_relic_tier(RunState& rs) noexcept {
     return relic_tier_for_roll(random(rs.relic_rng, 0, 99));
+}
+
+void fill_campfire_relic_count(const RunState& rs,
+                               RelicSpawnContext& ctx) noexcept {
+    // Girya.canSpawn (Girya.java:538-549), PeacePipe.canSpawn (:862-873) and
+    // Shovel.canSpawn (:1024-1035) each walk player.relics counting instances of
+    // PeacePipe, Shovel or Girya and spawn only while that count is < 2. The scan
+    // is identical in all three, so it is done once here and the three predicates
+    // read the number.
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        const uint16_t id = rs.relics[i].relic_id;
+        if (id == static_cast<uint16_t>(RelicId::GIRYA) ||
+            id == static_cast<uint16_t>(RelicId::PEACE_PIPE) ||
+            id == static_cast<uint16_t>(RelicId::SHOVEL)) {
+            ++n;
+        }
+    }
+    ctx.campfire_relic_count = n;
 }
 
 void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept {

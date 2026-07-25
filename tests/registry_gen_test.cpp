@@ -176,7 +176,7 @@ TEST(RegistryGen, DuplicateRelicPoolOrderFailsWithClearError) {
     }
     {
         std::ofstream relics(bad_reg / "relics.yaml", std::ios::app);
-        relics << "\n- id: 66\n  name: DUPLICATE_POOL_SLOT\n"
+        relics << "\n- id: 200\n  name: DUPLICATE_POOL_SLOT\n"
                   "  game_id: \"Duplicate Pool Slot\"\n  tier: COMMON\n"
                   "  pool_order: 0\n"
                   "  provenance: \"synthetic duplicate for the negative test\"\n";
@@ -299,7 +299,8 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
 TEST(RegistryGen, RelicTableMatchesRegistry) {
     namespace r = sts::registry;
-    EXPECT_EQ(r::manifest::kRelicsCount, 65u);  // + B3.25's 30 uncommons
+    EXPECT_EQ(r::manifest::kRelicsCount, 111u);  // + the 28 rares, 17 shop
+                                                 // relics and Odd Mushroom
 
     // Burning Blood (starter, native on_victory).
     const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
@@ -332,7 +333,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
     EXPECT_EQ(r::relic_def(r::RelicId::RED_SKULL)->pool_order, 32);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->pool_order, -1);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->initial_counter, 1);
-    EXPECT_EQ(r::kRelicDefs.size(), 65u);
+    EXPECT_EQ(r::kRelicDefs.size(), 111u);
 
     // --- B3.25 uncommon rows ------------------------------------------------
     // Mercury Hourglass (data): atTurnStart DAMAGE 3 to ALL enemies, THORNS-typed
@@ -379,16 +380,17 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
-    EXPECT_EQ(m::kPowersCount, 27u);  // B3.7 appends Evolve (26) + Fire Breathing (27)
+    EXPECT_EQ(m::kPowersCount, 29u);  // + Buffer (28) and Intangible (29), both
+                                      // applied by a rare relic, not by a card
     EXPECT_EQ(m::kMonstersCount, 11u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
-    EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
+    EXPECT_EQ(m::kRelicsCount, 111u);  // 65 + 28 rare + 17 shop + Odd Mushroom
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 231u);  // integrated through B3.7/B3.20/B3.25
+    EXPECT_EQ(m::kTotalCount, 279u);  // + 46 relic rows and 2 power rows
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

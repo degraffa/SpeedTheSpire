@@ -224,6 +224,10 @@ RELIC_HOOKS = {
     # --- B3.25 additions (append-only, design doc §4.4) ---
     "on_monster_death": 14,         # onMonsterDeath (AbstractMonster.die:933-937)
     "on_shuffle": 15,               # onShuffle (EmptyDeckShuffleAction ctor :37-39)
+    # onBlockBroken (AbstractCreature.brokeBlock:159-167) -- fired ONLY when the
+    # creature whose block was reduced to zero is an AbstractMonster, reached from
+    # decrementBlock (:169-183). Hand Drill.
+    "on_block_broken": 16,
 }
 # RelicTier (AbstractRelic.RelicTier). Pinned/append-only; the translator's relic
 # table joins on it and reward/shop pools gate by it (design doc §5.3).

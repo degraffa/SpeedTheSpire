@@ -132,23 +132,42 @@ void start_of_turn(CombatState& s) noexcept {
     // energy/play; applyStartOfTurnOrbs -- no orbs. No-op without such a power.
     dispatch_at_start_of_turn(s);
 
-    // Energy recharge (EnergyManager.recharge(); see kIroncladBaseEnergy in
-    // action_queue.hpp). The real game performs this every turn via a
-    // presentation-coupled effect that still affects outcomes, so it is in scope.
-    // SET, not additive: any unspent energy from the previous turn does not carry
-    // over.
-    s.player_energy = kIroncladBaseEnergy;
+    // Energy recharge (EnergyManager.recharge(), EnergyManager.java:25-40; see
+    // kIroncladBaseEnergy in action_queue.hpp). The real game performs this every
+    // turn via a presentation-coupled effect that still affects outcomes, so it
+    // is in scope.
+    //
+    // Two branches, not one. The default is EnergyPanel.setEnergy(energyMaster)
+    // -- a SET, so unspent energy does NOT carry over. With Ice Cream owned it is
+    // EnergyPanel.addEnergy(energyMaster) instead: an ADD, capped at 999
+    // (EnergyPanel.addEnergy, EnergyPanel.java:59-68). The third branch, the
+    // Conserve power, is Silent-only and has no registry row. Retires the
+    // stage-a SET-to-constant simplification; the no-relic path below is
+    // byte-identical to the unconditional SET it replaces.
+    if (player_has_relic(s, RelicId::ICE_CREAM)) {
+        int32_t charged =
+            static_cast<int32_t>(s.player_energy) + kIroncladBaseEnergy;
+        if (charged > 999) {
+            charged = 999;
+        }
+        s.player_energy = static_cast<int16_t>(charged);
+    } else {
+        s.player_energy = kIroncladBaseEnergy;
+    }
     // NOTE: monster_attacks_queued is deliberately NOT reset here -- it is
     // cleared at the end-turn sentinel instead (see action_queue.hpp note (2)).
     s.turn_has_ended = 0;                        // this.turnHasEnded = false
     ++s.turn;                                    // ++turn
 
     // Block decay (GameActionManager.java:353-359). Barricade/Blur keep block;
-    // Calipers loses 15 instead of zeroing. The skeleton has none of these, so
-    // the branch STRUCTURE is present but only the default path runs.
+    // Calipers loses 15 (AbstractCreature.loseBlock(int), clamped at 0) instead
+    // of zeroing. Calipers is a registered relic, so its branch is LIVE; the
+    // other two are powers with no registry row yet, so their branch structure is
+    // present but only the default path runs. Blur is Silent-only and out of S1
+    // scope; Barricade is the remaining gap.
     const bool has_barricade = false;  // future: player has Barricade power
     const bool has_blur = false;       // future: player has Blur power
-    const bool has_calipers = false;   // future: player has Calipers relic
+    const bool has_calipers = player_has_relic(s, RelicId::CALIPERS);
     if (!has_barricade && !has_blur) {
         if (!has_calipers) {
             s.player_block = 0;                                  // loseBlock()
@@ -167,9 +186,15 @@ void start_of_turn(CombatState& s) noexcept {
     draw.amount = kStartOfTurnDrawCount;
     draw.flags = 0;
     add_to_bottom(s, draw);
-    // applyStartOfTurnPostDrawRelics -- none. applyStartOfTurnPostDrawPowers
-    // (Brutality/Demon Form): queued AFTER the DrawCardAction (line 362-363), so
-    // its effects resolve after the draw. No-op without such a power.
+    // applyStartOfTurnPostDrawRelics then applyStartOfTurnPostDrawPowers
+    // (GameActionManager.java:361-363), both queued AFTER the DrawCardAction so
+    // their effects resolve after the draw. Relics first, in acquisition order
+    // (Pocketwatch's conditional 3-card draw; Gambling Chip binds this hook too,
+    // with a deferred body). No-op without such a relic or power.
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_at_turn_start_post_draw(s, rv.relics, rv.count);
+    }
     dispatch_at_start_of_turn_post_draw(s);
     // EnableEndTurnButtonAction (line 364) is modeled by step 7 handing control
     // back to the player once the queued DrawCard has drained; no separate item.

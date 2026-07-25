@@ -228,6 +228,12 @@ sts_add_test(relic_hooks_test)
 # canSpawn/fallback behavior, and RunState acquisition/on-pickup effects.
 sts_add_test(relic_pools_test)
 
+# B3.26 RARE + SHOP relic tiers (+ the SPECIAL-tier Odd Mushroom): per-relic
+# combat mechanics, the damage-pipeline and ApplyPowerAction interception
+# relics, the pickup gates, and the asserted inertness of the rows whose bodies
+# are deliberately deferred.
+sts_add_test(relic_rares_shop_test)
+
 # B3.4 red common skills + CHOOSE-in-combat plumbing.
 sts_add_test(card_skills_test)
 

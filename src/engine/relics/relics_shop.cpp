@@ -1,0 +1,125 @@
+// SHOP-tier relics -- native hook bodies. Parameters a body does not read are
+// left unnamed to keep -Wextra quiet; the signature is the uniform RelicNativeFn.
+
+#include "relics_shop.hpp"
+
+#include <cstdint>
+
+#include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
+#include "sts/engine/cards.hpp"         // card_def, CardType (STATUS guard)
+#include "sts/engine/combat_state.hpp"
+#include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
+#include "sts/engine/run_state.hpp"     // RelicSlot
+#include "sts/engine/types.hpp"
+
+namespace sts::engine {
+
+void relic_native_brimstone(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
+                            const RelicHookContext& /*ctx*/) noexcept {
+    // Brimstone.atTurnStart (Brimstone.java:44-51):
+    //     addToBot(RelicAboveCreatureAction)                 -- cosmetic
+    //     addToTop(ApplyPowerAction(player, player, Strength 2))
+    //     for (m : monsters) addToTop(ApplyPowerAction(m, m, Strength 1))
+    //
+    // The calls are reproduced in Java ORDER rather than encoding their result,
+    // because successive addToTop pushes REVERSE: after the loop the queue front
+    // is the LAST monster, then the earlier monsters in descending slot order,
+    // and the player's +2 last of the three groups. Writing the loop the other
+    // way round would look tidier and be wrong.
+    if (hook != RelicHook::AT_TURN_START) {
+        return;
+    }
+    ActionQueueItem self{};
+    self.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    self.src = kActorPlayer;
+    self.tgt = kActorPlayer;
+    self.amount = 2;
+    self.flags = make_apply_power_flags(PowerId::STRENGTH);
+    add_to_top(s, self);
+    // getMonsters().monsters is every monster in the group, dead ones included,
+    // so the loop is over EVERY slot rather than the live ones: the game pushes
+    // an ApplyPowerAction for a corpse too, and ApplyPowerAction.update discards
+    // it on resolve (ApplyPowerAction.java:96-99). Filtering here instead would
+    // change the queue contents, which the observation layer can see.
+    for (uint8_t m = 0; m < s.monster_count; ++m) {
+        ActionQueueItem mon{};
+        mon.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        mon.src = m;
+        mon.tgt = m;
+        mon.amount = 1;
+        mon.flags = make_apply_power_flags(PowerId::STRENGTH);
+        add_to_top(s, mon);
+    }
+}
+
+void relic_native_hand_drill(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
+                             const RelicHookContext& ctx) noexcept {
+    // HandDrill.onBlockBroken (HandDrill.java:31-35): addToBot
+    // ApplyPowerAction(m, player, VulnerablePower(m, 2, false), 2), where `m` is
+    // the creature whose block just broke. Native, not a data step: no
+    // StepTarget encodes "the monster from the event".
+    if (hook != RelicHook::ON_BLOCK_BROKEN) {
+        return;
+    }
+    ActionQueueItem p{};
+    p.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    p.src = kActorPlayer;  // source is the player -> Champion Belt can see it
+    p.tgt = ctx.block_broken_monster;
+    p.amount = 2;
+    p.flags = make_apply_power_flags(PowerId::VULNERABLE);
+    add_to_bottom(s, p);
+}
+
+void relic_native_medical_kit(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
+                              const RelicHookContext& ctx) noexcept {
+    // MedicalKit.onUseCard (MedicalKit.java:1153-1159): a played STATUS card sets
+    // card.exhaust = true and action.exhaustCard = true. Both reduce to the same
+    // thing here: set the played INSTANCE's EXHAUST flag, which
+    // resolve_card_play reads AFTER the hook fan-out when it moves the card out
+    // of hand -- the Blue Candle mechanism.
+    if (hook != RelicHook::ON_USE_CARD) {
+        return;
+    }
+    const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+    if (cd == nullptr || cd->type != CardType::STATUS) {
+        return;
+    }
+    if (ctx.card_pool_index < kCardPoolCap) {
+        s.card_pool[ctx.card_pool_index].flags |= card_flag_bit(CardFlag::EXHAUST);
+    }
+}
+
+// --- DEFERRED combat bodies --------------------------------------------------
+
+void relic_native_orange_pellets(CombatState& /*s*/, RelicHook /*hook*/,
+                                 RelicSlot& /*slot*/,
+                                 const RelicHookContext& /*ctx*/) noexcept {
+    // OrangePellets (OrangePellets.java:1218-1250): atTurnStart clears three
+    // private ATTACK/SKILL/POWER booleans; onUseCard sets the one matching the
+    // played card's type and, once all three are set, addToBot
+    // RemoveDebuffsAction(player) and clears them again.
+    //
+    // DEFERRED as a whole rather than half-implemented: the latch bookkeeping is
+    // only observable through the effect it gates, and that effect has no
+    // representation. RemoveDebuffsAction removes EVERY DEBUFF-type power from
+    // the player, enumerated when the ACTION resolves; the REMOVE_POWER opcode
+    // names one PowerId chosen at queue time, so reproducing it needs a new
+    // opcode whose numbering is append-only and shared. Tracking the latches
+    // without the removal would leave state nothing reads, which is worse than an
+    // honest no-op.
+}
+
+void relic_native_sling_of_courage(CombatState& /*s*/, RelicHook /*hook*/,
+                                   RelicSlot& /*slot*/,
+                                   const RelicHookContext& /*ctx*/) noexcept {
+    // Sling.atBattleStart (Sling.java:1030-1038): if getCurrRoom().eliteTrigger,
+    // addToTop ApplyPowerAction(player, player, StrengthPower 2).
+    //
+    // DEFERRED: eliteTrigger is per-ROOM state the run layer sets when an elite
+    // encounter begins, and CombatState carries no elite marker at all. The gap
+    // is a producer, not a consumer: the body below is one queue_self_power_top
+    // call the moment a combat can answer "did this encounter come from an elite
+    // room?".
+}
+
+}  // namespace sts::engine

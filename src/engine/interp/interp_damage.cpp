@@ -42,7 +42,7 @@ namespace {
 // matters -- a new power cannot land without someone looking at this switch.
 [[nodiscard]] float at_damage_give(float dmg, PowerSlot p,
                                    int strength_mult = 1) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 27,
+    static_assert(sts::registry::manifest::kPowersCount == 29,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -62,19 +62,25 @@ namespace {
 // or *1.75f for a Vulnerable MONSTER when the player owns Paper Phrog
 // (VulnerablePower.java:67-70 -- `!owner.isPlayer && player.hasRelic("Paper
 // Frog")`; live, because Paper Phrog is a registered relic -- this is no longer
-// the unreachable branch the relic-free skeleton documented). The
-// player-side Odd Mushroom *1.25f branch (:64-66) lands with its rare-relic
-// tier, which has no registry rows yet. Without Paper Phrog the 1.5f multiply is
-// byte-identical to a relic-free hook (fixtures unchanged).
+// the unreachable branch the relic-free skeleton documented). The player-side
+// Odd Mushroom *1.25f branch (VulnerablePower.java:64-66) is live too, and is
+// tested FIRST exactly as the Java tests it: `owner.isPlayer && hasRelic("Odd
+// Mushroom")` precedes the Paper Frog test, and the two are mutually exclusive by
+// the owner test anyway. Without either relic the 1.5f multiply is byte-identical
+// to a relic-free hook (fixtures unchanged).
 [[nodiscard]] float at_damage_receive(const CombatState& s, uint8_t owner_actor,
                                       float dmg, PowerSlot p) noexcept {
-    static_assert(sts::registry::manifest::kPowersCount == 27,
+    static_assert(sts::registry::manifest::kPowersCount == 29,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
                   "still a pass-through because no power overrides it yet.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::VULNERABLE:
+            if (owner_actor == kActorPlayer &&
+                player_has_relic(s, RelicId::ODD_MUSHROOM)) {
+                return dmg * 1.25f;                     // VulnerablePower.java:65
+            }
             if (owner_actor != kActorPlayer &&
                 player_has_relic(s, RelicId::PAPER_PHROG)) {
                 return dmg * 1.75f;                     // VulnerablePower.java:68
@@ -85,15 +91,29 @@ namespace {
     }
 }
 
-// atDamageFinalGive / atDamageFinalReceive: no skeleton power overrides these
-// (Strength/Vulnerable/Weak leave AbstractPower's identity default), so both
-// are pass-throughs. Kept as explicit call sites so a future power that hooks
-// the "final" pass slots in without moving the pipeline.
+// atDamageFinalGive: no registered power overrides it (Strength/Vulnerable/Weak
+// leave AbstractPower's identity default). Kept as an explicit call site so a
+// future power that hooks the "final give" pass slots in without moving the
+// pipeline.
 [[nodiscard]] float at_damage_final_give(float dmg, PowerSlot /*p*/) noexcept {
     return dmg;
 }
-[[nodiscard]] float at_damage_final_receive(float dmg, PowerSlot /*p*/) noexcept {
-    return dmg;
+// atDamageFinalReceive: IntangiblePlayerPower caps incoming damage at 1
+// (IntangiblePlayerPower.java:43-49 -- `if (damage > 1.0f) damage = 1.0f`, with
+// NO DamageType test, but this pass only runs for NORMAL damage because THORNS
+// and HP_LOSS skip DamageInfo.applyPowers entirely). The separate,
+// type-agnostic guard in AbstractPlayer.damage (:1397-1399) is what catches
+// those two; see op_damage below.
+[[nodiscard]] float at_damage_final_receive(float dmg, PowerSlot p) noexcept {
+    static_assert(sts::registry::manifest::kPowersCount == 29,
+                  "new power: does it override atDamageFinalReceive (the last "
+                  "target-side pass, as Intangible does)? Add a case here if so.");
+    switch (static_cast<PowerId>(p.power_id)) {
+        case PowerId::INTANGIBLE:
+            return dmg > 1.0f ? 1.0f : dmg;   // IntangiblePlayerPower.java:44-48
+        default:
+            return dmg;
+    }
 }
 
 // Player stance hooks. The skeleton is stanceless (design doc §4.2: stance
@@ -119,6 +139,103 @@ void cards_took_player_damage(CombatState& s) noexcept;
         }
     }
     return false;
+}
+
+// --- Relic/power modifiers on the RECEIVE path (AbstractPlayer.damage) -------
+//
+// AbstractPlayer.damage (AbstractPlayer.java:1387-1512) is one long ordered
+// chain, and these helpers are its steps in that order. LoseHPAction routes
+// through the SAME method with DamageType.HP_LOSS (LoseHPAction.java:41), which
+// is why op_lose_hp calls them too; only decrementBlock and the NORMAL-only
+// onAttacked fan-out differ between the two entry points.
+
+// Step 1 (AbstractPlayer.java:1397-1399), BEFORE decrementBlock:
+//     if (damageAmount > 1 && this.hasPower("IntangiblePlayer")) damageAmount = 1;
+// This guard is type-agnostic, so it also caps THORNS and HP_LOSS -- the damage
+// types that never reach IntangiblePlayerPower.atDamageFinalReceive because they
+// skip DamageInfo.applyPowers. It is on AbstractPlayer only (monsters carry a
+// different IntangiblePower).
+[[nodiscard]] int intangible_cap(const CombatState& s, uint8_t tgt,
+                                 int dmg) noexcept {
+    if (tgt == kActorPlayer && dmg > 1 &&
+        actor_has_power(s, kActorPlayer, PowerId::INTANGIBLE)) {
+        return 1;
+    }
+    return dmg;
+}
+
+// Step 2 (AbstractPlayer.java:1412-1415), after decrementBlock: the VICTIM's
+// powers' onAttackedToChangeDamage. BufferPower.onAttackedToChangeDamage
+// (BufferPower.java:44-47) returns 0 unconditionally and, when the incoming
+// amount was positive, addToTop ReducePowerAction(owner, owner, "Buffer", 1) --
+// so a stack is spent only for a hit that would otherwise have landed, and the
+// return is 0 either way (identical when the amount is already 0).
+[[nodiscard]] int apply_buffer(CombatState& s, uint8_t tgt, int dmg) noexcept {
+    if (!actor_has_power(s, tgt, PowerId::BUFFER)) {
+        return dmg;
+    }
+    if (dmg > 0) {
+        ActionQueueItem reduce{};
+        reduce.opcode = static_cast<uint16_t>(Opcode::REDUCE_POWER);
+        reduce.src = tgt;
+        reduce.tgt = tgt;
+        reduce.amount = 1;
+        reduce.flags = make_apply_power_flags(PowerId::BUFFER);
+        add_to_top(s, reduce);
+    }
+    return 0;
+}
+
+// Step 3 (AbstractPlayer.java:1430-1432): the player's relics' onAttacked, run
+// AFTER the victim powers' onAttacked (Thorns / Flame Barrier). Torii.onAttacked
+// (Torii.java:1197-1205) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
+// into 1. `info.owner != null` holds for every hit this engine produces.
+[[nodiscard]] int apply_torii(const CombatState& s, uint8_t tgt, int dmg,
+                              DamageType type) noexcept {
+    if (tgt == kActorPlayer && type == DamageType::NORMAL && dmg > 1 &&
+        dmg <= 5 && player_has_relic(s, RelicId::TORII)) {
+        return 1;
+    }
+    return dmg;
+}
+
+// Step 4 (AbstractPlayer.java:1433-1435): the player's relics' onLoseHpLast --
+// the LAST modifier before the `if (damageAmount > 0)` block, so a 1-damage hit
+// reduced to 0 here fires no wasHPLost at all. TungstenRod.onLoseHpLast
+// (TungstenRod.java:1238-1245): positive damage becomes damage - 1.
+[[nodiscard]] int apply_tungsten_rod(const CombatState& s, uint8_t tgt,
+                                     int dmg) noexcept {
+    if (tgt == kActorPlayer && dmg > 0 &&
+        player_has_relic(s, RelicId::TUNGSTEN_ROD)) {
+        return dmg - 1;
+    }
+    return dmg;
+}
+
+// Step 5 (AbstractPlayer.java:1487-1493): once the HP write has taken the player
+// below 1, an armed Lizard Tail (counter == -1) revives instead of dying --
+// currentHealth is pinned at 0, onTrigger heals maxHealth/2 (min 1) and sets the
+// counter to -2, and damage() RETURNS so the death branch never runs
+// (LizardTail.java:672-690). Mark of the Bloom and Fairy Potion, which gate this
+// in the Java, have no rows, so their tests are constant-true here.
+void try_lizard_tail(CombatState& s) noexcept {
+    if (s.player_hp > 0) {
+        return;
+    }
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        RelicSlot& slot = s.relics[i];
+        if (slot.relic_id != static_cast<uint16_t>(RelicId::LIZARD_TAIL) ||
+            slot.counter != -1) {
+            continue;
+        }
+        slot.counter = -2;  // setCounter(-2) == usedUp
+        int amount = s.player_max_hp / 2;
+        if (amount < 1) {
+            amount = 1;
+        }
+        heal_player_with_relics(s, amount);
+        return;
+    }
 }
 
 // Blood for Blood.tookDamage: after each positive in-combat player HP-loss
@@ -167,8 +284,12 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     if (hp == nullptr || blk == nullptr) {
         return;
     }
-    int dmg = out;
+    // AbstractPlayer.damage:1397-1399 -- the Intangible cap runs BEFORE
+    // decrementBlock, so a capped hit is soaked by 1 block rather than by its
+    // full pre-cap size.
+    int dmg = intangible_cap(s, tgt, out);
     int block = *blk;
+    const int old_block = block;
     if (dmg >= block) {
         dmg -= block;
         block = 0;
@@ -177,6 +298,17 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         dmg = 0;
     }
     *blk = static_cast<int16_t>(block);
+    // AbstractCreature.decrementBlock -> brokeBlock (AbstractCreature.java:
+    // 159-183): the player's relics' onBlockBroken fan-out fires ONLY when the
+    // creature whose block just hit zero is an AbstractMonster, and only when
+    // that block was positive and the incoming damage was >= it. Hand Drill.
+    if (tgt != kActorPlayer && old_block > 0 && block == 0) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_block_broken(s, rv.relics, rv.count, tgt);
+    }
+    // The victim's powers' onAttackedToChangeDamage (AbstractPlayer.java:
+    // 1412-1415), between decrementBlock and the onAttacked fan-out. Buffer.
+    dmg = apply_buffer(s, tgt, dmg);
     // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire on a
     // NORMAL attack from a DISTINCT attacker -- AFTER decrementBlock and REGARDLESS
     // of whether damage penetrated (Thorns reflects even a fully-blocked hit). A
@@ -186,6 +318,10 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     if (type == DamageType::NORMAL && src != tgt) {
         dispatch_on_attacked(s, tgt, src, dmg);
     }
+    // The player's relics' onAttacked, then onLoseHpLast -- the last two
+    // modifiers before the HP write (AbstractPlayer.java:1430-1435).
+    dmg = apply_torii(s, tgt, dmg, type);
+    dmg = apply_tungsten_rod(s, tgt, dmg);
     const int old_hp = *hp;
     int new_hp = old_hp - dmg;
     if (new_hp < 0) {
@@ -202,6 +338,9 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     dispatch_was_hp_lost(s, tgt, src, hp_lost, static_cast<uint8_t>(type));
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
+    }
+    if (tgt == kActorPlayer) {
+        try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
     }
     // Monster death edge -> relics onMonsterDeath (AbstractMonster.die:933-937;
     // Gremlin Horn). Fires once, when this hit drops the monster from
@@ -234,8 +373,17 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     if (hp == nullptr) {
         return;
     }
+    // LoseHPAction routes through creature.damage() with DamageType.HP_LOSS
+    // (LoseHPAction.java:41), so the player's receive chain runs here too -- minus
+    // decrementBlock (HP_LOSS skips it, AbstractCreature.java:170) and minus
+    // Torii (its own body excludes HP_LOSS). Every one of these is a no-op
+    // without the relic/power that owns it, so the existing self-damage cards
+    // are byte-unchanged.
+    int dmg = intangible_cap(s, tgt, amount);   // AbstractPlayer.java:1397-1399
+    dmg = apply_buffer(s, tgt, dmg);            // AbstractPlayer.java:1412-1415
+    dmg = apply_tungsten_rod(s, tgt, dmg);      // AbstractPlayer.java:1433-1435
     const int old_hp = *hp;
-    int new_hp = old_hp - amount;
+    int new_hp = old_hp - dmg;
     if (new_hp < 0) {
         new_hp = 0;
     }
@@ -247,6 +395,9 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
                          static_cast<uint8_t>(DamageType::HP_LOSS));
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
+    }
+    if (tgt == kActorPlayer) {
+        try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
     }
     // A direct HP loss can also kill a monster -> same die() relic dispatch
     // (AbstractMonster.die:933-937), before the override seam as above.
