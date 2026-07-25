@@ -11,18 +11,35 @@
 # translator's consumer today is the WSL gtest translator_test.
 
 include(FetchContent)
+# Populate the source only (no add_subdirectory of nlohmann's own CMake), then
+# expose its single-header include dir as an INTERFACE target -- same "no
+# sub-build, include-only" shape the root uses for xxHash.
+#
+# xxHash gets that for free: its repo has no top-level CMakeLists.txt, so plain
+# FetchContent_MakeAvailable() populates and stops. nlohmann/json *does* have
+# one, so MakeAvailable would add_subdirectory() it and give us the sub-build
+# this grant is explicitly shaped to avoid (it would also give the dependency a
+# build tree, which is what disqualifies a dependency from the root's shared
+# checkout cache -- see STS_SHARED_DEP_CACHE).
+#
+# SOURCE_SUBDIR is the supported way to suppress that: MakeAvailable only calls
+# add_subdirectory() when <src>/<SOURCE_SUBDIR>/CMakeLists.txt exists, and the
+# docs (CMake >= 3.18) explicitly bless pointing it at a directory that does not
+# exist "to avoid adding a project that contains a CMakeLists.txt file in its
+# top directory". SOURCE_SUBDIR is inert in the ExternalProject sub-build the
+# populate step runs, so it changes nothing about what is checked out.
+#
+# This replaces the deprecated single-argument FetchContent_Populate(), which
+# policy CMP0169 (CMake 3.30) deprecates and which is slated to become an error.
+# The dev env is pinned at 3.28 where the old form still works, but the new form
+# works there too -- it is the same populate, just spelled the supported way.
 FetchContent_Declare(
     nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json.git
     GIT_TAG v3.11.3
+    SOURCE_SUBDIR  sts-populate-only-do-not-add-subdirectory
 )
-# Populate the source only (no add_subdirectory of nlohmann's own CMake), then
-# expose its single-header include dir as an INTERFACE target -- same "no
-# sub-build, include-only" shape the root uses for xxHash.
-FetchContent_GetProperties(nlohmann_json)
-if(NOT nlohmann_json_POPULATED)
-    FetchContent_Populate(nlohmann_json)
-endif()
+FetchContent_MakeAvailable(nlohmann_json)
 add_library(nlohmann_json INTERFACE)
 # SYSTEM so the third-party header does not trip our -Wconversion/-Wshadow wall.
 target_include_directories(nlohmann_json SYSTEM INTERFACE "${nlohmann_json_SOURCE_DIR}/single_include")
