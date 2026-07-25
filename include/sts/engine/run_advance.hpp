@@ -42,8 +42,6 @@
 //   * events / shops / rest sites / treasure rooms: no room content (here:
 //     entering one reseeds the floor streams then parks at
 //     ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
-//   * the A6 / A10 / A14 run-setup HP+curse modifiers: not applied (here: the
-//     base Ironclad sheet). A11 potion slots ARE applied.
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
 //     encounter whose members are not all implemented resolves its composition
 //     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
@@ -69,6 +67,10 @@
 //     no call site yet. Full reasoning at the dispatch in run_advance.cpp.
 //   * AbstractRoom.update battle-over (:277-357): the lifecycle transition points
 //     (COMPLETE -> reward screen); the reward ASSEMBLY is not modelled.
+//   * AbstractDungeon.<init> (AbstractDungeon.java:268-308) + dungeonTransitionSetup
+//     (:2562-2604) + AbstractPlayer.<init> (AbstractPlayer.java:201-221) +
+//     AbstractPlayer.initializeStarterDeck (:357-394): the run-setup ascension
+//     modifier order -- see the block comment on run_setup_max_hp below.
 
 #include <cstdint>
 #include <span>
@@ -171,6 +173,72 @@ struct RunActionMask {
 
 static_assert(std::is_trivially_copyable_v<RunActionMask>);
 
+// --- Run-setup ascension modifiers (registry/a20.yaml rows 5, 6, 10, 11, 14) --
+//
+// THE APPLICATION ORDER IS LOAD-BEARING, and it is derived from the game's own
+// call graph rather than from the order any table happens to list the levels in:
+//
+//   1. AbstractPlayer.<init> (AbstractPlayer.java:211-213): the potion-slot loss,
+//      over the field default potionSlots = 3 (AbstractPlayer.java:144). This is
+//      a CHARACTER constructor -- it runs before the dungeon object exists, so it
+//      is the earliest of the run-setup modifiers. Exposed as potion_slot_count()
+//      (potions.hpp), where the potion layer owns it.
+//   2. AbstractDungeon.<init> (AbstractDungeon.java:287) calls
+//      dungeonTransitionSetup (:2562-2604), whose floorNum <= 1 && Exordium block
+//      applies, in THIS order:
+//        a. the between-act heal (:2582-2586) -- which is ahead of the block, not
+//           in it. At run start the sheet is at full HP (80/80, Ironclad.java:114)
+//           so BOTH of its branches are no-ops; its position still matters,
+//           because sitting ahead of (b) is what stops it ever seeing a reduced
+//           max HP.
+//        b. the max-HP loss (:2591-2593) via decreaseMaxHealth
+//           (AbstractCreature.java:211-223), which subtracts, floors max HP at 1,
+//           and CLAMPS current HP down to the new max. The amount is per
+//           character: Ironclad.getAscensionMaxHPLoss (Ironclad.java:168-170)
+//           returns 5.
+//        c. current HP = MathUtils.round(max HP * 0.9f) (:2594-2596) -- taken of
+//           the ALREADY-REDUCED max. An Ironclad at ascension 20 therefore starts
+//           68/75: not 72/75 (which is what applying (c) before (b) would give)
+//           and not 72/80.
+//        d. masterDeck.addToTop(new AscendersBane()) (:2597-2600).
+//   3. AbstractDungeon.<init> calls p.initializeStarterDeck only afterwards
+//      (:295-296), so the starting 5 Strike / 4 Defend / 1 Bash are appended
+//      AFTER the curse and Ascender's Bane is master-deck index 0.
+
+// The base Ironclad sheet (Ironclad.getLoadout's CharSelectInfo, Ironclad.java:
+// 113-115): 80 max HP at full, 99 gold, 5-card draw.
+inline constexpr int kIroncladBaseMaxHp = 80;
+inline constexpr int kIroncladBaseGold = 99;
+
+// Ironclad.getAscensionMaxHPLoss (Ironclad.java:168-170).
+inline constexpr int kIroncladAscensionMaxHpLoss = 5;
+
+// libGDX MathUtils.round (MathUtils.java:233-235), replicated exactly -- the twin
+// of interp.hpp's mathutils_floor. NOT std::round: this is a floor of (v + 0.5)
+// via the 16384 bias, so exact .5 cases go UP and negatives round differently.
+// 90 % of 75 lands on exactly 67.5f, so the tie behaviour is load-bearing here.
+[[nodiscard]] constexpr int mathutils_round(float value) noexcept {
+    return static_cast<int>(static_cast<double>(value) + 16384.5) - 16384;
+}
+
+// Ironclad max HP after the run-setup max-HP loss, and the current HP after the
+// 90 %-of-max rewrite that follows it. Pure, so the tier-2 rows can be checked
+// without walking a whole run_begin.
+[[nodiscard]] constexpr int run_setup_max_hp(int ascension) noexcept {
+    return ascension >= 14 ? kIroncladBaseMaxHp - kIroncladAscensionMaxHpLoss
+                           : kIroncladBaseMaxHp;
+}
+[[nodiscard]] constexpr int run_setup_hp(int ascension) noexcept {
+    const int max_hp = run_setup_max_hp(ascension);
+    return ascension >= 6 ? mathutils_round(static_cast<float>(max_hp) * 0.9f)
+                          : max_hp;
+}
+
+// Whether the run starts with the Ascender's Bane curse in the master deck.
+[[nodiscard]] constexpr bool run_setup_has_starting_curse(int ascension) noexcept {
+    return ascension >= 10;
+}
+
 // --- API ---------------------------------------------------------------------
 
 // Build the Neow-pending initial run state for (seed, ascension). Reproduces the
@@ -179,10 +247,10 @@ static_assert(std::is_trivially_copyable_v<RunActionMask>);
 // the 5 pool-shuffle draws, mapRng at end-of-generateMap (the full act map is
 // written into run.map). The returned controller is at phase == NEOW.
 //
-// Character sheet is the BASE Ironclad sheet (80/80 HP, 99 gold, 5 Strike / 4
-// Defend / 1 Bash); potion slots apply A11. The remaining A20 run-setup
-// modifiers (A6 90% HP, A10 starting curse, A14 -5 max HP) are NOT applied --
-// see the scope note at the top of this header.
+// Character sheet is the Ironclad sheet (Ironclad.java:113-115) with the
+// run-setup ascension modifiers applied in the game's order (see the block above
+// run_setup_max_hp): potion slots, then max-HP loss, then the 90 %-of-max current
+// HP, then the starting curse, then the starting deck.
 [[nodiscard]] RunController run_begin(int64_t seed, uint8_t ascension) noexcept;
 
 // Fill `out` with the current run-level legal actions for `rc` (see RunActionMask).

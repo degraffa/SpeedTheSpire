@@ -31,6 +31,7 @@
 #include "sts/engine/relic_pools.hpp"      // pool init + acquisition/on-pickup
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
+#include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
 
 namespace sts::engine {
@@ -39,9 +40,13 @@ namespace {
 
 // The Ironclad starting deck (Ironclad.getStartingDeck, Ironclad.java:92-104):
 // 5 Strike, 4 Defend, 1 Bash, in that order (the order is load-bearing -- it is
-// the pre-shuffle master-deck order the combat-start shuffle_rng permutes). The
-// A10 AscendersBane curse is NOT added here (curse content + the A10 modifier are
-// not applied); documented in run_advance.hpp's scope note.
+// the pre-shuffle master-deck order the combat-start shuffle_rng permutes).
+// AbstractPlayer.initializeStarterDeck (AbstractPlayer.java:386-390) appends them
+// with masterDeck.addToTop, which CardGroup.addToTop (CardGroup.java:455-457)
+// implements as a plain ArrayList group.add -- an APPEND, not a head insert
+// (addToBottom, :459-461, is the group.add(0, c) one). So this array lands at the
+// END of whatever the master deck already holds, which at ascension 10+ is the
+// Ascender's Bane the dungeon constructor put there first.
 constexpr CardId kIroncladStartDeck[] = {
     CardId::STRIKE, CardId::STRIKE, CardId::STRIKE, CardId::STRIKE, CardId::STRIKE,
     CardId::DEFEND, CardId::DEFEND, CardId::DEFEND, CardId::DEFEND,
@@ -557,26 +562,56 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     encode_paths_into_run_state(g, rs);   // edges (+ post-path mapRng)
     encode_rooms_into_run_state(ra, rs);  // room types (+ end-of-generateMap mapRng)
 
-    // Base Ironclad sheet (CharSelectInfo: 80/80 HP, 99 gold; Ironclad.java:114).
-    // A11 potion slots are live here through potion_slot_count(). The remaining
-    // The A20 run-setup modifiers (A6 90% HP, A10 curse, A14 -5 max) are NOT
-    // applied -- see run_advance.hpp's scope note.
-    rs.hp = 80;
-    rs.max_hp = 80;
-    rs.gold = 99;
-    rs.potion_slots = static_cast<uint8_t>(potion_slot_count(ascension));
+    // The character sheet + the run-setup ascension modifiers, in the game's
+    //     own application order (derived in full in run_advance.hpp, above
+    //     run_setup_max_hp). Summarised: the potion-slot loss comes from the
+    //     AbstractPlayer constructor, so it is first; then dungeonTransitionSetup
+    //     runs the (no-op at full HP) between-act heal, the max-HP loss, and the
+    //     90 %-of-the-REDUCED-max current HP; then the curse; and only then does
+    //     the dungeon constructor call initializeStarterDeck.
+    const int asc = static_cast<int>(ascension);
 
-    // Starting deck (5 Strike / 4 Defend / 1 Bash) into the master deck.
+    // Ironclad loadout (Ironclad.getLoadout, Ironclad.java:113-115).
+    rs.gold = kIroncladBaseGold;
+    rs.potion_slots = static_cast<uint8_t>(potion_slot_count(asc));
+
+    // The between-act heal (AbstractDungeon.java:2582-2586) is a no-op here on
+    // BOTH branches: the sheet arrives at full HP, so missing HP is 0 and the
+    // else-branch heal(maxHealth) is equally saturated. It is named rather than
+    // written because its only observable contribution at run start is its
+    // POSITION -- ahead of the max-HP loss below.
+    rs.max_hp = static_cast<int16_t>(run_setup_max_hp(asc));
+    rs.hp = static_cast<int16_t>(run_setup_hp(asc));
+
+    // The starting curse (AbstractDungeon.java:2597-2600) goes in BEFORE the
+    // starting deck, because AbstractDungeon.<init> calls dungeonTransitionSetup
+    // (:287) and only then initializeStarterDeck (:295-296) -- the master deck is
+    // empty at this point, so Ascender's Bane ends up at index 0.
+    //
+    // It walks through add_card_to_master_deck (run_deck.hpp), the sanctioned
+    // master-deck door, rather than the bulk write below. Two reasons. The door's
+    // insert position is an append at master_deck_count, which is exactly what
+    // CardGroup.addToTop does (CardGroup.java:455-457). And the obtain-time relic
+    // pass the door runs is provably empty at this point: relic_count is still 0
+    // here (the starting relic is acquired further down), and even in the game --
+    // where initializeStarterRelics has already run in the AbstractPlayer
+    // constructor (AbstractPlayer.java:209) -- the call site is a raw CardGroup
+    // insert that never reaches obtainCard, and Burning Blood carries no
+    // on_obtain_card binding either way. A named test pins that the pass changes
+    // nothing so the equivalence cannot rot silently.
+    if (run_setup_has_starting_curse(asc)) {
+        (void)add_card_to_master_deck(rs, CardId::ASCENDERS_BANE);
+    }
+
+    // Starting deck (5 Strike / 4 Defend / 1 Bash) appended after it.
     constexpr int kDeckN = static_cast<int>(sizeof(kIroncladStartDeck) /
                                             sizeof(kIroncladStartDeck[0]));
     for (int i = 0; i < kDeckN; ++i) {
-        rs.master_deck[i].card_id = static_cast<uint16_t>(kIroncladStartDeck[i]);
-        rs.master_deck[i].upgrade = 0;
-        rs.master_deck[i].cost_now = 0;
-        rs.master_deck[i].flags = 0;
-        rs.master_deck[i].misc = 0;
+        CardInstance& c = rs.master_deck[rs.master_deck_count];
+        c = CardInstance{};
+        c.card_id = static_cast<uint16_t>(kIroncladStartDeck[i]);
+        ++rs.master_deck_count;
     }
-    rs.master_deck_count = static_cast<uint16_t>(kDeckN);
 
     // Starting relic: Burning Blood (Ironclad.getStartingRelics, Ironclad.java:86),
     // acquisition index 0 (== trigger order, trap 8). Its onVictory heal fires

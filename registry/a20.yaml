@@ -12,7 +12,178 @@
 # (stage-a §11 rule). This domain generates no enum; codegen validates entries and
 # reports the row count in the manifest only.
 #
-# Empty in the skeleton (stage-a design §9 / §11: the A20 modifier table is
-# deliberately deferred). Populating this domain is a later task; the file exists now
-# so codegen reports a zero row-count manifest entry cleanly.
-[]
+# ONE ROW PER ASCENSION LEVEL, and `id` == `level`. Design §6's table groups
+# levels that share a mechanism family (A2/A3/A4, A7/A8/A9, A17/A18/A19); this
+# file splits them so "one row per modifier" is literal and every §6 table row
+# maps onto at least one row here. There will never be a level 21, so id == level
+# stays append-only by construction.
+#
+# `notes` opens with the row's S1 STATUS, one of:
+#   IMPLEMENTED (<where>)   -- live in the sim, with tier-2 tests
+#   N/A-FOR-S1 (<reason>)   -- deliberately not implemented; the reason is frozen
+#
+# THE NEGATIVE FREEZE. Design §6's "negative results, frozen so nobody 'fixes'
+# them in later reading" list is recorded here as `no-such-modifier` statements so
+# that a later reader who "finds" one of these has to delete a written line rather
+# than merely add code. Each carries the line that was read to establish it:
+#
+#   no-such-modifier: campfire heal -- RestOption.<init> (RestOption.java:25)
+#     computes healAmt = (int)(maxHealth * 0.3f) with NO ascensionLevel branch
+#     anywhere in the constructor; the only modifiers are the Night Terrors daily
+#     mod and the endless-mode FullBelly blight.
+#   no-such-modifier: potion-drop chance -- AbstractRoom.addPotionToRewards
+#     (AbstractRoom.java:580-607) sets chance = 40 for elite/monster/event rooms,
+#     adjusts it only by blizzardPotionMod (the +-10 ratchet at :604-606) and the
+#     White Beast Statue override; no ascensionLevel appears in the method.
+#   no-such-modifier: normal-combat gold -- AbstractRoom.update
+#     (AbstractRoom.java:324) is treasureRng.random(10, 20), unbranched.
+#   no-such-modifier: elite-combat gold -- AbstractRoom.update
+#     (AbstractRoom.java:316) is treasureRng.random(25, 35), unbranched. Only the
+#     BOSS payout has an ascension branch (that is row id 13).
+#   no-such-modifier: card-reward RARITY -- AbstractDungeon.rollRarity
+#     (AbstractDungeon.java:1597-1603) is cardRng.random(99) + cardBlizzRandomizer
+#     handed to getCardRarity; getCardRarityFallback (:1606-1614) hard-codes
+#     rareRate = 3 / 40. No ascensionLevel term on either path.
+#
+# Rows 12 and 20 are the two ascension levels that are themselves negatives in S1;
+# they carry their own N/A-FOR-S1 reason below.
+
+- id: 1
+  level: 1
+  scope: run-setup
+  mechanic: "elite room quota x1.6 during map room-type assignment"
+  provenance: "AbstractDungeon.generateRoomTypes (AbstractDungeon.java:571-573): ascensionLevel >= 1 -> eliteCount = Math.round(availableRoomCount * eliteRoomChance * 1.6f), else Math.round(availableRoomCount * eliteRoomChance). Act-1 eliteRoomChance = 0.08f (Exordium.java:99)."
+  notes: "IMPLEMENTED (assign_room_types, map_rooms.hpp -- the ascension argument run_begin already passes through). Pinned by the elite-quota row test."
+
+- id: 2
+  level: 2
+  scope: monster
+  mechanic: "normal-monster damage and move parameters"
+  provenance: "Per-monster constructor / getMove branches on ascensionLevel >= 2, e.g. Cultist.<init> (Cultist.java:66): ritualAmount = ascensionLevel >= 2 ? 4 : 3."
+  notes: "IMPLEMENTED (per-monster, as the per-tier columns of registry/monsters.yaml -- design §4.2). No number lives in this row; each monster row cites its own branch."
+
+- id: 3
+  level: 3
+  scope: monster
+  mechanic: "elite-monster damage and move parameters"
+  provenance: "Per-elite constructor branches on ascensionLevel >= 3, e.g. GremlinNob.<init> (GremlinNob.java:72-74): bashDmg = 8, rushDmg = 16 (else the lower pair)."
+  notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the elites that exist; elites not yet landed carry the branch with their own row."
+
+- id: 4
+  level: 4
+  scope: monster
+  mechanic: "boss damage and move parameters"
+  provenance: "Per-boss constructor branches on ascensionLevel >= 4, e.g. TheGuardian.<init> (TheGuardian.java:107-109): fierceBashDamage = 36, rollDamage = 10; SlimeBoss.<init> (SlimeBoss.java:94-96): tackleDmg = 10, slamDmg = 38."
+  notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the Act-1 bosses that exist."
+
+- id: 5
+  level: 5
+  scope: run-setup
+  mechanic: "between-act heal is 75% of MISSING HP instead of a full heal"
+  provenance: "AbstractDungeon.dungeonTransitionSetup (AbstractDungeon.java:2582-2586): ascensionLevel >= 5 -> player.heal(MathUtils.round((maxHealth - currentHealth) * 0.75f), false), else player.heal(maxHealth, false)."
+  notes: "N/A-FOR-S1 at run setup: the same line runs on the floor-0 entry, but the character sheet arrives at full HP (80/80, Ironclad.java:114), so missing HP is 0 and BOTH branches are no-ops. It only bites as the post-boss between-act heal, which is Act 2 (out of S1 scope, design §1.1). Its POSITION is still load-bearing and is honoured: it runs BEFORE the A14/A6/A10 block, so it can never see the reduced max HP. Pinned by the run-setup sweep."
+
+- id: 6
+  level: 6
+  scope: run-setup
+  mechanic: "act starts at 90% of max HP"
+  provenance: "AbstractDungeon.dungeonTransitionSetup (AbstractDungeon.java:2594-2596): ascensionLevel >= 6 -> currentHealth = MathUtils.round(maxHealth * 0.9f). MathUtils.round (MathUtils.java:233-235) is (int)((double)v + 16384.5) - 16384."
+  notes: "IMPLEMENTED (run_begin). ORDER IS LOAD-BEARING: this runs AFTER the A14 max-HP loss inside the same floorNum <= 1 block, so at A14+ the 90% is taken of the ALREADY-REDUCED max. Ironclad: 90% of 75 = 67.5 -> 68, not 90% of 80 = 72."
+
+- id: 7
+  level: 7
+  scope: monster
+  mechanic: "normal-monster HP roll range"
+  provenance: "Per-monster constructor branches on ascensionLevel >= 7, e.g. Cultist.<init> (Cultist.java:59-63): setHp(50, 56) instead of setHp(48, 54)."
+  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml)."
+
+- id: 8
+  level: 8
+  scope: monster
+  mechanic: "elite-monster HP roll range"
+  provenance: "Per-elite constructor branches on ascensionLevel >= 8, e.g. GremlinNob.<init> (GremlinNob.java:67-71): setHp(85, 90) instead of setHp(82, 86)."
+  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml) for the elites that exist."
+
+- id: 9
+  level: 9
+  scope: monster
+  mechanic: "boss HP roll range"
+  provenance: "Per-boss constructor branches on ascensionLevel >= 9, e.g. TheGuardian.<init> (TheGuardian.java:100-102): setHp(250) + dmgThreshold 35 instead of setHp(240) + 30; SlimeBoss.<init> (SlimeBoss.java:89-93): setHp(150) instead of setHp(140). Some bosses add a further >= 19 tier ahead of this one (TheGuardian.java:97-99 keeps 250 HP but raises dmgThreshold to 40)."
+  notes: "IMPLEMENTED (per-monster hp columns in registry/monsters.yaml) for the Act-1 bosses that exist."
+
+- id: 10
+  level: 10
+  scope: run-setup
+  mechanic: "Ascender's Bane curse added to the master deck at run start"
+  provenance: "AbstractDungeon.dungeonTransitionSetup (AbstractDungeon.java:2597-2600): ascensionLevel >= 10 -> player.masterDeck.addToTop(new AscendersBane()). CardGroup.addToTop (CardGroup.java:455-457) is group.add(c) -- an ArrayList APPEND (addToBottom, :459-461, is the group.add(0, c) one). AscendersBane.<init> (AscendersBane.java:23-26): cost -2, CURSE/SPECIAL, isEthereal."
+  notes: "IMPLEMENTED (run_begin). POSITION IS LOAD-BEARING: AbstractDungeon.<init> calls dungeonTransitionSetup at AbstractDungeon.java:287 and p.initializeStarterDeck only at :295-296, so the master deck is EMPTY when the curse is appended and the starting 5 Strike / 4 Defend / 1 Bash (AbstractPlayer.initializeStarterDeck, AbstractPlayer.java:386-390, also addToTop) land AFTER it. Ascender's Bane is therefore master-deck index 0."
+
+- id: 11
+  level: 11
+  scope: run-setup
+  mechanic: "one fewer potion slot (3 -> 2)"
+  provenance: "AbstractPlayer.<init> (AbstractPlayer.java:211-213): ascensionLevel >= 11 -> --potionSlots, over the field default potionSlots = 3 (AbstractPlayer.java:144); the slot list is then built to that count (:214-217)."
+  notes: "IMPLEMENTED (potion_slot_count, potions.hpp; stored into RunState by run_begin). Applied EARLIEST of all run-setup modifiers: it is in the AbstractPlayer constructor, which runs before the AbstractDungeon constructor that calls dungeonTransitionSetup."
+
+- id: 12
+  level: 12
+  scope: economy
+  mechanic: "card rewards can arrive pre-upgraded"
+  provenance: "Exordium.initializeLevelSpecificChances (Exordium.java:107): cardUpgradedChance = 0.0f for Act 1, so the A12 branch has nothing to scale in Exordium."
+  notes: "N/A-FOR-S1 (frozen negative, design §6): A12 is a NO-OP in Act 1 because Exordium pins the upgrade chance to 0.0f. S1 is Act 1 only (design §1.1), so no A12 modifier may be added to the sim. no-such-modifier for S1."
+
+- id: 13
+  level: 13
+  scope: economy
+  mechanic: "boss combat gold x0.75"
+  provenance: "AbstractRoom.update battle-over block (AbstractRoom.java:291-296): tmp = 100 + miscRng.random(-5, 5); ascensionLevel >= 13 -> addGoldToRewards(MathUtils.round(tmp * 0.75f)), else addGoldToRewards(tmp). The miscRng draw happens on BOTH branches, so the stream is unaffected by the level."
+  notes: "N/A-FOR-S1 for now: combat REWARD ASSEMBLY is not modelled at the run layer (run_advance.hpp scope note) -- the reward screen exists and assembles nothing, so there is no gold payout to scale. The row records the verified number for the reward-assembly owner. NOTE the negative twin: normal and elite gold have no such branch (see the no-such-modifier block at the top of this file)."
+
+- id: 14
+  level: 14
+  scope: run-setup
+  mechanic: "-5 max HP at run start (character-specific amount)"
+  provenance: "AbstractDungeon.dungeonTransitionSetup (AbstractDungeon.java:2591-2593): ascensionLevel >= 14 -> player.decreaseMaxHealth(player.getAscensionMaxHPLoss()). Ironclad.getAscensionMaxHPLoss (Ironclad.java:168-170) returns 5. AbstractCreature.decreaseMaxHealth (AbstractCreature.java:211-223) subtracts, floors maxHealth at 1, and CLAMPS currentHealth down to the new maxHealth."
+  notes: "IMPLEMENTED (run_begin). Runs FIRST of the three floorNum <= 1 modifiers, ahead of A6 -- see row 6. The clamp in decreaseMaxHealth is why HP is 75 for one statement before A6 rewrites it."
+
+- id: 15
+  level: 15
+  scope: event
+  mechanic: "harsher event branches, per event"
+  provenance: "Per-event branches on ascensionLevel >= 15, e.g. WomanInBlue.<init> (WomanInBlue.java:47-51) swaps the leave option's text for a MathUtils.ceil(maxHealth * 0.05f) HP cost, and WomanInBlue.buttonEffect case 3 (WomanInBlue.java:96-98) applies that HP_LOSS damage."
+  notes: "N/A-FOR-S1 for now: no event bodies exist yet (registry/events.yaml is empty; ?-rooms park at an unimplemented stall). Each event lands its own >= 15 branch with its own row when its owning task lands it."
+
+- id: 16
+  level: 16
+  scope: economy
+  mechanic: "shop prices x1.1"
+  provenance: "ShopScreen.init (ShopScreen.java:227-229): ascensionLevel >= 16 -> applyDiscount(1.1f, false) (a price MULTIPLIER despite the name), applied before The Courier's 0.8f."
+  notes: "N/A-FOR-S1 for now: shops are not modelled (run_advance.hpp scope note -- a shop room parks at an unimplemented stall). Row records the verified number for the shop owner."
+
+- id: 17
+  level: 17
+  scope: monster
+  mechanic: "normal-monster special behavior"
+  provenance: "Per-monster getMove/takeTurn branches on ascensionLevel >= 17, e.g. Cultist.takeTurn (Cultist.java:95-97): RitualPower(this, ritualAmount + 1, false) instead of the plain ritualAmount."
+  notes: "IMPLEMENTED (per-monster, in each monster's own module + registry row)."
+
+- id: 18
+  level: 18
+  scope: monster
+  mechanic: "elite-monster special behavior"
+  provenance: "Per-elite branches on ascensionLevel >= 18, e.g. GremlinNob.takeTurn (GremlinNob.java:92-95): AngerPower(this, 3) applied 3 instead of AngerPower(this, 2) applied 2."
+  notes: "IMPLEMENTED (per-monster) for the elites that exist."
+
+- id: 19
+  level: 19
+  scope: monster
+  mechanic: "boss special behavior"
+  provenance: "Per-boss branches on ascensionLevel >= 19, e.g. SlimeBoss.takeTurn case 4 (SlimeBoss.java:125-127): MakeTempCardInDiscardAction(new Slimed(), 5) instead of 3; TheGuardian.<init> (TheGuardian.java:97-99): dmgThreshold 40 instead of the >= 9 tier's 35."
+  notes: "IMPLEMENTED (per-monster) for the Act-1 bosses that exist."
+
+- id: 20
+  level: 20
+  scope: monster
+  mechanic: "double boss on the final act"
+  provenance: "ProceedButton.update (ProceedButton.java:100-104): ascensionLevel >= 20 && bossList.size() == 2 -> goToDoubleBoss(), gated on AbstractDungeon.id.equals(\"TheBeyond\"). AbstractMonster.onFinalBossVictoryLogic (AbstractMonster.java:1058-1060) reads the same pair."
+  notes: "N/A-FOR-S1 (frozen negative, design §6): the double boss is Act-3-only (the TheBeyond gate above) and S1 is Act 1 (design §1.1). A20 adds NOTHING to an Act-1 run beyond the union of levels 1..19. no-such-modifier for S1."
