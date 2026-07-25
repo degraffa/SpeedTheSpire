@@ -360,6 +360,28 @@ both binaries, alternate them, and report the pair-wise delta with a noise
 estimate. If load makes a number untrustworthy, **say it is unmeasured** rather
 than publishing it.
 
+> **ELIMINATED 2026-07-25: `tools/bench_ab.sh` — the only sanctioned way to
+> compare two builds.** It takes two Google Benchmark binaries and *can only*
+> measure interleaved (a discarded warm-up pair, then A B A B … for `-n`
+> pairs), parses `items_per_second=<N>M/s`, and prints every pair's delta plus
+> the mean, sd and standard error.
+>
+> ```bash
+> tools/bench_ab.sh -n 5 /tmp/bench_A /tmp/bench_B          # inside WSL
+> tools/wsl_run.sh --script tools/bench_ab.sh -n 5 A B      # from Windows
+> ```
+>
+> When `|mean| <= 2 × sem` it prints `RESULT: UNMEASURED` and exits **3**
+> instead of a headline — that is a valid answer meaning "the box is louder than
+> the effect", and it is what you report. Exit 0 carries the delta with its 95%
+> band. Calibration on this box, two copies of one binary: per-pair deltas
+> ranged −2.8% … +2.4% and the verdict was UNMEASURED — that spread is the size
+> of the effects both bad measurements above claimed to have found. The script
+> never builds anything, so it cannot measure the wrong tree; comparing two
+> commits means building each into its own tree and passing both binaries. A run
+> that yields no result (crash, assert, empty filter) is an error, never half a
+> comparison.
+
 **`git branch --merged` and `git cherry` both lie here.** Integration edits the
 ledger while cherry-picking, so a landed branch's patch-id no longer matches
 anything on `master` — both tools report the work as unlanded. To check whether
