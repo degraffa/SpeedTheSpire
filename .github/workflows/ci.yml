@@ -5,6 +5,23 @@ on:
   pull_request:
 
 jobs:
+  # A pass count baked into a committed file is stale the next time the suite
+  # grows (conventions §8). The check lives in tools/check_stale_counts.sh
+  # rather than inline here on purpose: whoever is about to write the number
+  # must be able to run the same check locally and get the same answer -- a
+  # rule only CI can evaluate is one you learn about after the commit exists.
+  # This job is only the enforcement point. It is separate from build-and-test
+  # because it needs no toolchain and should answer in seconds rather than
+  # behind an LTO build.
+  stale-numbers:
+    name: stale numbers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: No committed file may assert a test-pass count
+        run: bash tools/check_stale_counts.sh
+
   build-and-test:
     name: ${{ matrix.preset }}
     runs-on: ubuntu-latest

@@ -213,21 +213,44 @@ error` so this fails loudly instead; do not remove it. This was found by
 accident, not by design — assume any *new* test target is not running until you
 have seen its name in `ctest -N`.
 
-### Calling WSL from the Windows host (hard-won — read before scripting it)
+### Calling WSL from the Windows host — use `tools/wsl_run.sh`
 
-The harness's Git-Bash layer mangles `$VAR` and bare `/mnt/...` arguments
-forwarded to `wsl`. **Run multi-line WSL work from a script file:**
-
-```bash
-MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash /mnt/c/.../script.sh
-```
-
-For a one-shot build/test:
+**ELIMINATED 2026-07-25: `tools/wsl_run.sh` (+ `tools/wsl_run.cmd` for
+cmd/PowerShell callers) is now the sanctioned form. It crosses the boundary
+once, correctly, and refuses arguments it cannot carry; hand-rolled `wsl`
+invocations are no longer the documented workaround.**
 
 ```bash
-MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -lc 'cd /mnt/d/STS_BG_Mod/SpeedTheSpire \
-  && cmake --preset debug && cmake --build --preset debug && ctest --preset debug'
+tools/wsl_run.sh debug                  # configure + build + test one preset
+tools/wsl_run.sh debug asan release     # all three, one PASS/FAIL summary at the end
+tools/wsl_run.sh release -DSTS_BUILD_BENCHMARKS=ON
+tools/wsl_run.sh --script tools/bench_ab.sh A B   # run a script file inside WSL
 ```
+
+The same command line works from Git-Bash, from cmd/PowerShell (via the
+`.cmd`), and from inside WSL. Each worktree runs its own copy against its own
+tree, so there is no path to edit.
+
+**Why it exists — the trap it removes.** The harness's Git-Bash layer mangles
+`$VAR` and bare `/mnt/...` arguments forwarded to `wsl`. The `$VAR` half is the
+dangerous one, because it fails *silently*:
+
+```bash
+MSYS_NO_PATHCONV=1 wsl -d Ubuntu-2404 -- bash -c 'printf "[%s]" "$1"' _ x
+# prints []  -- the boundary substituted $1 before WSL's bash ever saw the string
+```
+
+An orchestrator loop over `for p in debug asan release` lost its variable that
+way and returned three empty results that looked like runs. The old workaround
+("run multi-line work from a script file") was correct and was still hand-rolled
+at every call site, which is why the trap kept firing — §7.
+
+`wsl_run.sh` never interpolates across the boundary: it forwards a fixed argv,
+re-executes itself inside WSL where all the shell code lives, sets
+`MSYS_NO_PATHCONV=1` itself, derives its own `/mnt/<drive>/...` path from its
+location, and **exits 2 on any argument containing `$`** rather than run a
+command that has quietly lost a word. It also always builds before it tests, so
+the `_NOT_BUILT` trap above cannot be reached through it.
 
 A cold WSL start can fail with `0x800705aa` under memory pressure — retry
 after freeing RAM.
@@ -329,6 +352,23 @@ Logs are correct only on the day they are written. A stale count (454, when the
 tree was at 526) was copied out of a Log into four separate task briefs before
 anyone checked. `ctest -N | tail -1` is the source of truth.
 
+> **ELIMINATED 2026-07-25: `tools/check_stale_counts.sh`, run by hand and by a
+> `stale-numbers` CI job on every push.** It fails when a committed file asserts
+> a pass count — an equal `<N>/<N>` ratio on a line that also talks about tests,
+> an `<N>/<M> tests` count, or "all *N* tests pass" in prose. It reads tracked
+> *and* untracked-but-not-ignored files, so it catches the number before you
+> stage it; `--help` lists the patterns. Run it from **Git-Bash on the Windows
+> host** (or in CI) — it is a git-side check, so the §6 gitdir trap applies and
+> it cannot run through WSL; note that `bash` on the PowerShell `PATH` *is*
+> WSL's bash. Deliberately **not** scanned:
+> `docs/stage-*-log.md` (append-only archives of past runs), and the `[x]` /
+> `[!]` lines of `docs/stage-*-tasks.md` (a landed entry recording what was
+> green when it landed is history, and §2 requires it) — but `[ ]` and `[~]`
+> lines *are* scanned, because a pending task brief quoting a count is exactly
+> the incident above. A line carrying `stale-count-ok` is skipped; that hatch is
+> for prose about a past incident, not for new claims. If it fires on a file you
+> are editing, the number is already a liability: delete it and cite `ctest -N`.
+
 **Benchmark A/B must be interleaved.** This box drifts by more than the effects
 being measured. Two separate measurements this project has taken were wrong
 until re-run as interleaved A/B/A/B pairs — one reported a spurious −1.4%, the
@@ -336,6 +376,28 @@ other a spurious 5.1s saving that a direct measurement showed to be noise. Build
 both binaries, alternate them, and report the pair-wise delta with a noise
 estimate. If load makes a number untrustworthy, **say it is unmeasured** rather
 than publishing it.
+
+> **ELIMINATED 2026-07-25: `tools/bench_ab.sh` — the only sanctioned way to
+> compare two builds.** It takes two Google Benchmark binaries and *can only*
+> measure interleaved (a discarded warm-up pair, then A B A B … for `-n`
+> pairs), parses `items_per_second=<N>M/s`, and prints every pair's delta plus
+> the mean, sd and standard error.
+>
+> ```bash
+> tools/bench_ab.sh -n 5 /tmp/bench_A /tmp/bench_B          # inside WSL
+> tools/wsl_run.sh --script tools/bench_ab.sh -n 5 A B      # from Windows
+> ```
+>
+> When `|mean| <= 2 × sem` it prints `RESULT: UNMEASURED` and exits **3**
+> instead of a headline — that is a valid answer meaning "the box is louder than
+> the effect", and it is what you report. Exit 0 carries the delta with its 95%
+> band. Calibration on this box, two copies of one binary: per-pair deltas
+> ranged −2.8% … +2.4% and the verdict was UNMEASURED — that spread is the size
+> of the effects both bad measurements above claimed to have found. The script
+> never builds anything, so it cannot measure the wrong tree; comparing two
+> commits means building each into its own tree and passing both binaries. A run
+> that yields no result (crash, assert, empty filter) is an error, never half a
+> comparison.
 
 **`git branch --merged` and `git cherry` both lie here.** Integration edits the
 ledger while cherry-picking, so a landed branch's patch-id no longer matches
