@@ -1221,6 +1221,58 @@ not inferred: focused translator **16/16**, focused B3.7 **12/12**, complete
 debug **526/526**, and leak-detecting ASan/UBSan **526/526**. No schema, layout,
 or ID change.
 
+<a id="b38"></a>
+
+### B3.8 `[x]` ∥ Red rares
+**Deps:** B3.2 · **Provenance:** cards/red RARE (16)
+**Deliverables:** registry entries: Barricade, Berserk, Bludgeon, Brutality,
+Corruption, Demon Form, Double Tap, Exhume, Feed, Fiend Fire, Immolate,
+Impervious, Juggernaut, Limit Break, Offering, Reaper. Wires the block-decay
+Barricade branch A3.1 left structural, Corruption's cost/exhaust rewrite,
+Feed/Reaper HP-max/heal opcodes.
+**Acceptance:** tier-2 per card; Barricade block-persistence through the
+frozen start-of-turn sequence; directed script.
+**Inherited:** `healing: true` on **Feed** and **Reaper** (CardTags.HEALING) — deferred by
+B3.6; `kIroncladAttackPool` is generated from the healing column, so Infernal Blade's
+pool is WRONG until this lands. Barricade's block-decay branch and the recursive-play
+opcode for Double Tap — deferred by B3.2.
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan` from
+the Windows host, both presets PASS; the new `card_rares_test` target's 27 cases
+were confirmed **by name** in `ctest -N` before the green was trusted;
+`tools/check_stale_counts.sh` and `tools/check_doc_links.sh` both clean). Landed
+as commit `603cac2`, merged at `c47d534`, integrated at `8235477`. `cards.yaml`
+ids **76-91** — the 16 enumerated from source (`cards/red` constructors passing
+`CardRarity.RARE`), every `use()`/ctor read in full before encoding.
+`powers.yaml` ids **48-53**; opcodes **34-39** including **`PLAY_CARD`**;
+`ChoiceKind::EXHAUST_TO_HAND` = 5 for Exhume's exhaust-pile source; and
+`CardFlag::PURGE_ON_USE`.
+- **Corruption needed no power row** — id 11 is the row B3.2's hook framework
+  had already registered; only its card was missing. `PowerId` **47 was left the
+  permanent gap the Guardian batch reserved**, not backfilled.
+- **`PLAY_CARD` is the GENERAL recursive-play verb**, not a Double Tap special
+  case: the source is a card-pool index *or* the top of the draw pile, with
+  flags for choose-copy / purge / forced exhaust / queue-front. **B3.11's Mayhem
+  reuses `{op: PLAY_CARD, play: [from_draw_top]}` unchanged**, which is what
+  discharges B3.2's obligation in its general form. Double Tap calls the same
+  body **directly rather than queueing**, because `DoubleTapPower.onUseCard`
+  inserts **synchronously inside the `UseCardAction` constructor**.
+- **Three deferred obligations discharged.**
+  - **`healing: true` on Feed and Reaper** (`CardTags.HEALING`, `Feed.java:38` /
+    `Reaper.java:37`). The generated `kIroncladAttackPool` moves **25 → 28** —
+    Bludgeon, Fiend Fire and Immolate join; Feed and Reaper leave — which fixes
+    Infernal Blade's pool. Both heals route through `heal_player_with_relics`,
+    so Magic Flower applies (named tests assert the ×1.5).
+  - **Barricade's block-decay branch, on the `kSubsequentTurn` side of the
+    turn-1 gate, with Calipers.** The whole guard paragraph is
+    `GameActionManager.java:353-359`, **inside step 6**, and
+    `AbstractRoom.java:236-258` has **no `loseBlock` line at all**. Calipers was
+    left exactly as B3.26 landed it.
+  - **The recursive-play opcode for Double Tap** — see above.
+- **Two fix-forwards, both made reachable by Corruption's card landing:**
+  `AbstractPlayer.useCard:1378`'s energy skip for a SKILL under Corruption, and
+  `CorruptionPower.onCardDraw`'s missing `COST_MODIFIED_FOR_TURN` mark (without
+  it the free cost outlived the turn).
+
 <a id="b39"></a>
 
 ### B3.9 `[x]` ∥ Status + curses
@@ -1378,6 +1430,52 @@ After integration on top of B3.5, the combined manifest is cards 50 / powers 21 
 monsters 8 / relics 34 / potions 33 / encounters 20 / total 166; focused Slime
 7/7 and RegistryGen 15/15 remained green, followed by full integrated Debug
 413/413 and leak-detecting ASan/UBSan 413/413.
+
+<a id="b316"></a>
+
+### B3.16 `[x]` ∥ Monsters: gremlin gang
+**Deps:** B3.12 · **Provenance:** GremlinWarrior/Thief/Fat/Tsundere/
+Wizard.java; MonsterHelper.java:737-765
+**Deliverables:** registry entries ×5 (Angry thorns, sneaky escape?, fat
+weak, shield tsundere protect logic — native where the protect targeting
+doesn't fit the table shape, per design §4.2), gang spawn order from B3.12.
+**Acceptance:** tier-2 per gremlin; gang composition draws already covered by
+B3.12 — here per-monster behavior incl. Tsundere's block-ally logic.
+**Inherited:** un-park this gang — run-created combats currently consume the B3.12
+composition draws and then park; deferred by B4.4.
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan` from
+the Windows host against this worktree, both presets PASS with zero failures;
+`tools/check_stale_counts.sh` and `tools/check_doc_links.sh` both clean). Landed
+as commit `574ded0`, merged at `12d179e`, integrated at `5c2cd83`. `MonsterId`
+**16-20** (GREMLIN_WARRIOR / THIEF / FAT / TSUNDERE / WIZARD), `PowerId::ANGRY`
+= 40, and `MonsterIntent::DEFEND` = 11. Tier-2 `gremlin_test`, 19 cases.
+- **Six independent 32-seed × 20-turn XS128 fixtures**
+  (`tests/fixtures/gen_gremlin_fixture.py`, a second implementation of the
+  decompiled trees): one per class solo, plus a **4-gremlin battery** pinning
+  the Tsundere's `aiRng` block-target pick.
+- **Move 99 (ESCAPE) is unreachable in Act 1 and is deliberately unmodelled.**
+  `escapeNext()` has no caller anywhere in the decompiled tree, and the only
+  `deathReact()` call is `BanditBear.java:131` (an Act-2 group), so the escape
+  branch of every gremlin `takeTurn` cannot be reached from the Exordium-only
+  registry. **Both halves are recorded for whoever adds Act 2** — the
+  `EscapeAction` body and the `deathReact`/`escapeNext` trigger land together or
+  not at all.
+- **The Tsundere's `aliveCount` counts itself**, so the "protect an ally" branch
+  and the self-fallback are keyed off a count that includes the actor.
+- **Angry's `damageAmount > 0` guard reads POST-block damage**
+  (`AngryPower.onAttacked`), so a **fully-blocked hit grants no Strength** —
+  pinned by its own case.
+- **Fat is the only gremlin queueing a real `RollMoveAction`**; the others set
+  their next move through a queued `SetMoveAction`.
+- **Registering the five init fns un-parked the Gremlin Gang encounter** through
+  `run_advance.cpp`'s data-driven `monster_init_fn(id) == nullptr` gate — **no
+  edit to that file**.
+- Provenance, all read in full: `GremlinWarrior.java:45-141`,
+  `GremlinThief.java:44-128`, `GremlinFat.java:48-141`,
+  `GremlinTsundere.java:49-134` (+ `GainBlockRandomMonsterAction.update:27-42`),
+  `GremlinWizard.java:47-154`, `MonsterHelper.spawnGremlins`
+  (`MonsterHelper.java:737-765`), `AngryPower.onAttacked`
+  (`AngryPower.java:34-41`), and `AbstractMonster.java:705-715,765-775,908-913`.
 
 <a id="b317"></a>
 
@@ -1593,6 +1691,103 @@ sources. Integrated manifest: cards 75 / powers 27 / monsters 11 / relics 65 /
 potions 33 / encounters 20 / total 231. Verified by running, not inferred, in
 WSL Ubuntu-2404: focused Slime Boss **6/6**, Large Slime **13/13**, RegistryGen
 **17/17**; complete debug **521/521**; leak-detecting ASan/UBSan **521/521**.
+
+<a id="b321"></a>
+
+### B3.21 `[x]` ∥ Boss: The Guardian
+**Deps:** B3.12 · **Provenance:** TheGuardian.java (:97-107/185; mode shift
+thresholds 30/35/40, Sharp Hide)
+**Deliverables:** registry entry (native AI: offensive/defensive mode state
+machine keyed on damage-taken threshold), Mode Shift + Sharp Hide powers.
+**Acceptance:** tier-2: mode flips at the exact cumulative-damage threshold
+incl. threshold growth per cycle; Sharp Hide triggers on attack plays; A19
+column.
+**Inherited:** un-park this boss — run-created combats currently consume the B3.12
+composition draws and then park; deferred by B4.4. The translator's real `act_boss`
+field also waits on a boss registry (deferred by B1.5/B4.3, no owner named).
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan` from
+the Windows host, both presets PASS; `guardian_test`'s 17 cases were confirmed
+**by name** in `ctest -N` on both presets before the green was trusted —
+conventions §6; `tools/check_stale_counts.sh` and `tools/check_doc_links.sh`
+clean). Landed as the WIP snapshot `8b237e8` plus its acceptance commit
+`741d90f` (the snapshot had never been built; it compiled and passed on the
+first try, so `741d90f` is verification and coverage, not a repair, and the
+snapshot was **not** amended — conventions §2), merged at `47035a0`, integrated
+at `56248c5`. `MonsterId` 21 THE_GUARDIAN with the native offensive/defensive
+mode machine, powers `MODE_SHIFT` = 45 / `SHARP_HIDE` = 46, and `MonsterIntent`
+`DEFEND` = 11 / `ATTACK_BUFF` = 12.
+- **`PowerId` 47 is deliberately unused and must never be backfilled.** It was
+  reserved by this batch and not needed; a later batch filling it would be an
+  id renumber in all but name (conventions §5, design §4.4). B3.8 correctly
+  appended from 48.
+- **The mode threshold GROWS by 10 at every Defensive-Mode entry**
+  (`TheGuardian.java:61,245`) — 40, 50, 60 … at A20. The test
+  `GuardianModeShift.ThreeFlipsRequireFortyThenFiftyThenSixty` **drives three
+  real flips** rather than computing the third, so a `dmgThresholdIncrease`
+  applied once instead of per-flip fails rather than passes.
+- **Mode state is NOT derived from `ModeShiftPower.amount`.** On the return to
+  Offensive Mode, `isOpen` is set **synchronously** (`:262`) while the power and
+  the Reset Threshold are only **queued** (`:254-255`). A player with Thorns or
+  Flame Barrier reflects into exactly that window, where Java's `dmgTaken` and
+  the power's amount diverge —
+  `GuardianModeShift.ThornsReflectedIntoTheReopenGapIsDiscarded` was proven red
+  without the gate: the Guardian flips at 49 instead of 50.
+- **Found en route and fixed: Spot Weakness silently paid out nothing against a
+  telegraphed `ATTACK_BUFF`.** Fixed in `op_spot_weakness`. The provenance is
+  the game's own `AbstractMonster.setMove` "SET INCORRECTLY! REPORT TO DEV" list
+  (`AbstractMonster.java:451-458`), which names exactly the four ATTACK-family
+  intents as the ones that must carry a baseDamage. The gap was genuinely
+  invisible before: with `ATTACK_BUFF` removed from the predicate,
+  `GuardianSpotWeakness.AttackBuffTelegraphPaysOutStrength` fails while the
+  pre-existing `CardUncommonSkillsSpotWeakness.StrengthOnlyAgainstAttackIntents`
+  stays green.
+
+<a id="b322"></a>
+
+### B3.22 `[x]` ∥ Boss: Hexaghost
+**Deps:** B3.12 · **Provenance:** Hexaghost.java (:99, :137-142 —
+Body/Orb components), Divider damage = f(player HP)
+**Deliverables:** registry entry (native AI: orb-count state, Divider math,
+Inferno upgrade of Burns, Sear/Tackle/Inflame cycle); decision recorded on
+modeling orbs (monster `misc` fields vs. extra powers — CombatState additive
+change needs a schema bump + fixture regeneration via checked-in generators,
+design §4.4).
+**Acceptance:** tier-2: Divider = player-HP-derived exactly per the cited
+line; move cycle across 12+ turns matches hand-derivation; Burn upgrades at
+the cited turn.
+**Inherited:** un-park this boss — run-created combats currently consume the B3.12
+composition draws and then park; deferred by B4.4.
+**Log:** Verified by running, not inferred (`STS_JOBS=4 tools/wsl_run.sh debug
+asan`, both presets PASS on the same total with zero failures; the new
+`hexaghost_test` target confirmed present in `ctest -N` with its 19 named cases;
+`tools/check_stale_counts.sh` and `tools/check_doc_links.sh` both clean). Landed
+as commit `7232d01`, merged at `d9e9f6d`, integrated at `8235477`. `MonsterId`
+22 HEXAGHOST — the last Act-1 boss.
+- **The orb-modelling decision the ledger asked for: the orbs are not
+  entities.** `HexaghostOrb` extends nothing, never joins the `MonsterGroup` and
+  is never damaged (`HexaghostOrb.java:19-59`, constructed at
+  `Hexaghost.java:136-143`). The only combat-relevant residue is the **scalar
+  `orbActiveCount`** (`Hexaghost.java:93`), range 0-6, read solely by `getMove`.
+  It therefore needs neither monster `misc` fields nor extra powers: three spare
+  `MonsterState.flags` bits hold it, a fourth holds `burnUpgraded`, and the
+  Divider base takes the whole `pad0` scratch byte. **No `CombatState` field is
+  added, so there is no `SCHEMA_VERSION` bump and no fixture regeneration**
+  (design §4.4).
+- **Divider damage = `player.currentHealth / 12 + 1`** (`:151`, Java int
+  division), assigned synchronously on the ACTIVATE turn and then spent as six
+  separate hits on the next.
+- **`getMove` never reads its rolled `num`**, as with Lagavulin and the Slime
+  Boss, so the **draw count is pinned** rather than expressed as a fixture.
+- **Inferno's `BurnIncreaseAction` upgrades the Burns already in the DISCARD
+  then the DRAW pile — not the hand** — and the insert happens in
+  `ShowCardAndAddToDiscardEffect`'s **constructor**.
+- Added **no powers, no intents** (all four telegraphs were already in the
+  vocabulary, so `MonsterIntent` 13-16 stay unallocated) and **no `cards.yaml`
+  edit** (BURN already carried an upgraded program).
+- **All three Act-1 BOSS encounters are now live**, which discharges this task's
+  share of the B4.4 un-park obligation by construction (the gate is
+  `monster_init_fn(id) == nullptr`) and unblocks the translator's real
+  `act_boss`.
 
 <a id="b323"></a>
 
@@ -1855,6 +2050,130 @@ no-op (native branch or run-layer note) so accounting/wiring is in place.
 encounters 20 / **total 201**. Focused: RelicHooks +
 RelicHooksUncommon, RelicPools (incl. the new uncommon three-seed oracle),
 RelicAcquisition, RunDeck, PaperPhrog, RegistryGen — 82/82.
+
+<a id="b326"></a>
+
+### B3.26 `[x]` ∥ Relics: rares + shop
+**Deps:** B3.24 · **Provenance:** relics/ RARE + SHOP, Ironclad-obtainable
+**Deliverables:** registry rows + triggers (Bird-Faced Urn, Calipers —
+retiring A3.1's structural branch, Champion Belt, Charon's Ashes, Dead
+Branch, Du-Vu Doll, Fossilized Helix, Gambling Chip, Ginger, Girya, Ice
+Cream — retiring A4.3's EnergyManager SET simplification note, Incense
+Burner, Lizard Tail, Magic Flower, Mango, Old Coin, Peace Pipe, Pocketwatch,
+Prayer Wheel, Shovel, Stone Calendar, Thread and Needle, Torii, Tungsten
+Rod, Turnip, Unceasing Top, Wing Boots, plus SHOP tier — enumerate).
+**Acceptance:** tier-2 per relic; Ice Cream forces the energy-recharge
+rewrite from SET to conditional-carry (stage-a §12 A4.3 entry's documented
+boundary) — regression: all Stage A energy tests still green.
+**Inherited:** Odd Mushroom's ×1.25 Vulnerable branch — deferred by B3.25 (Paper Phrog's
+×1.75 twin retired there). RARE + SHOP `pool_order` rows for the generic five-tier
+initializer — deferred by B4.6.
+**Log:** Verified by running, not inferred (`tools/wsl_run.sh debug asan` from
+the Windows host, both presets PASS with zero failures; the new
+`relic_rares_shop_test` target was confirmed present in `ctest -N` with its 54
+cases before the green was trusted). Landed as commit `860ab73`, merged at
+`114c47e`, integrated at `5c2cd83`. **46 relic rows, ids 66-111**: the 28
+Ironclad-obtainable RARE relics, the 17 SHOP relics, and the SPECIAL-tier Odd
+Mushroom. Two power rows, both relic-granted rather than card-granted — `BUFFER`
+= 28 and `INTANGIBLE` = 29.
+- **RARE + SHOP `pool_order` are the canonical PRE-shuffle
+  `RelicLibrary.populateRelicPool` orders, recovered by INVERTING the JDK
+  shuffle** on `relicRng.randomLong` draws #3 and #4 against **ten** live
+  `b14_accept` captures — all ten agree. The method is **validated, not fitted**:
+  the same inversion reproduces B3.25's already-committed UNCOMMON `pool_order`
+  exactly.
+- **Four deferred obligations discharged.**
+  - Odd Mushroom's ×1.25 Vulnerable branch (`VulnerablePower.java:61-73`), in
+    `interp/interp_damage.cpp` `at_damage_receive`.
+  - **Calipers** (`GameActionManager.java:353-359`) — A3.1's structural
+    `has_calipers = false` in `action_queue.cpp` is now live. Barricade's branch
+    was left exactly as found; it is B3.8's.
+  - **Ice Cream** (`EnergyManager.java:25-40`) — the start-of-turn recharge goes
+    from A4.3's unconditional SET-to-constant to the Java's two branches:
+    `setEnergy(base)` by default, `addEnergy(base)` capped at 999 with Ice
+    Cream. **The no-relic path stays byte-identical to the SET it replaces**,
+    proven by all 20 committed fixtures replaying zero-diff, with the Stage A
+    energy tests green unmodified.
+  - The **RARE + SHOP `pool_order` rows** themselves.
+- New engine surfaces: `RelicHook::ON_BLOCK_BROKEN` = 16
+  (`AbstractCreature.brokeBlock:159-167` — monster-only, fired from
+  `decrementBlock`; Hand Drill); an **`at_turn_start_post_draw` relic dispatch
+  phase**, wired behind the start-of-turn `DrawCardAction`
+  (`GameActionManager.java:361-362`; Pocketwatch); and **one
+  `heal_player_with_relics` seam** carrying Magic Flower's
+  `MathUtils.round(amount * 1.5f)`, so that **Magic Flower cannot be forgotten
+  at a heal site** — Burning Blood, Blood Vial, Pantograph, Meat on the Bone,
+  Blood Potion, Bird-Faced Urn and the Lizard Tail revive all route through it.
+- **Prismatic Shard is a deliberate no-op, and the deliberateness is the
+  point.** Its row, `canSpawn` and pool membership are **exact and live** — it
+  occupies a SHOP slot and consumes a `relicRng` draw — and only the
+  cross-colour reward effect is inert. Owner decision, deferred to post-S1
+  multi-character support. `relic_rares_shop_test` **asserts** the inertness of
+  every such row, so implementing one fails there first.
+- **Three defects found by re-deriving from the Java rather than porting an
+  earlier WIP snapshot.** That snapshot (1) had **Brimstone's resolution order
+  backwards** — successive `addToTop` reverses, so the *last* monster resolves
+  first and the player's +2 lands last; (2) rewrote `op_lose_hp` through
+  `op_damage` in a way that **moved monster-death dispatch and the split seam**;
+  and (3) restructured the opening turn for two relics whose bodies it left
+  deferred.
+
+<a id="b327"></a>
+
+### B3.27 `[x]` ∥ Relics: boss (Neow pool) + event-specials
+**Deps:** B3.24 · **Spec:** design §5.3, §5.6 (Neow cat-3 in scope) ·
+**Provenance:** relics/ BOSS + SPECIAL, Ironclad-obtainable; event sources
+(design §5.6)
+**Deliverables:** registry rows + triggers for the Ironclad boss pool
+(Black Blood, Snecko Eye — cardRandomRng cost rolls, Runic Dome — observation
+impact documented, Coffee Dripper, Cursed Key, Ectoplasm, Fusion Hammer,
+Mark of Pain, Philosopher's Stone, Runic Cube?, Sozu, Velvet Choker, … —
+enumerate/filter) and the Act-1-event specials (Golden Idol, Neow's Lament,
+Necronomicon?, … — filter by S1 event reachability, B4.11-13).
+**Acceptance:** tier-2 per relic; Snecko Eye's per-draw cost roll stream +
+draw-order accounting tested (trap-10 family).
+**Inherited:** BOSS-tier `pool_order` rows for the five-tier initializer — deferred by
+B4.6; once B3.26 **and** this task land, un-defer the translator's all-tier
+`relicPools` mapping (storage has existed since B4.3).
+**Log:** Verified by running, not inferred (`STS_JOBS=4 tools/wsl_run.sh debug
+asan`, both presets PASS with zero failures; the new `relic_boss_special_test`
+target confirmed present in `ctest -N` with its 29 cases;
+`tools/check_stale_counts.sh` and `tools/check_doc_links.sh` both clean).
+Landed as commit `5a9a541`, merged at `13ebacf`, integrated at `8235477`.
+**31 relic rows**: the 22 Ironclad-obtainable BOSS relics (ids **112-133**) and
+the 9 SPECIAL-tier relics an Ironclad can obtain in Act 1 (ids **134-142**). One
+power row, applied by a boss relic rather than by a card — `CONFUSION` = 59.
+- **BOSS `pool_order` recovered by inverting the JDK shuffle** on
+  `relicRng.randomLong` draw #5 (`AbstractDungeon.java:1237-1241`) against ten
+  live `b14_accept` captures — all ten agree. **Validated, not fitted:** the
+  same inversion run against draws #1-#4 reproduces the already-committed
+  COMMON, UNCOMMON, RARE and SHOP orders **id-for-id**.
+- **SPECIAL scope was filtered against the S1 event set**, with every
+  exclusion's gate recorded on its registry row rather than left as a silent
+  omission.
+- **Both inherited obligations discharged.** The BOSS `pool_order` rows — every
+  tier is populated now, and `relicRng` is bit-identical either way because all
+  five shuffle draws were always unconditional. And the translator's **all-tier
+  `relicPools` un-deferral**: storage has existed since schema v3; the blocker
+  was a *complete* `relics.yaml`, because `join_relic` is fail-loud and one
+  unregistered `game_id` in any of the five arrays aborts the whole translation.
+  Mapped **by name**, not by the oracle's key order. Windows-host corpus run:
+  **10 files, 0 drift/error, and no relic in the unknown-id tally**.
+- **Snecko Eye drove a new `AT_PRE_BATTLE` relic dispatch**
+  (`applyPreCombatLogic`, `AbstractPlayer.java:1885-1890`), wired ahead of
+  `begin_first_turn` so Confusion lands before the opening draw. Its per-draw
+  `cardRandomRng` accounting is **pinned against an independently derived
+  stream**: one `cardRandomRng.random(3)` per drawn card whose cost >= 0, in
+  draw order, none for an X-cost or unplayable card, and the draw happens
+  *before* the `cost != newCost` compare, so an unchanged cost still spends one.
+- **`gain_gold` is now the single run-layer gold door**, carrying
+  `AbstractPlayer.gainGold`'s Ectoplasm suppression
+  (`AbstractPlayer.java:719-737`).
+- **Deliberately inert, with ASSERTED inertness** (`relic_boss_special_test`
+  fails first if one is implemented): the ten `energyMaster` relics and Snecko
+  Eye's hand-size bump, Slaver's Collar, Warped Tongs, and five `onEquip`
+  bodies. Each is deferred **whole** rather than half-done, because every
+  partial would have desynced `miscRng` or `relicRng`.
 
 
 ---

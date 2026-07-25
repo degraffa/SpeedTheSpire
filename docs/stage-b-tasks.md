@@ -63,25 +63,25 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| **Combat start runs an end-of-round pass the game never runs** | B3.19 | **IN PROGRESS — `fix-combat-start`** | `combat_begin` (`advance.cpp:156-159`) and `enter_combat` (`run_advance.cpp:351-354`) prime turn 1 with `turn_has_ended = 1` and pump, routing through `start_of_turn` → `dispatch_at_end_of_round` before the player's first turn. The game cannot reach that branch: `AbstractRoom.java:236-243` sets the flag then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`). **Measured**: a sleeping Lagavulin has 16 block on turn 1 instead of 8. A fix must touch **both** entry points |
+| **`dispatch_at_start_of_turn_post_draw` runs at combat start, where the game has no counterpart** | integration-14 | **IN PROGRESS — `fix-postdraw-gate`** | the twin of the (now discharged) combat-start end-of-round row, and the half that fix deliberately left: `AbstractRoom.java`'s turn-1 block calls `applyStartOfTurnPostDrawRelics` (`:254`) but has **no** post-draw *powers* line, while `GameActionManager.java:363` does. B3.8 registered the first two binders (Brutality 50, Demon Form 51), so the comment asserting the hook was unbound merged **silently inverted** and was corrected in `4da5167`. Still unobservable — both powers require playing their card, so neither can exist at combat start — so gating it is a behaviour change owing a test, not an integration edit |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
-| `healing: true` on **Feed** and **Reaper** (CardTags.HEALING) | B3.6 | B3.8 | `kIroncladAttackPool` is generated from the healing column — Infernal Blade's pool is wrong until this lands |
-| Barricade block-decay branch (A3.1 left it structural) | B3.2 | B3.8 | the start-of-turn block-decay branch is a structural no-op today |
-| Recursive-play opcode (design R14) — Double Tap | B3.2 | B3.8 | Havoc's `PLAY_TOP_DRAW` (B3.4) is a special case, not the general form |
-| Recursive-play opcode (design R14) — Mayhem | B3.2 | B3.11 | same opcode; also unblocks the Duplication and Distilled Chaos potions |
+| Recursive-play opcode (design R14) — Mayhem | B3.2 | B3.11 | **the opcode now exists**: B3.8 landed `PLAY_CARD` = 34 as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}` **unchanged** — this row is the authoring, not the verb. Also unblocks the Duplication and Distilled Chaos potions |
 | Per-power counter storage — Panache (every-5th), The Bomb (3-turn) | B3.2 | B3.11 | B3.2 added no `PowerSlot` counter field; Combust (B3.7) and Rampage (B3.5) were solved locally |
 | Enemy self-escape + stolen-gold return rules | B4.4 | B3.15 | B4.4 names B3.15 as the explicit owner |
 | Smoke Bomb combat-escape potion body | B3.23 | B3.15 | B4.4 landed the run-level half (rejects bosses, no-reward proceed); the combat-escape path is still B3.15's |
 | Pantograph atBattleStart boss heal 25 | B3.25 | B3.15 | needs EnemyType/BOSS monster metadata; named "B3.15-B3.17", and B3.16/B3.17/B3.20 landed without it |
-| Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15, B3.16, B3.21, B3.22 | run-created combats with an unimplemented group cannot play out. **B3.18 and B3.19 discharged their share by construction** (Gremlin Nob, 3 Sentries, Lagavulin) — the gate is `monster_init_fn(id) == nullptr`, i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. The remaining owners inherit the same free discharge |
-| Odd Mushroom ×1.25 Vulnerable branch | B3.25 | B3.26 | Paper Phrog's ×1.75 twin retired at B3.25; Odd Mushroom is the rare-tier one |
-| Calipers branch of the start-of-turn block decay (loses 15 instead of zeroing) | A3.1 | B3.26 | Stage A left the branch structural (`action_queue.cpp` `has_calipers = false`); B3.26's deliverables already say "Calipers — retiring A3.1's structural branch". Barricade is the separate row above (B3.8); the third branch, Blur, is Silent-only and out of S1 scope |
-| Ice Cream — the only S1 consumer of the `EnergyManager.recharge()` SET-to-constant simplification | A4.3 | B3.26 | Stage A set energy to `kIroncladBaseEnergy` unconditionally each turn, exact only because no skeleton relic/power reaches the Ice Cream / Conserve branches (stage-a design §12, `action_queue.hpp`); B3.26's deliverables and acceptance already name it |
-| RARE + SHOP relic `pool_order` rows | B4.6, B3.25 | B3.26 | the five-tier initializer is generic and already draws for empty tiers; only rows are missing. Also narrows B3.25's "tiers empty" scaffold assertions |
-| BOSS relic `pool_order` rows | B4.6, B3.25 | B3.27 | as above |
-| Translator `relicPools` un-deferral (all 5 tiers) | B1.5, B4.3, B4.6 | B3.27 | RunState storage exists since B4.3; blocked on a complete `relics.yaml` (a fail-loud join would throw). Lands once B3.26 **and** B3.27 rows exist |
+| Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15 | run-created combats with an unimplemented group cannot play out. **B3.18, B3.19, B3.16, B3.21 and B3.22 have all discharged their share by construction** — the gate is `monster_init_fn(id) == nullptr`, i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. B3.15 (slavers, Looter, Fungi Beast) is the last owner and inherits the same free discharge |
+| Ten `energyMaster` relics (Fusion Hammer, Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu, Philosopher's Stone, Coffee Dripper, Mark of Pain) **and Snecko Eye's `masterHandSize += 2`** | B3.27 | UNASSIGNED — next `action_queue.cpp` owner | there is no `energyMaster` / `gameHandSize` field, and the single consumer is the recharge/draw line inside `start_of_turn`. Each is deferred **whole**, with asserted inertness, because every partial would desync `miscRng` or `relicRng` |
+| `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
+| Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — whoever owns Sling of Courage (B3.26's inert twin, blocked on the same marker) | `CombatState` carries no elite/boss room marker. **NB:** B3.26's four inert relics — Dead Branch, Gambling Chip, Sling of Courage, Orange Pellets — have no rows of their own in this table; each is an explicit empty native body with its reason and citation, and `relic_rares_shop_test` asserts the inertness, but that is code-side only. Surfaced, not invented: the orchestrator should say whether they want rows |
+| Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
+| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Cursed Key + N'loth's Mask chest hooks; Busted Crown reward count; Black Star elite relic; Golden Idol ×1.25 gold; Sozu potion block; Sacred Bark potency; Fusion Hammer / Coffee Dripper campfire locks | B3.27 | B4.5 / B4.7 / B4.9 / B4.10-13 | the reward, chest, campfire and event screens do not exist yet |
+| Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
+| Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
+| `interp_damage.cpp`'s `at_damage_receive` static_assert message is stale | integration-14 | next `interp_damage.cpp` owner | it says `atDamageFinalReceive` "is still a pass-through because no power overrides it yet"; `INTANGIBLE` has had a case since B3.26. Conventions §8's "a comment asserting X does not exist yet" class |
+| Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | B4.4 `[x]` | B1.6 scoped itself to "adapter + format only" and named B4.4; B4.4's Log records run-combat equivalence but no `replay` generalization |
 | Question Card / Singing Bowl / White Beast Statue (reward-screen modifiers) | B3.25 | B4.5 | rows + canSpawn gates live, effects are documented no-ops |
 | Emit `kIroncladAttackPool` in CardLibrary HashMap **library order** instead of registry-id order | B3.6 | B4.5 | documented interim deviation; a one-line `gen.py` fix once B4.5's oracle capture pins library order |
@@ -106,10 +106,10 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Fairy in a Bottle out-of-combat revive | B3.23 | UNASSIGNED | flagged native at B3.23, no owner named |
 | Translator: power `misc` fields other than player-owned Combust | B3.7 | UNASSIGNED | the fix-forward mapped only Combust `hpLoss`; every other power `misc` stays deferred |
 | Translator: `monster_move_history` beyond 3 entries | B1.5, B4.3 | UNASSIGNED | "stays deferred to its owning task" — none named |
-| Translator: real `act_boss` | B1.5, B4.3 | UNASSIGNED | needs a boss registry; B3.21/B3.22 land Act-1 bosses but no owner is named |
+| Translator: real `act_boss` | B1.5, B4.3 | UNASSIGNED | the boss registry now exists — B3.20/B3.21/B3.22 landed all three Act-1 bosses, so the blocker is gone — but still no owner is named |
 | Bit-exact oracle for the raw monsterRng monster / elite / boss lists | B3.12 | UNASSIGNED | B3.12 pinned the algorithm + determinism, not a golden list; B4.4's floor-0 triple pins stream state only. Natural home is B5.2's campaign automation |
 | `RETAIN` `CardFlag` end-of-turn sweep | B3.1 | UNASSIGNED — "first content consumer" | ETHEREAL (B3.5/B3.6) and INNATE (B3.9) discharged; no S1 Ironclad card uses Retain |
-| `gen.py` step-authoring for `SET_COST` | B3.1 | UNASSIGNED — "first card consumer" | `MAKE_CARD`'s half was discharged at B3.3; candidates are B3.8 (Corruption) and B3.27 (Snecko Eye) |
+| `gen.py` step-authoring for `SET_COST` | B3.1 | UNASSIGNED — **both named candidates are now spent; PROPOSED FOR CLOSURE, see the change log** | `MAKE_CARD`'s half was discharged at B3.3. **B3.8 did not need it** — Corruption's cost rewrite is native in the power (`powers.yaml` CORRUPTION is `native: true`, hooks `on_use_card` / `on_card_draw`), so the B3.8 candidacy is closed. **Nor did B3.27** — Snecko Eye's rewrite is likewise native, in `PowerId::CONFUSION` (`native: true`, `on_card_draw`), so the second named candidate landed without it either. Separately, `stsgen/steps.py` has classified `SET_COST` as **`ENGINE_EMITTED_OPS` — deliberately never authorable** since `b291d8f`, because its `src` operand is a runtime card-pool index no YAML author can name, and a generation-time assert partitions every opcode into exactly one capability group. The row is therefore left open **and re-owned by the orchestrator, not silently closed** |
 | `lagavulin_init_awake` has no production caller | B3.19 | UNASSIGNED — Lagavulin Event owner | implemented and tested; the event that would build `Lagavulin(false)` does not exist |
 | Gremlin move-99 escape (`EscapeAction` body **and** the `deathReact`/`escapeNext` trigger, landed together) | B3.16 | UNASSIGNED — Act-2 owner | unreachable in Act 1: `escapeNext()` has no caller in the decompiled tree; the only `deathReact()` call is `BanditBear.java:131` |
 | `run_advance.cpp` file-header comment (~line 7) enumerates a stale monster roster | integration-11 | UNASSIGNED — next `run_advance.cpp` toucher | same rot as the step-(2) comment fixed in `5f96ec4`; conventions §8's "comment asserting X does not exist yet" class |
@@ -128,13 +128,23 @@ allocates first.
 (`tools/registry_gen/stsgen/loader.py`) requires an id that is an integer,
 `>= 1`, unique and appended — it does **not** require contiguity, and no
 emitted table is a dense id-indexed array, so a gap costs nothing at runtime.
-Two gaps are live today and both are correct: `MonsterId` 14 is unallocated
-(B3.18 took 12/13, B3.19 took 15), and `PowerId::ANGER` is 33 against a
-28-row power table. **Never renumber to close a gap.** Renumbering an existing
-id is stop-the-line (conventions §5, design §4.4) and would cost a design-doc
-change-log entry plus a schema-version bump — never worth a cosmetic tidy.
-(Note the one place contiguity *is* required and is a different thing:
-`relics.yaml` `pool_order` within a tier.)
+Several gaps are live today and every one of them is correct: `MonsterId` 14 is
+unallocated (B3.18 took 12/13, B3.19 took 15), and `PowerId` ids have long run
+ahead of the row count (`ANGER` is 33, `ANGRY` is 40). **Never renumber to close
+a gap.** Renumbering an existing id is stop-the-line (conventions §5, design
+§4.4) and would cost a design-doc change-log entry plus a schema-version bump —
+never worth a cosmetic tidy. Re-derive the live id list from `registry/*.yaml`,
+never from this paragraph. (Note the one place contiguity *is* required and is a
+different thing: `relics.yaml` `pool_order` within a tier.)
+
+**`PowerId` 47 and 54–58 are PERMANENT gaps.** 47 was reserved by B3.21, which
+took `MODE_SHIFT` 45 and `SHARP_HIDE` 46 and then did not need a third; **B3.8
+correctly refused to backfill it** and appended its six powers at 48–53. 54–58
+were left behind in the same way — B3.27 appended `CONFUSION` at 59 rather than
+filling them. Both reserving tasks have landed, so neither window will ever be
+issued. Filling a permanent gap is an id renumber in all but name: it changes
+which power a stored `PowerSlot.power_id` byte means, which is exactly what the
+append-only rule exists to prevent. Leave them empty.
 
 **2. `MonsterIntent` values in `tools/registry_gen/stsgen/vocab.py` are a
 shared namespace and need orchestrator allocation before use.** The generator
@@ -147,9 +157,20 @@ pick one locally.
 |---|---|---|
 | `SLEEP` | 9 | B3.19 — landed |
 | `STUN` | 10 | B3.19 — landed |
-| `DEFEND` | 11 | B3.16 |
-| `ATTACK_BUFF` | 12 | B3.21 |
-| *(reserved)* | 13–16 | B3.22 |
+| `DEFEND` | 11 | B3.16 — landed (also The Guardian's Charge Up: one Intent constant, two users) |
+| `ATTACK_BUFF` | 12 | B3.21 — landed |
+| *(free)* | 13–16 | **unallocated** — reserved for B3.22, which needed none: all four Hexaghost telegraphs were already in the vocabulary. Claim one in a task brief before use |
+
+## Landed non-task work
+
+Changes on `master` that are **not** ledger tasks, so they have no task block to
+archive and no `#log` anchor. They are indexed here for the same reason task
+entries are: conventions §2 requires that history and this ledger never
+disagree, and a fix or a toolchain change that nothing records is invisible to
+the next session.
+
+- **Combat start: turn 1 must not run the end-of-round pass** `[x]` — commit `821bffd`, merged at `9dea548`, landed in `56248c5`. `combat_begin` and `enter_combat` both primed turn 1 with `turn_has_ended = 1` and pumped, routing through `start_of_turn` → `dispatch_at_end_of_round` **before the player's first turn**, so every end-of-round hook on a power present at combat start fired once for free. **The game cannot reach that branch**: `AbstractRoom.java:236-243` sets the flag and then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`) — the queue is never empty while that item is pending, so the step-6 test is false by the time it is reached. **Measured**: a sleeping Lagavulin had **16 block on turn 1 instead of 8** (monster block never decays, so it also gained +8 every later turn). Fixed at **both** entry points via a shared `begin_first_turn` that reuses the same `start_of_turn` with a `TurnStart` parameter; **two by-construction guards scan both files**, so a one-sided regression fails rather than drifts. All 20 committed fixtures replayed **zero-diff**, proving the spurious pass was inert for every piece of landed content. The post-draw *powers* twin was reported and deliberately left — it is the `fix-postdraw-gate` row in the obligations table.
+- **Build / toolchain effort** `[x]` — commits `44c1e11` (FP contract), `b481db2` + `c568cad` (ctest parallelism, job gate, shared ccache), `93e7a7d` + `c6913f2` (native Windows), merged at `28eab81`, landed in `8235477`. **The floating-point contract is pinned** (`-ffp-contract=off`, `cmake/StsFloatingPoint.cmake`): the frozen oracles were **not** captured under contraction only because baseline x86-64 has no FMA instruction — one `-march=native` away from silently changing damage numbers — and `fp_contract_test` now fails if contraction returns. `ctest` runs parallel; a machine-wide job gate bounds concurrent build parallelism across worktrees; ccache is shared across worktrees via `CCACHE_BASEDIR` (measured 0 % → 50 % cross-worktree hit rate). **A native Windows target was added** — clang-cl 22.1.8, presets `win-debug` / `win-release` / `win-asan` — and it is **byte-identical to Linux**: the 20 fixture traces hash to `ccdc4432…` under GCC 13.3, Clang 18.1.3 and clang-cl alike (debug, LTO release, asan). **WSL is therefore optional, including for sanitizers**: ASan *and* UBSan both work under clang-cl. `cl.exe` silently ignores `/fsanitize=undefined` (warning D9002, exit 0), which is why clang-cl is **required** here rather than merely preferred. The Windows CI job is proposed but unverified — see the obligations table.
 
 ---
 
@@ -199,22 +220,7 @@ noted in the Log.
 - **B3.5** `[x]` Red uncommons — attacks — 11 uncommon attacks, card ids 40-50, opcodes 21-24; Searing Blow encodes its multi-upgrade in the existing `CardInstance.upgrade` count (no schema change); +18 tests, 405/405 ×3 · [log](stage-b-log.md#b35)
 - **B3.6** `[x]` Red uncommons — skills — 17 uncommon skills (source enumeration moved **Rage** here from B3.7), card ids 51-67, powers `NO_DRAW`=24 / `FLAME_BARRIER`=25, opcodes 30-33, `ChoiceKind::DUPLICATE`=4, `CardType::POWER`=4; 4 stop-the-line Java corrections fixed forward; +35 tests, 464/464 ×3 · [log](stage-b-log.md#b36)
 - **B3.7** `[x]` Red uncommons — power cards — 8 uncommon power cards, card ids 68-75, powers 26-27, POWER-card play path (apply + remove from every pile, no discard); plus a fix-forward importing Combust `hpLoss` from oracle power `misc`; 526/526 debug + asan · [log](stage-b-log.md#b37)
-
-### B3.8 `[ ]` ∥ Red rares
-**Deps:** B3.2 · **Provenance:** cards/red RARE (16)
-**Deliverables:** registry entries: Barricade, Berserk, Bludgeon, Brutality,
-Corruption, Demon Form, Double Tap, Exhume, Feed, Fiend Fire, Immolate,
-Impervious, Juggernaut, Limit Break, Offering, Reaper. Wires the block-decay
-Barricade branch A3.1 left structural, Corruption's cost/exhaust rewrite,
-Feed/Reaper HP-max/heal opcodes.
-**Acceptance:** tier-2 per card; Barricade block-persistence through the
-frozen start-of-turn sequence; directed script.
-**Inherited:** `healing: true` on **Feed** and **Reaper** (CardTags.HEALING) — deferred by
-B3.6; `kIroncladAttackPool` is generated from the healing column, so Infernal Blade's
-pool is WRONG until this lands. Barricade's block-decay branch and the recursive-play
-opcode for Double Tap — deferred by B3.2.
-**Log:** —
-
+- **B3.8** `[x]` ∥ Red rares — 16 rare cards, ids 76-91; powers 48-53 (**Corruption needed no row** — id 11 already existed, and `PowerId` 47 was left the gap B3.21 reserved); opcodes 34-39 incl. **`PLAY_CARD`, the general recursive-play verb** (B3.11's Mayhem reuses it unchanged); `ChoiceKind::EXHAUST_TO_HAND`=5, `CardFlag::PURGE_ON_USE`; discharges `healing: true` on Feed/Reaper (`kIroncladAttackPool` 25 → 28, both heals through `heal_player_with_relics`), Barricade's block-decay branch on the `kSubsequentTurn` side, and the recursive-play opcode · [log](stage-b-log.md#b38)
 - **B3.9** `[x]` Status + curses — 4 statuses + 11 curses, card ids 25-39; opcodes `LOSE_HP_PER_HAND`=18 / `DISCARD_HAND`=19 / `REDUCE_POWER`=20, native `FRAIL`=21; end-of-turn order rewritten; all 20 combat fixtures regenerated from the checked-in generator; 368/368 · [log](stage-b-log.md#b39)
 
 ### B3.10 `[ ]` ∥ Colorless uncommons
@@ -237,7 +243,9 @@ Transmutation, Violence — verify from source).
 **Acceptance:** tier-2 per card; directed script.
 **Inherited:** the recursive-play opcode (Mayhem) and per-power counter storage for
 Panache (every-5th) and The Bomb (3-turn) — deferred by B3.2 (no new `PowerSlot`
-field was added there).
+field was added there). **The opcode itself now exists:** B3.8 landed `PLAY_CARD` = 34
+as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}`
+unchanged — what is left here is the authoring, not the verb.
 **Log:** —
 
 - **B3.12** `[x]` Multi-monster combat + encounter framework — `encounters.yaml` with 20 Act-1 encounters and their miscRng composition programs; `resolve_composition`/`generate_monster_lists`/`spawn_group`/`dispatch_monster_turn`; **schema 3→4** (`kMonsterCap` 5→7, `sizeof(CombatState)` 3672→3896); 20 fixtures regenerated with a byte-level zero-diff-in-meaning proof; +13 tests, 286/286 ×3 · [log](stage-b-log.md#b312)
@@ -258,88 +266,18 @@ metadata) — deferred by B3.25. Smoke Bomb's combat-escape body — deferred by
 un-parking unimplemented monster groups — deferred by B4.4.
 **Log:** —
 
-### B3.16 `[ ]` ∥ Monsters: gremlin gang
-**Deps:** B3.12 · **Provenance:** GremlinWarrior/Thief/Fat/Tsundere/
-Wizard.java; MonsterHelper.java:737-765
-**Deliverables:** registry entries ×5 (Angry thorns, sneaky escape?, fat
-weak, shield tsundere protect logic — native where the protect targeting
-doesn't fit the table shape, per design §4.2), gang spawn order from B3.12.
-**Acceptance:** tier-2 per gremlin; gang composition draws already covered by
-B3.12 — here per-monster behavior incl. Tsundere's block-ally logic.
-**Inherited:** un-park this gang — run-created combats currently consume the B3.12
-composition draws and then park; deferred by B4.4.
-**Log:** —
-
+- **B3.16** `[x]` ∥ Monsters: gremlin gang — monster ids 16-20, `PowerId::ANGRY`=40, `MonsterIntent::DEFEND`=11; six independent 32-seed × 20-turn XS128 fixtures incl. a 4-gremlin battery pinning the Tsundere's `aiRng` block-target pick; **move 99 (ESCAPE) is unreachable in Act 1** and left unmodelled with both halves recorded for Act 2; Angry's `damageAmount > 0` guard reads **post-block** damage; registering the five init fns un-parked the encounter with no `run_advance.cpp` edit · [log](stage-b-log.md#b316)
 - **B3.17** `[x]` Monsters: large slimes + split — monster ids 9-10 (large slimes), `PowerId::SPLIT`=22, opcodes 25-29 (`CANNOT_LOSE`/`CAN_LOSE`/`SUICIDE`/`SPAWN_MONSTER`/`SET_MOVE`); the Java-exact split framework; 441/441 ×3 · [log](stage-b-log.md#b317)
 - **B3.18** `[x]` Elites: Gremlin Nob + Sentries — monster ids 12 GREMLIN_NOB / 13 SENTRY (both ELITE) + `PowerId::ANGER`=33; Artifact needed **no** new row (B3.2's id 4, the nullify already at the APPLY_POWER site — Sentry only grants the stack); 3 independent 32-seed × 20-turn fixtures pin the Nob's A18 history tree and the Sentry in an even and an odd slot; registering the two init fns un-parked the Gremlin Nob and 3 Sentries encounters by construction; Sentry's animation-only `damage()` is an explicit empty `on_monster_damaged` case, not a `default:`; union 641/641 ×3 · [log](stage-b-log.md#b318)
 - **B3.19** `[x]` Elite: Lagavulin — monster id 15 LAGAVULIN (ELITE), native sleep/wake machine; **no new power id** (Metallicize was already id 5 — now the first MONSTER-owned power to bind an end-of-turn hook, and the generator's duplicate-name check caught the re-add); `MonsterIntent` SLEEP=9 / STUN=10; `on_monster_damaged` gains `hp_lost` so absorbed damage cannot wake it; armour stands at 8/16/24 because monster block never decays in this build; un-parked the Lagavulin encounter by construction; union 641/641 ×3 · [log](stage-b-log.md#b319)
 - **B3.20** `[x]` Boss: Slime Boss — monster id 11 + `MonsterIntent::STRONG_DEBUFF`=8; fixed 150 HP, Goop→Prep→Slam cycle, exact-half split chaining into B3.17's large slimes; 521/521 debug + asan · [log](stage-b-log.md#b320)
-
-### B3.21 `[ ]` ∥ Boss: The Guardian
-**Deps:** B3.12 · **Provenance:** TheGuardian.java (:97-107/185; mode shift
-thresholds 30/35/40, Sharp Hide)
-**Deliverables:** registry entry (native AI: offensive/defensive mode state
-machine keyed on damage-taken threshold), Mode Shift + Sharp Hide powers.
-**Acceptance:** tier-2: mode flips at the exact cumulative-damage threshold
-incl. threshold growth per cycle; Sharp Hide triggers on attack plays; A19
-column.
-**Inherited:** un-park this boss — run-created combats currently consume the B3.12
-composition draws and then park; deferred by B4.4. The translator's real `act_boss`
-field also waits on a boss registry (deferred by B1.5/B4.3, no owner named).
-**Log:** —
-
-### B3.22 `[ ]` ∥ Boss: Hexaghost
-**Deps:** B3.12 · **Provenance:** Hexaghost.java (:99, :137-142 —
-Body/Orb components), Divider damage = f(player HP)
-**Deliverables:** registry entry (native AI: orb-count state, Divider math,
-Inferno upgrade of Burns, Sear/Tackle/Inflame cycle); decision recorded on
-modeling orbs (monster `misc` fields vs. extra powers — CombatState additive
-change needs a schema bump + fixture regeneration via checked-in generators,
-design §4.4).
-**Acceptance:** tier-2: Divider = player-HP-derived exactly per the cited
-line; move cycle across 12+ turns matches hand-derivation; Burn upgrades at
-the cited turn.
-**Inherited:** un-park this boss — run-created combats currently consume the B3.12
-composition draws and then park; deferred by B4.4.
-**Log:** —
-
+- **B3.21** `[x]` ∥ Boss: The Guardian — monster id 21, native offensive/defensive mode machine, powers MODE_SHIFT=45 / SHARP_HIDE=46 (**47 deliberately unused, never to be backfilled**), intents DEFEND=11 / ATTACK_BUFF=12; the mode threshold **grows by 10 at every Defensive-Mode entry** (40, 50, 60 … at A20 — driven for three real flips, not computed), and mode state is **not** derived from `ModeShiftPower.amount` because `isOpen` is set synchronously while the power is only queued; found and fixed en route: **Spot Weakness paid out nothing against a telegraphed `ATTACK_BUFF`** · [log](stage-b-log.md#b321)
+- **B3.22** `[x]` ∥ Boss: Hexaghost — monster id 22; **the orbs are not entities**, so the only combat-relevant state is the scalar `orbActiveCount` (0-6) in three spare `MonsterState.flags` bits with a fourth for `burnUpgraded` — **no `CombatState` field, so no `SCHEMA_VERSION` bump and no fixture regeneration**; Divider = `player.currentHealth / 12 + 1` locked at the ACTIVATE turn; `getMove` never reads its rolled `num`, so the draw count is pinned; no new powers, intents or `cards.yaml` edit. **All three Act-1 BOSS encounters are now live** · [log](stage-b-log.md#b322)
 - **B3.23** `[x]` Potions — `potions.yaml` with 33 Ironclad-pool rows in pool order; `potions.hpp/.cpp` `use_potion`; trap-14 rejection-sampling identity roll (draw-count pinned); `potion_slot_count(A20)`==2; +19 tests, 232/232 · [log](stage-b-log.md#b323)
 - **B3.24** `[x]` Relics: starter + commons — 34 relic rows (Burning Blood + 33 commons), ids 1-34; a distinct `RelicHook` framework dispatching in **acquisition order** (trap 8) with DATA/native bindings; +18 tests, 250/250 · [log](stage-b-log.md#b324)
 - **B3.25** `[x]` Relics: uncommons — 30 rows, ids 36-65; the canonical pre-shuffle UNCOMMON `pool_order` recovered by inverting the JDK shuffle against 3 live captures; `RelicHook` `ON_MONSTER_DEATH`=14 / `ON_SHUFFLE`=15; power `NEXT_TURN_BLOCK`=23; Paper Phrog retires stage-a A4.1's “unreachable” note; 454/454 ×3 · [log](stage-b-log.md#b325)
-
-### B3.26 `[ ]` ∥ Relics: rares + shop
-**Deps:** B3.24 · **Provenance:** relics/ RARE + SHOP, Ironclad-obtainable
-**Deliverables:** registry rows + triggers (Bird-Faced Urn, Calipers —
-retiring A3.1's structural branch, Champion Belt, Charon's Ashes, Dead
-Branch, Du-Vu Doll, Fossilized Helix, Gambling Chip, Ginger, Girya, Ice
-Cream — retiring A4.3's EnergyManager SET simplification note, Incense
-Burner, Lizard Tail, Magic Flower, Mango, Old Coin, Peace Pipe, Pocketwatch,
-Prayer Wheel, Shovel, Stone Calendar, Thread and Needle, Torii, Tungsten
-Rod, Turnip, Unceasing Top, Wing Boots, plus SHOP tier — enumerate).
-**Acceptance:** tier-2 per relic; Ice Cream forces the energy-recharge
-rewrite from SET to conditional-carry (stage-a §12 A4.3 entry's documented
-boundary) — regression: all Stage A energy tests still green.
-**Inherited:** Odd Mushroom's ×1.25 Vulnerable branch — deferred by B3.25 (Paper Phrog's
-×1.75 twin retired there). RARE + SHOP `pool_order` rows for the generic five-tier
-initializer — deferred by B4.6.
-**Log:** —
-
-### B3.27 `[ ]` ∥ Relics: boss (Neow pool) + event-specials
-**Deps:** B3.24 · **Spec:** design §5.3, §5.6 (Neow cat-3 in scope) ·
-**Provenance:** relics/ BOSS + SPECIAL, Ironclad-obtainable; event sources
-(design §5.6)
-**Deliverables:** registry rows + triggers for the Ironclad boss pool
-(Black Blood, Snecko Eye — cardRandomRng cost rolls, Runic Dome — observation
-impact documented, Coffee Dripper, Cursed Key, Ectoplasm, Fusion Hammer,
-Mark of Pain, Philosopher's Stone, Runic Cube?, Sozu, Velvet Choker, … —
-enumerate/filter) and the Act-1-event specials (Golden Idol, Neow's Lament,
-Necronomicon?, … — filter by S1 event reachability, B4.11-13).
-**Acceptance:** tier-2 per relic; Snecko Eye's per-draw cost roll stream +
-draw-order accounting tested (trap-10 family).
-**Inherited:** BOSS-tier `pool_order` rows for the five-tier initializer — deferred by
-B4.6; once B3.26 **and** this task land, un-defer the translator's all-tier
-`relicPools` mapping (storage has existed since B4.3).
-**Log:** —
+- **B3.26** `[x]` ∥ Relics: rares + shop — 46 rows (28 RARE + 17 SHOP + Odd Mushroom SPECIAL), ids 66-111; powers BUFFER=28 / INTANGIBLE=29, `RelicHook::ON_BLOCK_BROKEN`=16, an `at_turn_start_post_draw` relic dispatch phase, and one `heal_player_with_relics` seam so Magic Flower cannot be forgotten at a heal site; RARE/SHOP `pool_order` recovered by **inverting the JDK shuffle** against ten live captures and validated by reproducing B3.25's UNCOMMON order; discharges Odd Mushroom ×1.25, Calipers, Ice Cream (no-relic path byte-identical) and the RARE+SHOP `pool_order` rows; **Prismatic Shard is a deliberate no-op** with an exact, live pool slot · [log](stage-b-log.md#b326)
+- **B3.27** `[x]` ∥ Relics: boss (Neow pool) + event-specials — 31 rows (22 BOSS ids 112-133 + 9 Act-1 SPECIALs ids 134-142), power CONFUSION=59; BOSS `pool_order` recovered by the same shuffle inversion and **validated, not fitted** — the same inversion reproduces the committed COMMON/UNCOMMON/RARE/SHOP orders id-for-id; Snecko Eye drove a new `AT_PRE_BATTLE` relic dispatch with its `cardRandomRng` accounting pinned against an independently derived stream; `gain_gold` is now the single run-layer gold door; discharges the BOSS `pool_order` rows and the translator's all-tier `relicPools` un-deferral · [log](stage-b-log.md#b327)
 
 ---
 
@@ -394,7 +332,9 @@ does — that door fires the `onObtainCard` relics (Ceramic Fish, the three eggs
 Darkstone Periapt), and its only production caller today is B4.15's A10 curse
 (where the pass is provably empty), so a direct write for reward cards would
 silently disable all of them; use `remove_master_deck_card` for the Parasite
-side — flagged by the hook audit.
+side — flagged by the hook audit. **Busted Crown**'s reward-count reduction and
+the **Black Star** elite relic — deferred by B3.27 (rows and pool slots live,
+bodies inert).
 **Log:** —
 
 - **B4.6** `[x]` Relic pools + acquisition — `relic_pools.hpp/.cpp`: 5 unconditional relicRng shuffles (JDK-LCG route), front/end pop, 50/33/17 tier roll, canSpawn re-check + Circlet fallback, acquisition in trap-8 order with pickup effects; 3-seed live-oracle pool + `(s0,s1,counter)` match; 428/428 ×3 · [log](stage-b-log.md#b46)
@@ -408,7 +348,9 @@ amount ×(0.9,1.1), relic grant via B4.6, the fixed treasure row (map row 8).
 **Acceptance:** tier-2: chest tables vs. hand-derivation across the roll
 range; trap-16 named test; oracle spot-diff ≥ 2 treasure floors.
 **Inherited:** Matryoshka (chest relic; floor≤40 canSpawn gate already live, effect is
-a documented no-op) — deferred by B3.25.
+a documented no-op) — deferred by B3.25. The **Cursed Key** and **N'loth's Mask** chest
+hooks — deferred by B3.27 (rows and pool slots live, bodies inert; see the obligations
+table row that groups them with the other screen-blocked boss/special relics).
 **Log:** —
 
 ### B4.8 `[ ]` Shop
@@ -437,7 +379,9 @@ relics, the fixed rest row (14) + no-rest-row-13 rule already in B4.2.
 **Acceptance:** tier-2: heal amount, smith upgrade writes the upgrade bit
 via registry rows; option availability matrix (no upgradable cards → no
 smith).
-**Inherited:** Eternal Feather (rest-room heal) — deferred by B3.25.
+**Inherited:** Eternal Feather (rest-room heal) — deferred by B3.25. The **Fusion
+Hammer** and **Coffee Dripper** campfire-option locks — deferred by B3.27 (rows live,
+bodies inert).
 **Log:** —
 
 ### B4.10 `[ ]` Event framework + ?-room resolution
@@ -455,7 +399,11 @@ for ≥ 3 seeds; trap-19 named test.
 **Inherited:** the ?-room `eventRng` duplicate roll — deferred by B4.4. Un-defer the
 translator's `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets
 (RunState storage has existed since B4.3) — deferred by B1.5/B4.3, jointly with
-B4.11-B4.13's `events.yaml` rows and the canonical list order.
+B4.11-B4.13's `events.yaml` rows and the canonical list order. The event-screen half
+of B3.27's inert boss/special relics (**Golden Idol** ×1.25 gold, **Sozu**'s potion
+block, **Sacred Bark** potency, and the five deferred `onEquip` bodies — Pandora's
+Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) — deferred by B3.27, each
+deferred whole because a partial would desync `miscRng` or `relicRng`.
 **Log:** —
 
 ### B4.11 `[ ]` ∥ Exordium events I
@@ -631,6 +579,64 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **ledger/history reconciliation after integration-12, -13 and
+  -14 (`master` at `8235477`).** Six tasks — **B3.26** (`860ab73`), **B3.16**
+  (`574ded0`), **B3.21** (`8b237e8` + `741d90f`), **B3.8** (`603cac2`),
+  **B3.22** (`7232d01`) and **B3.27** (`5a9a541`) — were on `master` while this
+  ledger still showed them `[ ]`, which conventions §2 calls an incident. All
+  six blocks are now archived verbatim in [stage-b-log.md](stage-b-log.md)
+  (`#b326`, `#b316`, `#b321`, `#b38`, `#b322`, `#b327`) with their Logs filled,
+  and appear here as one-line index entries. Two landed changes that are **not**
+  ledger tasks — the combat-start end-of-round fix (`821bffd`, in `56248c5`) and
+  the build/toolchain effort (in `8235477`) — get the new **Landed non-task
+  work** section, because neither has a task block to archive and neither was
+  recorded anywhere the next session would look.
+  Master's suite is green on **six** presets: `debug` / `asan` / `release` (WSL,
+  GCC 13.3) and `win-debug` / `win-asan` / `win-release` (clang-cl 22.1.8), with
+  zero NOT_BUILT lines across 51 test binaries. Landed manifest, **regenerated**
+  by `tools/registry_gen/gen.py` rather than summed: cards 91 / powers 40 /
+  monsters 21 / relics 142 / potions 33 / events 0 / encounters 20 / a20 20 /
+  **total 367**.
+  Ten obligation rows were discharged and deleted (Odd Mushroom ×1.25; Calipers;
+  Ice Cream / `EnergyManager.recharge`; RARE+SHOP `pool_order`; BOSS
+  `pool_order`; translator `relicPools`; `healing: true` on Feed/Reaper;
+  Barricade's block-decay branch; the recursive-play opcode for Double Tap; and
+  the combat-start end-of-round row). Ten were added, one narrowed and three
+  corrected. Three corrections have the **ledger as the losing document**
+  (conventions §4):
+  - **The un-park row is narrowed to B3.15 alone, not closed.** B3.16, B3.21 and
+    B3.22 discharged their share **by construction** — the gate is
+    `monster_init_fn(id) == nullptr`, so registering an init fn un-parks the
+    group with no shared code site edited. B3.15's slavers / Looter / Fungi
+    Beast are the last group still parking.
+  - **The `act_boss` row's blocker is gone.** It said a boss registry was needed
+    and that "B3.21/B3.22 land Act-1 bosses"; all three Act-1 bosses (B3.20,
+    B3.21, B3.22) have landed. The row stays open because it still has no owner,
+    but the stated blocker is now false and is corrected.
+  - **The shared-namespace paragraph's "28-row power table" was stale**, and a
+    bare row count there is the same liability conventions §8 documents for test
+    counts. Replaced with the invariant it was trying to state (ids run ahead of
+    the row count, re-derive the list from `registry/*.yaml`), plus the new
+    permanent-gap record for `PowerId` 47 and 54–58.
+- 2026-07-25 — **proposed, NOT applied: close the `gen.py` `SET_COST`
+  step-authoring obligation.** Recorded here for the orchestrator to accept or
+  reject; this pass corrected the row's *facts* but did not delete it, because
+  an obligation needs explicit re-owning rather than silent closure. The row
+  named two candidates and **both have now landed without needing it**: B3.8's
+  Corruption rewrites cost natively in the power (`powers.yaml` CORRUPTION,
+  `native: true`, hooks `on_use_card` / `on_card_draw`), and B3.27's Snecko Eye
+  does the same through `PowerId::CONFUSION` (`native: true`, `on_card_draw`) —
+  so the brief's "B3.27/Snecko Eye remains the candidate" had already become
+  false by the time this pass ran, and was not written into the row.
+  Independently, `tools/registry_gen/stsgen/steps.py` has classified `SET_COST`
+  as **`ENGINE_EMITTED_OPS` — deliberately never authorable from YAML** since
+  the codegen refactor `b291d8f` (2026-07-24), because its `src` operand is a
+  runtime card-pool index no YAML author can name; a generation-time assert
+  partitions every opcode into exactly one capability group, so the decision is
+  enforced, not merely documented. If the orchestrator agrees that "authoring"
+  is answered by "deliberately unauthorable", the row should be **deleted** with
+  that citation. What must **not** happen is the row quietly surviving with a
+  candidate that cannot arrive.
 - 2026-07-25 — **proposed, NOT applied: split B4.5 into B4.5a / B4.5b.**
   Recorded here for the orchestrator to accept or reject; this ledger pass did
   not split or renumber anything, because a task's real scope turning out
