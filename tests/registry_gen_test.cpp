@@ -379,16 +379,18 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
     EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
-    EXPECT_EQ(m::kPowersCount, 27u);  // B3.7 appends Evolve (26) + Fire Breathing (27)
-    EXPECT_EQ(m::kMonstersCount, 11u); // + B3.14 four small/medium slimes
+    EXPECT_EQ(m::kPowersCount, 28u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+                                      // Anger (33) is the Gremlin Nob's Bellow power
+    EXPECT_EQ(m::kMonstersCount, 13u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
+                                       // + Gremlin Nob (12) and Sentry (13)
     EXPECT_EQ(m::kRelicsCount, 65u);  // 35 + B3.25's 30 Ironclad-obtainable uncommons
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 0u);
-    EXPECT_EQ(m::kTotalCount, 231u);  // integrated through B3.7/B3.20/B3.25
+    EXPECT_EQ(m::kTotalCount, 234u);  // 75 + 28 + 13 + 65 + 33 + 0 + 20 + 0
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

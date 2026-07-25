@@ -90,6 +90,14 @@ sts_add_test(large_slime_test FIXTURES)
 # chain positioning, boss terminal gate, and a public advance() directed script.
 sts_add_test(slime_boss_test)
 
+# Act-1 elites (Gremlin Nob + Sentry): registry ascension columns, Anger's
+# SKILL-only trigger, Skull Bash's damage-then-Vulnerable order, the Sentry's
+# pre-battle Artifact and its debuff nullify, Bolt's Dazed-into-discard count,
+# and the 3-Sentry group from composition through spawn to alternating
+# telegraphs. Three independent 32-seed x 20-turn fixtures (Nob, Sentry in an
+# even and an odd slot) pin move history and the aiRng draw accounting.
+sts_add_test(elite_test FIXTURES)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
