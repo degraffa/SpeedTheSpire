@@ -90,6 +90,13 @@ sts_add_test(large_slime_test FIXTURES)
 # chain positioning, boss terminal gate, and a public advance() directed script.
 sts_add_test(slime_boss_test)
 
+# B3.19: Lagavulin, the sleeping elite. Registry columns (HP A8 / attack A3 /
+# debuff A18), the pre-battle armour that grows 8 a round until the shell opens,
+# both wake paths (three idles, or the first hit that moves HP), the post-wake
+# attack/attack/debuff cadence, the lethal-hit !isDying branch, and the awake
+# `Lagavulin(false)` ctor variant.
+sts_add_test(lagavulin_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

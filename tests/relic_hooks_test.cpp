@@ -1056,12 +1056,18 @@ TEST(RelicHooksPantograph, DoesNotHealInANormalFight) {
 }
 
 // An ELITE fight is, to Pantograph, an ordinary fight: the Java compares against
-// BOSS specifically, so ELITE takes the same `continue` branch NORMAL does. No
-// ELITE-typed monster row exists yet (GremlinNob.java:63 / Lagavulin.java:75 /
-// Sentry.java:61 are the three Exordium elites, none implemented), so this pins
-// the discriminator those rows will meet: is_boss() is BOSS-only, not "anything
-// above NORMAL".
+// BOSS specifically, so ELITE takes the same `continue` branch NORMAL does.
+// Lagavulin (Lagavulin.java:75) is the first REAL ELITE-typed row -- the other
+// two Exordium elites (GremlinNob.java:63 / Sentry.java:61) are still
+// unimplemented -- so it is checked here next to the synthetic one, pinning that
+// is_boss() means BOSS and not "anything above NORMAL".
 TEST(RelicHooksPantograph, EliteEnemyTypeIsNotABossFight) {
+    const sts::registry::MonsterDef* lagavulin =
+        sts::registry::monster_def(MonsterId::LAGAVULIN);
+    ASSERT_NE(lagavulin, nullptr);
+    EXPECT_EQ(lagavulin->enemy_type, sts::registry::MonsterEnemyType::ELITE);
+    EXPECT_FALSE(lagavulin->is_boss());
+
     sts::registry::MonsterDef elite = sts::registry::kSlimeBoss;
     elite.enemy_type = sts::registry::MonsterEnemyType::ELITE;
     EXPECT_FALSE(elite.is_boss());

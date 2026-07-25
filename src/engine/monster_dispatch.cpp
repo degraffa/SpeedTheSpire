@@ -11,6 +11,7 @@
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
+#include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
@@ -82,6 +83,11 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &acid_slime_large_init;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_init;
+        case MonsterId::LAGAVULIN:
+            // The ELITE encounter's `new Lagavulin(true)` (MonsterHelper.java:
+            // 439-441). lagavulin_init_awake is the "Lagavulin Event" ctor and has
+            // no encounter to spawn it yet.
+            return &lagavulin_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -113,6 +119,8 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &acid_slime_large_take_turn;
         case MonsterId::SLIME_BOSS:
             return &slime_boss_take_turn;
+        case MonsterId::LAGAVULIN:
+            return &lagavulin_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -120,7 +128,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     switch (id) {
@@ -146,7 +154,7 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
@@ -193,8 +201,9 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     fn(state, slot, hp);  // m.init(): the child's aiRng roll, at resolve time
 }
 
-void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+void on_monster_damaged(CombatState& state, uint8_t monster_index,
+                        int32_t hp_lost) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
@@ -208,13 +217,18 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index) noexcept {
         case MonsterId::SLIME_BOSS:
             slime_boss_on_damaged(state, monster_index);
             return;
+        case MonsterId::LAGAVULIN:
+            // The only override that reads how much HP actually moved
+            // (Lagavulin.java:199-205); the slime interrupts test resulting HP.
+            lagavulin_on_damaged(state, monster_index, hp_lost);
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 11,
+    static_assert(sts::registry::manifest::kMonstersCount == 12,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -222,6 +236,11 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)
+
+        case MonsterId::LAGAVULIN:
+            // Asleep: 8 Block + Metallicize(8) (Lagavulin.java:104-107). Awake:
+            // a bare setMove(DEBUFF) (:112). No RNG on either branch.
+            return &lagavulin_use_pre_battle_action;
 
         // The two monsters below DO override usePreBattleAction; both are
         // deliberately nullptr here, and the reasons differ. They are spelled out
@@ -255,10 +274,10 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
             return nullptr;
 
         default:
-            // Checked, not assumed: of the 11 registry monsters only JawWorm,
-            // LouseNormal, LouseDefensive and SlimeBoss declare the method at
-            // all. The other seven (Cultist, the four small/medium slimes, the
-            // two large slimes) inherit AbstractMonster's empty body
+            // Checked, not assumed: of the 12 registry monsters only JawWorm,
+            // LouseNormal, LouseDefensive, SlimeBoss and Lagavulin declare the
+            // method at all. The other seven (Cultist, the four small/medium
+            // slimes, the two large slimes) inherit AbstractMonster's empty body
             // (AbstractMonster.java:953-954), so there is genuinely nothing to
             // run for them.
             //

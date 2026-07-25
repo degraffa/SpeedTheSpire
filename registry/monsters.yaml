@@ -419,3 +419,69 @@
         # MakeTempCardInDiscardAction(new Slimed(), A19 ? 5 : 3), not hand.
         - {op: MAKE_CARD, target: PLAYER, amount: {base: 3, a19: 5}, card: SLIMED, pile: DISCARD}
   ai: native
+
+# --- Elite: Lagavulin --------------------------------------------------------
+# Lagavulin.java read in full. The whole class is one sleep/wake state machine
+# whose transitions are direct setMove / SetMoveAction calls, so selection is
+# native (monster_lagavulin.*) and only the two acting moves carry data effects.
+#
+# Move ids are the class's own bytes (Lagavulin.java:54-58): DEBUFF=1,
+# STRONG_ATK=3, OPEN=4, IDLE=5, OPEN_NATURAL=6.
+#
+# OPEN_NATURAL (6) IS DELIBERATELY ABSENT from the table below. takeTurn has a
+# `case 6:` (:165-172), but nothing in the 11-30-2020 build ever sets move 6 --
+# there is no setMove(6, ...) or SetMoveAction(..., 6, ...) in Lagavulin.java or
+# anywhere else, so no telegraphed intent for it exists to record. Giving it a
+# row would mean inventing an Intent the game never displays. Whoever finds a
+# reachable path to it adds the row then.
+#
+# OPEN (4) and IDLE (5) act but queue no state-changing effects of their own:
+# move 4 is a TextAboveCreatureAction(STUNNED) (:161) and move 5's body is
+# TalkActions plus the native counter/telegraph logic (:136-158). Both take the
+# NOP placeholder the large-slime SPLIT move established.
+
+- id: 15
+  name: LAGAVULIN
+  game_id: "Lagavulin"
+  provenance: "Lagavulin ctor setHp A8 / attackDmg A3 / debuff A18 branches (Lagavulin.java:73-100), usePreBattleAction asleep block+Metallicize vs awake DEBUFF telegraph (:102-114), takeTurn DEBUFF/STRONG_ATK/IDLE/OPEN cases (:116-174), changeState OPEN (:176-195), damage() wake interrupt (:197-210), getMove (:212-227), move ids (:54-58), ARMOR_AMT 8 (:66), STRONG_ATK_DMG 18 / A_2_STRONG_ATK_DMG 20 (:60,63), DEBUFF_AMT -1 / A_18_DEBUFF_AMT -2 (:61-62); ID (:45); MonsterHelper.getEncounter \"Lagavulin\" -> new Lagavulin(true) (MonsterHelper.java:439-441), \"Lagavulin Event\" -> new Lagavulin(false) (:445-447)"
+  enemy_type: ELITE   # Lagavulin.java:75
+  hp:
+    base: {min: 109, max: 111}  # Lagavulin.java:80 (ascension < 8)
+    a8:   {min: 112, max: 115}  # Lagavulin.java:78 (ascension >= 8)
+  moves:
+    - name: DEBUFF
+      move_id: 1               # Lagavulin.java:54
+      intent: STRONG_DEBUFF    # setMove(DEBUFF_NAME, 1, Intent.STRONG_DEBUFF) (:112,217,222)
+      effects:
+        # DEXTERITY FIRST, then STRENGTH -- takeTurn's addToBottom order
+        # (Lagavulin.java:123-124). debuff = -1, or -2 from A18 (:83); the field
+        # names A_18_DEBUFF_AMT/DEBUFF_AMT (:61-62) match the branch for once.
+        # Negative Strength/Dexterity flip the applied instance to DEBUFF
+        # (StrengthPower/DexterityPower updateDescription), so Artifact nullifies
+        # them -- handled at the APPLY_POWER site, not here.
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: -1, a18: -2}, power: DEXTERITY}
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: -1, a18: -2}, power: STRENGTH}
+    - name: STRONG_ATK
+      move_id: 3               # Lagavulin.java:55
+      intent: ATTACK
+      effects:
+        # damage.get(0) == attackDmg: 18, or 20 from A3 (Lagavulin.java:82,84).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 18, a3: 20}}
+    - name: OPEN
+      move_id: 4               # Lagavulin.java:56
+      intent: STUN             # damage() telegraphs setMove(4, Intent.STUN) (:202)
+      effects:
+        # TextAboveCreatureAction(STUNNED) then RollMoveAction (:160-163):
+        # presentation plus a native roll. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: IDLE
+      move_id: 5               # Lagavulin.java:57
+      intent: SLEEP            # setMove(5, Intent.SLEEP) (:144,225)
+      effects:
+        # idleCount bookkeeping, TalkActions, and the third-idle OPEN/SetMove
+        # sequence are all native (:136-158). NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+  ai: native   # getMove (Lagavulin.java:212-227) ignores `num` entirely: asleep ->
+               # IDLE forever; awake -> STRONG_ATK until debuffTurnCount reaches 2,
+               # then DEBUFF. rollMove still draws one aiRng.random(99) every time
+               # (AbstractMonster.java:712-714), which the native module reproduces.

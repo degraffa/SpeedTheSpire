@@ -204,6 +204,15 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //     SpikeSlime_L.java:66,138). Set synchronously by the damage() interrupt
 //     the first time currentHealth falls to <= maxHealth/2 so later hits do not
 //     re-queue the split telegraph.
+//   * `flags` bits kMonsterFlagLagavulin{Asleep,IsOut,OutTriggered} -- Lagavulin:
+//     the three independent booleans of its sleep/wake machine (`asleep` set once
+//     by the ctor argument, `isOut` set by changeState("OPEN"), `isOutTriggered`
+//     the one-shot latch that stops a second hit re-stunning it;
+//     Lagavulin.java:67-69,85,88-91,185,204).
+//   * `pad0` -- Lagavulin: two 4-bit counters, idleCount in the low nibble and
+//     debuffTurnCount in the high nibble (Lagavulin.java:70-71). Both are bounded
+//     by their own state machine (idleCount stops mattering at 3, debuffTurnCount
+//     is reset to 0 the turn after it reaches 2), so a nibble each is ample.
 // These are mutually exclusive across monster types (a Cultist never bites; a
 // Louse never has Ritual), so no field is read under two meanings at once.
 struct MonsterState {
@@ -226,6 +235,16 @@ inline constexpr uint16_t kMonsterFlagCurlUpTriggered = 0x0002u;
 // Large slime splitTriggered latch (AcidSlime_L.java:71,145-151 /
 // SpikeSlime_L.java:66,133-139); see the MonsterState comment above.
 inline constexpr uint16_t kMonsterFlagSplitTriggered = 0x0004u;
+// Lagavulin's three sleep/wake booleans (Lagavulin.java:67-69). `asleep` is the
+// ctor argument and never changes; `isOut` means the shell is open (set by
+// changeState("OPEN"), :185); `isOutTriggered` is the one-shot latch that makes
+// the damage() wake fire at most once (:69,204). They are NOT redundant: between
+// the damage interrupt and the queued open, isOutTriggered is set while isOut is
+// still false, and a LETHAL hit latches isOutTriggered without ever opening
+// (changeState's !isDying guard, :184).
+inline constexpr uint16_t kMonsterFlagLagavulinAsleep = 0x0008u;
+inline constexpr uint16_t kMonsterFlagLagavulinIsOut = 0x0010u;
+inline constexpr uint16_t kMonsterFlagLagavulinOutTriggered = 0x0020u;
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,

@@ -407,6 +407,8 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "AcidSlime_L.java -- no this.type assignment"},
         {MonsterId::SLIME_BOSS,         MonsterEnemyType::BOSS,
          "SlimeBoss.java:86 -- this.type = EnemyType.BOSS"},
+        {MonsterId::LAGAVULIN,          MonsterEnemyType::ELITE,
+         "Lagavulin.java:75 -- this.type = EnemyType.ELITE"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);
