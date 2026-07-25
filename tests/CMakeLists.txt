@@ -22,6 +22,67 @@ unset(BUILD_SHARED_LIBS)
 
 include(GoogleTest)
 
+# GoogleTest's headers are third-party and must not gate our build.
+#
+# sts_set_warnings lands PRIVATE, which correctly keeps our -Werror off
+# googletest's own SOURCES -- but a header included by one of our test TUs is
+# compiled with OUR flags, so gtest's header code is judged by our gate. Under
+# clang-cl that is not theoretical: gtest 1.15.2 fails the build outright.
+#
+#   _deps/googletest-src/googletest/include/gtest/gtest-printers.h(524,35):
+#   error: implicit conversion from 'char8_t' to 'char32_t' may change the
+#   meaning of the represented code unit [-Werror,-Wcharacter-conversion]
+#
+# -Wcharacter-conversion is a recent addition to clang's -Wconversion family and
+# is about character-encoding meaning, not the value-changing integer narrowing
+# this project promoted to an error. Marking the include directories SYSTEM is
+# the fix that costs nothing: it suppresses diagnostics from THEIR headers while
+# leaving our gate over our own code exactly as strict. Suppressing the warning
+# globally instead would have blunted -Wconversion everywhere to appease one
+# line of someone else's code.
+#
+# Written as a property edit rather than FetchContent_Declare(... SYSTEM),
+# because the latter needs CMake 3.25 and this project's floor is 3.21.
+#
+# The second half is googletest's OWN -WX (warnings-as-errors), which it applies
+# to its own sources for MSVC-like compilers. clang-cl satisfies CMake's MSVC
+# check, so gtest builds itself with `-W4 -WX` -- and under clang-cl /W4 means
+# clang's -Wall -Wextra, which in clang 22 includes the new
+# -Wcharacter-conversion. gtest 1.15.2 then fails to compile ITSELF:
+#
+#   gtest/gtest-printers.h(524,35): error: implicit conversion from 'char8_t'
+#   to 'char32_t' ... [-Werror,-Wcharacter-conversion]
+#
+# gtest's own -wdNNNN suppression list cannot cover this: those are MSVC warning
+# NUMBERS, which say nothing about a clang-native diagnostic.
+#
+# A VERSION BUMP DOES NOT FIX THIS -- tested, not assumed. Reproduced in an
+# isolated project containing nothing but googletest and clang-cl 22.1.8:
+#   v1.15.2 -> fails at gtest-printers.h:524
+#   v1.17.0 -> fails at gtest-printers.h:528   (same defect, moved 4 lines)
+# so this is a googletest x clang-22 incompatibility that upstream has not
+# addressed, not a staleness problem in our pin.
+#
+# /WX- (disable warnings-as-errors) is scoped to the third-party targets only.
+# It is deliberately NOT -Wno-character-conversion: silencing one named
+# diagnostic would leave the next new clang warning to break the build the same
+# way, and this says the accurate thing instead -- a dependency's opinion about
+# its own warnings is not a gate on our build. Our own targets are untouched;
+# sts_set_warnings still promotes the conversion pair to errors on every file we
+# own. Nothing in googletest's source tree is patched.
+foreach(_gt gtest gtest_main gmock gmock_main)
+    if(TARGET ${_gt})
+        get_target_property(_gt_inc ${_gt} INTERFACE_INCLUDE_DIRECTORIES)
+        if(_gt_inc)
+            set_target_properties(${_gt} PROPERTIES
+                INTERFACE_SYSTEM_INCLUDE_DIRECTORIES "${_gt_inc}")
+        endif()
+        if(CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            target_compile_options(${_gt} PRIVATE /WX-)
+        endif()
+    endif()
+endforeach()
+
 # Every target below is declared with sts_add_test (cmake/StsAddTest.cmake),
 # which supplies the shape all 39 suites shared by hand: one executable, a
 # GTest::gtest_main link, sts_set_warnings, sts_enable_sanitizers, and

@@ -9,6 +9,27 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "Build type" FORCE)
 endif()
 
+# Windows has no RPATH: the loader finds a DLL next to the .exe, on PATH, or not
+# at all. googletest is deliberately built SHARED here (see tests/CMakeLists.txt
+# -- it takes relinking ~39 test executables from ~33s to ~9.5s), so on Windows
+# every test binary needs gtest.dll beside it. Without this, the executables link
+# fine and then fail at startup with 0xc0000135 (STATUS_DLL_NOT_FOUND), which
+# surfaces through ctest as the thoroughly unhelpful
+#
+#   discover_tests failed to run command: ...
+#   execute_process Abnormal exit: Exit code 0xc0000135
+#
+# i.e. every test reported as a discovery failure rather than a missing DLL.
+# Pointing all runtime artifacts at one directory is the standard fix and keeps
+# gtest's shared-link benefit on both platforms.
+#
+# Scoped to WIN32 deliberately: on Linux the layout is load-bearing for tooling
+# that addresses binaries by path (tools/fixture_gen/gen_combat_fixtures among
+# them), and ELF RPATH already solves this, so there is nothing to fix there.
+if(WIN32)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+endif()
+
 option(STS_BUILD_TESTS "Build unit tests" ON)
 # Default OFF: benchmarks are not part of any test run, but building them means
 # fetching and building google-benchmark, which measured 50.9s vs 21.2s of
@@ -77,7 +98,26 @@ include(FetchContent)
 # declared in tests/ and benchmarks/, which stay on the default base dir.
 option(STS_SHARED_DEP_CACHE
     "Share the sub-build-free FetchContent checkouts (xxHash, nlohmann/json) across build trees" ON)
-set(STS_DEP_CACHE_DIR "${CMAKE_SOURCE_DIR}/.cache/deps" CACHE PATH
+# The cache is partitioned by HOST SYSTEM, and that is not tidiness -- it is
+# required for the WSL and native-Windows toolchains to coexist on one checkout.
+#
+# Both hosts reach the SAME physical directory under a different absolute-path
+# spelling: WSL sees /mnt/d/STS_BG_Mod/... and Windows sees D:/STS_BG_Mod/...
+# FetchContent's sub-build bakes its own path into the generated
+# <dep>-subbuild/CMakeCache.txt, and CMake then refuses to reuse a cache
+# directory whose recorded path is not the one it was invoked with:
+#
+#   CMake Error: The current CMakeCache.txt directory
+#   D:/.../.cache/deps/xxhash-subbuild/CMakeCache.txt is different than the
+#   directory /mnt/d/.../.cache/deps/xxhash-subbuild where CMakeCache.txt was
+#   created.
+#
+# That is a hard configure failure, not a cache miss, so a single shared
+# directory means whichever toolchain configured second simply cannot build.
+# Splitting by CMAKE_HOST_SYSTEM_NAME keeps both sides cached and independent;
+# the cost is one extra checkout per host, of a ~13 MB pair.
+set(STS_DEP_CACHE_DIR "${CMAKE_SOURCE_DIR}/.cache/deps/${CMAKE_HOST_SYSTEM_NAME}"
+    CACHE PATH
     "Location of the shared FetchContent checkout cache (see STS_SHARED_DEP_CACHE)")
 
 if(STS_SHARED_DEP_CACHE)

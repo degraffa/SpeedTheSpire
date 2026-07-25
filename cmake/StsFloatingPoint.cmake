@@ -96,17 +96,50 @@ function(sts_apply_fp_contract)
         # semantics out of the optimiser (we never read the FP status word).
         # MSVC's contraction behaviour under /fp:precise has changed across
         # toolset versions and is not something to take on trust from a
-        # document -- which is why clang-cl also gets the exact
-        # -ffp-contract=off it understands, and why fp_contract_test is the
-        # thing that actually decides whether the contract holds on a given
-        # Windows toolchain. If that test fails under cl.exe, the answer is
-        # /fp:strict (correct, slower), not a weaker assertion.
-        list(APPEND _flags /fp:precise /fp:except-)
+        # document -- which is why clang-cl also gets an exact contraction
+        # control, and why fp_contract_test is the thing that actually decides
+        # whether the contract holds on a given Windows toolchain. If that test
+        # fails under cl.exe, the answer is /fp:strict (correct, slower), not a
+        # weaker assertion.
+        if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+            list(APPEND _flags /fp:precise /fp:except-)
+        endif()
         if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-            # clang-cl takes the MSVC switches above *and* understands the GNU
-            # spelling of the contraction control, which is more precise than
-            # anything cl.exe offers. Both are applied deliberately.
-            list(APPEND _flags -ffp-contract=off)
+            # clang-cl gives access to the exact contraction control that cl.exe
+            # has no equivalent for -- but ONLY through the /clang: escape
+            # hatch. The bare GNU spelling is NOT accepted:
+            #
+            #   clang-cl: error: unknown argument ignored in clang-cl:
+            #   '-ffp-contract=off' [-Werror,-Wunknown-argument]
+            #
+            # Measured with clang-cl 22.1.8. An earlier revision of this file
+            # asserted the opposite from documentation, and the build caught it
+            # -- because clang-cl promotes unknown arguments to errors. Had it
+            # been a plain warning the flag would have been silently dropped,
+            # contraction left on, and the build would have looked clean. That
+            # is what fp_contract_test is for.
+            #
+            # /fp:precise is deliberately NOT passed alongside this, for two
+            # reasons that only show up on a real build:
+            #
+            #  - It is not sufficient. clang maps /fp:precise to
+            #    -ffp-model=precise, which sets -ffp-contract=ON: fusing is
+            #    permitted within a single statement, and `a + b * c` is a
+            #    single statement. Measured on an FMA-capable target with
+            #    clang-cl 22.1.8:
+            #       /fp:precise                          -> vfmadd231ss
+            #       /fp:precise /clang:-ffp-contract=off -> vmulss + vaddss
+            #       /fp:fast                             -> vfmadd231ss
+            #    (the default x86-64 target has no FMA instruction, so the
+            #    difference is invisible until someone adds -march.)
+            #
+            #  - Passing both is a hard error, not a redundancy:
+            #       clang-cl: error: overriding '-ffp-model=precise' option
+            #       with '-ffp-contract=off' [-Werror,-Woverriding-option]
+            #
+            # clang's default FP model is already precise (no fast-math), so
+            # contraction is the only thing that needs saying.
+            list(APPEND _flags /clang:-ffp-contract=off)
         endif()
     elseif(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang|IntelLLVM)$")
         # --- GCC / Clang with the GNU driver --------------------------------
