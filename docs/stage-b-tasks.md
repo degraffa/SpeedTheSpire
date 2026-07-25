@@ -73,9 +73,13 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Smoke Bomb combat-escape potion body | B3.23 | B3.15 | B4.4 landed the run-level half (rejects bosses, no-reward proceed); the combat-escape path is still B3.15's |
 | Pantograph atBattleStart boss heal 25 | B3.25 | B3.15 | needs EnemyType/BOSS monster metadata; named "B3.15-B3.17", and B3.16/B3.17/B3.20 landed without it |
 | Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15 | run-created combats with an unimplemented group cannot play out. **B3.18, B3.19, B3.16, B3.21 and B3.22 have all discharged their share by construction** — the gate is `monster_init_fn(id) == nullptr`, i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. B3.15 (slavers, Looter, Fungi Beast) is the last owner and inherits the same free discharge |
+| **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
+| **Gambling Chip** `atTurnStartPostDraw` | B3.26 | UNASSIGNED — needs an OPTIONAL multi-select `CHOOSE_CARD` | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. Every existing `ChoiceKind` selects a **mandatory fixed count**, so this needs an optional multi-select with an explicit confirm — which **changes the public `ActionMask` surface** the observation and translator layers join on, and is therefore not a local relic change. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
+| **Sling of Courage** `atBattleStart` | B3.26 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `Sling.atBattleStart` (`Sling.java:1030-1038`) grants Strength 2 when `getCurrRoom().eliteTrigger` is set. `eliteTrigger` is per-**ROOM** state the run layer sets when an elite encounter begins, and `CombatState` carries no elite marker; producing one is a run-layer change. **Twin of the Slaver's Collar row below** — same missing marker, so both wait on the blocker, not on each other. Inertness asserted by `relic_rares_shop_test` |
+| **Orange Pellets** `onUseCard` | B3.26 | UNASSIGNED — needs a new opcode | `OrangePellets.java:1218-1250`: once an ATTACK, a SKILL and a POWER have all been played, it queues `RemoveDebuffsAction(player)`, which removes **every** DEBUFF-type power on the player, **enumerated when the action resolves**. No opcode expresses that — `REMOVE_POWER` names one `PowerId` chosen at *queue* time. The three latches and their `at_turn_start` clear are live; only the removal is deferred. Inertness asserted by `relic_rares_shop_test` |
 | Ten `energyMaster` relics (Fusion Hammer, Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu, Philosopher's Stone, Coffee Dripper, Mark of Pain) **and Snecko Eye's `masterHandSize += 2`** | B3.27 | UNASSIGNED — next `action_queue.cpp` owner | there is no `energyMaster` / `gameHandSize` field, and the single consumer is the recharge/draw line inside `start_of_turn`. Each is deferred **whole**, with asserted inertness, because every partial would desync `miscRng` or `relicRng` |
 | `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
-| Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — whoever owns Sling of Courage (B3.26's inert twin, blocked on the same marker) | `CombatState` carries no elite/boss room marker. **NB:** B3.26's four inert relics — Dead Branch, Gambling Chip, Sling of Courage, Orange Pellets — have no rows of their own in this table; each is an explicit empty native body with its reason and citation, and `relic_rares_shop_test` asserts the inertness, but that is code-side only. Surfaced, not invented: the orchestrator should say whether they want rows |
+| Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
 | Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Cursed Key + N'loth's Mask chest hooks; Busted Crown reward count; Black Star elite relic; Golden Idol ×1.25 gold; Sozu potion block; Sacred Bark potency; Fusion Hammer / Coffee Dripper campfire locks | B3.27 | B4.5 / B4.7 / B4.9 / B4.10-13 | the reward, chest, campfire and event screens do not exist yet |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
@@ -109,7 +113,6 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Translator: real `act_boss` | B1.5, B4.3 | UNASSIGNED | the boss registry now exists — B3.20/B3.21/B3.22 landed all three Act-1 bosses, so the blocker is gone — but still no owner is named |
 | Bit-exact oracle for the raw monsterRng monster / elite / boss lists | B3.12 | UNASSIGNED | B3.12 pinned the algorithm + determinism, not a golden list; B4.4's floor-0 triple pins stream state only. Natural home is B5.2's campaign automation |
 | `RETAIN` `CardFlag` end-of-turn sweep | B3.1 | UNASSIGNED — "first content consumer" | ETHEREAL (B3.5/B3.6) and INNATE (B3.9) discharged; no S1 Ironclad card uses Retain |
-| `gen.py` step-authoring for `SET_COST` | B3.1 | UNASSIGNED — **both named candidates are now spent; PROPOSED FOR CLOSURE, see the change log** | `MAKE_CARD`'s half was discharged at B3.3. **B3.8 did not need it** — Corruption's cost rewrite is native in the power (`powers.yaml` CORRUPTION is `native: true`, hooks `on_use_card` / `on_card_draw`), so the B3.8 candidacy is closed. **Nor did B3.27** — Snecko Eye's rewrite is likewise native, in `PowerId::CONFUSION` (`native: true`, `on_card_draw`), so the second named candidate landed without it either. Separately, `stsgen/steps.py` has classified `SET_COST` as **`ENGINE_EMITTED_OPS` — deliberately never authorable** since `b291d8f`, because its `src` operand is a runtime card-pool index no YAML author can name, and a generation-time assert partitions every opcode into exactly one capability group. The row is therefore left open **and re-owned by the orchestrator, not silently closed** |
 | `lagavulin_init_awake` has no production caller | B3.19 | UNASSIGNED — Lagavulin Event owner | implemented and tested; the event that would build `Lagavulin(false)` does not exist |
 | Gremlin move-99 escape (`EscapeAction` body **and** the `deathReact`/`escapeNext` trigger, landed together) | B3.16 | UNASSIGNED — Act-2 owner | unreachable in Act 1: `escapeNext()` has no caller in the decompiled tree; the only `deathReact()` call is `BanditBear.java:131` |
 | `run_advance.cpp` file-header comment (~line 7) enumerates a stale monster roster | integration-11 | UNASSIGNED — next `run_advance.cpp` toucher | same rot as the step-(2) comment fixed in `5f96ec4`; conventions §8's "comment asserting X does not exist yet" class |
@@ -579,6 +582,38 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **the `gen.py` `SET_COST` step-authoring obligation is CLOSED**,
+  and B3.26's four deliberately-inert relics **get rows**. Orchestrator
+  decisions on the two items the reconciliation entry below surfaced rather than
+  applied; both were verified against the tree again before being written here.
+  - **`SET_COST` row deleted.** The obligation assumed `SET_COST` would
+    eventually need YAML step-authoring, with "the first card consumer" as its
+    owner. Both named candidates are spent: Corruption (**B3.8**) and Snecko Eye
+    (**B3.27**) both landed with **native** cost rewrites —
+    `PowerId::CORRUPTION` (`native: true`, `on_use_card` / `on_card_draw`) and
+    `PowerId::CONFUSION` (`native: true`, `on_card_draw`). Independently,
+    `SET_COST` has sat in `ENGINE_EMITTED_OPS` (`stsgen/steps.py:71-74`) since
+    **`b291d8f`** (2026-07-24) — **deliberately unauthorable**, enforced by a
+    generation-time assert that partitions every opcode into exactly one
+    capability group. The obligation is therefore not merely unowned, it is
+    **contrary to a standing design decision**: authoring `SET_COST` from YAML
+    is something the generator is built to refuse. **Closed rather than
+    re-owned.** If a future card genuinely needs an authorable cost rewrite, the
+    change is to move the opcode between groups in `steps.py` — a deliberate
+    authorability decision carrying its own assert — **not** this row.
+  - **Four rows added for B3.26's inert relics** — Dead Branch, Gambling Chip,
+    Sling of Courage, Orange Pellets — each carrying the blocker as the registry
+    provenance records it, and each noting that `relic_rares_shop_test` asserts
+    the inertness today, so implementing one fails a test rather than silently
+    changing behaviour. Code-side asserted inertness is **not** a substitute for
+    a row: a passing assertion tells you the relic is still inert, not that
+    anyone intends to implement it, and this table's own header says an
+    obligation that is not in it is invisible once the deferring block is
+    archived. The dangling "same owner as Sling of Courage" reference on the
+    Slaver's Collar row was the proof — it named an owner that did not exist.
+    **Both** that row and the new Sling of Courage row now point at the shared
+    **blocker** (no elite/boss room marker on `CombatState`) and cross-reference
+    each other only as twins, so neither defines the other's owner.
 - 2026-07-25 — **ledger/history reconciliation after integration-12, -13 and
   -14 (`master` at `8235477`).** Six tasks — **B3.26** (`860ab73`), **B3.16**
   (`574ded0`), **B3.21** (`8b237e8` + `741d90f`), **B3.8** (`603cac2`),
@@ -619,7 +654,10 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
     the row count, re-derive the list from `registry/*.yaml`), plus the new
     permanent-gap record for `PowerId` 47 and 54–58.
 - 2026-07-25 — **proposed, NOT applied: close the `gen.py` `SET_COST`
-  step-authoring obligation.** Recorded here for the orchestrator to accept or
+  step-authoring obligation.** *(Superseded: the orchestrator **accepted** this;
+  the row is deleted and the closure recorded in the topmost entry above. Left
+  here as written, because the proposal and its verification are the record of
+  why the obligation stopped existing.)* Recorded here for the orchestrator to accept or
   reject; this pass corrected the row's *facts* but did not delete it, because
   an obligation needs explicit re-owning rather than silent closure. The row
   named two candidates and **both have now landed without needing it**: B3.8's
