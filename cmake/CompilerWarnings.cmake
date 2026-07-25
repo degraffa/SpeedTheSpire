@@ -23,16 +23,18 @@
 # hard errors and the build dies before link. CI configures every preset with
 # -DSTS_BUILD_BENCHMARKS=ON, so that failure mode reddens every job at once.
 #
-# -Wconversion (the lossy-narrowing half) is deliberately left as a warning even
-# though a fresh three-preset build emits none of it today. Promoting a flag is
-# a commitment to keep it at zero, and -Wconversion fires on ordinary integer
-# narrowing all over a codebase built from uint8_t/int16_t state fields -- so
-# that commitment deserves its own decision rather than riding along with this
-# one. If it is still at zero when someone next measures, promoting it is a
-# one-word change here.
+# -Wconversion (the lossy-narrowing half) is promoted on the same terms, as a
+# separate decision rather than a ride-along: a fresh three-preset build emitted
+# none of it, and the owner accepted the standing commitment that promotion
+# implies. It matters more here than in most codebases -- state lives in
+# uint8_t/int16_t fields, so an ordinary-looking int assignment is exactly how a
+# value silently changes, which is the defect class this simulator exists to
+# avoid. Expect it to bite when new state fields land; the fix is an explicit
+# cast at the narrowing site (or as_index() in index_cast.hpp for the
+# signed->subscript case), never a suppression.
 function(sts_set_warnings target)
     target_compile_options(${target} PRIVATE
-        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wnon-virtual-dtor -Woverloaded-virtual -Werror=sign-conversion>
+        $<$<CXX_COMPILER_ID:GNU,Clang>:-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wnon-virtual-dtor -Woverloaded-virtual -Werror=sign-conversion -Werror=conversion>
         $<$<CXX_COMPILER_ID:MSVC>:/W4>
     )
 endfunction()
