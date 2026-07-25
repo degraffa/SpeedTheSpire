@@ -269,6 +269,13 @@ sts_add_test(relic_pools_test)
 # are deliberately deferred.
 sts_add_test(relic_rares_shop_test)
 
+# B3.27 BOSS relic pool (Neow's category-3 swap) + the Act-1-event-reachable
+# SPECIAL tier: Snecko Eye's per-draw Confusion cost roll and its draw-order
+# accounting, Velvet Choker's play limit, the direct-write relics (Philosopher's
+# Stone, Neow's Lament), the Ectoplasm gold suppression and act gate, and the
+# asserted inertness of every deliberate no-op in both tiers.
+sts_add_test(relic_boss_special_test)
+
 # B3.4 red common skills + CHOOSE-in-combat plumbing.
 sts_add_test(card_skills_test)
 

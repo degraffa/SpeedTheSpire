@@ -299,8 +299,10 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
 TEST(RegistryGen, RelicTableMatchesRegistry) {
     namespace r = sts::registry;
-    EXPECT_EQ(r::manifest::kRelicsCount, 111u);  // + the 28 rares, 17 shop
-                                                 // relics and Odd Mushroom
+    EXPECT_EQ(r::manifest::kRelicsCount, 142u);  // + the 28 rares, 17 shop
+                                                 // relics and Odd Mushroom,
+                                                 // + the 22-relic BOSS pool and
+                                                 // the 9 Act-1 event SPECIALs
 
     // Burning Blood (starter, native on_victory).
     const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
@@ -333,7 +335,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
     EXPECT_EQ(r::relic_def(r::RelicId::RED_SKULL)->pool_order, 32);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->pool_order, -1);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->initial_counter, 1);
-    EXPECT_EQ(r::kRelicDefs.size(), 111u);
+    EXPECT_EQ(r::kRelicDefs.size(), 142u);
 
     // --- B3.25 uncommon rows ------------------------------------------------
     // Mercury Hourglass (data): atTurnStart DAMAGE 3 to ALL enemies, THORNS-typed
@@ -382,7 +384,7 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kCardsCount, 75u);   // B3.7: prior 67 + 8 red uncommon POWER cards
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 33u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 34u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -391,19 +393,22 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.16's Angry (40), the Gremlin Warrior's
                                       // pre-battle power; 30-39 are other batches
                                       // + B3.21's Mode Shift (45) + Sharp Hide (46)
+                                      // + B3.27's Confusion (59), applied by the
+                                      // Snecko Eye boss relic, not by a card
     EXPECT_EQ(m::kMonstersCount, 20u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
                                        // Lagavulin (15)
                                        // + B3.16 five gremlins (ids 16-20)
                                        // + B3.21 The Guardian (id 21)
-    EXPECT_EQ(m::kRelicsCount, 111u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
+    EXPECT_EQ(m::kRelicsCount, 142u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
+                                       // + B3.27's 22 boss + 9 Act-1 event specials
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 0u);
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
-    EXPECT_EQ(m::kTotalCount, 312u);  // 75 + 33 + 20 + 111 + 33 + 0 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 344u);  // 75 + 34 + 20 + 142 + 33 + 0 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

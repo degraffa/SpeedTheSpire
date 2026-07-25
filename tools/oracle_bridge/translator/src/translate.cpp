@@ -488,21 +488,65 @@ struct OracleAnchors {
     rs.purge_cost = static_cast<int16_t>(as_i64(fr.require("purgeCost"), ctx, path + ".purgeCost"));
     fr.mapped();
 
-    // -- Still deferred: the id-LIST items. B4.3 added their RunState storage
-    //    (relic_pools[5], event/shrine/special membership bitsets), but mapping
-    //    the golden's real values bit-for-bit needs content-id enums that do NOT
-    //    exist at HEAD -- relics.yaml and events.yaml are empty (skeleton). A
-    //    fail-loud join of these ids would throw. They translate once B4.6
-    //    (relics.yaml -> relic_from_game_id) and B4.10-B4.13 (events.yaml -> an
-    //    event id/enum + canonical list order) land the registries; each is that
-    //    task's translator un-deferral, needing no further schema bump (the
-    //    storage is already here). Per the B4.3 deliverable's "now-representable
-    //    fields". These defer() calls still STRUCTURALLY consume the keys (so a
-    //    genuinely new/renamed oracle key still trips the drift error). --
+    // -- relicPools (§2.5 #8): UN-DEFERRED. The RunState storage
+    //    (relic_pools[5][kRelicPoolCap] + relic_pool_count[5]) has existed since
+    //    the schema-v3 additive pass; what was missing was a COMPLETE
+    //    registry/relics.yaml, because join_relic is fail-loud -- a single
+    //    unregistered game_id in any of the five arrays throws and aborts the
+    //    whole translation. That is why this key waited for the last relic tier
+    //    rather than landing tier by tier: a partial registry would have turned
+    //    every real capture into an error instead of a partial mapping.
+    //
+    //    The five keys are mapped by NAME, not by array position -- the oracle
+    //    emits the object with its own key order (uncommon/shop/boss/common/rare
+    //    in the captures), while RunState indexes pools by RelicPool
+    //    (0=Common..4=Boss). Reading them positionally would silently transpose
+    //    the pools. Each tier's array is the POST-shuffle dungeon order, so it is
+    //    copied verbatim: this is a state translation, not a re-derivation. --
+    if (const json* rp = fr.take("relicPools")) {
+        FieldReader rpr(*rp, path + ".relicPools", ctx);
+        struct PoolKey { const char* key; int index; };
+        static constexpr PoolKey kPools[] = {
+            {"common",   0}, {"uncommon", 1}, {"rare", 2},
+            {"shop",     3}, {"boss",     4},
+        };
+        for (const PoolKey& pk : kPools) {
+            const std::string where = path + ".relicPools." + pk.key;
+            const json& arr = rpr.require(pk.key);
+            if (!arr.is_array()) {
+                throw TranslateError(loc(ctx) + " expected array at " + where);
+            }
+            if (arr.size() > eng::kRelicPoolCap) {
+                throw TranslateError(loc(ctx) + " " + where + " has " +
+                                     std::to_string(arr.size()) +
+                                     " > kRelicPoolCap (" +
+                                     std::to_string(eng::kRelicPoolCap) + ")");
+            }
+            std::size_t n = 0;
+            for (std::size_t i = 0; i < arr.size(); ++i) {
+                const std::string at = where + "[" + std::to_string(i) + "]";
+                rs.relic_pools[pk.index][n++] = static_cast<uint16_t>(
+                    join_relic(as_str(arr[i], ctx, at), ctx, at));
+            }
+            rs.relic_pool_count[pk.index] = static_cast<uint8_t>(n);
+            rpr.mapped();
+        }
+        rpr.finish();
+        fr.mapped();
+    }
+
+    // -- Still deferred: the remaining id-LIST items. B4.3 added their RunState
+    //    storage (event/shrine/special membership bitsets), but mapping the
+    //    golden's real values bit-for-bit needs content-id enums that do NOT
+    //    exist at HEAD -- events.yaml is empty. A fail-loud join of these ids
+    //    would throw. They translate once B4.10-B4.13 (events.yaml -> an event
+    //    id/enum + canonical list order) land the registry; that is that task's
+    //    translator un-deferral, needing no further schema bump (the storage is
+    //    already here). These defer() calls still STRUCTURALLY consume the keys
+    //    (so a genuinely new/renamed oracle key still trips the drift error). --
     fr.defer("eventList");                // remaining events -> event_membership (needs event enum)
     fr.defer("shrineList");               // remaining shrines -> shrine_membership (needs event enum)
     fr.defer("specialOneTimeEventList");  // remaining specials -> special_membership (needs event enum)
-    fr.defer("relicPools");               // 5-tier pool orders -> relic_pools[5] (needs relics.yaml)
     fr.defer("monster_move_history");     // full per-monster history (§2.5 #9);
                                           // CombatState holds only move_history[3]
     fr.finish();

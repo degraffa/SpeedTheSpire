@@ -405,3 +405,17 @@
   hooks:
     on_use_card: []           # native: a played ATTACK reflects `amount` THORNS at the player
   provenance: "SharpHidePower.onUseCard (SharpHidePower.java:43-49) -- if card.type == ATTACK: addToBot DamageAction(player, DamageInfo(owner, amount, THORNS)). Native because the trigger is conditional on the played card's TYPE (the RagePower.onUseCard shape, id 12). Dispatched at ON_USE_CARD, where power_hooks.cpp already fans out to MONSTER powers last (UseCardAction.java:41-64) -- the Guardian is the owner, so NO shared dispatch site changed. The THORNS type skips the NORMAL-only power modifiers, so a Vulnerable player is not amplified and the Guardian's Strength does not scale it (interp.hpp DamageType). Applied to itself by TheGuardian.useCloseUp -- thornsDamage 3, or 4 at A19+ (TheGuardian.java:74,185-189) -- and removed at the end of Twin Slam (:197). Default type BUFF (AbstractPower.java:67); POWER_ID \"Sharp Hide\" (:24)."
+
+- id: 59
+  name: CONFUSION
+  game_id: "Confusion"
+  type: DEBUFF
+  stack: none
+  native: true
+  hooks:
+    on_card_draw: []          # native: one cardRandomRng.random(3) per drawn card with cost >= 0
+  # Checked, not assumed, against both count-guarded switches: Confusion overrides
+  # neither atDamageGive / atDamageReceive / atDamageFinalReceive
+  # (interp_damage.cpp) nor modifyBlock (interp_block.cpp) -- its ONLY override is
+  # onCardDraw -- so none of those four needed a case.
+  provenance: "ConfusionPower.onCardDraw (ConfusionPower.java:38-48) -- if card.cost >= 0: newCost = AbstractDungeon.cardRandomRng.random(3) (INCLUSIVE 0..3, stage-a trap 3), and if newCost != cost set BOTH card.cost and card.costForTurn to it and mark isCostModified; freeToPlayOnce = false either way. The DRAW IS UNCONDITIONAL within the cost >= 0 branch -- it happens before the != comparison, so a card that rolls its own cost still consumes one draw; a card with cost < 0 (X-cost, or an unplayable curse/status) consumes NONE. Applied only by SneckoEye.atPreBattle (SneckoEye.java:39-43); the ctor (:23-31) takes no amount, hence stack: none. POWER_ID \"Confusion\" (:18)."

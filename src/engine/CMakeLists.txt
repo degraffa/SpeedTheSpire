@@ -32,6 +32,7 @@ add_library(sts_engine
     powers/power_angry.cpp
     powers/power_artifact.cpp
     powers/power_combust.cpp
+    powers/power_confusion.cpp
     powers/power_corruption.cpp
     powers/power_curl_up.cpp
     powers/power_dark_embrace.cpp
@@ -52,13 +53,14 @@ add_library(sts_engine
     powers/power_thorns.cpp
     relic_hooks.cpp
     # Native relic combat bodies, one TU per RelicTier (see
-    # relics/relic_native.hpp), matching the relic_pickup_* split below. The
-    # BOSS tier adds a file here when it lands.
+    # relics/relic_native.hpp), matching the relic_pickup_* split below.
     relics/relics_starter.cpp
     relics/relics_common.cpp
     relics/relics_uncommon.cpp
     relics/relics_rare.cpp
     relics/relics_shop.cpp
+    relics/relics_boss.cpp
+    relics/relics_special.cpp
     relic_pools.cpp
     # The master deck's obtain-time relic pass; holds the generated
     # STS_REGISTRY_RELIC_ON_OBTAIN_CARD dispatch table.
@@ -71,6 +73,7 @@ add_library(sts_engine
     relics/relic_pickup_uncommon.cpp
     relics/relic_pickup_rare.cpp
     relics/relic_pickup_shop.cpp
+    relics/relic_pickup_boss.cpp
     potions.cpp
     advance.cpp
     run_advance.cpp

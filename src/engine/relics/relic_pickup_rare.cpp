@@ -93,13 +93,13 @@ void relic_on_equip_mango(RunState& rs, RngStream& /*misc_rng*/,
 
 void relic_on_equip_old_coin(RunState& rs, RngStream& /*misc_rng*/,
                              RelicSlot& /*slot*/) noexcept {
-    // OldCoin.onEquip (OldCoin.java:812-816): gainGold(300). The two things
-    // AbstractPlayer.gainGold wraps the += with -- the Ectoplasm suppression and
-    // the relics' onGainGold fan-out (AbstractPlayer.java:720-733) -- are no-ops
-    // for the current registry, exactly as documented at
-    // relic_on_obtain_card_ceramic_fish; when the boss tier lands, both belong in
-    // one shared gainGold helper rather than in each producer.
-    rs.gold += 300;
+    // OldCoin.onEquip (OldCoin.java:812-816): gainGold(300). Routed through the
+    // shared gain_gold door (relics/relic_pickup.hpp) rather than a direct
+    // `rs.gold +=`, which is what this comment asked for "when the boss tier
+    // lands": Ectoplasm (registry id ECTOPLASM) makes gainGold return without
+    // adding anything (AbstractPlayer.java:719-724), so a direct write would
+    // silently ignore it.
+    gain_gold(rs, 300);
 }
 
 }  // namespace sts::engine

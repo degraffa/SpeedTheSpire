@@ -123,7 +123,7 @@ void remove_owned_from_pools(RunState& rs) noexcept {
 }  // namespace
 
 void initialize_relic_pools(RunState& rs) noexcept {
-    static_assert(sts::registry::manifest::kRelicsCount == 111,
+    static_assert(sts::registry::manifest::kRelicsCount == 142,
                   "new relic: it joins its tier's dungeon pool at its "
                   "pool_order, which fixes the relicRng shuffle order for that "
                   "tier. Confirm the row's tier is poolable, that pool_order is "
@@ -179,6 +179,22 @@ void fill_campfire_relic_count(const RunState& rs,
         }
     }
     ctx.campfire_relic_count = n;
+}
+
+void fill_boss_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept {
+    // Ectoplasm.canSpawn (Ectoplasm.java:50-53) reads AbstractDungeon.actNum;
+    // BlackBlood.canSpawn (BlackBlood.java:33-36) reads
+    // player.hasRelic("Burning Blood"). Both are pure predicates over the
+    // context, so the RunState reads happen once, here.
+    ctx.act = rs.act;
+    ctx.has_burning_blood = false;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::BURNING_BLOOD)) {
+            ctx.has_burning_blood = true;
+            break;
+        }
+    }
 }
 
 void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept {

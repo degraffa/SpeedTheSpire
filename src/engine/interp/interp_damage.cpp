@@ -46,7 +46,9 @@ namespace {
     // overrides only updateDescription (ModeShiftPower.java:27-30) and
     // SharpHidePower only updateDescription + onUseCard (SharpHidePower.java:
     // 38-49). Sharp Hide QUEUES damage, but it does not scale anyone else's.
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 34,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -78,7 +80,9 @@ namespace {
     // (ModeShiftPower.java:27-30 / SharpHidePower.java:38-49). In particular
     // Mode Shift does NOT reduce incoming damage -- it only counts it
     // (TheGuardian.java:281-284), which is why it needs no hook at all.
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 34,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -120,7 +124,9 @@ namespace {
     // the youngest of the three (it arrived with Intangible), so a branch cut
     // before Intangible landed will not conflict here and will leave this count
     // stale while fixing the other two. Update all three together.
-    static_assert(sts::registry::manifest::kPowersCount == 33,
+    // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
+    // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
+    static_assert(sts::registry::manifest::kPowersCount == 34,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {

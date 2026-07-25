@@ -132,19 +132,13 @@ void relic_on_obtain_card_ceramic_fish(RunState& rs, CardInstance& /*card*/,
     // CeramicFish.onObtainCard (CeramicFish.java:40-42): gainGold(9) for ANY
     // obtained card -- no type, rarity or upgrade condition.
     //
-    // AbstractPlayer.gainGold (AbstractPlayer.java:720-733) wraps the += with two
-    // things this engine cannot express yet, both of which are no-ops for the
-    // current registry rather than omissions:
-    //   * an early return when the player owns Ectoplasm, which suppresses ALL
-    //     gold gain (:721-724). Ectoplasm is a BOSS-tier relic and no boss row
-    //     exists yet; whoever lands that tier must add the guard here and to
-    //     every other gold producer, so it belongs in gainGold's eventual shared
-    //     helper rather than being pre-empted in this one handler.
-    //   * a fan-out to every relic's onGainGold (:730-732). No registered relic
-    //     defines onGainGold today (checked against all rows), so the fan-out has
-    //     nothing to call.
-    // CardCrawlGame.goldGained (:728) is a run-summary statistic, not run state.
-    rs.gold += 9;
+    // Routed through the shared gain_gold door (relics/relic_pickup.hpp), which
+    // carries AbstractPlayer.gainGold's two wrappers (AbstractPlayer.java:
+    // 719-737): the Ectoplasm early return, now LIVE because the boss tier
+    // registered Ectoplasm, and the relics' onGainGold fan-out, which no
+    // registered S1 relic overrides. CardCrawlGame.goldGained (:728) is a
+    // run-summary statistic, not run state.
+    gain_gold(rs, 9);
 }
 
 }  // namespace sts::engine
