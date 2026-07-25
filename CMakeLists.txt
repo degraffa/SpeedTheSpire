@@ -44,8 +44,14 @@ include(FetchContent)
 # xxHash and nlohmann/json are populated only (never add_subdirectory'd) and are
 # consumed as INTERFACE include directories, compiled by our own targets with
 # our own flags. Sharing their checkouts therefore cannot carry a build artifact
-# -- let alone a sanitizer-instrumented one -- between presets. They are also
-# ~290 MB of the ~315 MB fetched, so they are the bulk of the cost.
+# -- let alone a sanitizer-instrumented one -- between presets.
+#
+# Size note: this scoping used to also capture the bulk of the bytes (~290 MB of
+# ~315 MB), because nlohmann/json was a 278 MB git clone. It is now fetched as a
+# 293 KB release asset, so the shared pair is ~13 MB (xxHash 11 MB + nlohmann
+# 1.9 MB) of ~38 MB total, against googletest 20 MB + benchmark 5.2 MB that stay
+# per-build-tree. The cache is therefore worth much less in bytes than it was;
+# what it still buys is not re-running git clone for xxHash once per preset.
 #
 # googletest and benchmark keep a private per-build-tree _deps. They are
 # declared in tests/ and benchmarks/, which stay on the default base dir.
@@ -127,8 +133,9 @@ if(STS_BUILD_TESTS)
     # Bracketed by the shared-checkout macros because this directory's only
     # FetchContent use is nlohmann/json, which it populates *without* an
     # add_subdirectory (single-header, exposed as an INTERFACE include dir), so it
-    # has no build tree to share. At 279 MB of clone it is the single most
-    # expensive dependency in the project.
+    # has no build tree to share. It used to be the single most expensive
+    # dependency in the project at 278 MB of clone; it is now fetched as the
+    # 293 KB upstream include.zip release asset instead (see that file).
     sts_shared_deps_begin()
     add_subdirectory(tools/oracle_bridge/translator)
     sts_shared_deps_end()
