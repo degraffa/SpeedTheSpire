@@ -357,7 +357,10 @@ anyone checked. `ctest -N | tail -1` is the source of truth.
 > a pass count — an equal `<N>/<N>` ratio on a line that also talks about tests,
 > an `<N>/<M> tests` count, or "all *N* tests pass" in prose. It reads tracked
 > *and* untracked-but-not-ignored files, so it catches the number before you
-> stage it; `--help` lists the patterns. Deliberately **not** scanned:
+> stage it; `--help` lists the patterns. Run it from **Git-Bash on the Windows
+> host** (or in CI) — it is a git-side check, so the §6 gitdir trap applies and
+> it cannot run through WSL; note that `bash` on the PowerShell `PATH` *is*
+> WSL's bash. Deliberately **not** scanned:
 > `docs/stage-*-log.md` (append-only archives of past runs), and the `[x]` /
 > `[!]` lines of `docs/stage-*-tasks.md` (a landed entry recording what was
 > green when it landed is history, and §2 requires it) — but `[ ]` and `[~]`

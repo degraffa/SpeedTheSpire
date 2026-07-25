@@ -11,6 +11,10 @@
 # Usage:  tools/check_stale_counts.sh [path...]      (default: the whole repo)
 # Exit:   0 clean, 1 violations found, 2 usage/environment error.
 #
+# Run it from Git-Bash on the Windows host, or in CI. NOT through WSL: it is a
+# git-side check, and WSL's git cannot read a linked worktree's `gitdir: D:/...`
+# (conventions §6). Note that `bash` on the PowerShell PATH is WSL's bash.
+#
 # WHAT IS FLAGGED (a line must look like an assertion about a test run). The
 # three examples below carry the `stale-count-ok` escape hatch, which is also
 # what using it looks like -- this script does not exempt itself:
@@ -40,8 +44,16 @@ case ${1:-} in -h|--help)
     awk 'NR>1 && /^#/ { sub(/^# ?/, ""); print; next } NR>1 { exit }' "$0"; exit 0 ;;
 esac
 
-git rev-parse --show-toplevel >/dev/null 2>&1 \
-    || { echo "check_stale_counts: not inside a git repository" >&2; exit 2; }
+# This is a git-side check, so run it from the Windows host (or in CI), never
+# through WSL: WSL's git cannot resolve the `gitdir: D:/...` path that
+# `git worktree add` writes, so it reports a linked worktree as "not a git
+# repository" (conventions §6).
+git rev-parse --show-toplevel >/dev/null 2>&1 || {
+    echo "check_stale_counts: git does not see a repository here." >&2
+    [ "$(uname -s)" = Linux ] && [ -f .git ] && echo \
+        "  In a linked worktree under WSL this is the §6 gitdir trap -- run it from Windows." >&2
+    exit 2
+}
 cd "$(git rev-parse --show-toplevel)"
 
 # One broad candidate sweep; awk below decides. -I skips binary files.
