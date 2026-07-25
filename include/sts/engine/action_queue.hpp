@@ -175,4 +175,26 @@ PumpStepResult pump_step(CombatState& state, MonsterTurnFn take_turn) noexcept;
 void pump(CombatState& state,
           MonsterTurnFn take_turn = default_monster_turn) noexcept;
 
+// Combat start: run the game's turn-1 block and leave the combat in
+// WAITING_ON_USER with turn == 1, the opening hand drawn and energy set. The one
+// entry point every combat-construction path uses, so no caller hand-rolls it.
+//
+// It is NOT getNextAction's step 6. AbstractRoom.update (AbstractRoom.java:
+// 236-243) sets turnHasEnded = true and immediately queues
+// GainEnergyAndEnableControlsAction, whose update clears the flag again
+// (GainEnergyAndEnableControlsAction.java:35) before the queue can ever drain
+// down to the step-6 branch (GameActionManager.java:329). So the combat-start
+// block runs the start-of-turn sequence WITHOUT the monsters'
+// applyEndOfTurnPowers pass (GameActionManager.java:331) that step 6 opens with.
+// A monster power that is present at combat start and binds an end-of-round hook
+// -- a sleeping Lagavulin's Metallicize (Lagavulin.java:106-107;
+// MetallicizePower.java:38-42) -- would otherwise trigger once before the player
+// has taken a single turn.
+//
+// The pre-battle actions queued by usePreBattleAction drain FIRST, because
+// AbstractRoom.update only lets waitTimer reach 0 (and the turn-1 block run) once
+// the action queue is empty (AbstractRoom.java:229-235).
+void begin_first_turn(CombatState& state,
+                      MonsterTurnFn take_turn = default_monster_turn) noexcept;
+
 }  // namespace sts::engine
