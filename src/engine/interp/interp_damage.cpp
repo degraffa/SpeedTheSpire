@@ -115,10 +115,11 @@ namespace {
 [[nodiscard]] float at_damage_final_receive(float dmg, PowerSlot p) noexcept {
     // Checked for the Guardian's two powers: neither overrides
     // atDamageFinalReceive (ModeShiftPower.java:27-30 / SharpHidePower.java:
-    // 38-49). This site carries no conflict marker of its own -- it arrived with
-    // B3.26 (Intangible) after B3.21 was branched, so B3.21 never saw it and git
-    // merged it clean at the stale count. It is the THIRD kPowersCount site in
-    // this file; the other two are above.
+    // 38-49). NOTE FOR THE NEXT READER: this is the THIRD kPowersCount site in
+    // this file -- the other two are atDamageGive and atDamageReceive above. It is
+    // the youngest of the three (it arrived with Intangible), so a branch cut
+    // before Intangible landed will not conflict here and will leave this count
+    // stale while fixing the other two. Update all three together.
     static_assert(sts::registry::manifest::kPowersCount == 33,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");

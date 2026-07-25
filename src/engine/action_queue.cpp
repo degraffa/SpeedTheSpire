@@ -160,7 +160,28 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // Conserve power, is Silent-only and has no registry row. Retires the
     // stage-a SET-to-constant simplification; the no-relic path below is
     // byte-identical to the unconditional SET it replaces.
-    if (player_has_relic(s, RelicId::ICE_CREAM)) {
+    //
+    // The Ice Cream branch is kSubsequentTurn ONLY, and the derivation is a chain
+    // worth spelling out because the two call sites reach energy by different
+    // routes entirely:
+    //   * Ice Cream lives in EnergyManager.recharge (EnergyManager.java:26-34),
+    //     and recharge() has exactly ONE caller in the whole game: the
+    //     PlayerTurnEffect constructor (PlayerTurnEffect.java:46).
+    //   * PlayerTurnEffect is constructed only by DrawCardAction's 3-arg ctor
+    //     when `endTurnDraw` is true (DrawCardAction.java:32-34).
+    //   * Step 6 passes true (`new DrawCardAction(null, gameHandSize, true)`,
+    //     GameActionManager.java:361) -- so a later turn DOES run recharge().
+    //   * The combat-start block passes the 2-arg ctor (`new DrawCardAction(
+    //     player, gameHandSize)`, AbstractRoom.java:242), which delegates with
+    //     endTurnDraw = false (DrawCardAction.java:41-43) -- so turn 1 NEVER
+    //     reaches recharge(), and Ice Cream's ADD is unreachable there.
+    // Turn 1's energy comes from GainEnergyAndEnableControlsAction instead
+    // (AbstractRoom.java:241), whose update calls player.gainEnergy(energyMaster)
+    // = EnergyPanel.addEnergy (AbstractPlayer.java:1555-1558) with NO Ice Cream
+    // test -- an add onto a panel EnergyManager.prep() has just zeroed
+    // (EnergyManager.java:21-24), i.e. exactly the plain SET below.
+    if (when == TurnStart::kSubsequentTurn &&
+        player_has_relic(s, RelicId::ICE_CREAM)) {
         int32_t charged =
             static_cast<int32_t>(s.player_energy) + kIroncladBaseEnergy;
         if (charged > 999) {
@@ -181,15 +202,28 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // other two are powers with no registry row yet, so their branch structure is
     // present but only the default path runs. Blur is Silent-only and out of S1
     // scope; Barricade is the remaining gap.
-    const bool has_barricade = false;  // future: player has Barricade power
-    const bool has_blur = false;       // future: player has Blur power
-    const bool has_calipers = player_has_relic(s, RelicId::CALIPERS);
-    if (!has_barricade && !has_blur) {
-        if (!has_calipers) {
-            s.player_block = 0;                                  // loseBlock()
-        } else {
-            s.player_block = static_cast<int16_t>(               // loseBlock(15)
-                s.player_block > 15 ? s.player_block - 15 : 0);
+    //
+    // kSubsequentTurn ONLY. This whole paragraph is step 6's; the combat-start
+    // block (AbstractRoom.java:236-258) has no loseBlock line of any kind, which
+    // stands to reason -- block is a per-turn resource and turn 1 has no previous
+    // turn to decay. It is INERT today either way (both entry points reach
+    // begin_first_turn with player_block == 0, advance.cpp / run_advance.cpp), so
+    // gating it moves no fixture; it is gated because leaving a step-6-only line
+    // running at combat start is exactly the shape of the end-of-round bug this
+    // fix exists to remove, and it would come alive the moment anything grants
+    // block before turn 1 (a Barricade-like power, or an atBattleStart block
+    // relic) -- at which point turn 1 would silently eat it.
+    if (when == TurnStart::kSubsequentTurn) {
+        const bool has_barricade = false;  // future: player has Barricade power
+        const bool has_blur = false;       // future: player has Blur power
+        const bool has_calipers = player_has_relic(s, RelicId::CALIPERS);
+        if (!has_barricade && !has_blur) {
+            if (!has_calipers) {
+                s.player_block = 0;                              // loseBlock()
+            } else {
+                s.player_block = static_cast<int16_t>(           // loseBlock(15)
+                    s.player_block > 15 ? s.player_block - 15 : 0);
+            }
         }
     }
 
@@ -207,10 +241,22 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // their effects resolve after the draw. Relics first, in acquisition order
     // (Pocketwatch's conditional 3-card draw; Gambling Chip binds this hook too,
     // with a deferred body). No-op without such a relic or power.
+    //
+    // The RELIC phase is deliberately UNGATED -- unlike the end-of-round pass,
+    // the Ice Cream branch and the block decay above, applyStartOfTurnPostDrawRelics
+    // is one of the lines the combat-start block DOES carry (AbstractRoom.java:254,
+    // alongside applyStartOfTurnRelics at :253), so it belongs to every turn.
     {
         const RelicView rv = player_relics(s);
         dispatch_relics_at_turn_start_post_draw(s, rv.relics, rv.count);
     }
+    // The POWER phase is a known asymmetry, deliberately left UNGATED here: the
+    // combat-start block calls applyStartOfTurnPowers (AbstractRoom.java:256) but
+    // has no applyStartOfTurnPostDrawPowers line, so strictly this call belongs to
+    // step 6 alone (GameActionManager.java:363). It long predates the TurnStart
+    // split above and is inert -- no registered power binds the post-draw hook --
+    // so changing it is a behaviour question that wants its own test, not a
+    // silent edit. Recorded here rather than changed or ignored.
     dispatch_at_start_of_turn_post_draw(s);
     // EnableEndTurnButtonAction (line 364) is modeled by step 7 handing control
     // back to the player once the queued DrawCard has drained; no separate item.

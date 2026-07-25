@@ -282,11 +282,11 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         // interrupts above, this override reads the SIZE of the hit
         // (`tmpHealth - currentHealth`), not the resulting HP. It reconstructs
         // that delta from its own HP baseline (monster_guardian.hpp). This hook
-        // now DOES carry the lost HP (the `hp_lost` parameter Lagavulin added),
-        // so the reconstruction is redundant -- but it is also the form B3.21
-        // proved green, so it is left exactly as tested rather than rewritten
-        // during a merge. Switching it to `hp_lost` is a behaviour-preserving
-        // simplification for its own task, not for this reconciliation.
+        // now DOES carry the lost HP -- the `hp_lost` parameter Lagavulin's wake
+        // test needed -- so the Guardian's private reconstruction is redundant.
+        // It is left as written because the two are equivalent here and swapping
+        // them is a behaviour-preserving cleanup that wants its own test run,
+        // not a change made in passing.
         case MonsterId::THE_GUARDIAN:
             guardian_on_damaged(state, monster_index);
             return;
