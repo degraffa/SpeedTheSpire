@@ -602,6 +602,26 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-25 — **terminal-outcome coverage is now pinned by a test**,
+  `FixtureOracle.CorpusCoversBothTerminalOutcomes`. The corpus must contain at
+  least one fight ending in monster death and at least one ending in player
+  death, and both are classified from the **replayed terminal `CombatState`** —
+  the engine driven through each fixture's own recorded actions — never from a
+  file name. Renaming a file cannot satisfy it; neutering a script cannot pass
+  it.
+  This is the actual lesson of the two fixture corrections below. The zero-diff
+  oracle compares two implementations against each other and is silent whenever
+  they agree, and two implementations agree very readily about an action that
+  does nothing. The coverage claim therefore lived nowhere executable — in a
+  file name and a markdown row — and went stale without anything turning red.
+  A guarantee that nothing asserts is a guarantee that will drift.
+  Two smaller corrections ride along, both found with `--dumpall` and neither
+  changing any trace: fixt20's coverage description claimed the monster "gains
+  Strength", which r18's Chomp/Thrash/Chomp sequence never does — it never
+  Bellows, so it stays Vulnerable-only, and it is now described as the
+  Vulnerable-only counterpart to the overlap fixtures. And `--dumpall` is now
+  documented in the generator's USAGE block, since the derivation notes name it
+  as their source of truth.
 - 2026-07-25 — **an out-of-range hand slot is now a hard generation failure**
   in `tools/fixture_gen/gen_combat_fixtures.cpp`, the twin of the affordability
   abort added the day before and the mechanism behind the fixt16 correction

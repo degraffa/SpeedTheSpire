@@ -286,8 +286,12 @@ the card is actually **played** (or the event actually **occurs**) in its trace.
 The two death rows are the ones a stale table can hide most expensively, because a
 fixture named for an outcome it never reaches still passes its zero-diff check —
 both implementations simply agree that nothing happened, and the name goes on
-asserting the coverage. Both are read out of the replayed terminal `CombatState`
-(phase `COMBAT_OVER` plus which side is at 0 HP), never out of a file name.
+asserting the coverage. So those two rows are **not** left to this table:
+`FixtureOracle.CorpusCoversBothTerminalOutcomes` (`tests/fixture_oracle_test.cpp`)
+replays every trace through the real engine and requires at least one fight to end
+with the monster dead and at least one with the player dead, classified from the
+replayed terminal `CombatState` (phase `COMBAT_OVER` plus which side is at 0 HP)
+and never from a file name. Deleting or neutering either fixture now fails a test.
 
 All 20 traces replay through the real engine (`combat_begin` + `advance`) with a
 zero `DiffReport` at every action, on the `debug`, `asan` and `release` presets.

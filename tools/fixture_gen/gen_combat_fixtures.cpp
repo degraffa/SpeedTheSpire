@@ -78,6 +78,9 @@
 //   gen_combat_fixtures            -> writes every *.trace under STS_FIXTURE_OUT_DIR
 //   gen_combat_fixtures --dump NAME-> prints the human-readable turn-by-turn trace
 //                                     for one fixture (used to author/verify scripts)
+//   gen_combat_fixtures --dumpall  -> the same for every fixture, in order; this is
+//                                     the source of truth the derivation notes and
+//                                     their coverage table are checked against
 
 #include <cstdint>
 #include <cstdio>
@@ -925,10 +928,15 @@ std::vector<Fixture> all_fixtures() {
                  {Play(1), Play(0), End(), Play(0), Play(0), End(), Play(0), End()},
                  "Multi-turn Defends vs escalating monster (Thrash/Bellow)"});
 
-    // 20 -- Bash + attacks over two turns into a Vulnerable, Strength-buffed foe.
+    // 20 -- Bash + attacks over two turns into a Vulnerable foe, ending on a
+    // reshuffle. r18's moves are Chomp/Thrash/Chomp: the monster never Bellows,
+    // so it never gains Strength. This is the Vulnerable-ONLY counterpart to the
+    // Strength+Vulnerable overlap fixtures (12, 13, 18, 19) -- the description
+    // used to claim the overlap, which --dump shows it never reaches.
     f.push_back({"fixt20_r18_bash_two_turns", "r18",
                  {Play(1), Play(0), End(), Play(0), Play(0), End()},
-                 "Bash Vuln turn 1; attacks turn 2 while monster gains Strength"});
+                 "Bash Vuln turn 1; Defend + a Vuln-boosted Strike turn 2 vs a "
+                 "Thrash; monster stays Vulnerable-only (never Bellows)"});
 
     return f;
 }
