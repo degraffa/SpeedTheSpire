@@ -6,32 +6,36 @@
 // one covers RelicHook bodies inside a combat, this covers the run-layer seams a
 // relic sits on when it is DRAWN from a pool or PICKED UP.
 //
-// Two dispatch surfaces, not one. They are kept apart because they differ in
+// Three dispatch surfaces, not one. They are kept apart because they differ in
 // every way that matters:
 //
-//   can_spawn  A PREDICATE. Pure: (RelicSpawnContext) -> bool, no RunState, no
-//              RNG. Consulted inside the pool-draw loop (return_random_relic_key /
-//              return_end_random_relic_key), where a `false` makes the draw pop
-//              another id -- so this surface is RNG-VISIBLE and a wrong answer
-//              moves the whole relicRng sequence. Default: true.
-//   on_equip   An ACTION. Mutates RunState and may CONSUME miscRng (WarPaint /
-//              Whetstone each burn one randomLong for a Collections.shuffle, even
-//              when fewer than two cards qualify). Runs once, at acquisition,
-//              after the relic's slot has been appended. Default: nothing.
+//   can_spawn       A PREDICATE. Pure: (RelicSpawnContext) -> bool, no RunState,
+//                   no RNG. Consulted inside the pool-draw loop
+//                   (return_random_relic_key / return_end_random_relic_key),
+//                   where a `false` makes the draw pop another id -- so this
+//                   surface is RNG-VISIBLE and a wrong answer moves the whole
+//                   relicRng sequence. Default: true.
+//   on_equip        An ACTION. Mutates RunState and may CONSUME miscRng (WarPaint
+//                   / Whetstone each burn one randomLong for a
+//                   Collections.shuffle, even when fewer than two cards qualify).
+//                   Runs once, at acquisition, after the relic's slot has been
+//                   appended. Default: nothing.
+//   on_obtain_card  An ACTION over the card being added to the master deck, run
+//                   for every owned relic in ACQUISITION order. Mutates the card
+//                   instance (the eggs' upgrade-on-obtain) and/or RunState
+//                   (Darkstone Periapt's max HP, Ceramic Fish's gold). No RNG.
+//                   Default: nothing.
 //
-// Both tables are GENERATED from registry/relics.yaml `pickup:` (the
-// STS_REGISTRY_RELIC_CAN_SPAWN / STS_REGISTRY_RELIC_ON_EQUIP X-macros in the
-// generated relic_table.hpp, expanded by relic_pools.cpp). A row that lists a
-// surface but whose handler nobody wrote is a link error, exactly as for
-// `native:` combat bodies. Bringing up a tier's relics is therefore: registry
-// rows, one new .cpp under src/engine/relics/, one CMakeLists line -- and NO edit
-// to relic_pools.cpp or to any other tier's file. Two people filling in different
-// tiers (rare/shop, boss/special) never touch the same source line, which is what
-// the generated table in relic_hooks.cpp already achieved for the combat domain.
-//
-// (The third surface, on_obtain_card, has its macro emitted but not yet consumed
-// -- run_deck.hpp still hand-rolls that switch. No signature is fixed for it here
-// until that wiring lands.)
+// All three tables are GENERATED from registry/relics.yaml `pickup:` (the
+// STS_REGISTRY_RELIC_CAN_SPAWN / _ON_EQUIP / _ON_OBTAIN_CARD X-macros in the
+// generated relic_table.hpp; the first two are expanded by relic_pools.cpp, the
+// third by run_deck.cpp). A row that lists a surface but whose handler nobody
+// wrote is a link error, exactly as for `native:` combat bodies. Bringing up a
+// tier's relics is therefore: registry rows, one new .cpp under
+// src/engine/relics/, one CMakeLists line -- and NO edit to relic_pools.cpp,
+// run_deck.cpp, or any other tier's file. Two people filling in different tiers
+// (rare/shop, boss/special) never touch the same source line, which is what the
+// generated table in relic_hooks.cpp already achieved for the combat domain.
 
 #include <span>
 
@@ -62,11 +66,22 @@ using RelicOnEquipSig = void(RunState& rs, RngStream& misc_rng,
                              RelicSlot& slot) noexcept;
 using RelicOnEquipFn = RelicOnEquipSig*;
 
-// The generated dispatch tables (relic_pools.cpp): the handler for `id`, or
-// nullptr when the row does not list that surface. A relic whose override is
-// DEFERRED maps to its explicit empty body, not to nullptr.
+// One relic's onObtainCard body. `card` is the master-deck row just appended
+// (mutable: the eggs upgrade it in place); `def` is its registry row, already
+// resolved by the caller so each handler does not repeat the lookup. Handlers run
+// in acquisition order and see each other's edits, exactly as the Java's
+// sequential `r.onObtainCard(c)` fan-out does.
+using RelicOnObtainCardSig = void(RunState& rs, CardInstance& card,
+                                  const CardDef& def) noexcept;
+using RelicOnObtainCardFn = RelicOnObtainCardSig*;
+
+// The generated dispatch tables (relic_pools.cpp for the first two, run_deck.cpp
+// for the third): the handler for `id`, or nullptr when the row does not list
+// that surface. A relic whose override is DEFERRED maps to its explicit empty
+// body, not to nullptr.
 [[nodiscard]] RelicCanSpawnFn relic_can_spawn_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept;
+[[nodiscard]] RelicOnObtainCardFn relic_on_obtain_card_fn(RelicId id) noexcept;
 
 // Upgrade up to two random not-yet-upgraded master-deck cards of `wanted`
 // (WarPaint.onEquip WarPaint.java:36-59 / Whetstone.onEquip Whetstone.java:36-59

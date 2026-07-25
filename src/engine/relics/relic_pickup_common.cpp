@@ -125,4 +125,26 @@ void relic_on_equip_whetstone(RunState& rs, RngStream& misc_rng,
     upgrade_random_cards(rs, misc_rng, CardType::ATTACK);
 }
 
+// --- onObtainCard ------------------------------------------------------------
+
+void relic_on_obtain_card_ceramic_fish(RunState& rs, CardInstance& /*card*/,
+                                       const CardDef& /*def*/) noexcept {
+    // CeramicFish.onObtainCard (CeramicFish.java:40-42): gainGold(9) for ANY
+    // obtained card -- no type, rarity or upgrade condition.
+    //
+    // AbstractPlayer.gainGold (AbstractPlayer.java:720-733) wraps the += with two
+    // things this engine cannot express yet, both of which are no-ops for the
+    // current registry rather than omissions:
+    //   * an early return when the player owns Ectoplasm, which suppresses ALL
+    //     gold gain (:721-724). Ectoplasm is a BOSS-tier relic and no boss row
+    //     exists yet; whoever lands that tier must add the guard here and to
+    //     every other gold producer, so it belongs in gainGold's eventual shared
+    //     helper rather than being pre-empted in this one handler.
+    //   * a fan-out to every relic's onGainGold (:730-732). No registered relic
+    //     defines onGainGold today (checked against all rows), so the fan-out has
+    //     nothing to call.
+    // CardCrawlGame.goldGained (:728) is a run-summary statistic, not run state.
+    rs.gold += 9;
+}
+
 }  // namespace sts::engine

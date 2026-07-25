@@ -22,11 +22,7 @@ PICKUP_SURFACES = {
     "on_equip": ("STS_REGISTRY_RELIC_ON_EQUIP", "relic_on_equip_",
                  "relic_pools.cpp", None),
     "on_obtain_card": ("STS_REGISTRY_RELIC_ON_OBTAIN_CARD",
-                       "relic_on_obtain_card_", "run_deck.hpp",
-                       "NOT YET CONSUMED -- run_deck.hpp still hand-rolls this "
-                       "switch; wiring it is staged behind the change that owns "
-                       "that header. Until then the list is declarative only, "
-                       "and the link-error guarantee below does not yet bite."),
+                       "relic_on_obtain_card_", "run_deck.cpp", None),
 }
 
 
