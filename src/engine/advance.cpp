@@ -13,6 +13,7 @@
 #include "sts/engine/advance.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 
 #include "sts/engine/action_queue.hpp"
@@ -46,9 +47,16 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    cards, design doc §9). --
     const int n = static_cast<int>(deck.size());
     for (int i = 0; i < n; ++i) {
-        const CardDef* def = card_def(deck[i]);
+        // `deck` is a std::span, so subscripting it converts the loop index to
+        // size_type -- the only two -Wsign-conversion sites in src/engine. The
+        // index is bounded by deck.size() and cannot be negative, so an explicit
+        // widening cast (done ONCE, into a named card id, rather than twice at the
+        // two subscripts) is the honest fix; the plain-array subscripts below need
+        // no cast.
+        const CardId id = deck[static_cast<std::size_t>(i)];
+        const CardDef* def = card_def(id);
         assert(def != nullptr && "deck holds an unknown CardId");
-        state.card_pool[i].card_id = static_cast<uint16_t>(deck[i]);
+        state.card_pool[i].card_id = static_cast<uint16_t>(id);
         state.card_pool[i].upgrade = 0;
         state.card_pool[i].cost_now = card_cost(*def, 0);
         // Seed per-instance flags from the registry (exhaust/
