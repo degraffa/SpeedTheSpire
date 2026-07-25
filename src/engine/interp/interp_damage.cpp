@@ -55,7 +55,12 @@ namespace {
     // case below already does the scaling.
     // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
     // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
-    static_assert(sts::registry::manifest::kPowersCount == 40,
+    // Checked for the two monster powers added alongside the slavers and the
+    // Fungi Beast, neither of which needs a case:
+    // EntanglePower overrides only playApplyPowerSfx / updateDescription /
+    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // updateDescription / onDeath (SporeCloudPower.java:28-42).
+    static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -93,7 +98,12 @@ namespace {
     // so none needed a case.
     // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
     // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
-    static_assert(sts::registry::manifest::kPowersCount == 40,
+    // Checked for the two monster powers added alongside the slavers and the
+    // Fungi Beast, neither of which needs a case:
+    // EntanglePower overrides only playApplyPowerSfx / updateDescription /
+    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // updateDescription / onDeath (SporeCloudPower.java:28-42).
+    static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -139,7 +149,12 @@ namespace {
     // so none needed a case.
     // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
     // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
-    static_assert(sts::registry::manifest::kPowersCount == 40,
+    // Checked for the two monster powers added alongside the slavers and the
+    // Fungi Beast, neither of which needs a case:
+    // EntanglePower overrides only playApplyPowerSfx / updateDescription /
+    // atEndOfTurn (EntanglePower.java:32-53) and SporeCloudPower only
+    // updateDescription / onDeath (SporeCloudPower.java:28-42).
+    static_assert(sts::registry::manifest::kPowersCount == 42,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -376,13 +391,19 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     if (tgt == kActorPlayer) {
         try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
     }
-    // Monster death edge -> relics onMonsterDeath (AbstractMonster.die:933-937;
-    // Gremlin Horn). Fires once, when this hit drops the monster from
-    // positive HP to 0. Runs BEFORE the damage() override seam below: die() is
-    // called synchronously inside super.damage(), while the override's
-    // post-super check sees isDying and never split-telegraphs a lethal hit.
-    // No-op with an empty relic mirror (fixtures unchanged).
+    // Monster death edge -> the dying monster's OWN powers' onDeath, then relics
+    // onMonsterDeath (AbstractMonster.die:741-750; Spore Cloud and Gremlin Horn).
+    // Fires once, when this hit drops the monster from positive HP to 0. The two
+    // loops run in die()'s order -- powers first (:743-746), relics second
+    // (:747-750) -- and both AFTER the HP write, so a power that asks "is the
+    // battle ending?" sees this monster as already dying, exactly as the Java's
+    // `isDying = true` at :743 arranges. Runs BEFORE the damage() override seam
+    // below: die() is called synchronously inside super.damage(), while the
+    // override's post-super check sees isDying and never split-telegraphs a
+    // lethal hit. No-op with an empty relic mirror and no ON_DEATH power
+    // (fixtures unchanged).
     if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
+        dispatch_on_death(s, tgt);
         const RelicView rv = player_relics(s);
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
     }
@@ -435,9 +456,10 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     if (tgt == kActorPlayer) {
         try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
     }
-    // A direct HP loss can also kill a monster -> same die() relic dispatch
-    // (AbstractMonster.die:933-937), before the override seam as above.
+    // A direct HP loss can also kill a monster -> the same die() power-then-relic
+    // dispatch (AbstractMonster.die:741-750), before the override seam as above.
     if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
+        dispatch_on_death(s, tgt);
         const RelicView rv = player_relics(s);
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
     }

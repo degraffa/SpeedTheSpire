@@ -10,6 +10,7 @@
 
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
+#include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
 #include "sts/engine/monster_guardian.hpp" // The Guardian's mode state machine
@@ -18,6 +19,7 @@
 #include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
+#include "sts/engine/monster_slaver.hpp"   // the Blue and Red slavers
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
@@ -111,6 +113,12 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &guardian_init;
         case MonsterId::HEXAGHOST:
             return &hexaghost_init;
+        case MonsterId::SLAVER_BLUE:
+            return &slaver_blue_init;
+        case MonsterId::SLAVER_RED:
+            return &slaver_red_init;
+        case MonsterId::FUNGI_BEAST:
+            return &fungi_beast_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -162,6 +170,12 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &guardian_take_turn;
         case MonsterId::HEXAGHOST:
             return &hexaghost_take_turn;
+        case MonsterId::SLAVER_BLUE:
+            return &slaver_blue_take_turn;
+        case MonsterId::SLAVER_RED:
+            return &slaver_red_take_turn;
+        case MonsterId::FUNGI_BEAST:
+            return &fungi_beast_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -169,7 +183,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 21,
+    static_assert(sts::registry::manifest::kMonstersCount == 24,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for The Guardian: it queues none. getMove (TheGuardian.java:
@@ -194,6 +208,18 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
         // (monster_hexaghost.hpp).
         case MonsterId::HEXAGHOST:
             return &hexaghost_roll_move;
+        // The two slavers and the Fungi Beast all end takeTurn in a RollMoveAction
+        // that sits
+        // AFTER the switch, so every move body reaches it (SlaverBlue.java:89,
+        // SlaverRed.java:110, FungiBeast.java:97). Unlike GremlinFat's, whose
+        // getMove discards the value, these three getMove overrides READ the
+        // rolled num -- the draw both moves the stream and picks the move.
+        case MonsterId::SLAVER_BLUE:
+            return &slaver_blue_roll_move;
+        case MonsterId::SLAVER_RED:
+            return &slaver_red_roll_move;
+        case MonsterId::FUNGI_BEAST:
+            return &fungi_beast_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -212,10 +238,14 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 21,
+    static_assert(sts::registry::manifest::kMonstersCount == 24,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
+    // Checked for the two slavers and the Fungi Beast: nothing spawns any of
+    // them mid-combat. Every group that contains one builds it at spawn time
+    // (MonsterHelper.java:391-393,406-408,427-429 and the Exordium Thugs /
+    // Exordium Wildlife bottom-* helpers, :780-829); none splits or summons.
     // Checked for The Guardian: nothing spawns it mid-combat. It is a solo boss
     // encounter (encounters.yaml "The Guardian") and neither splits nor summons.
     // Same for Hexaghost: a solo boss encounter (encounters.yaml "Hexaghost")
@@ -266,7 +296,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 21,
+    static_assert(sts::registry::manifest::kMonstersCount == 24,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     if (monster_index >= kMonsterCap) {
@@ -314,13 +344,26 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         // same reason as Sentry above.
         case MonsterId::HEXAGHOST:
             return;
+
+        // FungiBeast.damage (FungiBeast.java:126-133) DOES override damage(),
+        // and -- like Sentry's -- its whole body past super.damage() is the
+        // "Hit" spine animation, gated on a non-THORNS hit with output > 0.
+        // Nothing there touches combat state or draws RNG, so an empty hook is
+        // the complete translation; hp_lost is deliberately unread. Its Spore
+        // Cloud is an ON_DEATH power, dispatched at the death edge in
+        // interp_damage.cpp, not here. NEITHER SLAVER overrides damage() at all
+        // (SlaverBlue.java / SlaverRed.java declare takeTurn, playSfx,
+        // playDeathSfx, getMove, die and -- for the Red -- changeState, and
+        // nothing else), so both stay with the `default:`.
+        case MonsterId::FUNGI_BEAST:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 21,
+    static_assert(sts::registry::manifest::kMonstersCount == 24,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -392,15 +435,23 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::GREMLIN_WARRIOR:
             return &gremlin_warrior_use_pre_battle_action;
 
+        // FungiBeast.usePreBattleAction (FungiBeast.java:75-78) is the real
+        // thing: addToBottom ApplyPowerAction(self, SporeCloudPower(self, 2)),
+        // the power it releases onto the player when it dies. It draws no RNG.
+        // NEITHER SLAVER declares the method (both inherit the empty base body),
+        // so they fall through to the default below.
+        case MonsterId::FUNGI_BEAST:
+            return &fungi_beast_use_pre_battle_action;
+
         default:
-            // Checked, not assumed: of the 21 registry monsters only JawWorm,
+            // Checked, not assumed: of the 24 registry monsters only JawWorm,
             // LouseNormal, LouseDefensive, SlimeBoss, Sentry, Lagavulin,
-            // GremlinWarrior, TheGuardian and Hexaghost declare the method at
-            // all. The other twelve (Cultist, GremlinNob, the four small/medium
-            // slimes, the two large slimes, and the Thief / Fat / Tsundere /
-            // Wizard gremlins) inherit AbstractMonster's empty body
-            // (AbstractMonster.java:953-954), so there is genuinely nothing to
-            // run for them.
+            // GremlinWarrior, TheGuardian, Hexaghost and FungiBeast declare the
+            // method at all. The other fourteen (Cultist, GremlinNob, the four
+            // small/medium slimes, the two large slimes, the Thief / Fat /
+            // Tsundere / Wizard gremlins, and the two slavers) inherit
+            // AbstractMonster's empty body (AbstractMonster.java:953-954), so
+            // there is genuinely nothing to run for them.
             //
             // The sibling hook AbstractMonster.useUniversalPreBattleAction
             // (:956-968, called from MonsterGroup.java:78) is likewise absent by

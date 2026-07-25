@@ -262,9 +262,13 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // SuicideAction.update (SuicideAction.java:29-36): gold = 0 (no
             // per-monster gold field), currentHealth = 0, die(relicTrigger).
             // The split passes triggerRelics == false (flags bit0 clear): no
-            // power onDeath / relic onMonsterDeath dispatch (none exist in the
-            // current roster anyway; the bit records the ctor argument). Block
-            // is NOT cleared -- SuicideAction bypasses damage()'s block-break.
+            // power onDeath / relic onMonsterDeath dispatch. That is now a REAL
+            // difference rather than a formality -- Spore Cloud binds ON_DEATH
+            // (powers/power_spore_cloud.cpp) and Gremlin Horn binds
+            // onMonsterDeath -- and both are correctly silent here, exactly as
+            // AbstractMonster.die(false) skips both loops (AbstractMonster.java:
+            // 741-750). Block is NOT cleared -- SuicideAction bypasses damage()'s
+            // block-break.
             if (item.tgt >= kMonsterCap) {
                 return;
             }
