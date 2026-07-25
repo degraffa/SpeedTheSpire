@@ -19,6 +19,8 @@
 #include "sts/engine/run_advance.hpp"
 
 #include <cstring>
+#include <initializer_list>
+
 #include <gtest/gtest.h>
 
 #include "sts/engine/advance.hpp"
@@ -27,6 +29,8 @@
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/potions.hpp"
+#include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
+#include "sts/engine/relics.hpp"       // RelicDef / kRelicDefs
 #include "sts/engine/rng_stream.hpp"
 
 namespace sts::engine {
@@ -393,6 +397,242 @@ TEST(RunCombat, LousePreBattleAndInnateResolveBeforePlayerControl) {
     EXPECT_EQ(rc.combat.card_queue_count, 0);
     EXPECT_EQ(rc.combat.monster_queue_count, 0);
     EXPECT_TRUE(hand_contains(rc.combat, CardId::WRITHE));
+}
+
+// =============================================================================
+// atBattleStart relics, through the REAL combat-entry path
+// =============================================================================
+//
+// applyStartOfCombatLogic (AbstractPlayer.java:1892-1901) fires every relic's
+// atBattleStart in acquisition order; its ONE call site is the turn-1
+// combat-start block of AbstractRoom.update (AbstractRoom.java:236-258), where
+// the opening DrawCardAction (AbstractRoom.java:242) is queued before the hook
+// is invoked (AbstractRoom.java:245). enter_combat therefore dispatches it after
+// its turn-1 pump; the full derivation lives at that call in run_advance.cpp.
+//
+// Every test below walks run_begin -> map pick -> enter_combat and then reads
+// the resulting CombatState. NONE of them calls dispatch_relics_at_battle_start.
+// That is the whole point: the dispatcher already carried direct-call coverage
+// in relic_hooks_test.cpp and passed all of it while having zero production call
+// sites, because a direct-call test cannot distinguish "wired" from
+// "unreachable". Only entry through enter_combat can.
+
+// Replace the run's relics with `ids`, in acquisition order.
+void set_run_relics(RunController& rc, std::initializer_list<RelicId> ids) {
+    uint8_t i = 0;
+    for (const RelicId id : ids) {
+        rc.run.relics[i] = RelicSlot{static_cast<uint16_t>(id), 0};
+        ++i;
+    }
+    rc.run.relic_count = i;
+}
+
+// Walk the real path into the floor-1 Jaw Worm combat holding exactly `ids`.
+RunController enter_jaw_worm_holding(std::initializer_list<RelicId> ids) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    set_run_relics(rc, ids);
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    return rc;
+}
+
+const PowerSlot* player_power(const CombatState& s, PowerId id) {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) {
+            return &s.player_powers[i];
+        }
+    }
+    return nullptr;
+}
+
+const PowerSlot* monster_power_slot(const CombatState& s, uint8_t mi, PowerId id) {
+    const MonsterState& m = s.monsters[mi];
+    for (uint8_t i = 0; i < m.power_count; ++i) {
+        if (m.powers[i].power_id == static_cast<uint16_t>(id)) {
+            return &m.powers[i];
+        }
+    }
+    return nullptr;
+}
+
+// Control: with no battle-start relic the combat is untouched. Establishes the
+// baseline the ordering tests below are read against.
+TEST(RunCombatBattleStart, NoBattleStartRelicLeavesTheOpeningStateUntouched) {
+    RunController rc = enter_jaw_worm_holding({RelicId::BURNING_BLOOD});
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(rc.combat.hand_count, 5);
+    EXPECT_EQ(rc.combat.player_block, 0);
+    EXPECT_EQ(rc.combat.player_hp, 80);
+}
+
+// Burning Blood binds only onVictory (registry/relics.yaml), so holding it must
+// produce the same combat as holding nothing at all. This is the reason the 20
+// golden combat fixtures and the pinned relic-pool oracles do not move when the
+// at_battle_start dispatch goes live: their only relic has no binding for it.
+TEST(RunCombatBattleStart, BurningBloodEntersCombatIdenticallyToNoRelic) {
+    RunController with_relic = enter_jaw_worm_holding({RelicId::BURNING_BLOOD});
+    RunController without = enter_jaw_worm_holding({});
+    ASSERT_EQ(with_relic.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(without.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    // Blank the relic mirror itself (that field is expected to differ) and
+    // require every other combat byte to match.
+    CombatState a = with_relic.combat;
+    CombatState b = without.combat;
+    std::memset(a.relics, 0, sizeof(a.relics));
+    std::memset(b.relics, 0, sizeof(b.relics));
+    a.relic_count = 0;
+    b.relic_count = 0;
+    EXPECT_EQ(std::memcmp(&a, &b, sizeof(CombatState)), 0)
+        << "a relic with no at_battle_start binding must not perturb combat entry";
+}
+
+// THE ORDERING TEST. Anchor.atBattleStart (Anchor.java:32-36) is
+// addToBot GainBlockAction(player, 10). start_of_turn (action_queue.cpp) zeroes
+// player_block before it queues the opening draw -- the loseBlock of
+// GameActionManager.java:352-359, which Java's turn-1 block does not actually
+// run. So a dispatch placed BEFORE the turn-1 pump would grant the block and
+// then have it wiped in the same pump: the relic fires and nothing happens,
+// which is the same dead effect as never firing. Dispatching after the pump --
+// where Java's own call site sits, behind the queued DrawCardAction -- keeps it.
+TEST(RunCombatBattleStart, AnchorBlockSurvivesTheTurnOneBlockReset) {
+    RunController rc = enter_jaw_worm_holding({RelicId::ANCHOR});
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.player_block, 10);
+    // ...and it is in place BEFORE the player's first action: turn 1, control
+    // handed back, nothing left queued behind it.
+    EXPECT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(rc.combat.turn, 1);
+    EXPECT_EQ(rc.combat.action_count, 0);
+    EXPECT_EQ(rc.combat.pre_turn_count, 0);
+    EXPECT_EQ(rc.combat.card_queue_count, 0);
+    EXPECT_EQ(rc.combat.cards_played_this_turn, 0);
+}
+
+// The draw-ordering pin. BagOfPreparation.atBattleStart
+// (BagOfPreparation.java:30-34) is addToBot DrawCardAction(player, 2), queued
+// behind the opening DrawCardAction(gameHandSize) -- so the opening five are
+// drawn first and the two land on top of them. Both draws come off the same
+// draw pile in one uninterrupted run, so the resulting hand must be the opening
+// hand PLUS two, in that order, with the pile down by seven.
+TEST(RunCombatBattleStart, BagOfPreparationDrawsTwoOnTopOfTheOpeningHand) {
+    RunController base = enter_jaw_worm_holding({});
+    RunController rc = enter_jaw_worm_holding({RelicId::BAG_OF_PREPARATION});
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(base.combat.hand_count, 5);
+
+    EXPECT_EQ(rc.combat.hand_count, 7);
+    EXPECT_EQ(rc.combat.draw_count, base.combat.draw_count - 2);
+    // The opening five are unchanged and still first: the relic drew AFTER them,
+    // not before. A pre-draw dispatch would draw the pile's top two first and
+    // push the opening hand down.
+    for (uint8_t i = 0; i < 5; ++i) {
+        EXPECT_EQ(rc.combat.hand[i], base.combat.hand[i])
+            << "opening-hand slot " << static_cast<int>(i) << " moved";
+    }
+    // The two extra cards are the ones that were still on top of the base run's
+    // draw pile, taken in pile order.
+    ASSERT_GE(base.combat.draw_count, 2);
+    EXPECT_EQ(rc.combat.hand[5],
+              base.combat.draw[base.combat.draw_count - 1]);
+    EXPECT_EQ(rc.combat.hand[6],
+              base.combat.draw[base.combat.draw_count - 2]);
+}
+
+// A native at_battle_start body reached through the real path: BloodVial
+// .atBattleStart (BloodVial.java:30-34) heals 2, clamped at max HP. The heal
+// changes the HP the combat STARTS at, so it is visible before any action.
+TEST(RunCombatBattleStart, BloodVialHealsIntoTheStartingHpOfTheCombat) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    set_run_relics(rc, {RelicId::BLOOD_VIAL});
+    rc.run.hp = 50;
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.player_hp, 52);
+
+    // At full HP the HealAction clamps and the combat starts at max.
+    RunController full = enter_jaw_worm_holding({RelicId::BLOOD_VIAL});
+    EXPECT_EQ(full.combat.player_hp, full.combat.player_max_hp);
+}
+
+// The two DATA at_battle_start shapes -- a SELF power and an ALL_ENEMY power --
+// both routed through the real entry. Vajra.atBattleStart (Vajra.java:31-35)
+// applies Strength 1 to the player; BagOfMarbles.atBattleStart
+// (BagOfMarbles.java:34-40) applies Vulnerable 1 to every monster.
+TEST(RunCombatBattleStart, VajraAndBagOfMarblesApplyTheirPowersBeforeTurnOne) {
+    RunController rc =
+        enter_jaw_worm_holding({RelicId::VAJRA, RelicId::BAG_OF_MARBLES});
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    const PowerSlot* str = player_power(rc.combat, PowerId::STRENGTH);
+    ASSERT_NE(str, nullptr) << "Vajra's Strength never reached the live combat";
+    EXPECT_EQ(str->amount, 1);
+
+    ASSERT_GT(rc.combat.monster_count, 0);
+    for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+        const PowerSlot* vuln = monster_power_slot(rc.combat, m, PowerId::VULNERABLE);
+        ASSERT_NE(vuln, nullptr) << "monster " << static_cast<int>(m)
+                                 << " has no Bag of Marbles Vulnerable";
+        EXPECT_EQ(vuln->amount, 1);
+    }
+}
+
+// Acquisition order drives the dispatch (relic_hooks.cpp iterates the mirror
+// 0..count-1) and the mirror is filled from RunState in that order, so a
+// multi-relic hand lands every effect. Held together they must not cancel each
+// other or the turn-1 sequence.
+TEST(RunCombatBattleStart, SeveralBattleStartRelicsAllLandBeforeTheFirstAction) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    set_run_relics(rc, {RelicId::ANCHOR, RelicId::BAG_OF_PREPARATION,
+                        RelicId::VAJRA, RelicId::BLOOD_VIAL});
+    rc.run.hp = 60;
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(rc.combat.player_block, 10);   // Anchor
+    EXPECT_EQ(rc.combat.hand_count, 7);      // Bag of Preparation
+    EXPECT_EQ(rc.combat.player_hp, 62);      // Blood Vial
+    const PowerSlot* str = player_power(rc.combat, PowerId::STRENGTH);
+    ASSERT_NE(str, nullptr);
+    EXPECT_EQ(str->amount, 1);               // Vajra
+    // The turn-1 invariants are intact underneath all of it.
+    EXPECT_EQ(rc.combat.turn, 1);
+    EXPECT_EQ(rc.combat.action_count, 0);
+    EXPECT_EQ(rc.combat.player_energy, 3);
+}
+
+// atBattleStartPreDraw is a DISTINCT hook (AT_BATTLE_START_PRE_DRAW), fired from
+// applyStartOfCombatPreDrawLogic (AbstractPlayer.java:1903-1908) at
+// AbstractRoom.java:241 -- genuinely before the opening draw, unlike the
+// atBattleStart site wired above. The engine does not conflate the two: they are
+// separate enum values and dispatch_relics_at_battle_start fires only
+// AT_BATTLE_START. It has no call site because NO registered relic binds it --
+// in the Java its only holders are Gambling Chip, Holy Water, Ninja Scroll, Pure
+// Water and Toolbox, none of which is in registry/relics.yaml. This test pins
+// that emptiness, so the day a pre-draw relic is registered this fails and the
+// second dispatch (ahead of the pump's draw) has to be written deliberately
+// rather than folded into the post-draw one.
+TEST(RunCombatBattleStart, NoRegisteredRelicBindsThePreDrawHook) {
+    ASSERT_FALSE(sts::registry::kRelicDefs.empty()) << "no relic rows -- probe is wrong";
+    bool any_battle_start = false;
+    for (const sts::registry::RelicDef* d : sts::registry::kRelicDefs) {
+        if (d->hook_binding(sts::registry::RelicHook::AT_BATTLE_START) != nullptr) {
+            any_battle_start = true;
+        }
+        EXPECT_EQ(d->hook_binding(
+                      sts::registry::RelicHook::AT_BATTLE_START_PRE_DRAW),
+                  nullptr)
+            << "relic id " << static_cast<int>(d->id)
+            << " binds at_battle_start_pre_draw, which has no dispatch site; "
+               "enter_combat must gain one BEFORE its turn-1 pump";
+    }
+    EXPECT_TRUE(any_battle_start)
+        << "no relic binds at_battle_start -- the wiring under test would be moot";
 }
 
 // =============================================================================

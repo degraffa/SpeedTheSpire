@@ -27,7 +27,7 @@
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
 #include "sts/engine/observation.hpp"      // encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
-#include "sts/engine/relic_hooks.hpp"      // dispatch_relics_on_victory
+#include "sts/engine/relic_hooks.hpp"      // dispatch_relics_at_battle_start / _on_victory
 #include "sts/engine/relic_pools.hpp"      // pool init + acquisition/on-pickup
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
@@ -340,6 +340,62 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     s.turn = 0;
     s.monster_attacks_queued = 1;
     s.turn_has_ended = 1;
+    pump(s, dispatch_monster_turn);
+
+    // (10) applyStartOfCombatLogic -> every relic's atBattleStart, in acquisition
+    //      order (AbstractPlayer.applyStartOfCombatLogic,
+    //      AbstractPlayer.java:1892-1901). Its one call site is the turn-1
+    //      combat-start block of AbstractRoom.update (AbstractRoom.java:236-258),
+    //      a fixed line sequence:
+    //
+    //        addToBottom(GainEnergyAndEnableControlsAction)  (AbstractRoom.java:239)
+    //        applyStartOfCombatPreDrawLogic()                (AbstractRoom.java:241)
+    //        addToBottom(DrawCardAction(gameHandSize))       (AbstractRoom.java:242)
+    //        addToBottom(EnableEndTurnButtonAction())        (AbstractRoom.java:243)
+    //        applyStartOfCombatLogic()                       (AbstractRoom.java:245)
+    //        applyStartOfTurnRelics()                        (AbstractRoom.java:253)
+    //
+    //      so atBattleStart is invoked with the opening DrawCardAction ALREADY
+    //      queued, and an addToBot relic body lands behind it. queue_relic_step
+    //      (relic_hooks.cpp) is addToBot-only, so the faithful placement is after
+    //      the opening draw has resolved -- which is exactly where the pump above
+    //      leaves the combat.
+    //
+    //      Placing it BEFORE the pump would not merely reorder, it would silently
+    //      cancel effects. This engine folds Java's turn-1 block into
+    //      start_of_turn (action_queue.cpp), and start_of_turn SETS player_energy
+    //      and ZEROES player_block (the loseBlock of GameActionManager.java:352-359,
+    //      which the turn-1 block does not actually run) before it queues the draw.
+    //      Anything queued ahead of the pump executes ahead of start_of_turn, so
+    //      Anchor's 10 block (Anchor.atBattleStart, Anchor.java:32-36) would be
+    //      granted and then wiped by that reset -- a relic that fires and does
+    //      nothing, the same class of dead effect as never firing at all.
+    //
+    //      Known deviation, currently unobservable: the addToTop bodies
+    //      (BloodVial.java:33, Vajra.java:33, BronzeScales.java:32,
+    //      OddlySmoothStone.java:33, Pantograph.java:36) resolve BEFORE the opening
+    //      draw in Java. They are heals and player powers; the draw reads neither,
+    //      and no card is played between the draw and the return of control, so the
+    //      state handed to the player is identical either way. The distinction only
+    //      becomes visible if a relic whose atBattleStart body is addToTop ever
+    //      touches the draw pile or energy.
+    //
+    //      atBattleStartPreDraw is a SEPARATE hook, not a conflation of this one:
+    //      AT_BATTLE_START_PRE_DRAW already exists in the hook inventory
+    //      (relic_hooks.hpp) and is fired from applyStartOfCombatPreDrawLogic
+    //      (AbstractPlayer.java:1903-1908) at AbstractRoom.java:241, genuinely
+    //      before the draw. No dispatch is wired for it because no row in
+    //      registry/relics.yaml binds it -- in the Java its only holders are
+    //      GamblingChip, HolyWater, NinjaScroll, PureWater and Toolbox, none of
+    //      which is registered. When one lands it needs its own call, ahead of the
+    //      pump's draw rather than here.
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_at_battle_start(s, rv.relics, rv.count);
+    }
+    // Drain what the hook queued. A no-op (and byte-identical) when no relic
+    // responds: the queue is empty, so the pump falls straight through to
+    // WAITING_ON_USER, which is already the phase.
     pump(s, dispatch_monster_turn);
 
     rc.combat = s;
