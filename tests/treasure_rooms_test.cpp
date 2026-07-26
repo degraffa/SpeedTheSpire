@@ -64,6 +64,20 @@ void give_relics(RunState& rs,
     }
 }
 
+// Bulk deck setup for capacity tests: raw rows on purpose (no obtain hooks),
+// like run_begin's starter-deck write. Clears every row first so byte compares
+// of RunState cannot see stale rows past the count.
+void fill_master_deck(RunState& rs, int count) {
+    for (CardInstance& c : rs.master_deck) {
+        c = CardInstance{};
+    }
+    rs.master_deck_count = 0;
+    for (int i = 0; i < count; ++i) {
+        CardInstance& c = rs.master_deck[rs.master_deck_count++];
+        c.card_id = static_cast<uint16_t>(CardId::STRIKE);
+    }
+}
+
 int find_reward(const RewardScreen& s, RewardItemKind kind) {
     for (uint8_t i = 0; i < s.count; ++i) {
         if (static_cast<RewardItemKind>(s.items[i].kind) == kind) {
@@ -411,6 +425,147 @@ TEST(TreasureCapacity, PublicBeforeHookRollsBackLateNearFullFailure) {
         rewards, before_rewards, "RewardScreen transaction rollback");
 }
 
+TEST(TreasureCapacity, CursedKeyAtFullMasterDeckRejectsOpenAtomically) {
+    RunController rc{};
+    rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
+    rc.run.floor = 9;
+    rc.run.act = 1;
+    rc.run.card_rng = from_seed(1201);
+    rc.run.relic_rng = from_seed(1202);
+    rc.run.treasure_rng = from_seed(1203);
+    rc.combat.misc_rng = from_seed(1204);
+    rc.treasure_chest = TreasureChest{
+        static_cast<uint8_t>(ChestSize::SMALL),
+        static_cast<uint8_t>(RelicTier::COMMON), 1, 0};
+    give_relics(rc.run, {{RelicId::CURSED_KEY, -1}});
+    set_pool(rc.run, RelicTier::COMMON, {RelicId::ANCHOR});
+    fill_master_deck(rc.run, kMasterDeckCap);
+    rc.rewards.open_card_item = kNoOpenCardReward;
+
+    // The unblocked key needs a deck slot and none remain: the single
+    // authority must already say no.
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_open_chest);
+    EXPECT_TRUE(mask.can_proceed);
+
+    // Whole-controller byte tests: a forced step and a direct open are both
+    // total no-ops -- no lost curse, no committed RNG/pool/reward changes.
+    const RunController before = rc;
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
+    expect_byte_equal(rc, before, "forced full-deck controller open");
+
+    EXPECT_FALSE(open_treasure_chest(
+        rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
+    expect_byte_equal(rc, before, "direct full-deck open");
+}
+
+TEST(TreasureCapacity, BeforeHookRollsBackWhenCurseCannotJoinFullDeck) {
+    // Matryoshka fires first (relicRng draw, pool pop, counter tick), THEN the
+    // Cursed Key add fails at the full deck: the public seam must roll ALL of
+    // it back, not just the deck write.
+    RunState rs{};
+    rs.floor = 9;
+    rs.act = 1;
+    rs.card_rng = from_seed(1301);
+    rs.relic_rng = from_seed(1302);
+    give_relics(rs, {{RelicId::MATRYOSHKA, 1},
+                     {RelicId::CURSED_KEY, -1}});
+    set_pool(rs, RelicTier::COMMON, {RelicId::ANCHOR});
+    set_pool(rs, RelicTier::UNCOMMON, {RelicId::PEAR});
+    fill_master_deck(rs, kMasterDeckCap);
+
+    RewardScreen rewards{};
+    rewards.open_card_item = kNoOpenCardReward;
+    const RunState before_rs = rs;
+    const RewardScreen before_rewards = rewards;
+    EXPECT_FALSE(dispatch_relics_on_chest_open(rs, rewards, false));
+    expect_byte_equal(rs, before_rs, "full-deck curse RunState rollback");
+    expect_byte_equal(
+        rewards, before_rewards, "full-deck curse RewardScreen rollback");
+}
+
+TEST(TreasureCapacity, OrderedCursedKeysPreflightAgainstRemainingSlots) {
+    // Acquisition order: OMAMORI(1), KEY, KEY, OMAMORI(2), KEY. The FIRST
+    // Omamori's single charge blocks key #1 and is spent; keys #2 and #3 are
+    // unblocked because getRelic keeps returning that first (now empty)
+    // Omamori -- the second one is never consulted. Two deck slots required.
+    RunState rs{};
+    rs.floor = 9;
+    rs.act = 1;
+    rs.card_rng = from_seed(1401);
+    give_relics(rs, {{RelicId::OMAMORI, 1},
+                     {RelicId::CURSED_KEY, -1},
+                     {RelicId::CURSED_KEY, -1},
+                     {RelicId::OMAMORI, 2},
+                     {RelicId::CURSED_KEY, -1}});
+    set_pool(rs, RelicTier::COMMON, {RelicId::ANCHOR});
+    const TreasureChest chest{
+        static_cast<uint8_t>(ChestSize::SMALL),
+        static_cast<uint8_t>(RelicTier::COMMON), 0, 0};
+
+    // One slot short of the two required: illegal, and the direct hook seam
+    // rolls back byte-stably (identity draws included).
+    fill_master_deck(rs, kMasterDeckCap - 1);
+    EXPECT_FALSE(treasure_chest_open_legal(rs, chest));
+    {
+        RewardScreen rewards{};
+        rewards.open_card_item = kNoOpenCardReward;
+        const RunState before_rs = rs;
+        const RewardScreen before_rewards = rewards;
+        EXPECT_FALSE(dispatch_relics_on_chest_open(rs, rewards, false));
+        expect_byte_equal(rs, before_rs, "one-slot-short RunState rollback");
+        expect_byte_equal(rewards, before_rewards,
+                          "one-slot-short RewardScreen rollback");
+    }
+
+    // Exactly two slots free: legal, and the open lands both curses, spends
+    // the first Omamori's last charge, leaves the second untouched, and drew
+    // one cardRng identity per key (blocked or not).
+    fill_master_deck(rs, kMasterDeckCap - 2);
+    EXPECT_TRUE(treasure_chest_open_legal(rs, chest));
+    TreasureChest open_chest = chest;
+    RewardScreen rewards{};
+    RngStream misc = from_seed(1402);
+    ASSERT_TRUE(open_treasure_chest(rs, misc, open_chest, rewards));
+    EXPECT_EQ(rs.master_deck_count, kMasterDeckCap);
+    EXPECT_EQ(rs.card_rng.counter, 3);
+    EXPECT_EQ(rs.relics[0].counter, 0);
+    EXPECT_EQ(rs.relics[3].counter, 2);
+    EXPECT_EQ(open_chest.opened, 1);
+}
+
+TEST(TreasureCapacity, OmamoriChargesDepleteAcrossKeysInThePreflight) {
+    // One Omamori with two charges ahead of three keys: it blocks keys #1 and
+    // #2, then key #3 needs a slot -- the preflight must model the depletion,
+    // not treat Omamori as an unconditional block.
+    RunState rs{};
+    rs.floor = 9;
+    rs.act = 1;
+    rs.card_rng = from_seed(1501);
+    give_relics(rs, {{RelicId::OMAMORI, 2},
+                     {RelicId::CURSED_KEY, -1},
+                     {RelicId::CURSED_KEY, -1},
+                     {RelicId::CURSED_KEY, -1}});
+    set_pool(rs, RelicTier::COMMON, {RelicId::ANCHOR});
+    const TreasureChest chest{
+        static_cast<uint8_t>(ChestSize::SMALL),
+        static_cast<uint8_t>(RelicTier::COMMON), 0, 0};
+
+    fill_master_deck(rs, kMasterDeckCap);
+    EXPECT_FALSE(treasure_chest_open_legal(rs, chest));
+
+    fill_master_deck(rs, kMasterDeckCap - 1);
+    EXPECT_TRUE(treasure_chest_open_legal(rs, chest));
+
+    // A spent Omamori (counter 0, the value Omamori.use leaves behind) blocks
+    // nothing: every key now needs a slot.
+    rs.relics[0].counter = 0;
+    EXPECT_FALSE(treasure_chest_open_legal(rs, chest));
+    fill_master_deck(rs, kMasterDeckCap - 3);
+    EXPECT_TRUE(treasure_chest_open_legal(rs, chest));
+}
+
 TEST(TreasureCapacity, SevenMatryoshkasRejectOpenWithoutAnyControllerChange) {
     RunController rc{};
     rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
@@ -490,12 +645,18 @@ TEST(TreasureCapacity, ExactEightItemOpenStillSucceeds) {
 }
 
 TEST(TreasureMalformed, EveryInvalidDescriptorIsMaskAndStepAtomic) {
-    constexpr std::array<TreasureChest, 6> invalid{{
+    constexpr std::array<TreasureChest, 8> invalid{{
         {static_cast<uint8_t>(ChestSize::NONE),
          static_cast<uint8_t>(RelicTier::COMMON), 0, 0},
         {4, static_cast<uint8_t>(RelicTier::COMMON), 0, 0},
         {static_cast<uint8_t>(ChestSize::SMALL),
          static_cast<uint8_t>(RelicTier::SHOP), 0, 0},
+        // Size/tier pairs the generator can never emit: the tier switch is not
+        // independent of the size switch.
+        {static_cast<uint8_t>(ChestSize::SMALL),
+         static_cast<uint8_t>(RelicTier::RARE), 0, 0},
+        {static_cast<uint8_t>(ChestSize::LARGE),
+         static_cast<uint8_t>(RelicTier::COMMON), 0, 0},
         {static_cast<uint8_t>(ChestSize::SMALL),
          static_cast<uint8_t>(RelicTier::COMMON), 2, 0},
         {static_cast<uint8_t>(ChestSize::SMALL),
@@ -531,6 +692,38 @@ TEST(TreasureMalformed, EveryInvalidDescriptorIsMaskAndStepAtomic) {
         EXPECT_FALSE(open_treasure_chest(
             rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
         expect_byte_equal(rc, before, "direct malformed open");
+    }
+}
+
+TEST(TreasureMalformed, DescriptorDomainMatchesGeneratorExhaustively) {
+    // Re-derive the constructible (size, tier) pairs from the generator, the
+    // single authority, and require the legality predicate to agree on every
+    // representable descriptor byte pair. has_gold stays a free 0/1 bit here,
+    // matching the predicate's domain (it is not part of the pair table).
+    bool constructible[4][8] = {};
+    for (int32_t size_roll = 0; size_roll < 100; ++size_roll) {
+        for (int32_t contents_roll = 0; contents_roll < 100; ++contents_roll) {
+            const TreasureChest c =
+                treasure_chest_for_rolls(size_roll, contents_roll);
+            ASSERT_LT(c.size, 4);
+            ASSERT_LT(c.relic_tier, 8);
+            constructible[c.size][c.relic_tier] = true;
+        }
+    }
+
+    for (uint8_t size = 0; size < 4; ++size) {
+        for (uint8_t tier = 0; tier < 8; ++tier) {
+            for (uint8_t gold = 0; gold <= 1; ++gold) {
+                RunState rs{};
+                rs.floor = 9;
+                rs.act = 1;
+                const TreasureChest chest{size, tier, gold, 0};
+                EXPECT_EQ(treasure_chest_open_legal(rs, chest),
+                          constructible[size][tier])
+                    << "size=" << int{size} << " tier=" << int{tier}
+                    << " gold=" << int{gold};
+            }
+        }
     }
 }
 

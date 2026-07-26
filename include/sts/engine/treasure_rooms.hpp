@@ -77,8 +77,12 @@ static_assert(sizeof(TreasureChest) == 4);
 [[nodiscard]] TreasureChest roll_treasure_chest(RunState& rs) noexcept;
 
 // The single authority for whether an ordinary chest can be opened. Besides
-// requiring the constructor's exact descriptor domain, this preflights the
-// fixed RewardScreen capacity for every active Matryoshka plus gold/base relic.
+// requiring the constructor's exact descriptor domain -- the (size, tier)
+// pairs derived from treasure_chest_for_rolls, so SMALL+RARE / LARGE+COMMON
+// and every non-chest tier are rejected -- this preflights the fixed
+// RewardScreen capacity for every active Matryoshka plus gold/base relic, and
+// the master-deck slots consumed by acquisition-ordered Cursed Keys that
+// Omamori (first match only, one charge per block) does not block.
 // A false result guarantees that open_treasure_chest is a byte-stable no-op.
 [[nodiscard]] bool treasure_chest_open_legal(
     const RunState& rs, const TreasureChest& chest) noexcept;
@@ -86,8 +90,9 @@ static_assert(sizeof(TreasureChest) == 4);
 // Public hook seams keep the boss/non-boss gates independently testable even
 // though this module owns only ordinary TreasureRoom chests. BossChest itself
 // belongs to the post-boss/act-transition task. Both are transactions: false
-// means malformed counts or insufficient reward capacity and leaves both
-// arguments byte-stable.
+// means malformed counts or insufficient reward capacity -- or, for the open
+// hook, a Cursed Key curse that cannot join a full master deck -- and leaves
+// both arguments byte-stable.
 [[nodiscard]] bool dispatch_relics_on_chest_open(
     RunState& rs, RewardScreen& out, bool boss_chest) noexcept;
 [[nodiscard]] bool dispatch_relics_on_chest_open_after(

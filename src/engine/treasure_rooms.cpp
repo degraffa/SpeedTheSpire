@@ -1,5 +1,7 @@
 #include "sts/engine/treasure_rooms.hpp"
 
+#include <iterator>
+
 #include "sts/engine/card_pools.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/relic_pools.hpp"
@@ -56,7 +58,12 @@ bool add_random_relic_item(RunState& rs, RewardScreen& out,
 // forward is observationally safe here because those obtain handlers cannot
 // alter treasureRng, relicRng, a relic pool, or this reward list. The identity
 // draw and Omamori use remain at their constructor-time positions.
-void cursed_key_obtain(RunState& rs) noexcept {
+//
+// Returns false when the curse cannot join the master deck. The Java deck is an
+// unbounded ArrayList, so kMasterDeckCap is an engine limit, not a game rule:
+// the failure is a transaction abort for the enclosing trial-copy rollback (and
+// treasure_chest_open_legal preflights it), never a silently dropped curse.
+[[nodiscard]] bool cursed_key_obtain(RunState& rs) noexcept {
     const CardId curse = return_random_curse(rs.card_rng);
     RelicSlot* omamori = nullptr;
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
@@ -68,9 +75,55 @@ void cursed_key_obtain(RunState& rs) noexcept {
     }
     if (omamori != nullptr && omamori->counter != 0) {
         --omamori->counter;
-        return;
+        return true;
     }
-    (void)add_card_to_master_deck(rs, curse);
+    return add_card_to_master_deck(rs, curse);
+}
+
+// Master-deck slots the non-boss onChestOpen pass will consume: one per Cursed
+// Key whose curse Omamori does not block. Mirrors the gate cursed_key_obtain
+// applies per key (ShowCardAndObtainEffect.java:31-36): getRelic("Omamori")
+// returns the FIRST match, only counter != 0 blocks, and each block spends one
+// charge (Omamori.use, Omamori.java:38-46; usedUp leaves counter at 0). So one
+// Omamori with counter N blocks the first N keys in acquisition order and then
+// stops blocking; a second Omamori is never consulted. Simulated with the same
+// first-match lookup and decrement the mutation pass performs, so preflight and
+// mutation cannot disagree.
+int cursed_key_master_deck_adds(const RunState& rs) noexcept {
+    bool has_omamori = false;
+    int16_t omamori_counter = 0;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (static_cast<RelicId>(rs.relics[i].relic_id) ==
+            RelicId::OMAMORI) {
+            has_omamori = true;
+            omamori_counter = rs.relics[i].counter;
+            break;
+        }
+    }
+    int adds = 0;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (static_cast<RelicId>(rs.relics[i].relic_id) !=
+            RelicId::CURSED_KEY) {
+            continue;
+        }
+        if (has_omamori && omamori_counter != 0) {
+            --omamori_counter;
+        } else {
+            ++adds;
+        }
+    }
+    return adds;
+}
+
+// Preflight for the acquisition-ordered curse obtains against the slots
+// actually remaining, so a chest reported legal cannot fail mid-open at the
+// deck door. `adds == 0` short-circuits: with no unblocked key the pass never
+// touches the deck, so an (unreachable) malformed over-cap count stays the
+// no-op it always was.
+bool curse_obtains_fit(const RunState& rs) noexcept {
+    const int adds = cursed_key_master_deck_adds(rs);
+    return adds == 0 ||
+           static_cast<int>(rs.master_deck_count) + adds <= kMasterDeckCap;
 }
 
 bool dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
@@ -94,8 +147,8 @@ bool dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
                 }
                 break;
             case RelicId::CURSED_KEY:
-                if (!boss_chest) {
-                    cursed_key_obtain(rs);
+                if (!boss_chest && !cursed_key_obtain(rs)) {
+                    return false;
                 }
                 break;
             default:
@@ -135,29 +188,58 @@ void dispatch_on_chest_open_after_impl(RunState& rs, RewardScreen& out,
     }
 }
 
+// The constructible (size, relic_tier) pairs, DERIVED at compile time from the
+// single authority treasure_chest_for_rolls by enumerating all 100x100 wrapper
+// rolls -- not a second hand-copied table, so it cannot drift from the
+// generator. Dimensions cover the full pinned uint8 enum ranges the descriptor
+// bytes can index (ChestSize 0..3, RelicTier 0..7).
+struct ChestDescriptorDomain {
+    bool pair[4][8];
+};
+
+constexpr ChestDescriptorDomain derive_chest_descriptor_domain() noexcept {
+    ChestDescriptorDomain d{};
+    for (int32_t size_roll = 0; size_roll < 100; ++size_roll) {
+        for (int32_t contents_roll = 0; contents_roll < 100; ++contents_roll) {
+            const TreasureChest c =
+                treasure_chest_for_rolls(size_roll, contents_roll);
+            d.pair[c.size][c.relic_tier] = true;
+        }
+    }
+    return d;
+}
+
+inline constexpr ChestDescriptorDomain kChestDescriptorDomain =
+    derive_chest_descriptor_domain();
+
+// Spell out the derived table so a generator edit that moves it fails loudly
+// here (the exhaustive test regresses the same property at run time).
+constexpr bool chest_pair_valid(ChestSize s, RelicTier t) noexcept {
+    return kChestDescriptorDomain
+        .pair[static_cast<uint8_t>(s)][static_cast<uint8_t>(t)];
+}
+static_assert(chest_pair_valid(ChestSize::SMALL, RelicTier::COMMON));
+static_assert(chest_pair_valid(ChestSize::SMALL, RelicTier::UNCOMMON));
+static_assert(!chest_pair_valid(ChestSize::SMALL, RelicTier::RARE));
+static_assert(chest_pair_valid(ChestSize::MEDIUM, RelicTier::COMMON));
+static_assert(chest_pair_valid(ChestSize::MEDIUM, RelicTier::UNCOMMON));
+static_assert(chest_pair_valid(ChestSize::MEDIUM, RelicTier::RARE));
+static_assert(!chest_pair_valid(ChestSize::LARGE, RelicTier::COMMON));
+static_assert(chest_pair_valid(ChestSize::LARGE, RelicTier::UNCOMMON));
+static_assert(chest_pair_valid(ChestSize::LARGE, RelicTier::RARE));
+static_assert(!chest_pair_valid(ChestSize::NONE, RelicTier::COMMON));
+static_assert(!chest_pair_valid(ChestSize::SMALL, RelicTier::BOSS));
+static_assert(!chest_pair_valid(ChestSize::SMALL, RelicTier::SHOP));
+
 bool exact_unopened_chest_descriptor(const TreasureChest& chest) noexcept {
     if (chest.opened != 0 || chest.has_gold > 1) {
         return false;
     }
-
-    switch (static_cast<ChestSize>(chest.size)) {
-        case ChestSize::SMALL:
-        case ChestSize::MEDIUM:
-        case ChestSize::LARGE:
-            break;
-        case ChestSize::NONE:
-        default:
-            return false;
+    if (chest.size >= std::size(kChestDescriptorDomain.pair) ||
+        chest.relic_tier >= std::size(kChestDescriptorDomain.pair[0])) {
+        return false;
     }
-
-    switch (static_cast<RelicTier>(chest.relic_tier)) {
-        case RelicTier::COMMON:
-        case RelicTier::UNCOMMON:
-        case RelicTier::RARE:
-            return true;
-        default:
-            return false;
-    }
+    return kChestDescriptorDomain.pair[chest.size][chest.relic_tier];
 }
 
 bool chest_rewards_fit(const RunState& rs,
@@ -201,7 +283,7 @@ TreasureChest roll_treasure_chest(RunState& rs) noexcept {
 bool treasure_chest_open_legal(const RunState& rs,
                                const TreasureChest& chest) noexcept {
     return exact_unopened_chest_descriptor(chest) &&
-           chest_rewards_fit(rs, chest);
+           chest_rewards_fit(rs, chest) && curse_obtains_fit(rs);
 }
 
 bool dispatch_relics_on_chest_open(RunState& rs, RewardScreen& out,
