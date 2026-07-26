@@ -319,8 +319,8 @@ bool dispatch_relics_on_chest_open_after(RunState& rs, RewardScreen& out,
     return true;
 }
 
-bool open_treasure_chest(RunState& rs, RngStream& /*misc_rng*/,
-                         TreasureChest& chest, RewardScreen& out) noexcept {
+bool open_treasure_chest(RunState& rs, TreasureChest& chest,
+                         RewardScreen& out) noexcept {
     if (!treasure_chest_open_legal(rs, chest)) {
         return false;
     }

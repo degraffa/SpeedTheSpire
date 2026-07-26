@@ -2839,9 +2839,58 @@ unopened descriptor; the step enters `COMBAT_REWARD` only after a successful
 transaction. Four named regressions cover public-hook late rollback, seven
 active Matryoshkas, exact-cap success, and malformed size/tier/boolean/opened
 descriptors with whole-controller byte comparisons. The task remains `[ ]`
-only for the already-recorded live-oracle spot-diff blocker. The complete
-fix-forward WSL matrix is **debug 1010/1010, leak-detecting ASan/UBSan
-1010/1010, release 1010/1010**.
+only for the already-recorded live-oracle spot-diff blocker.
+
+**Second fix-forward — curse capacity + derived descriptor domain.** Two P1
+fixes to the open authority. `cursed_key_obtain` discarded the result of
+`add_card_to_master_deck`, so a full master deck silently lost the curse while
+the open still reported success and committed later RNG, pool and reward
+changes; it is now fallible, `dispatch_on_chest_open_impl` propagates the
+failure, and `treasure_chest_open_legal` preflights the deck slots that
+acquisition-ordered Cursed Keys consume, modelling first-match Omamori lookup
+and per-block charge depletion with the same walk the mutation pass performs.
+Separately, `exact_unopened_chest_descriptor` tested size and tier
+independently and so accepted the Cartesian product, including the
+non-constructible SMALL+RARE and LARGE+COMMON; the valid pairs are now derived
+at compile time by enumerating all 100×100 wrapper rolls through
+`treasure_chest_for_rolls`, with `static_assert`s pinning the derived table.
+Five new named cases (four capacity/rollback plus an exhaustive
+generator-agreement test) and an extension of
+`EveryInvalidDescriptorIsMaskAndStepAtomic` to the two impossible pairs; all
+six fail against the pre-fix source.
+
+**Third fix-forward — P3 cleanup (2026-07-26).** `open_treasure_chest` lost its
+vestigial `misc_rng` parameter. It was never read: the gold roll is
+`treasureRng.random(GOLD_AMT*0.9f, GOLD_AMT*1.1f)` (`AbstractChest.java:72`)
+and nothing else on the open path — neither hook pass, nor `returnRandomCurse`,
+nor the pool front-pop — touches `miscRng`, which is first read later at claim
+time by `acquire_relic`'s onEquip bodies. Confirmed against the Java before
+removal, so this is dead API, not a missing draw; the signature comment now
+records why the parameter is absent. The one engine call site is inside the
+branch-new `RunPhase::TREASURE_ROOM` case, which master does not have, so the
+change adds nothing to the pending merge's conflict surface.
+
+**Document conflict resolved in the same change (conventions §4).** Design
+§1.1 claimed the sapphire-key reward branch "never fires in S1", citing
+`AbstractChest.java:95-96` — contradicting its own paragraph, which
+establishes `Settings.isFinalActAvailable` as TRUE on the frozen
+fully-unlocked profile (the reason `setEmeraldElite` fires, corrected at B4.1).
+`hasSapphireKey` is cleared at dungeon reset (`CardCrawlGame.java:473`) and set
+only by `ObtainKeyEffect` (`ObtainKeyEffect.java:74`), unreachable in Act 1, so
+both conjuncts hold and every Act-1 chest open appends a `SAPPHIRE_KEY` reward
+row linked to the base relic (`AbstractRoom.java:545-547`). No RNG draw is
+involved and no C++ behavior changes. §1.1 was corrected with a **§11 v0.1.6**
+change-log entry; the same stale reasoning was fixed in
+`include/sts/engine/combat_rewards.hpp` and `PROTOCOL.md` §3.6 (dispositions
+unchanged — only the reason was wrong). B4.7's pending oracle spot-diff
+acceptance now states the expected extra row **and** that the capture must
+claim the base **relic**, never the key: claiming the relic marks the linked
+key row `isDone`/`ignoreReward` (`RewardItem.java:298-300`), while claiming the
+key does the reverse (`:317-322`) and would cost the run its relic.
+
+The complete WSL matrix at this revision is **debug 1015/1015, leak-detecting
+ASan/UBSan 1015/1015, release 1015/1015** (`ctest -N` reports 1015 total on
+each preset).
 
 <a id="b415"></a>
 

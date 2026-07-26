@@ -1080,8 +1080,7 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     treasure_chest_open_legal(
                         rc.run, rc.treasure_chest) &&
                     open_treasure_chest(
-                        rc.run, rc.combat.misc_rng, rc.treasure_chest,
-                        rc.rewards)) {
+                        rc.run, rc.treasure_chest, rc.rewards)) {
                     rc.phase = static_cast<uint8_t>(
                         RunPhase::COMBAT_REWARD);
                 } else if (a0 == kChooseProceed) {

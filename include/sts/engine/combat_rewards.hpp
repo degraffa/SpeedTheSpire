@@ -107,7 +107,13 @@
 //     of S1 scope (map_rooms.hpp's setEmeraldElite note: the mapRng DRAW is
 //     modelled, the chosen node's key flag is not stored), so the reward layer
 //     cannot know which elite carries it. Follows that documented scoping.
-//   * SAPPHIRE_KEY (chest-linked) -- S2 (design §1.1).
+//   * SAPPHIRE_KEY (chest-linked). The key is S2 content, but the branch that
+//     appends its reward row DOES fire on every Act-1 chest open (design §1.1
+//     / §11 v0.1.6, correcting the earlier "never fires in S1" reading). It
+//     consumes no RNG and adds no relic, so omitting the row costs no stream
+//     or state parity; an oracle capture just carries one extra trailing row
+//     and must claim the linked base RELIC, never the key
+//     (RewardItem.java:298-300 vs :317-322).
 //   * Prismatic Shard's any-color draw (AbstractDungeon.java:1455) -- Prismatic
 //     Shard is a documented deliberate no-op with a live pool slot (see its
 //     registry/relics.yaml row);

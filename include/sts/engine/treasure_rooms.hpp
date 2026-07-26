@@ -104,8 +104,13 @@ static_assert(sizeof(TreasureChest) == 4);
 // Matryoshka and Cursed Key before gold/base relic; N'loth's Mask afterwards.
 // Returns false without changing any argument when the descriptor/capacity
 // preflight fails.
+//
+// No miscRng parameter: the gold roll is `treasureRng.random(GOLD_AMT*0.9f,
+// GOLD_AMT*1.1f)` (AbstractChest.java:72) and nothing else on the open path --
+// neither hook pass, nor `returnRandomCurse`, nor the pool front-pop -- reads
+// miscRng. It is first touched later, at claim time, by `acquire_relic`'s
+// onEquip bodies (combat_rewards.hpp).
 [[nodiscard]] bool open_treasure_chest(
-    RunState& rs, RngStream& misc_rng, TreasureChest& chest,
-    RewardScreen& out) noexcept;
+    RunState& rs, TreasureChest& chest, RewardScreen& out) noexcept;
 
 }  // namespace sts::engine

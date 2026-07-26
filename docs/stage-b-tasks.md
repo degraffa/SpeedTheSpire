@@ -549,6 +549,23 @@ LargeChest.java:18-22
 amount ×(0.9,1.1), relic grant via B4.6, the fixed treasure row (map row 8).
 **Acceptance:** tier-2: chest tables vs. hand-derivation across the roll
 range; trap-16 named test; oracle spot-diff ≥ 2 treasure floors.
+**Pending oracle spot-diff — expected shape (design §11 v0.1.6):** the capture
+**will** carry one extra trailing `SAPPHIRE_KEY` reward row after the base
+relic on every Act-1 chest open (`isFinalActAvailable && !hasSapphireKey`
+holds, AbstractChest.java:95-96; `AbstractRoom.addSapphireKey`,
+AbstractRoom.java:545-547). It is **expected, not a divergence**: it consumes
+no RNG, the sim models no key row, and the translator already classifies the
+type as known and ignores `rewards[].link`. The spot-diff must therefore
+(a) compare reward rows ignoring that trailing key row, and (b) **claim the
+base RELIC, never the key** — claiming the relic marks the linked key row
+`isDone`/`ignoreReward` (RewardItem.java:298-300), whereas claiming the key
+does the reverse (RewardItem.java:317-322) and would cost the run its relic,
+diverging every downstream floor. The one legitimate absence is an N'loth's
+Mask open with no Matryoshka bonus: `removeOneRelicFromRewards` deletes the
+first RELIC row **and** the row immediately after it when that row is its
+`relicLink` (AbstractRoom.java:549-557), taking the key with the base relic.
+Any other missing key row, or a key row on a *non*-treasure reward screen, IS
+a divergence.
 **Inherited — DISCHARGED in code:** Matryoshka (chest relic; floor≤40
 canSpawn gate was already live), plus the **Cursed Key** and **N'loth's Mask**
 chest hooks deferred by B3.27. All three now have exact non-boss bodies,
@@ -562,7 +579,9 @@ under first-Omamori charge depletion (a full-deck curse aborts the whole open
 byte-stably instead of being silently dropped), and its descriptor domain is
 derived at compile time from `treasure_chest_for_rolls`, so non-constructible
 size/tier pairs (SMALL+RARE, LARGE+COMMON) are rejected and the table cannot
-drift from the generator.
+drift from the generator. `open_treasure_chest`'s vestigial `misc_rng`
+parameter is gone — the open path reads `treasureRng` only
+(AbstractChest.java:72), and `miscRng` is first touched at claim time.
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b47)
 (the task stays unchecked until its required live-game spot-diff can run)
 

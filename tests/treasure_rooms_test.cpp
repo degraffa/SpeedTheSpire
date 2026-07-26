@@ -196,9 +196,8 @@ TEST(TreasureOpen, GoldUsesExactFloatRangeAndTreasureHasNoGoldenIdolBonus) {
     RngStream expected = rs.treasure_rng;
     const int gold = mathutils_round(random(expected, 25.0f * 0.9f,
                                             25.0f * 1.1f));
-    RngStream misc = from_seed(1);
     RewardScreen rewards{};
-    ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
+    ASSERT_TRUE(open_treasure_chest(rs, chest, rewards));
 
     ASSERT_EQ(rewards.count, 2);
     ASSERT_EQ(rewards.items[0].kind,
@@ -235,8 +234,8 @@ TEST(TreasureOpen, BaseRelicUsesThePreRolledTierAndB46ClaimDoor) {
             static_cast<uint8_t>(ChestSize::MEDIUM),
             static_cast<uint8_t>(row.tier), 0, 0};
         RewardScreen rewards{};
-        RngStream misc = from_seed(2);
-        ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
+        RngStream misc = from_seed(2);  // claim-time stream only.
+        ASSERT_TRUE(open_treasure_chest(rs, chest, rewards));
         ASSERT_EQ(rewards.count, 1);
         EXPECT_EQ(rewards.items[0].id, static_cast<uint16_t>(row.relic));
         EXPECT_EQ(rs.relic_pool_count[pool_index(row.tier)], 0);
@@ -269,8 +268,7 @@ TEST(TreasureHooks, ExactBeforeBaseAfterOrderMakesNlothRemoveMatryoshkaBonus) {
         static_cast<uint8_t>(ChestSize::SMALL),
         static_cast<uint8_t>(RelicTier::COMMON), 0, 0};
     RewardScreen rewards{};
-    RngStream misc = from_seed(3);
-    ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
+    ASSERT_TRUE(open_treasure_chest(rs, chest, rewards));
 
     // Matryoshka popped/inserted Anchor before the base relic popped/inserted
     // Vajra. N'loth's after hook removes the first RELIC reward, not the last.
@@ -456,7 +454,7 @@ TEST(TreasureCapacity, CursedKeyAtFullMasterDeckRejectsOpenAtomically) {
     expect_byte_equal(rc, before, "forced full-deck controller open");
 
     EXPECT_FALSE(open_treasure_chest(
-        rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
+        rc.run, rc.treasure_chest, rc.rewards));
     expect_byte_equal(rc, before, "direct full-deck open");
 }
 
@@ -526,8 +524,7 @@ TEST(TreasureCapacity, OrderedCursedKeysPreflightAgainstRemainingSlots) {
     EXPECT_TRUE(treasure_chest_open_legal(rs, chest));
     TreasureChest open_chest = chest;
     RewardScreen rewards{};
-    RngStream misc = from_seed(1402);
-    ASSERT_TRUE(open_treasure_chest(rs, misc, open_chest, rewards));
+    ASSERT_TRUE(open_treasure_chest(rs, open_chest, rewards));
     EXPECT_EQ(rs.master_deck_count, kMasterDeckCap);
     EXPECT_EQ(rs.card_rng.counter, 3);
     EXPECT_EQ(rs.relics[0].counter, 0);
@@ -608,7 +605,7 @@ TEST(TreasureCapacity, SevenMatryoshkasRejectOpenWithoutAnyControllerChange) {
     expect_byte_equal(rc, before, "forced capacity-rejected controller open");
 
     EXPECT_FALSE(open_treasure_chest(
-        rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
+        rc.run, rc.treasure_chest, rc.rewards));
     expect_byte_equal(rc, before, "direct capacity-rejected open");
 }
 
@@ -636,10 +633,9 @@ TEST(TreasureCapacity, ExactEightItemOpenStillSucceeds) {
         static_cast<uint8_t>(ChestSize::SMALL),
         static_cast<uint8_t>(RelicTier::COMMON), 1, 0};
     RewardScreen rewards{};
-    RngStream misc = from_seed(1003);
 
     ASSERT_TRUE(treasure_chest_open_legal(rs, chest));
-    ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
+    ASSERT_TRUE(open_treasure_chest(rs, chest, rewards));
     EXPECT_EQ(rewards.count, kRewardItemCap);
     EXPECT_EQ(chest.opened, 1);
 }
@@ -690,7 +686,7 @@ TEST(TreasureMalformed, EveryInvalidDescriptorIsMaskAndStepAtomic) {
         expect_byte_equal(rc, before, "forced malformed controller open");
 
         EXPECT_FALSE(open_treasure_chest(
-            rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
+            rc.run, rc.treasure_chest, rc.rewards));
         expect_byte_equal(rc, before, "direct malformed open");
     }
 }
