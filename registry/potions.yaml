@@ -361,7 +361,8 @@
   game_id: "SmokeBomb"
   rarity: RARE
   potency: 0
-  # Escape combat (non-boss) -> reuses the B3.15 combat-escape path. Native, flagged (ledger). Deferred body.
+  # Native body latches the combat-state player-escape flag; run_advance
+  # intercepts the same USE for the timer-collapse / reward-screen consequence.
   native: true
   provenance: "SmokeBomb.use (SmokeBomb.java:37), getPotency (:66) -- EscapeAction / room escape, combat-escape semantics"
 

@@ -745,6 +745,8 @@ TEST(RunPotion, SmokeBombEscapeIsNotAKillAndOpensProceedChoice) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
     EXPECT_EQ(rc.combat_outcome,
               static_cast<uint8_t>(RunCombatOutcome::SMOKE_BOMB));
+    EXPECT_NE(rc.combat.flags & kCombatFlagPlayerEscaped, 0u)
+        << "SmokeBomb.use must latch the player's escape before rewards open";
     EXPECT_EQ(rc.combat.monsters[0].hp, monster_hp);  // monster was not killed.
     EXPECT_EQ(rc.run.hp, 46);  // AbstractRoom.endBattle still fires Burning Blood.
     EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
@@ -929,6 +931,9 @@ TEST(RunEscape, SmokeBombAfterAMugKeepsTheMuggedScreenAndItsRewards) {
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
     EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::MUGGED))
         << "mugged outranks smoked in the screen pick";
+    EXPECT_NE(rc.combat.flags & kCombatFlagMugged, 0u);
+    EXPECT_NE(rc.combat.flags & kCombatFlagPlayerEscaped, 0u)
+        << "the independent smoked flag must survive even when mugged wins";
     EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::GOLD), 1);
     EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::CARDS), 1);
 }

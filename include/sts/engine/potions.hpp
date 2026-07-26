@@ -109,13 +109,13 @@ bool use_potion(CombatState& state, PotionId id, uint8_t target) noexcept;
 [[nodiscard]] bool potion_use_implemented(PotionId id) noexcept;
 
 // The native USE escape hatch (the same convention as the power/relic natives).
-// Handles potions whose effect
-// the opcode set cannot express, or which the generator's potion domain cannot
-// author. Implemented here today: BLOOD_POTION (percent heal) and
-// BLESSING_OF_THE_FORGE (the Armaments+ CHOOSE_CARD item). FRUIT_JUICE,
-// ENTROPIC_BREW and SMOKE_BOMB are implemented at the RUN layer instead
+// Handles potions whose effect the opcode set cannot express, or which the
+// generator's potion domain cannot author. Implemented here today:
+// BLOOD_POTION (percent heal), BLESSING_OF_THE_FORGE (the Armaments+
+// CHOOSE_CARD item), and SMOKE_BOMB (the combat-state player-escape latch).
+// FRUIT_JUICE and ENTROPIC_BREW are implemented at the RUN layer instead
 // (run_advance.cpp intercepts them before use_potion), so a direct combat-layer
-// call for those three is a documented no-op. Every remaining native potion's
+// call for those two is a documented no-op. Every remaining native potion's
 // body is DEFERRED to its dependency (an in-combat CHOOSE verb, recursive play,
 // cost randomization, the out-of-combat revive) -- and use_potion now REFUSES
 // those rather than no-op'ing, see potion_use_implemented. Exposed for the

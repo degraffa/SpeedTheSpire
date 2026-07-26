@@ -943,8 +943,16 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
         // mugged wins the screen pick (AbstractRoom.update:334-341 checks it
         // first) -- the mug screen still assembles items, so smoking past the
         // survivors of a mugged combat forfeits the fight but not the rewards.
-        clear_potion_slot(rc.run, slot);
+        // Preserve PotionPopUp.updateInput's order (PotionPopUp.java:234-239):
+        // potion.use first, then every relic.onUsePotion, then destroy the
+        // slot. The native body latches kCombatFlagPlayerEscaped; the run layer
+        // below owns the immediate timer-collapse / reward-screen consequence.
+        if (!use_potion(rc.combat, id, target)) {
+            fill_combat_result(rc.combat, res);
+            return true;
+        }
         dispatch_run_relics_on_use_potion(rc);
+        clear_potion_slot(rc.run, slot);
         rc.combat.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         fill_combat_result(rc.combat, res);
         res.reward = 0.0f;  // escape is not a kill.
