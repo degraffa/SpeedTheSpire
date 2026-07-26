@@ -46,6 +46,14 @@ relaunches on crash / hang / boss-reward until the driver marks the campaign
 complete. `--kill-after-seeds N` induces one deliberate mid-campaign game kill to
 exercise crash-resume (the B1.4 acceptance bar).
 
+An oracle campaign is valid only when the explicitly selected
+`CommunicationMod-oracle` fork emits `game_state.oracle`. The driver checks the
+first in-dungeon dump before it creates an artifact or advances the policy; a
+missing block records `status: fatal_environment_drift`, and the orchestrator
+stops instead of relaunching. Run campaign acceptance with
+`validate_artifacts.py --require-oracle`; the default validator remains
+backward-compatible with old, deliberately non-oracle B1.4 artifacts.
+
 Artifacts land under `<data-root>/<campaign-id>/`:
 `run_<seed>_a20_ironclad.jsonl` (one per run), `campaign_progress.json`,
 `campaign_manifest.json`, `campaign_heartbeat.json`,
@@ -116,17 +124,22 @@ command=C:/Python39/python.exe D:/STS_BG_Mod/SpeedTheSpire/tools/oracle_bridge/d
 
 ## Scriptable launch (design §1.2 paths)
 
-ModTheSpire, run from the game directory so it finds `desktop-1.0.jar`:
+For oracle work, use `orchestrator.py`; its launch is deliberately explicit:
 
 ```bat
 cd /d D:\SteamLibrary\steamapps\common\SlayTheSpire
-java -jar "D:\SteamLibrary\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar" --skip-launcher --mods basemod,CommunicationMod
+"D:\SteamLibrary\steamapps\common\SlayTheSpire\jre\bin\java.exe" -jar "D:\SteamLibrary\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar" --skip-launcher --mods basemod,CommunicationMod-oracle
 ```
 
 - ModTheSpire `1605060445`, BaseMod `1605833019`, CommunicationMod
   `2131373661` (Steam workshop, appid 646570).
-- The GUI path (Steam → *Play with Mods*, or launching `mts-launcher.jar`) is
-  equivalent; `--skip-launcher` just bypasses the mod-picker for automation.
+- The stock workshop `CommunicationMod` and the fork share the same
+  `SpireConfig("CommunicationMod", ...)` namespace. A GUI launch may therefore
+  spawn the campaign driver while loading the stock jar, producing plausible
+  artifacts with no oracle block. The GUI path is **not equivalent for oracle
+  campaigns**; never rely on its remembered mod selection.
+- Stock `CommunicationMod` remains usable only for the deliberately non-oracle
+  B0.2 protocol bring-up. Never load stock and fork together.
 - CommunicationMod's stderr lands in `communication_mod_errors.log` in the game
   directory — first place to look if the child never attaches.
 

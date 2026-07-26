@@ -34,6 +34,9 @@ import sys
 import time
 from datetime import datetime, timezone
 
+FATAL_PROGRESS_STATUS = "fatal_environment_drift"
+EXIT_FATAL_ENVIRONMENT = 3
+
 
 def utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -111,6 +114,16 @@ def read_json(path):
             return json.load(fh)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def fatal_progress(prog) -> bool:
+    return bool(prog and prog.get("status") == FATAL_PROGRESS_STATUS)
+
+
+def log_fatal_progress(prog) -> None:
+    fatal = prog.get("fatal") or {}
+    detail = fatal.get("message") or "driver reported environment drift"
+    log(f"FATAL ENVIRONMENT DRIFT -- {detail}")
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
@@ -220,6 +233,11 @@ def main(argv=None) -> int:
             log("CAMPAIGN TIMEOUT -- giving up")
             return 2
         prog = read_json(progress_path(args))
+        if fatal_progress(prog):
+            log_fatal_progress(prog)
+            timeline.append({"event": "fatal_environment_drift", "utc": utc()})
+            _summary(args, timeline)
+            return EXIT_FATAL_ENVIRONMENT
         if prog and prog.get("status") == "complete":
             log("campaign already complete")
             break
@@ -241,6 +259,18 @@ def main(argv=None) -> int:
             prog = read_json(progress_path(args))
             done = len(prog["seeds_done"]) if prog else 0
             failed = len(prog["seeds_failed"]) if prog else 0
+
+            if fatal_progress(prog):
+                log_fatal_progress(prog)
+                kill_tree(proc)
+                timeline.append({
+                    "event": "fatal_environment_drift",
+                    "utc": utc(),
+                    "done": done,
+                    "failed": failed,
+                })
+                _summary(args, timeline)
+                return EXIT_FATAL_ENVIRONMENT
 
             if prog and prog.get("status") == "complete":
                 log(f"campaign COMPLETE ({done} done, {failed} failed) -- "

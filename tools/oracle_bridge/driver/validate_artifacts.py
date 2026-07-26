@@ -17,6 +17,7 @@ Runs standalone (no game), stdlib-only. Exit 0 iff every file is clean.
 Usage:
   python validate_artifacts.py <run.jsonl> [more.jsonl ...]
   python validate_artifacts.py --campaign <data-root>/<campaign-id>
+  python validate_artifacts.py --require-oracle --campaign <campaign-dir>
 """
 
 from __future__ import annotations
@@ -41,13 +42,28 @@ ORACLE_KEYS = {"seed", "floor", "act", "ascension", "streams",
 RUN_STREAMS = {"monsterRng", "eventRng", "merchantRng", "cardRng", "treasureRng",
                "relicRng", "potionRng", "monsterHpRng", "aiRng", "shuffleRng",
                "cardRandomRng", "miscRng", "mapRng"}
+REWARD_ORACLE_FIELDS = {"cardBlizzRandomizer", "blizzardPotionMod"}
+REWARD_STREAMS = {"cardRng", "treasureRng", "potionRng", "relicRng", "miscRng"}
 
 
 def _fail(errs, path, lineno, msg):
     errs.append(f"{os.path.basename(path)}:{lineno}: {msg}")
 
 
-def validate_file(path: str):
+def _check_stream_triples(errs, path, lineno, streams, names):
+    missing = names - streams.keys()
+    if missing:
+        _fail(errs, path, lineno,
+              f"oracle.streams missing {sorted(missing)}")
+    for name in sorted(names & streams.keys()):
+        sv = streams.get(name)
+        if not isinstance(sv, dict) or \
+                not {"counter", "s0", "s1"} <= sv.keys():
+            _fail(errs, path, lineno,
+                  f"stream {name} lacks counter/s0/s1")
+
+
+def validate_file(path: str, require_oracle: bool = False):
     errs = []
     records = []
     with open(path, "r", encoding="utf-8") as fh:
@@ -75,6 +91,9 @@ def validate_file(path: str):
     if len(fh_hash) != 64:
         _fail(errs, path, ln0, f"fork_jar_sha256 not a sha256: {fh_hash!r}")
     oracle_on = header.get("oracle_block_enabled", False)
+    if require_oracle and oracle_on is not True:
+        _fail(errs, path, ln0,
+              "--require-oracle requires oracle_block_enabled: true")
 
     action_count = 0
     saw_terminal = False
@@ -109,23 +128,45 @@ def validate_file(path: str):
         gmiss = GS_ANCHORS - gs.keys()
         if gmiss:
             _fail(errs, path, lineno, f"game_state missing anchors {sorted(gmiss)}")
-        if oracle_on:
+        if oracle_on or require_oracle:
             oc = gs.get("oracle")
             if not isinstance(oc, dict):
-                _fail(errs, path, lineno, "oracle_block_enabled but no oracle block")
+                reason = ("--require-oracle but no oracle block"
+                          if require_oracle
+                          else "oracle_block_enabled but no oracle block")
+                _fail(errs, path, lineno, reason)
             else:
-                omiss = ORACLE_KEYS - oc.keys()
-                if omiss:
-                    _fail(errs, path, lineno, f"oracle block missing {sorted(omiss)}")
-                streams = oc.get("streams") or {}
-                smiss = RUN_STREAMS - streams.keys()
-                if smiss:
-                    _fail(errs, path, lineno,
-                          f"oracle.streams missing {sorted(smiss)}")
-                for name, sv in streams.items():
-                    if not {"counter", "s0", "s1"} <= (sv or {}).keys():
+                if oracle_on:
+                    omiss = ORACLE_KEYS - oc.keys()
+                    if omiss:
                         _fail(errs, path, lineno,
-                              f"stream {name} lacks counter/s0/s1")
+                              f"oracle block missing {sorted(omiss)}")
+                streams = oc.get("streams") or {}
+                if not isinstance(streams, dict):
+                    _fail(errs, path, lineno,
+                          "oracle.streams missing/not an object")
+                    streams = {}
+                if oracle_on:
+                    smiss = RUN_STREAMS - streams.keys()
+                    if smiss:
+                        _fail(errs, path, lineno,
+                              f"oracle.streams missing {sorted(smiss)}")
+                    # Preserve the default validator's historical contract:
+                    # every emitted stream, including a future extra one, must
+                    # have a complete state triple.
+                    for name, sv in streams.items():
+                        if not isinstance(sv, dict) or \
+                                not {"counter", "s0", "s1"} <= sv.keys():
+                            _fail(errs, path, lineno,
+                                  f"stream {name} lacks counter/s0/s1")
+                if require_oracle:
+                    pity_missing = REWARD_ORACLE_FIELDS - oc.keys()
+                    if pity_missing:
+                        _fail(errs, path, lineno,
+                              "reward oracle fields missing "
+                              f"{sorted(pity_missing)}")
+                    _check_stream_triples(
+                        errs, path, lineno, streams, REWARD_STREAMS)
 
     if not saw_terminal:
         _fail(errs, path, records[-1][0], "no terminal record")
@@ -137,6 +178,9 @@ def main(argv=None) -> int:
     ap.add_argument("paths", nargs="*", help="run JSONL files")
     ap.add_argument("--campaign", help="a <data-root>/<campaign-id> directory; "
                     "validates every run_*.jsonl within")
+    ap.add_argument("--require-oracle", action="store_true",
+                    help="reject artifacts without an enabled oracle block and "
+                         "require B4.5 pity fields plus reward RNG triples")
     args = ap.parse_args(argv)
 
     files = list(args.paths)
@@ -149,7 +193,7 @@ def main(argv=None) -> int:
 
     total_errs = 0
     for path in files:
-        errs, actions = validate_file(path)
+        errs, actions = validate_file(path, require_oracle=args.require_oracle)
         status = "OK" if not errs else f"{len(errs)} ERROR(S)"
         print(f"{os.path.basename(path)}: {actions} actions -- {status}")
         for e in errs[:25]:

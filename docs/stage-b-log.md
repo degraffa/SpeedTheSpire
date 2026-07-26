@@ -2964,3 +2964,47 @@ repository at
   case; writer-to-reader tests cover every non-`NONE` kind. Summary build ids
   end in `schema5-b51fix2`, preventing reports from this binary from merging
   with the earlier audited build.
+
+<a id="b45-oracle-preflight"></a>
+
+### B4.5 oracle-capture preflight hardening `[x]` (non-task)
+
+**Scope:** prevent recurrence of an invalid live capture; this is safety
+tooling, not B4.5 acceptance. The external
+`D:\STS_BG_Mod\_oracle_data\campaigns\b45_rewards` directory was preserved
+unchanged.
+
+**Incident:** the campaign driver attached and completed six seeds, but every
+artifact header had `oracle_block_enabled: false` and no `game_state.oracle`.
+The GUI had selected stock CommunicationMod; stock and fork share
+`SpireConfig("CommunicationMod", ...)`, so successful child-process attachment
+did not prove the fork loaded. The header's fork hash and game/mod fields also
+did not prove runtime identity: the driver hashes its configured
+`--fork-jar` path and writes static frozen-version constants. An independent
+launch log showed environment drift. The observed 2022/MTS 3.30.3/BaseMod
+5.56.0 stack remains evidence of drift, not a sanctioned replacement for the
+frozen stack.
+
+**Fix:** `campaign_driver.py` inspects the first in-dungeon dump before opening
+either JSONL sidecar or advancing policy. A missing `game_state.oracle` records
+a durable `fatal_environment_drift` status with seed/attempt/detail and exits
+fatal. `orchestrator.py` recognizes that status both before launch and during a
+launch, kills the game if needed, writes its timeline/summary, and exits
+nonzero without relaunch. `validate_artifacts.py --require-oracle` rejects a
+false header or missing block and requires the B4.5 pity pair plus complete
+triples for the five reward RNG streams; default validation deliberately keeps
+the B1.4 non-oracle compatibility behavior. The B4.5 runbook now gates the
+campaign on a separate one-seed preflight, explicit fork-only launch-log
+identity, frozen version checks, deployed-jar hash, fatal-free progress, and
+strict oracle validation. README no longer describes stock/GUI launch as
+equivalent for an oracle campaign.
+
+**Tests:** Windows-host stdlib `unittest`
+`tools/oracle_bridge/driver/test_oracle_campaign.py` covers missing-oracle
+fail-fast before artifact creation, durable fatal progress, orchestrator
+no-relaunch, validator default compatibility, strict false-header/missing-block
+rejection, required pity/stream rejection, and strict acceptance. Full
+debug/ASan/release, stale-count, and documentation-link checks were run before
+commit. No schema, fixture, golden, registry, engine, vendored fork, or external
+campaign artifact changed. The frozen environment choice remains blocked on
+the owner, and B4.5 stays `[!]`.

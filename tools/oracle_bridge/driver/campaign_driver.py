@@ -50,7 +50,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-DRIVER_VERSION = "b1.4.0"
+DRIVER_VERSION = "b1.4.1"
 SCHEMA_VERSION = 1
 
 # Static provenance for the artifact header (design 1.2; PROTOCOL.md 0).
@@ -115,6 +115,10 @@ EXIT_FATAL = 5
 
 class GameGone(Exception):
     """stdin EOF or watchdog trip: the game process is gone / hung."""
+
+
+class FatalEnvironmentDrift(RuntimeError):
+    """The launched game/mod stack cannot produce authoritative oracle data."""
 
 
 class Reader:
@@ -496,6 +500,27 @@ class Progress:
         except OSError:
             pass
 
+    def fatal_environment_drift(self, seed: str, attempt: int,
+                                message: str) -> None:
+        """Persist a non-retryable environment failure for the orchestrator.
+
+        The driver is the only process that can inspect the first in-dungeon
+        dump.  A missing fork-only oracle block therefore has to cross the
+        process boundary through this durable status rather than an exit code
+        (the game, not the orchestrator, is the driver's parent).
+        """
+        self.data["status"] = "fatal_environment_drift"
+        self.data["fatal"] = {
+            "kind": "missing_oracle_block",
+            "message": message,
+            "seed": seed,
+            "attempt": attempt,
+            "utc": _utc(),
+        }
+        self.data["current_seed"] = seed
+        self.data["current_seed_attempt"] = attempt
+        self.flush()
+
     def done_seeds(self) -> set:
         d = self.data
         return {s["seed"] for s in d["seeds_done"]} | {
@@ -592,10 +617,25 @@ class CampaignDriver:
         kind, state = self.stepper.step(f"start ironclad 20 {seed}")
         if kind == "error":
             raise RuntimeError(f"start rejected: {state.get('error')}")
-        if not state.get("in_game"):
-            # occasionally the menu fade needs one more settle; wait once more
-            kind, state = self.stepper.await_ready()
+        # `start` can answer from a still-ready menu/fade state before the first
+        # dungeon dump exists. Force fresh, non-mutating dumps until we actually
+        # cross the in_game boundary; never infer fork health from a menu state.
+        dungeon_deadline = _now() + self.args.menu_timeout
+        while not state.get("in_game"):
+            if _now() >= dungeon_deadline:
+                raise GameGone(
+                    "start never produced a first in-dungeon state")
+            kind, state = self.stepper.step("state")
+            if kind == "error":
+                raise RuntimeError(
+                    "state rejected while awaiting first in-dungeon dump: "
+                    f"{state.get('error')}")
         gs = state.get("game_state") or {}
+        if not isinstance(gs.get("oracle"), dict):
+            raise FatalEnvironmentDrift(
+                "first in-dungeon dump has no game_state.oracle object; "
+                "CommunicationMod-oracle is not active or oracleBlock is "
+                "disabled. Refusing to advance policy or create an artifact")
         seed_long = gs.get("seed")
         expect_long = seed_to_long(seed)
         seed_ok = (seed_long == expect_long)
@@ -836,6 +876,10 @@ class CampaignDriver:
         _log(f"campaign {self.args.campaign_id}: {len(seed_list)} seeds, "
              f"policy={self.args.policy}, launch #{self.progress.data['launches']}, "
              f"done={len(self.progress.done_seeds())}, fork={self.fork_hash[:12]}")
+        if self.progress.data.get("status") == "fatal_environment_drift":
+            _log("campaign is already stopped on fatal environment drift; "
+                 "refusing to resume")
+            return EXIT_FATAL
 
         try:
             self.stepper.await_ready()  # drain the handshake dump
@@ -862,6 +906,11 @@ class CampaignDriver:
             try:
                 self.wait_menu()
                 outcome, floor, acts, menu_ok = self.run_seed(seed, attempt)
+            except FatalEnvironmentDrift as e:
+                message = str(e)
+                _log(f"FATAL ENVIRONMENT DRIFT: {message}")
+                self.progress.fatal_environment_drift(seed, attempt, message)
+                return EXIT_FATAL
             except GameGone as e:
                 _log(f"seed {seed}: game gone mid-run ({e}); attempt {attempt}")
                 if attempt >= self.args.max_attempts:
