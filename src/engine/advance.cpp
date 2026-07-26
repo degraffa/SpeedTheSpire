@@ -196,7 +196,6 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
             choice_requires_user(state, front)) {
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
-            const uint8_t excluded = choice_excluded_index(front);
             out.choice_pending = true;
             out.choice_from_discard = choice_source(kind) == ChoiceSource::DISCARD;
             out.choice_from_exhaust = choice_source(kind) == ChoiceSource::EXHAUST;
@@ -208,7 +207,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
                 out.can_choose[i] = choice_slot_eligible(
-                    state, static_cast<uint8_t>(i), kind, excluded);
+                    state, static_cast<uint8_t>(i), kind);
             }
             return;
         }
@@ -572,8 +571,9 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
             const uint8_t slot = action_arg0(a);
             // arg0 indexes the kind's SOURCE pile (hand, or discard for
-            // discard-to-draw-top). choice_slot_eligible checks the bound and
-            // the discard source-card exclusion.
+            // discard-to-draw-top). choice_slot_eligible checks the bound (the
+            // just-played source card is in the limbo pile, so no discard
+            // exclusion exists any more).
             //
             // This is the ONE place the guard reads a predicate rather than
             // the mask, and it is still the same single source of truth:
@@ -584,8 +584,7 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             // may legally name a discard slot beyond that (advance.hpp,
             // "Discard-source CHOOSE"). Gating on the array would reject legal
             // selections; gating on the function it is built from does not.
-            if (!choice_slot_eligible(s, slot, kind,
-                                      choice_excluded_index(front))) {
+            if (!choice_slot_eligible(s, slot, kind)) {
                 break;  // illegal selection -- no-op
             }
             // DUPLICATE carries its clone count in the packed flags

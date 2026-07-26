@@ -41,9 +41,11 @@ OPCODES = {
     # DAMAGE_BLOCK reads the player's current block as the base at EXECUTE time
     # (Body Slam, BodySlam.java:96). DAMAGE_STR_MULT deals `amount` base with the
     # player's Strength counted x `extra` (Heavy Blade, HeavyBlade.java:426-435).
-    # DAMAGE_PER_STRIKE deals `amount` + `extra` per "Strike"-named card owned; it
-    # is BAKED into a plain DAMAGE at queue time (source card excluded), matching
-    # applyPowers-at-use timing (Perfected Strike, PerfectedStrike.java:592-607).
+    # DAMAGE_PER_STRIKE deals `amount` + `extra` per STRIKE-tagged card in
+    # hand+draw+discard. It is BAKED into a plain DAMAGE at queue time, matching
+    # applyPowers-at-use timing: a hand play counts itself because it has not
+    # left the hand yet; an autoplay already in limbo does not
+    # (PerfectedStrike.java:37-52; AbstractPlayer.java:1361,1373).
     "DAMAGE_BLOCK": 15,
     "DAMAGE_STR_MULT": 16,
     "DAMAGE_PER_STRIKE": 17,
@@ -147,6 +149,19 @@ OPCODES = {
     "CONDITIONAL_DRAW": 46,
     "RESHUFFLE_ALL": 47,
     "MADNESS": 48,
+    # The played card's filing action, allocated at 53 because 49-52 remain
+    # exclusively reserved for the open colorless-card opcode block and
+    # permanent gaps are never backfilled.
+    # USE_CARD is
+    # UseCardAction.update (UseCardAction.java:77-137) as a queued action:
+    # AbstractPlayer.useCard queues the card's own actions FIRST and this LAST
+    # (:1369-1375), so the played card sits in the CombatState limbo pile -- in
+    # NO observable pile -- until this resolves, which then rolls Strange Spoon
+    # (:109-113) and files the card away (discard / exhaust / purge-poof /
+    # POWER). Emitted only by resolve_card_play (the operand is a runtime
+    # card-pool index), never authored in YAML, but pinned in the enum for the
+    # cards.hpp drift check -- the SET_MOVE / ESCAPE precedent.
+    "USE_CARD": 53,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

@@ -12,6 +12,7 @@
 #include "sts/engine/piles.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <span>
 
@@ -82,28 +83,16 @@ void shuffle_discard_into_draw(CombatState& s) noexcept {
     s.discard_count = 0;
 }
 
-void reshuffle_all(CombatState& s, int exclude) noexcept {
-    // Split the discard into the cards the game would actually be shuffling and
-    // the ONE card that is in limbo at this moment (the card whose use() queued
-    // this action; see piles.hpp for why it must not participate). Everything
-    // downstream -- the guard, the permutation, the resulting piles -- is computed
-    // from `pool`, which is exactly the game's discardPile at DeepBreath.use time.
-    CardPoolIndex pool[kDiscardCap];
-    int n = 0;
-    bool limbo_present = false;
-    for (uint8_t i = 0; i < s.discard_count; ++i) {
-        if (static_cast<int>(s.discard[i]) == exclude) {
-            limbo_present = true;
-            continue;
-        }
-        pool[n++] = s.discard[i];
-    }
-
+void reshuffle_all(CombatState& s) noexcept {
+    // The card whose program queued this sits in the LIMBO pile (piles.hpp), so
+    // the discard scanned here is exactly the game's discardPile at
+    // DeepBreath.use time -- no exclusion needed.
+    //
     // DeepBreath.use (DeepBreath.java:34-38) queues EmptyDeckShuffleAction AND
     // ShuffleAction(drawPile, false) under ONE `discardPile.size() > 0` guard.
     // Read that guard once, here: the first shuffle empties the discard, so a
     // second, separately-guarded step could never see the same answer.
-    if (n == 0) {
+    if (s.discard_count == 0) {
         return;  // both actions skipped -- ZERO shuffle_rng draws
     }
 
@@ -123,20 +112,15 @@ void reshuffle_all(CombatState& s, int exclude) noexcept {
     // the top card.
     {
         JdkRandom rng(random_long(s.shuffle_rng));
-        jdk_shuffle(std::span<CardPoolIndex>(pool, static_cast<size_t>(n)), rng);
+        jdk_shuffle(std::span<CardPoolIndex>(s.discard, s.discard_count), rng);
     }
-    int moved = n;
+    int moved = s.discard_count;
     if (s.draw_count + moved > kDrawCap) {
         moved = kDrawCap - s.draw_count;  // defensive clamp, as above
     }
-    std::copy(pool, pool + moved, s.draw + s.draw_count);
+    std::copy(s.discard, s.discard + moved, s.draw + s.draw_count);
     s.draw_count = static_cast<uint8_t>(s.draw_count + moved);
-    // The discard is now empty except for the limbo card, which UseCardAction
-    // files there a moment later anyway.
     s.discard_count = 0;
-    if (limbo_present) {
-        s.discard[s.discard_count++] = static_cast<CardPoolIndex>(exclude);
-    }
 
     // ShuffleAction.update (ShuffleAction.java:31-40) with triggerRelics == false:
     // no second onShuffle pass, just group.shuffle() -- CardGroup.shuffle()
@@ -209,6 +193,81 @@ void exhaust_card(CombatState& s, int pool_index) noexcept {
             // on-exhaust program, so the skeleton EXHAUST-opcode path is unchanged.
             dispatch_on_exhaust(s, idx, s.card_pool[idx].card_id);
             return;
+        }
+    }
+}
+
+// --- The limbo pile (cardInUse) -- see piles.hpp for the model ---------------
+
+void limbo_add(CombatState& s, uint8_t pool_index) noexcept {
+    assert(s.limbo_count < kLimboCap &&
+           "limbo overflow (design doc §4.1: hard assert)");
+    s.limbo[s.limbo_count] = pool_index;
+    ++s.limbo_count;
+}
+
+bool limbo_remove(CombatState& s, uint8_t pool_index) noexcept {
+    for (uint8_t i = 0; i < s.limbo_count; ++i) {
+        if (s.limbo[i] == pool_index) {
+            for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.limbo_count; ++j) {
+                s.limbo[j - 1] = s.limbo[j];
+            }
+            --s.limbo_count;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool file_card_from_limbo(CombatState& s, uint8_t pool_index, bool to_exhaust,
+                          bool remove_only) noexcept {
+    if (!limbo_remove(s, pool_index)) {
+        return false;  // defensive: not a limbo card (malformed item)
+    }
+    if (remove_only) {
+        // purgeOnUse poof / POWER empower (UseCardAction.java:89-108): the card
+        // lands in NO pile. The pool row stays as inert instance storage (the
+        // documented purged-copy row leak is unchanged by the limbo model).
+        return true;
+    }
+    if (to_exhaust) {
+        assert(s.exhaust_count < kExhaustCap &&
+               "exhaust overflow (design doc §4.1: hard assert)");
+        s.exhaust[s.exhaust_count] = pool_index;
+        ++s.exhaust_count;
+        // resetAttributes on exhaust (ExhaustCardEffect.update:41-43): a
+        // this-turn-only cost reverts as the card lands in the pile.
+        reset_cost_for_turn(s, pool_index);
+        return true;
+    }
+    assert(s.discard_count < kDiscardCap &&
+           "discard overflow (design doc §4.1: hard assert)");
+    s.discard[s.discard_count] = pool_index;
+    ++s.discard_count;
+    return true;
+}
+
+void flush_limbo_at_combat_over(CombatState& s) noexcept {
+    // Terminal normalization -- see piles.hpp. File front-to-back in limbo
+    // insertion order. A synchronous replay may precede its source here
+    // (Double Tap puts the copy into limbo during the source's UseCardAction
+    // constructor), but purge copies land in no pile, so this preserves every
+    // observable destination-pile order. No RNG, no hooks.
+    while (s.limbo_count > 0) {
+        const uint8_t pi = s.limbo[0];
+        const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        const bool remove_only =
+            (def != nullptr && def->type == CardType::POWER) ||
+            has_card_flag(s.card_pool[pi].flags, CardFlag::PURGE_ON_USE);
+        const bool to_exhaust =
+            has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST) ||
+            has_card_flag(s.card_pool[pi].flags,
+                          CardFlag::EXHAUST_ON_USE_ONCE);
+        file_card_from_limbo(s, pi, to_exhaust, remove_only);
+        if (!remove_only) {
+            s.card_pool[pi].flags = static_cast<uint16_t>(
+                s.card_pool[pi].flags &
+                ~card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE));
         }
     }
 }

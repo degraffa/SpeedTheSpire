@@ -147,13 +147,15 @@ enum class Opcode : uint16_t {
     DAMAGE_STR_MULT = 16, // src attacks tgt for `amount` base with Strength counted
                            // x `flags` (the multiplier), then the pipeline (Heavy
                            // Blade; HeavyBlade.java:426-435 strength.amount *= magic).
-    DAMAGE_PER_STRIKE = 17, // deal `amount` + `extra`-per-"Strike"-card damage
-                             // (Perfected Strike; PerfectedStrike.java:592-607). BAKED
-                             // into a plain DAMAGE at QUEUE time (card_play.cpp), with
-                             // the just-played source card excluded from the count --
-                             // it is in limbo at applyPowers-at-use time. This opcode
-                             // therefore never reaches execute_opcode (a safe no-op if
-                             // it somehow does); it exists only as the table encoding.
+    DAMAGE_PER_STRIKE = 17, // deal `amount` + `extra` per STRIKE-tagged card in
+                             // hand+draw+discard (PerfectedStrike.java:37-52).
+                             // BAKED into plain DAMAGE at QUEUE time
+                             // (card_play.cpp): a hand play counts itself because
+                             // calculateCardDamage precedes hand.removeCard
+                             // (AbstractPlayer.java:1361,1373); an autoplay
+                             // already in limbo does not. This opcode therefore
+                             // never reaches execute_opcode (a safe no-op if it
+                             // somehow does); it exists only as table encoding.
     // --- End-of-turn hand/power sweeps (append-only from 18) ---
     LOSE_HP_PER_HAND = 18,  // `tgt` loses HP == the current hand size, bypassing
                              // block (HP_LOSS type). Regret's end-of-turn self-loss
@@ -323,6 +325,30 @@ enum class Opcode : uint16_t {
                               // hit, then set BOTH its cost and its costForTurn to
                               // 0 -- a permanent, not this-turn, zeroing. With no
                               // eligible card it draws NOTHING.
+    // --- The played card's filing action (allocated at 53) -------------------
+    // 49-52 remain exclusively reserved for the open colorless-card opcode
+    // block (stage-b-tasks.md shared namespace table); the lower permanent
+    // gaps 41-44 are never backfilled.
+    USE_CARD = 53,            // UseCardAction.update (UseCardAction.java:77-137)
+                              // as a queued action. AbstractPlayer.useCard
+                              // (:1369-1375) queues the card's own actions FIRST
+                              // and the UseCardAction LAST, so from
+                              // hand.removeCard (:1373) until this item resolves
+                              // the played card is cardInUse -- the CombatState
+                              // `limbo` pile here -- and in NO observable pile.
+                              // Executing it rolls Strange Spoon (:109-113, ONE
+                              // cardRandomRng boolean, only for an exhausting
+                              // non-POWER play), then files the card out of
+                              // limbo: purge poof (:89-94) and POWER empower
+                              // (:95-108) leave it in no pile; otherwise exhaust
+                              // (:129-131, moveToExhaustPile -> onExhaust +
+                              // resetAttributes) or discard (:127). `amount` is
+                              // the card-pool index. Never authored in YAML
+                              // (ENGINE_EMITTED_OPS); emitted only by
+                              // resolve_card_play. onAfterUseCard (:79-88) has
+                              // no S1 binder (BeatOfDeath / Rebound / Slow /
+                              // TimeMaze / TimeWarp are all out of scope), so
+                              // its seam is a named comment in op_use_card.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -582,27 +608,13 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // --- CHOOSE_CARD queries -----------------------------------------------------
 // Shared by the pump (block-or-auto decision), legal_actions (which hand slots
 // the player may CHOOSE), and advance (validating a CHOOSE action). Pure reads.
-
-// "No card excluded" sentinel for a discard-source choice's `excluded` argument
-// (a real pool index is 0..kCardPoolCap-1 == 0..159, so 255 can never collide).
-inline constexpr uint8_t kNoChoiceExclusion = 255;
-
-// The pool index a CHOOSE_CARD excludes from its SOURCE pile, or kNoChoiceExclusion.
-// Discard-source choices (Headbutt) stamp the just-played card's pool index into
-// the item's `tgt` (card_play.cpp): our resolve_card_play moves the played card to
-// the discard pile BEFORE the queued choice resolves, but the game keeps it in
-// limbo (cardInUse) -- the UseCardAction that discards it is queued AFTER the
-// card's own DiscardPileToTopOfDeckAction (AbstractPlayer.useCard:1369-1375). So
-// the just-played card must not be a discard-choice candidate. Hand-source choices
-// carry no exclusion.
-[[nodiscard]] constexpr uint8_t choice_excluded_index(
-    const ActionQueueItem& item) noexcept {
-    if (static_cast<Opcode>(item.opcode) == Opcode::CHOOSE_CARD &&
-        choice_source_is_discard(choose_kind_from_flags(item.flags))) {
-        return item.tgt;
-    }
-    return kNoChoiceExclusion;
-}
+//
+// NOTE: there is deliberately NO "excluded just-played card" parameter here any
+// more. The played card is in the `limbo` pile while its own CHOOSE_CARD
+// resolves (AbstractPlayer.useCard:1369-1375: cardInUse until the queued
+// UseCardAction files it), so a discard-source choice (Headbutt) simply cannot
+// see it in the discard -- the per-item `choice_excluded_index` compensation
+// this replaced is folded into the general limbo model (USE_CARD above).
 
 // Is slot `slot` of the kind's SOURCE pile (hand, or discard for
 // discard-to-draw-top) a legal selection for a CHOOSE_CARD of the given kind?
@@ -612,12 +624,10 @@ inline constexpr uint8_t kNoChoiceExclusion = 255;
 // overrides canUpgrade to always-true (SearingBlow.java:58-60) and so stays
 // eligible when already upgraded. EXHAUST /
 // PUT_ON_DRAW_TOP accept any hand card; DISCARD_TO_DRAW_TOP accepts any discard
-// card except `excluded` (the just-played source, in limbo in the game);
-// DUPLICATE (Dual Wield) accepts ATTACK or POWER hand cards only
+// card; DUPLICATE (Dual Wield) accepts ATTACK or POWER hand cards only
 // (DualWieldAction.isDualWieldable:95-97).
 [[nodiscard]] bool choice_slot_eligible(
-    const CombatState& state, uint8_t slot, ChoiceKind kind,
-    uint8_t excluded = kNoChoiceExclusion) noexcept;
+    const CombatState& state, uint8_t slot, ChoiceKind kind) noexcept;
 
 // Does the CHOOSE_CARD `item` (assumed at the front of the action queue) require
 // a real player prompt? True iff it selects fewer cards than are eligible AND it

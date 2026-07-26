@@ -24,9 +24,12 @@ void power_native_corruption(CombatState& s, Hook hook,
         return;
     }
     if (hook == Hook::ON_USE_CARD) {
-        // card.exhaustOnUseOnce: mark this instance to exhaust on play.
+        // Corruption mutates UseCardAction.exhaustCard, not card.exhaust
+        // (CorruptionPower.java:45-49). EXHAUST_ON_USE_ONCE is the action-local
+        // lifetime mirror: op_use_card clears it after this filing, including
+        // when Strange Spoon redirects the card to discard.
         s.card_pool[ctx.card_pool_index].flags |=
-            card_flag_bit(CardFlag::EXHAUST);
+            card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE);
     } else if (hook == Hook::ON_CARD_DRAW) {
         // setCostForTurn(0) (AbstractCard.java:2001-2011): assign, and mark the
         // instance cost-modified-for-turn when the new value differs from the

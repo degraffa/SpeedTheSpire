@@ -1,5 +1,5 @@
 // Card-play flow -- PLAY_CARD -> cardQueue -> dequeue resolution. See
-// card_play.hpp for the full provenance, the hook-order collapse decision, and
+// card_play.hpp for the full provenance, the played-card limbo window, and
 // the preserved timing facts (effects are QUEUED not applied inline; energy
 // deducted after; random-target roll at dequeue).
 //
@@ -17,7 +17,7 @@
 #include "sts/engine/cards.hpp"         // CardDef, card_def
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
-#include "sts/engine/piles.hpp"         // reset_cost_for_turn (exhaust reset)
+#include "sts/engine/piles.hpp"         // limbo_add (cardInUse model)
 #include "sts/engine/power_hooks.hpp"   // onPlayCard/onUseCard fan-out + onExhaust
 #include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strike Dummy bake)
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
@@ -28,22 +28,23 @@ namespace sts::engine {
 namespace {
 
 // Count "Strike"-named cards (CardTags.STRIKE == CardDef.is_strike) in the
-// hand + draw + discard piles, excluding pool index `exclude` (the just-played
-// source card). Perfected Strike's countCards() scans exactly those three piles
-// (PerfectedStrike.java:565-580); at queue time the source is still in hand but
-// is in limbo (cardInUse) in the game, so it is excluded. Exhaust pile is NOT
-// counted (matching the Java).
-[[nodiscard]] int count_strikes_excluding(const CombatState& s,
-                                          CardPoolIndex exclude) noexcept {
+// hand + draw + discard piles, the source card INCLUDED when it is in one of
+// them. Perfected Strike's countCards() scans exactly those three piles
+// (PerfectedStrike.java:37-52), and it runs from calculateCardDamage at
+// useCard entry (AbstractPlayer.java:1361) -- BEFORE hand.removeCard (:1373).
+// A hand-played Perfected Strike is therefore still in the HAND and counts
+// itself (playCard, :1285-1302, queues the hovered card without removing it);
+// an AUTOPLAYED one sits in the limbo CardGroup and does not. Both fall out of
+// pile membership here: at queue time a hand play is still in s.hand, an
+// autoplay is in s.limbo, and limbo is not scanned. Exhaust pile is NOT
+// counted (matching the Java). The former unconditional source exclusion
+// contradicted the Java for hand plays (every hand play was `magic` low).
+[[nodiscard]] int count_strikes(const CombatState& s) noexcept {
     int n = 0;
     auto scan = [&](const CardPoolIndex* pile, uint8_t cnt) noexcept {
         for (uint8_t i = 0; i < cnt; ++i) {
-            const CardPoolIndex pi = pile[i];
-            if (pi == exclude) {
-                continue;
-            }
             const CardDef* d =
-                card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+                card_def(static_cast<CardId>(s.card_pool[pile[i]].card_id));
             if (d != nullptr && d->is_strike) {
                 ++n;
             }
@@ -89,12 +90,12 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     }
     item.amount = step.amount;
     item.flags = step.extra;  // APPLY_POWER: PowerId flags; else 0
-    // PLAY_TOP_DRAW (Havoc): stamp the SOURCE card's pool index into `amount` so
-    // the opcode can exclude it from the deck it plays from -- the source is
-    // cardInUse (limbo) in the game, not a replay candidate (op_play_top_draw).
-    if (step.op == static_cast<decltype(step.op)>(Opcode::PLAY_TOP_DRAW)) {
-        item.amount = source_index;
-    } else if (step.op == static_cast<decltype(step.op)>(Opcode::MAKE_CARD)) {
+    // NOTE: PLAY_TOP_DRAW, RESHUFFLE_ALL and the discard-source CHOOSE_CARD no
+    // longer carry a stamped source-card exclusion. The played card is in the
+    // LIMBO pile while its own actions resolve (resolve_card_play below), so
+    // none of those opcodes can see it in a pile it should not be in -- the
+    // three per-item compensations are folded into that general model.
+    if (step.op == static_cast<decltype(step.op)>(Opcode::MAKE_CARD)) {
         // MAKE_CARD authoring: the step's `extra` packs the created
         // CardId (bits 0-15), the destination CardPile (bits 16-23), and an
         // upgraded-copy flag (bit 24). The interpreter reads the CardId + upgrade
@@ -105,10 +106,12 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         item.flags = step.extra;  // CardId(low16) + upgraded bit(24)
     } else if (step.op == static_cast<decltype(step.op)>(Opcode::DAMAGE_PER_STRIKE)) {
         // Perfected Strike: BAKE the per-"Strike" bonus into a plain DAMAGE at
-        // queue time -- applyPowers-at-use timing, with the just-played source card
-        // excluded from the count (it is in limbo, PerfectedStrike.java:592-607).
+        // queue time -- calculateCardDamage-at-useCard timing
+        // (AbstractPlayer.java:1361, before hand.removeCard at :1373), so a
+        // hand-played Perfected Strike counts ITSELF while an autoplayed one
+        // (in limbo) does not -- both by plain pile membership (count_strikes).
         // `extra` is the per-Strike magicNumber; `amount` the flat base.
-        const int strikes = count_strikes_excluding(s, source_index);
+        const int strikes = count_strikes(s);
         item.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
         item.amount = step.amount + static_cast<int32_t>(step.extra) * strikes;
         item.flags = 0;
@@ -131,24 +134,6 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         // then increments only this card instance's misc counter.
         item.flags = static_cast<uint32_t>(source_index) |
                      (step.extra << 8u);
-    } else if (step.op == static_cast<decltype(step.op)>(Opcode::RESHUFFLE_ALL)) {
-        // Deep Breath: same limbo problem as the discard-source choice below, and
-        // the same fix. AbstractPlayer.useCard queues the card's own actions
-        // BEFORE the UseCardAction that files the card away (:1369-1375), so the
-        // played card is in NO pile while its reshuffle resolves; resolve_card_play
-        // has already moved it to the discard. Stamp its pool index into `tgt` so
-        // reshuffle_all can keep it out of the shuffled set -- otherwise the played
-        // card is shuffled into the draw pile, and its mere presence changes both
-        // the `discardPile.size() > 0` guard and the Fisher-Yates permutation of
-        // every other card.
-        item.tgt = source_index;
-    } else if (step.op == static_cast<decltype(step.op)>(Opcode::CHOOSE_CARD) &&
-               choice_source_is_discard(choose_kind_from_flags(step.extra))) {
-        // Headbutt (discard-source choice): stamp the just-played source card's
-        // pool index into `tgt` so the choice excludes it -- resolve_card_play
-        // moves the source to the discard early, but the game keeps it in limbo
-        // (AbstractPlayer.useCard:1369-1375; choice_excluded_index).
-        item.tgt = source_index;
     }
     // Strike Dummy: AbstractCard.applyPowers runs relic atDamageModify on
     // float(baseDamage) BEFORE the player-power atDamageGive loop
@@ -193,50 +178,25 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
     return false;
 }
 
-// Move the played card (pool index) from hand to its destination pile. A card
-// with the EXHAUST flag goes to the exhaust pile (AbstractCard.exhaust /
-// UseCardAction), otherwise to discard (AbstractPlayer.useCard ->
-// moveToDiscardPile). Locating by pool index is unambiguous (each pool row is a
-// distinct instance). `to_exhaust` selects the exhaust destination; a card
-// without the EXHAUST flag takes the discard path.
-void move_card_hand_to_pile(CombatState& s, CardPoolIndex pool_index,
-                            bool to_exhaust, bool remove_after_use) noexcept {
+// hand.removeCard(c); cardInUse = c (AbstractPlayer.useCard:1373-1375): the
+// played card leaves the hand and enters LIMBO -- no observable pile -- until
+// the queued USE_CARD action files it away. An AUTOPLAYED card (Havoc /
+// Double Tap) never was in the hand: op_play_top_draw / op_play_card put it in
+// limbo directly (the game's limbo CardGroup), so finding it absent from the
+// hand but already in limbo is the normal autoplay path, not an error.
+void move_played_card_to_limbo(CombatState& s, CardPoolIndex pool_index) noexcept {
     for (uint8_t i = 0; i < s.hand_count; ++i) {
         if (s.hand[i] == pool_index) {
             for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.hand_count; ++j) {
                 s.hand[j - 1] = s.hand[j];
             }
             --s.hand_count;
-            // AbstractPlayer.useCard removes POWER cards from their temporary
-            // limbo instead of placing them in discard/exhaust. Keep the pool row
-            // as inert instance storage, but leave it in no pile so it cannot be
-            // redrawn or replayed.
-            if (remove_after_use) {
-                return;
-            }
-            if (to_exhaust) {
-                assert(s.exhaust_count < kExhaustCap &&
-                       "exhaust overflow (design doc §4.1: hard assert)");
-                s.exhaust[s.exhaust_count] = pool_index;
-                ++s.exhaust_count;
-                // An exhausted card's this-turn-only cost reverts
-                // (ExhaustCardEffect.update:41-43 resetAttributes).
-                reset_cost_for_turn(s, pool_index);
-                // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card
-                // lands in the exhaust pile. No-op without an on-exhaust power or
-                // card-level on-exhaust program (Sentinel).
-                dispatch_on_exhaust(s, pool_index, s.card_pool[pool_index].card_id);
-            } else {
-                assert(s.discard_count < kDiscardCap &&
-                       "discard overflow (design doc §4.1: hard assert)");
-                s.discard[s.discard_count] = pool_index;
-                ++s.discard_count;
-            }
+            limbo_add(s, pool_index);
             return;
         }
     }
-    // Not found in hand: a malformed play. Leave state untouched (defensive; the
-    // caller/queue_card_play only ever queues a card that was in hand).
+    // Not in hand: an autoplay already sitting in limbo is expected; anything
+    // else is a malformed play, left untouched (defensive).
 }
 
 // --- Card-level trigger programs (statuses / curses) -------------------------
@@ -383,13 +343,26 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         }
     }
 
-    // 5. UseCardAction onUseCard fan-out (UseCardAction.java:41-64 order: player
-    //    powers -> relics -> cards -> monster powers), THEN move the card out of
-    //    hand. Corruption's onUseCard may redirect a SKILL to exhaust here, so the
-    //    exhaust destination is re-read from the instance flags AFTER the fan-out
-    //    (not the pre-fan-out snapshot). EXHAUST -> exhaust pile, else discard.
+    // 5. UseCardAction: its CONSTRUCTOR runs synchronously at useCard time
+    //    (AbstractPlayer.java:1370) -- that is the onUseCard fan-out
+    //    (UseCardAction.java:41-64 order: player powers -> relics -> cards ->
+    //    monster powers), dispatched here with the played card still in the
+    //    hand, exactly as the ctor sees it. Its UPDATE -- the Strange Spoon
+    //    roll and the filing -- is the queued USE_CARD action below, which the
+    //    useCard body addToBottom's AFTER the card's own actions (:1370), so
+    //    the card stays in limbo while they resolve. Corruption's onUseCard may
+    //    redirect a SKILL to exhaust; the destination is derived from the
+    //    instance flags when USE_CARD executes, which is after the fan-out.
     dispatch_on_use_card(s, pool_index, s.card_pool[pool_index].card_id,
                          resolved_target);
+    {
+        ActionQueueItem use{};
+        use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
+        use.src = kActorPlayer;
+        use.tgt = kActorPlayer;
+        use.amount = pool_index;
+        add_to_bottom(s, use);
+    }
     // hand.triggerOnOtherCardPlayed(c) (AbstractPlayer.useCard:1371-1373): fired
     // AFTER c.use() + the UseCardAction fan-out, BEFORE the card leaves the hand,
     // on every OTHER hand card. Pain (trigger ON_OTHER_CARD_PLAYED) addToTop's a
@@ -406,26 +379,13 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         queue_card_trigger_program(
             s, card_effect_steps(*od, s.card_pool[pi].upgrade), /*add_top=*/true);
     }
-    // Strange Spoon (UseCardAction.java:109-131): a play that WOULD exhaust and
-    // is not a POWER rolls ONE cardRandomRng.randomBoolean() while the relic is
-    // owned; on true ("spoonProc") the card goes to the discard pile instead.
-    // The roll is guarded by exhaustCard FIRST, so a non-exhausting play consumes
-    // no RNG at all -- that guard order is RNG-visible and is reproduced exactly.
-    bool to_exhaust =
-        has_card_flag(s.card_pool[pool_index].flags, CardFlag::EXHAUST);
-    if (to_exhaust && def->type != CardType::POWER &&
-        player_has_relic(s, RelicId::STRANGE_SPOON) &&
-        random_boolean(s.card_random_rng)) {
-        to_exhaust = false;
-    }
-    // AbstractPlayer.useCard removes a POWER card from limbo rather than placing
-    // it in a pile (:1374 + UseCardAction.java:95-108), and UseCardAction's FIRST
-    // branch does the same for a purgeOnUse instance (:89-94) -- the replay copy a
-    // Double Tap creates, which is destroyed instead of landing anywhere.
-    const bool remove_after_use =
-        def->type == CardType::POWER ||
-        has_card_flag(s.card_pool[pool_index].flags, CardFlag::PURGE_ON_USE);
-    move_card_hand_to_pile(s, pool_index, to_exhaust, remove_after_use);
+    // hand.removeCard(c); cardInUse = c (:1373-1375): into limbo. The Strange
+    // Spoon roll and the exhaust/discard/poof/empower decision all belong to
+    // UseCardAction.update and happen when the queued USE_CARD executes
+    // (op_use_card) -- AFTER the card's own actions have resolved, which is
+    // both pile-visible (discard/exhaust ORDER) and RNG-visible (the spoon
+    // boolean's position in the cardRandomRng stream).
+    move_played_card_to_limbo(s, pool_index);
 
     // 6. energy.use(cost): deducted AFTER the effects are queued (useCard order).
     //    X-cost already consumed all energy above; otherwise deduct the

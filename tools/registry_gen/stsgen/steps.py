@@ -58,11 +58,14 @@ GENERAL_OPS = frozenset({
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
 # at queue time -- card_play.cpp queue_effect_step stamps the source pool index
-# (PLAY_TOP_DRAW's amount, DAMAGE_RAMPAGE's flags, the discard-source
-# CHOOSE_CARD's tgt), bakes the source card's upgrade count / Strike count into a
-# plain DAMAGE (DAMAGE_UPGRADE_SCALE, DAMAGE_PER_STRIKE), or splits MAKE_CARD's
-# packed CardPile into item.src. No other domain's helper does any of that, so
-# authoring one of these outside a card program produces a MISPACKED item.
+# (DAMAGE_RAMPAGE's flags), bakes the source card's upgrade count / Strike count
+# into a plain DAMAGE (DAMAGE_UPGRADE_SCALE, DAMAGE_PER_STRIKE), or splits
+# MAKE_CARD's packed CardPile into item.src. (PLAY_TOP_DRAW and the
+# discard-source CHOOSE_CARD once carried a stamped just-played-card exclusion
+# too; the limbo pile made those stamps obsolete, but both ops stay in this
+# group -- their semantics still assume a card program's queue helper.) No other
+# domain's helper does any of that, so authoring one of these outside a card
+# program produces a MISPACKED item.
 CARD_CONTEXT_OPS = frozenset({
     "MAKE_CARD", "CHOOSE_CARD", "PLAY_TOP_DRAW",
     "DAMAGE_PER_STRIKE", "DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE",
@@ -80,6 +83,9 @@ ENGINE_EMITTED_OPS = frozenset({
     # ESCAPE's operand is the escaping monster's slot, decided by its native
     # take-turn body (monster_looter.cpp) -- same category as SUICIDE/SET_MOVE.
     "ESCAPE",
+    # USE_CARD's operand is the played card's runtime pool index; emitted only
+    # by resolve_card_play (card_play.cpp) as the queued UseCardAction.update.
+    "USE_CARD",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE

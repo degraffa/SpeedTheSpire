@@ -2827,3 +2827,63 @@ in **both** presets.
   not summed): cards 75 / powers 28 / monsters 14 / relics 65 / potions 33 /
   events 0 / encounters 20 / a20 20 / **total 255**.
 
+<a id="card-limbo"></a>
+
+### card-limbo `[x]` ∥ Played-card limbo / queued `UseCardAction` filing
+**Deferred by:** B3.10a · **Deps:** existing `CombatState.limbo` and action
+queue · **Provenance:** `GameActionManager.getNextAction`,
+`AbstractPlayer.playCard` / `useCard`, `UseCardAction`, `PlayTopCardAction`,
+`UnlimboAction`, `DoubleTapPower.onUseCard`, `DeepBreath.use`,
+`DrawCardAction.update`, `FiendFireAction.update`, `ExhaustCardEffect.update`,
+`DiscardPileToTopOfDeckAction.update`, `CorruptionPower`,
+`CardGroup.moveToDiscardPile` / `moveToExhaustPile` /
+`resetCardBeforeMoving`, `PerfectedStrike`, and `MummifiedHand`.
+
+**Log:** The B3.10a obligation was real: `AbstractPlayer.useCard` queues the
+card's effects first and `UseCardAction` last, then removes the source from
+hand into `cardInUse`; the source is in no observable pile while its own
+effects resolve. The engine instead filed it immediately. That required local
+Headbutt and Deep Breath exclusions, plus a Havoc lift-out/restore
+compensation, and still failed the general Shrug It Off empty-draw case.
+`resolve_card_play` now enters the existing bounded `CombatState.limbo`,
+queues engine-emitted `USE_CARD`, and leaves discard / exhaust / POWER /
+purge-poof filing, Strange Spoon's guarded RNG draw, exhaust reset, and
+`onExhaust` dispatch to that action's real queue position. No third local
+compensation was added; all three old ones were removed.
+
+- **Ordering:** `GameActionManager.getNextAction` retains `cardQueue[0]`
+  through `player.useCard` and removes it afterwards. The pump now does the
+  same, so Double Tap's synchronous index-1 replay is promoted ahead of a
+  previously queued play. Terminal combat still halts immediately, but a
+  pending `USE_CARD` is resolved exactly first: lethal `DamageAction` calls
+  `clearPostCombatActions`, whose allowlist deliberately retains
+  `UseCardAction`, so Strange Spoon RNG and the filing-time `onExhaust` fan-out
+  remain gameplay-visible. Only a terminal-cancelled limbo card which never
+  acquired a filing action takes the no-RNG/no-hook fallback. Every other
+  established stranded action is preserved.
+- **Independent audit findings:** a hand-played Perfected Strike counts itself
+  because `calculateCardDamage` precedes `hand.removeCard`; autoplay already
+  in limbo does not. Mummified Hand excludes its source through the still-live
+  `cardQueue` entry, not through early hand removal. A rejected first pass also
+  exposed that `CardFlag::EXHAUST` had collapsed Java's permanent `exhaust`
+  with `exhaustOnUseOnce`: Havoc/Corruption could make a Spoon-saved or Exhumed
+  Strike exhaust on every later play. Append-only bit 8 is now
+  `EXHAUST_ON_USE_ONCE` and is consumed after the filing decision, while
+  intrinsic/Medical-Kit `EXHAUST` remains. All three distinctions are pinned.
+- **Namespace:** `USE_CARD` is opcode **53**. Opcodes 49–52 remain the
+  exclusive live B3.10b reservation; 41–44 are permanent gaps left by landed
+  owners and were not backfilled. The generated/engine opcode equality is
+  compile-time pinned. `SCHEMA_VERSION` remains 5.
+- **Regression diagnosis:** the inherited implementation initially exposed
+  four failures. The lethal-Strike fixture found a real terminal queue
+  normalization defect and was fixed in engine state without editing the
+  fixture. Two Strange Spoon tests asserted synchronously before the newly
+  queued filing action, and the Chemical X test counted that legitimate
+  trailing action; their assertion points were corrected without weakening
+  the semantic checks.
+- **Acceptance:** final-tree full Debug **940/940**, leak-detecting ASan/UBSan
+  **940/940**, and Release **940/940**; `FixtureOracle`, all twelve `CardLimbo`,
+  and the affected `RelicRaresShop` regressions included. `git diff --check`,
+  documentation link/stale-count checks, and a clean diff under
+  `tests/golden/` completed the handoff. No schema bump and no committed
+  fixture/golden edit.

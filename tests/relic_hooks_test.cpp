@@ -803,8 +803,9 @@ TEST(RelicHooksUncommon, MeatOnTheBoneHealsTwelveAtHalfBeforeOnVictory) {
 // MummifiedHand.onUseCard (MummifiedHand.java:38-72). The acceptance points are
 // (a) only a POWER play triggers it (:39), (b) the eligibility filter
 // cost > 0 && costForTurn > 0 (:44), (c) the just-played card is NOT a candidate
-// (AbstractPlayer.useCard:1374 pulls it out of the hand before the queued
-// UseCardAction runs), (d) EXACTLY ONE cardRandomRng draw when a candidate
+// because it remains in actionManager.cardQueue until getNextAction removes it
+// after AbstractPlayer.useCard returns (:50-54), (d) EXACTLY ONE
+// cardRandomRng draw when a candidate
 // exists (:61) and ZERO when none does (:56-64) -- the stream-desync guard --
 // and (e) the discount is this-turn-only (setCostForTurn -> isCostModifiedForTurn,
 // AbstractCard.java:2001-2011).
@@ -851,9 +852,12 @@ TEST(RelicHooksUncommonMummifiedHand, PowerPlayZeroesOneRandomEligibleHandCard) 
 
 TEST(RelicHooksUncommonMummifiedHand, PlayedPowerIsNotItsOwnCandidate) {
     // The engine dispatches onUseCard while the source card is still in hand
-    // (card_play.cpp step 5 precedes move_card_hand_to_pile); the Java's hand
-    // no longer holds it. With nothing else in hand there is NO candidate, so
-    // no draw happens and the power keeps its cost.
+    // (card_play.cpp step 5 precedes the move to limbo), matching Java where
+    // UseCardAction's constructor fires the hook before hand.removeCard. Java
+    // excludes the source via cardQueue; this direct-hook test supplies the
+    // equivalent source identity through the hook context. With nothing else
+    // in hand there is NO candidate, so no draw happens and the power keeps
+    // its cost.
     CombatState s = MakeState();
     seed_card(s, 0, CardId::INFLAME);
     s.hand[0] = 0;

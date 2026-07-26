@@ -283,28 +283,27 @@ void relic_native_mummified_hand(CombatState& s, RelicHook hook,
     for (uint8_t i = 0; i < s.hand_count && n < kHandCap; ++i) {
         const CardPoolIndex pi = s.hand[i];
 
-        // THE PLAYED CARD ITSELF. AbstractPlayer.useCard removes it from the
-        // hand (:1374) BEFORE the UseCardAction it queued at :1371 ever
-        // executes, so the Java's hand.group cannot contain it when this hook
-        // fires. The engine collapses UseCardAction into resolve_card_play and
-        // dispatches onUseCard BEFORE move_card_hand_to_pile (card_play.cpp
-        // step 5), so here the source card IS still in the hand -- exclude it
-        // explicitly. Same limbo/cardInUse correction count_strikes_excluding
-        // (Perfected Strike) and choice_excluded_index (Headbutt) already make.
+        // THE PLAYED CARD ITSELF. The onUseCard fan-out runs in the
+        // UseCardAction CONSTRUCTOR (AbstractPlayer.useCard:1370), BEFORE
+        // hand.removeCard (:1373) -- so in the Java the played card IS still
+        // in hand.group when this hook fires, and what keeps it out of
+        // Mummified Hand's candidates is the relic's own cardQueue exclusion
+        // (:50-54): at useCard time the play is still cardQueue.get(0)
+        // (getNextAction remove(0)'s only afterwards). The pump preserves that
+        // ordering. Keep the explicit source guard as well because native hook
+        // tests and other direct resolve_card_play callers do not necessarily
+        // install the source in cardQueue first.
         if (pi == ctx.card_pool_index) {
             continue;
         }
 
         // THE cardQueue EXCLUSION (:50-54). The brief's prior audit called this
         // analogue-less; it is not. CombatState carries a real cardQueue
-        // (s.card_queue / card_queue_count, design §5.1) and PLAY_TOP_DRAW
-        // (Havoc) genuinely parks a card in the HAND while its play sits queued
-        // (interp_cards.cpp op_play_top_draw), which is exactly the state the
-        // Java loop guards against. So implement it rather than document it
-        // away. It is currently belt-and-braces -- op_play_top_draw also sets
-        // that card's cost_now to 0, so the costForTurn > 0 filter below
-        // already rejects it -- but it is one loop, and it keeps the engine
-        // correct if a future queue-a-hand-card verb (Duplication) lands.
+        // (s.card_queue / card_queue_count, design §5.1). A second hand play
+        // can already be queued while this one resolves, which is exactly the
+        // state the Java loop guards against. So implement it rather than
+        // document it away; it also keeps the engine correct for future
+        // queue-a-hand-card verbs.
         bool queued = false;
         for (uint8_t q = 0; q < s.card_queue_count; ++q) {
             if (s.card_queue[q].card_index == pi) {

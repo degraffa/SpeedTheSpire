@@ -4,15 +4,18 @@
 // implementation. New engine mechanics exercised (all cited at their card):
 //   * Body Slam         -- DAMAGE_BLOCK: base == current player block (BodySlam.java:96).
 //   * Heavy Blade       -- DAMAGE_STR_MULT: Strength x magic (HeavyBlade.java:426-435).
-//   * Perfected Strike  -- DAMAGE_PER_STRIKE: +magic per "Strike"-named card, source
-//                          excluded (PerfectedStrike.java:565-607).
+//   * Perfected Strike  -- DAMAGE_PER_STRIKE: +magic per "Strike"-named card; a
+//                          hand play counts itself, still in hand at
+//                          calculateCardDamage time (PerfectedStrike.java:37-52;
+//                          AbstractPlayer.java:1361 before :1373).
 //   * Anger             -- MAKE_CARD self-copy to discard, upgrade preserved
 //                          (Anger.java:42; makeStatEquivalentCopy).
 //   * Wild Strike       -- MAKE_CARD Wound to a random draw-pile spot (WildStrike.java:840).
 //   * Cleave/Thunderclap-- ALL_ENEMY AoE (separate DamageInfo per live monster).
 //   * Sword Boomerang   -- RANDOM_ENEMY per-hit roll (one card_random_rng draw/hit).
-//   * Headbutt          -- CHOOSE_CARD discard_to_draw_top, just-played source
-//                          excluded (DiscardPileToTopOfDeckAction; useCard:1369-1375).
+//   * Headbutt          -- CHOOSE_CARD discard_to_draw_top; the just-played
+//                          source is in the LIMBO pile while the choice is open
+//                          (DiscardPileToTopOfDeckAction; useCard:1369-1375).
 //   * Clash             -- canUse: playable only if every hand card is an Attack.
 
 #include <cstdint>
@@ -248,7 +251,8 @@ TEST(CardAttacksHeadbutt, EmptyDiscardOnlyDamages) {
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
     EXPECT_EQ(s.monsters[0].hp, 50 - 9);
-    EXPECT_EQ(s.draw_count, 1) << "the just-played Headbutt is excluded, nothing retrieved";
+    EXPECT_EQ(s.draw_count, 1)
+        << "the just-played Headbutt is in limbo, so nothing is retrieved";
     ASSERT_EQ(s.discard_count, 1) << "only the source Headbutt";
     EXPECT_EQ(s.card_pool[s.discard[0]].card_id, static_cast<uint16_t>(CardId::HEADBUTT));
 }
@@ -257,7 +261,7 @@ TEST(CardAttacksHeadbutt, SingleOtherDiscardCardAutoMovesToDrawTop) {
     CombatState s = MakeState(CardId::HEADBUTT, 1);
     s.card_pool[5].card_id = static_cast<uint16_t>(CardId::DEFEND);
     s.discard[0] = 5;
-    s.discard_count = 1;  // one other card -> forced auto-move (source excluded)
+    s.discard_count = 1;  // one real discard -> forced auto-move
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
     EXPECT_EQ(s.monsters[0].hp, 50 - 9);
@@ -278,14 +282,15 @@ TEST(CardAttacksHeadbutt, TwoDiscardCardsPromptAChoice) {
 
     Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));
     EXPECT_EQ(s.monsters[0].hp, 50 - 9);
-    // discard now = [5, 6, 0(source Headbutt)].
+    // Headbutt is in limbo, so discard remains exactly [5, 6].
+    ASSERT_EQ(s.discard_count, 2);
     ActionMask m{};
     legal_actions(s, m);
     ASSERT_TRUE(m.choice_pending);
     EXPECT_TRUE(m.choice_from_discard);
     EXPECT_TRUE(m.can_choose[0]);   // slot 0 == pool 5
     EXPECT_TRUE(m.can_choose[1]);   // slot 1 == pool 6
-    EXPECT_FALSE(m.can_choose[2]);  // slot 2 == the source Headbutt (excluded)
+    EXPECT_FALSE(m.can_choose[2]);  // slot 2 is outside the real discard pile
 
     Step(s, make_action(ActionVerb::CHOOSE, 1));  // retrieve pool 6 (Strike)
     ActionMask m2{};
@@ -357,18 +362,22 @@ TEST(CardAttacksIronWave, UpgradedSevenSeven) {
     EXPECT_EQ(s.monsters[0].hp, 50 - 7);
 }
 
-// --- Perfected Strike (id 19): 6 + 2 per "Strike" card (self excluded); upgrade +3.
-TEST(CardAttacksPerfectedStrike, NoOtherStrikesIsBase) {
+// --- Perfected Strike (id 19): 6 + 2 per "Strike" card; upgrade +3 per.
+// A HAND play counts ITSELF: countCards (PerfectedStrike.java:37-52) scans
+// hand+draw+discard, and it runs from calculateCardDamage at useCard entry
+// (AbstractPlayer.java:1361) -- before hand.removeCard (:1373), with the played
+// card still in the hand (playCard, :1285-1302, queues without removing).
+TEST(CardAttacksPerfectedStrike, NoOtherStrikesCountsItself) {
     CombatState s = MakeState(CardId::PERFECTED_STRIKE, 2);
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
-    EXPECT_EQ(s.monsters[0].hp, 50 - 6) << "6 + 2*0 (the source Strike is excluded)";
+    EXPECT_EQ(s.monsters[0].hp, 50 - 8) << "6 + 2*1: the played card itself";
 }
 
-TEST(CardAttacksPerfectedStrike, CountsStrikesInHandDrawDiscardExcludingSelf) {
+TEST(CardAttacksPerfectedStrike, CountsStrikesInHandDrawDiscardAndItself) {
     CombatState s = MakeState(CardId::PERFECTED_STRIKE, 2);
     // hand: +Strike (pool 1). draw: Twin Strike (2) + Defend non-strike (4).
-    // discard: Pommel Strike (3). Strikes (excl the source PS): 3.
+    // discard: Pommel Strike (3). Strikes: 3 others + the played PS = 4.
     s.card_pool[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
     s.hand[1] = 1;
     s.hand_count = 2;
@@ -383,7 +392,7 @@ TEST(CardAttacksPerfectedStrike, CountsStrikesInHandDrawDiscardExcludingSelf) {
 
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
-    EXPECT_EQ(s.monsters[0].hp, 50 - (6 + 2 * 3));  // 12
+    EXPECT_EQ(s.monsters[0].hp, 50 - (6 + 2 * 4));  // 14
 }
 
 TEST(CardAttacksPerfectedStrike, UpgradedPerStrikeIsThree) {
@@ -396,7 +405,7 @@ TEST(CardAttacksPerfectedStrike, UpgradedPerStrikeIsThree) {
     s.hand_count = 3;
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
-    EXPECT_EQ(s.monsters[0].hp, 50 - (6 + 3 * 2));  // 12: two other Strikes, +3 each
+    EXPECT_EQ(s.monsters[0].hp, 50 - (6 + 3 * 3));  // 15: 2 others + itself, +3 each
 }
 
 // --- Sword Boomerang (id 20): 3 dmg x3 at random live enemies; upgrade x4 hits.
