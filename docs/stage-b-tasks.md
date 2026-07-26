@@ -73,6 +73,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Smoke Bomb combat-escape potion body | B3.23 | **B3.15 remainder** | B4.4 landed the run-level half (rejects bosses, no-reward proceed); the combat-escape path is still B3.15's. **Blocked on the identical predicate** — `SmokeBomb.use` never touches the monsters, it sets the **player's** `isEscaping`, which is why the run layer and not the combat layer carries the working implementation today. Recorded at the site in `potions.cpp`'s deferred-natives note |
 | Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | **B3.15 remainder** | run-created combats with an unimplemented group cannot play out. **B3.18, B3.19, B3.16, B3.21, B3.22 and now B3.15's landed half have all discharged their share by construction** — the gate is `monster_init_fn(id) == nullptr` (`run_advance.cpp:273`), i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. B3.15's partial landing un-parked Blue Slaver, Red Slaver, 2 Fungi Beasts and Exordium Wildlife. **Only Looter and Exordium Thugs remain parked**, and they un-park the same free way the moment the Looter's init fn is registered |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
+| **Purity and Forethought** (colorless uncommons, `CardId` **109** and **101** reserved) | B3.10 split | UNASSIGNED — **same owner as the Gambling Chip row below**, whoever makes the optional multi-select change | reached from a *card* batch rather than a relic, which is what makes it worth its own row: the blocker is no longer a single deferred relic but a **third** independent consumer. Purity discards zero-to-all; Forethought needs a new draw-**bottom** `ChoiceKind` **and** a `freeToPlayOnce` `CardFlag` (bits 8–15 are free), and Forethought+ is itself zero-to-all. `choice_requires_user` (`interp_cards.cpp:718-728`) hard-codes a mandatory fixed count, `ActionVerb` has no confirm/skip, and the translator explicitly defers `can_pick_zero` (`translate.cpp:757`). **Do not let a reward-screen or shop skip button become this change by accident** — it is a public `ActionMask` surface change and wants its own task |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | UNASSIGNED — needs an OPTIONAL multi-select `CHOOSE_CARD` | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. Every existing `ChoiceKind` selects a **mandatory fixed count**, so this needs an optional multi-select with an explicit confirm — which **changes the public `ActionMask` surface** the observation and translator layers join on, and is therefore not a local relic change. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
 | **Sling of Courage** `atBattleStart` | B3.26 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `Sling.atBattleStart` (`Sling.java:1030-1038`) grants Strength 2 when `getCurrRoom().eliteTrigger` is set. `eliteTrigger` is per-**ROOM** state the run layer sets when an elite encounter begins, and `CombatState` carries no elite marker; producing one is a run-layer change. **Twin of the Slaver's Collar row below** — same missing marker, so both wait on the blocker, not on each other. Inertness asserted by `relic_rares_shop_test` |
 | **Orange Pellets** `onUseCard` | B3.26 | UNASSIGNED — needs a new opcode | `OrangePellets.java:1218-1250`: once an ATTACK, a SKILL and a POWER have all been played, it queues `RemoveDebuffsAction(player)`, which removes **every** DEBUFF-type power on the player, **enumerated when the action resolves**. No opcode expresses that — `REMOVE_POWER` names one `PowerId` chosen at *queue* time. The three latches and their `at_turn_start` clear are live; only the removal is deferred. Inertness asserted by `relic_rares_shop_test` |
@@ -115,6 +116,8 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `lagavulin_init_awake` has no production caller | B3.19 | UNASSIGNED — Lagavulin Event owner | implemented and tested; the event that would build `Lagavulin(false)` does not exist |
 | Gremlin move-99 escape (`EscapeAction` body **and** the `deathReact`/`escapeNext` trigger, landed together) | B3.16 | UNASSIGNED — Act-2 owner | unreachable in Act 1: `escapeNext()` has no caller in the decompiled tree; the only `deathReact()` call is `BanditBear.java:131` |
 | `run_advance.cpp` file-header comment (~line 7) enumerates a stale monster roster | integration-11 | UNASSIGNED — next `run_advance.cpp` toucher | same rot as the step-(2) comment fixed in `5f96ec4`; conventions §8's "comment asserting X does not exist yet" class. **Staler since B3.15**: the roster is now 24 monsters, and B3.15's landed half un-parked four more groups **without touching this file** (the un-park gate asks the dispatch switch, not this comment), so nothing forces the comment to move |
+| `registry/cards.yaml`'s documented `native: <bool>` field is a **silent no-op** | B3.10 scope read | UNASSIGNED — next `emit/cards.py` or schema owner | `cards.yaml:20` documents the field, but `emit/cards.py` **never reads it** and `loader.py:34-70` accepts unknown keys silently, so `native: true` on a card row does nothing and reports nothing. Powers, relics, potions and monsters all have a native path; **cards do not**. This is conventions §8's "a comment asserting X" class running in reverse — documentation asserting a capability the code lacks — and it is a live trap: a future card batch will reasonably reach for it. Either implement it, delete the doc line, or make the loader reject the key |
+| `CardDef` has no upgraded-**target** column | B3.10 scope read | UNASSIGNED — `ActionMask` / observation owner | Blind+ and Trip+ change `this.target` to `ALL_ENEMY` (`Blind.java:48`, `Trip.java:43`). The *effect* is encodable via an `ALL_ENEMY` step target in the upgraded program, so B3.10a is not blocked — but card-level `needs_target` stays single-target, which is an **`ActionMask` deviation, not a state one**: the mask offers a target choice the game would not. Cheap to miss because every test of the effect passes |
 | **Nine pre-existing out-of-range Java citations, repo-wide** | integration-15 citation audit | UNASSIGNED | `RupturePower`, `DexterityPower`, `FrailPower`, `Clash`, `HeavyBlade`, `Torii`, `TungstenRod`, `LizardTail`, `MagicFlower` each carry a `File.java:line` citation that does not resolve in `D:\STS_BG_Mod\SlayTheSpireDecompiled`. Found while fixing the two citations integration-15's own merge broke, and **deliberately left alone** — they predate that integration and are a separate repo-wide condition, not something those branches introduced. Fixing them is comment/provenance-only and needs each cited method **re-read in full**, not line-shifted: the two integration-15 fixed both had *correct prose and wrong numbers*, so a mechanical offset would have looked right and been wrong |
 | `a20.yaml` row 4 cites `tackleDmg = 10`, a dead `DamageInfo` | integration-11 | B4.15 follow-up | literally accurate (`SlimeBoss.java:94-96`) but `tackleDmg` is `damage.get(0)` and SlimeBoss never reads it — only `damage.get(1)` at `:137`/`:144`. `monsters.yaml` is right to omit it. Not a document conflict |
 
@@ -187,24 +190,52 @@ holds leaves the rest a permanent gap (that is fine and costs nothing — see th
 it does **not** take the next free number, because its siblings are invisible to
 it.
 
-| Namespace | B3.15 remainder (`b315-looter`) | B4.5 (`b45-rewards`) | B3.10 (`b310-colorless-uncommons`) |
-|---|---|---|---|
-| `CardId` | — | — | **92–111** (+112–115 reserve) |
-| `PowerId` | **75–76** | — | **77–80** |
-| `MonsterId` | **26** (LOOTER) | — | — |
-| `MonsterIntent` | **13** (+14 reserve) | — | — |
-| Opcode | **40–42** | **43–44** | **45–48** |
-| `ChoiceKind` | — | **6–7** | — |
+| Namespace | B3.15 remainder (`b315-looter`) | B4.5 (`b45-rewards`) | B3.10a | B3.10b |
+|---|---|---|---|---|
+| `CardId` | — | — | **92, 93, 95, 97, 99, 100, 102, 103, 105, 106, 107, 108, 110, 111** | **94, 96, 98, 104** |
+| `PowerId` | **75–76** | — | **77** | **78** (+79–80 reserve) |
+| `MonsterId` | **26** (LOOTER) | — | — | — |
+| `MonsterIntent` | **13** (+14 reserve) | — | — | — |
+| Opcode | **40–42** | **43–44** | **45–48** | **49–52** |
+| `ChoiceKind` | — | **6–7** | — | — |
 
-**`registry/powers.yaml` is shared by two of the three** (B3.15 remainder and
-B3.10), append-only and within disjoint blocks — the B3.8 ∥ B3.27 precedent.
-The hazard this creates is **not** the YAML, which appends at different places:
-it is the **four `kPowersCount` guards** (1 in `interp_block.cpp`, 3 in
-`interp_damage.cpp`). Both branches must move all four to compile, so both will
-carry a *different* correct-for-itself value, and the merge can land either one
-silently — which is exactly integration-14's stale-count-assert defect. The
-integrator **re-derives the union from the regenerated manifest** and fixes all
-four together; neither branch's number is authoritative.
+**The `CardId` blocks are deliberately interleaved, not contiguous.** B3.10's
+twenty cards are numbered 92–111 in `CardLibrary.addColorlessCards` **library
+(alphabetical) order** (`CardLibrary.java:799-834`), and that order is worth
+preserving because the colorless pool B3.10b needs is emitted from it — getting
+it right here avoids the documented interim deviation `kIroncladAttackPool`
+still carries. So the split leaves **interior gaps** that B3.10b and the
+choice-surface owner fill later. This is legal and explicitly fine: `loader.py`
+enforces id **uniqueness**, never monotonicity. Reserved interior ids: **101**
+(Forethought) and **109** (Purity) — see the optional-multi-select obligation row.
+
+**Two shared-file rules this wave, both of which a brief got wrong once:**
+
+1. **`tools/registry_gen/stsgen/vocab.py` holds two different namespaces and they
+   have different rules.** `MONSTER_INTENTS` is **exclusive to the B3.15
+   remainder** this wave. `OPCODES` (`vocab.py:17-119`) is **shared and
+   append-only within each task's allocated block** — every wave-A task holds an
+   opcode block, so a blanket "vocab.py is off limits" makes the allocation
+   unspendable. Name the *namespace*, never the file.
+2. **`registry/powers.yaml` is shared**, append-only within disjoint blocks — the
+   B3.8 ∥ B3.27 precedent. The hazard is not the YAML, which appends at different
+   places: it is the **count guards**, which every adding branch must move to
+   compile, so each carries a *different* correct-for-itself value and the merge
+   can land either silently. That is integration-14's defect exactly. The
+   integrator **re-derives the union from the regenerated manifest**; no branch's
+   number is authoritative.
+
+**Count-guard site inventory** — re-derived 2026-07-26, and longer than the
+brief that first quoted it claimed. Move every site in a family together:
+
+| Constant | Sites |
+|---|---|
+| `kPowersCount` | `interp_block.cpp:40`, `interp_damage.cpp:63`, `:106`, `:157`, **`tests/registry_gen_test.cpp:407`** |
+| `kCardsCount` | `tests/registry_gen_test.cpp:403`, `tests/registry_gen_standalone.cpp:25`, **`src/engine/relic_pools.cpp:207`** |
+
+`relic_pools.cpp:207`'s assert message asks a **real question** — whether the new
+rows change Bottled Tornado's gate — so it is answered, not bumped. (For B3.10's
+twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
 
@@ -270,15 +301,67 @@ noted in the Log.
 - **B3.8** `[x]` ∥ Red rares — 16 rare cards, ids 76-91; powers 48-53 (**Corruption needed no row** — id 11 already existed, and `PowerId` 47 was left the gap B3.21 reserved); opcodes 34-39 incl. **`PLAY_CARD`, the general recursive-play verb** (B3.11's Mayhem reuses it unchanged); `ChoiceKind::EXHAUST_TO_HAND`=5, `CardFlag::PURGE_ON_USE`; discharges `healing: true` on Feed/Reaper (`kIroncladAttackPool` 25 → 28, both heals through `heal_player_with_relics`), Barricade's block-decay branch on the `kSubsequentTurn` side, and the recursive-play opcode · [log](stage-b-log.md#b38)
 - **B3.9** `[x]` Status + curses — 4 statuses + 11 curses, card ids 25-39; opcodes `LOSE_HP_PER_HAND`=18 / `DISCARD_HAND`=19 / `REDUCE_POWER`=20, native `FRAIL`=21; end-of-turn order rewritten; all 20 combat fixtures regenerated from the checked-in generator; 368/368 · [log](stage-b-log.md#b39)
 
-### B3.10 `[ ]` ∥ Colorless uncommons
-**Deps:** B3.2 · **Provenance:** cards/colorless UNCOMMON (20)
-**Deliverables:** registry entries for the 20 (Bandage Up, Blind, Dark
-Shackles, Deep Breath, Discovery, Dramatic Entrance, Enlightenment, Finesse,
-Flash of Steel, Forethought, Good Instincts, Impatience, Jack of All Trades,
-Madness, Mind Blast, Panacea, Panic Button, Purity, Swift Strike, Trip —
-verify enumeration from source).
-**Acceptance:** tier-2 per card; Discovery/Madness cardRandomRng draw
-accounting; directed script.
+### B3.10 — **SPLIT 2026-07-26 into B3.10a / B3.10b + a deferred pair**
+The enumeration was verified against source before the split and is **exactly
+the twenty the original entry listed** — no card moved between tasks the way
+B3.6 gained Rage. `CardLibrary.addColorlessCards` (`CardLibrary.java:799-834`)
+orders them alphabetically, and ids 92–111 map 1:1 onto that order.
+
+The split is a **scope** finding, not a scoping preference: ten of the twenty
+need no new machinery, and the other ten each need a *distinct* verb. Conventions
+§5 says a task whose real scope turns out materially larger than its ledger entry
+gets the split proposed first, so the dispatched agent stopped without
+committing rather than take unallocated ids or land a fragment. That was correct.
+
+### B3.10a `[ ]` ∥ Colorless uncommons — the fourteen
+**Deps:** B3.2 · **Provenance:** cards/colorless UNCOMMON, the fourteen below
+**Deliverables:** registry entries for Bandage Up, Blind, Deep Breath, Dramatic
+Entrance, Finesse, Flash of Steel, Good Instincts, Impatience, Madness, Mind
+Blast, Panacea, Panic Button, Swift Strike, Trip — ids **92, 93, 95, 97, 99,
+100, 102, 103, 105, 106, 107, 108, 110, 111** (library order, interior gaps
+reserved). Opcodes **45–48**: `DAMAGE_DRAW_PILE` (Mind Blast), `CONDITIONAL_DRAW`
+(Impatience), a **fused** reshuffle op (Deep Breath), `MADNESS`. Power **77**
+`NO_BLOCK` (Panic Button).
+**Three findings that must survive into the implementation:**
+- **`NO_BLOCK` overrides `modifyBlockLast`, not `modifyBlock`** (`NoBlockPower
+  .java:58-60`) — it is the game's *only* overrider of that hook.
+  `applyPowersToBlock` (`AbstractCard.java:2291-2307`) runs `modifyBlock` over
+  **all** powers and *then* `modifyBlockLast` over all powers. The engine's
+  `modify_block` is a **single pass**, so folding `NO_BLOCK` into it is wrong
+  whenever a Dexterity sits later in the power list: single-pass yields `N`, the
+  game yields `0`. `interp_block.cpp` needs a genuine second pass — this is a
+  structural change, not a new case.
+- **Deep Breath cannot be authored as two `SHUFFLE_IN` steps.** The game guards
+  *both* `EmptyDeckShuffleAction` **and** `ShuffleAction(drawPile)` on
+  `discardPile.size() > 0` (`DeepBreath.java:34-38`) — i.e. **two**
+  `shuffleRng.randomLong()` draws or zero. `shuffle_discard_into_draw` does only
+  the first, and after it runs the discard is empty either way, so a following
+  step can no longer tell. One fused opcode.
+- **Discovery+ removes Exhaust** (`Discovery.java:38`) — noted here because it
+  contradicts the commonly-assumed upgrade and is easy to encode from memory and
+  get wrong. (Discovery itself is B3.10b's.)
+**Acceptance:** tier-2 per card; **Madness `cardRandomRng` draw accounting**;
+directed script. A named test pinning the `modifyBlock` / `modifyBlockLast`
+two-pass order against a Dexterity-after-`NO_BLOCK` power list.
+**Log:** —
+
+### B3.10b `[ ]` Colorless uncommons — the four needing a colorless pool
+**Deps:** B3.10a (shares `cards.yaml`; branch off it, do not run beside it)
+**Deliverables:** Dark Shackles, Discovery, Enlightenment, Jack of All Trades —
+ids **94, 96, 98, 104**, opcodes **49–52**, power **78** (Dark Shackles'
+`GainStrengthPower`, "Shackled").
+**The real deliverable is the colorless card pool.** Discovery and Jack of All
+Trades draw from `srcColorlessCardPool` =
+`AbstractDungeon.returnTrulyRandomColorlessCardInCombat` (`:981-995`) — **all 35
+colorless uncommons + rares minus HEALING** (Bandage Up), so 34 candidates. No
+colorless pool exists: `kIroncladAttackPool` is `color == "RED"`-gated and
+`kPoolableCurses` is the only other. The pool builder in `emit/cards.py:275-287`
+is the template, and membership **self-completes when B3.11 lands** — the same
+precedent B3.8 set. Discovery additionally needs a choice source that is a
+**generated 3-card set**, where `ChoiceSource` is `HAND`/`DISCARD`/`EXHAUST`
+today.
+**Acceptance:** tier-2 per card; Discovery `cardRandomRng` draw accounting;
+directed script.
 **Log:** —
 
 ### B3.11 `[ ]` ∥ Colorless rares
@@ -662,6 +745,42 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **B3.10 split, and two brief errors the wave's own agents
+  caught.** The dispatched B3.10 agent **stopped without committing** and
+  proposed a split instead: the enumeration was right, but ten of the twenty
+  cards each need a *distinct* new verb, ~2.5× the allocated opcode budget. It
+  declined to land the clean fourteen-card subset too, on the grounds that doing
+  so would spend all four opcodes on four of the ten verbs and consume interior
+  ids under an allocation about to be revised. Both calls were correct and are
+  conventions §5's "propose the split first". Split into **B3.10a** (fourteen
+  cards, opcodes 45–48, power 77), **B3.10b** (four cards needing the colorless
+  pool, opcodes 49–52, power 78), and **Purity + Forethought** deferred to the
+  optional-multi-select owner as a new obligation row.
+  - **Two orchestrator brief errors, both found by reading the tree.** (1) The
+    briefs named `vocab.py` off limits when `OPCODES` lives in it and *every*
+    wave-A task holds an opcode block — the allocation was unspendable as
+    written. The rule now names the **namespace**, not the file:
+    `MONSTER_INTENTS` exclusive, `OPCODES` shared and append-only per block.
+    (2) The count guards were briefed as **four** `kPowersCount` sites; there are
+    **five** — `tests/registry_gen_test.cpp:407` was missed, and a branch moving
+    only four would fail or, worse, merge silently stale. The full inventory for
+    both `kPowersCount` and `kCardsCount` is now in the allocations section, with
+    the note that `relic_pools.cpp:207`'s assert asks a real question and is
+    answered, not bumped. Both corrections were sent to the two agents still
+    running.
+  - **`NO_BLOCK` overrides `modifyBlockLast`, not `modifyBlock`** — the game's
+    only overrider of that hook, and `applyPowersToBlock` runs the two as
+    **separate full passes**. The engine's single-pass `modify_block` yields `N`
+    where the game yields `0` whenever a Dexterity sits later in the list. This
+    turns Panic Button from a data row into a structural `interp_block.cpp`
+    change, and is exactly the kind of thing that would have merged green and
+    been wrong.
+  - Three further rows added from the same read: the deferred Purity/Forethought
+    pair; `cards.yaml`'s documented-but-never-read `native:` field (§8's comment
+    class **inverted** — docs asserting a capability the code lacks, and cards
+    are the one domain with no native path); and `CardDef`'s missing upgraded-
+    **target** column, an `ActionMask` deviation that every effect test would
+    pass straight through.
 - 2026-07-26 — **ledger/history reconciliation after integration-15 (`master` at
   `34c3e96`, pushed).** A conventions §2 incident of the same shape as the
   integration-12/-13/-14 entry below, and a **narrower, more instructive one**:
