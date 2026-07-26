@@ -65,6 +65,18 @@ using sts::registry::kPoolableCurses;
 // order is a known, documented deviation until an oracle capture pins it).
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
+// The three per-rarity combat CARD-REWARD pools: every RED non-BASIC
+// card split by rarity (AbstractDungeon.initializeCardPools ->
+// CardLibrary.addRedCards, CardLibrary.java:1152-1161). No type filter and no
+// healing exclusion -- those are the ATTACK transform pool's, not these.
+// Same documented pool-ORDER deviation as kIroncladAttackPool (registry-id
+// order until an oracle capture pins CardLibrary HashMap order).
+using sts::registry::kIroncladCommonPoolCount;
+using sts::registry::kIroncladCommonPool;
+using sts::registry::kIroncladUncommonPoolCount;
+using sts::registry::kIroncladUncommonPool;
+using sts::registry::kIroncladRarePoolCount;
+using sts::registry::kIroncladRarePool;
 
 // --- The card table (generated from registry/cards.yaml) ---------------------
 // Each entry mirrors its use()'s addToBot order exactly; provenance is cited

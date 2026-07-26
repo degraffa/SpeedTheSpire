@@ -21,6 +21,7 @@
 
 #include "sts/engine/action_queue.hpp"     // pump / begin_first_turn
 #include "sts/engine/cards.hpp"            // card_def / card_cost / card_flags
+#include "sts/engine/combat_rewards.hpp"   // reward assembly + the claim flow
 #include "sts/engine/encounters.hpp"       // generate_monster_lists / resolve_encounter
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
@@ -214,6 +215,22 @@ void fill_combat_result(const CombatState& s, StepResult& r) noexcept {
     encode_observation(s, r.obs);
 }
 
+// THE reward gate: which RewardOutcome a finished combat earned. Explicit and
+// exhaustive so the escape work (the Looter's mugged screen, the combat-side
+// Smoke Bomb body) extends a named seam instead of an inline condition --
+// "combat over" does not imply a kill, and a kill is not the only screen shape.
+// DEFEAT/NONE never reach the reward path (finish_combat_after_action routes
+// death to RUN_OVER first).
+RewardOutcome reward_outcome_for(RunCombatOutcome outcome) noexcept {
+    switch (outcome) {
+        case RunCombatOutcome::SMOKE_BOMB:
+            return RewardOutcome::PLAYER_ESCAPED;
+        case RunCombatOutcome::KILLED:
+        default:
+            return RewardOutcome::KILLED;
+    }
+}
+
 void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
                          StepResult& res) noexcept {
     // AbstractRoom.endBattle (AbstractRoom.java:413-421): Meat on the Bone's
@@ -227,6 +244,18 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
     fold_back_combat(rc);
     rc.combat_outcome = static_cast<uint8_t>(outcome);
     rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+
+    // The battle-over reward block + screen open, assembled HERE -- after
+    // endBattle's Meat-on-the-Bone / onVictory pass above, exactly the game's
+    // order (AbstractRoom.endBattle:413-421 runs before the update loop reaches
+    // the battle-over block at :277-357). Boss gold draws the floor-scoped
+    // miscRng (rc.combat.misc_rng -- trap 18); a Smoke Bomb consumes the
+    // gold / elite-relic / potion draws but offers nothing (openCombat's smoked
+    // path never calls setupItemReward, CombatRewardScreen.java:267-289).
+    assemble_combat_rewards(rc.run, rc.combat.misc_rng,
+                            static_cast<RoomType>(rc.room_type),
+                            reward_outcome_for(outcome), rc.rewards);
+
     const float combat_reward = res.reward;
     res = StepResult{};  // reward screens have no combat observation view.
     res.reward = combat_reward;
@@ -636,6 +665,9 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     rc.phase = static_cast<uint8_t>(RunPhase::NEOW);
     rc.cur_x = kNeowColumn;
     rc.room_type = static_cast<uint8_t>(RoomType::None);
+    rc.rewards.open_card_item = kNoOpenCardReward;  // value-init 0 would mean
+                                                    // "item 0's pick screen is
+                                                    // open"; keep it closed.
     return rc;
 }
 
@@ -647,9 +679,32 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
 
     switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW:
-        case RunPhase::COMBAT_REWARD:
             out.can_proceed = true;
             break;
+
+        case RunPhase::COMBAT_REWARD: {
+            const RewardScreen& s = rc.rewards;
+            if (s.open_card_item != kNoOpenCardReward) {
+                // The CARD pick screen is up: pick / skip / (bowl) sing. The
+                // Proceed button is hidden while it is open
+                // (CardRewardScreen.open hides proceedButton,
+                // CardRewardScreen.java:459-460).
+                const RunRewardItem& item = s.items[s.open_card_item];
+                for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap;
+                     ++j) {
+                    out.can_take_card[j] = true;
+                }
+                out.can_skip_card = true;
+                out.can_sing = run_has_relic(rc.run, RelicId::SINGING_BOWL);
+            } else {
+                out.can_proceed = true;
+                for (uint8_t i = 0; i < s.count && i < kRewardItemCap; ++i) {
+                    out.can_claim_reward[i] =
+                        reward_claim_legal(rc.run, s, i);
+                }
+            }
+            break;
+        }
 
         case RunPhase::MAP_CHOICE: {
             if (rc.run.floor == 0) {
@@ -847,9 +902,32 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
         }
 
         case RunPhase::COMBAT_REWARD: {
-            // Nothing assembles rewards yet; here CHOOSE proceeds back to the map.
+            // The reward claim flow. Illegal choices are non-corrupting no-ops, the
+            // same contract as MAP_CHOICE above.
             if (action_verb(a) == ActionVerb::CHOOSE) {
-                rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                RewardScreen& s = rc.rewards;
+                const uint8_t a0 = action_arg0(a);
+                if (s.open_card_item != kNoOpenCardReward) {
+                    if (a0 == kChooseSkipCard) {
+                        reward_skip_card(s);
+                    } else if (a0 == kChooseSing) {
+                        (void)reward_sing(rc.run, s);
+                    } else {
+                        (void)reward_take_card(rc.run, s, a0);
+                    }
+                } else if (a0 == kChooseProceed) {
+                    // Leave the screen; anything unclaimed is abandoned (an
+                    // assembled relic stays popped from its pool, as in the
+                    // game). The screen state is cleared so a stale mask can
+                    // never claim across rooms.
+                    s = RewardScreen{};
+                    s.open_card_item = kNoOpenCardReward;
+                    rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                } else {
+                    // Claim item a0 (CARDS opens the pick screen). Relic
+                    // onEquip bodies draw the floor-scoped miscRng.
+                    (void)claim_reward(rc.run, rc.combat.misc_rng, s, a0);
+                }
             }
             fill_run_result(rc, res);
             break;

@@ -81,6 +81,8 @@ add_library(sts_engine
     relics/relic_pickup_boss.cpp
     potions.cpp
     advance.cpp
+    # Combat-reward assembly + claim (combat_rewards.hpp).
+    combat_rewards.cpp
     run_advance.cpp
 )
 

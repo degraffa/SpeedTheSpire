@@ -753,7 +753,14 @@ TEST(RunPotion, SmokeBombEscapeIsNotAKillAndOpensProceedChoice) {
     RunActionMask reward_mask{};
     legal_actions(rc, reward_mask);
     EXPECT_TRUE(reward_mask.can_proceed);
-    step(rc, kProceed);
+    // B4.5: a Smoke Bomb offers nothing claimable, but the battle-over block
+    // still consumed the gold + unconditional-potion draws (combat_rewards_test
+    // pins the exact accounting; here we pin "nothing on the screen").
+    EXPECT_EQ(rc.rewards.count, 0);
+    for (int i = 0; i < kRewardItemCap; ++i) {
+        EXPECT_FALSE(reward_mask.can_claim_reward[i]);
+    }
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
@@ -871,22 +878,40 @@ TEST(FullFloorCycle, MapPickCombatRewardNextFloor) {
     EXPECT_EQ(rc.run.gold, 321);
     EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
     EXPECT_EQ(std::memcmp(deck_before, rc.run.master_deck, sizeof(deck_before)), 0);
+    // Streams a plain monster room's reward assembly does NOT touch survive
+    // byte-for-byte; the three it does touch (B4.5) advanced -- exact draw
+    // accounting is pinned in combat_rewards_test, this cycle test pins only
+    // the attribution (trap 18: normal-room gold is treasureRng, never miscRng
+    // or a relicRng draw).
     EXPECT_TRUE(streams_equal(rc.run.monster_rng, persistent_before.monster_rng));
     EXPECT_TRUE(streams_equal(rc.run.event_rng, persistent_before.event_rng));
     EXPECT_TRUE(streams_equal(rc.run.merchant_rng, persistent_before.merchant_rng));
-    EXPECT_TRUE(streams_equal(rc.run.card_rng, persistent_before.card_rng));
-    EXPECT_TRUE(streams_equal(rc.run.treasure_rng, persistent_before.treasure_rng));
     EXPECT_TRUE(streams_equal(rc.run.relic_rng, persistent_before.relic_rng));
-    EXPECT_TRUE(streams_equal(rc.run.potion_rng, persistent_before.potion_rng));
+    EXPECT_EQ(rc.run.treasure_rng.counter,
+              persistent_before.treasure_rng.counter + 1);  // one gold roll
+    EXPECT_GE(rc.run.potion_rng.counter,
+              persistent_before.potion_rng.counter + 1);  // unconditional roll
+    EXPECT_GT(rc.run.card_rng.counter, persistent_before.card_rng.counter);
+    // The assembled screen: gold first, then (maybe) a potion, then the cards.
+    ASSERT_GE(rc.rewards.count, 2);
+    EXPECT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::GOLD));
+    EXPECT_GE(rc.rewards.items[0].gold, 10);
+    EXPECT_LE(rc.rewards.items[0].gold, 20);
+    EXPECT_EQ(rc.rewards.items[rc.rewards.count - 1].kind,
+              static_cast<uint8_t>(RewardItemKind::CARDS));
+    EXPECT_EQ(rc.rewards.items[rc.rewards.count - 1].card_count, 3);
 
     const CombatState reward_boundary = rc.combat;
     RunActionMask reward_mask{};
     legal_actions(rc, reward_mask);
     EXPECT_TRUE(reward_mask.can_proceed);
 
-    // Proceed past the reward screen -> back to the map (still floor 1).
-    step(rc, kProceed);
+    // Proceed past the reward screen (claiming nothing) -> back to the map
+    // (still floor 1). Unclaimed rewards are abandoned, and the screen clears.
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(rc.rewards.count, 0);
     EXPECT_EQ(rc.run.floor, 1);
     EXPECT_TRUE(streams_equal(rc.combat.monster_hp_rng,
                               reward_boundary.monster_hp_rng));

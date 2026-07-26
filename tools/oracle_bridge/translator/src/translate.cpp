@@ -182,6 +182,18 @@ private:
     }
     return rid;
 }
+[[nodiscard]] reg::PotionId join_potion(const std::string& id, const Ctx& c,
+                                        const std::string& where) {
+    if (id.empty() || id == "Potion Slot") return reg::PotionId::NONE;
+    reg::PotionId pid = reg::potion_from_game_id(id);
+    if (pid == reg::PotionId::NONE) {
+        if (c.tolerate_ids) { tally_unknown_id(c, "potion", id); return reg::PotionId::NONE; }
+        throw TranslateError(loc(c) + " unknown potion id \"" + id + "\" at " + where +
+                             " — registry has no game_id mapping (schema drift, "
+                             "translation aborted)");
+    }
+    return pid;
+}
 
 // ---- card / power parsers (PROTOCOL §3.13 / §3.14) -----------------------
 
@@ -611,10 +623,14 @@ void parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
 
 // ---- screen_state variants (PROTOCOL §3.3-3.9, §3.19) --------------------
 //
-// None of the screen_state content has schema storage yet (map / events / shop /
-// rewards are B4.x). Each variant's key-set is enumerated so a KNOWN field never
-// trips the drift error, while a genuinely new key still does. Nested objects
-// (cards, relics, potions, options, nodes) are structurally validated too.
+// No screen_state content has schema storage (map / events / shop are B4.x;
+// the B4.5 REWARD screens are deliberately storage-less -- the sim derives its
+// reward screen and the acceptance diffs the post-claim RunState). Each
+// variant's key-set is enumerated so a KNOWN field never trips the drift
+// error, while a genuinely new key still does. Nested objects (cards, relics,
+// potions, options, nodes) are structurally validated; the B4.5 reward slice
+// (CARD_REWARD / COMBAT_REWARD) is additionally content-validated: enumerated
+// reward_type, typed gold/booleans, and id-joined potions/relics/cards.
 
 void defer_all(FieldReader& fr, std::initializer_list<std::string_view> keys) {
     for (auto k : keys) fr.defer(k);
@@ -696,18 +712,73 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
     } else if (screen_type == "CHEST" || screen_type == "REST") {
         defer_all(fr, {"chest_type", "chest_open", "has_rested", "rest_options"});
     } else if (screen_type == "CARD_REWARD") {
-        fr.defer("bowl_available");
-        fr.defer("skip_available");
+        // B4.5 reward slice: content-validated + id-joined (fail loud), still
+        // storage-less BY DESIGN -- the sim derives the reward screen
+        // (RunController.rewards) and the acceptance diffs the post-claim
+        // RunState, so screen content never lands in a schema field. What
+        // changed from the structural pass: the two booleans are type-checked,
+        // and the cards were already id-joined by defer_card_list.
+        if (const json* b = fr.take("bowl_available")) {
+            if (!b->is_boolean()) {
+                throw TranslateError(loc(ctx) + " expected boolean at " + path +
+                                     ".bowl_available");
+            }
+            fr.defer("bowl_available");
+        }
+        if (const json* sk = fr.take("skip_available")) {
+            if (!sk->is_boolean()) {
+                throw TranslateError(loc(ctx) + " expected boolean at " + path +
+                                     ".skip_available");
+            }
+            fr.defer("skip_available");
+        }
         defer_card_list(fr, "cards", path, ctx);
     } else if (screen_type == "COMBAT_REWARD") {
+        // B4.5 reward slice (same storage-less contract as CARD_REWARD above):
+        // reward_type is validated against RewardItem.RewardType's full name
+        // set (RewardItem$RewardType -- an unknown name is drift, where the old
+        // structural pass accepted anything), gold is type-checked, the potion
+        // id is JOINED through the registry (an unknown potion fails loud /
+        // tallies under id-tolerance), and relics were already joined.
         if (const json* rw = fr.take("rewards")) {
             for (std::size_t i = 0; i < rw->size(); ++i) {
                 const std::string rp = path + ".rewards[" + std::to_string(i) + "]";
                 FieldReader r((*rw)[i], rp, ctx);
-                r.defer("reward_type");
-                r.defer("gold");
+                {
+                    const std::string t =
+                        as_str(r.require("reward_type"), ctx, rp + ".reward_type");
+                    // RewardItem.RewardType (RewardItem.java): the S1-visible
+                    // four plus the three S2/deferred members, kept so a
+                    // capture that wanders into one is classified as KNOWN
+                    // shape (STOLEN_GOLD lands with the Looter; the keys are
+                    // final-act content).
+                    if (t != "CARD" && t != "GOLD" && t != "RELIC" &&
+                        t != "POTION" && t != "STOLEN_GOLD" &&
+                        t != "EMERALD_KEY" && t != "SAPPHIRE_KEY") {
+                        throw TranslateError(loc(ctx) + " unknown reward_type \"" +
+                                             t + "\" at " + rp +
+                                             " (schema drift, translation aborted)");
+                    }
+                    r.defer("reward_type");
+                }
+                if (const json* g = r.take("gold")) {
+                    (void)as_i64(*g, ctx, rp + ".gold");
+                    r.defer("gold");
+                }
                 if (const json* rl = r.take("relic")) { parse_relic(*rl, rp + ".relic", ctx, nullptr); r.defer("relic"); }
-                if (const json* pt = r.take("potion")) { FieldReader p(*pt, rp + ".potion", ctx); p.defer("id"); p.ignore("name"); p.defer("can_use"); p.defer("can_discard"); p.defer("requires_target"); p.defer("price"); p.finish(); r.defer("potion"); }
+                if (const json* pt = r.take("potion")) {
+                    FieldReader p(*pt, rp + ".potion", ctx);
+                    (void)join_potion(as_str(p.require("id"), ctx, rp + ".potion.id"),
+                                      ctx, rp + ".potion.id");
+                    p.defer("id");
+                    p.ignore("name");
+                    p.defer("can_use");
+                    p.defer("can_discard");
+                    p.defer("requires_target");
+                    p.defer("price");
+                    p.finish();
+                    r.defer("potion");
+                }
                 if (const json* lk = r.take("link")) { parse_relic(*lk, rp + ".link", ctx, nullptr); r.ignore("link"); }  // S2 scope
                 r.finish();
             }
