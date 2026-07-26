@@ -27,18 +27,22 @@
 //   * the floor loop + trap-7 reseed at every floor entry.
 //   * monster-room combat entry via the encounter framework (encounters.hpp)
 //     + fold-back.
-//   * combat-reward / proceed / map-choice screens as CHOOSE states, with kill
-//     and Smoke Bomb escape distinguished.
+//   * COMBAT REWARDS (combat_rewards.hpp): assembly at reward-screen
+//     open (gold / elite relic / potion / card rolls with pity + the no-dupe
+//     re-roll + the Act-1 zero-chance upgrade draws), then a claim flow over
+//     CHOOSE -- claim item, pick/skip/sing on the card screen, proceed. A
+//     Smoke Bomb consumes the battle-over draws but offers nothing.
 //   * potion-slot legality/consumption in combat plus Fruit Juice / Entropic
 //     Brew run mutations outside combat.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
 //   * Neow blessing options + payouts: not modelled (here: a single "proceed"
 //     skip, so the stream state stays right even though no blessing applies).
-//   * combat REWARD ASSEMBLY (gold/potion/card rolls): not modelled (here: the
-//     reward screen exists as a CHOOSE-proceed state; it assembles nothing).
-//   * relic POOLS and acquisition are live; what has no owner yet is the
-//     downstream decision of WHEN to draw/acquire (reward, chest, shop, Neow).
+//   * relic POOLS and acquisition are live, and the combat-reward draw site now
+//     consumes them; the chest / shop / Neow draw sites are separate work.
+//   * the mugged (Looter) screen + STOLEN_GOLD -- blocked with the parked
+//     Looter remainder; the EMERALD_KEY reward item -- follows the emerald-flag
+//     scoping (combat_rewards.hpp).
 //   * events / shops / rest sites / treasure rooms: no room content (here:
 //     entering one reseeds the floor streams then parks at
 //     ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
@@ -66,7 +70,8 @@
 //     hook (applyStartOfCombatPreDrawLogic, :241) has no registered relic and so
 //     no call site yet. Full reasoning at the dispatch in run_advance.cpp.
 //   * AbstractRoom.update battle-over (:277-357): the lifecycle transition points
-//     (COMPLETE -> reward screen); the reward ASSEMBLY is not modelled.
+//     (COMPLETE -> reward screen); the reward ASSEMBLY itself lives in
+//     combat_rewards.hpp/.cpp and runs from enter_combat_reward.
 //   * AbstractDungeon.<init> (AbstractDungeon.java:268-308) + dungeonTransitionSetup
 //     (:2562-2604) + AbstractPlayer.<init> (AbstractPlayer.java:201-221) +
 //     AbstractPlayer.initializeStarterDeck (:357-394): the run-setup ascension
@@ -77,6 +82,7 @@
 #include <type_traits>
 
 #include "sts/engine/advance.hpp"       // ActionMask, StepResult, combat advance/legal_actions
+#include "sts/engine/combat_rewards.hpp"  // RewardScreen + the claim flow
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"    // MonsterLists
 #include "sts/engine/interp.hpp"        // mathutils_round (run_setup_hp)
@@ -95,7 +101,7 @@ enum class RunPhase : uint8_t {
     NEOW = 1,              // floor 0, Neow blessing pending (no blessing content).
     MAP_CHOICE = 2,        // choosing the next map node (an outgoing edge).
     COMBAT = 3,            // inside a combat; delegates to the embedded CombatState.
-    COMBAT_REWARD = 4,     // post-combat reward/proceed screen (assembles nothing).
+    COMBAT_REWARD = 4,     // post-combat reward screen (claim / pick / proceed).
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // player dead (loss) -- terminal.
 };
@@ -117,6 +123,20 @@ inline constexpr uint8_t kChooseBoss = static_cast<uint8_t>(kMapCols);  // 7
 
 // cur_x sentinel: the controller is at Neow (floor 0), with no grid column yet.
 inline constexpr uint8_t kNeowColumn = 0xFF;
+
+// CHOOSE arg0 sentinels at a COMBAT_REWARD. Small arg0 values are claim /
+// pick indices, so the named buttons live at the top of the u8 range:
+//   * kChooseProceed -- the Proceed button: leave the screen for the map,
+//     abandoning anything unclaimed (an assembled-but-skipped relic stays
+//     popped from its pool, exactly as in the game).
+//   * kChooseSkipCard -- the card screen's Skip: close the pick screen, the
+//     CARD item stays claimable.
+//   * kChooseSing -- the Singing Bowl button: +2 max HP instead of a card.
+// NEOW keeps its pre-reward behavior (any CHOOSE proceeds; no blessing
+// content yet).
+inline constexpr uint8_t kChooseProceed = 0xFF;
+inline constexpr uint8_t kChooseSkipCard = 0xFE;
+inline constexpr uint8_t kChooseSing = 0xFD;
 
 // --- RunController -----------------------------------------------------------
 
@@ -142,6 +162,13 @@ struct RunController {
     uint8_t elite_cursor;
     uint8_t boss_cursor;
     uint8_t pad1;           // explicit padding.
+
+    // The live COMBAT_REWARD screen: assembled once when the reward
+    // screen opens, mutated by claims. Transient screen-flow state exactly like
+    // the cursors above -- the game derives it too (a POST_COMBAT save re-rolls
+    // the cards from the saved cardRng counter), so RunState stays untouched
+    // (no new storage, no schema bump).
+    RewardScreen rewards;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -151,7 +178,13 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 
 // The run-level legal-action set (the run analogue of ActionMask). Which fields
 // are meaningful depends on `phase`:
-//   NEOW / COMBAT_REWARD : can_proceed (CHOOSE, arg0 ignored).
+//   NEOW                 : can_proceed (CHOOSE, arg0 ignored).
+//   COMBAT_REWARD        : with no card screen open -- can_proceed (CHOOSE
+//                          kChooseProceed) + can_claim_reward[i] (CHOOSE i);
+//                          with a CARD item open -- can_take_card[j] (CHOOSE j),
+//                          can_skip_card (kChooseSkipCard), can_sing
+//                          (kChooseSing); proceed is NOT legal until the pick
+//                          screen closes.
 //   MAP_CHOICE           : can_choose_node[x] over next-row columns + can_choose_boss.
 //                          The CHOOSE action's arg0 is the destination column
 //                          (0..kMapCols-1) or kChooseBoss.
@@ -160,9 +193,15 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
-    bool can_proceed;                  // NEOW / COMBAT_REWARD single proceed.
+    bool can_proceed;                  // NEOW / COMBAT_REWARD proceed.
     bool can_choose_node[kMapCols];    // MAP_CHOICE: legal next-node columns.
     bool can_choose_boss;              // MAP_CHOICE: the boss edge is available.
+    // COMBAT_REWARD. Claim legality mirrors RewardItem.claimReward's
+    // failure cases (a POTION with full slots and no Sozu is not claimable).
+    bool can_claim_reward[kRewardItemCap];
+    bool can_take_card[kRewardCardCap];
+    bool can_skip_card;
+    bool can_sing;
     // USE_POTION owns a RunState slot, so its legality lives at this layer.
     // Fruit Juice and Entropic Brew can be used in stable non-combat phases.
     // During COMBAT, can_use_potion_target[slot][monster] enumerates target-

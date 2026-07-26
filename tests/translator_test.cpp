@@ -301,6 +301,78 @@ TEST(Translator, UnknownContentIdRefused) {
     }
 }
 
+// --- B4.5 reward-screen slice: content-validated, still storage-less ---------
+// The committed sample never reaches a reward screen, so these tests tamper the
+// run-level record into one (the same technique as the refusal tests above).
+
+std::string with_reward_screen(const std::string& line,
+                               const std::string& screen_state_json) {
+    const std::string anchor = "\"screen_type\":\"NONE\"";
+    std::string out = line;
+    const auto pos = out.find(anchor);
+    EXPECT_NE(pos, std::string::npos);
+    out.replace(pos, anchor.size(),
+                "\"screen_type\":\"COMBAT_REWARD\",\"screen_state\":" +
+                    screen_state_json);
+    return out;
+}
+
+TEST(Translator, CombatRewardScreenStateValidatesAndJoins) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    const std::string tampered = with_reward_screen(
+        lines[1],
+        "{\"rewards\":["
+        "{\"reward_type\":\"GOLD\",\"gold\":13},"
+        "{\"reward_type\":\"POTION\",\"potion\":{\"id\":\"Block Potion\","
+        "\"name\":\"Block Potion\",\"can_use\":false,\"can_discard\":true,"
+        "\"requires_target\":false}},"
+        "{\"reward_type\":\"RELIC\",\"relic\":{\"id\":\"Burning Blood\","
+        "\"name\":\"Burning Blood\",\"counter\":-1}},"
+        "{\"reward_type\":\"CARD\"}"
+        "]}");
+    // Known shape + known ids: translates cleanly (content is deliberately
+    // storage-less -- the acceptance diffs the post-claim RunState).
+    tr::TranslatedRun run = tr::translate_lines({lines[0], tampered}, "reward");
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.records[0].run.gold, 99);  // untouched by screen content
+}
+
+TEST(Translator, UnknownRewardTypeRefused) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    const std::string tampered = with_reward_screen(
+        lines[1], "{\"rewards\":[{\"reward_type\":\"BANANA\"}]}");
+    try {
+        (void)tr::translate_lines({lines[0], tampered}, "reward");
+        FAIL() << "expected TranslateError for an unknown reward_type";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("unknown reward_type"),
+                  std::string::npos)
+            << e.what();
+        EXPECT_NE(std::string(e.what()).find("BANANA"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(Translator, UnknownRewardPotionIdRefused) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    const std::string tampered = with_reward_screen(
+        lines[1],
+        "{\"rewards\":[{\"reward_type\":\"POTION\","
+        "\"potion\":{\"id\":\"TotallyFakePotion\"}}]}");
+    try {
+        (void)tr::translate_lines({lines[0], tampered}, "reward");
+        FAIL() << "expected TranslateError for an unknown reward potion id";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("unknown potion id"),
+                  std::string::npos)
+            << e.what();
+        EXPECT_NE(std::string(e.what()).find("TotallyFakePotion"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
 TEST(Translator, UnknownStreamNameRefused) {
     std::vector<std::string> lines = read_lines(sample_path());
     std::string tampered = lines[1];
