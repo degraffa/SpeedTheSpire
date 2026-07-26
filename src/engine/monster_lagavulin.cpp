@@ -61,12 +61,12 @@ void set_debuff_turn_count(MonsterState& m, uint8_t v) noexcept {
     return v < 0x0Fu ? static_cast<uint8_t>(v + 1) : v;
 }
 
-[[nodiscard]] bool has_flag(const MonsterState& m, uint16_t bit) noexcept {
+[[nodiscard]] bool has_flag(const MonsterState& m, uint32_t bit) noexcept {
     return (m.flags & bit) != 0u;
 }
 
-void set_flag(MonsterState& m, uint16_t bit) noexcept {
-    m.flags = static_cast<uint16_t>(m.flags | bit);
+void set_flag(MonsterState& m, uint32_t bit) noexcept {
+    m.flags |= bit;
 }
 
 // getMove (Lagavulin.java:212-227). The rollMove argument is drawn but never
@@ -149,8 +149,8 @@ void lagavulin_init_impl(CombatState& s, uint8_t mi, bool asleep) noexcept {
     // isOutTriggered, which is what makes the awake variant skip the wake
     // interrupt and telegraph an attack straight out of init().
     m.flags = asleep ? kMonsterFlagLagavulinAsleep
-                     : static_cast<uint16_t>(kMonsterFlagLagavulinIsOut |
-                                             kMonsterFlagLagavulinOutTriggered);
+                     : (kMonsterFlagLagavulinIsOut |
+                        kMonsterFlagLagavulinOutTriggered);
 
     roll_move(s, m);  // init() -> rollMove(): IDLE if asleep, else STRONG_ATK
 }

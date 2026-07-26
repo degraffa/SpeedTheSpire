@@ -64,9 +64,11 @@ inline constexpr int kLimboCap = 8;
 // index-parity opener and SpawnMonsterAction smart-positioning read list indices
 // among ALL (incl. dead) records, so index identity must be stable -- growing the
 // cap (rather than compacting dead records) preserves it. Sized once here so the
-// framework covers the worst split case above (scoping report §1.5/§6). Budget: MonsterState
-// is 112 B, so 7 slots = 784 B; sizeof(CombatState) 3672 -> 3896, inside the 4 KB
-// ceiling (static_assert below). This is a schema change -> SCHEMA_VERSION 3 -> 4.
+// framework covers the worst split case above (scoping report §1.5/§6). Budget at
+// the time of that change: MonsterState was 112 B, so 7 slots = 784 B and
+// sizeof(CombatState) went 3672 -> 3896, inside the then-4 KB ceiling; that was
+// schema bump 3 -> 4. (The flags widening later grew MonsterState to 116 B and
+// CombatState to 3928 B -- schema bump 4 -> 5, see the static_asserts below.)
 inline constexpr int kMonsterCap = 7;
 inline constexpr int kActionQueueCap = 64;
 inline constexpr int kCardQueueCap = 16;
@@ -75,7 +77,7 @@ inline constexpr int kMonsterQueueCap = 5;
 // start-of-next-turn relic/power actions here, a handful per turn in the
 // skeleton's scope, so 16 is generous headroom (16 * 12 B = 192 B, comfortably
 // inside CombatState's size budget -- a CEILING of 8192 B against an actual
-// sizeof of 3896 B; see the static_assert at the bottom of this file, and note
+// sizeof of 3928 B; see the static_assert at the bottom of this file, and note
 // the ceiling was raised from 4096 on 2026-07-24). Sized to match the main
 // action ring's element type/idiom rather than trimmed to a tight bound.
 inline constexpr int kPreTurnActionQueueCap = 16;
@@ -202,11 +204,51 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 // -- Jaw Worm's AI needs last-move and last-two-moves (design doc §9); the move
 // id encoding is defined by the monster module (monster_jaw_worm.hpp), here it
 // is an opaque uint8_t. `intent` is the telegraphed next move id. `flags` is a
-// reserved per-monster bitfield. `power_count` is the live length of `powers`
-// (parallels the pile counts); empty slots also read PowerId::NONE.
+// per-monster bitfield governed by the two-region policy directly below.
+// `power_count` is the live length of `powers` (parallels the pile counts);
+// empty slots also read PowerId::NONE.
 //
-// PER-MONSTER-TYPE fields (`flags`, `pad0`) carry monster-specific meaning,
-// interpreted only by that monster's native module:
+// ---- MonsterState.flags: the two-region allocation policy ------------------
+//
+// The 32-bit `flags` word is split into two regions with different rules. The
+// old 16-bit word was exhausted by LINEAR allocation -- a fresh bit for every
+// monster type even though no record is ever two types at once -- so ~9
+// flag-using Act-1 types consumed all 16 bits (the Guardian alone took 5).
+// Acts 2-4 add many more stateful monsters; allocated linearly, 32 bits would
+// run out too. The policy below is what makes 32 bits sufficient for the full
+// game:
+//
+//   * Bits 0-23 -- TYPE-SCOPED and REUSABLE. A bit here means whatever the
+//     OWNING monster type says it means, and is read only by code that already
+//     knows `monster_id` (the type's own module, or a power native reached
+//     through a power only that type can own). Two monster types MAY use the
+//     same bit -- with different meanings -- provided no single monster record
+//     can ever be both types at once. A new monster type therefore allocates
+//     from 0-23 and should DELIBERATELY REUSE bits held by types it can never
+//     co-occur with, rather than extend upward.
+//     Reuse caveat: a bit consumed by a POWER's native body rather than the
+//     monster's own module (RitualSkip by RITUAL's at_end_of_round,
+//     CurlUpTriggered by CURL_UP's on-attacked body and the CURL_UP
+//     apply/remove paths in interp_powers.cpp) is scoped to the set of types
+//     that can OWN that power, not to one type -- a type reusing such a bit
+//     must also never be able to own the power.
+//     The existing Act-1 bits below keep their historical values; they are NOT
+//     re-based (re-basing regenerates every fixture and buys nothing).
+//
+//   * Bits 24-31 -- GLOBAL and SCARCE. Flags read TYPE-AGNOSTICALLY, i.e. by
+//     code that does not know which monster it is looking at. Each global bit
+//     is unique forever; there are only 8, by design. A candidate belongs here
+//     ONLY if some reader genuinely cannot check `monster_id` first. Today
+//     there is exactly one: ESCAPED (bit 24), read by monster_dead_or_escaped()
+//     below from the pump, interpreter, targeting, damage and power-walk
+//     layers.
+//
+// The next allocator's rule: take type-scoped bits from 0-23, reusing where
+// the types provably cannot co-occur; a global bit is a design decision to be
+// argued for, never a default.
+//
+// PER-MONSTER-TYPE fields (`flags` bits 0-23, `pad0`) carry monster-specific
+// meaning, interpreted only by that monster's native module:
 //   * `flags` bit kMonsterFlagRitualSkip -- Cultist: the RitualPower's `skipFirst`
 //     (RitualPower.java:19,46-55). Set when the Cultist casts Incantation; the
 //     RITUAL native at_end_of_round body consumes it to skip the first tick.
@@ -271,21 +313,28 @@ struct MonsterState {
     int16_t hp;
     int16_t max_hp;
     int16_t block;
-    uint16_t flags;                   // reserved per-monster bitfield (see above)
+    uint32_t flags;                   // two-region bitfield: 0-23 type-scoped,
+                                      // 24-31 global (policy comment above)
     uint8_t move_history[3];          // last 3 move ids, [0] = most recent
     uint8_t intent;                   // telegraphed next move id
     uint8_t power_count;              // live length of powers[]
     uint8_t pad0;                     // monster-type-scoped scratch byte (see above)
+    uint8_t pad1[2];                  // explicit padding (uint32_t flags makes the
+                                      // struct 4-aligned; keeps powers[] placement
+                                      // explicit and value-init-zeroed)
     PowerSlot powers[kPowerCap];
 };
 
+// ALL constants below are TYPE-SCOPED (region 0-23) except kMonsterFlagEscaped,
+// which is GLOBAL (region 24-31) -- see the policy comment above the struct.
+//
 // Cultist RitualPower.skipFirst (MonsterState.flags bit): while set, the RITUAL
 // power's next at_end_of_round Strength tick is skipped (RitualPower.java:48-53).
-inline constexpr uint16_t kMonsterFlagRitualSkip = 0x0001u;
-inline constexpr uint16_t kMonsterFlagCurlUpTriggered = 0x0002u;
+inline constexpr uint32_t kMonsterFlagRitualSkip = 0x0001u;
+inline constexpr uint32_t kMonsterFlagCurlUpTriggered = 0x0002u;
 // Large slime splitTriggered latch (AcidSlime_L.java:71,145-151 /
 // SpikeSlime_L.java:66,133-139); see the MonsterState comment above.
-inline constexpr uint16_t kMonsterFlagSplitTriggered = 0x0004u;
+inline constexpr uint32_t kMonsterFlagSplitTriggered = 0x0004u;
 // Lagavulin's three sleep/wake booleans (Lagavulin.java:67-69). `asleep` is the
 // ctor argument and never changes; `isOut` means the shell is open (set by
 // changeState("OPEN"), :185); `isOutTriggered` is the one-shot latch that makes
@@ -293,9 +342,9 @@ inline constexpr uint16_t kMonsterFlagSplitTriggered = 0x0004u;
 // the damage interrupt and the queued open, isOutTriggered is set while isOut is
 // still false, and a LETHAL hit latches isOutTriggered without ever opening
 // (changeState's !isDying guard, :184).
-inline constexpr uint16_t kMonsterFlagLagavulinAsleep = 0x0008u;
-inline constexpr uint16_t kMonsterFlagLagavulinIsOut = 0x0010u;
-inline constexpr uint16_t kMonsterFlagLagavulinOutTriggered = 0x0020u;
+inline constexpr uint32_t kMonsterFlagLagavulinAsleep = 0x0008u;
+inline constexpr uint32_t kMonsterFlagLagavulinIsOut = 0x0010u;
+inline constexpr uint32_t kMonsterFlagLagavulinOutTriggered = 0x0020u;
 
 // Bits 0x0008 / 0x0010 / 0x0020 belong to Lagavulin's three sleep/wake booleans
 // and are not free; this batch was allocated from 0x0040 up rather than
@@ -318,14 +367,16 @@ inline constexpr uint16_t kMonsterFlagLagavulinOutTriggered = 0x0020u;
 //                           so reaching an 8th flip would need 40+50+...+110 ==
 //                           600 cumulative damage against a 250 HP sheet. The
 //                           increment saturates rather than wrapping.
-inline constexpr uint16_t kMonsterFlagGuardianOpen = 0x0040u;
-inline constexpr uint16_t kMonsterFlagGuardianCloseUpTriggered = 0x0080u;
-inline constexpr uint16_t kMonsterFlagGuardianShiftShift = 8u;
-inline constexpr uint16_t kMonsterFlagGuardianShiftMask = 0x0700u;
+inline constexpr uint32_t kMonsterFlagGuardianOpen = 0x0040u;
+inline constexpr uint32_t kMonsterFlagGuardianCloseUpTriggered = 0x0080u;
+inline constexpr uint32_t kMonsterFlagGuardianShiftShift = 8u;
+inline constexpr uint32_t kMonsterFlagGuardianShiftMask = 0x0700u;
 
 // Hexaghost (Hexaghost.java, see monster_hexaghost.hpp). Bits 0x0001..0x0700
 // are taken by the five monsters above, so this batch was allocated from 0x0800
-// up; 0x8000 is left free.
+// up. (When the field was 16 bits wide this left only 0x8000 free, which the
+// Escaped bit then took -- the exhaustion that forced the widening and the
+// two-region policy above. Escaped now lives in the global region at bit 24.)
 //   * ORB_COUNT     -- `orbActiveCount` (:93), the whole combat-relevant residue
 //                      of the six presentation orbs. getMove switches on it
 //                      (:224-252) and nothing else reads it. Its range is 0..6:
@@ -336,31 +387,30 @@ inline constexpr uint16_t kMonsterFlagGuardianShiftMask = 0x0700u;
 //   * BURN_UPGRADED -- `burnUpgraded` (:92,205-207): a one-shot set by the first
 //                      Inferno, after which every Burn Sear creates is upgraded
 //                      (:183-185). Never cleared.
-inline constexpr uint16_t kMonsterFlagHexaghostOrbShift = 11u;
-inline constexpr uint16_t kMonsterFlagHexaghostOrbMask = 0x3800u;
-inline constexpr uint16_t kMonsterFlagHexaghostBurnUpgraded = 0x4000u;
+inline constexpr uint32_t kMonsterFlagHexaghostOrbShift = 11u;
+inline constexpr uint32_t kMonsterFlagHexaghostOrbMask = 0x3800u;
+inline constexpr uint32_t kMonsterFlagHexaghostBurnUpgraded = 0x4000u;
 
-// ESCAPED -- the first GLOBAL (not monster-type-scoped) flag bit: the monster
-// left the fight ALIVE. AbstractMonster.escape (AbstractMonster.java:915-919)
-// sets `isEscaping`; the escape animation then latches `escaped`
-// (updateEscapeAnimation, :894-906). This engine has no animation clock, so the
-// two Java booleans collapse into this one bit, set by the ESCAPE opcode
-// (EscapeAction.java:21-28 -> escape()) at resolve time. The Looter is the only
-// Act-1 producer (Looter.java:126-133); the gremlins' move 99 is unreachable in
-// Act 1 (no escapeNext()/deathReact() caller) and stays unmodelled.
+// ESCAPED -- the first (and today only) GLOBAL flag bit, bit 24, the bottom of
+// the 24-31 global region: the monster left the fight ALIVE.
+// AbstractMonster.escape (AbstractMonster.java:915-919) sets `isEscaping`; the
+// escape animation then latches `escaped` (updateEscapeAnimation, :894-906).
+// This engine has no animation clock, so the two Java booleans collapse into
+// this one bit, set by the ESCAPE opcode (EscapeAction.java:21-28 -> escape())
+// at resolve time. The Looter is the only Act-1 producer (Looter.java:126-133);
+// the gremlins' move 99 is unreachable in Act 1 (no escapeNext()/deathReact()
+// caller) and stays unmodelled.
 //
 // An escaped monster keeps its positive hp -- it is NOT dying -- so every
 // liveness read that means "in the fight" must test monster_dead_or_escaped()
 // below rather than hp alone. Being global, this bit is read without checking
-// monster_id, unlike every type-scoped bit above.
+// monster_id, unlike every type-scoped bit above -- which is exactly why it
+// lives in the global region and must never be reused.
 //
-// This takes the last free MonsterState.flags bit. That is acceptable because
-// the type-scoped bits above are MUTUALLY EXCLUSIVE across monster types (no
-// record is two types at once), so a future monster needing scratch bits may
-// deliberately overlap another type's allocation -- only genuinely global bits
-// like this one must be unique, and escape is the only global creature state
-// the Java carries that hp does not already express.
-inline constexpr uint16_t kMonsterFlagEscaped = 0x8000u;
+// (History: as a uint16_t bit it was 0x8000 -- the last free bit of the old
+// 16-bit field, sitting inside what is now the type-scoped region. The v5
+// widening moved it to bit 24 so the region boundary is honest.)
+inline constexpr uint32_t kMonsterFlagEscaped = 1u << 24;
 
 // --- Liveness predicates ------------------------------------------------------
 // The game's monster liveness is NOT `hp > 0`: it is `isDying || isEscaping`
@@ -378,7 +428,10 @@ inline constexpr uint16_t kMonsterFlagEscaped = 0x8000u;
 }
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
-static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,
+// 20 = 8 (id/hp/max_hp/block) + 4 (flags u32) + 3 (move_history) + 1 (intent)
+// + 1 (power_count) + 1 (pad0) + 2 (pad1). Was 16 + 4*kPowerCap before the
+// flags widening (schema v5).
+static_assert(sizeof(MonsterState) == 20 + 4 * kPowerCap,
               "MonsterState layout drifted -- update SCHEMA_VERSION");
 
 // --- CombatState ------------------------------------------------------------
@@ -511,7 +564,9 @@ static_assert(std::is_trivially_copyable_v<CombatState>,
 // the POD layout to fit) would have been a schema + fixture change -- exactly
 // the stop-the-line class of change this avoids.
 //
-// This is a CEILING, not a target. sizeof(CombatState) is unchanged at 3896 B.
+// This is a CEILING, not a target. sizeof(CombatState) was 3896 B when the
+// ceiling was raised; the schema-v5 flags widening (MonsterState 112 -> 116 B,
+// plus alignment padding) grew it to 3928 B, still far inside the budget.
 static_assert(sizeof(CombatState) <= 8192,
               "CombatState exceeds its 8 KB budget (design doc §4.2)");
 

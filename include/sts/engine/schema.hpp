@@ -67,6 +67,24 @@ namespace sts::engine {
 //   schema_version is unchanged; only their state_size field moves. The trace v2
 //   container format is unchanged; kTraceFormatV2 follows this constant to 4.
 // TASK-ID-ALLOWED-END
-inline constexpr uint32_t SCHEMA_VERSION = 4;
+//
+// v5 (=5): the MonsterState.flags widening (owner-approved 2026-07-26, branch
+//   monsterflags-widen -- not a ledger task, so no task id here). `flags` grows
+//   uint16_t -> uint32_t under the two-region allocation policy (combat_state.hpp:
+//   bits 0-23 type-scoped and reusable across monster types that cannot co-occur,
+//   bits 24-31 global), and kMonsterFlagEscaped moves from bit 15 (the last free
+//   bit of the old word, inside what is now the type-scoped region) to bit 24
+//   (bottom of the global region). No stored VALUE changes meaning: every
+//   type-scoped bit keeps its old value, and no committed trace carries a set
+//   Escaped bit. sizeof(MonsterState) 112 -> 116, sizeof(CombatState)
+//   3896 -> 3928, so per §8 this is a schema bump. The 20 combat fixtures are
+//   REGENERATED via the checked-in generator (tools/fixture_gen/
+//   gen_combat_fixtures.cpp) under the established byte-level
+//   zero-diff-in-meaning discipline for layout bumps: every difference is zero
+//   padding at compiler-derived offsets, every pre-existing byte preserved in
+//   order. The fixtures stamp the DECOUPLED on-disk tag kTraceFormatV1 (=1) as
+//   before; only their state_size field moves. kTraceFormatV2 follows this
+//   constant to 5.
+inline constexpr uint32_t SCHEMA_VERSION = 5;
 
 }  // namespace sts::engine

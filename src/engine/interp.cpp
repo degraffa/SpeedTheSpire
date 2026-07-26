@@ -333,9 +333,7 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             if (item.tgt >= kMonsterCap) {
                 return;
             }
-            s.monsters[item.tgt].flags =
-                static_cast<uint16_t>(s.monsters[item.tgt].flags |
-                                      kMonsterFlagEscaped);
+            s.monsters[item.tgt].flags |= kMonsterFlagEscaped;
             return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))

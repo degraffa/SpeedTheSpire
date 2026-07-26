@@ -33,13 +33,12 @@ constexpr int32_t kDefensiveBlock = 20;
 // The largest flip count kMonsterFlagGuardianShiftMask can hold. Unreachable in
 // play (see the combat_state.hpp note); the increment saturates here rather than
 // wrapping into the neighbouring latches.
-constexpr uint16_t kMaxShiftCount =
-    static_cast<uint16_t>(kMonsterFlagGuardianShiftMask >>
-                          kMonsterFlagGuardianShiftShift);
+constexpr uint32_t kMaxShiftCount =
+    kMonsterFlagGuardianShiftMask >> kMonsterFlagGuardianShiftShift;
 
-[[nodiscard]] uint16_t guardian_shift_count(const MonsterState& m) noexcept {
-    return static_cast<uint16_t>((m.flags & kMonsterFlagGuardianShiftMask) >>
-                                 kMonsterFlagGuardianShiftShift);
+[[nodiscard]] uint32_t guardian_shift_count(const MonsterState& m) noexcept {
+    return (m.flags & kMonsterFlagGuardianShiftMask) >>
+           kMonsterFlagGuardianShiftShift;
 }
 
 // Re-glue the accumulator baseline to the current HP, so that the derived
@@ -60,14 +59,12 @@ void queue_defensive_mode(CombatState& s, uint8_t mi) noexcept {
     MonsterState& m = s.monsters[mi];
 
     // dmgThreshold += dmgThresholdIncrease (:245), saturating (see kMaxShiftCount).
-    const uint16_t shifts = guardian_shift_count(m);
+    const uint32_t shifts = guardian_shift_count(m);
     if (shifts < kMaxShiftCount) {
-        m.flags = static_cast<uint16_t>(
-            (m.flags & ~kMonsterFlagGuardianShiftMask) |
-            static_cast<uint16_t>((shifts + 1u) <<
-                                  kMonsterFlagGuardianShiftShift));
+        m.flags = (m.flags & ~kMonsterFlagGuardianShiftMask) |
+                  ((shifts + 1u) << kMonsterFlagGuardianShiftShift);
     }
-    m.flags = static_cast<uint16_t>(m.flags & ~kMonsterFlagGuardianOpen);  // isOpen = false (:248)
+    m.flags &= ~kMonsterFlagGuardianOpen;  // isOpen = false (:248)
 
     ActionQueueItem it{};
     it.opcode = static_cast<uint16_t>(Opcode::SET_MOVE);
@@ -225,9 +222,8 @@ void guardian_take_turn(CombatState& s, uint8_t mi) noexcept {
             // latches) happens here; its queued half lands after the move's data
             // program, which is exactly where the Java's addToBottom puts it.
             const int32_t block_at_entry = m.block;
-            m.flags = static_cast<uint16_t>(m.flags | kMonsterFlagGuardianOpen);
-            m.flags = static_cast<uint16_t>(
-                m.flags & ~kMonsterFlagGuardianCloseUpTriggered);  // (:262-263)
+            m.flags |= kMonsterFlagGuardianOpen;
+            m.flags &= ~kMonsterFlagGuardianCloseUpTriggered;  // (:262-263)
             queue_monster_move_effects(s, mi, def, kTwinSlam);
             queue_offensive_mode_tail(s, mi, block_at_entry);
             set_monster_move(m, kWhirlwind, MonsterIntent::ATTACK);
@@ -263,8 +259,7 @@ void guardian_on_damaged(CombatState& s, uint8_t mi) noexcept {
         return;
     }
     guardian_reset_accumulator(m);  // dmgTaken = 0 (:286)
-    m.flags = static_cast<uint16_t>(m.flags |
-                                    kMonsterFlagGuardianCloseUpTriggered);  // (:289)
+    m.flags |= kMonsterFlagGuardianCloseUpTriggered;  // (:289)
     queue_defensive_mode(s, mi);  // ChangeStateAction(DEFENSIVE_MODE) (:288)
 }
 
