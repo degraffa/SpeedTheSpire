@@ -2964,3 +2964,67 @@ repository at
   case; writer-to-reader tests cover every non-`NONE` kind. Summary build ids
   end in `schema5-b51fix2`, preventing reports from this binary from merging
   with the earlier audited build.
+
+<a id="card-dead-target"></a>
+
+### card-dead-target `[x]` — Queued-card dead-target revalidation
+
+**Provenance:** `GameActionManager.getNextAction`,
+`AbstractCard.cardPlayable` / `canUse`, `DoubleTapPower.onUseCard`, and
+`UseCardAction`.
+
+**Log:** A post-landing `card-limbo` audit found that `resolve_card_play`
+skipped `GameActionManager.getNextAction`'s dequeue-time `canUse` call
+(`GameActionManager.java:209-214`). `AbstractCard.cardPlayable` rejects an
+enemy-target card whose selected monster is dying before any hook or `use()`
+call (`AbstractCard.java:854-859,916-924`), while the engine instead fired
+hooks, counted the play and ran its program against the dead target. The fix
+resolves random targeting first, then cancels a dead selected target before
+all hook/counter/effect/energy work. An autoplay already in limbo receives
+only Java's no-trigger `UseCardAction` filing
+(`GameActionManager.java:285-301`): a normal free autoplay discards, while
+Double Tap's target-preserving purge copy (`DoubleTapPower.java:43-66`) lands
+in no pile. Two regressions keep a second monster alive and pin no retargeting
+plus exact filing, queue, energy, RNG, Rage and Double Tap behavior. No schema,
+fixture/golden, registry namespace, opcode or frozen-design change.
+
+**Acceptance:** final-tree Debug **950/950**, leak-detecting ASan/UBSan
+**950/950**, and Release **950/950**; both focused `CardLimbo` regressions and
+the unchanged fixture oracle were included. Documentation links, stale-count,
+whitespace and golden/fixture safety checks passed before commit.
+
+**Independent-audit fix-forward (supersedes the implementation and acceptance
+claims above):** commit `9484f70` stopped only an hp-dead selected target and
+therefore did not implement Java's full `canUse` call. It also collapsed
+`ENEMY` with `SELF_AND_ENEMY`, permanently zeroed autoplay `cost_now`, lost
+Double Tap X-cost `energyOnUse`, and terminal-flushed a queued autoplay without
+the retained no-trigger `UseCardAction`'s Spoon/onExhaust/cleanup behavior.
+
+The corrected path shares one full in-scope `canUse` authority with
+`legal_actions`: unplayable STATUS/CURSE plus Medical Kit/Blue Candle, target
+and all-monsters-dead `cardPlayable`, `turnHasEnded`, affordability with the
+autoplay exception, Entangle, Velvet Choker, Normality, and Clash. Generated
+`CardDef` preserves the exact target kind from existing YAML, so the
+successful-gate post-hook null/dead/escaping suppression applies only to
+`CardTarget.ENEMY`; an ordinary card stays in hand, a limbo autoplay is removed
+without filing, and `SELF_AND_ENEMY` (Spot Weakness) proceeds. A failed gate
+instead queues no-trigger filing, including terminal normalization, preserving
+purge/POWER, Strange Spoon, discard/exhaust, `onExhaust`, and one-shot cleanup.
+
+Autoplay is transiently inferred from limbo and never rewrites `cost_now`.
+Draw-top X autoplay reads the unchanged energy at its front-queued dequeue; a
+fresh Double Tap copy that is both purge-only and X-cost stores the original
+energy in its otherwise-doomed row under a transient runtime flag. No
+persistent card's `misc` is overwritten, and later ordinary plays pay normally.
+The expanded regressions pin ordinary-hand retention, Havoc/Wound, Normality
+and Velvet replay vetoes, escaped `ENEMY` versus `SELF_AND_ENEMY`, nonterminal
+and terminal Spoon/onExhaust filing, ordinary replay cost, draw-top and Double
+Tap X-cost energy, and random-target draw-before-gate/no-extra-draw ordering.
+The earlier 950-test acceptance count is obsolete. Final-tree Debug,
+leak-detecting ASan/UBSan, and Release are each **961/961**; the unchanged
+`FixtureOracle` is included, and no fixture/golden file changed.
+
+**Integration note:** this behavior change landed after B5.1's accepted soak.
+The fuzzer build identity was therefore advanced from
+`schema5-b51fix2` to `schema5-b51fix2-cardgate1`; summaries produced before
+and after queued-play revalidation cannot be merged.

@@ -146,12 +146,11 @@ bool file_card_from_limbo(CombatState& state, uint8_t pool_index,
 // flag/type-derived destination, WITHOUT Strange Spoon rolls or onExhaust
 // hooks. The pump halts the moment the fight is decided, abandoning whatever
 // is still queued exactly as it already abandons a lethal card's trailing
-// effects. Pending USE_CARD actions are resolved exactly (including Spoon and
-// onExhaust) by action_queue.cpp before this fallback runs; this helper handles
-// only limbo cards which never reached their UseCardAction (for example a
-// queued autoplay cancelled by terminal combat). It also consumes their
-// EXHAUST_ON_USE_ONCE state. The fixture corpus pins the ordinary lethal-Strike
-// shape (discard, empty limbo).
+// effects. Pending USE_CARD actions and terminal-cancelled queued autoplays are
+// resolved exactly (including Spoon and onExhaust) by action_queue.cpp before
+// this fallback runs. This helper handles only otherwise-stranded limbo rows
+// and consumes their EXHAUST_ON_USE_ONCE state. The fixture corpus pins the
+// ordinary lethal-Strike shape (discard, empty limbo).
 void flush_limbo_at_combat_over(CombatState& state) noexcept;
 
 // If pool row `pool_index` carries the COST_MODIFIED_FOR_TURN bit

@@ -19,6 +19,7 @@
 #include "sts/engine/interp.hpp"        // Opcode
 #include "sts/engine/piles.hpp"         // limbo_add (cardInUse model)
 #include "sts/engine/power_hooks.hpp"   // onPlayCard/onUseCard fan-out + onExhaust
+#include "relics/relics_boss.hpp"       // kVelvetChokerPlayLimit
 #include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strike Dummy bake)
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
 #include "sts/engine/types.hpp"         // CardId
@@ -199,6 +200,93 @@ void move_played_card_to_limbo(CombatState& s, CardPoolIndex pool_index) noexcep
     // else is a malformed play, left untouched (defensive).
 }
 
+// CardQueueItem.autoplayCard is not a stored bit in the compact two-byte queue
+// row. Its live producers (PlayTopCardAction / PLAY_CARD copies) put the
+// instance in limbo before queueing it, while an ordinary hand play stays in
+// hand until AbstractPlayer.useCard succeeds. Pile membership is therefore the
+// exact distinction at dequeue time.
+[[nodiscard]] bool card_is_autoplaying(const CombatState& s,
+                                       CardPoolIndex pool_index) noexcept {
+    for (uint8_t i = 0; i < s.limbo_count; ++i) {
+        if (s.limbo[i] == pool_index) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A failed autoplay canUse check does not run the normal play sequence, but
+// GameActionManager still queues `new UseCardAction(c)` with
+// dontTriggerOnUseCard set (GameActionManager.java:285-301). Its constructor
+// fires no hooks; its update performs only the normal purge/exhaust/discard
+// decision (including Strange Spoon and onExhaust). Leaving the compact-model
+// card in limbo until this queued USE_CARD resolves is gameplay-equivalent to
+// Java's presentation-only ExhaustCardEffect removal and gives the filing
+// action the source membership file_card_from_limbo requires.
+void queue_cancelled_autoplay_filing(CombatState& s,
+                                     CardPoolIndex pool_index) noexcept {
+    ActionQueueItem use{};
+    use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
+    use.src = kActorPlayer;
+    use.tgt = kActorPlayer;
+    use.amount = pool_index;
+    add_to_bottom(s, use);
+}
+
+[[nodiscard]] bool has_player_power(const CombatState& s,
+                                    PowerId id) noexcept {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool all_hand_cards_are_attacks(const CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardDef* def =
+            card_def(static_cast<CardId>(s.card_pool[s.hand[i]].card_id));
+        if (def == nullptr || def->type != CardType::ATTACK) {
+            return false;
+        }
+    }
+    return true;
+}
+
+[[nodiscard]] bool normality_vetoes_play(const CombatState& s) noexcept {
+    if (s.cards_played_this_turn < 3) {
+        return false;
+    }
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.card_pool[s.hand[i]].card_id ==
+            static_cast<uint16_t>(CardId::NORMALITY)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool velvet_choker_vetoes_play(const CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        if (s.relics[i].relic_id ==
+                static_cast<uint16_t>(RelicId::VELVET_CHOKER) &&
+            s.relics[i].counter >= kVelvetChokerPlayLimit) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] bool monsters_basically_dead(const CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        if (!monster_dead_or_escaped(s.monsters[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // --- Card-level trigger programs (statuses / curses) -------------------------
 // A passive status/curse (trigger != ON_PLAY) runs its `effects`/`upgraded`
 // program at a hook site instead of on play. Every in-scope trigger step is
@@ -275,6 +363,66 @@ uint8_t resolve_play_target(CombatState& s, const CardDef& def,
     return declared_target;
 }
 
+bool card_can_use_without_target(const CombatState& s,
+                                 CardPoolIndex pool_index,
+                                 bool autoplay) noexcept {
+    if (pool_index >= kCardPoolCap) {
+        return false;
+    }
+    const CardInstance& card = s.card_pool[pool_index];
+    const CardDef* def = card_def(static_cast<CardId>(card.card_id));
+    if (def == nullptr) {
+        return false;
+    }
+
+    // AbstractCard.canUse's two cost<-1 escape hatches happen before the
+    // ordinary cardPlayable && hasEnoughEnergy tail.
+    if (has_card_flag(card.flags, CardFlag::UNPLAYABLE)) {
+        const bool relic_unlock =
+            (def->type == CardType::STATUS &&
+             player_has_relic(s, RelicId::MEDICAL_KIT)) ||
+            (def->type == CardType::CURSE &&
+             player_has_relic(s, RelicId::BLUE_CANDLE));
+        if (!relic_unlock) {
+            return false;
+        }
+    }
+
+    // AbstractCard.hasEnoughEnergy, including its power/relic/card fan-outs and
+    // the in-scope card override (Clash.canUse).
+    if (s.turn_has_ended != 0u ||
+        (def->type == CardType::ATTACK &&
+         has_player_power(s, PowerId::ENTANGLE)) ||
+        velvet_choker_vetoes_play(s) || normality_vetoes_play(s) ||
+        (def->requires_all_attacks && !all_hand_cards_are_attacks(s))) {
+        return false;
+    }
+    if (!autoplay && s.player_energy < static_cast<int16_t>(card.cost_now)) {
+        return false;
+    }
+    return true;
+}
+
+bool card_can_use(const CombatState& s, CardPoolIndex pool_index,
+                  uint8_t target, bool autoplay) noexcept {
+    if (pool_index >= kCardPoolCap) {
+        return false;
+    }
+    const CardDef* def = card_def(
+        static_cast<CardId>(s.card_pool[pool_index].card_id));
+    if (def == nullptr || monsters_basically_dead(s)) {
+        return false;
+    }
+    const bool selected_enemy_target =
+        def->target_kind == CardTargetKind::ENEMY ||
+        def->target_kind == CardTargetKind::SELF_AND_ENEMY;
+    if (selected_enemy_target && target < s.monster_count &&
+        s.monsters[target].hp <= 0) {
+        return false;
+    }
+    return card_can_use_without_target(s, pool_index, autoplay);
+}
+
 void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     const CardPoolIndex pool_index = item.card_index;
     const CardId card_id = static_cast<CardId>(s.card_pool[pool_index].card_id);
@@ -284,16 +432,44 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         return;
     }
 
+    // GameActionManager.getNextAction resolves a random target first, then
+    // re-runs canUse before ANY hook/counter/use work (:209-249).
+    const uint8_t resolved_target = resolve_play_target(s, *def, item.target);
+
+    const bool autoplay = card_is_autoplaying(s, pool_index);
+    // A rejected ordinary queued hand play simply stays in hand. A rejected
+    // autoplay already in limbo gets the no-trigger UseCardAction filing
+    // GameActionManager adds at :285-301. Nothing before this point except the
+    // random-target draw is observable.
+    if (!card_can_use(s, pool_index, resolved_target, autoplay)) {
+        if (autoplay) {
+            queue_cancelled_autoplay_filing(s, pool_index);
+        }
+        return;
+    }
+
     // 1. onPlayCard hook fan-out (§5.3: player powers -> monster powers ->
     //    relics -> stance -> blights -> hand/discard/draw cards). Queues each
     //    responding hook's effects; no-op without a hook-bearing power.
-    dispatch_on_play_card(s, s.card_pool[pool_index].card_id, item.target);
+    dispatch_on_play_card(s, s.card_pool[pool_index].card_id, resolved_target);
 
     // 2. ++cardsPlayedThisTurn (AbstractPlayer.useCard:1373).
     ++s.cards_played_this_turn;
 
-    // 3. Resolve the effect target (trap-10 random roll at dequeue, else declared).
-    const uint8_t resolved_target = resolve_play_target(s, *def, item.target);
+    // GameActionManager.java:264-283 is AFTER the successful gate and hook /
+    // counter sequence, but BEFORE AbstractPlayer.useCard. It applies only to
+    // exact CardTarget.ENEMY. A null, dead, or escaping selected monster
+    // suppresses useCard; a limbo autoplay is removed with no filing, while an
+    // ordinary queued card remains in hand. SELF_AND_ENEMY deliberately
+    // proceeds (Spot Weakness).
+    if (def->target_kind == CardTargetKind::ENEMY &&
+        (resolved_target >= s.monster_count ||
+         monster_dead_or_escaped(s.monsters[resolved_target]))) {
+        if (autoplay) {
+            (void)limbo_remove(s, pool_index);
+        }
+        return;
+    }
 
     // Per-instance runtime data: the upgrade level selects which of the two
     // effect programs runs (the base/upgraded two-row lookup); the instance flags
@@ -319,7 +495,11 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     if (def->trigger != CardTrigger::ON_PLAY) {
         // no queued effects: the card's program belongs to its passive trigger
     } else if (is_xcost) {
-        int energy_on_use = s.player_energy;
+        int energy_on_use =
+            autoplay &&
+                    has_card_flag(inst_flags, CardFlag::AUTOPLAY_X_ENERGY)
+                ? static_cast<int>(s.card_pool[pool_index].misc)
+                : static_cast<int>(s.player_energy);
         if (energy_on_use < 0) {
             energy_on_use = 0;
         }
@@ -391,12 +571,30 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    X-cost already consumed all energy above; otherwise deduct the
     //    per-instance runtime cost (card_pool[...].cost_now), so a cost modifier
     //    (SET_COST) is honored.
-    if (is_xcost) {
+    if (!autoplay && is_xcost) {
         s.player_energy = 0;
-    } else if (!corruption_makes_free(s, *def)) {
+    } else if (!autoplay && !corruption_makes_free(s, *def)) {
         s.player_energy =
             static_cast<int16_t>(s.player_energy - static_cast<int16_t>(cost_now));
     }
+}
+
+void normalize_terminal_card_queue(CombatState& s) noexcept {
+    const uint8_t queued = s.card_queue_count;
+    for (uint8_t i = 0; i < queued; ++i) {
+        const CardQueueItem item = s.card_queue[i];
+        if (is_end_turn_sentinel(item) ||
+            !card_is_autoplaying(s, item.card_index)) {
+            continue;
+        }
+        ActionQueueItem use{};
+        use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
+        use.src = kActorPlayer;
+        use.tgt = kActorPlayer;
+        use.amount = item.card_index;
+        execute_opcode(s, use);
+    }
+    s.card_queue_count = 0;
 }
 
 // --- Card-level trigger dispatch (public) ------------------------------------

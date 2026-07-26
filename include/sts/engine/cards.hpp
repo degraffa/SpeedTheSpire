@@ -36,6 +36,11 @@ namespace sts::engine {
 // content tasks.
 using CardType = sts::registry::CardType;
 
+// Exact AbstractCard.CardTarget value. `needs_target` remains the compact UI
+// convenience, while this distinction is needed by GameActionManager's
+// post-hook ENEMY-only dead/escaping suppression (SELF_AND_ENEMY is excluded).
+using CardTargetKind = sts::registry::CardTargetKind;
+
 // When a card's effect program runs. ON_PLAY is the played-card
 // path (every ATTACK/SKILL + the playable Slimed status); the unplayable
 // statuses/curses instead run their program at a passive hook -- END_OF_TURN

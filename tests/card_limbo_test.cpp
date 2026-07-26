@@ -31,6 +31,7 @@
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/monster_dispatch.hpp"
 #include "sts/engine/relic_hooks.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -506,6 +507,397 @@ TEST(CardLimbo, DoubleTapReplayPrecedesAnAlreadyQueuedPlay) {
         has_card_flag(s.card_pool[replay].flags, CardFlag::PURGE_ON_USE));
     EXPECT_EQ(s.card_queue[1].card_index, second)
         << "the pre-existing play stays behind Double Tap's index-1 replay";
+}
+
+// --- 11. A queued autoplay is revalidated when it reaches the card queue.
+//
+// GameActionManager.getNextAction rolls a random target (when needed), then
+// calls canUse BEFORE any play hooks or use() (:209-249). AbstractCard.canUse
+// delegates to cardPlayable, which rejects an enemy-target card whose selected
+// monster is dying (:854-859, :916-924). A rejected autoplay still receives a
+// no-trigger UseCardAction for filing (:285-301), but it does not spend energy,
+// increment cardsPlayedThisTurn, fire Rage, queue damage, or retarget.
+TEST(CardLimbo, QueuedAutoplayCancelsWhenItsSelectedTargetDies) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/6);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 30;
+    s.monsters[1].max_hp = 30;
+    s.player_powers[0].power_id = static_cast<uint16_t>(PowerId::RAGE);
+    s.player_powers[0].amount = 3;
+    s.player_power_count = 1;
+    const CardPoolIndex strike = AddDrawTop(s, CardId::STRIKE);
+    const int32_t card_rng_before = s.card_random_rng.counter;
+    const int32_t shuffle_rng_before = s.shuffle_rng.counter;
+
+    ActionQueueItem autoplay{};
+    autoplay.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    autoplay.src = kActorPlayer;
+    autoplay.tgt = 0;
+    autoplay.flags = kPlayCardFromDrawTop;
+    add_to_bottom(s, autoplay);
+
+    // Actions outrank cardQueue resolution. This hit therefore kills the
+    // selected monster after PLAY_CARD has put Strike in limbo/cardQueue, but
+    // before that queued play reaches GameActionManager's canUse gate.
+    ActionQueueItem lethal{};
+    lethal.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    lethal.src = kActorPlayer;
+    lethal.tgt = 0;
+    lethal.amount = 6;
+    add_to_bottom(s, lethal);
+
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.monsters[1].hp, 30) << "a rejected play is never retargeted";
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+    EXPECT_EQ(s.player_block, 0) << "Rage's onUseCard hook must not fire";
+    EXPECT_EQ(s.player_energy, 6) << "autoplay cancellation spends no energy";
+    EXPECT_EQ(s.card_random_rng.counter, card_rng_before);
+    EXPECT_EQ(s.shuffle_rng.counter, shuffle_rng_before);
+    ASSERT_EQ(s.discard_count, 1)
+        << "the no-trigger UseCardAction still files the autoplayed card";
+    EXPECT_EQ(s.discard[0], strike);
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.limbo_count, 0);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_queue_count, 0);
+}
+
+// --- 12. Double Tap keeps the original target on its autoplay replay.
+//
+// DoubleTapPower.onUseCard copies the original target into a front-queued,
+// purge-on-use autoplay (:43-66). If the first Strike kills that monster while
+// another remains, the replay reaches the same canUse rejection above: it
+// neither retargets nor fires play/use hooks, and its no-trigger UseCardAction
+// merely purges the temporary limbo copy.
+TEST(CardLimbo, DoubleTapReplayCancelsWhenOriginalTargetDies) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/6);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 30;
+    s.monsters[1].max_hp = 30;
+    s.player_powers[0].power_id =
+        static_cast<uint16_t>(PowerId::DOUBLE_TAP);
+    s.player_powers[0].amount = 1;
+    s.player_powers[1].power_id = static_cast<uint16_t>(PowerId::RAGE);
+    s.player_powers[1].amount = 3;
+    s.player_power_count = 2;
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    const int32_t card_rng_before = s.card_random_rng.counter;
+    const int32_t shuffle_rng_before = s.shuffle_rng.counter;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.monsters[1].hp, 30) << "Double Tap preserves, never rerolls, target";
+    EXPECT_EQ(s.cards_played_this_turn, 1)
+        << "only the original passes canUse and enters the hook sequence";
+    EXPECT_EQ(s.player_block, 3) << "Rage fires once for the original only";
+    EXPECT_EQ(s.player_energy, 5)
+        << "the original costs one; the rejected autoplay copy is free";
+    EXPECT_EQ(s.card_random_rng.counter, card_rng_before);
+    EXPECT_EQ(s.shuffle_rng.counter, shuffle_rng_before);
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], strike);
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.limbo_count, 0) << "the replay's UseCardAction purged its copy";
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_queue_count, 0);
+    ASSERT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(s.player_powers[0].power_id,
+              static_cast<uint16_t>(PowerId::RAGE))
+        << "Double Tap spent exactly once on the original";
+}
+
+TEST(CardLimbo, OrdinaryQueuedCardRejectedByCanUseStaysInHand) {
+    CombatState s = MakeCombat(6, 0);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 30;
+    s.monsters[1].max_hp = 30;
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.hand[0], strike);
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+    EXPECT_EQ(s.player_energy, 6);
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.exhaust_count, 0);
+}
+
+TEST(CardLimbo, HavocAutoplayStillRejectsAnUnplayableStatus) {
+    CombatState s = MakeCombat(6, 100);
+    AddHand(s, CardId::HAVOC);
+    const CardPoolIndex wound = AddDrawTop(s, CardId::WOUND);
+
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump(s);
+
+    EXPECT_EQ(s.cards_played_this_turn, 1) << "only Havoc passes canUse";
+    EXPECT_EQ(s.player_energy, 5);
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, wound))
+        << "failed autoplay still gets no-trigger UseCardAction filing";
+    EXPECT_FALSE(has_card_flag(s.card_pool[wound].flags,
+                               CardFlag::EXHAUST_ON_USE_ONCE));
+}
+
+TEST(CardLimbo, DoubleTapReplayIsRevalidatedAgainstNormality) {
+    CombatState s = MakeCombat(6, 100);
+    s.cards_played_this_turn = 2;
+    s.player_powers[0].power_id =
+        static_cast<uint16_t>(PowerId::DOUBLE_TAP);
+    s.player_powers[0].amount = 1;
+    s.player_power_count = 1;
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::NORMALITY);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 94);
+    EXPECT_EQ(s.cards_played_this_turn, 3);
+    EXPECT_EQ(s.player_energy, 5);
+    EXPECT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+              static_cast<uint16_t>(CardId::NORMALITY));
+}
+
+TEST(CardLimbo, DoubleTapReplayIsRevalidatedAgainstVelvetChoker) {
+    CombatState s = MakeCombat(6, 100);
+    s.cards_played_this_turn = 5;
+    GiveRelic(s, RelicId::VELVET_CHOKER);
+    s.relics[0].counter = 5;
+    s.player_powers[0].power_id =
+        static_cast<uint16_t>(PowerId::DOUBLE_TAP);
+    s.player_powers[0].amount = 1;
+    s.player_power_count = 1;
+    AddHand(s, CardId::STRIKE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 94);
+    EXPECT_EQ(s.cards_played_this_turn, 6);
+    EXPECT_EQ(s.relics[0].counter, 6);
+    EXPECT_EQ(s.player_energy, 5);
+}
+
+TEST(CardLimbo, EscapedEnemySuppressionExcludesSelfAndEnemyCards) {
+    CombatState enemy = MakeCombat(6, 100);
+    enemy.monster_count = 2;
+    enemy.monsters[0].flags |= kMonsterFlagEscaped;
+    enemy.monsters[1].monster_id =
+        static_cast<uint16_t>(MonsterId::JAW_WORM);
+    enemy.monsters[1].hp = 100;
+    enemy.monsters[1].max_hp = 100;
+    const CardPoolIndex strike = AddHand(enemy, CardId::STRIKE);
+    ASSERT_TRUE(queue_card_play(enemy, 0, 0));
+    pump(enemy);
+    EXPECT_EQ(enemy.cards_played_this_turn, 1)
+        << "the escaped-target split is after hooks/counters";
+    EXPECT_EQ(enemy.player_energy, 6);
+    ASSERT_EQ(enemy.hand_count, 1);
+    EXPECT_EQ(enemy.hand[0], strike);
+    EXPECT_EQ(enemy.discard_count, 0);
+
+    CombatState autoplay = MakeCombat(6, 100);
+    autoplay.monster_count = 2;
+    autoplay.monsters[0].flags |= kMonsterFlagEscaped;
+    autoplay.monsters[1].monster_id =
+        static_cast<uint16_t>(MonsterId::JAW_WORM);
+    autoplay.monsters[1].hp = 100;
+    autoplay.monsters[1].max_hp = 100;
+    const CardPoolIndex auto_strike = AddDrawTop(autoplay, CardId::STRIKE);
+    ActionQueueItem play{};
+    play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    play.tgt = 0;
+    play.flags = kPlayCardFromDrawTop;
+    add_to_bottom(autoplay, play);
+    pump(autoplay);
+    EXPECT_EQ(autoplay.cards_played_this_turn, 1);
+    EXPECT_EQ(autoplay.player_energy, 6);
+    EXPECT_FALSE(PileHas(autoplay.limbo, autoplay.limbo_count, auto_strike));
+    EXPECT_FALSE(PileHas(autoplay.discard, autoplay.discard_count, auto_strike));
+    EXPECT_FALSE(PileHas(autoplay.exhaust, autoplay.exhaust_count, auto_strike))
+        << "post-hook ENEMY suppression removes limbo without filing";
+
+    CombatState both = MakeCombat(6, 100);
+    both.monster_count = 2;
+    both.monsters[0].flags |= kMonsterFlagEscaped;
+    both.monsters[0].intent = static_cast<uint8_t>(MonsterIntent::ATTACK);
+    both.monsters[1].monster_id =
+        static_cast<uint16_t>(MonsterId::JAW_WORM);
+    both.monsters[1].hp = 100;
+    both.monsters[1].max_hp = 100;
+    AddHand(both, CardId::SPOT_WEAKNESS);
+    ASSERT_TRUE(queue_card_play(both, 0, 0));
+    pump(both);
+    EXPECT_EQ(both.cards_played_this_turn, 1);
+    EXPECT_EQ(both.player_energy, 5);
+    EXPECT_EQ(both.hand_count, 0);
+    EXPECT_EQ(both.discard_count, 1);
+    ASSERT_EQ(both.player_power_count, 1);
+    EXPECT_EQ(both.player_powers[0].power_id,
+              static_cast<uint16_t>(PowerId::STRENGTH));
+    EXPECT_EQ(both.player_powers[0].amount, 3);
+}
+
+TEST(CardLimbo, FailedAutoplayUsesSpoonAndOnExhaustBeforeCombatEnds) {
+    int64_t seed = 0;
+    for (;; ++seed) {
+        RngStream probe = from_seed(seed);
+        if (!random_boolean(probe)) {
+            break;
+        }
+    }
+    CombatState s = MakeCombat(6, 100);
+    s.card_random_rng = from_seed(seed);
+    s.cards_played_this_turn = 3;
+    GiveRelic(s, RelicId::STRANGE_SPOON);
+    AddHand(s, CardId::NORMALITY);
+    const CardPoolIndex sentinel = AddDrawTop(s, CardId::SENTINEL);
+    ActionQueueItem play{};
+    play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    play.tgt = 0;
+    play.flags = kPlayCardFromDrawTop | kPlayCardExhaust;
+    add_to_bottom(s, play);
+
+    pump(s);
+
+    EXPECT_EQ(s.card_random_rng.counter, 1);
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, sentinel));
+    EXPECT_EQ(s.player_energy, 8) << "Sentinel.onExhaust resolved";
+    EXPECT_FALSE(has_card_flag(s.card_pool[sentinel].flags,
+                               CardFlag::EXHAUST_ON_USE_ONCE));
+}
+
+TEST(CardLimbo, TerminalQueuedAutoplayUsesSpoonAndOnExhaustFiling) {
+    int64_t seed = 0;
+    for (;; ++seed) {
+        RngStream probe = from_seed(seed);
+        if (!random_boolean(probe)) {
+            break;
+        }
+    }
+    CombatState s = MakeCombat(6, 6);
+    s.card_random_rng = from_seed(seed);
+    GiveRelic(s, RelicId::STRANGE_SPOON);
+    const CardPoolIndex sentinel = AddDrawTop(s, CardId::SENTINEL);
+    ActionQueueItem play{};
+    play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    play.tgt = 0;
+    play.flags = kPlayCardFromDrawTop | kPlayCardExhaust;
+    add_to_bottom(s, play);
+    ActionQueueItem lethal{};
+    lethal.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    lethal.tgt = 0;
+    lethal.amount = 6;
+    add_to_bottom(s, lethal);
+
+    pump(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(s.card_random_rng.counter, 1);
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, sentinel));
+    EXPECT_FALSE(has_card_flag(s.card_pool[sentinel].flags,
+                               CardFlag::EXHAUST_ON_USE_ONCE));
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem& on_exhaust = s.action_queue[s.action_head];
+    EXPECT_EQ(static_cast<Opcode>(on_exhaust.opcode), Opcode::GAIN_ENERGY);
+    EXPECT_EQ(on_exhaust.amount, 2);
+}
+
+TEST(CardLimbo, AutoplayDoesNotPermanentlyZeroLaterPlayCost) {
+    int64_t seed = 0;
+    for (;; ++seed) {
+        RngStream probe = from_seed(seed);
+        (void)random(probe, 0);
+        if (random_boolean(probe)) {
+            break;
+        }
+    }
+    CombatState s = MakeCombat(6, 100);
+    s.card_random_rng = from_seed(seed);
+    GiveRelic(s, RelicId::STRANGE_SPOON);
+    AddHand(s, CardId::HAVOC);
+    const CardPoolIndex strike = AddDrawTop(s, CardId::STRIKE);
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump(s);
+    EXPECT_EQ(s.player_energy, 5);
+    EXPECT_EQ(s.card_pool[strike].cost_now, 1);
+
+    uint8_t slot = 0;
+    while (slot < s.discard_count && s.discard[slot] != strike) {
+        ++slot;
+    }
+    ASSERT_LT(slot, s.discard_count);
+    for (uint8_t i = static_cast<uint8_t>(slot + 1); i < s.discard_count; ++i) {
+        s.discard[i - 1] = s.discard[i];
+    }
+    --s.discard_count;
+    s.hand[s.hand_count++] = strike;
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.player_energy, 4);
+}
+
+TEST(CardLimbo, DrawTopAutoplayXCostPreservesPlayerEnergy) {
+    CombatState s = MakeCombat(3, 100);
+    AddDrawTop(s, CardId::WHIRLWIND);
+    ActionQueueItem play{};
+    play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    play.tgt = kActorPlayer;
+    play.flags = kPlayCardFromDrawTop;
+    add_to_bottom(s, play);
+    pump(s);
+    EXPECT_EQ(s.monsters[0].hp, 85);
+    EXPECT_EQ(s.player_energy, 3);
+}
+
+TEST(CardLimbo, DoubleTapXCostReplayKeepsOriginalEnergyOnUse) {
+    CombatState s = MakeCombat(3, 100);
+    s.player_powers[0].power_id =
+        static_cast<uint16_t>(PowerId::DOUBLE_TAP);
+    s.player_powers[0].amount = 1;
+    s.player_power_count = 1;
+    const CardPoolIndex whirlwind = AddHand(s, CardId::WHIRLWIND);
+    s.card_pool[whirlwind].misc = 77;
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump(s);
+    EXPECT_EQ(s.monsters[0].hp, 70)
+        << "original and replay each execute energyOnUse == 3";
+    EXPECT_EQ(s.player_energy, 0);
+    EXPECT_EQ(s.card_pool[whirlwind].misc, 77)
+        << "capturing the purge copy must not overwrite persistent source misc";
+}
+
+TEST(CardLimbo, RandomTargetDrawPrecedesFailedGateAndIsNotRepeated) {
+    CombatState s = MakeCombat(6, 100);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 100;
+    s.monsters[1].max_hp = 100;
+    s.cards_played_this_turn = 3;
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::NORMALITY);
+    CardDef random_def = *card_def(CardId::STRIKE);
+    random_def.random_target = true;
+    random_def.target_kind = CardTargetKind::RANDOM_ENEMY;
+
+    const int32_t before = s.card_random_rng.counter;
+    const uint8_t target = resolve_play_target(s, random_def, 0);
+    EXPECT_LT(target, s.monster_count);
+    EXPECT_EQ(s.card_random_rng.counter, before + 1)
+        << "dequeue resolves random targeting before canUse";
+    EXPECT_FALSE(card_can_use(s, strike, target, /*autoplay=*/false));
+    EXPECT_EQ(s.card_random_rng.counter, before + 1)
+        << "the failed gate neither rerolls nor consumes another draw";
 }
 
 }  // namespace
