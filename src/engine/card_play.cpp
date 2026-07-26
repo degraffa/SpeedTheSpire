@@ -199,6 +199,39 @@ void move_played_card_to_limbo(CombatState& s, CardPoolIndex pool_index) noexcep
     // else is a malformed play, left untouched (defensive).
 }
 
+// CardQueueItem.autoplayCard is not a stored bit in the compact two-byte queue
+// row. Its live producers (PlayTopCardAction / PLAY_CARD copies) put the
+// instance in limbo before queueing it, while an ordinary hand play stays in
+// hand until AbstractPlayer.useCard succeeds. Pile membership is therefore the
+// exact distinction at dequeue time.
+[[nodiscard]] bool card_is_autoplaying(const CombatState& s,
+                                       CardPoolIndex pool_index) noexcept {
+    for (uint8_t i = 0; i < s.limbo_count; ++i) {
+        if (s.limbo[i] == pool_index) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// A failed autoplay canUse check does not run the normal play sequence, but
+// GameActionManager still queues `new UseCardAction(c)` with
+// dontTriggerOnUseCard set (GameActionManager.java:285-301). Its constructor
+// fires no hooks; its update performs only the normal purge/exhaust/discard
+// decision (including Strange Spoon and onExhaust). Leaving the compact-model
+// card in limbo until this queued USE_CARD resolves is gameplay-equivalent to
+// Java's presentation-only ExhaustCardEffect removal and gives the filing
+// action the source membership file_card_from_limbo requires.
+void queue_cancelled_autoplay_filing(CombatState& s,
+                                     CardPoolIndex pool_index) noexcept {
+    ActionQueueItem use{};
+    use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
+    use.src = kActorPlayer;
+    use.tgt = kActorPlayer;
+    use.amount = pool_index;
+    add_to_bottom(s, use);
+}
+
 // --- Card-level trigger programs (statuses / curses) -------------------------
 // A passive status/curse (trigger != ON_PLAY) runs its `effects`/`upgraded`
 // program at a hook site instead of on play. Every in-scope trigger step is
@@ -284,16 +317,36 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
         return;
     }
 
+    // GameActionManager.getNextAction resolves a random target first, then
+    // re-runs canUse before ANY hook/counter/use work (:209-249).
+    const uint8_t resolved_target = resolve_play_target(s, *def, item.target);
+
+    // AbstractCard.cardPlayable (:854-859) rejects an enemy-target card when
+    // its selected monster is dying. The engine's isDying representation is
+    // hp <= 0. Do not use monster_dead_or_escaped here: Java's canUse gate does
+    // not reject isEscaping (the later :265-280 no-effect branch handles it).
+    //
+    // A rejected ordinary queued hand play simply stays in hand. A rejected
+    // autoplay already in limbo gets only the no-trigger UseCardAction filing
+    // GameActionManager adds at :298-301. In both cases there is no retarget,
+    // hook, counter increment, effect, energy spend, or additional RNG draw.
+    const bool selected_target_died =
+        def->needs_target && resolved_target < s.monster_count &&
+        s.monsters[resolved_target].hp <= 0;
+    if (selected_target_died) {
+        if (card_is_autoplaying(s, pool_index)) {
+            queue_cancelled_autoplay_filing(s, pool_index);
+        }
+        return;
+    }
+
     // 1. onPlayCard hook fan-out (§5.3: player powers -> monster powers ->
     //    relics -> stance -> blights -> hand/discard/draw cards). Queues each
     //    responding hook's effects; no-op without a hook-bearing power.
-    dispatch_on_play_card(s, s.card_pool[pool_index].card_id, item.target);
+    dispatch_on_play_card(s, s.card_pool[pool_index].card_id, resolved_target);
 
     // 2. ++cardsPlayedThisTurn (AbstractPlayer.useCard:1373).
     ++s.cards_played_this_turn;
-
-    // 3. Resolve the effect target (trap-10 random roll at dequeue, else declared).
-    const uint8_t resolved_target = resolve_play_target(s, *def, item.target);
 
     // Per-instance runtime data: the upgrade level selects which of the two
     // effect programs runs (the base/upgraded two-row lookup); the instance flags

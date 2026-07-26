@@ -508,5 +508,108 @@ TEST(CardLimbo, DoubleTapReplayPrecedesAnAlreadyQueuedPlay) {
         << "the pre-existing play stays behind Double Tap's index-1 replay";
 }
 
+// --- 11. A queued autoplay is revalidated when it reaches the card queue.
+//
+// GameActionManager.getNextAction rolls a random target (when needed), then
+// calls canUse BEFORE any play hooks or use() (:209-249). AbstractCard.canUse
+// delegates to cardPlayable, which rejects an enemy-target card whose selected
+// monster is dying (:854-859, :916-924). A rejected autoplay still receives a
+// no-trigger UseCardAction for filing (:285-301), but it does not spend energy,
+// increment cardsPlayedThisTurn, fire Rage, queue damage, or retarget.
+TEST(CardLimbo, QueuedAutoplayCancelsWhenItsSelectedTargetDies) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/6);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 30;
+    s.monsters[1].max_hp = 30;
+    s.player_powers[0].power_id = static_cast<uint16_t>(PowerId::RAGE);
+    s.player_powers[0].amount = 3;
+    s.player_power_count = 1;
+    const CardPoolIndex strike = AddDrawTop(s, CardId::STRIKE);
+    const int32_t card_rng_before = s.card_random_rng.counter;
+    const int32_t shuffle_rng_before = s.shuffle_rng.counter;
+
+    ActionQueueItem autoplay{};
+    autoplay.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    autoplay.src = kActorPlayer;
+    autoplay.tgt = 0;
+    autoplay.flags = kPlayCardFromDrawTop;
+    add_to_bottom(s, autoplay);
+
+    // Actions outrank cardQueue resolution. This hit therefore kills the
+    // selected monster after PLAY_CARD has put Strike in limbo/cardQueue, but
+    // before that queued play reaches GameActionManager's canUse gate.
+    ActionQueueItem lethal{};
+    lethal.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    lethal.src = kActorPlayer;
+    lethal.tgt = 0;
+    lethal.amount = 6;
+    add_to_bottom(s, lethal);
+
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.monsters[1].hp, 30) << "a rejected play is never retargeted";
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+    EXPECT_EQ(s.player_block, 0) << "Rage's onUseCard hook must not fire";
+    EXPECT_EQ(s.player_energy, 6) << "autoplay cancellation spends no energy";
+    EXPECT_EQ(s.card_random_rng.counter, card_rng_before);
+    EXPECT_EQ(s.shuffle_rng.counter, shuffle_rng_before);
+    ASSERT_EQ(s.discard_count, 1)
+        << "the no-trigger UseCardAction still files the autoplayed card";
+    EXPECT_EQ(s.discard[0], strike);
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.limbo_count, 0);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_queue_count, 0);
+}
+
+// --- 12. Double Tap keeps the original target on its autoplay replay.
+//
+// DoubleTapPower.onUseCard copies the original target into a front-queued,
+// purge-on-use autoplay (:43-66). If the first Strike kills that monster while
+// another remains, the replay reaches the same canUse rejection above: it
+// neither retargets nor fires play/use hooks, and its no-trigger UseCardAction
+// merely purges the temporary limbo copy.
+TEST(CardLimbo, DoubleTapReplayCancelsWhenOriginalTargetDies) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/6);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 30;
+    s.monsters[1].max_hp = 30;
+    s.player_powers[0].power_id =
+        static_cast<uint16_t>(PowerId::DOUBLE_TAP);
+    s.player_powers[0].amount = 1;
+    s.player_powers[1].power_id = static_cast<uint16_t>(PowerId::RAGE);
+    s.player_powers[1].amount = 3;
+    s.player_power_count = 2;
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    const int32_t card_rng_before = s.card_random_rng.counter;
+    const int32_t shuffle_rng_before = s.shuffle_rng.counter;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.monsters[1].hp, 30) << "Double Tap preserves, never rerolls, target";
+    EXPECT_EQ(s.cards_played_this_turn, 1)
+        << "only the original passes canUse and enters the hook sequence";
+    EXPECT_EQ(s.player_block, 3) << "Rage fires once for the original only";
+    EXPECT_EQ(s.player_energy, 5)
+        << "the original costs one; the rejected autoplay copy is free";
+    EXPECT_EQ(s.card_random_rng.counter, card_rng_before);
+    EXPECT_EQ(s.shuffle_rng.counter, shuffle_rng_before);
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], strike);
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.limbo_count, 0) << "the replay's UseCardAction purged its copy";
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_queue_count, 0);
+    ASSERT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(s.player_powers[0].power_id,
+              static_cast<uint16_t>(PowerId::RAGE))
+        << "Double Tap spent exactly once on the original";
+}
+
 }  // namespace
 }  // namespace sts::engine

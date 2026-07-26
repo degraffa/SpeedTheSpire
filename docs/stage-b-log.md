@@ -2887,3 +2887,31 @@ compensation was added; all three old ones were removed.
   documentation link/stale-count checks, and a clean diff under
   `tests/golden/` completed the handoff. No schema bump and no committed
   fixture/golden edit.
+
+<a id="card-dead-target"></a>
+
+### card-dead-target `[x]` — Queued-card dead-target revalidation
+
+**Provenance:** `GameActionManager.getNextAction`,
+`AbstractCard.cardPlayable` / `canUse`, `DoubleTapPower.onUseCard`, and
+`UseCardAction`.
+
+**Log:** A post-landing `card-limbo` audit found that `resolve_card_play`
+skipped `GameActionManager.getNextAction`'s dequeue-time `canUse` call
+(`GameActionManager.java:209-214`). `AbstractCard.cardPlayable` rejects an
+enemy-target card whose selected monster is dying before any hook or `use()`
+call (`AbstractCard.java:854-859,916-924`), while the engine instead fired
+hooks, counted the play and ran its program against the dead target. The fix
+resolves random targeting first, then cancels a dead selected target before
+all hook/counter/effect/energy work. An autoplay already in limbo receives
+only Java's no-trigger `UseCardAction` filing
+(`GameActionManager.java:285-301`): a normal free autoplay discards, while
+Double Tap's target-preserving purge copy (`DoubleTapPower.java:43-66`) lands
+in no pile. Two regressions keep a second monster alive and pin no retargeting
+plus exact filing, queue, energy, RNG, Rage and Double Tap behavior. No schema,
+fixture/golden, registry namespace, opcode or frozen-design change.
+
+**Acceptance:** final-tree Debug **950/950**, leak-detecting ASan/UBSan
+**950/950**, and Release **950/950**; both focused `CardLimbo` regressions and
+the unchanged fixture oracle were included. Documentation links, stale-count,
+whitespace and golden/fixture safety checks passed before commit.

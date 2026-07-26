@@ -284,6 +284,22 @@ entries are: conventions §2 requires that history and this ledger never
 disagree, and a fix or a toolchain change that nothing records is invisible to
 the next session.
 
+- **Queued-card dead-target revalidation** `[x]` — a post-landing
+  `card-limbo` audit found that `resolve_card_play` omitted Java's dequeue-time
+  `canUse` gate. `GameActionManager.getNextAction` resolves any random target
+  and calls `canUse` before the first play hook (`GameActionManager.java:
+  209-214`); `AbstractCard.cardPlayable` rejects a targeted card whose selected
+  monster is dying (`AbstractCard.java:854-859,916-924`). A queued autoplay or
+  Double Tap copy could therefore fire hooks, increment the play counter and
+  run its program against a target killed by an earlier queued action. The
+  resolver now cancels before those effects, never retargets, and queues only
+  Java's no-trigger `UseCardAction` filing for an autoplay already in limbo
+  (`GameActionManager.java:285-301`). Ordinary free autoplay files to discard;
+  a Double Tap copy preserves purge-on-use and lands in no pile. Focused
+  regressions pin filing, energy, queue, RNG, Rage/Double Tap hook counts, and
+  a second live monster remaining untouched. No state/schema, registry,
+  opcode, fixture, golden, or frozen-design change.
+  [Archive log.](stage-b-log.md#card-dead-target)
 - **Run-layer escape obligation + Smoke Bomb flag-parity audit** `[x]` —
   commit `82d497a` plus its immediate fix-forward (this ledger change).
   Discharges and deletes both deferred rows that named the next

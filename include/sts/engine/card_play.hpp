@@ -51,6 +51,11 @@
 //   * Energy is deducted AFTER the effects are queued (useCard order), not before.
 //   * The random-target roll (trap 10) happens at DEQUEUE (resolve), never at
 //     enqueue (queue_card_play) -- see resolve_play_target / roll_random_target.
+//   * The dequeue path re-runs Java's canUse gate BEFORE every hook. If a
+//     selected enemy died while a targeted autoplay waited in the queue, the
+//     play is not retargeted and runs no hooks/effects/counters/energy spend;
+//     only a no-trigger USE_CARD files the already-limbo autoplay instance
+//     (GameActionManager.java:209-214,285-301; AbstractCard.java:854-859).
 
 #include <cstdint>
 
@@ -89,8 +94,9 @@ bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noe
 
 // Resolve one dequeued card play (design doc §5.3; the limbo model above).
 // Called from pump_step()'s step 3 when the cardQueue head is a real card (not
-// the end-turn sentinel). Runs the hook fan-outs, ++cards_played_this_turn,
-// the trap-10 target resolution, queues the card's effect ActionQueueItems via
+// the end-turn sentinel). Resolves trap-10 targeting, applies the dead-selected-
+// target canUse cancellation above, then runs the hook fan-outs,
+// ++cards_played_this_turn, and queues the card's effect ActionQueueItems via
 // add_to_bottom -- the upgrade-selected effect program (the two-row lookup)
 // once, or, for an X-cost card, energyOnUse times with energy then zeroed --
 // then queues the USE_CARD filing action, moves the card hand -> LIMBO, and
