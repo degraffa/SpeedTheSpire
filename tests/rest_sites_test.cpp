@@ -297,6 +297,46 @@ TEST(RestSites, MalformedDreamCatcherRewardIsInertAndAdvertisesNothing) {
     }
 }
 
+TEST(RestSites, ZeroCardDreamCatcherRewardIsInertAndAdvertisesNothing) {
+    RunController rc = enter_floor_one_rest();
+    set_relics(
+        rc.run,
+        {RelicSlot{static_cast<uint16_t>(RelicId::SINGING_BOWL), -1}});
+    rc.rest.screen = static_cast<uint8_t>(RestScreen::DREAM_CATCHER);
+    rc.rewards = RewardScreen{};
+    rc.rewards.count = 1;
+    rc.rewards.open_card_item = 0;
+    rc.rewards.items[0].kind =
+        static_cast<uint8_t>(RewardItemKind::CARDS);
+    ASSERT_EQ(rc.rewards.items[0].card_count, 0);
+    EXPECT_FALSE(reward_card_item_open_legal(rc.rewards));
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_proceed);
+    EXPECT_FALSE(mask.can_skip_card);
+    EXPECT_FALSE(mask.can_sing);
+    for (bool can_take : mask.can_take_card) {
+        EXPECT_FALSE(can_take);
+    }
+    for (bool can_claim : mask.can_claim_reward) {
+        EXPECT_FALSE(can_claim);
+    }
+
+    const Action forced[] = {
+        make_action(ActionVerb::CHOOSE, 0),
+        make_action(ActionVerb::CHOOSE, kChooseSkipCard),
+        make_action(ActionVerb::CHOOSE, kChooseSing),
+        make_action(ActionVerb::CHOOSE, kChooseProceed)};
+    for (const Action action : forced) {
+        RunController attempted = rc;
+        step(attempted, action);
+        EXPECT_EQ(std::memcmp(&attempted, &rc, sizeof(rc)), 0)
+            << "zero-card Dream Catcher state accepted forced CHOOSE "
+            << static_cast<int>(action_arg0(action));
+    }
+}
+
 // CampfireUI inserts Rest, Smith, then calls addCampfireOption on each relic in
 // acquisition order.  Unusable buttons remain in the menu but are absent from
 // legal actions.
