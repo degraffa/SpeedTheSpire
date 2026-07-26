@@ -169,9 +169,14 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_choose_card(s, item);
             return;
         case Opcode::PLAY_TOP_DRAW:
-            // `amount` carries the source card's pool index to exclude from the
-            // deck (stamped by resolve_card_play; see op_play_top_draw / Havoc).
-            op_play_top_draw(s, item.amount);
+            // The source card (Havoc) is in the limbo pile; no exclusion operand.
+            op_play_top_draw(s);
+            return;
+        case Opcode::USE_CARD:
+            // UseCardAction.update as a queued action: the Strange Spoon roll,
+            // then file the played card (`amount` = pool index) out of the
+            // limbo pile (op_use_card; queued by resolve_card_play).
+            op_use_card(s, item);
             return;
         case Opcode::REMOVE_POWER:
             op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags));
@@ -263,12 +268,10 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                                 conditional_draw_type_from_flags(item.flags));
             return;
         case Opcode::RESHUFFLE_ALL:
-            // The fused Deep Breath double shuffle (piles.cpp). `tgt` carries the
-            // source card's pool index, stamped by card_play.cpp, so the card that
-            // is in limbo in the game is kept out of the shuffled discard; a
-            // non-card queuer leaves an actor sentinel there, which is >=
-            // kCardPoolCap and so means "exclude nothing".
-            reshuffle_all(s, item.tgt);
+            // The fused Deep Breath double shuffle (piles.cpp). The played Deep
+            // Breath is in the limbo pile, so the discard scanned is exactly
+            // the game's -- the former `tgt` exclusion stamp is folded away.
+            reshuffle_all(s);
             return;
         case Opcode::MADNESS:
             op_madness(s);

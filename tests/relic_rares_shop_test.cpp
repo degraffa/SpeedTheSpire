@@ -924,10 +924,16 @@ TEST(RelicRaresShop, MedicalKitExhaustsThePlayedStatus) {
     item.card_index = pi;
     resolve_card_play(s, item);
     EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.action_count, 1)
+        << "a status runs no ON_PLAY program -- the one queued item is the "
+           "USE_CARD filing action (the played card is in limbo until then)";
+    ASSERT_EQ(s.limbo_count, 1);
+    EXPECT_EQ(s.limbo[0], pi);
+    drain(s);  // resolve the queued USE_CARD (UseCardAction.update)
     EXPECT_EQ(s.discard_count, 0);
     ASSERT_EQ(s.exhaust_count, 1);
     EXPECT_EQ(s.exhaust[0], pi);
-    EXPECT_EQ(s.action_count, 0) << "a status runs no ON_PLAY program";
+    EXPECT_EQ(s.limbo_count, 0);
 }
 
 // StrangeSpoon (UseCardAction.java:109-131): an exhausting non-POWER play rolls
@@ -946,6 +952,7 @@ TEST(RelicRaresShop, StrangeSpoonRollsOncePerExhaustingPlay) {
         CardQueueItem item{};
         item.card_index = pi;
         resolve_card_play(s, item);
+        drain(s);  // the Strange Spoon roll lives in queued UseCardAction.update
         EXPECT_EQ(s.card_random_rng.counter, before.counter + 1)
             << "exactly one boolean, seed=" << seed;
         if (s.discard_count == 1) {
@@ -971,6 +978,7 @@ TEST(RelicRaresShop, StrangeSpoonConsumesNoRngOnANonExhaustingPlay) {
     CardQueueItem item{};
     item.card_index = pi;
     resolve_card_play(s, item);
+    drain(s);  // queued UseCardAction files the non-exhausting card
     EXPECT_EQ(s.card_random_rng.counter, before) << "no draw for a plain play";
     EXPECT_EQ(s.discard_count, 1);
 }
@@ -987,6 +995,12 @@ TEST(RelicRaresShop, ChemicalXAddsTwoRepetitionsWithoutSpendingEnergy) {
     it0.card_index = p0;
     resolve_card_play(plain, it0);
     const uint8_t plain_actions = plain.action_count;
+    ASSERT_GE(plain_actions, 1);
+    EXPECT_EQ(static_cast<Opcode>(
+                  plain.action_queue[(plain.action_head + plain_actions - 1) %
+                                     kActionQueueCap]
+                      .opcode),
+              Opcode::USE_CARD);
     EXPECT_EQ(plain.player_energy, 0);
 
     CombatState boosted = MakeState(1, /*monster_hp=*/200);
@@ -996,8 +1010,9 @@ TEST(RelicRaresShop, ChemicalXAddsTwoRepetitionsWithoutSpendingEnergy) {
     CardQueueItem it1{};
     it1.card_index = p1;
     resolve_card_play(boosted, it1);
-    EXPECT_EQ(boosted.action_count, plain_actions * 2)
-        << "2 energy -> 4 repetitions";
+    // Both queues have one non-program item: the trailing UseCardAction.
+    EXPECT_EQ(boosted.action_count - 1, (plain_actions - 1) * 2)
+        << "2 energy -> 4 repetitions, plus one filing action per play";
     EXPECT_EQ(boosted.player_energy, 0) << "still spends only the real energy";
 }
 

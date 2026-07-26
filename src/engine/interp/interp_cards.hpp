@@ -23,8 +23,15 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
 // CHOOSE_CARD (auto path only -- see the definition).
 void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept;
 
-// PLAY_TOP_DRAW (Havoc).
-void op_play_top_draw(CombatState& s, int exclude) noexcept;
+// PLAY_TOP_DRAW (Havoc). The played Havoc needs no exclusion parameter: it sits
+// in the limbo pile throughout (see op_use_card).
+void op_play_top_draw(CombatState& s) noexcept;
+
+// USE_CARD -- UseCardAction.update as a queued action: Strange Spoon roll, then
+// file the played card (item.amount = pool index) out of the limbo pile into
+// discard / exhaust / nothing (purge, POWER). See the definition for the full
+// UseCardAction.java mapping.
+void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept;
 
 // SET_COST.
 void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept;

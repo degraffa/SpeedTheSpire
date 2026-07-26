@@ -9,36 +9,45 @@
 //   * GameActionManager.getNextAction, cardQueue branch (GameActionManager.java
 //     :193-280) -- a queued card is DEQUEUED and resolved here, not when the
 //     player chose it.
-//   * AbstractPlayer.useCard (AbstractPlayer.java:1358-1384) -- the onPlayCard
-//     hook fan-out (player powers -> monster powers -> relics -> stance ->
-//     blights -> hand/discard/draw cards), ++cardsPlayedThisTurn, then
-//     c.use(player, target), then move the card to its destination pile, then
-//     energy.use(cost).
+//   * GameActionManager.getNextAction (:214-249) -- the onPlayCard hook fan-out
+//     (player powers -> monster powers -> relics -> stance -> blights ->
+//     hand/discard/draw cards) and ++cardsPlayedThisTurn before useCard.
+//   * AbstractPlayer.useCard (AbstractPlayer.java:1358-1384) -- calculate/use,
+//     queue UseCardAction, notify the other hand cards, then remove the played
+//     card into cardInUse limbo and finally energy.use(cost).
 //   * UseCardAction (UseCardAction.java, whole file) -- the separate queued
 //     action that runs onUseCard/onAfterUseCard and moves the card to discard.
 //   * getRandomMonster(cardRandomRng) (AbstractDungeon / MonsterGroup) -- the
 //     TRAP 10 random-target roll, evaluated at DEQUEUE time.
 //
-// HOOK-ORDER COLLAPSE (documented decision). The real game splits card
-// resolution across TWO pump cycles purely for
-// animation pacing: useCard() runs the onPlayCard fan-out + ++cardsPlayedThisTurn
-// + c.use() (which QUEUES the card's effect actions via addToBot) + energy.use();
-// then a SEPARATELY queued UseCardAction later runs onUseCard/onAfterUseCard and
-// the duration-timed hand->discard move. Our headless engine has no animation,
-// and the skeleton has ZERO relics/powers/blights/stances with a real
-// onPlayCard/onUseCard/onAfterUseCard body -- every hook in the fan-out is a
-// no-op. So resolve_card_play() collapses both cycles into ONE synchronous step
-// when the cardQueue head is dequeued. This yields the identical observable end
-// state and the identical RNG draw sequence as the multi-cycle version (verified
-// against the source: the only cross-cycle interaction would be a listener with
-// a real body, of which the skeleton has none). The hook sites are present as
-// documented no-op stubs so Stage B attaches real listeners without moving the
-// call sites (the §5.5-style extension-point convention).
+// THE LIMBO WINDOW (the collapse that used to live here is REVERSED). The game
+// splits card resolution across two pump cycles, and that split is OBSERVABLE,
+// not animation pacing: useCard() runs the onPlayCard fan-out +
+// ++cardsPlayedThisTurn + c.use() (which QUEUES the card's effect actions via
+// addToBot) + the UseCardAction ctor's onUseCard fan-out + queues the
+// UseCardAction LAST + hand.removeCard + cardInUse = c + energy.use(). From
+// removeCard until UseCardAction.update resolves, the played card is in NO
+// pile, while every action the card queued resolves inside that window. An
+// early collapse (file the card at resolve time) was correct for the original
+// hookless skeleton but wrong the moment anything in the window observed a
+// pile: the reshuffle a card's own draw triggers (Shrug It Off), the discard a
+// card's own program appends to (Anger), a discard/exhaust grid select
+// (Headbutt/Exhume), the Strange Spoon roll's cardRandomRng position, the
+// played card's own onExhaust timing (Dark Embrace). Three per-site
+// compensations had accumulated; the model now reproduces the window itself:
+// resolve_card_play moves the card to the LIMBO pile (CombatState.limbo -- the
+// game's cardInUse / limbo CardGroup) and queues a USE_CARD action
+// (UseCardAction.update: spoon roll + filing) at UseCardAction's exact queue
+// position (interp_cards.cpp op_use_card).
 //
 // KEY TIMING FACTS preserved (matching the Java, not simplified away):
 //   * A card's use() does NOT apply its effects inline -- it QUEUES them via
 //     add_to_bottom onto the action_queue; they resolve later through the
 //     normal pump priority order, exactly like AbstractCard.use()'s addToBot.
+//   * The onPlayCard fan-out and the UseCardAction CTOR's onUseCard fan-out run
+//     synchronously at resolve time (both run inside useCard in the game, with
+//     the card still in the hand); only UseCardAction.UPDATE -- spoon + filing
+//     -- is deferred, as the queued USE_CARD.
 //   * Energy is deducted AFTER the effects are queued (useCard order), not before.
 //   * The random-target roll (trap 10) happens at DEQUEUE (resolve), never at
 //     enqueue (queue_card_play) -- see resolve_play_target / roll_random_target.
@@ -78,15 +87,18 @@ bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noe
 [[nodiscard]] uint8_t resolve_play_target(CombatState& state, const CardDef& def,
                                           uint8_t declared_target) noexcept;
 
-// Resolve one dequeued card play (design doc §5.3, collapsed per the note above).
+// Resolve one dequeued card play (design doc §5.3; the limbo model above).
 // Called from pump_step()'s step 3 when the cardQueue head is a real card (not
-// the end-turn sentinel). Runs the no-op hook stubs, ++cards_played_this_turn,
-// the trap-10 target resolution, then queues the card's effect ActionQueueItems
-// via add_to_bottom. The upgrade-selected effect program (the two-row
-// lookup) runs once, or -- for an X-cost card -- energyOnUse times with energy
-// then zeroed. The card moves hand->exhaust (EXHAUST flag) or hand->discard, and
-// non-X cost is deducted from player_energy. `item.card_index` is the card-pool
-// index of the played card.
+// the end-turn sentinel). Runs the hook fan-outs, ++cards_played_this_turn,
+// the trap-10 target resolution, queues the card's effect ActionQueueItems via
+// add_to_bottom -- the upgrade-selected effect program (the two-row lookup)
+// once, or, for an X-cost card, energyOnUse times with energy then zeroed --
+// then queues the USE_CARD filing action, moves the card hand -> LIMBO, and
+// deducts the non-X cost from player_energy. The card reaches its destination
+// pile (exhaust / discard / nowhere for POWER + purge) only when the queued
+// USE_CARD executes. `item.card_index` is the card-pool index of the played
+// card; an AUTOPLAYED card (Havoc / Double Tap) is already in limbo when this
+// runs.
 void resolve_card_play(CombatState& state, const CardQueueItem& item) noexcept;
 
 // --- Card-level passive triggers (statuses / curses) -------------------------

@@ -69,7 +69,6 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Recursive-play opcode (design R14) — Mayhem | B3.2 | B3.11 | **the opcode now exists**: B3.8 landed `PLAY_CARD` = 34 as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}` **unchanged** — this row is the authoring, not the verb. Also unblocks the Duplication and Distilled Chaos potions |
 | Per-power counter storage — Panache (every-5th), The Bomb (3-turn) | B3.2 | B3.11 | B3.2 added no `PowerSlot` counter field; Combust (B3.7) and Rampage (B3.5) were solved locally |
 | **Escape at the RUN layer: outcome enum, gold settlement, `live_target`** | B3.15 (its combat half landed) | UNASSIGNED — next `run_advance.cpp` owner | the combat layer now expresses escape fully; the **run** layer does not. Three concrete gaps, all in files B3.15 could not touch: (1) `RunCombatOutcome` has no `MUGGED`/`ESCAPED` value and `finish_combat_after_action` maps a survivor-combat-over to `KILLED`; (2) nothing deducts `rs.gold` on a Looter escape or returns stolen gold on a kill; (3) **`live_target` (`run_advance.cpp:92`) still tests `hp > 0`**, so a targeted potion could name an escaped monster — a one-line fix to `monster_dead_or_escaped`. The combat side already carries everything needed: `looter_stolen_gold()`, `kCombatFlagMugged`, and the shared predicate. B4.5 deliberately left a seam for this — its reward gate is the named `RewardOutcome` enum + `reward_outcome_for()`, so `MUGGED` extends it rather than rewriting it |
-| **A played card is in no pile while its own effects resolve — the general case** | B3.10a | UNASSIGNED — engine-wide, pre-existing | `AbstractPlayer.useCard` (`:1369-1375`) queues the card's actions **before** the `UseCardAction` that files it away, so the played card sits in `cardInUse` limbo, in **no pile**. `resolve_card_play` moves it to the discard early instead. Two sites compensate locally — Headbutt's `choice_excluded_index`, and now Deep Breath's `RESHUFFLE_ALL` pool-index stamp — but **the general divergence is live on `master` today with a green suite**: `Shrug It Off` into an empty draw pile has it too. Found by regularisation, not by a failing test, which is how most defects here have surfaced. Fixing it properly means modelling limbo rather than adding a third local compensation |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Purity and Forethought** (colorless uncommons, `CardId` **109** and **101** reserved) | B3.10 split | UNASSIGNED — **same owner as the Gambling Chip row below**, whoever makes the optional multi-select change | reached from a *card* batch rather than a relic, which is what makes it worth its own row: the blocker is no longer a single deferred relic but a **third** independent consumer. Purity discards zero-to-all; Forethought needs a new draw-**bottom** `ChoiceKind` **and** a `freeToPlayOnce` `CardFlag` (bits 8–15 are free), and Forethought+ is itself zero-to-all. `choice_requires_user` (`interp_cards.cpp:718-728`) hard-codes a mandatory fixed count, `ActionVerb` has no confirm/skip, and the translator explicitly defers `can_pick_zero` (`translate.cpp:757`). **Do not let a reward-screen or shop skip button become this change by accident** — it is a public `ActionMask` surface change and wants its own task |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | UNASSIGNED — needs an OPTIONAL multi-select `CHOOSE_CARD` | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. Every existing `ChoiceKind` selects a **mandatory fixed count**, so this needs an optional multi-select with an explicit confirm — which **changes the public `ActionMask` surface** the observation and translator layers join on, and is therefore not a local relic change. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
@@ -212,6 +211,12 @@ unspent ids below are now **permanent gaps and must never be backfilled**):
 | B3.15 remainder | `MonsterId` 26, `PowerId` 75 `THIEVERY`, `MonsterIntent` 13 `ESCAPE`, opcode 40 `ESCAPE` | `PowerId` 76, `MonsterIntent` 14, opcodes 41–42 |
 | B4.5 | *(none — needed no new registry id)* | opcodes 43–44, `ChoiceKind` 6–7 |
 | B3.10a | 14 `CardId`s, `PowerId` 77 `NO_BLOCK`, opcodes 45–48 `DAMAGE_DRAW_PILE`/`CONDITIONAL_DRAW`/`RESHUFFLE_ALL`/`MADNESS` | — (spent its block exactly) |
+| card-limbo | opcode 53 `USE_CARD` | — |
+
+`USE_CARD` does not consume the numerically earlier 49–52: that block remains
+the exclusive live reservation for open task B3.10b. Nor does it backfill
+41–44, which became permanent gaps when their owners landed. The append-only
+allocation therefore advances from the highest live reservation to 53.
 
 **`MonsterState.flags` is a two-region `uint32_t` — allocate from the right
 region.** It was a `uint16_t` and ran out (`kMonsterFlagEscaped` took the last
@@ -350,7 +355,8 @@ need no new machinery, and the other ten each need a *distinct* verb. Convention
 gets the split proposed first, so the dispatched agent stopped without
 committing rather than take unallocated ids or land a fragment. That was correct.
 
-- **B3.10a** `[x]` ∥ Colorless uncommons — the fourteen reachable without new choice machinery, card ids 92-111 **sparse** (interior gaps pinned empty by a named test), opcodes 45-48, power 77 `NO_BLOCK`. Split out after the whole-B3.10 agent read every `use()` and **stopped without committing** — ten of the twenty need a distinct verb each, ~2.5× the allocated budget. **`NO_BLOCK` overrides `modifyBlockLast`, not `modifyBlock`** — the game’s only overrider of that hook — so `interp_block.cpp` gained a genuine **second pass**, demonstrated RED before green and pinned by one named test (the Log says so, because the other seven block cases pass under the wrong shape). Deep Breath exposed the **card-in-limbo** divergence: played onto an empty discard it would draw 2 `shuffleRng` values where the game draws 0 — fixed locally, general case deferred · [log](stage-b-log.md#b310a)
+- **B3.10a** `[x]` ∥ Colorless uncommons — the fourteen reachable without new choice machinery, card ids 92-111 **sparse** (interior gaps pinned empty by a named test), opcodes 45-48, power 77 `NO_BLOCK`. Split out after the whole-B3.10 agent read every `use()` and **stopped without committing** — ten of the twenty need a distinct verb each, ~2.5× the allocated budget. **`NO_BLOCK` overrides `modifyBlockLast`, not `modifyBlock`** — the game’s only overrider of that hook — so `interp_block.cpp` gained a genuine **second pass**, demonstrated RED before green and pinned by one named test (the Log says so, because the other seven block cases pass under the wrong shape). Deep Breath exposed the **card-in-limbo** divergence; the local compensation and general deferral recorded at landing are now discharged by `card-limbo` below · [log](stage-b-log.md#b310a)
+- **card-limbo** `[x]` Played-card limbo / queued `UseCardAction` filing — discharges B3.10a's engine-wide obligation, removes the Headbutt / Deep Breath / Havoc local compensations, and allocates engine-emitted opcode 53 without consuming B3.10b's 49–52 reservation · [log](stage-b-log.md#card-limbo)
 
 ### B3.10b `[ ]` Colorless uncommons — the four needing a colorless pool
 **Deps:** B3.10a (shares `cards.yaml`; branch off it, do not run beside it)
@@ -734,6 +740,13 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **the played-card limbo obligation is discharged.**
+  `resolve_card_play` now moves the source to `CombatState.limbo`, and an
+  engine-emitted queued `USE_CARD` action files it only after its own effects,
+  matching `AbstractPlayer.useCard` / `UseCardAction`. Opcode **53** is the
+  append-only allocation: B3.10b still exclusively owns live reservation
+  49–52, while 41–44 remain permanent gaps and are not backfilled. No schema
+  version or committed fixture/golden changed. [Archive log.](stage-b-log.md#card-limbo)
 - 2026-07-26 — **`MonsterState.flags` widened to `uint32_t` with a two-region
   allocation policy (`master` at `a32e84c`).** Owner-directed after the wave-A
   reconciliation recorded that the `uint16_t` was full. Recorded in the frozen

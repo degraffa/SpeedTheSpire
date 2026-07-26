@@ -14,8 +14,10 @@
 #include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
-#include "sts/engine/piles.hpp"         // exhaust_card / shuffle_discard_into_draw
-#include "sts/engine/rng_stream.hpp"    // random (DRAW_RANDOM insert position)
+#include "sts/engine/piles.hpp"         // exhaust_card / shuffle_discard_into_draw / limbo
+#include "sts/engine/power_hooks.hpp"   // dispatch_on_exhaust (USE_CARD filing)
+#include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strange Spoon)
+#include "sts/engine/rng_stream.hpp"    // random / random_boolean (spoon roll)
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -233,34 +235,18 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
 }
 
 // The eligible source-pile-card count for a CHOOSE_CARD of `kind` (hand slots for
-// the hand kinds, discard slots for discard-to-draw-top; `excluded` drops the
-// just-played source card from a discard-source count).
-[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind,
-                                 uint8_t excluded) noexcept {
+// the hand kinds, discard slots for discard-to-draw-top). The just-played source
+// card needs no exclusion here: it sits in the LIMBO pile while its own choice
+// is open (AbstractPlayer.useCard:1369-1375), so no source pile contains it.
+[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind) noexcept {
     const uint8_t src_count = choice_pile_count(s, kind);
     int n = 0;
     for (uint8_t i = 0; i < src_count; ++i) {
-        if (choice_slot_eligible(s, i, kind, excluded)) {
+        if (choice_slot_eligible(s, i, kind)) {
             ++n;
         }
     }
     return n;
-}
-
-// Remove pool index `idx` from the discard pile if present; return true if it was
-// removed (so the caller can restore it). Used to lift the just-played source card
-// (Havoc) out of the deck during its own PLAY_TOP_DRAW (see op_play_top_draw).
-bool discard_remove(CombatState& s, CardPoolIndex idx) noexcept {
-    for (uint8_t i = 0; i < s.discard_count; ++i) {
-        if (s.discard[i] == idx) {
-            for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.discard_count; ++j) {
-                s.discard[j - 1] = s.discard[j];
-            }
-            --s.discard_count;
-            return true;
-        }
-    }
-    return false;
 }
 
 }  // namespace
@@ -352,8 +338,7 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
     if (need <= 0) {
         return;
     }
-    const uint8_t excluded = choice_excluded_index(item);
-    const int eligible = count_eligible(s, kind, excluded);
+    const int eligible = count_eligible(s, kind);
     if (eligible <= need) {
         // Forced: apply to ALL eligible cards. Snapshot pool indices first (the
         // apply mutates the source pile). (ExhaustAction: hand.size() <= amount ->
@@ -367,7 +352,7 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
         const uint8_t sc = choice_pile_count(s, kind);
         const CardPoolIndex* src_pile = choice_pile_cards(s, kind);
         for (uint8_t i = 0; i < sc && m < kHandCap; ++i) {
-            if (choice_slot_eligible(s, i, kind, excluded)) {
+            if (choice_slot_eligible(s, i, kind)) {
                 picked[m++] = src_pile[i];
             }
         }
@@ -403,55 +388,41 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
 }
 
 // PLAY_TOP_DRAW (Havoc / PlayTopCardAction.update): play the top draw card, then
-// exhaust it. `exclude` is the pool index of the SOURCE card (Havoc): in the game
-// the source is cardInUse (limbo) during PlayTopCardAction and is moved to discard
-// only afterwards (AbstractPlayer.useCard: removeCard + cardInUse, then the queued
-// UseCardAction discards), so it is NOT a replay candidate. Our synchronous
-// resolve_card_play already moved it to discard, so lift it out for the duration
-// and restore it after -- reproducing the limbo state exactly. The card_random_rng
-// monster-target roll happens FIRST and UNCONDITIONALLY (getRandomMonster is
-// evaluated as Havoc.use()'s argument), then the empty / reshuffle checks.
-void op_play_top_draw(CombatState& s, int exclude) noexcept {
-    const bool restore = (exclude >= 0 && exclude < kCardPoolCap)
-                             ? discard_remove(s, static_cast<CardPoolIndex>(exclude))
-                             : false;
-    const CardPoolIndex excl = static_cast<CardPoolIndex>(exclude);
-    auto restore_source = [&]() noexcept {
-        if (restore && s.discard_count < kDiscardCap) {
-            s.discard[s.discard_count++] = excl;
-        }
-    };
-
+// exhaust it. The SOURCE card (Havoc itself) needs no handling here any more:
+// it is cardInUse during PlayTopCardAction in the game and sits in the LIMBO
+// pile here (resolve_card_play), so it is in neither the draw pile nor the
+// discard this may reshuffle -- the former lift-out/restore compensation is
+// folded into the general model. The card_random_rng monster-target roll
+// happens FIRST and UNCONDITIONALLY (getRandomMonster is evaluated as
+// Havoc.use()'s argument), then the empty / reshuffle checks.
+void op_play_top_draw(CombatState& s) noexcept {
     // getRandomMonster(null, true, cardRandomRng): one card_random_rng draw over
     // the live monsters (no draw if none alive -- combat is over in that case).
     const uint8_t target = roll_random_target(s);
     if (s.draw_count == 0 && s.discard_count == 0) {
-        restore_source();
         return;  // deckSize + discardSize == 0 -> nothing to play (:34-36)
     }
     if (s.draw_count == 0) {
         shuffle_discard_into_draw(s);  // EmptyDeckShuffleAction (one shuffle_rng draw)
         if (s.draw_count == 0) {
-            restore_source();
             return;
         }
     }
     const CardPoolIndex pi = s.draw[s.draw_count - 1];  // getTopCard
     --s.draw_count;
     // exhaustOnUseOnce = true (:48) -> force the played card to exhaust; play it
-    // free (autoplay does not pay energy). Put it in hand so resolve_card_play's
-    // hand->pile move finds it, then queue its play at the front of the cardQueue
-    // (NewQueueCardAction -> the normal §5.3 resolve).
+    // free (autoplay does not pay energy). The game moves the card into the
+    // player's limbo CardGroup (PlayTopCardAction.update:
+    // `AbstractDungeon.player.limbo.group.add(card)`) -- ours goes to the limbo
+    // pile, where resolve_card_play finds it -- then its play is queued at the
+    // front of the cardQueue (NewQueueCardAction -> the normal §5.3 resolve).
     s.card_pool[pi].flags |= card_flag_bit(CardFlag::EXHAUST);
     s.card_pool[pi].cost_now = 0;
-    if (s.hand_count < kHandCap) {
-        s.hand[s.hand_count++] = pi;
-    }
+    limbo_add(s, pi);
     CardQueueItem q{};
     q.card_index = pi;
     q.target = target;
     add_card_to_queue_top(s, q);
-    restore_source();
 }
 
 // PLAY_CARD -- the general recursive-play verb. Three Java sites share this
@@ -471,9 +442,10 @@ void op_play_top_draw(CombatState& s, int exclude) noexcept {
 // A QUEUED PLAY_CARD never arrives with that sentinel (execute_opcode resolves
 // dynamic targets before the switch, taking the same single draw); the branch is
 // for the direct callers, which pass a concrete target today.
-// The played instance is put in the hand so resolve_card_play's hand->pile move
-// finds it; a purge instance leaves the hand again as it resolves and lands in
-// no pile, which is what the game's limbo does.
+// The played instance goes into the LIMBO pile -- the game's limbo CardGroup
+// (DoubleTapPower.java:51 `player.limbo.addToBottom(tmp)`; PlayTopCardAction's
+// `limbo.group.add(card)`) -- where resolve_card_play finds it; the queued
+// USE_CARD then files it (a purge instance lands in no pile).
 void op_play_card(CombatState& s, uint8_t target, int source_index,
                   uint32_t flags) noexcept {
     const uint8_t resolved =
@@ -525,9 +497,7 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
         s.card_pool[pi].flags = static_cast<uint16_t>(
             s.card_pool[pi].flags | card_flag_bit(CardFlag::EXHAUST));
     }
-    if (s.hand_count < kHandCap) {
-        s.hand[s.hand_count++] = pi;
-    }
+    limbo_add(s, pi);
     CardQueueItem q{};
     q.card_index = pi;
     q.target = resolved;
@@ -535,6 +505,58 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
         add_card_to_queue_top(s, q);
     } else {
         add_card_to_queue_bottom(s, q);
+    }
+}
+
+// USE_CARD -- UseCardAction.update (UseCardAction.java:77-137) as a queued
+// action; `item.amount` is the played card's pool index, sitting in the LIMBO
+// pile since resolve_card_play. Everything the card's own program queued has
+// already resolved (useCard addToBottom'd this LAST, AbstractPlayer.java:1370),
+// so the filing below lands AFTER any card the program added to the discard
+// (Anger's copy) or the exhaust pile (Fiend Fire's hand exhausts), and the
+// Strange Spoon boolean sits AFTER the program's cardRandomRng draws in the
+// stream. In update() order:
+//   :79-88   onAfterUseCard fan-out -- NO S1 binder exists (the only binders in
+//            the game are BeatOfDeath / Rebound / Slow / TimeMaze / TimeWarp,
+//            all out of S1 scope), so the seam is this comment; a future binder
+//            dispatches here, between the program's actions and the filing.
+//   :89-94   purgeOnUse: the instance poofs -- leaves limbo, lands in NO pile.
+//   :95-108  POWER: hand.empower -- likewise lands in NO pile.
+//   :109-113 Strange Spoon: an exhausting non-POWER play rolls ONE
+//            cardRandomRng.randomBoolean(); true redirects to the discard. The
+//            exhaustCard guard comes FIRST, so a non-exhausting play consumes
+//            no RNG at all -- that guard order is RNG-visible.
+//   :114-131 file: exhaust (moveToExhaustPile -> onExhaust hooks + the
+//            resetAttributes cost revert) or discard (moveToDiscardPile). The
+//            reboundCard / shuffleBackIntoDrawPile / returnToHand branches
+//            (:118-126) have no S1 producer and are deliberately absent.
+// The exhaust destination is read from the instance flags HERE, not at play
+// resolution: Corruption's onUseCard stamped CardFlag::EXHAUST during the
+// constructor fan-out, and the ctor ran before this action was queued.
+void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
+    if (item.amount < 0 || item.amount >= kCardPoolCap) {
+        return;  // malformed (defensive)
+    }
+    const uint8_t pi = static_cast<uint8_t>(item.amount);
+    const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+    const bool is_power = def != nullptr && def->type == CardType::POWER;
+    const bool remove_only =
+        is_power || has_card_flag(s.card_pool[pi].flags, CardFlag::PURGE_ON_USE);
+    bool to_exhaust = has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST);
+    if (!remove_only && to_exhaust &&
+        player_has_relic(s, RelicId::STRANGE_SPOON) &&
+        random_boolean(s.card_random_rng)) {
+        to_exhaust = false;  // spoonProc (:109-118)
+    }
+    if (!file_card_from_limbo(s, pi, to_exhaust, remove_only)) {
+        return;  // not in limbo (defensive; nothing to file)
+    }
+    if (!remove_only && to_exhaust) {
+        // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card lands
+        // in the exhaust pile -- AFTER the card's own program resolved, so a
+        // Dark Embrace draw for the played card is queued at THIS point, behind
+        // anything the program's own exhausts already queued.
+        dispatch_on_exhaust(s, pi, s.card_pool[pi].card_id);
     }
 }
 
@@ -766,8 +788,8 @@ void op_madness(CombatState& s) noexcept {
 
 // --- Public: CHOOSE_CARD queries ---------------------------------------------
 
-bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
-                          uint8_t excluded) noexcept {
+bool choice_slot_eligible(const CombatState& s, uint8_t slot,
+                          ChoiceKind kind) noexcept {
     if (kind == ChoiceKind::EXHAUST_TO_HAND) {
         // Exhume. Three of ExhumeAction's early-outs collapse into eligibility:
         //   * a FULL hand kills the whole action (ExhumeAction.java:40-43), so no
@@ -786,9 +808,9 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,
     }
     if (choice_source_is_discard(kind)) {
         // Discard-to-draw-top: any discard card is a legal pick
-        // (DiscardPileToTopOfDeckAction has no eligibility filter) EXCEPT the
-        // just-played source card (in limbo in the game, not the discard).
-        return slot < s.discard_count && s.discard[slot] != excluded;
+        // (DiscardPileToTopOfDeckAction has no eligibility filter). The
+        // just-played source card is in the LIMBO pile, never in this one.
+        return slot < s.discard_count;
     }
     if (slot >= s.hand_count) {
         return false;
@@ -843,7 +865,7 @@ bool choice_requires_user(const CombatState& s,
         return false;  // nothing left to pick / auto-rolled -- never blocks
     }
     const ChoiceKind kind = choose_kind_from_flags(item.flags);
-    return count_eligible(s, kind, choice_excluded_index(item)) > item.amount;
+    return count_eligible(s, kind) > item.amount;
 }
 
 void apply_choice_selection(CombatState& s, uint8_t slot, ChoiceKind kind,

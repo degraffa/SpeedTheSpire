@@ -445,6 +445,13 @@ sts_add_test(card_rares_test)
 # modifyBlockLast TWO-PASS order No Block's correctness depends on.
 sts_add_test(card_colorless_uncommons_test)
 
+# The played-card limbo window (AbstractPlayer.useCard:1369-1375): while a
+# card's own queued effects resolve, the card is cardInUse -- in NO pile --
+# until the queued UseCardAction files it away. Pins the reshuffle-membership,
+# discard/exhaust-order, Strange-Spoon RNG-position, Perfected-Strike
+# self-count and choice-window consequences of that window.
+sts_add_test(card_limbo_test)
+
 # B4.15: ascension modifier table (design §6) -- the implemented run-setup + map
 # rows, their application ORDER, and the frozen "no such modifier" negatives.
 # Reads registry/a20.yaml directly (STS_REGISTRY_DIR) because that file is the

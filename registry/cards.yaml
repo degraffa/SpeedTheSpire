@@ -195,7 +195,9 @@
 #   DAMAGE_BLOCK      -- base == player block at execute (Body Slam).
 #   DAMAGE_STR_MULT   -- `amount` base, Strength counted x `mult` (Heavy Blade).
 #   DAMAGE_PER_STRIKE -- `amount` + `per`-per-"Strike"-card, baked at queue time,
-#                        source card excluded (Perfected Strike).
+#                        scanning hand+draw+discard; a hand play counts itself
+#                        because calculateCardDamage precedes hand.removeCard,
+#                        while an autoplay already in limbo does not.
 #   MAKE_CARD         -- create `card` copies into `pile` (Anger self-copy to
 #                        discard; Wild Strike Wound to a random draw-pile spot).
 #   CHOOSE_CARD discard_to_draw_top -- Headbutt (discard -> top of draw).
@@ -343,7 +345,7 @@
   target: ENEMY
   flags: []
   strike: true
-  provenance: "PerfectedStrike (PerfectedStrike.java): DamageAction(damage); calculateCardDamage/applyPowers (:592-607) baseDamage += magic * countCards(). countCards (:565-580) = STRIKE-tagged cards in hand+draw+discard (source in limbo -> excluded). baseDamage 6 / magic 2 (:560-561); upgradeMagicNumber(1) -> 3 (:615-622). tags STRIKE (:562)."
+  provenance: "PerfectedStrike (PerfectedStrike.java): DamageAction(damage); calculateCardDamage/applyPowers (:64-70/:73-80) baseDamage += magic * countCards(). countCards (:37-52) = STRIKE-tagged cards in hand+draw+discard. A HAND play counts ITSELF: playCard (AbstractPlayer.java:1285-1302) queues the hovered card without removing it from hand.group, and calculateCardDamage runs at useCard entry (:1361), before hand.removeCard (:1373) -- so the played card is still in the hand (it carries STRIKE, :34). An AUTOPLAY sits in the limbo CardGroup and is not counted. baseDamage 6 / magic 2 (:32-33); upgradeMagicNumber(1) -> 3 (:87-94). tags STRIKE (:34)."
   effects:
     - {op: DAMAGE_PER_STRIKE, target: CARD_TARGET, amount: 6, per: 2}
   upgraded:

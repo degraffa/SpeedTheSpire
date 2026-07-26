@@ -77,19 +77,13 @@ void shuffle_discard_into_draw(CombatState& state) noexcept;
 // discard pile draws nothing at all and leaves the draw pile untouched -- the game
 // skips both actions together, never just the second.
 //
-// `exclude` is the pool index of the card whose program queued this, or any value
-// >= kCardPoolCap for none. It is REQUIRED for correctness here, not a nicety:
-// AbstractPlayer.useCard (:1369-1375) queues the card's own actions FIRST and the
-// UseCardAction that files the card away LAST, so throughout this action the
-// played card sits in limbo (cardInUse) and is in NO pile. resolve_card_play moves
-// it to the discard early instead -- the same modelling gap the discard-source
-// CHOOSE_CARD already compensates for (interp.hpp choice_excluded_index) -- and
-// here it would be doubly visible: the card would be shuffled into the draw pile
-// it should not be in, and its presence would change both the guard's answer and
-// the Fisher-Yates permutation of every other card. Excluding it reproduces the
-// game exactly: the excluded card stays behind as the discard pile's sole member,
-// which is where UseCardAction would have put it moments later anyway.
-void reshuffle_all(CombatState& state, int exclude) noexcept;
+// The played Deep Breath itself needs no special handling here: throughout this
+// action it sits in the `limbo` pile (AbstractPlayer.useCard:1369-1375 queues
+// the card's own actions FIRST and the UseCardAction that files it LAST), so it
+// is simply not in the discard this shuffles. The former `exclude` parameter --
+// a local compensation for the early discard move -- is folded into that
+// general model (interp.hpp USE_CARD).
+void reshuffle_all(CombatState& state) noexcept;
 
 // Draw `amount` cards from the top of the draw pile into the hand, reshuffling
 // the discard pile in when the draw pile empties (AbstractPlayer.draw() +
@@ -118,6 +112,46 @@ void exhaust_card(CombatState& state, int pool_index) noexcept;
 // before this sweep. The animation-only ClearCardQueue/DiscardAction chain is
 // intentionally collapsed without changing pile outcome or trigger ordering.
 void discard_hand_at_end_of_turn(CombatState& state) noexcept;
+
+// --- The limbo pile (cardInUse) ----------------------------------------------
+// AbstractPlayer.useCard removes the played card from the hand and holds it as
+// `cardInUse` (:1373-1375) until the queued UseCardAction files it away; an
+// AUTOPLAYED card (Havoc / Double Tap) sits in the game's limbo CardGroup from
+// the moment it leaves its source pile. Both are the CombatState `limbo` pile
+// (design stage-a §4.2 budgets it, cap 8): membership there means "in no
+// observable pile". Nesting (Havoc's target card queued while Havoc itself is
+// still in limbo) stacks entries; kLimboCap overflow is a hard assert (§4.1).
+
+// Append pool row `pool_index` to the limbo pile.
+void limbo_add(CombatState& state, uint8_t pool_index) noexcept;
+
+// Remove pool row `pool_index` from the limbo pile (by value -- nested plays
+// resolve inner-first, but removal must not assume stack order). Returns true
+// if it was present.
+bool limbo_remove(CombatState& state, uint8_t pool_index) noexcept;
+
+// File the card `pool_index` OUT of the limbo pile to its destination:
+//   * remove_only (purgeOnUse poof, UseCardAction.java:89-94; POWER empower,
+//     :95-108) -- the card leaves limbo and lands in NO pile (the pool row stays
+//     as inert instance storage, exactly as the pre-limbo model kept it);
+//   * to_exhaust -- exhaust pile append + resetAttributes cost revert
+//     (ExhaustCardEffect.update:41-43); the caller decides whether onExhaust
+//     hooks fire (they do in-combat; the COMBAT_OVER flush below does not);
+//   * otherwise -- discard pile append (moveToDiscardPile, :127).
+// A card not in limbo is a defensive no-op (returns false).
+bool file_card_from_limbo(CombatState& state, uint8_t pool_index,
+                          bool to_exhaust, bool remove_only) noexcept;
+
+// COMBAT_OVER normalization: file every card still in limbo to its
+// flag/type-derived destination, WITHOUT Strange Spoon rolls or onExhaust
+// hooks. The pump halts the moment the fight is decided, abandoning whatever
+// is still queued -- including a pending USE_CARD -- exactly as it already
+// abandons a lethal card's trailing effects. In the game the queue keeps
+// draining during the death animation, so the terminal piles DO contain the
+// played card; this flush reproduces that terminal state while spending no RNG
+// and firing no hooks, consistent with the existing halt-at-death collapse
+// (the fixture corpus pins both: fixt16's lethal Strike ends in the discard).
+void flush_limbo_at_combat_over(CombatState& state) noexcept;
 
 // If pool row `pool_index` carries the COST_MODIFIED_FOR_TURN bit
 // (setCostForTurn -- Infernal Blade's generated attack), restore cost_now to the

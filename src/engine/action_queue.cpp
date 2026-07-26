@@ -28,6 +28,32 @@ static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
 
 namespace {
 
+// The engine stops pumping as soon as combat is terminal, while the game keeps
+// draining presentation-time actions. flush_limbo_at_combat_over performs the
+// gameplay-visible part of each pending UseCardAction without RNG or hooks.
+// Remove those now-consumed filing actions from the ring so terminal state does
+// not retain an action that would file the same card a second time. Preserve
+// every other abandoned action: the established halt-at-death model deliberately
+// leaves a lethal card's trailing gameplay effects queued.
+void discard_pending_use_card_actions(CombatState& s) noexcept {
+    uint8_t kept = 0;
+    for (uint8_t i = 0; i < s.action_count; ++i) {
+        const uint8_t src = static_cast<uint8_t>(
+            (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
+        const ActionQueueItem item = s.action_queue[src];
+        if (static_cast<Opcode>(item.opcode) == Opcode::USE_CARD) {
+            continue;
+        }
+        const uint8_t dst = static_cast<uint8_t>(
+            (static_cast<unsigned>(s.action_head) + kept) % kActionQueueCap);
+        s.action_queue[dst] = item;
+        ++kept;
+    }
+    s.action_count = kept;
+    s.action_tail = static_cast<uint8_t>(
+        (static_cast<unsigned>(s.action_head) + kept) % kActionQueueCap);
+}
+
 // !areMonstersBasicallyDead() (MonsterGroup.java:90-95): a monster is in the
 // fight unless `isDying || isEscaping`. The engine models isDying as hp <= 0
 // and isEscaping as kMonsterFlagEscaped (monster_dead_or_escaped,
@@ -457,6 +483,14 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     // so an escape terminal is distinct from a kill by inspection.
     if (s.player_hp <= 0 || (s.flags & kCombatFlagPlayerEscaped) != 0u ||
         (!any_monster_alive(s) && (s.flags & kCombatFlagCannotLose) == 0u)) {
+        // The halt abandons whatever is still queued -- including a pending
+        // USE_CARD, whose played card is still in the limbo pile. File it to
+        // its destination pile with no hooks and no RNG (piles.hpp
+        // flush_limbo_at_combat_over): in the game the queue keeps draining
+        // during the death animation, so the terminal piles DO contain the
+        // played card, and the fixture corpus pins that terminal shape.
+        flush_limbo_at_combat_over(s);
+        discard_pending_use_card_actions(s);
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         r.outcome = PumpOutcome::COMBAT_OVER;
         return r;
@@ -495,16 +529,19 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
 
     // 3. else cardQueue non-empty -> resolve head. Either the end-turn sentinel
     //    (null-card) or a real card play (§5.3), resolved by
-    //    resolve_card_play (card_play.cpp): it runs the no-op hook stubs,
+    //    resolve_card_play (card_play.cpp): it runs the hook fan-outs,
     //    ++cards_played_this_turn, the trap-10 target resolution, queues the
     //    card's effect actions via add_to_bottom (they resolve on later pump
-    //    iterations via step 1), moves the card hand->discard, and deducts energy.
-    //    The skeleton's cards never insert into the cardQueue during use(), so
-    //    popping the head before resolving is safe (trap 9's index-1 rule is
-    //    untouched -- no card re-enters the queue mid-resolution).
+    //    iterations via step 1) followed by the USE_CARD filing action, moves
+    //    the card hand->LIMBO, and deducts energy. The card reaches its
+    //    destination pile when USE_CARD executes -- after its own effects.
+    //    Keep the resolving card at index 0 until resolve_card_play returns,
+    //    exactly as GameActionManager.getNextAction does. DoubleTapPower's
+    //    UseCardAction-constructor hook can insert a replay at index 1 while
+    //    that call is active; removing the original afterwards promotes the
+    //    replay ahead of every play that was already queued (trap 9).
     if (s.card_queue_count > 0) {
         const CardQueueItem head = s.card_queue[0];
-        card_queue_pop_front(s);
         if (is_end_turn_sentinel(head)) {
             s.turn_has_ended = 1;              // (endTurn(): turnHasEnded = true)
             s.monster_attacks_queued = 0;      // prime step 4 (see hpp note (2))
@@ -529,6 +566,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             resolve_card_play(s, head);        // (§5.3): dequeue-resolve
             r.outcome = PumpOutcome::RAN_CARD_QUEUE;
         }
+        card_queue_pop_front(s);  // Java removes index 0 after useCard returns
         return r;
     }
 
