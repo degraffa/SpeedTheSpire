@@ -4,13 +4,16 @@
 // The combat construction (enter_combat) deliberately MIRRORS combat_begin
 // (advance.cpp) field-for-field so that the single-Jaw-Worm path remains
 // byte-identical to combat_begin(seed, floor, deck). That equivalence is pinned
-// by a named test even though Cultist and both louse variants are now live
-// (run_advance_test's RunCombatMatchesCombatBegin), so any future drift in the
-// combat-start sequence is caught rather than silently diverging. The one
-// intentional difference is that enter_combat first resolves the encounter
-// composition on miscRng (the game's getEncounter, MonsterHelper.java) -- for the
-// single-emit "Jaw Worm" encounter that consumes ZERO miscRng draws, preserving
-// the byte-equivalence.
+// by a named test (run_advance_test's RunCombatMatchesCombatBegin), so any
+// future drift in the combat-start sequence is caught rather than silently
+// diverging. WHICH encounters can be built here is deliberately not written
+// down in this file: the enter_combat gate asks the dispatch switch
+// (monster_init_fn(id) != nullptr, per member), so the answer changes as
+// monster cases land without any edit here -- an enumerated roster in a
+// comment would only rot. The one intentional difference from combat_begin is
+// that enter_combat first resolves the encounter composition on miscRng (the
+// game's getEncounter, MonsterHelper.java) -- for the single-emit "Jaw Worm"
+// encounter that consumes ZERO miscRng draws, preserving the byte-equivalence.
 
 #include "sts/engine/run_advance.hpp"
 
@@ -26,6 +29,7 @@
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
+#include "sts/engine/monster_looter.hpp"   // looter_stolen_gold (settlement)
 #include "sts/engine/observation.hpp"      // encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
 #include "sts/engine/relic_hooks.hpp"      // dispatch_relics_at_battle_start / _on_victory
@@ -90,8 +94,14 @@ bool potion_requires_target(const PotionDef& def) noexcept {
     return false;
 }
 
+// "Alive" for targeting is the game's dying-or-escaping walk, never hp alone:
+// an ESCAPED monster keeps positive hp but has left the screen entirely
+// (updateEscapeAnimation, AbstractMonster.java:894-906), and every targeting
+// read skips isDying/isEscaping records (MonsterGroup.java:164,180,204,220).
+// The combat-layer can_play_target grid already uses this predicate.
 bool live_target(const CombatState& s, uint8_t target) noexcept {
-    return target < s.monster_count && s.monsters[target].hp > 0;
+    return target < s.monster_count &&
+           !monster_dead_or_escaped(s.monsters[target]);
 }
 
 bool combat_potion_legal(const RunController& rc, uint8_t slot,
@@ -120,11 +130,16 @@ bool combat_potion_legal(const RunController& rc, uint8_t slot,
         rc.room_type == static_cast<uint8_t>(RoomType::Boss)) {
         return false;  // SmokeBomb.canUse rejects bosses.
     }
-    bool any_alive = false;
+    // "Any monster left to use it on" is the in-the-fight predicate, matching
+    // every other liveness read. (The WAITING_ON_USER gate above already makes
+    // an all-out-of-the-fight state unreachable here; keep the shared
+    // predicate anyway so no hp-only read survives in this file.)
+    bool any_in_fight = false;
     for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
-        any_alive = any_alive || rc.combat.monsters[m].hp > 0;
+        any_in_fight =
+            any_in_fight || !monster_dead_or_escaped(rc.combat.monsters[m]);
     }
-    if (!any_alive) {
+    if (!any_in_fight) {
         return false;
     }
     if (!potion_requires_target(*def)) {
@@ -204,27 +219,98 @@ void dispatch_run_relics_on_use_potion(RunController& rc) noexcept {
     }
 }
 
+// Mirrors advance.cpp's fill_result: "in the fight" is monster_dead_or_escaped
+// (an escaped monster keeps positive hp but ends the battle like a dead one),
+// and a player escape is terminal without being a loss.
 void fill_combat_result(const CombatState& s, StepResult& r) noexcept {
-    bool any_alive = false;
+    const bool player_dead = s.player_hp <= 0;
+    const bool player_escaped = (s.flags & kCombatFlagPlayerEscaped) != 0u;
+    bool any_in_fight = false;
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        any_alive = any_alive || s.monsters[m].hp > 0;
+        any_in_fight = any_in_fight || !monster_dead_or_escaped(s.monsters[m]);
     }
     r = StepResult{};
-    r.terminal = s.player_hp <= 0 || !any_alive;
-    r.reward = s.player_hp <= 0 ? -1.0f : (!any_alive ? 1.0f : 0.0f);
+    r.terminal = player_dead || player_escaped || !any_in_fight;
+    if (player_dead) {
+        r.reward = -1.0f;
+    } else if (player_escaped) {
+        r.reward = 0.0f;
+    } else if (!any_in_fight) {
+        r.reward = 1.0f;
+    }
     encode_observation(s, r.obs);
 }
 
+// MonsterGroup.haveMonstersEscaped (MonsterGroup.java:124-130): true iff EVERY
+// monster's `escaped` is set. A dead monster is NOT escaped, so any kill in
+// the group keeps this false.
+bool have_monsters_escaped(const CombatState& s) noexcept {
+    for (uint8_t m = 0; m < s.monster_count; ++m) {
+        if (!monster_escaped(s.monsters[m])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Settle the thieves' stolen gold against the run's purse at combat end.
+// The game deducts at STEAL time (DamageAction.stealGold, DamageAction.java:
+// 98-114 -- a direct target.gold write, clamped per steal to the player's
+// remaining gold, bypassing gainGold and its relic hooks); CombatState carries
+// no gold field, so the engine accrues the UNCLAMPED count on the monster
+// record (looter_stolen_gold) and settles min(total, gold) here instead --
+// equal to the game's per-steal clamps whenever the thief's steals are the
+// combat's only gold movement, which holds at this layer: every Act-1 group
+// fields at most one thief, and no landed combat effect touches RunState.gold
+// while a combat is live (gold moves again only at reward claim, after this).
+//
+// Returns the portion carried by DEAD thieves -- exactly what Looter.die()
+// feeds addStolenGoldToRewards (its clamped accrual, Looter.java:170-172),
+// i.e. the claimable STOLEN_GOLD return. An ESCAPED thief's share is simply
+// gone. Called on EVERY combat end, defeat included: the game's deduction
+// happened at steal time, so a dead player's final purse is short too.
+int32_t settle_stolen_gold(RunController& rc) noexcept {
+    int32_t total = 0;
+    int32_t dead = 0;
+    for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+        const MonsterState& ms = rc.combat.monsters[m];
+        if (static_cast<MonsterId>(ms.monster_id) != MonsterId::LOOTER) {
+            continue;
+        }
+        const int32_t g = looter_stolen_gold(ms);
+        total += g;
+        if (ms.hp <= 0) {
+            dead += g;
+        }
+    }
+    if (total <= 0) {
+        return 0;
+    }
+    const int32_t settled = total < rc.run.gold ? total : rc.run.gold;
+    rc.run.gold -= settled;
+    return dead < settled ? dead : settled;
+}
+
 // THE reward gate: which RewardOutcome a finished combat earned. Explicit and
-// exhaustive so the escape work (the Looter's mugged screen, the combat-side
-// Smoke Bomb body) extends a named seam instead of an inline condition --
-// "combat over" does not imply a kill, and a kill is not the only screen shape.
-// DEFEAT/NONE never reach the reward path (finish_combat_after_action routes
-// death to RUN_OVER first).
-RewardOutcome reward_outcome_for(RunCombatOutcome outcome) noexcept {
+// exhaustive -- "combat over" does not imply a kill, and a kill is not the
+// only screen shape. DEFEAT/NONE never reach the reward path
+// (finish_combat_after_action routes death to RUN_OVER first).
+//
+// `monsters_escaped` is haveMonstersEscaped -- and IT, not the mugged flag, is
+// what the battle-over block's gold gate (AbstractRoom.java:319) and
+// potion-chance gate (:585-589) read. A MUGGED combat whose other members
+// were killed (or that the player then smoke-bombed past) therefore assembles
+// the FULL kill shape: the mug screen still calls setupItemReward
+// (CombatRewardScreen.java:280-285), and only the banner -- which this engine
+// does not model -- differs.
+RewardOutcome reward_outcome_for(RunCombatOutcome outcome,
+                                 bool monsters_escaped) noexcept {
     switch (outcome) {
         case RunCombatOutcome::SMOKE_BOMB:
             return RewardOutcome::PLAYER_ESCAPED;
+        case RunCombatOutcome::MUGGED:
+            return monsters_escaped ? RewardOutcome::MONSTERS_ESCAPED
+                                    : RewardOutcome::KILLED;
         case RunCombatOutcome::KILLED:
         default:
             return RewardOutcome::KILLED;
@@ -242,6 +328,12 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
     dispatch_relics_on_victory(rc.combat, rc.combat.relics,
                                rc.combat.relic_count);
     fold_back_combat(rc);
+    // Stolen-gold settlement: the game's purse already reflects every steal by
+    // now (deducted at steal time), so settle before anything reads rs.gold.
+    // The dead-thief portion returns as a claimable STOLEN_GOLD item below --
+    // and on a PLAYER_ESCAPED end the assembly discards it unclaimed, exactly
+    // as the smoked screen never shows the room's reward list.
+    const int32_t stolen_return = settle_stolen_gold(rc);
     rc.combat_outcome = static_cast<uint8_t>(outcome);
     rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
 
@@ -254,7 +346,9 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
     // path never calls setupItemReward, CombatRewardScreen.java:267-289).
     assemble_combat_rewards(rc.run, rc.combat.misc_rng,
                             static_cast<RoomType>(rc.room_type),
-                            reward_outcome_for(outcome), rc.rewards);
+                            reward_outcome_for(outcome,
+                                               have_monsters_escaped(rc.combat)),
+                            rc.rewards, stolen_return);
 
     const float combat_reward = res.reward;
     res = StepResult{};  // reward screens have no combat observation view.
@@ -782,6 +876,10 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
     }
     if (rc.combat.player_hp <= 0) {
         fold_back_combat(rc);
+        // The mugging already cost the gold at steal time in the game's terms,
+        // so a dead player's final purse is short too; no return is reachable
+        // (no reward screen opens past a defeat).
+        (void)settle_stolen_gold(rc);
         rc.combat_outcome = static_cast<uint8_t>(RunCombatOutcome::DEFEAT);
         rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
         res = StepResult{};
@@ -789,7 +887,18 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
         res.reward = -1.0f;
         return;
     }
-    enter_combat_reward(rc, RunCombatOutcome::KILLED, res);
+    // The survivor's screen pick, in the game's precedence (AbstractRoom.
+    // update:334-341): mugged first, then smoked, then the ordinary open. A
+    // pump-ended combat is smoked only through an imported/hand-built state
+    // (step_potion routes the run-layer Smoke Bomb itself), but the same
+    // precedence is honoured wherever the flags come from.
+    RunCombatOutcome outcome = RunCombatOutcome::KILLED;
+    if ((rc.combat.flags & kCombatFlagMugged) != 0u) {
+        outcome = RunCombatOutcome::MUGGED;
+    } else if ((rc.combat.flags & kCombatFlagPlayerEscaped) != 0u) {
+        outcome = RunCombatOutcome::SMOKE_BOMB;
+    }
+    enter_combat_reward(rc, outcome, res);
 }
 
 bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
@@ -829,13 +938,21 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
         dispatch_run_relics_on_use_potion(rc);
     } else if (id == PotionId::SMOKE_BOMB) {
         // SmokeBomb.use marks the room smoked; the player's escape timer calls
-        // endBattle, which runs onVictory and opens the smoked proceed screen.
+        // endBattle, which runs onVictory and opens the battle-over screen. If
+        // a thief already escaped this combat the room is ALSO mugged, and
+        // mugged wins the screen pick (AbstractRoom.update:334-341 checks it
+        // first) -- the mug screen still assembles items, so smoking past the
+        // survivors of a mugged combat forfeits the fight but not the rewards.
         clear_potion_slot(rc.run, slot);
         dispatch_run_relics_on_use_potion(rc);
         rc.combat.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         fill_combat_result(rc.combat, res);
         res.reward = 0.0f;  // escape is not a kill.
-        enter_combat_reward(rc, RunCombatOutcome::SMOKE_BOMB, res);
+        const RunCombatOutcome outcome =
+            (rc.combat.flags & kCombatFlagMugged) != 0u
+                ? RunCombatOutcome::MUGGED
+                : RunCombatOutcome::SMOKE_BOMB;
+        enter_combat_reward(rc, outcome, res);
         return true;
     } else {
         if (!use_potion(rc.combat, id, target)) {

@@ -32,6 +32,11 @@
 //     re-roll + the Act-1 zero-chance upgrade draws), then a claim flow over
 //     CHOOSE -- claim item, pick/skip/sing on the card screen, proceed. A
 //     Smoke Bomb consumes the battle-over draws but offers nothing.
+//   * ESCAPE at the run layer: a combat the pump ended with the room mugged
+//     settles the thief's stolen gold against RunState.gold (the game deducted
+//     it at steal time), keeps the screen claimable, and suppresses exactly
+//     what the game suppresses (RewardOutcome, combat_rewards.hpp); a KILLED
+//     thief's stolen gold comes back as a claimable STOLEN_GOLD item.
 //   * potion-slot legality/consumption in combat plus Fruit Juice / Entropic
 //     Brew run mutations outside combat.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
@@ -40,9 +45,8 @@
 //     skip, so the stream state stays right even though no blessing applies).
 //   * relic POOLS and acquisition are live, and the combat-reward draw site now
 //     consumes them; the chest / shop / Neow draw sites are separate work.
-//   * the mugged (Looter) screen + STOLEN_GOLD -- blocked with the parked
-//     Looter remainder; the EMERALD_KEY reward item -- follows the emerald-flag
-//     scoping (combat_rewards.hpp).
+//   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
+//     (combat_rewards.hpp).
 //   * events / shops / rest sites / treasure rooms: no room content (here:
 //     entering one reseeds the floor streams then parks at
 //     ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
@@ -106,15 +110,34 @@ enum class RunPhase : uint8_t {
     RUN_OVER = 6,          // player dead (loss) -- terminal.
 };
 
-// Why combat ended. AbstractRoom.update opens the ordinary reward screen after
-// a kill and openCombat(..., true) after Smoke Bomb; both are CHOOSE/proceed
-// states but the latter exposes no claimable rewards. DEFEAT transitions to
-// RUN_OVER instead.
+// Why combat ended. AbstractRoom keeps two independent end-of-battle room
+// flags -- `mugged` (a thief ran: Looter.takeTurn case ESCAPE sets it
+// synchronously, Looter.java:128 -> kCombatFlagMugged) and `smoked` (the
+// player threw Smoke Bomb, SmokeBomb.java:40) -- and the battle-over block
+// picks the screen by checking mugged FIRST (AbstractRoom.update:334-341):
+// mugged -> openCombat(TEXT[0]), which STILL assembles claimable items
+// (CombatRewardScreen.java:280-285); smoked -> openCombat(TEXT[1], true), a
+// bare proceed screen; otherwise the ordinary open(). So MUGGED outranks
+// SMOKE_BOMB when both flags are set (the thief escaped, then the player
+// smoke-bombed past the survivors). DEFEAT transitions to RUN_OVER instead.
+//
+// What a MUGGED screen actually offers is NOT a function of this value alone:
+// the gold and potion-chance gates read MonsterGroup.haveMonstersEscaped
+// (every record escaped, MonsterGroup.java:124-130), not the mug flag -- see
+// RewardOutcome (combat_rewards.hpp) for the split.
+//
+// Value 5 is allocated but deliberately unspent: the only other escape shape
+// -- haveMonstersEscaped without a mug, i.e. a non-thief escape -- has no
+// Act-1 producer (the gremlins' move-99 escape has no reachable trigger in
+// the Exordium-only registry) and lands with whoever implements that trigger.
+// Values are append-only; 0-3 are never renumbered.
 enum class RunCombatOutcome : uint8_t {
     NONE = 0,
     KILLED = 1,
     SMOKE_BOMB = 2,
     DEFEAT = 3,
+    MUGGED = 4,   // the room was mugged: a thief escaped, its stolen gold went
+                  // with it (settled against RunState.gold at combat end).
 };
 
 // CHOOSE arg0 sentinel for "take the boss edge" at a MAP_CHOICE (the boss node is

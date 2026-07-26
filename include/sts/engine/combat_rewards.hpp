@@ -71,6 +71,26 @@
 //     claimable until the screen is left), or Singing Bowl's +2 max HP
 //     (SingingBowlButton.onClick -> increaseMaxHp(2,true) which also heals 2 --
 //     AbstractCreature.java:199-209 -- and removes the item).
+//   * Stolen gold: DamageAction.stealGold deducts the player's gold AT STEAL
+//     TIME, clamped per hit, writing this.target.gold directly -- NOT through
+//     gainGold, so no relic hook sees the theft (DamageAction.java:98-114).
+//     Looter.die() hands its clamped accrual to addStolenGoldToRewards
+//     (Looter.java:170-172; AbstractRoom.java:619-626), which constructs
+//     RewardItem(gold, true): applyGoldBonus's theft branch takes NO Golden
+//     Idol bonus (RewardItem.java:104-129). Since die() runs DURING combat,
+//     the STOLEN_GOLD item PRECEDES every battle-over item in the rewards
+//     list. Claim is player.gainGold, body-identical to the GOLD case
+//     (RewardItem.claimReward, RewardItem.java:255-273). An ESCAPED thief's
+//     accrual is returned by nothing: the gold is simply gone.
+//   * Escape gates: MonsterGroup.haveMonstersEscaped (MonsterGroup.java:
+//     124-130) is true iff EVERY monster escaped -- a dead monster is NOT
+//     escaped, so any kill in the group keeps it false. It (not the mugged
+//     flag) gates the plain-monster gold roll (AbstractRoom.java:319) and
+//     zeroes the potion CHANCE (:585-589; the roll and ratchet still run, and
+//     White Beast Statue's 100 overrides even the zero, :594-596). The
+//     mugged/smoked room flags pick only the SCREEN (:334-341, mugged first):
+//     a mugged openCombat still calls setupItemReward
+//     (CombatRewardScreen.java:280-285); a smoked one never does (:286-288).
 //
 // COLORLESS IS UNREACHABLE FROM A COMBAT REWARD: the
 // combat reward pool is RED-only -- Ironclad.getCardPool calls only
@@ -83,9 +103,6 @@
 // through the shop's two colorless slots and Neow.
 //
 // Deliberately NOT modelled here, each with the reason:
-//   * STOLEN_GOLD / the mugged screen (Looter) -- blocked with the parked
-//     Looter remainder (the liveness predicate); the reward side gains a
-//     RewardItemKind value when the Looter lands.
 //   * The EMERALD_KEY reward item -- the emerald-elite node flag itself is out
 //     of S1 scope (map_rooms.hpp's setEmeraldElite note: the mapRng DRAW is
 //     modelled, the chosen node's key flag is not stored), so the reward layer
@@ -123,15 +140,18 @@ inline constexpr int kRewardCardCap = 4;  // 3 base + Question Card's +1.
 
 enum class RewardItemKind : uint8_t {
     NONE = 0,
-    GOLD = 1,    // RewardType.GOLD
-    POTION = 2,  // RewardType.POTION
-    RELIC = 3,   // RewardType.RELIC (drawn from the pool at assembly)
-    CARDS = 4,   // RewardType.CARD (the 3-card pick screen)
+    GOLD = 1,         // RewardType.GOLD
+    POTION = 2,       // RewardType.POTION
+    RELIC = 3,        // RewardType.RELIC (drawn from the pool at assembly)
+    CARDS = 4,        // RewardType.CARD (the 3-card pick screen)
+    STOLEN_GOLD = 5,  // RewardType.STOLEN_GOLD (a killed thief's return; no
+                      // Golden Idol bonus -- the applyGoldBonus theft branch)
 };
 
 struct RunRewardItem {
-    int32_t gold;                            // base amount (GOLD)
-    int32_t bonus_gold;                      // Golden Idol +25% (GOLD)
+    int32_t gold;                            // base amount (GOLD / STOLEN_GOLD)
+    int32_t bonus_gold;                      // Golden Idol +25% (GOLD only;
+                                             // always 0 on STOLEN_GOLD)
     uint16_t id;                             // RelicId (RELIC) / PotionId (POTION)
     uint16_t card_ids[kRewardCardCap];       // CARDS: the offer
     uint8_t card_upgrades[kRewardCardCap];   // CARDS: offer upgrade counts (0 in
@@ -217,24 +237,37 @@ enum class RewardCardRarity : uint8_t { COMMON = 0, UNCOMMON = 1, RARE = 2 };
 
 // HOW the combat ended, as the reward layer needs to know it. This is THE
 // reward gate: "the pump reported combat over" does not imply a kill, and a
-// kill is not the only shape that reaches this screen. The three battle-over
-// shapes the game distinguishes (AbstractRoom.update:334-341):
-//   KILLED         -- every monster dead: full assembly + the card reward(s).
-//   PLAYER_ESCAPED -- Smoke Bomb: the battle-over block still runs (gold roll,
-//                     elite relic tier + pop, the unconditional potion roll +
-//                     ratchet -- monsters did NOT escape, so the plain-monster
-//                     gold gate passes), but openCombat(label, true) never
-//                     calls setupItemReward: no card roll, nothing claimable.
-//   (MUGGED)       -- the Looter left with the gold. NOT a value yet: it lands
-//                     with the Looter itself (the escape liveness predicate).
-//                     When it does, it is a THIRD case here, not a KILLED
-//                     variant: haveMonstersEscaped() suppresses the plain-
-//                     monster gold roll and zeroes the potion CHANCE (the roll
-//                     and ratchet still happen), setupItemReward still rolls
-//                     the cards, and a STOLEN_GOLD item joins the screen.
+// kill is not the only shape that reaches this screen.
+//   KILLED           -- full assembly + the card reward(s). Also the shape of
+//                       a MUGGED combat whose other members were killed, and
+//                       of a mugged-then-smoked one: the mug screen assembles
+//                       items (openCombat -> setupItemReward,
+//                       CombatRewardScreen.java:280-285), and the gold/potion
+//                       gates read haveMonstersEscaped, not the mug flag.
+//   PLAYER_ESCAPED   -- Smoke Bomb: the battle-over block still runs (gold
+//                       roll, elite relic tier + pop, the unconditional potion
+//                       roll + ratchet -- monsters did NOT escape, so the
+//                       plain-monster gold gate passes), but
+//                       openCombat(label, true) never calls setupItemReward:
+//                       no card roll, nothing claimable.
+//   MONSTERS_ESCAPED -- EVERY monster escaped (MonsterGroup.
+//                       haveMonstersEscaped, MonsterGroup.java:124-130; in Act
+//                       1 exactly the solo Looter's exit): NO plain-monster
+//                       gold roll (AbstractRoom.java:319), potion CHANCE zero
+//                       while the roll and +/-10 ratchet still run (:585-607)
+//                       and White Beast Statue still forces 100 (:594-596) --
+//                       and the cards ARE still rolled and offered, because
+//                       the mugged openCombat calls setupItemReward. Named for
+//                       the gate the Java reads; the mug flag itself picks
+//                       only the (unmodelled) banner. NOTE the earlier sketch
+//                       here had a STOLEN_GOLD item joining this shape -- the
+//                       source says otherwise: die() alone adds STOLEN_GOLD
+//                       (Looter.java:170-172), so the return rides a KILLED
+//                       thief, never an escaped one.
 enum class RewardOutcome : uint8_t {
     KILLED = 1,
     PLAYER_ESCAPED = 2,
+    MONSTERS_ESCAPED = 3,
 };
 
 // Assemble the post-combat rewards for a combat that ended with `outcome` in
@@ -243,8 +276,16 @@ enum class RewardOutcome : uint8_t {
 // floor-scoped miscRng (boss gold; also the stream relic onEquip bodies
 // consume at claim). For PLAYER_ESCAPED, `out.count` is left 0 -- the stream
 // movement is the point; a Smoke Bomb is not a stream no-op.
+//
+// `stolen_gold_return` is a KILLED thief's clamped accrual (what Looter.die()
+// fed addStolenGoldToRewards), already deducted from rs.gold by the caller's
+// settlement; > 0 adds a STOLEN_GOLD item AHEAD of every battle-over item
+// (die() ran during combat, so its item is first in the game's list and
+// counts toward the >= 4 potion-suppression threshold). 0 means no dead thief
+// stole anything -- die() adds nothing for a zero accrual (Looter.java:170).
 void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
-                             RewardOutcome outcome, RewardScreen& out) noexcept;
+                             RewardOutcome outcome, RewardScreen& out,
+                             int32_t stolen_gold_return = 0) noexcept;
 
 // --- Claim -----------------------------------------------------------------
 

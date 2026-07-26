@@ -213,16 +213,28 @@ int roll_normal_gold(RngStream& treasure_rng) noexcept {
 }
 
 void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
-                             RewardOutcome outcome, RewardScreen& out) noexcept {
+                             RewardOutcome outcome, RewardScreen& out,
+                             int32_t stolen_gold_return) noexcept {
     out = RewardScreen{};
     out.open_card_item = kNoOpenCardReward;
 
-    // The two named gates the outcome controls (see RewardOutcome's contract).
-    // A MUGGED value flips monsters_escaped to true while keeping
-    // screen_offers_items true -- the seam is these two booleans, not the
+    // The two named gates the outcome controls (see RewardOutcome's contract):
+    // haveMonstersEscaped for the gold/potion suppression, and the smoked
+    // screen's items-or-nothing. The seam is these two booleans, not the
     // branches below.
-    const bool monsters_escaped = false;  // no outcome sets it until MUGGED lands
+    const bool monsters_escaped = outcome == RewardOutcome::MONSTERS_ESCAPED;
     const bool screen_offers_items = outcome != RewardOutcome::PLAYER_ESCAPED;
+
+    // (0) A killed thief's returned gold. Looter.die() ran DURING combat
+    // (addStolenGoldToRewards, Looter.java:170-172 -> AbstractRoom.java:
+    // 619-626), so its item PRECEDES every battle-over item and counts toward
+    // the >= 4 potion-suppression threshold in (3). No Golden Idol bonus:
+    // applyGoldBonus's theft branch skips it (RewardItem.java:104-129).
+    if (stolen_gold_return > 0) {
+        RunRewardItem& item = push_item(out);
+        item.kind = static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD);
+        item.gold = stolen_gold_return;
+    }
 
     // (1) Gold (AbstractRoom.java:286-326). The plain-monster branch is gated
     // on !haveMonstersEscaped() in the Java (boss and elite are not).
@@ -316,8 +328,9 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
     // (CombatRewardScreen.java:72-100), which the smoked openCombat(label,
     // true) never calls (:280-288): a Smoke Bomb consumed every draw above but
     // rolls no card and offers NOTHING (the screen shows only Proceed). The
-    // mugged screen, when it lands, keeps offering: setupItemReward runs for
-    // openCombat(label, false) too (:280-285).
+    // mugged screen KEEPS offering: setupItemReward runs for
+    // openCombat(label, false) too (:280-285), so even an all-escaped combat
+    // still rolls and shows its cards.
     if (!screen_offers_items) {
         out = RewardScreen{};  // items discarded unclaimed; stream movement stays.
         out.open_card_item = kNoOpenCardReward;
@@ -363,8 +376,12 @@ bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
     RunRewardItem& item = s.items[index];
     switch (static_cast<RewardItemKind>(item.kind)) {
         case RewardItemKind::GOLD:
+        case RewardItemKind::STOLEN_GOLD:
             // player.gainGold via the one run-layer door (Ectoplasm suppression
             // + the onGainGold fan-out live there, relics/relic_pickup.hpp).
+            // The GOLD and STOLEN_GOLD claim cases are body-identical in the
+            // game (RewardItem.claimReward, RewardItem.java:255-273);
+            // bonus_gold is always 0 on a STOLEN_GOLD item.
             gain_gold(rs, item.gold + item.bonus_gold);
             remove_item(s, index);
             return true;

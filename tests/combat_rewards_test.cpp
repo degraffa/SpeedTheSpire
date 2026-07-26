@@ -860,6 +860,111 @@ TEST(RewardClaim, SkipKeepsTheCardItemClaimable) {
 }
 
 // =============================================================================
+// Escape shapes: MONSTERS_ESCAPED and the STOLEN_GOLD return
+// =============================================================================
+
+TEST(RewardEscape, MonstersEscapedSuppressesGoldAndZeroesThePotionChance) {
+    // haveMonstersEscaped gates the plain-monster gold roll (AbstractRoom.
+    // java:319) and zeroes the potion CHANCE while the roll and +10 ratchet
+    // still run (:585-607); the cards are STILL rolled and offered (the mugged
+    // openCombat calls setupItemReward, CombatRewardScreen.java:280-285).
+    RunState rs = make_run(41);
+    RngStream misc = from_seed(4100);
+    const RngStream misc_before = misc;
+    const RngStream treasure_before = rs.treasure_rng;
+
+    // Hand-accounting: exactly ONE potionRng draw (a guaranteed miss at
+    // chance 0), and the card procedure of an ordinary kill.
+    RngStream potion_copy = rs.potion_rng;
+    (void)random(potion_copy, 0, 99);
+    RngStream card_copy = rs.card_rng;
+    int16_t pity = rs.card_blizz_randomizer;
+    const HandCardReward cards =
+        hand_roll_cards(card_copy, pity, 3, RoomType::Monster);
+
+    RewardScreen s{};
+    assemble_combat_rewards(rs, misc, RoomType::Monster,
+                            RewardOutcome::MONSTERS_ESCAPED, s);
+    EXPECT_EQ(count_kind(s, RewardItemKind::GOLD), 0);
+    EXPECT_EQ(count_kind(s, RewardItemKind::POTION), 0);
+    EXPECT_EQ(count_kind(s, RewardItemKind::STOLEN_GOLD), 0);
+    ASSERT_EQ(count_kind(s, RewardItemKind::CARDS), 1);
+    EXPECT_TRUE(streams_equal(rs.treasure_rng, treasure_before))
+        << "the suppressed gold roll must not consume treasureRng";
+    EXPECT_TRUE(streams_equal(rs.potion_rng, potion_copy));
+    EXPECT_TRUE(streams_equal(rs.card_rng, card_copy));
+    EXPECT_TRUE(streams_equal(misc, misc_before));
+    EXPECT_EQ(rs.blizzard_potion_mod, 10);
+    EXPECT_EQ(rs.card_blizz_randomizer, pity);
+    const int ci = find_kind(s, RewardItemKind::CARDS);
+    ASSERT_GE(ci, 0);
+    for (int i = 0; i < cards.count; ++i) {
+        EXPECT_EQ(s.items[ci].card_ids[i], cards.ids[i]);
+    }
+}
+
+TEST(RewardEscape, WhiteBeastStatueOverridesTheEscapeZeroedChance) {
+    // AbstractRoom.addPotionToRewards:594-596 runs AFTER the escape gate, so
+    // White Beast Statue's forced 100 beats the zero: an all-escaped combat
+    // still drops its potion (and the ratchet steps down).
+    RunState rs = make_run(42);
+    give_relics(rs, {RelicId::WHITE_BEAST_STATUE});
+    RngStream misc = from_seed(4200);
+    RewardScreen s{};
+    assemble_combat_rewards(rs, misc, RoomType::Monster,
+                            RewardOutcome::MONSTERS_ESCAPED, s);
+    EXPECT_EQ(count_kind(s, RewardItemKind::POTION), 1);
+    EXPECT_EQ(count_kind(s, RewardItemKind::GOLD), 0);
+    EXPECT_EQ(rs.blizzard_potion_mod, -10);
+}
+
+TEST(RewardStolenGold, ReturnPrecedesGoldAndTakesNoGoldenIdolBonus) {
+    // Looter.die() ran during combat, so its item is FIRST in the list
+    // (AbstractRoom.java:619-626), and RewardItem's theft branch skips the
+    // Golden Idol bonus (applyGoldBonus, RewardItem.java:104-129) that the
+    // ordinary gold item on the same screen still receives.
+    RunState rs = make_run(43);
+    give_relics(rs, {RelicId::GOLDEN_IDOL});
+    RngStream misc = from_seed(4300);
+    RewardScreen s{};
+    assemble_combat_rewards(rs, misc, RoomType::Monster, RewardOutcome::KILLED,
+                            s, /*stolen_gold_return=*/40);
+    ASSERT_GE(s.count, 2);
+    EXPECT_EQ(s.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD));
+    EXPECT_EQ(s.items[0].gold, 40);
+    EXPECT_EQ(s.items[0].bonus_gold, 0)
+        << "applyGoldBonus's theft branch takes no Golden Idol bonus";
+    const int gi = find_kind(s, RewardItemKind::GOLD);
+    ASSERT_GE(gi, 1);
+    EXPECT_GT(s.items[gi].bonus_gold, 0)
+        << "the ordinary gold item still gets the +25%";
+
+    // Claim goes through the same gainGold door as GOLD (RewardItem.java:
+    // 255-273).
+    const int32_t before = rs.gold;
+    ASSERT_TRUE(claim_reward(rs, misc, s, 0));
+    EXPECT_EQ(rs.gold, before + 40);
+    EXPECT_EQ(count_kind(s, RewardItemKind::STOLEN_GOLD), 0);
+}
+
+TEST(RewardStolenGold, PlayerEscapeDiscardsTheReturnUnclaimed) {
+    // Kill the thief, then smoke-bomb: the smoked screen never calls
+    // setupItemReward, so the room's reward list -- returned stolen gold
+    // included -- is never shown; the battle-over draws are still consumed.
+    RunState rs = make_run(44);
+    const RngStream treasure_before = rs.treasure_rng;
+    RngStream misc = from_seed(4400);
+    RewardScreen s{};
+    assemble_combat_rewards(rs, misc, RoomType::Monster,
+                            RewardOutcome::PLAYER_ESCAPED, s,
+                            /*stolen_gold_return=*/40);
+    EXPECT_EQ(s.count, 0);
+    EXPECT_FALSE(streams_equal(rs.treasure_rng, treasure_before))
+        << "the battle-over gold draw is still consumed";
+}
+
+// =============================================================================
 // Run-level integration: the CHOOSE claim flow end to end
 // =============================================================================
 

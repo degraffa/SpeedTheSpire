@@ -30,6 +30,7 @@
 #include "sts/engine/encounters.hpp"
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
+#include "sts/engine/monster_looter.hpp"  // kLooterGoldAmt / looter_steal_count
 #include "sts/engine/potions.hpp"
 #include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
 #include "sts/engine/relics.hpp"       // RelicDef / kRelicDefs
@@ -762,6 +763,174 @@ TEST(RunPotion, SmokeBombEscapeIsNotAKillAndOpensProceedChoice) {
     }
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+// =============================================================================
+// Escape at the run layer
+// =============================================================================
+
+// An ESCAPED monster keeps positive hp but is out of the fight: every combat-
+// layer targeting read already excludes it (monster_dead_or_escaped -- the
+// game's isDying/isEscaping walks, MonsterGroup.java:164,180,204,220, and an
+// escaped monster has left the screen entirely, AbstractMonster.
+// updateEscapeAnimation:894-906). The RUN-layer potion-target mask must apply
+// the same predicate: a targeted potion can never name an escaped monster.
+TEST(RunEscape, TargetedPotionRefusesAnEscapedMonster) {
+    RunController rc = run_begin(find_two_louse_seed(), kA20);
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.monster_count, 2);
+
+    // The record shape the ESCAPE opcode leaves behind: kMonsterFlagEscaped
+    // set, hp untouched (alive, gone).
+    rc.combat.monsters[0].flags |= kMonsterFlagEscaped;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FIRE_POTION);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]);
+    EXPECT_FALSE(mask.can_use_potion_target[0][0])
+        << "a targeted potion must not be able to name an escaped monster";
+    EXPECT_TRUE(mask.can_use_potion_target[0][1])
+        << "the monster still in the fight must stay targetable";
+}
+
+int count_reward_kind(const RewardScreen& s, RewardItemKind k) {
+    int n = 0;
+    for (uint8_t i = 0; i < s.count; ++i) {
+        n += s.items[i].kind == static_cast<uint8_t>(k) ? 1 : 0;
+    }
+    return n;
+}
+
+// The REAL run path into a floor-1 solo-Looter combat (the encounter-key
+// substitution trick from combat_start_test: it puts the encounter in front of
+// the genuine construction path instead of hunting a seed whose map opens on
+// a strong-pool floor).
+RunController enter_looter_combat() {
+    RunController rc = run_begin(kSeed, kA20);
+    rc.lists.monster_list[0] = "Looter";
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.monster_count, 1);
+    return rc;
+}
+
+// The escaped-thief terminal, end to end through the run layer: the Looter's
+// machine is Mug, Mug, [Smoke Bomb | Lunge, Smoke Bomb], Escape, so doing
+// nothing ends the combat by escape on turn 4 or 5. The run must land on the
+// MUGGED outcome, actually take the stolen gold out of RunState.gold, roll no
+// plain-room gold (treasureRng untouched, AbstractRoom.java:319), run the
+// potion roll at chance zero (potionRng moves, the ratchet moves, no item --
+// :585-607), and STILL offer the card reward: the mugged openCombat calls
+// setupItemReward (CombatRewardScreen.java:280-285).
+TEST(RunEscape, LooterEscapeSettlesGoldAndOpensTheMuggedScreen) {
+    RunController rc = enter_looter_combat();
+    const RngStream treasure_before = rc.run.treasure_rng;
+    const RngStream potion_before = rc.run.potion_rng;
+    const int32_t card_counter_before = rc.run.card_rng.counter;
+    ASSERT_EQ(rc.run.gold, 99);
+
+    for (int turn = 0; turn < 8 &&
+                       rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+         ++turn) {
+        step(rc, make_action(ActionVerb::END_TURN));
+    }
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD))
+        << "the solo Looter's escape must end the combat";
+    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::MUGGED));
+    EXPECT_TRUE(monster_escaped(rc.combat.monsters[0]));
+    EXPECT_GT(rc.combat.monsters[0].hp, 0);
+
+    // Gold settlement: min(count * goldAmt, gold). Both machine paths steal
+    // before escaping -- 2 mugs, or 2 mugs + a lunge.
+    const int steals = static_cast<int>(looter_steal_count(rc.combat.monsters[0]));
+    ASSERT_GE(steals, 2);
+    ASSERT_LE(steals, 3);
+    EXPECT_EQ(rc.run.gold, 99 - steals * kLooterGoldAmt)
+        << "the escaped thief's stolen gold must actually leave the purse";
+
+    // Screen shape: cards only. No gold roll (treasureRng byte-identical), no
+    // stolen-gold return (the thief was not killed), the potion roll consumed
+    // at chance zero with the +10 ratchet.
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::GOLD), 0);
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::STOLEN_GOLD), 0);
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::POTION), 0);
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::CARDS), 1);
+    EXPECT_TRUE(streams_equal(rc.run.treasure_rng, treasure_before));
+    EXPECT_EQ(rc.run.potion_rng.counter, potion_before.counter + 1);
+    EXPECT_EQ(rc.run.blizzard_potion_mod, 10);
+    EXPECT_GT(rc.run.card_rng.counter, card_counter_before);
+
+    // The screen is a live CHOOSE state: the card item is claimable and
+    // Proceed leaves for the map.
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed);
+    EXPECT_TRUE(mask.can_claim_reward[0]);
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+// The killed-thief terminal: die() returns the clamped accrual through the
+// reward screen (addStolenGoldToRewards, Looter.java:170-172), so the run
+// deducts the settled amount AND assembles a claimable STOLEN_GOLD item ahead
+// of every battle-over item; claiming it puts the gold back through the
+// gainGold door. Abandoning it (Proceed) would keep the purse short, exactly
+// like the game.
+TEST(RunEscape, KilledLooterReturnsStolenGoldThroughTheScreen) {
+    RunController rc = enter_looter_combat();
+    // Two END_TURNs: Mug, Mug -- steal count 2, gold still untouched (the
+    // engine settles at combat end, provenance on settle_stolen_gold).
+    step(rc, make_action(ActionVerb::END_TURN));
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(looter_steal_count(rc.combat.monsters[0]), 2);
+    ASSERT_EQ(rc.run.gold, 99);
+
+    // Kill the thief (the record shape a lethal hit leaves: hp 0, the steal
+    // count surviving on the dead record) and let the pump see it.
+    rc.combat.monsters[0].hp = 0;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::KILLED));
+
+    const int32_t stolen = 2 * kLooterGoldAmt;
+    EXPECT_EQ(rc.run.gold, 99 - stolen);
+    ASSERT_GE(rc.rewards.count, 2);
+    EXPECT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::STOLEN_GOLD))
+        << "die() ran during combat, so its item precedes the battle-over gold";
+    EXPECT_EQ(rc.rewards.items[0].gold, stolen);
+    EXPECT_EQ(rc.rewards.items[0].bonus_gold, 0);
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::GOLD), 1)
+        << "a kill (not an all-escape) keeps the plain-room gold roll";
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::CARDS), 1);
+
+    // Claim the return: the purse is whole again.
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.gold, 99);
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::STOLEN_GOLD), 0);
+}
+
+// Mugged beats smoked (AbstractRoom.update:334-341 checks mugged FIRST): a
+// player who smoke-bombs out of a combat some thief already fled still gets
+// the mug screen, and the mug screen assembles the FULL kill shape -- the
+// gold/potion gates read haveMonstersEscaped (false here: the survivor is
+// alive and un-escaped), not the mug flag.
+TEST(RunEscape, SmokeBombAfterAMugKeepsTheMuggedScreenAndItsRewards) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.combat.flags |= kCombatFlagMugged;  // a thief already ran this combat
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SMOKE_BOMB);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::MUGGED))
+        << "mugged outranks smoked in the screen pick";
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::GOLD), 1);
+    EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::CARDS), 1);
 }
 
 // --- The potion legality trap -------------------------------------------------
