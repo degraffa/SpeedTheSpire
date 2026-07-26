@@ -41,9 +41,9 @@ void power_native_ritual(CombatState& s, Hook hook,
         if (ctx.owner == kActorPlayer || ctx.owner >= kMonsterCap) {
             return;  // player Ritual is onPlayer -> atEndOfRound no-op
         }
-        uint16_t& mf = s.monsters[ctx.owner].flags;
+        uint32_t& mf = s.monsters[ctx.owner].flags;
         if ((mf & kMonsterFlagRitualSkip) != 0u) {
-            mf = static_cast<uint16_t>(mf & ~kMonsterFlagRitualSkip);
+            mf &= ~kMonsterFlagRitualSkip;
             return;  // skipFirst: consume, no Strength this round
         }
         ActionQueueItem up{};

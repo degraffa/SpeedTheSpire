@@ -36,11 +36,10 @@ constexpr uint8_t kAllOrbsLit = 6;
 constexpr int kBurnIncreaseCopies = 3;
 
 void set_orb_count(MonsterState& m, uint8_t count) noexcept {
-    const uint16_t bits = static_cast<uint16_t>(
-        static_cast<uint16_t>(count << kMonsterFlagHexaghostOrbShift) &
-        kMonsterFlagHexaghostOrbMask);
-    m.flags = static_cast<uint16_t>(
-        (m.flags & static_cast<uint16_t>(~kMonsterFlagHexaghostOrbMask)) | bits);
+    const uint32_t bits = (static_cast<uint32_t>(count)
+                           << kMonsterFlagHexaghostOrbShift) &
+                          kMonsterFlagHexaghostOrbMask;
+    m.flags = (m.flags & ~kMonsterFlagHexaghostOrbMask) | bits;
 }
 
 // The two-item tail every move body but ACTIVATE ends with: ChangeStateAction
@@ -285,8 +284,7 @@ void hexaghost_roll_move(CombatState& s, uint8_t mi) noexcept {
             // `burnUpgraded = true` (:205-207) is synchronous in the Java
             // takeTurn; nothing between there and here reads it, and the first
             // reader is the NEXT Sear turn.
-            m.flags = static_cast<uint16_t>(m.flags |
-                                            kMonsterFlagHexaghostBurnUpgraded);
+            m.flags |= kMonsterFlagHexaghostBurnUpgraded;
             set_orb_count(m, 0);  // ChangeStateAction(DEACTIVATE_ALL_ORBS) (:208)
             break;
         case kSear:

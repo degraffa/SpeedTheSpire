@@ -267,7 +267,7 @@ void large_slime_on_damaged(CombatState& s, uint8_t mi) noexcept {
     it.amount = kMove3;
     it.flags = static_cast<uint32_t>(MonsterIntent::UNKNOWN);
     add_to_bottom(s, it);
-    m.flags = static_cast<uint16_t>(m.flags | kMonsterFlagSplitTriggered);
+    m.flags |= kMonsterFlagSplitTriggered;
 }
 
 }  // namespace sts::engine

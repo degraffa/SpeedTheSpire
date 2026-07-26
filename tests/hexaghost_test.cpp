@@ -338,12 +338,12 @@ TEST(HexaghostRegistry, TheBossEncounterRowResolvesToThisMonster) {
 // a new CombatState field (and therefore no SCHEMA_VERSION bump).
 TEST(HexaghostState, OrbCountAndBurnLatchLiveInSpareFlagBitsOnly) {
     // Disjoint from every previously allocated per-monster flag bit.
-    constexpr uint16_t kTaken = static_cast<uint16_t>(
+    constexpr uint32_t kTaken =
         kMonsterFlagRitualSkip | kMonsterFlagCurlUpTriggered |
         kMonsterFlagSplitTriggered | kMonsterFlagLagavulinAsleep |
         kMonsterFlagLagavulinIsOut | kMonsterFlagLagavulinOutTriggered |
         kMonsterFlagGuardianOpen | kMonsterFlagGuardianCloseUpTriggered |
-        kMonsterFlagGuardianShiftMask);
+        kMonsterFlagGuardianShiftMask;
     EXPECT_EQ(kTaken & kMonsterFlagHexaghostOrbMask, 0u);
     EXPECT_EQ(kTaken & kMonsterFlagHexaghostBurnUpgraded, 0u);
     EXPECT_EQ(kMonsterFlagHexaghostOrbMask & kMonsterFlagHexaghostBurnUpgraded,

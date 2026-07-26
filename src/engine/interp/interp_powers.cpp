@@ -197,8 +197,7 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // A newly-created CurlUpPower starts with triggered=false
         // (CurlUpPower.java:25,27-34). Existing instances preserve the latch when
         // stacked; only the new-slot path clears it.
-        s.monsters[tgt].flags = static_cast<uint16_t>(
-            s.monsters[tgt].flags & ~kMonsterFlagCurlUpTriggered);
+        s.monsters[tgt].flags &= ~kMonsterFlagCurlUpTriggered;
     }
     if (id == PowerId::FRAIL && tgt == kActorPlayer) {
         // All in-scope player Frail constructors pass isSourceMonster=true
@@ -240,8 +239,7 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
             if (id == PowerId::CURL_UP && tgt < kMonsterCap) {
                 // RemoveSpecificPowerAction destroys the CurlUpPower instance;
                 // its private triggered latch leaves with it.
-                s.monsters[tgt].flags = static_cast<uint16_t>(
-                    s.monsters[tgt].flags & ~kMonsterFlagCurlUpTriggered);
+                s.monsters[tgt].flags &= ~kMonsterFlagCurlUpTriggered;
             }
             if (id == PowerId::FRAIL && tgt == kActorPlayer) {
                 s.flags &= ~kCombatFlagFrailJustApplied;

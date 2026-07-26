@@ -409,7 +409,7 @@ TEST(LargeSlimeSplit, AcidSplitsIntoTwoMediumsAtCurrentHp) {
     MonsterState& m = s.monsters[0];
     m.hp = 30;  // parent's CURRENT hp -- the children's spawn HP
     set_monster_move(m, kSplitMove, MonsterIntent::UNKNOWN);
-    m.flags = static_cast<uint16_t>(m.flags | kMonsterFlagSplitTriggered);
+    m.flags |= kMonsterFlagSplitTriggered;
 
     // Hand-derive the children's init() rolls from a copy of the ai stream:
     // AcidSlime_M.getMove A17 on an empty history draws ONE random(99) --
@@ -472,7 +472,7 @@ TEST(LargeSlimeSplit, SpikeSplitAddsPosthumousParentRoll) {
     m.hp = 21;
     m.block = 5;  // SuicideAction bypasses damage(): block survives
     set_monster_move(m, kSplitMove, MonsterIntent::UNKNOWN);
-    m.flags = static_cast<uint16_t>(m.flags | kMonsterFlagSplitTriggered);
+    m.flags |= kMonsterFlagSplitTriggered;
 
     // Expected draws, in order: child0 random(99), child1 random(99), then the
     // dead parent's trailing RollMoveAction random(99) (SpikeSlime_L.java:127;
