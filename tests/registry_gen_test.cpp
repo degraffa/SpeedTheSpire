@@ -400,11 +400,18 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 91u);   // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 105u);  // B3.7: prior 67 + 8 red uncommon POWER cards
                                       // + the 16 red RARE cards (ids 76-91)
+                                      // + B3.10a's 14 colorless UNCOMMONs. Their
+                                      // ids run 92-111 with SIX interior gaps
+                                      // (94/96/98/101/104/109) reserved for
+                                      // B3.10b and the optional-multi-select
+                                      // pair, so the row COUNT is 14, not 20 --
+                                      // exactly the sparse-id case the note
+                                      // below describes.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 42u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 44u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -425,7 +432,14 @@ TEST(RegistryGen, ManifestCounts) {
                                       // Slaver's net and the Fungi Beast's
                                       // on-death release; 60-72 are other
                                       // batches' block
-    EXPECT_EQ(m::kMonstersCount, 24u); // + B3.14 four small/medium slimes
+                                      // + the Looter's Thievery (75), a pure
+                                      // marker (its only override is
+                                      // updateDescription); 76 is that batch's
+                                      // published reserve and stays unissued
+                                      // + B3.10a's No Block (77), Panic Button's
+                                      // debuff and the only power in the game
+                                      // that overrides modifyBlockLast
+    EXPECT_EQ(m::kMonstersCount, 25u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
                                        // Lagavulin (15)
@@ -435,11 +449,11 @@ TEST(RegistryGen, ManifestCounts) {
                                        // unchanged -- it applies only the
                                        // pre-existing Strength row
                                        // + B3.15's Blue Slaver (23), Red Slaver
-                                       // (24) and Fungi Beast (25). The Looter
-                                       // is NOT among them -- see the block
-                                       // comment in registry/monsters.yaml for
-                                       // why its escape lands with the pump's
-                                       // liveness predicate
+                                       // (24) and Fungi Beast (25)
+                                       // + the Looter (26), landed together
+                                       // with the escape liveness predicate --
+                                       // see the block comments in
+                                       // registry/monsters.yaml
     EXPECT_EQ(m::kRelicsCount, 142u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
                                        // + B3.27's 22 boss + 9 Act-1 event specials
     EXPECT_EQ(m::kPotionsCount, 33u);
@@ -447,7 +461,10 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
-    EXPECT_EQ(m::kTotalCount, 372u);  // 91 + 42 + 24 + 142 + 33 + 0 + 20 + 20
+    // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
+    // kPowersCount families even though it names neither: any batch that moves
+    // either constant has to move this sum too.
+    EXPECT_EQ(m::kTotalCount, 389u);  // 105 + 44 + 25 + 142 + 33 + 0 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -936,10 +953,15 @@ TEST(RegistryGen, UpgradedBlockAndFlagsEmitDistinctRow) {
         }
     }
     {
-        // id 100: X-cost + exhaust; base DAMAGE 7 (all enemies), upgraded DAMAGE 99.
-        // (Past the real card ids 1-10 so it never collides -- B3.4 filled 6-10.)
+        // X-cost + exhaust; base DAMAGE 7 (all enemies), upgraded DAMAGE 99.
+        // The id must not collide with a real cards.yaml row, and the loader
+        // rejects a duplicate outright. It was 100 and picked as "past the real
+        // card ids 1-10" -- which stopped being true the moment the card roster
+        // grew past 100 rows, exactly the rot conventions §8 warns about. 901 is
+        // in the same deliberately-far band the other synthetic rows in this file
+        // use (900), chosen so no content batch will ever reach it.
         std::ofstream cards(reg / "cards.yaml", std::ios::app);
-        cards << "\n- id: 100\n  name: SYNTH_XCOST\n  game_id: \"SynthX\"\n"
+        cards << "\n- id: 901\n  name: SYNTH_XCOST\n  game_id: \"SynthX\"\n"
                  "  type: ATTACK\n  cost: -1\n  target: ALL_ENEMY\n"
                  "  flags: [exhaust]\n"
                  "  provenance: \"synthetic B3.1 upgrade/flags codegen test\"\n"

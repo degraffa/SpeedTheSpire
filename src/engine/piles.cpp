@@ -82,6 +82,73 @@ void shuffle_discard_into_draw(CombatState& s) noexcept {
     s.discard_count = 0;
 }
 
+void reshuffle_all(CombatState& s, int exclude) noexcept {
+    // Split the discard into the cards the game would actually be shuffling and
+    // the ONE card that is in limbo at this moment (the card whose use() queued
+    // this action; see piles.hpp for why it must not participate). Everything
+    // downstream -- the guard, the permutation, the resulting piles -- is computed
+    // from `pool`, which is exactly the game's discardPile at DeepBreath.use time.
+    CardPoolIndex pool[kDiscardCap];
+    int n = 0;
+    bool limbo_present = false;
+    for (uint8_t i = 0; i < s.discard_count; ++i) {
+        if (static_cast<int>(s.discard[i]) == exclude) {
+            limbo_present = true;
+            continue;
+        }
+        pool[n++] = s.discard[i];
+    }
+
+    // DeepBreath.use (DeepBreath.java:34-38) queues EmptyDeckShuffleAction AND
+    // ShuffleAction(drawPile, false) under ONE `discardPile.size() > 0` guard.
+    // Read that guard once, here: the first shuffle empties the discard, so a
+    // second, separately-guarded step could never see the same answer.
+    if (n == 0) {
+        return;  // both actions skipped -- ZERO shuffle_rng draws
+    }
+
+    // EmptyDeckShuffleAction. Its CTOR fires the relics' onShuffle
+    // (EmptyDeckShuffleAction.java:37-39), before the shuffle draw; Sundial counts
+    // these, and its GainEnergy is queued, so the RNG accounting below is
+    // untouched.
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_shuffle(s, rv.relics, rv.count);
+    }
+    // ONE shuffleRng.randomLong() seeds a fresh java.util.Random driving
+    // Collections.shuffle over the discard list (CardGroup.shuffle(Random),
+    // CardGroup.java:565-567). Then update() walks the shuffled list front-to-back
+    // moving each card via Soul.shuffle -> drawPile.addToTop, i.e. appending to the
+    // END of the draw list -- which is our draw[] tail, since draw[draw_count-1] is
+    // the top card.
+    {
+        JdkRandom rng(random_long(s.shuffle_rng));
+        jdk_shuffle(std::span<CardPoolIndex>(pool, static_cast<size_t>(n)), rng);
+    }
+    int moved = n;
+    if (s.draw_count + moved > kDrawCap) {
+        moved = kDrawCap - s.draw_count;  // defensive clamp, as above
+    }
+    std::copy(pool, pool + moved, s.draw + s.draw_count);
+    s.draw_count = static_cast<uint8_t>(s.draw_count + moved);
+    // The discard is now empty except for the limbo card, which UseCardAction
+    // files there a moment later anyway.
+    s.discard_count = 0;
+    if (limbo_present) {
+        s.discard[s.discard_count++] = static_cast<CardPoolIndex>(exclude);
+    }
+
+    // ShuffleAction.update (ShuffleAction.java:31-40) with triggerRelics == false:
+    // no second onShuffle pass, just group.shuffle() -- CardGroup.shuffle()
+    // (CardGroup.java:561-563) takes ONE MORE shuffleRng.randomLong() and
+    // Collections.shuffle()s the WHOLE draw pile, which by now holds the
+    // pre-existing draw cards plus everything the first half moved in.
+    {
+        JdkRandom rng(random_long(s.shuffle_rng));
+        jdk_shuffle(std::span<CardPoolIndex>(s.draw, s.draw_count), rng);
+    }
+}
+
 int draw_cards(CombatState& s, int amount) noexcept {
     // AbstractPlayer.draw(): a full hand refuses to draw anything at all.
     if (s.hand_count >= kHandCap) {

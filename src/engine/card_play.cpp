@@ -131,6 +131,17 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
         // then increments only this card instance's misc counter.
         item.flags = static_cast<uint32_t>(source_index) |
                      (step.extra << 8u);
+    } else if (step.op == static_cast<decltype(step.op)>(Opcode::RESHUFFLE_ALL)) {
+        // Deep Breath: same limbo problem as the discard-source choice below, and
+        // the same fix. AbstractPlayer.useCard queues the card's own actions
+        // BEFORE the UseCardAction that files the card away (:1369-1375), so the
+        // played card is in NO pile while its reshuffle resolves; resolve_card_play
+        // has already moved it to the discard. Stamp its pool index into `tgt` so
+        // reshuffle_all can keep it out of the shuffled set -- otherwise the played
+        // card is shuffled into the draw pile, and its mere presence changes both
+        // the `discardPile.size() > 0` guard and the Fisher-Yates permutation of
+        // every other card.
+        item.tgt = source_index;
     } else if (step.op == static_cast<decltype(step.op)>(Opcode::CHOOSE_CARD) &&
                choice_source_is_discard(choose_kind_from_flags(step.extra))) {
         // Headbutt (discard-source choice): stamp the just-played source card's
@@ -273,12 +284,16 @@ bool queue_card_play(CombatState& s, uint8_t hand_index, uint8_t target) noexcep
 }
 
 uint8_t roll_random_target(CombatState& s) noexcept {
-    // getRandomMonster(null, true, cardRandomRng): pick uniformly among the LIVE
-    // monsters via one cardRandomRng draw over [0, aliveCount-1] (inclusive).
+    // getRandomMonster(null, true, cardRandomRng) (MonsterGroup.java:156-171):
+    // pick uniformly among the monsters still IN the fight via one cardRandomRng
+    // draw over [0, aliveCount-1] (inclusive). The Java's aliveOnly filter skips
+    // `halfDead || isDying || isEscaping` (:164), so an escaped monster is not
+    // in the candidate list -- monster_dead_or_escaped is that exact test here
+    // (halfDead has no S1 producer).
     uint8_t alive[kMonsterCap];
     int n = 0;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp > 0) {
+        if (!monster_dead_or_escaped(s.monsters[i])) {
             alive[n++] = i;
         }
     }

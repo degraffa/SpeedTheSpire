@@ -97,6 +97,24 @@ inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
 // is NOT gated (the Java latch only guards the victory branch).
 inline constexpr uint32_t kCombatFlagCannotLose = 1u << 1;
 
+// CombatState.flags bit for the room's `mugged` latch (AbstractRoom.mugged).
+// Set SYNCHRONOUSLY when a thief's Escape move runs (Looter.takeTurn case
+// ESCAPE, Looter.java:128 -- before the queued EscapeAction resolves). The
+// reward layer reads it: a mugged room's combat reward keeps no gold and the
+// thief's stolen gold is gone with it. Nothing in the combat layer reads it
+// back.
+inline constexpr uint32_t kCombatFlagMugged = 1u << 2;
+
+// CombatState.flags bit for the PLAYER's escape (Smoke Bomb). SmokeBomb.use
+// (SmokeBomb.java:37-48) marks the room `smoked` and sets player.isEscaping +
+// a 2.5s escapeTimer; the timer expiring is what ends the battle
+// (AbstractPlayer.updateEscapeAnimation, AbstractPlayer.java:2281-2292 --
+// endBattle() unconditionally, NOT gated on cannotLose). With no animation
+// clock the three Java fields (smoked, isEscaping, the timer) collapse into
+// this one bit; the pump's combat-over check reads it every step, which is what
+// lets a combat end while monsters are still alive.
+inline constexpr uint32_t kCombatFlagPlayerEscaped = 1u << 3;
+
 // CombustPower keeps a private hpLoss counter distinct from its visible damage
 // amount. The player-owned counter lives in otherwise-reserved CombatState
 // flags: the cards are self-only, and this preserves the frozen PowerSlot/POD
@@ -321,6 +339,43 @@ inline constexpr uint16_t kMonsterFlagGuardianShiftMask = 0x0700u;
 inline constexpr uint16_t kMonsterFlagHexaghostOrbShift = 11u;
 inline constexpr uint16_t kMonsterFlagHexaghostOrbMask = 0x3800u;
 inline constexpr uint16_t kMonsterFlagHexaghostBurnUpgraded = 0x4000u;
+
+// ESCAPED -- the first GLOBAL (not monster-type-scoped) flag bit: the monster
+// left the fight ALIVE. AbstractMonster.escape (AbstractMonster.java:915-919)
+// sets `isEscaping`; the escape animation then latches `escaped`
+// (updateEscapeAnimation, :894-906). This engine has no animation clock, so the
+// two Java booleans collapse into this one bit, set by the ESCAPE opcode
+// (EscapeAction.java:21-28 -> escape()) at resolve time. The Looter is the only
+// Act-1 producer (Looter.java:126-133); the gremlins' move 99 is unreachable in
+// Act 1 (no escapeNext()/deathReact() caller) and stays unmodelled.
+//
+// An escaped monster keeps its positive hp -- it is NOT dying -- so every
+// liveness read that means "in the fight" must test monster_dead_or_escaped()
+// below rather than hp alone. Being global, this bit is read without checking
+// monster_id, unlike every type-scoped bit above.
+//
+// This takes the last free MonsterState.flags bit. That is acceptable because
+// the type-scoped bits above are MUTUALLY EXCLUSIVE across monster types (no
+// record is two types at once), so a future monster needing scratch bits may
+// deliberately overlap another type's allocation -- only genuinely global bits
+// like this one must be unique, and escape is the only global creature state
+// the Java carries that hp does not already express.
+inline constexpr uint16_t kMonsterFlagEscaped = 0x8000u;
+
+// --- Liveness predicates ------------------------------------------------------
+// The game's monster liveness is NOT `hp > 0`: it is `isDying || isEscaping`
+// (MonsterGroup.areMonstersBasicallyDead, MonsterGroup.java:90-95) or
+// isDeadOrEscaped (AbstractCreature.java:780-790) depending on the site. This
+// engine models isDying as hp <= 0 (die() and SuicideAction both zero HP) and
+// isEscaping/escaped as kMonsterFlagEscaped, so "dead or escaped" is one shared
+// predicate. halfDead has no S1 producer (no Awakened One / Darklings), so the
+// Java's halfDead terms are constant-false here.
+[[nodiscard]] inline bool monster_escaped(const MonsterState& m) noexcept {
+    return (m.flags & kMonsterFlagEscaped) != 0u;
+}
+[[nodiscard]] inline bool monster_dead_or_escaped(const MonsterState& m) noexcept {
+    return m.hp <= 0 || monster_escaped(m);
+}
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 static_assert(sizeof(MonsterState) == 16 + 4 * kPowerCap,

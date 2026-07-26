@@ -60,7 +60,14 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30) -- a pure
+    // marker; the steal itself rides DamageAction's stealGold, not a power hook.
+    // Checked for No Block, which needs no case: its ONLY damage-relevant answer
+    // is "none". NoBlockPower declares atEndOfRound (NoBlockPower.java:39-50),
+    // updateDescription (:52-55) and modifyBlockLast (:58-60) -- the last of those
+    // is on the BLOCK path (interp_block.cpp), not this pipeline.
+    static_assert(sts::registry::manifest::kPowersCount == 44,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -103,11 +110,18 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30).
+    // Checked for No Block: same answer as the pass above -- its only override
+    // outside its own lifecycle is modifyBlockLast (NoBlockPower.java:58-60), on
+    // the BLOCK path, so no case is needed here either.
+    static_assert(sts::registry::manifest::kPowersCount == 44,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
-                  "still a pass-through because no power overrides it yet.");
+                  "NOT a pass-through: INTANGIBLE has a case there "
+                  "(IntangiblePlayerPower.java:43-49). Its twin "
+                  "atDamageFinalGive still is one.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::VULNERABLE:
             if (owner_actor == kActorPlayer &&
@@ -154,7 +168,11 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30).
+    // Checked for No Block: it overrides no atDamage* hook at all (its whole
+    // damage-side surface is empty -- NoBlockPower.java:39-60), so no case here.
+    static_assert(sts::registry::manifest::kPowersCount == 44,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -505,7 +523,7 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 void op_vampire_damage_all(CombatState& s, int base) noexcept {
     int healed = 0;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp <= 0) {
+        if (monster_dead_or_escaped(s.monsters[i])) {
             continue;  // isDying || currentHealth <= 0 || isEscaping (:60)
         }
         const int16_t before = s.monsters[i].hp;

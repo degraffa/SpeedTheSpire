@@ -16,6 +16,7 @@ add_library(sts_engine
     monster_hexaghost.cpp
     monster_slaver.cpp
     monster_fungi_beast.cpp
+    monster_looter.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp

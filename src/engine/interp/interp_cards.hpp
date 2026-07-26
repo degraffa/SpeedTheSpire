@@ -47,4 +47,14 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
 // FIEND_FIRE -- exhaust the hand one random card at a time, then hit `base` times.
 void op_fiend_fire(CombatState& s, uint8_t target, int base) noexcept;
 
+// CONDITIONAL_DRAW (Impatience) -- draw `amount` only if NO hand card has
+// CardType `restricted_type` (the raw CardType value, interp.hpp
+// conditional_draw_type_from_flags).
+void op_conditional_draw(CombatState& s, int amount,
+                         uint8_t restricted_type) noexcept;
+
+// MADNESS -- rejection-sample the hand with card_random_rng and permanently zero
+// the chosen card's cost.
+void op_madness(CombatState& s) noexcept;
+
 }  // namespace sts::engine

@@ -206,6 +206,18 @@ sts_add_test(slaver_test FIXTURES)
 # 20-turn fixture pins the roll-driven d60 move tree.
 sts_add_test(fungi_beast_test FIXTURES)
 
+# The Looter -- the A7 HP column, the A2 mug/lunge damage columns, the
+# slashCount/steal accounting (pad0 doubles as the steal count), the Thievery
+# marker power, and THE FIRST REACHABLE ESCAPE: the liveness predicate is now
+# `dead or escaped` (MonsterGroup.java:90-95,117-122), so an escaped monster is
+# alive, out of the fight, untargetable, skipped by AoE/random targeting and
+# the power walks, and its departure ends a solo battle in a terminal state
+# distinct from a kill (mugged room, positive HP, escaped flag). Also the
+# Smoke Bomb potion's combat-layer body, blocked on the same predicate. One
+# independent 32-seed fixture whose per-seed ROW COUNT (4 or 5 turns, to the
+# escape) pins the Smoke-Bomb-or-Lunge coin.
+sts_add_test(looter_test FIXTURES)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE
@@ -413,6 +425,15 @@ sts_add_test(card_uncommon_powers_test)
 # exhaust-pile choice, Feed/Reaper healing through the relic seam, and an
 # advance() script.
 sts_add_test(card_rares_test)
+
+# B3.10a: the fourteen colorless UNCOMMON cards that need no colorless card pool.
+# Per-card base/upgraded behaviour, the six reserved interior CardId gaps, Deep
+# Breath's fused double reshuffle and its two-draw shuffle_rng accounting,
+# Impatience's conditional draw (including that it stays behind the No Draw
+# gate), Mind Blast's draw-pile-sized base, Madness's cardRandomRng
+# REJECTION-SAMPLING draw accounting, No Block, and the modifyBlock /
+# modifyBlockLast TWO-PASS order No Block's correctness depends on.
+sts_add_test(card_colorless_uncommons_test)
 
 # B4.15: ascension modifier table (design §6) -- the implemented run-setup + map
 # rows, their application ORDER, and the frozen "no such modifier" negatives.

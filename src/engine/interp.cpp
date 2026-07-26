@@ -23,7 +23,7 @@
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // roll_monster_move / spawn_monster_at_slot
-#include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
+#include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / reshuffle_all / exhaust_card
 #include "sts/engine/power_hooks.hpp"   // power hook dispatch (onCardDraw)
 #include "sts/engine/types.hpp"
 
@@ -39,10 +39,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
     // Dynamic-target resolution at EXECUTE time (interp.hpp decision (4)).
     if (item.tgt == kActorAllEnemies) {
         // AoE: a SEPARATE op (and, for DAMAGE, a separate DamageInfo) per LIVE
-        // monster (DamageAllEnemiesAction skips isDeadOrEscaped). Snapshotting
-        // the live set here matches the game resolving the AoE action in place.
+        // monster (DamageAllEnemiesAction skips isDeadOrEscaped,
+        // DamageAllEnemiesAction.java:56-83 -- so an escaped Looter is not hit).
+        // Snapshotting the live set here matches the game resolving the AoE
+        // action in place.
         for (uint8_t i = 0; i < s.monster_count; ++i) {
-            if (s.monsters[i].hp > 0) {
+            if (!monster_dead_or_escaped(s.monsters[i])) {
                 ActionQueueItem one = item;
                 one.tgt = i;
                 execute_opcode(s, one);
@@ -249,6 +251,28 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // Baked into a plain DAMAGE at queue time (card_play.cpp); never
             // reaches execute in practice. Safe no-op if it somehow does.
             return;
+        case Opcode::DAMAGE_DRAW_PILE:
+            // Mind Blast: base == the DRAW PILE SIZE (read here at execute time),
+            // then the normal DamageInfo pipeline. `src` is the player
+            // (queue_effect_step), `amount` is unused -- the same shape as
+            // DAMAGE_BLOCK above.
+            op_damage(s, item.src, item.tgt, static_cast<int>(s.draw_count));
+            return;
+        case Opcode::CONDITIONAL_DRAW:
+            op_conditional_draw(s, item.amount,
+                                conditional_draw_type_from_flags(item.flags));
+            return;
+        case Opcode::RESHUFFLE_ALL:
+            // The fused Deep Breath double shuffle (piles.cpp). `tgt` carries the
+            // source card's pool index, stamped by card_play.cpp, so the card that
+            // is in limbo in the game is kept out of the shuffled discard; a
+            // non-card queuer leaves an actor sentinel there, which is >=
+            // kCardPoolCap and so means "exclude nothing".
+            reshuffle_all(s, item.tgt);
+            return;
+        case Opcode::MADNESS:
+            op_madness(s);
+            return;
         case Opcode::CANNOT_LOSE:
             // CannotLoseAction.update (CannotLoseAction.java:12-15): latch the
             // room's cannotLose so the pump's all-monsters-dead victory gate
@@ -294,6 +318,25 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                              static_cast<MonsterIntent>(item.flags & 0xFFu));
             return;
         }
+        case Opcode::ESCAPE:
+            // EscapeAction.update (EscapeAction.java:21-28) -> escape()
+            // (AbstractMonster.java:915-919): the monster leaves the fight
+            // alive. The Java sets isEscaping and a 3s timer whose expiry
+            // latches `escaped` (updateEscapeAnimation:894-906); with no
+            // animation clock both collapse into the one flag bit, set at
+            // resolve time. HP, block and powers are untouched -- an escaped
+            // monster is NOT dying, which is why every "in the fight" read
+            // goes through monster_dead_or_escaped. The battle-end that
+            // :902-904 performs (areMonstersDead && !cannotLose -> endBattle)
+            // needs no code here: pump_step recomputes the combat-over
+            // predicate from the flags at the top of every step.
+            if (item.tgt >= kMonsterCap) {
+                return;
+            }
+            s.monsters[item.tgt].flags =
+                static_cast<uint16_t>(s.monsters[item.tgt].flags |
+                                      kMonsterFlagEscaped);
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

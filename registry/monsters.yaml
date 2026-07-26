@@ -930,19 +930,20 @@
 # columns key on the `if (ascensionLevel >= N)` branches, which are 7 for HP and
 # 2 for damage in all three classes.
 #
-# THE LOOTER IS DELIBERATELY ABSENT, and its absence is a finding rather than an
-# omission. Its escape move (Looter.java:126-133 -> EscapeAction ->
-# AbstractMonster.escape, AbstractMonster.java:915-919) IS reachable in Act 1:
-# unlike the gremlins' move 99 it needs no escapeNext()/deathReact() caller
-# (AbstractMonster.java:908-913), it is simply where its own takeTurn state
-# machine ends -- Mug, Mug, then a 50/50 into Smoke Bomb or Lunge, and Smoke Bomb
-# always telegraphs Escape. But an escaped monster is one that is STILL ALIVE and
-# no longer in the fight, and the engine's single liveness signal is hp > 0; the
-# Java's is `isDying || isEscaping` (MonsterGroup.areMonstersBasicallyDead,
-# MonsterGroup.java:90-95, and queueMonsters' isDeadOrEscaped, :117-122). Making
-# escape a terminal state distinct from a kill therefore means teaching the
-# pump's liveness predicate about it, which lives in a file this task does not
-# own. The Looter lands with that predicate rather than half-implemented here.
+# THE LOOTER LANDED SEPARATELY from the three above (its row, id 26, is at the
+# end of this file), and later than them on purpose: its escape move
+# (Looter.java:126-133 -> EscapeAction -> AbstractMonster.escape,
+# AbstractMonster.java:915-919) IS reachable in Act 1 -- unlike the gremlins'
+# move 99 it needs no escapeNext()/deathReact() caller (AbstractMonster.java:
+# 908-913), it is simply where its own takeTurn state machine ends (Mug, Mug,
+# then a 50/50 into Smoke Bomb or Lunge, and Smoke Bomb always telegraphs
+# Escape). An escaped monster is STILL ALIVE and no longer in the fight, which
+# the engine's old hp-only liveness signal could not express; the Java's is
+# `isDying || isEscaping` (MonsterGroup.areMonstersBasicallyDead,
+# MonsterGroup.java:90-95, and queueMonsters' isDeadOrEscaped, :117-122). The
+# Looter therefore landed TOGETHER WITH that predicate (monster_dead_or_escaped
+# + kMonsterFlagEscaped, combat_state.hpp; the ESCAPE opcode, interp.hpp) rather
+# than half-implemented ahead of it.
 
 - id: 23
   name: SLAVER_BLUE
@@ -1046,3 +1047,86 @@
                # fixed 2, no ascension branch) is queued by monster_fungi_beast.cpp
                # -- a pre-battle power amount is not one of the schema's tier
                # columns (the GremlinWarrior/Angry precedent).
+
+# --- The Looter (landed with the escape predicate; see the block comment
+# above the slavers for why it did not land with them) -------------------------
+# Looter.java read in full (:33-193). Draw accounting at A20:
+#   * ctor setHp(46, 50) -- one monster_hp_rng draw (AbstractMonster.java:765-775).
+#   * init() rollMove -- one ai_rng.random(99) draw, which getMove (:177-179)
+#     then IGNORES: the opener is unconditionally Mug. No takeTurn body queues a
+#     RollMoveAction, so this is the ONLY rollMove draw of the whole combat --
+#     every later transition is a setMove / queued SetMoveAction inside takeTurn
+#     (the Guardian precedent, not the slaver one).
+#   * takeTurn's OWN ai_rng draws, both randomBoolean (nextFloat) draws:
+#       - the FIRST Mug only: `slashCount == 0 && aiRng.randomBoolean(0.6f)`
+#         (:92) gates a TalkAction -- presentation, but the DRAW moves the
+#         stream, and Java's && short-circuit means later Mugs draw NOTHING.
+#       - the SECOND attack (slashCount reaches 2, :100-107): one
+#         aiRng.randomBoolean(0.5f) -- true means Smoke Bomb next, false means
+#         Lunge next. The Lunge turn itself rolls nothing (:111-118).
+#   * playSfx / playDeathSfx roll MathUtils.random -- the libgdx global
+#     generator, NOT a seeded stream (unlike the Act-2 Mugger, which rolls
+#     aiRng for the same sound, Mugger.java:139,149).
+# The gold steal: usePreBattleAction applies ThieveryPower(this, goldAmt) (:85;
+# powers.yaml id 75), goldAmt = 15 / A17 20 (:63). Each Mug/Lunge queues an
+# anonymous accrual action (stolenGold += min(goldAmt, player.gold); the
+# synthetic accessors :181-192 are its residue) and then the 3-arg
+# DamageAction(player, damage.get(i), goldAmt) whose stealGold (DamageAction.
+# java:98-114) clamps to the player's gold and deducts it. CombatState carries
+# no gold, so the engine records the STEAL COUNT (MonsterState.pad0) and the
+# run/reward layer settles gold at combat end -- exact for every Act-1 group
+# because none fields two thieves (see monster_looter.hpp).
+# die() (:159-174): if stolenGold > 0, addStolenGoldToRewards(stolenGold) --
+# BEFORE super.die()'s power/relic walks -- so a KILLED Looter returns what it
+# stole via the reward screen, while an ESCAPED one keeps it (room.mugged,
+# :128). Rewards are B4.5's; the state carries both outcomes distinctly.
+
+- id: 26
+  name: LOOTER
+  game_id: "Looter"
+  provenance: "Looter ctor setHp/goldAmt/damage branches (Looter.java:59-81), usePreBattleAction ThieveryPower (:84-86), takeTurn (:88-135) -- Mug (:91-110), Lunge (:111-119), Smoke Bomb (:120-125), Escape incl. room.mugged and EscapeAction (:126-133), move ids MUG=1/SMOKE_BOMB=2/ESCAPE=3/LUNGE=4 (:48-51), swipeDmg 10 / A2 11 and lungeDmg 12 / A2 14 (:69-77), escapeDef 6 (:46), goldAmt 15 / A17 20 (:63), slashCount/stolenGold (:56-57), die stolen-gold return (:159-174), getMove ignores num (:176-179); ID (:35); ThieveryPower.java:11-31; DamageAction stealGold (DamageAction.java:39-42,75-77,98-114); EscapeAction.java:13-29; AbstractMonster.escape/updateEscapeAnimation (AbstractMonster.java:894-906,915-919); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 44, max: 48}   # Looter.java:67 (ascension < 7)
+    a7:   {min: 46, max: 50}   # Looter.java:65 (ascension >= 7)
+  moves:
+    - name: MUG
+      move_id: 1               # Looter.java:48
+      intent: ATTACK
+      effects:
+        # damage.get(0) == swipeDmg: 10, or 11 from A2 (Looter.java:69-77); the
+        # 3-arg DamageAction (:98) also steals goldAmt -- the steal-count accrual
+        # is native (monster_looter.cpp), the damage is this program.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+    - name: SMOKE_BOMB
+      move_id: 2               # Looter.java:49
+      intent: DEFEND           # setMove((byte)2, Intent.DEFEND) (:102,117)
+      effects:
+        # GainBlockAction(this, this, escapeDef) -- a flat 6, no ascension
+        # branch (Looter.java:46,122). The SetMoveAction(3, Intent.ESCAPE)
+        # behind it (:123) is native (an engine-emitted SET_MOVE).
+        - {op: BLOCK, target: SELF, amount: 6}
+    - name: ESCAPE
+      move_id: 3               # Looter.java:50
+      intent: ESCAPE           # SetMoveAction(3, Intent.ESCAPE) (:123,131)
+      effects:
+        # The whole body is native (monster_looter.cpp): room.mugged is set
+        # SYNCHRONOUSLY (:128, kCombatFlagMugged), then the queued EscapeAction
+        # (:130, the engine-emitted ESCAPE opcode) and the re-telegraphing
+        # SetMoveAction (:131). The Talk/VFX either side are presentation and
+        # roll nothing. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: LUNGE
+      move_id: 4               # Looter.java:51
+      intent: ATTACK           # SetMoveAction(..., 4, Intent.ATTACK, lungeDmg) (:105)
+      effects:
+        # damage.get(1) == lungeDmg: 12, or 14 from A2 (Looter.java:69-77); the
+        # 3-arg DamageAction (:116) steals like Mug's does.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 12, a2: 14}}
+  ai: native   # Not a roll-driven tree at all: getMove (:176-179) IGNORES its
+               # rolled num (the init draw still happens and is discarded -- the
+               # Red Slaver/Guardian precedent) and every later move is decided
+               # inside takeTurn by slashCount and two aiRng randomBoolean draws
+               # (the 0.6 first-Mug talk gate and the 0.5 Smoke-Bomb-or-Lunge
+               # coin). slashCount lives in MonsterState.pad0 and doubles as the
+               # steal count. See monster_looter.cpp.

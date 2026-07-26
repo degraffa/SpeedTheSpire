@@ -21,9 +21,10 @@ authored today.
 
 from __future__ import annotations
 
-from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CHOICE_COPIES_SHIFT,
-                    CHOICE_KIND_HIGH_BIT, CHOICE_KINDS, CHOICE_RANDOM_BIT,
-                    DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
+from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
+                    CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT, CHOICE_KINDS,
+                    CHOICE_RANDOM_BIT, DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS,
+                    STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
 # Which ops a domain MAY author is a property of the queueing helper that turns a
@@ -48,6 +49,11 @@ GENERAL_OPS = frozenset({
     # that form is emitted natively, never authored (see interp.hpp kPlayCard*).
     "DAMAGE_FEED", "FIEND_FIRE", "DOUBLE_STRENGTH", "VAMPIRE_DAMAGE_ALL",
     "HEAL", "PLAY_CARD",
+    # Colorless-uncommon verbs. Every operand is a literal or an execute-time
+    # read of player-side state (the draw-pile size, the hand's card types, the
+    # discard pile, the hand), so none of them needs the played card's instance
+    # and all four carry identically from any domain's queue helper.
+    "DAMAGE_DRAW_PILE", "CONDITIONAL_DRAW", "RESHUFFLE_ALL", "MADNESS",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -71,6 +77,9 @@ CARD_CONTEXT_OPS = frozenset({
 ENGINE_EMITTED_OPS = frozenset({
     "EXHAUST", "SET_COST", "ROLL_MOVE",
     "CANNOT_LOSE", "CAN_LOSE", "SUICIDE", "SPAWN_MONSTER", "SET_MOVE",
+    # ESCAPE's operand is the escaping monster's slot, decided by its native
+    # take-turn body (monster_looter.cpp) -- same category as SUICIDE/SET_MOVE.
+    "ESCAPE",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE
@@ -265,6 +274,23 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             raise fail(f"{owner} PLAY_CARD must author 'from_draw_top': it is the "
                        f"only source a YAML program can name")
         return bits
+
+    if op == "CONDITIONAL_DRAW":
+        # `extra` = the RESTRICTED CardType (ConditionalDrawAction's
+        # restrictedType ctor argument, :20-27): the draw happens only when NO
+        # hand card has that type. Required, never defaulted -- ATTACK packs as
+        # 0, so an omitted key would be indistinguishable from `ATTACK` and
+        # would silently author Impatience's exact semantics onto a row that
+        # meant something else.
+        ct = step.get("card_type")
+        if ct is None:
+            raise fail(f"{owner} CONDITIONAL_DRAW needs an explicit "
+                       f"card_type: (known: {sorted(CARD_TYPES)})")
+        ct = str(ct).upper()
+        if ct not in CARD_TYPES:
+            raise fail(f"{owner} CONDITIONAL_DRAW has unknown card_type "
+                       f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
+        return CARD_TYPES[ct]
 
     if op in ("DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE"):
         # Dynamic per-instance damage: `increment` is the first-upgrade

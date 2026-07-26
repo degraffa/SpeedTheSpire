@@ -28,12 +28,14 @@ static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
 
 namespace {
 
-// Any monster in a live slot (design doc §5.2 uses areMonstersBasicallyDead();
-// the proxy here is hp > 0 -- MonsterState has no halfDead/escaped fields, so
-// the closest available liveness signal is positive HP).
+// !areMonstersBasicallyDead() (MonsterGroup.java:90-95): a monster is in the
+// fight unless `isDying || isEscaping`. The engine models isDying as hp <= 0
+// and isEscaping as kMonsterFlagEscaped (monster_dead_or_escaped,
+// combat_state.hpp) -- an escaped monster is ALIVE and OUT of the fight, so a
+// bare hp test would keep a mugged battle open forever after the Looter leaves.
 [[nodiscard]] bool any_monster_alive(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp > 0) {
+        if (!monster_dead_or_escaped(s.monsters[i])) {
             return true;
         }
     }
@@ -41,11 +43,12 @@ namespace {
 }
 
 // queueMonsters equivalent (GameActionManager.java:306 ->
-// MonsterGroup.queueMonsters): enqueue every live monster, in slot order. The
-// game skips dead/escaped monsters; the proxy here is hp > 0 (see above).
+// MonsterGroup.queueMonsters, MonsterGroup.java:117-122): enqueue every live
+// monster, in slot order. The Java guard is `isDeadOrEscaped() && !halfDead`;
+// halfDead has no S1 producer, so the skip is exactly monster_dead_or_escaped.
 void queue_monsters(CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp > 0) {
+        if (!monster_dead_or_escaped(s.monsters[i])) {
             assert(s.monster_queue_count < kMonsterQueueCap &&
                    "monster_queue overflow (design doc §4.1: hard assert)");
             s.monster_queue[s.monster_queue_count].monster_index = i;
@@ -430,15 +433,29 @@ bool pop_pre_turn_front(CombatState& s, ActionQueueItem& out) noexcept {
 PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     PumpStepResult r{};
 
-    // Minimal combat-over check (design doc §5.2 scope note: full death handling
-    // is not yet modeled; this just gives the phase transition so pump() cannot
-    // spin). The all-monsters-dead victory branch is gated on the cannotLose
-    // latch: between a splitting slime's SUICIDE and its children's
-    // SPAWN_MONSTER actions no monster is alive, and the game keeps the battle
-    // open exactly because endBattle() checks !cannotLose (AbstractMonster.
-    // updateDeathAnimation:869; CannotLoseAction/CanLoseAction:12-15). Player
-    // death is NOT gated -- the Java latch only guards the victory branch.
-    if (s.player_hp <= 0 ||
+    // Combat-over check, recomputed at the top of EVERY step. Three exits:
+    //   * player dead -- NOT gated on cannotLose (the Java latch only guards
+    //     the victory branch).
+    //   * player escaped (Smoke Bomb) -- kCombatFlagPlayerEscaped. The Java
+    //     ends this battle from the player's escape-timer expiry
+    //     (AbstractPlayer.updateEscapeAnimation:2286-2291, an unconditional
+    //     endBattle()), also not gated on cannotLose; unreachable mid-split
+    //     anyway, because the latch is only ever set inside a monster's own
+    //     resolution window while the player cannot act.
+    //   * nobody left IN the fight -- any_monster_alive is the
+    //     areMonstersBasicallyDead complement, so a monster that ESCAPED
+    //     (alive, out of the fight) ends the battle exactly as a dead one does
+    //     (updateEscapeAnimation:902-904's areMonstersDead check). Gated on the
+    //     cannotLose latch: between a splitting slime's SUICIDE and its
+    //     children's SPAWN_MONSTER actions no monster is alive, and the game
+    //     keeps the battle open exactly because endBattle() checks !cannotLose
+    //     (AbstractMonster.updateDeathAnimation:869; CannotLoseAction/
+    //     CanLoseAction:12-15).
+    // The terminal STATE distinguishes the three: player_hp <= 0 is a defeat;
+    // kCombatFlagPlayerEscaped is the player's escape; otherwise every monster
+    // record reads dead (hp <= 0) or escaped (kMonsterFlagEscaped, hp > 0) --
+    // so an escape terminal is distinct from a kill by inspection.
+    if (s.player_hp <= 0 || (s.flags & kCombatFlagPlayerEscaped) != 0u ||
         (!any_monster_alive(s) && (s.flags & kCombatFlagCannotLose) == 0u)) {
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         r.outcome = PumpOutcome::COMBAT_OVER;
@@ -530,7 +547,10 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     if (s.monster_queue_count > 0) {
         const uint8_t mi = s.monster_queue[0].monster_index;
         monster_queue_pop_front(s);
-        if (mi < s.monster_count && s.monsters[mi].hp > 0) {
+        // Step-5 liveness gate (GameActionManager.java:310): `!isDeadOrEscaped()
+        // || halfDead` -- a monster that died OR ESCAPED while queued behind a
+        // sibling forfeits its turn (halfDead has no S1 producer).
+        if (mi < s.monster_count && !monster_dead_or_escaped(s.monsters[mi])) {
             take_turn(s, mi);            // m.takeTurn()
             // m.applyTurnPowers() -- stub (no monster powers with a turn hook).
         }

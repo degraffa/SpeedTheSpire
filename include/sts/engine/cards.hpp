@@ -216,7 +216,17 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::VAMPIRE_DAMAGE_ALL) ==
             static_cast<uint16_t>(Opcode::VAMPIRE_DAMAGE_ALL) &&
         static_cast<uint16_t>(sts::registry::Opcode::HEAL) ==
-            static_cast<uint16_t>(Opcode::HEAL),
+            static_cast<uint16_t>(Opcode::HEAL) &&
+        static_cast<uint16_t>(sts::registry::Opcode::ESCAPE) ==
+            static_cast<uint16_t>(Opcode::ESCAPE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_DRAW_PILE) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_DRAW_PILE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::CONDITIONAL_DRAW) ==
+            static_cast<uint16_t>(Opcode::CONDITIONAL_DRAW) &&
+        static_cast<uint16_t>(sts::registry::Opcode::RESHUFFLE_ALL) ==
+            static_cast<uint16_t>(Opcode::RESHUFFLE_ALL) &&
+        static_cast<uint16_t>(sts::registry::Opcode::MADNESS) ==
+            static_cast<uint16_t>(Opcode::MADNESS),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

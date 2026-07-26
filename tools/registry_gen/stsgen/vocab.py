@@ -116,6 +116,37 @@ OPCODES = {
     "DOUBLE_STRENGTH": 37,
     "VAMPIRE_DAMAGE_ALL": 38,
     "HEAL": 39,
+    # Looter-batch addition (append-only from 40; 41-42 are the batch's published
+    # reserve and stay unissued). ESCAPE is the queued EscapeAction
+    # (EscapeAction.java:21-28 -> AbstractMonster.escape, AbstractMonster.java:
+    # 915-919): the tgt monster leaves the fight ALIVE -- kMonsterFlagEscaped,
+    # not an HP write -- and the pump's liveness predicate (monster_dead_or_
+    # escaped) is what then ends the battle when nobody is left in it. Emitted
+    # natively by monster modules (the operand is a monster slot), never
+    # authored in YAML move programs, but pinned in the enum for the cards.hpp
+    # drift check -- the SET_MOVE precedent exactly.
+    "ESCAPE": 40,
+    # Colorless-uncommon additions (append-only from 45; 41-42 are the Looter
+    # batch's published reserve and 43-44 are B4.5's block -- deliberately not
+    # filled here).
+    # DAMAGE_DRAW_PILE: Mind Blast -- baseDamage = drawPile.size()
+    # (MindBlast.applyPowers, MindBlast.java:47-52), then the ordinary
+    # DamageInfo pipeline. CONDITIONAL_DRAW: Impatience --
+    # ConditionalDrawAction.update (:29-45) addToTop's a DrawCardAction(amount)
+    # only when NO hand card has the restricted CardType (`extra` carries that
+    # type). RESHUFFLE_ALL: Deep Breath -- the FUSED pair of shuffles
+    # DeepBreath.use guards on the SAME `discardPile.size() > 0` test
+    # (DeepBreath.java:34-38): EmptyDeckShuffleAction (shuffle the discard, move
+    # it onto the draw pile) AND ShuffleAction(drawPile) (shuffle the whole draw
+    # pile) -- TWO shuffleRng.randomLong() draws, or zero. It cannot be two
+    # authored steps: after the first runs the discard is empty either way, so a
+    # second step can no longer see the guard's input. MADNESS: MadnessAction.
+    # update (:26-65) -- rejection-sample the hand with cardRandomRng until an
+    # eligible card is hit, then permanently zero its cost.
+    "DAMAGE_DRAW_PILE": 45,
+    "CONDITIONAL_DRAW": 46,
+    "RESHUFFLE_ALL": 47,
+    "MADNESS": 48,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -324,6 +355,10 @@ MONSTER_INTENTS = {
                           # TheGuardian.java:204). A DISTINCT Intent constant from
                           # ATTACK_DEFEND=3; the "buff" is the queued return to
                           # Offensive Mode (TheGuardian.java:194).
+    "ESCAPE": 13,        # The Looter's telegraphed escape (AbstractMonster.Intent.
+                          # ESCAPE; Looter.java:123,131 -- Smoke Bomb telegraphs it
+                          # and the Escape turn re-telegraphs it). Value 14 is a
+                          # published reserve for the same batch and stays unissued.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).
