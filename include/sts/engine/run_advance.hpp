@@ -39,6 +39,8 @@
 //     thief's stolen gold comes back as a claimable STOLEN_GOLD item.
 //   * potion-slot legality/consumption in combat plus Fruit Juice / Entropic
 //     Brew run mutations outside combat.
+//   * rest sites: Rest/Smith plus the Girya, Peace Pipe and Shovel options,
+//     Regal Pillow and Dream Catcher hooks, all through CHOOSE.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
 //   * Neow blessing options + payouts: not modelled (here: a single "proceed"
@@ -47,9 +49,9 @@
 //     consumes them; the chest / shop / Neow draw sites are separate work.
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
 //     (combat_rewards.hpp).
-//   * events / shops / rest sites / treasure rooms: no room content (here:
-//     entering one reseeds the floor streams then parks at
-//     ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
+//   * events / shops / treasure rooms: no room content (here: entering one
+//     reseeds the floor streams then parks at ROOM_UNIMPLEMENTED with the
+//     stalling RoomType recorded).
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
 //     encounter whose members are not all implemented resolves its composition
 //     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
@@ -91,6 +93,7 @@
 #include "sts/engine/encounters.hpp"    // MonsterLists
 #include "sts/engine/interp.hpp"        // mathutils_round (run_setup_hp)
 #include "sts/engine/map_rooms.hpp"     // RoomType
+#include "sts/engine/rest_sites.hpp"    // RestSiteState / menu constants
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
 
@@ -108,6 +111,7 @@ enum class RunPhase : uint8_t {
     COMBAT_REWARD = 4,     // post-combat reward screen (claim / pick / proceed).
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // player dead (loss) -- terminal.
+    REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
 };
 
 // Why combat ended. AbstractRoom keeps two independent end-of-battle room
@@ -192,6 +196,7 @@ struct RunController {
     // the cards from the saved cardRng counter), so RunState stays untouched
     // (no new storage, no schema bump).
     RewardScreen rewards;
+    RestSiteState rest;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -213,6 +218,8 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 //                          (0..kMapCols-1) or kChooseBoss.
 //   COMBAT               : `combat` holds PLAY_CARD / END_TURN / CHOOSE;
 //                          run-owned potion masks below hold USE_POTION.
+//   REST_SITE            : menu buttons, a Smith/Toke master-deck grid, or
+//                          Dream Catcher's direct card-pick screen.
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
@@ -225,6 +232,11 @@ struct RunActionMask {
     bool can_take_card[kRewardCardCap];
     bool can_skip_card;
     bool can_sing;
+    // REST_SITE. Menu indices preserve CampfireUI's insertion order; Smith and
+    // Toke grids address the stable master-deck index directly. Dream Catcher
+    // reuses the card-pick fields above.
+    bool can_choose_rest[kRestOptionCap];
+    bool can_choose_master_deck[kMasterDeckCap];
     // USE_POTION owns a RunState slot, so its legality lives at this layer.
     // Fruit Juice and Entropic Brew can be used in stable non-combat phases.
     // During COMBAT, can_use_potion_target[slot][monster] enumerates target-

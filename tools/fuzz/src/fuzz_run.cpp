@@ -101,9 +101,15 @@ void update_lists(XXH3_state_t* st, const engine::MonsterLists& l) noexcept {
 }
 
 [[nodiscard]] uint64_t scalars_hash(const RunController& rc) noexcept {
-    const uint8_t s[8] = {rc.phase,        rc.cur_x,          rc.room_type,
-                          rc.combat_outcome, rc.monster_cursor, rc.elite_cursor,
-                          rc.boss_cursor,  rc.pad1};
+    const uint8_t s[9] = {rc.phase,
+                          rc.cur_x,
+                          rc.room_type,
+                          rc.combat_outcome,
+                          rc.monster_cursor,
+                          rc.elite_cursor,
+                          rc.boss_cursor,
+                          rc.pad1,
+                          rc.rest.screen};
     return static_cast<uint64_t>(XXH3_64bits(s, sizeof(s)));
 }
 

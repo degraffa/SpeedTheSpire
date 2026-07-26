@@ -345,6 +345,17 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
     }
 }
 
+bool open_rest_card_reward(RunState& rs, RewardScreen& out) noexcept {
+    out = RewardScreen{};
+    out.open_card_item = kNoOpenCardReward;
+    roll_card_reward_item(rs, RoomType::Rest, out);
+    if (out.count == 0) {
+        return false;
+    }
+    out.open_card_item = 0;
+    return true;
+}
+
 bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
                         uint8_t index) noexcept {
     if (index >= s.count || s.open_card_item != kNoOpenCardReward) {

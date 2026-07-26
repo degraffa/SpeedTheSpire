@@ -60,6 +60,13 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::REWARD_SKIP_CARD: return "reward_skip_card";
         case MoveCat::REWARD_SING: return "reward_sing";
         case MoveCat::REWARD_PROCEED: return "reward_proceed";
+        case MoveCat::REST: return "rest";
+        case MoveCat::SMITH: return "smith";
+        case MoveCat::LIFT: return "lift";
+        case MoveCat::TOKE: return "toke";
+        case MoveCat::DIG: return "dig";
+        case MoveCat::SMITH_CARD: return "smith_card";
+        case MoveCat::TOKE_CARD: return "toke_card";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -221,6 +228,68 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                 }
             }
             break;
+
+        case RunPhase::REST_SITE: {
+            const auto screen = static_cast<engine::RestScreen>(rc.rest.screen);
+            if (screen == engine::RestScreen::MENU) {
+                const engine::RestMenu menu = engine::build_rest_menu(rc.run);
+                for (uint8_t i = 0; i < menu.count; ++i) {
+                    if (!mask.can_choose_rest[i]) {
+                        continue;
+                    }
+                    MoveCat cat = MoveCat::REST;
+                    switch (static_cast<engine::RestOptionKind>(
+                        menu.entries[i].kind)) {
+                        case engine::RestOptionKind::REST:
+                            cat = MoveCat::REST;
+                            break;
+                        case engine::RestOptionKind::SMITH:
+                            cat = MoveCat::SMITH;
+                            break;
+                        case engine::RestOptionKind::LIFT:
+                            cat = MoveCat::LIFT;
+                            break;
+                        case engine::RestOptionKind::TOKE:
+                            cat = MoveCat::TOKE;
+                            break;
+                        case engine::RestOptionKind::DIG:
+                            cat = MoveCat::DIG;
+                            break;
+                    }
+                    s.add(make_action(ActionVerb::CHOOSE, i), cat);
+                }
+            } else if (screen == engine::RestScreen::DREAM_CATCHER) {
+                for (int j = 0; j < engine::kRewardCardCap; ++j) {
+                    if (mask.can_take_card[j]) {
+                        s.add(make_action(ActionVerb::CHOOSE,
+                                          static_cast<uint8_t>(j)),
+                              MoveCat::REWARD_TAKE_CARD);
+                    }
+                }
+                if (mask.can_skip_card) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      engine::kChooseSkipCard),
+                          MoveCat::REWARD_SKIP_CARD);
+                }
+                if (mask.can_sing) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      engine::kChooseSing),
+                          MoveCat::REWARD_SING);
+                }
+            } else {
+                const MoveCat cat = screen == engine::RestScreen::SMITH
+                                        ? MoveCat::SMITH_CARD
+                                        : MoveCat::TOKE_CARD;
+                for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+                    if (mask.can_choose_master_deck[i]) {
+                        s.add(make_action(ActionVerb::CHOOSE,
+                                          static_cast<uint8_t>(i)),
+                              cat);
+                    }
+                }
+            }
+            break;
+        }
 
         case RunPhase::NONE:
         case RunPhase::ROOM_UNIMPLEMENTED:
@@ -406,6 +475,19 @@ struct CardScore {
         case MoveCat::REWARD_PROCEED:
             // Below any claim, so rewards are actually consumed before leaving.
             return 5;
+        case MoveCat::REST:
+            return 80;
+        case MoveCat::SMITH:
+            return 90;
+        case MoveCat::LIFT:
+            return 110;
+        case MoveCat::TOKE:
+            return 70;
+        case MoveCat::DIG:
+            return 100;
+        case MoveCat::SMITH_CARD:
+        case MoveCat::TOKE_CARD:
+            return 50;
         case MoveCat::COUNT:
             break;
     }

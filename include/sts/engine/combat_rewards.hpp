@@ -287,6 +287,16 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
                              RewardOutcome outcome, RewardScreen& out,
                              int32_t stolen_gold_return = 0) noexcept;
 
+// Dream Catcher uses AbstractDungeon.getRewardCards directly from a RestRoom,
+// then opens CardRewardScreen without an outer reward-item screen
+// (CampfireSleepEffect.java:71-76). Roll the ordinary RestRoom rarity table,
+// including Question Card / Busted Crown count modifiers, cardRng pity,
+// no-dupe and upgrade draws, and leave that sole CARD item directly open.
+// Returns false only when a malformed stacked modifier list drives the offer
+// count to zero.
+[[nodiscard]] bool open_rest_card_reward(RunState& rs,
+                                         RewardScreen& out) noexcept;
+
 // --- Claim -----------------------------------------------------------------
 
 // Legality of claiming item `index` right now (RewardItem.claimReward's

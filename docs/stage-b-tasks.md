@@ -77,7 +77,8 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
 | Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
-| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Cursed Key + N'loth's Mask chest hooks; Sacred Bark potency; Fusion Hammer / Coffee Dripper campfire locks; **Sozu's potion block and Golden Idol's ×1.25 at the CHEST and EVENT claim sites** | B3.27 | B4.7 / B4.9 / B4.10-13 | the chest, campfire and event screens do not exist yet. **B4.5's shares are discharged** — Busted Crown's reward count, the Black Star elite relic, Golden Idol ×1.25 and Sozu's block are all live at the *combat-reward* claim; what remains here is the same two relics' behaviour on screens that do not exist. Busted Crown's and Ectoplasm's energy halves stay in their own rows |
+| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Cursed Key + N'loth's Mask chest hooks; Sacred Bark potency; **Sozu's potion block and Golden Idol's ×1.25 at the CHEST and EVENT claim sites** | B3.27 | B4.7 / B4.10-13 | the chest and event screens do not exist yet. **B4.5's shares are discharged** — Busted Crown's reward count, the Black Star elite relic, Golden Idol ×1.25 and Sozu's block are all live at the *combat-reward* claim; what remains here is the same two relics' behaviour on screens that do not exist. Busted Crown's and Ectoplasm's energy halves stay in their own rows |
+| Fusion Hammer / Coffee Dripper campfire-option locks | B3.27, B4.9 | UNASSIGNED — next campfire/relic-lock follow-up | B4.9 deliberately preserves these whole-effect deferrals: the registered boss relic rows and pool slots are live, but their shared `energyMaster` half remains deferred and the task brief explicitly prohibited silently partially implementing the Smith/Rest locks. `build_rest_menu` therefore documents that both base buttons remain unlocked until one owner lands the relic bodies coherently. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
@@ -85,7 +86,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Emit `kIroncladAttackPool` **and the three B4.5 reward pools** in CardLibrary HashMap **library order** instead of registry-id order | B3.6 | B4.5's oracle capture | documented interim deviation; **one** `gen.py` fix pins all four pools at once. Blocked on the same manual capture that blocks B4.5 itself — the runbook's §4 documents exactly how the capture pins them |
 | Matryoshka (chest relic) | B3.25 | B4.7 | floor≤40 canSpawn gate live, effect deferred |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
-| Eternal Feather (rest-room heal) | B3.25 | B4.9 | row live, effect deferred |
+| Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
 | Translator `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets | B1.5, B4.3 | B4.10 | storage exists since B4.3; needs `events.yaml` + the canonical list order (B4.10-B4.13) |
 | ?-room `eventRng` duplicate roll | B4.4 | B4.10 | B4.4 names B4.10 as owner |
 | Translator `screen_state` content (event / shop / grid / map screens) | B1.5, B4.3 | B4.8, B4.10, B4.14 | structurally consumed today (a new/renamed key still fails loud), not mapped. **The reward slice is DISCHARGED** by B4.5, which also made CARD_REWARD/COMBAT_REWARD content-validated — the `reward_type` name is now enumerated and an unknown one fails loud, where previously anything passed |
@@ -557,20 +558,7 @@ documented no-op) — deferred by B3.25. Shop `screen_state` translation — def
 B1.5/B4.3.
 **Log:** —
 
-### B4.9 `[ ]` Rest sites
-**Deps:** B4.4, B3.26 (Girya/Peace Pipe/Shovel options) · **Spec:** design
-§5.6 · **Provenance:** RestOption.java:25; CampfireUI.java:81-107; smith
-grid flow (read at task)
-**Deliverables:** rest (30 % max-HP heal, the frozen no-ascension-effect
-negative), smith (upgrade grid CHOOSE), relic-added options for implemented
-relics, the fixed rest row (14) + no-rest-row-13 rule already in B4.2.
-**Acceptance:** tier-2: heal amount, smith upgrade writes the upgrade bit
-via registry rows; option availability matrix (no upgradable cards → no
-smith).
-**Inherited:** Eternal Feather (rest-room heal) — deferred by B3.25. The **Fusion
-Hammer** and **Coffee Dripper** campfire-option locks — deferred by B3.27 (rows live,
-bodies inert).
-**Log:** —
+- **B4.9** `[x]` Rest sites — Java-order campfire menu and CHOOSE flows for Rest/Smith/Lift/Toke/Dig; base 30% + Regal Pillow heal, Dream Catcher direct card reward, Girya/Peace Pipe/Shovel effects and exact RNG/pool order; no schema or combat `ActionMask` change; full three-preset suite green · [log](stage-b-log.md#b49)
 
 ### B4.10 `[ ]` Event framework + ?-room resolution
 **Deps:** B4.4 · **Spec:** design §5.6; §10 traps 17/19 · **Provenance:**
