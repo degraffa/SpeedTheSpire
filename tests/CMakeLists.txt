@@ -414,6 +414,15 @@ sts_add_test(card_uncommon_powers_test)
 # advance() script.
 sts_add_test(card_rares_test)
 
+# B3.10a: the fourteen colorless UNCOMMON cards that need no colorless card pool.
+# Per-card base/upgraded behaviour, the six reserved interior CardId gaps, Deep
+# Breath's fused double reshuffle and its two-draw shuffle_rng accounting,
+# Impatience's conditional draw (including that it stays behind the No Draw
+# gate), Mind Blast's draw-pile-sized base, Madness's cardRandomRng
+# REJECTION-SAMPLING draw accounting, No Block, and the modifyBlock /
+# modifyBlockLast TWO-PASS order No Block's correctness depends on.
+sts_add_test(card_colorless_uncommons_test)
+
 # B4.15: ascension modifier table (design §6) -- the implemented run-setup + map
 # rows, their application ORDER, and the frozen "no such modifier" negatives.
 # Reads registry/a20.yaml directly (STS_REGISTRY_DIR) because that file is the

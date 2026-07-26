@@ -273,7 +273,60 @@ enum class Opcode : uint16_t {
                               // so the onPlayerHeal relic pass (Magic Flower)
                               // cannot be skipped. Queued rather than applied
                               // inline wherever the Java queues a HealAction.
+    // --- Colorless-uncommon verbs (append-only from 45; 40-44 are other
+    // --- batches' blocks and stay gaps here) ---------------------------------
+    DAMAGE_DRAW_PILE = 45,    // src (player) attacks tgt for base == the DRAW
+                              // PILE SIZE, read at EXECUTE time, then the normal
+                              // DamageInfo pipeline (Mind Blast;
+                              // MindBlast.applyPowers:47-52 sets baseDamage =
+                              // player.drawPile.size() before super.applyPowers).
+                              // Same execute-time-read model as DAMAGE_BLOCK: the
+                              // card queues exactly one damage action and nothing
+                              // between queue and execute touches the draw pile.
+    CONDITIONAL_DRAW = 46,    // ConditionalDrawAction.update (:29-45): if NO card
+                              // in hand has the CardType carried in `flags`,
+                              // addToTop a DrawCardAction(`amount`); otherwise do
+                              // nothing. The queued DRAW is what runs, so the No
+                              // Draw gate and the per-card onCardDraw fan-out are
+                              // reached identically (Impatience, restricted type
+                              // ATTACK -- Impatience.java:32).
+    RESHUFFLE_ALL = 47,       // Deep Breath's FUSED double shuffle. DeepBreath.use
+                              // (:34-38) guards BOTH EmptyDeckShuffleAction AND
+                              // ShuffleAction(drawPile, false) on the SAME
+                              // `discardPile.size() > 0` test, so it draws TWO
+                              // shuffleRng.randomLong()s or none: shuffle the
+                              // discard and move it onto the draw pile
+                              // (EmptyDeckShuffleAction.update:42-64 -- this also
+                              // fires relics' onShuffle from its ctor:37-39), then
+                              // shuffle the WHOLE draw pile (CardGroup.shuffle():
+                              // 561-563; triggerRelics false, so no second
+                              // onShuffle). One opcode because the guard's input
+                              // is destroyed by the first half.
+    MADNESS = 48,             // MadnessAction.update (:26-65): scan the hand for
+                              // an eligible card; if one exists, REJECTION-SAMPLE
+                              // the hand with cardRandomRng (one
+                              // getRandomCard(cardRandomRng) draw per attempt,
+                              // CardGroup.java:498-500) until an eligible card is
+                              // hit, then set BOTH its cost and its costForTurn to
+                              // 0 -- a permanent, not this-turn, zeroing. With no
+                              // eligible card it draws NOTHING.
 };
+
+// --- CONDITIONAL_DRAW field encoding -----------------------------------------
+// `amount` is the number of cards to draw; `flags` low byte carries the
+// RESTRICTED CardType (ConditionalDrawAction's `restrictedType`, :18-27) whose
+// PRESENCE in hand cancels the draw. Stored as the raw CardType value, which is
+// the same numbering the generated table uses (cards.hpp CardType). Declared as
+// a uint8_t rather than the CardType enum because interp.hpp is below cards.hpp
+// in the include order; the DAMAGE damage-type encoding above has the same shape.
+[[nodiscard]] constexpr uint32_t make_conditional_draw_flags(
+    uint8_t card_type) noexcept {
+    return static_cast<uint32_t>(card_type);
+}
+[[nodiscard]] constexpr uint8_t conditional_draw_type_from_flags(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>(flags & 0xFFu);
+}
 
 // --- PLAY_CARD field encoding ------------------------------------------------
 // The general "play this card again / play the next card off the deck" verb.

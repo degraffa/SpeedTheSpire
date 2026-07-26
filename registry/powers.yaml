@@ -528,3 +528,24 @@
   hooks:
     on_death: []              # native: unless the battle is already ending, addToTop 2 Vulnerable onto the player
   provenance: "SporeCloudPower (SporeCloudPower.java:14-42): POWER_ID \"Spore Cloud\" (:16), default type BUFF (AbstractPower.java:67), amount is the Vulnerable stack the owner will release (FungiBeast constructs it with 2, FungiBeast.java:77). onDeath (:35-42) -- `if (AbstractDungeon.getCurrRoom().isBattleEnding()) return;` then addToTop ApplyPowerAction(player, null, new VulnerablePower(player, amount, true), amount). NATIVE for two reasons a data program cannot express: (1) the battle-ending guard -- AbstractRoom.isBattleEnding (AbstractRoom.java:628-635) is isBattleOver || MonsterGroup.areMonstersBasicallyDead (:90-95), and AbstractMonster.die sets isDying BEFORE walking the power list (AbstractMonster.java:928-932), so the LAST monster's Spore Cloud releases NOTHING while an earlier one's does; (2) addToTop, not addToBot. This is the first consumer of Hook::ON_DEATH, whose dispatch site is the monster-death edge in op_damage / op_lose_hp (interp_damage.cpp) -- powers' onDeath BEFORE relics' onMonsterDeath, the order die() runs them in (:925-937)."
+
+# --- Colorless-uncommon card-applied debuff (id 77) --------------------------
+# Searched for before appending: no "No Block" / "NoBlockPower" row existed, and
+# the generator's duplicate-name check would have rejected a re-add anyway. Id 77
+# comes out of the block this task owns; 47, 54-58 and 60-72 stay permanent gaps
+# and are never backfilled.
+#
+# Checked, not assumed, against BOTH count-guarded switch families. It overrides
+# NO atDamage* hook (interp_damage.cpp needed only its three numbers moved). It
+# DOES need a case in interp_block.cpp -- but in modifyBlockLast, a hook nothing
+# else in the game overrides, which is why that file grew a genuine SECOND PASS
+# rather than another case in the existing switch.
+
+- id: 77
+  name: NO_BLOCK
+  game_id: "No Block"
+  type: DEBUFF
+  hooks:
+    at_end_of_round:
+      - {op: REDUCE_POWER, target: SELF, amount: 1, power: NO_BLOCK}
+  provenance: "NoBlockPower (NoBlockPower.java:17-61): POWER_ID \"NoBlockPower\" (:19) but the game_id string the translator joins on is the POWER_ID literal; type DEBUFF (:35), isTurnBased (:36), stackPower additive (AbstractPower default). THE OVERRIDE IS modifyBlockLast (:58-60) -- `return 0.0f`, unconditional -- and NoBlockPower is the ONLY class in the game that overrides it (AbstractPower.java declares the pass-through; AbstractCard.java is the only caller). AbstractCard.applyPowersToBlock (AbstractCard.java:2291-2307) runs modifyBlock over ALL powers and THEN modifyBlockLast over ALL powers, so this cannot be folded into the modifyBlock pass: with a power list of [No Block, Dexterity] a single pass would yield the Dexterity amount and the game yields 0. atEndOfRound (:39-50) -- the justApplied gate (:41-44) consumes one round for an instance created while actionManager.turnHasEnded by a MONSTER source (ctor :32-34); then amount == 0 -> RemoveSpecificPowerAction, else ReducePowerAction(1). The justApplied branch is DEAD for every S1 applier: Panic Button passes isSourceMonster = false (PanicButton.java:37) and no Act-1 monster applies this power, so it collapses to the single REDUCE_POWER step above -- the IntangiblePlayerPower precedent (id 29), where op_reduce_power already removes the slot at <= 0 and ApplyPowerAction never lands amount 0. Applied only by Panic Button, amount 2 base and upgraded (PanicButton.java:30,37)."

@@ -116,6 +116,26 @@ OPCODES = {
     "DOUBLE_STRENGTH": 37,
     "VAMPIRE_DAMAGE_ALL": 38,
     "HEAL": 39,
+    # Colorless-uncommon additions (append-only from 45; 40-44 belong to other
+    # batches of the same wave and are deliberately not filled here).
+    # DAMAGE_DRAW_PILE: Mind Blast -- baseDamage = drawPile.size()
+    # (MindBlast.applyPowers, MindBlast.java:47-52), then the ordinary
+    # DamageInfo pipeline. CONDITIONAL_DRAW: Impatience --
+    # ConditionalDrawAction.update (:29-45) addToTop's a DrawCardAction(amount)
+    # only when NO hand card has the restricted CardType (`extra` carries that
+    # type). RESHUFFLE_ALL: Deep Breath -- the FUSED pair of shuffles
+    # DeepBreath.use guards on the SAME `discardPile.size() > 0` test
+    # (DeepBreath.java:34-38): EmptyDeckShuffleAction (shuffle the discard, move
+    # it onto the draw pile) AND ShuffleAction(drawPile) (shuffle the whole draw
+    # pile) -- TWO shuffleRng.randomLong() draws, or zero. It cannot be two
+    # authored steps: after the first runs the discard is empty either way, so a
+    # second step can no longer see the guard's input. MADNESS: MadnessAction.
+    # update (:26-65) -- rejection-sample the hand with cardRandomRng until an
+    # eligible card is hit, then permanently zero its cost.
+    "DAMAGE_DRAW_PILE": 45,
+    "CONDITIONAL_DRAW": 46,
+    "RESHUFFLE_ALL": 47,
+    "MADNESS": 48,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

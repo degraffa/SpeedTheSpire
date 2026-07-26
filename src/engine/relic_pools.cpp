@@ -204,7 +204,14 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // set is still exactly Strike/Defend/Bash), and five of them ARE POWER-type
     // (Barricade, Brutality, Corruption, Demon Form, Juggernaut), which only
     // widens the already-live Bottled Tornado gate.
-    static_assert(sts::registry::manifest::kCardsCount == 91,
+    // Checked for the fourteen colorless UNCOMMON rows, and the answer to BOTH
+    // questions below is NO: every one is CardRarity.UNCOMMON (their ctors, e.g.
+    // BandageUp.java:26 / SwiftStrike.java:30) so the hard-coded BASIC set is
+    // still exactly {STRIKE, DEFEND, BASH}, and every one is CardType.SKILL or
+    // CardType.ATTACK -- there is no POWER among them -- so Bottled Tornado's
+    // rarity-agnostic type scan is unchanged too. Neither gate moved; the number
+    // is not merely bumped.
+    static_assert(sts::registry::manifest::kCardsCount == 105,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "
