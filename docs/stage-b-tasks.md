@@ -558,7 +558,7 @@ documented no-op) — deferred by B3.25. Shop `screen_state` translation — def
 B1.5/B4.3.
 **Log:** —
 
-- **B4.9** `[x]` Rest sites — Java-order campfire menu and CHOOSE flows for Rest/Smith/Lift/Toke/Dig; base 30% + Regal Pillow heal, Dream Catcher direct card reward, Girya/Peace Pipe/Shovel effects and exact RNG/pool order; no schema or combat `ActionMask` change; full three-preset suite green · [log](stage-b-log.md#b49)
+- **B4.9** `[x]` Rest sites — Java-order campfire menu and CHOOSE flows for Rest/Smith/Lift/Toke/Dig; base 30% + Regal Pillow heal, Dream Catcher direct card reward, Girya/Peace Pipe/Shovel effects and exact RNG/pool order; independent-audit fix-forward closes fixed master-deck/relic-cap legality without changing skip/proceed or Circlet stacking; no schema or combat `ActionMask` change; full three-preset suite green · [log](stage-b-log.md#b49)
 
 ### B4.10 `[ ]` Event framework + ?-room resolution
 **Deps:** B4.4 · **Spec:** design §5.6; §10 traps 17/19 · **Provenance:**

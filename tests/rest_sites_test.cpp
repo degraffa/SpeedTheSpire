@@ -212,6 +212,60 @@ TEST(RestSites, DreamCatcherSkipFinishesTheRestSiteWithoutAddingACard) {
     EXPECT_EQ(rc.rewards.count, 0);
 }
 
+TEST(RestSites, FullMasterDeckDreamCatcherOffersOnlySkipOrSingingBowl) {
+    RunController skip = enter_floor_one_rest();
+    set_relics(
+        skip.run,
+        {RelicSlot{static_cast<uint16_t>(RelicId::DREAM_CATCHER), -1}});
+    for (uint16_t i = skip.run.master_deck_count; i < kMasterDeckCap; ++i) {
+        skip.run.master_deck[i] =
+            CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
+    }
+    skip.run.master_deck_count = kMasterDeckCap;
+    step(skip, make_action(ActionVerb::CHOOSE,
+                           option_index(skip.run, RestOptionKind::REST)));
+    ASSERT_EQ(skip.rest.screen,
+              static_cast<uint8_t>(RestScreen::DREAM_CATCHER));
+
+    RunActionMask mask{};
+    legal_actions(skip, mask);
+    for (uint8_t i = 0; i < skip.rewards.items[0].card_count; ++i) {
+        EXPECT_FALSE(mask.can_take_card[i]);
+    }
+    EXPECT_TRUE(mask.can_skip_card);
+    EXPECT_FALSE(mask.can_sing);
+    const RunController before = skip;
+    step(skip, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(std::memcmp(&skip, &before, sizeof(skip)), 0);
+    step(skip, make_action(ActionVerb::CHOOSE, kChooseSkipCard));
+    EXPECT_EQ(skip.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(skip.run.master_deck_count, kMasterDeckCap);
+
+    RunController sing = enter_floor_one_rest();
+    set_relics(
+        sing.run,
+        {RelicSlot{static_cast<uint16_t>(RelicId::DREAM_CATCHER), -1},
+         RelicSlot{static_cast<uint16_t>(RelicId::SINGING_BOWL), -1}});
+    for (uint16_t i = sing.run.master_deck_count; i < kMasterDeckCap; ++i) {
+        sing.run.master_deck[i] =
+            CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
+    }
+    sing.run.master_deck_count = kMasterDeckCap;
+    sing.run.hp = 10;
+    step(sing, make_action(ActionVerb::CHOOSE,
+                           option_index(sing.run, RestOptionKind::REST)));
+    legal_actions(sing, mask);
+    EXPECT_TRUE(mask.can_skip_card);
+    EXPECT_TRUE(mask.can_sing);
+    const int16_t max_before_bowl = sing.run.max_hp;
+    const int16_t hp_after_rest = sing.run.hp;
+    step(sing, make_action(ActionVerb::CHOOSE, kChooseSing));
+    EXPECT_EQ(sing.run.max_hp, max_before_bowl + 2);
+    EXPECT_EQ(sing.run.hp, hp_after_rest + 2);
+    EXPECT_EQ(sing.run.master_deck_count, kMasterDeckCap);
+    EXPECT_EQ(sing.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
 // CampfireUI inserts Rest, Smith, then calls addCampfireOption on each relic in
 // acquisition order.  Unusable buttons remain in the menu but are absent from
 // legal actions.
@@ -398,6 +452,37 @@ TEST(RestSites, ShovelConsumesTierRollThenFrontPopAndOpensRelicReward) {
     EXPECT_EQ(static_cast<RelicId>(rc.run.relics[1].relic_id), relic);
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+TEST(RestSites, ShovelRelicAtFixedCapStaysUnclaimedAndCanBeSkipped) {
+    RunController rc = enter_floor_one_rest();
+    rc.run.relic_count = kRelicCap;
+    rc.run.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SHOVEL), -1};
+    for (uint8_t i = 1; i < rc.run.relic_count; ++i) {
+        rc.run.relics[i] =
+            RelicSlot{static_cast<uint16_t>(RelicId::ANCHOR), -1};
+    }
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         option_index(rc.run, RestOptionKind::DIG)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    ASSERT_EQ(rc.rewards.count, 1);
+    ASSERT_EQ(static_cast<RewardItemKind>(rc.rewards.items[0].kind),
+              RewardItemKind::RELIC);
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_claim_reward[0]);
+    EXPECT_TRUE(mask.can_proceed)
+        << "the player can abandon the already-popped dug relic";
+
+    const RunController before = rc;
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(std::memcmp(&rc, &before, sizeof(rc)), 0)
+        << "a forced claim must neither consume the item nor mutate the run";
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(rc.rewards.count, 0);
 }
 
 TEST(RestSites, CopiedControllersExposeIdenticalMasksAndTransitions) {

@@ -796,7 +796,8 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                 const RunRewardItem& item = s.items[s.open_card_item];
                 for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap;
                      ++j) {
-                    out.can_take_card[j] = true;
+                    out.can_take_card[j] =
+                        reward_take_card_legal(rc.run, s, j);
                 }
                 out.can_skip_card = true;
                 out.can_sing = run_has_relic(rc.run, RelicId::SINGING_BOWL);
@@ -883,7 +884,8 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                     const RunRewardItem& item = s.items[s.open_card_item];
                     for (uint8_t j = 0;
                          j < item.card_count && j < kRewardCardCap; ++j) {
-                        out.can_take_card[j] = true;
+                        out.can_take_card[j] =
+                            reward_take_card_legal(rc.run, s, j);
                     }
                     out.can_skip_card = true;
                     out.can_sing =

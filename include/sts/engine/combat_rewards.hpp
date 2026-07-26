@@ -300,9 +300,10 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
 // --- Claim -----------------------------------------------------------------
 
 // Legality of claiming item `index` right now (RewardItem.claimReward's
-// failure cases): a POTION needs a free slot below rs.potion_slots unless Sozu
-// is owned (Sozu claims-and-discards, RewardItem.java:276-279); everything
-// else is claimable while it exists.
+// failure cases plus the engine's explicit fixed capacities): a POTION needs a
+// free slot below rs.potion_slots unless Sozu is owned (Sozu
+// claims-and-discards, RewardItem.java:276-279), and a RELIC must fit through
+// acquire_relic (including Circlet's stack-at-full exception).
 [[nodiscard]] bool reward_claim_legal(const RunState& rs,
                                       const RewardScreen& s,
                                       uint8_t index) noexcept;
@@ -313,10 +314,17 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
 [[nodiscard]] bool claim_reward(RunState& rs, RngStream& misc_rng,
                                 RewardScreen& s, uint8_t index) noexcept;
 
+// Whether card `card_index` of the OPEN card item can currently pass through
+// add_card_to_master_deck. Used by both ordinary combat rewards and Dream
+// Catcher's direct screen so a fixed-cap failure is never advertised as legal.
+[[nodiscard]] bool reward_take_card_legal(const RunState& rs,
+                                          const RewardScreen& s,
+                                          uint8_t card_index) noexcept;
+
 // Take card `card_index` of the OPEN card item into the master deck through
 // add_card_to_master_deck (the onObtainCard door -- Ceramic Fish, the eggs,
 // Darkstone Periapt fire there), then remove the item and close the screen.
-// Returns false (no mutation) when no card item is open or the index is bad.
+// Returns false (no mutation) when reward_take_card_legal is false.
 [[nodiscard]] bool reward_take_card(RunState& rs, RewardScreen& s,
                                     uint8_t card_index) noexcept;
 

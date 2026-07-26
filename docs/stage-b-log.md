@@ -2811,6 +2811,34 @@ Complete WSL Ubuntu-2404 suites are **debug 992/992, leak-detecting ASan/UBSan
 992/992, release 992/992**; stale-count and documentation-link checks pass, and
 fixture/golden/registry paths are byte-unchanged.
 
+**Independent-audit fix-forward (supersedes the fixed-cap acceptance surface
+above):** the original Dream Catcher mask advertised every offered card even
+when `master_deck_count == kMasterDeckCap`; the shared deck-add door then
+refused the selection, turning a mask-authorized action into the fuzzer's
+forbidden no-progress transition. Ordinary combat card rewards had the same
+latent edge. A shared `reward_take_card_legal` predicate now owns the open-item,
+card-id/index and fixed-deck-cap checks for both screens. A full deck therefore
+offers only Skip and, when owned, Singing Bowl; direct Dream Catcher still
+returns to the map, while an ordinary skipped CARD item returns to its outer
+reward screen and leaves Proceed available.
+
+Shovel exposed the generic relic twin: RELIC claims were always advertised,
+and `claim_reward` discarded the item even when `acquire_relic` returned
+`RELIC_CAP_REACHED`. `relic_acquire_legal` now models invalid ids, the fixed
+relic array and Circlet's exact exception (an existing Circlet may stack at a
+full array until its signed counter itself caps). Reward-mask legality reads
+that authority, and `claim_reward` also checks the actual acquisition result
+before removing the item. A capped dug relic remains visible but unclaimable;
+Proceed explicitly abandons the already-popped reward, preserving the game's
+skip path and pool semantics.
+
+Five regressions cover generic fixed-deck card masks/forced no-ops, ordinary
+relic-cap preservation, Circlet stack/counter boundaries, Dream Catcher's
+full-deck Skip and Singing Bowl paths, and Shovel's capped claim plus Proceed.
+No persistent state, schema, RNG sequence, fixture, golden, registry namespace
+or combat `ActionMask` changed. Final-tree WSL Debug, leak-detecting ASan/UBSan
+and Release are each **997/997**; hygiene checks pass.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes

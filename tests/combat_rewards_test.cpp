@@ -13,6 +13,7 @@
 
 #include <cstring>
 #include <initializer_list>
+#include <limits>
 #include <span>
 
 #include <gtest/gtest.h>
@@ -787,6 +788,67 @@ TEST(RewardClaim, PotionNeedsAFreeSlotUnlessSozuDiscardsIt) {
     FAIL() << "no potion-dropping seed found in range";
 }
 
+TEST(RewardClaim, RelicAtFixedCapIsIllegalAndNeverConsumed) {
+    RunState rs = make_run(23);
+    rs.relic_count = kRelicCap;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        rs.relics[i] =
+            RelicSlot{static_cast<uint16_t>(RelicId::ANCHOR), -1};
+    }
+    RewardScreen s{};
+    s.count = 1;
+    s.open_card_item = kNoOpenCardReward;
+    s.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    s.items[0].id = static_cast<uint16_t>(RelicId::STRAWBERRY);
+    RngStream misc = from_seed(2300);
+    const RunState run_before = rs;
+    const RewardScreen screen_before = s;
+    const RngStream misc_before = misc;
+
+    EXPECT_FALSE(reward_claim_legal(rs, s, 0));
+    EXPECT_FALSE(claim_reward(rs, misc, s, 0));
+    EXPECT_EQ(std::memcmp(&rs, &run_before, sizeof(rs)), 0);
+    EXPECT_EQ(std::memcmp(&s, &screen_before, sizeof(s)), 0)
+        << "a failed relic acquisition must leave the reward claimable";
+    EXPECT_TRUE(streams_equal(misc, misc_before));
+}
+
+TEST(RewardClaim, CircletCanStackAtFixedRelicCapUntilItsCounterCaps) {
+    RunState rs = make_run(24);
+    rs.relic_count = kRelicCap;
+    rs.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::CIRCLET), 1};
+    for (uint8_t i = 1; i < rs.relic_count; ++i) {
+        rs.relics[i] =
+            RelicSlot{static_cast<uint16_t>(RelicId::ANCHOR), -1};
+    }
+    auto circlet_screen = [] {
+        RewardScreen s{};
+        s.count = 1;
+        s.open_card_item = kNoOpenCardReward;
+        s.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+        s.items[0].id = static_cast<uint16_t>(RelicId::CIRCLET);
+        return s;
+    };
+    RngStream misc = from_seed(2400);
+    RewardScreen s = circlet_screen();
+
+    EXPECT_TRUE(reward_claim_legal(rs, s, 0))
+        << "Circlet stacks in-place even when no relic slot remains";
+    ASSERT_TRUE(claim_reward(rs, misc, s, 0));
+    EXPECT_EQ(rs.relic_count, kRelicCap);
+    EXPECT_EQ(rs.relics[0].counter, 2);
+    EXPECT_EQ(s.count, 0);
+
+    rs.relics[0].counter = std::numeric_limits<int16_t>::max();
+    s = circlet_screen();
+    const RewardScreen before = s;
+    EXPECT_FALSE(reward_claim_legal(rs, s, 0));
+    EXPECT_FALSE(claim_reward(rs, misc, s, 0));
+    EXPECT_EQ(std::memcmp(&s, &before, sizeof(s)), 0);
+    EXPECT_EQ(rs.relics[0].counter, std::numeric_limits<int16_t>::max());
+}
+
 TEST(RewardClaim, TakeCardWalksTheDoorCeramicFishPaysNine) {
     // THE cheapest guard against a direct rs.master_deck[] write: obtaining a
     // reward card with Ceramic Fish equipped must pay out 9 gold through
@@ -1067,6 +1129,42 @@ TEST(RewardFlow, ChooseClaimsGoldAndCardThenProceeds) {
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
     EXPECT_EQ(rc.rewards.count, 0);
+}
+
+TEST(RewardFlow, FullMasterDeckOffersSkipButNoLegalCardTake) {
+    RunController rc = run_begin(47, kA20);
+    RewardScreen s = assemble_normal(rc.run, 47);
+    const int ci = find_kind(s, RewardItemKind::CARDS);
+    ASSERT_GE(ci, 0);
+    rc.rewards = s;
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    ASSERT_TRUE(claim_reward(rc.run, rc.combat.misc_rng, rc.rewards,
+                             static_cast<uint8_t>(ci)));
+    for (uint16_t i = rc.run.master_deck_count; i < kMasterDeckCap; ++i) {
+        rc.run.master_deck[i] =
+            CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
+    }
+    rc.run.master_deck_count = kMasterDeckCap;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    for (uint8_t i = 0; i < rc.rewards.items[ci].card_count; ++i) {
+        EXPECT_FALSE(mask.can_take_card[i]);
+        EXPECT_FALSE(reward_take_card_legal(rc.run, rc.rewards, i));
+    }
+    EXPECT_TRUE(mask.can_skip_card);
+    EXPECT_FALSE(mask.can_proceed);
+
+    const RunController before = rc;
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(std::memcmp(&rc, &before, sizeof(rc)), 0)
+        << "a forced fixed-cap take is a non-corrupting no-op";
+
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseSkipCard));
+    EXPECT_EQ(rc.rewards.open_card_item, kNoOpenCardReward);
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed)
+        << "the outer reward screen remains explicitly escapable after skip";
 }
 
 }  // namespace

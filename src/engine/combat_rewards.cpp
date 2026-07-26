@@ -376,6 +376,9 @@ bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
         }
         return false;
     }
+    if (static_cast<RewardItemKind>(item.kind) == RewardItemKind::RELIC) {
+        return relic_acquire_legal(rs, static_cast<RelicId>(item.id));
+    }
     return true;
 }
 
@@ -413,7 +416,14 @@ bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
             // instantObtain: append in acquisition order + onEquip (which may
             // consume miscRng -- War Paint / Whetstone). The pool pop already
             // happened at assembly.
-            (void)acquire_relic(rs, misc_rng, static_cast<RelicId>(item.id));
+            {
+                const RelicAcquireResult acquired =
+                    acquire_relic(rs, misc_rng, static_cast<RelicId>(item.id));
+                if (acquired != RelicAcquireResult::ACQUIRED &&
+                    acquired != RelicAcquireResult::CIRCLET_STACKED) {
+                    return false;
+                }
+            }
             remove_item(s, index);
             return true;
         case RewardItemKind::CARDS:
@@ -428,16 +438,26 @@ bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
     }
 }
 
+bool reward_take_card_legal(const RunState& rs, const RewardScreen& s,
+                            uint8_t card_index) noexcept {
+    if (s.open_card_item == kNoOpenCardReward ||
+        s.open_card_item >= s.count ||
+        rs.master_deck_count >= kMasterDeckCap) {
+        return false;
+    }
+    const RunRewardItem& item = s.items[s.open_card_item];
+    return static_cast<RewardItemKind>(item.kind) == RewardItemKind::CARDS &&
+           card_index < item.card_count &&
+           card_def(static_cast<CardId>(item.card_ids[card_index])) != nullptr;
+}
+
 bool reward_take_card(RunState& rs, RewardScreen& s,
                       uint8_t card_index) noexcept {
-    if (s.open_card_item == kNoOpenCardReward || s.open_card_item >= s.count) {
+    if (!reward_take_card_legal(rs, s, card_index)) {
         return false;
     }
     const uint8_t item_index = s.open_card_item;
     const RunRewardItem& item = s.items[item_index];
-    if (card_index >= item.card_count) {
-        return false;
-    }
     // THE door (run_deck.hpp): fires every owned relic's onObtainCard in
     // acquisition order -- Ceramic Fish (+9 gold), the eggs (upgrade on
     // obtain), Darkstone Periapt (+6 max HP) -- then onMasterDeckChange. A

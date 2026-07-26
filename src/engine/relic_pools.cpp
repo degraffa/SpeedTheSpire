@@ -350,6 +350,22 @@ RelicId return_end_random_relic_key(RunState& rs, RelicTier tier,
                : return_end_random_relic_key(rs, tier, ctx);
 }
 
+bool relic_acquire_legal(const RunState& rs, RelicId id) noexcept {
+    if (relic_def(id) == nullptr) {
+        return false;
+    }
+    if (id == RelicId::CIRCLET) {
+        for (uint8_t i = 0; i < rs.relic_count; ++i) {
+            const RelicSlot& slot = rs.relics[i];
+            if (slot.relic_id ==
+                static_cast<uint16_t>(RelicId::CIRCLET)) {
+                return slot.counter != std::numeric_limits<int16_t>::max();
+            }
+        }
+    }
+    return rs.relic_count < kRelicCap;
+}
+
 RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
                                  RelicId id) noexcept {
     const RelicDef* def = relic_def(id);
