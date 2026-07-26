@@ -151,7 +151,10 @@ enum class PumpOutcome : uint8_t {
     RAN_MONSTER,         // step 5: ran one monster's turn via the extension point
     STARTED_TURN,        // step 6: ran the start-of-turn sequence (turn++)
     WAITING_ON_USER,     // step 7: control returns to the player (terminal)
-    COMBAT_OVER,         // player dead or all monsters dead (terminal)
+    COMBAT_OVER,         // terminal: player dead, player escaped (Smoke Bomb's
+                         // kCombatFlagPlayerEscaped), or every monster dead or
+                         // escaped (monster_dead_or_escaped -- the
+                         // areMonstersBasicallyDead complement)
 };
 
 struct PumpStepResult {

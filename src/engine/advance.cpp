@@ -370,14 +370,17 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             }
             out.can_play[i] = playable;
             // Per-target legality: an enemy-target (needs_target) card is
-            // legal only against a LIVE monster slot. Self/all/none/random cards
-            // ignore the declared target, so their grid row stays all-false and
-            // can_play[i] alone carries their legality.
+            // legal only against a monster slot that is IN the fight -- the
+            // game's target reticle skips isDeadOrEscaped monsters, so an
+            // escaped Looter is not a legal target even though its hp is
+            // positive. Self/all/none/random cards ignore the declared target,
+            // so their grid row stays all-false and can_play[i] alone carries
+            // their legality.
             if (out.can_play[i] && def != nullptr && def->needs_target) {
                 for (int t = 0; t < kMonsterCap; ++t) {
                     out.can_play_target[i][t] =
                         t < static_cast<int>(state.monster_count) &&
-                        state.monsters[t].hp > 0;
+                        !monster_dead_or_escaped(state.monsters[t]);
                 }
             }
         } else {
@@ -393,20 +396,27 @@ namespace {
 // and the observation projection. See advance.hpp's REWARD note.
 void fill_result(const CombatState& s, StepResult& r) noexcept {
     const bool player_dead = s.player_hp <= 0;
-    bool any_monster_alive = false;
+    const bool player_escaped = (s.flags & kCombatFlagPlayerEscaped) != 0u;
+    // "In the fight" is the pump's own predicate (monster_dead_or_escaped): an
+    // ESCAPED monster keeps positive hp but ends the battle like a dead one, so
+    // a mugged combat terminates here too. The terminal STATE stays distinct --
+    // the escaped record reads hp > 0 with kMonsterFlagEscaped, a killed one
+    // reads hp <= 0, and kCombatFlagMugged marks the room.
+    bool any_monster_in_fight = false;
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        if (s.monsters[m].hp > 0) {
-            any_monster_alive = true;
+        if (!monster_dead_or_escaped(s.monsters[m])) {
+            any_monster_in_fight = true;
             break;
         }
     }
-    const bool all_monsters_dead = !any_monster_alive;
 
-    r.terminal = player_dead || all_monsters_dead;
+    r.terminal = player_dead || player_escaped || !any_monster_in_fight;
     if (player_dead) {
         r.reward = -1.0f;                       // loss takes precedence
-    } else if (all_monsters_dead) {
-        r.reward = 1.0f;                        // win
+    } else if (player_escaped) {
+        r.reward = 0.0f;                        // Smoke Bomb: survived, no kill
+    } else if (!any_monster_in_fight) {
+        r.reward = 1.0f;                        // win (kills and/or escapes)
     } else {
         r.reward = 0.0f;                        // combat ongoing
     }

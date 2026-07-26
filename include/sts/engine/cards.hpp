@@ -216,7 +216,9 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::VAMPIRE_DAMAGE_ALL) ==
             static_cast<uint16_t>(Opcode::VAMPIRE_DAMAGE_ALL) &&
         static_cast<uint16_t>(sts::registry::Opcode::HEAL) ==
-            static_cast<uint16_t>(Opcode::HEAL),
+            static_cast<uint16_t>(Opcode::HEAL) &&
+        static_cast<uint16_t>(sts::registry::Opcode::ESCAPE) ==
+            static_cast<uint16_t>(Opcode::ESCAPE),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

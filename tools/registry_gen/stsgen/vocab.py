@@ -116,6 +116,16 @@ OPCODES = {
     "DOUBLE_STRENGTH": 37,
     "VAMPIRE_DAMAGE_ALL": 38,
     "HEAL": 39,
+    # Looter-batch addition (append-only from 40; 41-42 are the batch's published
+    # reserve and stay unissued). ESCAPE is the queued EscapeAction
+    # (EscapeAction.java:21-28 -> AbstractMonster.escape, AbstractMonster.java:
+    # 915-919): the tgt monster leaves the fight ALIVE -- kMonsterFlagEscaped,
+    # not an HP write -- and the pump's liveness predicate (monster_dead_or_
+    # escaped) is what then ends the battle when nobody is left in it. Emitted
+    # natively by monster modules (the operand is a monster slot), never
+    # authored in YAML move programs, but pinned in the enum for the cards.hpp
+    # drift check -- the SET_MOVE precedent exactly.
+    "ESCAPE": 40,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -324,6 +334,10 @@ MONSTER_INTENTS = {
                           # TheGuardian.java:204). A DISTINCT Intent constant from
                           # ATTACK_DEFEND=3; the "buff" is the queued return to
                           # Offensive Mode (TheGuardian.java:194).
+    "ESCAPE": 13,        # The Looter's telegraphed escape (AbstractMonster.Intent.
+                          # ESCAPE; Looter.java:123,131 -- Smoke Bomb telegraphs it
+                          # and the Escape turn re-telegraphs it). Value 14 is a
+                          # published reserve for the same batch and stays unissued.
 }
 # Monster-move effect target (generated MonsterMoveTarget): SELF = the acting
 # monster itself; PLAYER = the player (the game's AbstractDungeon.player).

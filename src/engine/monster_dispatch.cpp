@@ -17,6 +17,7 @@
 #include "sts/engine/monster_hexaghost.hpp"  // Hexaghost orb-count cycle
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
+#include "sts/engine/monster_looter.hpp"   // the Looter: steal + escape machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
 #include "sts/engine/monster_slaver.hpp"   // the Blue and Red slavers
@@ -119,6 +120,11 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             return &slaver_red_init;
         case MonsterId::FUNGI_BEAST:
             return &fungi_beast_init;
+        case MonsterId::LOOTER:
+            // Registering this init fn is the WHOLE of what un-parks the
+            // "Looter" and "Exordium Thugs" encounters: the run layer's gate is
+            // monster_init_fn(id) == nullptr, asked of this switch directly.
+            return &looter_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -176,6 +182,8 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &slaver_red_take_turn;
         case MonsterId::FUNGI_BEAST:
             return &fungi_beast_take_turn;
+        case MonsterId::LOOTER:
+            return &looter_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -183,12 +191,16 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 24,
+    static_assert(sts::registry::manifest::kMonstersCount == 25,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for The Guardian: it queues none. getMove (TheGuardian.java:
     // 226-232) runs only from init's rollMove; every later transition is a
     // direct setMove, so no ROLL_MOVE item ever targets it.
+    // Checked for the Looter: it queues none either -- takeTurn (Looter.java:
+    // 88-135) has no trailing RollMoveAction; every case decides the next move
+    // itself (setMove or a queued SetMoveAction), and getMove (:176-179) runs
+    // only from init's rollMove, discarding its num.
     // Checked for Hexaghost: it queues one on FIVE of its six move bodies
     // (Hexaghost.java:167,176,188,196,209); only the ACTIVATE opener
     // re-telegraphs with a direct setMove (:153).
@@ -238,10 +250,14 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 24,
+    static_assert(sts::registry::manifest::kMonstersCount == 25,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
+    // Checked for the Looter: nothing spawns it mid-combat. Both encounters
+    // that field one build it at spawn time ("Looter", MonsterHelper.java:
+    // 400-402; Exordium Thugs' bottomGetStrongHumanoid, :816-829); it neither
+    // splits nor summons, and it leaves by ESCAPING, not by spawning anything.
     // Checked for the two slavers and the Fungi Beast: nothing spawns any of
     // them mid-combat. Every group that contains one builds it at spawn time
     // (MonsterHelper.java:391-393,406-408,427-429 and the Exordium Thugs /
@@ -296,9 +312,15 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 24,
+    static_assert(sts::registry::manifest::kMonstersCount == 25,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
+    // Checked for the Looter: NO damage() override at all -- Looter.java
+    // declares usePreBattleAction, takeTurn, playSfx, playDeathSfx, die and
+    // getMove, nothing else -- so it stays with the `default:`. Its die()
+    // override (:159-174) is playDeathSfx (MathUtils, unseeded) plus the
+    // stolen-gold return to rewards, which is a READ of the surviving record
+    // (looter_stolen_gold) by the reward layer, not a combat-time hook.
     if (monster_index >= kMonsterCap) {
         return;
     }
@@ -363,7 +385,7 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 24,
+    static_assert(sts::registry::manifest::kMonstersCount == 25,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
@@ -443,11 +465,17 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
         case MonsterId::FUNGI_BEAST:
             return &fungi_beast_use_pre_battle_action;
 
+        // Looter.usePreBattleAction (Looter.java:84-86) is the real thing:
+        // addToBottom ApplyPowerAction(this, this, ThieveryPower(this,
+        // goldAmt)) -- the marker power the steal rides past. It draws no RNG.
+        case MonsterId::LOOTER:
+            return &looter_use_pre_battle_action;
+
         default:
-            // Checked, not assumed: of the 24 registry monsters only JawWorm,
+            // Checked, not assumed: of the 25 registry monsters only JawWorm,
             // LouseNormal, LouseDefensive, SlimeBoss, Sentry, Lagavulin,
-            // GremlinWarrior, TheGuardian, Hexaghost and FungiBeast declare the
-            // method at all. The other fourteen (Cultist, GremlinNob, the four
+            // GremlinWarrior, TheGuardian, Hexaghost, FungiBeast and the Looter
+            // declare the method at all. The other fourteen (Cultist, GremlinNob, the four
             // small/medium slimes, the two large slimes, the Thief / Fat /
             // Tsundere / Wizard gremlins, and the two slavers) inherit
             // AbstractMonster's empty body (AbstractMonster.java:953-954), so

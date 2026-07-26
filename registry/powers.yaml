@@ -528,3 +528,20 @@
   hooks:
     on_death: []              # native: unless the battle is already ending, addToTop 2 Vulnerable onto the player
   provenance: "SporeCloudPower (SporeCloudPower.java:14-42): POWER_ID \"Spore Cloud\" (:16), default type BUFF (AbstractPower.java:67), amount is the Vulnerable stack the owner will release (FungiBeast constructs it with 2, FungiBeast.java:77). onDeath (:35-42) -- `if (AbstractDungeon.getCurrRoom().isBattleEnding()) return;` then addToTop ApplyPowerAction(player, null, new VulnerablePower(player, amount, true), amount). NATIVE for two reasons a data program cannot express: (1) the battle-ending guard -- AbstractRoom.isBattleEnding (AbstractRoom.java:628-635) is isBattleOver || MonsterGroup.areMonstersBasicallyDead (:90-95), and AbstractMonster.die sets isDying BEFORE walking the power list (AbstractMonster.java:928-932), so the LAST monster's Spore Cloud releases NOTHING while an earlier one's does; (2) addToTop, not addToBot. This is the first consumer of Hook::ON_DEATH, whose dispatch site is the monster-death edge in op_damage / op_lose_hp (interp_damage.cpp) -- powers' onDeath BEFORE relics' onMonsterDeath, the order die() runs them in (:925-937)."
+
+# --- Looter-batch monster-applied power (id 75; 76 is the batch's published
+# reserve and stays unissued) -------------------------------------------------
+# "Thievery" was searched for in this file before being appended: no row, and
+# the generator's duplicate-name check would have rejected a re-add anyway.
+#
+# Checked, not assumed, against both count-guarded switch families: ThieveryPower
+# overrides NONE of atDamageGive / atDamageReceive / atDamageFinalReceive
+# (interp_damage.cpp) nor modifyBlock (interp_block.cpp) -- its ONLY override is
+# updateDescription (ThieveryPower.java:27-30) -- so no switch needed a case;
+# only the kPowersCount guards moved (42 -> 43, all five sites).
+
+- id: 75
+  name: THIEVERY
+  game_id: "Thievery"
+  type: BUFF
+  provenance: "ThieveryPower (ThieveryPower.java:11-31): POWER_ID \"Thievery\" (:13), default type BUFF (AbstractPower.java:67), amount = stealAmount -- the gold the owner takes PER HIT (the Looter/Mugger goldAmt: 15, or 20 from A17, Looter.java:63). A PURE MARKER: the only override is updateDescription (:27-30). The steal itself is DamageAction's 3-arg stealGold ctor (DamageAction.java:39-42,75-77,98-114), fired by the attack that carries it, NOT by any hook on this power -- which is why the row binds no hooks and is not native. Applied by Looter.usePreBattleAction (Looter.java:84-86) via ApplyPowerAction(this, this, ThieveryPower(this, goldAmt))."

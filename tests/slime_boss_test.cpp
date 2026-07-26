@@ -434,6 +434,10 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "SlaverRed.java -- no this.type assignment (ctor :58-78)"},
         {MonsterId::FUNGI_BEAST,        MonsterEnemyType::NORMAL,
          "FungiBeast.java -- no this.type assignment (ctor :54-73)"},
+        {MonsterId::LOOTER,             MonsterEnemyType::NORMAL,
+         "Looter.java -- no this.type assignment (ctor :59-81); NORMAL matters "
+         "here because SmokeBomb.canUse's BOSS scan must not veto the potion "
+         "against it (SmokeBomb.java:50-62)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);
