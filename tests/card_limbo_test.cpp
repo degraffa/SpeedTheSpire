@@ -82,6 +82,18 @@ CardPoolIndex AddDiscard(CombatState& s, CardId id, uint8_t upgrade = 0) {
     return pi;
 }
 
+CardPoolIndex AddDrawTop(CombatState& s, CardId id, uint8_t upgrade = 0) {
+    const CardPoolIndex pi = AddCard(s, id, upgrade);
+    s.draw[s.draw_count++] = pi;
+    return pi;
+}
+
+void GiveRelic(CombatState& s, RelicId id) {
+    s.relics[s.relic_count].relic_id = static_cast<uint16_t>(id);
+    s.relics[s.relic_count].counter = -1;
+    ++s.relic_count;
+}
+
 bool PileHas(const CardPoolIndex* pile, uint8_t count, CardPoolIndex pi) {
     for (uint8_t i = 0; i < count; ++i) {
         if (pile[i] == pi) {
@@ -273,7 +285,137 @@ TEST(CardLimbo, StrangeSpoonRollsAfterTheCardsOwnRandomDraws) {
     }
 }
 
-// --- 7. The limbo window is visible at a blocking choice: the played card is
+// --- 7. exhaustOnUseOnce is consumed by UseCardAction.
+//
+// PlayTopCardAction sets card.exhaustOnUseOnce for Havoc's target (:48).
+// UseCardAction snapshots that into exhaustCard in its constructor (:36-38),
+// then clears exhaustOnUseOnce after the Spoon/file decision (:132). It is not
+// the card's permanent `exhaust` attribute. If Spoon saves the target, or
+// Exhume later retrieves it from the exhaust pile, an ordinary replay of a
+// normally non-exhausting card must discard.
+TEST(CardLimbo, HavocSpoonSaveConsumesOneShotExhaustBeforeOrdinaryReplay) {
+    int64_t seed = 0;
+    for (;; ++seed) {
+        RngStream probe = from_seed(seed);
+        (void)random(probe, 0);  // Havoc getRandomMonster with one live target
+        if (random_boolean(probe)) {
+            break;  // choose a deterministic Spoon-save seed
+        }
+    }
+
+    CombatState s = MakeCombat(6, 100);
+    s.card_random_rng = from_seed(seed);
+    GiveRelic(s, RelicId::STRANGE_SPOON);
+    AddHand(s, CardId::HAVOC);
+    const CardPoolIndex strike = AddDrawTop(s, CardId::STRIKE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump(s);
+    ASSERT_TRUE(PileHas(s.discard, s.discard_count, strike))
+        << "the selected seed makes Strange Spoon save Havoc's target";
+    EXPECT_FALSE(has_card_flag(s.card_pool[strike].flags,
+                               CardFlag::EXHAUST_ON_USE_ONCE))
+        << "UseCardAction.java:132 consumes exhaustOnUseOnce after Spoon";
+
+    // Simulate drawing the saved Strike, then play it normally. It no longer
+    // qualifies for Spoon and must take the ordinary discard route.
+    uint8_t strike_slot = 0;
+    while (strike_slot < s.discard_count &&
+           s.discard[strike_slot] != strike) {
+        ++strike_slot;
+    }
+    ASSERT_LT(strike_slot, s.discard_count);
+    for (uint8_t i = static_cast<uint8_t>(strike_slot + 1);
+         i < s.discard_count; ++i) {
+        s.discard[i - 1] = s.discard[i];
+    }
+    --s.discard_count;
+    s.hand[s.hand_count++] = strike;
+    const int32_t rng_before = s.card_random_rng.counter;
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_EQ(s.card_random_rng.counter, rng_before)
+        << "ordinary Strike must not make a second Spoon roll";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, strike));
+    EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, strike));
+}
+
+TEST(CardLimbo, HavocExhumeReplayConsumesOneShotExhaust) {
+    CombatState s = MakeCombat(8, 100);
+    AddHand(s, CardId::HAVOC);
+    const CardPoolIndex exhume = AddHand(s, CardId::EXHUME);
+    const CardPoolIndex strike = AddDrawTop(s, CardId::STRIKE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump(s);
+    ASSERT_TRUE(PileHas(s.exhaust, s.exhaust_count, strike));
+    EXPECT_FALSE(has_card_flag(s.card_pool[strike].flags,
+                               CardFlag::EXHAUST_ON_USE_ONCE));
+
+    // Exhume's one-card branch retrieves Strike automatically; Exhume itself
+    // then exhausts through its queued UseCardAction.
+    ASSERT_TRUE(queue_card_play(s, 0, kActorPlayer));
+    pump(s);
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.hand[0], strike);
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, exhume));
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, strike))
+        << "the Exhumed ordinary Strike discards on its next play";
+    EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, strike));
+}
+
+// A lethal DamageAction invokes clearPostCombatActions, whose allowlist retains
+// UseCardAction (DamageAction.java:88-91; GameActionManager.java:130-136).
+// Therefore the filing action still consumes Strange Spoon RNG and
+// moveToExhaustPile still fires onExhaust hooks. With one other hand card,
+// Fiend Fire's random ExhaustAction is forced (zero RNG): the only draw is the
+// deliberately-selected false Spoon boolean. Feel No Pain queues one BLOCK for
+// the hand card before lethal damage and a second for Fiend Fire at terminal
+// filing; both stay queued under the engine's established immediate halt.
+TEST(CardLimbo, TerminalUseCardStillRollsSpoonAndDispatchesOnExhaustInOrder) {
+    int64_t seed = 0;
+    for (;; ++seed) {
+        RngStream probe = from_seed(seed);
+        if (!random_boolean(probe)) {
+            break;  // force the played Fiend Fire to exhaust, not Spoon-save
+        }
+    }
+
+    CombatState s = MakeCombat(6, 7);
+    s.card_random_rng = from_seed(seed);
+    GiveRelic(s, RelicId::STRANGE_SPOON);
+    s.player_powers[0].power_id =
+        static_cast<uint16_t>(PowerId::FEEL_NO_PAIN);
+    s.player_powers[0].amount = 3;
+    s.player_power_count = 1;
+    const CardPoolIndex fiend = AddHand(s, CardId::FIEND_FIRE);
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(s.card_random_rng.counter, 1)
+        << "lethal filing still executes Strange Spoon's boolean";
+    ASSERT_EQ(s.exhaust_count, 2);
+    EXPECT_EQ(s.exhaust[0], strike)
+        << "Fiend Fire's own program exhausts the hand first";
+    EXPECT_EQ(s.exhaust[1], fiend)
+        << "the retained UseCardAction files the source afterwards";
+    ASSERT_EQ(s.action_count, 2)
+        << "Feel No Pain fires for both exhausts under the terminal halt";
+    for (uint8_t i = 0; i < s.action_count; ++i) {
+        const ActionQueueItem& item =
+            s.action_queue[(s.action_head + i) % kActionQueueCap];
+        EXPECT_EQ(static_cast<Opcode>(item.opcode), Opcode::BLOCK);
+        EXPECT_EQ(item.amount, 3);
+    }
+}
+
+// --- 8. The limbo window is visible at a blocking choice: the played card is
 //        in the limbo pile, not the discard.
 //
 // Headbutt with >= 2 other discard cards blocks on a grid select
@@ -308,7 +450,7 @@ TEST(CardLimbo, HeadbuttPromptSeesOnlyTheRealDiscardCards) {
               static_cast<uint16_t>(CardId::HEADBUTT));
 }
 
-// --- 8. The engine's halt-at-death collapse still produces a normalized
+// --- 9. The engine's halt-at-death collapse still produces a normalized
 //        terminal state.
 //
 // A lethal single-DAMAGE card leaves only its queued UseCardAction when the
@@ -334,7 +476,7 @@ TEST(CardLimbo, LethalStrikeFilesCardAndConsumesOnlyItsFilingAction) {
         << "the terminal flush consumed the pending UseCardAction";
 }
 
-// --- 9. A synchronous replay enters immediately behind the resolving card.
+// --- 10. A synchronous replay enters immediately behind the resolving card.
 //
 // GameActionManager.getNextAction keeps cardQueue[0] in place through
 // player.useCard and removes it only afterwards (:193-298). DoubleTapPower's

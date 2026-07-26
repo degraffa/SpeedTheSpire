@@ -98,6 +98,14 @@ using RelicId = sts::registry::RelicId;
 //                 (DoubleTapPower.onUseCard, DoubleTapPower.java:59) and re-read
 //                 by that same power's guard (`!card.purgeOnUse`, :44), which is
 //                 what stops a replayed copy from being replayed again.
+//   EXHAUST_ON_USE_ONCE -- (per-INSTANCE runtime bit, never authored in YAML)
+//                 AbstractCard.exhaustOnUseOnce. PlayTopCardAction (Havoc)
+//                 sets it before moving the draw-top card into limbo; the
+//                 UseCardAction snapshots it into exhaustCard and clears it
+//                 after the discard/exhaust decision (:132). Corruption's
+//                 action-local exhaust redirect uses the same one-play
+//                 lifetime; unlike EXHAUST, this bit must not survive a
+//                 Strange Spoon save or an Exhume/replay cycle.
 enum class CardFlag : uint16_t {
     NONE       = 0,
     EXHAUST    = 1u << 0,
@@ -108,6 +116,7 @@ enum class CardFlag : uint16_t {
     XCOST      = 1u << 5,
     COST_MODIFIED_FOR_TURN = 1u << 6,
     PURGE_ON_USE = 1u << 7,
+    EXHAUST_ON_USE_ONCE = 1u << 8,
 };
 
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {

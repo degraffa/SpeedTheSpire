@@ -2854,14 +2854,22 @@ compensation was added; all three old ones were removed.
 - **Ordering:** `GameActionManager.getNextAction` retains `cardQueue[0]`
   through `player.useCard` and removes it afterwards. The pump now does the
   same, so Double Tap's synchronous index-1 replay is promoted ahead of a
-  previously queued play. Terminal combat still halts immediately: a
-  no-RNG/no-hook normalization files any limbo cards and removes only their
-  now-consumed `USE_CARD` actions, preserving every other established
-  stranded-action behavior.
+  previously queued play. Terminal combat still halts immediately, but a
+  pending `USE_CARD` is resolved exactly first: lethal `DamageAction` calls
+  `clearPostCombatActions`, whose allowlist deliberately retains
+  `UseCardAction`, so Strange Spoon RNG and the filing-time `onExhaust` fan-out
+  remain gameplay-visible. Only a terminal-cancelled limbo card which never
+  acquired a filing action takes the no-RNG/no-hook fallback. Every other
+  established stranded action is preserved.
 - **Independent audit findings:** a hand-played Perfected Strike counts itself
   because `calculateCardDamage` precedes `hand.removeCard`; autoplay already
   in limbo does not. Mummified Hand excludes its source through the still-live
-  `cardQueue` entry, not through early hand removal. Both are pinned.
+  `cardQueue` entry, not through early hand removal. A rejected first pass also
+  exposed that `CardFlag::EXHAUST` had collapsed Java's permanent `exhaust`
+  with `exhaustOnUseOnce`: Havoc/Corruption could make a Spoon-saved or Exhumed
+  Strike exhaust on every later play. Append-only bit 8 is now
+  `EXHAUST_ON_USE_ONCE` and is consumed after the filing decision, while
+  intrinsic/Medical-Kit `EXHAUST` remains. All three distinctions are pinned.
 - **Namespace:** `USE_CARD` is opcode **53**. Opcodes 49–52 remain the
   exclusive live B3.10b reservation; 41–44 are permanent gaps left by landed
   owners and were not backfilled. The generated/engine opcode equality is
@@ -2873,8 +2881,8 @@ compensation was added; all three old ones were removed.
   queued filing action, and the Chemical X test counted that legitimate
   trailing action; their assertion points were corrected without weakening
   the semantic checks.
-- **Acceptance:** final-tree full Debug **937/937**, leak-detecting ASan/UBSan
-  **937/937**, and Release **937/937**; `FixtureOracle`, all nine `CardLimbo`,
+- **Acceptance:** final-tree full Debug **940/940**, leak-detecting ASan/UBSan
+  **940/940**, and Release **940/940**; `FixtureOracle`, all twelve `CardLimbo`,
   and the affected `RelicRaresShop` regressions included. `git diff --check`,
   documentation link/stale-count checks, and a clean diff under
   `tests/golden/` completed the handoff. No schema bump and no committed

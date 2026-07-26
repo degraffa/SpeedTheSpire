@@ -145,12 +145,13 @@ bool file_card_from_limbo(CombatState& state, uint8_t pool_index,
 // COMBAT_OVER normalization: file every card still in limbo to its
 // flag/type-derived destination, WITHOUT Strange Spoon rolls or onExhaust
 // hooks. The pump halts the moment the fight is decided, abandoning whatever
-// is still queued -- including a pending USE_CARD -- exactly as it already
-// abandons a lethal card's trailing effects. In the game the queue keeps
-// draining during the death animation, so the terminal piles DO contain the
-// played card; this flush reproduces that terminal state while spending no RNG
-// and firing no hooks, consistent with the existing halt-at-death collapse
-// (the fixture corpus pins both: fixt16's lethal Strike ends in the discard).
+// is still queued exactly as it already abandons a lethal card's trailing
+// effects. Pending USE_CARD actions are resolved exactly (including Spoon and
+// onExhaust) by action_queue.cpp before this fallback runs; this helper handles
+// only limbo cards which never reached their UseCardAction (for example a
+// queued autoplay cancelled by terminal combat). It also consumes their
+// EXHAUST_ON_USE_ONCE state. The fixture corpus pins the ordinary lethal-Strike
+// shape (discard, empty limbo).
 void flush_limbo_at_combat_over(CombatState& state) noexcept;
 
 // If pool row `pool_index` carries the COST_MODIFIED_FOR_TURN bit

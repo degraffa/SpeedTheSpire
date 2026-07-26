@@ -260,8 +260,15 @@ void flush_limbo_at_combat_over(CombatState& s) noexcept {
             (def != nullptr && def->type == CardType::POWER) ||
             has_card_flag(s.card_pool[pi].flags, CardFlag::PURGE_ON_USE);
         const bool to_exhaust =
-            has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST);
+            has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST) ||
+            has_card_flag(s.card_pool[pi].flags,
+                          CardFlag::EXHAUST_ON_USE_ONCE);
         file_card_from_limbo(s, pi, to_exhaust, remove_only);
+        if (!remove_only) {
+            s.card_pool[pi].flags = static_cast<uint16_t>(
+                s.card_pool[pi].flags &
+                ~card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE));
+        }
     }
 }
 

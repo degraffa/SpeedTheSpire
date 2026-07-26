@@ -28,30 +28,40 @@ static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
 
 namespace {
 
-// The engine stops pumping as soon as combat is terminal, while the game keeps
-// draining presentation-time actions. flush_limbo_at_combat_over performs the
-// gameplay-visible part of each pending UseCardAction without RNG or hooks.
-// Remove those now-consumed filing actions from the ring so terminal state does
-// not retain an action that would file the same card a second time. Preserve
-// every other abandoned action: the established halt-at-death model deliberately
-// leaves a lethal card's trailing gameplay effects queued.
-void discard_pending_use_card_actions(CombatState& s) noexcept {
-    uint8_t kept = 0;
-    for (uint8_t i = 0; i < s.action_count; ++i) {
+// A lethal DamageAction calls clearPostCombatActions, which deliberately KEEPS
+// UseCardAction (GameActionManager.java:130-136; DamageAction.java:88-91).
+// Therefore terminal filing still performs gameplay-visible work: Strange
+// Spoon consumes its boolean, and moveToExhaustPile fires relic/power/card
+// onExhaust hooks. The headless pump otherwise keeps its established immediate
+// terminal halt. Rebuild the ring without USE_CARD, preserving every other
+// abandoned action, then resolve the saved filing actions in queue order. Any
+// hook actions they add land behind the preserved queue, exactly as addToBot
+// from UseCardAction's later position would.
+void resolve_pending_use_card_actions_at_terminal(CombatState& s) noexcept {
+    ActionQueueItem kept[kActionQueueCap]{};
+    ActionQueueItem filing[kActionQueueCap]{};
+    uint8_t kept_count = 0;
+    uint8_t filing_count = 0;
+    const uint8_t original_count = s.action_count;
+    for (uint8_t i = 0; i < original_count; ++i) {
         const uint8_t src = static_cast<uint8_t>(
             (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
         const ActionQueueItem item = s.action_queue[src];
         if (static_cast<Opcode>(item.opcode) == Opcode::USE_CARD) {
-            continue;
+            filing[filing_count++] = item;
+        } else {
+            kept[kept_count++] = item;
         }
-        const uint8_t dst = static_cast<uint8_t>(
-            (static_cast<unsigned>(s.action_head) + kept) % kActionQueueCap);
-        s.action_queue[dst] = item;
-        ++kept;
     }
-    s.action_count = kept;
-    s.action_tail = static_cast<uint8_t>(
-        (static_cast<unsigned>(s.action_head) + kept) % kActionQueueCap);
+    s.action_head = 0;
+    s.action_tail = 0;
+    s.action_count = 0;
+    for (uint8_t i = 0; i < kept_count; ++i) {
+        add_to_bottom(s, kept[i]);
+    }
+    for (uint8_t i = 0; i < filing_count; ++i) {
+        execute_opcode(s, filing[i]);
+    }
 }
 
 // !areMonstersBasicallyDead() (MonsterGroup.java:90-95): a monster is in the
@@ -483,14 +493,12 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     // so an escape terminal is distinct from a kill by inspection.
     if (s.player_hp <= 0 || (s.flags & kCombatFlagPlayerEscaped) != 0u ||
         (!any_monster_alive(s) && (s.flags & kCombatFlagCannotLose) == 0u)) {
-        // The halt abandons whatever is still queued -- including a pending
-        // USE_CARD, whose played card is still in the limbo pile. File it to
-        // its destination pile with no hooks and no RNG (piles.hpp
-        // flush_limbo_at_combat_over): in the game the queue keeps draining
-        // during the death animation, so the terminal piles DO contain the
-        // played card, and the fixture corpus pins that terminal shape.
+        // Resolve pending UseCardAction filing exactly: the game retains those
+        // actions after lethal damage, so their Spoon RNG and onExhaust fan-out
+        // remain gameplay-visible. Then normalize any limbo entry which never
+        // acquired a USE_CARD (a terminal-cancelled queued autoplay).
+        resolve_pending_use_card_actions_at_terminal(s);
         flush_limbo_at_combat_over(s);
-        discard_pending_use_card_actions(s);
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         r.outcome = PumpOutcome::COMBAT_OVER;
         return r;

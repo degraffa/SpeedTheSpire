@@ -416,7 +416,8 @@ void op_play_top_draw(CombatState& s) noexcept {
     // `AbstractDungeon.player.limbo.group.add(card)`) -- ours goes to the limbo
     // pile, where resolve_card_play finds it -- then its play is queued at the
     // front of the cardQueue (NewQueueCardAction -> the normal §5.3 resolve).
-    s.card_pool[pi].flags |= card_flag_bit(CardFlag::EXHAUST);
+    s.card_pool[pi].flags |=
+        card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE);
     s.card_pool[pi].cost_now = 0;
     limbo_add(s, pi);
     CardQueueItem q{};
@@ -495,7 +496,8 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
     }
     if ((flags & kPlayCardExhaust) != 0u) {
         s.card_pool[pi].flags = static_cast<uint16_t>(
-            s.card_pool[pi].flags | card_flag_bit(CardFlag::EXHAUST));
+            s.card_pool[pi].flags |
+            card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE));
     }
     limbo_add(s, pi);
     CardQueueItem q{};
@@ -530,9 +532,10 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
 //            resetAttributes cost revert) or discard (moveToDiscardPile). The
 //            reboundCard / shuffleBackIntoDrawPile / returnToHand branches
 //            (:118-126) have no S1 producer and are deliberately absent.
-// The exhaust destination is read from the instance flags HERE, not at play
-// resolution: Corruption's onUseCard stamped CardFlag::EXHAUST during the
-// constructor fan-out, and the ctor ran before this action was queued.
+// The exhaust destination is read from the instance flags HERE. Intrinsic or
+// permanent exhaust is CardFlag::EXHAUST; Havoc/Corruption's action-local
+// exhaust is EXHAUST_ON_USE_ONCE and is cleared at UseCardAction.java:132 after
+// the filing decision, even when Strange Spoon saved the card.
 void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
     if (item.amount < 0 || item.amount >= kCardPoolCap) {
         return;  // malformed (defensive)
@@ -542,7 +545,11 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
     const bool is_power = def != nullptr && def->type == CardType::POWER;
     const bool remove_only =
         is_power || has_card_flag(s.card_pool[pi].flags, CardFlag::PURGE_ON_USE);
-    bool to_exhaust = has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST);
+    const bool exhaust_once = has_card_flag(
+        s.card_pool[pi].flags, CardFlag::EXHAUST_ON_USE_ONCE);
+    bool to_exhaust =
+        has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST) ||
+        exhaust_once;
     if (!remove_only && to_exhaust &&
         player_has_relic(s, RelicId::STRANGE_SPOON) &&
         random_boolean(s.card_random_rng)) {
@@ -550,6 +557,13 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
     }
     if (!file_card_from_limbo(s, pi, to_exhaust, remove_only)) {
         return;  // not in limbo (defensive; nothing to file)
+    }
+    if (!remove_only && exhaust_once) {
+        // UseCardAction.update:132 -- exhaustOnUseOnce is consumed whether the
+        // card exhausted or Strange Spoon redirected it to discard.
+        s.card_pool[pi].flags = static_cast<uint16_t>(
+            s.card_pool[pi].flags &
+            ~card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE));
     }
     if (!remove_only && to_exhaust) {
         // §5.5 onExhaust (CardGroup.moveToExhaustPile): fires as the card lands
