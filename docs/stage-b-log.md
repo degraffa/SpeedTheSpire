@@ -3008,3 +3008,47 @@ debug/ASan/release, stale-count, and documentation-link checks were run before
 commit. No schema, fixture, golden, registry, engine, vendored fork, or external
 campaign artifact changed. The frozen environment choice remains blocked on
 the owner, and B4.5 stays `[!]`.
+
+<a id="b45-oracle-preflight-fix-forward"></a>
+
+### B4.5 oracle-capture strict campaign fix-forward `[x]` (non-task)
+
+**Independent-review blockers:** `--require-oracle` checked every in-game
+action it encountered but did not require one to exist, so
+header-plus-terminal and all-menu artifacts passed. Separately,
+orchestrator `--fresh` removed only progress/heartbeat/manifest. A stale
+successful run and timing pair could survive a later retry-exhausted seed;
+the old validator globbed the run file without joining it to the current
+campaign ledger, and the orchestrator treated `complete` with failed seeds as
+success.
+
+**Fix-forward:** strict `--campaign` treats `campaign_progress.json` and
+`campaign_manifest.json` as one identity contract: status must be exactly
+`complete`, failures empty, current seed cleared, ordered `seeds_done` exactly
+equal to the unique non-empty `seed_list`, and both ledgers must agree.
+Expected conventional run and timing names are derived from that ledger and
+must match the directory bijectively. Each run header is joined on campaign
+id, seed, attempt, policy, schema, and fork hash; its terminal is joined to the
+done outcome/floor/action summary. Each timing header is joined on campaign
+id, seed, attempt, and policy. Strict per-file validation now also requires at
+least one in-game action carrying a valid oracle block. Default direct-file
+and campaign validation retains the historical non-oracle behavior.
+
+The driver refuses resume when campaign id, seed list, policy, fork hash, or
+schema differs and emits `complete_with_failures`/nonzero after any exhausted
+seed. The orchestrator checks requested seed identity before accepting
+progress and returns nonzero for incomplete or failed completion. Explicit
+`--fresh` removes only known control files, numbered launch logs, and the exact
+requested seeds' run/timing names; unexpected files remain visible to strict
+validation. Timing headers now carry seed and attempt. The B4.5 runbook makes
+every preflight and reward attempt a new timestamped, preserved campaign id.
+
+**Regression proof:** synthetic tests cover header-plus-terminal and all-menu
+strict rejection, valid strict campaign identity, missing/extra/stale and
+cross-campaign files, bounded fresh cleanup, resume mismatch, non-relaunch on
+failed completion, and a two-launch retry-exhaustion path with a stale valid
+run/timing pair that cannot be accepted. Full preset, Python, stale-count,
+documentation-link, whitespace, and golden/fixture hygiene checks were run
+before the separate fix-forward commit. No state schema, engine, registry,
+fixture, golden, vendored fork, or external campaign artifact changed. The
+frozen environment decision remains the live B4.5 stop line.

@@ -44,6 +44,15 @@ RUN_STREAMS = {"monsterRng", "eventRng", "merchantRng", "cardRng", "treasureRng"
                "cardRandomRng", "miscRng", "mapRng"}
 REWARD_ORACLE_FIELDS = {"cardBlizzRandomizer", "blizzardPotionMod"}
 REWARD_STREAMS = {"cardRng", "treasureRng", "potionRng", "relicRng", "miscRng"}
+STRICT_PROGRESS_KEYS = {
+    "campaign_id", "schema_version", "driver_version", "fork_jar_sha256",
+    "policy", "seed_list", "status", "seeds_done", "seeds_failed",
+    "current_seed", "current_seed_attempt",
+}
+STRICT_MANIFEST_KEYS = {
+    "campaign_id", "schema_version", "driver_version", "fork_jar_sha256",
+    "policy", "seed_list", "status", "seeds_done", "seeds_failed",
+}
 
 
 def _fail(errs, path, lineno, msg):
@@ -96,6 +105,7 @@ def validate_file(path: str, require_oracle: bool = False):
               "--require-oracle requires oracle_block_enabled: true")
 
     action_count = 0
+    in_game_oracle_actions = 0
     saw_terminal = False
     for lineno, rec in records[1:]:
         kind = rec.get("record_kind")
@@ -167,10 +177,236 @@ def validate_file(path: str, require_oracle: bool = False):
                               f"{sorted(pity_missing)}")
                     _check_stream_triples(
                         errs, path, lineno, streams, REWARD_STREAMS)
+                    if not pity_missing and isinstance(streams, dict) and \
+                            not (REWARD_STREAMS - streams.keys()) and all(
+                                isinstance(streams.get(name), dict) and
+                                {"counter", "s0", "s1"} <=
+                                streams[name].keys()
+                                for name in REWARD_STREAMS):
+                        in_game_oracle_actions += 1
 
     if not saw_terminal:
         _fail(errs, path, records[-1][0], "no terminal record")
+    if require_oracle and in_game_oracle_actions == 0:
+        _fail(errs, path, 0,
+              "--require-oracle requires at least one in-game action "
+              "with a valid oracle block")
     return errs, action_count
+
+
+def _read_json(path, errs, label):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            value = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        errs.append(f"{label}: cannot read valid JSON: {exc}")
+        return None
+    if not isinstance(value, dict):
+        errs.append(f"{label}: expected a JSON object")
+        return None
+    return value
+
+
+def _artifact_identity(path, errs):
+    records = []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for lineno, line in enumerate(fh, 1):
+                if line.strip():
+                    records.append((lineno, json.loads(line)))
+    except (OSError, json.JSONDecodeError) as exc:
+        errs.append(f"{os.path.basename(path)}: cannot inspect identity: {exc}")
+        return None, None
+    if not records:
+        return None, None
+    header = records[0][1] if isinstance(records[0][1], dict) else None
+    terminals = [
+        rec for _lineno, rec in records
+        if isinstance(rec, dict) and rec.get("record_kind") == "terminal"
+    ]
+    return header, terminals[-1] if terminals else None
+
+
+def _timing_identity(path, errs):
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    value = json.loads(line)
+                    if not isinstance(value, dict) or \
+                            value.get("record_kind") != "timing_header":
+                        errs.append(
+                            f"{os.path.basename(path)}: first record is not "
+                            "a timing_header")
+                        return None
+                    return value
+    except (OSError, json.JSONDecodeError) as exc:
+        errs.append(f"{os.path.basename(path)}: cannot inspect timing header: "
+                    f"{exc}")
+        return None
+    errs.append(f"{os.path.basename(path)}: empty timing artifact")
+    return None
+
+
+def validate_campaign(campaign_dir: str, require_oracle: bool = False):
+    """Validate one campaign directory.
+
+    The historical/default mode remains the original glob-and-validate
+    behavior. Strict oracle mode additionally treats progress + manifest as the
+    campaign authority and proves a bijection between their successful seed
+    ledger and both artifact families.
+    """
+    files = sorted(glob.glob(os.path.join(
+        campaign_dir, "run_*_a20_ironclad.jsonl")))
+    if not require_oracle:
+        return files, []
+
+    errs = []
+    progress = _read_json(
+        os.path.join(campaign_dir, "campaign_progress.json"),
+        errs, "campaign_progress.json")
+    manifest = _read_json(
+        os.path.join(campaign_dir, "campaign_manifest.json"),
+        errs, "campaign_manifest.json")
+    if progress is None or manifest is None:
+        return files, errs
+
+    missing = STRICT_PROGRESS_KEYS - progress.keys()
+    if missing:
+        errs.append(f"campaign_progress.json: missing keys {sorted(missing)}")
+    missing = STRICT_MANIFEST_KEYS - manifest.keys()
+    if missing:
+        errs.append(f"campaign_manifest.json: missing keys {sorted(missing)}")
+
+    campaign_id = progress.get("campaign_id")
+    directory_id = os.path.basename(os.path.normpath(campaign_dir))
+    if campaign_id != directory_id:
+        errs.append("campaign_progress.json: campaign_id does not match "
+                    f"directory name ({campaign_id!r} != {directory_id!r})")
+    if progress.get("status") != "complete":
+        errs.append("campaign_progress.json: strict campaign status must be "
+                    f"'complete', got {progress.get('status')!r}")
+    if progress.get("current_seed") is not None or \
+            progress.get("current_seed_attempt") != 0:
+        errs.append("campaign_progress.json: completed campaign retains a "
+                    "current seed/attempt")
+
+    seed_list = progress.get("seed_list")
+    done = progress.get("seeds_done")
+    failed = progress.get("seeds_failed")
+    if not isinstance(seed_list, list) or not seed_list or \
+            any(not isinstance(seed, str) or not seed for seed in seed_list):
+        errs.append("campaign_progress.json: seed_list must be a non-empty "
+                    "list of seed strings")
+        seed_list = []
+    if len(seed_list) != len(set(seed_list)):
+        errs.append("campaign_progress.json: seed_list contains duplicates")
+    if not isinstance(done, list):
+        errs.append("campaign_progress.json: seeds_done must be a list")
+        done = []
+    if not isinstance(failed, list):
+        errs.append("campaign_progress.json: seeds_failed must be a list")
+        failed = []
+    if failed:
+        errs.append("campaign_progress.json: strict campaign contains failed "
+                    f"seeds {[row.get('seed') for row in failed if isinstance(row, dict)]}")
+
+    done_seeds = [
+        row.get("seed") for row in done if isinstance(row, dict)
+    ]
+    if len(done_seeds) != len(done):
+        errs.append("campaign_progress.json: malformed seeds_done entry")
+    if done_seeds != seed_list:
+        errs.append("campaign_progress.json: seeds_done must match seed_list "
+                    f"exactly and in order ({done_seeds!r} != {seed_list!r})")
+
+    for key in STRICT_MANIFEST_KEYS:
+        if key in progress and key in manifest and manifest[key] != progress[key]:
+            errs.append(f"campaign_manifest.json: {key} does not match "
+                        "campaign_progress.json")
+
+    expected_runs = set()
+    expected_timings = set()
+    rows_by_seed = {}
+    for row in done:
+        if not isinstance(row, dict):
+            continue
+        seed = row.get("seed")
+        artifact = row.get("artifact")
+        conventional = f"run_{seed}_a20_ironclad.jsonl"
+        if artifact != conventional:
+            errs.append(f"campaign_progress.json: seed {seed!r} artifact "
+                        f"must be {conventional!r}, got {artifact!r}")
+        expected_runs.add(conventional)
+        expected_timings.add(f"run_{seed}_a20_ironclad.timing.jsonl")
+        if seed in rows_by_seed:
+            errs.append(f"campaign_progress.json: duplicate done seed {seed!r}")
+        rows_by_seed[seed] = row
+
+    actual_runs = {os.path.basename(path) for path in files}
+    timing_files = sorted(glob.glob(os.path.join(
+        campaign_dir, "run_*_a20_ironclad.timing.jsonl")))
+    actual_timings = {os.path.basename(path) for path in timing_files}
+    for name in sorted(expected_runs - actual_runs):
+        errs.append(f"campaign artifacts: missing {name}")
+    for name in sorted(actual_runs - expected_runs):
+        errs.append(f"campaign artifacts: unexpected/stale {name}")
+    for name in sorted(expected_timings - actual_timings):
+        errs.append(f"campaign timing artifacts: missing {name}")
+    for name in sorted(actual_timings - expected_timings):
+        errs.append(f"campaign timing artifacts: unexpected/stale {name}")
+
+    for path in files:
+        name = os.path.basename(path)
+        if name not in expected_runs:
+            continue
+        seed = name[len("run_"):-len("_a20_ironclad.jsonl")]
+        row = rows_by_seed.get(seed, {})
+        header, terminal = _artifact_identity(path, errs)
+        if not isinstance(header, dict):
+            continue
+        expected_header = {
+            "campaign_id": campaign_id,
+            "policy": progress.get("policy"),
+            "fork_jar_sha256": progress.get("fork_jar_sha256"),
+            "schema_version": progress.get("schema_version"),
+            "attempt": row.get("attempts"),
+        }
+        for key, expected in expected_header.items():
+            if header.get(key) != expected:
+                errs.append(f"{name}: header {key} {header.get(key)!r} "
+                            f"does not match campaign {expected!r}")
+        if (header.get("seed") or {}).get("string") != seed:
+            errs.append(f"{name}: header seed does not match filename/ledger")
+        if isinstance(terminal, dict):
+            for terminal_key, row_key in (
+                    ("outcome", "outcome"), ("floor", "floor"),
+                    ("actions", "actions")):
+                if terminal.get(terminal_key) != row.get(row_key):
+                    errs.append(f"{name}: terminal {terminal_key} does not "
+                                "match seeds_done")
+
+    for path in timing_files:
+        name = os.path.basename(path)
+        if name not in expected_timings:
+            continue
+        seed = name[len("run_"):-len("_a20_ironclad.timing.jsonl")]
+        row = rows_by_seed.get(seed, {})
+        timing = _timing_identity(path, errs)
+        if timing is None:
+            continue
+        for key, expected in {
+                "campaign_id": campaign_id,
+                "policy": progress.get("policy"),
+                "seed": seed,
+                "attempt": row.get("attempts"),
+        }.items():
+            if timing.get(key) != expected:
+                errs.append(f"{name}: timing_header {key} "
+                            f"{timing.get(key)!r} does not match campaign "
+                            f"{expected!r}")
+
+    return files, errs
 
 
 def main(argv=None) -> int:
@@ -184,14 +420,20 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     files = list(args.paths)
+    campaign_errs = []
     if args.campaign:
-        files += sorted(glob.glob(os.path.join(args.campaign,
-                                               "run_*_a20_ironclad.jsonl")))
+        campaign_files, campaign_errs = validate_campaign(
+            args.campaign, require_oracle=args.require_oracle)
+        files += campaign_files
     if not files:
+        for error in campaign_errs:
+            print(f"    {error}")
         print("no artifact files given")
         return 2
 
-    total_errs = 0
+    total_errs = len(campaign_errs)
+    for error in campaign_errs:
+        print(f"    {error}")
     for path in files:
         errs, actions = validate_file(path, require_oracle=args.require_oracle)
         status = "OK" if not errs else f"{len(errs)} ERROR(S)"

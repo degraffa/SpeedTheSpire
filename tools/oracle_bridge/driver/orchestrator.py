@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -36,6 +37,7 @@ from datetime import datetime, timezone
 
 FATAL_PROGRESS_STATUS = "fatal_environment_drift"
 EXIT_FATAL_ENVIRONMENT = 3
+EXIT_CAMPAIGN_INVALID = 4
 
 
 def utc() -> str:
@@ -126,6 +128,80 @@ def log_fatal_progress(prog) -> None:
     log(f"FATAL ENVIRONMENT DRIFT -- {detail}")
 
 
+def resolve_seeds(spec: str) -> list:
+    if os.path.exists(spec):
+        with open(spec, "r", encoding="utf-8") as fh:
+            seeds = [line.strip().upper() for line in fh
+                     if line.strip() and not line.startswith("#")]
+    else:
+        seeds = [seed.strip().upper() for seed in spec.split(",")
+                 if seed.strip()]
+    if not seeds or any(re.fullmatch(r"[0-9A-Z]+", seed) is None
+                        for seed in seeds):
+        raise ValueError("seeds must be non-empty base-35-style strings")
+    if len(seeds) != len(set(seeds)):
+        raise ValueError("seed list contains duplicates")
+    return seeds
+
+
+def progress_identity_error(prog, args):
+    if not prog:
+        return None
+    expected = {
+        "campaign_id": args.campaign_id,
+        "seed_list": args.seed_list,
+        "policy": args.policy,
+    }
+    mismatches = [
+        f"{key}={prog.get(key)!r} (expected {value!r})"
+        for key, value in expected.items() if prog.get(key) != value
+    ]
+    return "; ".join(mismatches) if mismatches else None
+
+
+def completion_error(prog, expected_seeds):
+    failed = prog.get("seeds_failed")
+    done = prog.get("seeds_done")
+    if not isinstance(failed, list) or not isinstance(done, list):
+        return "completion ledger lacks seeds_done/seeds_failed lists"
+    if failed:
+        return f"campaign has {len(failed)} failed seed(s)"
+    done_seeds = [row.get("seed") for row in done if isinstance(row, dict)]
+    if len(done_seeds) != len(done) or done_seeds != expected_seeds:
+        return (f"completed seed ledger {done_seeds!r} does not match "
+                f"requested seed list {expected_seeds!r}")
+    return None
+
+
+def clear_fresh_campaign_files(campaign_dir: str, seed_list: list) -> list:
+    """Remove only artifacts this exact invocation owns.
+
+    Unexpected seed artifacts are deliberately preserved; strict validation
+    will report them as stale instead of silently deleting unrelated evidence.
+    """
+    names = {
+        "campaign_progress.json", "campaign_progress.json.tmp",
+        "campaign_heartbeat.json", "campaign_manifest.json",
+        "orchestrator_timeline.json",
+    }
+    for seed in seed_list:
+        names.add(f"run_{seed}_a20_ironclad.jsonl")
+        names.add(f"run_{seed}_a20_ironclad.timing.jsonl")
+    try:
+        entries = os.listdir(campaign_dir)
+    except FileNotFoundError:
+        entries = []
+    names.update(name for name in entries
+                 if re.fullmatch(r"mts_launch[0-9]+\.log", name))
+    removed = []
+    for name in sorted(names):
+        path = os.path.join(campaign_dir, name)
+        if os.path.isfile(path):
+            os.remove(path)
+            removed.append(name)
+    return removed
+
+
 def kill_tree(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
@@ -199,15 +275,17 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     args.seeds_arg = args.seeds  # passed through to the driver verbatim
+    try:
+        args.seed_list = resolve_seeds(args.seeds)
+    except ValueError as exc:
+        log(f"INVALID CAMPAIGN INPUT -- {exc}")
+        return EXIT_CAMPAIGN_INVALID
     camp_dir = os.path.join(args.data_root, args.campaign_id)
     os.makedirs(camp_dir, exist_ok=True)
     if args.fresh:
-        for f in ("campaign_progress.json", "campaign_heartbeat.json",
-                  "campaign_manifest.json"):
-            p = os.path.join(camp_dir, f)
-            if os.path.exists(p):
-                os.remove(p)
-        log(f"--fresh: cleared prior progress in {camp_dir}")
+        removed = clear_fresh_campaign_files(camp_dir, args.seed_list)
+        log(f"--fresh: cleared {len(removed)} owned prior file(s) in "
+            f"{camp_dir}")
 
     config_path = os.path.join(
         os.environ["LOCALAPPDATA"], "ModTheSpire", "CommunicationMod",
@@ -233,12 +311,23 @@ def main(argv=None) -> int:
             log("CAMPAIGN TIMEOUT -- giving up")
             return 2
         prog = read_json(progress_path(args))
+        identity_error = progress_identity_error(prog, args)
+        if identity_error:
+            log(f"CAMPAIGN IDENTITY MISMATCH -- {identity_error}; use a new "
+                "campaign id or explicitly restart with --fresh")
+            return EXIT_CAMPAIGN_INVALID
         if fatal_progress(prog):
             log_fatal_progress(prog)
             timeline.append({"event": "fatal_environment_drift", "utc": utc()})
             _summary(args, timeline)
             return EXIT_FATAL_ENVIRONMENT
-        if prog and prog.get("status") == "complete":
+        if prog and prog.get("status") in ("complete",
+                                          "complete_with_failures"):
+            error = completion_error(prog, args.seed_list)
+            if error:
+                log(f"CAMPAIGN NOT ACCEPTABLE -- {error}")
+                _summary(args, timeline)
+                return EXIT_CAMPAIGN_INVALID
             log("campaign already complete")
             break
 
@@ -259,6 +348,14 @@ def main(argv=None) -> int:
             prog = read_json(progress_path(args))
             done = len(prog["seeds_done"]) if prog else 0
             failed = len(prog["seeds_failed"]) if prog else 0
+            identity_error = progress_identity_error(prog, args)
+            if identity_error:
+                log(f"CAMPAIGN IDENTITY MISMATCH -- {identity_error}")
+                kill_tree(proc)
+                timeline.append({"event": "campaign_identity_mismatch",
+                                 "utc": utc()})
+                _summary(args, timeline)
+                return EXIT_CAMPAIGN_INVALID
 
             if fatal_progress(prog):
                 log_fatal_progress(prog)
@@ -272,7 +369,17 @@ def main(argv=None) -> int:
                 _summary(args, timeline)
                 return EXIT_FATAL_ENVIRONMENT
 
-            if prog and prog.get("status") == "complete":
+            if prog and prog.get("status") in ("complete",
+                                              "complete_with_failures"):
+                error = completion_error(prog, args.seed_list)
+                if error:
+                    log(f"CAMPAIGN NOT ACCEPTABLE -- {error}")
+                    kill_tree(proc)
+                    timeline.append({"event": "campaign_failed",
+                                     "utc": utc(), "done": done,
+                                     "failed": failed})
+                    _summary(args, timeline)
+                    return EXIT_CAMPAIGN_INVALID
                 log(f"campaign COMPLETE ({done} done, {failed} failed) -- "
                     f"stopping game")
                 kill_tree(proc)

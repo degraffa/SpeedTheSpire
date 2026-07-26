@@ -121,6 +121,10 @@ class FatalEnvironmentDrift(RuntimeError):
     """The launched game/mod stack cannot produce authoritative oracle data."""
 
 
+class CampaignIdentityError(RuntimeError):
+    """An existing resume ledger belongs to a different campaign invocation."""
+
+
 class Reader:
     """Reads state lines off the game (our stdin) on a dedicated thread and
     publishes the newest parsed message under a condition variable, tagged with
@@ -461,6 +465,22 @@ class Progress:
         if os.path.exists(self.path):
             with open(self.path, "r", encoding="utf-8") as fh:
                 self.data = json.load(fh)
+            expected = {
+                "campaign_id": campaign_id,
+                "seed_list": seed_list,
+                "policy": policy,
+                "fork_jar_sha256": fork_hash,
+                "schema_version": SCHEMA_VERSION,
+            }
+            mismatches = [
+                f"{key}={self.data.get(key)!r} (expected {value!r})"
+                for key, value in expected.items()
+                if self.data.get(key) != value
+            ]
+            if mismatches:
+                raise CampaignIdentityError(
+                    "existing campaign_progress.json identity mismatch: " +
+                    "; ".join(mismatches))
             # A fresh launch resumed us; bump the launch count.
             self.data["launches"] = self.data.get("launches", 0) + 1
         else:
@@ -563,10 +583,12 @@ class CampaignDriver:
     def run_dir(self) -> str:
         return os.path.join(self.args.data_root, self.args.campaign_id)
 
-    def strip_flags(self) -> dict:
+    def strip_flags(self, seed: str, attempt: int) -> dict:
         return {"run_label": self.args.run_label,
                 "campaign_id": self.args.campaign_id,
-                "policy": self.args.policy}
+                "policy": self.args.policy,
+                "seed": seed,
+                "attempt": attempt}
 
     # -- menu / seed helpers -------------------------------------------------
     def wait_menu(self):
@@ -671,7 +693,7 @@ class CampaignDriver:
         # throughput.py reads these to compute sustained injected-actions/sec.
         timing = TimingLog(os.path.join(
             self.run_dir(), f"run_{seed}_a20_ironclad.timing.jsonl"),
-            self.strip_flags())
+            self.strip_flags(seed, attempt))
         script = self._load_script(seed) if self.args.policy == "script" else None
         _log(f"seed {seed} attempt {attempt}: header written "
              f"(long={seed_long}, oracle={'oracle' in gs}); playing")
@@ -890,10 +912,16 @@ class CampaignDriver:
         while True:
             seed = self.next_seed()
             if seed is None:
-                self.progress.data["status"] = "complete"
+                failed = self.progress.data["seeds_failed"]
+                self.progress.data["status"] = (
+                    "complete_with_failures" if failed else "complete")
                 self.progress.data["current_seed"] = None
+                self.progress.data["current_seed_attempt"] = 0
                 self.progress.flush()
                 self._write_manifest()
+                if failed:
+                    _log("campaign COMPLETE WITH FAILURES")
+                    return EXIT_FATAL
                 _log("campaign COMPLETE")
                 return EXIT_OK
 
@@ -958,6 +986,7 @@ class CampaignDriver:
             "fork_jar_sha256": d["fork_jar_sha256"],
             "policy": d["policy"],
             "seed_list": d["seed_list"],
+            "status": d["status"],
             "launches": d["launches"],
             "started_utc": d["started_utc"],
             "finished_utc": _utc(),

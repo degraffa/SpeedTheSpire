@@ -53,6 +53,18 @@ missing block records `status: fatal_environment_drift`, and the orchestrator
 stops instead of relaunching. Run campaign acceptance with
 `validate_artifacts.py --require-oracle`; the default validator remains
 backward-compatible with old, deliberately non-oracle B1.4 artifacts.
+Strict campaign validation requires a complete, failure-free progress and
+manifest ledger, exact ordered seed completion, at least one valid in-game
+oracle action per run, and one current run plus timing artifact per completed
+seed with no missing or extra files. Run headers are bound to campaign id,
+seed, attempt, policy, schema, and fork identity; timing headers are bound to
+campaign id, seed, attempt, and policy.
+
+Treat a campaign id as immutable evidence. A new live attempt gets a new id;
+failed directories are preserved rather than retried in place. `--fresh`
+removes only this invocation's known control files, launch logs, and exact
+requested-seed run/timing names. It deliberately preserves unexpected files,
+which strict validation then rejects as stale instead of silently deleting.
 
 Artifacts land under `<data-root>/<campaign-id>/`:
 `run_<seed>_a20_ironclad.jsonl` (one per run), `campaign_progress.json`,

@@ -27,12 +27,17 @@ decision.
 
 ## 2. One-seed preflight (operator, Windows host)
 
-After the environment decision is resolved, run a distinct one-seed campaign
-before any reward capture:
+After the environment decision is resolved, allocate a **new, immutable
+campaign tag for this attempt** (UTC timestamp plus an operator suffix is
+recommended). Never rerun a failed or completed B4.5 id: preserve its directory
+as evidence and allocate another tag. In the same `cmd.exe` window:
 
 ```bat
+set B45_TAG=20260726T210000Z_alex01
+set B45_PREFLIGHT_ID=b45_rewards_preflight_%B45_TAG%
+
 C:\Python39\python.exe orchestrator.py ^
-    --campaign-id b45_rewards_preflight ^
+    --campaign-id %B45_PREFLIGHT_ID% ^
     --seeds STS00041 ^
     --policy random-legal ^
     --max-actions 1 ^
@@ -65,14 +70,19 @@ The preflight is a gate, not a smoke test. All of these checks are required:
 
    ```bat
    C:\Python39\python.exe validate_artifacts.py --require-oracle ^
-       --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b45_rewards_preflight
+       --campaign D:/STS_BG_Mod/_oracle_data/campaigns/%B45_PREFLIGHT_ID%
    ```
 
    Strict mode requires `oracle_block_enabled: true`, a `game_state.oracle`
-   object on every in-game action record, both reward pity fields
+   object on every in-game action record, **at least one such in-game action**,
+   both reward pity fields
    (`cardBlizzRandomizer`, `blizzardPotionMod`), and complete
    `{counter,s0,s1}` triples for `cardRng`, `treasureRng`, `potionRng`,
-   `relicRng`, and `miscRng`.
+   `relicRng`, and `miscRng`. With `--campaign`, strict mode also requires a
+   complete, failure-free progress/manifest ledger whose ordered `seed_list`
+   and `seeds_done` match exactly, then proves a bijection to the run and timing
+   artifacts. Missing, extra, stale, cross-campaign, or failed-seed evidence is
+   fatal.
 
 If any check fails, preserve the preflight directory for diagnosis and stop.
 Do not relaunch, reuse its artifact, or advance to the reward campaign.
@@ -93,11 +103,14 @@ early floors avoid:
   setEmeraldElite note). Any other elite is clean.
 
 Then, per the standard flow (`README.md` in this directory), let the
-orchestrator launch the explicit fork-only mod list:
+orchestrator launch the explicit fork-only mod list. Derive a second,
+never-before-used id from the successful preflight tag:
 
 ```bat
+set B45_REWARD_ID=b45_rewards_oracle_%B45_TAG%
+
 C:\Python39\python.exe orchestrator.py ^
-    --campaign-id b45_rewards_oracle ^
+    --campaign-id %B45_REWARD_ID% ^
     --seeds D:/STS_BG_Mod/_oracle_data/campaigns/b45_seeds.txt ^
     --policy random-legal ^
     --fresh
@@ -106,15 +119,18 @@ C:\Python39\python.exe orchestrator.py ^
 `random-legal` claims reward items and picks/skips reward cards, so each run's
 JSONL carries several COMBAT_REWARD / CARD_REWARD screens with the states on
 both sides of every claim. Artifacts land under
-`D:/STS_BG_Mod/_oracle_data/campaigns/b45_rewards_oracle/`. This distinct id is
+`D:/STS_BG_Mod/_oracle_data/campaigns/%B45_REWARD_ID%/`. This distinct id is
 required: never reuse or overwrite the preserved invalid `b45_rewards`
-campaign.
+campaign, a prior preflight, or a prior reward attempt. `--fresh` authorizes
+only bounded cleanup of that invocation's control files, launch logs, and the
+exact requested seeds' run/timing artifacts; it does not erase unexpected
+files, which strict validation reports instead.
 
 Before translation, require the oracle gate on the reward campaign too:
 
 ```bat
 C:\Python39\python.exe validate_artifacts.py --require-oracle ^
-    --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b45_rewards_oracle
+    --campaign D:/STS_BG_Mod/_oracle_data/campaigns/%B45_REWARD_ID%
 ```
 
 ## 4. Translate
@@ -125,8 +141,11 @@ three artifacts:
 ```bash
 tools/wsl_run.sh debug          # builds translate_cli among everything else
 build/debug/tools/oracle_bridge/translator/translate_cli \
-    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/b45_rewards_oracle/run_*.jsonl
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/$B45_REWARD_ID/run_*.jsonl
 ```
+
+In WSL, either export `B45_REWARD_ID` again or replace it with the exact
+preserved directory name printed by the Windows capture step.
 
 Expected: `OK` per file, **zero unknown-field errors**. The B4.5 translator
 slice content-validates the reward screens (enumerated `reward_type`, typed

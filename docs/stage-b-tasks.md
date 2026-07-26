@@ -776,6 +776,20 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **B4.5 oracle-capture preflight fix-forward closes strict
+  campaign false accepts; B4.5 remains `[!]`.** Independent review found that
+  strict validation still accepted a header-plus-terminal/all-menu artifact
+  with no observed in-game oracle state, and that `--fresh` left old run/timing
+  artifacts behind. A later failed attempt could therefore appear supported by
+  stale files. Strict `--campaign` now binds complete/failure-free progress and
+  manifest identity to the ordered seed ledger and exact run/timing artifact
+  sets, including per-file campaign/seed/attempt identity; it rejects missing,
+  extra, stale, failed, and zero-observation evidence. Driver/orchestrator
+  completion is nonzero for any failed seed, resume identity is checked, and
+  `--fresh` performs bounded cleanup only for its exact requested seeds.
+  The runbook allocates a new preserved id per preflight/reward attempt.
+  Default legacy validation remains compatible.
+  [Archive log.](stage-b-log.md#b45-oracle-preflight-fix-forward)
 - 2026-07-26 — **B4.5 oracle-capture preflight made fail-closed; B4.5 remains
   `[!]`.** The preserved `b45_rewards` campaign exposed two independent false
   confidence paths: stock CommunicationMod shares the fork's config namespace,
