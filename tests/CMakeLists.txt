@@ -482,4 +482,5 @@ sts_add_test(fuzz_test
     DEFS
         STS_FUZZ_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/fuzz_scratch"
         STS_FUZZ_SOAK_BIN="$<TARGET_FILE:fuzz_soak>"
-        STS_FUZZ_REPRO_BIN="$<TARGET_FILE:fuzz_repro>")
+        STS_FUZZ_REPRO_BIN="$<TARGET_FILE:fuzz_repro>"
+        STS_FUZZ_SOAK_SCRIPT="${CMAKE_SOURCE_DIR}/tools/fuzz/soak.sh")

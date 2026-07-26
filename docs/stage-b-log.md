@@ -2838,27 +2838,30 @@ every run replayed twice, final-state hashes compared; assert/hash-mismatch
 triage output with reproducers; overnight-runnable script.
 **Acceptance:** ≥ 10M actions across ≥ 10k seeds, zero nondeterminism, zero
 asserts, asan-clean sample (≥ 1 % of runs under asan); numbers recorded here.
-**Log:** Verified by running, not inferred. `tools/wsl_run.cmd debug asan` and
-`tools/wsl_run.cmd release` from the Windows host each passed **946/946** tests.
-The acceptance campaign then ran
+**Log:** Verified by running, not inferred. The original acceptance evidence in
+`cd397c5` was superseded by the fix-forward audit below: its sanitizer prefix
+overlapped the main sweep, and the runner still had integrity holes. After all
+eight audit findings were closed, `tools/wsl_run.cmd debug asan release` from
+the Windows host passed **957/957** tests in every preset. The replacement
+acceptance campaign then ran
 `tools/wsl_run.cmd --script tools/fuzz/soak.sh --main-bin
 build/release/tools/fuzz/fuzz_soak --asan-bin
 build/asan/tools/fuzz/fuzz_soak --out
 /mnt/d/STS_BG_Mod/SpeedTheSpire-campaigns/fuzz --seeds 10000 --seed-start 1
 --reps 5 --asan-percent 1 --jobs 12 --asan-jobs 8 --max-actions 4000 --label
-b51_accept_10m` and exited 0. Artifacts are intentionally outside the
+b51_fixforward_final` and exited 0. Artifacts are intentionally outside the
 repository at
-`D:\STS_BG_Mod\SpeedTheSpire-campaigns\fuzz\b51_accept_10m_20260726_140658`.
+`D:\STS_BG_Mod\SpeedTheSpire-campaigns\fuzz\b51_fixforward_final_20260726_145440`.
 - **Release sweep:** 10,000 distinct sequential run seeds, all five policies,
   five policy seeds per `(run seed, policy)` = **250,000 cases**;
-  **10,810,546 counted actions** (pass A only), 21,662,592 actions including
-  replay passes, 500,977 engine runs, **0 failures**, 270.0 s. The 37
+  **10,808,430 counted actions** (pass A only), 21,658,338 actions including
+  replay passes, 500,977 engine runs, **0 failures**, 240.0 s. The 37
   action-cap endings are the configured 4,000-action safety limit, not asserts
-  or illegal states; `no_legal_moves=0`, `livelock=0`.
-- **Sanitizer sample:** the first 100 of those 10,000 run seeds, with the same
-  five policies × five policy seeds = **2,500 / 250,000 cases = 1.00 %**;
-  **104,702 counted actions**, 209,945 including replay passes, 5,010 engine
-  runs, **0 failures**, ASan/UBSan clean.
+  or illegal states; `no_legal_moves=0`, `livelock=0`, `no_progress=0`.
+- **Sanitizer sample:** the next 100 run seeds (**10,001–10,100**, disjoint
+  from the main interval), with the same five policies × five policy seeds =
+  **2,500 / 250,000 cases = 1.00 %**; **110,484 counted actions**, 221,246
+  including replay passes, 5,010 engine runs, **0 failures**, ASan/UBSan clean.
 - `fuzz_core` owns deterministic policy selection, whole-controller content
   hashing (including transient run flow without hashing `string_view`
   addresses), the A/B policy replay and sampled literal-action C pass,
@@ -2880,3 +2883,14 @@ repository at
   `Coverage` objects while they were being mutated. That driver-only data race
   was removed by publishing a single atomic counted-action scalar; engine
   behavior, schema, and fixtures are unchanged.
+- Fix-forward audit closed eight acceptance defects: targeted potion
+  enumeration no longer emits an untargeted illegal duplicate; discard/exhaust
+  choices enumerate their full pile capacities under a proven move bound; a
+  legal immediate no-op is a distinct failing/reproducer outcome; sanitizer
+  seeds are a disjoint ceiling-rounded interval and reports are never added to
+  main totals; versioned summaries bind build/configuration/shard identity,
+  require a complete non-overlapping shard set, validate failures and checked
+  arithmetic, and reject missing or incompatible fields; artifact, merge,
+  output-pipe, and report-write failures propagate nonzero; and the CLI,
+  summary, and `STSFUZZ v1` parsers reject partial, zero-work, overflow,
+  duplicate, malformed, and trailing inputs.

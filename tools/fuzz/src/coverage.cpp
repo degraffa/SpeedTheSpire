@@ -1,10 +1,12 @@
 #include "sts/fuzz/coverage.hpp"
 
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "sts/engine/map_rooms.hpp"
@@ -19,6 +21,7 @@ const char* end_reason_name(EndReason r) noexcept {
         case EndReason::NO_LEGAL_MOVES: return "no_legal_moves";
         case EndReason::ACTION_CAP: return "action_cap";
         case EndReason::LIVELOCK: return "livelock";
+        case EndReason::NO_PROGRESS: return "no_progress";
         case EndReason::COUNT: break;
     }
     return "?";
@@ -143,6 +146,22 @@ void Coverage::merge(const Coverage& o) noexcept {
     powers_applied.merge(o.powers_applied);
 }
 
+bool Coverage::merge_checked(const Coverage& o) noexcept {
+    std::vector<uint64_t*> dst;
+    visit_scalars(*this, [&](const std::string&, uint64_t& v) {
+        dst.push_back(&v);
+    });
+    std::vector<const uint64_t*> src;
+    visit_scalars(o, [&](const std::string&, const uint64_t& v) {
+        src.push_back(&v);
+    });
+    for (size_t i = 0; i < dst.size() && i < src.size(); ++i) {
+        if (*src[i] > UINT64_MAX - *dst[i]) return false;
+    }
+    merge(o);
+    return true;
+}
+
 std::string Coverage::kv() const {
     std::ostringstream os;
     visit_scalars(*this, [&](const std::string& k, const uint64_t& v) {
@@ -177,6 +196,24 @@ bool coverage_from_kv(const std::string& text, Coverage& out) {
         keys.push_back(k);
         slots.push_back(&v);
     });
+    std::unordered_set<std::string> expected(keys.begin(), keys.end());
+    expected.insert("max_turn");
+    expected.insert("max_floor");
+    expected.insert("max_actions_in_case");
+    expected.insert("set.cards_played");
+    expected.insert("set.monsters_fought");
+    expected.insert("set.relics_owned");
+    expected.insert("set.potions_held");
+    expected.insert("set.powers_applied");
+    std::unordered_set<std::string> seen;
+
+    auto parse_u64 = [](const std::string& token, int base, uint64_t& value) {
+        if (token.empty()) return false;
+        const auto parsed = std::from_chars(
+            token.data(), token.data() + token.size(), value, base);
+        return parsed.ec == std::errc{} &&
+               parsed.ptr == token.data() + token.size();
+    };
 
     auto find_slot = [&](const std::string& k) -> uint64_t* {
         for (size_t i = 0; i < keys.size(); ++i) {
@@ -195,6 +232,7 @@ bool coverage_from_kv(const std::string& text, Coverage& out) {
         std::istringstream ls(line);
         std::string key;
         ls >> key;
+        if (!expected.contains(key) || !seen.insert(key).second) return false;
         if (key.rfind("set.", 0) == 0) {
             const std::string name = key.substr(4);
             uint64_t* w = nullptr;
@@ -215,13 +253,20 @@ bool coverage_from_kv(const std::string& text, Coverage& out) {
             for (size_t i = 0; i < n; ++i) {
                 std::string hx;
                 if (!(ls >> hx)) return false;
-                w[i] = std::strtoull(hx.c_str(), nullptr, 16);
+                if (hx.size() != 16 || !parse_u64(hx, 16, w[i])) return false;
             }
+            std::string extra;
+            if (ls >> extra) return false;
             continue;
         }
         if (key == "max_turn" || key == "max_floor" || key == "max_actions_in_case") {
-            unsigned long long v = 0;
-            if (!(ls >> v)) return false;
+            std::string token;
+            uint64_t v = 0;
+            if (!(ls >> token) || !parse_u64(token, 10, v) || v > UINT32_MAX) {
+                return false;
+            }
+            std::string extra;
+            if (ls >> extra) return false;
             const auto v32 = static_cast<uint32_t>(v);
             if (key == "max_turn") c.max_turn = v32;
             else if (key == "max_floor") c.max_floor = v32;
@@ -230,10 +275,14 @@ bool coverage_from_kv(const std::string& text, Coverage& out) {
         }
         uint64_t* slot = find_slot(key);
         if (slot == nullptr) return false;
-        unsigned long long v = 0;
-        if (!(ls >> v)) return false;
+        std::string token;
+        uint64_t v = 0;
+        if (!(ls >> token) || !parse_u64(token, 10, v)) return false;
+        std::string extra;
+        if (ls >> extra) return false;
         *slot = v;
     }
+    if (seen.size() != expected.size()) return false;
     out = c;
     return true;
 }

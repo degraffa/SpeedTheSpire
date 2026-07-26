@@ -17,6 +17,7 @@
 // Exit codes: 0 replayed clean and matched, 1 a mismatch/failure was
 // reproduced, 2 bad usage or an unreadable file.
 
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -34,7 +35,7 @@ void usage() {
     std::fprintf(stderr, R"(fuzz_repro -- replay one fuzz case (B5.1)
 
   fuzz_repro FILE.repro [options]
-  fuzz_repro --seed N --policy NAME --policy-seed N [--ascension N] [options]
+  fuzz_repro --seed N --ascension N --policy NAME --policy-seed N [options]
 
   --regen           re-derive the action list from the case id and require it to
                     equal the file's list (cross-checks the two reproducer forms)
@@ -46,12 +47,27 @@ exit: 0 clean, 1 failure reproduced, 2 usage/IO
 )");
 }
 
+template <class T>
+bool parse_integer(const std::string& text, T& out) {
+    if (text.empty()) return false;
+    T value{};
+    const auto parsed =
+        std::from_chars(text.data(), text.data() + text.size(), value, 10);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != text.data() + text.size()) return false;
+    out = value;
+    return true;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     std::string file;
     CaseId id;
-    bool have_case = false;
+    bool have_seed = false;
+    bool have_ascension = false;
+    bool have_policy = false;
+    bool have_policy_seed = false;
     bool regen = false;
     bool verbose = false;
     std::string emit;
@@ -67,22 +83,49 @@ int main(int argc, char** argv) {
         else if (a == "--regen") regen = true;
         else if (a == "--verbose" || a == "-v") verbose = true;
         else if (a == "--emit") emit = next("--emit");
-        else if (a == "--max-actions") max_actions = static_cast<uint32_t>(std::strtoul(next("--max-actions").c_str(), nullptr, 10));
-        else if (a == "--seed") { id.run_seed = std::strtoll(next("--seed").c_str(), nullptr, 10); have_case = true; }
-        else if (a == "--ascension") id.ascension = static_cast<uint8_t>(std::strtoul(next("--ascension").c_str(), nullptr, 10));
+        else if (a == "--max-actions") {
+            if (!parse_integer(next("--max-actions"), max_actions) || max_actions == 0) return 2;
+        }
+        else if (a == "--seed") {
+            if (have_seed || !parse_integer(next("--seed"), id.run_seed)) return 2;
+            have_seed = true;
+        }
+        else if (a == "--ascension") {
+            if (have_ascension) return 2;
+            unsigned value = 0;
+            if (!parse_integer(next("--ascension"), value) || value > 20) return 2;
+            id.ascension = static_cast<uint8_t>(value);
+            have_ascension = true;
+        }
         else if (a == "--policy") {
+            if (have_policy) return 2;
             const std::string n = next("--policy");
             if (!policy_from_name(n, id.policy)) { std::fprintf(stderr, "unknown policy '%s'\n", n.c_str()); return 2; }
-            have_case = true;
+            have_policy = true;
         }
-        else if (a == "--policy-seed") { id.policy_seed = std::strtoull(next("--policy-seed").c_str(), nullptr, 10); have_case = true; }
+        else if (a == "--policy-seed") {
+            if (have_policy_seed ||
+                !parse_integer(next("--policy-seed"), id.policy_seed)) return 2;
+            have_policy_seed = true;
+        }
         else if (!a.empty() && a[0] == '-') { std::fprintf(stderr, "unknown argument '%s'\n", a.c_str()); usage(); return 2; }
-        else file = a;
+        else {
+            if (!file.empty()) {
+                std::fprintf(stderr, "only one reproducer file may be supplied\n");
+                return 2;
+            }
+            file = a;
+        }
     }
 
     ReproFile rf;
     bool from_file = false;
     if (!file.empty()) {
+        if (have_seed || have_ascension || have_policy || have_policy_seed) {
+            std::fprintf(stderr,
+                         "a reproducer file cannot be combined with case-id options\n");
+            return 2;
+        }
         std::string err;
         if (!read_fuzz_repro(file, rf, err)) {
             std::fprintf(stderr, "cannot read reproducer: %s\n", err.c_str());
@@ -97,7 +140,8 @@ int main(int argc, char** argv) {
                       << rf.fail_step;
         }
         std::cout << "\n";
-    } else if (!have_case) {
+    } else if (!have_seed || !have_ascension || !have_policy || !have_policy_seed) {
+        std::fprintf(stderr, "case-id mode requires --seed, --ascension, --policy, and --policy-seed\n");
         usage();
         return 2;
     }

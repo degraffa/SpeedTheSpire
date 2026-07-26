@@ -26,15 +26,16 @@
 
 namespace sts::fuzz {
 
-// Why a run stopped. Only the first three are ordinary; the last two are
-// FINDINGS and are reported separately from the totals.
+// Why a run stopped. Only the first three are ordinary; the last three are
+// findings and are reported separately from the totals.
 enum class EndReason : uint8_t {
     RUN_OVER = 0,             // player died -- terminal, expected
     ROOM_UNIMPLEMENTED = 1,   // parked on unmodelled room content -- expected today
     NO_LEGAL_MOVES = 2,       // mask empty in a non-terminal phase -- suspicious
     ACTION_CAP = 3,           // hit --max-actions; the run was still going
     LIVELOCK = 4,             // the run started revisiting states (see below)
-    COUNT = 5,
+    NO_PROGRESS = 5,          // a legal action was an immediate one-state cycle
+    COUNT = 6,
 };
 
 // LIVELOCK is NOT reported as a failure by default, and the reason is a real
@@ -138,6 +139,9 @@ struct Coverage {
     SeenSet<registry::manifest::kPowersCount + kIdHeadroom> powers_applied;
 
     void merge(const Coverage& o) noexcept;
+    // Merge only if every additive scalar fits. Summary ingestion uses this
+    // strict form so individually-valid shards cannot wrap a campaign total.
+    [[nodiscard]] bool merge_checked(const Coverage& o) noexcept;
 
     // Human-readable report. `elapsed_s` may be 0 when unknown.
     [[nodiscard]] std::string report(double elapsed_s) const;

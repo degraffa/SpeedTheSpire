@@ -100,6 +100,10 @@ struct Inject {
     // only triage path available when an engine assert/ASan finding prevents
     // normal unwinding: the already-flushed in-flight journal.
     bool abort_process = false;
+    // Restore the pre-step controller after advance(). This exercises the
+    // immediate legal-mask/advance no-progress finding without modifying the
+    // engine.
+    bool no_progress = false;
     uint32_t at_step = 0;
 };
 

@@ -105,14 +105,15 @@ struct Move {
     MoveCat cat = MoveCat::END_TURN;
 };
 
-// Upper bound on simultaneously-legal moves:
-//   hand 10 x (1 untargeted + 7 targets)      = 80
-//   potions 5 x (1 untargeted + 7 targets)    = 40
-//   combat CHOOSE (hand slots)                = 10
-//   map columns + boss                        =  8
-//   reward claims + card picks + skip/sing/pr = 16
-// 160 covers it with margin; enumerate_moves asserts it never overflows.
-inline constexpr size_t kMoveCap = 160;
+// Proven upper bound on simultaneously-legal moves. A combat CHOOSE may source
+// the 128-slot discard/exhaust pile (not merely the ten-slot hand), while each
+// potion slot contributes either one non-target move or at most kMonsterCap
+// targeted moves. Those two sets may coexist while a choice is open.
+inline constexpr size_t kMoveCap =
+    static_cast<size_t>(engine::kDiscardCap) +
+    static_cast<size_t>(engine::kPotionCap * engine::kMonsterCap);
+static_assert(engine::kDiscardCap >= engine::kExhaustCap);
+static_assert(kMoveCap >= 163);
 
 // Enumerate every legal move for `rc`. `mask` must be the output of
 // engine::legal_actions(rc, mask). Returns the move count (<= kMoveCap).

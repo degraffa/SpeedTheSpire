@@ -22,7 +22,7 @@
 #     --seeds N           run seeds in the main sweep (default 10000)
 #     --seed-start N      first seed (default 1)
 #     --reps N            policy seeds per (seed, policy) (default 1)
-#     --asan-percent P    percent of the sweep re-run under asan (default 1)
+#     --asan-percent P    disjoint asan seeds as a percent of main (default 1)
 #     --jobs N            worker threads for the main sweep (default 4)
 #     --asan-jobs N       worker threads for the asan sweep (default 2)
 #     --max-actions N     per-run action cap (default 4000)
@@ -50,6 +50,8 @@ label="fuzz"
 dry_run=0
 
 die() { echo "soak.sh: $*" >&2; exit 2; }
+positive_int() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -gt 0 ]; }
+signed_int() { [[ "$1" =~ ^-?[0-9]+$ ]]; }
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -73,14 +75,33 @@ done
 [ -n "$main_bin" ] || die "--main-bin is required (this script never builds)"
 [ -f "$main_bin" ] || die "--main-bin '$main_bin' does not exist"
 [ -z "$asan_bin" ] || [ -f "$asan_bin" ] || die "--asan-bin '$asan_bin' does not exist"
+positive_int "$seeds" || die "--seeds must be a positive integer"
+signed_int "$seed_start" || die "--seed-start must be an integer"
+positive_int "$reps" || die "--reps must be a positive integer"
+positive_int "$jobs" || die "--jobs must be a positive integer"
+positive_int "$asan_jobs" || die "--asan-jobs must be a positive integer"
+positive_int "$max_actions" || die "--max-actions must be a positive integer"
+positive_int "$asan_percent" || die "--asan-percent must be in 1..100"
+[ "$asan_percent" -le 100 ] || die "--asan-percent must be in 1..100"
 
 stamp="$(date +%Y%m%d_%H%M%S)"
 run_dir="$out_dir/${label}_${stamp}"
 
-# The asan sample is a PREFIX of the same seed sweep, so it is a sample of the
-# real sweep rather than a different experiment.
-asan_seeds=$(( seeds * asan_percent / 100 ))
-[ "$asan_seeds" -ge 1 ] || asan_seeds=1
+# The sanitizer interval begins immediately after the main interval.  Keeping
+# the seed ranges disjoint makes the two reports independent evidence and
+# prevents accidental double counting even outside this script.
+# Split the percentage calculation so neither multiplication nor the +99 can
+# overflow Bash's signed arithmetic for an otherwise valid seed count.
+asan_seeds=$(( (seeds / 100) * asan_percent +
+               ((seeds % 100) * asan_percent + 99) / 100 ))
+asan_seed_start=$(( seed_start + seeds ))
+main_seed_last=$(( seed_start + seeds - 1 ))
+asan_seed_last=$(( asan_seed_start + asan_seeds - 1 ))
+[ "$main_seed_last" -ge "$seed_start" ] ||
+    die "main seed interval overflows signed 64-bit arithmetic"
+[ "$asan_seed_start" -gt "$main_seed_last" ] &&
+    [ "$asan_seed_last" -ge "$asan_seed_start" ] ||
+    die "sanitizer seed interval overflows or overlaps the main interval"
 
 main_cmd=("$main_bin"
     --seed-start "$seed_start" --seeds "$seeds" --reps "$reps"
@@ -89,7 +110,7 @@ main_cmd=("$main_bin"
 asan_cmd=()
 if [ -n "$asan_bin" ]; then
     asan_cmd=("$asan_bin"
-        --seed-start "$seed_start" --seeds "$asan_seeds" --reps "$reps"
+        --seed-start "$asan_seed_start" --seeds "$asan_seeds" --reps "$reps"
         --max-actions "$max_actions" --threads "$asan_jobs"
         --label "${label}_asan" --out "$run_dir")
 fi
@@ -109,20 +130,20 @@ rc=0
     echo "# fuzz soak $stamp"
     echo "# main: ${main_cmd[*]}"
     [ ${#asan_cmd[@]} -gt 0 ] && echo "# asan: ${asan_cmd[*]}"
-} > "$run_dir/COMMANDS.txt"
+} > "$run_dir/COMMANDS.txt" || die "cannot write COMMANDS.txt"
 
 echo "soak.sh: main sweep ($seeds seeds, $jobs threads)..."
 "${main_cmd[@]}" 2>&1 | tee "$run_dir/${label}_main.log"
-main_rc=${PIPESTATUS[0]}
-[ "$main_rc" = "0" ] || rc=1
+main_status=("${PIPESTATUS[@]}")
+[ "${main_status[0]}" = "0" ] && [ "${main_status[1]}" = "0" ] || rc=1
 
 if [ ${#asan_cmd[@]} -gt 0 ]; then
     echo "soak.sh: asan sample ($asan_seeds seeds = ${asan_percent}%, $asan_jobs threads)..."
     # Leak detection is on in the project's asan preset; keep it.
     ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=1:abort_on_error=0}" \
         "${asan_cmd[@]}" 2>&1 | tee "$run_dir/${label}_asan.log"
-    asan_rc=${PIPESTATUS[0]}
-    [ "$asan_rc" = "0" ] || rc=1
+    asan_status=("${PIPESTATUS[@]}")
+    [ "${asan_status[0]}" = "0" ] && [ "${asan_status[1]}" = "0" ] || rc=1
 fi
 
 # An in-flight journal that survived means a worker died mid-case. That file is
@@ -142,10 +163,30 @@ if [ ${#repros[@]} -gt 0 ]; then
     for f in "${repros[@]}"; do echo "   $f"; done
 fi
 
-kvs=("$run_dir"/*_summary_s*.kv)
-if [ ${#kvs[@]} -gt 0 ]; then
-    echo "soak.sh: merged report ->" "$run_dir/MERGED_REPORT.txt"
-    "$main_bin" --merge "${kvs[@]}" | tee "$run_dir/MERGED_REPORT.txt"
+main_kvs=("$run_dir"/"${label}_main"_summary_s*.kv)
+if [ ${#main_kvs[@]} -gt 0 ]; then
+    echo "soak.sh: main report ->" "$run_dir/MAIN_REPORT.txt"
+    if ! "$main_bin" --merge "${main_kvs[@]}" |
+        tee "$run_dir/MAIN_REPORT.txt"; then
+        rc=1
+    fi
+else
+    echo "!! soak.sh: main sweep produced no summary"
+    rc=1
+fi
+
+asan_kvs=("$run_dir"/"${label}_asan"_summary_s*.kv)
+if [ ${#asan_cmd[@]} -gt 0 ]; then
+    if [ ${#asan_kvs[@]} -gt 0 ]; then
+        echo "soak.sh: sanitizer report ->" "$run_dir/ASAN_REPORT.txt"
+        if ! "$asan_bin" --merge "${asan_kvs[@]}" |
+            tee "$run_dir/ASAN_REPORT.txt"; then
+            rc=1
+        fi
+    else
+        echo "!! soak.sh: sanitizer sweep produced no summary"
+        rc=1
+    fi
 fi
 
 echo "soak.sh: exit $rc"

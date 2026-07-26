@@ -17,6 +17,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -26,6 +27,8 @@
 #include <vector>
 
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/interp.hpp"
+#include "sts/engine/potions.hpp"
 #include "sts/engine/state_hash.hpp"
 #include "sts/fuzz/coverage.hpp"
 #include "sts/fuzz/fuzz_run.hpp"
@@ -143,6 +146,20 @@ TEST(FuzzTriage, InjectedDivergenceIsDetectedAtTheRightStep) {
     EXPECT_NE(text.find("hash_mismatch"), std::string::npos);
     EXPECT_NE(text.find("seed=12345"), std::string::npos);
     EXPECT_NE(text.find("[0]"), std::string::npos);
+}
+
+TEST(FuzzTriage, LegalActionNoProgressFailsImmediately) {
+    const CaseId id = make_case(PolicyKind::GREEDY_DAMAGE);
+    Inject inject;
+    inject.enabled = true;
+    inject.no_progress = true;
+    inject.at_step = 3;
+    CaseResult r;
+    EXPECT_FALSE(run_case(id, limits(), nullptr, r, false, inject));
+    EXPECT_EQ(r.failure.kind, FailKind::NO_PROGRESS);
+    EXPECT_EQ(r.end_reason, EndReason::NO_PROGRESS);
+    EXPECT_EQ(r.failure.step, 3u);
+    EXPECT_EQ(r.failure.hash_a, r.failure.hash_b);
 }
 
 TEST(FuzzTriage, EmittedReproducerFromAnInjectedFailureReplays) {
@@ -282,44 +299,98 @@ TEST(FuzzDriver, SeedSweepWritesAMergeableSummary) {
     const std::string label = "sweep_path";
     const std::string child_log = scratch(label + ".log");
     const std::string merge_log = scratch(label + "_merge.log");
-    const std::string kv = scratch(label + "_summary_s0.kv");
-    const std::string report = scratch(label + "_report_s0.txt");
+    const std::string kv0 = scratch(label + "_summary_s0.kv");
+    const std::string kv1 = scratch(label + "_summary_s1.kv");
+    const std::string bad_kv = scratch(label + "_summary_bad.kv");
+    const std::string report0 = scratch(label + "_report_s0.txt");
+    const std::string report1 = scratch(label + "_report_s1.txt");
     std::remove(child_log.c_str());
     std::remove(merge_log.c_str());
-    std::remove(kv.c_str());
-    std::remove(report.c_str());
+    std::remove(kv0.c_str());
+    std::remove(kv1.c_str());
+    std::remove(bad_kv.c_str());
+    std::remove(report0.c_str());
+    std::remove(report1.c_str());
 
-    const std::string command =
+    const std::string command0 =
         shell_quote(STS_FUZZ_SOAK_BIN) +
         " --seed-start 41 --seeds 2 --policies random,greedy_damage"
         " --threads 2 --max-actions 2000 --verify-repro-every 1 --out " +
         shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
-        " --quiet >" + shell_quote(child_log) + " 2>&1";
-    ASSERT_EQ(std::system(command.c_str()), 0) << read_text(child_log);
-
-    Coverage persisted;
-    ASSERT_TRUE(coverage_from_kv(read_text(kv), persisted));
-    EXPECT_EQ(persisted.cases, 4u);
-    EXPECT_GE(persisted.runs, 12u)
-        << "every case should execute passes A, B, and sampled replay C";
-    EXPECT_GT(persisted.actions, 0u);
-    EXPECT_EQ(persisted.per_policy_cases[static_cast<int>(PolicyKind::RANDOM)], 2u);
-    EXPECT_EQ(
-        persisted.per_policy_cases[static_cast<int>(PolicyKind::GREEDY_DAMAGE)], 2u);
+        " --shard 0/2 --quiet >" + shell_quote(child_log) + " 2>&1";
+    const std::string command1 =
+        shell_quote(STS_FUZZ_SOAK_BIN) +
+        " --seed-start 41 --seeds 2 --policies random,greedy_damage"
+        " --threads 2 --max-actions 2000 --verify-repro-every 1 --out " +
+        shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
+        " --shard 1/2 --quiet >>" + shell_quote(child_log) + " 2>&1";
+    ASSERT_EQ(std::system(command0.c_str()), 0) << read_text(child_log);
+    ASSERT_EQ(std::system(command1.c_str()), 0) << read_text(child_log);
+    EXPECT_NE(read_text(kv0).find("STSFUZZ_SUMMARY v1\n"), std::string::npos);
+    EXPECT_NE(read_text(kv1).find("shard 1\n"), std::string::npos);
 
     const std::string merge_command =
-        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv) + " >" +
-        shell_quote(merge_log) + " 2>&1";
+        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) + " " +
+        shell_quote(kv1) + " >" + shell_quote(merge_log) + " 2>&1";
     ASSERT_EQ(std::system(merge_command.c_str()), 0) << read_text(merge_log);
     const std::string merged = read_text(merge_log);
     EXPECT_NE(merged.find("cases (seed x policy x policy-seed) : 4"),
               std::string::npos);
     EXPECT_NE(merged.find("ACTIONS (counted once per case)"), std::string::npos);
+    EXPECT_NE(merged.find("failures: 0"), std::string::npos);
+
+    const std::string duplicate_command =
+        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) + " " +
+        shell_quote(kv0) + " >" + shell_quote(merge_log) + " 2>&1";
+    EXPECT_NE(std::system(duplicate_command.c_str()), 0);
+    EXPECT_NE(read_text(merge_log).find("duplicate/overlapping shard"),
+              std::string::npos);
+
+    const std::string incomplete_command =
+        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) +
+        " >" + shell_quote(merge_log) + " 2>&1";
+    EXPECT_NE(std::system(incomplete_command.c_str()), 0);
+    EXPECT_NE(read_text(merge_log).find("incomplete shard set"),
+              std::string::npos);
+
+    std::string corrupted = read_text(kv0);
+    const size_t global_cases = corrupted.find("global_cases 4\n");
+    ASSERT_NE(global_cases, std::string::npos);
+    corrupted.replace(global_cases, std::strlen("global_cases 4"),
+                      "global_cases 5");
+    {
+        std::ofstream os(bad_kv);
+        os << corrupted;
+    }
+    const std::string bad_merge =
+        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(bad_kv) +
+        " >" + shell_quote(merge_log) + " 2>&1";
+    EXPECT_NE(std::system(bad_merge.c_str()), 0);
+    EXPECT_NE(read_text(merge_log).find(
+                  "global_cases does not match its sweep configuration"),
+              std::string::npos);
+
+    const std::string incompatible_shard =
+        shell_quote(STS_FUZZ_SOAK_BIN) +
+        " --seed-start 41 --seeds 2 --policies random,greedy_damage"
+        " --threads 2 --max-actions 1999 --verify-repro-every 1 --out " +
+        shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
+        " --shard 1/2 --quiet >/dev/null 2>&1";
+    ASSERT_EQ(std::system(incompatible_shard.c_str()), 0);
+    const std::string incompatible_merge =
+        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) + " " +
+        shell_quote(kv1) + " >" + shell_quote(merge_log) + " 2>&1";
+    EXPECT_NE(std::system(incompatible_merge.c_str()), 0);
+    EXPECT_NE(read_text(merge_log).find("incompatible summary"),
+              std::string::npos);
 
     std::remove(child_log.c_str());
     std::remove(merge_log.c_str());
-    std::remove(kv.c_str());
-    std::remove(report.c_str());
+    std::remove(kv0.c_str());
+    std::remove(kv1.c_str());
+    std::remove(bad_kv.c_str());
+    std::remove(report0.c_str());
+    std::remove(report1.c_str());
 }
 
 TEST(FuzzTriage, AbortLeavesAnActionableInFlightJournal) {
@@ -384,6 +455,58 @@ TEST(FuzzTriage, AbortLeavesAnActionableInFlightJournal) {
     std::remove(emitted.c_str());
 }
 
+TEST(FuzzTriage, DriverWritesReproducerForImmediateNoProgress) {
+    const std::string label = "no_progress_path";
+    const std::string child_log = scratch(label + ".log");
+    const std::string merge_log = scratch(label + "_merge.log");
+    const std::string kv = scratch(label + "_summary_s0.kv");
+    const std::string report = scratch(label + "_report_s0.txt");
+    std::remove(child_log.c_str());
+    std::remove(merge_log.c_str());
+    std::remove(kv.c_str());
+    std::remove(report.c_str());
+    for (const auto& e : std::filesystem::directory_iterator(STS_FUZZ_SCRATCH)) {
+        const std::string name = e.path().filename().string();
+        if (name.starts_with(label + "_") && e.path().extension() == ".repro") {
+            std::filesystem::remove(e.path());
+        }
+    }
+    const std::string command =
+        shell_quote(STS_FUZZ_SOAK_BIN) +
+        " --seed-start 12345 --seeds 1 --policies greedy_damage"
+        " --threads 1 --max-actions 2000 --out " +
+        shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
+        " --inject-no-progress 0:3 --quiet >" + shell_quote(child_log) +
+        " 2>&1";
+    EXPECT_NE(std::system(command.c_str()), 0);
+    const std::string text = read_text(child_log);
+    EXPECT_NE(text.find("=== FUZZ FAILURE: no_progress ==="), std::string::npos);
+    std::vector<std::filesystem::path> repros;
+    for (const auto& e : std::filesystem::directory_iterator(STS_FUZZ_SCRATCH)) {
+        const std::string name = e.path().filename().string();
+        if (name.starts_with(label + "_") && e.path().extension() == ".repro") {
+            repros.push_back(e.path());
+        }
+    }
+    ASSERT_EQ(repros.size(), 1u);
+    ReproFile rf;
+    std::string error;
+    ASSERT_TRUE(read_fuzz_repro(repros[0].string(), rf, error)) << error;
+    EXPECT_EQ(rf.fail_kind, "no_progress");
+    EXPECT_EQ(rf.fail_step, 3u);
+    EXPECT_EQ(rf.actions.size(), 4u);
+    const std::string merge_command =
+        shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv) +
+        " >" + shell_quote(merge_log) + " 2>&1";
+    EXPECT_NE(std::system(merge_command.c_str()), 0);
+    EXPECT_NE(read_text(merge_log).find("failures: 1"), std::string::npos);
+    std::filesystem::remove(repros[0]);
+    std::remove(child_log.c_str());
+    std::remove(merge_log.c_str());
+    std::remove(kv.c_str());
+    std::remove(report.c_str());
+}
+
 TEST(FuzzTriage, CorruptingTheActionListIsCaught) {
     // A reproducer whose actions were edited into something the engine no
     // longer considers legal must FAIL loudly, not replay something else.
@@ -431,6 +554,42 @@ TEST(FuzzTriage, ReproducerRejectsAnUnknownKey) {
     std::string err;
     EXPECT_FALSE(read_fuzz_repro(path, r, err));
     EXPECT_NE(err.find("unknown key"), std::string::npos);
+    std::remove(path.c_str());
+}
+
+TEST(FuzzTriage, ReproducerRequiresEveryCaseIdentityFieldExactlyOnce) {
+    const std::string missing = scratch("missing_case_field.repro");
+    {
+        std::ofstream os(missing);
+        os << "STSFUZZ v1\nseed 1\nascension 20\npolicy random\nactions 0\n";
+    }
+    ReproFile r;
+    std::string err;
+    EXPECT_FALSE(read_fuzz_repro(missing, r, err));
+    EXPECT_NE(err.find("policy_seed"), std::string::npos);
+
+    const std::string duplicate = scratch("duplicate_case_field.repro");
+    {
+        std::ofstream os(duplicate);
+        os << "STSFUZZ v1\nseed 1\nseed 2\nascension 20\npolicy random\n"
+              "policy_seed 3\nactions 0\n";
+    }
+    EXPECT_FALSE(read_fuzz_repro(duplicate, r, err));
+    EXPECT_NE(err.find("duplicate"), std::string::npos);
+    std::remove(missing.c_str());
+    std::remove(duplicate.c_str());
+}
+
+TEST(FuzzTriage, ReproducerRejectsOverflowAndTrailingActionData) {
+    const std::string path = scratch("bad_action.repro");
+    {
+        std::ofstream os(path);
+        os << "STSFUZZ v1\nseed 1\nascension 20\npolicy random\n"
+              "policy_seed 3\nactions 1\n4294967296 not-a-comment\n";
+    }
+    ReproFile r;
+    std::string err;
+    EXPECT_FALSE(read_fuzz_repro(path, r, err));
     std::remove(path.c_str());
 }
 
@@ -503,6 +662,90 @@ TEST(FuzzPolicy, EnumeratedMovesAreAllAcceptedByAdvance) {
         engine::advance(rs, as, os);
     }
     EXPECT_GT(checked, 20) << "the walk did not get far enough to prove anything";
+}
+
+TEST(FuzzPolicy, TargetedPotionIsEnumeratedOnceAndOnlyForLiveTargets) {
+    engine::RunController rc = engine::run_begin(123, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::COMBAT);
+    rc.run.potion_slots = 1;
+    rc.run.potions[0] = static_cast<uint16_t>(engine::PotionId::FEAR_POTION);
+    rc.combat.phase =
+        static_cast<uint8_t>(engine::CombatPhase::WAITING_ON_USER);
+    rc.combat.monster_count = 2;
+    rc.combat.monsters[0].hp = 0;
+    rc.combat.monsters[1].hp = 20;
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    int potion_moves = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (engine::action_verb(moves[i].action) !=
+            engine::ActionVerb::USE_POTION) continue;
+        ++potion_moves;
+        EXPECT_EQ(moves[i].cat, MoveCat::USE_POTION_TARGET);
+        EXPECT_EQ(engine::action_arg0(moves[i].action), 0);
+        EXPECT_EQ(engine::action_arg1(moves[i].action), 1);
+    }
+    EXPECT_EQ(potion_moves, 1);
+}
+
+void ExpectLargeChoiceEnumerated(engine::ChoiceKind kind) {
+    engine::RunController rc = engine::run_begin(456, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::COMBAT);
+    rc.combat.phase =
+        static_cast<uint8_t>(engine::CombatPhase::WAITING_ON_USER);
+    rc.combat.action_count = 1;
+    rc.combat.action_head = 0;
+    engine::ActionQueueItem& choose = rc.combat.action_queue[0];
+    choose.opcode = static_cast<uint16_t>(engine::Opcode::CHOOSE_CARD);
+    choose.amount = 1;
+    choose.tgt = engine::kNoChoiceExclusion;
+    choose.flags = engine::make_choose_flags(kind, false);
+    for (uint8_t i = 0; i < 12; ++i) {
+        rc.combat.card_pool[i].card_id =
+            static_cast<uint16_t>(engine::CardId::STRIKE);
+        if (kind == engine::ChoiceKind::DISCARD_TO_DRAW_TOP) {
+            rc.combat.discard[i] = i;
+        } else {
+            rc.combat.exhaust[i] = i;
+        }
+    }
+    if (kind == engine::ChoiceKind::DISCARD_TO_DRAW_TOP) {
+        rc.combat.discard_count = 12;
+    } else {
+        rc.combat.exhaust_count = 12;
+    }
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    ASSERT_TRUE(mask.combat.choice_pending);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    bool found_11 = false;
+    for (size_t i = 0; i < n; ++i) {
+        if (moves[i].cat == MoveCat::COMBAT_CHOOSE &&
+            engine::action_arg0(moves[i].action) == 11) {
+            found_11 = true;
+            engine::RunController probe = rc;
+            engine::StepResult result{};
+            const uint64_t before = hash_controller(probe);
+            engine::advance(std::span<engine::RunController>(&probe, 1),
+                            std::span<const engine::Action>(&moves[i].action, 1),
+                            std::span<engine::StepResult>(&result, 1));
+            EXPECT_NE(hash_controller(probe), before);
+        }
+    }
+    EXPECT_TRUE(found_11);
+}
+
+TEST(FuzzPolicy, EnumeratesDiscardChoicesBeyondTheHandCapacity) {
+    ExpectLargeChoiceEnumerated(engine::ChoiceKind::DISCARD_TO_DRAW_TOP);
+}
+
+TEST(FuzzPolicy, EnumeratesExhaustChoicesBeyondTheHandCapacity) {
+    ExpectLargeChoiceEnumerated(engine::ChoiceKind::EXHAUST_TO_HAND);
 }
 
 // --- 3b. the controller hash is a CONTENT hash, not a byte hash --------------
@@ -590,4 +833,88 @@ TEST(FuzzCoverage, ActionsAreCountedOncePerCaseNotOncePerPass) {
     EXPECT_EQ(c.actions, r.actions);
     EXPECT_GE(c.actions_engine, c.actions * 3);  // A + B + C
     EXPECT_EQ(c.runs, 3u);
+}
+
+TEST(FuzzCoverage, CheckedMergeRejectsCounterOverflow) {
+    Coverage total;
+    total.actions = UINT64_MAX;
+    Coverage shard;
+    shard.actions = 1;
+    EXPECT_FALSE(total.merge_checked(shard));
+    EXPECT_EQ(total.actions, UINT64_MAX);
+}
+
+TEST(FuzzDriver, RejectsZeroWorkMalformedAndPartialCaseCli) {
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds garbage --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 0 --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --reps 0 --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seed-start 9223372036854775807 --seeds 2"
+                           " --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 1 --progress-secs nan"
+                           " --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_REPRO_BIN) +
+                           " --seed 1 --policy random --policy-seed 2"
+                           " >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_REPRO_BIN) +
+                           " dummy.repro --seed 1 --ascension 20"
+                           " --policy random --policy-seed 2"
+                           " >/dev/null 2>&1").c_str()),
+              0);
+}
+
+TEST(FuzzDriver, RejectsMissingArtifactDirectoryAndMalformedSummary) {
+    const std::string absent = scratch("does_not_exist/subdir");
+    std::filesystem::remove_all(scratch("does_not_exist"));
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 1 --out " + shell_quote(absent) +
+                           " --quiet >/dev/null 2>&1").c_str()),
+              0);
+
+    const std::string malformed = scratch("malformed_summary.kv");
+    {
+        std::ofstream os(malformed);
+        os << "STSFUZZ_SUMMARY v1\nbuild_id bad\n";
+    }
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " +
+                           shell_quote(malformed) +
+                           " >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) + " --quiet --merge " +
+                           shell_quote(malformed) +
+                           " >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((std::string("bash ") +
+                           shell_quote(STS_FUZZ_SOAK_SCRIPT) + " --main-bin " +
+                           shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seed-start 9223372036854775807 --seeds 2"
+                           " --dry-run >/dev/null 2>&1").c_str()),
+              0);
+    std::remove(malformed.c_str());
+}
+
+TEST(FuzzRunner, SanitizerPercentageUsesCeilingDivision) {
+    const std::string log = scratch("asan_ceiling.log");
+    const std::string command =
+        std::string("bash ") + shell_quote(STS_FUZZ_SOAK_SCRIPT) +
+        " --main-bin " + shell_quote(STS_FUZZ_SOAK_BIN) + " --asan-bin " +
+        shell_quote(STS_FUZZ_SOAK_BIN) +
+        " --seeds 101 --asan-percent 1 --dry-run >" + shell_quote(log) +
+        " 2>&1";
+    ASSERT_EQ(std::system(command.c_str()), 0) << read_text(log);
+    const std::string text = read_text(log);
+    EXPECT_NE(text.find("--seeds 2"), std::string::npos) << text;
+    EXPECT_NE(text.find("asan: "), std::string::npos) << text;
+    EXPECT_NE(text.find("--seed-start 102"), std::string::npos) << text;
+    std::remove(log.c_str());
 }

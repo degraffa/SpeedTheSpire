@@ -1,9 +1,11 @@
 #include "sts/fuzz/repro.hpp"
 
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 namespace sts::fuzz {
 
@@ -54,6 +56,29 @@ namespace {
     return std::string(buf);
 }
 
+template <class T>
+bool parse_decimal_token(const std::string& token, T& out) {
+    if (token.empty()) return false;
+    T value{};
+    const auto parsed =
+        std::from_chars(token.data(), token.data() + token.size(), value, 10);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != token.data() + token.size()) return false;
+    out = value;
+    return true;
+}
+
+bool parse_hex_token(const std::string& token, uint64_t& out) {
+    if (token.size() != 16) return false;
+    uint64_t value = 0;
+    const auto parsed =
+        std::from_chars(token.data(), token.data() + token.size(), value, 16);
+    if (parsed.ec != std::errc{} ||
+        parsed.ptr != token.data() + token.size()) return false;
+    out = value;
+    return true;
+}
+
 }  // namespace
 
 bool write_fuzz_repro(const std::string& path, const ReproFile& r) {
@@ -101,6 +126,10 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
     }
 
     bool have_count = false;
+    std::unordered_set<std::string> seen_keys;
+    bool have_hash_a = false;
+    bool have_hash_b = false;
+    bool have_final_hash = false;
     size_t want = 0;
     while (std::getline(is, line)) {
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
@@ -109,9 +138,16 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
 
         if (have_count) {
             // Body: one Action.bits per line, '#' trailer ignored.
-            unsigned long long bits = 0;
-            if (!(ls >> bits)) {
+            std::string token;
+            uint64_t bits = 0;
+            if (!(ls >> token) || !parse_decimal_token(token, bits) ||
+                bits > UINT32_MAX) {
                 error = "malformed action line: '" + line + "'";
+                return false;
+            }
+            std::string tail;
+            if (ls >> tail && !tail.starts_with("#")) {
+                error = "trailing data on action line: '" + line + "'";
                 return false;
             }
             r.actions.push_back(Action{static_cast<uint32_t>(bits)});
@@ -120,35 +156,58 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
 
         std::string key;
         ls >> key;
+        if (!seen_keys.insert(key).second) {
+            error = "duplicate key '" + key + "'";
+            return false;
+        }
+        std::string token;
+        auto one_token = [&]() -> bool {
+            if (!(ls >> token)) return false;
+            std::string extra;
+            return !(ls >> extra);
+        };
         if (key == "seed") {
-            if (!(ls >> r.id.run_seed)) { error = "bad seed"; return false; }
+            if (!one_token() || !parse_decimal_token(token, r.id.run_seed)) {
+                error = "bad seed"; return false;
+            }
         } else if (key == "ascension") {
-            int v = 0;
-            if (!(ls >> v) || v < 0 || v > 255) { error = "bad ascension"; return false; }
+            unsigned v = 0;
+            if (!one_token() || !parse_decimal_token(token, v) || v > 20) {
+                error = "bad ascension"; return false;
+            }
             r.id.ascension = static_cast<uint8_t>(v);
         } else if (key == "policy") {
-            std::string name;
-            ls >> name;
-            if (!policy_from_name(name, r.id.policy)) {
-                error = "unknown policy '" + name + "'";
+            if (!one_token() || !policy_from_name(token, r.id.policy)) {
+                error = "unknown policy '" + token + "'";
                 return false;
             }
         } else if (key == "policy_seed") {
-            if (!(ls >> r.id.policy_seed)) { error = "bad policy_seed"; return false; }
+            if (!one_token() || !parse_decimal_token(token, r.id.policy_seed)) {
+                error = "bad policy_seed"; return false;
+            }
         } else if (key == "fail") {
-            ls >> r.fail_kind;
+            if (!one_token() || token.empty()) { error = "bad fail"; return false; }
+            r.fail_kind = token;
         } else if (key == "fail_step") {
-            if (!(ls >> r.fail_step)) { error = "bad fail_step"; return false; }
+            if (!one_token() || !parse_decimal_token(token, r.fail_step)) {
+                error = "bad fail_step"; return false;
+            }
         } else if (key == "hash_a" || key == "hash_b" || key == "final_hash") {
-            std::string hx;
-            ls >> hx;
-            const uint64_t v = std::strtoull(hx.c_str(), nullptr, 16);
+            uint64_t v = 0;
+            if (!one_token() || !parse_hex_token(token, v)) {
+                error = "bad " + key; return false;
+            }
             if (key == "hash_a") r.hash_a = v;
             else if (key == "hash_b") r.hash_b = v;
             else r.final_hash = v;
-            r.has_hashes = true;
+            if (key == "hash_a") have_hash_a = true;
+            else if (key == "hash_b") have_hash_b = true;
+            else have_final_hash = true;
         } else if (key == "actions") {
-            if (!(ls >> want)) { error = "bad action count"; return false; }
+            if (!one_token() || !parse_decimal_token(token, want) ||
+                want >= UINT32_MAX) {
+                error = "bad action count"; return false;
+            }
             have_count = true;
             r.actions.reserve(want);
         } else {
@@ -162,6 +221,21 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
         error = "missing 'actions' count";
         return false;
     }
+    for (const char* required : {"seed", "ascension", "policy", "policy_seed"}) {
+        if (!seen_keys.contains(required)) {
+            error = std::string("missing '") + required + "'";
+            return false;
+        }
+    }
+    if (have_hash_a != have_hash_b || have_hash_a != have_final_hash) {
+        error = "hash_a/hash_b/final_hash must appear together";
+        return false;
+    }
+    if (seen_keys.contains("fail") != seen_keys.contains("fail_step")) {
+        error = "fail/fail_step must appear together";
+        return false;
+    }
+    r.has_hashes = have_hash_a;
     if (r.actions.size() != want) {
         error = "action count mismatch: header says " + std::to_string(want) +
                 ", body has " + std::to_string(r.actions.size());

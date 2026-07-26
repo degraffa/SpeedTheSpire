@@ -8,6 +8,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
+#include "sts/engine/potions.hpp"
 
 namespace sts::fuzz {
 
@@ -68,6 +69,13 @@ const char* move_cat_name(MoveCat c) noexcept {
 
 namespace {
 
+[[nodiscard]] bool potion_is_targeted(const engine::PotionDef& def) noexcept {
+    for (uint8_t i = 0; i < def.step_count; ++i) {
+        if (def.steps[i].target == engine::StepTarget::CARD_TARGET) return true;
+    }
+    return false;
+}
+
 struct Sink {
     Move* out;
     size_t cap;
@@ -96,7 +104,10 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
     // USE_POTION is a run-layer verb and is legal in several phases, so it is
     // enumerated first and unconditionally from the run mask.
     for (int p = 0; p < engine::kPotionCap; ++p) {
-        if (mask.can_use_potion[p]) {
+        const engine::PotionDef* potion = engine::potion_def(
+            static_cast<engine::PotionId>(rc.run.potions[p]));
+        const bool targeted = potion != nullptr && potion_is_targeted(*potion);
+        if (mask.can_use_potion[p] && !targeted) {
             s.add(make_action(ActionVerb::USE_POTION, static_cast<uint8_t>(p)),
                   MoveCat::USE_POTION);
         }
@@ -132,8 +143,17 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
         case RunPhase::COMBAT: {
             const engine::ActionMask& cm = mask.combat;
             if (cm.choice_pending) {
-                for (int i = 0; i < engine::kHandCap; ++i) {
-                    if (cm.can_choose[i]) {
+                const engine::ActionQueueItem& front =
+                    rc.combat.action_queue[rc.combat.action_head];
+                const engine::ChoiceKind kind =
+                    engine::choose_kind_from_flags(front.flags);
+                const uint8_t excluded = engine::choice_excluded_index(front);
+                int source_count = rc.combat.hand_count;
+                if (cm.choice_from_discard) source_count = rc.combat.discard_count;
+                if (cm.choice_from_exhaust) source_count = rc.combat.exhaust_count;
+                for (int i = 0; i < source_count; ++i) {
+                    if (engine::choice_slot_eligible(
+                            rc.combat, static_cast<uint8_t>(i), kind, excluded)) {
                         s.add(make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(i)),
                               MoveCat::COMBAT_CHOOSE);
                     }

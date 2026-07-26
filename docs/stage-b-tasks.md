@@ -632,9 +632,9 @@ Then: update CLAUDE.md "Current state".
 - **B5.1** `[x]` ∥ Sim self-replay fuzz soak — deterministic random-legal +
   four E0 heuristic policies, replay-twice per-step/final controller hashing,
   `STSFUZZ v1` mismatch reproducers + pre-crash journals, shardable coverage
-  reports, and `soak.sh`; acceptance release sweep **10,810,546 actions /
+  reports, and `soak.sh`; acceptance release sweep **10,808,430 actions /
   10,000 seeds / 250,000 cases**, zero failures, plus ASan-clean **2,500 /
-  250,000 cases = 1.00 %** sample; 946/946 ×3 ·
+  250,000 cases = 1.00 %** disjoint sample; 957/957 ×3 ·
   [log](stage-b-log.md#b51)
 
 ### B5.2 `[ ]` ∥ Oracle campaign automation

@@ -344,6 +344,12 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
         }
 
         // --- step -------------------------------------------------------------
+        const uint64_t before = hash_controller(rc);
+        RunController before_rc{};
+        if (inject != nullptr && inject->enabled && inject->no_progress &&
+            step == inject->at_step) {
+            before_rc = rc;
+        }
         {
             std::span<RunController> rs(&rc, 1);
             std::span<const Action> as(&chosen, 1);
@@ -359,10 +365,14 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                 std::fflush(nullptr);
                 std::abort();
             }
-            // Driver-side injected divergence (fuzz_run.hpp Inject): a real
-            // state change the comparator sees exactly as it would see an
-            // engine nondeterminism.
-            rc.run.gold += 1;
+            if (inject->no_progress) {
+                rc = before_rc;
+            } else {
+                // Driver-side injected divergence (fuzz_run.hpp Inject): a real
+                // state change the comparator sees exactly as it would see an
+                // engine nondeterminism.
+                rc.run.gold += 1;
+            }
         }
         StepHash sh;
         sh.whole = hash_controller(rc, &sh.run, &sh.combat);
@@ -370,6 +380,21 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
 
         p.actions.push_back(chosen);
         p.hashes.push_back(sh);
+
+        // A one-state cycle is never a legitimate transition: it means an
+        // action enumerated from legal_actions() was ignored by advance().
+        // Report it immediately. Longer cycles (notably reward claim/skip)
+        // remain ordinary LIVELOCK accounting below.
+        if (after == before) {
+            p.end = EndReason::NO_PROGRESS;
+            p.failure.kind = FailKind::NO_PROGRESS;
+            p.failure.step = step;
+            p.failure.phase = rc.phase;
+            p.failure.action_a = chosen.bits;
+            p.failure.hash_a = before;
+            p.failure.hash_b = after;
+            break;
+        }
 
         bool seen = false;
         for (uint32_t k = 0; k < recent_n; ++k) {
@@ -508,6 +533,7 @@ bool run_case(const CaseId& id, const RunLimits& limits, Coverage* cov, CaseResu
     };
 
     if (b.failure) {
+        out.end_reason = b.end;
         out.failure = b.failure;
         return false;
     }
