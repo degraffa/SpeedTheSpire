@@ -2827,3 +2827,56 @@ in **both** presets.
   not summed): cards 75 / powers 28 / monsters 14 / relics 65 / potions 33 /
   events 0 / encounters 20 / a20 20 / **total 255**.
 
+<a id="b51"></a>
+
+### B5.1 `[x]` ∥ Sim self-replay fuzz soak
+**Deps:** B4.4 · **Spec:** design §7.1(2); stage-a §2 (replay-twice memory
+guard)
+**Deliverables:** `tools/fuzz/` sim-side fuzzer: random-legal + heuristic
+policies (design §3.3's E0 stand-ins, implemented here) over seed sweeps;
+every run replayed twice, final-state hashes compared; assert/hash-mismatch
+triage output with reproducers; overnight-runnable script.
+**Acceptance:** ≥ 10M actions across ≥ 10k seeds, zero nondeterminism, zero
+asserts, asan-clean sample (≥ 1 % of runs under asan); numbers recorded here.
+**Log:** Verified by running, not inferred. `tools/wsl_run.cmd debug asan` and
+`tools/wsl_run.cmd release` from the Windows host each passed **946/946** tests.
+The acceptance campaign then ran
+`tools/wsl_run.cmd --script tools/fuzz/soak.sh --main-bin
+build/release/tools/fuzz/fuzz_soak --asan-bin
+build/asan/tools/fuzz/fuzz_soak --out
+/mnt/d/STS_BG_Mod/SpeedTheSpire-campaigns/fuzz --seeds 10000 --seed-start 1
+--reps 5 --asan-percent 1 --jobs 12 --asan-jobs 8 --max-actions 4000 --label
+b51_accept_10m` and exited 0. Artifacts are intentionally outside the
+repository at
+`D:\STS_BG_Mod\SpeedTheSpire-campaigns\fuzz\b51_accept_10m_20260726_140658`.
+- **Release sweep:** 10,000 distinct sequential run seeds, all five policies,
+  five policy seeds per `(run seed, policy)` = **250,000 cases**;
+  **10,810,546 counted actions** (pass A only), 21,662,592 actions including
+  replay passes, 500,977 engine runs, **0 failures**, 270.0 s. The 37
+  action-cap endings are the configured 4,000-action safety limit, not asserts
+  or illegal states; `no_legal_moves=0`, `livelock=0`.
+- **Sanitizer sample:** the first 100 of those 10,000 run seeds, with the same
+  five policies × five policy seeds = **2,500 / 250,000 cases = 1.00 %**;
+  **104,702 counted actions**, 209,945 including replay passes, 5,010 engine
+  runs, **0 failures**, ASan/UBSan clean.
+- `fuzz_core` owns deterministic policy selection, whole-controller content
+  hashing (including transient run flow without hashing `string_view`
+  addresses), the A/B policy replay and sampled literal-action C pass,
+  livelock/legal-action findings, coverage accounting, and strict `STSFUZZ v1`
+  parsing. Thin `fuzz_soak` / `fuzz_repro` executables provide campaign and
+  one-case entry points.
+- Mismatch triage is exercised at the process boundary on every test run:
+  `FuzzTriage.DriverWritesActionableReproducerForInjectedMismatch` injects the
+  first divergence at step 3, requires the minimal four-action reproducer, and
+  hands it to standalone `fuzz_repro --regen`. Abort triage separately proves
+  the already-flushed case journal can regenerate a literal reproducer.
+- Coverage reports distinguish counted actions from replay work, name
+  termination reasons, policy/room/move traffic, combat/floor depth, run-layer
+  events, registry rows seen, and every category never reached. The kv form is
+  additive across stable `--shard I/N` case partitions; the executable-level
+  `FuzzDriver.SeedSweepWritesAMergeableSummary` test pins sweep expansion,
+  persistence, and `--merge`.
+- During final audit, the progress thread was found reading worker-owned
+  `Coverage` objects while they were being mutated. That driver-only data race
+  was removed by publishing a single atomic counted-action scalar; engine
+  behavior, schema, and fixtures are unchanged.
