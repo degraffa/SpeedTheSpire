@@ -70,8 +70,9 @@ removes only this invocation's known control files, launch logs, and exact
 requested-seed run/timing names. It deliberately preserves unexpected files,
 which strict validation then rejects as stale instead of silently deleting.
 Campaign ids are single safe path components; both CLIs reject rooted paths,
-separators, `.`/`..`, and any campaign directory or file whose resolved path
-escapes `data-root`.
+separators, `.`/`..`, and every symlink/junction/reparse redirect at a campaign
+directory or direct-child file. `--fresh` never follows an owned-looking name
+to a different target, even when that target remains inside the campaign.
 
 Artifacts land under `<data-root>/<campaign-id>/`:
 `run_<seed>_a20_ironclad.jsonl` (one per run), `campaign_progress.json`,

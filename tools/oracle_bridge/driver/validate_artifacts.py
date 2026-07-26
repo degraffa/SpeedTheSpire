@@ -30,7 +30,11 @@ import os
 import re
 import sys
 
-from campaign_paths import validate_campaign_id, validate_seed_list
+from campaign_paths import (
+    exact_path_without_redirect,
+    validate_campaign_id,
+    validate_seed_list,
+)
 
 HEADER_KEYS = {"record_kind", "schema_version", "driver_version", "created_utc",
                "game", "mods", "fork_jar_sha256", "oracle_block_enabled",
@@ -118,6 +122,12 @@ def _check_stream_triples(errs, path, lineno, streams, names):
 def validate_file(path: str, require_oracle: bool = False):
     errs = []
     records = []
+    if require_oracle:
+        try:
+            path = exact_path_without_redirect(path)
+        except ValueError as exc:
+            _fail(errs, path, 0, str(exc))
+            return errs, 0
     try:
         with open(path, "r", encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
@@ -399,9 +409,10 @@ def validate_file(path: str, require_oracle: bool = False):
 
 def _read_json(path, errs, label):
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(exact_path_without_redirect(path), "r",
+                  encoding="utf-8") as fh:
             value = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         errs.append(f"{label}: cannot read valid JSON: {exc}")
         return None
     if not isinstance(value, dict):
@@ -413,11 +424,12 @@ def _read_json(path, errs, label):
 def _artifact_identity(path, errs):
     records = []
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(exact_path_without_redirect(path), "r",
+                  encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
                 if line.strip():
                     records.append((lineno, json.loads(line)))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
         errs.append(f"{os.path.basename(path)}: cannot inspect identity: {exc}")
         return None, None, []
     if not records:
@@ -438,7 +450,8 @@ def _artifact_identity(path, errs):
 def _timing_records(path, errs):
     records = []
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(exact_path_without_redirect(path), "r",
+                  encoding="utf-8") as fh:
             for lineno, line in enumerate(fh, 1):
                 if line.strip():
                     try:
@@ -449,7 +462,7 @@ def _timing_records(path, errs):
                             f"not JSON: {exc}")
                         continue
                     records.append((lineno, value))
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         errs.append(f"{os.path.basename(path)}: cannot read timing artifact: "
                     f"{exc}")
         return None, []
@@ -525,6 +538,11 @@ def validate_campaign(campaign_dir: str, require_oracle: bool = False):
     campaign authority and proves a bijection between their successful seed
     ledger and both artifact families.
     """
+    if require_oracle:
+        try:
+            campaign_dir = exact_path_without_redirect(campaign_dir)
+        except ValueError as exc:
+            return [], [f"campaign directory: {exc}"]
     files = sorted(glob.glob(os.path.join(
         campaign_dir, "run_*_a20_ironclad.jsonl")))
     if not require_oracle:

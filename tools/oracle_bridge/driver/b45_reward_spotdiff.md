@@ -130,7 +130,9 @@ only bounded cleanup of that invocation's control files, launch logs, and the
 exact requested seeds' run/timing artifacts; it does not erase unexpected
 files, which strict validation reports instead. The id must remain the one safe
 path component shown above: rooted ids, path separators, `.`/`..`, symlink
-escapes, and any resolved write/delete target outside `data-root` are rejected.
+escapes, and any symlink/junction/reparse redirect at a campaign directory or
+direct-child file are rejected. `--fresh` never follows an owned-looking name
+to another target, including another file inside the campaign.
 The orchestrator hashes the requested fork before it accepts even an already
 complete ledger; changing fork/schema/seed/policy requires a new campaign id.
 

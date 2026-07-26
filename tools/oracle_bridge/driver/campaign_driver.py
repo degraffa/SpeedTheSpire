@@ -53,6 +53,7 @@ from datetime import datetime, timezone
 from campaign_paths import (
     campaign_dir_under_root,
     campaign_file_under_root,
+    exact_path_without_redirect,
     validate_campaign_id,
     validate_seed_list,
 )
@@ -395,6 +396,7 @@ class RunLogger:
     translator (B1.5) enforces unknown-field-is-error, so nothing is pruned."""
 
     def __init__(self, path: str, header: dict) -> None:
+        path = exact_path_without_redirect(path)
         self._fh = open(path, "w", encoding="utf-8", newline="\n")
         self._seq = 0
         self._write(header)
@@ -443,6 +445,7 @@ class TimingLog:
     a run completes within a single game launch, so its marks share one clock."""
 
     def __init__(self, path: str, meta: dict) -> None:
+        path = exact_path_without_redirect(path)
         self._fh = open(path, "w", encoding="utf-8", newline="\n")
         self._write({"record_kind": "timing_header",
                      "created_utc": _utc(), **meta})
@@ -477,7 +480,8 @@ class Progress:
 
     def load_or_init(self, campaign_id, seed_list, policy, fork_hash) -> dict:
         if os.path.exists(self.path):
-            with open(self.path, "r", encoding="utf-8") as fh:
+            with open(exact_path_without_redirect(self.path), "r",
+                      encoding="utf-8") as fh:
                 self.data = json.load(fh)
             expected = {
                 "campaign_id": campaign_id,
@@ -520,16 +524,19 @@ class Progress:
 
     def flush(self) -> None:
         self.data["updated_utc"] = _utc()
-        tmp = self.tmp_path
+        tmp = exact_path_without_redirect(self.tmp_path)
+        destination = exact_path_without_redirect(self.path)
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(self.data, fh, indent=2)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, self.path)
+        os.replace(exact_path_without_redirect(tmp),
+                   exact_path_without_redirect(destination))
 
     def heartbeat(self, seed, floor, actions) -> None:
         try:
-            with open(self.hb_path, "w", encoding="utf-8", newline="\n") as fh:
+            with open(exact_path_without_redirect(self.hb_path), "w",
+                      encoding="utf-8", newline="\n") as fh:
                 json.dump({"t": _now(), "utc": _utc(), "seed": seed,
                            "floor": floor, "actions": actions}, fh)
         except OSError:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 
 _CAMPAIGN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _SEED_RE = re.compile(r"[0-9A-Z]+")
@@ -48,6 +49,39 @@ def _contained(root: str, target: str) -> bool:
         return False
 
 
+def _same_path(left: str, right: str) -> bool:
+    return os.path.normcase(os.path.normpath(left)) == \
+        os.path.normcase(os.path.normpath(right))
+
+
+def _is_redirect(path: str) -> bool:
+    """Whether an existing path is a symlink/junction/reparse redirect."""
+    try:
+        info = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(info.st_mode):
+        return True
+    # Python 3.9 has no os.path.isjunction(). Windows lstat exposes the same
+    # fail-closed signal for symlinks, junctions, mount points, and other
+    # name-surrogate reparse points.
+    reparse = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(getattr(info, "st_file_attributes", 0) & reparse)
+
+
+def exact_path_without_redirect(path: str) -> str:
+    """Return an absolute lexical path only when no component redirects it."""
+    exact = os.path.abspath(path)
+    if _is_redirect(exact):
+        raise ValueError(f"refusing redirected campaign path: {exact!r}")
+    resolved = os.path.realpath(exact)
+    if not _same_path(exact, resolved):
+        raise ValueError(
+            f"refusing redirected campaign path: {exact!r} resolves to "
+            f"{resolved!r}")
+    return exact
+
+
 def campaign_dir_under_root(data_root: str, campaign_id: str) -> str:
     """Resolve a campaign directory and prove it stays below data_root.
 
@@ -56,7 +90,7 @@ def campaign_dir_under_root(data_root: str, campaign_id: str) -> str:
     """
     validate_campaign_id(campaign_id)
     root = os.path.realpath(os.path.abspath(data_root))
-    target = os.path.realpath(os.path.abspath(os.path.join(root, campaign_id)))
+    target = exact_path_without_redirect(os.path.join(root, campaign_id))
     if target == root or not _contained(root, target):
         raise ValueError(
             f"campaign directory escapes data root: {target!r} not below "
@@ -71,7 +105,7 @@ def campaign_file_under_root(data_root: str, campaign_id: str,
             os.path.basename(name) != name or name in (".", ".."):
         raise ValueError(f"unsafe campaign file name {name!r}")
     directory = campaign_dir_under_root(data_root, campaign_id)
-    target = os.path.realpath(os.path.abspath(os.path.join(directory, name)))
+    target = exact_path_without_redirect(os.path.join(directory, name))
     if target == directory or not _contained(directory, target):
         raise ValueError(
             f"campaign file escapes campaign directory: {target!r} not below "

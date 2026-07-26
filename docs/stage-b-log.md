@@ -3104,3 +3104,21 @@ validator remains compatible for non-strict artifacts. Full preset and hygiene
 results are recorded by the separate fix-forward commit; no engine schema,
 registry, fixture, golden, vendored fork, or external campaign artifact changed.
 B4.5 remains `[!]` on the manual oracle capture and frozen-environment decision.
+
+<a id="b45-oracle-preflight-redirect-fix-forward"></a>
+
+### B4.5 redirected-child cleanup fix-forward `[x]` (non-task)
+
+**Supersession:** independent post-review found that containment alone was not
+enough: an expected direct-child name symlinked to unexpected evidence *inside*
+the campaign passed the root check, and `--fresh` deleted the resolved target.
+Campaign paths now retain the exact lexical child and reject every existing
+symlink, junction, or Windows reparse redirect before cleanup, progress
+temp/replace, heartbeat, run/timing, manifest, launch-log, summary, or strict
+validation access. The cross-platform regression creates a real file symlink
+when supported and proves cleanup, orchestration, strict validation, and direct
+progress resume all fail explicitly while the link and target evidence survive.
+Normal bounded cleanup and non-strict historical validation remain unchanged.
+Verified on the Windows host: Python 34/34 and WSL Debug, ASan/UBSan, and
+Release 980/980 each; stale-count, documentation-link, whitespace, and
+golden/fixture/registry hygiene are clean.

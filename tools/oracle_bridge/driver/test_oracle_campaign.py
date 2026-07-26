@@ -955,6 +955,56 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
             self.assertEqual(campaign_driver.EXIT_FATAL, driver_result)
             self.assertTrue(os.path.exists(sentinel))
 
+    def test_redirected_owned_child_fails_without_touching_target(self):
+        with tempfile.TemporaryDirectory() as data_root:
+            campaign_id = "redirected"
+            campaign_dir = os.path.join(data_root, campaign_id)
+            os.makedirs(campaign_dir)
+            unexpected = os.path.join(campaign_dir, "operator_notes.txt")
+            with open(unexpected, "w", encoding="utf-8") as fh:
+                fh.write("preserve this evidence")
+            redirected = os.path.join(
+                campaign_dir, "campaign_progress.json")
+            try:
+                os.symlink(unexpected, redirected)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(
+                    f"platform cannot create a file symlink: {exc}")
+
+            with self.assertRaisesRegex(ValueError, "redirected campaign path"):
+                orchestrator.clear_fresh_campaign_files(
+                    data_root, campaign_id, [SEED])
+            self.assertTrue(os.path.lexists(redirected))
+            with open(unexpected, "r", encoding="utf-8") as fh:
+                self.assertEqual("preserve this evidence", fh.read())
+
+            _files, errors = validate_artifacts.validate_campaign(
+                campaign_dir, require_oracle=True)
+            self.assertIn("redirected campaign path", "\n".join(errors))
+
+            with mock.patch.object(orchestrator, "launch_game") as launch:
+                result = orchestrator.main([
+                    "--data-root", data_root,
+                    "--campaign-id", campaign_id,
+                    "--seeds", SEED,
+                    "--fork-jar", unexpected,
+                    "--fresh",
+                ])
+            self.assertEqual(orchestrator.EXIT_CAMPAIGN_INVALID, result)
+            launch.assert_not_called()
+            self.assertTrue(os.path.lexists(redirected))
+            with open(unexpected, "r", encoding="utf-8") as fh:
+                self.assertEqual("preserve this evidence", fh.read())
+
+            progress = campaign_driver.Progress(
+                redirected,
+                os.path.join(campaign_dir, "campaign_heartbeat.json"))
+            with self.assertRaisesRegex(ValueError, "redirected campaign path"):
+                progress.load_or_init(
+                    campaign_id, [SEED], "random-legal", "A" * 64)
+            with open(unexpected, "r", encoding="utf-8") as fh:
+                self.assertEqual("preserve this evidence", fh.read())
+
     def test_resume_identity_mismatch_becomes_durable_fatal_status(self):
         with tempfile.TemporaryDirectory() as root:
             campaign_id = "identity"
