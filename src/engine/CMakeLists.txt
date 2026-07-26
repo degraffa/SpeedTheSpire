@@ -84,6 +84,8 @@ add_library(sts_engine
     advance.cpp
     # Combat-reward assembly + claim (combat_rewards.hpp).
     combat_rewards.cpp
+    # Treasure-room chest construction/opening + chest relic hooks.
+    treasure_rooms.cpp
     run_advance.cpp
 )
 

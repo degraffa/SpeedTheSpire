@@ -77,13 +77,13 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
 | Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
-| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Cursed Key + N'loth's Mask chest hooks; Sacred Bark potency; Fusion Hammer / Coffee Dripper campfire locks; **Sozu's potion block and Golden Idol's ×1.25 at the CHEST and EVENT claim sites** | B3.27 | B4.7 / B4.9 / B4.10-13 | the chest, campfire and event screens do not exist yet. **B4.5's shares are discharged** — Busted Crown's reward count, the Black Star elite relic, Golden Idol ×1.25 and Sozu's block are all live at the *combat-reward* claim; what remains here is the same two relics' behaviour on screens that do not exist. Busted Crown's and Ectoplasm's energy halves stay in their own rows |
+| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Cursed Key + N'loth's Mask chest hooks; Sacred Bark potency; Fusion Hammer / Coffee Dripper campfire locks; Sozu / Golden Idol at non-combat claim sites | B3.27 | B4.7 / B4.9 / B4.10-13 | **Chest hooks DISCHARGED by B4.7:** Cursed Key and N'loth's Mask are live and tested, including boss gates and acquisition order. The source audit also corrected the inherited claim: `RewardItem.applyGoldBonus` explicitly excludes `TreasureRoom`, and an ordinary chest has no potion reward, so Golden Idol and Sozu have no chest share to implement. Their event-screen shares remain with B4.10-13. **B4.5's shares are discharged** at combat rewards. The five `onEquip` bodies, Sacred Bark, campfire locks, and Busted Crown/Ectoplasm energy halves stay in their own rows. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | B4.4 `[x]` | B1.6 scoped itself to "adapter + format only" and named B4.4; B4.4's Log records run-combat equivalence but no `replay` generalization |
 | Emit `kIroncladAttackPool` **and the three B4.5 reward pools** in CardLibrary HashMap **library order** instead of registry-id order | B3.6 | B4.5's oracle capture | documented interim deviation; **one** `gen.py` fix pins all four pools at once. Blocked on the same manual capture that blocks B4.5 itself — the runbook's §4 documents exactly how the capture pins them |
-| Matryoshka (chest relic) | B3.25 | B4.7 | floor≤40 canSpawn gate live, effect deferred |
+| Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
 | Eternal Feather (rest-room heal) | B3.25 | B4.9 | row live, effect deferred |
 | Translator `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets | B1.5, B4.3 | B4.10 | storage exists since B4.3; needs `events.yaml` + the canonical list order (B4.10-B4.13) |
@@ -549,11 +549,12 @@ LargeChest.java:18-22
 amount ×(0.9,1.1), relic grant via B4.6, the fixed treasure row (map row 8).
 **Acceptance:** tier-2: chest tables vs. hand-derivation across the roll
 range; trap-16 named test; oracle spot-diff ≥ 2 treasure floors.
-**Inherited:** Matryoshka (chest relic; floor≤40 canSpawn gate already live, effect is
-a documented no-op) — deferred by B3.25. The **Cursed Key** and **N'loth's Mask** chest
-hooks — deferred by B3.27 (rows and pool slots live, bodies inert; see the obligations
-table row that groups them with the other screen-blocked boss/special relics).
-**Log:** —
+**Inherited — DISCHARGED in code:** Matryoshka (chest relic; floor≤40
+canSpawn gate was already live), plus the **Cursed Key** and **N'loth's Mask**
+chest hooks deferred by B3.27. All three now have exact non-boss bodies,
+boss gates, counter/RNG/acquisition-order tests, and source-order coverage.
+**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b47)
+(the task stays unchecked until its required live-game spot-diff can run)
 
 ### B4.8 `[ ]` Shop
 **Deps:** B4.5, B4.6, B3.23 · **Spec:** design §5.6 · **Provenance:**

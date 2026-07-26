@@ -1137,8 +1137,7 @@ TEST(MapChoice, LegalColumnsMatchGeneratedEdges) {
 }
 
 TEST(RoomRouting, NonCombatRoomsParkAtUnimplemented) {
-    for (RoomType kind : {RoomType::Event, RoomType::Shop, RoomType::Rest,
-                          RoomType::Treasure}) {
+    for (RoomType kind : {RoomType::Event, RoomType::Shop, RoomType::Rest}) {
         RunController rc = run_begin(kSeed, kA20);
         for (int x = 0; x < kMapCols; ++x) {
             rc.run.map[run_state_map_index(x, 0)].room_type =

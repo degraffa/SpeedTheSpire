@@ -839,6 +839,30 @@ TEST(FuzzPolicy, EnumeratesExhaustChoicesBeyondTheHandCapacity) {
     ExpectLargeChoiceEnumerated(engine::ChoiceKind::EXHAUST_TO_HAND);
 }
 
+TEST(FuzzPolicy, TreasureRoomEnumeratesDistinctOpenAndSkipActions) {
+    engine::RunController rc = engine::run_begin(8080, 20);
+    rc.phase =
+        static_cast<uint8_t>(engine::RunPhase::TREASURE_ROOM);
+    rc.room_type =
+        static_cast<uint8_t>(engine::RoomType::Treasure);
+    rc.treasure_chest.size =
+        static_cast<uint8_t>(engine::ChestSize::SMALL);
+    rc.treasure_chest.relic_tier =
+        static_cast<uint8_t>(engine::RelicTier::COMMON);
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    ASSERT_EQ(n, 2u);
+    EXPECT_EQ(moves[0].cat, MoveCat::TREASURE_OPEN);
+    EXPECT_EQ(engine::action_arg0(moves[0].action),
+              engine::kChooseOpenChest);
+    EXPECT_EQ(moves[1].cat, MoveCat::TREASURE_SKIP);
+    EXPECT_EQ(engine::action_arg0(moves[1].action),
+              engine::kChooseProceed);
+}
+
 // --- 3b. the controller hash is a CONTENT hash, not a byte hash --------------
 
 TEST(FuzzHash, ControllerHashIgnoresEncounterKeyADDRESSES) {
@@ -875,6 +899,23 @@ TEST(FuzzHash, RegionBreakdownAgreesWithTheWholeHash) {
     EXPECT_EQ(p.run, engine::hash_state(rc.run));
     EXPECT_EQ(p.combat, engine::hash_state(rc.combat));
     EXPECT_NE(p.lists, 0u);
+}
+
+TEST(FuzzHash, ControllerHashIncludesTheTreasureChestDescriptor) {
+    engine::RunController rc = engine::run_begin(99, 20);
+    const ControllerHashes before = hash_controller_parts(rc);
+    rc.treasure_chest.size =
+        static_cast<uint8_t>(engine::ChestSize::LARGE);
+    rc.treasure_chest.relic_tier =
+        static_cast<uint8_t>(engine::RelicTier::RARE);
+    rc.treasure_chest.has_gold = 1;
+    const ControllerHashes after = hash_controller_parts(rc);
+    EXPECT_NE(after.whole, before.whole);
+    EXPECT_NE(after.treasure, before.treasure);
+    EXPECT_EQ(after.run, before.run);
+    EXPECT_EQ(after.combat, before.combat);
+    EXPECT_EQ(after.rewards, before.rewards);
+    EXPECT_EQ(after.scalars, before.scalars);
 }
 
 // --- 4. coverage bookkeeping --------------------------------------------------

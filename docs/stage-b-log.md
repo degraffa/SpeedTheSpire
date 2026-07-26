@@ -2747,6 +2747,79 @@ Focused RelicPools 14/14, RegistryGen 16/16, and run lifecycle 19/19 remained
 green; the complete integrated WSL matrix is **debug 428/428, leak-detecting
 ASan/UBSan 428/428, release 428/428**.
 
+<a id="b47"></a>
+
+### B4.7 `[ ]` Treasure rooms — implementation complete, oracle acceptance blocked
+
+**Implementation.** `treasure_rooms.hpp/.cpp` owns the non-boss Act-1 chest
+transaction. Room entry constructs the chest with exactly two `treasureRng`
+wrapper calls: `getRandomChest`'s 50/33/17 size roll, then
+`AbstractChest.randomizeReward`'s one shared 0..99 contents roll. That single
+value drives both gold presence and the size-specific 75/25/0, 35/50/15, or
+0/75/25 relic tier table (trap 16). Opening is a separate CHOOSE action:
+before-hooks run first, optional gold uses the exact float
+`GOLD_AMT*0.9f .. GOLD_AMT*1.1f` draw and Java rounding, the pre-rolled tier
+front-pops through the existing relic-pool machinery, then after-hooks run.
+The resulting `RewardScreen` uses the established claim/proceed path, so a
+relic is acquired only on claim while an abandoned relic stays consumed from
+its pool. Proceed can also skip an unopened chest without consuming any
+open-time RNG.
+
+**Lifecycle / replay namespace.** `RunPhase::TREASURE_ROOM` is append-only value
+**8**. Value **7** is explicitly reserved for the independently-developed rest
+site branch; compile-time and runtime checks pin the two values distinct.
+`RunController` gained only a 4-byte transient POD chest descriptor — the
+frozen `RunState`, schema version, fixtures and golden data did not change.
+`RunActionMask` exposes open and skip, the fuzz move enumerator can replay both,
+and the whole-controller content hash includes the descriptor as its own
+triage region. The fixed map row 8 is asserted at run start, and entry/open/
+claim/proceed plus entry/skip transitions are covered.
+
+**Inherited hook audit — all three discharged.** The exact
+`AbstractChest.open(false)` order is
+`onChestOpen` acquisition pass → optional gold → base relic →
+`onChestOpenAfter` acquisition pass.
+
+- Matryoshka decrements once per non-boss open, consumes one
+  `relicRng.randomBoolean(0.75f)`, inserts its COMMON/UNCOMMON relic before the
+  base relic, and goes `2→1→-2`; a third chest consumes no draw.
+- Cursed Key evaluates `returnRandomCurse()` before constructing
+  `ShowCardAndObtainEffect`, so it always consumes one `cardRng` identity draw.
+  Omamori then decrements and blocks the card if active; otherwise the curse
+  routes through `add_card_to_master_deck`, firing Ceramic Fish, Darkstone
+  Periapt, Du-Vu Doll and the other established obtain hooks. Multiple imported
+  Cursed Keys preserve acquisition order.
+- N'loth's Mask runs after base insertion, removes the **first** relic reward
+  while leaving its pool pop consumed, and goes `1→-2`. Consequently a
+  Matryoshka bonus is the relic removed when both are present. All three hooks
+  are explicitly no-ops for a boss chest.
+
+The source audit corrected an inherited ledger claim: chest gold does **not**
+receive Golden Idol's 25% bonus. `RewardItem.applyGoldBonus`
+(`RewardItem.java:110-129`) explicitly excludes `TreasureRoom`; ordinary
+chests also have no potion reward for Sozu to block. Their remaining
+non-combat shares are event-screen work, not treasure behavior.
+
+**Provenance read in full:** `AbstractDungeon.getRandomChest`
+(`AbstractDungeon.java:499-508`), `AbstractChest.randomizeReward/open`
+(`AbstractChest.java:54-102`), all three size constructors,
+`TreasureRoom`, `Matryoshka.onChestOpen`, `CursedKey.onChestOpen`,
+`NlothsMask.onChestOpenAfter`, `AbstractRoom.addRelicToRewards` /
+`removeOneRelicFromRewards`, `AbstractDungeon.returnRandomCurse`,
+`CardLibrary.getCurse`, `ShowCardAndObtainEffect`, `Omamori`, and
+`RewardItem.applyGoldBonus/claimReward`.
+
+**Acceptance status.** Fourteen new named cases cover every 0..99 contents
+roll for all sizes, all four threshold edges, trap 16, exact stream states,
+gold, all tiers, pool consumption/acquisition, hook ordering/counters/gates,
+fixed-row lifecycle, fuzz enumeration and hashing. The required live-game
+spot-diff of at least two treasure floors remains blocked by the unresolved
+frozen oracle/capture environment already recorded for the reward work. No
+sim-only expectation is being substituted for that evidence and no drift is
+sanctioned; the task deliberately remains `[ ]` until those captures can run.
+The complete final-tree WSL matrix is **debug 1006/1006, leak-detecting
+ASan/UBSan 1006/1006, release 1006/1006**.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes
