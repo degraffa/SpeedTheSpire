@@ -264,6 +264,11 @@ sts_add_test(run_advance_test)
 # Prayer Wheel).
 sts_add_test(combat_rewards_test)
 
+# Rest sites: Java-float 30% heal with the ascension-negative pinned, Regal
+# Pillow/Dream Catcher, Smith and Peace Pipe grids, Girya/Shovel effects, menu
+# availability/order, and deterministic RunController masks/transitions.
+sts_add_test(rest_sites_test)
+
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer

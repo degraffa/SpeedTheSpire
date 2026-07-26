@@ -1136,8 +1136,8 @@ TEST(MapChoice, LegalColumnsMatchGeneratedEdges) {
     }
 }
 
-TEST(RoomRouting, NonCombatRoomsParkAtUnimplemented) {
-    for (RoomType kind : {RoomType::Event, RoomType::Shop, RoomType::Rest,
+TEST(RoomRouting, UnimplementedNonCombatRoomsParkAtUnimplemented) {
+    for (RoomType kind : {RoomType::Event, RoomType::Shop,
                           RoomType::Treasure}) {
         RunController rc = run_begin(kSeed, kA20);
         for (int x = 0; x < kMapCols; ++x) {
@@ -1152,6 +1152,22 @@ TEST(RoomRouting, NonCombatRoomsParkAtUnimplemented) {
         // Reseed still happened (design: floor streams valid even in unimpl rooms).
         EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor_stream(kSeed, 1)));
     }
+}
+
+TEST(RoomRouting, RestRoomsOpenRestSiteMenu) {
+    RunController rc = run_begin(kSeed, kA20);
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+    }
+    step(rc, kProceed);
+    const uint8_t x = first_start_column(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, x));
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Rest));
+    EXPECT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::MENU));
+    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor_stream(kSeed, 1)));
 }
 
 TEST(BatchHeterogeneity, MixedPhasesStepIndependently) {

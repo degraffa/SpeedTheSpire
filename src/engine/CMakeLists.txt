@@ -84,6 +84,7 @@ add_library(sts_engine
     advance.cpp
     # Combat-reward assembly + claim (combat_rewards.hpp).
     combat_rewards.cpp
+    rest_sites.cpp
     run_advance.cpp
 )
 

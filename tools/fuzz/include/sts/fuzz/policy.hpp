@@ -95,7 +95,14 @@ enum class MoveCat : uint8_t {
     REWARD_SKIP_CARD = 11,
     REWARD_SING = 12,
     REWARD_PROCEED = 13,
-    COUNT = 14,
+    REST = 14,
+    SMITH = 15,
+    LIFT = 16,
+    TOKE = 17,
+    DIG = 18,
+    SMITH_CARD = 19,
+    TOKE_CARD = 20,
+    COUNT = 21,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;
@@ -113,6 +120,7 @@ inline constexpr size_t kMoveCap =
     static_cast<size_t>(engine::kDiscardCap) +
     static_cast<size_t>(engine::kPotionCap * engine::kMonsterCap);
 static_assert(engine::kDiscardCap >= engine::kExhaustCap);
+static_assert(engine::kDiscardCap >= engine::kMasterDeckCap);
 static_assert(kMoveCap >= 163);
 
 // Enumerate every legal move for `rc`. `mask` must be the output of

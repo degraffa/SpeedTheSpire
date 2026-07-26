@@ -2747,6 +2747,118 @@ Focused RelicPools 14/14, RegistryGen 16/16, and run lifecycle 19/19 remained
 green; the complete integrated WSL matrix is **debug 428/428, leak-detecting
 ASan/UBSan 428/428, release 428/428**.
 
+<a id="b49"></a>
+
+### B4.9 `[x]` Rest sites
+**Deps:** B4.4, B3.26 (Girya/Peace Pipe/Shovel options) · **Spec:** design
+§5.6 · **Provenance:** RestOption.java:25; CampfireUI.java:81-107; smith
+grid flow (read at task)
+**Deliverables:** rest (30 % max-HP heal, the frozen no-ascension-effect
+negative), smith (upgrade grid CHOOSE), relic-added options for implemented
+relics, the fixed rest row (14) + no-rest-row-13 rule already in B4.2.
+**Acceptance:** tier-2: heal amount, smith upgrade writes the upgrade bit
+via registry rows; option availability matrix (no upgradable cards → no
+smith).
+**Inherited:** Eternal Feather (rest-room heal) — deferred by B3.25. The **Fusion
+Hammer** and **Coffee Dripper** campfire-option locks — deferred by B3.27 (rows live,
+bodies inert).
+**Log:** Done 2026-07-26 on base `fb9bf137`. `rest_sites.hpp/.cpp` and the
+transient `RunController` rest screen now implement the Java-order campfire
+menu: Rest, Smith, then each owned relic's added option in relic acquisition
+order. Disabled options remain visible but absent from `RunActionMask`. Smith
+and Peace Pipe open master-deck-indexed CHOOSE grids; Smith updates the
+existing `CardInstance.upgrade` count (including repeated Searing Blow
+upgrades), while Toke excludes Ascender's Bane and removes through the
+master-deck removal door. Girya increments its persistent relic counter through
+three, and Shovel consumes exactly one relicRng tier roll followed by the
+selected pool's front pop before opening a claimable relic reward.
+
+Rest uses the Java float expression `(int)(maxHealth * 0.3f)` with no ascension
+branch, clamps at max HP, and includes the two already-live registered
+campfire hooks discovered in the completion audit: Regal Pillow adds 15 to the
+heal, and Dream Catcher rolls `AbstractDungeon.getRewardCards()` after healing
+and opens the card-pick screen directly. Dream Catcher reuses the existing
+cardRng rarity/pity, no-duplicate, upgrade-draw, Question Card, Busted Crown,
+master-deck acquisition, skip, and Singing Bowl machinery; selecting or
+skipping returns directly to the map rather than fabricating an outer combat
+reward claim. The rest flow is controller-transient: `RunState`, schema,
+fixtures, goldens, registry namespaces, and the public combat `ActionMask`
+remain unchanged. The run-only mask gained fixed-cap rest-menu and master-deck
+grid rows, and the deterministic fuzz controller hash includes the rest screen.
+
+Source methods read in full: `RestOption`, `CampfireUI.initializeButtons`,
+`SmithOption`, `DigOption`, `TokeOption`, `LiftOption`, all five
+`Campfire*Effect` classes, `Girya`, `PeacePipe`, `Shovel`, `RegalPillow`,
+`DreamCatcher`, `EternalFeather`, `FusionHammer`, `CoffeeDripper`,
+`CardGroup.getUpgradableCards/getPurgeableCards/getGroupWithoutBottledCards`,
+`AbstractCard.canUpgrade`, and
+`AbstractDungeon.returnRandomRelic/returnRandomRelicTier/getRewardCards`.
+The decisive registered-hook lines are `CampfireSleepEffect.java:48-52`
+(Regal Pillow) and `:61-76` (heal/onRest then Dream Catcher reward).
+`EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) remains the
+task-brief-directed whole deferral because it is a room-entry heal, not a Rest
+option; Fusion Hammer and Coffee Dripper locks likewise remain whole-effect
+deferrals. Both obligations were explicitly re-owned to unassigned follow-ups
+in the live ledger rather than left owned by completed B4.9.
+
+Tier-2 and directed regressions cover float-floor/no-ascension healing, cap and
+RNG negatives, Regal Pillow, Dream Catcher's direct pick and skip flows, menu
+order/availability, no-upgradeable Smith, stable upgrade writes, Peace Pipe's
+purge door, Girya's cap/persistence, Shovel's tier-roll/front-pop order,
+copied-controller mask/transition determinism, and RestRoom routing. The
+pre-existing B4.2 fixed rest row 14 and no-rest-row-13 tests remain green.
+Complete WSL Ubuntu-2404 suites are **debug 992/992, leak-detecting ASan/UBSan
+992/992, release 992/992**; stale-count and documentation-link checks pass, and
+fixture/golden/registry paths are byte-unchanged.
+
+**Independent-audit fix-forward (supersedes the fixed-cap acceptance surface
+above):** the original Dream Catcher mask advertised every offered card even
+when `master_deck_count == kMasterDeckCap`; the shared deck-add door then
+refused the selection, turning a mask-authorized action into the fuzzer's
+forbidden no-progress transition. Ordinary combat card rewards had the same
+latent edge. A shared `reward_take_card_legal` predicate now owns the open-item,
+card-id/index and fixed-deck-cap checks for both screens. A full deck therefore
+offers only Skip and, when owned, Singing Bowl; direct Dream Catcher still
+returns to the map, while an ordinary skipped CARD item returns to its outer
+reward screen and leaves Proceed available.
+
+Shovel exposed the generic relic twin: RELIC claims were always advertised,
+and `claim_reward` discarded the item even when `acquire_relic` returned
+`RELIC_CAP_REACHED`. `relic_acquire_legal` now models invalid ids, the fixed
+relic array and Circlet's exact exception (an existing Circlet may stack at a
+full array until its signed counter itself caps). Reward-mask legality reads
+that authority, and `claim_reward` also checks the actual acquisition result
+before removing the item. A capped dug relic remains visible but unclaimable;
+Proceed explicitly abandons the already-popped reward, preserving the game's
+skip path and pool semantics.
+
+Five regressions cover generic fixed-deck card masks/forced no-ops, ordinary
+relic-cap preservation, Circlet stack/counter boundaries, Dream Catcher's
+full-deck Skip and Singing Bowl paths, and Shovel's capped claim plus Proceed.
+No persistent state, schema, RNG sequence, fixture, golden, registry namespace
+or combat `ActionMask` changed. Final-tree WSL Debug, leak-detecting ASan/UBSan
+and Release are each **997/997**; hygiene checks pass.
+
+**Defensive-legality fix-forward (supersedes the generic-mask boundary
+above):** the shared claim predicate previously fell through to `true` for
+`RewardItemKind::NONE` and unknown byte values even though `claim_reward`
+rejected both. A hand-built reward screen could therefore advertise a
+guaranteed no-progress claim. `reward_claim_legal` now explicitly accepts only
+GOLD, STOLEN_GOLD, POTION, RELIC and CARDS and rejects an over-cap screen before
+indexing. A second shared predicate validates the exact no-open sentinel,
+screen count/storage bounds, CARD kind and offer capacity before ordinary or
+Dream Catcher masks expose Take, Skip or Singing Bowl. The take, skip and bowl
+mutation paths read the same authority, so forced actions against malformed
+transient state are non-corrupting no-ops rather than out-of-bounds accesses or
+wrong-kind consumption.
+
+Three regressions pin NONE/unknown generic claims, ordinary malformed open-card
+indices/kinds/counts, and Dream Catcher's corresponding bounds. Final-tree WSL
+Debug, leak-detecting ASan/UBSan and Release are each **1000/1000**; hygiene
+checks pass. The old-base task branch deliberately leaves the fuzz campaign
+build id for the integration commit to advance against the then-current master
+identity.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes

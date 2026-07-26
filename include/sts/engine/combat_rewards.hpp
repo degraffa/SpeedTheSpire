@@ -287,12 +287,23 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
                              RewardOutcome outcome, RewardScreen& out,
                              int32_t stolen_gold_return = 0) noexcept;
 
+// Dream Catcher uses AbstractDungeon.getRewardCards directly from a RestRoom,
+// then opens CardRewardScreen without an outer reward-item screen
+// (CampfireSleepEffect.java:71-76). Roll the ordinary RestRoom rarity table,
+// including Question Card / Busted Crown count modifiers, cardRng pity,
+// no-dupe and upgrade draws, and leave that sole CARD item directly open.
+// Returns false only when a malformed stacked modifier list drives the offer
+// count to zero.
+[[nodiscard]] bool open_rest_card_reward(RunState& rs,
+                                         RewardScreen& out) noexcept;
+
 // --- Claim -----------------------------------------------------------------
 
 // Legality of claiming item `index` right now (RewardItem.claimReward's
-// failure cases): a POTION needs a free slot below rs.potion_slots unless Sozu
-// is owned (Sozu claims-and-discards, RewardItem.java:276-279); everything
-// else is claimable while it exists.
+// failure cases plus the engine's explicit fixed capacities): a POTION needs a
+// free slot below rs.potion_slots unless Sozu is owned (Sozu
+// claims-and-discards, RewardItem.java:276-279), and a RELIC must fit through
+// acquire_relic (including Circlet's stack-at-full exception).
 [[nodiscard]] bool reward_claim_legal(const RunState& rs,
                                       const RewardScreen& s,
                                       uint8_t index) noexcept;
@@ -303,10 +314,23 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
 [[nodiscard]] bool claim_reward(RunState& rs, RngStream& misc_rng,
                                 RewardScreen& s, uint8_t index) noexcept;
 
+// Whether open_card_item names an in-bounds CARDS item on a structurally valid
+// reward screen. This is the shared authority for card-pick masks and
+// take/skip/Singing Bowl mutation paths.
+[[nodiscard]] bool reward_card_item_open_legal(
+    const RewardScreen& s) noexcept;
+
+// Whether card `card_index` of the OPEN card item can currently pass through
+// add_card_to_master_deck. Used by both ordinary combat rewards and Dream
+// Catcher's direct screen so a fixed-cap failure is never advertised as legal.
+[[nodiscard]] bool reward_take_card_legal(const RunState& rs,
+                                          const RewardScreen& s,
+                                          uint8_t card_index) noexcept;
+
 // Take card `card_index` of the OPEN card item into the master deck through
 // add_card_to_master_deck (the onObtainCard door -- Ceramic Fish, the eggs,
 // Darkstone Periapt fire there), then remove the item and close the screen.
-// Returns false (no mutation) when no card item is open or the index is bad.
+// Returns false (no mutation) when reward_take_card_legal is false.
 [[nodiscard]] bool reward_take_card(RunState& rs, RewardScreen& s,
                                     uint8_t card_index) noexcept;
 

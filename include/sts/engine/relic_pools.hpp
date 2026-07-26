@@ -109,6 +109,12 @@ void initialize_relic_pools(RunState& rs) noexcept;
 [[nodiscard]] bool relic_can_spawn(RelicId id,
                                    RelicSpawnContext ctx) noexcept;
 
+// Whether acquire_relic can complete without hitting an invalid-id, fixed-slot,
+// or Circlet-counter capacity guard. A Circlet can still stack while the relic
+// array itself is full, provided its existing counter has room.
+[[nodiscard]] bool relic_acquire_legal(const RunState& rs,
+                                       RelicId id) noexcept;
+
 [[nodiscard]] RelicAcquireResult acquire_relic(
     RunState& rs, RngStream& misc_rng, RelicId id) noexcept;
 

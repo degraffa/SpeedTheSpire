@@ -549,9 +549,10 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 }
 
 // onPlayerEntry dispatch for the room just entered (AbstractDungeon.java:1800).
-// Combat rooms build the combat via the encounter framework; every other room
-// kind is not yet implemented, so it reseeds the floor streams (for
-// oracle-reseed visibility) and parks at ROOM_UNIMPLEMENTED.
+// Combat rooms build the combat via the encounter framework; a RestRoom opens
+// its campfire menu; every other non-combat room kind is not yet implemented,
+// so it reseeds the floor streams (for oracle-reseed visibility) and parks at
+// ROOM_UNIMPLEMENTED.
 void on_player_entry(RunController& rc, RoomType room) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
@@ -562,6 +563,7 @@ void on_player_entry(RunController& rc, RoomType room) noexcept {
     auto stall = [&](RoomType r) noexcept {
         rc.combat = CombatState{};
         reseed_floor_streams(rc.combat, seed, floor);
+        rc.rest = RestSiteState{};
         rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
         rc.room_type = static_cast<uint8_t>(r);
     };
@@ -588,9 +590,17 @@ void on_player_entry(RunController& rc, RoomType room) noexcept {
                 stall(room);
             }
             break;
+        case RoomType::Rest:
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            rc.rest = RestSiteState{};
+            rc.rest.screen = static_cast<uint8_t>(RestScreen::MENU);
+            rc.phase = static_cast<uint8_t>(RunPhase::REST_SITE);
+            break;
         case RoomType::Event:
         case RoomType::Shop:
-        case RoomType::Rest:
         case RoomType::Treasure:
         case RoomType::None:
         default:
@@ -783,10 +793,14 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                 // Proceed button is hidden while it is open
                 // (CardRewardScreen.open hides proceedButton,
                 // CardRewardScreen.java:459-460).
+                if (!reward_card_item_open_legal(s)) {
+                    break;
+                }
                 const RunRewardItem& item = s.items[s.open_card_item];
                 for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap;
                      ++j) {
-                    out.can_take_card[j] = true;
+                    out.can_take_card[j] =
+                        reward_take_card_legal(rc.run, s, j);
                 }
                 out.can_skip_card = true;
                 out.can_sing = run_has_relic(rc.run, RelicId::SINGING_BOWL);
@@ -849,6 +863,40 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             break;
         }
 
+        case RunPhase::REST_SITE: {
+            const RestScreen screen = static_cast<RestScreen>(rc.rest.screen);
+            if (screen == RestScreen::MENU) {
+                const RestMenu menu = build_rest_menu(rc.run);
+                for (uint8_t i = 0; i < menu.count; ++i) {
+                    out.can_choose_rest[i] = menu.entries[i].usable;
+                }
+            } else if (screen == RestScreen::SMITH) {
+                for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+                    out.can_choose_master_deck[i] =
+                        rest_card_upgradeable(rc.run.master_deck[i]);
+                }
+            } else if (screen == RestScreen::TOKE) {
+                for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+                    out.can_choose_master_deck[i] =
+                        rest_card_purgeable(rc.run.master_deck[i]);
+                }
+            } else if (screen == RestScreen::DREAM_CATCHER) {
+                const RewardScreen& s = rc.rewards;
+                if (reward_card_item_open_legal(s)) {
+                    const RunRewardItem& item = s.items[s.open_card_item];
+                    for (uint8_t j = 0;
+                         j < item.card_count && j < kRewardCardCap; ++j) {
+                        out.can_take_card[j] =
+                            reward_take_card_legal(rc.run, s, j);
+                    }
+                    out.can_skip_card = true;
+                    out.can_sing =
+                        run_has_relic(rc.run, RelicId::SINGING_BOWL);
+                }
+            }
+            break;
+        }
+
         case RunPhase::ROOM_UNIMPLEMENTED:
         case RunPhase::RUN_OVER:
         case RunPhase::NONE:
@@ -869,6 +917,33 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
 // --- advance (run overload) -------------------------------------------------
 
 namespace {
+
+void finish_rest_site(RunController& rc) noexcept {
+    rc.rest = RestSiteState{};
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+}
+
+void finish_sleep(RunController& rc) noexcept {
+    if (run_has_relic(rc.run, RelicId::DREAM_CATCHER) &&
+        open_rest_card_reward(rc.run, rc.rewards)) {
+        rc.rest.screen = static_cast<uint8_t>(RestScreen::DREAM_CATCHER);
+        return;
+    }
+    finish_rest_site(rc);
+}
+
+void open_dig_reward(RunController& rc) noexcept {
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.rewards.count = 1;
+    RunRewardItem& item = rc.rewards.items[0];
+    item.kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    item.id = static_cast<uint16_t>(rest_dig_relic(rc.run));
+    rc.rest = RestSiteState{};
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+}
 
 void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
     if (rc.combat.phase != static_cast<uint8_t>(CombatPhase::COMBAT_OVER)) {
@@ -1033,12 +1108,14 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 RewardScreen& s = rc.rewards;
                 const uint8_t a0 = action_arg0(a);
                 if (s.open_card_item != kNoOpenCardReward) {
-                    if (a0 == kChooseSkipCard) {
-                        reward_skip_card(s);
-                    } else if (a0 == kChooseSing) {
-                        (void)reward_sing(rc.run, s);
-                    } else {
-                        (void)reward_take_card(rc.run, s, a0);
+                    if (reward_card_item_open_legal(s)) {
+                        if (a0 == kChooseSkipCard) {
+                            reward_skip_card(s);
+                        } else if (a0 == kChooseSing) {
+                            (void)reward_sing(rc.run, s);
+                        } else {
+                            (void)reward_take_card(rc.run, s, a0);
+                        }
                     }
                 } else if (a0 == kChooseProceed) {
                     // Leave the screen; anything unclaimed is abandoned (an
@@ -1052,6 +1129,66 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     // Claim item a0 (CARDS opens the pick screen). Relic
                     // onEquip bodies draw the floor-scoped miscRng.
                     (void)claim_reward(rc.run, rc.combat.misc_rng, s, a0);
+                }
+            }
+            fill_run_result(rc, res);
+            break;
+        }
+
+        case RunPhase::REST_SITE: {
+            if (action_verb(a) == ActionVerb::CHOOSE) {
+                const uint8_t a0 = action_arg0(a);
+                const RestScreen screen =
+                    static_cast<RestScreen>(rc.rest.screen);
+                if (screen == RestScreen::MENU) {
+                    const RestMenu menu = build_rest_menu(rc.run);
+                    if (a0 < menu.count && menu.entries[a0].usable) {
+                        const RestOptionEntry& option = menu.entries[a0];
+                        switch (static_cast<RestOptionKind>(option.kind)) {
+                            case RestOptionKind::REST:
+                                (void)rest_apply_heal(rc.run);
+                                finish_sleep(rc);
+                                break;
+                            case RestOptionKind::SMITH:
+                                rc.rest.screen =
+                                    static_cast<uint8_t>(RestScreen::SMITH);
+                                break;
+                            case RestOptionKind::LIFT:
+                                if (rest_lift(rc.run, option.relic_index)) {
+                                    finish_rest_site(rc);
+                                }
+                                break;
+                            case RestOptionKind::TOKE:
+                                rc.rest.screen =
+                                    static_cast<uint8_t>(RestScreen::TOKE);
+                                break;
+                            case RestOptionKind::DIG:
+                                open_dig_reward(rc);
+                                break;
+                        }
+                    }
+                } else if (screen == RestScreen::SMITH) {
+                    if (rest_upgrade_card(rc.run, a0)) {
+                        finish_rest_site(rc);
+                    }
+                } else if (screen == RestScreen::TOKE) {
+                    if (rest_purge_card(rc.run, a0)) {
+                        finish_rest_site(rc);
+                    }
+                } else if (screen == RestScreen::DREAM_CATCHER) {
+                    bool done = false;
+                    if (a0 == kChooseSkipCard &&
+                        reward_card_item_open_legal(rc.rewards)) {
+                        reward_skip_card(rc.rewards);
+                        done = true;
+                    } else if (a0 == kChooseSing) {
+                        done = reward_sing(rc.run, rc.rewards);
+                    } else {
+                        done = reward_take_card(rc.run, rc.rewards, a0);
+                    }
+                    if (done) {
+                        finish_rest_site(rc);
+                    }
                 }
             }
             fill_run_result(rc, res);
