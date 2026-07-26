@@ -793,7 +793,6 @@ void ExpectLargeChoiceEnumerated(engine::ChoiceKind kind) {
     engine::ActionQueueItem& choose = rc.combat.action_queue[0];
     choose.opcode = static_cast<uint16_t>(engine::Opcode::CHOOSE_CARD);
     choose.amount = 1;
-    choose.tgt = engine::kNoChoiceExclusion;
     choose.flags = engine::make_choose_flags(kind, false);
     for (uint8_t i = 0; i < 12; ++i) {
         rc.combat.card_pool[i].card_id =

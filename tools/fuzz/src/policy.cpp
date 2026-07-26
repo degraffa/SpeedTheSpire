@@ -147,13 +147,12 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                     rc.combat.action_queue[rc.combat.action_head];
                 const engine::ChoiceKind kind =
                     engine::choose_kind_from_flags(front.flags);
-                const uint8_t excluded = engine::choice_excluded_index(front);
                 int source_count = rc.combat.hand_count;
                 if (cm.choice_from_discard) source_count = rc.combat.discard_count;
                 if (cm.choice_from_exhaust) source_count = rc.combat.exhaust_count;
                 for (int i = 0; i < source_count; ++i) {
                     if (engine::choice_slot_eligible(
-                            rc.combat, static_cast<uint8_t>(i), kind, excluded)) {
+                            rc.combat, static_cast<uint8_t>(i), kind)) {
                         s.add(make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(i)),
                               MoveCat::COMBAT_CHOOSE);
                     }
