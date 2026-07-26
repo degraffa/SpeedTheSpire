@@ -38,15 +38,29 @@ against the vendored upstream source (§11, and tools/oracle_bridge/PROTOCOL.md)
   counters, and every A20 modifier that has an Act-1 effect (§6).
 - **Out (S2+):** the act-1→act-2 transition and the post-boss **boss chest /
   boss-relic pick** (the run terminates when the act-1 boss's combat rewards
-  are claimed), acts 2–4, keys (the sapphire-key reward branch in chests is
-  final-act-gated, AbstractChest.java:95-96, so it never fires in S1;
-  `setEmeraldElite`, by contrast, is gated by `isFinalActAvailable`, **not** by
-  keys — a profile-unlock condition (`IRONCLAD_WIN && SILENT_WIN && DEFECT_WIN
-  && …`, Settings.java:642) that the frozen fully-unlocked assumption below
-  makes TRUE, so it **DOES fire every act in S1**, consuming one `mapRng` draw
-  (`mapRng.random(0, eliteNodes.size()-1)`) **after** room assignment
-  (AbstractDungeon.java:539, 542-556); corrected at B4.1 from live evidence,
-  see §11 v0.1.3), save-file loading, other characters.
+  are claimed), acts 2–4, **keys as obtainable content**, save-file loading,
+  other characters.
+  - Two branches that merely *test* key state are **not** excluded by that
+    boundary: both are gated on `Settings.isFinalActAvailable`, a
+    *profile-unlock* condition (`IRONCLAD_WIN && SILENT_WIN && DEFECT_WIN
+    && …`, Settings.java:642, applied at run start via
+    `setFinalActAvailability`, CardCrawlGame.java:661) that the frozen
+    fully-unlocked assumption below makes TRUE, so **both fire in S1**.
+  - `setEmeraldElite` (`isFinalActAvailable && !hasEmeraldKey`,
+    AbstractDungeon.java:543) consumes one `mapRng` draw
+    (`mapRng.random(0, eliteNodes.size()-1)`) **after** room assignment
+    (AbstractDungeon.java:539, 542-556); corrected at B4.1 from live evidence,
+    see §11 v0.1.3.
+  - The sapphire-key reward branch (`isFinalActAvailable && !hasSapphireKey`,
+    AbstractChest.java:95-96) fires on **every Act-1 chest open** —
+    `hasSapphireKey` is cleared at run start (CardCrawlGame.java:473) and set
+    only by `ObtainKeyEffect` (ObtainKeyEffect.java:74), which no Act-1 path
+    reaches. It **appends one `SAPPHIRE_KEY` reward row linked to the base
+    relic** (`AbstractRoom.addSapphireKey`, AbstractRoom.java:545-547) and
+    consumes **no RNG**. Keys stay out of S1: the sim models no key row, and
+    an oracle capture keeps parity by claiming the **relic**, whose claim
+    marks the linked key row done and ignored (RewardItem.java:298-300).
+    Corrected at B4.7, see §11 v0.1.6.
 - **Environment assumption (frozen):** the sim models a **fully-unlocked
   profile**. Unlock state gates real content — e.g. `initializeBoss` special-
   cases unseen bosses via `UnlockTracker.isBossSeen` (Exordium.java:196-201)
@@ -1013,3 +1027,40 @@ Continuing stage-a §10's numbering:
   **Note (not fixed here, this document is frozen):** `docs/stage-a-design.md`
   §4.2 and the older Logs carry the 112 B / 3896 B figures, which were true when
   written.
+- v0.1.6 (2026-07-26) — B4.7 sapphire-key erratum against §1.1. §1.1's "Out
+  (S2+)" list claimed the sapphire-key reward branch "is final-act-gated,
+  AbstractChest.java:95-96, so it never fires in S1". **Corrected: it fires on
+  every Act-1 chest open.** The claim contradicted its own paragraph — the
+  guard is `Settings.isFinalActAvailable && !Settings.hasSapphireKey` (:95),
+  and `isFinalActAvailable` is the *same* profile-unlock condition
+  (Settings.java:642, applied at run start by `setFinalActAvailability`,
+  CardCrawlGame.java:661) that the same bullet already establishes as TRUE on
+  the frozen fully-unlocked profile, which is exactly why `setEmeraldElite`
+  fires (v0.1.3, live evidence). `hasSapphireKey` is cleared on dungeon reset
+  (CardCrawlGame.java:473) and set only by `ObtainKeyEffect`
+  (ObtainKeyEffect.java:74), which no Act-1 path reaches — so both conjuncts
+  hold and `AbstractRoom.addSapphireKey` (AbstractRoom.java:545-547) appends a
+  `SAPPHIRE_KEY` reward row linked to the last reward, i.e. the base relic.
+  This is the same error v0.1.3 corrected for `setEmeraldElite`, in the
+  neighbouring clause of the same sentence, left standing for the sapphire
+  key. **No live evidence is claimed or needed:** the decompiled Java already
+  outranks the design docs (§1.3), and this is a document-internal
+  contradiction, so the correction is recorded under conventions §4 rather
+  than as a live-game override.
+  **Impact — bounded, and none of it is RNG.** The branch consumes no RNG
+  draw, so every stream state is unchanged and no C++ behavior is affected:
+  `open_treasure_chest` is correct as written. The oracle path is already
+  tolerant — the translator classifies `SAPPHIRE_KEY` as a known reward type
+  and ignores `rewards[].link` (`translate.cpp:757` in
+  `tools/oracle_bridge/translator/src/`, PROTOCOL.md §3.6), and the reward
+  screen is deferred, not compared. **What does change is capture procedure:** an Act-1 chest-open
+  spot-diff must expect the extra trailing `SAPPHIRE_KEY` row, and the driver
+  must claim the **relic**, not the key — claiming the relic marks the linked
+  key row `isDone`/`ignoreReward` (RewardItem.java:298-300), while claiming
+  the key does the reverse (RewardItem.java:317-322) and would silently cost
+  the run its relic. B4.7's pending oracle acceptance criteria in
+  `docs/stage-b-tasks.md` were amended to say so; B4.7 remains `[ ]`, its live
+  capture still blocked. **Also stale for the same reason:**
+  `include/sts/engine/combat_rewards.hpp`'s S2 note on SAPPHIRE_KEY and
+  `PROTOCOL.md` §3.6's `rewards[].link` note, both updated in the same change;
+  the disposition (`I`, out of S1) is unchanged — only the reason was wrong.

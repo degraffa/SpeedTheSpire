@@ -130,6 +130,8 @@ uint64_t hash_controller(const RunController& rc, uint64_t* run_h,
     const uint64_t sc = scalars_hash(rc);
     XXH3_64bits_update(&st, &sc, sizeof(sc));
     XXH3_64bits_update(&st, &rc.rewards, sizeof(rc.rewards));
+    XXH3_64bits_update(&st, &rc.treasure_chest,
+                       sizeof(rc.treasure_chest));
     update_lists(&st, rc.lists);
     return static_cast<uint64_t>(XXH3_64bits_digest(&st));
 }
@@ -141,6 +143,8 @@ ControllerHashes hash_controller_parts(const RunController& rc) noexcept {
     h.combat = engine::hash_state(rc.combat);
     h.lists = lists_hash(rc.lists);
     h.rewards = static_cast<uint64_t>(XXH3_64bits(&rc.rewards, sizeof(rc.rewards)));
+    h.treasure = static_cast<uint64_t>(
+        XXH3_64bits(&rc.treasure_chest, sizeof(rc.treasure_chest)));
     h.scalars = scalars_hash(rc);
     return h;
 }
@@ -228,7 +232,10 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                 ++cov->deaths;
             }
             if (rc.room_type < kRoomTypeCount &&
-                (phase == RunPhase::COMBAT || phase == RunPhase::ROOM_UNIMPLEMENTED)) {
+                (phase == RunPhase::COMBAT ||
+                 phase == RunPhase::REST_SITE ||
+                 phase == RunPhase::TREASURE_ROOM ||
+                 phase == RunPhase::ROOM_UNIMPLEMENTED)) {
                 ++cov->room_entered[rc.room_type];
             }
             prev_phase = rc.phase;

@@ -67,6 +67,8 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::DIG: return "dig";
         case MoveCat::SMITH_CARD: return "smith_card";
         case MoveCat::TOKE_CARD: return "toke_card";
+        case MoveCat::TREASURE_OPEN: return "treasure_open";
+        case MoveCat::TREASURE_SKIP: return "treasure_skip";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -291,6 +293,19 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             break;
         }
 
+        case RunPhase::TREASURE_ROOM:
+            if (mask.can_open_chest) {
+                s.add(make_action(ActionVerb::CHOOSE,
+                                  engine::kChooseOpenChest),
+                      MoveCat::TREASURE_OPEN);
+            }
+            if (mask.can_proceed) {
+                s.add(make_action(ActionVerb::CHOOSE,
+                                  engine::kChooseProceed),
+                      MoveCat::TREASURE_SKIP);
+            }
+            break;
+
         case RunPhase::NONE:
         case RunPhase::ROOM_UNIMPLEMENTED:
         case RunPhase::RUN_OVER:
@@ -438,12 +453,15 @@ struct CardScore {
             const engine::RoomType r = map_move_room(rc, m);
             if (kind == PolicyKind::ALWAYS_EVENT) {
                 // Steer AWAY from combat: the ?-room / shop / rest / treasure
-                // nodes are the ones that park at ROOM_UNIMPLEMENTED, which is
-                // exactly the seam this policy is here to hammer.
+                // nodes exercise non-combat routing. Treasure and Rest now
+                // continue; event and shop park at the explicit unimplemented
+                // seam. Treasure scores above the generic non-combat weight so
+                // this policy reliably reaches the chest phase.
+                if (r == engine::RoomType::Treasure) return 110;
                 return is_combat_room(r) ? 10 : 100;
             }
             // Every other heuristic wants depth, and depth lives in combat:
-            // a non-combat node ends the run at ROOM_UNIMPLEMENTED today.
+            // most non-combat nodes still park at ROOM_UNIMPLEMENTED.
             if (r == engine::RoomType::Elite) return 110;  // longest fights
             if (r == engine::RoomType::Monster) return 100;
             if (r == engine::RoomType::Boss) return 90;
@@ -488,6 +506,10 @@ struct CardScore {
         case MoveCat::SMITH_CARD:
         case MoveCat::TOKE_CARD:
             return 50;
+        case MoveCat::TREASURE_OPEN:
+            return 100;
+        case MoveCat::TREASURE_SKIP:
+            return 5;
         case MoveCat::COUNT:
             break;
     }
