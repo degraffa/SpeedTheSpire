@@ -63,16 +63,15 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| **`dispatch_at_start_of_turn_post_draw` runs at combat start, where the game has no counterpart** | integration-14 | **IN PROGRESS — `fix-postdraw-gate`** | the twin of the (now discharged) combat-start end-of-round row, and the half that fix deliberately left: `AbstractRoom.java`'s turn-1 block calls `applyStartOfTurnPostDrawRelics` (`:254`) but has **no** post-draw *powers* line, while `GameActionManager.java:363` does. B3.8 registered the first two binders (Brutality 50, Demon Form 51), so the comment asserting the hook was unbound merged **silently inverted** and was corrected in `4da5167`. Still unobservable — both powers require playing their card, so neither can exist at combat start — so gating it is a behaviour change owing a test, not an integration edit |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
 | Recursive-play opcode (design R14) — Mayhem | B3.2 | B3.11 | **the opcode now exists**: B3.8 landed `PLAY_CARD` = 34 as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}` **unchanged** — this row is the authoring, not the verb. Also unblocks the Duplication and Distilled Chaos potions |
 | Per-power counter storage — Panache (every-5th), The Bomb (3-turn) | B3.2 | B3.11 | B3.2 added no `PowerSlot` counter field; Combust (B3.7) and Rampage (B3.5) were solved locally |
-| Enemy self-escape + stolen-gold return rules | B4.4 | B3.15 | B4.4 names B3.15 as the explicit owner |
-| Smoke Bomb combat-escape potion body | B3.23 | B3.15 | B4.4 landed the run-level half (rejects bosses, no-reward proceed); the combat-escape path is still B3.15's |
-| Pantograph atBattleStart boss heal 25 | B3.25 | B3.15 | needs EnemyType/BOSS monster metadata; named "B3.15-B3.17", and B3.16/B3.17/B3.20 landed without it |
-| Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | B3.15 | run-created combats with an unimplemented group cannot play out. **B3.18, B3.19, B3.16, B3.21 and B3.22 have all discharged their share by construction** — the gate is `monster_init_fn(id) == nullptr`, i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. B3.15 (slavers, Looter, Fungi Beast) is the last owner and inherits the same free discharge |
+| **The liveness predicate: `hp > 0` where the Java's is `isDying \|\| isEscaping`** | B3.15 (partial landing) | **B3.15 remainder** — the Looter cluster | the single blocker under the **two rows immediately below**, found by B3.15 and the reason its Looter half deliberately did not land (the un-park row three down is **not** blocked on it — that one discharges for free the moment the Looter's init fn is registered). `any_monster_alive` / `queue_monsters` (`src/engine/action_queue.cpp`) read `hp > 0`; the game reads `isDying \|\| isEscaping` (`MonsterGroup.java:90-95,117-122`), so an **escaped monster is alive and out of the fight** and this engine cannot express that state. There is **no alternative seam**: `pump_step` recomputes the phase from the predicate every iteration, so a `COMBAT_OVER` written by an opcode is overwritten on the next step. **`action_queue.cpp` is now free** — the `fix-postdraw-gate` branch that held it landed in `06c4fa0` |
+| Enemy self-escape + stolen-gold return rules | B4.4 | **B3.15 remainder** | B4.4 names B3.15 as the explicit owner. Blocked on the liveness-predicate row above. The Looter's escape **is reachable in Act 1** — unlike B3.16's gremlin move 99 it needs no `escapeNext()`/`deathReact()` caller; it is simply where its own `takeTurn` machine ends (Mug, Mug, a 50/50 into Smoke Bomb or Lunge, then Escape on turn 4 or 5, `Looter.java:33-193`) |
+| Smoke Bomb combat-escape potion body | B3.23 | **B3.15 remainder** | B4.4 landed the run-level half (rejects bosses, no-reward proceed); the combat-escape path is still B3.15's. **Blocked on the identical predicate** — `SmokeBomb.use` never touches the monsters, it sets the **player's** `isEscaping`, which is why the run layer and not the combat layer carries the working implementation today. Recorded at the site in `potions.cpp`'s deferred-natives note |
+| Un-park unimplemented monster groups (they consume their B3.12 composition draws and then park) | B4.4 | **B3.15 remainder** | run-created combats with an unimplemented group cannot play out. **B3.18, B3.19, B3.16, B3.21, B3.22 and now B3.15's landed half have all discharged their share by construction** — the gate is `monster_init_fn(id) == nullptr` (`run_advance.cpp:273`), i.e. it asks the dispatch switch directly, so **no code edit is needed**: registering an init fn un-parks that group automatically. B3.15's partial landing un-parked Blue Slaver, Red Slaver, 2 Fungi Beasts and Exordium Wildlife. **Only Looter and Exordium Thugs remain parked**, and they un-park the same free way the moment the Looter's init fn is registered |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | UNASSIGNED — needs an OPTIONAL multi-select `CHOOSE_CARD` | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. Every existing `ChoiceKind` selects a **mandatory fixed count**, so this needs an optional multi-select with an explicit confirm — which **changes the public `ActionMask` surface** the observation and translator layers join on, and is therefore not a local relic change. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
 | **Sling of Courage** `atBattleStart` | B3.26 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `Sling.atBattleStart` (`Sling.java:1030-1038`) grants Strength 2 when `getCurrRoom().eliteTrigger` is set. `eliteTrigger` is per-**ROOM** state the run layer sets when an elite encounter begins, and `CombatState` carries no elite marker; producing one is a run-layer change. **Twin of the Slaver's Collar row below** — same missing marker, so both wait on the blocker, not on each other. Inertness asserted by `relic_rares_shop_test` |
@@ -115,7 +114,8 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `RETAIN` `CardFlag` end-of-turn sweep | B3.1 | UNASSIGNED — "first content consumer" | ETHEREAL (B3.5/B3.6) and INNATE (B3.9) discharged; no S1 Ironclad card uses Retain |
 | `lagavulin_init_awake` has no production caller | B3.19 | UNASSIGNED — Lagavulin Event owner | implemented and tested; the event that would build `Lagavulin(false)` does not exist |
 | Gremlin move-99 escape (`EscapeAction` body **and** the `deathReact`/`escapeNext` trigger, landed together) | B3.16 | UNASSIGNED — Act-2 owner | unreachable in Act 1: `escapeNext()` has no caller in the decompiled tree; the only `deathReact()` call is `BanditBear.java:131` |
-| `run_advance.cpp` file-header comment (~line 7) enumerates a stale monster roster | integration-11 | UNASSIGNED — next `run_advance.cpp` toucher | same rot as the step-(2) comment fixed in `5f96ec4`; conventions §8's "comment asserting X does not exist yet" class |
+| `run_advance.cpp` file-header comment (~line 7) enumerates a stale monster roster | integration-11 | UNASSIGNED — next `run_advance.cpp` toucher | same rot as the step-(2) comment fixed in `5f96ec4`; conventions §8's "comment asserting X does not exist yet" class. **Staler since B3.15**: the roster is now 24 monsters, and B3.15's landed half un-parked four more groups **without touching this file** (the un-park gate asks the dispatch switch, not this comment), so nothing forces the comment to move |
+| **Nine pre-existing out-of-range Java citations, repo-wide** | integration-15 citation audit | UNASSIGNED | `RupturePower`, `DexterityPower`, `FrailPower`, `Clash`, `HeavyBlade`, `Torii`, `TungstenRod`, `LizardTail`, `MagicFlower` each carry a `File.java:line` citation that does not resolve in `D:\STS_BG_Mod\SlayTheSpireDecompiled`. Found while fixing the two citations integration-15's own merge broke, and **deliberately left alone** — they predate that integration and are a separate repo-wide condition, not something those branches introduced. Fixing them is comment/provenance-only and needs each cited method **re-read in full**, not line-shifted: the two integration-15 fixed both had *correct prose and wrong numbers*, so a mechanical offset would have looked right and been wrong |
 | `a20.yaml` row 4 cites `tackleDmg = 10`, a dead `DamageInfo` | integration-11 | B4.15 follow-up | literally accurate (`SlimeBoss.java:94-96`) but `tackleDmg` is `damage.get(0)` and SlimeBoss never reads it — only `damage.get(1)` at `:137`/`:144`. `monsters.yaml` is right to omit it. Not a document conflict |
 
 ## Shared namespaces — allocation now in force
@@ -140,14 +140,26 @@ never worth a cosmetic tidy. Re-derive the live id list from `registry/*.yaml`,
 never from this paragraph. (Note the one place contiguity *is* required and is a
 different thing: `relics.yaml` `pool_order` within a tier.)
 
-**`PowerId` 47 and 54–58 are PERMANENT gaps.** 47 was reserved by B3.21, which
-took `MODE_SHIFT` 45 and `SHARP_HIDE` 46 and then did not need a third; **B3.8
-correctly refused to backfill it** and appended its six powers at 48–53. 54–58
-were left behind in the same way — B3.27 appended `CONFUSION` at 59 rather than
-filling them. Both reserving tasks have landed, so neither window will ever be
-issued. Filling a permanent gap is an id renumber in all but name: it changes
-which power a stored `PowerSlot.power_id` byte means, which is exactly what the
-append-only rule exists to prevent. Leave them empty.
+**`PowerId` 47, 54–58 and 60–72 are PERMANENT gaps.** 47 was reserved by B3.21,
+which took `MODE_SHIFT` 45 and `SHARP_HIDE` 46 and then did not need a third;
+**B3.8 correctly refused to backfill it** and appended its six powers at 48–53.
+54–58 were left behind in the same way — B3.27 appended `CONFUSION` at 59 rather
+than filling them. **60–72 are the third instance**: B3.15 appended `ENTANGLE`
+73 / `SPORE_CLOUD` 74 out of the block allocated to it (the rationale is
+recorded in `powers.yaml`'s own B3.15 header comment) rather than reaching down
+into the free window below it. Every task holding a reservation in these three
+windows has landed, so none of them will ever be issued. Filling a permanent gap
+is an id renumber in all but name: it changes which power a stored
+`PowerSlot.power_id` byte means, which is exactly what the append-only rule
+exists to prevent. Leave them empty.
+
+**Allocated blocks belong in this file, not only in a brief.** All three gaps
+above exist because a block was handed to a task that then needed fewer ids than
+it reserved — which is correct and costs nothing. What is *not* free is leaving
+the allocation only in the dispatching brief: a worktree cannot see its siblings,
+the brief is gone once the wave lands, and the next reader is left with an
+unexplained thirteen-wide hole and no way to tell a reservation from an error.
+Record the block here when it is allocated.
 
 **2. `MonsterIntent` values in `tools/registry_gen/stsgen/vocab.py` are a
 shared namespace and need orchestrator allocation before use.** The generator
@@ -173,6 +185,8 @@ disagree, and a fix or a toolchain change that nothing records is invisible to
 the next session.
 
 - **Combat start: turn 1 must not run the end-of-round pass** `[x]` — commit `821bffd`, merged at `9dea548`, landed in `56248c5`. `combat_begin` and `enter_combat` both primed turn 1 with `turn_has_ended = 1` and pumped, routing through `start_of_turn` → `dispatch_at_end_of_round` **before the player's first turn**, so every end-of-round hook on a power present at combat start fired once for free. **The game cannot reach that branch**: `AbstractRoom.java:236-243` sets the flag and then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`) — the queue is never empty while that item is pending, so the step-6 test is false by the time it is reached. **Measured**: a sleeping Lagavulin had **16 block on turn 1 instead of 8** (monster block never decays, so it also gained +8 every later turn). Fixed at **both** entry points via a shared `begin_first_turn` that reuses the same `start_of_turn` with a `TurnStart` parameter; **two by-construction guards scan both files**, so a one-sided regression fails rather than drifts. All 20 committed fixtures replayed **zero-diff**, proving the spurious pass was inert for every piece of landed content. The post-draw *powers* twin was reported and deliberately left — it is the `fix-postdraw-gate` row in the obligations table.
+- **Combat start: turn 1 must not run the post-draw power pass** `[x]` — commit `f05ad8a`, merged at `a5afbf9`, landed in `06c4fa0`. The **sibling** of the end-of-round gate above and the second half of the same divergence, discharging the obligation integration-14 left. `start_of_turn`'s end-of-round pass, Ice Cream energy branch and block decay were all gated to `kSubsequentTurn`; `dispatch_at_start_of_turn_post_draw` was not, so it also ran while priming turn 1. **The game has no counterpart there**: `AbstractRoom.update`'s turn-1 block calls `applyStartOfTurnRelics` (`:253`), `applyStartOfTurnPostDrawRelics` (`:254`), `applyStartOfTurnCards` (`:255`), `applyStartOfTurnPowers` (`:256`) and `applyStartOfTurnOrbs` (`:257`) — and **no `applyStartOfTurnPostDrawPowers` line at all**; `GameActionManager.java:363` (step 6) is the whole game's only caller. The two halves are **not** a pair — the relic half really is on both sides, which is why only the power half moved. Inert for all landed content (Brutality and Demon Form are the only binders, and both require playing their card), so **no test could see it**: the two new `combat_start_test` cases construct the state with the power already present, and the fix was **demonstrated RED before green** — re-arming the dispatch failed exactly those two and nothing else. Fixtures replayed unchanged.
+- **Citation audit + Pantograph's inverted DEFERRED marker** `[x]` — commit `39876f0`, in `06c4fa0`. Comment/provenance only: no executable line, registry value or generated-table value changed. Two defects, **both invisible to git because neither branch conflicted** — the conventions §8 class, and a direct instance of "a conflict-free merge is not evidence of correctness". (1) `AbstractMonster.die()` was cited as `:741-750` at nine new on-death sites; `die(boolean)` is at `:925` and `:741-750` is render code, so **the merge replaced master's already-correct `:933-937` with a wrong one** — re-read and corrected to `isDying` `:927` / powers' `onDeath` `:928-932` / relics' `onMonsterDeath` `:933-937`. (2) `EntanglePower` was cited as `:50-53` at eight sites in a **47-line file**, i.e. resolving to nothing — corrected to `:15-47` / `:17` / `:20-29` / `:31-46`. The described *behaviour* was right throughout in both cases; only the line numbers were wrong. (3) `relics.yaml`'s Pantograph row carried a `DEFERRED` marker **on live, tested code** — the same bug signal running the other way — retired after verifying the native body and its four tests; both premises of the deferral are dead (`enemy_type` column + `MonsterDef::is_boss()`, and three BOSS rows exist). The other ~39 `DEFERRED` markers in that file are legitimate and were not touched.
 - **Build / toolchain effort** `[x]` — commits `44c1e11` (FP contract), `b481db2` + `c568cad` (ctest parallelism, job gate, shared ccache), `93e7a7d` + `c6913f2` (native Windows), merged at `28eab81`, landed in `8235477`. **The floating-point contract is pinned** (`-ffp-contract=off`, `cmake/StsFloatingPoint.cmake`): the frozen oracles were **not** captured under contraction only because baseline x86-64 has no FMA instruction — one `-march=native` away from silently changing damage numbers — and `fp_contract_test` now fails if contraction returns. `ctest` runs parallel; a machine-wide job gate bounds concurrent build parallelism across worktrees; ccache is shared across worktrees via `CCACHE_BASEDIR` (measured 0 % → 50 % cross-worktree hit rate). **A native Windows target was added** — clang-cl 22.1.8, presets `win-debug` / `win-release` / `win-asan` — and it is **byte-identical to Linux**: the 20 fixture traces hash to `ccdc4432…` under GCC 13.3, Clang 18.1.3 and clang-cl alike (debug, LTO release, asan). **WSL is therefore optional, including for sanitizers**: ASan *and* UBSan both work under clang-cl. `cl.exe` silently ignores `/fsanitize=undefined` (warning D9002, exit 0), which is why clang-cl is **required** here rather than merely preferred. The Windows CI job is proposed but unverified — see the obligations table.
 
 ---
@@ -255,7 +269,7 @@ unchanged — what is left here is the authoring, not the verb.
 - **B3.13** `[x]` Monsters: Cultist + louses — monster ids 2-4 (Cultist, LouseNormal, LouseDefensive) + power `CURL_UP`=20; committed independent XS128 fixtures, 32 seeds × 20 turns per monster; 359/359 · [log](stage-b-log.md#b313)
 - **B3.14** `[x]` Monsters: small/medium slimes — monster ids 5-8 (Spike/Acid Slime S+M) + `MonsterIntent::ATTACK_DEBUFF`=6; XS128 fixtures ×4; 413/413 integrated · [log](stage-b-log.md#b314)
 
-### B3.15 `[ ]` ∥ Monsters: slavers + Looter + Fungi Beast
+### B3.15 `[ ]` Monsters: slavers + Looter + Fungi Beast — **PARTIALLY LANDED**
 **Deps:** B3.12 · **Provenance:** SlaverBlue/Red.java, Looter.java,
 FungiBeast.java
 **Deliverables:** registry entries: entangle (Red Slaver), Looter's
@@ -263,11 +277,47 @@ gold-steal + escape (combat-end-without-death path + stolen-gold return
 rules), Fungi Beast Spore Cloud (on-death Vulnerable).
 **Acceptance:** tier-2 per monster; escape terminal state distinct from kill
 (reward implications tested at B4.5); on-death trigger ordering.
-**Inherited:** Pantograph's atBattleStart boss heal 25 (needs EnemyType/BOSS monster
-metadata) — deferred by B3.25. Smoke Bomb's combat-escape body — deferred by B3.23
-(B4.4 landed the run-level half). Enemy self-escape + stolen-gold return, and
-un-parking unimplemented monster groups — deferred by B4.4.
-**Log:** —
+
+**Landed so far** — commit `f24b8db`, merged at `243bf63`, landed in `06c4fa0`
+(with a citation fix in `39876f0`): **three of the four monsters**, ids 23
+`SLAVER_BLUE` / 24 `SLAVER_RED` / 25 `FUNGI_BEAST`, powers `ENTANGLE` = 73 and
+`SPORE_CLOUD` = 74, and the **first dispatch site for `Hook::ON_DEATH`**. All
+three end `takeTurn` in a queued `RollMoveAction`, and unlike Lagavulin / Slime
+Boss / Hexaghost all three `getMove` overrides **read** the rolled `num`, so the
+fixtures pin the roll-driven move rather than a draw count. Two findings worth
+carrying forward: **Entangled is a legality predicate, not a power hook** —
+`AbstractCard.hasEnoughEnergy:872-875` refuses ATTACK-type cards outright, so
+the veto sits in `legal_actions` beside Normality's and Velvet Choker's, after
+the Medical Kit / Blue Candle escape hatches; and **Spore Cloud's ordering
+bites** — `die()` latches `isDying` *before* walking powers, so with two Fungi
+Beasts the **first** death releases 2 Vulnerable and the **last** releases none
+(four named tests). `SUICIDE` deliberately does not dispatch `ON_DEATH`
+(`triggerRelics == false`, `SuicideAction.java:29-36`). `SlaverRed.usedEntangle`
+is the first `MonsterState.pad0` bit-flag user — no layout change, no schema
+bump.
+
+**Remaining — the Looter cluster.** The Looter deliberately did **not** land, and
+that was the right call rather than a shortfall: it is blocked on the liveness
+predicate (top row of the obligations table), and nothing half-working was
+committed. The remainder is now **one coherent piece of work**: the Looter
+itself, enemy self-escape, Smoke Bomb's combat-escape body, and the stolen-gold
+return — all four are the *same* `isDying || isEscaping` change. **This
+remainder is no longer parallel-safe** (the ∥ marker is dropped from the
+heading): it owns `src/engine/action_queue.cpp`, a core-loop file, so it cannot
+run beside anything else touching the pump. `action_queue.cpp` is free as of
+`06c4fa0`.
+
+**Inherited:** Smoke Bomb's combat-escape body — deferred by B3.23 (B4.4 landed
+the run-level half); enemy self-escape + stolen-gold return, and un-parking
+unimplemented monster groups — deferred by B4.4. All three now carry the same
+blocker and stay with the remainder. **Pantograph's `atBattleStart` boss heal 25
+is DISCHARGED** — it was found already implemented and tested (native
+`relic_native_pantograph`, pinned by four `RelicHooksPantograph` tests); only its
+stale `DEFERRED` markers needed retiring, done in `39876f0`. The un-park
+obligation is **partially discharged**: Blue Slaver, Red Slaver, 2 Fungi Beasts
+and Exordium Wildlife un-parked by construction; **Looter and Exordium Thugs
+remain parked**.
+**Log:** — (task is not done; the partial landing is recorded above)
 
 - **B3.16** `[x]` ∥ Monsters: gremlin gang — monster ids 16-20, `PowerId::ANGRY`=40, `MonsterIntent::DEFEND`=11; six independent 32-seed × 20-turn XS128 fixtures incl. a 4-gremlin battery pinning the Tsundere's `aiRng` block-target pick; **move 99 (ESCAPE) is unreachable in Act 1** and left unmodelled with both halves recorded for Act 2; Angry's `damageAmount > 0` guard reads **post-block** damage; registering the five init fns un-parked the encounter with no `run_advance.cpp` edit · [log](stage-b-log.md#b316)
 - **B3.17** `[x]` Monsters: large slimes + split — monster ids 9-10 (large slimes), `PowerId::SPLIT`=22, opcodes 25-29 (`CANNOT_LOSE`/`CAN_LOSE`/`SUICIDE`/`SPAWN_MONSTER`/`SET_MOVE`); the Java-exact split framework; 441/441 ×3 · [log](stage-b-log.md#b317)
@@ -582,6 +632,62 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **ledger/history reconciliation after integration-15 (`master` at
+  `34c3e96`, pushed).** A conventions §2 incident of the same shape as the
+  integration-12/-13/-14 entry below, and a **narrower, more instructive one**:
+  the previous reconciliation missed *tasks*, this one missed a **partial
+  landing**. Integration-15 landed `f24b8db` (B3.15's three monsters), `f05ad8a`
+  (the post-draw gate) and `39876f0` (the citation audit) — none of the five
+  commits since `d3500dc` touched `docs/`, so this ledger still showed B3.15
+  untouched, the post-draw obligation "IN PROGRESS", and Pantograph deferred to a
+  task that had already found it implemented. **The push was correct and the code
+  is sound; only the record lagged.**
+  - **Verified before writing, not inferred.** A clean `debug` build of
+    `34c3e96` (`STS_JOBS=6 tools/wsl_run.sh debug`) reports **100 % passed, zero
+    failed**, independently corroborating integration-15's six-preset claim; the
+    count itself is deliberately not restated here — re-derive it with `ctest -N
+    | tail -1`, per §8. Manifest
+    **regenerated** by `tools/registry_gen/gen.py` rather than summed: cards 91 /
+    powers 42 / monsters 24 / relics 142 / potions 33 / events 0 / encounters 20
+    / a20 20 / **total 372**. The four `kPowersCount` guards (1 in
+    `interp_block.cpp`, 3 in `interp_damage.cpp`) were checked against the
+    regenerated value and are consistently at 42 — B3.15 moved all four
+    together, so this is **not** a repeat of integration-14's silently-stale
+    count assert.
+  - **B3.15 is recorded as PARTIALLY LANDED and stays `[ ]`.** Its Acceptance
+    names "escape terminal state distinct from kill", which no landed code
+    satisfies, so §1's "done only when its Acceptance block passes" keeps it
+    open; the landed half is recorded in a **Landed so far** block instead of a
+    Log. Its `∥` marker is **dropped**: the remainder owns
+    `src/engine/action_queue.cpp` and is no longer parallel-safe.
+  - **One new obligation row replaces three separate blockers.** The Looter,
+    enemy self-escape, Smoke Bomb's combat body and the stolen-gold return were
+    three rows pointing at different-sounding problems; B3.15 proved they are
+    **one predicate** — `hp > 0` where the Java reads `isDying || isEscaping`
+    (`MonsterGroup.java:90-95,117-122`) — with no alternative seam, because
+    `pump_step` recomputes the phase from it every iteration. The predicate now
+    has its own row at the head of the table and the other three point at it.
+  - **Two rows discharged and deleted.** The post-draw gate row (landed as
+    `f05ad8a`; moved to **Landed non-task work** with its provenance, alongside a
+    new bullet for the citation audit) and **Pantograph's boss heal** — which was
+    never deferred at all by the time B3.15 reached it: the body, the
+    `native: true` row and four `RelicHooksPantograph` tests were already live,
+    and only the `DEFERRED` markers were stale. **A deferral marker sitting on
+    live code is conventions §8's bug signal inverted**, and it is the second
+    kind this wave produced.
+  - **Two rows added, two narrowed.** Added: the liveness predicate; and the
+    **nine pre-existing out-of-range Java citations** the audit found and
+    correctly left alone. Narrowed: the un-park row (Blue Slaver, Red Slaver, 2
+    Fungi Beasts and Exordium Wildlife un-parked by construction — **only Looter
+    and Exordium Thugs remain**) and the `run_advance.cpp` stale-roster comment,
+    which got staler precisely *because* the un-park gate needs no edit there.
+  - **`PowerId` 60–72 are recorded as a third permanent gap.** B3.15 appended
+    `ENTANGLE` 73 / `SPORE_CLOUD` 74 out of its allocated block rather than
+    reaching into the free window below it — correct, and the same shape as 47
+    and 54–58. The **allocation itself was never written down here**, only in the
+    dispatching brief, leaving an unexplained thirteen-wide hole for the next
+    reader; the namespaces section now says allocated blocks belong in this file,
+    which is the rule that hole exists to teach.
 - 2026-07-25 — **the `gen.py` `SET_COST` step-authoring obligation is CLOSED**,
   and B3.26's four deliberately-inert relics **get rows**. Orchestrator
   decisions on the two items the reconciliation entry below surfaced rather than
