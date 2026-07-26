@@ -9,7 +9,182 @@
 #                          metadata (design doc B §4.1: dialog trees are irreducibly
 #                          bespoke). Default true in practice for events.
 #
-# Empty in the skeleton (stage-a design §9: no events). Populating this domain is a
-# later task; the file exists now so codegen produces the (NONE-only) EventId enum
-# and a zero row-count manifest entry cleanly.
-[]
+# Event ids are ordered by the three canonical dungeon lists. The ids are
+# identity only: B4.10 owns list membership and selection; B4.11-B4.13 own the
+# native bodies. Keeping all three blocks in Java insertion order makes the
+# generated enum and translator join auditable against the pool bit positions.
+
+# Exordium.initializeEventList (Exordium.java:223-236).
+- id: 1
+  name: BIG_FISH
+  game_id: "Big Fish"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 0; BigFish.ID (BigFish.java:24) is \"Big Fish\"."
+  native: true
+- id: 2
+  name: THE_CLERIC
+  game_id: "The Cleric"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 1; Cleric.ID (Cleric.java:18) is \"The Cleric\"."
+  native: true
+- id: 3
+  name: DEAD_ADVENTURER
+  game_id: "Dead Adventurer"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 2; DeadAdventurer.ID (DeadAdventurer.java:37) is \"Dead Adventurer\"."
+  native: true
+- id: 4
+  name: GOLDEN_IDOL
+  game_id: "Golden Idol"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 3; GoldenIdolEvent.ID (GoldenIdolEvent.java:27) is \"Golden Idol\"."
+  native: true
+- id: 5
+  name: GOLDEN_WING
+  game_id: "Golden Wing"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 4; GoldenWing.ID (GoldenWing.java:30) is \"Golden Wing\"."
+  native: true
+- id: 6
+  name: WORLD_OF_GOOP
+  game_id: "World of Goop"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 5; GoopPuddle.ID (GoopPuddle.java:25) is \"World of Goop\"."
+  native: true
+- id: 7
+  name: LIARS_GAME
+  game_id: "Liars Game"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 6; Sssserpent.ID (Sssserpent.java:25) is \"Liars Game\"."
+  native: true
+- id: 8
+  name: LIVING_WALL
+  game_id: "Living Wall"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 7; LivingWall.ID (LivingWall.java:26) is \"Living Wall\"."
+  native: true
+- id: 9
+  name: MUSHROOMS
+  game_id: "Mushrooms"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 8; Mushrooms.ID (Mushrooms.java:34) is \"Mushrooms\"."
+  native: true
+- id: 10
+  name: SCRAP_OOZE
+  game_id: "Scrap Ooze"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 9; ScrapOoze.ID (ScrapOoze.java:24) is \"Scrap Ooze\"."
+  native: true
+- id: 11
+  name: SHINING_LIGHT
+  game_id: "Shining Light"
+  provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 10; ShiningLight.ID (ShiningLight.java:31) is \"Shining Light\"."
+  native: true
+
+# Exordium.initializeShrineList (Exordium.java:238-246).
+- id: 12
+  name: MATCH_AND_KEEP
+  game_id: "Match and Keep!"
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 0; GremlinMatchGame.ID (GremlinMatchGame.java:36) is \"Match and Keep!\"."
+  native: true
+- id: 13
+  name: GOLDEN_SHRINE
+  game_id: "Golden Shrine"
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 1; GoldShrine.ID (GoldShrine.java:24) is \"Golden Shrine\"."
+  native: true
+- id: 14
+  name: TRANSMORGRIFIER
+  game_id: "Transmorgrifier"
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 2; Transmogrifier.ID (Transmogrifier.java:22) is \"Transmorgrifier\"."
+  native: true
+- id: 15
+  name: PURIFIER
+  game_id: "Purifier"
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 3; PurificationShrine.ID (PurificationShrine.java:21) is \"Purifier\"."
+  native: true
+- id: 16
+  name: UPGRADE_SHRINE
+  game_id: "Upgrade Shrine"
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 4; UpgradeShrine.ID (UpgradeShrine.java:24) is \"Upgrade Shrine\"."
+  native: true
+- id: 17
+  name: WHEEL_OF_CHANGE
+  game_id: "Wheel of Change"
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 5; GremlinWheelGame.ID (GremlinWheelGame.java:48) is \"Wheel of Change\"."
+  native: true
+
+# AbstractDungeon.initializeSpecialOneTimeEventList
+# (AbstractDungeon.java:1340-1358).
+#
+# The `position N` annotations in this block are the indices of the
+# NFY-PRESENT configuration (list length 14). isNoteForYourselfAvailable
+# (:1360-1378) guards the `specialOneTimeEventList.add("NoteForYourself")`
+# call ITSELF (:1351-1353) -- there is NO placeholder slot. When it returns
+# false the list is length 13 and every entry after it shifts down by one, so
+# SecretPortal sits at runtime index 9, not 10. The registry `id` is identity
+# only and never moves; only the runtime index does.
+#
+# Class files live under com/megacrit/cardcrawl/events/. This block is NOT
+# uniformly `shrines/`: KnowingSkull and TheJoust are `city/` and SecretPortal
+# is `beyond/` (EventHelper.java:18 imports it from there). Those three rows
+# carry a package-qualified path; the remaining eleven are `shrines/`.
+- id: 18
+  name: ACCURSED_BLACKSMITH
+  game_id: "Accursed Blacksmith"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 0; AccursedBlacksmith.ID (AccursedBlacksmith.java:22)."
+  native: true
+- id: 19
+  name: BONFIRE_ELEMENTALS
+  game_id: "Bonfire Elementals"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 1; Bonfire.ID (Bonfire.java:26)."
+  native: true
+- id: 20
+  name: DESIGNER
+  game_id: "Designer"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 2; Designer.ID (Designer.java:31)."
+  native: true
+- id: 21
+  name: DUPLICATOR
+  game_id: "Duplicator"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 3; Duplicator.ID (Duplicator.java:17)."
+  native: true
+- id: 22
+  name: FACE_TRADER
+  game_id: "FaceTrader"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 4; FaceTrader.ID (FaceTrader.java:27)."
+  native: true
+- id: 23
+  name: FOUNTAIN_OF_CLEANSING
+  game_id: "Fountain of Cleansing"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 5; FountainOfCurseRemoval.ID (FountainOfCurseRemoval.java:21)."
+  native: true
+- id: 24
+  name: KNOWING_SKULL
+  game_id: "Knowing Skull"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 6; KnowingSkull.ID (events/city/KnowingSkull.java:35) -- city/, not shrines/."
+  native: true
+- id: 25
+  name: LAB
+  game_id: "Lab"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 7; Lab.ID (Lab.java:24)."
+  native: true
+- id: 26
+  name: NLOTH
+  game_id: "N'loth"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 8; Nloth.ID (Nloth.java:21)."
+  native: true
+- id: 27
+  name: NOTE_FOR_YOURSELF
+  game_id: "NoteForYourself"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 9, present only when isNoteForYourselfAvailable (:1360-1378) is true (:1351-1353); NoteForYourself.ID (NoteForYourself.java:25)."
+  native: true
+- id: 28
+  name: SECRET_PORTAL
+  game_id: "SecretPortal"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 10 with NoteForYourself present, 9 without; com.megacrit.cardcrawl.events.beyond.SecretPortal.ID (events/beyond/SecretPortal.java:24) -- beyond/, not shrines/ (EventHelper.java:18 imports it from there)."
+  native: true
+- id: 29
+  name: THE_JOUST
+  game_id: "The Joust"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 11 with NoteForYourself present, 10 without; TheJoust.ID (events/city/TheJoust.java:22) -- city/, not shrines/."
+  native: true
+- id: 30
+  name: WE_MEET_AGAIN
+  game_id: "WeMeetAgain"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 12 with NoteForYourself present, 11 without; WeMeetAgain.ID (WeMeetAgain.java:32)."
+  native: true
+- id: 31
+  name: THE_WOMAN_IN_BLUE
+  game_id: "The Woman in Blue"
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 13 with NoteForYourself present, 12 without; WomanInBlue.ID (WomanInBlue.java:29)."
+  native: true
