@@ -2859,6 +2859,12 @@ checks pass. The old-base task branch deliberately leaves the fuzz campaign
 build id for the integration commit to advance against the then-current master
 identity.
 
+**Integration note:** landing B4.9 changes run transitions, legal-action
+enumeration and fuzz coverage. The fuzzer build identity therefore advances
+from `schema5-b51fix2-cardgate1` to
+`schema5-b51fix2-cardgate1-rest1`; summaries from before and after rest-site
+support cannot be merged.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes
