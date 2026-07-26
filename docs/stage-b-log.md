@@ -2865,6 +2865,13 @@ from `schema5-b51fix2-cardgate1` to
 `schema5-b51fix2-cardgate1-rest1`; summaries from before and after rest-site
 support cannot be merged.
 
+**Post-landing empty-offer audit:** structural CARD validity now requires an
+offer count in `[1, kRewardCardCap]`, both before an outer reward can be claimed
+and while its pick screen is open. Zero-card ordinary and Dream Catcher
+regressions pin empty masks and inert forced Take/Skip/Singing Bowl actions;
+the ordinary outer screen still exposes Proceed, while a malformed open screen
+does not.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes

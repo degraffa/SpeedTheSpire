@@ -369,7 +369,8 @@ bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
         case RewardItemKind::STOLEN_GOLD:
             return true;
         case RewardItemKind::CARDS:
-            return item.card_count <= kRewardCardCap;
+            return item.card_count > 0 &&
+                   item.card_count <= kRewardCardCap;
         case RewardItemKind::POTION:
             // Sozu claims-and-discards regardless of slots (RewardItem.java:
             // 276-279); otherwise obtainPotion needs a free slot below the
@@ -456,6 +457,7 @@ bool reward_card_item_open_legal(const RewardScreen& s) noexcept {
     }
     const RunRewardItem& item = s.items[s.open_card_item];
     return static_cast<RewardItemKind>(item.kind) == RewardItemKind::CARDS &&
+           item.card_count > 0 &&
            item.card_count <= kRewardCardCap;
 }
 

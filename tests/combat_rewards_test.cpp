@@ -1209,6 +1209,68 @@ TEST(RewardFlow, NoneAndUnknownRewardKindsNeverAuthorizeANoOpClaim) {
     EXPECT_EQ(std::memcmp(&oversized, &before, sizeof(oversized)), 0);
 }
 
+TEST(RewardFlow, ZeroCardOfferIsUnclaimableAndMalformedOpenStateIsInert) {
+    RunController outer = run_begin(49, kA20);
+    give_relics(outer.run, {RelicId::SINGING_BOWL});
+    outer.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    outer.rewards = RewardScreen{};
+    outer.rewards.count = 1;
+    outer.rewards.open_card_item = kNoOpenCardReward;
+    outer.rewards.items[0].kind =
+        static_cast<uint8_t>(RewardItemKind::CARDS);
+    ASSERT_EQ(outer.rewards.items[0].card_count, 0);
+
+    RunActionMask mask{};
+    legal_actions(outer, mask);
+    EXPECT_FALSE(mask.can_claim_reward[0]);
+    EXPECT_TRUE(mask.can_proceed)
+        << "the outer screen must remain escapable despite a malformed item";
+    EXPECT_FALSE(mask.can_skip_card);
+    EXPECT_FALSE(mask.can_sing);
+    for (bool can_take : mask.can_take_card) {
+        EXPECT_FALSE(can_take);
+    }
+    EXPECT_FALSE(reward_claim_legal(outer.run, outer.rewards, 0));
+
+    const RunController outer_before = outer;
+    step(outer, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(std::memcmp(&outer, &outer_before, sizeof(outer)), 0);
+
+    RunController abandoned = outer;
+    step(abandoned, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    EXPECT_EQ(abandoned.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(abandoned.rewards.count, 0);
+    EXPECT_EQ(abandoned.rewards.open_card_item, kNoOpenCardReward);
+
+    RunController open = outer;
+    open.rewards.open_card_item = 0;
+    EXPECT_FALSE(reward_card_item_open_legal(open.rewards));
+    legal_actions(open, mask);
+    EXPECT_FALSE(mask.can_proceed)
+        << "Proceed stays hidden whenever an open-card sentinel is present";
+    EXPECT_FALSE(mask.can_skip_card);
+    EXPECT_FALSE(mask.can_sing);
+    for (bool can_take : mask.can_take_card) {
+        EXPECT_FALSE(can_take);
+    }
+    for (bool can_claim : mask.can_claim_reward) {
+        EXPECT_FALSE(can_claim);
+    }
+
+    const Action forced[] = {
+        make_action(ActionVerb::CHOOSE, 0),
+        make_action(ActionVerb::CHOOSE, kChooseSkipCard),
+        make_action(ActionVerb::CHOOSE, kChooseSing),
+        make_action(ActionVerb::CHOOSE, kChooseProceed)};
+    for (const Action action : forced) {
+        RunController attempted = open;
+        step(attempted, action);
+        EXPECT_EQ(std::memcmp(&attempted, &open, sizeof(open)), 0)
+            << "zero-card open state accepted forced CHOOSE "
+            << static_cast<int>(action_arg0(action));
+    }
+}
+
 TEST(RewardFlow, MalformedOpenCardStatesAreInertAndAdvertiseNothing) {
     auto expect_inert = [](RewardScreen malformed) {
         RunController rc = run_begin(49, kA20);
