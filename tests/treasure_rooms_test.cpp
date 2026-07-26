@@ -11,7 +11,9 @@
 
 #include <array>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
+#include <type_traits>
 
 #include "gtest/gtest.h"
 
@@ -76,6 +78,12 @@ void step(RunController& rc, Action action) {
     advance(std::span<RunController>(&rc, 1),
             std::span<const Action>(&action, 1),
             std::span<StepResult>(&result, 1));
+}
+
+template <typename T>
+void expect_byte_equal(const T& got, const T& want, const char* label) {
+    static_assert(std::is_trivially_copyable_v<T>);
+    EXPECT_EQ(std::memcmp(&got, &want, sizeof(T)), 0) << label;
 }
 
 TEST(TreasureChestTable, ExactSizeAndContentsBoundaries) {
@@ -176,7 +184,7 @@ TEST(TreasureOpen, GoldUsesExactFloatRangeAndTreasureHasNoGoldenIdolBonus) {
                                             25.0f * 1.1f));
     RngStream misc = from_seed(1);
     RewardScreen rewards{};
-    open_treasure_chest(rs, misc, chest, rewards);
+    ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
 
     ASSERT_EQ(rewards.count, 2);
     ASSERT_EQ(rewards.items[0].kind,
@@ -214,7 +222,7 @@ TEST(TreasureOpen, BaseRelicUsesThePreRolledTierAndB46ClaimDoor) {
             static_cast<uint8_t>(row.tier), 0, 0};
         RewardScreen rewards{};
         RngStream misc = from_seed(2);
-        open_treasure_chest(rs, misc, chest, rewards);
+        ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
         ASSERT_EQ(rewards.count, 1);
         EXPECT_EQ(rewards.items[0].id, static_cast<uint16_t>(row.relic));
         EXPECT_EQ(rs.relic_pool_count[pool_index(row.tier)], 0);
@@ -248,7 +256,7 @@ TEST(TreasureHooks, ExactBeforeBaseAfterOrderMakesNlothRemoveMatryoshkaBonus) {
         static_cast<uint8_t>(RelicTier::COMMON), 0, 0};
     RewardScreen rewards{};
     RngStream misc = from_seed(3);
-    open_treasure_chest(rs, misc, chest, rewards);
+    ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
 
     // Matryoshka popped/inserted Anchor before the base relic popped/inserted
     // Vajra. N'loth's after hook removes the first RELIC reward, not the last.
@@ -273,19 +281,19 @@ TEST(TreasureHooks, MatryoshkaHasTwoNonBossUsesThenStopsDrawing) {
              {RelicId::PEAR, RelicId::PANTOGRAPH, RelicId::HORN_CLEAT});
 
     RewardScreen first{};
-    dispatch_relics_on_chest_open(rs, first, false);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, first, false));
     EXPECT_EQ(first.count, 1);
     EXPECT_EQ(rs.relics[0].counter, 1);
     EXPECT_EQ(rs.relic_rng.counter, 1);
 
     RewardScreen second{};
-    dispatch_relics_on_chest_open(rs, second, false);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, second, false));
     EXPECT_EQ(second.count, 1);
     EXPECT_EQ(rs.relics[0].counter, -2);
     EXPECT_EQ(rs.relic_rng.counter, 2);
 
     RewardScreen third{};
-    dispatch_relics_on_chest_open(rs, third, false);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, third, false));
     EXPECT_EQ(third.count, 0);
     EXPECT_EQ(rs.relics[0].counter, -2);
     EXPECT_EQ(rs.relic_rng.counter, 2);
@@ -300,7 +308,7 @@ TEST(TreasureHooks, CursedKeyAlwaysDrawsIdentityBeforeOmamoriBlocks) {
                      {RelicId::CERAMIC_FISH, -1}});
     const RngStream before = rs.card_rng;
     RewardScreen rewards{};
-    dispatch_relics_on_chest_open(rs, rewards, false);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, rewards, false));
     EXPECT_EQ(rs.card_rng.counter, before.counter + 1);
     EXPECT_EQ(rs.master_deck_count, 0);
     EXPECT_EQ(rs.relics[1].counter, 1);
@@ -320,7 +328,7 @@ TEST(TreasureHooks, CursedKeyCurseUsesTheMasterDeckObtainHooks) {
     RngStream expected_rng = rs.card_rng;
     const CardId expected = return_random_curse(expected_rng);
     RewardScreen rewards{};
-    dispatch_relics_on_chest_open(rs, rewards, false);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, rewards, false));
 
     ASSERT_EQ(rs.master_deck_count, 1);
     EXPECT_EQ(rs.master_deck[0].card_id,
@@ -342,7 +350,7 @@ TEST(TreasureHooks, MultipleCursedKeysConsumeOmamoriThenAcquireInOrder) {
                      {RelicId::CURSED_KEY, -1},
                      {RelicId::CERAMIC_FISH, -1}});
     RewardScreen rewards{};
-    dispatch_relics_on_chest_open(rs, rewards, false);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, rewards, false));
     EXPECT_EQ(rs.card_rng.counter, 2);
     EXPECT_EQ(rs.relics[1].counter, 0);
     EXPECT_EQ(rs.master_deck_count, 1);
@@ -360,8 +368,8 @@ TEST(TreasureHooks, AllThreeHooksAreNoOpsForBossChest) {
     rewards.count = 1;
     rewards.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
     rewards.items[0].id = static_cast<uint16_t>(RelicId::ANCHOR);
-    dispatch_relics_on_chest_open(rs, rewards, true);
-    dispatch_relics_on_chest_open_after(rs, rewards, true);
+    ASSERT_TRUE(dispatch_relics_on_chest_open(rs, rewards, true));
+    ASSERT_TRUE(dispatch_relics_on_chest_open_after(rs, rewards, true));
     EXPECT_EQ(rs.card_rng.counter, 0);
     EXPECT_EQ(rs.relic_rng.counter, 0);
     EXPECT_EQ(rs.master_deck_count, 0);
@@ -370,6 +378,160 @@ TEST(TreasureHooks, AllThreeHooksAreNoOpsForBossChest) {
     ASSERT_EQ(rewards.count, 1);
     EXPECT_EQ(rewards.items[0].id,
               static_cast<uint16_t>(RelicId::ANCHOR));
+}
+
+TEST(TreasureCapacity, PublicBeforeHookRollsBackLateNearFullFailure) {
+    RunState rs{};
+    rs.floor = 9;
+    rs.act = 1;
+    rs.card_rng = from_seed(404);
+    rs.relic_rng = from_seed(505);
+    give_relics(rs, {{RelicId::CURSED_KEY, -1},
+                     {RelicId::MATRYOSHKA, 1},
+                     {RelicId::MATRYOSHKA, 1}});
+    set_pool(rs, RelicTier::COMMON,
+             {RelicId::ANCHOR, RelicId::VAJRA});
+    set_pool(rs, RelicTier::UNCOMMON,
+             {RelicId::PEAR, RelicId::HORN_CLEAT});
+
+    RewardScreen rewards{};
+    rewards.open_card_item = kNoOpenCardReward;
+    rewards.count = static_cast<uint8_t>(kRewardItemCap - 1);
+    for (uint8_t i = 0; i < rewards.count; ++i) {
+        rewards.items[i].kind =
+            static_cast<uint8_t>(RewardItemKind::GOLD);
+        rewards.items[i].gold = static_cast<int16_t>(10 + i);
+    }
+
+    const RunState before_rs = rs;
+    const RewardScreen before_rewards = rewards;
+    EXPECT_FALSE(dispatch_relics_on_chest_open(rs, rewards, false));
+    expect_byte_equal(rs, before_rs, "RunState transaction rollback");
+    expect_byte_equal(
+        rewards, before_rewards, "RewardScreen transaction rollback");
+}
+
+TEST(TreasureCapacity, SevenMatryoshkasRejectOpenWithoutAnyControllerChange) {
+    RunController rc{};
+    rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
+    rc.run.floor = 9;
+    rc.run.act = 1;
+    rc.run.card_rng = from_seed(606);
+    rc.run.relic_rng = from_seed(707);
+    rc.run.treasure_rng = from_seed(808);
+    rc.combat.misc_rng = from_seed(909);
+    rc.treasure_chest = TreasureChest{
+        static_cast<uint8_t>(ChestSize::SMALL),
+        static_cast<uint8_t>(RelicTier::COMMON), 1, 0};
+    rc.run.relic_count = 7;
+    for (uint8_t i = 0; i < rc.run.relic_count; ++i) {
+        rc.run.relics[i].relic_id =
+            static_cast<uint16_t>(RelicId::MATRYOSHKA);
+        rc.run.relics[i].counter = 1;
+    }
+    set_pool(rc.run, RelicTier::COMMON,
+             {RelicId::ANCHOR, RelicId::VAJRA, RelicId::BLOOD_VIAL,
+              RelicId::BAG_OF_MARBLES, RelicId::BRONZE_SCALES,
+              RelicId::CENTENNIAL_PUZZLE, RelicId::HAPPY_FLOWER,
+              RelicId::JUZU_BRACELET});
+    set_pool(rc.run, RelicTier::UNCOMMON,
+             {RelicId::PEAR, RelicId::HORN_CLEAT, RelicId::PANTOGRAPH,
+              RelicId::SINGING_BOWL, RelicId::MATRYOSHKA,
+              RelicId::NLOTHS_MASK, RelicId::ETERNAL_FEATHER});
+    rc.rewards.count = 1;
+    rc.rewards.items[0].kind =
+        static_cast<uint8_t>(RewardItemKind::GOLD);
+    rc.rewards.items[0].gold = 123;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_open_chest);
+    EXPECT_TRUE(mask.can_proceed);
+
+    const RunController before = rc;
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
+    expect_byte_equal(rc, before, "forced capacity-rejected controller open");
+
+    EXPECT_FALSE(open_treasure_chest(
+        rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
+    expect_byte_equal(rc, before, "direct capacity-rejected open");
+}
+
+TEST(TreasureCapacity, ExactEightItemOpenStillSucceeds) {
+    RunState rs{};
+    rs.floor = 9;
+    rs.act = 1;
+    rs.relic_rng = from_seed(1001);
+    rs.treasure_rng = from_seed(1002);
+    give_relics(rs, {{RelicId::MATRYOSHKA, 1},
+                     {RelicId::MATRYOSHKA, 1},
+                     {RelicId::MATRYOSHKA, 1},
+                     {RelicId::MATRYOSHKA, 1},
+                     {RelicId::MATRYOSHKA, 1},
+                     {RelicId::MATRYOSHKA, 1}});
+    set_pool(rs, RelicTier::COMMON,
+             {RelicId::ANCHOR, RelicId::VAJRA, RelicId::BLOOD_VIAL,
+              RelicId::BAG_OF_MARBLES, RelicId::BRONZE_SCALES,
+              RelicId::CENTENNIAL_PUZZLE, RelicId::HAPPY_FLOWER});
+    set_pool(rs, RelicTier::UNCOMMON,
+             {RelicId::PEAR, RelicId::HORN_CLEAT, RelicId::PANTOGRAPH,
+              RelicId::SINGING_BOWL, RelicId::NLOTHS_MASK,
+              RelicId::ETERNAL_FEATHER});
+    TreasureChest chest{
+        static_cast<uint8_t>(ChestSize::SMALL),
+        static_cast<uint8_t>(RelicTier::COMMON), 1, 0};
+    RewardScreen rewards{};
+    RngStream misc = from_seed(1003);
+
+    ASSERT_TRUE(treasure_chest_open_legal(rs, chest));
+    ASSERT_TRUE(open_treasure_chest(rs, misc, chest, rewards));
+    EXPECT_EQ(rewards.count, kRewardItemCap);
+    EXPECT_EQ(chest.opened, 1);
+}
+
+TEST(TreasureMalformed, EveryInvalidDescriptorIsMaskAndStepAtomic) {
+    constexpr std::array<TreasureChest, 6> invalid{{
+        {static_cast<uint8_t>(ChestSize::NONE),
+         static_cast<uint8_t>(RelicTier::COMMON), 0, 0},
+        {4, static_cast<uint8_t>(RelicTier::COMMON), 0, 0},
+        {static_cast<uint8_t>(ChestSize::SMALL),
+         static_cast<uint8_t>(RelicTier::SHOP), 0, 0},
+        {static_cast<uint8_t>(ChestSize::SMALL),
+         static_cast<uint8_t>(RelicTier::COMMON), 2, 0},
+        {static_cast<uint8_t>(ChestSize::SMALL),
+         static_cast<uint8_t>(RelicTier::COMMON), 0, 1},
+        {static_cast<uint8_t>(ChestSize::SMALL),
+         static_cast<uint8_t>(RelicTier::COMMON), 0, 2},
+    }};
+
+    for (const TreasureChest& malformed : invalid) {
+        RunController rc{};
+        rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
+        rc.run.floor = 9;
+        rc.run.act = 1;
+        rc.run.relic_rng = from_seed(1111);
+        rc.run.treasure_rng = from_seed(2222);
+        rc.combat.misc_rng = from_seed(3333);
+        rc.treasure_chest = malformed;
+        rc.rewards.open_card_item = kNoOpenCardReward;
+        rc.rewards.count = 1;
+        rc.rewards.items[0].kind =
+            static_cast<uint8_t>(RewardItemKind::GOLD);
+        rc.rewards.items[0].gold = 77;
+
+        RunActionMask mask{};
+        legal_actions(rc, mask);
+        EXPECT_FALSE(mask.can_open_chest);
+        EXPECT_TRUE(mask.can_proceed);
+
+        const RunController before = rc;
+        step(rc, make_action(ActionVerb::CHOOSE, kChooseOpenChest));
+        expect_byte_equal(rc, before, "forced malformed controller open");
+
+        EXPECT_FALSE(open_treasure_chest(
+            rc.run, rc.combat.misc_rng, rc.treasure_chest, rc.rewards));
+        expect_byte_equal(rc, before, "direct malformed open");
+    }
 }
 
 TEST(TreasureLifecycle, FixedRowEntryOffersOpenAndSkipThenReusesRewardFlow) {

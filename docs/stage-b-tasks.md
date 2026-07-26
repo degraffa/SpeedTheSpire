@@ -553,6 +553,10 @@ range; trap-16 named test; oracle spot-diff ≥ 2 treasure floors.
 canSpawn gate was already live), plus the **Cursed Key** and **N'loth's Mask**
 chest hooks deferred by B3.27. All three now have exact non-boss bodies,
 boss gates, counter/RNG/acquisition-order tests, and source-order coverage.
+**Defensive fix-forward:** one strict descriptor/capacity authority now gates
+mask, open, and step; fallible copy-commit reward/hook transactions make
+malformed or over-cap forced opens byte-stable in Debug and Release, including
+duplicate imported Matryoshkas and near-full public hook calls.
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b47)
 (the task stays unchecked until its required live-game spot-diff can run)
 

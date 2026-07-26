@@ -786,9 +786,7 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
 
         case RunPhase::TREASURE_ROOM:
             out.can_open_chest =
-                rc.treasure_chest.opened == 0 &&
-                static_cast<ChestSize>(rc.treasure_chest.size) !=
-                    ChestSize::NONE;
+                treasure_chest_open_legal(rc.run, rc.treasure_chest);
             out.can_proceed = true;  // TreasureRoom is COMPLETE on entry.
             break;
 
@@ -1079,11 +1077,13 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
             if (action_verb(a) == ActionVerb::CHOOSE) {
                 const uint8_t a0 = action_arg0(a);
                 if (a0 == kChooseOpenChest &&
-                    rc.treasure_chest.opened == 0) {
-                    open_treasure_chest(rc.run, rc.combat.misc_rng,
-                                        rc.treasure_chest, rc.rewards);
-                    rc.phase =
-                        static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+                    treasure_chest_open_legal(
+                        rc.run, rc.treasure_chest) &&
+                    open_treasure_chest(
+                        rc.run, rc.combat.misc_rng, rc.treasure_chest,
+                        rc.rewards)) {
+                    rc.phase = static_cast<uint8_t>(
+                        RunPhase::COMBAT_REWARD);
                 } else if (a0 == kChooseProceed) {
                     // The map Proceed button is live before the chest is opened;
                     // skipping consumes no open-time RNG or relic hooks.

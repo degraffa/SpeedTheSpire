@@ -1,7 +1,5 @@
 #include "sts/engine/treasure_rooms.hpp"
 
-#include <cassert>
-
 #include "sts/engine/card_pools.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/relic_pools.hpp"
@@ -11,17 +9,23 @@ namespace sts::engine {
 
 namespace {
 
-RunRewardItem& push_item(RewardScreen& s) noexcept {
-    assert(s.count < kRewardItemCap);
+RunRewardItem* try_push_item(RewardScreen& s) noexcept {
+    if (s.count >= kRewardItemCap) {
+        return nullptr;
+    }
     RunRewardItem& item = s.items[s.count++];
     item = RunRewardItem{};
-    return item;
+    return &item;
 }
 
-void add_relic_item(RewardScreen& s, RelicId id) noexcept {
-    RunRewardItem& item = push_item(s);
-    item.kind = static_cast<uint8_t>(RewardItemKind::RELIC);
-    item.id = static_cast<uint16_t>(id);
+bool add_relic_item(RewardScreen& s, RelicId id) noexcept {
+    RunRewardItem* const item = try_push_item(s);
+    if (item == nullptr) {
+        return false;
+    }
+    item->kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    item->id = static_cast<uint16_t>(id);
+    return true;
 }
 
 RelicSpawnContext chest_spawn_context(const RunState& rs) noexcept {
@@ -34,9 +38,13 @@ RelicSpawnContext chest_spawn_context(const RunState& rs) noexcept {
     return ctx;
 }
 
-void add_random_relic_item(RunState& rs, RewardScreen& out,
+bool add_random_relic_item(RunState& rs, RewardScreen& out,
                            RelicTier tier) noexcept {
-    add_relic_item(
+    // Do not pop a relic pool unless its reward can be represented.
+    if (out.count >= kRewardItemCap) {
+        return false;
+    }
+    return add_relic_item(
         out, return_random_relic_key(rs, tier, chest_spawn_context(rs)));
 }
 
@@ -65,7 +73,7 @@ void cursed_key_obtain(RunState& rs) noexcept {
     (void)add_card_to_master_deck(rs, curse);
 }
 
-void dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
+bool dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
                                  bool boss_chest) noexcept {
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
         RelicSlot& slot = rs.relics[i];
@@ -77,7 +85,9 @@ void dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
                         random_boolean(rs.relic_rng, 0.75f)
                             ? RelicTier::COMMON
                             : RelicTier::UNCOMMON;
-                    add_random_relic_item(rs, out, tier);
+                    if (!add_random_relic_item(rs, out, tier)) {
+                        return false;
+                    }
                     if (slot.counter == 0) {
                         slot.counter = -2;
                     }
@@ -92,6 +102,7 @@ void dispatch_on_chest_open_impl(RunState& rs, RewardScreen& out,
                 break;
         }
     }
+    return true;
 }
 
 void remove_first_relic_item(RewardScreen& s) noexcept {
@@ -124,6 +135,47 @@ void dispatch_on_chest_open_after_impl(RunState& rs, RewardScreen& out,
     }
 }
 
+bool exact_unopened_chest_descriptor(const TreasureChest& chest) noexcept {
+    if (chest.opened != 0 || chest.has_gold > 1) {
+        return false;
+    }
+
+    switch (static_cast<ChestSize>(chest.size)) {
+        case ChestSize::SMALL:
+        case ChestSize::MEDIUM:
+        case ChestSize::LARGE:
+            break;
+        case ChestSize::NONE:
+        default:
+            return false;
+    }
+
+    switch (static_cast<RelicTier>(chest.relic_tier)) {
+        case RelicTier::COMMON:
+        case RelicTier::UNCOMMON:
+        case RelicTier::RARE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool chest_rewards_fit(const RunState& rs,
+                       const TreasureChest& chest) noexcept {
+    if (rs.relic_count > kRelicCap) {
+        return false;
+    }
+    int required = 1 + (chest.has_gold != 0 ? 1 : 0);  // base relic + gold
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        const RelicSlot& slot = rs.relics[i];
+        if (static_cast<RelicId>(slot.relic_id) == RelicId::MATRYOSHKA &&
+            slot.counter > 0) {
+            ++required;
+        }
+    }
+    return required <= kRewardItemCap;
+}
+
 int chest_gold_amount(ChestSize size) noexcept {
     switch (size) {
         case ChestSize::SMALL:
@@ -146,46 +198,94 @@ TreasureChest roll_treasure_chest(RunState& rs) noexcept {
     return treasure_chest_for_rolls(size_roll, contents_roll);
 }
 
-void dispatch_relics_on_chest_open(RunState& rs, RewardScreen& out,
+bool treasure_chest_open_legal(const RunState& rs,
+                               const TreasureChest& chest) noexcept {
+    return exact_unopened_chest_descriptor(chest) &&
+           chest_rewards_fit(rs, chest);
+}
+
+bool dispatch_relics_on_chest_open(RunState& rs, RewardScreen& out,
                                    bool boss_chest) noexcept {
-    dispatch_on_chest_open_impl(rs, out, boss_chest);
-}
-
-void dispatch_relics_on_chest_open_after(RunState& rs, RewardScreen& out,
-                                         bool boss_chest) noexcept {
-    dispatch_on_chest_open_after_impl(rs, out, boss_chest);
-}
-
-void open_treasure_chest(RunState& rs, RngStream& /*misc_rng*/,
-                         TreasureChest& chest, RewardScreen& out) noexcept {
-    if (chest.opened != 0 ||
-        static_cast<ChestSize>(chest.size) == ChestSize::NONE) {
-        return;
+    if (rs.relic_count > kRelicCap || out.count > kRewardItemCap) {
+        return false;
     }
 
-    out = RewardScreen{};
-    out.open_card_item = kNoOpenCardReward;
+    // The public hook seam can start with an arbitrary reward list and can
+    // encounter Cursed Key before a later overflowing Matryoshka. Run the
+    // acquisition-ordered Java pass on copies so any late capacity failure
+    // rolls back card/relic RNG, pools, counters, deck hooks, and rewards.
+    RunState trial_rs = rs;
+    RewardScreen trial_out = out;
+    if (!dispatch_on_chest_open_impl(trial_rs, trial_out, boss_chest)) {
+        return false;
+    }
+    rs = trial_rs;
+    out = trial_out;
+    return true;
+}
+
+bool dispatch_relics_on_chest_open_after(RunState& rs, RewardScreen& out,
+                                         bool boss_chest) noexcept {
+    if (rs.relic_count > kRelicCap || out.count > kRewardItemCap) {
+        return false;
+    }
+    RunState trial_rs = rs;
+    RewardScreen trial_out = out;
+    dispatch_on_chest_open_after_impl(trial_rs, trial_out, boss_chest);
+    rs = trial_rs;
+    out = trial_out;
+    return true;
+}
+
+bool open_treasure_chest(RunState& rs, RngStream& /*misc_rng*/,
+                         TreasureChest& chest, RewardScreen& out) noexcept {
+    if (!treasure_chest_open_legal(rs, chest)) {
+        return false;
+    }
+
+    // Keep the whole open transaction private until every fixed-capacity
+    // insertion succeeds. This also makes an unexpected late failure atomic.
+    RunState trial_rs = rs;
+    TreasureChest trial_chest = chest;
+    RewardScreen trial_out{};
+    trial_out.open_card_item = kNoOpenCardReward;
 
     // AbstractChest.open(false), line order is observable across three streams
     // and the reward list: before-hooks, gold, base relic, after-hooks.
-    dispatch_relics_on_chest_open(rs, out, /*boss_chest=*/false);
+    if (!dispatch_on_chest_open_impl(
+            trial_rs, trial_out, /*boss_chest=*/false)) {
+        return false;
+    }
 
-    if (chest.has_gold != 0) {
-        const int base = chest_gold_amount(static_cast<ChestSize>(chest.size));
-        RunRewardItem& item = push_item(out);
-        item.kind = static_cast<uint8_t>(RewardItemKind::GOLD);
-        item.gold = mathutils_round(random(
-            rs.treasure_rng, static_cast<float>(base) * 0.9f,
+    if (trial_chest.has_gold != 0) {
+        const int base =
+            chest_gold_amount(static_cast<ChestSize>(trial_chest.size));
+        RunRewardItem* const item = try_push_item(trial_out);
+        if (item == nullptr) {
+            return false;
+        }
+        item->kind = static_cast<uint8_t>(RewardItemKind::GOLD);
+        item->gold = mathutils_round(random(
+            trial_rs.treasure_rng, static_cast<float>(base) * 0.9f,
             static_cast<float>(base) * 1.1f));
         // RewardItem.applyGoldBonus explicitly excludes TreasureRoom, so Golden
         // Idol contributes no bonus here (RewardItem.java:110-129).
-        item.bonus_gold = 0;
+        item->bonus_gold = 0;
     }
 
-    add_random_relic_item(
-        rs, out, static_cast<RelicTier>(chest.relic_tier));
-    dispatch_relics_on_chest_open_after(rs, out, /*boss_chest=*/false);
-    chest.opened = 1;
+    if (!add_random_relic_item(
+            trial_rs, trial_out,
+            static_cast<RelicTier>(trial_chest.relic_tier))) {
+        return false;
+    }
+    dispatch_on_chest_open_after_impl(
+        trial_rs, trial_out, /*boss_chest=*/false);
+    trial_chest.opened = 1;
+
+    rs = trial_rs;
+    chest = trial_chest;
+    out = trial_out;
+    return true;
 }
 
 }  // namespace sts::engine

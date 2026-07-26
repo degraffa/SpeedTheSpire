@@ -76,19 +76,31 @@ static_assert(sizeof(TreasureChest) == 4);
 // TreasureRoom.onPlayerEntry -> getRandomChest -> chest constructor.
 [[nodiscard]] TreasureChest roll_treasure_chest(RunState& rs) noexcept;
 
+// The single authority for whether an ordinary chest can be opened. Besides
+// requiring the constructor's exact descriptor domain, this preflights the
+// fixed RewardScreen capacity for every active Matryoshka plus gold/base relic.
+// A false result guarantees that open_treasure_chest is a byte-stable no-op.
+[[nodiscard]] bool treasure_chest_open_legal(
+    const RunState& rs, const TreasureChest& chest) noexcept;
+
 // Public hook seams keep the boss/non-boss gates independently testable even
 // though this module owns only ordinary TreasureRoom chests. BossChest itself
-// belongs to the post-boss/act-transition task.
-void dispatch_relics_on_chest_open(RunState& rs, RewardScreen& out,
-                                   bool boss_chest) noexcept;
-void dispatch_relics_on_chest_open_after(RunState& rs, RewardScreen& out,
-                                         bool boss_chest) noexcept;
+// belongs to the post-boss/act-transition task. Both are transactions: false
+// means malformed counts or insufficient reward capacity and leaves both
+// arguments byte-stable.
+[[nodiscard]] bool dispatch_relics_on_chest_open(
+    RunState& rs, RewardScreen& out, bool boss_chest) noexcept;
+[[nodiscard]] bool dispatch_relics_on_chest_open_after(
+    RunState& rs, RewardScreen& out, bool boss_chest) noexcept;
 
 // AbstractChest.open(false), collapsed to its state-visible result. Reward
 // relics are popped immediately but acquired only when claimed through the
 // existing reward/acquisition door. The hook pass is acquisition ordered:
 // Matryoshka and Cursed Key before gold/base relic; N'loth's Mask afterwards.
-void open_treasure_chest(RunState& rs, RngStream& misc_rng,
-                         TreasureChest& chest, RewardScreen& out) noexcept;
+// Returns false without changing any argument when the descriptor/capacity
+// preflight fails.
+[[nodiscard]] bool open_treasure_chest(
+    RunState& rs, RngStream& misc_rng, TreasureChest& chest,
+    RewardScreen& out) noexcept;
 
 }  // namespace sts::engine

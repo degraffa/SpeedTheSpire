@@ -2820,6 +2820,29 @@ sanctioned; the task deliberately remains `[ ]` until those captures can run.
 The complete final-tree WSL matrix is **debug 1006/1006, leak-detecting
 ASan/UBSan 1006/1006, release 1006/1006**.
 
+**Defensive fix-forward (2026-07-26; supersedes the original capacity and
+descriptor handling above).** Independent review found that the chest-local
+reward insertion relied on a debug assertion: an imported state with enough
+active duplicate Matryoshkas could write beyond the fixed eight-item reward
+array in release. Every treasure insertion is now fallible and bounds-safe.
+The public before/after hook seams and the complete open transaction use
+copy-then-commit semantics, so a late capacity failure rolls back earlier
+Cursed Key deck hooks, pool pops, counters, every RNG stream, and the reward
+list. The ordinary room preflights Matryoshka + optional gold + base relic;
+an unrepresentable open is absent from the action mask and a forced action is
+a byte-stable no-op.
+
+The same fix-forward makes `treasure_chest_open_legal` the single authority
+used by the action mask, direct open, and run step. It accepts only SMALL /
+MEDIUM / LARGE, COMMON / UNCOMMON / RARE, canonical boolean fields, and an
+unopened descriptor; the step enters `COMBAT_REWARD` only after a successful
+transaction. Four named regressions cover public-hook late rollback, seven
+active Matryoshkas, exact-cap success, and malformed size/tier/boolean/opened
+descriptors with whole-controller byte comparisons. The task remains `[ ]`
+only for the already-recorded live-oracle spot-diff blocker. The complete
+fix-forward WSL matrix is **debug 1010/1010, leak-detecting ASan/UBSan
+1010/1010, release 1010/1010**.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes
