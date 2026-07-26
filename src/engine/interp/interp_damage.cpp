@@ -119,7 +119,9 @@ namespace {
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
-                  "still a pass-through because no power overrides it yet.");
+                  "NOT a pass-through: INTANGIBLE has a case there "
+                  "(IntangiblePlayerPower.java:43-49). Its twin "
+                  "atDamageFinalGive still is one.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::VULNERABLE:
             if (owner_actor == kActorPlayer &&

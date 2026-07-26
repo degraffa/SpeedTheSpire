@@ -286,8 +286,8 @@ enum class Opcode : uint16_t {
                               // does. Emitted natively (monster_looter.cpp);
                               // never authored in YAML. 41-42 are this batch's
                               // published reserve and stay unissued.
-    // --- Colorless-uncommon verbs (append-only from 45; 41-42 are B3.15's
-    // --- reserve and 43-44 are B4.5's block -- all stay gaps here) -----------
+    // --- Colorless-uncommon verbs (append-only from 45; 41-44 were allocated
+    // --- to other batches that did not spend them and stay permanent gaps) ---
     DAMAGE_DRAW_PILE = 45,    // src (player) attacks tgt for base == the DRAW
                               // PILE SIZE, read at EXECUTE time, then the normal
                               // DamageInfo pipeline (Mind Blast;
