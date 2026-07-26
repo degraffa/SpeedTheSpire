@@ -46,6 +46,34 @@ relaunches on crash / hang / boss-reward until the driver marks the campaign
 complete. `--kill-after-seeds N` induces one deliberate mid-campaign game kill to
 exercise crash-resume (the B1.4 acceptance bar).
 
+An oracle campaign is valid only when the explicitly selected
+`CommunicationMod-oracle` fork emits `game_state.oracle`. The driver checks the
+first in-dungeon dump before it creates an artifact or advances the policy; a
+missing block records `status: fatal_environment_drift`, and the orchestrator
+stops instead of relaunching. Run campaign acceptance with
+`validate_artifacts.py --require-oracle`; the default validator remains
+backward-compatible with old, deliberately non-oracle B1.4 artifacts.
+Strict campaign validation requires a complete, failure-free progress and
+manifest ledger, exact ordered seed completion, at least one valid in-game
+oracle action per run, and one current run plus timing artifact per completed
+seed with no missing or extra files. Run headers are bound to campaign id,
+seed string/long/getLong, attempt, policy, schema, driver, and fork identity;
+every in-game `game_state.seed` and `oracle.seed` must agree. Strict run grammar
+requires contiguous action sequence numbers, exactly one final terminal, and
+matching injected-action/terminal/done summaries. Timing sidecars are parsed in
+full and joined mark-for-action (sequence, command, floor, and screen), with
+their headers bound to the same campaign/schema/driver/fork identity.
+
+Treat a campaign id as immutable evidence. A new live attempt gets a new id;
+failed directories are preserved rather than retried in place. `--fresh`
+removes only this invocation's known control files, launch logs, and exact
+requested-seed run/timing names. It deliberately preserves unexpected files,
+which strict validation then rejects as stale instead of silently deleting.
+Campaign ids are single safe path components; both CLIs reject rooted paths,
+separators, `.`/`..`, and every symlink/junction/reparse redirect at a campaign
+directory or direct-child file. `--fresh` never follows an owned-looking name
+to a different target, even when that target remains inside the campaign.
+
 Artifacts land under `<data-root>/<campaign-id>/`:
 `run_<seed>_a20_ironclad.jsonl` (one per run), `campaign_progress.json`,
 `campaign_manifest.json`, `campaign_heartbeat.json`,
@@ -59,8 +87,11 @@ seed as **both** base-35 string and long, ascension, character, policy). Then on
 `action` record per injected action — `{action_command, sim_action_bits (null,
 B1.5 fills it), ready_for_command, available_commands, state_json}` — where
 `state_json` is the game's dump **verbatim / un-pruned** (lossless: the translator
-B1.5 enforces unknown-field-is-error). The file ends with a `terminal` record
-(`outcome`, floor, act, actions). Validate with:
+B1.5 enforces unknown-field-is-error). A final synthetic
+`__terminal_observed__` action may preserve the post-claim state; it is
+sequence-bearing but is not counted as an injected action or timing mark. The
+file ends with exactly one `terminal` record (`outcome`, floor, act, actions).
+Validate with:
 
 ```bash
 python validate_artifacts.py --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b14_accept
@@ -116,17 +147,22 @@ command=C:/Python39/python.exe D:/STS_BG_Mod/SpeedTheSpire/tools/oracle_bridge/d
 
 ## Scriptable launch (design §1.2 paths)
 
-ModTheSpire, run from the game directory so it finds `desktop-1.0.jar`:
+For oracle work, use `orchestrator.py`; its launch is deliberately explicit:
 
 ```bat
 cd /d D:\SteamLibrary\steamapps\common\SlayTheSpire
-java -jar "D:\SteamLibrary\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar" --skip-launcher --mods basemod,CommunicationMod
+"D:\SteamLibrary\steamapps\common\SlayTheSpire\jre\bin\java.exe" -jar "D:\SteamLibrary\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar" --skip-launcher --mods basemod,CommunicationMod-oracle
 ```
 
 - ModTheSpire `1605060445`, BaseMod `1605833019`, CommunicationMod
   `2131373661` (Steam workshop, appid 646570).
-- The GUI path (Steam → *Play with Mods*, or launching `mts-launcher.jar`) is
-  equivalent; `--skip-launcher` just bypasses the mod-picker for automation.
+- The stock workshop `CommunicationMod` and the fork share the same
+  `SpireConfig("CommunicationMod", ...)` namespace. A GUI launch may therefore
+  spawn the campaign driver while loading the stock jar, producing plausible
+  artifacts with no oracle block. The GUI path is **not equivalent for oracle
+  campaigns**; never rely on its remembered mod selection.
+- Stock `CommunicationMod` remains usable only for the deliberately non-oracle
+  B0.2 protocol bring-up. Never load stock and fork together.
 - CommunicationMod's stderr lands in `communication_mod_errors.log` in the game
   directory — first place to look if the child never attaches.
 

@@ -10,7 +10,88 @@ needs the live game, which is **launched manually by a human operator**
 the capture is prepared below; the capture and the diff read-out are the
 remaining human steps.
 
-## 1. Capture (operator, Windows host)
+## 1. Stop-line environment decision
+
+The preserved `b45_rewards` campaign is **not acceptance evidence**. Its
+headers say `oracle_block_enabled: false`: a GUI launch loaded stock
+`CommunicationMod`, which shares the fork's config namespace and therefore
+still spawned the driver. Separately, the installed launch log reported Slay
+the Spire `12-18-2022`, ModTheSpire `3.30.3`, and BaseMod `5.56.0`, while the
+frozen environment names Slay the Spire `11-30-2020` and ModTheSpire `3.18.1`.
+Those newer versions are recorded as the observed drift, **not sanctioned**.
+
+Do not run the B4.5 campaign until the owner either restores the frozen stack
+or formally approves a frozen-design/environment amendment. This runbook
+continues to express the existing frozen choice; it does not make that
+decision.
+
+## 2. One-seed preflight (operator, Windows host)
+
+After the environment decision is resolved, allocate a **new, immutable
+campaign tag for this attempt** (UTC timestamp plus an operator suffix is
+recommended). Never rerun a failed or completed B4.5 id: preserve its directory
+as evidence and allocate another tag. In the same `cmd.exe` window:
+
+```bat
+set B45_TAG=20260726T210000Z_alex01
+set B45_PREFLIGHT_ID=b45_rewards_preflight_%B45_TAG%
+
+C:\Python39\python.exe orchestrator.py ^
+    --campaign-id %B45_PREFLIGHT_ID% ^
+    --seeds STS00041 ^
+    --policy random-legal ^
+    --max-actions 1 ^
+    --fresh
+```
+
+The preflight is a gate, not a smoke test. All of these checks are required:
+
+1. `mts_launch1.log` names **Slay the Spire (11-30-2020)**,
+   **ModTheSpire (3.18.1)**, and
+   **CommunicationMod-oracle (1.2.1-oracle.0)** in its version/mod list; it
+   must not list stock `CommunicationMod`. The BaseMod line must match the
+   owner-approved frozen installation. A different or unresolved BaseMod
+   version stops the campaign rather than being inferred from the hard-coded
+   artifact header.
+2. The deployed fork jar's SHA-256 is
+   `04477E4EAA07FC14774F9A687AC971EFBDB64EA7ECCB56804481B008B2C36636`.
+   Verify the deployed file itself:
+
+   ```powershell
+   (Get-FileHash -Algorithm SHA256 `
+     'D:\SteamLibrary\steamapps\common\SlayTheSpire\mods\CommunicationMod-oracle.jar').Hash
+   ```
+
+   The artifact header alone is not proof of which mod loaded: the driver
+   hashes its `--fork-jar` argument independently of ModTheSpire.
+3. `campaign_progress.json` is `complete`, never
+   `fatal_environment_drift`, and the preflight artifact passes the strict
+   oracle validator:
+
+   ```bat
+   C:\Python39\python.exe validate_artifacts.py --require-oracle ^
+       --campaign D:/STS_BG_Mod/_oracle_data/campaigns/%B45_PREFLIGHT_ID%
+   ```
+
+   Strict mode requires `oracle_block_enabled: true`, a `game_state.oracle`
+   object on every in-game action record, **at least one such in-game action**,
+   both reward pity fields
+   (`cardBlizzRandomizer`, `blizzardPotionMod`), and complete
+   `{counter,s0,s1}` triples for `cardRng`, `treasureRng`, `potionRng`,
+   `relicRng`, and `miscRng`. With `--campaign`, strict mode also requires a
+   complete, failure-free progress/manifest ledger whose ordered `seed_list`
+    and `seeds_done` match exactly, then proves a bijection to the run and timing
+    artifacts. Missing, extra, stale, cross-campaign, or failed-seed evidence is
+    fatal. It also joins the filename/header/in-game/oracle seed identities,
+    requires exactly one final terminal with contiguous action sequence and
+    matching terminal/done counts, and parses every timing row with exact
+    mark-for-action correspondence. A header-only timing file, malformed tail,
+    duplicate terminal, action after terminal, or missing summary is fatal.
+
+If any check fails, preserve the preflight directory for diagnosis and stop.
+Do not relaunch, reuse its artifact, or advance to the reward campaign.
+
+## 3. Capture (operator, Windows host)
 
 Pick three seeds and put them (base-35 strings, one per line) in
 `D:/STS_BG_Mod/_oracle_data/campaigns/b45_seeds.txt`. Prefer seeds/paths whose
@@ -25,13 +106,15 @@ early floors avoid:
   that flag is documented out of S1 scope (see `map_rooms.hpp`'s
   setEmeraldElite note). Any other elite is clean.
 
-Then, per the standard flow (`README.md` in this directory — the game is
-launched by the orchestrator, but ModTheSpire's launcher window is confirmed
-manually):
+Then, per the standard flow (`README.md` in this directory), let the
+orchestrator launch the explicit fork-only mod list. Derive a second,
+never-before-used id from the successful preflight tag:
 
 ```bat
+set B45_REWARD_ID=b45_rewards_oracle_%B45_TAG%
+
 C:\Python39\python.exe orchestrator.py ^
-    --campaign-id b45_rewards ^
+    --campaign-id %B45_REWARD_ID% ^
     --seeds D:/STS_BG_Mod/_oracle_data/campaigns/b45_seeds.txt ^
     --policy random-legal ^
     --fresh
@@ -40,9 +123,27 @@ C:\Python39\python.exe orchestrator.py ^
 `random-legal` claims reward items and picks/skips reward cards, so each run's
 JSONL carries several COMBAT_REWARD / CARD_REWARD screens with the states on
 both sides of every claim. Artifacts land under
-`D:/STS_BG_Mod/_oracle_data/campaigns/b45_rewards/`.
+`D:/STS_BG_Mod/_oracle_data/campaigns/%B45_REWARD_ID%/`. This distinct id is
+required: never reuse or overwrite the preserved invalid `b45_rewards`
+campaign, a prior preflight, or a prior reward attempt. `--fresh` authorizes
+only bounded cleanup of that invocation's control files, launch logs, and the
+exact requested seeds' run/timing artifacts; it does not erase unexpected
+files, which strict validation reports instead. The id must remain the one safe
+path component shown above: rooted ids, path separators, `.`/`..`, symlink
+escapes, and any symlink/junction/reparse redirect at a campaign directory or
+direct-child file are rejected. `--fresh` never follows an owned-looking name
+to another target, including another file inside the campaign.
+The orchestrator hashes the requested fork before it accepts even an already
+complete ledger; changing fork/schema/seed/policy requires a new campaign id.
 
-## 2. Translate
+Before translation, require the oracle gate on the reward campaign too:
+
+```bat
+C:\Python39\python.exe validate_artifacts.py --require-oracle ^
+    --campaign D:/STS_BG_Mod/_oracle_data/campaigns/%B45_REWARD_ID%
+```
+
+## 4. Translate
 
 Build `translate_cli` (any preset; it is a tools target) and run it over the
 three artifacts:
@@ -50,15 +151,18 @@ three artifacts:
 ```bash
 tools/wsl_run.sh debug          # builds translate_cli among everything else
 build/debug/tools/oracle_bridge/translator/translate_cli \
-    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/b45_rewards/run_*.jsonl
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/$B45_REWARD_ID/run_*.jsonl
 ```
+
+In WSL, either export `B45_REWARD_ID` again or replace it with the exact
+preserved directory name printed by the Windows capture step.
 
 Expected: `OK` per file, **zero unknown-field errors**. The B4.5 translator
 slice content-validates the reward screens (enumerated `reward_type`, typed
 gold, id-joined potions/relics/cards), so an unexpected reward shape fails loud
 here rather than passing silently.
 
-## 3. Spot-diff (the read-out)
+## 5. Spot-diff (the read-out)
 
 For each captured reward screen: take the last record **after** the claims/
 proceed (the post-claim state) and compare its translated `RunState` against
@@ -82,7 +186,7 @@ main that calls `run_begin` and feeds the artifact's `action_command` sequence
 as run-level `CHOOSE`/`PLAY_CARD` actions). `diff_run_states`
 (`tools/diff_harness`, `sts/diff/differ.hpp`) prints the field-by-field diff.
 
-## 4. Known caveat the capture ALSO resolves: card-pool library order
+## 6. Known caveat the capture ALSO resolves: card-pool library order
 
 The three generated reward pools (`kIroncladCommonPool` / `...UncommonPool` /
 `...RarePool`, like `kIroncladAttackPool` before them) are emitted in

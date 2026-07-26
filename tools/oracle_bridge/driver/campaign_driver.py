@@ -50,7 +50,15 @@ import threading
 import time
 from datetime import datetime, timezone
 
-DRIVER_VERSION = "b1.4.0"
+from campaign_paths import (
+    campaign_dir_under_root,
+    campaign_file_under_root,
+    exact_path_without_redirect,
+    validate_campaign_id,
+    validate_seed_list,
+)
+
+DRIVER_VERSION = "b1.4.2"
 SCHEMA_VERSION = 1
 
 # Static provenance for the artifact header (design 1.2; PROTOCOL.md 0).
@@ -115,6 +123,19 @@ EXIT_FATAL = 5
 
 class GameGone(Exception):
     """stdin EOF or watchdog trip: the game process is gone / hung."""
+
+
+class FatalEnvironmentDrift(RuntimeError):
+    """The launched game/mod stack cannot produce authoritative oracle data."""
+
+    def __init__(self, message: str,
+                 kind: str = "missing_oracle_block") -> None:
+        super().__init__(message)
+        self.kind = kind
+
+
+class CampaignIdentityError(RuntimeError):
+    """An existing resume ledger belongs to a different campaign invocation."""
 
 
 class Reader:
@@ -375,6 +396,7 @@ class RunLogger:
     translator (B1.5) enforces unknown-field-is-error, so nothing is pruned."""
 
     def __init__(self, path: str, header: dict) -> None:
+        path = exact_path_without_redirect(path)
         self._fh = open(path, "w", encoding="utf-8", newline="\n")
         self._seq = 0
         self._write(header)
@@ -423,6 +445,7 @@ class TimingLog:
     a run completes within a single game launch, so its marks share one clock."""
 
     def __init__(self, path: str, meta: dict) -> None:
+        path = exact_path_without_redirect(path)
         self._fh = open(path, "w", encoding="utf-8", newline="\n")
         self._write({"record_kind": "timing_header",
                      "created_utc": _utc(), **meta})
@@ -448,15 +471,35 @@ class Progress:
     every seed transition; a lightweight heartbeat file is bumped each action so
     the orchestrator can tell a working driver from a wedged one."""
 
-    def __init__(self, path: str, hb_path: str) -> None:
+    def __init__(self, path: str, hb_path: str,
+                 tmp_path: str | None = None) -> None:
         self.path = path
         self.hb_path = hb_path
+        self.tmp_path = tmp_path if tmp_path is not None else path + ".tmp"
         self.data = None  # type: dict | None
 
     def load_or_init(self, campaign_id, seed_list, policy, fork_hash) -> dict:
         if os.path.exists(self.path):
-            with open(self.path, "r", encoding="utf-8") as fh:
+            with open(exact_path_without_redirect(self.path), "r",
+                      encoding="utf-8") as fh:
                 self.data = json.load(fh)
+            expected = {
+                "campaign_id": campaign_id,
+                "seed_list": seed_list,
+                "policy": policy,
+                "fork_jar_sha256": fork_hash,
+                "schema_version": SCHEMA_VERSION,
+            }
+            mismatches = [
+                f"{key}={self.data.get(key)!r} (expected {value!r})"
+                for key, value in expected.items()
+                if type(self.data.get(key)) is not type(value) or
+                self.data.get(key) != value
+            ]
+            if mismatches:
+                raise CampaignIdentityError(
+                    "existing campaign_progress.json identity mismatch: " +
+                    "; ".join(mismatches))
             # A fresh launch resumed us; bump the launch count.
             self.data["launches"] = self.data.get("launches", 0) + 1
         else:
@@ -481,20 +524,56 @@ class Progress:
 
     def flush(self) -> None:
         self.data["updated_utc"] = _utc()
-        tmp = self.path + ".tmp"
+        tmp = exact_path_without_redirect(self.tmp_path)
+        destination = exact_path_without_redirect(self.path)
         with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
             json.dump(self.data, fh, indent=2)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(tmp, self.path)
+        os.replace(exact_path_without_redirect(tmp),
+                   exact_path_without_redirect(destination))
 
     def heartbeat(self, seed, floor, actions) -> None:
         try:
-            with open(self.hb_path, "w", encoding="utf-8", newline="\n") as fh:
+            with open(exact_path_without_redirect(self.hb_path), "w",
+                      encoding="utf-8", newline="\n") as fh:
                 json.dump({"t": _now(), "utc": _utc(), "seed": seed,
                            "floor": floor, "actions": actions}, fh)
         except OSError:
             pass
+
+    def fatal_environment_drift(self, seed: str | None, attempt: int,
+                                message: str, kind: str) -> None:
+        """Persist a non-retryable environment failure for the orchestrator.
+
+        The driver is the only process that can inspect the first in-dungeon
+        dump.  A missing fork-only oracle block therefore has to cross the
+        process boundary through this durable status rather than an exit code
+        (the game, not the orchestrator, is the driver's parent).
+        """
+        self.data["status"] = "fatal_environment_drift"
+        self.data["fatal"] = {
+            "kind": kind,
+            "message": message,
+            "seed": seed,
+            "attempt": attempt,
+            "utc": _utc(),
+        }
+        self.data["current_seed"] = seed
+        self.data["current_seed_attempt"] = attempt
+        self.flush()
+
+    def fatal_identity_mismatch(self, message: str) -> None:
+        """Make a resume identity mismatch durable and non-retryable."""
+        self.data["status"] = "fatal_environment_drift"
+        self.data["fatal"] = {
+            "kind": "campaign_identity_mismatch",
+            "message": message,
+            "seed": self.data.get("current_seed"),
+            "attempt": self.data.get("current_seed_attempt", 0),
+            "utc": _utc(),
+        }
+        self.flush()
 
     def done_seeds(self) -> set:
         d = self.data
@@ -507,14 +586,19 @@ class Progress:
 class CampaignDriver:
     def __init__(self, args) -> None:
         self.args = args
+        validate_campaign_id(args.campaign_id)
+        args.seeds = validate_seed_list(args.seeds)
         self.rng = random.Random(args.policy_seed)
         self.reader = Reader()
         self.stepper = Stepper(self.reader, args.timeout, args.probe_timeout)
         self.fork_hash = sha256_file(args.fork_jar)
         os.makedirs(self.run_dir(), exist_ok=True)
+        # Re-resolve after mkdir to catch an existing/redirection race.
+        campaign_dir_under_root(args.data_root, args.campaign_id)
         self.progress = Progress(
-            os.path.join(self.run_dir(), "campaign_progress.json"),
-            os.path.join(self.run_dir(), "campaign_heartbeat.json"),
+            self.run_file("campaign_progress.json"),
+            self.run_file("campaign_heartbeat.json"),
+            self.run_file("campaign_progress.json.tmp"),
         )
         # Script(s) are loaded per-seed in run_seed (a --script-dir campaign has a
         # distinct command list per seed). A single --script applies to all seeds.
@@ -536,12 +620,22 @@ class CampaignDriver:
         return list(self.single_script)
 
     def run_dir(self) -> str:
-        return os.path.join(self.args.data_root, self.args.campaign_id)
+        return campaign_dir_under_root(
+            self.args.data_root, self.args.campaign_id)
 
-    def strip_flags(self) -> dict:
+    def run_file(self, name: str) -> str:
+        return campaign_file_under_root(
+            self.args.data_root, self.args.campaign_id, name)
+
+    def strip_flags(self, seed: str, attempt: int) -> dict:
         return {"run_label": self.args.run_label,
                 "campaign_id": self.args.campaign_id,
-                "policy": self.args.policy}
+                "policy": self.args.policy,
+                "seed": seed,
+                "attempt": attempt,
+                "schema_version": SCHEMA_VERSION,
+                "driver_version": DRIVER_VERSION,
+                "fork_jar_sha256": self.fork_hash}
 
     # -- menu / seed helpers -------------------------------------------------
     def wait_menu(self):
@@ -581,8 +675,8 @@ class CampaignDriver:
     def run_seed(self, seed: str, attempt: int):
         """Play one seeded A20 Ironclad run to a terminal state.
         Returns (outcome, floor, actions, menu_returnable)."""
-        artifact = os.path.join(self.run_dir(),
-                                f"run_{seed}_a20_ironclad.jsonl")
+        validate_seed_list([seed])
+        artifact = self.run_file(f"run_{seed}_a20_ironclad.jsonl")
         # Per-seed policy RNG: a run's action sequence depends only on
         # (policy_seed, seed), not on the campaign's position, so any run is
         # reproducible in isolation -- the (seed, action-prefix) reproducibility
@@ -592,16 +686,33 @@ class CampaignDriver:
         kind, state = self.stepper.step(f"start ironclad 20 {seed}")
         if kind == "error":
             raise RuntimeError(f"start rejected: {state.get('error')}")
-        if not state.get("in_game"):
-            # occasionally the menu fade needs one more settle; wait once more
-            kind, state = self.stepper.await_ready()
+        # `start` can answer from a still-ready menu/fade state before the first
+        # dungeon dump exists. Force fresh, non-mutating dumps until we actually
+        # cross the in_game boundary; never infer fork health from a menu state.
+        dungeon_deadline = _now() + self.args.menu_timeout
+        while not state.get("in_game"):
+            if _now() >= dungeon_deadline:
+                raise GameGone(
+                    "start never produced a first in-dungeon state")
+            kind, state = self.stepper.step("state")
+            if kind == "error":
+                raise RuntimeError(
+                    "state rejected while awaiting first in-dungeon dump: "
+                    f"{state.get('error')}")
         gs = state.get("game_state") or {}
+        if not isinstance(gs.get("oracle"), dict):
+            raise FatalEnvironmentDrift(
+                "first in-dungeon dump has no game_state.oracle object; "
+                "CommunicationMod-oracle is not active or oracleBlock is "
+                "disabled. Refusing to advance policy or create an artifact")
         seed_long = gs.get("seed")
         expect_long = seed_to_long(seed)
         seed_ok = (seed_long == expect_long)
         if not seed_ok:
-            _log(f"seed crosscheck MISMATCH {seed}: dump={seed_long} "
-                 f"getLong={expect_long}")
+            raise FatalEnvironmentDrift(
+                f"seed crosscheck mismatch for {seed}: dump={seed_long!r}, "
+                f"getLong={expect_long!r}; refusing artifact/policy",
+                kind="seed_identity_mismatch")
 
         header = {
             "record_kind": "header",
@@ -629,9 +740,9 @@ class CampaignDriver:
         # is a SEPARATE file from the JSONL artifact, so the equivalence-critical
         # action-record / state_json schema (B1.5) is untouched. measure_
         # throughput.py reads these to compute sustained injected-actions/sec.
-        timing = TimingLog(os.path.join(
-            self.run_dir(), f"run_{seed}_a20_ironclad.timing.jsonl"),
-            self.strip_flags())
+        timing = TimingLog(self.run_file(
+            f"run_{seed}_a20_ironclad.timing.jsonl"),
+            self.strip_flags(seed, attempt))
         script = self._load_script(seed) if self.args.policy == "script" else None
         _log(f"seed {seed} attempt {attempt}: header written "
              f"(long={seed_long}, oracle={'oracle' in gs}); playing")
@@ -658,8 +769,9 @@ class CampaignDriver:
                     return ov, floor, actions, True
 
                 if is_boss_combat_reward(gs):
-                    outcome = self._claim_boss_reward(rl, state, seed, actions)
-                    return outcome, floor, outcome_actions(outcome, actions), False
+                    outcome, actions = self._claim_boss_reward(
+                        rl, timing, state, seed, actions)
+                    return outcome, floor, actions, False
 
                 if actions >= self.args.max_actions:
                     rl.terminal("action_cap", gs, actions)
@@ -764,6 +876,8 @@ class CampaignDriver:
                     else:
                         esc = "state"
                     rl.action(esc, state)
+                    timing.mark(actions, esc, gs2.get("floor"),
+                                gs2.get("screen_type"))
                     actions += 1
                     kind, state = self.stepper.step(esc)
         finally:
@@ -776,10 +890,10 @@ class CampaignDriver:
             return None
         return self.rng.choice(acts)
 
-    def _claim_boss_reward(self, rl, state, seed, actions):
+    def _claim_boss_reward(self, rl, timing, state, seed, actions):
         """On the Act-1 boss combat-reward screen: claim every reward, then STOP
         (do not `proceed` -- that opens the boss chest, which is S2/out of scope,
-        design 1.1). Returns 'act1_boss_reward'."""
+        design 1.1). Returns ('act1_boss_reward', updated_action_count)."""
         _log(f"seed {seed}: ACT-1 BOSS reward reached -- claiming, then stop")
         guard = 0
         while True:
@@ -789,20 +903,22 @@ class CampaignDriver:
             guard += 1
             if guard > 60:
                 rl.terminal("act1_boss_reward", gs, actions)
-                return "act1_boss_reward"
+                return "act1_boss_reward", actions
             if st == "COMBAT_REWARD":
                 if choices:
                     rl.action("choose 0", state)
+                    timing.mark(actions, "choose 0", gs.get("floor"), st)
                     actions += 1
                     kind, state = self.stepper.step("choose 0")
                     continue
                 # all rewards claimed -> terminal, do NOT proceed to boss chest
                 rl.action("__terminal_observed__", state)
                 rl.terminal("act1_boss_reward", gs, actions)
-                return "act1_boss_reward"
+                return "act1_boss_reward", actions
             if st == "CARD_REWARD":
                 cmd = "choose 0" if choices else "skip"
                 rl.action(cmd, state)
+                timing.mark(actions, cmd, gs.get("floor"), st)
                 actions += 1
                 kind, state = self.stepper.step(cmd)
                 continue
@@ -831,11 +947,22 @@ class CampaignDriver:
         self.stepper.send("state")
 
         seed_list = self.args.seeds
-        self.progress.load_or_init(self.args.campaign_id, seed_list,
-                                   self.args.policy, self.fork_hash)
+        try:
+            self.progress.load_or_init(
+                self.args.campaign_id, seed_list,
+                self.args.policy, self.fork_hash)
+        except CampaignIdentityError as exc:
+            message = str(exc)
+            _log(f"FATAL CAMPAIGN IDENTITY: {message}")
+            self.progress.fatal_identity_mismatch(message)
+            return EXIT_FATAL
         _log(f"campaign {self.args.campaign_id}: {len(seed_list)} seeds, "
              f"policy={self.args.policy}, launch #{self.progress.data['launches']}, "
              f"done={len(self.progress.done_seeds())}, fork={self.fork_hash[:12]}")
+        if self.progress.data.get("status") == "fatal_environment_drift":
+            _log("campaign is already stopped on fatal environment drift; "
+                 "refusing to resume")
+            return EXIT_FATAL
 
         try:
             self.stepper.await_ready()  # drain the handshake dump
@@ -846,10 +973,16 @@ class CampaignDriver:
         while True:
             seed = self.next_seed()
             if seed is None:
-                self.progress.data["status"] = "complete"
+                failed = self.progress.data["seeds_failed"]
+                self.progress.data["status"] = (
+                    "complete_with_failures" if failed else "complete")
                 self.progress.data["current_seed"] = None
+                self.progress.data["current_seed_attempt"] = 0
                 self.progress.flush()
                 self._write_manifest()
+                if failed:
+                    _log("campaign COMPLETE WITH FAILURES")
+                    return EXIT_FATAL
                 _log("campaign COMPLETE")
                 return EXIT_OK
 
@@ -862,6 +995,12 @@ class CampaignDriver:
             try:
                 self.wait_menu()
                 outcome, floor, acts, menu_ok = self.run_seed(seed, attempt)
+            except FatalEnvironmentDrift as e:
+                message = str(e)
+                _log(f"FATAL ENVIRONMENT DRIFT: {message}")
+                self.progress.fatal_environment_drift(
+                    seed, attempt, message, e.kind)
+                return EXIT_FATAL
             except GameGone as e:
                 _log(f"seed {seed}: game gone mid-run ({e}); attempt {attempt}")
                 if attempt >= self.args.max_attempts:
@@ -909,20 +1048,16 @@ class CampaignDriver:
             "fork_jar_sha256": d["fork_jar_sha256"],
             "policy": d["policy"],
             "seed_list": d["seed_list"],
+            "status": d["status"],
             "launches": d["launches"],
             "started_utc": d["started_utc"],
             "finished_utc": _utc(),
             "seeds_done": d["seeds_done"],
             "seeds_failed": d["seeds_failed"],
         }
-        with open(os.path.join(self.run_dir(), "campaign_manifest.json"),
+        with open(self.run_file("campaign_manifest.json"),
                   "w", encoding="utf-8", newline="\n") as fh:
             json.dump(manifest, fh, indent=2)
-
-
-def outcome_actions(outcome, actions):
-    return actions
-
 
 def parse_args(argv=None) -> argparse.Namespace:
     ap = argparse.ArgumentParser(description="SpeedTheSpire campaign driver (B1.4)")
@@ -976,14 +1111,22 @@ def parse_args(argv=None) -> argparse.Namespace:
 def resolve_seeds(spec: str) -> list:
     if os.path.exists(spec):
         with open(spec, "r", encoding="utf-8") as fh:
-            return [ln.strip().upper() for ln in fh
-                    if ln.strip() and not ln.startswith("#")]
-    return [s.strip().upper() for s in spec.split(",") if s.strip()]
+            seeds = [ln.strip().upper() for ln in fh
+                     if ln.strip() and not ln.startswith("#")]
+    else:
+        seeds = [s.strip().upper() for s in spec.split(",") if s.strip()]
+    return validate_seed_list(seeds)
 
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    args.seeds = resolve_seeds(args.seeds)
+    try:
+        validate_campaign_id(args.campaign_id)
+        args.seeds = resolve_seeds(args.seeds)
+        campaign_dir_under_root(args.data_root, args.campaign_id)
+    except ValueError as exc:
+        _log(f"invalid campaign input: {exc}")
+        return EXIT_FATAL
     if args.policy == "script" and not args.script and not args.script_dir:
         _log("--policy script requires --script or --script-dir")
         return EXIT_FATAL

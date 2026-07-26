@@ -3153,3 +3153,161 @@ leak-detecting ASan/UBSan, and Release are each **961/961**; the unchanged
 The fuzzer build identity was therefore advanced from
 `schema5-b51fix2` to `schema5-b51fix2-cardgate1`; summaries produced before
 and after queued-play revalidation cannot be merged.
+
+<a id="b45-oracle-preflight"></a>
+
+### B4.5 oracle-capture preflight hardening `[x]` (non-task)
+
+**Scope:** prevent recurrence of an invalid live capture; this is safety
+tooling, not B4.5 acceptance. The external
+`D:\STS_BG_Mod\_oracle_data\campaigns\b45_rewards` directory was preserved
+unchanged.
+
+**Incident:** the campaign driver attached and completed six seeds, but every
+artifact header had `oracle_block_enabled: false` and no `game_state.oracle`.
+The GUI had selected stock CommunicationMod; stock and fork share
+`SpireConfig("CommunicationMod", ...)`, so successful child-process attachment
+did not prove the fork loaded. The header's fork hash and game/mod fields also
+did not prove runtime identity: the driver hashes its configured
+`--fork-jar` path and writes static frozen-version constants. An independent
+launch log showed environment drift. The observed 2022/MTS 3.30.3/BaseMod
+5.56.0 stack remains evidence of drift, not a sanctioned replacement for the
+frozen stack.
+
+**Fix:** `campaign_driver.py` inspects the first in-dungeon dump before opening
+either JSONL sidecar or advancing policy. A missing `game_state.oracle` records
+a durable `fatal_environment_drift` status with seed/attempt/detail and exits
+fatal. `orchestrator.py` recognizes that status both before launch and during a
+launch, kills the game if needed, writes its timeline/summary, and exits
+nonzero without relaunch. `validate_artifacts.py --require-oracle` rejects a
+false header or missing block and requires the B4.5 pity pair plus complete
+triples for the five reward RNG streams; default validation deliberately keeps
+the B1.4 non-oracle compatibility behavior. The B4.5 runbook now gates the
+campaign on a separate one-seed preflight, explicit fork-only launch-log
+identity, frozen version checks, deployed-jar hash, fatal-free progress, and
+strict oracle validation. README no longer describes stock/GUI launch as
+equivalent for an oracle campaign.
+
+**Tests:** Windows-host stdlib `unittest`
+`tools/oracle_bridge/driver/test_oracle_campaign.py` covers missing-oracle
+fail-fast before artifact creation, durable fatal progress, orchestrator
+no-relaunch, validator default compatibility, strict false-header/missing-block
+rejection, required pity/stream rejection, and strict acceptance. Full
+debug/ASan/release, stale-count, and documentation-link checks were run before
+commit. No schema, fixture, golden, registry, engine, vendored fork, or external
+campaign artifact changed. The frozen environment choice remains blocked on
+the owner, and B4.5 stays `[!]`.
+
+<a id="b45-oracle-preflight-fix-forward"></a>
+
+### B4.5 oracle-capture strict campaign fix-forward `[x]` (non-task)
+
+**Independent-review blockers:** `--require-oracle` checked every in-game
+action it encountered but did not require one to exist, so
+header-plus-terminal and all-menu artifacts passed. Separately,
+orchestrator `--fresh` removed only progress/heartbeat/manifest. A stale
+successful run and timing pair could survive a later retry-exhausted seed;
+the old validator globbed the run file without joining it to the current
+campaign ledger, and the orchestrator treated `complete` with failed seeds as
+success.
+
+**Fix-forward:** strict `--campaign` treats `campaign_progress.json` and
+`campaign_manifest.json` as one identity contract: status must be exactly
+`complete`, failures empty, current seed cleared, ordered `seeds_done` exactly
+equal to the unique non-empty `seed_list`, and both ledgers must agree.
+Expected conventional run and timing names are derived from that ledger and
+must match the directory bijectively. Each run header is joined on campaign
+id, seed, attempt, policy, schema, and fork hash; its terminal is joined to the
+done outcome/floor/action summary. Each timing header is joined on campaign
+id, seed, attempt, and policy. Strict per-file validation now also requires at
+least one in-game action carrying a valid oracle block. Default direct-file
+and campaign validation retains the historical non-oracle behavior.
+
+The driver refuses resume when campaign id, seed list, policy, fork hash, or
+schema differs and emits `complete_with_failures`/nonzero after any exhausted
+seed. The orchestrator checks requested seed identity before accepting
+progress and returns nonzero for incomplete or failed completion. Explicit
+`--fresh` removes only known control files, numbered launch logs, and the exact
+requested seeds' run/timing names; unexpected files remain visible to strict
+validation. Timing headers now carry seed and attempt. The B4.5 runbook makes
+every preflight and reward attempt a new timestamped, preserved campaign id.
+
+**Regression proof:** synthetic tests cover header-plus-terminal and all-menu
+strict rejection, valid strict campaign identity, missing/extra/stale and
+cross-campaign files, bounded fresh cleanup, resume mismatch, non-relaunch on
+failed completion, and a two-launch retry-exhaustion path with a stale valid
+run/timing pair that cannot be accepted. Full preset, Python, stale-count,
+documentation-link, whitespace, and golden/fixture hygiene checks were run
+before the separate fix-forward commit. No state schema, engine, registry,
+fixture, golden, vendored fork, or external campaign artifact changed. The
+frozen environment decision remains the live B4.5 stop line.
+
+<a id="b45-oracle-preflight-second-fix-forward"></a>
+
+### B4.5 strict oracle evidence second fix-forward `[x]` (non-task)
+
+**Independent-review findings:** the first strict terminal join exposed a
+pre-existing live-driver counter split: boss-reward claims incremented only a
+local count, so the terminal and `seeds_done` summaries disagreed for ordinary
+full-run termination. The same review reproduced five more gaps. A requested
+seed mismatch was logged but accepted; duplicate/out-of-order terminals and
+actions plus missing summaries could pass; a rooted or `..` campaign id let
+`--fresh` escape the data root; timing validation ignored everything after its
+header; and fork/schema resume mismatch was not durable or checked by the
+orchestrator before accepting completed progress.
+
+**Fix-forward:** boss-reward claim actions now return their updated count and
+write corresponding timing marks, including the no-op recovery path. The
+terminal marker remains an explicitly non-injected final-state observation:
+action sequence is contiguous, terminal `seq` counts every action-shaped
+record, while terminal/progress `actions` and timing marks count only injected
+commands. A wrong dump seed is fatal before artifact creation or policy
+advancement. Strict validation derives the long from the filename/header string
+and requires header long/getLong/crosscheck, every in-game `game_state.seed`,
+and every `oracle.seed` to agree.
+
+Strict run grammar now requires exactly one final terminal, contiguous action
+sequence, required terminal and done summaries, and consistent sequence/action
+counts. Timing JSONL is parsed completely: one first header, marks only
+thereafter, valid required fields and monotonic clocks, contiguous sequence,
+and exact command/floor/screen correspondence to every injected artifact
+action. Timing identity now includes campaign, seed, attempt, policy, schema,
+driver, and fork hash.
+
+The shared `campaign_paths.py` contract accepts only single-component campaign
+ids and base-35-style seed names. Every driver/orchestrator campaign write and
+delete resolves through absolute/real containment below `data_root`; rooted
+paths, separators, dot segments, symlink escapes, and unsafe direct child names
+fail closed. Resume identity mismatch is persisted as a non-retryable fatal
+status. The orchestrator hashes the currently requested fork and joins
+campaign/seed/policy/fork/schema before accepting even completed progress, and
+any `complete_with_failures` status is nonzero regardless of list contents.
+
+**Regression proof:** the Python suite now directly covers the normal
+boss-reward strict campaign, wrong requested/dump/header/oracle seeds, duplicate
+terminals, actions after terminal, sequence/count drift, missing terminal/done
+summaries, malformed/duplicate/missing/drifted timing rows, path traversal at
+both CLIs and cleanup, durable resume mismatch, current-fork completed-progress
+rejection, and empty-list `complete_with_failures`. The historical default
+validator remains compatible for non-strict artifacts. Full preset and hygiene
+results are recorded by the separate fix-forward commit; no engine schema,
+registry, fixture, golden, vendored fork, or external campaign artifact changed.
+B4.5 remains `[!]` on the manual oracle capture and frozen-environment decision.
+
+<a id="b45-oracle-preflight-redirect-fix-forward"></a>
+
+### B4.5 redirected-child cleanup fix-forward `[x]` (non-task)
+
+**Supersession:** independent post-review found that containment alone was not
+enough: an expected direct-child name symlinked to unexpected evidence *inside*
+the campaign passed the root check, and `--fresh` deleted the resolved target.
+Campaign paths now retain the exact lexical child and reject every existing
+symlink, junction, or Windows reparse redirect before cleanup, progress
+temp/replace, heartbeat, run/timing, manifest, launch-log, summary, or strict
+validation access. The cross-platform regression creates a real file symlink
+when supported and proves cleanup, orchestration, strict validation, and direct
+progress resume all fail explicitly while the link and target evidence survive.
+Normal bounded cleanup and non-strict historical validation remain unchanged.
+Verified on the Windows host: Python 34/34 and WSL Debug, ASan/UBSan, and
+Release 980/980 each; stale-count, documentation-link, whitespace, and
+golden/fixture/registry hygiene are clean.

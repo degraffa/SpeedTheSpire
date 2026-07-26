@@ -468,11 +468,30 @@ Everything else landed and is green; the task stays open because §1 says a task
 is done only when its Acceptance **passes**, and this one has not been run.
 **To close it,** follow the committed runbook
 `tools/oracle_bridge/driver/b45_reward_spotdiff.md`: pick 3 seeds (it names which
-to avoid and why), launch via `orchestrator.py --campaign-id b45_rewards --policy
-random-legal --fresh`, `translate_cli` the artifacts, then diff the **post-claim
+to avoid and why), pass its distinct one-seed preflight, launch via
+`orchestrator.py --campaign-id b45_rewards_oracle --policy random-legal
+--fresh`, `translate_cli` the artifacts, then diff the **post-claim
 `RunState`** per its field table. Expect the deck column to expose the
 CardLibrary library-order deviation; the captured offers are what pins the
 one-line `gen.py` fix, after which it re-diffs to zero.
+
+**Safety hardening (non-acceptance):** the preserved `b45_rewards` artifacts
+were rejected because the GUI loaded stock CommunicationMod and every header
+has `oracle_block_enabled: false`; the launch environment also drifted from the
+frozen game/ModTheSpire versions. The driver now makes a missing oracle block
+on the first in-dungeon dump a fatal durable status before policy/artifact
+acceptance, the orchestrator stops relaunching on that status, and the
+validator/runbook require a distinct one-seed oracle preflight. The choice
+between restoring the frozen stack and formally amending it remains blocked on
+the owner; this hardening does **not** close B4.5.
+An independent second review then closed the remaining strict-evidence gaps:
+normal boss-reward claims now propagate their action count; seed identity is
+joined from request through every in-game/oracle record; run and timing JSONL
+grammars are complete and bijective; campaign ids and resolved paths cannot
+escape the data root; and resume identity includes the currently requested
+fork/schema even for completed ledgers. These are capture-safety fixes only;
+the manual oracle acceptance remains the blocker.
+See the [non-task archive log](stage-b-log.md#b45-oracle-preflight).
 
 **Landed** — commit `4f0544a`, merged at `e222dc2`, landed in `e6ec9ce`:
 `combat_rewards.{hpp,cpp}` (assembly at reward-screen open), the `RewardScreen`
@@ -766,6 +785,43 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **B4.5 strict evidence second fix-forward closes six
+  independent-review findings; B4.5 remains `[!]`.** The first fix-forward's
+  new terminal join exposed the driver's pre-existing boss-claim counter
+  split; seed-long identity, terminal ordering/counts, timing bodies, resolved
+  cleanup containment, and current fork/schema resume identity also needed
+  fail-closed contracts. All now have direct adversarial regressions plus a
+  happy strict boss-reward campaign. Default non-oracle validation remains
+  backward-compatible.
+  [Archive log.](stage-b-log.md#b45-oracle-preflight-second-fix-forward)
+- 2026-07-26 — **B4.5 oracle-capture preflight fix-forward closes strict
+  campaign false accepts; B4.5 remains `[!]`.** Independent review found that
+  strict validation still accepted a header-plus-terminal/all-menu artifact
+  with no observed in-game oracle state, and that `--fresh` left old run/timing
+  artifacts behind. A later failed attempt could therefore appear supported by
+  stale files. Strict `--campaign` now binds complete/failure-free progress and
+  manifest identity to the ordered seed ledger and exact run/timing artifact
+  sets, including per-file campaign/seed/attempt identity; it rejects missing,
+  extra, stale, failed, and zero-observation evidence. Driver/orchestrator
+  completion is nonzero for any failed seed, resume identity is checked, and
+  `--fresh` performs bounded cleanup only for its exact requested seeds.
+  The runbook allocates a new preserved id per preflight/reward attempt.
+  Default legacy validation remains compatible.
+  [Archive log.](stage-b-log.md#b45-oracle-preflight-fix-forward)
+- 2026-07-26 — **B4.5 oracle-capture preflight made fail-closed; B4.5 remains
+  `[!]`.** The preserved `b45_rewards` campaign exposed two independent false
+  confidence paths: stock CommunicationMod shares the fork's config namespace,
+  so it spawned the campaign driver and produced normal-looking artifacts with
+  `oracle_block_enabled: false`; and artifact version/mod fields are static
+  driver provenance, not proof of the runtime selected by ModTheSpire. A
+  missing oracle block on the first in-dungeon dump is now a durable
+  `fatal_environment_drift` before artifact creation or policy advancement;
+  the orchestrator stops rather than relaunching; and explicit
+  `--require-oracle` validation plus a one-seed fork/version/hash/oracle
+  preflight gates the reward runbook. The invalid external campaign is
+  preserved. The observed newer game/MTS/BaseMod stack is not sanctioned, and
+  restore-vs-amend remains an owner stop-line decision.
+  [Archive log.](stage-b-log.md#b45-oracle-preflight)
 - 2026-07-26 — **run-layer escape deferred obligations discharged; rejected
   Smoke Bomb branch fixed before landing.** The implementation commit
   `82d497a` closed the outcome / stolen-gold / liveness seam and replaced the

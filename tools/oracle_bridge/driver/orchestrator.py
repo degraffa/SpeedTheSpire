@@ -27,12 +27,26 @@ Stdlib-only. Run it from anywhere on the Windows host with Python 3.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+
+from campaign_paths import (
+    campaign_dir_under_root,
+    campaign_file_under_root,
+    validate_campaign_id,
+    validate_seed_list,
+)
+
+FATAL_PROGRESS_STATUS = "fatal_environment_drift"
+EXIT_FATAL_ENVIRONMENT = 3
+EXIT_CAMPAIGN_INVALID = 4
+SCHEMA_VERSION = 1
 
 
 def utc() -> str:
@@ -98,11 +112,13 @@ def build_driver_command(args) -> str:
 
 
 def progress_path(args) -> str:
-    return os.path.join(args.data_root, args.campaign_id, "campaign_progress.json")
+    return campaign_file_under_root(
+        args.data_root, args.campaign_id, "campaign_progress.json")
 
 
 def heartbeat_path(args) -> str:
-    return os.path.join(args.data_root, args.campaign_id, "campaign_heartbeat.json")
+    return campaign_file_under_root(
+        args.data_root, args.campaign_id, "campaign_heartbeat.json")
 
 
 def read_json(path):
@@ -111,6 +127,103 @@ def read_json(path):
             return json.load(fh)
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def fatal_progress(prog) -> bool:
+    return bool(prog and prog.get("status") == FATAL_PROGRESS_STATUS)
+
+
+def log_fatal_progress(prog) -> None:
+    fatal = prog.get("fatal") or {}
+    detail = fatal.get("message") or "driver reported environment drift"
+    log(f"FATAL ENVIRONMENT DRIFT -- {detail}")
+
+
+def resolve_seeds(spec: str) -> list:
+    if os.path.exists(spec):
+        with open(spec, "r", encoding="utf-8") as fh:
+            seeds = [line.strip().upper() for line in fh
+                     if line.strip() and not line.startswith("#")]
+    else:
+        seeds = [seed.strip().upper() for seed in spec.split(",")
+                 if seed.strip()]
+    return validate_seed_list(seeds)
+
+
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def progress_identity_error(prog, args):
+    if not prog:
+        return None
+    expected = {
+        "campaign_id": args.campaign_id,
+        "seed_list": args.seed_list,
+        "policy": args.policy,
+        "fork_jar_sha256": args.fork_hash,
+        "schema_version": SCHEMA_VERSION,
+    }
+    mismatches = [
+        f"{key}={prog.get(key)!r} (expected {value!r})"
+        for key, value in expected.items()
+        if type(prog.get(key)) is not type(value) or prog.get(key) != value
+    ]
+    return "; ".join(mismatches) if mismatches else None
+
+
+def completion_error(prog, expected_seeds):
+    if prog.get("status") != "complete":
+        return (f"campaign status must be 'complete', got "
+                f"{prog.get('status')!r}")
+    failed = prog.get("seeds_failed")
+    done = prog.get("seeds_done")
+    if not isinstance(failed, list) or not isinstance(done, list):
+        return "completion ledger lacks seeds_done/seeds_failed lists"
+    if failed:
+        return f"campaign has {len(failed)} failed seed(s)"
+    done_seeds = [row.get("seed") for row in done if isinstance(row, dict)]
+    if len(done_seeds) != len(done) or done_seeds != expected_seeds:
+        return (f"completed seed ledger {done_seeds!r} does not match "
+                f"requested seed list {expected_seeds!r}")
+    return None
+
+
+def clear_fresh_campaign_files(data_root: str, campaign_id: str,
+                               seed_list: list) -> list:
+    """Remove only artifacts this exact invocation owns.
+
+    Unexpected seed artifacts are deliberately preserved; strict validation
+    will report them as stale instead of silently deleting unrelated evidence.
+    """
+    campaign_id = validate_campaign_id(campaign_id)
+    seed_list = validate_seed_list(seed_list)
+    campaign_dir = campaign_dir_under_root(data_root, campaign_id)
+    names = {
+        "campaign_progress.json", "campaign_progress.json.tmp",
+        "campaign_heartbeat.json", "campaign_manifest.json",
+        "orchestrator_timeline.json",
+    }
+    for seed in seed_list:
+        names.add(f"run_{seed}_a20_ironclad.jsonl")
+        names.add(f"run_{seed}_a20_ironclad.timing.jsonl")
+    try:
+        entries = os.listdir(campaign_dir)
+    except FileNotFoundError:
+        entries = []
+    names.update(name for name in entries
+                 if re.fullmatch(r"mts_launch[0-9]+\.log", name))
+    removed = []
+    for name in sorted(names):
+        path = campaign_file_under_root(data_root, campaign_id, name)
+        if os.path.isfile(path):
+            os.remove(path)
+            removed.append(name)
+    return removed
 
 
 def kill_tree(proc: subprocess.Popen) -> None:
@@ -131,8 +244,8 @@ def launch_game(args, launch_idx: int) -> subprocess.Popen:
     java = os.path.join(args.game_dir, "jre", "bin", "java.exe")
     cmd = [java, "-jar", args.mts_jar,
            "--skip-launcher", "--mods", "basemod,CommunicationMod-oracle"]
-    out = open(os.path.join(args.data_root, args.campaign_id,
-                            f"mts_launch{launch_idx}.log"), "w",
+    out = open(campaign_file_under_root(
+        args.data_root, args.campaign_id, f"mts_launch{launch_idx}.log"), "w",
                encoding="utf-8", newline="\n")
     log(f"launch #{launch_idx}: {java} -jar {args.mts_jar} --skip-launcher "
         f"--mods basemod,CommunicationMod-oracle  (cwd={args.game_dir})")
@@ -186,15 +299,30 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     args.seeds_arg = args.seeds  # passed through to the driver verbatim
-    camp_dir = os.path.join(args.data_root, args.campaign_id)
+    try:
+        validate_campaign_id(args.campaign_id)
+        args.seed_list = resolve_seeds(args.seeds)
+        args.fork_hash = sha256_file(args.fork_jar)
+        camp_dir = campaign_dir_under_root(args.data_root, args.campaign_id)
+    except (OSError, ValueError) as exc:
+        log(f"INVALID CAMPAIGN INPUT -- {exc}")
+        return EXIT_CAMPAIGN_INVALID
     os.makedirs(camp_dir, exist_ok=True)
+    try:
+        # Re-resolve after mkdir so an existing/redirection race fails closed.
+        camp_dir = campaign_dir_under_root(args.data_root, args.campaign_id)
+    except ValueError as exc:
+        log(f"INVALID CAMPAIGN PATH -- {exc}")
+        return EXIT_CAMPAIGN_INVALID
     if args.fresh:
-        for f in ("campaign_progress.json", "campaign_heartbeat.json",
-                  "campaign_manifest.json"):
-            p = os.path.join(camp_dir, f)
-            if os.path.exists(p):
-                os.remove(p)
-        log(f"--fresh: cleared prior progress in {camp_dir}")
+        try:
+            removed = clear_fresh_campaign_files(
+                args.data_root, args.campaign_id, args.seed_list)
+        except ValueError as exc:
+            log(f"REFUSING --fresh CLEANUP -- {exc}")
+            return EXIT_CAMPAIGN_INVALID
+        log(f"--fresh: cleared {len(removed)} owned prior file(s) in "
+            f"{camp_dir}")
 
     config_path = os.path.join(
         os.environ["LOCALAPPDATA"], "ModTheSpire", "CommunicationMod",
@@ -220,7 +348,23 @@ def main(argv=None) -> int:
             log("CAMPAIGN TIMEOUT -- giving up")
             return 2
         prog = read_json(progress_path(args))
-        if prog and prog.get("status") == "complete":
+        identity_error = progress_identity_error(prog, args)
+        if identity_error:
+            log(f"CAMPAIGN IDENTITY MISMATCH -- {identity_error}; use a new "
+                "campaign id or explicitly restart with --fresh")
+            return EXIT_CAMPAIGN_INVALID
+        if fatal_progress(prog):
+            log_fatal_progress(prog)
+            timeline.append({"event": "fatal_environment_drift", "utc": utc()})
+            _summary(args, timeline)
+            return EXIT_FATAL_ENVIRONMENT
+        if prog and prog.get("status") in ("complete",
+                                          "complete_with_failures"):
+            error = completion_error(prog, args.seed_list)
+            if error:
+                log(f"CAMPAIGN NOT ACCEPTABLE -- {error}")
+                _summary(args, timeline)
+                return EXIT_CAMPAIGN_INVALID
             log("campaign already complete")
             break
 
@@ -241,8 +385,38 @@ def main(argv=None) -> int:
             prog = read_json(progress_path(args))
             done = len(prog["seeds_done"]) if prog else 0
             failed = len(prog["seeds_failed"]) if prog else 0
+            identity_error = progress_identity_error(prog, args)
+            if identity_error:
+                log(f"CAMPAIGN IDENTITY MISMATCH -- {identity_error}")
+                kill_tree(proc)
+                timeline.append({"event": "campaign_identity_mismatch",
+                                 "utc": utc()})
+                _summary(args, timeline)
+                return EXIT_CAMPAIGN_INVALID
 
-            if prog and prog.get("status") == "complete":
+            if fatal_progress(prog):
+                log_fatal_progress(prog)
+                kill_tree(proc)
+                timeline.append({
+                    "event": "fatal_environment_drift",
+                    "utc": utc(),
+                    "done": done,
+                    "failed": failed,
+                })
+                _summary(args, timeline)
+                return EXIT_FATAL_ENVIRONMENT
+
+            if prog and prog.get("status") in ("complete",
+                                              "complete_with_failures"):
+                error = completion_error(prog, args.seed_list)
+                if error:
+                    log(f"CAMPAIGN NOT ACCEPTABLE -- {error}")
+                    kill_tree(proc)
+                    timeline.append({"event": "campaign_failed",
+                                     "utc": utc(), "done": done,
+                                     "failed": failed})
+                    _summary(args, timeline)
+                    return EXIT_CAMPAIGN_INVALID
                 log(f"campaign COMPLETE ({done} done, {failed} failed) -- "
                     f"stopping game")
                 kill_tree(proc)
@@ -293,10 +467,9 @@ def main(argv=None) -> int:
 
 def _summary(args, timeline) -> None:
     prog = read_json(progress_path(args)) or {}
-    man = read_json(os.path.join(args.data_root, args.campaign_id,
-                                 "campaign_manifest.json"))
-    with open(os.path.join(args.data_root, args.campaign_id,
-                           "orchestrator_timeline.json"), "w",
+    with open(campaign_file_under_root(
+            args.data_root, args.campaign_id,
+            "orchestrator_timeline.json"), "w",
               encoding="utf-8", newline="\n") as fh:
         json.dump({"timeline": timeline, "final_status": prog.get("status")},
                   fh, indent=2)

@@ -349,6 +349,17 @@ sts_add_test(oracle_adapter_test
         STS_ORACLE_CORPUS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus"
         STS_TRANSLATOR_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/oracle_adapter_scratch")
 
+# B4.5 live-capture safety hardening. Stdlib-only synthetic tests exercise the
+# driver/orchestrator process boundary and strict artifact preflight without
+# launching the game. Unlike the live campaign, this belongs in every preset:
+# it proves missing fork state stops before artifact/policy acceptance and
+# cannot be turned into an orchestrator relaunch loop.
+add_test(
+    NAME oracle_campaign_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_oracle_campaign.py)
+set_tests_properties(oracle_campaign_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+
 # B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
 # corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign
 # b13_on20b). Header-only engine code, so it links sts_engine like the other
