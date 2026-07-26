@@ -1294,6 +1294,77 @@ discard tested against the frozen §5.4 order; directed script.
 - Added `status_curse_test` (9 tier-2/directed tests). Correct hand discard intentionally changes the 20 combat traces; all were regenerated from the checked-in generator, replay green, and a repeated generation produced an identical sorted SHA-256 manifest. Updated the affected CardIntegration hash/trace, power-hook action count, and translator unknown-id probe rather than weakening them.
 - Verification: task branch full Debug 353/353 and leak-detecting ASan/UBSan 353/353. After semantic integration with B3.13 and Frail completion, full WSL Ubuntu-2404 Debug 368/368 and `ASAN_OPTIONS=detect_leaks=1 UBSAN_OPTIONS=print_stacktrace=1` ASan/UBSan 368/368. No schema bump; `git diff --check` clean.
 
+<a id="b310a"></a>
+
+### B3.10a `[x]` ∥ Colorless uncommons — the fourteen
+**Deps:** B3.2 · **Provenance:** cards/colorless UNCOMMON, the fourteen below
+**Deliverables:** Bandage Up, Blind, Deep Breath, Dramatic Entrance, Finesse,
+Flash of Steel, Good Instincts, Impatience, Madness, Mind Blast, Panacea, Panic
+Button, Swift Strike, Trip — ids 92, 93, 95, 97, 99, 100, 102, 103, 105, 106,
+107, 108, 110, 111 (library order, interior gaps reserved).
+**Acceptance:** tier-2 per card; Madness `cardRandomRng` draw accounting;
+directed script; a named test pinning the two block passes.
+
+**Log:** commit `4da9739`, merged at `f552e84`, landed in `20825be`. Opcodes 45
+`DAMAGE_DRAW_PILE` / 46 `CONDITIONAL_DRAW` / 47 `RESHUFFLE_ALL` / 48 `MADNESS`,
+power 77 `NO_BLOCK`. The allocated block was spent exactly; ids 94/96/98/101/104/
+109 stay empty and are **pinned empty by a named test** (`InteriorIdsStayReserved`).
+
+**This task exists because its predecessor refused to do it.** B3.10 was
+dispatched whole; the agent read every `use()` and ctor in full, found that ten
+of the twenty cards each need a *distinct* new verb — about 2.5× the allocated
+opcode budget — and **stopped without committing**, proposing the split
+(conventions §5). It also declined to land the clean fourteen-card subset,
+because doing so would spend all four opcodes on four of the ten verbs and
+consume interior ids under an allocation about to be revised. Both calls were
+right. The same read produced the two brief errors recorded in the ledger's
+change log (`vocab.py` wrongly declared off limits when `OPCODES` lives in it;
+the count guards briefed as four sites when there are five).
+
+**`NO_BLOCK` overrides `modifyBlockLast`, not `modifyBlock`**
+(`NoBlockPower.java:58-60`) — the whole game's only overrider of that hook
+(verified by searching the tree: `AbstractPower.java` declares it,
+`NoBlockPower.java` overrides it, `AbstractCard.java` calls it, nothing else
+mentions it). `applyPowersToBlock` (`AbstractCard.java:2291-2307`) runs
+`modifyBlock` over **all** powers and *then* `modifyBlockLast` over all powers.
+The engine's `modify_block` was a **single pass**, which yields `N` where the
+game yields `0` whenever a Dexterity sits later in the power list. So Panic
+Button was a **structural** `interp_block.cpp` change, not a data row.
+Pinned by `ModifyBlockLastBeatsADexterityLaterInTheList` and
+**demonstrated RED before green**: folding `NO_BLOCK` back into the single pass
+failed that test with exactly the predicted 3 — and *nothing else moved*, so
+that one test is the sole thing pinning the ordering, which the Log records
+rather than hides. Three companion cases keep it from decaying (Dexterity alone
+→ 9, reversed list → 0, Frail → 4).
+
+**Deep Breath exposed a live, engine-wide divergence.** `AbstractPlayer.useCard`
+(`:1369-1375`) queues a card's own actions **before** the `UseCardAction` that
+files it away, so the played card is in `cardInUse` limbo — in **no pile** —
+while its own reshuffle runs; `resolve_card_play` moves it to the discard early.
+For Deep Breath that changes both the `discardPile.size() > 0` guard's answer
+*and* the Fisher-Yates permutation of every other card: played onto an otherwise
+empty discard it would have drawn **2** `shuffleRng` values where the game draws
+**0**. Fixed the Headbutt way (a source-pool index stamped into `tgt`, excluded
+by `reshuffle_all`). Deep Breath also **cannot be two authored `SHUFFLE_IN`
+steps** — the game guards *both* `EmptyDeckShuffleAction` and
+`ShuffleAction(drawPile)` on the same test (`DeepBreath.java:34-38`), and after
+the first runs the discard is empty either way, so a second step can no longer
+see the guard's input. Hence one fused opcode. **The general limbo gap was
+deliberately not widened into** and is now an obligations row.
+
+**Two count-guard sites the published inventory missed**, both hit here:
+`registry_gen_test.cpp`'s `kTotalCount` is a **derived** site naming neither
+constant, so grepping for either misses it; and a synthetic test card was pinned
+at **id 100** under a comment reading "past the real card ids 1-10 so it never
+collides" — `FLASH_OF_STEEL` is id 100, and the loader rejected the duplicate.
+Any card batch reaching 100 rows would have hit it. `relic_pools.cpp`'s
+`kCardsCount` assert was **answered, not bumped**: all fourteen rows are
+UNCOMMON and every one is SKILL or ATTACK, so neither the hard-coded BASIC set
+nor Bottled Tornado's POWER scan moves.
+
+**Verified:** union green on debug / asan / release at integration-16 with zero
+NOT_BUILT; no committed fixture or golden vector modified, deleted or renamed.
+
 <a id="b312"></a>
 
 ### B3.12 `[x]` Multi-monster combat + encounter framework
@@ -1430,6 +1501,93 @@ After integration on top of B3.5, the combined manifest is cards 50 / powers 21 
 monsters 8 / relics 34 / potions 33 / encounters 20 / total 166; focused Slime
 7/7 and RegistryGen 15/15 remained green, followed by full integrated Debug
 413/413 and leak-detecting ASan/UBSan 413/413.
+
+<a id="b315"></a>
+
+### B3.15 `[x]` Monsters: slavers + Looter + Fungi Beast
+**Deps:** B3.12 · **Provenance:** SlaverBlue/Red.java, Looter.java,
+FungiBeast.java, EntanglePower.java, SporeCloudPower.java, ThieveryPower.java,
+EscapeAction.java, MonsterGroup.java, SmokeBomb.java
+**Deliverables:** registry entries: entangle (Red Slaver), Looter's
+gold-steal + escape (combat-end-without-death path + stolen-gold return
+rules), Fungi Beast Spore Cloud (on-death Vulnerable).
+**Acceptance:** tier-2 per monster; escape terminal state distinct from kill
+(reward implications tested at B4.5); on-death trigger ordering.
+
+**Log:** landed in **two deliberate halves**, which is the most useful thing
+about this entry.
+
+**Half one** — `f24b8db`, merged at `243bf63`, landed in `06c4fa0` (citation fix
+in `39876f0`): monster ids 23 `SLAVER_BLUE` / 24 `SLAVER_RED` / 25
+`FUNGI_BEAST`, powers `ENTANGLE` = 73 and `SPORE_CLOUD` = 74, and the **first
+dispatch site for `Hook::ON_DEATH`**. All three end `takeTurn` in a queued
+`RollMoveAction`, and unlike Lagavulin / Slime Boss / Hexaghost all three
+`getMove` overrides **read** the rolled `num` (thresholds 40, 75/55, 60), so the
+fixtures pin the roll-driven move rather than a draw count. **Entangled is a
+legality predicate, not a power hook** — `AbstractCard.hasEnoughEnergy:872-875`
+refuses ATTACK-type cards outright, so the veto sits in `legal_actions` beside
+Normality's and Velvet Choker's, after the Medical Kit / Blue Candle escape
+hatches. **Spore Cloud's ordering bites**: `die()` latches `isDying` *before*
+walking powers, so with two Fungi Beasts the **first** death releases 2
+Vulnerable and the **last** releases none (four named tests). `SUICIDE`
+deliberately does not dispatch `ON_DEATH` (`triggerRelics == false`,
+`SuicideAction.java:29-36`). `SlaverRed.usedEntangle` is the first
+`MonsterState.pad0` bit-flag user — no layout change, no schema bump.
+
+**The Looter was deliberately withheld from half one**, and that judgement is
+the entry's real content. It was not "too hard": the task isolated a single
+missing predicate and refused to code around it. This engine's only liveness
+signal was `hp > 0`; the game's is `isDying || isEscaping`
+(`MonsterGroup.java:90-95,117-122`), so an **escaped monster is alive and out of
+the fight** — a state the engine could not express. There was **no alternative
+seam**: `pump_step` recomputes the phase from that predicate every iteration, so
+a `COMBAT_OVER` written by an opcode is overwritten on the next step. Four
+obligation rows that looked like four problems were therefore **one**.
+
+**Half two** — `a2a60df`, merged at `6809671`, landed in `20825be`. A shared
+`monster_dead_or_escaped()` + `kMonsterFlagEscaped` (0x8000). **Every** "in the
+fight" read was converted against its Java citation, not just the two obvious
+ones: `any_monster_alive` / `queue_monsters` / the step-5 forfeit gate
+(`action_queue.cpp`), AoE fan-out (`interp.cpp`), `roll_random_target`
+(`card_play.cpp`), `VAMPIRE_DAMAGE_ALL` (`interp_damage.cpp`), both end-of-round
+monster walks (`power_hooks.cpp`), Spore Cloud's `battle_is_ending`, and the
+target grid + `fill_result` (`advance.cpp`). **No `CombatState` field and no
+`SCHEMA_VERSION` bump** — the stop-the-line scenario the brief warned about did
+not materialise, and all 20 committed fixtures replay unchanged.
+
+The Looter itself is monster id 26, `PowerId` 75 `THIEVERY`, `MonsterIntent` 13
+`ESCAPE`, opcode 40 `ESCAPE`. Its escape **is reachable in Act 1** — unlike
+B3.16's gremlin move 99 it needs no `escapeNext()`/`deathReact()` caller; it is
+simply where its own `takeTurn` machine ends (Mug, Mug, a 50/50 into Smoke Bomb
+or Lunge, then Escape on turn 4 or 5). `pad0` carries slashCount, which provably
+equals the steal count. Stolen gold is accrued **unclamped** and settled as
+`min(count × goldAmt, gold)`, proven equal to the game's per-steal clamps
+whenever the thief is the combat's only gold movement — true for every Act-1
+group (at most one thief anywhere, verified against `encounters.yaml`).
+**Smoke Bomb's combat body** sets the *player's* escape flag exactly as
+`SmokeBomb.use` sets `isEscaping`, and the pump ends the battle with monsters
+alive and untouched.
+
+**Un-parked by construction with no `run_advance.cpp` edit** — the gate at
+`:273` asks `monster_init_fn` directly. Half one un-parked Blue Slaver, Red
+Slaver, 2 Fungi Beasts and Exordium Wildlife; half two un-parked Looter and
+Exordium Thugs, closing that obligation entirely.
+
+**Fixture deviation, deliberate:** 32 seeds but rows run to each seed's escape
+turn rather than a fixed 20, because a solo combat *ends* there — and the row
+count itself pins the 50/50 (13 smoke-bomb / 19 lunge paths).
+
+**Discharged:** enemy self-escape + stolen-gold return; Smoke Bomb's
+combat-escape body; the un-park row; and **Pantograph's boss heal**, which was
+found already implemented and tested — only its stale `DEFERRED` markers needed
+retiring (`39876f0`). A deferral marker on live code is conventions §8's bug
+signal inverted. **Handed on:** the run-layer half of escape (outcome enum, gold
+settlement, `live_target`) — see the obligations table.
+
+**Verified:** union green on debug / asan / release at integration-16 with zero
+NOT_BUILT; manifest regenerated to cards 105 / powers 44 / monsters 25 /
+relics 142 / potions 33 / encounters 20 / a20 20 / total 389; no committed
+fixture or golden vector modified, deleted or renamed.
 
 <a id="b316"></a>
 
