@@ -286,6 +286,34 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 
+    # B4.5: the three per-rarity combat CARD-REWARD pools (AbstractDungeon.
+    # initializeCardPools, AbstractDungeon.java:1135-1180: player.getCardPool ->
+    # CardLibrary.addRedCards, CardLibrary.java:1152-1161 -- every RED card
+    # whose rarity != BASIC, split by rarity into commonCardPool /
+    # uncommonCardPool / rareCardPool). Unlike the ATTACK transform pool above,
+    # these have NO type filter and NO healing exclusion (Feed and Reaper ARE
+    # reward-poolable; only returnTrulyRandomCardInCombat excludes them).
+    # getCard(rarity) (AbstractDungeon.java:1481-1498) draws
+    # pool.getRandomCard(true) == group.get(cardRng.random(size - 1))
+    # (CardGroup.java:502-506): one cardRng draw indexing THIS list.
+    # ORDER: same documented interim deviation as kIroncladAttackPool -- the
+    # game's pools fill in CardLibrary HashMap iteration order ("library
+    # order"); until the B4.5 oracle capture pins that order these are emitted
+    # in registry-id order. Draw-count accounting and membership are Java-exact;
+    # only which ID a given index maps to can deviate.
+    for tier in ("COMMON", "UNCOMMON", "RARE"):
+        pool = [r for r in rows
+                if r["color"] == "RED" and r["rarity"] == tier]
+        pool.sort(key=lambda r: r["id"])
+        tname = pascal(tier)
+        out.append(f"inline constexpr int kIronclad{tname}PoolCount = "
+                   f"{len(pool)};")
+        out.append(f"inline constexpr std::array<CardId, "
+                   f"kIronclad{tname}PoolCount> kIronclad{tname}Pool{{{{")
+        for r in pool:
+            out.append(f"    CardId::{r['name']},")
+        out.append("}};\n")
+
     # Lookup table + accessor (mirrors cards.hpp card_def()).
     out.append("inline constexpr std::array<const CardDef*, "
                f"{len(rows)}> kCardDefs{{{{")

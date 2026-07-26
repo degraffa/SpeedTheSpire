@@ -254,6 +254,16 @@ sts_add_test(encounters_test)
 # choice legality + non-combat routing + heterogeneous batch advance.
 sts_add_test(run_advance_test)
 
+# B4.5: combat rewards -- rarity thresholds (< 3 / < 40; elite < 10 / < 50; boss
+# always RARE), pity dynamics vs. independent recomputation, the no-dupe
+# re-roll, the Act-1 zero-chance upgrade draws, stream attribution (traps 13 +
+# 18), potion drop + blizzard ratchet, elite relic (+ Black Star), Smoke Bomb's
+# consumes-but-offers-nothing path, and the claim flow (gold door, potion
+# slots/Sozu, the master-deck door incl. the Ceramic Fish guard, Singing Bowl,
+# skip, Question Card / Busted Crown / White Beast Statue / Golden Idol /
+# Prayer Wheel).
+sts_add_test(combat_rewards_test)
+
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer
