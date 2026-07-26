@@ -213,14 +213,32 @@ unspent ids below are now **permanent gaps and must never be backfilled**):
 | B4.5 | *(none — needed no new registry id)* | opcodes 43–44, `ChoiceKind` 6–7 |
 | B3.10a | 14 `CardId`s, `PowerId` 77 `NO_BLOCK`, opcodes 45–48 `DAMAGE_DRAW_PILE`/`CONDITIONAL_DRAW`/`RESHUFFLE_ALL`/`MADNESS` | — (spent its block exactly) |
 
-**`MonsterState.flags` is now FULL.** `kMonsterFlagEscaped = 0x8000` took the
-**last free bit** of that `uint16_t`. It is also the first *global* bit — every
-other is type-scoped (Lagavulin's, the Guardian's, Hexaghost's) and may overlap
-across monster types because no monster is two types at once. The next monster
-needing a flag has exactly two options: reuse a type-scoped bit where the types
-provably cannot coexist, or widen the field — which **is** a `SCHEMA_VERSION`
-bump and fixture regeneration, i.e. stop-the-line (conventions §5, design §4.4).
-Do not let that decision be taken locally inside a content task.
+**`MonsterState.flags` is a two-region `uint32_t` — allocate from the right
+region.** It was a `uint16_t` and ran out (`kMonsterFlagEscaped` took the last
+bit); it was widened to 32 bits on 2026-07-26, owner-approved, as
+`SCHEMA_VERSION` 4 → 5 (design §11 v0.1.5). **The width was the smaller half of
+the fix.** Bits had been handed out **linearly**, a fresh bit per monster type,
+though no monster is two types at once — nine Act-1 types burned all sixteen
+bits while the worst single type (The Guardian) needs five. Widening alone would
+have re-exhausted the word in Act 2. The rule now:
+
+- **Bits 0–23 — TYPE-SCOPED and reusable.** A bit means whatever the owning
+  monster type says. Two types may share a bit **only** if no single monster is
+  both. Existing constants keep their historical values; do not re-base them.
+- **Bits 24–31 — GLOBAL, scarce, orchestrator-allocated.** For flags that
+  *type-agnostic* code reads. Today there is exactly one: `kMonsterFlagEscaped`
+  (bit 24), read by `monster_dead_or_escaped()` from the queue, interpreter,
+  card-play, damage, power-hook, advance and Spore Cloud paths.
+- **The power caveat.** A bit consumed by a *power's* native body is scoped to
+  that power's possible **owner set**, not to one monster type — the CurlUp and
+  Ritual latch sites key on `PowerId`, not `monster_id`. A type reusing such a
+  bit must also never be able to own that power.
+
+**When widening a flag field, hunt the truncating writes.** The u16→u32 change
+found several `static_cast<uint16_t>` flag writes that would have **silently
+cleared the whole global region** — quietly erasing `Escaped` — on every write.
+The compiler cannot help: narrowing through an explicit cast is what the cast
+asks for. They were removed across eight source files and two tests.
 
 **Three shared-file rules this wave, two of which a brief got wrong once:**
 
@@ -264,6 +282,7 @@ disagree, and a fix or a toolchain change that nothing records is invisible to
 the next session.
 
 - **Combat start: turn 1 must not run the end-of-round pass** `[x]` — commit `821bffd`, merged at `9dea548`, landed in `56248c5`. `combat_begin` and `enter_combat` both primed turn 1 with `turn_has_ended = 1` and pumped, routing through `start_of_turn` → `dispatch_at_end_of_round` **before the player's first turn**, so every end-of-round hook on a power present at combat start fired once for free. **The game cannot reach that branch**: `AbstractRoom.java:236-243` sets the flag and then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`) — the queue is never empty while that item is pending, so the step-6 test is false by the time it is reached. **Measured**: a sleeping Lagavulin had **16 block on turn 1 instead of 8** (monster block never decays, so it also gained +8 every later turn). Fixed at **both** entry points via a shared `begin_first_turn` that reuses the same `start_of_turn` with a `TurnStart` parameter; **two by-construction guards scan both files**, so a one-sided regression fails rather than drifts. All 20 committed fixtures replayed **zero-diff**, proving the spurious pass was inert for every piece of landed content. The post-draw *powers* twin was reported and deliberately left — it is the `fix-postdraw-gate` row in the obligations table.
+- **`MonsterState.flags` widened u16 → u32, schema v4 → v5** `[x]` — commit `2684548`, landed in `a32e84c`. **Owner-directed** (2026-07-26), recorded in the frozen spec's change log as design §11 **v0.1.5**. The width was the smaller half of the fix: bits had been allocated **linearly**, one fresh bit per monster type, though **no monster is two types at once** — nine Act-1 types consumed all sixteen bits while the worst single type (The Guardian) needs five, so widening alone would have re-exhausted the word in Act 2. The two-region policy is in **Shared namespaces** above; `kMonsterFlagEscaped` moved bit 15 → **24**, every type-scoped bit kept its historical value. **A latent hazard the widening exposed:** several flag writes were `static_cast<uint16_t>`, which after widening would have **silently cleared the entire global region** — quietly erasing `Escaped` — on every write; the compiler cannot catch it, because narrowing through an explicit cast is exactly what the cast asks for. Removed across eight source files and two tests. `sizeof(MonsterState)` 112 → 116 and `sizeof(CombatState)` 3896 → 3928, **measured by compiled `offsetof`/`sizeof` probes, not predicted**, under the 8192 ceiling v0.1.4 raised. **All 20 combat fixtures regenerated — the single sanctioned exception to this project's never-modify-a-committed-fixture rule**, owner-approved; nothing under `tests/golden/` outside `combat_fixtures/` moved. The B3.12/B4.3 single-zero-run-insertion proof shape **was not available and was not faked**: widening an *interior* field moves every later offset and deletes an old alignment pad, so an equivalent per-field proof was produced from probe-derived offsets over 20 fixtures / 112 records.
 - **Combat start: turn 1 must not run the post-draw power pass** `[x]` — commit `f05ad8a`, merged at `a5afbf9`, landed in `06c4fa0`. The **sibling** of the end-of-round gate above and the second half of the same divergence, discharging the obligation integration-14 left. `start_of_turn`'s end-of-round pass, Ice Cream energy branch and block decay were all gated to `kSubsequentTurn`; `dispatch_at_start_of_turn_post_draw` was not, so it also ran while priming turn 1. **The game has no counterpart there**: `AbstractRoom.update`'s turn-1 block calls `applyStartOfTurnRelics` (`:253`), `applyStartOfTurnPostDrawRelics` (`:254`), `applyStartOfTurnCards` (`:255`), `applyStartOfTurnPowers` (`:256`) and `applyStartOfTurnOrbs` (`:257`) — and **no `applyStartOfTurnPostDrawPowers` line at all**; `GameActionManager.java:363` (step 6) is the whole game's only caller. The two halves are **not** a pair — the relic half really is on both sides, which is why only the power half moved. Inert for all landed content (Brutality and Demon Form are the only binders, and both require playing their card), so **no test could see it**: the two new `combat_start_test` cases construct the state with the power already present, and the fix was **demonstrated RED before green** — re-arming the dispatch failed exactly those two and nothing else. Fixtures replayed unchanged.
 - **Citation audit + Pantograph's inverted DEFERRED marker** `[x]` — commit `39876f0`, in `06c4fa0`. Comment/provenance only: no executable line, registry value or generated-table value changed. Two defects, **both invisible to git because neither branch conflicted** — the conventions §8 class, and a direct instance of "a conflict-free merge is not evidence of correctness". (1) `AbstractMonster.die()` was cited as `:741-750` at nine new on-death sites; `die(boolean)` is at `:925` and `:741-750` is render code, so **the merge replaced master's already-correct `:933-937` with a wrong one** — re-read and corrected to `isDying` `:927` / powers' `onDeath` `:928-932` / relics' `onMonsterDeath` `:933-937`. (2) `EntanglePower` was cited as `:50-53` at eight sites in a **47-line file**, i.e. resolving to nothing — corrected to `:15-47` / `:17` / `:20-29` / `:31-46`. The described *behaviour* was right throughout in both cases; only the line numbers were wrong. (3) `relics.yaml`'s Pantograph row carried a `DEFERRED` marker **on live, tested code** — the same bug signal running the other way — retired after verifying the native body and its four tests; both premises of the deferral are dead (`enemy_type` column + `MonsterDef::is_boss()`, and three BOSS rows exist). The other ~39 `DEFERRED` markers in that file are legitimate and were not touched.
 - **Build / toolchain effort** `[x]` — commits `44c1e11` (FP contract), `b481db2` + `c568cad` (ctest parallelism, job gate, shared ccache), `93e7a7d` + `c6913f2` (native Windows), merged at `28eab81`, landed in `8235477`. **The floating-point contract is pinned** (`-ffp-contract=off`, `cmake/StsFloatingPoint.cmake`): the frozen oracles were **not** captured under contraction only because baseline x86-64 has no FMA instruction — one `-march=native` away from silently changing damage numbers — and `fp_contract_test` now fails if contraction returns. `ctest` runs parallel; a machine-wide job gate bounds concurrent build parallelism across worktrees; ccache is shared across worktrees via `CCACHE_BASEDIR` (measured 0 % → 50 % cross-worktree hit rate). **A native Windows target was added** — clang-cl 22.1.8, presets `win-debug` / `win-release` / `win-asan` — and it is **byte-identical to Linux**: the 20 fixture traces hash to `ccdc4432…` under GCC 13.3, Clang 18.1.3 and clang-cl alike (debug, LTO release, asan). **WSL is therefore optional, including for sanitizers**: ASan *and* UBSan both work under clang-cl. `cl.exe` silently ignores `/fsanitize=undefined` (warning D9002, exit 0), which is why clang-cl is **required** here rather than merely preferred. The Windows CI job is proposed but unverified — see the obligations table.
@@ -715,6 +734,38 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **`MonsterState.flags` widened to `uint32_t` with a two-region
+  allocation policy (`master` at `a32e84c`).** Owner-directed after the wave-A
+  reconciliation recorded that the `uint16_t` was full. Recorded in the frozen
+  spec as design §11 **v0.1.5**; the **Shared namespaces** section's
+  "flags is now FULL" paragraph is replaced by the allocation rule.
+  - **The diagnosis mattered more than the width.** Widening alone would have
+    re-exhausted the word in Act 2, because the exhaustion was caused by
+    **linear** allocation — a fresh bit per monster type, when no monster is two
+    types at once. Type-scoped reuse (bits 0–23) plus a small scarce global
+    region (24–31) makes 32 bits sufficient for the whole game; the worst single
+    type needs five.
+  - **A hazard the change exposed rather than introduced:** several flag writes
+    were `static_cast<uint16_t>`. After widening, each would have **silently
+    cleared the whole global region**, erasing `Escaped`. No compiler diagnostic
+    is possible — narrowing through an explicit cast is what the cast requests.
+    Removed across eight source files and two tests. Generalised in the
+    namespaces section as: **when widening a flag field, hunt the truncating
+    writes.**
+  - **A refinement to the policy, found in implementation:** a bit consumed by a
+    *power's* native body is scoped to that power's possible **owner set**, not
+    to a single monster type — the CurlUp and Ritual latch sites key on
+    `PowerId`, not `monster_id`. Reuse requires the reusing type can never own
+    that power.
+  - **The fixture proof was honest about not matching precedent.** B3.12 and
+    B4.3 both proved their bumps with a single-zero-run insertion; that shape is
+    **unavailable** when an *interior* field widens, because every later offset
+    moves and an old alignment pad disappears. Rather than force the analogy, an
+    equivalent per-field proof was produced from offsets taken by probes compiled
+    against both old and new headers, verifying every meaning-carrying byte
+    preserved in order across 20 fixtures / 112 records. **This is the one
+    sanctioned exception to never modifying a committed fixture** — owner-
+    approved, and nothing under `tests/golden/` outside `combat_fixtures/` moved.
 - 2026-07-26 — **wave A landed: B3.15 `[x]`, B3.10a `[x]`, B4.5 `[!]`
   (`master` at `e6ec9ce`).** Three tasks dispatched in parallel on disjoint
   files; two integration passes, `integration-16` (B3.15 + B3.10a) and

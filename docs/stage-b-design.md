@@ -967,3 +967,49 @@ Continuing stage-a §10's numbering:
   frozen):** the §4.2 heading in `docs/stage-a-design.md:213` still reads
   "budget ≤ 4 KB", and `docs/stage-a-tasks.md` / `docs/stage-b-log.md` carry
   historical `≤ 4096` statements that were true when written.
+- v0.1.5 (2026-07-26) — `MonsterState.flags` widened `uint16_t` → **`uint32_t`**,
+  with a **two-region bit-allocation policy**, and **`SCHEMA_VERSION` 4 → 5**.
+  **Decision made by the project owner on 2026-07-26**; this entry records it.
+  **What changed:** the field's width; a new explicit `uint8_t pad1[2]` so no
+  implicit padding exists; the exact-size guard in
+  `include/sts/engine/combat_state.hpp` (`16 + 4*kPowerCap` →
+  `20 + 4*kPowerCap`); `SCHEMA_VERSION` and `kTraceFormatV2`; and
+  `kMonsterFlagEscaped` moved from bit 15 to **bit 24**. Every *type-scoped* bit
+  keeps its historical value — nothing was re-based.
+  **Why the policy, not just the width:** bits had been allocated **linearly**,
+  a fresh bit per monster type, even though no monster is two types at once, so
+  nine Act-1 types consumed all sixteen bits while the worst *single* type (The
+  Guardian) needs five. Widening alone would have deferred the same exhaustion
+  into Act 2. The policy splits the word: **bits 0–23 type-scoped and reusable**
+  across types that cannot co-occur, **bits 24–31 global** for flags that
+  type-agnostic code reads — today only `Escaped`, read by
+  `monster_dead_or_escaped()`. A refinement found while implementing: a bit
+  consumed by a *power's* native body is scoped to that power's possible **owner
+  set** (the CurlUp and Ritual latch sites key on `PowerId`, not `monster_id`),
+  so reuse additionally requires that the reusing type can never own that power.
+  **A latent hazard the widening exposed and removed:** several flag writes were
+  `static_cast<uint16_t>`, which after widening would have **silently cleared the
+  entire global region** — i.e. quietly erased `Escaped` — on every such write.
+  All were removed (`interp.cpp`, `interp_powers.cpp` ×2, `monster_guardian`,
+  `monster_hexaghost`, `monster_lagavulin`, `monster_slime_large`,
+  `power_ritual`, plus two tests). The compiler could not catch these: narrowing
+  to a *smaller* type through an explicit cast is exactly what the cast asks for.
+  **Sizes, measured by compiled `offsetof`/`sizeof` probes rather than
+  predicted:** `sizeof(MonsterState)` **112 → 116**, `sizeof(CombatState)`
+  **3896 → 3928** — comfortably under the 8192 ceiling raised in v0.1.4, whose
+  headroom rationale this change consumes a small part of.
+  **Fixtures:** all 20 combat fixtures were **regenerated** via the checked-in
+  generator. **The B3.12/B4.3 single-zero-run-insertion proof shape is not
+  available here** and was not faked: widening an *interior* field moves every
+  later offset and deletes an old 2-byte alignment pad, so no single insertion
+  describes the delta. The equivalent per-field form was produced instead —
+  offsets taken from probes compiled against both the old and new headers
+  (nothing hand-derived), then every meaning-carrying byte verified preserved in
+  order at its new offset across 20 fixtures / 112 records, each widened field's
+  low half equal to the old value with a zero high half, all remaining
+  differences zero padding at compiler-derived offsets, and headers/actions
+  identical but for `state_size` 3896 → 3928. The old `Escaped` bit is unset in
+  every committed record, so relocating the constant changes no stored meaning.
+  **Note (not fixed here, this document is frozen):** `docs/stage-a-design.md`
+  §4.2 and the older Logs carry the 112 B / 3896 B figures, which were true when
+  written.
