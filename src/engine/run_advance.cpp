@@ -37,6 +37,7 @@
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
 #include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
+#include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
 
 namespace sts::engine {
@@ -550,9 +551,10 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 
 // onPlayerEntry dispatch for the room just entered (AbstractDungeon.java:1800).
 // Combat rooms build the combat via the encounter framework; a RestRoom opens
-// its campfire menu; every other non-combat room kind is not yet implemented,
-// so it reseeds the floor streams (for oracle-reseed visibility) and parks at
-// ROOM_UNIMPLEMENTED.
+// its campfire menu; Treasure constructs its chest immediately (two
+// treasureRng calls) and waits for open/skip. Every other room kind is not yet
+// implemented, so it reseeds the floor streams (for oracle-reseed visibility)
+// and parks at ROOM_UNIMPLEMENTED.
 void on_player_entry(RunController& rc, RoomType room) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
@@ -599,9 +601,16 @@ void on_player_entry(RunController& rc, RoomType room) noexcept {
             rc.rest.screen = static_cast<uint8_t>(RestScreen::MENU);
             rc.phase = static_cast<uint8_t>(RunPhase::REST_SITE);
             break;
+        case RoomType::Treasure:
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            rc.treasure_chest = roll_treasure_chest(rc.run);
+            rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
+            break;
         case RoomType::Event:
         case RoomType::Shop:
-        case RoomType::Treasure:
         case RoomType::None:
         default:
             stall(room);  // no room content for this kind yet
@@ -784,6 +793,12 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
     switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW:
             out.can_proceed = true;
+            break;
+
+        case RunPhase::TREASURE_ROOM:
+            out.can_open_chest =
+                treasure_chest_open_legal(rc.run, rc.treasure_chest);
+            out.can_proceed = true;  // TreasureRoom is COMPLETE on entry.
             break;
 
         case RunPhase::COMBAT_REWARD: {
@@ -1124,6 +1139,7 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     // never claim across rooms.
                     s = RewardScreen{};
                     s.open_card_item = kNoOpenCardReward;
+                    rc.treasure_chest = TreasureChest{};
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
                 } else {
                     // Claim item a0 (CARDS opens the pick screen). Relic
@@ -1189,6 +1205,29 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     if (done) {
                         finish_rest_site(rc);
                     }
+                }
+            }
+            fill_run_result(rc, res);
+            break;
+        }
+
+        case RunPhase::TREASURE_ROOM: {
+            if (action_verb(a) == ActionVerb::CHOOSE) {
+                const uint8_t a0 = action_arg0(a);
+                if (a0 == kChooseOpenChest &&
+                    treasure_chest_open_legal(
+                        rc.run, rc.treasure_chest) &&
+                    open_treasure_chest(
+                        rc.run, rc.treasure_chest, rc.rewards)) {
+                    rc.phase = static_cast<uint8_t>(
+                        RunPhase::COMBAT_REWARD);
+                } else if (a0 == kChooseProceed) {
+                    // The map Proceed button is live before the chest is opened;
+                    // skipping consumes no open-time RNG or relic hooks.
+                    rc.treasure_chest = TreasureChest{};
+                    rc.rewards = RewardScreen{};
+                    rc.rewards.open_card_item = kNoOpenCardReward;
+                    rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
                 }
             }
             fill_run_result(rc, res);

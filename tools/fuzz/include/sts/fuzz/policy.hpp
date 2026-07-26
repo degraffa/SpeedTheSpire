@@ -102,7 +102,9 @@ enum class MoveCat : uint8_t {
     DIG = 18,
     SMITH_CARD = 19,
     TOKE_CARD = 20,
-    COUNT = 21,
+    TREASURE_OPEN = 21,
+    TREASURE_SKIP = 22,
+    COUNT = 23,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

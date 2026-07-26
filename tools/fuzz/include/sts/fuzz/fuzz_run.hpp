@@ -135,7 +135,8 @@ bool replay_actions(const CaseId& id, const std::vector<engine::Action>& actions
 
 // Whole-RunController CONTENT hash: the two engine states through
 // engine::hash_state, plus the transient screen-flow fields (phase, cursors,
-// reward screen, encounter lists) that RunState/CombatState do not cover.
+// reward screen, treasure chest, encounter lists) that RunState/CombatState do
+// not cover.
 //
 // It is emphatically NOT a byte hash of the struct. RunController embeds
 // `std::string_view` encounter keys, so its bytes contain POINTERS whose values
@@ -160,6 +161,7 @@ struct ControllerHashes {
     uint64_t combat = 0;    // engine::hash_state(CombatState)
     uint64_t lists = 0;     // generated encounter lists
     uint64_t rewards = 0;   // live reward screen
+    uint64_t treasure = 0;  // constructor-time chest descriptor
     uint64_t scalars = 0;   // phase / cur_x / room_type / outcome / cursors
 };
 

@@ -32,6 +32,9 @@
 //     re-roll + the Act-1 zero-chance upgrade draws), then a claim flow over
 //     CHOOSE -- claim item, pick/skip/sing on the card screen, proceed. A
 //     Smoke Bomb consumes the battle-over draws but offers nothing.
+//   * TREASURE ROOMS: fixed-row chest construction consumes the exact size +
+//     shared contents rolls on entry; open/skip, chest gold/relic rewards and
+//     the three registered chest relic hooks are live.
 //   * ESCAPE at the run layer: a combat the pump ended with the room mugged
 //     settles the thief's stolen gold against RunState.gold (the game deducted
 //     it at steal time), keeps the screen claimable, and suppresses exactly
@@ -45,13 +48,13 @@
 // never faked):
 //   * Neow blessing options + payouts: not modelled (here: a single "proceed"
 //     skip, so the stream state stays right even though no blessing applies).
-//   * relic POOLS and acquisition are live, and the combat-reward draw site now
-//     consumes them; the chest / shop / Neow draw sites are separate work.
+//   * relic POOLS and acquisition are live, and combat/chest reward draw sites
+//     consume them; shop / Neow draw sites are separate work.
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
 //     (combat_rewards.hpp).
-//   * events / shops / treasure rooms: no room content (here: entering one
-//     reseeds the floor streams then parks at ROOM_UNIMPLEMENTED with the
-//     stalling RoomType recorded).
+//   * events / shops: no room content (here: entering one reseeds the floor
+//     streams then parks at ROOM_UNIMPLEMENTED with the stalling RoomType
+//     recorded).
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
 //     encounter whose members are not all implemented resolves its composition
 //     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
@@ -95,6 +98,7 @@
 #include "sts/engine/map_rooms.hpp"     // RoomType
 #include "sts/engine/rest_sites.hpp"    // RestSiteState / menu constants
 #include "sts/engine/run_state.hpp"
+#include "sts/engine/treasure_rooms.hpp"
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -112,6 +116,7 @@ enum class RunPhase : uint8_t {
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // player dead (loss) -- terminal.
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
+    TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
 };
 
 // Why combat ended. AbstractRoom keeps two independent end-of-battle room
@@ -164,6 +169,7 @@ inline constexpr uint8_t kNeowColumn = 0xFF;
 inline constexpr uint8_t kChooseProceed = 0xFF;
 inline constexpr uint8_t kChooseSkipCard = 0xFE;
 inline constexpr uint8_t kChooseSing = 0xFD;
+inline constexpr uint8_t kChooseOpenChest = 0;
 
 // --- RunController -----------------------------------------------------------
 
@@ -197,6 +203,11 @@ struct RunController {
     // (no new storage, no schema bump).
     RewardScreen rewards;
     RestSiteState rest;
+
+    // The constructor-time chest rolls while phase == TREASURE_ROOM, retained
+    // through its reward screen for replay/hash observability. Transient like
+    // RewardScreen; never added to the frozen RunState schema.
+    TreasureChest treasure_chest;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -207,6 +218,8 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 // The run-level legal-action set (the run analogue of ActionMask). Which fields
 // are meaningful depends on `phase`:
 //   NEOW                 : can_proceed (CHOOSE, arg0 ignored).
+//   TREASURE_ROOM        : can_open_chest (CHOOSE kChooseOpenChest) and
+//                          can_proceed (CHOOSE kChooseProceed) to skip it.
 //   COMBAT_REWARD        : with no card screen open -- can_proceed (CHOOSE
 //                          kChooseProceed) + can_claim_reward[i] (CHOOSE i);
 //                          with a CARD item open -- can_take_card[j] (CHOOSE j),
@@ -223,7 +236,8 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
-    bool can_proceed;                  // NEOW / COMBAT_REWARD proceed.
+    bool can_proceed;                  // NEOW / TREASURE_ROOM / reward proceed.
+    bool can_open_chest;               // TREASURE_ROOM: open the fixed-row chest.
     bool can_choose_node[kMapCols];    // MAP_CHOICE: legal next-node columns.
     bool can_choose_boss;              // MAP_CHOICE: the boss edge is available.
     // COMBAT_REWARD. Claim legality mirrors RewardItem.claimReward's
@@ -333,8 +347,9 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept;
 // Step a heterogeneous batch of runs by one action each (the run-level analogue
 // of advance()). Each index is dispatched INDEPENDENTLY by its own phase: a
 // COMBAT entry pumps its embedded CombatState (and folds back on combat end); a
-// MAP_CHOICE consumes a CHOOSE(column); a NEOW / COMBAT_REWARD consumes a
-// CHOOSE(proceed). No heap allocation in the loop. results[i] carries the
+// MAP_CHOICE consumes a CHOOSE(column); NEOW / TREASURE_ROOM /
+// COMBAT_REWARD consume their CHOOSE actions. No heap allocation in the loop.
+// results[i] carries the
 // terminal flag, the combat reward passthrough, and (in COMBAT) the combat
 // observation (zeroed otherwise).
 void advance(std::span<RunController> runs, std::span<const Action> actions,

@@ -269,6 +269,11 @@ sts_add_test(combat_rewards_test)
 # availability/order, and deterministic RunController masks/transitions.
 sts_add_test(rest_sites_test)
 
+# Act-1 fixed-row treasure rooms: exact 50/33/17 chest size and shared
+# contents-roll tables, open/skip lifecycle, 0.9/1.1 gold roll, B4.6 relic
+# grant/claim, and Matryoshka/Cursed Key/N'loth's Mask hook ordering + gates.
+sts_add_test(treasure_rooms_test)
+
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer

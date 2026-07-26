@@ -252,7 +252,7 @@ site in `GameStateConverter.java` maps to exactly one row below (see §4).
 | `rewards[].gold` | int | S | :274 | `goldAmt + bonusGold` (GOLD/STOLEN_GOLD) |
 | `rewards[].relic` | relic | S | :277 | §3.16 |
 | `rewards[].potion` | potion | S | :280 | §3.17 |
-| `rewards[].link` | relic | I (S2 scope) | :283 | SAPPHIRE_KEY link — keys are final-act-gated, out of S1 (design §1.1) |
+| `rewards[].link` | relic | I (S2 scope) | :283 | SAPPHIRE_KEY link. The key is out of S1, but the row **does** appear on every Act-1 chest open (design §1.1 / §11 v0.1.6, correcting "never fires in S1"). No RNG; ignored here, and a capture claims the linked **relic**, never the key |
 
 ### 3.7 `screen_state` for MAP — `getMapScreenState` (:299-312)
 

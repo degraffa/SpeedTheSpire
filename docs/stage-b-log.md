@@ -2872,6 +2872,151 @@ regressions pin empty masks and inert forced Take/Skip/Singing Bowl actions;
 the ordinary outer screen still exposes Proceed, while a malformed open screen
 does not.
 
+<a id="b47"></a>
+
+### B4.7 `[ ]` Treasure rooms — implementation complete, oracle acceptance blocked
+
+**Implementation.** `treasure_rooms.hpp/.cpp` owns the non-boss Act-1 chest
+transaction. Room entry constructs the chest with exactly two `treasureRng`
+wrapper calls: `getRandomChest`'s 50/33/17 size roll, then
+`AbstractChest.randomizeReward`'s one shared 0..99 contents roll. That single
+value drives both gold presence and the size-specific 75/25/0, 35/50/15, or
+0/75/25 relic tier table (trap 16). Opening is a separate CHOOSE action:
+before-hooks run first, optional gold uses the exact float
+`GOLD_AMT*0.9f .. GOLD_AMT*1.1f` draw and Java rounding, the pre-rolled tier
+front-pops through the existing relic-pool machinery, then after-hooks run.
+The resulting `RewardScreen` uses the established claim/proceed path, so a
+relic is acquired only on claim while an abandoned relic stays consumed from
+its pool. Proceed can also skip an unopened chest without consuming any
+open-time RNG.
+
+**Lifecycle / replay namespace.** `RunPhase::TREASURE_ROOM` is append-only value
+**8**. Value **7** is explicitly reserved for the independently-developed rest
+site branch; compile-time and runtime checks pin the two values distinct.
+`RunController` gained only a 4-byte transient POD chest descriptor — the
+frozen `RunState`, schema version, fixtures and golden data did not change.
+`RunActionMask` exposes open and skip, the fuzz move enumerator can replay both,
+and the whole-controller content hash includes the descriptor as its own
+triage region. The fixed map row 8 is asserted at run start, and entry/open/
+claim/proceed plus entry/skip transitions are covered.
+
+**Inherited hook audit — all three discharged.** The exact
+`AbstractChest.open(false)` order is
+`onChestOpen` acquisition pass → optional gold → base relic →
+`onChestOpenAfter` acquisition pass.
+
+- Matryoshka decrements once per non-boss open, consumes one
+  `relicRng.randomBoolean(0.75f)`, inserts its COMMON/UNCOMMON relic before the
+  base relic, and goes `2→1→-2`; a third chest consumes no draw.
+- Cursed Key evaluates `returnRandomCurse()` before constructing
+  `ShowCardAndObtainEffect`, so it always consumes one `cardRng` identity draw.
+  Omamori then decrements and blocks the card if active; otherwise the curse
+  routes through `add_card_to_master_deck`, firing Ceramic Fish, Darkstone
+  Periapt, Du-Vu Doll and the other established obtain hooks. Multiple imported
+  Cursed Keys preserve acquisition order.
+- N'loth's Mask runs after base insertion, removes the **first** relic reward
+  while leaving its pool pop consumed, and goes `1→-2`. Consequently a
+  Matryoshka bonus is the relic removed when both are present. All three hooks
+  are explicitly no-ops for a boss chest.
+
+The source audit corrected an inherited ledger claim: chest gold does **not**
+receive Golden Idol's 25% bonus. `RewardItem.applyGoldBonus`
+(`RewardItem.java:110-129`) explicitly excludes `TreasureRoom`; ordinary
+chests also have no potion reward for Sozu to block. Their remaining
+non-combat shares are event-screen work, not treasure behavior.
+
+**Provenance read in full:** `AbstractDungeon.getRandomChest`
+(`AbstractDungeon.java:499-508`), `AbstractChest.randomizeReward/open`
+(`AbstractChest.java:54-102`), all three size constructors,
+`TreasureRoom`, `Matryoshka.onChestOpen`, `CursedKey.onChestOpen`,
+`NlothsMask.onChestOpenAfter`, `AbstractRoom.addRelicToRewards` /
+`removeOneRelicFromRewards`, `AbstractDungeon.returnRandomCurse`,
+`CardLibrary.getCurse`, `ShowCardAndObtainEffect`, `Omamori`, and
+`RewardItem.applyGoldBonus/claimReward`.
+
+**Acceptance status.** Fourteen new named cases cover every 0..99 contents
+roll for all sizes, all four threshold edges, trap 16, exact stream states,
+gold, all tiers, pool consumption/acquisition, hook ordering/counters/gates,
+fixed-row lifecycle, fuzz enumeration and hashing. The required live-game
+spot-diff of at least two treasure floors remains blocked by the unresolved
+frozen oracle/capture environment already recorded for the reward work. No
+sim-only expectation is being substituted for that evidence and no drift is
+sanctioned; the task deliberately remains `[ ]` until those captures can run.
+The complete final-tree WSL matrix is **debug 1006/1006, leak-detecting
+ASan/UBSan 1006/1006, release 1006/1006**.
+
+**Defensive fix-forward (2026-07-26; supersedes the original capacity and
+descriptor handling above).** Independent review found that the chest-local
+reward insertion relied on a debug assertion: an imported state with enough
+active duplicate Matryoshkas could write beyond the fixed eight-item reward
+array in release. Every treasure insertion is now fallible and bounds-safe.
+The public before/after hook seams and the complete open transaction use
+copy-then-commit semantics, so a late capacity failure rolls back earlier
+Cursed Key deck hooks, pool pops, counters, every RNG stream, and the reward
+list. The ordinary room preflights Matryoshka + optional gold + base relic;
+an unrepresentable open is absent from the action mask and a forced action is
+a byte-stable no-op.
+
+The same fix-forward makes `treasure_chest_open_legal` the single authority
+used by the action mask, direct open, and run step. It accepts only SMALL /
+MEDIUM / LARGE, COMMON / UNCOMMON / RARE, canonical boolean fields, and an
+unopened descriptor; the step enters `COMBAT_REWARD` only after a successful
+transaction. Four named regressions cover public-hook late rollback, seven
+active Matryoshkas, exact-cap success, and malformed size/tier/boolean/opened
+descriptors with whole-controller byte comparisons. The task remains `[ ]`
+only for the already-recorded live-oracle spot-diff blocker.
+
+**Second fix-forward — curse capacity + derived descriptor domain.** Two P1
+fixes to the open authority. `cursed_key_obtain` discarded the result of
+`add_card_to_master_deck`, so a full master deck silently lost the curse while
+the open still reported success and committed later RNG, pool and reward
+changes; it is now fallible, `dispatch_on_chest_open_impl` propagates the
+failure, and `treasure_chest_open_legal` preflights the deck slots that
+acquisition-ordered Cursed Keys consume, modelling first-match Omamori lookup
+and per-block charge depletion with the same walk the mutation pass performs.
+Separately, `exact_unopened_chest_descriptor` tested size and tier
+independently and so accepted the Cartesian product, including the
+non-constructible SMALL+RARE and LARGE+COMMON; the valid pairs are now derived
+at compile time by enumerating all 100×100 wrapper rolls through
+`treasure_chest_for_rolls`, with `static_assert`s pinning the derived table.
+Five new named cases (four capacity/rollback plus an exhaustive
+generator-agreement test) and an extension of
+`EveryInvalidDescriptorIsMaskAndStepAtomic` to the two impossible pairs; all
+six fail against the pre-fix source.
+
+**Third fix-forward — P3 cleanup (2026-07-26).** `open_treasure_chest` lost its
+vestigial `misc_rng` parameter. It was never read: the gold roll is
+`treasureRng.random(GOLD_AMT*0.9f, GOLD_AMT*1.1f)` (`AbstractChest.java:72`)
+and nothing else on the open path — neither hook pass, nor `returnRandomCurse`,
+nor the pool front-pop — touches `miscRng`, which is first read later at claim
+time by `acquire_relic`'s onEquip bodies. Confirmed against the Java before
+removal, so this is dead API, not a missing draw; the signature comment now
+records why the parameter is absent. The one engine call site is inside the
+branch-new `RunPhase::TREASURE_ROOM` case, which master does not have, so the
+change adds nothing to the pending merge's conflict surface.
+
+**Document conflict resolved in the same change (conventions §4).** Design
+§1.1 claimed the sapphire-key reward branch "never fires in S1", citing
+`AbstractChest.java:95-96` — contradicting its own paragraph, which
+establishes `Settings.isFinalActAvailable` as TRUE on the frozen
+fully-unlocked profile (the reason `setEmeraldElite` fires, corrected at B4.1).
+`hasSapphireKey` is cleared at dungeon reset (`CardCrawlGame.java:473`) and set
+only by `ObtainKeyEffect` (`ObtainKeyEffect.java:74`), unreachable in Act 1, so
+both conjuncts hold and every Act-1 chest open appends a `SAPPHIRE_KEY` reward
+row linked to the base relic (`AbstractRoom.java:545-547`). No RNG draw is
+involved and no C++ behavior changes. §1.1 was corrected with a **§11 v0.1.6**
+change-log entry; the same stale reasoning was fixed in
+`include/sts/engine/combat_rewards.hpp` and `PROTOCOL.md` §3.6 (dispositions
+unchanged — only the reason was wrong). B4.7's pending oracle spot-diff
+acceptance now states the expected extra row **and** that the capture must
+claim the base **relic**, never the key: claiming the relic marks the linked
+key row `isDone`/`ignoreReward` (`RewardItem.java:298-300`), while claiming the
+key does the reverse (`:317-322`) and would cost the run its relic.
+
+The complete WSL matrix at this revision is **debug 1015/1015, leak-detecting
+ASan/UBSan 1015/1015, release 1015/1015** (`ctest -N` reports 1015 total on
+each preset).
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes
