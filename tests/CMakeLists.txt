@@ -474,3 +474,20 @@ sts_add_test(fp_contract_test)
 # anything it links, so a new comment is caught without recompiling the engine;
 # the allowlist mechanism and the reasoning live in the test file's header.
 sts_add_test(no_task_ids_test DEFS STS_SOURCE_ROOT="${CMAKE_SOURCE_DIR}")
+
+# B5.1: sim-side fuzz soak. Tests the TOOL, not the engine: that an injected
+# divergence is caught at the right step, that the emitted STSFUZZ reproducer
+# replays it, that the four-value case id alone regenerates the identical
+# trajectory, that every enumerated move is one advance() actually honours, and
+# that coverage kv round-trips for shard merging. The soak itself is a campaign
+# (tools/fuzz/soak.sh), never a ctest entry -- what is unit-tested here is the
+# triage path, so it is exercised on every build rather than first tried on the
+# day something breaks.
+sts_add_test(fuzz_test
+    LIBS fuzz_core
+    MAKE_DIRS fuzz_scratch
+    DEFS
+        STS_FUZZ_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/fuzz_scratch"
+        STS_FUZZ_SOAK_BIN="$<TARGET_FILE:fuzz_soak>"
+        STS_FUZZ_REPRO_BIN="$<TARGET_FILE:fuzz_repro>"
+        STS_FUZZ_SOAK_SCRIPT="${CMAKE_SOURCE_DIR}/tools/fuzz/soak.sh")

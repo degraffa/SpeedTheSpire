@@ -191,6 +191,12 @@ if(STS_BUILD_TESTS)
     # the tests since it links diff_harness (write_trace) + sts_engine and is run
     # manually to regenerate tests/golden/combat_fixtures/*.trace.
     add_subdirectory(tools/fixture_gen)
+    # B5.1: sim-side self-replay fuzz soak -- policies, the replay-twice
+    # determinism guard, coverage accounting, the STSFUZZ reproducer format,
+    # and the fuzz_soak / fuzz_repro executables. Built with the tests because
+    # fuzz_test links its static library; the soak itself is a campaign driven
+    # by tools/fuzz/soak.sh, never by ctest.
+    add_subdirectory(tools/fuzz)
     # B1.5: JSON->schema translator (campaign JSONL -> RunState/CombatState). Links
     # diff_harness (write_trace) + nlohmann/json (tools-only grant, PRIVATE); its
     # consumer is the WSL translator_test gtest.

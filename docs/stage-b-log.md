@@ -2887,3 +2887,80 @@ compensation was added; all three old ones were removed.
   documentation link/stale-count checks, and a clean diff under
   `tests/golden/` completed the handoff. No schema bump and no committed
   fixture/golden edit.
+<a id="b51"></a>
+
+### B5.1 `[x]` ∥ Sim self-replay fuzz soak
+**Deps:** B4.4 · **Spec:** design §7.1(2); stage-a §2 (replay-twice memory
+guard)
+**Deliverables:** `tools/fuzz/` sim-side fuzzer: random-legal + heuristic
+policies (design §3.3's E0 stand-ins, implemented here) over seed sweeps;
+every run replayed twice, final-state hashes compared; assert/hash-mismatch
+triage output with reproducers; overnight-runnable script.
+**Acceptance:** ≥ 10M actions across ≥ 10k seeds, zero nondeterminism, zero
+asserts, asan-clean sample (≥ 1 % of runs under asan); numbers recorded here.
+**Log:** Verified by running, not inferred. The original acceptance evidence in
+`cd397c5` was superseded by the fix-forward audit below: its sanitizer prefix
+overlapped the main sweep, and the runner still had integrity holes. A second
+fix-forward closed the remaining strict CLI/reproducer-reader findings and
+versioned the changed binary's summary identity. After both audits,
+`tools/wsl_run.cmd debug asan release` from the Windows host passed
+**959/959** tests in every preset. The final replacement acceptance campaign
+then ran
+`tools/wsl_run.cmd --script tools/fuzz/soak.sh --main-bin
+build/release/tools/fuzz/fuzz_soak --asan-bin
+build/asan/tools/fuzz/fuzz_soak --out
+/mnt/d/STS_BG_Mod/SpeedTheSpire-campaigns/fuzz --seeds 10000 --seed-start 1
+--reps 5 --asan-percent 1 --jobs 12 --asan-jobs 8 --max-actions 4000 --label
+b51_final2` and exited 0. Artifacts are intentionally outside the
+repository at
+`D:\STS_BG_Mod\SpeedTheSpire-campaigns\fuzz\b51_final2_20260726_152823`.
+- **Release sweep:** 10,000 distinct sequential run seeds, all five policies,
+  five policy seeds per `(run seed, policy)` = **250,000 cases**;
+  **10,808,430 counted actions** (pass A only), 21,658,338 actions including
+  replay passes, 500,977 engine runs, **0 failures**, 210.0 s. The 37
+  action-cap endings are the configured 4,000-action safety limit, not asserts
+  or illegal states; `no_legal_moves=0`, `livelock=0`, `no_progress=0`.
+- **Sanitizer sample:** the next 100 run seeds (**10,001–10,100**, disjoint
+  from the main interval), with the same five policies × five policy seeds =
+  **2,500 / 250,000 cases = 1.00 %**; **110,484 counted actions**, 221,246
+  including replay passes, 5,010 engine runs, **0 failures**, ASan/UBSan clean.
+- `fuzz_core` owns deterministic policy selection, whole-controller content
+  hashing (including transient run flow without hashing `string_view`
+  addresses), the A/B policy replay and sampled literal-action C pass,
+  livelock/legal-action findings, coverage accounting, and strict `STSFUZZ v1`
+  parsing. Thin `fuzz_soak` / `fuzz_repro` executables provide campaign and
+  one-case entry points.
+- Mismatch triage is exercised at the process boundary on every test run:
+  `FuzzTriage.DriverWritesActionableReproducerForInjectedMismatch` injects the
+  first divergence at step 3, requires the minimal four-action reproducer, and
+  hands it to standalone `fuzz_repro --regen`. Abort triage separately proves
+  the already-flushed case journal can regenerate a literal reproducer.
+- Coverage reports distinguish counted actions from replay work, name
+  termination reasons, policy/room/move traffic, combat/floor depth, run-layer
+  events, registry rows seen, and every category never reached. The kv form is
+  additive across stable `--shard I/N` case partitions; the executable-level
+  `FuzzDriver.SeedSweepWritesAMergeableSummary` test pins sweep expansion,
+  persistence, and `--merge`.
+- During final audit, the progress thread was found reading worker-owned
+  `Coverage` objects while they were being mutated. That driver-only data race
+  was removed by publishing a single atomic counted-action scalar; engine
+  behavior, schema, and fixtures are unchanged.
+- Fix-forward audit closed eight acceptance defects: targeted potion
+  enumeration no longer emits an untargeted illegal duplicate; discard/exhaust
+  choices enumerate their full pile capacities under a proven move bound; a
+  legal immediate no-op is a distinct failing/reproducer outcome; sanitizer
+  seeds are a disjoint ceiling-rounded interval and reports are never added to
+  main totals; versioned summaries bind build/configuration/shard identity,
+  require a complete non-overlapping shard set, validate failures and checked
+  arithmetic, and reject missing or incompatible fields; artifact, merge,
+  output-pipe, and report-write failures propagate nonzero; and the CLI,
+  summary, and `STSFUZZ v1` parsers reject partial, zero-work, overflow,
+  duplicate, malformed, and trailing inputs.
+- Final parser closure rejects empty or duplicate policy lists, repeated
+  `--policies`, and repeated or conflicting diagnostic injection switches.
+  Its popcount check independently pins policy uniqueness. Failure records
+  accept the end boundary only for failure kinds that can arise after the last
+  appended action, including the legitimate zero-action `NO_LEGAL_MOVES`
+  case; writer-to-reader tests cover every non-`NONE` kind. Summary build ids
+  end in `schema5-b51fix2`, preventing reports from this binary from merging
+  with the earlier audited build.

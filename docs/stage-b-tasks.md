@@ -662,16 +662,13 @@ Then: update CLAUDE.md "Current state".
 
 ## Phase B5 — Verification campaigns + S1 exit (Gate G7 = M4)
 
-### B5.1 `[ ]` ∥ Sim self-replay fuzz soak
-**Deps:** B4.4 · **Spec:** design §7.1(2); stage-a §2 (replay-twice memory
-guard)
-**Deliverables:** `tools/fuzz/` sim-side fuzzer: random-legal + heuristic
-policies (design §3.3's E0 stand-ins, implemented here) over seed sweeps;
-every run replayed twice, final-state hashes compared; assert/hash-mismatch
-triage output with reproducers; overnight-runnable script.
-**Acceptance:** ≥ 10M actions across ≥ 10k seeds, zero nondeterminism, zero
-asserts, asan-clean sample (≥ 1 % of runs under asan); numbers recorded here.
-**Log:** —
+- **B5.1** `[x]` ∥ Sim self-replay fuzz soak — deterministic random-legal +
+  four E0 heuristic policies, replay-twice per-step/final controller hashing,
+  `STSFUZZ v1` mismatch reproducers + pre-crash journals, shardable coverage
+  reports, and `soak.sh`; acceptance release sweep **10,808,430 actions /
+  10,000 seeds / 250,000 cases**, zero failures, plus ASan-clean **2,500 /
+  250,000 cases = 1.00 %** disjoint sample; 959/959 ×3 ·
+  [log](stage-b-log.md#b51)
 
 ### B5.2 `[ ]` ∥ Oracle campaign automation
 **Deps:** B1.4, B4.4 · **Spec:** design §7.1-7.3
