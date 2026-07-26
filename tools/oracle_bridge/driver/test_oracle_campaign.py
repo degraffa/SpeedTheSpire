@@ -13,11 +13,13 @@ from types import SimpleNamespace
 from unittest import mock
 
 import campaign_driver
+import campaign_paths
 import orchestrator
 import validate_artifacts
 
 
 SEED = "STS00041"
+SEED_LONG = campaign_driver.seed_to_long(SEED)
 
 
 class _StartStepper:
@@ -57,10 +59,17 @@ def _header(oracle_enabled):
         "mods": ["basemod", "CommunicationMod-oracle"],
         "fork_jar_sha256": "A" * 64,
         "oracle_block_enabled": oracle_enabled,
-        "seed": {"string": SEED, "long": 1},
+        "seed": {
+            "string": SEED,
+            "long": SEED_LONG,
+            "long_getLong": SEED_LONG,
+            "crosscheck_ok": True,
+        },
         "ascension": 20,
         "character": "IRONCLAD",
         "policy": "random-legal",
+        "campaign_id": "direct",
+        "attempt": 1,
     }
 
 
@@ -70,7 +79,7 @@ def _oracle():
         for name in validate_artifacts.RUN_STREAMS
     }
     return {
-        "seed": 1,
+        "seed": SEED_LONG,
         "floor": 1,
         "act": 1,
         "ascension": 20,
@@ -86,9 +95,9 @@ def _oracle():
     }
 
 
-def _action(oracle=None):
+def _action(oracle=None, seq=0, command="choose 0"):
     game_state = {
-        "seed": 1,
+        "seed": SEED_LONG,
         "floor": 1,
         "act": 1,
         "screen_type": "COMBAT_REWARD",
@@ -100,7 +109,8 @@ def _action(oracle=None):
         game_state["oracle"] = oracle
     return {
         "record_kind": "action",
-        "action_command": "choose 0",
+        "seq": seq,
+        "action_command": command,
         "sim_action_bits": None,
         "state_json": {
             "available_commands": ["choose"],
@@ -111,9 +121,10 @@ def _action(oracle=None):
     }
 
 
-def _menu_action():
+def _menu_action(seq=0):
     return {
         "record_kind": "action",
+        "seq": seq,
         "action_command": "state",
         "sim_action_bits": None,
         "state_json": {
@@ -124,9 +135,10 @@ def _menu_action():
     }
 
 
-def _terminal(outcome="test", floor=1, actions=1):
+def _terminal(outcome="test", floor=1, actions=1, seq=None):
     return {
         "record_kind": "terminal",
+        "seq": actions if seq is None else seq,
         "outcome": outcome,
         "floor": floor,
         "actions": actions,
@@ -144,6 +156,12 @@ def _campaign_header(campaign_id, seed=SEED, attempt=1):
     header["campaign_id"] = campaign_id
     header["attempt"] = attempt
     header["seed"]["string"] = seed
+    seed_long = campaign_driver.seed_to_long(seed)
+    header["seed"].update({
+        "long": seed_long,
+        "long_getLong": seed_long,
+        "crosscheck_ok": True,
+    })
     return header
 
 
@@ -186,6 +204,17 @@ def _write_timing(path, campaign_id, seed=SEED, attempt=1):
         "policy": "random-legal",
         "seed": seed,
         "attempt": attempt,
+        "schema_version": 1,
+        "driver_version": "test",
+        "fork_jar_sha256": "A" * 64,
+    }, {
+        "record_kind": "mark",
+        "seq": 0,
+        "t_mono": 1.0,
+        "t_wall": 2.0,
+        "cmd": "choose 0",
+        "floor": 1,
+        "screen": "COMBAT_REWARD",
     }])
 
 
@@ -256,6 +285,36 @@ class CampaignDriverPreflightTest(unittest.TestCase):
             self.assertFalse(os.path.exists(os.path.join(
                 run_dir, f"run_{SEED}_a20_ironclad.timing.jsonl")))
 
+    def test_requested_dump_seed_mismatch_fails_before_artifact_or_policy(self):
+        with tempfile.TemporaryDirectory() as root:
+            driver = campaign_driver.CampaignDriver.__new__(
+                campaign_driver.CampaignDriver)
+            driver.args = SimpleNamespace(
+                data_root=root,
+                campaign_id="seed_mismatch",
+                policy_seed=1234,
+                menu_timeout=1.0,
+            )
+            state = _action(_oracle())["state_json"]
+            state["game_state"]["seed"] = SEED_LONG + 1
+            driver.stepper = _StartStepper(state)
+            driver._policy_command = mock.Mock(
+                side_effect=AssertionError("policy must not run"))
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift,
+                    "seed crosscheck mismatch") as raised:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual(
+                "seed_identity_mismatch", raised.exception.kind)
+            driver._policy_command.assert_not_called()
+            run_dir = os.path.join(root, "seed_mismatch")
+            self.assertFalse(os.path.exists(os.path.join(
+                run_dir, f"run_{SEED}_a20_ironclad.jsonl")))
+            self.assertFalse(os.path.exists(os.path.join(
+                run_dir, f"run_{SEED}_a20_ironclad.timing.jsonl")))
+
     def test_fatal_drift_is_persisted_and_ends_driver(self):
         with tempfile.TemporaryDirectory() as root:
             driver = campaign_driver.CampaignDriver.__new__(
@@ -311,6 +370,8 @@ class OrchestratorPreflightTest(unittest.TestCase):
             with mock.patch.dict(
                     os.environ, {"LOCALAPPDATA": local_app_data}), \
                     mock.patch.object(
+                        orchestrator, "sha256_file", return_value="A" * 64), \
+                    mock.patch.object(
                         orchestrator, "launch_game") as launch:
                 result = orchestrator.main([
                     "--data-root", root,
@@ -353,6 +414,8 @@ class OrchestratorPreflightTest(unittest.TestCase):
             with mock.patch.dict(
                     os.environ, {"LOCALAPPDATA": local_app_data}), \
                     mock.patch.object(
+                        orchestrator, "sha256_file", return_value="A" * 64), \
+                    mock.patch.object(
                         orchestrator, "launch_game",
                         side_effect=launch_and_report_fatal) as launch, \
                     mock.patch.object(orchestrator, "kill_tree") as kill, \
@@ -384,6 +447,58 @@ class OrchestratorPreflightTest(unittest.TestCase):
             with mock.patch.dict(
                     os.environ, {"LOCALAPPDATA": local_app_data}), \
                     mock.patch.object(
+                        orchestrator, "sha256_file", return_value="A" * 64), \
+                    mock.patch.object(
+                        orchestrator, "launch_game") as launch:
+                result = orchestrator.main([
+                    "--data-root", root,
+                    "--campaign-id", "preflight",
+                    "--seeds", SEED,
+                ])
+
+            self.assertEqual(orchestrator.EXIT_CAMPAIGN_INVALID, result)
+            launch.assert_not_called()
+
+    def test_completed_progress_is_joined_to_current_fork_before_acceptance(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = os.path.join(root, "preflight")
+            os.makedirs(campaign_dir)
+            _write_campaign_json(
+                os.path.join(campaign_dir, "campaign_progress.json"),
+                _progress("preflight"))
+            local_app_data = os.path.join(root, "local")
+            with mock.patch.dict(
+                    os.environ, {"LOCALAPPDATA": local_app_data}), \
+                    mock.patch.object(
+                        orchestrator, "sha256_file",
+                        return_value="B" * 64), \
+                    mock.patch.object(
+                        orchestrator, "launch_game") as launch:
+                result = orchestrator.main([
+                    "--data-root", root,
+                    "--campaign-id", "preflight",
+                    "--seeds", SEED,
+                ])
+
+            self.assertEqual(orchestrator.EXIT_CAMPAIGN_INVALID, result)
+            launch.assert_not_called()
+
+    def test_complete_with_failures_empty_list_is_still_nonzero(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = os.path.join(root, "preflight")
+            os.makedirs(campaign_dir)
+            _write_campaign_json(
+                os.path.join(campaign_dir, "campaign_progress.json"),
+                _progress(
+                    "preflight", status="complete_with_failures",
+                    failed=[]))
+            local_app_data = os.path.join(root, "local")
+            with mock.patch.dict(
+                    os.environ, {"LOCALAPPDATA": local_app_data}), \
+                    mock.patch.object(
+                        orchestrator, "sha256_file",
+                        return_value="A" * 64), \
+                    mock.patch.object(
                         orchestrator, "launch_game") as launch:
                 result = orchestrator.main([
                     "--data-root", root,
@@ -398,7 +513,7 @@ class OrchestratorPreflightTest(unittest.TestCase):
 class ArtifactOracleRequirementTest(unittest.TestCase):
     def _validate(self, records, require_oracle=False):
         with tempfile.TemporaryDirectory() as root:
-            path = os.path.join(root, "run_test_a20_ironclad.jsonl")
+            path = os.path.join(root, f"run_{SEED}_a20_ironclad.jsonl")
             _write_artifact(path, records)
             return validate_artifacts.validate_file(
                 path, require_oracle=require_oracle)[0]
@@ -452,6 +567,43 @@ class ArtifactOracleRequirementTest(unittest.TestCase):
             require_oracle=True)
         self.assertIn("at least one in-game action with a valid oracle block",
                       "\n".join(errors))
+
+    def test_require_oracle_joins_all_seed_identities(self):
+        header = _header(True)
+        header["seed"].update({
+            "long": SEED_LONG + 1,
+            "long_getLong": SEED_LONG + 2,
+            "crosscheck_ok": False,
+        })
+        oracle = _oracle()
+        oracle["seed"] = SEED_LONG + 3
+        action = _action(oracle)
+        action["state_json"]["game_state"]["seed"] = SEED_LONG + 4
+
+        errors = self._validate(
+            [header, action, _terminal()], require_oracle=True)
+        joined = "\n".join(errors)
+        self.assertIn("seed.long_getLong", joined)
+        self.assertIn("seed.long", joined)
+        self.assertIn("crosscheck_ok", joined)
+        self.assertIn("game_state.seed", joined)
+        self.assertIn("oracle.seed", joined)
+
+    def test_require_oracle_rejects_boolean_seed_longs(self):
+        header = _header(True)
+        header["seed"]["long"] = True
+        header["seed"]["long_getLong"] = True
+        action = _action(_oracle())
+        action["state_json"]["game_state"]["seed"] = True
+        action["state_json"]["game_state"]["oracle"]["seed"] = True
+
+        errors = self._validate(
+            [header, action, _terminal()], require_oracle=True)
+        joined = "\n".join(errors)
+        self.assertIn("seed.long_getLong", joined)
+        self.assertIn("seed.long", joined)
+        self.assertIn("game_state.seed", joined)
+        self.assertIn("oracle.seed", joined)
 
 
 class StrictCampaignValidationTest(unittest.TestCase):
@@ -543,10 +695,177 @@ class StrictCampaignValidationTest(unittest.TestCase):
             self.assertIn("unexpected/stale run_STS00999", joined)
             self.assertIn("header campaign_id", joined)
 
+    def test_strict_artifact_rejects_duplicate_terminal_and_action_after_it(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = self._make_campaign(root)
+            path = os.path.join(
+                campaign_dir, f"run_{SEED}_a20_ironclad.jsonl")
+            with open(path, "r", encoding="utf-8") as fh:
+                records = [json.loads(line) for line in fh if line.strip()]
+            records.append(dict(records[-1]))
+            _write_artifact(path, records)
+
+            errors, _actions = validate_artifacts.validate_file(
+                path, require_oracle=True)
+            self.assertIn(
+                "more than one terminal", "\n".join(errors))
+
+            records = records[:-1]
+            records.append(_action(_oracle(), seq=1))
+            _write_artifact(path, records)
+            errors, _actions = validate_artifacts.validate_file(
+                path, require_oracle=True)
+            joined = "\n".join(errors)
+            self.assertIn("terminal must be the final record", joined)
+            self.assertIn("action appears after terminal", joined)
+
+    def test_strict_campaign_rejects_missing_done_and_terminal_summaries(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = self._make_campaign(root)
+            progress_path = os.path.join(
+                campaign_dir, "campaign_progress.json")
+            with open(progress_path, "r", encoding="utf-8") as fh:
+                progress = json.load(fh)
+            del progress["seeds_done"][0]["floor"]
+            del progress["seeds_done"][0]["actions"]
+            _write_campaign_json(progress_path, progress)
+            _write_campaign_json(
+                os.path.join(campaign_dir, "campaign_manifest.json"),
+                {key: progress[key]
+                 for key in validate_artifacts.STRICT_MANIFEST_KEYS})
+            path = os.path.join(
+                campaign_dir, f"run_{SEED}_a20_ironclad.jsonl")
+            with open(path, "r", encoding="utf-8") as fh:
+                records = [json.loads(line) for line in fh if line.strip()]
+            del records[-1]["floor"]
+            del records[-1]["actions"]
+            _write_artifact(path, records)
+
+            _files, errors = validate_artifacts.validate_campaign(
+                campaign_dir, require_oracle=True)
+            joined = "\n".join(errors)
+            self.assertIn("seeds_done row missing", joined)
+            self.assertIn("strict terminal missing", joined)
+
+    def test_strict_artifact_rejects_seq_and_action_count_drift(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = self._make_campaign(root)
+            path = os.path.join(
+                campaign_dir, f"run_{SEED}_a20_ironclad.jsonl")
+            with open(path, "r", encoding="utf-8") as fh:
+                records = [json.loads(line) for line in fh if line.strip()]
+            records[1]["seq"] = 4
+            records[-1]["actions"] = 7
+            _write_artifact(path, records)
+
+            errors, _actions = validate_artifacts.validate_file(
+                path, require_oracle=True)
+            joined = "\n".join(errors)
+            self.assertIn("action seq must be contiguous", joined)
+            self.assertIn("does not match 1 injected action", joined)
+
+    def test_strict_timing_rejects_tail_duplicates_and_action_drift(self):
+        cases = {
+            "malformed_tail": lambda records: records.append("not-json"),
+            "duplicate_header": lambda records: records.append(
+                dict(records[0])),
+            "wrong_command": lambda records: records[1].update(
+                {"cmd": "skip"}),
+            "missing_mark": lambda records: records.pop(),
+        }
+        for label, mutate in cases.items():
+            with self.subTest(label=label), \
+                    tempfile.TemporaryDirectory() as root:
+                campaign_dir = self._make_campaign(root)
+                timing_path = os.path.join(
+                    campaign_dir,
+                    f"run_{SEED}_a20_ironclad.timing.jsonl")
+                with open(timing_path, "r", encoding="utf-8") as fh:
+                    records = [json.loads(line)
+                               for line in fh if line.strip()]
+                mutate(records)
+                with open(timing_path, "w", encoding="utf-8",
+                          newline="\n") as fh:
+                    for record in records:
+                        if isinstance(record, str):
+                            fh.write(record + "\n")
+                        else:
+                            fh.write(json.dumps(record) + "\n")
+                _files, errors = validate_artifacts.validate_campaign(
+                    campaign_dir, require_oracle=True)
+                self.assertTrue(errors, label)
+
+    def test_happy_boss_claim_counter_and_timing_pass_strict_campaign(self):
+        class BossStepper:
+            def step(self, _command):
+                final_state = _action(
+                    _oracle(), command=validate_artifacts.TERMINAL_MARKER)
+                state = final_state["state_json"]
+                state["game_state"].update({
+                    "room_type": "MonsterRoomBoss",
+                    "choice_list": [],
+                })
+                return "ready", state
+
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "boss_strict"
+            campaign_dir = os.path.join(root, campaign_id)
+            os.makedirs(campaign_dir)
+            run_path = os.path.join(
+                campaign_dir, f"run_{SEED}_a20_ironclad.jsonl")
+            timing_path = os.path.join(
+                campaign_dir,
+                f"run_{SEED}_a20_ironclad.timing.jsonl")
+            logger = campaign_driver.RunLogger(
+                run_path, _campaign_header(campaign_id))
+            timing = campaign_driver.TimingLog(timing_path, {
+                "campaign_id": campaign_id,
+                "policy": "random-legal",
+                "seed": SEED,
+                "attempt": 1,
+                "schema_version": 1,
+                "driver_version": "test",
+                "fork_jar_sha256": "A" * 64,
+            })
+            driver = campaign_driver.CampaignDriver.__new__(
+                campaign_driver.CampaignDriver)
+            driver.stepper = BossStepper()
+            first = _action(_oracle())["state_json"]
+            first["game_state"].update({
+                "room_type": "MonsterRoomBoss",
+                "choice_list": ["gold"],
+            })
+            outcome, actions = driver._claim_boss_reward(
+                logger, timing, first, SEED, 0)
+            logger.close()
+            timing.close()
+            self.assertEqual(("act1_boss_reward", 1),
+                             (outcome, actions))
+
+            done = _done()
+            done.update({
+                "outcome": outcome,
+                "actions": actions,
+            })
+            progress = _progress(campaign_id, done=[done])
+            _write_campaign_json(
+                os.path.join(campaign_dir, "campaign_progress.json"),
+                progress)
+            _write_campaign_json(
+                os.path.join(campaign_dir, "campaign_manifest.json"),
+                {key: progress[key]
+                 for key in validate_artifacts.STRICT_MANIFEST_KEYS})
+
+            _files, errors = validate_artifacts.validate_campaign(
+                campaign_dir, require_oracle=True)
+            self.assertEqual([], errors)
+
 
 class CampaignIdentityAndFreshTest(unittest.TestCase):
     def test_fresh_cleanup_is_bounded_to_owned_expected_files(self):
-        with tempfile.TemporaryDirectory() as root:
+        with tempfile.TemporaryDirectory() as data_root:
+            root = os.path.join(data_root, "strict")
+            os.makedirs(root)
             expected = [
                 "campaign_progress.json",
                 f"run_{SEED}_a20_ironclad.jsonl",
@@ -562,7 +881,8 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 with open(os.path.join(root, name), "w", encoding="utf-8"):
                     pass
 
-            removed = orchestrator.clear_fresh_campaign_files(root, [SEED])
+            removed = orchestrator.clear_fresh_campaign_files(
+                data_root, "strict", [SEED])
 
             self.assertEqual(set(expected), set(removed))
             for name in expected:
@@ -580,6 +900,114 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                     campaign_driver.CampaignIdentityError, "seed_list"):
                 progress.load_or_init(
                     "strict", ["STS00999"], "random-legal", "A" * 64)
+
+    def test_progress_refuses_boolean_schema_identity(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "campaign_progress.json")
+            heartbeat = os.path.join(root, "campaign_heartbeat.json")
+            stored = _progress("strict")
+            stored["schema_version"] = True
+            _write_campaign_json(path, stored)
+            progress = campaign_driver.Progress(path, heartbeat)
+            with self.assertRaisesRegex(
+                    campaign_driver.CampaignIdentityError, "schema_version"):
+                progress.load_or_init(
+                    "strict", [SEED], "random-legal", "A" * 64)
+
+    def test_campaign_id_escape_is_rejected_before_cleanup_or_write(self):
+        invalid_ids = [
+            ".", "..", "../outside", r"..\outside",
+            os.path.abspath(os.sep),
+        ]
+        for campaign_id in invalid_ids:
+            with self.subTest(campaign_id=campaign_id):
+                with self.assertRaises(ValueError):
+                    campaign_paths.validate_campaign_id(campaign_id)
+
+        with tempfile.TemporaryDirectory() as root:
+            sentinel = os.path.join(root, "campaign_progress.json")
+            with open(sentinel, "w", encoding="utf-8") as fh:
+                fh.write("preserve")
+            data_root = os.path.join(root, "campaigns")
+            os.makedirs(data_root)
+            with self.assertRaises(ValueError):
+                orchestrator.clear_fresh_campaign_files(
+                    data_root, "..", [SEED])
+            self.assertTrue(os.path.exists(sentinel))
+
+            with mock.patch.object(orchestrator, "launch_game") as launch:
+                result = orchestrator.main([
+                    "--data-root", data_root,
+                    "--campaign-id", "..",
+                    "--seeds", SEED,
+                    "--fresh",
+                ])
+            self.assertEqual(orchestrator.EXIT_CAMPAIGN_INVALID, result)
+            launch.assert_not_called()
+            self.assertTrue(os.path.exists(sentinel))
+
+            driver_result = campaign_driver.main([
+                "--data-root", data_root,
+                "--campaign-id", "..",
+                "--seeds", SEED,
+                "--fork-jar", sentinel,
+            ])
+            self.assertEqual(campaign_driver.EXIT_FATAL, driver_result)
+            self.assertTrue(os.path.exists(sentinel))
+
+    def test_resume_identity_mismatch_becomes_durable_fatal_status(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "identity"
+            campaign_dir = os.path.join(root, campaign_id)
+            os.makedirs(campaign_dir)
+            progress_path = os.path.join(
+                campaign_dir, "campaign_progress.json")
+            _write_campaign_json(
+                progress_path,
+                _progress(campaign_id, status="in_progress",
+                          done=[], failed=[]))
+            driver = campaign_driver.CampaignDriver.__new__(
+                campaign_driver.CampaignDriver)
+            driver.args = SimpleNamespace(
+                seeds=[SEED],
+                campaign_id=campaign_id,
+                policy="random-legal",
+            )
+            driver.reader = _Reader()
+            driver.stepper = _HandshakeStepper()
+            driver.fork_hash = "B" * 64
+            driver.progress = campaign_driver.Progress(
+                progress_path,
+                os.path.join(campaign_dir, "campaign_heartbeat.json"))
+
+            self.assertEqual(campaign_driver.EXIT_FATAL, driver.run())
+            with open(progress_path, "r", encoding="utf-8") as fh:
+                progress = json.load(fh)
+            self.assertEqual("fatal_environment_drift", progress["status"])
+            self.assertEqual(
+                "campaign_identity_mismatch", progress["fatal"]["kind"])
+
+    def test_orchestrator_joins_current_fork_and_rejects_any_failed_status(self):
+        args = SimpleNamespace(
+            campaign_id="strict",
+            seed_list=[SEED],
+            policy="random-legal",
+            fork_hash="B" * 64,
+        )
+        progress = _progress("strict")
+        self.assertIn(
+            "fork_jar_sha256",
+            orchestrator.progress_identity_error(progress, args))
+        progress["fork_jar_sha256"] = "B" * 64
+        progress["schema_version"] = True
+        self.assertIn(
+            "schema_version",
+            orchestrator.progress_identity_error(progress, args))
+        progress["status"] = "complete_with_failures"
+        progress["seeds_failed"] = []
+        self.assertIn(
+            "status must be 'complete'",
+            orchestrator.completion_error(progress, [SEED]))
 
     def test_retry_exhaustion_cannot_accept_stale_artifact(self):
         with tempfile.TemporaryDirectory() as root:

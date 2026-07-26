@@ -80,9 +80,13 @@ The preflight is a gate, not a smoke test. All of these checks are required:
    `{counter,s0,s1}` triples for `cardRng`, `treasureRng`, `potionRng`,
    `relicRng`, and `miscRng`. With `--campaign`, strict mode also requires a
    complete, failure-free progress/manifest ledger whose ordered `seed_list`
-   and `seeds_done` match exactly, then proves a bijection to the run and timing
-   artifacts. Missing, extra, stale, cross-campaign, or failed-seed evidence is
-   fatal.
+    and `seeds_done` match exactly, then proves a bijection to the run and timing
+    artifacts. Missing, extra, stale, cross-campaign, or failed-seed evidence is
+    fatal. It also joins the filename/header/in-game/oracle seed identities,
+    requires exactly one final terminal with contiguous action sequence and
+    matching terminal/done counts, and parses every timing row with exact
+    mark-for-action correspondence. A header-only timing file, malformed tail,
+    duplicate terminal, action after terminal, or missing summary is fatal.
 
 If any check fails, preserve the preflight directory for diagnosis and stop.
 Do not relaunch, reuse its artifact, or advance to the reward campaign.
@@ -124,7 +128,11 @@ required: never reuse or overwrite the preserved invalid `b45_rewards`
 campaign, a prior preflight, or a prior reward attempt. `--fresh` authorizes
 only bounded cleanup of that invocation's control files, launch logs, and the
 exact requested seeds' run/timing artifacts; it does not erase unexpected
-files, which strict validation reports instead.
+files, which strict validation reports instead. The id must remain the one safe
+path component shown above: rooted ids, path separators, `.`/`..`, symlink
+escapes, and any resolved write/delete target outside `data-root` are rejected.
+The orchestrator hashes the requested fork before it accepts even an already
+complete ledger; changing fork/schema/seed/policy requires a new campaign id.
 
 Before translation, require the oracle gate on the reward campaign too:
 

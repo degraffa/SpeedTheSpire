@@ -3052,3 +3052,55 @@ documentation-link, whitespace, and golden/fixture hygiene checks were run
 before the separate fix-forward commit. No state schema, engine, registry,
 fixture, golden, vendored fork, or external campaign artifact changed. The
 frozen environment decision remains the live B4.5 stop line.
+
+<a id="b45-oracle-preflight-second-fix-forward"></a>
+
+### B4.5 strict oracle evidence second fix-forward `[x]` (non-task)
+
+**Independent-review findings:** the first strict terminal join exposed a
+pre-existing live-driver counter split: boss-reward claims incremented only a
+local count, so the terminal and `seeds_done` summaries disagreed for ordinary
+full-run termination. The same review reproduced five more gaps. A requested
+seed mismatch was logged but accepted; duplicate/out-of-order terminals and
+actions plus missing summaries could pass; a rooted or `..` campaign id let
+`--fresh` escape the data root; timing validation ignored everything after its
+header; and fork/schema resume mismatch was not durable or checked by the
+orchestrator before accepting completed progress.
+
+**Fix-forward:** boss-reward claim actions now return their updated count and
+write corresponding timing marks, including the no-op recovery path. The
+terminal marker remains an explicitly non-injected final-state observation:
+action sequence is contiguous, terminal `seq` counts every action-shaped
+record, while terminal/progress `actions` and timing marks count only injected
+commands. A wrong dump seed is fatal before artifact creation or policy
+advancement. Strict validation derives the long from the filename/header string
+and requires header long/getLong/crosscheck, every in-game `game_state.seed`,
+and every `oracle.seed` to agree.
+
+Strict run grammar now requires exactly one final terminal, contiguous action
+sequence, required terminal and done summaries, and consistent sequence/action
+counts. Timing JSONL is parsed completely: one first header, marks only
+thereafter, valid required fields and monotonic clocks, contiguous sequence,
+and exact command/floor/screen correspondence to every injected artifact
+action. Timing identity now includes campaign, seed, attempt, policy, schema,
+driver, and fork hash.
+
+The shared `campaign_paths.py` contract accepts only single-component campaign
+ids and base-35-style seed names. Every driver/orchestrator campaign write and
+delete resolves through absolute/real containment below `data_root`; rooted
+paths, separators, dot segments, symlink escapes, and unsafe direct child names
+fail closed. Resume identity mismatch is persisted as a non-retryable fatal
+status. The orchestrator hashes the currently requested fork and joins
+campaign/seed/policy/fork/schema before accepting even completed progress, and
+any `complete_with_failures` status is nonzero regardless of list contents.
+
+**Regression proof:** the Python suite now directly covers the normal
+boss-reward strict campaign, wrong requested/dump/header/oracle seeds, duplicate
+terminals, actions after terminal, sequence/count drift, missing terminal/done
+summaries, malformed/duplicate/missing/drifted timing rows, path traversal at
+both CLIs and cleanup, durable resume mismatch, current-fork completed-progress
+rejection, and empty-list `complete_with_failures`. The historical default
+validator remains compatible for non-strict artifacts. Full preset and hygiene
+results are recorded by the separate fix-forward commit; no engine schema,
+registry, fixture, golden, vendored fork, or external campaign artifact changed.
+B4.5 remains `[!]` on the manual oracle capture and frozen-environment decision.

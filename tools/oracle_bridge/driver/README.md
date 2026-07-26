@@ -57,14 +57,21 @@ Strict campaign validation requires a complete, failure-free progress and
 manifest ledger, exact ordered seed completion, at least one valid in-game
 oracle action per run, and one current run plus timing artifact per completed
 seed with no missing or extra files. Run headers are bound to campaign id,
-seed, attempt, policy, schema, and fork identity; timing headers are bound to
-campaign id, seed, attempt, and policy.
+seed string/long/getLong, attempt, policy, schema, driver, and fork identity;
+every in-game `game_state.seed` and `oracle.seed` must agree. Strict run grammar
+requires contiguous action sequence numbers, exactly one final terminal, and
+matching injected-action/terminal/done summaries. Timing sidecars are parsed in
+full and joined mark-for-action (sequence, command, floor, and screen), with
+their headers bound to the same campaign/schema/driver/fork identity.
 
 Treat a campaign id as immutable evidence. A new live attempt gets a new id;
 failed directories are preserved rather than retried in place. `--fresh`
 removes only this invocation's known control files, launch logs, and exact
 requested-seed run/timing names. It deliberately preserves unexpected files,
 which strict validation then rejects as stale instead of silently deleting.
+Campaign ids are single safe path components; both CLIs reject rooted paths,
+separators, `.`/`..`, and any campaign directory or file whose resolved path
+escapes `data-root`.
 
 Artifacts land under `<data-root>/<campaign-id>/`:
 `run_<seed>_a20_ironclad.jsonl` (one per run), `campaign_progress.json`,
@@ -79,8 +86,11 @@ seed as **both** base-35 string and long, ascension, character, policy). Then on
 `action` record per injected action — `{action_command, sim_action_bits (null,
 B1.5 fills it), ready_for_command, available_commands, state_json}` — where
 `state_json` is the game's dump **verbatim / un-pruned** (lossless: the translator
-B1.5 enforces unknown-field-is-error). The file ends with a `terminal` record
-(`outcome`, floor, act, actions). Validate with:
+B1.5 enforces unknown-field-is-error). A final synthetic
+`__terminal_observed__` action may preserve the post-claim state; it is
+sequence-bearing but is not counted as an injected action or timing mark. The
+file ends with exactly one `terminal` record (`outcome`, floor, act, actions).
+Validate with:
 
 ```bash
 python validate_artifacts.py --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b14_accept

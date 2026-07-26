@@ -27,6 +27,7 @@ Stdlib-only. Run it from anywhere on the Windows host with Python 3.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -35,9 +36,17 @@ import sys
 import time
 from datetime import datetime, timezone
 
+from campaign_paths import (
+    campaign_dir_under_root,
+    campaign_file_under_root,
+    validate_campaign_id,
+    validate_seed_list,
+)
+
 FATAL_PROGRESS_STATUS = "fatal_environment_drift"
 EXIT_FATAL_ENVIRONMENT = 3
 EXIT_CAMPAIGN_INVALID = 4
+SCHEMA_VERSION = 1
 
 
 def utc() -> str:
@@ -103,11 +112,13 @@ def build_driver_command(args) -> str:
 
 
 def progress_path(args) -> str:
-    return os.path.join(args.data_root, args.campaign_id, "campaign_progress.json")
+    return campaign_file_under_root(
+        args.data_root, args.campaign_id, "campaign_progress.json")
 
 
 def heartbeat_path(args) -> str:
-    return os.path.join(args.data_root, args.campaign_id, "campaign_heartbeat.json")
+    return campaign_file_under_root(
+        args.data_root, args.campaign_id, "campaign_heartbeat.json")
 
 
 def read_json(path):
@@ -136,12 +147,15 @@ def resolve_seeds(spec: str) -> list:
     else:
         seeds = [seed.strip().upper() for seed in spec.split(",")
                  if seed.strip()]
-    if not seeds or any(re.fullmatch(r"[0-9A-Z]+", seed) is None
-                        for seed in seeds):
-        raise ValueError("seeds must be non-empty base-35-style strings")
-    if len(seeds) != len(set(seeds)):
-        raise ValueError("seed list contains duplicates")
-    return seeds
+    return validate_seed_list(seeds)
+
+
+def sha256_file(path: str) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
 
 
 def progress_identity_error(prog, args):
@@ -151,15 +165,21 @@ def progress_identity_error(prog, args):
         "campaign_id": args.campaign_id,
         "seed_list": args.seed_list,
         "policy": args.policy,
+        "fork_jar_sha256": args.fork_hash,
+        "schema_version": SCHEMA_VERSION,
     }
     mismatches = [
         f"{key}={prog.get(key)!r} (expected {value!r})"
-        for key, value in expected.items() if prog.get(key) != value
+        for key, value in expected.items()
+        if type(prog.get(key)) is not type(value) or prog.get(key) != value
     ]
     return "; ".join(mismatches) if mismatches else None
 
 
 def completion_error(prog, expected_seeds):
+    if prog.get("status") != "complete":
+        return (f"campaign status must be 'complete', got "
+                f"{prog.get('status')!r}")
     failed = prog.get("seeds_failed")
     done = prog.get("seeds_done")
     if not isinstance(failed, list) or not isinstance(done, list):
@@ -173,12 +193,16 @@ def completion_error(prog, expected_seeds):
     return None
 
 
-def clear_fresh_campaign_files(campaign_dir: str, seed_list: list) -> list:
+def clear_fresh_campaign_files(data_root: str, campaign_id: str,
+                               seed_list: list) -> list:
     """Remove only artifacts this exact invocation owns.
 
     Unexpected seed artifacts are deliberately preserved; strict validation
     will report them as stale instead of silently deleting unrelated evidence.
     """
+    campaign_id = validate_campaign_id(campaign_id)
+    seed_list = validate_seed_list(seed_list)
+    campaign_dir = campaign_dir_under_root(data_root, campaign_id)
     names = {
         "campaign_progress.json", "campaign_progress.json.tmp",
         "campaign_heartbeat.json", "campaign_manifest.json",
@@ -195,7 +219,7 @@ def clear_fresh_campaign_files(campaign_dir: str, seed_list: list) -> list:
                  if re.fullmatch(r"mts_launch[0-9]+\.log", name))
     removed = []
     for name in sorted(names):
-        path = os.path.join(campaign_dir, name)
+        path = campaign_file_under_root(data_root, campaign_id, name)
         if os.path.isfile(path):
             os.remove(path)
             removed.append(name)
@@ -220,8 +244,8 @@ def launch_game(args, launch_idx: int) -> subprocess.Popen:
     java = os.path.join(args.game_dir, "jre", "bin", "java.exe")
     cmd = [java, "-jar", args.mts_jar,
            "--skip-launcher", "--mods", "basemod,CommunicationMod-oracle"]
-    out = open(os.path.join(args.data_root, args.campaign_id,
-                            f"mts_launch{launch_idx}.log"), "w",
+    out = open(campaign_file_under_root(
+        args.data_root, args.campaign_id, f"mts_launch{launch_idx}.log"), "w",
                encoding="utf-8", newline="\n")
     log(f"launch #{launch_idx}: {java} -jar {args.mts_jar} --skip-launcher "
         f"--mods basemod,CommunicationMod-oracle  (cwd={args.game_dir})")
@@ -276,14 +300,27 @@ def main(argv=None) -> int:
 
     args.seeds_arg = args.seeds  # passed through to the driver verbatim
     try:
+        validate_campaign_id(args.campaign_id)
         args.seed_list = resolve_seeds(args.seeds)
-    except ValueError as exc:
+        args.fork_hash = sha256_file(args.fork_jar)
+        camp_dir = campaign_dir_under_root(args.data_root, args.campaign_id)
+    except (OSError, ValueError) as exc:
         log(f"INVALID CAMPAIGN INPUT -- {exc}")
         return EXIT_CAMPAIGN_INVALID
-    camp_dir = os.path.join(args.data_root, args.campaign_id)
     os.makedirs(camp_dir, exist_ok=True)
+    try:
+        # Re-resolve after mkdir so an existing/redirection race fails closed.
+        camp_dir = campaign_dir_under_root(args.data_root, args.campaign_id)
+    except ValueError as exc:
+        log(f"INVALID CAMPAIGN PATH -- {exc}")
+        return EXIT_CAMPAIGN_INVALID
     if args.fresh:
-        removed = clear_fresh_campaign_files(camp_dir, args.seed_list)
+        try:
+            removed = clear_fresh_campaign_files(
+                args.data_root, args.campaign_id, args.seed_list)
+        except ValueError as exc:
+            log(f"REFUSING --fresh CLEANUP -- {exc}")
+            return EXIT_CAMPAIGN_INVALID
         log(f"--fresh: cleared {len(removed)} owned prior file(s) in "
             f"{camp_dir}")
 
@@ -430,10 +467,9 @@ def main(argv=None) -> int:
 
 def _summary(args, timeline) -> None:
     prog = read_json(progress_path(args)) or {}
-    man = read_json(os.path.join(args.data_root, args.campaign_id,
-                                 "campaign_manifest.json"))
-    with open(os.path.join(args.data_root, args.campaign_id,
-                           "orchestrator_timeline.json"), "w",
+    with open(campaign_file_under_root(
+            args.data_root, args.campaign_id,
+            "orchestrator_timeline.json"), "w",
               encoding="utf-8", newline="\n") as fh:
         json.dump({"timeline": timeline, "final_status": prog.get("status")},
                   fh, indent=2)

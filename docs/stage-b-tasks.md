@@ -469,6 +469,13 @@ acceptance, the orchestrator stops relaunching on that status, and the
 validator/runbook require a distinct one-seed oracle preflight. The choice
 between restoring the frozen stack and formally amending it remains blocked on
 the owner; this hardening does **not** close B4.5.
+An independent second review then closed the remaining strict-evidence gaps:
+normal boss-reward claims now propagate their action count; seed identity is
+joined from request through every in-game/oracle record; run and timing JSONL
+grammars are complete and bijective; campaign ids and resolved paths cannot
+escape the data root; and resume identity includes the currently requested
+fork/schema even for completed ledgers. These are capture-safety fixes only;
+the manual oracle acceptance remains the blocker.
 See the [non-task archive log](stage-b-log.md#b45-oracle-preflight).
 
 **Landed** — commit `4f0544a`, merged at `e222dc2`, landed in `e6ec9ce`:
@@ -776,6 +783,15 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **B4.5 strict evidence second fix-forward closes six
+  independent-review findings; B4.5 remains `[!]`.** The first fix-forward's
+  new terminal join exposed the driver's pre-existing boss-claim counter
+  split; seed-long identity, terminal ordering/counts, timing bodies, resolved
+  cleanup containment, and current fork/schema resume identity also needed
+  fail-closed contracts. All now have direct adversarial regressions plus a
+  happy strict boss-reward campaign. Default non-oracle validation remains
+  backward-compatible.
+  [Archive log.](stage-b-log.md#b45-oracle-preflight-second-fix-forward)
 - 2026-07-26 — **B4.5 oracle-capture preflight fix-forward closes strict
   campaign false accepts; B4.5 remains `[!]`.** Independent review found that
   strict validation still accepted a header-plus-terminal/all-menu artifact
