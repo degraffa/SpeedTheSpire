@@ -498,6 +498,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         // remain gameplay-visible. Then normalize any limbo entry which never
         // acquired a USE_CARD (a terminal-cancelled queued autoplay).
         resolve_pending_use_card_actions_at_terminal(s);
+        normalize_terminal_card_queue(s);
         flush_limbo_at_combat_over(s);
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         r.outcome = PumpOutcome::COMBAT_OVER;

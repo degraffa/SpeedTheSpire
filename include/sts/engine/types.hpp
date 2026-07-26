@@ -106,6 +106,11 @@ using RelicId = sts::registry::RelicId;
 //                 action-local exhaust redirect uses the same one-play
 //                 lifetime; unlike EXHAUST, this bit must not survive a
 //                 Strange Spoon save or an Exhume/replay cycle.
+//   AUTOPLAY_X_ENERGY -- transient marker on a fresh PURGE_ON_USE replay copy.
+//                 Its misc word holds the original X card's energyOnUse because
+//                 the original spends energy before the copy dequeues. Draw-top
+//                 autoplay never needs storage (it is front-queued before any
+//                 intervening spend). The marked instance necessarily poofs.
 enum class CardFlag : uint16_t {
     NONE       = 0,
     EXHAUST    = 1u << 0,
@@ -117,6 +122,7 @@ enum class CardFlag : uint16_t {
     COST_MODIFIED_FOR_TURN = 1u << 6,
     PURGE_ON_USE = 1u << 7,
     EXHAUST_ON_USE_ONCE = 1u << 8,
+    AUTOPLAY_X_ENERGY = 1u << 9,
 };
 
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {

@@ -2915,3 +2915,34 @@ fixture/golden, registry namespace, opcode or frozen-design change.
 **950/950**, and Release **950/950**; both focused `CardLimbo` regressions and
 the unchanged fixture oracle were included. Documentation links, stale-count,
 whitespace and golden/fixture safety checks passed before commit.
+
+**Independent-audit fix-forward (supersedes the implementation and acceptance
+claims above):** commit `9484f70` stopped only an hp-dead selected target and
+therefore did not implement Java's full `canUse` call. It also collapsed
+`ENEMY` with `SELF_AND_ENEMY`, permanently zeroed autoplay `cost_now`, lost
+Double Tap X-cost `energyOnUse`, and terminal-flushed a queued autoplay without
+the retained no-trigger `UseCardAction`'s Spoon/onExhaust/cleanup behavior.
+
+The corrected path shares one full in-scope `canUse` authority with
+`legal_actions`: unplayable STATUS/CURSE plus Medical Kit/Blue Candle, target
+and all-monsters-dead `cardPlayable`, `turnHasEnded`, affordability with the
+autoplay exception, Entangle, Velvet Choker, Normality, and Clash. Generated
+`CardDef` preserves the exact target kind from existing YAML, so the
+successful-gate post-hook null/dead/escaping suppression applies only to
+`CardTarget.ENEMY`; an ordinary card stays in hand, a limbo autoplay is removed
+without filing, and `SELF_AND_ENEMY` (Spot Weakness) proceeds. A failed gate
+instead queues no-trigger filing, including terminal normalization, preserving
+purge/POWER, Strange Spoon, discard/exhaust, `onExhaust`, and one-shot cleanup.
+
+Autoplay is transiently inferred from limbo and never rewrites `cost_now`.
+Draw-top X autoplay reads the unchanged energy at its front-queued dequeue; a
+fresh Double Tap copy that is both purge-only and X-cost stores the original
+energy in its otherwise-doomed row under a transient runtime flag. No
+persistent card's `misc` is overwritten, and later ordinary plays pay normally.
+The expanded regressions pin ordinary-hand retention, Havoc/Wound, Normality
+and Velvet replay vetoes, escaped `ENEMY` versus `SELF_AND_ENEMY`, nonterminal
+and terminal Spoon/onExhaust filing, ordinary replay cost, draw-top and Double
+Tap X-cost energy, and random-target draw-before-gate/no-extra-draw ordering.
+The earlier 950-test acceptance count is obsolete. Final-tree Debug,
+leak-detecting ASan/UBSan, and Release are each **961/961**; the unchanged
+`FixtureOracle` is included, and no fixture/golden file changed.

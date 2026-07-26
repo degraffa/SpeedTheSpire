@@ -252,7 +252,9 @@ void flush_limbo_at_combat_over(CombatState& s) noexcept {
     // insertion order. A synchronous replay may precede its source here
     // (Double Tap puts the copy into limbo during the source's UseCardAction
     // constructor), but purge copies land in no pile, so this preserves every
-    // observable destination-pile order. No RNG, no hooks.
+    // observable destination-pile order. Pending filing actions and queued
+    // autoplay have already taken their exact path; this final fallback has no
+    // RNG or hooks.
     while (s.limbo_count > 0) {
         const uint8_t pi = s.limbo[0];
         const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));

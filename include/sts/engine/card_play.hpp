@@ -51,11 +51,12 @@
 //   * Energy is deducted AFTER the effects are queued (useCard order), not before.
 //   * The random-target roll (trap 10) happens at DEQUEUE (resolve), never at
 //     enqueue (queue_card_play) -- see resolve_play_target / roll_random_target.
-//   * The dequeue path re-runs Java's canUse gate BEFORE every hook. If a
-//     selected enemy died while a targeted autoplay waited in the queue, the
-//     play is not retargeted and runs no hooks/effects/counters/energy spend;
-//     only a no-trigger USE_CARD files the already-limbo autoplay instance
-//     (GameActionManager.java:209-214,285-301; AbstractCard.java:854-859).
+//   * The dequeue path resolves random targeting, then re-runs Java's full
+//     canUse gate BEFORE every hook. Failed ordinary plays stay in hand; failed
+//     autoplay receives only no-trigger USE_CARD filing. After a successful
+//     gate and hook/counter fan-out, exact CardTarget.ENEMY alone suppresses
+//     useCard for a null/dead/escaping target (GameActionManager.java:
+//     209-301; AbstractCard.java:854-924).
 
 #include <cstdint>
 
@@ -92,20 +93,32 @@ bool queue_card_play(CombatState& state, uint8_t hand_index, uint8_t target) noe
 [[nodiscard]] uint8_t resolve_play_target(CombatState& state, const CardDef& def,
                                           uint8_t declared_target) noexcept;
 
+// Java's dequeue-time AbstractCard.canUse gate, shared with legal_actions so
+// UI legality and queued/replayed-card revalidation cannot drift. `autoplay`
+// mirrors isInAutoplay: it bypasses only the energy-total check, not status /
+// curse playability, turn, power, relic, hand-card, or card-specific vetoes.
+[[nodiscard]] bool card_can_use_without_target(
+    const CombatState& state, CardPoolIndex pool_index, bool autoplay) noexcept;
+[[nodiscard]] bool card_can_use(const CombatState& state,
+                                CardPoolIndex pool_index, uint8_t target,
+                                bool autoplay) noexcept;
+
 // Resolve one dequeued card play (design doc §5.3; the limbo model above).
 // Called from pump_step()'s step 3 when the cardQueue head is a real card (not
-// the end-turn sentinel). Resolves trap-10 targeting, applies the dead-selected-
-// target canUse cancellation above, then runs the hook fan-outs,
-// ++cards_played_this_turn, and queues the card's effect ActionQueueItems via
-// add_to_bottom -- the upgrade-selected effect program (the two-row lookup)
-// once, or, for an X-cost card, energyOnUse times with energy then zeroed --
-// then queues the USE_CARD filing action, moves the card hand -> LIMBO, and
-// deducts the non-X cost from player_energy. The card reaches its destination
-// pile (exhaust / discard / nowhere for POWER + purge) only when the queued
-// USE_CARD executes. `item.card_index` is the card-pool index of the played
-// card; an AUTOPLAYED card (Havoc / Double Tap) is already in limbo when this
-// runs.
+// the end-turn sentinel). Resolves trap-10 targeting and the full canUse gate,
+// runs the hook/counter fan-out, applies the exact ENEMY post-hook suppression,
+// and otherwise queues the card program plus USE_CARD filing. X-cost programs
+// repeat energyOnUse times; only a non-autoplay play spends energy. The card
+// moves hand -> LIMBO and reaches exhaust/discard/nowhere only when USE_CARD
+// executes. `item.card_index` is the pool index; an autoplay (Havoc / Double
+// Tap) is already in limbo when this runs.
 void resolve_card_play(CombatState& state, const CardQueueItem& item) noexcept;
+
+// Combat-over normalization for queued autoplay instances that are still in
+// limbo and never reached the dequeue gate. Java's retained no-trigger
+// UseCardAction semantics still apply (Spoon, filing, onExhaust, one-shot
+// cleanup), so terminal handling must not reduce them to a raw limbo flush.
+void normalize_terminal_card_queue(CombatState& state) noexcept;
 
 // --- Card-level passive triggers (statuses / curses) -------------------------
 // Status/curse cards whose CardDef.trigger != ON_PLAY run their effect program at

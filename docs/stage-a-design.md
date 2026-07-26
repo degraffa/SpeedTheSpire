@@ -327,16 +327,26 @@ turn-N machinery rather than duplicating it. Not a change to any frozen
 mechanic: §5.2's step-6 text is accurate as far as it goes, and this section
 records only what §5.2 was silent about.
 
-### 5.3 Card-play hook order (lines 214-249)
+### 5.3 Card-play dequeue gate and hook order (lines 209-301)
 
-When a card play resolves from `cardQueue` (and unless `dontTriggerOnUseCard`):
-player powers `onPlayCard` → each monster's powers `onPlayCard` → relics
-`onPlayCard` (acquisition order) → stance → blights → hand cards
-`onPlayCard` → discard pile cards → draw pile cards → counters increment →
-`player.useCard(...)`. Random-target cards roll
-`getRandomMonster(cardRandomRng)` at *dequeue* time (line 212). A queued
-enemy-target card whose target died is exhausted from limbo without effect
-(lines 265-280).
+At dequeue, the queue item's autoplay flag is copied to `c.isInAutoplay`,
+random targeting is resolved, and then `c.canUse` is evaluated (or the
+`dontTriggerOnUseCard` override is accepted). A failed gate runs no
+`onPlayCard` hooks, counters, card program, `onUseCard` hooks, or energy
+payment. An ordinary queued card remains in hand. A failed autoplay is removed
+from limbo if present, marked `dontTriggerOnUseCard`, and receives a queued
+`UseCardAction`; that action skips use/after-use hooks but still performs
+purge/POWER disposition, Strange Spoon, exhaust/discard filing, `onExhaust`,
+and one-shot cleanup.
+
+After a successful gate, unless `dontTriggerOnUseCard`, the hook order is:
+player powers → each monster's powers → relics (acquisition order) → stance →
+blights → hand cards → discard pile cards → draw pile cards → play counters.
+Then, for exact `CardTarget.ENEMY`, a null, dead, or escaping selected monster
+suppresses `player.useCard`; the matching limbo card is removed and no effects,
+use hooks, filing, or energy payment occur. Otherwise `player.useCard(...)`
+runs. `CardTarget.SELF_AND_ENEMY` does not take that post-gate ENEMY-only
+branch. The random-target draw precedes both the gate and all hooks.
 
 ### 5.4 End-of-turn sequence (sentinel path, lines 369-377)
 
@@ -483,6 +493,17 @@ Non-freezing amendments (additive storage fixes and source-vs-paraphrase
 corrections found during Stage A execution). None change frozen mechanics; each
 cites the provenance that outranks the losing document (§1 precedence:
 decompiled Java > this design doc > the task ledger).
+
+- **Stage B — cardQueue `canUse` gate and dead/escaped split (§5.3 paraphrase
+  correction).** The old §5.3 began at the hook fan-out and misattributed
+  dead-target behavior to `GameActionManager.java:265-280`. The actual order is
+  the dequeue-time target resolution and full `canUse` gate at `:209-214`, the
+  failed-autoplay no-trigger filing path at `:285-301`, and only then the
+  successful-gate hook/counter path. Lines `:265-280` are a separate, post-hook
+  suppression of `player.useCard` for exact `CardTarget.ENEMY` when the selected
+  target is null, dead, or escaping; they remove a matching limbo card without
+  filing and do not cover `SELF_AND_ENEMY`. The Java outranks the earlier
+  paraphrase. This is a non-freezing source correction, not a mechanics change.
 
 - **Stage B — combat start is not step 6 (§5.2 was silent; new §5.2a).** §5.2
   enumerated `getNextAction`'s priority order and said nothing about the game's

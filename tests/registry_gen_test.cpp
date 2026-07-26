@@ -261,6 +261,9 @@ TEST(RegistryGen, CardTableMatchesEngine) {
             << "type, id " << id;
         EXPECT_EQ(g->needs_target, e->needs_target) << "needs_target, id " << id;
         EXPECT_EQ(g->random_target, e->random_target) << "random_target, id " << id;
+        EXPECT_EQ(static_cast<int>(g->target_kind),
+                  static_cast<int>(e->target_kind))
+            << "target_kind, id " << id;
         EXPECT_EQ(g->step_count, e->step_count) << "step_count, id " << id;
 
         for (int s = 0; s < sts::engine::kMaxCardSteps; ++s) {
@@ -285,6 +288,15 @@ TEST(RegistryGen, CardTableMatchesEngine) {
     ASSERT_NE(bash, nullptr);
     EXPECT_EQ(bash->steps[1].extra,
               sts::engine::make_apply_power_flags(sts::engine::PowerId::VULNERABLE));
+
+    const r::CardDef* strike = r::card_def(r::CardId::STRIKE);
+    const r::CardDef* spot = r::card_def(r::CardId::SPOT_WEAKNESS);
+    ASSERT_NE(strike, nullptr);
+    ASSERT_NE(spot, nullptr);
+    EXPECT_EQ(strike->target_kind, r::CardTargetKind::ENEMY);
+    EXPECT_EQ(spot->target_kind, r::CardTargetKind::SELF_AND_ENEMY);
+    EXPECT_NE(strike->target_kind, spot->target_kind)
+        << "needs_target alone must not collapse the dequeue split";
 }
 
 // --- 4. game_id string tables round-trip ------------------------------------

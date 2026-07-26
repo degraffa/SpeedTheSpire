@@ -24,6 +24,29 @@ namespace sts::engine {
 
 namespace {
 
+// A replay copy dequeues after the original X card has spent its energy, so
+// NewQueueCardAction must snapshot the original energyOnUse. This storage is
+// deliberately restricted to a fresh purge-only copy: no persistent card's
+// misc semantics (Rampage, etc.) are overwritten, and the transient row cannot
+// reach a later ordinary play. Draw-top autoplay is front-queued and can read
+// current energy at dequeue, so it needs no storage.
+void capture_purge_copy_x_energy(CombatState& s, CardPoolIndex pi,
+                                 uint32_t play_flags) noexcept {
+    if ((play_flags & (kPlayCardCopy | kPlayCardPurge)) !=
+            (kPlayCardCopy | kPlayCardPurge) ||
+        !has_card_flag(s.card_pool[pi].flags, CardFlag::XCOST)) {
+        return;
+    }
+    int energy = s.player_energy;
+    if (energy < 0) {
+        energy = 0;
+    }
+    s.card_pool[pi].misc = static_cast<uint16_t>(energy);
+    s.card_pool[pi].flags = static_cast<uint16_t>(
+        s.card_pool[pi].flags |
+        card_flag_bit(CardFlag::AUTOPLAY_X_ENERGY));
+}
+
 // --- CHOOSE_CARD helpers -----------------------------------------------------
 
 // The pile a CHOOSE_CARD of `kind` selects from. A choice's slot index -- the
@@ -418,7 +441,6 @@ void op_play_top_draw(CombatState& s) noexcept {
     // front of the cardQueue (NewQueueCardAction -> the normal §5.3 resolve).
     s.card_pool[pi].flags |=
         card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE);
-    s.card_pool[pi].cost_now = 0;
     limbo_add(s, pi);
     CardQueueItem q{};
     q.card_index = pi;
@@ -489,7 +511,6 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
         s.card_pool[slot] = s.card_pool[pi];
         pi = static_cast<CardPoolIndex>(slot);
     }
-    s.card_pool[pi].cost_now = 0;  // autoplay: useCard skips energy.use (:1378)
     if ((flags & kPlayCardPurge) != 0u) {
         s.card_pool[pi].flags = static_cast<uint16_t>(
             s.card_pool[pi].flags | card_flag_bit(CardFlag::PURGE_ON_USE));
@@ -499,6 +520,7 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
             s.card_pool[pi].flags |
             card_flag_bit(CardFlag::EXHAUST_ON_USE_ONCE));
     }
+    capture_purge_copy_x_energy(s, pi, flags);
     limbo_add(s, pi);
     CardQueueItem q{};
     q.card_index = pi;

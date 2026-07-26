@@ -330,14 +330,25 @@ RELIC_TIERS = {
 # `rarity:` names are these UPPER-case keys.
 POTION_RARITIES = {"COMMON": 0, "UNCOMMON": 1, "RARE": 2}
 
-# Card-level targeting -> (needs_target, random_target) (cards.hpp semantics).
+# Card-level targeting -> (needs_target, random_target, stable target-kind value).
+# The target kind preserves the Java CardTarget distinction at dequeue time:
+# ENEMY alone takes GameActionManager's post-hook dead/escaping suppression,
+# while SELF_AND_ENEMY (Spot Weakness) deliberately does not.
+CARD_TARGET_KINDS = {
+    "ENEMY": 0,
+    "ALL_ENEMY": 1,
+    "SELF": 2,
+    "NONE": 3,
+    "RANDOM_ENEMY": 4,
+    "SELF_AND_ENEMY": 5,
+}
 CARD_TARGETING = {
-    "ENEMY": (True, False),
-    "ALL_ENEMY": (False, False),
-    "SELF": (False, False),
-    "NONE": (False, False),
-    "RANDOM_ENEMY": (False, True),
-    "SELF_AND_ENEMY": (True, False),
+    "ENEMY": (True, False, CARD_TARGET_KINDS["ENEMY"]),
+    "ALL_ENEMY": (False, False, CARD_TARGET_KINDS["ALL_ENEMY"]),
+    "SELF": (False, False, CARD_TARGET_KINDS["SELF"]),
+    "NONE": (False, False, CARD_TARGET_KINDS["NONE"]),
+    "RANDOM_ENEMY": (False, True, CARD_TARGET_KINDS["RANDOM_ENEMY"]),
+    "SELF_AND_ENEMY": (True, False, CARD_TARGET_KINDS["SELF_AND_ENEMY"]),
 }
 
 # Monster-move telegraphed intents (generated MonsterIntent). Values are pinned

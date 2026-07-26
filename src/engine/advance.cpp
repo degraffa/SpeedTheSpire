@@ -23,8 +23,7 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
 #include "sts/engine/observation.hpp"
-#include "relics/relics_boss.hpp"           // kVelvetChokerPlayLimit
-#include "sts/engine/relic_hooks.hpp"       // player_has_relic (Blue Candle) + atPreBattle
+#include "sts/engine/relic_hooks.hpp"       // atPreBattle dispatch
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -217,157 +216,17 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     out.choice_from_discard = false;
     out.choice_from_exhaust = false;
 
-    // Clash (canUse): playable only when EVERY card in hand is an Attack
-    // (Clash.java:184-194). Computed once and applied to any hand card whose
-    // CardDef.requires_all_attacks is set.
-    bool all_hand_attacks = true;
-    for (uint8_t i = 0; i < state.hand_count; ++i) {
-        const CardDef* d =
-            card_def(static_cast<CardId>(state.card_pool[state.hand[i]].card_id));
-        if (d == nullptr || d->type != CardType::ATTACK) {
-            all_hand_attacks = false;
-            break;
-        }
-    }
-
-    // Normality (curse): while a Normality is in hand, no card may be played once
-    // 3 cards have been played this turn (Normality.canPlay:29-35 -- a canPlay veto
-    // on EVERY other card when cardsPlayedThisTurn >= 3). PLAY_LIMIT is the fixed 3
-    // (Normality.java:26). Computed once; forces every hand card unplayable below.
-    bool normality_locked = false;
-    if (state.cards_played_this_turn >= 3) {
-        for (uint8_t i = 0; i < state.hand_count; ++i) {
-            if (state.card_pool[state.hand[i]].card_id ==
-                static_cast<uint16_t>(CardId::NORMALITY)) {
-                normality_locked = true;
-                break;
-            }
-        }
-    }
-
-    // Entangled (the Red Slaver's net, SlaverRed.java:89): while the player holds
-    // it, no ATTACK-type card may be played. AbstractCard.hasEnoughEnergy:872-875
-    // -- `if (player.hasPower("Entangled") && this.type == CardType.ATTACK)
-    // return false` -- so this is a legality predicate, not a power hook, and it
-    // belongs here beside Normality's and Velvet Choker's vetoes. Its POSITION in
-    // canUse is load-bearing and matches theirs: :872 sits inside
-    // hasEnoughEnergy, which canUse reaches LAST (:923), so it applies AFTER the
-    // Medical Kit / Blue Candle unplayable escape hatches -- an ATTACK is not a
-    // curse or a status, so the two never interact today, but the ordering is
-    // what the Java says. The power removes itself at the end of the player's
-    // turn (EntanglePower.atEndOfTurn:41-46, a data hook), so the lock is exactly
-    // one turn long.
-    bool entangled = false;
-    for (uint8_t i = 0; i < state.player_power_count; ++i) {
-        if (state.player_powers[i].power_id ==
-            static_cast<uint16_t>(PowerId::ENTANGLE)) {
-            entangled = true;
-            break;
-        }
-    }
-
-    // Velvet Choker (boss relic): a canPlay veto on EVERY card once six have been
-    // played this turn (VelvetChoker.canPlay:77-84, reached from
-    // AbstractCard.hasEnoughEnergy's relic fan-out, AbstractCard.java:876-879).
-    // Structurally the Normality lock above, with the counter living on the relic
-    // instead of on the card.
-    //
-    // THE CHEAP GATE IS EXACT, not an approximation. The relic's counter is reset
-    // to 0 at battle start and at every turn start and incremented once per
-    // onPlayCard, clamped at 6 (relics/relics_boss.cpp) -- the same event and the
-    // same reset points as cards_played_this_turn (action_queue.cpp
-    // start_of_turn). So `cards_played_this_turn >= 6` holds exactly when a held
-    // Velvet Choker's counter has reached its limit, and the relic-mirror walk --
-    // the cold cache line the Blue Candle note below is about -- is paid only
-    // after a six-card turn, which is rare. The counter itself is still what the
-    // veto reads, so the relic remains the authority.
-    bool velvet_choker_locked = false;
-    if (state.cards_played_this_turn >= kVelvetChokerPlayLimit) {
-        for (uint8_t i = 0; i < state.relic_count; ++i) {
-            if (state.relics[i].relic_id ==
-                    static_cast<uint16_t>(RelicId::VELVET_CHOKER) &&
-                state.relics[i].counter >= kVelvetChokerPlayLimit) {
-                velvet_choker_locked = true;
-                break;
-            }
-        }
-    }
-
-    // Blue Candle's and Medical Kit's presence is a property of the player, not
-    // of a hand slot, so the relic-mirror scan is resolved AT MOST ONCE per
-    // legal_actions call and reused by every slot (it used to re-scan per
-    // unplayable curse). It resolves LAZILY rather than unconditionally above
-    // this loop ON PURPOSE: the relic mirror sits in a part of CombatState that
-    // legal_actions never otherwise reads, and touching it on every call measured
-    // ~20% SLOWER on bench_advance (an extra cold cache line per state across a
-    // 10k-state batch) because the common hand holds no unplayable card at all.
-    // Do not "simplify" this into an unconditional hoist without re-running that
-    // benchmark. The two relics share ONE latch so the mirror is walked once, not
-    // twice, when a hand holds both a curse and a status.
-    bool unplayable_relics_scanned = false;
-    bool has_blue_candle = false;
-    bool has_medical_kit = false;
-
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
         if (waiting && i < state.hand_count) {
-            const CardInstance& c = state.card_pool[state.hand[i]];
-            // ONE registry lookup for the slot, shared by every predicate below
-            // (Blue Candle's CURSE gate, Clash's all-attacks gate, needs_target).
-            // A CardId with no registry row resolves to nullptr -- each predicate
-            // guards for it, so an unknown card is simply never playable.
-            const CardDef* def = card_def(static_cast<CardId>(c.card_id));
-            // UNPLAYABLE (statuses/curses) is never a legal play regardless of
-            // energy. Otherwise affordability: energy >= cost_now
-            // (X-cost cards carry cost_now 0, so they are always affordable,
-            // matching costForTurn == -1).
-            const bool unplayable = has_card_flag(c.flags, CardFlag::UNPLAYABLE);
-            bool playable = !unplayable && state.player_energy >= c.cost_now &&
-                            !normality_locked;
-            // AbstractCard.canUse (AbstractCard.java:916-922) carries TWO relic
-            // escape hatches for otherwise-unplayable cards, one per card type:
-            //   :917  a STATUS with costForTurn < -1 IS playable with Medical Kit
-            //   :920  a CURSE  with costForTurn < -1 IS playable with Blue Candle
-            // cost_now is 0 for unplayable rows (the generator's -2 sentinel),
-            // matching the game spending no energy on such a play.
-            if (unplayable && !normality_locked && def != nullptr &&
-                (def->type == CardType::CURSE || def->type == CardType::STATUS)) {
-                if (!unplayable_relics_scanned) {
-                    has_blue_candle = player_has_relic(state, RelicId::BLUE_CANDLE);
-                    has_medical_kit = player_has_relic(state, RelicId::MEDICAL_KIT);
-                    unplayable_relics_scanned = true;
-                }
-                const bool unlocked = def->type == CardType::CURSE
-                                          ? has_blue_candle
-                                          : has_medical_kit;
-                if (unlocked) {
-                    playable = state.player_energy >= c.cost_now;
-                }
-            }
-            // Clash's all-attacks canUse predicate.
-            if (playable && def != nullptr && def->requires_all_attacks &&
-                !all_hand_attacks) {
-                playable = false;
-            }
-            // Velvet Choker's veto is applied LAST, after the Medical Kit / Blue
-            // Candle escape hatches, because that is where canUse puts it:
-            // :917/:920 return false early for the unplayable status/curse, and
-            // everything that survives them ends at
-            // `cardPlayable(m) && hasEnoughEnergy()` (AbstractCard.java:923) --
-            // and hasEnoughEnergy is the method that runs the relics' canPlay
-            // fan-out. So a curse the player CAN play thanks to Blue Candle is
-            // still vetoed by a spent Velvet Choker.
-            // Entangled's ATTACK veto sits in hasEnoughEnergy at :872, one line
-            // above the relic canPlay fan-out Velvet Choker rides (:876-879), so
-            // it is applied here -- after the escape hatches, just before the
-            // relic veto.
-            if (entangled && def != nullptr && def->type == CardType::ATTACK) {
-                playable = false;
-            }
-            if (velvet_choker_locked) {
-                playable = false;
-            }
-            out.can_play[i] = playable;
+            const CardPoolIndex pi = state.hand[i];
+            const CardDef* def = card_def(
+                static_cast<CardId>(state.card_pool[pi].card_id));
+            // Shared authority with dequeue-time revalidation. Targeted cards
+            // expose the target-independent canUse portion here; the exact
+            // cardPlayable/reticle result is carried by can_play_target.
+            out.can_play[i] =
+                card_can_use_without_target(state, pi, /*autoplay=*/false);
             // Per-target legality: an enemy-target (needs_target) card is
             // legal only against a monster slot that is IN the fight -- the
             // game's target reticle skips isDeadOrEscaped monsters, so an
@@ -379,8 +238,13 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
                 for (int t = 0; t < kMonsterCap; ++t) {
                     out.can_play_target[i][t] =
                         t < static_cast<int>(state.monster_count) &&
-                        !monster_dead_or_escaped(state.monsters[t]);
+                        !monster_dead_or_escaped(state.monsters[t]) &&
+                        card_can_use(state, pi, static_cast<uint8_t>(t),
+                                     /*autoplay=*/false);
                 }
+            } else if (out.can_play[i]) {
+                out.can_play[i] =
+                    card_can_use(state, pi, kActorPlayer, /*autoplay=*/false);
             }
         } else {
             out.can_play[i] = false;

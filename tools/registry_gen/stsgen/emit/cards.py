@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from ..loader import card_id_map, power_id_map
 from ..steps import CARD_DOMAIN, padded_step_literals, parse_steps
-from ..vocab import (BANNER, CARD_FLAGS, CARD_TARGETING, CARD_TRIGGERS,
-                     CARD_TYPES, OPCODES, STEP_TARGETS, fail, pascal)
+from ..vocab import (
+    BANNER, CARD_FLAGS, CARD_TARGETING, CARD_TARGET_KINDS, CARD_TRIGGERS,
+    CARD_TYPES, OPCODES, STEP_TARGETS, fail, pascal,
+)
 
 
 def parse_card_flags(card_name: str, raw_flags, cost: int) -> tuple[int, int]:
@@ -62,7 +64,7 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         if target not in CARD_TARGETING:
             raise fail(f"cards.yaml: card {c['name']} has unknown target "
                        f"{target!r}")
-        needs_target, random_target = CARD_TARGETING[target]
+        needs_target, random_target, target_kind = CARD_TARGETING[target]
 
         cost = int(c.get("cost", 0))
         flags, base_cost = parse_card_flags(c["name"], c.get("flags"), cost)
@@ -132,7 +134,8 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         rows.append({
             "name": c["name"], "cost": base_cost, "flags": flags,
             "ctype": CARD_TYPES[ctype], "needs_target": needs_target,
-            "random_target": random_target, "steps": steps,
+            "random_target": random_target, "target_kind": target_kind,
+            "steps": steps,
             "up_cost": up_base_cost, "up_flags": up_flags_bits,
             "up_steps": up_steps, "is_strike": is_strike,
             "requires_all_attacks": requires_all_attacks,
@@ -168,6 +171,10 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     for name, val in sorted(CARD_TYPES.items(), key=lambda kv: kv[1]):
         out.append(f"    {name} = {val},")
     out.append("};\n")
+    out.append("enum class CardTargetKind : uint8_t {")
+    for name, val in sorted(CARD_TARGET_KINDS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name} = {val},")
+    out.append("};\n")
     # CardTrigger (B3.9): mirror of cards.hpp CardTrigger; pinned/append-only.
     out.append("enum class CardTrigger : uint8_t {")
     for name, val in sorted(CARD_TRIGGERS.items(), key=lambda kv: kv[1]):
@@ -195,6 +202,7 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    CardType type;")
     out.append("    bool needs_target;")
     out.append("    bool random_target;")
+    out.append("    CardTargetKind target_kind;")
     out.append("    uint16_t flags;                // CardFlag bits (base)")
     out.append("    uint8_t step_count;")
     out.append("    std::array<CardEffectStep, kMaxCardSteps> steps;")
@@ -227,6 +235,7 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
                    f"CardType::{ctype_name}, "
                    f"{'true' if r['needs_target'] else 'false'}, "
                    f"{'true' if r['random_target'] else 'false'}, "
+                   f"CardTargetKind::{next(k for k, v in CARD_TARGET_KINDS.items() if v == r['target_kind'])}, "
                    f"{r['flags']}, {len(r['steps'])},")
         out.append("    {{")
         out.append(f"        {steps_txt},")
