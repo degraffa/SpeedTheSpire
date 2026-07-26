@@ -238,10 +238,12 @@ void dispatch_at_end_of_round(CombatState& s) noexcept {
     //       atEndOfRound is a no-op; guarded in the native body).
     //   (3) each LIVE monster: its powers atEndOfRound -- the Cultist Ritual
     //       Strength ramp fires here.
-    // "live" == hp > 0 (dying/escaping are skipped in the game; we model dying as
-    // hp <= 0). No-op unless a power binds these hooks -> jaw-worm fixtures unchanged.
+    // "live" == !monster_dead_or_escaped: both walks skip `isDying ||
+    // isEscaping` in the Java (MonsterGroup.applyEndOfTurnPowers:292,299), so an
+    // ESCAPED monster's powers stop firing the moment it leaves the fight. No-op
+    // unless a power binds these hooks -> jaw-worm fixtures unchanged.
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        if (s.monsters[m].hp <= 0) {
+        if (monster_dead_or_escaped(s.monsters[m])) {
             continue;
         }
         dispatch_actor_powers(s, m, Hook::AT_END_OF_TURN_PRE_CARD, HookContext{});
@@ -249,7 +251,7 @@ void dispatch_at_end_of_round(CombatState& s) noexcept {
     }
     dispatch_actor_powers(s, kActorPlayer, Hook::AT_END_OF_ROUND, HookContext{});
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        if (s.monsters[m].hp <= 0) {
+        if (monster_dead_or_escaped(s.monsters[m])) {
             continue;
         }
         dispatch_actor_powers(s, m, Hook::AT_END_OF_ROUND, HookContext{});

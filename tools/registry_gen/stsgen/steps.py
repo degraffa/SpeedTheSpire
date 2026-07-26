@@ -71,6 +71,9 @@ CARD_CONTEXT_OPS = frozenset({
 ENGINE_EMITTED_OPS = frozenset({
     "EXHAUST", "SET_COST", "ROLL_MOVE",
     "CANNOT_LOSE", "CAN_LOSE", "SUICIDE", "SPAWN_MONSTER", "SET_MOVE",
+    # ESCAPE's operand is the escaping monster's slot, decided by its native
+    # take-turn body (monster_looter.cpp) -- same category as SUICIDE/SET_MOVE.
+    "ESCAPE",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE

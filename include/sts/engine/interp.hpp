@@ -273,6 +273,19 @@ enum class Opcode : uint16_t {
                               // so the onPlayerHeal relic pass (Magic Flower)
                               // cannot be skipped. Queued rather than applied
                               // inline wherever the Java queues a HealAction.
+    ESCAPE = 40,              // EscapeAction.update (EscapeAction.java:21-28) ->
+                              // AbstractMonster.escape (:915-919): the tgt
+                              // monster leaves the fight ALIVE -- set
+                              // kMonsterFlagEscaped, touch nothing else. The
+                              // Java's isEscaping + the animation's `escaped`
+                              // latch (updateEscapeAnimation:894-906) collapse
+                              // into the one bit; the pump's liveness predicate
+                              // (monster_dead_or_escaped) then ends the battle
+                              // when nobody is left in the fight, exactly as
+                              // :902-904's areMonstersDead-and-!cannotLose check
+                              // does. Emitted natively (monster_looter.cpp);
+                              // never authored in YAML. 41-42 are this batch's
+                              // published reserve and stay unissued.
 };
 
 // --- PLAY_CARD field encoding ------------------------------------------------

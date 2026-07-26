@@ -206,6 +206,18 @@ sts_add_test(slaver_test FIXTURES)
 # 20-turn fixture pins the roll-driven d60 move tree.
 sts_add_test(fungi_beast_test FIXTURES)
 
+# The Looter -- the A7 HP column, the A2 mug/lunge damage columns, the
+# slashCount/steal accounting (pad0 doubles as the steal count), the Thievery
+# marker power, and THE FIRST REACHABLE ESCAPE: the liveness predicate is now
+# `dead or escaped` (MonsterGroup.java:90-95,117-122), so an escaped monster is
+# alive, out of the fight, untargetable, skipped by AoE/random targeting and
+# the power walks, and its departure ends a solo battle in a terminal state
+# distinct from a kill (mugged room, positive HP, escaped flag). Also the
+# Smoke Bomb potion's combat-layer body, blocked on the same predicate. One
+# independent 32-seed fixture whose per-seed ROW COUNT (4 or 5 turns, to the
+# escape) pins the Smoke-Bomb-or-Lunge coin.
+sts_add_test(looter_test FIXTURES)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

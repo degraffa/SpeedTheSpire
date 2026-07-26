@@ -39,10 +39,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
     // Dynamic-target resolution at EXECUTE time (interp.hpp decision (4)).
     if (item.tgt == kActorAllEnemies) {
         // AoE: a SEPARATE op (and, for DAMAGE, a separate DamageInfo) per LIVE
-        // monster (DamageAllEnemiesAction skips isDeadOrEscaped). Snapshotting
-        // the live set here matches the game resolving the AoE action in place.
+        // monster (DamageAllEnemiesAction skips isDeadOrEscaped,
+        // DamageAllEnemiesAction.java:56-83 -- so an escaped Looter is not hit).
+        // Snapshotting the live set here matches the game resolving the AoE
+        // action in place.
         for (uint8_t i = 0; i < s.monster_count; ++i) {
-            if (s.monsters[i].hp > 0) {
+            if (!monster_dead_or_escaped(s.monsters[i])) {
                 ActionQueueItem one = item;
                 one.tgt = i;
                 execute_opcode(s, one);
@@ -294,6 +296,25 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                              static_cast<MonsterIntent>(item.flags & 0xFFu));
             return;
         }
+        case Opcode::ESCAPE:
+            // EscapeAction.update (EscapeAction.java:21-28) -> escape()
+            // (AbstractMonster.java:915-919): the monster leaves the fight
+            // alive. The Java sets isEscaping and a 3s timer whose expiry
+            // latches `escaped` (updateEscapeAnimation:894-906); with no
+            // animation clock both collapse into the one flag bit, set at
+            // resolve time. HP, block and powers are untouched -- an escaped
+            // monster is NOT dying, which is why every "in the fight" read
+            // goes through monster_dead_or_escaped. The battle-end that
+            // :902-904 performs (areMonstersDead && !cannotLose -> endBattle)
+            // needs no code here: pump_step recomputes the combat-over
+            // predicate from the flags at the top of every step.
+            if (item.tgt >= kMonsterCap) {
+                return;
+            }
+            s.monsters[item.tgt].flags =
+                static_cast<uint16_t>(s.monsters[item.tgt].flags |
+                                      kMonsterFlagEscaped);
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

@@ -60,7 +60,10 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30) -- a pure
+    // marker; the steal itself rides DamageAction's stealGold, not a power hook.
+    static_assert(sts::registry::manifest::kPowersCount == 43,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -103,7 +106,9 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30).
+    static_assert(sts::registry::manifest::kPowersCount == 43,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -154,7 +159,9 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30).
+    static_assert(sts::registry::manifest::kPowersCount == 43,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -505,7 +512,7 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 void op_vampire_damage_all(CombatState& s, int base) noexcept {
     int healed = 0;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp <= 0) {
+        if (monster_dead_or_escaped(s.monsters[i])) {
             continue;  // isDying || currentHealth <= 0 || isEscaping (:60)
         }
         const int16_t before = s.monsters[i].hp;

@@ -37,7 +37,9 @@ namespace {
     // EntanglePower overrides only playApplyPowerSfx / updateDescription /
     // atEndOfTurn (EntanglePower.java:31-46) and SporeCloudPower only
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
-    static_assert(sts::registry::manifest::kPowersCount == 42,
+    // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
+    // ONLY override is updateDescription (ThieveryPower.java:27-30).
+    static_assert(sts::registry::manifest::kPowersCount == 43,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so.");
     // Checked for the Guardian's two powers, neither needs a case: ModeShiftPower

@@ -86,9 +86,11 @@ bool potion_use_implemented(PotionId id) noexcept {
     switch (id) {
         case PotionId::BLOOD_POTION:           // dispatch_native_potion, below
         case PotionId::BLESSING_OF_THE_FORGE:  // dispatch_native_potion, below
+        case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
+                                               // (run_advance's step_potion
+                                               // still intercepts it first)
         case PotionId::FRUIT_JUICE:            // run layer: use_fruit_juice
         case PotionId::ENTROPIC_BREW:          // run layer: use_entropic_brew
-        case PotionId::SMOKE_BOMB:             // run layer: step_potion's escape
             return true;
         default:
             // DEFERRED: no body anywhere. FAIRY_POTION lands here too, which is
@@ -124,7 +126,7 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
     static_assert(sts::registry::manifest::kPotionsCount == 33,
                   "new potion: if it is native AND resolves in combat, its "
                   "use() body belongs in this switch. Native run-layer potions "
-                  "(Fruit Juice, Entropic Brew, Smoke Bomb) do not.");
+                  "(Fruit Juice, Entropic Brew) do not.");
     switch (id) {
         case PotionId::BLOOD_POTION: {
             // HealAction(player, floor(maxHealth * potency/100)). Replicate the
@@ -198,40 +200,47 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // opcode, NOT a missing power row). Cost randomization: SNECKO_OIL.
         // Out-of-combat revive: FAIRY_POTION (never USED at all).
         // IMPLEMENTED, but at the RUN layer, so they never arrive here:
-        // FRUIT_JUICE, ENTROPIC_BREW (max-HP / slot mutation) and SMOKE_BOMB
-        // (the combat escape) -- run_advance's step_potion intercepts all three
-        // ahead of use_potion. potion_use_implemented names them so the legality
-        // gate still offers them.
-        //
-        // SMOKE BOMB HAS NO COMBAT-LAYER BODY ON PURPOSE, and the reason is worth
-        // knowing before anyone "finishes" it here. SmokeBomb.use (SmokeBomb.java:
-        // 37-48) does not act on the monsters at all: in RoomPhase.COMBAT it marks
-        // the room smoked and sets the PLAYER's isEscaping + a 2.5s escapeTimer,
-        // and it is the timer expiring (AbstractPlayer.java:2282-2290) that ends
-        // the battle. Ending a combat that still has live monsters is a property
-        // of the pump, not of an opcode: pump_step recomputes the phase from
-        // `player_hp <= 0 || !any_monster_alive(s)` at the top of EVERY step
-        // (action_queue.cpp), so a COMBAT_OVER written by an opcode is overwritten
-        // on the next iteration. That is why the working implementation is the
-        // run-layer one, which sets the phase and then does not re-pump. A real
-        // combat-layer escape -- for the potion and for a self-escaping monster
-        // alike -- needs that liveness predicate to know about escaping, which is
-        // the same single change both halves are waiting on.
-        //
-        // A SECOND, SEPARATE GAP, recorded where the next reader will look:
-        // SmokeBomb.canUse (:50-62) rejects the potion when any monster in the
-        // group is `type == EnemyType.BOSS` (or has BackAttack, an Act-3 power).
-        // It never asks the ROOM. combat_potion_legal (run_advance.cpp) tests
-        // `room_type == RoomType::Boss` instead. The two agree everywhere in
-        // Act 1, and `enemy_type` is now a live registry column with a
-        // MonsterDef::is_boss() accessor (the same one Pantograph reads), so the
-        // exact test is available whenever run_advance.cpp is open.
+        // FRUIT_JUICE and ENTROPIC_BREW (max-HP / slot mutation) --
+        // run_advance's step_potion intercepts both ahead of use_potion.
+        // potion_use_implemented names them so the legality gate still offers
+        // them.
+        case PotionId::SMOKE_BOMB:
+            // SmokeBomb.use (SmokeBomb.java:37-48): in RoomPhase.COMBAT, mark
+            // the room smoked and set the PLAYER's isEscaping + a 2.5s
+            // escapeTimer; the timer expiring (AbstractPlayer.
+            // updateEscapeAnimation, AbstractPlayer.java:2281-2292) is what
+            // ends the battle, unconditionally. It never touches the monsters.
+            // With no animation clock all three fields collapse into
+            // kCombatFlagPlayerEscaped, set SYNCHRONOUSLY exactly as use()
+            // sets isEscaping (the queued VFXAction is presentation); the
+            // pump's combat-over check reads the bit at the top of its next
+            // step, which is what lets the combat end with monsters still
+            // alive. This body was deferred until the liveness predicate
+            // could express escape -- an opcode writing COMBAT_OVER was
+            // overwritten by the next pump_step -- and landed with the
+            // Looter's escape, the other consumer of the same predicate.
+            //
+            // run_advance's step_potion still intercepts SMOKE_BOMB ahead of
+            // use_potion and drives the run-level consequences (no-reward
+            // proceed); this combat-layer body is the half a bare CombatState
+            // caller gets.
+            //
+            // A SEPARATE GAP, recorded where the next reader will look:
+            // SmokeBomb.canUse (:50-62) rejects the potion when any monster in
+            // the group is `type == EnemyType.BOSS` (or has BackAttack, an
+            // Act-3 power). It never asks the ROOM. combat_potion_legal
+            // (run_advance.cpp) tests `room_type == RoomType::Boss` instead.
+            // The two agree everywhere in Act 1, and `enemy_type` is a live
+            // registry column with a MonsterDef::is_boss() accessor, so the
+            // exact test is available whenever run_advance.cpp is open.
+            s.flags |= kCombatFlagPlayerEscaped;
+            break;
         default:
             // UNREACHABLE from use_potion: a data potion goes through
             // queue_use_step, an implemented native has a case above, and a
             // DEFERRED native is now refused before dispatch
             // (potion_use_implemented). Left as a safe no-op for a direct
-            // caller rather than an assert, since the run-layer three above are
+            // caller rather than an assert, since the run-layer two above are
             // legitimate direct-call arguments with nothing to do in combat.
             break;
     }

@@ -17,14 +17,16 @@ namespace {
 // AbstractRoom.isBattleEnding (AbstractRoom.java:628-635) reduced to what this
 // engine models: `isBattleOver || monsters.areMonstersBasicallyDead()`, where
 // areMonstersBasicallyDead (MonsterGroup.java:90-95) is "every monster is
-// isDying || isEscaping". The engine models isDying as hp <= 0 (the same proxy
-// action_queue.cpp's victory check and power_hooks.cpp's end-of-round walk use),
-// and no S1 Act-1 monster can be escaping at this point. isBattleOver is not a
-// separate latch here: the pump sets COMBAT_OVER from exactly this predicate, so
-// the two collapse into one walk.
+// isDying || isEscaping" -- exactly monster_dead_or_escaped (combat_state.hpp),
+// the same predicate action_queue.cpp's victory check and power_hooks.cpp's
+// end-of-round walk use. (No Act-1 group pairs a Fungi Beast with a Looter, so
+// the escaped term cannot fire here today; it is written anyway because the
+// predicate IS areMonstersBasicallyDead, not a per-site approximation of it.)
+// isBattleOver is not a separate latch here: the pump sets COMBAT_OVER from
+// exactly this predicate, so the two collapse into one walk.
 [[nodiscard]] bool battle_is_ending(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp > 0) {
+        if (!monster_dead_or_escaped(s.monsters[i])) {
             return false;
         }
     }

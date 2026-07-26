@@ -273,12 +273,16 @@ bool queue_card_play(CombatState& s, uint8_t hand_index, uint8_t target) noexcep
 }
 
 uint8_t roll_random_target(CombatState& s) noexcept {
-    // getRandomMonster(null, true, cardRandomRng): pick uniformly among the LIVE
-    // monsters via one cardRandomRng draw over [0, aliveCount-1] (inclusive).
+    // getRandomMonster(null, true, cardRandomRng) (MonsterGroup.java:156-171):
+    // pick uniformly among the monsters still IN the fight via one cardRandomRng
+    // draw over [0, aliveCount-1] (inclusive). The Java's aliveOnly filter skips
+    // `halfDead || isDying || isEscaping` (:164), so an escaped monster is not
+    // in the candidate list -- monster_dead_or_escaped is that exact test here
+    // (halfDead has no S1 producer).
     uint8_t alive[kMonsterCap];
     int n = 0;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (s.monsters[i].hp > 0) {
+        if (!monster_dead_or_escaped(s.monsters[i])) {
             alive[n++] = i;
         }
     }
