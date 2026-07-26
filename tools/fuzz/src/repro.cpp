@@ -7,6 +7,8 @@
 #include <sstream>
 #include <unordered_set>
 
+#include "sts/fuzz/fuzz_run.hpp"
+
 namespace sts::fuzz {
 
 using engine::Action;
@@ -130,6 +132,7 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
     bool have_hash_a = false;
     bool have_hash_b = false;
     bool have_final_hash = false;
+    FailKind recorded_fail = FailKind::NONE;
     size_t want = 0;
     while (std::getline(is, line)) {
         while (!line.empty() && (line.back() == '\r' || line.back() == '\n')) line.pop_back();
@@ -186,7 +189,9 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
                 error = "bad policy_seed"; return false;
             }
         } else if (key == "fail") {
-            if (!one_token() || token.empty()) { error = "bad fail"; return false; }
+            if (!one_token() || !fail_kind_from_name(token, recorded_fail)) {
+                error = "bad fail kind"; return false;
+            }
             r.fail_kind = token;
         } else if (key == "fail_step") {
             if (!one_token() || !parse_decimal_token(token, r.fail_step)) {
@@ -235,11 +240,29 @@ bool read_fuzz_repro(const std::string& path, ReproFile& out, std::string& error
         error = "fail/fail_step must appear together";
         return false;
     }
+    if (seen_keys.contains("fail") &&
+        !(have_hash_a && have_hash_b && have_final_hash)) {
+        error = "a failure record requires hash_a/hash_b/final_hash";
+        return false;
+    }
     r.has_hashes = have_hash_a;
     if (r.actions.size() != want) {
         error = "action count mismatch: header says " + std::to_string(want) +
                 ", body has " + std::to_string(r.actions.size());
         return false;
+    }
+    if (seen_keys.contains("fail")) {
+        const bool boundary_allowed =
+            recorded_fail == FailKind::LENGTH_MISMATCH ||
+            recorded_fail == FailKind::HASH_MISMATCH ||
+            recorded_fail == FailKind::REPRO_MISMATCH ||
+            recorded_fail == FailKind::NO_LEGAL_MOVES;
+        if (r.fail_step > r.actions.size() ||
+            (r.fail_step == r.actions.size() && !boundary_allowed)) {
+            error = "fail_step is out of range for fail kind '" +
+                    r.fail_kind + "'";
+            return false;
+        }
     }
     out = std::move(r);
     return true;

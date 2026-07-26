@@ -42,6 +42,18 @@ const char* fail_kind_name(FailKind k) noexcept {
     return "?";
 }
 
+bool fail_kind_from_name(std::string_view name, FailKind& out) noexcept {
+    for (uint8_t i = static_cast<uint8_t>(FailKind::HASH_MISMATCH);
+         i < static_cast<uint8_t>(FailKind::COUNT); ++i) {
+        const auto kind = static_cast<FailKind>(i);
+        if (name == fail_kind_name(kind)) {
+            out = kind;
+            return true;
+        }
+    }
+    return false;
+}
+
 // WHY THIS IS NOT `XXH3_64bits(&rc, sizeof(rc))`.
 //
 // It was, for exactly as long as it took to run the induced-failure test. A raw

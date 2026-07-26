@@ -47,7 +47,7 @@ namespace {
 using namespace sts::fuzz;
 
 #ifndef STS_FUZZ_BUILD_ID
-#define STS_FUZZ_BUILD_ID "stsfuzz-b51fix1-schema5"
+#define STS_FUZZ_BUILD_ID "stsfuzz-b51fix2-schema5"
 #endif
 
 struct Options {
@@ -132,19 +132,28 @@ exit: 0 clean, 1 failures found, 2 bad usage
 }
 
 bool parse_policies(const std::string& csv, std::vector<PolicyKind>& out) {
+    uint32_t seen = 0;
     size_t pos = 0;
     while (pos <= csv.size()) {
         const size_t comma = csv.find(',', pos);
         const std::string name =
             csv.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
-        if (!name.empty()) {
-            PolicyKind k{};
-            if (!policy_from_name(name, k)) {
-                std::fprintf(stderr, "unknown policy '%s'\n", name.c_str());
-                return false;
-            }
-            out.push_back(k);
+        if (name.empty()) {
+            std::fprintf(stderr, "--policies contains an empty component\n");
+            return false;
         }
+        PolicyKind k{};
+        if (!policy_from_name(name, k)) {
+            std::fprintf(stderr, "unknown policy '%s'\n", name.c_str());
+            return false;
+        }
+        const uint32_t bit = 1u << static_cast<uint8_t>(k);
+        if ((seen & bit) != 0) {
+            std::fprintf(stderr, "duplicate policy '%s'\n", name.c_str());
+            return false;
+        }
+        seen |= bit;
+        out.push_back(k);
         if (comma == std::string::npos) break;
         pos = comma + 1;
     }
@@ -366,6 +375,8 @@ int main(int argc, char** argv) {
     std::vector<std::string> merge_files;
     bool merge_mode = false;
     bool run_option_seen = false;
+    bool policies_seen = false;
+    bool injection_seen = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -394,7 +405,14 @@ int main(int argc, char** argv) {
             if (!parse_integer(next("--ascension"), value) || value > 20) return 2;
             o.ascension = static_cast<uint8_t>(value);
         }
-        else if (a == "--policies") { if (!parse_policies(next("--policies"), o.policies)) return 2; }
+        else if (a == "--policies") {
+            if (policies_seen) {
+                std::fprintf(stderr, "--policies may appear only once\n");
+                return 2;
+            }
+            policies_seen = true;
+            if (!parse_policies(next("--policies"), o.policies)) return 2;
+        }
         else if (a == "--max-actions") {
             if (!parse_integer(next("--max-actions"), o.limits.max_actions) ||
                 o.limits.max_actions == 0) return 2;
@@ -435,17 +453,35 @@ int main(int argc, char** argv) {
                 !parse_integer(v.substr(slash + 1), o.shard_count)) return 2;
             if (o.shard_count == 0 || o.shard >= o.shard_count) { std::fprintf(stderr, "bad --shard\n"); return 2; }
         } else if (a == "--inject-nondeterminism") {
+            if (injection_seen) {
+                std::fprintf(stderr,
+                             "diagnostic injection switches are mutually exclusive\n");
+                return 2;
+            }
+            injection_seen = true;
             const std::string v = next("--inject-nondeterminism");
             if (!parse_case_step(v, o.inject_case, o.inject_step)) {
                 std::fprintf(stderr, "--inject-nondeterminism wants CASE:STEP\n"); return 2;
             }
         } else if (a == "--inject-abort") {
+            if (injection_seen) {
+                std::fprintf(stderr,
+                             "diagnostic injection switches are mutually exclusive\n");
+                return 2;
+            }
+            injection_seen = true;
             const std::string v = next("--inject-abort");
             if (!parse_case_step(v, o.inject_case, o.inject_step)) {
                 std::fprintf(stderr, "--inject-abort wants CASE:STEP\n"); return 2;
             }
             o.inject_abort = true;
         } else if (a == "--inject-no-progress") {
+            if (injection_seen) {
+                std::fprintf(stderr,
+                             "diagnostic injection switches are mutually exclusive\n");
+                return 2;
+            }
+            injection_seen = true;
             const std::string v = next("--inject-no-progress");
             if (!parse_case_step(v, o.inject_case, o.inject_step)) {
                 std::fprintf(stderr, "--inject-no-progress wants CASE:STEP\n"); return 2;
@@ -542,6 +578,11 @@ int main(int argc, char** argv) {
         for (uint8_t i = 0; i < static_cast<uint8_t>(PolicyKind::COUNT); ++i) {
             o.policies.push_back(static_cast<PolicyKind>(i));
         }
+    }
+    if (std::popcount(policy_mask(o.policies)) !=
+        static_cast<int>(o.policies.size())) {
+        std::fprintf(stderr, "policy list contains duplicate entries\n");
+        return 2;
     }
     if (!o.out_dir.empty() &&
         (!std::filesystem::exists(o.out_dir) ||

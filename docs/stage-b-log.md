@@ -2840,22 +2840,24 @@ triage output with reproducers; overnight-runnable script.
 asserts, asan-clean sample (≥ 1 % of runs under asan); numbers recorded here.
 **Log:** Verified by running, not inferred. The original acceptance evidence in
 `cd397c5` was superseded by the fix-forward audit below: its sanitizer prefix
-overlapped the main sweep, and the runner still had integrity holes. After all
-eight audit findings were closed, `tools/wsl_run.cmd debug asan release` from
-the Windows host passed **957/957** tests in every preset. The replacement
-acceptance campaign then ran
+overlapped the main sweep, and the runner still had integrity holes. A second
+fix-forward closed the remaining strict CLI/reproducer-reader findings and
+versioned the changed binary's summary identity. After both audits,
+`tools/wsl_run.cmd debug asan release` from the Windows host passed
+**959/959** tests in every preset. The final replacement acceptance campaign
+then ran
 `tools/wsl_run.cmd --script tools/fuzz/soak.sh --main-bin
 build/release/tools/fuzz/fuzz_soak --asan-bin
 build/asan/tools/fuzz/fuzz_soak --out
 /mnt/d/STS_BG_Mod/SpeedTheSpire-campaigns/fuzz --seeds 10000 --seed-start 1
 --reps 5 --asan-percent 1 --jobs 12 --asan-jobs 8 --max-actions 4000 --label
-b51_fixforward_final` and exited 0. Artifacts are intentionally outside the
+b51_final2` and exited 0. Artifacts are intentionally outside the
 repository at
-`D:\STS_BG_Mod\SpeedTheSpire-campaigns\fuzz\b51_fixforward_final_20260726_145440`.
+`D:\STS_BG_Mod\SpeedTheSpire-campaigns\fuzz\b51_final2_20260726_152823`.
 - **Release sweep:** 10,000 distinct sequential run seeds, all five policies,
   five policy seeds per `(run seed, policy)` = **250,000 cases**;
   **10,808,430 counted actions** (pass A only), 21,658,338 actions including
-  replay passes, 500,977 engine runs, **0 failures**, 240.0 s. The 37
+  replay passes, 500,977 engine runs, **0 failures**, 210.0 s. The 37
   action-cap endings are the configured 4,000-action safety limit, not asserts
   or illegal states; `no_legal_moves=0`, `livelock=0`, `no_progress=0`.
 - **Sanitizer sample:** the next 100 run seeds (**10,001–10,100**, disjoint
@@ -2894,3 +2896,11 @@ repository at
   output-pipe, and report-write failures propagate nonzero; and the CLI,
   summary, and `STSFUZZ v1` parsers reject partial, zero-work, overflow,
   duplicate, malformed, and trailing inputs.
+- Final parser closure rejects empty or duplicate policy lists, repeated
+  `--policies`, and repeated or conflicting diagnostic injection switches.
+  Its popcount check independently pins policy uniqueness. Failure records
+  accept the end boundary only for failure kinds that can arise after the last
+  appended action, including the legitimate zero-action `NO_LEGAL_MOVES`
+  case; writer-to-reader tests cover every non-`NONE` kind. Summary build ids
+  end in `schema5-b51fix2`, preventing reports from this binary from merging
+  with the earlier audited build.

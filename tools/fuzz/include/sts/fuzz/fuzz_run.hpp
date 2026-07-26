@@ -37,6 +37,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "sts/engine/run_advance.hpp"
@@ -58,6 +59,8 @@ enum class FailKind : uint8_t {
 };
 
 [[nodiscard]] const char* fail_kind_name(FailKind k) noexcept;
+[[nodiscard]] bool fail_kind_from_name(std::string_view name,
+                                       FailKind& out) noexcept;
 
 struct Failure {
     FailKind kind = FailKind::NONE;

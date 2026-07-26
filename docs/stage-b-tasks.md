@@ -634,7 +634,7 @@ Then: update CLAUDE.md "Current state".
   `STSFUZZ v1` mismatch reproducers + pre-crash journals, shardable coverage
   reports, and `soak.sh`; acceptance release sweep **10,808,430 actions /
   10,000 seeds / 250,000 cases**, zero failures, plus ASan-clean **2,500 /
-  250,000 cases = 1.00 %** disjoint sample; 957/957 ×3 ·
+  250,000 cases = 1.00 %** disjoint sample; 959/959 ×3 ·
   [log](stage-b-log.md#b51)
 
 ### B5.2 `[ ]` ∥ Oracle campaign automation

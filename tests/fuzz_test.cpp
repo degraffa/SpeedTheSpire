@@ -593,6 +593,98 @@ TEST(FuzzTriage, ReproducerRejectsOverflowAndTrailingActionData) {
     std::remove(path.c_str());
 }
 
+TEST(FuzzTriage, ReproducerValidatesFailureKindHashesAndStepRange) {
+    const std::string path = scratch("bad_failure_record.repro");
+    auto write_record = [&](const std::string& body) {
+        std::ofstream os(path);
+        os << "STSFUZZ v1\nseed 1\nascension 20\npolicy random\n"
+              "policy_seed 3\n"
+           << body;
+    };
+    ReproFile r;
+    std::string err;
+
+    write_record("fail invented\nfail_step 0\n"
+                 "hash_a 0000000000000001\nhash_b 0000000000000002\n"
+                 "final_hash 0000000000000003\nactions 1\n0\n");
+    EXPECT_FALSE(read_fuzz_repro(path, r, err));
+    EXPECT_NE(err.find("bad fail kind"), std::string::npos);
+
+    write_record("fail action_mismatch\nfail_step 0\nactions 1\n0\n");
+    EXPECT_FALSE(read_fuzz_repro(path, r, err));
+    EXPECT_NE(err.find("requires hash_a/hash_b/final_hash"),
+              std::string::npos);
+
+    write_record("fail action_mismatch\nfail_step 1\n"
+                 "hash_a 0000000000000001\nhash_b 0000000000000002\n"
+                 "final_hash 0000000000000003\nactions 1\n0\n");
+    EXPECT_FALSE(read_fuzz_repro(path, r, err));
+    EXPECT_NE(err.find("fail_step is out of range"), std::string::npos);
+
+    write_record("fail hash_mismatch\nfail_step 1\n"
+                 "hash_a 0000000000000001\nhash_b 0000000000000002\n"
+                 "final_hash 0000000000000003\nactions 1\n0\n");
+    EXPECT_TRUE(read_fuzz_repro(path, r, err)) << err;
+    EXPECT_EQ(r.fail_step, 1u);
+
+    // NO_LEGAL_MOVES is discovered before an action is appended. In
+    // particular, the first live state may produce a valid zero-action
+    // reproducer whose failure step is exactly the end boundary.
+    write_record("fail no_legal_moves\nfail_step 0\n"
+                 "hash_a 0000000000000001\nhash_b 0000000000000002\n"
+                 "final_hash 0000000000000003\nactions 0\n");
+    EXPECT_TRUE(read_fuzz_repro(path, r, err)) << err;
+    EXPECT_EQ(r.fail_step, 0u);
+    EXPECT_TRUE(r.actions.empty());
+    std::remove(path.c_str());
+}
+
+TEST(FuzzTriage, ReproducerWriterReaderClosesOverEveryFailureKind) {
+    ReproFile rf;
+    rf.id = make_case(PolicyKind::RANDOM, 9191);
+    rf.actions = {
+        engine::make_action(engine::ActionVerb::CHOOSE,
+                            engine::kChooseProceed),
+        engine::make_action(engine::ActionVerb::END_TURN),
+    };
+    rf.hash_a = 0x1111111111111111ull;
+    rf.hash_b = 0x2222222222222222ull;
+    rf.final_hash = 0x3333333333333333ull;
+    rf.has_hashes = true;
+
+    for (uint8_t raw = static_cast<uint8_t>(FailKind::HASH_MISMATCH);
+         raw < static_cast<uint8_t>(FailKind::COUNT); ++raw) {
+        const FailKind kind = static_cast<FailKind>(raw);
+        rf.fail_kind = fail_kind_name(kind);
+        const bool end_boundary =
+            kind == FailKind::HASH_MISMATCH ||
+            kind == FailKind::LENGTH_MISMATCH ||
+            kind == FailKind::REPRO_MISMATCH ||
+            kind == FailKind::NO_LEGAL_MOVES;
+        rf.fail_step = end_boundary
+                           ? static_cast<uint32_t>(rf.actions.size())
+                           : 1u;
+
+        const std::string path =
+            scratch(std::string("failure_roundtrip_") + rf.fail_kind +
+                    ".repro");
+        ASSERT_TRUE(write_fuzz_repro(path, rf)) << rf.fail_kind;
+
+        ReproFile back;
+        std::string err;
+        ASSERT_TRUE(read_fuzz_repro(path, back, err))
+            << rf.fail_kind << ": " << err;
+        EXPECT_EQ(back.fail_kind, rf.fail_kind);
+        EXPECT_EQ(back.fail_step, rf.fail_step);
+        EXPECT_TRUE(back.has_hashes);
+        EXPECT_EQ(back.hash_a, rf.hash_a);
+        EXPECT_EQ(back.hash_b, rf.hash_b);
+        EXPECT_EQ(back.final_hash, rf.final_hash);
+        ASSERT_EQ(back.actions.size(), rf.actions.size());
+        std::remove(path.c_str());
+    }
+}
+
 TEST(FuzzTriage, ReproducerRoundTripsEveryActionVerb) {
     ReproFile rf;
     rf.id = make_case(PolicyKind::HOARD_GOLD, 777);
@@ -860,6 +952,29 @@ TEST(FuzzDriver, RejectsZeroWorkMalformedAndPartialCaseCli) {
               0);
     EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds 1 --progress-secs nan"
+                           " --quiet >/dev/null 2>&1").c_str()),
+              0);
+    for (const char* policies :
+         {"random,random", ",random", "random,,greedy_damage", "random,"}) {
+        EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                               " --seeds 1 --policies " + policies +
+                               " --quiet >/dev/null 2>&1").c_str()),
+                  0)
+            << policies;
+    }
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 1 --policies random"
+                           " --policies greedy_damage"
+                           " --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 1 --inject-nondeterminism 0:1"
+                           " --inject-abort 0:1"
+                           " --quiet >/dev/null 2>&1").c_str()),
+              0);
+    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 1 --inject-no-progress 0:1"
+                           " --inject-no-progress 0:2"
                            " --quiet >/dev/null 2>&1").c_str()),
               0);
     EXPECT_NE(std::system((shell_quote(STS_FUZZ_REPRO_BIN) +
