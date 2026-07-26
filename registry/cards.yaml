@@ -1539,3 +1539,246 @@
     - {op: VAMPIRE_DAMAGE_ALL, target: SELF, amount: 4}
   upgraded:
     - {op: VAMPIRE_DAMAGE_ALL, target: SELF, amount: 5}
+
+# --- Colorless UNCOMMON cards (ids 92-111 in CardLibrary library order) -------
+# CardLibrary.addColorlessCards (CardLibrary.java:799-834) adds the 35 colorless
+# cards ALPHABETICALLY, and ids 92-111 map 1:1 onto the twenty UNCOMMONs in that
+# order. Preserving it costs nothing now and is what lets the colorless combat
+# pool be emitted in library order later, avoiding the documented interim
+# deviation kIroncladAttackPool still carries (registry-id order).
+#
+# The INTERIOR GAPS are deliberate, permanent placeholders, not errors:
+#   94 Dark Shackles, 96 Discovery, 98 Enlightenment, 104 Jack of All Trades
+#      -- the four that need a generated colorless card pool;
+#   101 Forethought, 109 Purity
+#      -- the two that need an OPTIONAL (zero-to-all) multi-select choice, an
+#         ActionMask surface change; both are recorded in the ledger's deferred
+#         obligations.
+# The loader enforces id UNIQUENESS, never contiguity, and no emitted table is a
+# dense id-indexed array, so the holes cost nothing at runtime. Never renumber to
+# close one.
+#
+# Every row below carries `color: COLORLESS`, so none of them joins
+# kIroncladAttackPool (which is `color == "RED"`-gated) -- its count is unchanged.
+
+- id: 92
+  name: BANDAGE_UP
+  game_id: "Bandage Up"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: [exhaust]
+  healing: true  # CardTags.HEALING (BandageUp.java:29) -- the one colorless uncommon returnTrulyRandomColorlessCardInCombat excludes
+  provenance: "BandageUp (BandageUp.java:20-49): ctor (:25-30) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, magicNumber = baseMagicNumber = 4, exhaust = true, tags.add(CardTags.HEALING). use (:32-35) is a single addToBot HealAction(p, p, magicNumber). upgrade (:37-43) upgradeMagicNumber(2) -> 6, nothing else. The heal is encoded as the queued HEAL opcode so it routes through heal_player_with_relics (the onPlayerHeal seam, Magic Flower) exactly as the queued HealAction does."
+  effects:
+    - {op: HEAL, target: SELF, amount: 4}
+  upgraded:
+    - {op: HEAL, target: SELF, amount: 6}
+
+- id: 93
+  name: BLIND
+  game_id: "Blind"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: ENEMY
+  flags: []
+  provenance: "Blind (Blind.java:23-58): ctor (:28-31) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.ENEMY, magicNumber = baseMagicNumber = 2. use (:33-42) branches on `upgraded`: base addToBot ONE ApplyPowerAction(m, p, WeakPower(m, 2, false), 2); upgraded loops over getCurrRoom().monsters.monsters applying the same WeakPower to each. upgrade (:44-52) changes NOTHING but the target -- there is no upgradeMagicNumber -- so both rows apply 2. The upgraded loop is expressed as an ALL_ENEMY step target, whose execute-time fan-out is over the LIVE monsters; the Java loop is over the whole group, but ApplyPowerAction.update skips a dead target (isDeadOrEscaped), so the observable result is the same. CARD-LEVEL TARGETING IS A KNOWN DEVIATION: upgrade() also sets this.target = CardTarget.ALL_ENEMY (:48), and CardDef has no upgraded-target column, so an upgraded Blind still offers a target choice in the ActionMask that the game would not. State is unaffected; the row is in the ledger's deferred obligations."
+  effects:
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: WEAK}
+  upgraded:
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: WEAK}
+
+- id: 95
+  name: DEEP_BREATH
+  game_id: "Deep Breath"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "DeepBreath (DeepBreath.java:22-55): ctor (:27-30) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, magicNumber = baseMagicNumber = 1. use (:32-39): if (player.discardPile.size() > 0) { addToBot(EmptyDeckShuffleAction); addToBot(ShuffleAction(player.drawPile, false)); } then, UNCONDITIONALLY, addToBot DrawCardAction(p, magicNumber). upgrade (:41-49) upgradeMagicNumber(1) -> draw 2. THE TWO SHUFFLES ARE ONE OPCODE, not two authored steps: they share a single guard evaluated ONCE, and the first (EmptyDeckShuffleAction.update:42-64) empties the discard pile, so a separately-guarded second step could never observe the same answer. Each consumes one shuffleRng.randomLong() (CardGroup.shuffle(Random):565-567 and CardGroup.shuffle():561-563), so a play with a non-empty discard advances shuffle_rng by exactly 2 and one with an empty discard by 0. ShuffleAction's triggerRelics is false (:36), so only the EmptyDeckShuffleAction ctor (:37-39) fires relics' onShuffle -- once."
+  effects:
+    - {op: RESHUFFLE_ALL, target: SELF}
+    - {op: DRAW, target: SELF, amount: 1}
+  upgraded:
+    - {op: RESHUFFLE_ALL, target: SELF}
+    - {op: DRAW, target: SELF, amount: 2}
+
+- id: 97
+  name: DRAMATIC_ENTRANCE
+  game_id: "Dramatic Entrance"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 0
+  target: ALL_ENEMY
+  flags: [exhaust, innate]
+  provenance: "DramaticEntrance (DramaticEntrance.java:22-52): ctor (:27-33) cost 0, ATTACK, COLORLESS, UNCOMMON, CardTarget.ALL_ENEMY, baseDamage 8, isMultiDamage, exhaust = true, isInnate = true. use (:35-38) is a single addToBot DamageAllEnemiesAction(p, multiDamage, damageTypeForTurn, SLASH_DIAGONAL). upgrade (:40-46) upgradeDamage(4) -> 12. isMultiDamage + DamageAllEnemiesAction is exactly the ALL_ENEMY step target: one DamageInfo per LIVE monster, resolved at execute time."
+  effects:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 8}
+  upgraded:
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 12}
+
+- id: 99
+  name: FINESSE
+  game_id: "Finesse"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Finesse (Finesse.java:21-49): ctor (:26-29) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, baseBlock 2. use (:31-35) addToBot GainBlockAction(p, p, this.block) then addToBot DrawCardAction(p, 1) -- the draw is a LITERAL 1, not a magicNumber, so it does not move on upgrade. upgrade (:37-43) upgradeBlock(2) -> 4. The BLOCK step carries flags 0 (card block), so it runs both applyPowersToBlock passes -- modifyBlock (Dexterity/Frail) and then modifyBlockLast (No Block)."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 2}
+    - {op: DRAW, target: SELF, amount: 1}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 4}
+    - {op: DRAW, target: SELF, amount: 1}
+
+- id: 100
+  name: FLASH_OF_STEEL
+  game_id: "Flash of Steel"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 0
+  target: ENEMY
+  flags: []
+  provenance: "FlashOfSteel (FlashOfSteel.java:24-52): ctor (:29-32) cost 0, ATTACK, COLORLESS, UNCOMMON, CardTarget.ENEMY, baseDamage 3. use (:34-38) addToBot DamageAction(m, DamageInfo(p, damage, damageTypeForTurn), SLASH_HORIZONTAL) then addToBot DrawCardAction(p, 1) -- again a literal 1. upgrade (:40-46) upgradeDamage(3) -> 6. NOT a Strike-tagged card (the ctor adds no tags), so Perfected Strike does not count it and Strike Dummy does not boost it."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 3}
+    - {op: DRAW, target: SELF, amount: 1}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 6}
+    - {op: DRAW, target: SELF, amount: 1}
+
+- id: 102
+  name: GOOD_INSTINCTS
+  game_id: "Good Instincts"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "GoodInstincts (GoodInstincts.java:20-47): ctor (:25-28) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, baseBlock 6. use (:30-33) is a single addToBot GainBlockAction(p, p, this.block). upgrade (:35-41) upgradeBlock(3) -> 9."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 6}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 9}
+
+- id: 103
+  name: IMPATIENCE
+  game_id: "Impatience"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: []
+  provenance: "Impatience (Impatience.java:20-60): ctor (:25-28) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.NONE, magicNumber = baseMagicNumber = 2. use (:30-33) is a single addToBot ConditionalDrawAction(magicNumber, CardType.ATTACK). upgrade (:48-54) upgradeMagicNumber(1) -> 3. ConditionalDrawAction.update (ConditionalDrawAction.java:29-45): checkCondition() (:39-45) walks the hand and returns FALSE the moment any card has the restricted type, so the draw happens only with NO ATTACK in hand; on true it addToTop's DrawCardAction(source, amount) -- a real queued draw, which is why the No Draw gate and the per-card onCardDraw fan-out still apply to it. triggerOnGlowCheck / shouldGlow (:35-46) are UI only and share the predicate."
+  effects:
+    - {op: CONDITIONAL_DRAW, target: SELF, amount: 2, card_type: ATTACK}
+  upgraded:
+    - {op: CONDITIONAL_DRAW, target: SELF, amount: 3, card_type: ATTACK}
+
+- id: 105
+  name: MADNESS
+  game_id: "Madness"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  upgraded_cost: 0
+  target: SELF
+  flags: [exhaust]
+  provenance: "Madness (Madness.java:19-46): ctor (:24-27) cost 1, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, exhaust = true, and NO magicNumber. use (:29-32) is a single addToBot MadnessAction(). upgrade (:34-40) is upgradeBaseCost(0) ONLY -- the effect is identical at both levels, so the two programs are the same step and only the cost row differs. MadnessAction.update (MadnessAction.java:26-44) first scans the hand for eligibility: a card with costForTurn > 0 sets betterPossible, and (only if its costForTurn is <= 0) a card with cost > 0 sets possible; with NEITHER set it does nothing and consumes NO cardRandomRng. Otherwise findAndModifyCard(betterPossible) (:46-65) takes hand.getRandomCard(cardRandomRng) -- ONE random(size-1) draw, CardGroup.java:498-500 -- and RECURSES (another full draw) whenever the drawn card fails the branch's predicate, so the draw count is the number of rejection-sampling attempts, not one. The hit card gets BOTH cost and costForTurn set to 0, i.e. permanently for the combat, not this-turn-only."
+  effects:
+    - {op: MADNESS, target: SELF}
+  upgraded:
+    - {op: MADNESS, target: SELF}
+
+- id: 106
+  name: MIND_BLAST
+  game_id: "Mind Blast"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 2
+  upgraded_cost: 1
+  target: ENEMY
+  flags: [innate]
+  provenance: "MindBlast (MindBlast.java:27-74): ctor (:32-36) cost 2, ATTACK, COLORLESS, UNCOMMON, CardTarget.ENEMY, isInnate = true, baseDamage 0. applyPowers (:46-52) OVERWRITES baseDamage with AbstractDungeon.player.drawPile.size() before calling super.applyPowers(), and calculateCardDamage (:54-59) re-runs the same path -- so the base is the draw-pile size, never the ctor's 0, which is why the step's amount field is unused and set to 0. use (:38-44) is a VFXAction (presentation) then addToBot DamageAction(m, DamageInfo(p, damage, DamageType.NORMAL), AttackEffect.NONE); the rawDescription writes are UI. upgrade (:61-68) is upgradeBaseCost(1) ONLY. The size is read at EXECUTE time, the same model DAMAGE_BLOCK (Body Slam) uses: the card queues exactly one damage action, nothing between queue and execute moves the draw pile, and the played card itself sits in the hand, never in the draw pile."
+  effects:
+    - {op: DAMAGE_DRAW_PILE, target: CARD_TARGET, amount: 0}
+  upgraded:
+    - {op: DAMAGE_DRAW_PILE, target: CARD_TARGET, amount: 0}
+
+- id: 107
+  name: PANACEA
+  game_id: "Panacea"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: [exhaust]
+  provenance: "Panacea (Panacea.java:20-48): ctor (:25-29) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, magicNumber = baseMagicNumber = 1, exhaust = true. use (:31-34) is a single addToBot ApplyPowerAction(p, p, ArtifactPower(p, magicNumber), magicNumber). upgrade (:36-42) upgradeMagicNumber(1) -> 2. ArtifactPower is the pre-existing framework row (powers.yaml id 4, whose whole effect is the APPLY_POWER-site debuff nullify), so this card needs no new power."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: ARTIFACT}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: ARTIFACT}
+
+- id: 108
+  name: PANIC_BUTTON
+  game_id: "PanicButton"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: [exhaust]
+  provenance: "PanicButton (PanicButton.java:22-52): ctor (:27-32) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.SELF, baseBlock 30, magicNumber = baseMagicNumber = 2, exhaust = true. NOTE THE ID STRING -- ID = PanicButton (:24), with NO space, unlike every other card in this batch; that literal is the translator/oracle join key and is reproduced verbatim in game_id above. use (:34-38) addToBot GainBlockAction(p, p, this.block) THEN addToBot ApplyPowerAction(p, p, NoBlockPower(p, magicNumber, false), magicNumber). The ORDER matters and is preserved: the block is gained before No Block exists, so this card's own 30 is never zeroed by its own debuff. isSourceMonster is false (:37), which is what makes NoBlockPower's justApplied branch dead for this applier. upgrade (:40-46) upgradeBlock(10) -> 40; the magicNumber does NOT move, so both rows apply No Block 2."
+  effects:
+    - {op: BLOCK, target: SELF, amount: 30}
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: NO_BLOCK}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 40}
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: NO_BLOCK}
+
+- id: 110
+  name: SWIFT_STRIKE
+  game_id: "Swift Strike"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: ATTACK
+  cost: 0
+  target: ENEMY
+  flags: []
+  strike: true  # CardTags.STRIKE (SwiftStrike.java:32); Perfected Strike counts it
+  provenance: "SwiftStrike (SwiftStrike.java:24-52): ctor (:29-33) cost 0, ATTACK, COLORLESS, UNCOMMON, CardTarget.ENEMY, baseDamage 7, tags.add(CardTags.STRIKE). use (:35-38) is a single addToBot DamageAction(m, DamageInfo(p, damage, damageTypeForTurn), BLUNT_LIGHT). upgrade (:40-46) upgradeDamage(3) -> 10. The STRIKE tag is live in two places, both of which read CardDef.is_strike: Perfected Strike's per-Strike count and Strike Dummy's +3 atDamageModify."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 7}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 10}
+
+- id: 111
+  name: TRIP
+  game_id: "Trip"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: ENEMY
+  flags: []
+  provenance: "Trip (Trip.java:23-58): ctor (:28-31) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.ENEMY, magicNumber = baseMagicNumber = 2. use (:33-42) is Blind's structure with VulnerablePower in place of WeakPower: base applies ONE Vulnerable 2 to the played-on monster, upgraded loops the whole monster group. upgrade (:49-57) changes only the target -- there is no upgradeMagicNumber -- so both rows apply 2. Same two notes as Blind: the ALL_ENEMY step fans out over LIVE monsters (ApplyPowerAction skips a dead target, so the Java's whole-group loop is equivalent), and the card-level target stays ENEMY because CardDef has no upgraded-target column -- an ActionMask deviation on the upgraded row, recorded in the ledger's deferred obligations, with no state effect."
+  effects:
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
+  upgraded:
+    - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: VULNERABLE}

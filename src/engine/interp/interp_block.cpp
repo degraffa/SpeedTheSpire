@@ -20,15 +20,29 @@ namespace sts::engine {
 
 namespace {
 
-// modifyBlock (block-gain hook, distinct from the damage hooks in
-// interp_damage.cpp):
-// DexterityPower.modifyBlock adds `amount`; FrailPower multiplies by 0.75f.
-// Iterate in power-list order and floor once after all modifiers, matching
-// AbstractCard.applyPowersToBlock. Applied by op_block for CARD block only
+// AbstractCard.applyPowersToBlock (AbstractCard.java:2291-2307) is TWO passes
+// over the SAME power list, not one:
+//
+//     for (AbstractPower p : player.powers) tmp = p.modifyBlock(tmp, this);
+//     for (AbstractPower p : player.powers) tmp = p.modifyBlockLast(tmp);
+//
+// then a single clamp at 0 and a single MathUtils.floor. The two functions below
+// are those two passes, and op_block runs them in that order. Folding the second
+// hook into the first would be observably wrong: a power that zeroes the block in
+// modifyBlockLast must beat EVERY modifyBlock contributor, including ones that sit
+// LATER in the power list. With a list of [No Block, Dexterity 3] a single pass
+// yields 3 (No Block zeroes, then Dexterity adds); the game yields 0, because
+// Dexterity's whole contribution is made in the first pass and the zeroing happens
+// after all of it. The order is the reason, so it has a named test.
+//
+// Pass 1, modifyBlock (the block-gain hook, distinct from the damage hooks in
+// interp_damage.cpp): DexterityPower.modifyBlock adds `amount`
+// (DexterityPower.java:86-92); FrailPower multiplies by 0.75f
+// (FrailPower.java:58-60). Applied by op_block for CARD block only
 // (power/relic/potion block sets kBlockNoPowers).
 // The `default: return blk` below is a deliberate subset (most powers do not
 // touch block gain), so -Wswitch-enum would only add noise. The static_assert is
-// what makes a new power impossible to add without re-reading this switch.
+// what makes a new power impossible to add without re-reading BOTH switches.
 [[nodiscard]] float modify_block(float blk, PowerSlot p) noexcept {
     // Checked for Confusion (Snecko Eye's ConfusionPower), which needs no
     // case: its ONLY override is onCardDraw (ConfusionPower.java:38-48).
@@ -39,9 +53,12 @@ namespace {
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
     // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
     // ONLY override is updateDescription (ThieveryPower.java:27-30).
-    static_assert(sts::registry::manifest::kPowersCount == 43,
+    static_assert(sts::registry::manifest::kPowersCount == 44,
                   "new power: does it override modifyBlock (block-gain scaling, "
-                  "as Dexterity and Frail do)? Add a case here if so.");
+                  "as Dexterity and Frail do)? Add a case here if so. This guard "
+                  "covers BOTH block passes -- check modifyBlockLast in "
+                  "modify_block_last just below in the same pass; No Block is "
+                  "the game's only overrider of it.");
     // Checked for the Guardian's two powers, neither needs a case: ModeShiftPower
     // overrides only updateDescription (ModeShiftPower.java:27-30) and
     // SharpHidePower only updateDescription + onUseCard (SharpHidePower.java:
@@ -66,14 +83,35 @@ namespace {
     }
 }
 
+// Pass 2, modifyBlockLast. AbstractPower.modifyBlockLast is a pass-through and
+// NoBlockPower is the whole game's only overrider of it (verified by searching
+// the decompiled tree: AbstractPower.java declares it, NoBlockPower.java
+// overrides it, AbstractCard.java calls it, and nothing else mentions it).
+// NoBlockPower.modifyBlockLast (NoBlockPower.java:58-60) returns 0.0f
+// unconditionally -- it does not scale, it discards, which is precisely why it
+// has to run after every modifyBlock contributor rather than among them.
+// No guard of its own: the kPowersCount static_assert in modify_block above
+// covers this switch too and says so, keeping interp_block.cpp at exactly one
+// count-guard site.
+[[nodiscard]] float modify_block_last(float blk, PowerSlot p) noexcept {
+    switch (static_cast<PowerId>(p.power_id)) {
+        case PowerId::NO_BLOCK:
+            return 0.0f;                                // NoBlockPower.java:58-60
+        default:
+            return blk;
+    }
+}
+
 }  // namespace
 
 // BLOCK: tgt gains `amount` block. CARD block (flags & kBlockNoPowers == 0) runs
-// the gainer's modifyBlock hooks (Dexterity) with a single floor, mirroring
-// AbstractCard.applyPowers + GainBlockAction; power/relic/potion block sets
-// kBlockNoPowers (a direct GainBlockAction -- no modifyBlock) so it takes the
-// straight add. With no Dexterity present the modifyBlock pass is the identity and
-// gain == amount, so the 20 combat fixtures (no Dexterity) stay byte-identical.
+// the gainer's block-modifier hooks in AbstractCard.applyPowersToBlock's order --
+// the whole modifyBlock pass, THEN the whole modifyBlockLast pass -- with a single
+// clamp and a single floor after both; power/relic/potion block sets
+// kBlockNoPowers (a direct GainBlockAction -- neither pass runs) so it takes the
+// straight add. With neither a Dexterity/Frail nor a No Block present both passes
+// are the identity and gain == amount, so the 20 combat fixtures stay
+// byte-identical.
 void op_block(CombatState& s, uint8_t tgt, int amount, uint32_t flags) noexcept {
     int16_t* blk = actor_block(s, tgt);
     if (blk == nullptr) {
@@ -85,6 +123,12 @@ void op_block(CombatState& s, uint8_t tgt, int amount, uint32_t flags) noexcept 
         const PowerView pv = actor_powers(s, tgt);
         for (uint8_t i = 0; i < pv.count; ++i) {
             tmp = modify_block(tmp, pv.slots[i]);   // Dexterity: + amount, floor 0
+        }
+        // The SECOND pass, over the SAME list from the start
+        // (AbstractCard.java:2296-2298). Structurally separate, not a case folded
+        // into the loop above: No Block must beat a Dexterity that sits after it.
+        for (uint8_t i = 0; i < pv.count; ++i) {
+            tmp = modify_block_last(tmp, pv.slots[i]);   // No Block: -> 0
         }
         if (tmp < 0.0f) {
             tmp = 0.0f;                             // GainBlockAction post-clamp

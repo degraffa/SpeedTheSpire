@@ -64,6 +64,33 @@ namespace sts::engine {
 // the skeleton: hand+draw+discard <= the master deck size).
 void shuffle_discard_into_draw(CombatState& state) noexcept;
 
+// The RESHUFFLE_ALL opcode's body (Deep Breath). DeepBreath.use (DeepBreath.java:
+// 34-38) guards BOTH of its actions on the SAME `discardPile.size() > 0` test, so
+// the pair consumes TWO shuffle_rng draws or none:
+//   (1) EmptyDeckShuffleAction -- as shuffle_discard_into_draw above (one
+//       shuffle_rng draw, plus the relics' onShuffle its ctor fires);
+//   (2) ShuffleAction(drawPile, false) -- one MORE shuffle_rng draw seeding a
+//       fresh JdkRandom over the WHOLE draw pile (CardGroup.shuffle():561-563).
+//       Its triggerRelics argument is false, so there is NO second onShuffle pass.
+// It is one function rather than two authored steps because (1) empties the
+// discard: once it has run, nothing can still observe the guard's input. An empty
+// discard pile draws nothing at all and leaves the draw pile untouched -- the game
+// skips both actions together, never just the second.
+//
+// `exclude` is the pool index of the card whose program queued this, or any value
+// >= kCardPoolCap for none. It is REQUIRED for correctness here, not a nicety:
+// AbstractPlayer.useCard (:1369-1375) queues the card's own actions FIRST and the
+// UseCardAction that files the card away LAST, so throughout this action the
+// played card sits in limbo (cardInUse) and is in NO pile. resolve_card_play moves
+// it to the discard early instead -- the same modelling gap the discard-source
+// CHOOSE_CARD already compensates for (interp.hpp choice_excluded_index) -- and
+// here it would be doubly visible: the card would be shuffled into the draw pile
+// it should not be in, and its presence would change both the guard's answer and
+// the Fisher-Yates permutation of every other card. Excluding it reproduces the
+// game exactly: the excluded card stays behind as the discard pile's sole member,
+// which is where UseCardAction would have put it moments later anyway.
+void reshuffle_all(CombatState& state, int exclude) noexcept;
+
 // Draw `amount` cards from the top of the draw pile into the hand, reshuffling
 // the discard pile in when the draw pile empties (AbstractPlayer.draw() +
 // DrawCardAction). Semantics, in order:

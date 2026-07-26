@@ -23,7 +23,7 @@
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // roll_monster_move / spawn_monster_at_slot
-#include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / exhaust_card
+#include "sts/engine/piles.hpp"   // draw_cards / shuffle_discard_into_draw / reshuffle_all / exhaust_card
 #include "sts/engine/power_hooks.hpp"   // power hook dispatch (onCardDraw)
 #include "sts/engine/types.hpp"
 
@@ -250,6 +250,28 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::DAMAGE_PER_STRIKE:
             // Baked into a plain DAMAGE at queue time (card_play.cpp); never
             // reaches execute in practice. Safe no-op if it somehow does.
+            return;
+        case Opcode::DAMAGE_DRAW_PILE:
+            // Mind Blast: base == the DRAW PILE SIZE (read here at execute time),
+            // then the normal DamageInfo pipeline. `src` is the player
+            // (queue_effect_step), `amount` is unused -- the same shape as
+            // DAMAGE_BLOCK above.
+            op_damage(s, item.src, item.tgt, static_cast<int>(s.draw_count));
+            return;
+        case Opcode::CONDITIONAL_DRAW:
+            op_conditional_draw(s, item.amount,
+                                conditional_draw_type_from_flags(item.flags));
+            return;
+        case Opcode::RESHUFFLE_ALL:
+            // The fused Deep Breath double shuffle (piles.cpp). `tgt` carries the
+            // source card's pool index, stamped by card_play.cpp, so the card that
+            // is in limbo in the game is kept out of the shuffled discard; a
+            // non-card queuer leaves an actor sentinel there, which is >=
+            // kCardPoolCap and so means "exclude nothing".
+            reshuffle_all(s, item.tgt);
+            return;
+        case Opcode::MADNESS:
+            op_madness(s);
             return;
         case Opcode::CANNOT_LOSE:
             // CannotLoseAction.update (CannotLoseAction.java:12-15): latch the

@@ -645,6 +645,125 @@ void op_random_attack_to_hand(CombatState& s) noexcept {
     }
 }
 
+// CONDITIONAL_DRAW (Impatience / ConditionalDrawAction.update, :29-45):
+// checkCondition() (:39-45) returns false as soon as ONE hand card has the
+// restricted type, and only a true answer addToTop's a DrawCardAction(source,
+// amount). The draw is QUEUED rather than performed here, exactly as in the Java:
+// that keeps it behind the DRAW opcode's No Draw gate and its per-card
+// onCardDraw fan-out. addToTop, so it resolves ahead of anything already queued
+// behind this item.
+//
+// The card that played this is already out of the hand when the item executes
+// (resolve_card_play moves it before the queued effects run, mirroring
+// AbstractPlayer.useCard removing it before the action resolves), so it cannot
+// veto its own draw. Impatience is a SKILL and its restricted type is ATTACK, so
+// that makes no difference for the only authored user -- it is stated because the
+// scan is over whatever is in hand at EXECUTE time.
+void op_conditional_draw(CombatState& s, int amount,
+                         uint8_t restricted_type) noexcept {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardDef* def =
+            card_def(static_cast<CardId>(s.card_pool[s.hand[i]].card_id));
+        if (def != nullptr &&
+            static_cast<uint8_t>(def->type) == restricted_type) {
+            return;  // checkCondition() false -- NOTHING is queued
+        }
+    }
+    ActionQueueItem draw{};
+    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+    draw.src = kActorPlayer;
+    draw.tgt = kActorPlayer;
+    draw.amount = amount;
+    add_to_top(s, draw);  // ConditionalDrawAction.java:33
+}
+
+namespace {
+
+// The instance's `cost` field as the game keeps it, which is NOT the same thing
+// as its `costForTurn` (our cost_now). The engine stores one cost per instance,
+// and its two writers are distinguishable by the flag they leave behind:
+//   * setCostForTurn moves costForTurn ONLY and marks the instance
+//     COST_MODIFIED_FOR_TURN (the end-turn sweep restores costForTurn = cost from
+//     the registry), so for such an instance `cost` is still the registry value;
+//   * every other cost write here mirrors the game writing cost and costForTurn
+//     TOGETHER (Confusion, and op_madness below), leaving no flag -- so cost_now
+//     IS `cost`.
+// Madness needs the two predicates separately, which is the only reason this
+// distinction has to be reconstructed at all.
+[[nodiscard]] int instance_base_cost(const CombatState& s,
+                                     CardPoolIndex pi) noexcept {
+    const CardInstance& c = s.card_pool[pi];
+    if (has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN)) {
+        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+        return def == nullptr ? 0 : static_cast<int>(card_cost(*def, c.upgrade));
+    }
+    return static_cast<int>(c.cost_now);
+}
+
+}  // namespace
+
+// MADNESS (MadnessAction.update, :26-65). Two halves:
+//
+//   (1) The GUARD (:29-42). Walk the hand once: a card with costForTurn > 0 sets
+//       `betterPossible`; otherwise a card with cost > 0 sets `possible`. Note
+//       the `continue` in the first branch -- a card only reaches the `cost > 0`
+//       test when its costForTurn is already <= 0. If NEITHER flag ends up set
+//       the action does nothing and draws NO cardRandomRng at all.
+//
+//   (2) findAndModifyCard(better) (:46-65). One
+//       hand.getRandomCard(cardRandomRng) draw -- group.get(rng.random(size-1)),
+//       CardGroup.java:498-500, i.e. exactly one card_random_rng draw over the
+//       inclusive range [0, hand_count-1]. If the drawn card fails the branch's
+//       predicate (costForTurn > 0 when `better`, else cost > 0) the method
+//       RECURSES, which is another full draw. The draw count is therefore the
+//       number of rejection-sampling attempts, not one.
+//
+// The loop terminates because the guard proved at least one hand card satisfies
+// the very predicate the chosen branch tests: `better` is set only by a
+// costForTurn > 0 card, and the !better branch is reached only when `possible`
+// found a cost > 0 card.
+//
+// The zeroing writes BOTH c.cost and c.costForTurn (:50-52 / :58-60), i.e. it is
+// PERMANENT for the combat and not this-turn-only. So it clears
+// COST_MODIFIED_FOR_TURN as well as setting cost_now: leaving that bit set would
+// let the end-of-turn sweep restore the registry cost, which is the one outcome
+// the game rules out (isCostModified, which it does set, is display state with no
+// reset path). `superFlash` is presentation.
+void op_madness(CombatState& s) noexcept {
+    bool better_possible = false;
+    bool possible = false;
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        if (s.card_pool[pi].cost_now > 0) {
+            better_possible = true;
+            continue;
+        }
+        if (instance_base_cost(s, pi) <= 0) {
+            continue;
+        }
+        possible = true;
+    }
+    if (!better_possible && !possible) {
+        return;  // MadnessAction.java:39 -- findAndModifyCard is never called
+    }
+    const bool better = better_possible;
+    for (;;) {
+        const int32_t pick =
+            random(s.card_random_rng, static_cast<int32_t>(s.hand_count) - 1);
+        const CardPoolIndex pi = s.hand[static_cast<unsigned>(pick)];
+        const bool eligible = better ? (s.card_pool[pi].cost_now > 0)
+                                     : (instance_base_cost(s, pi) > 0);
+        if (!eligible) {
+            continue;  // the recursive call -- another cardRandomRng draw
+        }
+        s.card_pool[pi].cost_now = 0;
+        s.card_pool[pi].flags = static_cast<uint16_t>(
+            s.card_pool[pi].flags &
+            ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+        return;
+    }
+}
+
 // --- Public: CHOOSE_CARD queries ---------------------------------------------
 
 bool choice_slot_eligible(const CombatState& s, uint8_t slot, ChoiceKind kind,

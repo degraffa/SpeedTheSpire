@@ -22,12 +22,16 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-static_assert(sts::registry::manifest::kCardsCount == 91);  // + the 16 red RARE rows
+// 91 (through the red rares) + B3.10a's 14 colorless UNCOMMON rows; their ids
+// run 92-111 but six interior ids are reserved gaps, so the ROW count adds 14.
+static_assert(sts::registry::manifest::kCardsCount == 105);
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 // Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only
 // THREE pool members: Feed and Reaper carry CardTags.HEALING, which
-// returnTrulyRandomCardInCombat excludes (AbstractDungeon.java:964-979).
+// returnTrulyRandomCardInCombat excludes (AbstractDungeon.java:964-979). The
+// colorless uncommons add NONE: the pool builder is `color == "RED"`-gated, and
+// all fourteen are COLORLESS, so the count is unchanged by that batch.
 static_assert(sts::registry::kIroncladAttackPoolCount == 28);
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with
