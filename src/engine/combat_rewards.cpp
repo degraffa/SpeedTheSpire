@@ -358,28 +358,37 @@ bool open_rest_card_reward(RunState& rs, RewardScreen& out) noexcept {
 
 bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
                         uint8_t index) noexcept {
-    if (index >= s.count || s.open_card_item != kNoOpenCardReward) {
+    if (s.count > kRewardItemCap || index >= s.count ||
+        index >= kRewardItemCap ||
+        s.open_card_item != kNoOpenCardReward) {
         return false;
     }
     const RunRewardItem& item = s.items[index];
-    if (static_cast<RewardItemKind>(item.kind) == RewardItemKind::POTION) {
-        // Sozu claims-and-discards regardless of slots (RewardItem.java:
-        // 276-279); otherwise obtainPotion needs a free slot below the run's
-        // potionSlots or the claim bounces (RewardItem.java:280-288).
-        if (run_has_relic(rs, RelicId::SOZU)) {
+    switch (static_cast<RewardItemKind>(item.kind)) {
+        case RewardItemKind::GOLD:
+        case RewardItemKind::STOLEN_GOLD:
             return true;
-        }
-        for (uint8_t i = 0; i < rs.potion_slots && i < kPotionCap; ++i) {
-            if (rs.potions[i] == static_cast<uint16_t>(PotionId::NONE)) {
+        case RewardItemKind::CARDS:
+            return item.card_count <= kRewardCardCap;
+        case RewardItemKind::POTION:
+            // Sozu claims-and-discards regardless of slots (RewardItem.java:
+            // 276-279); otherwise obtainPotion needs a free slot below the
+            // run's potionSlots or the claim bounces (RewardItem.java:280-288).
+            if (run_has_relic(rs, RelicId::SOZU)) {
                 return true;
             }
-        }
-        return false;
+            for (uint8_t i = 0; i < rs.potion_slots && i < kPotionCap; ++i) {
+                if (rs.potions[i] == static_cast<uint16_t>(PotionId::NONE)) {
+                    return true;
+                }
+            }
+            return false;
+        case RewardItemKind::RELIC:
+            return relic_acquire_legal(rs, static_cast<RelicId>(item.id));
+        case RewardItemKind::NONE:
+        default:
+            return false;
     }
-    if (static_cast<RewardItemKind>(item.kind) == RewardItemKind::RELIC) {
-        return relic_acquire_legal(rs, static_cast<RelicId>(item.id));
-    }
-    return true;
 }
 
 bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
@@ -438,10 +447,22 @@ bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
     }
 }
 
+bool reward_card_item_open_legal(const RewardScreen& s) noexcept {
+    if (s.count > kRewardItemCap ||
+        s.open_card_item == kNoOpenCardReward ||
+        s.open_card_item >= s.count ||
+        s.open_card_item >= kRewardItemCap) {
+        return false;
+    }
+    const RunRewardItem& item = s.items[s.open_card_item];
+    return static_cast<RewardItemKind>(item.kind) == RewardItemKind::CARDS &&
+           item.card_count <= kRewardCardCap;
+}
+
 bool reward_take_card_legal(const RunState& rs, const RewardScreen& s,
                             uint8_t card_index) noexcept {
-    if (s.open_card_item == kNoOpenCardReward ||
-        s.open_card_item >= s.count ||
+    if (!reward_card_item_open_legal(s) ||
+        card_index >= kRewardCardCap ||
         rs.master_deck_count >= kMasterDeckCap) {
         return false;
     }
@@ -477,7 +498,7 @@ bool reward_take_card(RunState& rs, RewardScreen& s,
 }
 
 bool reward_sing(RunState& rs, RewardScreen& s) noexcept {
-    if (s.open_card_item == kNoOpenCardReward || s.open_card_item >= s.count ||
+    if (!reward_card_item_open_legal(s) ||
         !run_has_relic(rs, RelicId::SINGING_BOWL)) {
         return false;
     }
@@ -499,7 +520,9 @@ bool reward_sing(RunState& rs, RewardScreen& s) noexcept {
 void reward_skip_card(RewardScreen& s) noexcept {
     // CardRewardScreen's skip: closeCurrentScreen without takeReward -- the
     // CARD item stays on the reward screen and can be re-opened.
-    s.open_card_item = kNoOpenCardReward;
+    if (reward_card_item_open_legal(s)) {
+        s.open_card_item = kNoOpenCardReward;
+    }
 }
 
 }  // namespace sts::engine

@@ -793,6 +793,9 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                 // Proceed button is hidden while it is open
                 // (CardRewardScreen.open hides proceedButton,
                 // CardRewardScreen.java:459-460).
+                if (!reward_card_item_open_legal(s)) {
+                    break;
+                }
                 const RunRewardItem& item = s.items[s.open_card_item];
                 for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap;
                      ++j) {
@@ -879,8 +882,7 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                 }
             } else if (screen == RestScreen::DREAM_CATCHER) {
                 const RewardScreen& s = rc.rewards;
-                if (s.open_card_item != kNoOpenCardReward &&
-                    s.open_card_item < s.count) {
+                if (reward_card_item_open_legal(s)) {
                     const RunRewardItem& item = s.items[s.open_card_item];
                     for (uint8_t j = 0;
                          j < item.card_count && j < kRewardCardCap; ++j) {
@@ -1106,12 +1108,14 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 RewardScreen& s = rc.rewards;
                 const uint8_t a0 = action_arg0(a);
                 if (s.open_card_item != kNoOpenCardReward) {
-                    if (a0 == kChooseSkipCard) {
-                        reward_skip_card(s);
-                    } else if (a0 == kChooseSing) {
-                        (void)reward_sing(rc.run, s);
-                    } else {
-                        (void)reward_take_card(rc.run, s, a0);
+                    if (reward_card_item_open_legal(s)) {
+                        if (a0 == kChooseSkipCard) {
+                            reward_skip_card(s);
+                        } else if (a0 == kChooseSing) {
+                            (void)reward_sing(rc.run, s);
+                        } else {
+                            (void)reward_take_card(rc.run, s, a0);
+                        }
                     }
                 } else if (a0 == kChooseProceed) {
                     // Leave the screen; anything unclaimed is abandoned (an
@@ -1174,7 +1178,7 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 } else if (screen == RestScreen::DREAM_CATCHER) {
                     bool done = false;
                     if (a0 == kChooseSkipCard &&
-                        rc.rewards.open_card_item != kNoOpenCardReward) {
+                        reward_card_item_open_legal(rc.rewards)) {
                         reward_skip_card(rc.rewards);
                         done = true;
                     } else if (a0 == kChooseSing) {

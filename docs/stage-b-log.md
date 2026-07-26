@@ -2839,6 +2839,26 @@ No persistent state, schema, RNG sequence, fixture, golden, registry namespace
 or combat `ActionMask` changed. Final-tree WSL Debug, leak-detecting ASan/UBSan
 and Release are each **997/997**; hygiene checks pass.
 
+**Defensive-legality fix-forward (supersedes the generic-mask boundary
+above):** the shared claim predicate previously fell through to `true` for
+`RewardItemKind::NONE` and unknown byte values even though `claim_reward`
+rejected both. A hand-built reward screen could therefore advertise a
+guaranteed no-progress claim. `reward_claim_legal` now explicitly accepts only
+GOLD, STOLEN_GOLD, POTION, RELIC and CARDS and rejects an over-cap screen before
+indexing. A second shared predicate validates the exact no-open sentinel,
+screen count/storage bounds, CARD kind and offer capacity before ordinary or
+Dream Catcher masks expose Take, Skip or Singing Bowl. The take, skip and bowl
+mutation paths read the same authority, so forced actions against malformed
+transient state are non-corrupting no-ops rather than out-of-bounds accesses or
+wrong-kind consumption.
+
+Three regressions pin NONE/unknown generic claims, ordinary malformed open-card
+indices/kinds/counts, and Dream Catcher's corresponding bounds. Final-tree WSL
+Debug, leak-detecting ASan/UBSan and Release are each **1000/1000**; hygiene
+checks pass. The old-base task branch deliberately leaves the fuzz campaign
+build id for the integration commit to advance against the then-current master
+identity.
+
 <a id="b415"></a>
 
 ### B4.15 `[x]` A20 run-setup modifiers + negative freezes

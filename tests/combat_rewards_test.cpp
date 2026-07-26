@@ -1167,5 +1167,111 @@ TEST(RewardFlow, FullMasterDeckOffersSkipButNoLegalCardTake) {
         << "the outer reward screen remains explicitly escapable after skip";
 }
 
+TEST(RewardFlow, NoneAndUnknownRewardKindsNeverAuthorizeANoOpClaim) {
+    const uint8_t malformed_kinds[] = {
+        static_cast<uint8_t>(RewardItemKind::NONE), 0xFE};
+    for (const uint8_t kind : malformed_kinds) {
+        RunController rc = run_begin(48, kA20);
+        rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+        rc.rewards = RewardScreen{};
+        rc.rewards.count = 1;
+        rc.rewards.open_card_item = kNoOpenCardReward;
+        rc.rewards.items[0].kind = kind;
+
+        RunActionMask mask{};
+        legal_actions(rc, mask);
+        EXPECT_FALSE(mask.can_claim_reward[0]);
+        EXPECT_TRUE(mask.can_proceed)
+            << "a malformed outer item must remain abandonable";
+        EXPECT_FALSE(reward_claim_legal(rc.run, rc.rewards, 0));
+
+        const RunController before = rc;
+        step(rc, make_action(ActionVerb::CHOOSE, 0));
+        EXPECT_EQ(std::memcmp(&rc, &before, sizeof(rc)), 0)
+            << "kind " << static_cast<int>(kind)
+            << " was mask-illegal but mutated through the generic claim door";
+    }
+
+    RunController oversized = run_begin(48, kA20);
+    oversized.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    oversized.rewards = RewardScreen{};
+    oversized.rewards.count = 1;
+    oversized.rewards.open_card_item = kNoOpenCardReward;
+    oversized.rewards.items[0].kind =
+        static_cast<uint8_t>(RewardItemKind::CARDS);
+    oversized.rewards.items[0].card_count =
+        static_cast<uint8_t>(kRewardCardCap + 1);
+    RunActionMask mask{};
+    legal_actions(oversized, mask);
+    EXPECT_FALSE(mask.can_claim_reward[0]);
+    const RunController before = oversized;
+    step(oversized, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(std::memcmp(&oversized, &before, sizeof(oversized)), 0);
+}
+
+TEST(RewardFlow, MalformedOpenCardStatesAreInertAndAdvertiseNothing) {
+    auto expect_inert = [](RewardScreen malformed) {
+        RunController rc = run_begin(49, kA20);
+        give_relics(rc.run, {RelicId::SINGING_BOWL});
+        rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+        rc.rewards = malformed;
+
+        EXPECT_FALSE(reward_card_item_open_legal(rc.rewards));
+        EXPECT_FALSE(reward_take_card_legal(rc.run, rc.rewards, 0));
+        RunState run_before = rc.run;
+        RewardScreen screen_before = rc.rewards;
+        EXPECT_FALSE(reward_sing(rc.run, rc.rewards));
+        reward_skip_card(rc.rewards);
+        EXPECT_EQ(std::memcmp(&rc.run, &run_before, sizeof(rc.run)), 0);
+        EXPECT_EQ(std::memcmp(&rc.rewards, &screen_before,
+                              sizeof(rc.rewards)),
+                  0);
+
+        RunActionMask mask{};
+        legal_actions(rc, mask);
+        EXPECT_FALSE(mask.can_proceed);
+        EXPECT_FALSE(mask.can_skip_card);
+        EXPECT_FALSE(mask.can_sing);
+        for (bool can_take : mask.can_take_card) {
+            EXPECT_FALSE(can_take);
+        }
+        for (bool can_claim : mask.can_claim_reward) {
+            EXPECT_FALSE(can_claim);
+        }
+
+        const Action forced[] = {
+            make_action(ActionVerb::CHOOSE, 0),
+            make_action(ActionVerb::CHOOSE, kChooseSkipCard),
+            make_action(ActionVerb::CHOOSE, kChooseSing)};
+        for (const Action action : forced) {
+            RunController attempted = rc;
+            step(attempted, action);
+            EXPECT_EQ(std::memcmp(&attempted, &rc, sizeof(rc)), 0)
+                << "malformed open-card state accepted forced CHOOSE "
+                << static_cast<int>(action_arg0(action));
+        }
+    };
+
+    RewardScreen past_storage{};
+    past_storage.count = static_cast<uint8_t>(kRewardItemCap + 1);
+    past_storage.open_card_item = static_cast<uint8_t>(kRewardItemCap);
+    expect_inert(past_storage);
+
+    RewardScreen wrong_kind{};
+    wrong_kind.count = 1;
+    wrong_kind.open_card_item = 0;
+    wrong_kind.items[0].kind = static_cast<uint8_t>(RewardItemKind::GOLD);
+    expect_inert(wrong_kind);
+
+    RewardScreen oversized_offer{};
+    oversized_offer.count = 1;
+    oversized_offer.open_card_item = 0;
+    oversized_offer.items[0].kind =
+        static_cast<uint8_t>(RewardItemKind::CARDS);
+    oversized_offer.items[0].card_count =
+        static_cast<uint8_t>(kRewardCardCap + 1);
+    expect_inert(oversized_offer);
+}
+
 }  // namespace
 }  // namespace sts::engine
