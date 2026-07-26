@@ -174,7 +174,37 @@ pick one locally.
 | `STUN` | 10 | B3.19 — landed |
 | `DEFEND` | 11 | B3.16 — landed (also The Guardian's Charge Up: one Intent constant, two users) |
 | `ATTACK_BUFF` | 12 | B3.21 — landed |
-| *(free)* | 13–16 | **unallocated** — reserved for B3.22, which needed none: all four Hexaghost telegraphs were already in the vocabulary. Claim one in a task brief before use |
+| `ESCAPE` | 13 | **allocated — B3.15 remainder** (Looter's `Intent.ESCAPE` telegraph) |
+| *(reserve)* | 14 | **allocated — B3.15 remainder**, contingency only; report it if used |
+| *(free)* | 15–16 | **unallocated.** Claim one in a task brief before use |
+
+### Wave-A allocations — 2026-07-26, three concurrent worktrees
+
+Published here rather than only in the dispatching briefs, per the rule above.
+**Every block is exclusive to its task**; a task that needs fewer ids than it
+holds leaves the rest a permanent gap (that is fine and costs nothing — see the
+`PowerId` paragraph). A task that needs *more* stops and asks the orchestrator;
+it does **not** take the next free number, because its siblings are invisible to
+it.
+
+| Namespace | B3.15 remainder (`b315-looter`) | B4.5 (`b45-rewards`) | B3.10 (`b310-colorless-uncommons`) |
+|---|---|---|---|
+| `CardId` | — | — | **92–111** (+112–115 reserve) |
+| `PowerId` | **75–76** | — | **77–80** |
+| `MonsterId` | **26** (LOOTER) | — | — |
+| `MonsterIntent` | **13** (+14 reserve) | — | — |
+| Opcode | **40–42** | **43–44** | **45–48** |
+| `ChoiceKind` | — | **6–7** | — |
+
+**`registry/powers.yaml` is shared by two of the three** (B3.15 remainder and
+B3.10), append-only and within disjoint blocks — the B3.8 ∥ B3.27 precedent.
+The hazard this creates is **not** the YAML, which appends at different places:
+it is the **four `kPowersCount` guards** (1 in `interp_block.cpp`, 3 in
+`interp_damage.cpp`). Both branches must move all four to compile, so both will
+carry a *different* correct-for-itself value, and the merge can land either one
+silently — which is exactly integration-14's stale-count-assert defect. The
+integrator **re-derives the union from the regenerated manifest** and fixes all
+four together; neither branch's number is authoritative.
 
 ## Landed non-task work
 
