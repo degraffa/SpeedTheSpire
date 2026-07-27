@@ -330,6 +330,35 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 
+    # B3.11 stage C: the SKILL sibling of the pool above -- Chrysalis
+    # (Chrysalis.java:34) passes CardType.SKILL to the SAME
+    # returnTrulyRandomCardInCombat(type) (:964-979) that Infernal Blade and
+    # Metamorphosis pass ATTACK to, so the two are one emission shape with one
+    # filter changed. EMITTING the type-filtered pool (rather than filtering
+    # kIroncladCombatPool at runtime) is what makes the opcode's pick a single
+    # indexed read with no per-call scan, and it keeps the ONE draw over
+    # [0, size-1] structurally identical to the ATTACK pool's.
+    # ORDER: Java's three-pool concatenation preserves each source pool's
+    # relative order and the type filter is order-preserving, so a type-filtered
+    # subsequence of the full RED combat pool is order-equivalent to the game's
+    # filtered build -- under the SAME documented interim deviation the pools
+    # above carry (registry-id order vs CardLibrary HashMap order, pending the
+    # B4.5 oracle capture). Opcode 55's filtered view therefore INHERITS that
+    # deviation; membership and the one-draw accounting are Java-exact today.
+    skill_pool = [r for r in rows
+                  if r["color"] == "RED"
+                  and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+                  and r["ctype"] == CARD_TYPES["SKILL"]
+                  and not r["healing"]]
+    skill_pool.sort(key=lambda r: r["id"])
+    out.append(f"inline constexpr int kIroncladSkillPoolCount = "
+               f"{len(skill_pool)};")
+    out.append("inline constexpr std::array<CardId, kIroncladSkillPoolCount> "
+               "kIroncladSkillPool{{")
+    for r in skill_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
     # B3.10b Discovery: AbstractDungeon.returnTrulyRandomCardInCombat()
     # (:944-962) concatenates the player's src COMMON, UNCOMMON and RARE pools,
     # excluding HEALING-tagged cards, and spends one cardRandomRng draw per

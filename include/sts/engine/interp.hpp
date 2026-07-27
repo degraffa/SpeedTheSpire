@@ -340,6 +340,10 @@ enum class Opcode : uint16_t {
                               // cardRandomRng draws over the generated non-
                               // healing colorless combat pool; base copies enter
                               // hand/discard and duplicates are allowed.
+                              // `flags` (kColorlessToHand* below, both default
+                              // 0) additionally re-cost the copy for the turn
+                              // and/or generate it upgraded -- Transmutation's
+                              // per-X-repetition body.
     // --- The played card's filing action (allocated at 53) -------------------
     // 49-52 are the preceding colorless-card block; the lower permanent gaps
     // 41-44 are never backfilled.
@@ -374,6 +378,44 @@ enum class Opcode : uint16_t {
                               // upgrade COUNT keeps climbing past 1. The played
                               // Apotheosis sits in the LIMBO pile throughout and
                               // is in none of the four piles scanned.
+    RANDOM_CARD_TO_DRAW = 55, // Chrysalis (SKILL) / Metamorphosis (ATTACK) --
+                              // Chrysalis.use:31-42 and Metamorphosis.use:31-42
+                              // are the SAME loop with one CardType changed, so
+                              // the type rides in `flags` (make_random_card_to_
+                              // draw_flags) and `amount` is the loop count (3
+                              // base / 5 upgraded).
+                              // THE WHOLE LOOP IS ONE OPCODE because the rng
+                              // ORDER cannot be expressed as N independent
+                              // steps. use() performs ALL `amount` pool rolls
+                              // FIRST -- returnTrulyRandomCardInCombat(type)
+                              // (AbstractDungeon.java:964-979), ONE
+                              // cardRandomRng random(size-1) each over the
+                              // type-filtered RED combat pool, interleaved only
+                              // with addToBot, which consumes nothing -- and the
+                              // `amount` queued MakeTempCardInDrawPileActions
+                              // resolve AFTERWARDS, each spending ONE
+                              // cardRandomRng draw in CardGroup.addToRandomSpot
+                              // (:463-469; the EMPTY-pile branch is a free plain
+                              // append). Net stream: N rolls, THEN N inserts. An
+                              // encoding that interleaved roll/insert would pick
+                              // different cards AND different positions.
+                              // Nothing can interleave between the two halves in
+                              // the Java either: the N MakeTempCardInDrawPile-
+                              // Actions are consecutive queue entries that queue
+                              // nothing themselves, and the played card's
+                              // USE_CARD (with its Strange Spoon roll) sits
+                              // BEHIND all of them (AbstractPlayer.useCard:1370).
+                              // Each generated copy is a BASE library copy whose
+                              // cost, when > 0, is zeroed PERMANENTLY for the
+                              // combat -- Chrysalis.java:35-39 writes BOTH
+                              // card.cost and card.costForTurn, the MADNESS
+                              // (opcode 48) model, NOT setCostForTurn's
+                              // this-turn one. X-cost (-1) and already-0 cards
+                              // are untouched, exactly as the `cost > 0` guard
+                              // says. makeStatEquivalentCopy carries cost and
+                              // costForTurn through both copy hops
+                              // (AbstractCard.java:838-840), so the zero
+                              // survives into the draw pile.
     DRAW_PILE_FETCH = 56,     // Violence / DrawPileToHandAction.update (:31-71):
                               // pull up to `amount` cards of the CardType carried
                               // in `flags` out of the DRAW PILE into the hand.
@@ -395,7 +437,12 @@ enum class Opcode : uint16_t {
                               // that card draw -> hand, or draw -> DISCARD when
                               // the hand is already full (:51-55). The REAL draw
                               // pile is never reordered by the browse; only the
-                              // taken cards leave it. 55 and 57-59 stay unissued.
+                              // taken cards leave it. 57-59 stay unissued: 57 is
+                              // the next colorless-rare batch's and 58-59 are that
+                              // batch's published reserve. 58 was available to the
+                              // generated-card family and was NOT spent, because
+                              // RANDOM_COLORLESS_TO_HAND's two new default-0 flag
+                              // bits carried Transmutation cleanly.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -427,6 +474,36 @@ enum class Opcode : uint16_t {
     uint32_t flags) noexcept {
     return static_cast<uint8_t>(flags & 0xFFu);
 }
+
+// --- RANDOM_CARD_TO_DRAW field encoding --------------------------------------
+// `amount` is the number of cards to generate (Chrysalis / Metamorphosis
+// magicNumber, 3 base / 5 upgraded); `flags` low byte carries the CardType the
+// RED combat pool is filtered to (returnTrulyRandomCardInCombat's argument --
+// SKILL for Chrysalis, ATTACK for Metamorphosis), in the same raw-CardType
+// spelling CONDITIONAL_DRAW and DRAW_PILE_FETCH use above and for the same
+// include-order reason.
+[[nodiscard]] constexpr uint32_t make_random_card_to_draw_flags(
+    uint8_t card_type) noexcept {
+    return static_cast<uint32_t>(card_type);
+}
+[[nodiscard]] constexpr uint8_t random_card_to_draw_type_from_flags(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>(flags & 0xFFu);
+}
+
+// --- RANDOM_COLORLESS_TO_HAND field encoding ---------------------------------
+// `amount` is the number of independent pool draws; `flags` carries the two bits
+// below. BOTH default to 0, which is exactly the `extra` Jack of All Trades'
+// rows packed before they existed, so those rows and their tests are
+// byte-identical (checked, not assumed -- no test encoded a non-zero extra on
+// this opcode). MIRRORED in tools/registry_gen/stsgen/vocab.py
+// (COLORLESS_TO_HAND_FLAGS), authored as `generated: [...]` on the step.
+//
+// TransmutationAction.update (:44-51) is the only setter of either bit; it runs
+// upgrade() BEFORE setCostForTurn(0), so the this-turn zero replaces the
+// UPGRADED row's cost when both bits are set.
+inline constexpr uint32_t kColorlessToHandCostZeroForTurn = 1u << 0;
+inline constexpr uint32_t kColorlessToHandUpgradedCopy = 1u << 1;
 
 // --- PLAY_CARD field encoding ------------------------------------------------
 // The general "play this card again / play the next card off the deck" verb.

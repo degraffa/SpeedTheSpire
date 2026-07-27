@@ -178,8 +178,27 @@ OPCODES = {
     # upgraded past 1). The played Apotheosis is in the LIMBO pile throughout
     # and is in none of the four piles scanned.
     "UPGRADE_ALL": 54,
-    # B3.11 stage B addition (55 and 57-59 stay unissued -- 55 and 57 belong to
-    # later B3.11 stages and 58-59 are this batch's published reserve).
+    # B3.11 stage C addition. RANDOM_CARD_TO_DRAW is the Chrysalis /
+    # Metamorphosis generator (Chrysalis.use:31-42, Metamorphosis.use:31-42 --
+    # the same loop with CardType.SKILL vs ATTACK, which is why the type rides
+    # in `extra` rather than in two opcodes). ONE op for the WHOLE loop because
+    # the Java's rng ORDER cannot be expressed as N independent steps: use()
+    # performs ALL `amount` pool rolls first (returnTrulyRandomCardInCombat(type),
+    # AbstractDungeon.java:964-979 -- ONE cardRandomRng random(size-1) each,
+    # interleaved only with addToBot, which consumes nothing), and the `amount`
+    # MakeTempCardInDrawPileActions then resolve afterwards, each spending ONE
+    # cardRandomRng draw in CardGroup.addToRandomSpot (:463-469; an EMPTY draw
+    # pile costs zero). Net stream: N rolls, THEN N inserts -- an interleaved
+    # roll/insert/roll/insert encoding produces different cards AND different
+    # positions. Each generated BASE copy whose cost is > 0 is zeroed
+    # PERMANENTLY for the combat (both cost and costForTurn, Chrysalis.java:
+    # 35-39) -- the MADNESS model, not the setCostForTurn one; an X-cost (-1)
+    # or already-0 card is left alone.
+    "RANDOM_CARD_TO_DRAW": 55,
+    # B3.11 stage B addition (57-59 stay unissued -- 57 belongs to a later
+    # B3.11 stage and 58-59 are that batch's published reserve; stage C did
+    # NOT need 58, since RANDOM_COLORLESS_TO_HAND's two new `extra` bits
+    # carried Transmutation, see COLORLESS_TO_HAND_FLAGS below).
     # DRAW_PILE_FETCH is Violence / DrawPileToHandAction.update (:31-71): pull
     # `amount` cards of the CardType in `extra` out of the DRAW PILE into the
     # hand. DUAL-STREAM accounting, and the order of the early-outs is what
@@ -300,6 +319,23 @@ PLAY_CARD_FLAGS = {
     "exhaust": 1 << 2,
     "from_draw_top": 1 << 3,
     "queue_front": 1 << 4,
+}
+
+# RANDOM_COLORLESS_TO_HAND `extra` bits -- MIRROR of interp.hpp's
+# kColorlessToHand* constants (B3.11 stage C). BOTH default to 0, so Jack of All
+# Trades' rows (which author neither) keep the `extra = 0` they packed before
+# these bits existed -- verified byte-identical rather than assumed.
+#   cost_zero_for_turn -- TransmutationAction.java:49 `c.setCostForTurn(0)`:
+#       the generated copy costs 0 for THIS TURN ONLY (COST_MODIFIED_FOR_TURN,
+#       the RANDOM_ATTACK_TO_HAND / Infernal Blade model). Jack of All Trades
+#       does NOT set it (JackOfAllTrades never re-costs its copies).
+#   upgraded_copy -- TransmutationAction.java:46-48 `if (this.upgraded)
+#       c.upgrade()`: upgraded Transmutation generates UPGRADED copies. The
+#       upgrade runs BEFORE setCostForTurn, so the cost the this-turn zero
+#       replaces is the UPGRADED row's cost.
+COLORLESS_TO_HAND_FLAGS = {
+    "cost_zero_for_turn": 1 << 0,
+    "upgraded_copy": 1 << 1,
 }
 
 # CardFlag bits -- MIRROR of include/sts/engine/types.hpp CardFlag (append-only).

@@ -47,6 +47,8 @@ add_library(sts_engine
     powers/power_frail.cpp
     powers/power_lose_dexterity.cpp
     powers/power_lose_strength.cpp
+    powers/power_magnetism.cpp
+    powers/power_mayhem.cpp
     powers/power_next_turn_block.cpp
     powers/power_plated_armor.cpp
     powers/power_rage.cpp

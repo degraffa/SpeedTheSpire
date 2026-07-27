@@ -1849,17 +1849,20 @@
 # cards ALPHABETICALLY; ids 112-126 map 1:1 onto the fifteen RAREs in that
 # order (the twenty UNCOMMONs above exhaust at 111). B3.11 is split into
 # several stages, each with its own orchestrator-allocated id subset: stage A
-# owns 112, 116, 120, 124 and stage B owns 121, 122, 126.
+# owns 112, 116, 120, 124; stage B owns 121, 122, 126; stage C owns 113, 115,
+# 117, 118, 125 -- the generated-card family.
 #
-# The remaining INTERIOR GAPS (113-115, 117-119, 123, 125) are deliberate
-# placeholders owned by LATER B3.11 stages, not errors -- the same sparse-id
-# shape 101/109 used for B3.10c. The loader enforces id UNIQUENESS, never
-# contiguity, so the holes cost nothing at runtime. Never renumber to close one.
+# The remaining INTERIOR GAPS (114, 119, 123) are deliberate placeholders owned
+# by the LAST B3.11 stage, not errors -- the same sparse-id shape 101/109 used
+# for B3.10c. The loader enforces id UNIQUENESS, never contiguity, so the holes
+# cost nothing at runtime. Never renumber to close one.
 #
 # Every row below carries `color: COLORLESS`, so none of them joins
-# kIroncladAttackPool / kIroncladCombatPool (both `color == "RED"`-gated); all
-# seven join kColorlessCombatPool (COLORLESS + UNCOMMON/RARE, minus HEALING --
-# none of these seven is HEALING-tagged).
+# kIroncladAttackPool / kIroncladSkillPool / kIroncladCombatPool (all three
+# `color == "RED"`-gated); all twelve join kColorlessCombatPool (COLORLESS +
+# UNCOMMON/RARE, minus HEALING -- none of these twelve is HEALING-tagged), which
+# is the pool Jack of All Trades, Magnetism and Transmutation all draw from, so
+# each stage-C row is also a possible OUTPUT of two of its own siblings.
 
 - id: 112
   name: APOTHEOSIS
@@ -1877,6 +1880,37 @@
   upgraded:
     - {op: UPGRADE_ALL, target: SELF}
 
+- id: 113
+  name: CHRYSALIS
+  game_id: "Chrysalis"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: NONE
+  flags: [exhaust]
+  provenance: "Chrysalis (Chrysalis.java:20-56): ctor (:25-29) cost 2, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. upgrade (:44-50) upgradeMagicNumber(2) -> 5 and does NOT touch the cost or the exhaust flag, so both rows cost 2 and both exhaust. use (:31-42) is the loop `for (i < magicNumber) { card = returnTrulyRandomCardInCombat(SKILL).makeCopy(); if (card.cost > 0) { card.cost = 0; card.costForTurn = 0; card.isCostModified = true; } addToBot(new MakeTempCardInDrawPileAction(card, 1, true, true)); }`. Metamorphosis (id 118) is the SAME method with CardType.ATTACK, which is why the type is a step operand rather than a second opcode. POOL: returnTrulyRandomCardInCombat(type) (AbstractDungeon.java:964-979) concatenates srcCommonCardPool, srcUncommonCardPool and srcRareCardPool IN THAT ORDER, keeping only members of that CardType without CardTags.HEALING, then takes ONE cardRandomRng.random(list.size()-1) -- the generated kIroncladSkillPool, the SKILL sibling of the kIroncladAttackPool Infernal Blade already draws from, emitted by the same generator rule and inheriting the same documented registry-id pool-ORDER deviation. STREAM ORDER is the reason this is ONE fused opcode (RANDOM_CARD_TO_DRAW) and not N steps: use() performs ALL N pool rolls up front (addToBot consumes no rng), and the N queued MakeTempCardInDrawPileActions resolve afterwards, each spending ONE cardRandomRng draw in CardGroup.addToRandomSpot (CardGroup.java:463-469; an EMPTY draw pile is a free plain append). The net stream is N rolls THEN N inserts -- an interleaved roll/insert/roll/insert encoding picks different cards AND different positions. Nothing can slip between the halves: the N actions are consecutive queue entries that queue nothing themselves, and the played Chrysalis's own UseCardAction (with its Strange Spoon roll) is queued BEHIND all of them (AbstractPlayer.useCard:1370). DESTINATION: the 4-arg MakeTempCardInDrawPileAction ctor (:44-46) is (card, 1, shuffleInto = true, autoPosition = true) with toBottom = false, so ShowCardAndAddToDrawPileEffect's ctor (:27-52) takes the randomSpot branch at :47-48 -- drawPile.addToRandomSpot. COST: the zeroing writes BOTH card.cost and card.costForTurn, so it is PERMANENT for the combat, the MADNESS (opcode 48) model and NOT setCostForTurn's this-turn one; makeStatEquivalentCopy carries cost and costForTurn through both copy hops (AbstractCard.java:838-840), so the zero survives into the pile. The `cost > 0` guard leaves an X-cost card (Java cost -1, CardFlag::XCOST here) and an already-free card alone."
+  effects:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 3, card_type: SKILL}
+  upgraded:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 5, card_type: SKILL}
+
+- id: 115
+  name: MAGNETISM
+  game_id: "Magnetism"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 2
+  upgraded_cost: 1
+  target: SELF
+  flags: []
+  provenance: "Magnetism (Magnetism.java:20-47): ctor (:25-28) cost 2, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 1. use (:30-33) is a single addToBot ApplyPowerAction(p, p, MagnetismPower(p, magicNumber), magicNumber). upgrade (:35-41) is upgradeBaseCost(1) ONLY -- cost 2 -> 1, with NO upgradeMagicNumber -- so the effect program is identical at both levels and only the cost row differs (the Apotheosis precedent, id 112). PowerId MAGNETISM (powers.yaml id 82) carries the behaviour: a native AT_START_OF_TURN body that gates on areMonstersBasicallyDead and then, per stack, spends ONE cardRandomRng draw over kColorlessCombatPool AT HOOK TIME and queues the MakeTempCardInHandAction the Java queues -- see that row for the full reading of MagnetismPower.java:30-49 and for why the roll timing is native rather than a queued RANDOM_COLORLESS_TO_HAND."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAGNETISM}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAGNETISM}
+
 - id: 116
   name: MASTER_OF_STRATEGY
   game_id: "Master of Strategy"
@@ -1891,6 +1925,37 @@
     - {op: DRAW, target: SELF, amount: 3}
   upgraded:
     - {op: DRAW, target: SELF, amount: 4}
+
+- id: 117
+  name: MAYHEM
+  game_id: "Mayhem"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 2
+  upgraded_cost: 1
+  target: SELF
+  flags: []
+  provenance: "Mayhem (Mayhem.java:20-47): ctor (:25-28) cost 2, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 1. use (:30-33) is a single addToBot ApplyPowerAction(p, p, MayhemPower(p, magicNumber), magicNumber). upgrade (:40-46) is upgradeBaseCost(1) ONLY -- cost 2 -> 1, no upgradeMagicNumber -- so both rows carry the identical program and only the cost differs (the Apotheosis / Magnetism precedent). PowerId MAYHEM (powers.yaml id 81) carries the behaviour: a native AT_START_OF_TURN body queueing, per stack, one PLAY_CARD off the DRAW TOP at a random living monster with NO exhaust flag. That row states the CFR evidence gap in full (MayhemPower.java:37 is an undecompilable anonymous inner class) and the DistilledChaosPotion.java:41 / Havoc.java:31 reconstruction it rests on."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAYHEM}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAYHEM}
+
+- id: 118
+  name: METAMORPHOSIS
+  game_id: "Metamorphosis"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: NONE
+  flags: [exhaust]
+  provenance: "Metamorphosis (Metamorphosis.java:20-56) is Chrysalis with CardType.ATTACK everywhere CardType.SKILL appears, which is exactly why the encoding puts the type in the step's `card_type:` rather than in two opcodes. ctor (:25-29) cost 2, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. upgrade (:44-50) upgradeMagicNumber(2) -> 5, cost and exhaust unchanged. use (:31-42) is the same loop, calling returnTrulyRandomCardInCombat(CardType.ATTACK) (:34) -- the generated kIroncladAttackPool, the very pool Infernal Blade (opcode 33) already draws from, so this row needed no new pool at all. Every accounting note on the Chrysalis row (id 113) applies unchanged: N pool rolls THEN N CardGroup.addToRandomSpot inserts, a free append into an empty draw pile, base library copies, and the permanent both-fields cost zeroing gated on `cost > 0` -- which is the one place the ATTACK filter differs observably, since the RED attack pool DOES contain an X-cost card (Whirlwind, cost -1) that the guard must leave at X."
+  effects:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 3, card_type: ATTACK}
+  upgraded:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 5, card_type: ATTACK}
 
 - id: 120
   name: SADISTIC_NATURE
@@ -1958,6 +2023,21 @@
   upgraded:
     - {op: DRAW, target: SELF, amount: 2}
     - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1, guard: hand_nonempty}
+
+- id: 125
+  name: TRANSMUTATION
+  game_id: "Transmutation"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: -1
+  target: SELF
+  flags: [exhaust]
+  provenance: "Transmutation (Transmutation.java:20-51): ctor (:25-28) cost -1 (X), SKILL, COLORLESS, RARE, CardTarget.SELF, exhaust = true. upgrade (:43-50) only calls upgradeName + rewrites the description -- it sets `upgraded` and touches NOTHING else, so the exhaust flag is KEPT on the upgraded row and the two rows differ solely by the generated copies' upgrade level. use (:30-36) clamps energyOnUse UP to EnergyPanel.totalCount and queues TransmutationAction(p, upgraded, freeToPlayOnce, energyOnUse). TransmutationAction.update (:33-57) verbatim: effect = EnergyPanel.totalCount, overridden by energyOnUse when that is not -1; Chemical X adds 2; and `if (effect > 0)` guards BOTH the generation loop AND the energy spend -- so X == 0 without Chemical X does NOTHING AT ALL: no cards, NO cardRandomRng draws, and no energy consumed. Each of the `effect` iterations is: returnTrulyRandomColorlessCardInCombat().makeCopy() (AbstractDungeon.java:981-996 -- srcColorlessCardPool minus CardTags.HEALING, ONE cardRandomRng random(size-1)); then `if (upgraded) c.upgrade()`; then c.setCostForTurn(0); then addToBot(new MakeTempCardInHandAction(c, 1)). The queued MakeTempCardInHandActions consume no rng, so the stream is exactly `effect` sequential pool draws. DUPLICATES ARE ALLOWED (each draw is independent) and each copy takes MakeTempCardInHandAction's hand-cap spill to the discard pile (:71-77). The 0-cost is THIS TURN ONLY -- setCostForTurn (AbstractCard.java:2001-2011), the COST_MODIFIED_FOR_TURN model opcode 33 uses, in deliberate contrast to Chrysalis/Metamorphosis's permanent zeroing; note setCostForTurn is a NO-OP while costForTurn < 0, so a generated X-cost colorless card (this very card is in the pool) stays X-cost. The upgrade runs BEFORE the re-cost, so on the upgraded row it is the UPGRADED card's cost that the this-turn zero replaces. Encoded as ONE RANDOM_COLORLESS_TO_HAND per X repetition (amount 1): CardFlag::XCOST makes card_play.cpp repeat the WHOLE program energyOnUse (+2 with Chemical X) times and then zero the energy, the Whirlwind precedent, so X == 0 falls out as ZERO repetitions -- the Java's `effect > 0` guard needs no separate expression, and the energy is zeroed only on a non-autoplay play, matching `if (!freeToPlayOnce) p.energy.use(EnergyPanel.totalCount)` given that nothing between the snapshot and the spend changes the total. The two new default-0 `extra` bits (interp.hpp kColorlessToHand*) are what let opcode 52 carry this without a new opcode; Jack of All Trades authors neither and its rows are byte-identical."
+  effects:
+    - {op: RANDOM_COLORLESS_TO_HAND, target: SELF, amount: 1, generated: [cost_zero_for_turn]}
+  upgraded:
+    - {op: RANDOM_COLORLESS_TO_HAND, target: SELF, amount: 1, generated: [cost_zero_for_turn, upgraded_copy]}
 
 - id: 126
   name: VIOLENCE

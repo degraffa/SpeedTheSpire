@@ -228,7 +228,25 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // still exactly {STRIKE, DEFEND, BASH}; and all three are CardType.SKILL,
     // so the POWER-type count stays at 9 and Bottled Tornado's gate is
     // untouched. Neither gate moved; the number below is not merely bumped.
-    static_assert(sts::registry::manifest::kCardsCount == 116,
+    // Checked for the five colorless RARE rows added alongside this comment
+    // (Chrysalis, Magnetism, Mayhem, Metamorphosis, Transmutation). BASIC: NO
+    // for all five -- every ctor passes CardRarity.RARE (Chrysalis.java:26,
+    // Magnetism.java:26, Mayhem.java:26, Metamorphosis.java:26,
+    // Transmutation.java:26), so the hard-coded BASIC set stays exactly
+    // {STRIKE, DEFEND, BASH}. POWER: YES for TWO of them -- Magnetism.java:26
+    // and Mayhem.java:26 both pass CardType.POWER (Chrysalis, Metamorphosis and
+    // Transmutation are CardType.SKILL). That is the same "only widens the
+    // already-live gate" shape the red RARE batch's five POWER cards and
+    // Sadistic Nature set: ctx.deck_has_power is a plain type scan with NO
+    // rarity and no color clause (CardHelper.hasCardType, :80-86), so two more
+    // POWER rows can only make an already-satisfiable predicate satisfiable in
+    // more decks. The registry now has 11 POWER-type cards; the gate was
+    // already live and stays live. And the follow-up question these two raise
+    // has a definite answer: Bottled Tornado does not SELECT the bottled card
+    // here -- canSpawn (:93-95) only asks whether ANY POWER is in the master
+    // deck -- so a COLORLESS POWER changes the predicate's inputs and nothing
+    // else in this file.
+    static_assert(sts::registry::manifest::kCardsCount == 121,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

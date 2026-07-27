@@ -25,7 +25,7 @@ from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
                     CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT,
                     CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS,
                     CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
-                    CHOICE_TYPE_FILTER_SHIFT,
+                    CHOICE_TYPE_FILTER_SHIFT, COLORLESS_TO_HAND_FLAGS,
                     DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
@@ -68,6 +68,11 @@ GENERAL_OPS = frozenset({
     # and the draw pile / hand are execute-time reads, so the item carries
     # identically from any domain's queue helper.
     "DRAW_PILE_FETCH",
+    # B3.11 stage C (Chrysalis / Metamorphosis): `amount` is the loop count and
+    # the CardType selecting the pool rides in `extra`; the draw pile is an
+    # execute-time read and the generated copies are fresh library rows, so no
+    # operand needs the played card's instance.
+    "RANDOM_CARD_TO_DRAW",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -364,6 +369,38 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             raise fail(f"{owner} DRAW_PILE_FETCH has unknown card_type "
                        f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
         return CARD_TYPES[ct]
+
+    if op == "RANDOM_CARD_TO_DRAW":
+        # `extra` = the CardType the RED combat pool is filtered to
+        # (returnTrulyRandomCardInCombat(type)'s argument -- CardType.SKILL for
+        # Chrysalis.java:34, CardType.ATTACK for Metamorphosis.java:34).
+        # Required and never defaulted, for the same reason CONDITIONAL_DRAW's
+        # and DRAW_PILE_FETCH's are: ATTACK packs as 0, so an omitted key would
+        # silently author Metamorphosis's semantics onto Chrysalis's row.
+        ct = step.get("card_type")
+        if ct is None:
+            raise fail(f"{owner} RANDOM_CARD_TO_DRAW needs an explicit "
+                       f"card_type: (known: {sorted(CARD_TYPES)})")
+        ct = str(ct).upper()
+        if ct not in CARD_TYPES:
+            raise fail(f"{owner} RANDOM_CARD_TO_DRAW has unknown card_type "
+                       f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
+        return CARD_TYPES[ct]
+
+    if op == "RANDOM_COLORLESS_TO_HAND":
+        # `extra` = the COLORLESS_TO_HAND_FLAGS bit set, authored as a list
+        # (`generated: [cost_zero_for_turn, upgraded_copy]`). Absent -> 0, which
+        # is exactly what Jack of All Trades' two rows packed before these bits
+        # existed, so they stay byte-identical.
+        bits = 0
+        for name in (step.get("generated") or []):
+            key = str(name).lower()
+            if key not in COLORLESS_TO_HAND_FLAGS:
+                raise fail(f"{owner} RANDOM_COLORLESS_TO_HAND has unknown "
+                           f"generated flag {name!r} (known: "
+                           f"{sorted(COLORLESS_TO_HAND_FLAGS)})")
+            bits |= COLORLESS_TO_HAND_FLAGS[key]
+        return bits
 
     if op in ("DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE"):
         # Dynamic per-instance damage: `increment` is the first-upgrade

@@ -234,11 +234,23 @@ void set_cost_for_turn(CombatState& s, CardPoolIndex pi, int amount) noexcept {
     return static_cast<int>(c.cost_now);
 }
 
-// Allocate a fresh base library copy and add it to the hand, spilling to
-// discard at the hand cap. Discovery optionally applies setCostForTurn(0);
-// Jack of All Trades leaves the registry cost unchanged.
-void add_library_copy_to_hand(CombatState& s, CardId id,
-                              bool free_this_turn) noexcept {
+// Allocate a fresh library copy and add it to the hand, spilling to discard at
+// the hand cap. Discovery optionally applies setCostForTurn(0); Jack of All
+// Trades leaves the registry cost unchanged.
+//
+// `upgraded` is TransmutationAction's `if (this.upgraded) c.upgrade()`
+// (TransmutationAction.java:46-48): the copy is generated at upgrade level 1, so
+// its registry cost/flags come from the UPGRADED row -- and, because the Java
+// upgrades BEFORE setCostForTurn(0) (:49), that is the cost the this-turn zero
+// replaces and the cost the end-of-turn sweep restores.
+//
+// The `free_this_turn && cost != 0` guard is also the X-cost story:
+// setCostForTurn is a no-op while costForTurn < 0 (AbstractCard.java:2002), and
+// an X-cost row carries CardFlag::XCOST with a registry cost of 0, so a
+// generated X-cost card (Transmutation can generate another Transmutation) keeps
+// its X-cost play semantics and gains no this-turn marker.
+void add_library_copy_to_hand(CombatState& s, CardId id, bool free_this_turn,
+                              bool upgraded = false) noexcept {
     const CardDef* def = card_def(id);
     if (def == nullptr) {
         return;
@@ -253,12 +265,13 @@ void add_library_copy_to_hand(CombatState& s, CardId id,
     if (slot < 0) {
         return;
     }
+    const uint8_t upg = upgraded ? 1 : 0;
     CardInstance& c = s.card_pool[slot];
     c.card_id = static_cast<uint16_t>(id);
-    c.upgrade = 0;
-    c.cost_now = free_this_turn ? 0 : card_cost(*def, 0);
-    c.flags = card_flags(*def, 0);
-    if (free_this_turn && card_cost(*def, 0) != 0) {
+    c.upgrade = upg;
+    c.cost_now = free_this_turn ? 0 : card_cost(*def, upg);
+    c.flags = card_flags(*def, upg);
+    if (free_this_turn && card_cost(*def, upg) != 0) {
         c.flags = static_cast<uint16_t>(
             c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
     }
@@ -1118,16 +1131,125 @@ void op_enlightenment(CombatState& s, bool for_rest_of_combat) noexcept {
     }
 }
 
-void op_random_colorless_to_hand(CombatState& s, int count) noexcept {
+// RANDOM_COLORLESS_TO_HAND. Two consumers, distinguished only by `flags`:
+//   * Jack of All Trades (JackOfAllTrades.use:31-35, flags == 0): `amount`
+//     independent returnTrulyRandomColorlessCardInCombat() draws
+//     (AbstractDungeon.java:981-996 -- ONE cardRandomRng random(size-1) each
+//     over srcColorlessCardPool minus HEALING), each a BASE copy at its
+//     registry cost, into the hand with the MakeTempCardInHandAction hand-cap
+//     spill to discard. Duplicates are allowed: each draw is independent.
+//   * Transmutation, ONE repetition per X energy (TransmutationAction.update
+//     :44-51). Same draw, then `if (upgraded) c.upgrade()` followed by
+//     `c.setCostForTurn(0)` -- kColorlessToHandUpgradedCopy and
+//     kColorlessToHandCostZeroForTurn. The order matters and is preserved: the
+//     this-turn zero replaces the UPGRADED row's cost.
+// The rolls are sequential with nothing between them (the queued
+// MakeTempCardInHandActions consume no rng), so N calls cost exactly N draws.
+void op_random_colorless_to_hand(CombatState& s, int count,
+                                 uint32_t flags) noexcept {
     static_assert(kColorlessCombatPoolCount > 0,
                   "Jack of All Trades needs a non-empty colorless pool");
+    const bool free_this_turn = (flags & kColorlessToHandCostZeroForTurn) != 0u;
+    const bool upgraded = (flags & kColorlessToHandUpgradedCopy) != 0u;
     for (int i = 0; i < count; ++i) {
         const int32_t pick = random(
             s.card_random_rng,
             static_cast<int32_t>(kColorlessCombatPoolCount) - 1);
         add_library_copy_to_hand(
             s, kColorlessCombatPool[static_cast<unsigned>(pick)],
-            /*free_this_turn=*/false);
+            free_this_turn, upgraded);
+    }
+}
+
+// RANDOM_CARD_TO_DRAW (Chrysalis, type SKILL / Metamorphosis, type ATTACK --
+// Chrysalis.java:31-42 and Metamorphosis.java:31-42, the same loop). The two
+// halves below are the whole point of fusing the loop into one opcode: the Java
+// performs ALL `count` pool rolls inside use() and only then resolves the
+// `count` queued MakeTempCardInDrawPileActions, so the cardRandomRng stream is
+// [roll x count][insert x count] -- never interleaved. See the Opcode enum
+// comment in interp.hpp for why nothing can slip between the two halves.
+//
+// Each pick is one random(size-1) over the type-filtered RED combat pool
+// (returnTrulyRandomCardInCombat(type), AbstractDungeon.java:964-979), and the
+// generated instance is a BASE library copy whose cost, when the registry base
+// is > 0, is zeroed PERMANENTLY for the combat: Chrysalis.java:35-38 writes BOTH
+// card.cost and card.costForTurn, so this is op_madness's model (cost_now = 0
+// with no COST_MODIFIED_FOR_TURN marker), NOT setCostForTurn's. An X-cost card
+// (Java cost -1, our CardFlag::XCOST with base cost 0) and an already-0 card
+// both fail the `cost > 0` guard and keep their registry cost -- an X-cost
+// generated card is still an X-cost card.
+//
+// The insertion is CardGroup.addToRandomSpot (:463-469) via
+// ShowCardAndAddToDrawPileEffect's ctor (:47-48; randomSpot true, toBottom
+// false -- MakeTempCardInDrawPileAction's 4-arg ctor, :44-46): ONE
+// card_random_rng draw over [0, size-1] per insert, or a free plain append when
+// the draw pile is EMPTY at that moment. The pile grows as the inserts proceed,
+// so insert k sees the k-1 cards already added.
+void op_random_card_to_draw(CombatState& s, int count, uint8_t type) noexcept {
+    static_assert(kIroncladSkillPoolCount > 0 && kIroncladAttackPoolCount > 0,
+                  "Chrysalis / Metamorphosis need non-empty type pools");
+    if (count <= 0) {
+        return;
+    }
+    const bool want_skill = type == static_cast<uint8_t>(CardType::SKILL);
+    if (!want_skill && type != static_cast<uint8_t>(CardType::ATTACK)) {
+        return;  // defensive: only the two authored filters have an emitted pool
+    }
+    const CardId* pool = want_skill ? kIroncladSkillPool.data()
+                                    : kIroncladAttackPool.data();
+    const int pool_count =
+        want_skill ? kIroncladSkillPoolCount : kIroncladAttackPoolCount;
+    // Half 1 -- every pool roll, in order, before any insertion. The roll loop
+    // runs the FULL `count` regardless of what the piles can hold, because that
+    // is what the Java's use() does; only the storage is bounded (the generated
+    // cards are all headed for the draw pile, so its cap is the bound).
+    CardId picked[kDrawCap];
+    int n = 0;
+    for (int i = 0; i < count; ++i) {
+        const int32_t pick =
+            random(s.card_random_rng, static_cast<int32_t>(pool_count) - 1);
+        if (n < kDrawCap) {
+            picked[n++] = pool[static_cast<unsigned>(pick)];
+        }
+    }
+    // Half 2 -- the queued MakeTempCardInDrawPileActions, in queue order.
+    for (int i = 0; i < n; ++i) {
+        const CardDef* def = card_def(picked[i]);
+        if (def == nullptr) {
+            continue;  // defensive; the pool only holds registry rows
+        }
+        if (s.draw_count >= kDrawCap) {
+            return;  // defensive; nothing left to insert into
+        }
+        int slot = -1;
+        for (int k = 0; k < kCardPoolCap; ++k) {
+            if (s.card_pool[k].card_id == static_cast<uint16_t>(CardId::NONE)) {
+                slot = k;
+                break;
+            }
+        }
+        if (slot < 0) {
+            return;  // pool exhausted (defensive; 160-row cap, design §4.2)
+        }
+        CardInstance& c = s.card_pool[slot];
+        c.card_id = static_cast<uint16_t>(picked[i]);
+        c.upgrade = 0;  // makeCopy() -- a base library card
+        c.flags = card_flags(*def, 0);
+        c.misc = 0;
+        const uint8_t base = card_cost(*def, 0);
+        // `if (card.cost > 0)` -- an X-cost card has Java cost -1 (CardFlag::
+        // XCOST here, base cost 0) and so never enters this branch.
+        c.cost_now = (base > 0) ? 0 : base;
+        const CardPoolIndex idx = static_cast<CardPoolIndex>(slot);
+        int pos = 0;
+        if (s.draw_count > 0) {
+            pos = random(s.card_random_rng, s.draw_count - 1);
+        }
+        for (int j = s.draw_count; j > pos; --j) {
+            s.draw[j] = s.draw[j - 1];
+        }
+        s.draw[pos] = idx;
+        ++s.draw_count;
     }
 }
 

@@ -74,6 +74,12 @@ using sts::registry::kPoolableCurses;
 // order is a known, documented deviation until an oracle capture pins it).
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
+// The SKILL sibling of the pool above: returnTrulyRandomCardInCombat(SKILL) is
+// the SAME method with one CardType changed (Chrysalis.java:34 vs Infernal
+// Blade's / Metamorphosis.java:34's ATTACK). Same generator derivation and the
+// SAME documented pool-ORDER deviation -- opcode 55's filtered view inherits it.
+using sts::registry::kIroncladSkillPoolCount;
+using sts::registry::kIroncladSkillPool;
 // Full non-healing RED combat pool (Discovery / returnTrulyRandomCardInCombat).
 using sts::registry::kIroncladCombatPoolCount;
 using sts::registry::kIroncladCombatPool;

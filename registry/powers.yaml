@@ -577,3 +577,44 @@
       - {op: APPLY_POWER, target: SELF, amount: 0, power: STRENGTH}
       - {op: REMOVE_POWER, target: SELF, power: SHACKLED}
   provenance: "GainStrengthPower (GainStrengthPower.java:18-84): POWER_ID \"Shackled\" (:20), DEBUFF (:31), additive stackPower (:45-57). atEndOfTurn (:79-84) queues ApplyPowerAction(owner, owner, StrengthPower(owner, amount), amount) then RemoveSpecificPowerAction(owner, owner, POWER_ID), in that order. Dark Shackles is the S1 applier."
+
+# --- B3.11 stage C colorless-RARE card powers (ids 81-82) --------------------
+# Both names were searched for in this file before being appended: neither
+# "Mayhem" nor "Magnetism" had a row, and the generator's duplicate-name check
+# would have rejected a re-add anyway (the B3.19 Metallicize incident). Ids
+# 81-82 come out of the block this task owns; 79-80 belong to another stage and
+# 83-86 to later B3.11 stages, so all of those stay untouched gaps here.
+#
+# Checked, not assumed, against BOTH count-guarded switch families by reading
+# each class in full: MayhemPower's only overrides are updateDescription and
+# atStartOfTurn (MayhemPower.java:28-39), and MagnetismPower's are
+# updateDescription, stackPower and atStartOfTurn (MagnetismPower.java:30-49).
+# NEITHER overrides atDamageGive / atDamageReceive / atDamageFinalReceive
+# (interp_damage.cpp) nor modifyBlock / modifyBlockLast (interp_block.cpp), so
+# none of those switches needed a case -- only their kPowersCount guards moved.
+#
+# Both bind AT_START_OF_TURN, the §5.2 step-6 PRE-DRAW phase
+# (applyStartOfTurnPowers, GameActionManager.java:345; action_queue.cpp
+# start_of_turn dispatches it before it queues the turn's DrawCardAction), which
+# is why a Mayhem-played card is not among the five cards drawn and a Magnetism
+# card is in hand before the draw resolves. Berserk (id 43) is the existing
+# data-program precedent for that hook; both rows here are native instead, for
+# the reasons stated per row.
+
+- id: 81
+  name: MAYHEM
+  game_id: "Mayhem"
+  type: BUFF
+  native: true
+  hooks:
+    at_start_of_turn: []      # native: per stack, one deferred play-the-draw-top action
+  provenance: "MayhemPower (MayhemPower.java:12-40): POWER_ID \"Mayhem\" (:14), ctor (:19-26) takes the amount and sets NO type, so it is the AbstractPower default BUFF (AbstractPower.java:67), and it does NOT override stackPower, so a second Mayhem stacks additively (AbstractPower.stackPower). atStartOfTurn (:33-39) is `this.flash(); for (int i = 0; i < this.amount; ++i) this.addToBot(new <anonymous AbstractGameAction>)`. EVIDENCE GAP, STATED NOT PAPERED OVER: CFR could not decompile that queued action -- MayhemPower.java:37 reads literally \"/* Unavailable Anonymous Inner Class!! */\" and no MayhemPower$1 class file exists in the reference tree. The body is RECONSTRUCTED from the two verified in-repo parallels that queue the same effect, both read in full: DistilledChaosPotion.use (DistilledChaosPotion.java:41) -- addToBot(new PlayTopCardAction(AbstractDungeon.getCurrRoom().monsters.getRandomMonster(null, true, AbstractDungeon.cardRandomRng), false)) -- and Havoc.use (Havoc.java:31), the same shape with exhausts = TRUE. Mayhem is the DistilledChaos shape, exhausts = FALSE: the played card files normally, which is precisely what distinguishes Mayhem from Havoc. The anonymous WRAPPER is itself evidence about timing -- in DistilledChaosPotion getRandomMonster is an argument evaluated when the PlayTopCardAction is constructed, whereas wrapping it defers the roll to when the queued action EXECUTES, i.e. during the start-of-turn queue drain rather than during the power-hook walk. Encoded (power_mayhem.cpp) as one add_to_bottom PLAY_CARD per stack with kPlayCardFromDrawTop, NO exhaust bit and tgt == kActorRandomEnemy: execute_opcode's random-enemy fan-out spends exactly ONE card_random_rng draw (roll_random_target == getRandomMonster(null, true, cardRandomRng)) at execute time, ahead of op_play_card's pile checks -- the same order the Java has. Everything else the action does is already landed PLAY_CARD behaviour and is reused unchanged: the empty-draw EmptyDeckShuffleAction retry (PlayTopCardAction.java:38-43, one shuffle_rng draw), the both-piles-empty no-op (:34-37), limbo + NewQueueCardAction with the free autoplay energy snapshot (:44-58), the dequeue-time canUse revalidation, and the no-trigger UseCardAction filing an unplayable card takes. Applied by the Mayhem card with amount 1 (Mayhem.java:27,32)."
+
+- id: 82
+  name: MAGNETISM
+  game_id: "Magnetism"
+  type: BUFF
+  native: true
+  hooks:
+    at_start_of_turn: []      # native: monsters-alive gate, then per stack ONE hook-time colorless pool roll + a queued MakeTempCardInHand
+  provenance: "MagnetismPower (MagnetismPower.java:13-50): POWER_ID \"Magnetism\" (:15), ctor (:21-28) sets no type -> the AbstractPower default BUFF (AbstractPower.java:67); stackPower (:40-44) is `this.fontScale = 8.0f; this.amount += stackAmount` -- additive, the font scale being presentation. atStartOfTurn (:30-38): `if (!AbstractDungeon.getMonsters().areMonstersBasicallyDead()) { flash(); for (int i = 0; i < this.amount; ++i) addToBot(new MakeTempCardInHandAction(AbstractDungeon.returnTrulyRandomColorlessCardInCombat().makeCopy(), 1, false)); }`. NATIVE for two reasons no data program can express. (1) The areMonstersBasicallyDead gate (MonsterGroup.java:90-95, every monster dying or escaped) -- the DarkEmbracePower precedent, id 7, and monster_dead_or_escaped is that predicate here. (2) ROLL TIMING: returnTrulyRandomColorlessCardInCombat() is an ARGUMENT of the MakeTempCardInHandAction constructor, so all `amount` pool draws happen WHILE THE HOOK RUNS (synchronously inside applyStartOfTurnPowers) and only the card creation is deferred. Queuing a RANDOM_COLORLESS_TO_HAND item instead would move those draws to the queue drain, which is observable as soon as another start-of-turn power ahead of this one in the power list consumes card_random_rng from a queued action of its own -- Mayhem is exactly such a power. power_magnetism.cpp therefore rolls here and queues the SAME action the Java queues: MAKE_CARD into CardPile::HAND with count 1, whose op_make_card body IS MakeTempCardInHandAction, hand-cap spill to the discard pile included (MakeTempCardInHandAction.java:71-77). The pool is returnTrulyRandomColorlessCardInCombat (AbstractDungeon.java:981-996): srcColorlessCardPool minus CardTags.HEALING, ONE cardRandomRng random(size-1) -- the generated kColorlessCombatPool, the same pool and the same one-draw accounting opcode 52 (Jack of All Trades) uses, and the same documented registry-id pool-ORDER deviation. The copies are BASE library copies at their registry cost: makeCopy(), not makeStatEquivalentCopy, and this power re-costs nothing (contrast Transmutation). Applied by the Magnetism card with amount 1 at BOTH levels -- Magnetism.upgrade (Magnetism.java:36-41) is upgradeBaseCost(1) only, so the magicNumber never moves."

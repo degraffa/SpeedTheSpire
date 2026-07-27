@@ -288,7 +288,17 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_enlightenment(s, item.amount != 0);
             return;
         case Opcode::RANDOM_COLORLESS_TO_HAND:
-            op_random_colorless_to_hand(s, item.amount);
+            // Jack of All Trades (flags 0) and Transmutation's per-X repetition
+            // (kColorlessToHand* -- cost 0 for the turn, and the upgraded row's
+            // copy on the upgraded card).
+            op_random_colorless_to_hand(s, item.amount, item.flags);
+            return;
+        case Opcode::RANDOM_CARD_TO_DRAW:
+            // Chrysalis / Metamorphosis: `amount` picks over the RED combat pool
+            // filtered to the CardType in `flags`, ALL rolled before ANY of the
+            // `amount` random-spot draw-pile insertions.
+            op_random_card_to_draw(s, item.amount,
+                                   random_card_to_draw_type_from_flags(item.flags));
             return;
         case Opcode::CANNOT_LOSE:
             // CannotLoseAction.update (CannotLoseAction.java:12-15): latch the

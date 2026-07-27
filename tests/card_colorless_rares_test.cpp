@@ -8,6 +8,13 @@
 // draw-pile-sourced deck-to-hand verbs -- plus the DRAW_PILE_FETCH opcode and
 // the PutOnDeckAction forced-path RNG fix that Warcry and Thinking Ahead share.
 //
+// B3.11 stage C adds the generated-card family -- Chrysalis, Magnetism, Mayhem,
+// Metamorphosis, Transmutation -- plus the RANDOM_CARD_TO_DRAW opcode, the two
+// new RANDOM_COLORLESS_TO_HAND flag bits and PowerIds MAYHEM / MAGNETISM. The
+// load-bearing cases there are Chrysalis's stream ORDER (all N pool rolls, THEN
+// all N random-spot inserts) and the permanent-vs-this-turn cost split between
+// Chrysalis and Transmutation.
+//
 // Expected values are hand-computed from the cited decompiled Java (see the
 // per-row provenance in registry/cards.yaml); the seeded permutation cases
 // build an INDEPENDENT oracle out of the golden-tested JDK/xorshift primitives
@@ -27,7 +34,9 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/piles.hpp"
+#include "sts/engine/power_hooks.hpp"  // dispatch_at_start_of_turn (Mayhem/Magnetism)
 #include "sts/engine/powers.hpp"
+#include "sts/engine/relics.hpp"       // RelicId (Chemical X)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -151,6 +160,18 @@ void QueueDrawToHand(CombatState& s, CardType type, int amount = 1) {
     add_to_bottom(s, it);
 }
 
+// A bare queued RANDOM_CARD_TO_DRAW, for the accounting cases a hand play
+// cannot isolate (the empty-draw-pile free append, the X-cost guard).
+ActionQueueItem RandomCardToDrawItem(int amount, CardType type) {
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::RANDOM_CARD_TO_DRAW);
+    it.src = kActorPlayer;
+    it.tgt = kActorPlayer;
+    it.amount = amount;
+    it.flags = make_random_card_to_draw_flags(static_cast<uint8_t>(type));
+    return it;
+}
+
 ActionQueueItem DrawPileFetchItem(int amount, CardType type) {
     ActionQueueItem it{};
     it.opcode = static_cast<uint16_t>(Opcode::DRAW_PILE_FETCH);
@@ -169,18 +190,23 @@ StepResult Step(CombatState& s, Action a) {
 }
 
 // ===========================================================================
-// Registry: the exact four-card roster this stage owns, in library order, with
-// its interior gaps left reserved for later B3.11 stages.
+// Registry: the exact twelve-card roster stages A, B and C own between them, in
+// library order, with the interior gaps left reserved for the last B3.11 stage.
 // ===========================================================================
 
 TEST(CardColorlessRaresRegistry, ExactRosterAndReservedGaps) {
-    const std::array<std::pair<int, CardId>, 7> roster{{
+    const std::array<std::pair<int, CardId>, 12> roster{{
         {112, CardId::APOTHEOSIS},
+        {113, CardId::CHRYSALIS},
+        {115, CardId::MAGNETISM},
         {116, CardId::MASTER_OF_STRATEGY},
+        {117, CardId::MAYHEM},
+        {118, CardId::METAMORPHOSIS},
         {120, CardId::SADISTIC_NATURE},
         {121, CardId::SECRET_TECHNIQUE},
         {122, CardId::SECRET_WEAPON},
         {124, CardId::THINKING_AHEAD},
+        {125, CardId::TRANSMUTATION},
         {126, CardId::VIOLENCE},
     }};
     for (const auto& [id, card] : roster) {
@@ -189,12 +215,16 @@ TEST(CardColorlessRaresRegistry, ExactRosterAndReservedGaps) {
         ASSERT_NE(d, nullptr);
         EXPECT_EQ(d->id, card);
     }
-    // 113-115, 117-119, 123, 125: owned by later B3.11 stages. A reservation
-    // nothing asserts is indistinguishable from an omission.
-    for (const int reserved : {113, 114, 115, 117, 118, 119, 123, 125}) {
+    // 114, 119, 123: owned by the last B3.11 stage. A reservation nothing
+    // asserts is indistinguishable from an omission.
+    for (const int reserved : {114, 119, 123}) {
         EXPECT_EQ(card_def(static_cast<CardId>(reserved)), nullptr)
             << "id " << reserved << " is reserved and must have no row";
     }
+    // The two PowerIds the generated-card family owns, pinned next to the
+    // CardIds they are applied by.
+    EXPECT_EQ(static_cast<int>(PowerId::MAYHEM), 81);
+    EXPECT_EQ(static_cast<int>(PowerId::MAGNETISM), 82);
 }
 
 TEST(CardColorlessRaresRegistry, CostsTypesFlagsAndTargeting) {
@@ -1176,10 +1206,10 @@ TEST(CardColorlessRaresViolence, FullHandSendsEveryPickToTheDiscard) {
 }
 
 // ===========================================================================
-// Pool membership: the colorless combat pool grows by exactly these three
+// Pool membership: the colorless combat pool grows by exactly these rows
 // ===========================================================================
 
-TEST(CardColorlessRaresRegistry, AllSevenJoinTheColorlessCombatPool) {
+TEST(CardColorlessRaresRegistry, AllTwelveJoinTheColorlessCombatPool) {
     auto pool_has = [](CardId id) {
         for (const CardId c : kColorlessCombatPool) {
             if (c == id) {
@@ -1188,16 +1218,748 @@ TEST(CardColorlessRaresRegistry, AllSevenJoinTheColorlessCombatPool) {
         }
         return false;
     };
-    for (const CardId id : {CardId::APOTHEOSIS, CardId::MASTER_OF_STRATEGY,
+    for (const CardId id : {CardId::APOTHEOSIS, CardId::CHRYSALIS,
+                            CardId::MAGNETISM, CardId::MASTER_OF_STRATEGY,
+                            CardId::MAYHEM, CardId::METAMORPHOSIS,
                             CardId::SADISTIC_NATURE, CardId::SECRET_TECHNIQUE,
                             CardId::SECRET_WEAPON, CardId::THINKING_AHEAD,
-                            CardId::VIOLENCE}) {
+                            CardId::TRANSMUTATION, CardId::VIOLENCE}) {
         EXPECT_TRUE(pool_has(id)) << "COLORLESS + RARE + non-HEALING";
     }
-    // Colour-gated pools stay RED-only.
+    // Colour-gated pools stay RED-only -- including the SKILL pool this stage
+    // added: Chrysalis and Transmutation are COLORLESS SKILLs and must not be in
+    // it, and Metamorphosis must not be in the ATTACK pool.
     for (const CardId id : kIroncladCombatPool) {
         EXPECT_NE(id, CardId::VIOLENCE);
     }
+    for (const CardId id : kIroncladSkillPool) {
+        EXPECT_NE(id, CardId::CHRYSALIS);
+        EXPECT_NE(id, CardId::TRANSMUTATION);
+    }
+    for (const CardId id : kIroncladAttackPool) {
+        EXPECT_NE(id, CardId::METAMORPHOSIS);
+    }
+}
+
+// ===========================================================================
+// STAGE C -- the generated-card family: Chrysalis, Magnetism, Mayhem,
+// Metamorphosis, Transmutation, plus opcode RANDOM_CARD_TO_DRAW and the two
+// new RANDOM_COLORLESS_TO_HAND flag bits.
+// ===========================================================================
+
+TEST(CardColorlessRaresStageC, CostsTypesFlagsAndTargeting) {
+    // Chrysalis / Metamorphosis: cost 2 at BOTH levels (upgrade() only moves
+    // the magicNumber) and exhaust at BOTH levels.
+    for (const CardId id : {CardId::CHRYSALIS, CardId::METAMORPHOSIS}) {
+        const CardDef* d = card_def(id);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->type, CardType::SKILL);
+        EXPECT_EQ(d->target_kind, CardTargetKind::NONE);
+        EXPECT_FALSE(d->needs_target);
+        EXPECT_EQ(card_cost(*d, 0), 2);
+        EXPECT_EQ(card_cost(*d, 1), 2) << "upgrade() is upgradeMagicNumber only";
+        EXPECT_TRUE(has_card_flag(card_flags(*d, 0), CardFlag::EXHAUST));
+        EXPECT_TRUE(has_card_flag(card_flags(*d, 1), CardFlag::EXHAUST));
+        EXPECT_FALSE(has_card_flag(card_flags(*d, 0), CardFlag::XCOST));
+    }
+    // Magnetism / Mayhem: POWER, SELF, cost 2 -> 1, never exhaust.
+    for (const CardId id : {CardId::MAGNETISM, CardId::MAYHEM}) {
+        const CardDef* d = card_def(id);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->type, CardType::POWER);
+        EXPECT_EQ(d->target_kind, CardTargetKind::SELF);
+        EXPECT_FALSE(d->needs_target);
+        EXPECT_EQ(card_cost(*d, 0), 2);
+        EXPECT_EQ(card_cost(*d, 1), 1) << "upgrade() is upgradeBaseCost(1) only";
+        EXPECT_FALSE(has_card_flag(card_flags(*d, 0), CardFlag::EXHAUST));
+        EXPECT_FALSE(has_card_flag(card_flags(*d, 1), CardFlag::EXHAUST));
+    }
+    // Transmutation: X-cost SKILL, SELF, and the exhaust flag SURVIVES the
+    // upgrade (Transmutation.upgrade only rewrites the description).
+    {
+        const CardDef* d = card_def(CardId::TRANSMUTATION);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->type, CardType::SKILL);
+        EXPECT_EQ(d->target_kind, CardTargetKind::SELF);
+        EXPECT_FALSE(d->needs_target);
+        EXPECT_TRUE(has_card_flag(card_flags(*d, 0), CardFlag::XCOST));
+        EXPECT_TRUE(has_card_flag(card_flags(*d, 1), CardFlag::XCOST));
+        EXPECT_TRUE(has_card_flag(card_flags(*d, 0), CardFlag::EXHAUST));
+        EXPECT_TRUE(has_card_flag(card_flags(*d, 1), CardFlag::EXHAUST))
+            << "upgrade() does NOT clear exhaust (Transmutation.java:43-50)";
+    }
+}
+
+TEST(CardColorlessRaresStageC, EffectProgramsBaseAndUpgraded) {
+    struct Gen {
+        CardId id;
+        CardType type;
+    };
+    for (const Gen& g : std::array<Gen, 2>{{{CardId::CHRYSALIS, CardType::SKILL},
+                                            {CardId::METAMORPHOSIS,
+                                             CardType::ATTACK}}}) {
+        const CardDef* d = card_def(g.id);
+        ASSERT_NE(d, nullptr);
+        const CardEffectView base = card_effect_steps(*d, 0);
+        const CardEffectView up = card_effect_steps(*d, 1);
+        ASSERT_EQ(base.count, 1);
+        ASSERT_EQ(up.count, 1);
+        EXPECT_TRUE(StepOpIs(base.steps[0].op, Opcode::RANDOM_CARD_TO_DRAW));
+        EXPECT_TRUE(StepOpIs(up.steps[0].op, Opcode::RANDOM_CARD_TO_DRAW));
+        EXPECT_EQ(base.steps[0].amount, 3);
+        EXPECT_EQ(up.steps[0].amount, 5) << "upgradeMagicNumber(2)";
+        EXPECT_EQ(random_card_to_draw_type_from_flags(base.steps[0].extra),
+                  static_cast<uint8_t>(g.type));
+        EXPECT_EQ(random_card_to_draw_type_from_flags(up.steps[0].extra),
+                  static_cast<uint8_t>(g.type));
+    }
+    // Magnetism / Mayhem: one APPLY_POWER of 1 stack, identical on both rows.
+    struct Pow {
+        CardId card;
+        PowerId power;
+    };
+    for (const Pow& p : std::array<Pow, 2>{{{CardId::MAGNETISM,
+                                             PowerId::MAGNETISM},
+                                            {CardId::MAYHEM, PowerId::MAYHEM}}}) {
+        const CardDef* d = card_def(p.card);
+        ASSERT_NE(d, nullptr);
+        for (uint8_t up = 0; up < 2; ++up) {
+            const CardEffectView v = card_effect_steps(*d, up);
+            ASSERT_EQ(v.count, 1);
+            EXPECT_TRUE(StepOpIs(v.steps[0].op, Opcode::APPLY_POWER));
+            EXPECT_EQ(v.steps[0].amount, 1) << "no upgradeMagicNumber";
+            EXPECT_EQ(v.steps[0].extra, make_apply_power_flags(p.power));
+            EXPECT_EQ(v.steps[0].target, StepTarget::SELF);
+        }
+    }
+    // Transmutation: ONE colorless-to-hand per X repetition, cost-zero-for-turn
+    // on both rows and the upgraded-copy bit only on the upgraded one.
+    {
+        const CardDef* d = card_def(CardId::TRANSMUTATION);
+        ASSERT_NE(d, nullptr);
+        const CardEffectView base = card_effect_steps(*d, 0);
+        const CardEffectView up = card_effect_steps(*d, 1);
+        ASSERT_EQ(base.count, 1);
+        ASSERT_EQ(up.count, 1);
+        EXPECT_TRUE(StepOpIs(base.steps[0].op, Opcode::RANDOM_COLORLESS_TO_HAND));
+        EXPECT_EQ(base.steps[0].amount, 1) << "one per repetition (Whirlwind shape)";
+        EXPECT_EQ(base.steps[0].extra, kColorlessToHandCostZeroForTurn);
+        EXPECT_EQ(up.steps[0].amount, 1);
+        EXPECT_EQ(up.steps[0].extra,
+                  kColorlessToHandCostZeroForTurn | kColorlessToHandUpgradedCopy);
+    }
+}
+
+// The two new opcode-52 flag bits default to 0, so the rows that predate them
+// are byte-identical. Asserted, not assumed -- that is the whole justification
+// for extending opcode 52 rather than spending reserve opcode 58.
+TEST(CardColorlessRaresStageC, JackOfAllTradesExtraStaysZero) {
+    const CardDef* d = card_def(CardId::JACK_OF_ALL_TRADES);
+    ASSERT_NE(d, nullptr);
+    for (uint8_t up = 0; up < 2; ++up) {
+        const CardEffectView v = card_effect_steps(*d, up);
+        ASSERT_EQ(v.count, 1);
+        EXPECT_TRUE(StepOpIs(v.steps[0].op, Opcode::RANDOM_COLORLESS_TO_HAND));
+        EXPECT_EQ(v.steps[0].extra, 0u)
+            << "neither new bit may leak onto Jack of All Trades";
+    }
+}
+
+// The emitted SKILL pool is the ATTACK pool's sibling: same RED + non-BASIC +
+// non-HEALING membership rule, one CardType changed, and disjoint from it.
+TEST(CardColorlessRaresStageC, IroncladSkillPoolShape) {
+    EXPECT_GT(kIroncladSkillPoolCount, 0);
+    for (const CardId id : kIroncladSkillPool) {
+        const CardDef* d = card_def(id);
+        ASSERT_NE(d, nullptr) << "every pool member is a registry row";
+        EXPECT_EQ(d->type, CardType::SKILL);
+        for (const CardId a : kIroncladAttackPool) {
+            EXPECT_NE(a, id) << "the two type pools are disjoint";
+        }
+        bool in_combat_pool = false;
+        for (const CardId c : kIroncladCombatPool) {
+            in_combat_pool = in_combat_pool || c == id;
+        }
+        EXPECT_TRUE(in_combat_pool)
+            << "the type pool is a subsequence of the full RED combat pool";
+    }
+    // Order-equivalence with the full RED combat pool: Java's type filter
+    // preserves the concatenated pools' relative order, so the SKILL pool must
+    // be exactly the SKILL SUBSEQUENCE of kIroncladCombatPool, in order.
+    {
+        int k = 0;
+        for (const CardId c : kIroncladCombatPool) {
+            const CardDef* d = card_def(c);
+            if (d != nullptr && d->type == CardType::SKILL) {
+                ASSERT_LT(k, kIroncladSkillPoolCount);
+                EXPECT_EQ(kIroncladSkillPool[static_cast<unsigned>(k)], c);
+                ++k;
+            }
+        }
+        EXPECT_EQ(k, kIroncladSkillPoolCount);
+    }
+    // The BASIC rows never enter srcCommon/srcUncommon/srcRare.
+    for (const CardId id : kIroncladSkillPool) {
+        EXPECT_NE(id, CardId::DEFEND);
+        EXPECT_NE(id, CardId::STRIKE);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Chrysalis / Metamorphosis -- opcode RANDOM_CARD_TO_DRAW
+// ---------------------------------------------------------------------------
+
+// THE pin of this stage. Chrysalis.use rolls ALL N cards before ANY of the N
+// MakeTempCardInDrawPileActions resolves, so the cardRandomRng stream is
+// [roll roll roll][insert insert insert]. The oracle below is built from the
+// golden-tested primitives, not from the engine's own path, and it checks BOTH
+// halves: which cards were generated AND where each landed.
+TEST(CardColorlessRaresChrysalis, SeededStreamIsAllRollsThenAllInserts) {
+    CombatState s = MakeCombat();
+    // A two-card draw pile so the very first insert is a real random(size-1)
+    // draw rather than the free empty-group append.
+    const CardPoolIndex bottom = AddDrawTop(s, CardId::STRIKE);
+    const CardPoolIndex top = AddDrawTop(s, CardId::DEFEND);
+    AddHand(s, CardId::CHRYSALIS);
+    s.card_random_rng = from_seed(31337);
+
+    RngStream probe = from_seed(31337);
+    // Half 1: the three pool rolls, back to back.
+    CardId gen[3]{};
+    for (int i = 0; i < 3; ++i) {
+        const int32_t pick =
+            random(probe, static_cast<int32_t>(kIroncladSkillPoolCount) - 1);
+        gen[i] = kIroncladSkillPool[static_cast<unsigned>(pick)];
+    }
+    // Half 2: the three addToRandomSpot inserts, in queue order, into a pile
+    // that grows as they go.
+    std::vector<CardId> pile{CardId::STRIKE, CardId::DEFEND};
+    for (int i = 0; i < 3; ++i) {
+        const int32_t pos =
+            random(probe, static_cast<int32_t>(pile.size()) - 1);
+        pile.insert(pile.begin() + pos, gen[i]);
+    }
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "3 pool rolls + 3 insert draws == 6";
+    EXPECT_EQ(s.card_random_rng.counter - from_seed(31337).counter, 6);
+    ASSERT_EQ(s.draw_count, 5);
+    for (int i = 0; i < 5; ++i) {
+        EXPECT_EQ(s.card_pool[s.draw[i]].card_id,
+                  static_cast<uint16_t>(pile[static_cast<std::size_t>(i)]))
+            << "draw pile slot " << i;
+    }
+    // The two pre-existing instances are still the same pool rows.
+    EXPECT_TRUE(PileHas(s.draw, s.draw_count, bottom));
+    EXPECT_TRUE(PileHas(s.draw, s.draw_count, top));
+}
+
+// The interleaved encoding this opcode exists to avoid: rolling and inserting
+// one card at a time consumes the SAME number of draws but in a different
+// order, so it produces a different pile. Pinning the difference is what stops
+// a future "simplification" from silently reintroducing it.
+TEST(CardColorlessRaresChrysalis, InterleavedOrderWouldDifferFromTheJava) {
+    RngStream a = from_seed(31337);
+    RngStream b = from_seed(31337);
+    CardId batched[3]{};
+    for (int i = 0; i < 3; ++i) {
+        batched[i] = kIroncladSkillPool[static_cast<unsigned>(
+            random(a, static_cast<int32_t>(kIroncladSkillPoolCount) - 1))];
+    }
+    CardId interleaved[3]{};
+    int size = 2;
+    for (int i = 0; i < 3; ++i) {
+        interleaved[i] = kIroncladSkillPool[static_cast<unsigned>(
+            random(b, static_cast<int32_t>(kIroncladSkillPoolCount) - 1))];
+        (void)random(b, size - 1);
+        ++size;
+    }
+    bool same = true;
+    for (int i = 0; i < 3; ++i) {
+        same = same && batched[i] == interleaved[i];
+    }
+    EXPECT_FALSE(same)
+        << "if these ever agree the pin above has stopped discriminating";
+}
+
+// The zeroing writes BOTH cost and costForTurn (Chrysalis.java:35-38), so it is
+// PERMANENT for the combat: no COST_MODIFIED_FOR_TURN marker, and the
+// end-of-turn reset sweep leaves it at 0. Contrast Transmutation below.
+TEST(CardColorlessRaresChrysalis, GeneratedCopiesAreZeroCostPermanently) {
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::CHRYSALIS);
+    s.card_random_rng = from_seed(77);
+    Play(s, 0);
+    ASSERT_EQ(s.draw_count, 3);
+
+    int had_a_real_cost = 0;
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        const CardInstance& c = s.card_pool[s.draw[i]];
+        const CardDef* d = card_def(static_cast<CardId>(c.card_id));
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->type, CardType::SKILL) << "Chrysalis generates SKILLs only";
+        EXPECT_EQ(c.upgrade, 0) << "makeCopy() -- a base library card";
+        if (card_cost(*d, 0) > 0) {
+            ++had_a_real_cost;
+            EXPECT_EQ(c.cost_now, 0);
+        } else {
+            EXPECT_EQ(c.cost_now, card_cost(*d, 0)) << "the cost > 0 guard";
+        }
+        EXPECT_FALSE(has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN))
+            << "permanent, not this-turn";
+    }
+    ASSERT_GT(had_a_real_cost, 0) << "this seed must generate a costed card";
+
+    // End the turn: AbstractRoom.endTurn's costForTurn reset touches only
+    // COST_MODIFIED_FOR_TURN rows, so these keep their zero.
+    const std::array<CardPoolIndex, 3> made{s.draw[0], s.draw[1], s.draw[2]};
+    Step(s, make_action(ActionVerb::END_TURN));
+    for (const CardPoolIndex pi : made) {
+        const CardInstance& c = s.card_pool[pi];
+        const CardDef* d = card_def(static_cast<CardId>(c.card_id));
+        ASSERT_NE(d, nullptr);
+        if (card_cost(*d, 0) > 0) {
+            EXPECT_EQ(c.cost_now, 0)
+                << "the zero survives the end-of-turn sweep";
+        }
+    }
+}
+
+// `if (card.cost > 0)` -- an X-cost card (Java cost -1, CardFlag::XCOST here)
+// fails the guard and stays an X-cost card. The ATTACK pool is where this is
+// reachable: Whirlwind is its only X-cost member.
+TEST(CardColorlessRaresMetamorphosis, GeneratedXCostCardKeepsItsXCost) {
+    int64_t chosen = -1;
+    for (int64_t seed = 1; seed <= 4000 && chosen < 0; ++seed) {
+        RngStream probe = from_seed(seed);
+        const int32_t pick =
+            random(probe, static_cast<int32_t>(kIroncladAttackPoolCount) - 1);
+        if (kIroncladAttackPool[static_cast<unsigned>(pick)] ==
+            CardId::WHIRLWIND) {
+            chosen = seed;
+        }
+    }
+    ASSERT_GE(chosen, 0) << "no seed in range generates Whirlwind first";
+
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(chosen);
+    execute_opcode(s, RandomCardToDrawItem(1, CardType::ATTACK));
+    ASSERT_EQ(s.draw_count, 1);
+    const CardInstance& c = s.card_pool[s.draw[0]];
+    EXPECT_EQ(c.card_id, static_cast<uint16_t>(CardId::WHIRLWIND));
+    EXPECT_TRUE(has_card_flag(c.flags, CardFlag::XCOST))
+        << "an X-cost generated card is still an X-cost card";
+    const CardDef* d = card_def(CardId::WHIRLWIND);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(c.cost_now, card_cost(*d, 0))
+        << "the cost > 0 guard left the registry cost alone";
+    EXPECT_FALSE(has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+TEST(CardColorlessRaresMetamorphosis, GeneratesAttacksAndUpgradedGeneratesFive) {
+    for (uint8_t up = 0; up < 2; ++up) {
+        CombatState s = MakeCombat();
+        const CardPoolIndex meta = AddHand(s, CardId::METAMORPHOSIS, up);
+        s.card_random_rng = from_seed(909 + up);
+        Play(s, 0);
+        EXPECT_EQ(s.draw_count, up == 0 ? 3 : 5);
+        for (uint8_t i = 0; i < s.draw_count; ++i) {
+            const CardDef* d =
+                card_def(static_cast<CardId>(s.card_pool[s.draw[i]].card_id));
+            ASSERT_NE(d, nullptr);
+            EXPECT_EQ(d->type, CardType::ATTACK);
+        }
+        EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, meta))
+            << "exhaust survives the upgrade";
+    }
+}
+
+// CardGroup.addToRandomSpot's empty-group branch is a plain append that draws
+// NOTHING (CardGroup.java:463-465), so the first insert into an empty draw pile
+// is free and the second is not.
+TEST(CardColorlessRaresChrysalis, EmptyDrawPileMakesTheFirstInsertFree) {
+    {
+        CombatState s = MakeCombat();
+        s.card_random_rng = from_seed(11);
+        const int32_t before = s.card_random_rng.counter;
+        execute_opcode(s, RandomCardToDrawItem(1, CardType::SKILL));
+        EXPECT_EQ(s.card_random_rng.counter - before, 1)
+            << "one pool roll, zero insert draws";
+        EXPECT_EQ(s.draw_count, 1);
+    }
+    {
+        CombatState s = MakeCombat();
+        s.card_random_rng = from_seed(11);
+        const int32_t before = s.card_random_rng.counter;
+        execute_opcode(s, RandomCardToDrawItem(2, CardType::SKILL));
+        EXPECT_EQ(s.card_random_rng.counter - before, 3)
+            << "two pool rolls, then a free insert and a real one";
+        EXPECT_EQ(s.draw_count, 2);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Magnetism -- PowerId 82, the pre-draw colorless generator
+// ---------------------------------------------------------------------------
+
+// The pool draws happen WHILE THE HOOK RUNS (returnTrulyRandomColorlessCardIn-
+// Combat is an argument of the queued action's constructor), and only the card
+// creation is deferred. Both halves are pinned here.
+TEST(CardColorlessRaresMagnetism, RollsAtHookTimeAndCreatesOnePerStack) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAGNETISM, 2);
+    s.card_random_rng = from_seed(4242);
+
+    RngStream probe = from_seed(4242);
+    CardId expected[2]{};
+    for (int i = 0; i < 2; ++i) {
+        const int32_t pick = random(
+            probe, static_cast<int32_t>(kColorlessCombatPoolCount) - 1);
+        expected[i] = kColorlessCombatPool[static_cast<unsigned>(pick)];
+    }
+
+    dispatch_at_start_of_turn(s);
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "both stacks rolled during the hook walk, before any queue drain";
+    EXPECT_EQ(s.hand_count, 0) << "only the CREATION is deferred";
+    EXPECT_EQ(s.action_count, 2);
+
+    Pump(s);
+    ASSERT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "the queued creations consume no rng";
+    for (int i = 0; i < 2; ++i) {
+        const CardInstance& c = s.card_pool[s.hand[i]];
+        EXPECT_EQ(c.card_id, static_cast<uint16_t>(expected[i]));
+        const CardDef* d = card_def(expected[i]);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(c.upgrade, 0) << "makeCopy() -- a base library card";
+        EXPECT_EQ(c.cost_now, card_cost(*d, 0)) << "Magnetism re-costs nothing";
+        EXPECT_FALSE(has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN));
+    }
+}
+
+// applyStartOfTurnPowers is the PRE-DRAW phase (GameActionManager.java:345),
+// queued ahead of the turn's DrawCardAction, so the generated card is in hand
+// before the five drawn ones.
+TEST(CardColorlessRaresMagnetism, CardArrivesBeforeTheTurnsDraw) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAGNETISM, 1);
+    for (int i = 0; i < 8; ++i) {
+        AddDrawTop(s, CardId::STRIKE);
+    }
+    s.card_random_rng = from_seed(88);
+    RngStream probe = from_seed(88);
+    const CardId expected = kColorlessCombatPool[static_cast<unsigned>(random(
+        probe, static_cast<int32_t>(kColorlessCombatPoolCount) - 1))];
+
+    Step(s, make_action(ActionVerb::END_TURN));
+
+    ASSERT_EQ(s.hand_count, 6) << "1 generated + the 5-card draw";
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id, static_cast<uint16_t>(expected))
+        << "the generated card is in hand BEFORE the draw resolves";
+    for (uint8_t i = 1; i < s.hand_count; ++i) {
+        EXPECT_EQ(s.card_pool[s.hand[i]].card_id,
+                  static_cast<uint16_t>(CardId::STRIKE));
+    }
+}
+
+// MakeTempCardInHandAction.update:71-77 -- past the 10-card cap the copies are
+// created directly in the DISCARD pile.
+TEST(CardColorlessRaresMagnetism, FullHandCreatesInTheDiscardPile) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAGNETISM, 2);
+    for (int i = 0; i < kHandCap; ++i) {
+        AddHand(s, CardId::DEFEND);
+    }
+    s.card_random_rng = from_seed(5150);
+    dispatch_at_start_of_turn(s);
+    Pump(s);
+    EXPECT_EQ(s.hand_count, kHandCap) << "the hand did not grow";
+    EXPECT_EQ(s.discard_count, 2) << "both copies were created in the discard";
+}
+
+// The areMonstersBasicallyDead gate (MagnetismPower.java:32): nothing at all --
+// no rolls, no queued creations.
+TEST(CardColorlessRaresMagnetism, DeadMonstersSuppressTheWholeHook) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAGNETISM, 3);
+    s.monsters[0].hp = 0;
+    s.card_random_rng = from_seed(9);
+    const int32_t before = s.card_random_rng.counter;
+    dispatch_at_start_of_turn(s);
+    EXPECT_EQ(s.card_random_rng.counter, before);
+    EXPECT_EQ(s.action_count, 0);
+    Pump(s);
+    EXPECT_EQ(s.hand_count, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Mayhem -- PowerId 81, the pre-draw play-the-top-card generator
+// ---------------------------------------------------------------------------
+
+TEST(CardColorlessRaresMayhem, TopCardIsPlayedBeforeTheTurnsDraw) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAYHEM, 1);
+    for (int i = 0; i < 8; ++i) {
+        AddDrawTop(s, CardId::STRIKE);
+    }
+    const CardPoolIndex top = AddDrawTop(s, CardId::DEFEND);  // played, not drawn
+    s.card_random_rng = from_seed(2024);
+
+    Step(s, make_action(ActionVerb::END_TURN));
+
+    EXPECT_FALSE(PileHas(s.hand, s.hand_count, top))
+        << "the played card is not among the five drawn";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, top))
+        << "exhausts = FALSE -- Mayhem files the card normally (contrast Havoc)";
+    EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, top));
+    EXPECT_GT(s.player_block, 0) << "the Defend actually resolved";
+    EXPECT_EQ(s.cards_played_this_turn, 1);
+}
+
+TEST(CardColorlessRaresMayhem, TwoStacksPlayTwoCardsInDrawOrder) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAYHEM, 2);
+    const CardPoolIndex second = AddDrawTop(s, CardId::DEFEND);
+    const CardPoolIndex first = AddDrawTop(s, CardId::STRIKE);  // top of pile
+    s.card_random_rng = from_seed(606);
+    const int32_t before = s.card_random_rng.counter;
+
+    dispatch_at_start_of_turn(s);
+    EXPECT_EQ(s.card_random_rng.counter, before)
+        << "the target roll is deferred to the queued action, not the hook";
+    EXPECT_EQ(s.action_count, 2);
+    Pump(s);
+
+    EXPECT_EQ(s.card_random_rng.counter - before, 2)
+        << "exactly one getRandomMonster draw per play";
+    EXPECT_EQ(s.draw_count, 0);
+    ASSERT_EQ(s.discard_count, 2);
+    EXPECT_EQ(s.discard[0], first) << "top card first";
+    EXPECT_EQ(s.discard[1], second);
+    EXPECT_LT(s.monsters[0].hp, 100) << "the Strike hit";
+    EXPECT_GT(s.player_block, 0) << "the Defend blocked";
+    EXPECT_EQ(s.cards_played_this_turn, 2);
+}
+
+// An unplayable status on top: the dequeue-time canUse revalidation refuses it,
+// the no-trigger UseCardAction files it to the discard, and it does not count
+// as played.
+TEST(CardColorlessRaresMayhem, UnplayableTopCardIsFiledWithNoTriggers) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAYHEM, 1);
+    const CardPoolIndex wound = AddDrawTop(s, CardId::WOUND);
+    ASSERT_TRUE(has_card_flag(s.card_pool[wound].flags, CardFlag::UNPLAYABLE));
+    s.card_random_rng = from_seed(31);
+    const int16_t hp_before = s.monsters[0].hp;
+
+    dispatch_at_start_of_turn(s);
+    Pump(s);
+
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, wound));
+    EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, wound));
+    EXPECT_EQ(s.cards_played_this_turn, 0)
+        << "a refused autoplay never reaches ++cardsPlayedThisTurn";
+    EXPECT_EQ(s.monsters[0].hp, hp_before);
+    EXPECT_EQ(s.player_block, 0);
+}
+
+// PlayTopCardAction.update:38-43 -- an empty draw pile queues an
+// EmptyDeckShuffleAction (ONE shuffle_rng draw) and retries.
+TEST(CardColorlessRaresMayhem, EmptyDrawReshufflesTheDiscardThenPlays) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAYHEM, 1);
+    const CardPoolIndex only = AddDiscard(s, CardId::DEFEND);
+    s.card_random_rng = from_seed(17);
+    s.shuffle_rng = from_seed(18);
+    const int32_t c_before = s.card_random_rng.counter;
+    const int32_t sh_before = s.shuffle_rng.counter;
+
+    dispatch_at_start_of_turn(s);
+    Pump(s);
+
+    EXPECT_EQ(s.card_random_rng.counter - c_before, 1) << "one target roll";
+    EXPECT_EQ(s.shuffle_rng.counter - sh_before, 1) << "one reshuffle";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, only))
+        << "reshuffled in, played, and filed back to the discard";
+    EXPECT_GT(s.player_block, 0);
+}
+
+// PlayTopCardAction.update:34-37 -- deckSize + discardSize == 0 ends the action
+// immediately. The target roll still happens (it is the constructor argument,
+// evaluated first), and nothing else does.
+TEST(CardColorlessRaresMayhem, BothPilesEmptyIsACleanNoOp) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::MAYHEM, 1);
+    s.card_random_rng = from_seed(23);
+    s.shuffle_rng = from_seed(24);
+    const int32_t c_before = s.card_random_rng.counter;
+    const int32_t sh_before = s.shuffle_rng.counter;
+
+    dispatch_at_start_of_turn(s);
+    Pump(s);
+
+    EXPECT_EQ(s.card_random_rng.counter - c_before, 1);
+    EXPECT_EQ(s.shuffle_rng.counter - sh_before, 0);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Transmutation -- the X-cost colorless generator
+// ---------------------------------------------------------------------------
+
+// TransmutationAction.java:43 -- `if (effect > 0)` guards BOTH the loop and the
+// energy spend, so X == 0 is a total no-op.
+TEST(CardColorlessRaresTransmutation, ZeroEnergyGeneratesNothingAndSpendsNothing) {
+    CombatState s = MakeCombat(/*energy=*/0);
+    const CardPoolIndex tx = AddHand(s, CardId::TRANSMUTATION);
+    s.card_random_rng = from_seed(3);
+    const int32_t before = s.card_random_rng.counter;
+    Play(s, 0);
+    EXPECT_EQ(s.card_random_rng.counter, before) << "no pool draws at all";
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.player_energy, 0);
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, tx));
+}
+
+TEST(CardColorlessRaresTransmutation, XThreeGeneratesThreeAndZeroesEnergy) {
+    CombatState s = MakeCombat(/*energy=*/3);
+    AddHand(s, CardId::TRANSMUTATION);
+    s.card_random_rng = from_seed(555);
+    RngStream probe = from_seed(555);
+    CardId expected[3]{};
+    for (int i = 0; i < 3; ++i) {
+        expected[i] = kColorlessCombatPool[static_cast<unsigned>(random(
+            probe, static_cast<int32_t>(kColorlessCombatPoolCount) - 1))];
+    }
+
+    Play(s, 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter) << "3 draws, no more";
+    ASSERT_EQ(s.hand_count, 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(s.card_pool[s.hand[i]].card_id,
+                  static_cast<uint16_t>(expected[i]));
+        EXPECT_EQ(s.card_pool[s.hand[i]].cost_now, 0) << "setCostForTurn(0)";
+        EXPECT_EQ(s.card_pool[s.hand[i]].upgrade, 0) << "base row is not upgraded";
+    }
+    EXPECT_EQ(s.player_energy, 0) << "p.energy.use(EnergyPanel.totalCount)";
+}
+
+// ChemicalX (BOOST = 2) adds two repetitions without changing the energy spent.
+TEST(CardColorlessRaresTransmutation, ChemicalXAddsTwoRepetitions) {
+    CombatState s = MakeCombat(/*energy=*/1);
+    s.relics[0].relic_id = static_cast<uint16_t>(RelicId::CHEMICAL_X);
+    s.relics[0].counter = -1;
+    s.relic_count = 1;
+    AddHand(s, CardId::TRANSMUTATION);
+    s.card_random_rng = from_seed(4);
+    Play(s, 0);
+    EXPECT_EQ(s.hand_count, 3) << "X == 1 plus the relic's 2";
+    EXPECT_EQ(s.player_energy, 0);
+}
+
+// `if (this.upgraded) c.upgrade()` -- the copies come out UPGRADED, and because
+// the upgrade runs BEFORE setCostForTurn(0) the restored cost next turn is the
+// UPGRADED row's.
+TEST(CardColorlessRaresTransmutation, UpgradedGeneratesUpgradedCopies) {
+    CombatState s = MakeCombat(/*energy=*/2);
+    AddHand(s, CardId::TRANSMUTATION, /*upgrade=*/1);
+    s.card_random_rng = from_seed(1212);
+    Play(s, 0);
+    ASSERT_EQ(s.hand_count, 2);
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardInstance& c = s.card_pool[s.hand[i]];
+        EXPECT_EQ(c.upgrade, 1) << "every copy is upgraded";
+        EXPECT_EQ(c.cost_now, 0);
+    }
+    // Same seed, BASE row: identical cards, un-upgraded. The only difference
+    // between the two rows is the upgrade bit.
+    CombatState b = MakeCombat(/*energy=*/2);
+    AddHand(b, CardId::TRANSMUTATION, /*upgrade=*/0);
+    b.card_random_rng = from_seed(1212);
+    Play(b, 0);
+    ASSERT_EQ(b.hand_count, 2);
+    for (uint8_t i = 0; i < b.hand_count; ++i) {
+        EXPECT_EQ(b.card_pool[b.hand[i]].card_id, s.card_pool[s.hand[i]].card_id);
+        EXPECT_EQ(b.card_pool[b.hand[i]].upgrade, 0);
+    }
+}
+
+// setCostForTurn, NOT the permanent zeroing Chrysalis uses: the marker is set
+// and AbstractRoom.endTurn's sweep restores the registry cost.
+TEST(CardColorlessRaresTransmutation, CopiesAreFreeThisTurnOnly) {
+    int64_t chosen = -1;
+    for (int64_t seed = 1; seed <= 4000 && chosen < 0; ++seed) {
+        RngStream probe = from_seed(seed);
+        const CardId id = kColorlessCombatPool[static_cast<unsigned>(random(
+            probe, static_cast<int32_t>(kColorlessCombatPoolCount) - 1))];
+        const CardDef* d = card_def(id);
+        if (d != nullptr && card_cost(*d, 0) > 0 &&
+            !has_card_flag(card_flags(*d, 0), CardFlag::XCOST)) {
+            chosen = seed;
+        }
+    }
+    ASSERT_GE(chosen, 0) << "no seed in range generates a costed colorless card";
+
+    CombatState s = MakeCombat(/*energy=*/1);
+    AddHand(s, CardId::TRANSMUTATION);
+    s.card_random_rng = from_seed(chosen);
+    Play(s, 0);
+    ASSERT_EQ(s.hand_count, 1);
+    const CardPoolIndex made = s.hand[0];
+    const CardDef* d = card_def(static_cast<CardId>(s.card_pool[made].card_id));
+    ASSERT_NE(d, nullptr);
+    ASSERT_GT(card_cost(*d, 0), 0);
+    EXPECT_EQ(s.card_pool[made].cost_now, 0);
+    EXPECT_TRUE(
+        has_card_flag(s.card_pool[made].flags, CardFlag::COST_MODIFIED_FOR_TURN))
+        << "this-turn only -- the bit Chrysalis's copies must NOT carry";
+
+    Step(s, make_action(ActionVerb::END_TURN));
+    EXPECT_EQ(s.card_pool[made].cost_now, card_cost(*d, 0))
+        << "costForTurn = cost at end of turn";
+    EXPECT_FALSE(
+        has_card_flag(s.card_pool[made].flags, CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+// Autoplayed off the draw top (the shape Mayhem produces): the repetition count
+// comes from the energy snapshot at dequeue and NOTHING is spent.
+TEST(CardColorlessRaresTransmutation, AutoplayUsesTheSnapshotAndSpendsNothing) {
+    CombatState s = MakeCombat(/*energy=*/2);
+    AddDrawTop(s, CardId::TRANSMUTATION);
+    s.card_random_rng = from_seed(64);
+
+    ActionQueueItem play{};
+    play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    play.src = kActorPlayer;
+    play.tgt = kActorRandomEnemy;
+    play.flags = kPlayCardFromDrawTop;
+    add_to_bottom(s, play);
+    Pump(s);
+
+    EXPECT_EQ(s.hand_count, 2) << "two repetitions from the snapshot";
+    EXPECT_EQ(s.player_energy, 2) << "an autoplay spends nothing";
+}
+
+TEST(CardColorlessRaresTransmutation, OverflowPastTenIsCreatedInTheDiscard) {
+    CombatState s = MakeCombat(/*energy=*/3);
+    AddHand(s, CardId::TRANSMUTATION);
+    for (int i = 0; i < kHandCap - 1; ++i) {
+        AddHand(s, CardId::DEFEND);
+    }
+    ASSERT_EQ(s.hand_count, kHandCap);
+    s.card_random_rng = from_seed(71);
+    Play(s, 0);
+    EXPECT_EQ(s.hand_count, kHandCap)
+        << "the play freed one slot, the first copy refilled it";
+    EXPECT_EQ(s.discard_count, 2) << "the other two were created in the discard";
 }
 
 }  // namespace
