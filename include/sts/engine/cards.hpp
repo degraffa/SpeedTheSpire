@@ -98,6 +98,35 @@ using sts::registry::kIroncladUncommonPoolCount;
 using sts::registry::kIroncladUncommonPool;
 using sts::registry::kIroncladRarePoolCount;
 using sts::registry::kIroncladRarePool;
+// The nine TYPE-FILTERED views of the three pools above, one per
+// (rarity, ATTACK|SKILL|POWER). getCardFromPool(rarity, type, useRng)
+// (AbstractDungeon.java:1538-1577) reaches CardGroup.getRandomCard(type,
+// useRng) (CardGroup.java:539-552), which filters by type, SORTS the filtered
+// view (AbstractCard.compareTo == cardID compare) and indexes it with cardRng.
+// Because of that sort these are ORDER-EXACT -- they do NOT inherit the
+// registry-id ordering deviation the unsorted pools above carry. The shop's
+// five colored slots are the only S1 consumer. kIroncladCommonPowerPool is
+// deliberately EMPTY: the Ironclad has no common POWER, which is what makes
+// getCardFromPool's POWER branch recurse to the next rarity without spending a
+// draw.
+using sts::registry::kIroncladCommonAttackPoolCount;
+using sts::registry::kIroncladCommonAttackPool;
+using sts::registry::kIroncladCommonSkillPoolCount;
+using sts::registry::kIroncladCommonSkillPool;
+using sts::registry::kIroncladCommonPowerPoolCount;
+using sts::registry::kIroncladCommonPowerPool;
+using sts::registry::kIroncladUncommonAttackPoolCount;
+using sts::registry::kIroncladUncommonAttackPool;
+using sts::registry::kIroncladUncommonSkillPoolCount;
+using sts::registry::kIroncladUncommonSkillPool;
+using sts::registry::kIroncladUncommonPowerPoolCount;
+using sts::registry::kIroncladUncommonPowerPool;
+using sts::registry::kIroncladRareAttackPoolCount;
+using sts::registry::kIroncladRareAttackPool;
+using sts::registry::kIroncladRareSkillPoolCount;
+using sts::registry::kIroncladRareSkillPool;
+using sts::registry::kIroncladRarePowerPoolCount;
+using sts::registry::kIroncladRarePowerPool;
 // The dungeon COLORLESS card pool (AbstractDungeon.addColorlessCards,
 // AbstractDungeon.java:1203-1210: every COLORLESS card that is neither BASIC
 // nor SPECIAL rarity nor a STATUS). The two rarity views are what

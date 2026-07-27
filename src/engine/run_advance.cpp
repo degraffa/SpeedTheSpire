@@ -40,6 +40,7 @@
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
 #include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
+#include "sts/engine/shop.hpp"             // merchant stock / purchases / purge
 #include "relics/relic_pickup.hpp"         // gain_gold (the one run-layer gold door)
 #include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
@@ -617,6 +618,7 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
     rc.room_type = static_cast<uint8_t>(room);
     rc.combat_outcome = static_cast<uint8_t>(RunCombatOutcome::NONE);
     rc.event = EventDialogState{};  // no dialog survives a room boundary
+    rc.shop = ShopState{};          // nor does a merchant
 
     auto stall = [&](RoomType r) noexcept {
         rc.combat = CombatState{};
@@ -625,6 +627,16 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
         rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
         rc.room_type = static_cast<uint8_t>(r);
     };
+
+    // AbstractRelic.justEnteredRoom for the room actually arrived in
+    // (AbstractDungeon.java:1785-1789). An EventRoom is EXCLUDED here on
+    // purpose: the game replaces that room object with its rolled result
+    // (:1763-1779) and calls setCurrMapNode (:1783) BEFORE this fan-out, so the
+    // ? branch below dispatches it after resolving -- which is exactly what
+    // makes Meal Ticket heal on a ?->Shop as it does on a static ShopRoom.
+    if (room != RoomType::Event) {
+        dispatch_just_entered_room_relics(rc.run, room == RoomType::Shop);
+    }
 
     switch (room) {
         case RoomType::Monster:
@@ -692,10 +704,10 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
                     on_player_entry(rc, RoomType::Treasure, left_room);
                     return;
                 case EventRoomResult::SHOP:
-                    // A real ShopRoom; shop content is its own task, so it
-                    // parks with the RESOLVED kind recorded (the roll and
-                    // pity updates above are already committed).
-                    stall(RoomType::Shop);
+                    // A real ShopRoom, byte-identical to a map shop node --
+                    // including the justEnteredRoom fan-out the recursion
+                    // performs, which is where Meal Ticket's heal comes from.
+                    on_player_entry(rc, RoomType::Shop, left_room);
                     return;
                 case EventRoomResult::ELITE:
                     // Unreachable without the DeadlyEvents/endless mods
@@ -706,6 +718,12 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
                 default:
                     break;  // fall through to the event selection below
             }
+            // The room stayed an EventRoom, so the deferred justEnteredRoom
+            // fan-out runs here with in_shop false -- an explicit no-op rather
+            // than an omission, so the ? branch has the call the other branches
+            // get through the recursion.
+            dispatch_just_entered_room_relics(rc.run, /*in_shop=*/false);
+
             // EventRoom.onPlayerEntry (EventRoom.java:26-31): selection on a
             // throwaway duplicate (discarded; rs.event_rng byte-identical),
             // pool-removal + event_flags bookkeeping committed.
@@ -733,6 +751,17 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
             break;
         }
         case RoomType::Shop:
+            // ShopRoom.onPlayerEntry (ShopRoom.java:43-50) -> new Merchant()
+            // -> ShopScreen.init: the whole stock and price build, in one
+            // uninterrupted sequence, before the player can act.
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            rc.rest = RestSiteState{};
+            rc.shop = generate_shop(rc.run);
+            rc.phase = static_cast<uint8_t>(RunPhase::SHOP);
+            break;
         case RoomType::None:
         default:
             stall(room);  // no room content for this kind yet
@@ -841,6 +870,14 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     rs.event_pity_treasure = 0.02f;
     rs.card_blizz_randomizer = 5;
     rs.blizzard_potion_mod = 0;
+
+    // ShopScreen.resetPurgeCost (ShopScreen.java:241-244), called from the
+    // dungeon reset that precedes a new run (CardCrawlGame.java:478). The field
+    // is a STATIC in the game, so nothing else zeroes it between runs -- which
+    // is exactly why the reset exists, and why run_begin has to spell it: a
+    // value-initialized RunState would open its first merchant offering card
+    // removal for nothing.
+    rs.purge_cost = static_cast<int16_t>(kPurgeCostBase);
 
     // The three event-pool membership bitsets: initializeEventList /
     // initializeShrineList / initializeSpecialOneTimeEventList (the last
@@ -1140,6 +1177,44 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                     }
                 }
             }
+            break;
+        }
+
+        case RunPhase::SHOP: {
+            const ShopState& shop = rc.shop;
+            if (static_cast<ShopScreenKind>(shop.screen) ==
+                ShopScreenKind::PURGE_GRID) {
+                // gridSelectScreen is modal over the shop: only the grid's own
+                // rows are legal while it is up (the Smith/Toke grid shape).
+                for (uint16_t i = 0;
+                     i < rc.run.master_deck_count && i < kMasterDeckCap; ++i) {
+                    out.can_choose_master_deck[i] =
+                        shop_purge_card_legal(rc.run, shop, i);
+                }
+                break;
+            }
+            for (int i = 0; i < kShopColoredCount; ++i) {
+                out.can_buy_shop_item[kChooseShopColoredBase + i] =
+                    shop_buy_card_legal(rc.run, shop, static_cast<uint8_t>(i),
+                                        /*colorless=*/false);
+            }
+            for (int i = 0; i < kShopColorlessCount; ++i) {
+                out.can_buy_shop_item[kChooseShopColorlessBase + i] =
+                    shop_buy_card_legal(rc.run, shop, static_cast<uint8_t>(i),
+                                        /*colorless=*/true);
+            }
+            for (int i = 0; i < kShopRelicCount; ++i) {
+                out.can_buy_shop_item[kChooseShopRelicBase + i] =
+                    shop_buy_relic_legal(rc.run, shop, static_cast<uint8_t>(i));
+            }
+            for (int i = 0; i < kShopPotionCount; ++i) {
+                out.can_buy_shop_item[kChooseShopPotionBase + i] =
+                    shop_buy_potion_legal(rc.run, shop, static_cast<uint8_t>(i));
+            }
+            out.can_purge = shop_purge_legal(rc.run, shop);
+            // ShopRoom's phase is COMPLETE from the moment it is entered
+            // (ShopRoom.java:30), so the proceed button is live throughout.
+            out.can_proceed = true;
             break;
         }
 
@@ -1533,6 +1608,48 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         rc.event = EventDialogState{};
                         rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
                     }
+                }
+            }
+            fill_run_result(rc, res);
+            break;
+        }
+
+        case RunPhase::SHOP: {
+            // Buying is the MAP_CHOICE contract again: an illegal arg0 is a
+            // non-corrupting no-op, and every purchase re-derives its own
+            // legality inside shop.cpp so a stale mask cannot spend gold.
+            if (action_verb(a) == ActionVerb::CHOOSE) {
+                ShopState& shop = rc.shop;
+                const uint8_t a0 = action_arg0(a);
+                if (static_cast<ShopScreenKind>(shop.screen) ==
+                    ShopScreenKind::PURGE_GRID) {
+                    (void)shop_purge_card(rc.run, shop, a0);
+                } else if (a0 == kChooseProceed) {
+                    rc.shop = ShopState{};
+                    rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                } else if (a0 == kChooseShopPurge) {
+                    // purchasePurge (:969-978) only OPENS the grid; the gold
+                    // leaves when a card is confirmed.
+                    if (shop_purge_legal(rc.run, shop)) {
+                        shop.screen =
+                            static_cast<uint8_t>(ShopScreenKind::PURGE_GRID);
+                    }
+                } else if (a0 >= kChooseShopPotionBase &&
+                           a0 < kChooseShopPurge) {
+                    (void)shop_buy_potion(
+                        rc.run, shop,
+                        static_cast<uint8_t>(a0 - kChooseShopPotionBase));
+                } else if (a0 >= kChooseShopRelicBase) {
+                    (void)shop_buy_relic(
+                        rc.run, rc.combat.misc_rng, shop,
+                        static_cast<uint8_t>(a0 - kChooseShopRelicBase));
+                } else if (a0 >= kChooseShopColorlessBase) {
+                    (void)shop_buy_card(
+                        rc.run, shop,
+                        static_cast<uint8_t>(a0 - kChooseShopColorlessBase),
+                        /*colorless=*/true);
+                } else {
+                    (void)shop_buy_card(rc.run, shop, a0, /*colorless=*/false);
                 }
             }
             fill_run_result(rc, res);

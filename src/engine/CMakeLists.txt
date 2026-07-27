@@ -91,6 +91,8 @@ add_library(sts_engine
     rest_sites.cpp
     # Treasure-room chest construction/opening + chest relic hooks.
     treasure_rooms.cpp
+    # Merchant stock generation, pricing, purchases and the purge service.
+    shop.cpp
     # ?-room roll + event selection/pool bookkeeping + dialog dispatch.
     event_framework.cpp
     # Native event bodies, grouped by delivery batch.

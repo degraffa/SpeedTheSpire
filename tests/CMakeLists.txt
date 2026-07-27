@@ -274,6 +274,14 @@ sts_add_test(rest_sites_test)
 # grant/claim, and Matryoshka/Cursed Key/N'loth's Mask hook ordering + gates.
 sts_add_test(treasure_rooms_test)
 
+# B4.8: the merchant. The sixteen-draw merchantRng stock/price sequence pinned
+# by a beside-the-engine replay, the truncate/halve/round price pipeline with
+# its ascension and shop-relic discounts, the run-persistent purge ramp across
+# two shops, the Maw Bank / Meal Ticket / Membership Card / Smiling Mask hooks,
+# the CHOOSE flow and its modal removal grid, plus a real captured A20 shop
+# reproduced id-for-id and price-for-price.
+sts_add_test(shop_test)
+
 # B4.10: the ?-room roll table (incl. the asymmetric slot-99 clamps), the
 # one-committed-draw eventRng contract, trap-19 pity float sequences vs
 # bit-exact hand-derivation, Tiny Chest / Juzu / leaving-a-shop hooks,

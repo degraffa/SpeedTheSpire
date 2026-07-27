@@ -47,10 +47,14 @@
 //   * NEOW (neow.hpp): the four-category blessing rolled at run start off the
 //     event-scoped neow stream, every payout, and the card / master-deck-grid /
 //     reward sub-screens they open -- all inside RunPhase::NEOW.
+//   * SHOPS (shop.hpp): the merchant's whole stock is built on room entry
+//     (cardRng identities, merchantRng prices + sale + relic tiers, potionRng
+//     potions, relic-pool END pops), priced through the ascension and shop-relic
+//     discount chain, and then bought through CHOOSE; the card-removal service
+//     runs off the run-persistent RunState.purge_cost and ramps it. A ? room
+//     that rolls SHOP enters the same phase as a map shop node.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * relic POOLS and acquisition are live, and combat/chest/Neow reward draw
-//     sites consume them; the shop's draw sites are separate work.
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
 //     (combat_rewards.hpp).
 //   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
@@ -60,8 +64,10 @@
 //     bookkeeping. Implemented bodies open EVENT_DIALOG; a selected event with
 //     no body parks at ROOM_UNIMPLEMENTED with the selection committed and the
 //     EventId recorded.
-//   * shops: no room content (entering one reseeds the floor streams then
-//     parks at ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
+//   * The Courier's RESTOCK half (shop.hpp): its price discount is live, but
+//     the replacement item a purchase pulls in is not, because the card branch
+//     draws with `useRng=false` -- the unseeded libGDX MathUtils global, not
+//     cardRng (ShopScreen.java:615-617) -- and so has no reproducible answer.
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
 //     encounter whose members are not all implemented resolves its composition
 //     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
@@ -108,6 +114,7 @@
 #include "sts/engine/neow.hpp"          // NeowState / the blessing screens
 #include "sts/engine/rest_sites.hpp"    // RestSiteState / menu constants
 #include "sts/engine/run_state.hpp"
+#include "sts/engine/shop.hpp"          // ShopState / merchant stock + purge
 #include "sts/engine/treasure_rooms.hpp"
 #include "sts/engine/types.hpp"
 
@@ -135,6 +142,12 @@ enum class RunPhase : uint8_t {
                            // reserved allocation (stage-b-tasks.md shared-
                            // namespace table); gaps are legal, values are
                            // append-only and never renumbered.
+    SHOP = 10,             // the merchant's floor, or its card-removal grid
+                           // (shop.hpp). Reached from a static ShopRoom map
+                           // node AND from a ? room whose eventRng roll came up
+                           // SHOP -- both build the same merchant. Value 10 is
+                           // the ledger's reserved allocation (stage-b-tasks.md
+                           // shared-namespace table).
 };
 
 // Why combat ended. AbstractRoom keeps two independent end-of-battle room
@@ -189,6 +202,24 @@ inline constexpr uint8_t kChooseSkipCard = 0xFE;
 inline constexpr uint8_t kChooseSing = 0xFD;
 inline constexpr uint8_t kChooseOpenChest = 0;
 
+// CHOOSE arg0 layout on the shop floor (RunPhase::SHOP, ShopScreenKind::MENU).
+// One dense index space over every purchasable row plus the purge service, so
+// a single `can_buy_shop_item[]` covers the screen; kChooseProceed leaves.
+// The bases are FIXED, not derived from what is left in stock -- a bought row
+// keeps its index for the rest of the visit (see ShopSlot's note on why slots
+// are not compacted). On ShopScreenKind::PURGE_GRID the arg0 is a master-deck
+// index instead, through can_choose_master_deck[].
+inline constexpr uint8_t kChooseShopColoredBase = 0;    // 0..4
+inline constexpr uint8_t kChooseShopColorlessBase =
+    kChooseShopColoredBase + kShopColoredCount;         // 5..6
+inline constexpr uint8_t kChooseShopRelicBase =
+    kChooseShopColorlessBase + kShopColorlessCount;     // 7..9
+inline constexpr uint8_t kChooseShopPotionBase =
+    kChooseShopRelicBase + kShopRelicCount;             // 10..12
+inline constexpr uint8_t kChooseShopPurge =
+    kChooseShopPotionBase + kShopPotionCount;           // 13
+inline constexpr int kShopItemCount = kChooseShopPurge; // 13 purchasable rows
+
 // --- RunController -----------------------------------------------------------
 
 // The whole run-loop state: a RunState (persistent) + a CombatState (the live
@@ -221,6 +252,13 @@ struct RunController {
     // (no new storage, no schema bump).
     RewardScreen rewards;
     RestSiteState rest;
+
+    // The live merchant while phase == SHOP. Transient for the same reason as
+    // everything else here: the game rebuilds a shop's whole stock from (seed,
+    // merchantRng.counter) on reload, so it is derived state. The one piece the
+    // game DOES persist -- the ramping purge cost -- is already a RunState
+    // field, not a member here.
+    ShopState shop;
 
     // The constructor-time chest rolls while phase == TREASURE_ROOM, retained
     // through its reward screen for replay/hash observability. Transient like
@@ -286,6 +324,10 @@ enum class EventCombatVariant : uint8_t {
 //                          Dream Catcher's direct card-pick screen.
 //   EVENT_DIALOG         : can_choose_event_option[i] (CHOOSE i) over a dialog,
 //                          or can_choose_master_deck[i] over an event grid.
+//   SHOP                 : can_buy_shop_item[i] (CHOOSE i) over the fixed row
+//                          layout, can_purge (CHOOSE kChooseShopPurge) and
+//                          can_proceed (CHOOSE kChooseProceed); once the purge
+//                          grid is open, can_choose_master_deck[i] only.
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
@@ -310,6 +352,14 @@ struct RunActionMask {
     // EVENT_DIALOG: the current screen's options, rebuilt from the event's
     // build_menu on every call (never cached). CHOOSE arg0 is the option index.
     bool can_choose_event_option[kEventOptionCap];
+    // SHOP, menu screen: one flag per purchasable row, indexed by the
+    // kChooseShop*Base layout above; can_purge opens the removal grid and
+    // can_proceed leaves for the map. The grid screen instead uses
+    // can_choose_master_deck[] and offers nothing else -- the same shape the
+    // rest site's Smith/Toke grids use (GridCardSelectScreen's cancel button is
+    // not modelled at the run layer by any grid yet).
+    bool can_buy_shop_item[kShopItemCount];
+    bool can_purge;
     // USE_POTION owns a RunState slot, so its legality lives at this layer.
     // Fruit Juice and Entropic Brew can be used in stable non-combat phases.
     // During COMBAT, can_use_potion_target[slot][monster] enumerates target-

@@ -78,17 +78,13 @@ RewardCardRarity neow_roll_rarity(RngStream& neow_rng) noexcept {
 }
 
 // getColorlessCardFromPool(rarity) (AbstractDungeon.java:1579-1595) ->
-// CardGroup.getRandomCard(true, rarity) (CardGroup.java:509-524): filter the
-// colorless pool to `rarity`, SORT it (AbstractCard.compareTo == cardID
-// compare), and index with cardRng. The two sorted views are generated, so the
-// only work here is picking one and drawing.
+// CardGroup.getRandomCard(true, rarity) (CardGroup.java:509-524). The draw
+// itself now lives beside its RED sibling as draw_colorless_card_from_pool
+// (combat_rewards.hpp) because the shop's two colourless slots are a second
+// caller of exactly the same read; this stays as the local spelling Neow's
+// payout code reads with.
 CardId colorless_from_pool(RngStream& card_rng, RewardCardRarity rarity) noexcept {
-    if (rarity == RewardCardRarity::RARE) {
-        const int32_t i = random(card_rng, kColorlessRarePoolCount - 1);
-        return kColorlessRarePool[static_cast<std::size_t>(i)];
-    }
-    const int32_t i = random(card_rng, kColorlessUncommonPoolCount - 1);
-    return kColorlessUncommonPool[static_cast<std::size_t>(i)];
+    return draw_colorless_card_from_pool(card_rng, rarity);
 }
 
 // CardDef carries no colour column, so colour is read where it is already

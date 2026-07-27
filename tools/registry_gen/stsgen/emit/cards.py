@@ -170,6 +170,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "on_remove_max_hp_loss": on_remove_max_hp_loss,
             "ox_steps": ox_steps, "up_ox_steps": up_ox_steps,
             "id": c["id"], "color": color, "rarity": rarity,
+            # The CardType SPELLING (not the emitted numeric value): the shop's
+            # type-filtered pools below group by it.
+            "type_name": ctype,
             "healing": healing,
             # The game's cardID string. Needed as a POOL SORT KEY, not only as a
             # translator join key: CardGroup.getRandomCard(useRng, rarity)
@@ -427,6 +430,49 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         for r in pool:
             out.append(f"    CardId::{r['name']},")
         out.append("}};\n")
+
+    # The nine TYPE-FILTERED views of the three RED reward pools. The shop's
+    # five colored slots are the only S1 consumer: Merchant.<init>
+    # (Merchant.java:59-83) asks getCardFromPool(rollRarity(), <type>, true)
+    # for ATTACK, ATTACK, SKILL, SKILL, POWER, and getCardFromPool
+    # (AbstractDungeon.java:1538-1577) forwards to
+    # <rarity>CardPool.getRandomCard(type, useRng) (CardGroup.java:539-552),
+    # which filters the rarity pool by CardType, **Collections.sort()s the
+    # filtered list**, and indexes it with `cardRng.random(size - 1)`.
+    #
+    # ORDER: because of that sort these nine arrays are ORDER-EXACT -- the sort
+    # key is AbstractCard.compareTo == cardID.compareTo (AbstractCard.java:
+    # 2583-2584), so a lexicographic sort of the game_id strings reproduces the
+    # game's list whatever order the source pool filled in. They therefore do
+    # NOT carry the CardLibrary-HashMap-order deviation the unsorted
+    # kIronclad{Common,Uncommon,Rare}Pool arrays above carry, exactly as the
+    # kColorless{Uncommon,Rare}Pool rarity views do not. Emitting them (rather
+    # than filtering + sorting at runtime) keeps the draw a single indexed read
+    # and keeps the sort out of the engine.
+    #
+    # An EMPTY view is legal and load-bearing: the Ironclad's COMMON pool holds
+    # no POWER card, and getCardFromPool's `retVal == null && type == POWER`
+    # branch (AbstractDungeon.java:1556-1565) is what turns that into a
+    # recursive draw at the next rarity up -- with NO cardRng draw spent on the
+    # empty pool, because getRandomCard returns null before indexing.
+    for tier in ("COMMON", "UNCOMMON", "RARE"):
+        for ctype_name in ("ATTACK", "SKILL", "POWER"):
+            pool = [r for r in rows
+                    if r["color"] == "RED" and r["rarity"] == tier
+                    and r["type_name"] == ctype_name]
+            pool.sort(key=lambda r: r["game_id"])
+            sym = f"kIronclad{pascal(tier)}{pascal(ctype_name)}Pool"
+            out.append(f"inline constexpr int {sym}Count = {len(pool)};")
+            if not pool:
+                # std::array<T, 0> has no member array to brace-init.
+                out.append(f"inline constexpr std::array<CardId, "
+                           f"{sym}Count> {sym}{{}};\n")
+                continue
+            out.append(f"inline constexpr std::array<CardId, "
+                       f"{sym}Count> {sym}{{{{")
+            for r in pool:
+                out.append(f"    CardId::{r['name']},  // {r['game_id']}")
+            out.append("}};\n")
 
     # The dungeon COLORLESS card pool (AbstractDungeon.addColorlessCards,
     # AbstractDungeon.java:1203-1210): every COLORLESS card whose rarity is

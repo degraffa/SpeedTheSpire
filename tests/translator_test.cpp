@@ -488,6 +488,18 @@ std::string with_reward_screen(const std::string& line,
     return out;
 }
 
+std::string with_shop_screen(const std::string& line,
+                             const std::string& screen_state_json) {
+    const std::string anchor = "\"screen_type\":\"NONE\"";
+    std::string out = line;
+    const auto pos = out.find(anchor);
+    EXPECT_NE(pos, std::string::npos);
+    out.replace(pos, anchor.size(),
+                "\"screen_type\":\"SHOP_SCREEN\",\"screen_state\":" +
+                    screen_state_json);
+    return out;
+}
+
 std::string with_event_screen(const std::string& line,
                               const std::string& screen_state_json) {
     const std::string anchor = "\"screen_type\":\"NONE\"";
@@ -603,6 +615,68 @@ TEST(Translator, CombatRewardScreenStateValidatesAndJoins) {
     tr::TranslatedRun run = tr::translate_lines({lines[0], tampered}, "reward");
     ASSERT_EQ(run.records.size(), 1u);
     EXPECT_EQ(run.records[0].run.gold, 99);  // untouched by screen content
+}
+
+// The SHOP_SCREEN slice: registry-joined, type-checked, storage-less. Same
+// contract as the reward slice above -- a merchant is derived state the game
+// rebuilds from (seed, merchantRng.counter), so nothing here lands in RunState.
+TEST(Translator, ShopScreenStateValidatesAndJoins) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    const std::string shop =
+        "{\"cards\":[{\"id\":\"Iron Wave\",\"name\":\"Iron Wave\","
+        "\"type\":\"ATTACK\",\"rarity\":\"COMMON\",\"upgrades\":0,\"cost\":1,"
+        "\"has_target\":true,\"exhausts\":false,\"ethereal\":false,"
+        "\"uuid\":\"x\",\"price\":59}],"
+        "\"relics\":[{\"id\":\"Blood Vial\",\"name\":\"Blood Vial\","
+        "\"counter\":-1,\"price\":172}],"
+        "\"potions\":[{\"id\":\"Strength Potion\",\"name\":\"Strength Potion\","
+        "\"can_use\":false,\"can_discard\":true,\"requires_target\":false,"
+        "\"price\":54}],"
+        "\"purge_available\":true,\"purge_cost\":75}";
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], with_shop_screen(lines[1], shop)}, "shop");
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.records[0].run.gold, 99);  // untouched by screen content
+}
+
+TEST(Translator, UnknownShopPotionIdRefused) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    const std::string shop =
+        "{\"potions\":[{\"id\":\"TotallyFakePotion\"}],"
+        "\"purge_available\":true,\"purge_cost\":75}";
+    try {
+        (void)tr::translate_lines({lines[0], with_shop_screen(lines[1], shop)},
+                                  "shop");
+        FAIL() << "expected TranslateError for an unknown shop potion id";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("TotallyFakePotion"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(Translator, ShopPurgeCostAndPricesAreTypeChecked) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    const std::string bad_cost =
+        "{\"purge_available\":true,\"purge_cost\":\"75\"}";
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], with_shop_screen(lines[1], bad_cost)},
+                                  "shop"),
+        tr::TranslateError);
+    const std::string bad_flag =
+        "{\"purge_available\":1,\"purge_cost\":75}";
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], with_shop_screen(lines[1], bad_flag)},
+                                  "shop"),
+        tr::TranslateError);
+    const std::string bad_price =
+        "{\"relics\":[{\"id\":\"Blood Vial\",\"counter\":-1,\"price\":\"172\"}],"
+        "\"purge_available\":true,\"purge_cost\":75}";
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], with_shop_screen(lines[1], bad_price)},
+                                  "shop"),
+        tr::TranslateError);
 }
 
 TEST(Translator, UnknownRewardTypeRefused) {

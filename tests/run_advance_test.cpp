@@ -315,12 +315,12 @@ TEST(RunBegin, MatchesLiveOracleFloorZeroStreams) {
 
 TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
     RunController rc = run_begin(kSeed, kA20);
-    // Force the floor-1 room to a non-combat kind so onPlayerEntry reseeds the
-    // floor streams and then does NOTHING to them (a clean reseed snapshot).
-    // Shop, not Event: since B4.10 an Event room resolves its ?-roll (an
-    // eventRng draw + possible combat/chest entry), so Shop is now the
-    // draw-free stall. Force every row-0 column so whichever start is picked
-    // is the Shop room.
+    // Force the floor-1 room to a Shop. Its whole build reads only RUN-scoped
+    // streams (merchantRng / cardRng / potionRng) and never touches a
+    // FLOOR-scoped one, so the five reseeded streams are still a pristine
+    // post-increment snapshot after the merchant exists. (An Event room would
+    // resolve its ?-roll instead -- an eventRng draw and possibly a combat.)
+    // Force every row-0 column so whichever start is picked is the Shop room.
     for (int col = 0; col < kMapCols; ++col) {
         rc.run.map[run_state_map_index(col, 0)].room_type =
             static_cast<uint8_t>(RoomType::Shop);
@@ -332,7 +332,7 @@ TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
     step(rc, make_action(ActionVerb::CHOOSE, x));
 
     EXPECT_EQ(rc.run.floor, 1);
-    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
     EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Shop));
 
     // The reseed uses floor 1 (post-increment). A reseed with the OLD floor (0)
@@ -349,8 +349,9 @@ TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
 
 TEST(FloorReseed, ReseedTracksFloorAcrossMultipleTransitions) {
     RunController rc = run_begin(kSeed, kA20);
-    // Force rows 0 and 1 to Shop so both transitions cleanly stall (no
-    // consumption; an Event room would consume an eventRng roll since B4.10).
+    // Force rows 0 and 1 to Shop: a merchant consumes no FLOOR-scoped stream,
+    // so both transitions leave a pristine reseed (an Event room would consume
+    // an eventRng roll).
     for (int x = 0; x < kMapCols; ++x) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
             static_cast<uint8_t>(RoomType::Shop);
@@ -1125,15 +1126,16 @@ TEST(FullFloorCycle, MapPickCombatRewardNextFloor) {
         if (m.can_choose_node[x]) { next = x; break; }
     }
     ASSERT_LT(next, kMapCols);
-    // Make the destination a no-consumption room so the floor-2 boundary is the
-    // pristine post-increment reseed, independently comparable stream-by-stream.
-    // (Shop: an Event room is no longer draw-free since B4.10.)
+    // Make the destination a room that touches no FLOOR-scoped stream, so the
+    // floor-2 boundary is the pristine post-increment reseed, independently
+    // comparable stream-by-stream. (A Shop's build is all run-scoped streams;
+    // an Event room would draw eventRng.)
     rc.run.map[run_state_map_index(next, 1)].room_type =
         static_cast<uint8_t>(RoomType::Shop);
     step(rc, make_action(ActionVerb::CHOOSE, next));
     EXPECT_EQ(rc.run.floor, 2);
     EXPECT_EQ(rc.monster_cursor, 1);  // floor-1 monster room removed on exit
-    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
     const RngStream floor2 = floor_stream(seed, 2);
     EXPECT_TRUE(streams_equal(rc.combat.monster_hp_rng, floor2));
     EXPECT_TRUE(streams_equal(rc.combat.ai_rng, floor2));
@@ -1158,23 +1160,24 @@ TEST(MapChoice, LegalColumnsMatchGeneratedEdges) {
     }
 }
 
-TEST(RoomRouting, UnimplementedNonCombatRoomsParkAtUnimplemented) {
-    // Shop only: since B4.10 an Event room resolves its ?-roll instead of
-    // stalling (see the QuestionMarkRoom suite below).
-    for (RoomType kind : {RoomType::Shop}) {
-        RunController rc = run_begin(kSeed, kA20);
-        for (int x = 0; x < kMapCols; ++x) {
-            rc.run.map[run_state_map_index(x, 0)].room_type =
-                static_cast<uint8_t>(kind);
-        }
-        leave_neow(rc);
-        uint8_t x = first_start_column(rc);
-        step(rc, make_action(ActionVerb::CHOOSE, x));
-        EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
-        EXPECT_EQ(rc.room_type, static_cast<uint8_t>(kind));
-        // Reseed still happened (design: floor streams valid even in unimpl rooms).
-        EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor_stream(kSeed, 1)));
+TEST(RoomRouting, ShopRoomsOpenTheMerchant) {
+    // The last non-combat map kind that used to park now has content: a Shop
+    // node builds its merchant on entry and hands the player the shop floor.
+    // Every remaining ROOM_UNIMPLEMENTED stall is a MISSING ENCOUNTER or a
+    // missing event body, not a missing room kind -- the QuestionMarkRoom suite
+    // and the event-framework suite cover those.
+    RunController rc = run_begin(kSeed, kA20);
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Shop);
     }
+    leave_neow(rc);
+    uint8_t x = first_start_column(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, x));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Shop));
+    // Reseed still happened, and the merchant left it alone.
+    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor_stream(kSeed, 1)));
 }
 
 TEST(RoomRouting, RestRoomsOpenRestSiteMenu) {
@@ -1441,11 +1444,15 @@ TEST(QuestionMarkRoom, MonsterRollEntersRealCombatAndConsumesMonsterList) {
     EXPECT_EQ(rc.elite_cursor, 0);
 }
 
-TEST(QuestionMarkRoom, ShopRollParksWithResolvedKindAndResetsShopPity) {
+TEST(QuestionMarkRoom, ShopRollOpensTheMerchantAndResetsShopPity) {
     const int64_t seed = find_event_roll_seed(0.10f, 0.13f);  // SHOP
     RunController rc = enter_question_mark(seed);
-    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
+    // generateRoom hands back a REAL ShopRoom, so a ?->Shop is the same room
+    // the map's own $ node builds -- same phase, same merchant.
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
     EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Shop));
+    EXPECT_EQ(rc.shop.screen, static_cast<uint8_t>(ShopScreenKind::MENU));
+    EXPECT_EQ(rc.run.merchant_rng.counter, 16);  // one full stock build
     EXPECT_EQ(rc.run.event_pity_monster, 0.1f + 0.1f);
     EXPECT_EQ(rc.run.event_pity_shop, 0.03f);        // hit -> reset
     EXPECT_EQ(rc.run.event_pity_treasure, 0.02f + 0.02f);

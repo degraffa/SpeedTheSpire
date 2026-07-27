@@ -118,14 +118,38 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
 //     if (amount > 0) { gold -= amount; if (gold < 0) gold = 0;
 //                       relics' onLoseGold(); }
 //
-// Two hooks live in that body and neither has an S1 producer at a non-shop
-// site. onSpendGold is gated on being IN a ShopRoom, so it cannot fire from an
-// event or from Neow (Maw Bank is its only S1 override); onLoseGold has no S1
-// override at all. Both are named rather than written for the same reason
-// gain_gold names its empty onGainGold fan-out: the door is where they belong
-// when a shop-side caller arrives. Non-positive amounts change nothing, and the
-// clamp is the Java's, not a defensive extra.
-inline void lose_gold(RunState& rs, int32_t amount) noexcept {
+// Two hooks live in that body. onSpendGold is gated on being IN a ShopRoom, so
+// it cannot fire from an event or from Neow; Maw Bank is its only S1 override
+// and the shop layer is its caller (`in_shop`). onLoseGold still has no S1
+// override at all and is named rather than written, for the same reason
+// gain_gold names its empty onGainGold fan-out.
+//
+// THE GATE IS THE ROOM, NOT THE AMOUNT. The Java runs the onSpendGold fan-out
+// BEFORE the `amount > 0` test, so a shop transaction fires it even for a
+// zero-cost item -- which is why the fan-out below sits ahead of the early
+// return rather than inside it. Non-positive amounts still change no gold, and
+// the clamp is the Java's, not a defensive extra.
+//
+// MawBank.onSpendGold (MawBank.java:38-44) is `if (!usedUp) { flash();
+// setCounter(-2); }` and setCounter(-2) (:46-53) is what marks it used up, so
+// counter == -2 is the used-up encoding -- the same one event_framework.cpp's
+// onEnterRoom share already reads. This is a fan-out over every held copy, not
+// a getRelic, matching the Java's relic iteration.
+inline void dispatch_relics_on_spend_gold(RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        RelicSlot& slot = rs.relics[i];
+        if (slot.relic_id == static_cast<uint16_t>(RelicId::MAW_BANK) &&
+            slot.counter != -2) {
+            slot.counter = -2;
+        }
+    }
+}
+
+inline void lose_gold(RunState& rs, int32_t amount,
+                      bool in_shop = false) noexcept {
+    if (in_shop) {
+        dispatch_relics_on_spend_gold(rs);
+    }
     if (amount <= 0) {
         return;
     }

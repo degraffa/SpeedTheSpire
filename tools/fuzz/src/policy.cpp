@@ -72,6 +72,7 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::EVENT_OPTION: return "event_option";
         case MoveCat::EVENT_GRID: return "event_grid";
         case MoveCat::CHOICE_CONFIRM: return "choice_confirm";
+        case MoveCat::SHOP: return "shop";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -411,6 +412,33 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             }
             break;
 
+        case RunPhase::SHOP:
+            // The purge grid is modal, so exactly one of these two loops ever
+            // produces moves.
+            for (int i = 0; i < engine::kMasterDeckCap; ++i) {
+                if (mask.can_choose_master_deck[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::SHOP);
+                }
+            }
+            for (int i = 0; i < engine::kShopItemCount; ++i) {
+                if (mask.can_buy_shop_item[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::SHOP);
+                }
+            }
+            if (mask.can_purge) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseShopPurge),
+                      MoveCat::SHOP);
+            }
+            if (mask.can_proceed) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseProceed),
+                      MoveCat::SHOP);
+            }
+            break;
+
         case RunPhase::NONE:
         case RunPhase::ROOM_UNIMPLEMENTED:
         case RunPhase::RUN_OVER:
@@ -631,6 +659,12 @@ struct CardScore {
             return 100;
         case MoveCat::EVENT_GRID:
             return 100;
+        case MoveCat::SHOP:
+            // One weight for the whole bucket, and it must stay ABOVE the
+            // implicit floor so a shop is actually shopped in rather than
+            // walked through -- but the Proceed that leaves shares the bucket,
+            // so an unaffordable shop still exits on the first pick.
+            return kind == PolicyKind::HOARD_GOLD ? 10 : 100;
         case MoveCat::COUNT:
             break;
     }

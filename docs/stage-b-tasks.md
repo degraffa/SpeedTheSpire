@@ -63,7 +63,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Meal Ticket `justEnteredRoom` shop heal, including ?→Shop | B4.10 | B4.8 | `AbstractDungeon.nextRoomTransition` replaces the original EventRoom and calls `setCurrMapNode` before `AbstractPlayer.justEnteredRoom`; `MealTicket.justEnteredRoom` therefore heals 15 for a ? that resolves to Shop exactly as for a static ShopRoom. B4.10 parks both shop routes at `ROOM_UNIMPLEMENTED`; B4.8 owns the shared entry effect |
+| Meal Ticket `justEnteredRoom` shop heal, including ?→Shop | B4.10 | B4.8 `[x]` | **DISCHARGED by B4.8.** `dispatch_just_entered_room_relics` (`shop.hpp`) is the shared entry effect, called from `on_player_entry` for every non-Event room and, for a ?, only AFTER the roll has replaced the room — which is where the game calls it (`AbstractDungeon.java:1763-1789`), so a ?→Shop and a static ShopRoom are the same room by then. Both paths are named tests (`ShopFlow.MealTicketHealsOnAStaticShopRoomEntry`, `ShopFlow.MealTicketAlsoHealsWhenAQuestionMarkResolvesToAShop`). The heal is out of combat, so Magic Flower's `onPlayerHeal` (combat-only, `MagicFlower.java:31-37`) cannot scale it and the fan-out is named rather than written, as `rest_apply_heal` already does |
 | Maw Bank `onEnterRoom` outside original EventRooms | B4.10 | UNASSIGNED — next shared room-entry-hook owner | B4.10 implements the original-EventRoom share before ? resolution: every unused copy gains 12 through the Ectoplasm-aware gold door. `MawBank.onEnterRoom` has no room-type condition, so static monster/shop/treasure/rest/boss entries still need the same acquisition-ordered fan-out |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
@@ -79,7 +79,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
 | Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency at EVENT acquisition/use sites | B3.27 | UNASSIGNED — no remaining S1 event site; re-own if an Act-2/3 event batch creates one | **B4.11 event-combat shares DISCHARGED:** Dead Adventurer preserves event-defined gold/relic rows into the generic EventRoom battle-over append; Golden Idol's ×1.25 bonus is recomputed when its gold rows merge, and Sozu's existing claim door removes/discards an event-combat potion. **B4.12 event-specific sites DISCHARGED:** Liars Game, Mushrooms and Living Wall route every card grant through the now-Omamori-aware normal obtain door; Ectoplasm still independently suppresses Liars Game gold; Mushrooms' fixed Odd Mushroom/Circlet reward claims through the generic relic door; Scrap Ooze can roll only COMMON/UNCOMMON/RARE screenless relics; and no B4.12 option uses a potion, so none of the five deferred BOSS `onEquip` bodies or Sacred Bark is reachable. **Chest hooks DISCHARGED by B4.7** and **ordinary combat-reward shares discharged by B4.5** as recorded previously. **B4.13 event-specific sites DISCHARGED:** every card grant across the six shrines and the eight Act-1 specials (Golden Shrine's Regret, the Wheel's Decay, Accursed Blacksmith's Pain, Match and Keep's matched card) goes through the Omamori-aware obtain door; the one exception, NoteForYourself's `addToTop`, matches the Java, which bypasses `ShowCardAndObtainEffect` and grants a non-curse. Every relic grant (Warped Tongs, Spirit Poop/Circlet, the five FaceTrader faces, the Wheel's and We Meet Again's screenless draws) goes through the generic `acquire_relic` door, and the Wheel's relic result presents through the ordinary reward screen. **Sacred Bark stays DEFERRED and is now demonstrably out of S1 event scope:** Lab and The Woman in Blue are the only S1 events that hand out potions, and both do it as reward-screen rows claimed through `claim_reward`, which grants a potion *identity* into a slot and never reads potency — no event USES a potion, so no potency site exists. The five BOSS `onEquip` bodies remain equally unreachable: no S1 event can grant a BOSS-tier relic. |
 | NoteForYourself's `NOTE_CARD` / `NOTE_UPGRADE` player-profile pin | B4.13 | B4.13's pending oracle capture | `NoteForYourself.initializeObtainCard` (`NoteForYourself.java:97-106`) reads two **cross-run player-profile preferences**, defaulting to `"Iron Wave"` and `0`. The engine pins the frozen audited reference profile at those documented defaults, exactly as `note_for_yourself_available` already pins that profile's `ASCENSION_LEVEL` read (`event_framework.hpp`). It is the only behaviour in the shrine/special batch a live capture could contradict without the Java being wrong: the capture must read the reference profile's actual NOTE_* values and either confirm the pin or replace it with a modelled write on the note-giving path. |
-| `colorlessCardPool` is shuffled IN PLACE by `returnColorlessCard` | B4.13 | UNASSIGNED — the shop's two colorless slots | `AbstractDungeon.returnColorlessCard(rarity)` (`AbstractDungeon.java:1100-1113`) JDK-shuffles the persistent `colorlessCardPool.group` before picking, so the new ORDER survives into the next reader of that list. Match and Keep is the only Act-1 caller and the port shuffles a local copy. Nothing in Act 1 observes the persisted order — `transformCard`'s COLORLESS branch reads the untouched `srcColorlessCardPool` (`:998-1014`) — but a shop with colorless slots would, and it would need the pool order to become run state. |
+| `colorlessCardPool` is shuffled IN PLACE by `returnColorlessCard` | B4.13 | UNASSIGNED — but the named consumer turned out not to be one | `AbstractDungeon.returnColorlessCard(rarity)` (`AbstractDungeon.java:1100-1113`) JDK-shuffles the persistent `colorlessCardPool.group` before picking, so the new ORDER survives into the next reader of that list. Match and Keep is the only Act-1 caller and the port shuffles a local copy. **B4.8 corrects this row's forward-looking half:** it named "a shop with colorless slots" as the consumer that would observe the persisted order, and the shop now exists and does **not**. `getColorlessCardFromPool` reaches `CardGroup.getRandomCard(true, rarity)` (`CardGroup.java:509-524`), which filters the group into a local `tmp` and **`Collections.sort`s it** before indexing, so the source order is discarded on every read. Nothing in Act 1 observes the persisted order at all — `transformCard`'s COLORLESS branch reads the untouched `srcColorlessCardPool` (`:998-1014`). The row stays open only against a future reader of the UNSORTED whole-pool view. |
 | Fusion Hammer / Coffee Dripper campfire-option locks | B3.27, B4.9 | UNASSIGNED — next campfire/relic-lock follow-up | B4.9 deliberately preserves these whole-effect deferrals: the registered boss relic rows and pool slots are live, but their shared `energyMaster` half remains deferred and the task brief explicitly prohibited silently partially implementing the Smith/Rest locks. `build_rest_menu` therefore documents that both base buttons remain unlocked until one owner lands the relic bodies coherently. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
@@ -87,9 +87,9 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | B4.4 `[x]` | B1.6 scoped itself to "adapter + format only" and named B4.4; B4.4's Log records run-combat equivalence but no `replay` generalization |
 | Emit `kIroncladAttackPool`, B3.10b's two generated combat pools, B3.11's `kIroncladSkillPool`, **and the three B4.5 reward pools** in CardLibrary HashMap iteration order instead of registry-id order | B3.6, B3.10b, B3.11 | B4.5's oracle capture | documented interim deviation; **one** `emit/cards.py` fix can pin all seven pools at once. Membership and RNG draw counts are live and tested now (B3.11 pins the SKILL pool as the in-order subsequence of the combat pool, so it cannot drift independently), but exact same-seed selected identities await the same manual HashMap-order capture that blocks B4.5 — the runbook's §4 documents how to pin the runtime ordering |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
-| The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
+| The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
-| Translator `screen_state` content (shop / grid / map screens and future event variants) | B1.5, B4.3 | B4.8 | **EVENT slice content-validation DISCHARGED by B4.11:** `event_id` joins through the generated registry and option `disabled` / `choice_index` fields are type-checked; the content intentionally remains storage-less because translation outputs `RunState`/`CombatState`, not transient `RunController::event`. **The reward slice was discharged by B4.5.** **The NEOW slice was discharged by B4.14:** Neow arrives as an `EVENT` screen with the hard-coded id `"Neow Event"` (GameStateConverter.getEventState :343-355), which is recognised as a sentinel rather than joined — it is deliberately not an `events.yaml` row, because Neow is in no act's event/shrine/special pool and an `EventId` for it would place a non-pool entry into the three membership bitsets that pool ids index; the option list still gets the ordinary EVENT validation, and a near-miss id (`"Neow"`) is still refused. Shop/grid/map content and any new event-variant fields remain with their owning tasks. |
+| Translator `screen_state` content (shop / grid / map screens and future event variants) | B1.5, B4.3 | B4.8 | **EVENT slice content-validation DISCHARGED by B4.11:** `event_id` joins through the generated registry and option `disabled` / `choice_index` fields are type-checked; the content intentionally remains storage-less because translation outputs `RunState`/`CombatState`, not transient `RunController::event`. **The reward slice was discharged by B4.5.** **The NEOW slice was discharged by B4.14:** Neow arrives as an `EVENT` screen with the hard-coded id `"Neow Event"` (GameStateConverter.getEventState :343-355), which is recognised as a sentinel rather than joined — it is deliberately not an `events.yaml` row, because Neow is in no act's event/shrine/special pool and an `EventId` for it would place a non-pool entry into the three membership bitsets that pool ids index; the option list still gets the ordinary EVENT validation, and a near-miss id (`"Neow"`) is still refused. **The SHOP slice was discharged by B4.8** on the same terms: potion ids join through the registry (an unknown one fails loud / tallies under id-tolerance, as the reward potion already did), every `price` on a card / relic / potion row is type-checked, `purge_cost` must be an integer and `purge_available` a boolean — and it stays storage-less deliberately, because a merchant is derived state the game rebuilds from `(seed, merchantRng.counter)` and the one piece it DOES persist (the ramping purge cost) already has a `RunState` field fed from the oracle block. GRID and MAP content and any new event-variant fields remain with their owning tasks. |
 | `b14_accept2` obtain-race capture-fidelity triage | B1.3 | B5.2 | flagged explicitly by B1.3; B1.4's acceptance is unaffected |
 | Infernal-Blade-generated Blood for Blood cost model (`cost_now` only; end-of-turn reset restores 4, not the game's reduced base) | B3.6 | G7 | judged unreachable — "revisit if G7 ever hits it" |
 | Bottled trio bottling at acquisition (run-layer acquisition-choice machinery + a per-master-deck-instance innate flag) | B3.25 | UNASSIGNED — named "B4-owner" | rows + deck-content gates live so pools and B4.7 chests are complete |
@@ -183,8 +183,8 @@ keys stored soak-coverage identities.
 
 | Namespace (defined in) | Taken | Reserved / free |
 |---|---|---|
-| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–9** (`NONE`..`EVENT_DIALOG`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10 — landed, claiming its reservation) | 10+ free — claim here first |
-| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–25** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c — **spent**; `COUNT = 26`) | 26+ free — claim here first and bump `COUNT` past every enumerator |
+| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–10** (`NONE`..`SHOP`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10, 10 `SHOP` B4.8 — all landed, each claiming its reservation) | 11+ free — claim here first |
+| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–26** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c, 26 `SHOP` B4.8 — **spent**; `COUNT = 27`) | 27+ free — claim here first and bump `COUNT` past every enumerator |
 
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
@@ -709,23 +709,83 @@ parameter is gone — the open path reads `treasureRng` only
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b47)
 (the task stays unchecked until its required live-game spot-diff can run)
 
-### B4.8 `[ ]` Shop
+### B4.8 `[ ]` Shop — **code landed; blocked on the manual oracle capture**
 **Deps:** B4.5, B4.6, B3.23 · **Spec:** design §5.6 · **Provenance:**
-ShopScreen.java:100-136, 227-292, 340-428, 601-661; Merchant.java (stock
-build — read at task)
-**Deliverables:** stock generation (5 colored + 2 colorless w/ 0.3 rare
-chance, 3 relics incl. end-pop + SHOP tier slot, 3 potions), pricing (base ×
-jitter, colorless ×1.2, A16 ×1.1, sale card /2), purge (75 + 25 ramp,
-persistent), purchase/purge as CHOOSE flow, merchantRng draw-order exactness.
+ShopScreen.java:130-244, 246-292, 340-428, 592-672, 969-978; Merchant.java:
+57-97; ShopRoom.java:29-77; StoreRelic.java:36-120; StorePotion.java:33-101;
+AbstractCard.getPrice :1915-1937; AbstractRelic.getPrice :173-201;
+AbstractPotion.getPrice :381-394; AbstractDungeon.getCardFromPool :1538-1577
+and getColorlessCardFromPool :1579-1595; CardGroup.getRandomCard :498-552;
+AbstractRoom.getCardRarity :148-178; AbstractPlayer.loseGold :697-717;
+MealTicket.java:31-38; MawBank.java:38-53
+**Dependency override — authorised.** B4.5 is `[!]` (code landed,
+capture-blocked), so this task's `Deps:` line was not formally satisfied when
+it started. The project owner explicitly authorised implementing B4.8 ahead of
+B4.5's acceptance on 2026-07-27, with the capture pipeline running
+concurrently. Nothing here reads B4.5's blocked leg: the shop's own reward
+machinery is the relic/potion/master-deck doors, all of which are `[x]`.
+**Deliverables:** stock generation (5 colored + 2 colorless, 3 relics incl.
+end-pop + SHOP tier slot, 3 potions), pricing (base × jitter, colorless ×1.2,
+A16 ×1.1, sale card /2), purge (75 + 25 ramp, persistent), purchase/purge as
+CHOOSE flow, merchantRng draw-order exactness.
+**A brief correction — "0.3 rare chance" is not the stock roll.** The
+deliverables line inherited that number from design §5.6's Neow-era phrasing;
+the shop's two colourless slots are **fixed UNCOMMON then RARE**
+(Merchant.java:84-85) and take no chance roll at all.
+`AbstractDungeon.colorlessRareChance` is read only by The Courier's colourless
+RESTOCK (ShopScreen.java:601), which is the half of that relic this task did
+not implement. Recorded here rather than silently dropped.
 **Acceptance:** tier-2: full stock + prices for a fixed merchantRng state
 match hand-derivation draw-for-draw; purge ramp persists across two shops;
 oracle spot-diff of a shop floor (stock, prices, sale index) zero-diff.
-**Inherited:** The Courier (floor≤48 && !in_shop gate already live, effect is a
-documented no-op) — deferred by B3.25. Shop `screen_state` translation — deferred by
-B1.5/B4.3.
-Meal Ticket's 15-HP `justEnteredRoom` heal applies both to a static ShopRoom
-and to an EventRoom replaced by a ?→Shop roll — deferred by B4.10.
-**Log:** —
+- [x] tier-2 draw order — `ShopDrawOrder.SixteenMerchantDrawsInTheJavaOrder-
+      ForAFixedState` replays all three streams beside the engine and compares
+      every price; the sixteen-draw table is a comment in `shop.hpp` and in the
+      test.
+- [x] purge ramp across two shops — `ShopPurge.RampPersistsAcrossTwoShops`.
+- [ ] oracle spot-diff — needs the live game, which only a human operator can
+      launch. Runbook:
+      [b48_shop_spotdiff.md](../tools/oracle_bridge/driver/b48_shop_spotdiff.md).
+      Same shape as B4.7 / B4.14.
+**A recorded capture already reproduces one whole merchant.**
+`ShopCapture.B13Seed1790050543758Floor3MatchesTheRecordedMerchant` rebuilds a
+real A20 shop — b13 sweep run `STS00008`, floor 3 — from that capture's
+pre-entry stream triples and relic pools, and matches all seven cards, three
+relics, three potions, every price, the sale index and the post-build state of
+`cardRng` (9→21), `merchantRng` (0→16) and `potionRng` (3→10). That is not the
+acceptance leg (one shop, from another task's campaign, with no purchase), but
+it is what pins the three base-price tables: `sts-classes.jar` carries no inner
+classes, so CFR emitted `AbstractRelic.getPrice`'s switch with `$SwitchMap`
+indices and no constant names, and the tier→price assignment is not recoverable
+from the decompiled source alone.
+**Inherited — DISCHARGED:** Meal Ticket's 15-HP `justEnteredRoom` heal, for a
+static ShopRoom **and** for a ?→Shop. The fan-out runs after the ?-roll has
+replaced the room object and after `setCurrMapNode`
+(AbstractDungeon.java:1763-1789), so the two paths are the same room; both are
+named tests. Shop `screen_state` translation, discharged on the B4.11/B4.14
+terms — registry-joined (potion ids), type-checked (every `price`,
+`purge_cost`, `purge_available`), storage-less, because translation outputs
+`RunState`/`CombatState` and a merchant is derived state the game rebuilds from
+`(seed, merchantRng.counter)`.
+**Inherited — PARTIALLY discharged, row updated not closed:** The Courier. Its
+`x0.8` price discount and its purge-cost branch are LIVE (they are inside
+`ShopScreen.init` and `purgeCard`, which this task implements in full). Its
+RESTOCK is not, and the reason is not effort: the card branch draws with
+`useRng=false`, i.e. off libGDX's **unseeded** `MathUtils` global rather than
+`cardRng` (ShopScreen.java:615-617), so the replacement card's identity has no
+reproducible answer. The relic and potion restocks (StoreRelic.java:105-112,
+StorePotion.java:86-89) are seeded and could be encoded, but landing half a
+relic's behaviour behind a hard blocker is worse than naming the blocker.
+**Namespace values taken:** `RunPhase::SHOP = 10` and fuzz `MoveCat::SHOP = 26`
+(`COUNT` 26→27), both pre-authorised in the allocation table above.
+**A latent run-setup bug this task found and fixed.** `run_begin` never
+initialised `RunState.purge_cost`, so a value-initialised run opened its first
+merchant offering card removal for **0 gold**. `ShopScreen.purgeCost` is a
+STATIC in the game, reset only by the dungeon reset that precedes a new run
+(CardCrawlGame.java:478 → ShopScreen.java:241-244) — which is exactly why the
+reset exists. Now spelled in `run_begin` beside the other
+dungeonTransitionSetup fields.
+**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b48)
 
 - **B4.9** `[x]` Rest sites — Java-order campfire menu and CHOOSE flows for Rest/Smith/Lift/Toke/Dig; base 30% + Regal Pillow heal, Dream Catcher direct card reward, Girya/Peace Pipe/Shovel effects and exact RNG/pool order; independent-audit fix-forwards close fixed master-deck/relic-cap and malformed reward-screen legality, including zero-card offers, without changing valid skip/proceed or Circlet stacking; no schema or combat `ActionMask` change; full three-preset suite green · [log](stage-b-log.md#b49)
 
