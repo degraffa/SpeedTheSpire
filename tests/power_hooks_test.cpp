@@ -708,5 +708,180 @@ TEST(PowerHooks, NewPowerSequenceIsDeterministic) {
     EXPECT_EQ(run(), run()) << "power sequence must be deterministic";
 }
 
+// --- DURATION debuffs: Vulnerable / Weak / Frail atEndOfRound ----------------
+//
+// VulnerablePower.atEndOfRound (VulnerablePower.java:44-53),
+// WeakPower.atEndOfRound (WeakPower.java:44-53) and FrailPower.atEndOfRound
+// (FrailPower.java:40-52) are the same body: consume a justApplied latch if one
+// is set, otherwise queue a one-stack ReducePowerAction (which REMOVES rather
+// than reduces once the request meets the stack, ReducePowerAction.java:45-51).
+// The three differ ONLY in when their ctor sets justApplied -- Vulnerable needs
+// `turnHasEnded && isSourceMonster` (:36-38); Weak and Frail need
+// `isSourceMonster` alone (:35-37 / :32-34).
+//
+// The latch is the slot's own PowerSlot.counter, so it is per INSTANCE: the
+// player and every monster can carry one at the same time.
+
+PowerSlot* player_power_slot(CombatState& s, PowerId id) {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) {
+            return &s.player_powers[i];
+        }
+    }
+    return nullptr;
+}
+
+void end_round(CombatState& s) {
+    dispatch_at_end_of_round(s);
+    drain_actions(s);
+}
+
+// A card-applied Vulnerable lands during the player's own turn, so turnHasEnded
+// is 0, no latch is taken, and the very first round end costs it a stack.
+TEST(DurationDebuffs, PlayerAppliedVulnerableStartsDecayingImmediately) {
+    CombatState s = MakeState(CardId::BASH, 2);
+    s.turn_has_ended = 0;
+    execute_opcode(s, apply_power_item(kActorPlayer, 0, PowerId::VULNERABLE, 2));
+    ASSERT_NE(monster_power(s, 0, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(monster_power(s, 0, PowerId::VULNERABLE)->counter, 0)
+        << "no justApplied: Bash is played while turnHasEnded is 0";
+
+    end_round(s);
+    ASSERT_NE(monster_power(s, 0, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(monster_power(s, 0, PowerId::VULNERABLE)->amount, 1);
+
+    end_round(s);
+    EXPECT_EQ(monster_power(s, 0, PowerId::VULNERABLE), nullptr)
+        << "1 - 1 is a removal, not a slot resting at 0";
+}
+
+// The monster-applied direction. A Vulnerable a monster puts on the player during
+// the enemy phase takes the latch, so its FIRST round end only clears the latch.
+TEST(DurationDebuffs, MonsterAppliedVulnerableSkipsItsFirstTick) {
+    CombatState s = MakeState(CardId::BASH, 2);
+    s.turn_has_ended = 1;  // the enemy phase: EndTurnAction has run
+    execute_opcode(s,
+                   apply_power_item(/*src=*/0, kActorPlayer, PowerId::VULNERABLE, 2));
+    ASSERT_NE(player_power_slot(s, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 1);
+
+    end_round(s);
+    ASSERT_NE(player_power_slot(s, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->amount, 2)
+        << "justApplied consumed instead of a stack";
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 0);
+
+    end_round(s);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->amount, 1);
+    end_round(s);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE), nullptr);
+}
+
+// Weak's ctor has no turnHasEnded clause, which is the one place the three
+// bodies' preconditions differ. In S1 scope `isSourceMonster` is exactly "the
+// owner is the player": the Doubt curse applies Weak to the player from the
+// player's OWN turn and still passes true (Doubt.java:35).
+TEST(DurationDebuffs, WeakLatchesByOwnerWithNoTurnHasEndedClause) {
+    CombatState player_side = MakeState(CardId::BASH, 2);
+    player_side.turn_has_ended = 0;  // Doubt fires at the end of the player's turn
+    execute_opcode(player_side,
+                   apply_power_item(kActorPlayer, kActorPlayer, PowerId::WEAK, 1));
+    ASSERT_NE(player_power_slot(player_side, PowerId::WEAK), nullptr);
+    EXPECT_EQ(player_power_slot(player_side, PowerId::WEAK)->counter, 1)
+        << "Weak latches on a player owner even with turnHasEnded == 0";
+    end_round(player_side);
+    EXPECT_EQ(player_power_slot(player_side, PowerId::WEAK)->amount, 1);
+    end_round(player_side);
+    EXPECT_EQ(player_power_slot(player_side, PowerId::WEAK), nullptr);
+
+    // A card weakening a MONSTER passes false, so it never latches.
+    CombatState monster_side = MakeState(CardId::BASH, 2);
+    execute_opcode(monster_side, apply_power_item(kActorPlayer, 0, PowerId::WEAK, 2));
+    ASSERT_NE(monster_power(monster_side, 0, PowerId::WEAK), nullptr);
+    EXPECT_EQ(monster_power(monster_side, 0, PowerId::WEAK)->counter, 0);
+    end_round(monster_side);
+    EXPECT_EQ(monster_power(monster_side, 0, PowerId::WEAK)->amount, 1);
+}
+
+// AbstractCreature.addPower (:506-513) hands the amount to the LIVE instance and
+// discards the freshly built one, latch and all -- so re-application never
+// re-arms, and never disarms, an existing latch.
+TEST(DurationDebuffs, StackingPreservesTheExistingLatch) {
+    CombatState s = MakeState(CardId::BASH, 2);
+    s.turn_has_ended = 1;
+    const ActionQueueItem apply =
+        apply_power_item(/*src=*/0, kActorPlayer, PowerId::VULNERABLE, 2);
+    execute_opcode(s, apply);
+    ASSERT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 1);
+
+    execute_opcode(s, apply);  // a second monster application, same round
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->amount, 4);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 1)
+        << "the surviving instance keeps its own latch";
+
+    // And once the latch is spent, re-stacking does not re-arm it.
+    end_round(s);
+    ASSERT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 0);
+    execute_opcode(s, apply);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->amount, 6);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 0);
+    end_round(s);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->amount, 5);
+}
+
+// Per INSTANCE, not per combat: the player and two monsters each hold their own
+// Vulnerable at their own amount and their own latch, and one round end moves all
+// three correctly. This is what the retired single CombatState.flags bit could
+// not express, and why Frail's latch moved into the slot with the other two.
+TEST(DurationDebuffs, EveryOwnerCarriesItsOwnLatchAndAmount) {
+    CombatState s = MakeState(CardId::BASH, 2);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 50;
+    s.monsters[1].max_hp = 50;
+
+    s.turn_has_ended = 1;
+    execute_opcode(s, apply_power_item(0, kActorPlayer, PowerId::VULNERABLE, 3));
+    s.turn_has_ended = 0;
+    execute_opcode(s, apply_power_item(kActorPlayer, 0, PowerId::VULNERABLE, 2));
+    execute_opcode(s, apply_power_item(kActorPlayer, 1, PowerId::VULNERABLE, 1));
+
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->counter, 1);
+    EXPECT_EQ(monster_power(s, 0, PowerId::VULNERABLE)->counter, 0);
+    EXPECT_EQ(monster_power(s, 1, PowerId::VULNERABLE)->counter, 0);
+
+    end_round(s);
+    EXPECT_EQ(player_power_slot(s, PowerId::VULNERABLE)->amount, 3) << "latched";
+    EXPECT_EQ(monster_power(s, 0, PowerId::VULNERABLE)->amount, 1);
+    EXPECT_EQ(monster_power(s, 1, PowerId::VULNERABLE), nullptr) << "1 -> removed";
+}
+
+// Frail shares the body, so a MONSTER-owned Frail now ticks. It could not before:
+// the old latch was a single player-only flag bit and the hook body returned early
+// for any other owner.
+TEST(DurationDebuffs, FrailOnAMonsterTicksLikeThePlayers) {
+    CombatState s = MakeState(CardId::BASH, 2);
+    execute_opcode(s, apply_power_item(kActorPlayer, 0, PowerId::FRAIL, 2));
+    ASSERT_NE(monster_power(s, 0, PowerId::FRAIL), nullptr);
+    EXPECT_EQ(monster_power(s, 0, PowerId::FRAIL)->counter, 0)
+        << "a monster-owned Frail is card-sourced -> isSourceMonster false";
+
+    end_round(s);
+    EXPECT_EQ(monster_power(s, 0, PowerId::FRAIL)->amount, 1);
+    end_round(s);
+    EXPECT_EQ(monster_power(s, 0, PowerId::FRAIL), nullptr);
+}
+
+// A dying or escaped monster is skipped by both applyEndOfTurnPowers walks
+// (MonsterGroup.java:292,299), so its debuffs stop moving the moment it leaves.
+TEST(DurationDebuffs, ADeadMonstersDebuffsStopTicking) {
+    CombatState s = MakeState(CardId::BASH, 2);
+    execute_opcode(s, apply_power_item(kActorPlayer, 0, PowerId::VULNERABLE, 2));
+    s.monsters[0].hp = 0;
+
+    end_round(s);
+    EXPECT_EQ(monster_power(s, 0, PowerId::VULNERABLE)->amount, 2);
+}
+
 }  // namespace
 }  // namespace sts::engine

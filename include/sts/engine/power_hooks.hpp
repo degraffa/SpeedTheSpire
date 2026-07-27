@@ -176,6 +176,16 @@ void dispatch_at_end_of_round(CombatState& state) noexcept;
 void dispatch_at_start_of_turn(CombatState& state) noexcept;
 void dispatch_at_start_of_turn_post_draw(CombatState& state) noexcept;
 
+// atStartOfTurn for ONE monster's powers -- the second half of
+// MonsterGroup.applyPreTurnLogic (MonsterGroup.java:98-105), which calls
+// m.applyStartOfTurnPowers() (AbstractCreature.java:529-533) immediately after
+// the Barricade-gated loseBlock(). Kept separate from dispatch_at_start_of_turn
+// because the two fire a whole monster phase apart: the player's is
+// GameActionManager's step 6, the monster's is MonsterStartTurnAction. The caller
+// (action_queue.cpp's apply_pre_turn_logic) owns the isDying/isEscaping filter.
+void dispatch_monster_at_start_of_turn(CombatState& state,
+                                       uint8_t monster_index) noexcept;
+
 // onGainedBlock (Juggernaut): fires after `actor` gains `amount` block (>0), on
 // the actor's own powers (the player path; monster block gain has no S1 consumer).
 void dispatch_on_gained_block(CombatState& state, uint8_t actor,

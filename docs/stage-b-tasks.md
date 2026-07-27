@@ -85,8 +85,6 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed by B4.5, still open | **PARTLY COVERED, not discharged.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does two thirds of it: its default mode genuinely seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. What is missing is the general case — resuming from an ARBITRARY mid-run translated state without re-driving the prefix (the run layer has no "restore a `RunController` from a `RunState`" door: map cursors, encounter lists and their cursors are transient and would have to be re-derived), and coverage of the rooms `--replay` still stops at (shop screens, out-of-combat potion discard, grid `cancel`) |
-| Monster block is never cleared at the monster's turn start | B4.5's oracle replay | UNASSIGNED — combat-layer owner | Found by `replay_run_diff --replay` on STS00051 (`b45_rewards_oracle2_20260727T204809Z_claude01`), floor 1, two Louse: the game's Louse enters the player's turn 3 at 0 block, the sim's keeps the 12 Curl Up block it gained on turn 2, so a 9-damage Strike that killed it in the game left 7 HP in the sim. `MonsterGroup.applyPreTurnLogic` (`MonsterGroup.java:98-104`) is the block-clearing walk, and it is called only from `MonsterStartTurnAction` — which CFR shows as referenced by nothing, because `AbstractRoom.endTurn` queues it as an anonymous inner class the decompiler dropped (`AbstractRoom.java:409`). Whoever takes this must read the real bytecode/another decompiler for that line rather than trust the `.java` |
-| `Vulnerable` / `Weak` durations never tick down | B4.5's oracle replay | UNASSIGNED — combat-layer owner | `registry/powers.yaml` gives STRENGTH/VULNERABLE/WEAK no hook bindings at all, on the (correct, but incomplete) grounds that their EFFECT is the native damage pipeline. Their DURATION is not: `atEndOfRound` decrements and removes them, dispatched for monsters and the player by `MonsterGroup.applyEndOfTurnPowers` (`:290-304`), which the sim already calls as `dispatch_at_end_of_round`. Same STS00051 record: the game's Louse is at Vulnerable 1 on turn 3, the sim's still at 2. Note `justApplied` — a debuff a MONSTER applies to the player skips its first decrement, and the player-applied direction does not |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
@@ -328,6 +326,98 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
 
+- **Combat: pre-turn monster block clear + debuff duration ticks** `[x]` —
+  discharges both combat-layer obligation rows B4.5's oracle replay left behind.
+  Two independent defects, one capture: run **STS00051** of
+  `b45_rewards_oracle2_20260727T204809Z_claude01`, floor 1, two Louse — the
+  game's Louse entered the player's turn 3 at 0 block and Vulnerable 1 and died
+  to a 9-damage Strike; the simulator's kept its Curl Up block and its
+  Vulnerable 2, absorbed the Strike and lived on 7 HP.
+  - **Monster block was never cleared at the monster's turn start.**
+    `MonsterGroup.applyPreTurnLogic` (`MonsterGroup.java:98-105`) — clear block
+    unless the monster `hasPower("Barricade")`, then
+    `applyStartOfTurnPowers()` — was believed to be dead code because its only
+    caller, `MonsterStartTurnAction`, is referenced by nothing in the decompiled
+    tree. That was a **decompiler artifact**: `AbstractRoom.endTurn` ends with
+    `addToBottom((AbstractGameAction)new /* Unavailable Anonymous Inner Class!! */)`
+    at `AbstractRoom.java:409`, because CFR dropped the anonymous class. Pinned
+    in bytecode instead — `AbstractRoom.endTurn (bytecode AbstractRoom$1, javap)
+    -- CFR-dropped anonymous class`. `javap -c` (JDK 8, against the game's own
+    `desktop-1.0.jar`, read-only) shows `endTurn` at offsets 167-178 constructing
+    `AbstractRoom$1` and handing it to `GameActionManager.addToBottom`, and
+    `AbstractRoom$1.update()` as `addToBot(EndTurnAction)` /
+    `addToBot(WaitAction(1.2f))` / `if (!skipMonsterTurn) addToBot(
+    MonsterStartTurnAction)` / `monsterAttacksQueued = false`;
+    `MonsterStartTurnAction.update()` then calls
+    `getCurrRoom().monsters.applyPreTurnLogic()`. Those actions drain before
+    `GameActionManager`'s `!monsterAttacksQueued` branch, so the walk sits
+    between the end-of-turn discard and `queueMonsters` — `pump_step` **step 4**,
+    which is where `apply_pre_turn_logic` now runs. `applyStartOfTurnPowers` is
+    implemented with it (`dispatch_monster_at_start_of_turn`); no S1
+    monster-ownable power binds that hook, so it is inert today.
+  - **`Vulnerable` and `Weak` never ticked down.** Both rows bound no hooks at
+    all. Their EFFECT is the native damage pipeline, but their DURATION is
+    `atEndOfRound` (`VulnerablePower.java:44-53`, `WeakPower.java:44-53`) — the
+    same six lines as `FrailPower.java:40-52`, which was already native. All
+    three are now `native: true` with an `at_end_of_round` binding over one
+    shared body (`src/engine/powers/power_duration_debuff.*`): consume a
+    `justApplied` latch if set, else queue a one-stack `REDUCE_POWER`, which
+    removes at zero (`ReducePowerAction.java:45-51`). The ctors' latch
+    conditions differ and are reproduced exactly — Vulnerable needs
+    `turnHasEnded && isSourceMonster` (`:36-38`), Weak and Frail
+    `isSourceMonster` alone (`:35-37` / `:32-34`). A **full audit of every
+    DEBUFF row** against its Java found no other gap: `LOSE_STRENGTH`,
+    `LOSE_DEXTERITY`, `SHACKLED`, `NO_DRAW` and `ENTANGLE` already self-remove at
+    end of turn, `NO_BLOCK` already reduces at end of round, and `CONFUSION` is
+    permanent in the Java too.
+  - **Storage, and a retired flag bit.** The latch is the slot's own
+    `PowerSlot.counter`, per instance. Frail's latch **moved there** from the
+    player-only `CombatState.flags` bit, which by construction could not describe
+    a monster-owned instance and could not have described Vulnerable or Weak at
+    all (six actors can hold one at once). `CombatState.flags` **bit 0 is
+    retired**, not reused, and the symbol is deleted so a stale reader is a
+    compile error rather than a silent "not just applied". No schema version, no
+    POD layout change: the latch is always 0 at a `WAITING_ON_USER` boundary
+    (set during the monster phase, consumed by `dispatch_at_end_of_round` in the
+    same pump), so it never reaches a snapshot, a state hash or an oracle diff.
+  - **The Lagavulin armour claim was wrong and is corrected.** A sleeping
+    Lagavulin's block is cleared at the top of its own turn, one full phase
+    before Metallicize re-grants 8 at `applyEndOfTurnPowers` time, so the armour
+    **holds at 8** and never stacks to 16 / 24. Corrected at
+    `include/sts/engine/monster_lagavulin.hpp` and
+    `src/engine/monster_lagavulin.cpp`, in the B3.19 ledger row and change-log
+    entry above, and as a dated addendum on the archived B3.19 Log (append-only,
+    so the original text stands and the correction is appended). Named test:
+    `LagavulinSleep.ArmourHoldsAtEightEachRoundAndIsGoneOnceTheShellOpens`, plus
+    `CombatStart.LagavulinArmourTicksOncePerCompletedRound` through the run layer.
+  - **Fixtures regenerated, not hand-edited.** Ten of the twenty committed combat
+    fixtures changed and were rewritten by the checked-in generator
+    (`tools/fixture_gen/gen_combat_fixtures`), whose independent model gained the
+    same two rules from the same Java. No schema change — content regeneration.
+    Two scripts moved, and only because the fix invalidated a coverage claim
+    rather than a number: `fixt18_r0_reshuffle_overlap` is renamed
+    `fixt18_r0_reshuffle_stale_block` (Bash-then-Bellow can no longer leave both
+    powers standing at a recorded boundary, since the round that ends with the
+    Bellow also runs `atEndOfRound`; what it now pins is a Bellow's block
+    outliving the player's next turn), and `fixt19_r9_long_block` gains a turn-4
+    Bash so Bellow-then-Bash carries the Strength+Vulnerable concurrency the
+    ledger's A6.2 requirement asks for. Both deaths still occur, checked against
+    `--dumpall`; the derivation notes and their coverage table are updated with
+    them.
+  - **Oracle proof.** `replay_run_diff --replay` over all six b45 reward runs,
+    before and after. **STS00051**: first divergence was floor 1, seq 15, the
+    sim still in COMBAT while the game was on its reward screen (12 fields:
+    `hp 66 -> 60` plus every reward stream at its pre-assembly value); now the
+    whole floor-1 combat and its post-combat `RunState` are **zero-diff**, and
+    the replay runs on to floor 3 before stopping. **STS00049**: first divergence
+    was the same shape at floor 1, seq 26; now **no divergence anywhere** in the
+    47 records it compares. **STS00050**: clean before and after. The three
+    remaining stops are unrelated and named per-run in the commit body.
+  - Named regressions: `PreTurnLogic.*` (four, in `action_queue_test`),
+    `DurationDebuffs.*` (seven, in `power_hooks_test`), and
+    `LouseCurlUp.BlockDoesNotSurviveIntoThePlayersNextTurn`, which reproduces the
+    captured two-Louse arithmetic without needing the artifact.
+
 - **B4.14-integration incident: red merge pushed; two fix-forwards; stale
   build-tree trap eliminated** `[x]` — commits `97d350f` + `09e103d` (merged
   after `09df37f`, the B4.14 union merge that was pushed while red — an
@@ -401,7 +491,7 @@ the next session.
   No persistent-state layout, registry id, opcode, fixture, or golden-vector
   change; this is deferred-obligation non-task work, so there is no task block
   to archive.
-- **Combat start: turn 1 must not run the end-of-round pass** `[x]` — commit `821bffd`, merged at `9dea548`, landed in `56248c5`. `combat_begin` and `enter_combat` both primed turn 1 with `turn_has_ended = 1` and pumped, routing through `start_of_turn` → `dispatch_at_end_of_round` **before the player's first turn**, so every end-of-round hook on a power present at combat start fired once for free. **The game cannot reach that branch**: `AbstractRoom.java:236-243` sets the flag and then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`) — the queue is never empty while that item is pending, so the step-6 test is false by the time it is reached. **Measured**: a sleeping Lagavulin had **16 block on turn 1 instead of 8** (monster block never decays, so it also gained +8 every later turn). Fixed at **both** entry points via a shared `begin_first_turn` that reuses the same `start_of_turn` with a `TurnStart` parameter; **two by-construction guards scan both files**, so a one-sided regression fails rather than drifts. All 20 committed fixtures replayed **zero-diff**, proving the spurious pass was inert for every piece of landed content. The post-draw *powers* twin was reported and deliberately left — it is the `fix-postdraw-gate` row in the obligations table.
+- **Combat start: turn 1 must not run the end-of-round pass** `[x]` — commit `821bffd`, merged at `9dea548`, landed in `56248c5`. `combat_begin` and `enter_combat` both primed turn 1 with `turn_has_ended = 1` and pumped, routing through `start_of_turn` → `dispatch_at_end_of_round` **before the player's first turn**, so every end-of-round hook on a power present at combat start fired once for free. **The game cannot reach that branch**: `AbstractRoom.java:236-243` sets the flag and then queues `GainEnergyAndEnableControlsAction`, which clears it (`:35`) — the queue is never empty while that item is pending, so the step-6 test is false by the time it is reached. **Measured**: a sleeping Lagavulin had **16 block on turn 1 instead of 8** (at the time monster block was never cleared, so it also gained +8 every later turn; the turn-1 defect this entry fixes is unaffected, but see the 2026-07-27 correction under [Landed non-task work](#landed-non-task-work) — the armour now holds at 8 from turn 2 on rather than accumulating). Fixed at **both** entry points via a shared `begin_first_turn` that reuses the same `start_of_turn` with a `TurnStart` parameter; **two by-construction guards scan both files**, so a one-sided regression fails rather than drifts. All 20 committed fixtures replayed **zero-diff**, proving the spurious pass was inert for every piece of landed content. The post-draw *powers* twin was reported and deliberately left — it is the `fix-postdraw-gate` row in the obligations table.
 - **`MonsterState.flags` widened u16 → u32, schema v4 → v5** `[x]` — commit `2684548`, landed in `a32e84c`. **Owner-directed** (2026-07-26), recorded in the frozen spec's change log as design §11 **v0.1.5**. The width was the smaller half of the fix: bits had been allocated **linearly**, one fresh bit per monster type, though **no monster is two types at once** — nine Act-1 types consumed all sixteen bits while the worst single type (The Guardian) needs five, so widening alone would have re-exhausted the word in Act 2. The two-region policy is in **Shared namespaces** above; `kMonsterFlagEscaped` moved bit 15 → **24**, every type-scoped bit kept its historical value. **A latent hazard the widening exposed:** several flag writes were `static_cast<uint16_t>`, which after widening would have **silently cleared the entire global region** — quietly erasing `Escaped` — on every write; the compiler cannot catch it, because narrowing through an explicit cast is exactly what the cast asks for. Removed across eight source files and two tests. `sizeof(MonsterState)` 112 → 116 and `sizeof(CombatState)` 3896 → 3928, **measured by compiled `offsetof`/`sizeof` probes, not predicted**, under the 8192 ceiling v0.1.4 raised. **All 20 combat fixtures regenerated — the single sanctioned exception to this project's never-modify-a-committed-fixture rule**, owner-approved; nothing under `tests/golden/` outside `combat_fixtures/` moved. The B3.12/B4.3 single-zero-run-insertion proof shape **was not available and was not faked**: widening an *interior* field moves every later offset and deletes an old alignment pad, so an equivalent per-field proof was produced from probe-derived offsets over 20 fixtures / 112 records.
 - **Combat start: turn 1 must not run the post-draw power pass** `[x]` — commit `f05ad8a`, merged at `a5afbf9`, landed in `06c4fa0`. The **sibling** of the end-of-round gate above and the second half of the same divergence, discharging the obligation integration-14 left. `start_of_turn`'s end-of-round pass, Ice Cream energy branch and block decay were all gated to `kSubsequentTurn`; `dispatch_at_start_of_turn_post_draw` was not, so it also ran while priming turn 1. **The game has no counterpart there**: `AbstractRoom.update`'s turn-1 block calls `applyStartOfTurnRelics` (`:253`), `applyStartOfTurnPostDrawRelics` (`:254`), `applyStartOfTurnCards` (`:255`), `applyStartOfTurnPowers` (`:256`) and `applyStartOfTurnOrbs` (`:257`) — and **no `applyStartOfTurnPostDrawPowers` line at all**; `GameActionManager.java:363` (step 6) is the whole game's only caller. The two halves are **not** a pair — the relic half really is on both sides, which is why only the power half moved. Inert for all landed content (Brutality and Demon Form are the only binders, and both require playing their card), so **no test could see it**: the two new `combat_start_test` cases construct the state with the power already present, and the fix was **demonstrated RED before green** — re-arming the dispatch failed exactly those two and nothing else. Fixtures replayed unchanged.
 - **Citation audit + Pantograph's inverted DEFERRED marker** `[x]` — commit `39876f0`, in `06c4fa0`. Comment/provenance only: no executable line, registry value or generated-table value changed. Two defects, **both invisible to git because neither branch conflicted** — the conventions §8 class, and a direct instance of "a conflict-free merge is not evidence of correctness". (1) `AbstractMonster.die()` was cited as `:741-750` at nine new on-death sites; `die(boolean)` is at `:925` and `:741-750` is render code, so **the merge replaced master's already-correct `:933-937` with a wrong one** — re-read and corrected to `isDying` `:927` / powers' `onDeath` `:928-932` / relics' `onMonsterDeath` `:933-937`. (2) `EntanglePower` was cited as `:50-53` at eight sites in a **47-line file**, i.e. resolving to nothing — corrected to `:15-47` / `:17` / `:20-29` / `:31-46`. The described *behaviour* was right throughout in both cases; only the line numbers were wrong. (3) `relics.yaml`'s Pantograph row carried a `DEFERRED` marker **on live, tested code** — the same bug signal running the other way — retired after verifying the native body and its four tests; both premises of the deferral are dead (`enemy_type` column + `MonsterDef::is_boss()`, and three BOSS rows exist). The other ~39 `DEFERRED` markers in that file are legitimate and were not touched.
@@ -510,7 +600,7 @@ committing rather than take unallocated ids or land a fragment. That was correct
 - **B3.16** `[x]` ∥ Monsters: gremlin gang — monster ids 16-20, `PowerId::ANGRY`=40, `MonsterIntent::DEFEND`=11; six independent 32-seed × 20-turn XS128 fixtures incl. a 4-gremlin battery pinning the Tsundere's `aiRng` block-target pick; **move 99 (ESCAPE) is unreachable in Act 1** and left unmodelled with both halves recorded for Act 2; Angry's `damageAmount > 0` guard reads **post-block** damage; registering the five init fns un-parked the encounter with no `run_advance.cpp` edit · [log](stage-b-log.md#b316)
 - **B3.17** `[x]` Monsters: large slimes + split — monster ids 9-10 (large slimes), `PowerId::SPLIT`=22, opcodes 25-29 (`CANNOT_LOSE`/`CAN_LOSE`/`SUICIDE`/`SPAWN_MONSTER`/`SET_MOVE`); the Java-exact split framework; 441/441 ×3 · [log](stage-b-log.md#b317)
 - **B3.18** `[x]` Elites: Gremlin Nob + Sentries — monster ids 12 GREMLIN_NOB / 13 SENTRY (both ELITE) + `PowerId::ANGER`=33; Artifact needed **no** new row (B3.2's id 4, the nullify already at the APPLY_POWER site — Sentry only grants the stack); 3 independent 32-seed × 20-turn fixtures pin the Nob's A18 history tree and the Sentry in an even and an odd slot; registering the two init fns un-parked the Gremlin Nob and 3 Sentries encounters by construction; Sentry's animation-only `damage()` is an explicit empty `on_monster_damaged` case, not a `default:`; union 641/641 ×3 · [log](stage-b-log.md#b318)
-- **B3.19** `[x]` Elite: Lagavulin — monster id 15 LAGAVULIN (ELITE), native sleep/wake machine; **no new power id** (Metallicize was already id 5 — now the first MONSTER-owned power to bind an end-of-turn hook, and the generator's duplicate-name check caught the re-add); `MonsterIntent` SLEEP=9 / STUN=10; `on_monster_damaged` gains `hp_lost` so absorbed damage cannot wake it; armour stands at 8/16/24 because monster block never decays in this build; un-parked the Lagavulin encounter by construction; union 641/641 ×3 · [log](stage-b-log.md#b319)
+- **B3.19** `[x]` Elite: Lagavulin — monster id 15 LAGAVULIN (ELITE), native sleep/wake machine; **no new power id** (Metallicize was already id 5 — now the first MONSTER-owned power to bind an end-of-turn hook, and the generator's duplicate-name check caught the re-add); `MonsterIntent` SLEEP=9 / STUN=10; `on_monster_damaged` gains `hp_lost` so absorbed damage cannot wake it; ~~armour stands at 8/16/24 because monster block never decays in this build~~ — **corrected 2026-07-27, see [Landed non-task work](#landed-non-task-work): the armour holds at 8. `MonsterStartTurnAction` looked uncalled only because CFR dropped the anonymous class that queues it; the bytecode has it, and the pre-turn block clear now runs**; un-parked the Lagavulin encounter by construction; union 641/641 ×3 · [log](stage-b-log.md#b319)
 - **B3.20** `[x]` Boss: Slime Boss — monster id 11 + `MonsterIntent::STRONG_DEBUFF`=8; fixed 150 HP, Goop→Prep→Slam cycle, exact-half split chaining into B3.17's large slimes; 521/521 debug + asan · [log](stage-b-log.md#b320)
 - **B3.21** `[x]` ∥ Boss: The Guardian — monster id 21, native offensive/defensive mode machine, powers MODE_SHIFT=45 / SHARP_HIDE=46 (**47 deliberately unused, never to be backfilled**), intents DEFEND=11 / ATTACK_BUFF=12; the mode threshold **grows by 10 at every Defensive-Mode entry** (40, 50, 60 … at A20 — driven for three real flips, not computed), and mode state is **not** derived from `ModeShiftPower.amount` because `isOpen` is set synchronously while the power is only queued; found and fixed en route: **Spot Weakness paid out nothing against a telegraphed `ATTACK_BUFF`** · [log](stage-b-log.md#b321)
 - **B3.22** `[x]` ∥ Boss: Hexaghost — monster id 22; **the orbs are not entities**, so the only combat-relevant state is the scalar `orbActiveCount` (0-6) in three spare `MonsterState.flags` bits with a fourth for `burnUpgraded` — **no `CombatState` field, so no `SCHEMA_VERSION` bump and no fixture regeneration**; Divider = `player.currentHealth / 12 + 1` locked at the ACTIVATE turn; `getMove` never reads its rolled `num`, so the draw count is pinned; no new powers, intents or `cards.yaml` edit. **All three Act-1 BOSS encounters are now live** · [log](stage-b-log.md#b322)

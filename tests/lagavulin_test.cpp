@@ -16,8 +16,10 @@
 //
 // Provenance: Lagavulin.java:54-58,60-66,73-100,102-114,116-174,176-195,
 // 197-210,212-227; MetallicizePower.java:19-42; AbstractCreature.java:548-553;
-// MonsterGroup.java:98-105,290-304; MonsterStartTurnAction.java:22 (uncalled --
-// why monster block never decays); ReducePowerAction.java:35-53;
+// MonsterGroup.java:98-105,290-304; MonsterStartTurnAction.java:22, queued by
+// AbstractRoom.endTurn's CFR-dropped anonymous class (bytecode AbstractRoom$1,
+// javap) -- the pre-turn block clear that holds the sleeping armour at 8;
+// ReducePowerAction.java:35-53;
 // SetMoveAction.java:52-56; AbstractMonster.java:431-437,465-491,712-715,765-775;
 // MonsterHelper.java:439-441,445-447.
 
@@ -270,7 +272,13 @@ TEST(LagavulinInit, PreBattleQueuesEightBlockThenMetallicizeAndDrawsNothing) {
 
 // --- Sleeping: block each round, wake on the third idle ------------------------
 
-TEST(LagavulinSleep, ArmourGrowsEightEachRoundAndStopsWhenTheShellOpens) {
+// The armour HOLDS at 8; it does not accumulate. applyPreTurnLogic clears the
+// monster's block at the start of its own turn (action_queue.cpp), one full phase
+// BEFORE Metallicize re-grants 8 at applyEndOfTurnPowers time, so each round's
+// tick replaces the last one. When the shell opens, that same round sheds
+// Metallicize before the end-of-round pass runs, so nothing re-grants and the
+// cleared block stays at 0.
+TEST(LagavulinSleep, ArmourHoldsAtEightEachRoundAndIsGoneOnceTheShellOpens) {
     CombatState s = spawn_asleep(15004);
     s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
     s.turn = 1;
@@ -302,14 +310,16 @@ TEST(LagavulinSleep, ArmourGrowsEightEachRoundAndStopsWhenTheShellOpens) {
     end_turn();  // idle 1: re-telegraph SLEEP, roll, then Metallicize ticks
     EXPECT_EQ(s.monsters[0].move_history[0], kIdle);
     EXPECT_EQ(s.monsters[0].intent, static_cast<uint8_t>(MonsterIntent::SLEEP));
-    EXPECT_EQ(s.monsters[0].block, 2 * kArmor);
+    EXPECT_EQ(s.monsters[0].block, kArmor)
+        << "pre-turn loseBlock() discarded the previous round's 8 before "
+           "Metallicize granted this round's";
     EXPECT_EQ(s.ai_rng.counter, ai_draws + 1);
     EXPECT_EQ(s.player_hp, 500) << "a sleeping Lagavulin deals no damage";
     ai_draws = s.ai_rng.counter;
 
     end_turn();  // idle 2
     EXPECT_EQ(s.monsters[0].move_history[0], kIdle);
-    EXPECT_EQ(s.monsters[0].block, 3 * kArmor);
+    EXPECT_EQ(s.monsters[0].block, kArmor);
     EXPECT_EQ(s.ai_rng.counter, ai_draws + 1);
     ai_draws = s.ai_rng.counter;
 
@@ -320,15 +330,16 @@ TEST(LagavulinSleep, ArmourGrowsEightEachRoundAndStopsWhenTheShellOpens) {
     EXPECT_TRUE((s.monsters[0].flags & kMonsterFlagLagavulinOutTriggered) != 0u);
     EXPECT_EQ(find_monster_power(s, 0, PowerId::METALLICIZE), nullptr)
         << "ReducePowerAction sheds all 8 stacks (Lagavulin.java:188)";
-    EXPECT_EQ(s.monsters[0].block, 3 * kArmor)
-        << "the armour it already has stays -- monster block never decays";
+    EXPECT_EQ(s.monsters[0].block, 0)
+        << "block was cleared at the start of this monster turn and Metallicize "
+           "was shed during it, so the end-of-round pass re-grants nothing";
     EXPECT_EQ(s.ai_rng.counter, ai_draws)
         << "the third idle queues no RollMoveAction (no inner case 3)";
     EXPECT_EQ(s.player_hp, 500);
 
     end_turn();  // turn 4: the first Strong Attack, A3 column
     EXPECT_EQ(s.player_hp, 500 - kA20AttackDamage);
-    EXPECT_EQ(s.monsters[0].block, 3 * kArmor) << "Metallicize is gone";
+    EXPECT_EQ(s.monsters[0].block, 0) << "Metallicize is gone";
 }
 
 // --- Waking on damage ---------------------------------------------------------

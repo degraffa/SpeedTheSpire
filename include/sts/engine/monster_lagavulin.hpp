@@ -37,12 +37,25 @@
 //   MonsterHelper.java:439-441 ("Lagavulin" -> new Lagavulin(true)) and :445-447
 //     ("Lagavulin Event" -> new Lagavulin(false)).
 //
-// MONSTER BLOCK NEVER DECAYS in this build, which is why the sleeping elite's
-// armour accumulates: MonsterGroup.applyPreTurnLogic (MonsterGroup.java:98-105)
-// is the only caller of a monster loseBlock(), and its own only caller is
-// MonsterStartTurnAction (MonsterStartTurnAction.java:22) -- which nothing
-// constructs. So the pre-battle 8 plus one Metallicize tick per round stands at
-// 8 / 16 / 24 across the three sleeping turns.
+// THE SLEEPING ARMOUR HOLDS AT 8 -- it does not accumulate.
+//
+// CORRECTION -- supersedes what this comment used to say. It read
+// "monster block never decays in this build, so the armour stands at 8 / 16 / 24
+// across the three sleeping turns", on the grounds that
+// MonsterGroup.applyPreTurnLogic (MonsterGroup.java:98-105) is the only caller of
+// a monster loseBlock() and its own only caller, MonsterStartTurnAction, is
+// constructed by nothing. The second half of that was a decompiler artifact, not
+// a fact about the game: `AbstractRoom.endTurn` queues MonsterStartTurnAction
+// from an anonymous inner class that CFR dropped, leaving
+// `new /* Unavailable Anonymous Inner Class!! */` at AbstractRoom.java:409.
+// `AbstractRoom.endTurn (bytecode AbstractRoom$1, javap) -- CFR-dropped anonymous
+// class` is the real call site; the javap read-out is quoted in full at
+// action_queue.cpp's apply_pre_turn_logic, which now performs the walk.
+//
+// So a sleeping Lagavulin's block IS cleared at the start of its own turn, one
+// full phase BEFORE its Metallicize re-grants 8 at applyEndOfTurnPowers time. The
+// pre-battle 8 and every later tick therefore replace each other rather than
+// stacking, and the armour the player sees is 8 on every sleeping turn.
 //
 // At the fixed S1 A20 difficulty (kMonsterAscension) the resolved columns are
 // HP 112-115, Strong Attack 20, and the A18 debuff column: -2 Dexterity AND

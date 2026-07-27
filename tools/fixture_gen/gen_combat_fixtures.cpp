@@ -51,12 +51,25 @@
 //       target's block absorbs, remainder hits hp (clamped >= 0).
 //   * Jaw Worm A20 effects (JawWorm.takeTurn, JawWorm.java:120-146):
 //       Chomp: 12 dmg.  Bellow: +5 Strength (self) then +9 block (self).
-//       Thrash: 7 dmg then +5 block (self). Strength/Vulnerable never decay in
-//       the skeleton (no power-decay hook; established by cards_test), and monster
-//       block persists (no monster-turn block-loss modeled -- cards_test).
-//   * Pump turn boundary (action_queue.cpp start_of_turn / pump_step): a monster
-//       attack resolves BEFORE the player's block is decayed, so this turn's block
-//       absorbs it; then start-of-turn zeroes player block, refills energy to 3,
+//       Thrash: 7 dmg then +5 block (self). STRENGTH never decays (StrengthPower
+//       binds no turn hook). VULNERABLE DOES: VulnerablePower.atEndOfRound
+//       (VulnerablePower.java:44-53) drops one stack per round end and removes the
+//       power at zero, skipping the round it was applied only when justApplied is
+//       set -- which needs `turnHasEnded && isSourceMonster` (:36-38), and Bash
+//       applies it during the player's own turn, so the skeleton's Vulnerable is
+//       never latched and starts decaying immediately. MONSTER BLOCK IS CLEARED at
+//       the start of the monster's own turn: MonsterGroup.applyPreTurnLogic
+//       (MonsterGroup.java:98-105) calls loseBlock() on every non-dying monster
+//       without Barricade, reached from AbstractRoom.endTurn via the anonymous
+//       inner class CFR dropped (bytecode AbstractRoom$1, javap; the read-out is
+//       quoted at action_queue.cpp's apply_pre_turn_logic). So a Bellow's or
+//       Thrash's block survives the player's NEXT turn and is discarded at the top
+//       of the monster's turn after that.
+//   * Pump turn boundary (action_queue.cpp start_of_turn / pump_step): the
+//       monster's OWN block is cleared first (step 4, applyPreTurnLogic), then a
+//       monster attack resolves BEFORE the player's block is decayed, so this
+//       turn's block absorbs it; then start-of-turn runs the end-of-round power
+//       pass (Vulnerable's decrement), zeroes player block, refills energy to 3,
 //       ++turn, and draws 5. DiscardAtEndOfTurnAction first moves the ordinary
 //       (non-ethereal) hand to discard. If the player dies on the
 //       monster's turn, pump halts at COMBAT_OVER: start-of-turn does NOT run, and
@@ -309,6 +322,22 @@ struct RefSim {
         for (auto& p : m_powers)
             if (p.first == pid) { p.second += amount; return; }
         m_powers.emplace_back(pid, amount);
+    }
+
+    // One round's Vulnerable decay on the monster (see end_turn's step-6 note).
+    // Erasing the slot rather than leaving a 0 mirrors RemoveSpecificPowerAction,
+    // and the vector's compaction mirrors the engine's slot compaction.
+    void decay_monster_vulnerable() {
+        const uint16_t pid = static_cast<uint16_t>(PowerId::VULNERABLE);
+        for (auto it = m_powers.begin(); it != m_powers.end(); ++it) {
+            if (it->first != pid) continue;
+            if (it->second <= 1) {
+                m_powers.erase(it);
+            } else {
+                --it->second;
+            }
+            return;
+        }
     }
 
     // draw_n: pull `n` cards from draw top into hand, honoring the up-front hand
@@ -564,6 +593,16 @@ struct RefSim {
         turn_has_ended = 1;
         monster_attacks_queued = 1;  // net effect after step 3 clears + step 4 sets
 
+        // Step 4, MonsterStartTurnAction -> MonsterGroup.applyPreTurnLogic
+        // (MonsterGroup.java:98-105): a live monster without Barricade loses ALL
+        // its block (`loseBlock()` == `loseBlock(currentBlock)`,
+        // AbstractCreature.java:485-487) before it acts. The Jaw Worm has no
+        // Barricade and this simulator has exactly one monster, so the walk is
+        // this line. It runs BEFORE the move, so a Bellow/Thrash block gained on
+        // the previous monster turn -- which the player's turn in between could
+        // spend -- is what gets discarded here, not the block this turn adds.
+        m_block = 0;
+
         const int M = monster_turns_done + 1;
         const uint8_t move = fx->turns[static_cast<size_t>(M - 1)].move;
 
@@ -602,6 +641,17 @@ struct RefSim {
             phase = CombatPhase::COMBAT_OVER;  // start-of-turn does NOT run
             return;
         }
+
+        // Step 6 opens with applyEndOfTurnPowers (GameActionManager.java:331),
+        // whose atEndOfRound pass is where a DURATION debuff loses a stack.
+        // Vulnerable is the skeleton's only one: unlatched (Bash applies it while
+        // turnHasEnded is 0), so `amount -= 1` and remove at zero
+        // (VulnerablePower.atEndOfRound :44-53, through
+        // ReducePowerAction.java:45-51, which removes rather than reduces once the
+        // request meets the stack). The engine queues that as a REDUCE_POWER item
+        // and drains it before control returns, so applying it directly here lands
+        // on the same snapshot.
+        decay_monster_vulnerable();
 
         // start-of-turn: reset counters, energy, block decay, ++turn, draw 5.
         cards_played = 0;
@@ -870,12 +920,15 @@ std::vector<Fixture> all_fixtures() {
 
     // 13 -- Three attacks into Vulnerable, SPLIT ACROSS THE TURN BOUNDARY.
     // Bash (2E) + Pommel (1E) is the whole 3-energy turn; the third attack is
-    // next turn's Strike, landing into the Vulnerable that does not decay in the
-    // skeleton. See the derivation notes for why this is not a one-turn script.
+    // next turn's Strike, landing into the SAME Vulnerable -- now down to 1 stack,
+    // because the round that ended in between ran atEndOfRound. One stack is still
+    // a stack, so the x1.5 is unchanged and the script's point survives its
+    // decay; that the amount MOVED is now part of what the fixture pins. See the
+    // derivation notes for why this is not a one-turn script.
     f.push_back({"fixt13_r21_triple", "r21",
                  {Play(2), Play(3), End(), Play(2), End()},
-                 "Bash 8 + Vuln, Pommel 13 (into Vuln); turn 2 Strike 9 into the "
-                 "same Vuln, then a Bellow + reshuffle"});
+                 "Bash 8 + Vuln 2, Pommel 13 (into Vuln); turn 2 Strike 9 into the "
+                 "same Vulnerable, now ticked to 1, then a Bellow + reshuffle"});
 
     // 14 -- Pommel then Strikes.
     f.push_back({"fixt14_r23_pommel_strikes", "r23",
@@ -915,28 +968,48 @@ std::vector<Fixture> all_fixtures() {
     // 18 -- RESHUFFLE + Bellow-Strength/Vulnerable OVERLAP: Bash (Vuln) turn 1,
     // play through turns so the 7-card draw pile empties and the discard
     // reshuffles (shuffle_rng draws a 2nd time), while a turn-2 Bellow gives the
-    // still-Vulnerable monster Strength (both powers live at once).
-    f.push_back({"fixt18_r0_reshuffle_overlap", "r0",
+    // still-Vulnerable monster Strength (both powers live at once). It is also the
+    // fixture that pins the block clear against a MONSTER's own block: Bellow's 9
+    // survives the player's turn 3 and eats 6 of that turn's Strike, and the 3 left
+    // over is discarded at the top of the monster's turn 4 before Thrash adds 5.
+    f.push_back({"fixt18_r0_reshuffle_stale_block", "r0",
                  {Play(3), Play(0), End(),
                   Play(0), Play(0), Play(0), End(),
                   Play(0), End()},
-                 "RESHUFFLE + Bellow-Strength & Vulnerable overlap on the monster"});
+                 "RESHUFFLE + a Bellow block that outlives the player's next turn "
+                 "and is cleared at the top of the monster's"});
 
     // 19 -- Longer blocking fight on another seed (exercises repeated Defends and
-    // multi-turn monster damage with Strength growth).
+    // multi-turn monster damage with Strength growth), ending on the STRENGTH +
+    // VULNERABLE OVERLAP.
+    //
+    // The overlap has to be built in this direction now. Bash-then-Bellow no
+    // longer leaves both powers standing at a recorded boundary: Bash's Vulnerable
+    // is applied on the player's turn and the round that ends with the Bellow also
+    // runs atEndOfRound, so a Vuln 2 applied a round earlier is already down to 1
+    // and a Vuln 1 is removed outright -- which is what happened to 12, 13 and 18.
+    // Bellow-then-Bash does stand: r9 Bellows at the end of player turn 3, and
+    // turn 4's hand deals Bash9 into slot 0 with a full 3 energy, so the snapshot
+    // after that play holds Strength 5 AND a fresh Vulnerable 2 at once (append
+    // order Strength-first, the mirror of the old Bash-first list). That is the
+    // ledger A6.2 concurrent-power-list requirement, kept rather than dropped.
     f.push_back({"fixt19_r9_long_block", "r9",
-                 {Play(1), Play(0), End(), Play(0), Play(0), End(), Play(0), End()},
-                 "Multi-turn Defends vs escalating monster (Thrash/Bellow)"});
+                 {Play(1), Play(0), End(), Play(0), Play(0), End(), Play(0), End(),
+                  Play(0)},
+                 "Multi-turn Defends vs an escalating monster (Thrash/Bellow); "
+                 "turn-4 Bash lands Vulnerable 2 on the already-Strengthened foe, "
+                 "so both powers are live in one recorded state"});
 
     // 20 -- Bash + attacks over two turns into a Vulnerable foe, ending on a
     // reshuffle. r18's moves are Chomp/Thrash/Chomp: the monster never Bellows,
     // so it never gains Strength. This is the Vulnerable-ONLY counterpart to the
-    // Strength+Vulnerable overlap fixtures (12, 13, 18, 19) -- the description
-    // used to claim the overlap, which --dump shows it never reaches.
+    // Strength+Vulnerable overlap fixture (19) -- the description used to claim
+    // the overlap, which --dump shows it never reaches. It now also pins the
+    // debuff's WHOLE life: Vuln 2 on turn 1, 1 on turn 2, and gone by turn 3.
     f.push_back({"fixt20_r18_bash_two_turns", "r18",
                  {Play(1), Play(0), End(), Play(0), Play(0), End()},
                  "Bash Vuln turn 1; Defend + a Vuln-boosted Strike turn 2 vs a "
-                 "Thrash; monster stays Vulnerable-only (never Bellows)"});
+                 "Thrash; no Bellow ever, and the Vulnerable expires on schedule"});
 
     return f;
 }

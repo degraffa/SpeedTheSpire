@@ -1,7 +1,8 @@
 // Lagavulin native AI: the sleep/wake state machine, its pre-battle armour, and
 // the damage() wake interrupt. See the public header for the full Java
-// provenance and the "monster block never decays" note that makes the sleeping
-// armour accumulate.
+// provenance, including the correction note explaining why the sleeping armour
+// HOLDS at 8 rather than accumulating: the monster's block is cleared at the top
+// of its own turn, one phase before Metallicize re-grants it.
 
 #include "sts/engine/monster_lagavulin.hpp"
 

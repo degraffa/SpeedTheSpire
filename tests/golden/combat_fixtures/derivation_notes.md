@@ -53,10 +53,24 @@ Java **without** re-deriving the RNG.
     the monster carries no Weak). Then the player's block absorbs, remainder to HP.
 - **Jaw Worm A20** (JawWorm.java; `monster_jaw_worm.hpp`): HP roll ∈ [42,46] per
   seed. Chomp = 12 dmg. Bellow = +5 Strength then +9 block (0 damage). Thrash =
-  7 dmg then +5 block. Strength/Vulnerable/block **never decay** in the skeleton
-  (no power-decay hook; monster block persists — both established by `cards_test`).
-- **Turn boundary** (`action_queue.cpp`): on END_TURN the monster acts FIRST, so
-  *this* turn's player block absorbs the hit; **then** start-of-turn zeroes the
+  7 dmg then +5 block. **Strength never decays** (StrengthPower binds no turn
+  hook). **Vulnerable does**: `VulnerablePower.atEndOfRound`
+  (`VulnerablePower.java:44-53`) drops one stack at every round end and removes
+  the power at zero. Its `justApplied` skip needs `turnHasEnded && isSourceMonster`
+  (`:36-38`), and Bash applies it during the player's own turn, so the skeleton's
+  Vulnerable is never latched and starts decaying with the very first round end —
+  `Vuln 2` on the turn it lands, `1` on the next, gone on the one after.
+  **Monster block is cleared at the start of the monster's own turn**:
+  `MonsterGroup.applyPreTurnLogic` (`MonsterGroup.java:98-105`) calls `loseBlock()`
+  on every non-dying monster without Barricade. Its caller is `AbstractRoom.endTurn`
+  via the anonymous inner class CFR dropped (bytecode `AbstractRoom$1`, `javap`;
+  the read-out is quoted at `action_queue.cpp`'s `apply_pre_turn_logic`). So a
+  Bellow's or Thrash's block **survives the player's next turn** — the player can
+  spend it — and whatever is left is discarded one monster turn later.
+- **Turn boundary** (`action_queue.cpp`): on END_TURN the monster's own block is
+  cleared first (step 4, `applyPreTurnLogic`), then the monster acts, so *this*
+  turn's player block absorbs the hit; **then** start-of-turn runs the end-of-round
+  power pass (Vulnerable's decrement), zeroes the
   player's block, refills energy to 3, `++turn`, and draws 5 (capped at hand 10,
   reshuffling the discard via `shuffle_rng` if the draw pile empties mid-draw).
   If the monster's hit kills the player, the pump halts at COMBAT_OVER: no
@@ -100,7 +114,7 @@ r7: mon HP 46; hand `Shrug10 Defend6 Strike1 Pommel11 Strike3`; moves C,B,T,…
 r5: mon HP 46; hand `Strike3 Bash9 Defend5 Strike2 Pommel11`; moves C,B,T,…
 - T1: **Bash** (hand[1]) → 8 dmg (before Vuln), mon 46→38, apply **Vuln 2**. energy 3→1.
 - **Strike** (hand[0]) → into Vuln `floor(6×1.5)=9`, mon 38→29. energy 1→0.
-- **END**: **Chomp** 12 → HP 80→68. Monster keeps Vuln 2.
+- **END**: **Chomp** 12 → HP 80→68. The round end ticks the monster to **Vuln 1**.
 
 ## fixt06_r3_shrug_pommel — two draws + block (3 actions)
 r3: mon HP 42; hand `Strike4 Strike2 Pommel11 Defend5 Shrug10`; moves C,T,C,…
@@ -110,7 +124,7 @@ r3: mon HP 42; hand `Strike4 Strike2 Pommel11 Defend5 Shrug10`; moves C,T,C,…
 ## fixt07_r13_bash_strike — Bash + Strike into Vuln (3 actions)
 r13: mon HP 44; hand `Strike3 Strike0 Strike2 Strike4 Bash9`; moves C,T,T,…
 - T1: **Bash** (hand[4]) → 8 dmg, mon 44→36, **Vuln 2**. **Strike** (hand[0]) → `9`, mon 36→27. energy 3→0.
-- **END**: **Chomp** 12 → HP 80→68.
+- **END**: **Chomp** 12 → HP 80→68; the round end ticks the monster to **Vuln 1**.
 
 ## fixt08_r19_block_two_turns — 2 turns, reshuffle + Bellow (7 actions)
 r19: mon HP 43; hand `Defend7 Defend6 Strike1 Strike0 Strike2`; moves C,B,C,…
@@ -126,7 +140,7 @@ r19: mon HP 43; hand `Defend7 Defend6 Strike1 Strike0 Strike2`; moves C,B,C,…
 ## fixt09_r6_bash_pommel_vuln — Bash + Pommel into Vuln (3 actions)
 r6: mon HP 46; hand `Pommel11 Strike1 Defend6 Defend5 Bash9`; moves C,B,C,…
 - T1: **Bash** (hand[4]) → 8, mon 46→38, **Vuln 2**. **Pommel** (hand[0]) → into Vuln `floor(9×1.5)=13`, mon 38→25, draw 1. energy 0.
-- **END**: **Chomp** 12 → HP 80→68.
+- **END**: **Chomp** 12 → HP 80→68; the round end ticks the monster to **Vuln 1**.
 
 ## fixt10_r8_block_stack — Shrug + Defend fully absorb Chomp (3 actions)
 r8: mon HP 46; hand `Defend7 Shrug10 Strike3 Strike0 Strike4`; moves C,B,C,…
@@ -145,7 +159,9 @@ r15: mon HP 46; hand `Strike4 Defend8 Pommel11 Bash9 Shrug10`; moves C,B,T,…
   draw 5 (draw 6→1) → hand `Defend6 Strike0 Defend5 Strike1 Strike2` — **no attack is
   played this turn**; the monster stays on 25.
 - T2: **Defend** (hand[0]) → block 5. energy 3→2.
-- **END**: monster T2 = **Bellow** → Str 5, block 9 (mon now Vuln 2 **and** Str 5). The
+- **END**: monster T2 = **Bellow** → Str 5, block 9. The Vulnerable is spent by now —
+  Bash put 2 on at T1, the T1 round end took it to 1 and this one takes it to 0, so
+  the monster ends holding **Strength 5 alone**. The
   4-card hand is discarded → discard 11. Start T3: the 1-card draw pile is drawn and
   **empties** → **RESHUFFLE** the 11-card discard (`shuffle_rng` 1→2) → draw 4 more.
 
@@ -154,9 +170,11 @@ r21: mon HP 42; hand `Strike4 Shrug10 Bash9 Defend7 Pommel11`; moves C,B,T,…
 - T1: **Bash** (hand[2]) → 8 (before Vuln), mon 42→34, **Vuln 2**. energy 3→1.
   **Pommel** (hand[3]) → into Vuln `floor(9×1.5)=13`, mon 34→21, draw 1. energy 1→**0**.
 - **END**: **Chomp** 12 → HP 80→68. Hand (4) discarded; start T2 draws 5 (draw 6→1).
-  Monster keeps **Vuln 2** — nothing decays it in the skeleton.
+  The round end ticks the monster to **Vuln 1** — still Vulnerable, so the ×1.5 below
+  is unchanged, but the amount has moved and the trace now pins that.
 - T2: **Strike** (hand[2]) → into the same Vuln `9`, mon 21→**12**. energy 3→2.
-- **END**: monster T2 = **Bellow** → **Str 5**, +9 block. Start T3: the 1-card draw
+- **END**: monster T2 = **Bellow** → **Str 5**, +9 block; this round end takes Vuln
+  1→0 and removes it, so T3 opens with **Strength 5 alone**. Start T3: the 1-card draw
   pile is exhausted mid-draw → **RESHUFFLE** the 11-card discard (`shuffle_rng`
   1→2) → draw 4 more. HP stays 68.
 
@@ -194,13 +212,14 @@ r30: mon HP 42; hand `Strike2 Shrug10 Pommel11 Defend8 Strike0`; moves C,T,B,…
 r29: mon HP 43; hand `Bash9 Strike1 Defend7 Strike4 Strike2`; moves C,T,…
 - T1: **Bash** (hand[0]) → 8, mon 43→35, **Vuln 2**. **Strike** (hand[0]) → `9`, mon 35→26. energy 0.
 - **END**: **Chomp** 12 → HP 80→68. The 3-card hand is discarded (discard 5). Start T2:
-  draw 5 (draw 7→2) → hand `Shrug10 Defend8 Strike3 Defend6 Pommel11`. Monster still
-  **Vuln 2**, block 0, on **26 HP**.
+  draw 5 (draw 7→2) → hand `Shrug10 Defend8 Strike3 Defend6 Pommel11`. The round end
+  ticked the monster to **Vuln 1** — one stack still multiplies, so every ×1.5 below
+  is unchanged — block 0, on **26 HP**.
 - T2: **Pommel** (hand[4]) → into Vuln `floor(9×1.5)=13`, mon 26→13, **draw 1 → Strike0**
   (the top of the 2-card draw pile) appended to the hand. energy 3→2.
   **Strike** (hand[2] = Strike3) → `9`, mon 13→4. energy 2→1.
   **Strike** (hand[3] = the drawn Strike0) → `9` into 4 HP → mon **0** → **COMBAT_OVER**.
-  energy 1→0. Player survives at 68; monster ends 0/43 still holding Vuln 2.
+  energy 1→0. Player survives at 68; monster ends 0/43 still holding Vuln 1.
 
 Why this shape and not three Strikes: turn 2 is dealt out of the five cards drawn at
 its start, and that hand holds exactly **one** Strike, so 3×9 = 27 is not on offer —
@@ -219,27 +238,34 @@ Strength after each Bellow: T2→5, T4→10, T6→15, T8→20. Player HP:
   T7 **Thrash** 7+15=22 → 7 · T8 Bellow 0 → 7 ·
   T9 **Chomp** 12+20=**32** → 7−32 < 0 → **HP 0, COMBAT_OVER**.
 Lethal move is a single-DAMAGE Chomp (no trailing effect queued); start-of-turn 10
-never runs. Monster ends at HP 44, block 41, Str 20.
+never runs. Monster block never accumulates across the fight: each monster turn opens
+by clearing it, so the recorded values are 0 / 9 / 0 / 9 / 0 / 9 / 5 / 9 and finally
+**0** — the T9 Chomp adds none. Monster ends at HP 44, block 0, Str 20.
 
-## fixt18_r0_reshuffle_overlap — RESHUFFLE + Str/Vuln OVERLAP (9 actions)  ★ coverage
+## fixt18_r0_reshuffle_stale_block — RESHUFFLE + a block that outlives a turn (9 actions)  ★ coverage
 r0: mon HP 44; hand `Defend6 Strike3 Defend8 Bash9 Defend7`; moves C,B,T,…
 - T1: **Bash** (hand[3]) → 8, mon 44→36, **Vuln 2**. **Defend** (hand[0]) → block 5. energy 0.
 - **END**: **Chomp** 12 vs block 5 → HP 80→73. The 3-card hand is discarded (discard 5).
   Start T2: draw 5 (draw 7→2) → hand `Strike1 Defend5 Pommel11 Strike2 Strike0`.
-- T2: **Strike** (hand[0]) → `9`, mon 36→27. **Defend** (hand[0]) → block 5.
+- T2: **Strike** (hand[0]) → `9`, mon 36→27 (**Vuln 1** since the T1 round end; one
+  stack still multiplies). **Defend** (hand[0]) → block 5.
   **Pommel** (hand[0]) → into Vuln `13`, mon 27→**14**, draw 1. energy 0. discard now 8.
-- **END**: monster T2 = **Bellow** → **Str 5**, +9 block. Monster now holds **Vulnerable 2 AND
-  Strength 5 simultaneously** (powers list `[Vulnerable(2), Strength(5)]` — Bash-first
-  append order). The 3-card hand is discarded → discard **11**. Start T3: draw 5 — the
+- **END**: monster T2 = **Bellow** → **Str 5**, +9 block; this round end takes Vuln 1→0
+  and removes it, so T3 opens with **Strength 5 alone**. The 3-card hand is discarded →
+  discard **11**. Start T3: draw 5 — the
   1-card draw pile is drawn and **empties** → **RESHUFFLE** the 11-card discard
   (`shuffle_rng` 1→2) → draw 4 more. HP stays 73.
-- T3: **Strike** (hand[0]) → into Vuln `9`, but monster **block 9** absorbs it all → mon 14, block 0.
-- **END**: monster T3 = **Thrash** 7+Str5=12 vs unblocked player → HP 73→61; +5 monster block.
-  Here the monster's Strength boosts *its* Thrash while its Vulnerable boosts *the
-  player's* Strikes — both powers concurrently live, exercising the combined
-  power-list bookkeeping (ledger A6.2 requirement).
+- T3: **Strike** (hand[0]) → plain `6` (no Vulnerable left) into monster **block 9** →
+  mon 14 unharmed, monster block 9→**3**.
+  This is what the fixture is now named for: the Bellow's block was gained on the
+  *monster's* turn 2 and is still standing through the whole of the player's turn 3,
+  because `applyPreTurnLogic` clears a monster's block at the start of ITS OWN turn,
+  not at the start of the player's.
+- **END**: the monster's turn 4 opens by discarding that leftover **3**, then
+  **Thrash** 7+Str5=12 vs an unblocked player → HP 73→61, and its +5 lands on the
+  now-empty block → **5**.
 
-## fixt19_r9_long_block — multi-turn, reshuffle (8 actions)
+## fixt19_r9_long_block — multi-turn, reshuffle, Str/Vuln OVERLAP (9 actions)  ★ coverage
 r9: mon HP 43; hand `Strike4 Defend8 Strike1 Defend5 Strike2`; moves C,T,B,…
 - T1: **Defend** (hand[1]) → block 5. **Strike** (hand[0]) → 6, mon 43→37. energy 1.
 - **END**: monster T1 **Chomp** 12 vs block 5 → HP 80→73. The 3-card hand is discarded
@@ -248,21 +274,37 @@ r9: mon HP 43; hand `Strike4 Defend8 Strike1 Defend5 Strike2`; moves C,T,B,…
 - **END**: monster T2 = **Thrash** 7 vs block 5 → HP 73→71; +5 monster block. The 3-card
   hand is discarded → discard 10. Start T3: the 2-card draw pile is drawn and **empties**
   → **RESHUFFLE** the 10-card discard (`shuffle_rng` 1→2) → draw 3 more.
-- T3: **Strike** (hand[0]) → into Vuln `floor(6×1.5)=9` vs monster **block 5** → 4 through,
+- T3: **Strike** (hand[0]) → into **Vuln 1** (Bash's 2 was ticked down by the T2 round
+  end) `floor(6×1.5)=9` vs monster **block 5** → 4 through,
   mon 29→**25**, monster block 0.
-- **END**: monster T3 = **Bellow** → Str 5, +9 block — the monster now carries **Vuln 2 and
-  Str 5 together**, as in fixt18.
+- **END**: monster T3 = **Bellow** → Str 5, +9 block; the same round end removes the
+  last Vulnerable stack. Start T4: draw 5 → hand `Bash9 Strike3 Shrug10 Strike1 Pommel11`.
+- T4: **Bash** (hand[0]) → 8 into monster **block 9** → mon stays 25, block 9→**1**;
+  then **Vulnerable 2** lands on a monster that already has **Strength 5**. The powers
+  list is `[Strength(5), Vulnerable(2)]` — both live in one recorded state, which is
+  the ledger A6.2 concurrency requirement.
 
-## fixt20_r18_bash_two_turns — Bash Vuln then attack a Strengthened foe (6 actions)
+> **This fixture absorbed the overlap coverage that used to live in fixt18.** Once
+> Vulnerable decays, Bash-then-Bellow cannot leave both powers standing at a recorded
+> boundary: the round that ends with the Bellow also runs `atEndOfRound`, so a
+> Vulnerable applied a round earlier is already spent. Bellow-then-Bash does stand,
+> and it exercises the opposite append order into the bargain. Fixtures 12, 13 and 18
+> lost the overlap for the same reason and no longer claim it.
+
+## fixt20_r18_bash_two_turns — a Vulnerable's whole life, no Strength (6 actions)
 r18: mon HP 45; hand `Strike0 Bash9 Defend8 Strike4 Shrug10`; moves C,T,C,…
 - T1: **Bash** (hand[1]) → 8, mon 45→37, **Vuln 2**. **Strike** (hand[0]) → `9`, mon 37→28. energy 0.
 - **END**: monster T1 **Chomp** 12 → HP 80→68. The 3-card hand is discarded (discard 5).
-  Start T2: draw 5 (draw 7→2) → hand `Defend5 Strike3 Defend6 Strike1 Strike2`.
+  Start T2: draw 5 (draw 7→2) → hand `Defend5 Strike3 Defend6 Strike1 Strike2`, monster
+  ticked to **Vuln 1**.
 - T2: **Defend** (hand[0]) → block 5. **Strike** (hand[0]) → into Vuln `9`, mon 28→19. energy 3→1.
-- **END**: monster T2 = **Thrash** 7 vs block 5 → HP 68→66; +5 monster block. Start T3: the
+- **END**: monster T2 = **Thrash** 7 vs block 5 → HP 68→66; +5 monster block, and the
+  round end takes the last Vulnerable stack, so T3 opens with an **empty power list**.
+  Start T3: the
   2-card draw pile is drawn and **empties** → **RESHUFFLE** the 10-card discard
   (`shuffle_rng` 1→2) → draw 3 more. The monster never Bellows here (moves C,T,C), so it
-  ends on Vuln 2 alone — **no Strength**.
+  never gains Strength either — this is the fixture that records a Vulnerable's whole
+  life, 2 → 1 → gone, with nothing else on the list to confuse it.
 
 ---
 
@@ -281,7 +323,9 @@ the card is actually **played** (or the event actually **occurs**) in its trace.
 | **Reshuffle** (`shuffle_rng` draws twice) | 08,12,13,15,18,19,20 |
 | **Player death** (`player_hp ≤ 0`, phase `COMBAT_OVER`) | 17 |
 | **Monster death** (`monsters[0].hp ≤ 0`, phase `COMBAT_OVER`) | 16 |
-| **Bellow-Strength + Vulnerable concurrent** | 18 (also 12, 13, 19) |
+| **Bellow-Strength + Vulnerable concurrent** | 19 |
+| **Vulnerable decays one stack per round end, and is removed at 0** | 05,07,09,12,13,16,18,19,20 |
+| **Monster block survives the player's turn, then is cleared at the top of the monster's** | 18,19 (also 15,17,20) |
 
 The two death rows are the ones a stale table can hide most expensively, because a
 fixture named for an outcome it never reaches still passes its zero-diff check —

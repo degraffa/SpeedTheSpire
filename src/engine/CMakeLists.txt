@@ -41,6 +41,9 @@ add_library(sts_engine
     powers/power_curl_up.cpp
     powers/power_dark_embrace.cpp
     powers/power_double_tap.cpp
+    # Not a power: the atEndOfRound body Vulnerable / Weak / Frail share, plus
+    # their application-time justApplied predicate (powers/power_duration_debuff.hpp).
+    powers/power_duration_debuff.cpp
     powers/power_evolve.cpp
     powers/power_fire_breathing.cpp
     powers/power_flame_barrier.cpp
@@ -61,6 +64,8 @@ add_library(sts_engine
     powers/power_spore_cloud.cpp
     powers/power_the_bomb.cpp
     powers/power_thorns.cpp
+    powers/power_vulnerable.cpp
+    powers/power_weak.cpp
     relic_hooks.cpp
     # Native relic combat bodies, one TU per RelicTier (see
     # relics/relic_native.hpp), matching the relic_pickup_* split below.

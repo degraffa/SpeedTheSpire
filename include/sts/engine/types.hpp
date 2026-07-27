@@ -247,6 +247,18 @@ static_assert(sizeof(CardInstance) == 8,
 // The `counter`-carrying powers are the ONLY consumers; Combust's private hpLoss
 // deliberately stays where it is (CombatState.flags, combat_state.hpp) -- those
 // bits are load-bearing on committed behaviour and moving them is out of scope.
+//
+// A SECOND MEANING, for the three DURATION debuffs. Vulnerable (2), Weak (3) and
+// Frail (21) use `counter` as their `justApplied` latch (0 / 1) rather than as a
+// number: the Java keeps a private boolean beside `amount` in each class
+// (VulnerablePower.java:25, WeakPower.java:25, FrailPower.java:22) that makes the
+// round a debuff arrived cost it no duration. It is per-INSTANCE for the same
+// reason Panache's damage is -- the player and every monster can hold one at
+// once, which is precisely what the retired single CombatState.flags bit could
+// not express. It is also always 0 at a WAITING_ON_USER boundary: set during the
+// monster phase, consumed by dispatch_at_end_of_round in the same pump. So it
+// never reaches a snapshot, a state hash, a committed fixture or an oracle diff.
+// See src/engine/powers/power_duration_debuff.hpp.
 struct PowerSlot {
     uint16_t power_id;  // PowerId; NONE marks an empty slot.
     int16_t amount;

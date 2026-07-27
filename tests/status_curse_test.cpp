@@ -195,7 +195,11 @@ TEST(StatusCurses, FrailModifiesOnlyCardBlockAndExpiresAfterSkipFirst) {
     execute_opcode(s, apply);
 
     ASSERT_NE(FindPlayerPower(s, PowerId::FRAIL), nullptr);
-    EXPECT_NE(s.flags & kCombatFlagFrailJustApplied, 0u);
+    // The justApplied latch is the slot's own `counter` (types.hpp), per
+    // INSTANCE -- it replaced the player-only CombatState.flags bit precisely so
+    // that a monster-owned Frail, and Vulnerable/Weak on any of six actors at
+    // once, can each carry their own.
+    EXPECT_EQ(FindPlayerPower(s, PowerId::FRAIL)->counter, 1);
 
     ActionQueueItem card_block{};
     card_block.opcode = static_cast<uint16_t>(Opcode::BLOCK);
@@ -212,12 +216,12 @@ TEST(StatusCurses, FrailModifiesOnlyCardBlockAndExpiresAfterSkipFirst) {
     dispatch_at_end_of_round(s);
     ASSERT_NE(FindPlayerPower(s, PowerId::FRAIL), nullptr);
     EXPECT_EQ(FindPlayerPower(s, PowerId::FRAIL)->amount, 1);
-    EXPECT_EQ(s.flags & kCombatFlagFrailJustApplied, 0u);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::FRAIL)->counter, 0);
 
     // Stacking the existing object does not recreate/reset justApplied.
     execute_opcode(s, apply);
     ASSERT_EQ(FindPlayerPower(s, PowerId::FRAIL)->amount, 2);
-    EXPECT_EQ(s.flags & kCombatFlagFrailJustApplied, 0u);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::FRAIL)->counter, 0);
     dispatch_at_end_of_round(s);
     ASSERT_EQ(s.action_count, 1);
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);

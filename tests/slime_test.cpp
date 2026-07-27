@@ -212,8 +212,9 @@ TEST(SlimeEffects, LicksApplyFrailAndWeakToPlayer) {
     drain(spike);
     ASSERT_NE(player_power(spike, PowerId::FRAIL), nullptr);
     EXPECT_EQ(player_power(spike, PowerId::FRAIL)->amount, 1);
-    EXPECT_NE(spike.flags & kCombatFlagFrailJustApplied, 0u)
-        << "monster-sourced new Frail preserves B3.9 justApplied semantics";
+    EXPECT_EQ(player_power(spike, PowerId::FRAIL)->counter, 1)
+        << "monster-sourced new Frail preserves B3.9 justApplied semantics; the "
+           "latch is now the slot's own counter, not a whole-combat flag bit";
 
     CombatState acid_s = make_state(2002);
     acid_slime_small_init(acid_s, 0);

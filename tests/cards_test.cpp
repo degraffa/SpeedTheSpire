@@ -383,15 +383,17 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     // ---- Turn 2: two drawn Strikes, then end turn ----
     // (energy refill to 3 already happened for real inside the prior pump()
     // call's start-of-turn sequence -- the unconditional kIroncladBaseEnergy refill)
-    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike 22 into Vulnerable
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike 22 into Vulnerable 1
     pump(s, jaw_worm_take_turn);
-    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike 21 into Vulnerable
+    ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike 21 into Vulnerable 1
     pump(s, jaw_worm_take_turn);
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
     pump(s, jaw_worm_take_turn);          // monster BELLOW (+5 Str,+9 blk), SoT3
 
     // ---- Turn 3: a drawn Strike, then end turn ----
     // (energy already refilled to 3 for real by the prior pump()'s start-of-turn)
+    // Vulnerable expired at the end of round 2, so this Strike is a plain 6 --
+    // and Bellow's 9 block is still up, so it costs the monster no HP at all.
     ASSERT_TRUE(queue_card_play(s, 0, 0));    // Strike 17
     pump(s, jaw_worm_take_turn);
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
@@ -411,14 +413,19 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     EXPECT_EQ(s.draw_count, 3);
     EXPECT_EQ(s.discard_count, 15);
     EXPECT_EQ(s.monsters[0].hp, 9);
-    EXPECT_EQ(s.monsters[0].block, 5);        // Bellow block clears; Thrash adds 5
-    ASSERT_EQ(s.monsters[0].power_count, 2);
+    // Bellow's 9 block survives the player's turn 3 -- applyPreTurnLogic clears a
+    // monster's block at the start of ITS OWN turn, which is after that -- and the
+    // turn-3 Strike spends 6 of it. The 3 that remains is then cleared at the top
+    // of the monster's turn 4, and Thrash adds its 5.
+    EXPECT_EQ(s.monsters[0].block, 5);
+    // Vulnerable is GONE: Bash applied 2 during the player's own turn, so it takes
+    // no justApplied latch, and one stack decays at each of the two round ends
+    // that follow (VulnerablePower.atEndOfRound, VulnerablePower.java:44-53). That
+    // is why the turn-3 Strike dealt 6 rather than 9 above.
+    ASSERT_EQ(s.monsters[0].power_count, 1);
     EXPECT_EQ(s.monsters[0].powers[0].power_id,
-              static_cast<uint16_t>(PowerId::VULNERABLE));
-    EXPECT_EQ(s.monsters[0].powers[0].amount, 2);
-    EXPECT_EQ(s.monsters[0].powers[1].power_id,
               static_cast<uint16_t>(PowerId::STRENGTH));
-    EXPECT_EQ(s.monsters[0].powers[1].amount, 5);
+    EXPECT_EQ(s.monsters[0].powers[0].amount, 5);
 
     // Queues fully drained (guards NormalizeScratch -- no live state lost).
     ASSERT_EQ(s.action_count, 0);
@@ -459,11 +466,9 @@ TEST(CardIntegration, ScriptedThreeTurnFightReachesExpectedHash) {
     exp.monsters[0].move_history[1] = kMoveThrash;   // turn 3 executed
     exp.monsters[0].move_history[2] = kMoveBellow;   // turn 2 executed
     exp.monsters[0].intent = static_cast<uint8_t>(MonsterIntent::ATTACK_DEFEND);
-    exp.monsters[0].power_count = 2;
-    exp.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::VULNERABLE);
-    exp.monsters[0].powers[0].amount = 2;
-    exp.monsters[0].powers[1].power_id = static_cast<uint16_t>(PowerId::STRENGTH);
-    exp.monsters[0].powers[1].amount = 5;
+    exp.monsters[0].power_count = 1;
+    exp.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::STRENGTH);
+    exp.monsters[0].powers[0].amount = 5;
 
     exp.monster_attacks_queued = 1;  // set during the last end-turn's step 4
     exp.turn_has_ended = 0;          // cleared by start-of-turn 4

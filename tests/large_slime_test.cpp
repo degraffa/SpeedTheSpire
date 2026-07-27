@@ -269,7 +269,7 @@ TEST(LargeSlimeEffects, LicksApplyFrail3AndWeak2AtA20) {
     drain(spike);
     ASSERT_NE(player_power(spike, PowerId::FRAIL), nullptr);
     EXPECT_EQ(player_power(spike, PowerId::FRAIL)->amount, 3);
-    EXPECT_NE(spike.flags & kCombatFlagFrailJustApplied, 0u);
+    EXPECT_EQ(player_power(spike, PowerId::FRAIL)->counter, 1);
 
     CombatState acid = make_state(6002);
     acid_slime_large_init(acid, 0);

@@ -413,5 +413,73 @@ TEST(LouseCurlUp, FullyBlockedAndLethalHitsDoNotTrigger) {
     EXPECT_EQ(lethal.action_count, 0);
 }
 
+// --- The captured floor-1 two-Louse divergence, as a directed test -----------
+//
+// Reproduces the shape of the oracle capture that found the missing pre-turn
+// block clear: run STS00051 of the b45 reward campaign, floor 1, two Louse. In
+// the game the Louse entered the player's turn 3 with 0 block and died to a
+// 9-damage Strike; in the simulator it kept the Curl Up block it had gained on
+// turn 2, absorbed the same Strike and survived on 7 HP -- the sim's whole floor-1
+// fight then ran long and its RunState diverged from the capture at the reward
+// screen.
+//
+// Expressed here without the artifact, because everything load-bearing about it
+// is local: Curl Up grants block when the monster is first attacked
+// (CurlUpPower.onAttacked), and MonsterGroup.applyPreTurnLogic
+// (MonsterGroup.java:98-105) clears it at the start of the MONSTER's next turn --
+// reached from AbstractRoom.endTurn through the anonymous inner class CFR dropped
+// (bytecode AbstractRoom$1, javap; see action_queue.cpp's apply_pre_turn_logic).
+// Two Louse, so the walk has to cover a sibling slot as well.
+TEST(LouseCurlUp, BlockDoesNotSurviveIntoThePlayersNextTurn) {
+    CombatState s = MakeState(/*seed=*/51);
+    s.monster_count = 2;
+    louse_normal_init(s, 0);
+    louse_normal_init(s, 1);
+    louse_use_pre_battle_action(s, 0);
+    louse_use_pre_battle_action(s, 1);
+    drain(s);
+    ASSERT_GE(monster_power(s, 0, PowerId::CURL_UP), 9);
+
+    // Put the target Louse on 16 so the capture's arithmetic is exact: one
+    // 9-damage Strike leaves 7, and a second one is lethal.
+    s.monsters[0].hp = 16;
+    s.monsters[0].max_hp = 16;
+    s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+    s.monster_attacks_queued = 1;
+    s.turn_has_ended = 0;
+    s.turn = 2;
+
+    ActionQueueItem strike{};
+    strike.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    strike.src = kActorPlayer;
+    strike.tgt = 0;
+    strike.amount = 9;
+
+    // Player's turn 2: the Strike lands in full (Curl Up's block is queued by
+    // onAttacked and arrives after the damage), and the Louse curls up.
+    execute_opcode(s, strike);
+    drain(s);
+    EXPECT_EQ(s.monsters[0].hp, 7);
+    const int16_t curled = s.monsters[0].block;
+    ASSERT_GE(curled, 9) << "Curl Up granted its block";
+    ASSERT_GT(curled, strike.amount) << "and it is more than the next Strike";
+
+    // End turn 2. The monster phase opens with applyPreTurnLogic.
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, dispatch_monster_turn);
+    ASSERT_EQ(s.turn, 3);
+
+    EXPECT_EQ(s.monsters[0].block, 0)
+        << "the game's Louse enters the player's turn 3 at 0 block; keeping the "
+           "Curl Up block here is the captured divergence";
+    EXPECT_EQ(s.monsters[1].block, 0) << "the sibling slot is walked too";
+
+    // Player's turn 3: the same Strike is lethal, as it was in the game. With the
+    // stale block it would have been absorbed whole and left the Louse on 7.
+    execute_opcode(s, strike);
+    drain(s);
+    EXPECT_LE(s.monsters[0].hp, 0) << "9 into 7 HP behind no block kills it";
+}
+
 }  // namespace
 }  // namespace sts::engine

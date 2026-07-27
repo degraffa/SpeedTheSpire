@@ -4,40 +4,19 @@
 
 #include "power_frail.hpp"
 
-#include <cstdint>
-#include "power_native.hpp"             // find_power
-#include "sts/engine/action_queue.hpp"  // add_to_bottom / kActor*
+#include "power_duration_debuff.hpp"
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
 
 void power_native_frail(CombatState& s, Hook hook,
                         const HookContext& ctx) noexcept {
-    // FrailPower.atEndOfRound (FrailPower.java:42-54): a newly-created,
-    // monster-sourced player instance consumes justApplied without losing
-    // duration. Later rounds reduce one stack and remove at zero. This
-    // dispatcher runs after monster turns and before next-turn setup.
-    if (hook != Hook::AT_END_OF_ROUND || ctx.owner != kActorPlayer) {
-        return;
-    }
-    PowerSlot* fp = find_power(s, kActorPlayer, PowerId::FRAIL);
-    if (fp == nullptr) {
-        s.flags &= ~kCombatFlagFrailJustApplied;
-        return;
-    }
-    if ((s.flags & kCombatFlagFrailJustApplied) != 0u) {
-        s.flags &= ~kCombatFlagFrailJustApplied;
-        return;
-    }
-    ActionQueueItem reduce{};
-    reduce.opcode = static_cast<uint16_t>(Opcode::REDUCE_POWER);
-    reduce.src = ctx.owner;
-    reduce.tgt = ctx.owner;
-    reduce.amount = 1;
-    reduce.flags = make_apply_power_flags(PowerId::FRAIL);
-    add_to_bottom(s, reduce);  // ReducePowerAction, FrailPower.java:52
+    // FrailPower.atEndOfRound (FrailPower.java:40-52). Identical to Vulnerable's
+    // and Weak's, so it shares their body -- including the OWNER generality the
+    // former CombatState.flags latch could not express: a monster-owned Frail now
+    // ticks like the player's.
+    duration_debuff_at_end_of_round(s, hook, ctx, PowerId::FRAIL);
 }
 
 }  // namespace sts::engine
