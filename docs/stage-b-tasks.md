@@ -68,8 +68,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
-| Recursive-play opcode (design R14) — Mayhem | B3.2 | B3.11 | **the opcode now exists**: B3.8 landed `PLAY_CARD` = 34 as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}` **unchanged** — this row is the authoring, not the verb. Also unblocks the Duplication and Distilled Chaos potions |
-| Per-power counter storage — Panache (every-5th), The Bomb (3-turn) | B3.2 | B3.11 | B3.2 added no `PowerSlot` counter field; Combust (B3.7) and Rampage (B3.5) were solved locally |
+| Stolen-gold clamp vs in-combat gold ordering | B3.11 | UNASSIGNED — B5.2 verification, or whoever models mid-combat gold timing | `fold_back_combat` settles the Hand of Greed accumulator through `gain_gold` before `settle_stolen_gold` runs, so a Looter's min(total, purse) clamp reads a purse that already contains greed gold. Diverges from the game only when the steal preceded the greed kill AND the purse was below the accrued steal (a Looter and a Hand of Greed kill in one combat, purse ≤ the steal amount); documented at the `settle_stolen_gold` site. Deliberately chosen to preserve exactly-once settlement on every combat-end path |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | B3.10c for the shared optional-multi-select surface; body remains UNASSIGNED | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. B3.10c must land the explicit-confirm `ActionMask`/translator/fuzz machinery for Purity and Forethought+; it does **not** silently expand into this relic body. After B3.10c, re-own the now-unblocked body rather than deleting this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
 | **Sling of Courage** `atBattleStart` | B3.26 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `Sling.atBattleStart` (`Sling.java:1030-1038`) grants Strength 2 when `getCurrRoom().eliteTrigger` is set. `eliteTrigger` is per-**ROOM** state the run layer sets when an elite encounter begins, and `CombatState` carries no elite marker; producing one is a run-layer change. **Twin of the Slaver's Collar row below** — same missing marker, so both wait on the blocker, not on each other. Inertness asserted by `relic_rares_shop_test` |
@@ -84,7 +83,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | B4.4 `[x]` | B1.6 scoped itself to "adapter + format only" and named B4.4; B4.4's Log records run-combat equivalence but no `replay` generalization |
-| Emit `kIroncladAttackPool`, B3.10b's two generated combat pools, **and the three B4.5 reward pools** in CardLibrary HashMap iteration order instead of registry-id order | B3.6, B3.10b | B4.5's oracle capture | documented interim deviation; **one** `emit/cards.py` fix can pin all six pools at once. Membership and RNG draw counts are live and tested now, but exact same-seed selected identities await the same manual HashMap-order capture that blocks B4.5 — the runbook's §4 documents how to pin the runtime ordering |
+| Emit `kIroncladAttackPool`, B3.10b's two generated combat pools, B3.11's `kIroncladSkillPool`, **and the three B4.5 reward pools** in CardLibrary HashMap iteration order instead of registry-id order | B3.6, B3.10b, B3.11 | B4.5's oracle capture | documented interim deviation; **one** `emit/cards.py` fix can pin all seven pools at once. Membership and RNG draw counts are live and tested now (B3.11 pins the SKILL pool as the in-order subsequence of the combat pool, so it cannot drift independently), but exact same-seed selected identities await the same manual HashMap-order capture that blocks B4.5 — the runbook's §4 documents how to pin the runtime ordering |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
@@ -223,6 +222,7 @@ unspent ids below are now **permanent gaps and must never be backfilled**):
 | B3.10a | 14 `CardId`s, `PowerId` 77 `NO_BLOCK`, opcodes 45–48 `DAMAGE_DRAW_PILE`/`CONDITIONAL_DRAW`/`RESHUFFLE_ALL`/`MADNESS` | — (spent its block exactly) |
 | B3.10b | `CardId`s 94/96/98/104, `PowerId` 78 `SHACKLED`, opcodes 49–52 `DARK_SHACKLES`/`DISCOVERY`/`ENLIGHTENMENT`/`RANDOM_COLORLESS_TO_HAND` | `PowerId` 79–80 |
 | card-limbo | opcode 53 `USE_CARD` | — |
+| B3.11 | `CardId`s 112–126 (all fifteen), `PowerId`s 81–84 `MAYHEM`/`MAGNETISM`/`PANACHE`/`THE_BOMB`, opcodes 54–57 `UPGRADE_ALL`/`RANDOM_CARD_TO_DRAW`/`DRAW_PILE_FETCH`/`DAMAGE_GREED`, `ChoiceKind` 9 `DRAW_TO_HAND`, `ChoiceSource` `DRAW`=4, two default-0 flag bits on opcode 52, `SCHEMA_VERSION` 5→6 | `PowerId`s 85–86, opcodes 58–59, `ChoiceKind` 10. Fuzz `MoveCat` 26 and `CardFlag` bit 15 were unused **contingencies** and are **released to free, not gapped** — bit namespaces are scarce, nothing ever encoded either value, and the permanent-gap rule's "costs nothing" rationale does not hold for bits (recorded in the B3.11 Log) |
 
 `USE_CARD` did not consume the numerically earlier 49–52: B3.10b spent that
 exclusive block exactly. Nor did it backfill 41–44, which became permanent
@@ -240,9 +240,12 @@ opcode: it extends the existing `CHOOSE_CARD` machinery.
 
 ### Wave-B allocation — 2026-07-27, B3.11 (single task, staged pipeline in one worktree)
 
-Allocated by the orchestrator before dispatch; every value below is exclusive
-to B3.11. Unspent values become permanent gaps at landing and are recorded in
-the spent table then.
+**SPENT 2026-07-27 — see the spent table above.** Kept for the record of what
+was allocated; the spent table is authoritative for what landed and what
+gapped. Note for B3.10c: B3.11 stage B landed the ≥ 8 choice-kind packing
+(high bit at `extra` bit 9, card-type filter bits 10–12, temp-group latch bit
+13) and fixed the old `((kv >> 2) != 0)` packing to `((kv & 0x4) != 0)` —
+kind 8 builds on that landed packing rather than re-deriving it.
 
 | Namespace | B3.11 block |
 |---|---|
@@ -468,20 +471,7 @@ optional multi-select surface also unblocks Gambling Chip, but that relic body
 remains its own obligation.
 **Log:** —
 
-### B3.11 `[~]` ∥ Colorless rares
-**Deps:** B3.2 · **Provenance:** cards/colorless RARE (15)
-**Deliverables:** registry entries for the 15 (Apotheosis, Chrysalis, Hand of
-Greed, Magnetism, Master of Strategy, Mayhem, Metamorphosis, Panache, Sadistic
-Nature, Secret Technique, Secret Weapon, The Bomb, Thinking Ahead,
-Transmutation, Violence — verify from source). **All fifteen are mandatory for
-S1: do not split, defer, or land inert registry rows.**
-**Acceptance:** tier-2 per card; directed script.
-**Inherited:** the recursive-play opcode (Mayhem) and per-power counter storage for
-Panache (every-5th) and The Bomb (3-turn) — deferred by B3.2 (no new `PowerSlot`
-field was added there). **The opcode itself now exists:** B3.8 landed `PLAY_CARD` = 34
-as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}`
-unchanged — what is left here is the authoring, not the verb.
-**Log:** —
+- **B3.11** `[x]` ∥ Colorless rares — all 15 live (none deferred, none inert), ids 112-126 in `addColorlessCards` alphabetical order; powers 81-84 MAYHEM/MAGNETISM/PANACHE/THE_BOMB — **The Bomb is the first instanced (non-merging) power**, with value-keyed queued reduce/remove because compaction makes queued slot indices stale; opcodes 54-57 `UPGRADE_ALL`/`RANDOM_CARD_TO_DRAW`/`DRAW_PILE_FETCH`/`DAMAGE_GREED`; `ChoiceKind::DRAW_TO_HAND`=9 over new `ChoiceSource::DRAW`=4 with a `requires_draw_pile_type` legality column; `kIroncladSkillPool` pinned as the in-order SKILL subsequence of the combat pool; owner-approved **schema 5→6** (`PowerSlot` +`counter`, instanced powers, combat-gold accumulator settled once through `gain_gold` at fold-back) with a mechanical layout-transform fixture proof, byte-identical over all 20 fixtures; fix-forwards: Sadistic's missing Shackled exclusion, PutOnDeck forced-path `cardRandomRng` billing (Warcry), the ≥8 choice-kind packing; Mayhem's CFR-unavailable anonymous body reconstructed from `DistilledChaosPotion.java:41` + `Havoc.java:31` and declared in provenance; discharges both B3.2-inherited rows; one new obligation row (stolen-gold clamp ordering corner) · [log](stage-b-log.md#b311)
 
 - **B3.12** `[x]` Multi-monster combat + encounter framework — `encounters.yaml` with 20 Act-1 encounters and their miscRng composition programs; `resolve_composition`/`generate_monster_lists`/`spawn_group`/`dispatch_monster_turn`; **schema 3→4** (`kMonsterCap` 5→7, `sizeof(CombatState)` 3672→3896); 20 fixtures regenerated with a byte-level zero-diff-in-meaning proof; +13 tests, 286/286 ×3 · [log](stage-b-log.md#b312)
 - **B3.13** `[x]` Monsters: Cultist + louses — monster ids 2-4 (Cultist, LouseNormal, LouseDefensive) + power `CURL_UP`=20; committed independent XS128 fixtures, 32 seeds × 20 turns per monster; 359/359 · [log](stage-b-log.md#b313)
@@ -900,6 +890,20 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-27 — **B3.11 landed: all fifteen colorless rares live; the S1
+  colorless card set is complete.** Four staged commits in one worktree under
+  the Wave-B allocation, serially integrated after an independent full-matrix
+  re-run. Owner-approved `SCHEMA_VERSION` 5→6 (`PowerSlot` counter field,
+  instanced powers for The Bomb, `CombatState` combat-gold accumulator) with a
+  generalized byte-identical fixture proof over all 20 fixtures. Two
+  stop-the-line fix-forwards landed with RED-first tests: the native Sadistic
+  body's missing Shackled exclusion (reachable only since B3.10b) and the
+  PutOnDeck forced-path `cardRandomRng` billing that Warcry had silently
+  omitted; the ≥8 choice-kind packing fix is groundwork B3.10c now inherits.
+  Both B3.2-inherited obligation rows are discharged; one new row records the
+  stolen-gold clamp ordering corner. Unused contingencies (fuzz `MoveCat` 26,
+  `CardFlag` bit 15) are released to free rather than gapped — bit namespaces
+  are scarce and nothing encoded them. [Archive log.](stage-b-log.md#b311)
 - 2026-07-26 — **B3.10b implemented; no colorless card remains deferred from
   S1.** A full source reread corrected the losing brief: Discovery's no-arg
   `DiscoveryAction` samples the non-healing RED common/uncommon/rare combat
