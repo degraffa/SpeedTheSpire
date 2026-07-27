@@ -185,3 +185,57 @@ block, and record the campaign id plus the seed list in its Log. Anything else
 is a divergence: follow conventions §5 — re-read the cited Java first, audit
 the fork's strip patches second, promote the reproducer to a regression
 fixture, and do not tick the box.
+
+## 6. What actually ran — 2026-07-27
+
+**No `b414_neow_oracle_*` campaign was ever launched, and §2 was not run.** By
+the time the read-out came due, three strict-validated campaigns taken for
+other tasks were already on disk, and **every run in all three passes through
+Neow** — floor 0 is unavoidable, which is exactly §1's point turned around.
+Forty-one A20 Ironclad runs, all `oracle_block_enabled: true` on the frozen
+stack, all translating `OK`:
+
+| Campaign | Runs |
+|---|---|
+| `b45_rewards_oracle_20260727T204809Z_claude01` | STS00042-46 |
+| `b45_rewards_oracle2_20260727T204809Z_claude01` | STS00047-52 |
+| `b47_treasure_oracle_20260727T204809Z_claude01` | STS00053-82 |
+
+**The read-out is a committed mode, not a hand-drive.** §4b says to drive the
+sim side by hand; it is now `replay_run_diff --neow`, and the comparison it
+performs is §4a plus §4b plus one checkpoint this runbook did not name:
+
+```bash
+build/debug/tools/oracle_bridge/replay/replay_run_diff --neow \
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/<campaign>/run_*.jsonl
+```
+
+The extra checkpoint is **ACTIVATION** — the record immediately after the
+option is pressed, before any payout sub-screen resolves. §4 asked for two
+comparisons and both are still made, but a boss swap whose relic has a deferred
+`onEquip` body can only reach the first of them, and the acquisition it *does*
+prove (which relic, off which pool pop, with `relicRng` untouched) is the part
+that belongs to this task. Splitting it out is what lets those seeds be
+reported precisely instead of just excluded.
+
+**Result: 35 of 41 seeds zero-diff on all three checkpoints.** Six exclusions,
+each named: STS00045/46 (Empty Cage) and STS00052/54 (Astrolabe) stop after
+ACQUISITION because the capture opens a grid the blessing did not; STS00076
+discards a potion out of combat, which the run layer has no verb for; STS00068
+diverges on one field, `relics[1].counter`, which is a Centennial Puzzle
+registry defect rather than a Neow one (obligations table).
+
+**On the three traps.** All three were reached without asking for them. Two
+colorless blessings confirmed the `cardRng`/`neowRng` split (trap 1); two
+three-potion blessings moved `cardBlizzRandomizer`, confirming the rolled-then-
+deleted reward row (trap 2); and twelve boss swaps returned no Black Blood
+(trap 3).
+
+**On the known-benign mismatch.** §4's RED-pool caveat is obsolete — B4.5
+pinned the CardLibrary order, and no card-offer identity differed anywhere in
+the 41 runs. What the capture *did* find is the neighbouring order question the
+caveat did not cover: `transformCard`'s list reads `commonCardPool` forwards but
+`srcUncommonCardPool` and `srcRareCardPool` BACKWARDS, because the `src*` copies
+are built with the prepending `addToBottom`. That was a real divergence, fixed
+in `transform_card` and frozen by `NeowCapture.TransformTwoReproducesThe-
+CapturedIdentities`.

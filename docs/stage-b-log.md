@@ -4482,6 +4482,149 @@ Java provenance: `NeowEvent.java:49-121, 162-242, 288-378`,
 2014-2041`, `BurningBlood.java:30`, `Omamori.java:18-19`,
 `BlackBlood.java:33-36`, and `AbstractEvent.java:63`.
 
+<a id="b414-readout"></a>
+
+### B4.14 oracle spot-diff read-out `[x]` — 2026-07-27 (addendum to the entry above)
+
+The blocked leg above is discharged. No new campaign was launched: the three
+strict-validated campaigns already on disk carry **41 A20 Ironclad runs**, and
+every one of them walks through Neow —
+`b45_rewards_oracle_20260727T204809Z_claude01` (5),
+`b45_rewards_oracle2_20260727T204809Z_claude01` (6) and
+`b47_treasure_oracle_20260727T204809Z_claude01` (30). Nothing under the §7.3
+data root was modified.
+
+**The verdict: 35 of 41 seeds zero-diff on every checkpoint**, against an
+acceptance bar of ten.
+
+| Outcome | Seeds | Which |
+|---|---|---|
+| fully zero-diff | 35 | options + activation + post-choice |
+| clean through ACQUISITION only | 4 | STS00045/46 (Empty Cage), STS00052/54 (Astrolabe) |
+| clean through ACQUISITION only | 1 | STS00076 — out-of-combat potion discard |
+| diverged | 1 | STS00068 — a relic-registry defect, not Neow's |
+
+**The harness.** `replay_run_diff --neow`, a third mode on the committed B4.5
+binary rather than a scratch main. It replays no prefix at all:
+`run_begin(seed, 20)` **is** the blessing screen, so the whole read-out sits on
+floor 0 and cannot depend on combat fidelity. Three checkpoints per seed:
+
+- **OPTIONS**, at the four-button record. The four option MEANINGS are joined
+  to the capture's localized labels through a table written in the RENDER
+  direction — sim meaning to the string the game would have printed — because
+  three labels interpolate a number (`Max HP +7`, `Lose 7 Max HP`, `Take 18
+  damage`) and rendering checks those numbers as part of the same comparison,
+  where a parse would have to discard them. Then the whole translated
+  `RunState`.
+- **ACTIVATION**, at the record immediately after the option is pressed: the
+  drawback and payout have run. This is where a boss swap's acquisition is
+  proved, and it is a checkpoint of its own precisely so that a deferred
+  `onEquip` body cannot take the acquisition down with it.
+- **POST-CHOICE**, at the first floor-0 map record, once the payout's
+  sub-screen has resolved.
+
+`neowRng` and `purge_cost` are **compared, not neutralized**, unlike in the
+reward mode: every record this mode looks at is a floor-0 record and the oracle
+block carries both there. The reward mode's comment claiming the fork emits
+thirteen streams and no `neowRng` was simply wrong — it emits fourteen, and the
+translator has mapped `neowRng` since B4.3. Its neutralization is still right,
+for the real reason: `NeowEvent.rng` is event-scoped, so every later dump omits
+the key and the translated value stays value-init. Corrected in place.
+
+**The capture ran the payout table wide.** 18 distinct option labels were taken
+across the 41 seeds, reaching 16 of the 19 payout types: 12 boss swaps, 4
+common-relic, 4 remove-one, 2 each of colorless / three-potion / remove-two /
+one-random-rare-card / three-enemy-kill / three-card-offer / transform-two /
+rare-colorless, and one each of five more. That reaches all three traps the
+runbook exists to catch. The colorless offers moved `cardRng` and not
+only `neowRng`; the three-potion blessings moved `cardRng` **and** the card
+pity, which is what proves `setupItemReward` rolls a reward row and then
+deletes it; and the twelve boss swaps returned Philosopher's Stone x2, Empty
+Cage x2, Astrolabe x2, and one each of Fusion Hammer, Black Star, Coffee
+Dripper, Runic Cube, Runic Pyramid and Busted Crown — **no Black Blood, in
+twelve draws**, which is the `loseRelic`-before-the-pop ordering.
+
+**One real divergence, root-caused and fixed: the transform pool order.**
+STS00055 and STS00057 both took category 2's "Transform 2 Cards", and all four
+transformed identities differed while every stream, both pity counters, the
+deck size and the upgrades agreed. The rarity of each result matched too, which
+localizes it to the index-to-card map.
+
+`AbstractDungeon.transformCard` -> `returnTrulyRandomCardFromAvailable`
+(`:1016-1045`) builds its list from `commonCardPool` ++ `srcUncommonCardPool`
+++ `srcRareCardPool`. **The first term is a LIVE pool; the other two are the
+`src*` copies**, and `initializeCardPools` fills every copy with `addToBottom`
+— `group.add(0, c)`, a PREPEND (`AbstractDungeon.java:1180-1199`;
+`CardGroup.java:459-461`) — so each holds its rarity's library order REVERSED.
+`transform_card` walked all three forwards. That reading is correct for the
+first block, and it was invisible before B4.5 pinned the CardLibrary order,
+because until then both candidate orders were equally arbitrary. Reversing the
+two `src*` blocks reproduces the game **4 for 4** across two independent seeds:
+
+| Seed | list index | was | is | game |
+|---|---|---|---|---|
+| STS00055 | 62 | Impervious | Barricade | Barricade |
+| STS00055 | 60 | Brutality | Limit Break | Limit Break |
+| STS00057 | 54 | Uppercut | Inflame | Inflame |
+| STS00057 | 70 | Demon Form | Offering | Offering |
+
+The comment that justified the old reading ("the `src*` copies are
+byte-identical to the live pools in S1") is deleted rather than softened: it is
+the exact claim B4.5's `addToBottom` finding disproved, and it survived only
+because nothing indexed the two spellings differently until now.
+
+**The remaining exclusions, each named rather than absorbed.** Four seeds took
+a boss relic whose `onEquip` opens a master-deck grid the sim defers — Empty
+Cage's two removals, Astrolabe's three transforms — so the capture shows a grid
+the blessing did not open. The harness detects exactly that (`rc.neow.screen`
+is not `GRID` while the artifact is on one) and stops with the relic named; the
+ACQUISITION checkpoint before it is clean, which is the whole claim: the right
+relic, off the right pool pop, with `relicRng` untouched and Burning Blood
+gone. STS00076 took the three-potion blessing and then discarded a potion from
+the reward screen — an out-of-combat discard the run layer has no verb for
+(B1.6's obligations row, now narrowed to that one command).
+
+**The one divergence that is not Neow's.** STS00068's common-relic blessing
+handed over Centennial Puzzle, and exactly one field differs:
+`relics[1].counter: -1 -> 0`. `CentennialPuzzle` gates its once-per-combat draw
+on a **static `boolean usedThisCombat`** and never assigns `this.counter`
+(`CentennialPuzzle.java:21, 33-49`), so `AbstractRelic`'s -1 default stands and
+the capture reports -1. `relics.yaml` gives the row `initial_counter: 0` and
+the native handler uses `slot.counter` as that flag. This is a relic-registry
+defect that any acquisition from any source would show; Neow's own accounting
+for that seed — pool pop, streams, gold, deck — is clean. Deliberately **not**
+fixed here: the correct repair moves the flag off the persistent counter into
+combat-scoped state, which is a combat-layer change with its own tests, and it
+needs an owner who can also answer why the sim never resets the flag between
+combats at all. Filed as an obligations row.
+
+**A second finding, stated from the Java and not measured.**
+`event_grid_transform_card` reaches the same
+`returnTrulyRandomCardFromAvailable` list, and its generated pool
+`kEventTransformRedPool` is built by walking `cards.yaml` rows in registry
+order — neither the library order nor the mixed src shape. No capture in hand
+exercises a Living Wall transform, so it is filed for B4.10/B4.11 rather than
+changed blind.
+
+**Tests.** `NeowCapture.TransformTwoReproducesTheCapturedIdentities` freezes
+both seeds' four identities in CI, re-driving each from `run_begin` through the
+capture's own option and grid indices — and asserting that the ROLLED option
+really was Transform 2 Cards with the recorded drawback, so the vector cannot
+decay into a forced one. `NeowGrid.TransformReadsTheSrcPoolsBackwards` pins the
+list's shape at its three block boundaries without a seed, and
+`NeowGrid.TransformCardDrawsOnceAndReplacesTheRow` now derives its expectation
+through the same independent helper.
+
+**Acceptance:** WSL Debug, leak-detecting ASan/UBSan and Release all green on
+the same tree as the B4.8 read-out below; the counts and the stale-count /
+doc-link checks are recorded there. No schema, fixture, golden, Steam/game
+deployment or oracle artifact changed; the three campaign directories were read
+only.
+
+Java provenance: `AbstractDungeon.java:852-878, 998-1045, 1135-1219`,
+`CardGroup.java:455-461`, `CentennialPuzzle.java:21, 33-49`,
+`NeowReward.java:105-128, 190-307`.
+
 <a id="b45"></a>
 
 ### B4.5 `[x]` Combat rewards — **oracle spot-diff PASSED; card-pool library order pinned**
@@ -5069,3 +5212,104 @@ Java provenance: `ShopScreen.java:99-136, 130-244, 246-292, 294-305, 340-428,
 `Courier.java:181-212`, `MembershipCard.java:229-255`,
 `MagicFlower.java:31-37`, `MoltenEgg2.java:35-55`,
 `FastCardObtainEffect.java:19-56`, and `Soul.java:145-156`.
+
+<a id="b48-readout"></a>
+
+### B4.8 oracle spot-diff read-out `[x]` — 2026-07-27 (addendum to the entry above)
+
+The blocked leg above is discharged, from a campaign taken for a different
+task. `b47_treasure_oracle_20260727T204809Z_claude01` walks thirty A20 runs
+under `random-legal`, and three of them reached a merchant — **STS00054,
+STS00057, STS00074** — which is exactly the three-seed bar the runbook sets. No
+new capture was launched and nothing under the §7.3 data root was modified.
+
+**Those three runs hold five merchants**, because two of them enter two shop
+rooms, and the set turned out to cover more than a purpose-built capture would
+have been aimed at:
+
+| Run | Floor | What the capture shows |
+|---|---|---|
+| STS00054 | 2 | entered and left without opening the screen — streams and pools only |
+| STS00054 | 7 | full shelf; buys Havoc (59) and an Explosive Potion (56) |
+| STS00057 | 5 | full shelf; purges a card for 75, ramping the run cost to 100 |
+| STS00074 | 3 | full shelf; buys a Skill Potion (57) and Havoc (54) |
+| STS00074 | 5 | full shelf; broke at 17 gold, buys nothing |
+
+**All five zero-diff.** Every card id, relic id, potion id and price on the four
+visible shelves; the sale slot on each; every purge cost and `purge_available`;
+and on all five, `merchantRng` +16 exactly, `cardRng` +12-or-more (two of the
+five spent a dedupe re-roll) and `potionRng` +3-or-more (trap-14 rejection
+sampling took as many as 13 extra draws), against the first in-room record,
+with the five relic-pool orders and `cardBlizzRandomizer` compared alongside. Then the whole `RunState` after every
+purchase. Three visits walk end to end clean; two stop **after every purchase
+has been verified**, at an out-of-combat potion discard the run layer has no
+verb for.
+
+The floor-2 merchant of STS00054 is worth keeping in the count rather than
+dropping as uninteresting: the run built a shop and left without opening it, so
+there is no shelf to compare — but the sixteen `merchantRng` draws, the twelve
+`cardRng` draws, the twelve `potionRng` draws and the three end-pops all
+happened, and all of them match. A merchant the player never looks at is still
+a merchant the RNG paid for.
+
+**The harness.** `replay_run_diff --shop`, a fourth mode on the same committed
+binary. Per visit it does two things, in the B4.5 shape:
+
+- **STOCK.** Seed a `RunState` from the capture's PRE-ENTRY record (the last
+  one before the map `choose` that entered the room), call `generate_shop`, and
+  compare the result against the captured `SHOP_SCREEN` and against the first
+  IN-ROOM record. Seeding from before the entry is what makes the build itself
+  the thing under test.
+- **PURCHASES.** Restart from the first in-room record's `RunState` — which
+  already carries the room-entry bookkeeping the merchant build is not
+  responsible for, notably the `eventRng` draw a `?`-resolved shop costs — and
+  walk the visit, diffing the whole `RunState` at every subsequent in-room
+  record.
+
+Two mechanism details are recorded in the runbook because they are not obvious
+from the Java. A shop `choose i` indexes the game's `choice_list`, which is the
+AFFORDABLE unsold rows by lowercased display name and renumbers after every
+purchase; the harness joins that name back to the captured shelf rather than
+re-deriving the affordability filter, so the read-out keeps measuring the
+merchant instead of measuring a model of the menu. And the sale slot is
+inferred from the capture alone — the screen carries no sale flag, so the mode
+takes the colored slot with the smallest price/base ratio (base from the row's
+own `rarity`) and requires both that it be `shop.sale_index` and that the ratio
+really be a halving. Price equality across all seven cards would already imply
+the sale slot; this makes the check independent of the simulator's answer.
+
+The purge grid needed the same buffering the Neow read-out needed: a one-pick
+grid selects on `choose`, commits on `proceed`, and `cancel` clears the
+selection, and STS00057 uses all three (it picked, cancelled, picked, cancelled,
+picked, confirmed). The harness accumulates picks and flushes them when the
+capture confirms — which is why `grid cancel`, one of the rooms `--replay`
+stops at, is now handled here.
+
+**The traps.** Trap 1 and trap 2 both confirmed: every first shop offered
+removal at exactly 75, STS00057's purge ramped the run-persistent cost to 100,
+and no A20 shelf moved the purge cost while every stock price carried the x1.1.
+Trap 5 held on all five merchants (sixteen `merchantRng` draws, never
+seventeen), and trap 3's `cardBlizzRandomizer` never moved across a build.
+Trap 4 was not exercised — none of the five popped one of the four shop-gated
+relics — so it stays on `ShopDrawOrder.ShopRelicDrawsSeeTheInShopCanSpawnGate`
+alone. No card-id mismatch occurred anywhere, which is what the game_id-sorted
+shop pools predict. The Courier was owned by none of the three runs, so its
+restock row is untouched.
+
+**Test.** STS00074's floor-3 merchant is frozen as
+`ShopCapture.B47Seed1790050543999Floor3MatchesTheRecordedMerchantAndItsPurchases`
+— the sibling of the b13 vector, and the first that exercises spending: the
+Skill Potion into the first free slot at 128 → 71, then Havoc appended at
+71 → 17, with the removal service untouched by either.
+
+**Acceptance:** WSL Debug, leak-detecting ASan/UBSan and Release each
+1358/1358. `tools/check_stale_counts.sh` and `tools/check_doc_links.sh` clean.
+No schema, fixture, golden, registry id, opcode, Steam/game deployment or
+oracle artifact changed; the campaign directories were read only. This commit
+also carries the B4.14 read-out above, including the `transform_card` fix,
+which is why the count moved from the entry above's.
+
+Java provenance: `ShopScreen.java:130-244, 246-292, 340-428, 592-672, 969-978`,
+`Merchant.java:57-97`, `ShopRoom.java:43-77`, `StoreRelic.java:36-120`,
+`StorePotion.java:33-101`, `AbstractDungeon.java:1538-1620, 1785-1789`,
+`CardGroup.java:498-552`.

@@ -862,8 +862,30 @@ TEST(NeowGrid, RemoveTwoNeedsTwoDistinctRowsBeforeItApplies) {
     EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
 }
 
-// TRANSFORM_CARD: one NeowEvent.rng draw over commonPool ++ uncommonPool ++
-// rarePool with the source card's own id excluded, then remove + obtain.
+// The list `returnTrulyRandomCardFromAvailable` builds for a RED source card
+// (AbstractDungeon.java:1016-1045), spelled out here independently of neow.cpp:
+// commonCardPool -- the LIVE pool, plain library order -- followed by
+// srcUncommonCardPool and srcRareCardPool, the `src*` COPIES, which
+// initializeCardPools fills with the PREPENDING addToBottom (:1180-1199,
+// CardGroup.java:459-461) and which therefore hold their rarity's library order
+// REVERSED. Pinning the mix of the two spellings is the point: reading all three
+// forwards is correct for the first block and wrong for the other two, and the
+// difference only becomes visible once the library order itself is pinned.
+[[nodiscard]] CardId truly_random_red_at(int index) {
+    if (index < kIroncladCommonPoolCount) {
+        return kIroncladCommonPool[static_cast<size_t>(index)];
+    }
+    if (index < kIroncladCommonPoolCount + kIroncladUncommonPoolCount) {
+        const int i = index - kIroncladCommonPoolCount;
+        return kIroncladUncommonPool[
+            static_cast<size_t>(kIroncladUncommonPoolCount - 1 - i)];
+    }
+    const int i = index - kIroncladCommonPoolCount - kIroncladUncommonPoolCount;
+    return kIroncladRarePool[static_cast<size_t>(kIroncladRarePoolCount - 1 - i)];
+}
+
+// TRANSFORM_CARD: one NeowEvent.rng draw over that list with the source card's
+// own id excluded, then remove + obtain.
 TEST(NeowGrid, TransformCardDrawsOnceAndReplacesTheRow) {
     RunController rc = run_begin(42, kA20);
     const RunState before = rc.run;
@@ -878,16 +900,7 @@ TEST(NeowGrid, TransformCardDrawsOnceAndReplacesTheRow) {
     const int32_t k = random(s, kIroncladCommonPoolCount +
                                     kIroncladUncommonPoolCount +
                                     kIroncladRarePoolCount - 1);
-    CardId want;
-    if (k < kIroncladCommonPoolCount) {
-        want = kIroncladCommonPool[static_cast<size_t>(k)];
-    } else if (k < kIroncladCommonPoolCount + kIroncladUncommonPoolCount) {
-        want = kIroncladUncommonPool[
-            static_cast<size_t>(k - kIroncladCommonPoolCount)];
-    } else {
-        want = kIroncladRarePool[static_cast<size_t>(
-            k - kIroncladCommonPoolCount - kIroncladUncommonPoolCount)];
-    }
+    const CardId want = truly_random_red_at(k);
 
     EXPECT_EQ(rc.run.neow_rng.counter, before.neow_rng.counter + 1);
     EXPECT_EQ(count_card(rc.run, CardId::DEFEND),
@@ -916,6 +929,78 @@ TEST(NeowGrid, TransformTwoRemovesBothBeforeEitherDraw) {
         const CardDef* def = card_def(static_cast<CardId>(
             rc.run.master_deck[rc.run.master_deck_count - i].card_id));
         ASSERT_NE(def, nullptr);
+    }
+}
+
+// The two `src*` blocks read backwards, pinned without a seed: the entry that
+// FOLLOWS the common block is the LAST uncommon in library order, and the entry
+// that follows the uncommon block is the LAST rare.
+TEST(NeowGrid, TransformReadsTheSrcPoolsBackwards) {
+    EXPECT_EQ(truly_random_red_at(0), kIroncladCommonPool[0]);
+    EXPECT_EQ(truly_random_red_at(kIroncladCommonPoolCount - 1),
+              kIroncladCommonPool[kIroncladCommonPoolCount - 1]);
+    EXPECT_EQ(truly_random_red_at(kIroncladCommonPoolCount),
+              kIroncladUncommonPool[kIroncladUncommonPoolCount - 1]);
+    EXPECT_EQ(truly_random_red_at(kIroncladCommonPoolCount +
+                                  kIroncladUncommonPoolCount - 1),
+              kIroncladUncommonPool[0]);
+    EXPECT_EQ(truly_random_red_at(kIroncladCommonPoolCount +
+                                  kIroncladUncommonPoolCount),
+              kIroncladRarePool[kIroncladRarePoolCount - 1]);
+    EXPECT_EQ(truly_random_red_at(kIroncladCommonPoolCount +
+                                  kIroncladUncommonPoolCount +
+                                  kIroncladRarePoolCount - 1),
+              kIroncladRarePool[0]);
+}
+
+// =============================================================================
+// Captured evidence
+// =============================================================================
+
+// The oracle capture that found the reversal above, frozen so CI keeps it. Two
+// A20 Ironclad runs took category 2's "Transform 2 Cards" and the game handed
+// back four identities; the whole flow is re-driven here from the seed, and the
+// four names are the capture's, not the simulator's. The purgeable grid the
+// game showed is master-deck rows 1..10 (row 0 is Ascender's Bane, which
+// getPurgeableCards drops), so a grid index g is master-deck row g + 1.
+TEST(NeowCapture, TransformTwoReproducesTheCapturedIdentities) {
+    struct Case {
+        int64_t seed;
+        NeowDrawback drawback;
+        uint8_t grid_a;   // the capture's first grid index
+        uint8_t grid_b;   // and its second
+        CardId first;     // the identity the game produced for grid_a's card
+        CardId second;    // ... and for grid_b's
+    };
+    // STS00055 and STS00057 of b47_treasure_oracle_20260727T204809Z_claude01.
+    const Case cases[] = {
+        {1790050543930LL, NeowDrawback::TEN_PERCENT_HP_LOSS, 6, 8,
+         CardId::BARRICADE, CardId::LIMIT_BREAK},
+        {1790050543932LL, NeowDrawback::NO_GOLD, 3, 9,
+         CardId::INFLAME, CardId::OFFERING},
+    };
+    for (const Case& c : cases) {
+        RunController rc = run_begin(c.seed, kA20);
+        // The capture's own option roll, not a forced one: slot 2 really did
+        // come up as this drawback + Transform 2 Cards.
+        ASSERT_EQ(rc.neow.option_type[2],
+                  static_cast<uint8_t>(NeowRewardType::TRANSFORM_TWO_CARDS))
+            << c.seed;
+        ASSERT_EQ(rc.neow.option_drawback[2], static_cast<uint8_t>(c.drawback))
+            << c.seed;
+        step(rc, choose(2));
+        ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::GRID));
+        step(rc, choose(static_cast<uint8_t>(c.grid_a + 1)));
+        step(rc, choose(static_cast<uint8_t>(c.grid_b + 1)));
+        ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+
+        // Both replacements are appended, in pick order.
+        const uint16_t n = rc.run.master_deck_count;
+        EXPECT_EQ(rc.run.master_deck[n - 2].card_id,
+                  static_cast<uint16_t>(c.first)) << c.seed;
+        EXPECT_EQ(rc.run.master_deck[n - 1].card_id,
+                  static_cast<uint16_t>(c.second)) << c.seed;
+        EXPECT_EQ(rc.run.neow_rng.counter, 7) << c.seed;
     }
 }
 
