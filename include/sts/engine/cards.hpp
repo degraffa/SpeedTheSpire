@@ -70,6 +70,12 @@ using sts::registry::kPoolableCurses;
 // order is a known, documented deviation until an oracle capture pins it).
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
+// Full non-healing RED combat pool (Discovery / returnTrulyRandomCardInCombat).
+using sts::registry::kIroncladCombatPoolCount;
+using sts::registry::kIroncladCombatPool;
+// Full non-healing COLORLESS uncommon+rare combat pool (Jack of All Trades).
+using sts::registry::kColorlessCombatPoolCount;
+using sts::registry::kColorlessCombatPool;
 // The three per-rarity combat CARD-REWARD pools: every RED non-BASIC
 // card split by rarity (AbstractDungeon.initializeCardPools ->
 // CardLibrary.addRedCards, CardLibrary.java:1152-1161). No type filter and no
@@ -244,6 +250,15 @@ static_assert(
             static_cast<uint16_t>(Opcode::RESHUFFLE_ALL) &&
         static_cast<uint16_t>(sts::registry::Opcode::MADNESS) ==
             static_cast<uint16_t>(Opcode::MADNESS) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DARK_SHACKLES) ==
+            static_cast<uint16_t>(Opcode::DARK_SHACKLES) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DISCOVERY) ==
+            static_cast<uint16_t>(Opcode::DISCOVERY) &&
+        static_cast<uint16_t>(sts::registry::Opcode::ENLIGHTENMENT) ==
+            static_cast<uint16_t>(Opcode::ENLIGHTENMENT) &&
+        static_cast<uint16_t>(
+            sts::registry::Opcode::RANDOM_COLORLESS_TO_HAND) ==
+            static_cast<uint16_t>(Opcode::RANDOM_COLORLESS_TO_HAND) &&
         static_cast<uint16_t>(sts::registry::Opcode::USE_CARD) ==
             static_cast<uint16_t>(Opcode::USE_CARD),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "

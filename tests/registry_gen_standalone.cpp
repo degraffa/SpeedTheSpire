@@ -25,7 +25,7 @@ static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
 // 91 (through the red rares) + B3.10a's 14 colorless UNCOMMON rows; their ids
 // run 92-111 but six interior ids are reserved gaps, so the ROW count adds 14.
-static_assert(sts::registry::manifest::kCardsCount == 105);
+static_assert(sts::registry::manifest::kCardsCount == 109);
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 // Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only

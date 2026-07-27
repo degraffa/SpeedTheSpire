@@ -149,9 +149,16 @@ OPCODES = {
     "CONDITIONAL_DRAW": 46,
     "RESHUFFLE_ALL": 47,
     "MADNESS": 48,
+    # B3.10b colorless-uncommon additions. The four opcodes are the whole
+    # published 49-52 reservation; USE_CARD remains 53 and the earlier gaps
+    # remain gaps.
+    "DARK_SHACKLES": 49,
+    "DISCOVERY": 50,
+    "ENLIGHTENMENT": 51,
+    "RANDOM_COLORLESS_TO_HAND": 52,
     # The played card's filing action, allocated at 53 because 49-52 remain
-    # exclusively reserved for the open colorless-card opcode block and
-    # permanent gaps are never backfilled.
+    # the preceding colorless-card opcode block and permanent gaps are never
+    # backfilled.
     # USE_CARD is
     # UseCardAction.update (UseCardAction.java:77-137) as a queued action:
     # AbstractPlayer.useCard queues the card's own actions FIRST and this LAST

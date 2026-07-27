@@ -211,7 +211,7 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // CardType.ATTACK -- there is no POWER among them -- so Bottled Tornado's
     // rarity-agnostic type scan is unchanged too. Neither gate moved; the number
     // is not merely bumped.
-    static_assert(sts::registry::manifest::kCardsCount == 105,
+    static_assert(sts::registry::manifest::kCardsCount == 109,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

@@ -56,6 +56,11 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     rows = []
     max_steps = 1  # cards.hpp reserves at least 1; skeleton max is 2.
     for c in cards:
+        if "native" in c:
+            raise fail(
+                f"cards.yaml: card {c['name']} uses unsupported key 'native'; "
+                "cards are effect-program driven and have no native-card "
+                "dispatch surface")
         ctype = c.get("type")
         if ctype not in CARD_TYPES:
             raise fail(f"cards.yaml: card {c['name']} has unsupported type "
@@ -292,6 +297,40 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("inline constexpr std::array<CardId, kIroncladAttackPoolCount> "
                "kIroncladAttackPool{{")
     for r in attack_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
+    # B3.10b Discovery: AbstractDungeon.returnTrulyRandomCardInCombat()
+    # (:944-962) concatenates the player's src COMMON, UNCOMMON and RARE pools,
+    # excluding HEALING-tagged cards, and spends one cardRandomRng draw per
+    # attempt. Membership is generated so later card rows self-complete it.
+    combat_pool = [r for r in rows
+                   if r["color"] == "RED"
+                   and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+                   and not r["healing"]]
+    combat_pool.sort(key=lambda r: r["id"])
+    out.append(f"inline constexpr int kIroncladCombatPoolCount = "
+               f"{len(combat_pool)};")
+    out.append("inline constexpr std::array<CardId, kIroncladCombatPoolCount> "
+               "kIroncladCombatPool{{")
+    for r in combat_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
+    # B3.10b Jack of All Trades: returnTrulyRandomColorlessCardInCombat
+    # (:981-995) draws from every poolable COLORLESS UNCOMMON/RARE except a
+    # HEALING-tagged card (Bandage Up). This reaches the final 34 members
+    # automatically as B3.10c and B3.11 add the remaining colorless rows.
+    colorless_pool = [r for r in rows
+                      if r["color"] == "COLORLESS"
+                      and r["rarity"] in ("UNCOMMON", "RARE")
+                      and not r["healing"]]
+    colorless_pool.sort(key=lambda r: r["id"])
+    out.append(f"inline constexpr int kColorlessCombatPoolCount = "
+               f"{len(colorless_pool)};")
+    out.append("inline constexpr std::array<CardId, kColorlessCombatPoolCount> "
+               "kColorlessCombatPool{{")
+    for r in colorless_pool:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 

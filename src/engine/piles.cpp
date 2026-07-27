@@ -35,11 +35,14 @@ void reset_cost_for_turn(CombatState& s, uint8_t pool_index) noexcept {
         return;
     }
     const CardDef* def = card_def(static_cast<CardId>(c.card_id));
-    if (def != nullptr) {
+    if (has_card_flag(c.flags, CardFlag::SAVED_BASE_COST)) {
+        c.cost_now = saved_base_cost(c.flags);
+    } else if (def != nullptr) {
         c.cost_now = card_cost(*def, c.upgrade);  // costForTurn = cost
     }
     c.flags = static_cast<uint16_t>(
-        c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+        c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+        ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
 }
 
 void shuffle_discard_into_draw(CombatState& s) noexcept {

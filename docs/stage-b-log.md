@@ -1365,6 +1365,71 @@ nor Bottled Tornado's POWER scan moves.
 **Verified:** union green on debug / asan / release at integration-16 with zero
 NOT_BUILT; no committed fixture or golden vector modified, deleted or renamed.
 
+<a id="b310b"></a>
+
+### B3.10b `[x]` Colorless uncommons — the four needing generated pools
+**Deps:** B3.10a (shares `cards.yaml`; branch off it, do not run beside it)
+**Deliverables:** Dark Shackles, Discovery, Enlightenment, Jack of All Trades —
+ids **94, 96, 98, 104**, opcodes **49–52**, power **78** (Dark Shackles'
+`GainStrengthPower`, "Shackled").
+**The real deliverable is two generated combat pools.** Discovery's no-argument
+`DiscoveryAction` calls `generateCardChoices(null)`, which uses
+`returnTrulyRandomCardInCombat()` — the full non-HEALING RED common, uncommon
+and rare combat pool (`DiscoveryAction.java:44-62,106-121`;
+`AbstractDungeon.java:944-979`). Jack alone uses
+`returnTrulyRandomColorlessCardInCombat()` — COLORLESS uncommon + rare minus
+HEALING (`JackOfAllTrades.java:28-34`; `AbstractDungeon.java:981-995`). The
+colorless pool reaches its final 34 members when mandatory B3.10c and B3.11
+land. Discovery additionally needs a **generated, unique 3-card choice** with
+one `cardRandomRng` draw per attempt, including rejected duplicates.
+**Acceptance:** tier-2 per card; Discovery `cardRandomRng` draw accounting;
+directed script.
+
+**Log:** Done 2026-07-26. A full source reread corrected the task's inherited
+source claim before implementation: Discovery does **not** use the colorless
+pool. Its no-argument action calls `generateCardChoices(null)`, which
+rejection-samples the player's RED common/uncommon/rare combat pool. Jack of All
+Trades is the sole consumer here of the colorless uncommon/rare pool. Both
+memberships are emitted from `cards.yaml`, exclude HEALING rows and
+self-complete as later mandatory card rows land. Their interim registry-id
+ordering is carried by the existing B4.5 HashMap-order capture obligation;
+membership and RNG draw counts are live now.
+
+Dark Shackles' fused opcode performs the Artifact presence test before queuing
+either child effect, then resolves Strength loss before Shackled, exactly
+preserving the Java case where Artifact consumes the Strength debuff and
+prevents Shackled from ever being queued. `PowerId` 78 is a real additive
+DEBUFF whose end-turn program restores precisely its own amount of Strength and
+removes itself. Named tests cover base/upgraded 9/15, Artifact, and a target
+that already had Strength.
+
+Discovery persists three distinct generated `CardId`s in its queue item and
+blocks as a generated choice source. The public mask exposes three legal offer
+slots; `advance(CHOOSE, slot)` creates the chosen base copy, makes it free this
+turn and spills it to discard at the hand cap. A multi-seed test independently
+replays rejection sampling and proves one `cardRandomRng` draw per attempt,
+including duplicate retries. The upgrade removes Discovery's exhaust flag and
+does not change its cost or choice.
+
+Enlightenment reconstructs `AbstractCard.cost` separately from
+`costForTurn`: base caps the current turn then restores the combat base;
+upgraded changes bases above 1 for the rest of combat without overwriting an
+already-cheaper temporary cost. `CardFlag` bit 10 plus a private three-bit
+payload in bits 11–13 preserves a Confusion-modified base without changing the
+fixed `CardInstance` layout; bits 14–15 remain free. Tests cover ordinary
+temporary/permanent behavior, a Confusion base, and a pre-existing zero
+`costForTurn`. Jack performs exactly one/two independent colorless-pool draws,
+allows duplicates, adds base copies and exhausts at both tiers.
+
+The directed test drives all four cards through only `legal_actions()` and
+`advance()`. Generated-pool membership tests pin all three RED rarities,
+HEALING exclusions and live colorless rows. Codegen now rejects any
+`cards.yaml native:` key with a named negative test, discharging the
+documented-but-silent no-op trap. No `CombatState`, registry schema, fixture or
+golden vector changed. Final-tree WSL Debug, leak-detecting ASan/UBSan and
+Release are green; stale-count, documentation-link and whitespace checks are
+clean.
+
 <a id="b312"></a>
 
 ### B3.12 `[x]` Multi-monster combat + encounter framework

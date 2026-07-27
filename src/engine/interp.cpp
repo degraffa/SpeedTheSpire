@@ -276,6 +276,20 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::MADNESS:
             op_madness(s);
             return;
+        case Opcode::DARK_SHACKLES:
+            op_dark_shackles(s, item.tgt, item.amount);
+            return;
+        case Opcode::DISCOVERY:
+            // A DISCOVERY item is prepared and intercepted at the action-queue
+            // head, then consumed by advance(CHOOSE). It never executes as an
+            // ordinary popped opcode; direct execution is a safe no-op.
+            return;
+        case Opcode::ENLIGHTENMENT:
+            op_enlightenment(s, item.amount != 0);
+            return;
+        case Opcode::RANDOM_COLORLESS_TO_HAND:
+            op_random_colorless_to_hand(s, item.amount);
+            return;
         case Opcode::CANNOT_LOSE:
             // CannotLoseAction.update (CannotLoseAction.java:12-15): latch the
             // room's cannotLose so the pump's all-monsters-dead victory gate

@@ -450,18 +450,17 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 105u);  // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 109u);  // B3.7: prior 67 + 8 red uncommon POWER cards
                                       // + the 16 red RARE cards (ids 76-91)
-                                      // + B3.10a's 14 colorless UNCOMMONs. Their
-                                      // ids run 92-111 with SIX interior gaps
-                                      // (94/96/98/101/104/109) reserved for
-                                      // B3.10b and the optional-multi-select
-                                      // pair, so the row COUNT is 14, not 20 --
+                                      // + B3.10a/B3.10b's 18 colorless UNCOMMONs.
+                                      // Their ids run 92-111 with TWO interior
+                                      // gaps (101/109) owned by mandatory B3.10c,
+                                      // so the row COUNT is 18, not 20 --
                                       // exactly the sparse-id case the note
                                       // below describes.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 44u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 45u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -489,6 +488,8 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.10a's No Block (77), Panic Button's
                                       // debuff and the only power in the game
                                       // that overrides modifyBlockLast
+                                      // + B3.10b's Shackled (78), Dark Shackles'
+                                      // end-of-turn Strength restoration
     EXPECT_EQ(m::kMonstersCount, 25u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
@@ -520,7 +521,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 420u);  // 105 + 44 + 25 + 142 + 33 + 31 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 425u);  // 109 + 45 + 25 + 142 + 33 + 31 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1148,6 +1149,31 @@ TEST(RegistryGen, EngineEmittedOpInCardDomainFailsWithClearError) {
     EXPECT_NE(msg.find("SYNTH_BAD_OP_CARD"), std::string::npos) << msg;
     EXPECT_NE(msg.find("SUICIDE"), std::string::npos) << msg;
     EXPECT_NE(msg.find("does not support"), std::string::npos) << msg;
+}
+
+TEST(RegistryGen, NativeCardKeyFailsLoudly) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_native_card_registry");
+    {
+        std::ofstream cards(bad_reg / "cards.yaml", std::ios::app);
+        cards << "\n- id: 900\n  name: SYNTH_NATIVE_CARD\n"
+                 "  game_id: \"SynthNativeCard\"\n"
+                 "  color: COLORLESS\n  rarity: UNCOMMON\n"
+                 "  type: SKILL\n  cost: 0\n  target: SELF\n"
+                 "  flags: []\n  native: true\n"
+                 "  provenance: \"synthetic native-card negative test\"\n"
+                 "  effects: []\n";
+    }
+
+    const fs::path out = scratch / "bad_native_card_out";
+    const fs::path err = scratch / "bad_native_card_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "cards have no native dispatch and must reject the key";
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("cards.yaml"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("SYNTH_NATIVE_CARD"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("unsupported key 'native'"), std::string::npos) << msg;
 }
 
 // The unification's other half: the packings that used to exist in only ONE

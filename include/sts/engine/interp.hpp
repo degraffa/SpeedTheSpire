@@ -325,10 +325,24 @@ enum class Opcode : uint16_t {
                               // hit, then set BOTH its cost and its costForTurn to
                               // 0 -- a permanent, not this-turn, zeroing. With no
                               // eligible card it draws NOTHING.
+    DARK_SHACKLES = 49,       // DarkShackles.use (:32-38): queue Strength(-amount)
+                              // and, only when Artifact was absent BEFORE that
+                              // debuff resolves, queue Shackled(+amount).
+    DISCOVERY = 50,           // DiscoveryAction: rejection-sample three distinct
+                              // non-healing RED combat-pool cards, persist the
+                              // generated offer in this queue item, then block
+                              // for a GENERATED-source CHOOSE. The selected base
+                              // copy costs 0 this turn and enters hand/discard.
+    ENLIGHTENMENT = 51,       // EnlightenmentAction: cap hand costForTurn at 1;
+                              // nonzero amount also makes base costs >1 equal 1
+                              // for the rest of combat (the upgraded card).
+    RANDOM_COLORLESS_TO_HAND = 52,  // Jack of All Trades: `amount` independent
+                              // cardRandomRng draws over the generated non-
+                              // healing colorless combat pool; base copies enter
+                              // hand/discard and duplicates are allowed.
     // --- The played card's filing action (allocated at 53) -------------------
-    // 49-52 remain exclusively reserved for the open colorless-card opcode
-    // block (stage-b-tasks.md shared namespace table); the lower permanent
-    // gaps 41-44 are never backfilled.
+    // 49-52 are the preceding colorless-card block; the lower permanent gaps
+    // 41-44 are never backfilled.
     USE_CARD = 53,            // UseCardAction.update (UseCardAction.java:77-137)
                               // as a queued action. AbstractPlayer.useCard
                               // (:1369-1375) queues the card's own actions FIRST
@@ -444,6 +458,7 @@ enum class ChoiceSource : uint8_t {
     HAND = 0,
     DISCARD = 1,
     EXHAUST = 2,
+    GENERATED = 3,  // Discovery's three-card offer packed in its queue item
 };
 
 [[nodiscard]] constexpr ChoiceSource choice_source(ChoiceKind k) noexcept {
@@ -460,6 +475,33 @@ enum class ChoiceSource : uint8_t {
 // Does a CHOOSE_CARD of this kind select from the discard pile (vs. the hand)?
 [[nodiscard]] constexpr bool choice_source_is_discard(ChoiceKind k) noexcept {
     return choice_source(k) == ChoiceSource::DISCARD;
+}
+
+inline constexpr uint8_t kDiscoveryChoiceCount = 3;
+
+// Discovery's generated offer is stored entirely in the queued DISCOVERY item:
+// choices 0/1 occupy flags' low/high u16 and choice 2 occupies amount's low
+// u16. amount==0 is the one unprepared sentinel (CardId::NONE is zero and no
+// real offer can carry it), so opening the screen needs no CombatState field or
+// schema bump.
+[[nodiscard]] constexpr bool discovery_choice_prepared(
+    const ActionQueueItem& item) noexcept {
+    return item.amount != 0;
+}
+[[nodiscard]] constexpr CardId discovery_choice_card(
+    const ActionQueueItem& item, uint8_t slot) noexcept {
+    if (slot == 0) {
+        return static_cast<CardId>(static_cast<uint16_t>(item.flags & 0xFFFFu));
+    }
+    if (slot == 1) {
+        return static_cast<CardId>(
+            static_cast<uint16_t>((item.flags >> 16u) & 0xFFFFu));
+    }
+    if (slot == 2) {
+        return static_cast<CardId>(
+            static_cast<uint16_t>(static_cast<uint32_t>(item.amount) & 0xFFFFu));
+    }
+    return CardId::NONE;
 }
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
@@ -652,6 +694,16 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // spill past a full hand to the discard (MakeTempCardInHandAction:71-77).
 void apply_choice_selection(CombatState& state, uint8_t slot, ChoiceKind kind,
                             int copies = 1, bool prompted = false) noexcept;
+
+// DISCOVERY choice lifecycle. prepare_discovery_choice rejection-samples and
+// persists the three-card offer exactly once. resolve_discovery_choice creates
+// the selected base copy at cost 0 for this turn; the caller pops the completed
+// queue item and resumes the pump.
+void prepare_discovery_choice(CombatState& state,
+                              ActionQueueItem& item) noexcept;
+void resolve_discovery_choice(CombatState& state,
+                              const ActionQueueItem& item,
+                              uint8_t slot) noexcept;
 
 // --- Dispatch ----------------------------------------------------------------
 // Execute one popped ActionQueueItem against `state`. One case per Opcode;

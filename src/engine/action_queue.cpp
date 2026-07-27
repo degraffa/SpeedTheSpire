@@ -515,7 +515,16 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         // the head and hand control back to the player (the "hand card select
         // screen" is open). advance(CHOOSE, hand_slot) resolves one selection and
         // re-pumps. Forced / RANDOM choices auto-resolve via execute_opcode below.
-        const ActionQueueItem& front = s.action_queue[s.action_head];
+        ActionQueueItem& front = s.action_queue[s.action_head];
+        if (static_cast<Opcode>(front.opcode) == Opcode::DISCOVERY) {
+            // DiscoveryAction opens a generated three-card reward screen. Build
+            // the offer once, persist it in the queue item, and block until
+            // advance(CHOOSE, offer_slot) consumes the item.
+            prepare_discovery_choice(s, front);
+            s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);
+            r.outcome = PumpOutcome::WAITING_ON_USER;
+            return r;
+        }
         if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
             choice_requires_user(s, front)) {
             s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);

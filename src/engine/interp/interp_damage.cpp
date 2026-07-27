@@ -67,7 +67,7 @@ namespace {
     // is "none". NoBlockPower declares atEndOfRound (NoBlockPower.java:39-50),
     // updateDescription (:52-55) and modifyBlockLast (:58-60) -- the last of those
     // is on the BLOCK path (interp_block.cpp), not this pipeline.
-    static_assert(sts::registry::manifest::kPowersCount == 44,
+    static_assert(sts::registry::manifest::kPowersCount == 45,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -115,7 +115,7 @@ namespace {
     // Checked for No Block: same answer as the pass above -- its only override
     // outside its own lifecycle is modifyBlockLast (NoBlockPower.java:58-60), on
     // the BLOCK path, so no case is needed here either.
-    static_assert(sts::registry::manifest::kPowersCount == 44,
+    static_assert(sts::registry::manifest::kPowersCount == 45,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -172,7 +172,7 @@ namespace {
     // ONLY override is updateDescription (ThieveryPower.java:27-30).
     // Checked for No Block: it overrides no atDamage* hook at all (its whole
     // damage-side surface is empty -- NoBlockPower.java:39-60), so no case here.
-    static_assert(sts::registry::manifest::kPowersCount == 44,
+    static_assert(sts::registry::manifest::kPowersCount == 45,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
