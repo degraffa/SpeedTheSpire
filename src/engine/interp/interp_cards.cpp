@@ -92,6 +92,9 @@ void capture_purge_copy_x_energy(CombatState& s, CardPoolIndex pi,
     return false;
 }
 
+[[nodiscard]] int instance_base_cost(const CombatState& s,
+                                     CardPoolIndex pi) noexcept;
+
 // AbstractCard.setCostForTurn (AbstractCard.java:2001-2011): assign, clamp a
 // negative sentinel to 0, and mark the instance cost-modified-for-turn whenever
 // the new value differs from the card's own base cost (so the end-turn sweep
@@ -105,10 +108,74 @@ void set_cost_for_turn(CombatState& s, CardPoolIndex pi, int amount) noexcept {
     if (amount < 0) {
         amount = 0;  // setCostForTurn clamps at zero (:2004-2006)
     }
+    const int base = instance_base_cost(s, pi);
+    const int registry_base = static_cast<int>(card_cost(*def, c.upgrade));
+    if (base != registry_base &&
+        !has_card_flag(c.flags, CardFlag::SAVED_BASE_COST)) {
+        const uint16_t encoded = static_cast<uint16_t>(
+            static_cast<uint16_t>(base > 7 ? 7 : base) <<
+            kSavedBaseCostShift);
+        c.flags = static_cast<uint16_t>(
+            (c.flags & ~kSavedBaseCostMask) |
+            card_flag_bit(CardFlag::SAVED_BASE_COST) | encoded);
+    }
     c.cost_now = static_cast<uint8_t>(amount);
-    if (static_cast<uint8_t>(amount) != card_cost(*def, c.upgrade)) {
+    if (amount != base) {
         c.flags = static_cast<uint16_t>(
             c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+    }
+}
+
+// Reconstruct AbstractCard.cost (as distinct from costForTurn/cost_now).
+// A COST_MODIFIED_FOR_TURN instance still has its registry base cost; every
+// other in-combat permanent writer changes both fields, so cost_now is cost.
+[[nodiscard]] int instance_base_cost(const CombatState& s,
+                                     CardPoolIndex pi) noexcept {
+    const CardInstance& c = s.card_pool[pi];
+    if (has_card_flag(c.flags, CardFlag::SAVED_BASE_COST)) {
+        return static_cast<int>(saved_base_cost(c.flags));
+    }
+    if (has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN)) {
+        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+        return def == nullptr ? 0 : static_cast<int>(card_cost(*def, c.upgrade));
+    }
+    return static_cast<int>(c.cost_now);
+}
+
+// Allocate a fresh base library copy and add it to the hand, spilling to
+// discard at the hand cap. Discovery optionally applies setCostForTurn(0);
+// Jack of All Trades leaves the registry cost unchanged.
+void add_library_copy_to_hand(CombatState& s, CardId id,
+                              bool free_this_turn) noexcept {
+    const CardDef* def = card_def(id);
+    if (def == nullptr) {
+        return;
+    }
+    int slot = -1;
+    for (int i = 0; i < kCardPoolCap; ++i) {
+        if (s.card_pool[i].card_id == static_cast<uint16_t>(CardId::NONE)) {
+            slot = i;
+            break;
+        }
+    }
+    if (slot < 0) {
+        return;
+    }
+    CardInstance& c = s.card_pool[slot];
+    c.card_id = static_cast<uint16_t>(id);
+    c.upgrade = 0;
+    c.cost_now = free_this_turn ? 0 : card_cost(*def, 0);
+    c.flags = card_flags(*def, 0);
+    if (free_this_turn && card_cost(*def, 0) != 0) {
+        c.flags = static_cast<uint16_t>(
+            c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+    }
+    c.misc = 0;
+    const CardPoolIndex pi = static_cast<CardPoolIndex>(slot);
+    if (s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = pi;
+    } else if (s.discard_count < kDiscardCap) {
+        s.discard[s.discard_count++] = pi;
     }
 }
 
@@ -735,31 +802,6 @@ void op_conditional_draw(CombatState& s, int amount,
     add_to_top(s, draw);  // ConditionalDrawAction.java:33
 }
 
-namespace {
-
-// The instance's `cost` field as the game keeps it, which is NOT the same thing
-// as its `costForTurn` (our cost_now). The engine stores one cost per instance,
-// and its two writers are distinguishable by the flag they leave behind:
-//   * setCostForTurn moves costForTurn ONLY and marks the instance
-//     COST_MODIFIED_FOR_TURN (the end-turn sweep restores costForTurn = cost from
-//     the registry), so for such an instance `cost` is still the registry value;
-//   * every other cost write here mirrors the game writing cost and costForTurn
-//     TOGETHER (Confusion, and op_madness below), leaving no flag -- so cost_now
-//     IS `cost`.
-// Madness needs the two predicates separately, which is the only reason this
-// distinction has to be reconstructed at all.
-[[nodiscard]] int instance_base_cost(const CombatState& s,
-                                     CardPoolIndex pi) noexcept {
-    const CardInstance& c = s.card_pool[pi];
-    if (has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN)) {
-        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
-        return def == nullptr ? 0 : static_cast<int>(card_cost(*def, c.upgrade));
-    }
-    return static_cast<int>(c.cost_now);
-}
-
-}  // namespace
-
 // MADNESS (MadnessAction.update, :26-65). Two halves:
 //
 //   (1) The GUARD (:29-42). Walk the hand once: a card with costForTurn > 0 sets
@@ -817,8 +859,153 @@ void op_madness(CombatState& s) noexcept {
         s.card_pool[pi].cost_now = 0;
         s.card_pool[pi].flags = static_cast<uint16_t>(
             s.card_pool[pi].flags &
-            ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+            ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+            ~card_flag_bit(CardFlag::SAVED_BASE_COST) &
+            ~kSavedBaseCostMask);
         return;
+    }
+}
+
+// DARK_SHACKLES (DarkShackles.use, :32-38). The Artifact test happens while
+// use() queues its actions, BEFORE Strength(-amount) has a chance to spend the
+// stack. This fused opcode performs that read once, then prepends the child
+// actions in reverse so they resolve Strength -> Shackled -> UseCard filing.
+void op_dark_shackles(CombatState& s, uint8_t target, int amount) noexcept {
+    if (target >= s.monster_count || monster_dead_or_escaped(s.monsters[target])) {
+        return;
+    }
+    bool has_artifact = false;
+    for (uint8_t i = 0; i < s.monsters[target].power_count; ++i) {
+        const PowerSlot& p = s.monsters[target].powers[i];
+        if (p.power_id == static_cast<uint16_t>(PowerId::ARTIFACT) &&
+            p.amount > 0) {
+            has_artifact = true;
+            break;
+        }
+    }
+    if (!has_artifact) {
+        ActionQueueItem shackled{};
+        shackled.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+        shackled.src = kActorPlayer;
+        shackled.tgt = target;
+        shackled.amount = amount;
+        shackled.flags = make_apply_power_flags(PowerId::SHACKLED);
+        add_to_top(s, shackled);
+    }
+    ActionQueueItem strength{};
+    strength.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    strength.src = kActorPlayer;
+    strength.tgt = target;
+    strength.amount = -amount;
+    strength.flags = make_apply_power_flags(PowerId::STRENGTH);
+    add_to_top(s, strength);
+}
+
+// ENLIGHTENMENT (EnlightenmentAction.update, :30-42). Base changes only
+// costForTurn; upgraded additionally changes `cost` for cards whose reconstructed
+// base cost exceeded 1. The source card is in limbo while this scans the hand.
+void op_enlightenment(CombatState& s, bool for_rest_of_combat) noexcept {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        CardInstance& c = s.card_pool[pi];
+        const int base_before = instance_base_cost(s, pi);
+        if (c.cost_now > 1) {
+            const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+            const int registry_base =
+                def == nullptr ? base_before
+                               : static_cast<int>(card_cost(*def, c.upgrade));
+            if (base_before != registry_base &&
+                !has_card_flag(c.flags, CardFlag::SAVED_BASE_COST)) {
+                const uint16_t encoded = static_cast<uint16_t>(
+                    static_cast<uint16_t>(base_before > 7 ? 7 : base_before)
+                    << kSavedBaseCostShift);
+                c.flags = static_cast<uint16_t>(
+                    (c.flags & ~kSavedBaseCostMask) |
+                    card_flag_bit(CardFlag::SAVED_BASE_COST) | encoded);
+            }
+            c.cost_now = 1;
+            c.flags = static_cast<uint16_t>(
+                c.flags | card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+        }
+        if (for_rest_of_combat && base_before > 1) {
+            // Java changes `cost` to 1 without overwriting a cheaper
+            // costForTurn. Keep that temporary current cost and remember the
+            // new permanent base (1); otherwise both fields are now 1 and the
+            // temporary marker can disappear.
+            if (c.cost_now < 1) {
+                const uint16_t encoded = static_cast<uint16_t>(
+                    1u << kSavedBaseCostShift);
+                c.flags = static_cast<uint16_t>(
+                    (c.flags & ~kSavedBaseCostMask) |
+                    card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) |
+                    card_flag_bit(CardFlag::SAVED_BASE_COST) | encoded);
+            } else {
+                c.cost_now = 1;
+                c.flags = static_cast<uint16_t>(
+                    c.flags &
+                    ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+                    ~card_flag_bit(CardFlag::SAVED_BASE_COST) &
+                    ~kSavedBaseCostMask);
+            }
+        }
+    }
+}
+
+void op_random_colorless_to_hand(CombatState& s, int count) noexcept {
+    static_assert(kColorlessCombatPoolCount > 0,
+                  "Jack of All Trades needs a non-empty colorless pool");
+    for (int i = 0; i < count; ++i) {
+        const int32_t pick = random(
+            s.card_random_rng,
+            static_cast<int32_t>(kColorlessCombatPoolCount) - 1);
+        add_library_copy_to_hand(
+            s, kColorlessCombatPool[static_cast<unsigned>(pick)],
+            /*free_this_turn=*/false);
+    }
+}
+
+void prepare_discovery_choice(CombatState& s,
+                              ActionQueueItem& item) noexcept {
+    if (discovery_choice_prepared(item)) {
+        return;
+    }
+    static_assert(kIroncladCombatPoolCount >= kDiscoveryChoiceCount,
+                  "Discovery needs at least three combat-pool cards");
+    CardId offered[kDiscoveryChoiceCount]{};
+    uint8_t count = 0;
+    while (count < kDiscoveryChoiceCount) {
+        const int32_t pick = random(
+            s.card_random_rng,
+            static_cast<int32_t>(kIroncladCombatPoolCount) - 1);
+        const CardId id =
+            kIroncladCombatPool[static_cast<unsigned>(pick)];
+        bool duplicate = false;
+        for (uint8_t i = 0; i < count; ++i) {
+            if (offered[i] == id) {
+                duplicate = true;
+                break;
+            }
+        }
+        if (!duplicate) {
+            offered[count++] = id;
+        }
+    }
+    item.flags =
+        static_cast<uint32_t>(static_cast<uint16_t>(offered[0])) |
+        (static_cast<uint32_t>(static_cast<uint16_t>(offered[1])) << 16u);
+    item.amount =
+        static_cast<int32_t>(static_cast<uint16_t>(offered[2]));
+}
+
+void resolve_discovery_choice(CombatState& s,
+                              const ActionQueueItem& item,
+                              uint8_t slot) noexcept {
+    if (!discovery_choice_prepared(item) || slot >= kDiscoveryChoiceCount) {
+        return;
+    }
+    const CardId id = discovery_choice_card(item, slot);
+    if (id != CardId::NONE) {
+        add_library_copy_to_hand(s, id, /*free_this_turn=*/true);
     }
 }
 

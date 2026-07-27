@@ -192,12 +192,26 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     // in scope: Armaments+/True Grit+/Warcry, canPickZero == false).
     if (waiting && state.action_count > 0) {
         const ActionQueueItem& front = state.action_queue[state.action_head];
+        if (static_cast<Opcode>(front.opcode) == Opcode::DISCOVERY &&
+            discovery_choice_prepared(front)) {
+            out.choice_pending = true;
+            out.choice_from_discard = false;
+            out.choice_from_exhaust = false;
+            out.choice_from_generated = true;
+            out.can_end_turn = false;
+            for (int i = 0; i < kHandCap; ++i) {
+                out.can_play[i] = false;
+                out.can_choose[i] = i < kDiscoveryChoiceCount;
+            }
+            return;
+        }
         if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
             choice_requires_user(state, front)) {
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
             out.choice_pending = true;
             out.choice_from_discard = choice_source(kind) == ChoiceSource::DISCARD;
             out.choice_from_exhaust = choice_source(kind) == ChoiceSource::EXHAUST;
+            out.choice_from_generated = false;
             out.can_end_turn = false;
             // can_choose[i] over the kind's SOURCE pile: hand slots for the hand
             // kinds, discard slots for discard-to-draw-top (Headbutt). For a large
@@ -215,6 +229,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     out.choice_pending = false;
     out.choice_from_discard = false;
     out.choice_from_exhaust = false;
+    out.choice_from_generated = false;
 
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
@@ -335,7 +350,8 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
     return m.can_end_turn == fresh.can_end_turn &&
            m.choice_pending == fresh.choice_pending &&
            m.choice_from_discard == fresh.choice_from_discard &&
-           m.choice_from_exhaust == fresh.choice_from_exhaust;
+           m.choice_from_exhaust == fresh.choice_from_exhaust &&
+           m.choice_from_generated == fresh.choice_from_generated;
 }
 #endif
 
@@ -432,8 +448,18 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
                 break;
             }
             ActionQueueItem& front = s.action_queue[s.action_head];
-            const ChoiceKind kind = choose_kind_from_flags(front.flags);
             const uint8_t slot = action_arg0(a);
+            if (mask.choice_from_generated) {
+                if (slot >= kDiscoveryChoiceCount || !mask.can_choose[slot]) {
+                    break;
+                }
+                resolve_discovery_choice(s, front, slot);
+                ActionQueueItem consumed{};
+                (void)pop_action_front(s, consumed);
+                pump(s, dispatch_monster_turn);
+                break;
+            }
+            const ChoiceKind kind = choose_kind_from_flags(front.flags);
             // arg0 indexes the kind's SOURCE pile (hand, or discard for
             // discard-to-draw-top). choice_slot_eligible checks the bound (the
             // just-played source card is in the limbo pile, so no discard

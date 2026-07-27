@@ -135,6 +135,10 @@ struct ActionMask {
     // flags are mutually exclusive, and both are false for a hand-source choice
     // and when idle.
     bool choice_from_exhaust;
+
+    // Discovery's generated three-card reward-style offer. When true, CHOOSE
+    // arg0 is an offer slot 0..2, not a pile slot; can_choose[0..2] are true.
+    bool choice_from_generated;
 };
 
 static_assert(std::is_trivially_copyable_v<ActionMask>,

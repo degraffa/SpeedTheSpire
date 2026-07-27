@@ -17,7 +17,8 @@
 #                          the skeleton deck is all base cards (stage-a design §9);
 #                          codegen emits base rows only until CardDef gains the
 #                          upgrade dimension (a later task).
-#     native: <bool>       OPTIONAL; true -> named native branch (default false).
+#     native:              UNSUPPORTED and rejected by codegen. Cards are
+#                          effect-program driven; there is no native-card dispatch.
 #
 # Step target: SELF = the player; CARD_TARGET = the monster the card was played on
 # (or the random roll). APPLY_POWER steps carry `power: <PowerId symbol>`; codegen
@@ -1549,13 +1550,10 @@
 # pool be emitted in library order later, avoiding the documented interim
 # deviation kIroncladAttackPool still carries (registry-id order).
 #
-# The INTERIOR GAPS are deliberate, permanent placeholders, not errors:
-#   94 Dark Shackles, 96 Discovery, 98 Enlightenment, 104 Jack of All Trades
-#      -- the four that need a generated colorless card pool;
+# The remaining INTERIOR GAPS are deliberate placeholders, not errors:
 #   101 Forethought, 109 Purity
-#      -- the two that need an OPTIONAL (zero-to-all) multi-select choice, an
-#         ActionMask surface change; both are recorded in the ledger's deferred
-#         obligations.
+#      -- the two owned by mandatory next task B3.10c (OPTIONAL zero-to-all
+#         multi-select, Forethought draw-bottom/freeToPlayOnce).
 # The loader enforces id UNIQUENESS, never contiguity, and no emitted table is a
 # dense id-indexed array, so the holes cost nothing at runtime. Never renumber to
 # close one.
@@ -1594,6 +1592,21 @@
   upgraded:
     - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: WEAK}
 
+- id: 94
+  name: DARK_SHACKLES
+  game_id: "Dark Shackles"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: ENEMY
+  flags: [exhaust]
+  provenance: "DarkShackles.use (DarkShackles.java:32-38): addToBot StrengthPower(target, -magicNumber), then ONLY when the target is non-null and does not have Artifact at use-time addToBot GainStrengthPower(target, magicNumber). The fused DARK_SHACKLES opcode preserves that pre-resolution Artifact test: a plain pair of APPLY_POWER steps would let the first debuff consume Artifact and incorrectly land Shackled. magicNumber is 9 and upgradeMagicNumber(6) makes 15 (:26,40-46). GainStrengthPower is POWER_ID \"Shackled\", DEBUFF; atEndOfTurn queues Strength(amount) then RemoveSpecificPowerAction (:79-84)."
+  effects:
+    - {op: DARK_SHACKLES, target: CARD_TARGET, amount: 9}
+  upgraded:
+    - {op: DARK_SHACKLES, target: CARD_TARGET, amount: 15}
+
 - id: 95
   name: DEEP_BREATH
   game_id: "Deep Breath"
@@ -1611,6 +1624,22 @@
     - {op: RESHUFFLE_ALL, target: SELF}
     - {op: DRAW, target: SELF, amount: 2}
 
+- id: 96
+  name: DISCOVERY
+  game_id: "Discovery"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: [exhaust]
+  provenance: "Discovery.use (Discovery.java:28-31) addToBot new DiscoveryAction(). The no-arg action calls generateCardChoices(null), NOT generateColorlessCardChoices (DiscoveryAction.java:44-52,57-62): it rejection-samples three distinct cards with returnTrulyRandomCardInCombat(), one cardRandomRng draw per attempt including duplicates (:106-121), from RED srcCommon+srcUncommon+srcRare with HEALING excluded (AbstractDungeon.java:944-962). The chosen base copy gets setCostForTurn(0) and goes to hand or, at the hand cap, discard (:64-103). upgrade removes exhaust and changes nothing else (Discovery.java:33-41)."
+  effects:
+    - {op: DISCOVERY, target: SELF}
+  upgraded_flags: []
+  upgraded:
+    - {op: DISCOVERY, target: SELF}
+
 - id: 97
   name: DRAMATIC_ENTRANCE
   game_id: "Dramatic Entrance"
@@ -1625,6 +1654,21 @@
     - {op: DAMAGE, target: ALL_ENEMY, amount: 8}
   upgraded:
     - {op: DAMAGE, target: ALL_ENEMY, amount: 12}
+
+- id: 98
+  name: ENLIGHTENMENT
+  game_id: "Enlightenment"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Enlightenment.use (Enlightenment.java:27-30) queues EnlightenmentAction(upgraded). update (EnlightenmentAction.java:30-42) scans the hand at action resolution: every card with costForTurn > 1 gets costForTurn=1 and isCostModifiedForTurn=true; upgraded additionally changes each card whose base cost >1 to cost=1 for the rest of combat. The played Enlightenment is already in cardInUse/limbo and is not scanned. Opcode amount 0 is base (temporary costForTurn), 1 is upgraded (permanent combat base where applicable)."
+  effects:
+    - {op: ENLIGHTENMENT, target: SELF, amount: 0}
+  upgraded:
+    - {op: ENLIGHTENMENT, target: SELF, amount: 1}
 
 - id: 99
   name: FINESSE
@@ -1689,6 +1733,21 @@
     - {op: CONDITIONAL_DRAW, target: SELF, amount: 2, card_type: ATTACK}
   upgraded:
     - {op: CONDITIONAL_DRAW, target: SELF, amount: 3, card_type: ATTACK}
+
+- id: 104
+  name: JACK_OF_ALL_TRADES
+  game_id: "Jack Of All Trades"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "JackOfAllTrades.use (JackOfAllTrades.java:33-42): draw one base copy from returnTrulyRandomColorlessCardInCombat(cardRandomRng) and add it to hand; upgraded repeats the call independently for a second card, so duplicates are allowed and the draw count is exactly 1/2. AbstractDungeon.java:981-995 selects uniformly from srcColorlessCardPool after excluding HEALING (Bandage Up); MakeTempCardInHandAction spills at the hand cap. upgradeMagicNumber(1) makes 2, exhaust is unchanged (:44-52)."
+  effects:
+    - {op: RANDOM_COLORLESS_TO_HAND, target: SELF, amount: 1}
+  upgraded:
+    - {op: RANDOM_COLORLESS_TO_HAND, target: SELF, amount: 2}
 
 - id: 105
   name: MADNESS

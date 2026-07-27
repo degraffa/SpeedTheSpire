@@ -53,7 +53,7 @@ namespace {
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
     // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
     // ONLY override is updateDescription (ThieveryPower.java:27-30).
-    static_assert(sts::registry::manifest::kPowersCount == 44,
+    static_assert(sts::registry::manifest::kPowersCount == 45,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

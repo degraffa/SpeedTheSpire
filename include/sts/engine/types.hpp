@@ -111,6 +111,14 @@ using RelicId = sts::registry::RelicId;
 //                 the original spends energy before the copy dequeues. Draw-top
 //                 autoplay never needs storage (it is front-queued before any
 //                 intervening spend). The marked instance necessarily poofs.
+//   SAVED_BASE_COST -- transient companion to COST_MODIFIED_FOR_TURN. When a
+//                 permanent combat cost writer (Confusion / Enlightenment+)
+//                 has moved AbstractCard.cost away from the registry row and a
+//                 later effect changes costForTurn only, bits 11..13 preserve
+//                 that combat base (all S1 card costs fit in three bits) so
+//                 resetAttributes restores the right value. Bits 14..15 remain
+//                 available to later card mechanics.
+//                 The encoding is private engine state, never authorable YAML.
 enum class CardFlag : uint16_t {
     NONE       = 0,
     EXHAUST    = 1u << 0,
@@ -123,13 +131,21 @@ enum class CardFlag : uint16_t {
     PURGE_ON_USE = 1u << 7,
     EXHAUST_ON_USE_ONCE = 1u << 8,
     AUTOPLAY_X_ENERGY = 1u << 9,
+    SAVED_BASE_COST = 1u << 10,
 };
+
+inline constexpr uint16_t kSavedBaseCostShift = 11u;
+inline constexpr uint16_t kSavedBaseCostMask = 0x3800u;
 
 [[nodiscard]] constexpr uint16_t card_flag_bit(CardFlag f) noexcept {
     return static_cast<uint16_t>(f);
 }
 [[nodiscard]] constexpr bool has_card_flag(uint16_t flags, CardFlag f) noexcept {
     return (flags & card_flag_bit(f)) != 0u;
+}
+[[nodiscard]] constexpr uint8_t saved_base_cost(uint16_t flags) noexcept {
+    return static_cast<uint8_t>((flags & kSavedBaseCostMask) >>
+                                kSavedBaseCostShift);
 }
 
 // --- ActionVerb --------------------------------------------------------------

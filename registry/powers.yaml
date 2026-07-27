@@ -567,3 +567,13 @@
     at_end_of_round:
       - {op: REDUCE_POWER, target: SELF, amount: 1, power: NO_BLOCK}
   provenance: "NoBlockPower (NoBlockPower.java:17-61): POWER_ID \"NoBlockPower\" (:19) but the game_id string the translator joins on is the POWER_ID literal; type DEBUFF (:35), isTurnBased (:36), stackPower additive (AbstractPower default). THE OVERRIDE IS modifyBlockLast (:58-60) -- `return 0.0f`, unconditional -- and NoBlockPower is the ONLY class in the game that overrides it (AbstractPower.java declares the pass-through; AbstractCard.java is the only caller). AbstractCard.applyPowersToBlock (AbstractCard.java:2291-2307) runs modifyBlock over ALL powers and THEN modifyBlockLast over ALL powers, so this cannot be folded into the modifyBlock pass: with a power list of [No Block, Dexterity] a single pass would yield the Dexterity amount and the game yields 0. atEndOfRound (:39-50) -- the justApplied gate (:41-44) consumes one round for an instance created while actionManager.turnHasEnded by a MONSTER source (ctor :32-34); then amount == 0 -> RemoveSpecificPowerAction, else ReducePowerAction(1). The justApplied branch is DEAD for every S1 applier: Panic Button passes isSourceMonster = false (PanicButton.java:37) and no Act-1 monster applies this power, so it collapses to the single REDUCE_POWER step above -- the IntangiblePlayerPower precedent (id 29), where op_reduce_power already removes the slot at <= 0 and ApplyPowerAction never lands amount 0. Applied only by Panic Button, amount 2 base and upgraded (PanicButton.java:30,37)."
+
+- id: 78
+  name: SHACKLED
+  game_id: "Shackled"
+  type: DEBUFF
+  hooks:
+    at_end_of_turn:
+      - {op: APPLY_POWER, target: SELF, amount: 0, power: STRENGTH}
+      - {op: REMOVE_POWER, target: SELF, power: SHACKLED}
+  provenance: "GainStrengthPower (GainStrengthPower.java:18-84): POWER_ID \"Shackled\" (:20), DEBUFF (:31), additive stackPower (:45-57). atEndOfTurn (:79-84) queues ApplyPowerAction(owner, owner, StrengthPower(owner, amount), amount) then RemoveSpecificPowerAction(owner, owner, POWER_ID), in that order. Dark Shackles is the S1 applier."

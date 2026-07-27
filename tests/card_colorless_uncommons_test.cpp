@@ -1,4 +1,4 @@
-// The fourteen colorless UNCOMMON cards that need no colorless card pool:
+// The colorless UNCOMMON cards:
 // per-card base/upgraded tier-2 behaviour, Deep Breath's fused double reshuffle
 // and its shuffle_rng accounting, Impatience's conditional draw, Mind Blast's
 // draw-pile-sized base, Madness's cardRandomRng REJECTION-SAMPLING draw
@@ -7,9 +7,10 @@
 // Expected values are hand-computed from the cited decompiled Java (see the
 // per-row provenance in registry/cards.yaml).
 //
-// The six interior CardId gaps this batch leaves are pinned here too: a
+// The two interior CardId gaps B3.10c owns are pinned here too: a
 // reservation nothing asserts is indistinguishable from an omission.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <span>
@@ -138,6 +139,15 @@ StepResult Step(CombatState& s, Action a) {
     return r;
 }
 
+int FindHandSlot(const CombatState& s, CardId id) {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.card_pool[s.hand[i]].card_id == static_cast<uint16_t>(id)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
 // ===========================================================================
 // Registry roster + the reserved interior ids
 // ===========================================================================
@@ -167,11 +177,9 @@ TEST(CardColorlessUncommonsRegistry, ExactRosterInCardLibraryOrder) {
 }
 
 TEST(CardColorlessUncommonsRegistry, InteriorIdsStayReserved) {
-    // 94 Dark Shackles / 96 Discovery / 98 Enlightenment / 104 Jack of All Trades
-    // belong to the colorless-pool half of the split; 101 Forethought and
-    // 109 Purity to the optional-multi-select obligation. They must be EMPTY, not
-    // quietly backfilled -- filling one later is an id renumber in all but name.
-    for (const int reserved : {94, 96, 98, 101, 104, 109}) {
+    // 101 Forethought and 109 Purity belong to mandatory next task B3.10c.
+    // They must stay empty in this branch, not quietly backfilled.
+    for (const int reserved : {101, 109}) {
         EXPECT_EQ(card_def(static_cast<CardId>(reserved)), nullptr)
             << "id " << reserved << " is reserved and must have no row";
     }
@@ -235,6 +243,58 @@ TEST(CardColorlessUncommonsRegistry, CostsFlagsAndTargeting) {
     // Flash of Steel deliberately is not (its ctor adds no tags).
     EXPECT_TRUE(card_def(CardId::SWIFT_STRIKE)->is_strike);
     EXPECT_FALSE(card_def(CardId::FLASH_OF_STEEL)->is_strike);
+}
+
+TEST(CardColorlessUncommonsRegistry, B310bRowsPoolsAndSparseIds) {
+    struct Row {
+        CardId id;
+        int raw_id;
+        uint8_t cost;
+        bool target;
+    };
+    const std::array<Row, 4> rows{{
+        {CardId::DARK_SHACKLES, 94, 0, true},
+        {CardId::DISCOVERY, 96, 1, false},
+        {CardId::ENLIGHTENMENT, 98, 0, false},
+        {CardId::JACK_OF_ALL_TRADES, 104, 0, false},
+    }};
+    for (const Row& r : rows) {
+        EXPECT_EQ(static_cast<int>(r.id), r.raw_id);
+        const CardDef* d = card_def(r.id);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->base_cost, r.cost);
+        EXPECT_EQ(d->needs_target, r.target);
+        EXPECT_EQ(d->type, CardType::SKILL);
+    }
+    EXPECT_EQ(static_cast<int>(PowerId::SHACKLED), 78);
+
+    auto colorless_has = [](CardId id) {
+        return std::find(kColorlessCombatPool.begin(),
+                         kColorlessCombatPool.end(), id) !=
+               kColorlessCombatPool.end();
+    };
+    EXPECT_FALSE(colorless_has(CardId::BANDAGE_UP))
+        << "the HEALING tag excludes Bandage Up";
+    for (CardId id : {CardId::DARK_SHACKLES, CardId::DISCOVERY,
+                      CardId::ENLIGHTENMENT, CardId::JACK_OF_ALL_TRADES}) {
+        EXPECT_TRUE(colorless_has(id));
+    }
+    for (CardId id : kColorlessCombatPool) {
+        EXPECT_NE(card_def(id), nullptr);
+    }
+
+    auto red_combat_has = [](CardId id) {
+        return std::find(kIroncladCombatPool.begin(),
+                         kIroncladCombatPool.end(), id) !=
+               kIroncladCombatPool.end();
+    };
+    EXPECT_TRUE(red_combat_has(CardId::ANGER));
+    EXPECT_TRUE(red_combat_has(CardId::SHRUG_IT_OFF));
+    EXPECT_TRUE(red_combat_has(CardId::BARRICADE));
+    EXPECT_FALSE(red_combat_has(CardId::STRIKE))
+        << "BASIC cards never enter srcCommon/srcUncommon/srcRare";
+    EXPECT_FALSE(red_combat_has(CardId::FEED));
+    EXPECT_FALSE(red_combat_has(CardId::REAPER));
 }
 
 // ===========================================================================
@@ -825,8 +885,292 @@ TEST(CardColorlessUncommonsMadness, ExhaustsAndCostsOneUntilUpgraded) {
 }
 
 // ===========================================================================
+// Dark Shackles -- pre-resolution Artifact gate + Shackled restoration
+// ===========================================================================
+
+TEST(CardColorlessUncommonsDarkShackles,
+     LosesNineOrFifteenThenRestoresAtEndOfTurn) {
+    for (uint8_t up = 0; up < 2; ++up) {
+        CombatState s = MakeCombat();
+        const int amount = up == 0 ? 9 : 15;
+        const CardPoolIndex dark = AddHand(s, CardId::DARK_SHACKLES, up);
+        Play(s, 0, 0);
+        ASSERT_NE(FindPower(s, 0, PowerId::STRENGTH), nullptr);
+        EXPECT_EQ(FindPower(s, 0, PowerId::STRENGTH)->amount, -amount);
+        ASSERT_NE(FindPower(s, 0, PowerId::SHACKLED), nullptr);
+        EXPECT_EQ(FindPower(s, 0, PowerId::SHACKLED)->amount, amount);
+        EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, dark));
+
+        EndTurn(s);
+        EXPECT_EQ(FindPower(s, 0, PowerId::STRENGTH), nullptr)
+            << "Strength(-N) + Strength(+N) queues the zero-stack removal";
+        EXPECT_EQ(FindPower(s, 0, PowerId::SHACKLED), nullptr);
+    }
+}
+
+TEST(CardColorlessUncommonsDarkShackles,
+     ArtifactBlocksStrengthAndPreventsShackledFromBeingQueued) {
+    CombatState s = MakeCombat();
+    AddPower(s, 0, PowerId::ARTIFACT, 1);
+    AddHand(s, CardId::DARK_SHACKLES);
+    Play(s, 0, 0);
+
+    EXPECT_EQ(FindPower(s, 0, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPower(s, 0, PowerId::SHACKLED), nullptr)
+        << "the hasPower(Artifact) test happened before Strength(-9) resolved";
+    ASSERT_NE(FindPower(s, 0, PowerId::ARTIFACT), nullptr);
+    EXPECT_EQ(FindPower(s, 0, PowerId::ARTIFACT)->amount, 0)
+        << "the Strength debuff consumed the one Artifact charge";
+}
+
+TEST(CardColorlessUncommonsDarkShackles, ExistingStrengthReturnsExactly) {
+    CombatState s = MakeCombat();
+    AddPower(s, 0, PowerId::STRENGTH, 3);
+    AddHand(s, CardId::DARK_SHACKLES);
+    Play(s, 0, 0);
+    ASSERT_NE(FindPower(s, 0, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPower(s, 0, PowerId::STRENGTH)->amount, -6);
+    EndTurn(s);
+    ASSERT_NE(FindPower(s, 0, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPower(s, 0, PowerId::STRENGTH)->amount, 3);
+    EXPECT_EQ(FindPower(s, 0, PowerId::SHACKLED), nullptr);
+}
+
+// ===========================================================================
+// Discovery -- generated choice + exact rejection-sampling accounting
+// ===========================================================================
+
+TEST(CardColorlessUncommonsDiscovery,
+     OfferIsThreeDistinctRedCardsWithExactRngAccounting) {
+    int seeds_with_duplicate_retry = 0;
+    for (int64_t seed = 1; seed <= 64; ++seed) {
+        CombatState s = MakeCombat();
+        AddHand(s, CardId::DISCOVERY);
+        s.card_random_rng = from_seed(seed);
+
+        RngStream probe = from_seed(seed);
+        CardId expected[kDiscoveryChoiceCount]{};
+        uint8_t n = 0;
+        int draws = 0;
+        while (n < kDiscoveryChoiceCount) {
+            const int32_t pick =
+                random(probe, static_cast<int32_t>(kIroncladCombatPoolCount) - 1);
+            ++draws;
+            const CardId id =
+                kIroncladCombatPool[static_cast<unsigned>(pick)];
+            bool dupe = false;
+            for (uint8_t i = 0; i < n; ++i) {
+                dupe = dupe || expected[i] == id;
+            }
+            if (!dupe) {
+                expected[n++] = id;
+            }
+        }
+        if (draws > kDiscoveryChoiceCount) {
+            ++seeds_with_duplicate_retry;
+        }
+
+        Play(s, 0);
+        ASSERT_EQ(s.action_count, 2);
+        const ActionQueueItem& offer = s.action_queue[s.action_head];
+        ASSERT_EQ(static_cast<Opcode>(offer.opcode), Opcode::DISCOVERY);
+        EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+            << "seed " << seed << ": duplicates consume full retry draws";
+        for (uint8_t i = 0; i < kDiscoveryChoiceCount; ++i) {
+            EXPECT_EQ(discovery_choice_card(offer, i), expected[i])
+                << "seed " << seed << ", offer slot " << int{i};
+        }
+        ActionMask mask{};
+        legal_actions(s, mask);
+        EXPECT_TRUE(mask.choice_pending);
+        EXPECT_TRUE(mask.choice_from_generated);
+        EXPECT_FALSE(mask.choice_from_discard);
+        EXPECT_FALSE(mask.choice_from_exhaust);
+        EXPECT_TRUE(mask.can_choose[0]);
+        EXPECT_TRUE(mask.can_choose[1]);
+        EXPECT_TRUE(mask.can_choose[2]);
+        EXPECT_FALSE(mask.can_choose[3]);
+    }
+    EXPECT_GT(seeds_with_duplicate_retry, 0)
+        << "the seed battery must cover at least one rejected duplicate";
+}
+
+TEST(CardColorlessUncommonsDiscovery,
+     ChosenBaseCopyIsFreeThisTurnAndUpgradeDoesNotExhaust) {
+    for (uint8_t up = 0; up < 2; ++up) {
+        CombatState s = MakeCombat(/*energy=*/3);
+        const CardPoolIndex discovery = AddHand(s, CardId::DISCOVERY, up);
+        s.card_random_rng = from_seed(123 + up);
+        Play(s, 0);
+        const ActionQueueItem offer = s.action_queue[s.action_head];
+
+        uint8_t selected = 0;
+        for (uint8_t i = 0; i < kDiscoveryChoiceCount; ++i) {
+            const CardDef* d = card_def(discovery_choice_card(offer, i));
+            ASSERT_NE(d, nullptr);
+            if (d->base_cost > 0) {
+                selected = i;
+                break;
+            }
+        }
+        const CardId expected = discovery_choice_card(offer, selected);
+        Step(s, make_action(ActionVerb::CHOOSE, selected));
+
+        ASSERT_EQ(s.hand_count, 1);
+        const CardInstance& made = s.card_pool[s.hand[0]];
+        EXPECT_EQ(made.card_id, static_cast<uint16_t>(expected));
+        EXPECT_EQ(made.upgrade, 0);
+        EXPECT_EQ(made.cost_now, 0);
+        const CardDef* made_def = card_def(expected);
+        ASSERT_NE(made_def, nullptr);
+        EXPECT_EQ(has_card_flag(made.flags, CardFlag::COST_MODIFIED_FOR_TURN),
+                  made_def->base_cost != 0);
+        EXPECT_EQ(s.player_energy, up == 0 ? 2 : 2)
+            << "Discovery costs 1 at both upgrade levels";
+        EXPECT_EQ(PileHas(s.exhaust, s.exhaust_count, discovery), up == 0);
+        EXPECT_EQ(PileHas(s.discard, s.discard_count, discovery), up != 0);
+    }
+}
+
+// ===========================================================================
+// Enlightenment -- temporary vs rest-of-combat cost base
+// ===========================================================================
+
+TEST(CardColorlessUncommonsEnlightenment, BaseCapsForTurnThenRestores) {
+    CombatState s = MakeCombat();
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+    AddHand(s, CardId::ENLIGHTENMENT);
+    Play(s, 1);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 1);
+    EXPECT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN));
+    EndTurn(s);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 2);
+}
+
+TEST(CardColorlessUncommonsEnlightenment,
+     UpgradedCapsBaseForTheRestOfCombat) {
+    CombatState s = MakeCombat();
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+    AddHand(s, CardId::ENLIGHTENMENT, /*upgrade=*/1);
+    Play(s, 1);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 1);
+    EXPECT_FALSE(has_card_flag(s.card_pool[bash].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+    EndTurn(s);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 1);
+}
+
+TEST(CardColorlessUncommonsEnlightenment,
+     TemporaryCapRestoresAConfusionModifiedBase) {
+    CombatState s = MakeCombat();
+    const CardPoolIndex defend = AddHand(s, CardId::DEFEND);
+    s.card_pool[defend].cost_now = 3;  // Confusion writes cost and costForTurn
+    AddHand(s, CardId::ENLIGHTENMENT);
+    Play(s, 1);
+    EXPECT_EQ(s.card_pool[defend].cost_now, 1);
+    EXPECT_TRUE(has_card_flag(s.card_pool[defend].flags,
+                              CardFlag::SAVED_BASE_COST));
+    EXPECT_EQ(saved_base_cost(s.card_pool[defend].flags), 3);
+    EndTurn(s);
+    EXPECT_EQ(s.card_pool[defend].cost_now, 3)
+        << "resetAttributes restores AbstractCard.cost, not the registry cost";
+}
+
+TEST(CardColorlessUncommonsEnlightenment,
+     UpgradedPreservesACheaperCostForTurnThenRestoresItsNewBase) {
+    CombatState s = MakeCombat();
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+    s.card_pool[bash].cost_now = 0;
+    s.card_pool[bash].flags = static_cast<uint16_t>(
+        s.card_pool[bash].flags |
+        card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+    AddHand(s, CardId::ENLIGHTENMENT, /*upgrade=*/1);
+
+    Play(s, 1);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 0)
+        << "Enlightenment+ writes cost=1 but leaves a cheaper costForTurn";
+    EXPECT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN));
+    EXPECT_EQ(saved_base_cost(s.card_pool[bash].flags), 1);
+
+    EndTurn(s);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 1);
+}
+
+// ===========================================================================
+// Jack of All Trades -- independent colorless-pool draws, duplicates allowed
+// ===========================================================================
+
+TEST(CardColorlessUncommonsJackOfAllTrades,
+     OneOrTwoIndependentColorlessDrawsAndExhausts) {
+    for (uint8_t up = 0; up < 2; ++up) {
+        CombatState s = MakeCombat();
+        const CardPoolIndex jack = AddHand(s, CardId::JACK_OF_ALL_TRADES, up);
+        s.card_random_rng = from_seed(700 + up);
+        RngStream probe = from_seed(700 + up);
+        const int count = up == 0 ? 1 : 2;
+        CardId expected[2]{};
+        for (int i = 0; i < count; ++i) {
+            const int32_t pick = random(
+                probe, static_cast<int32_t>(kColorlessCombatPoolCount) - 1);
+            expected[i] =
+                kColorlessCombatPool[static_cast<unsigned>(pick)];
+        }
+
+        Play(s, 0);
+        EXPECT_EQ(s.card_random_rng.counter, probe.counter);
+        ASSERT_EQ(s.hand_count, count);
+        for (int i = 0; i < count; ++i) {
+            const CardInstance& made = s.card_pool[s.hand[i]];
+            EXPECT_EQ(made.card_id, static_cast<uint16_t>(expected[i]));
+            const CardDef* d = card_def(expected[i]);
+            ASSERT_NE(d, nullptr);
+            EXPECT_EQ(made.cost_now, d->base_cost);
+            EXPECT_EQ(made.upgrade, 0);
+        }
+        EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, jack));
+    }
+}
+
+// ===========================================================================
 // Directed public-API script (advance() / legal_actions() only)
 // ===========================================================================
+
+TEST(CardColorlessUncommonsDirected, B310bGeneratedChoiceAndCostScript) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/80);
+    AddHand(s, CardId::DARK_SHACKLES);
+    AddHand(s, CardId::DISCOVERY);
+    AddHand(s, CardId::ENLIGHTENMENT);
+    AddHand(s, CardId::JACK_OF_ALL_TRADES, /*upgrade=*/1);
+    s.card_random_rng = from_seed(20260726);
+
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));
+    ASSERT_NE(FindPower(s, 0, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPower(s, 0, PowerId::STRENGTH)->amount, -9);
+
+    int slot = FindHandSlot(s, CardId::DISCOVERY);
+    ASSERT_GE(slot, 0);
+    Step(s, make_action(ActionVerb::PLAY_CARD, static_cast<uint8_t>(slot)));
+    ActionMask mask{};
+    legal_actions(s, mask);
+    ASSERT_TRUE(mask.choice_from_generated);
+    Step(s, make_action(ActionVerb::CHOOSE, 0));
+
+    slot = FindHandSlot(s, CardId::ENLIGHTENMENT);
+    ASSERT_GE(slot, 0);
+    Step(s, make_action(ActionVerb::PLAY_CARD, static_cast<uint8_t>(slot)));
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        EXPECT_LE(s.card_pool[s.hand[i]].cost_now, 1);
+    }
+
+    slot = FindHandSlot(s, CardId::JACK_OF_ALL_TRADES);
+    ASSERT_GE(slot, 0);
+    const uint8_t before = s.hand_count;
+    Step(s, make_action(ActionVerb::PLAY_CARD, static_cast<uint8_t>(slot)));
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(before + 1))
+        << "playing one hand card and creating two gives net +1";
+}
 
 TEST(CardColorlessUncommonsDirected, PanicButtonNoBlockDeepBreathScript) {
     CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/60);

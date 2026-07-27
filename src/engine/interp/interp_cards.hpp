@@ -64,4 +64,9 @@ void op_conditional_draw(CombatState& s, int amount,
 // the chosen card's cost.
 void op_madness(CombatState& s) noexcept;
 
+// DARK_SHACKLES / ENLIGHTENMENT / RANDOM_COLORLESS_TO_HAND.
+void op_dark_shackles(CombatState& s, uint8_t target, int amount) noexcept;
+void op_enlightenment(CombatState& s, bool for_rest_of_combat) noexcept;
+void op_random_colorless_to_hand(CombatState& s, int count) noexcept;
+
 }  // namespace sts::engine

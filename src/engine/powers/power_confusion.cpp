@@ -55,7 +55,8 @@ void power_native_confusion(CombatState& s, Hook hook,
     const int32_t new_cost = random(s.card_random_rng, 3);  // random(3) == 0..3
     c.cost_now = static_cast<uint8_t>(new_cost);
     c.flags = static_cast<uint16_t>(
-        c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+        c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+        ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
 }
 
 }  // namespace sts::engine

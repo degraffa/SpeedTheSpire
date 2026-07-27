@@ -154,6 +154,15 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
         case RunPhase::COMBAT: {
             const engine::ActionMask& cm = mask.combat;
             if (cm.choice_pending) {
+                if (cm.choice_from_generated) {
+                    for (uint8_t i = 0; i < engine::kDiscoveryChoiceCount; ++i) {
+                        if (cm.can_choose[i]) {
+                            s.add(make_action(ActionVerb::CHOOSE, i),
+                                  MoveCat::COMBAT_CHOOSE);
+                        }
+                    }
+                    break;
+                }
                 const engine::ActionQueueItem& front =
                     rc.combat.action_queue[rc.combat.action_head];
                 const engine::ChoiceKind kind =

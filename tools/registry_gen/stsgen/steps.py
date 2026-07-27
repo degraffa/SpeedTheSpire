@@ -54,6 +54,10 @@ GENERAL_OPS = frozenset({
     # discard pile, the hand), so none of them needs the played card's instance
     # and all four carry identically from any domain's queue helper.
     "DAMAGE_DRAW_PILE", "CONDITIONAL_DRAW", "RESHUFFLE_ALL", "MADNESS",
+    # B3.10b. DISCOVERY persists its generated offer in its own queued item;
+    # the other three read only literal operands plus execute-time combat state.
+    "DARK_SHACKLES", "DISCOVERY", "ENLIGHTENMENT",
+    "RANDOM_COLORLESS_TO_HAND",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
