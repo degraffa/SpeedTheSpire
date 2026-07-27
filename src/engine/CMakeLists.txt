@@ -95,6 +95,7 @@ add_library(sts_engine
     event_framework.cpp
     # Native event bodies, grouped by delivery batch.
     events/exordium_events_i.cpp
+    events/exordium_events_ii.cpp
     run_advance.cpp
 )
 

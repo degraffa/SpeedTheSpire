@@ -295,6 +295,10 @@ void close_event_grid(EventDialogState& es) noexcept;
 [[nodiscard]] bool event_grid_upgrade_card(RunState& rs,
                                            EventDialogState& es,
                                            uint16_t deck_index) noexcept;
+[[nodiscard]] bool event_grid_transform_card(RunState& rs,
+                                             EventDialogState& es,
+                                             RngStream& misc_rng,
+                                             uint16_t deck_index) noexcept;
 
 // Event damage keeps the Java DamageInfo owner explicit even though the two
 // owners used by this batch currently produce the same RunState HP delta.

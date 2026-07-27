@@ -50,15 +50,31 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     }
 }
 
-// Append one card to the master deck and run that pass. Returns false (no
-// mutation) when the deck is full or the id has no registry row.
+// ShowCardAndObtainEffect's acquisition door: curses are first offered to the
+// first owned Omamori, whose nonzero counter consumes the card; otherwise the
+// card is appended and the obtain/master-deck-change passes run. The Omamori
+// check precedes the append exactly as ShowCardAndObtainEffect.<init>
+// (ShowCardAndObtainEffect.java:30-36) precedes its update-time obtain
+// (:72-82). Returns false only when an unblocked card cannot be appended.
 [[nodiscard]] inline bool add_card_to_master_deck(RunState& run, CardId id,
                                                   uint8_t upgrade = 0) noexcept {
-    if (run.master_deck_count >= kMasterDeckCap) {
-        return false;
-    }
     const CardDef* def = card_def(id);
     if (def == nullptr) {
+        return false;
+    }
+    if (def->type == CardType::CURSE) {
+        for (uint8_t i = 0; i < run.relic_count; ++i) {
+            RelicSlot& slot = run.relics[i];
+            if (slot.relic_id == static_cast<uint16_t>(RelicId::OMAMORI)) {
+                if (slot.counter != 0) {
+                    --slot.counter;
+                    return true;
+                }
+                break;  // getRelic returns the first copy, even when used up.
+            }
+        }
+    }
+    if (run.master_deck_count >= kMasterDeckCap) {
         return false;
     }
     CardInstance& c = run.master_deck[run.master_deck_count];

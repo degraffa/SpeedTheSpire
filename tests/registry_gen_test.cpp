@@ -543,13 +543,13 @@ TEST(RegistryGen, ManifestCounts) {
                                       // TimeEventList's 14 (18-31). Metadata-only
                                       // rows: B4.10 owns list membership and
                                       // selection, B4.11-B4.13 the native bodies.
-    EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
-                                          // 10 strong + 3 elite + 3 boss)
+    EXPECT_EQ(m::kEncountersCount, 21u);  // 20 generated-list encounters plus
+                                          // Mushrooms' fixed event group
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 444u);  // 124 + 49 + 25 + 142 + 33 + 31 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 445u);  // 124 + 49 + 25 + 142 + 33 + 31 + 21 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1489,15 +1489,15 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
         << "game_id strings must be unique -- they are the translator join key";
 }
 
-TEST(RegistryGen, FirstSixEventsCarryAuditedNativeBodyMetadata) {
+TEST(RegistryGen, ExordiumEventsCarryAuditedNativeBodyMetadata) {
     namespace r = sts::registry;
     for (uint16_t raw = 1; raw <= 31; ++raw) {
         const auto id = static_cast<r::EventId>(raw);
         const r::EventDef* def = r::event_def(id);
         ASSERT_NE(def, nullptr) << raw;
         EXPECT_TRUE(def->native) << raw;
-        EXPECT_EQ(def->implemented, raw <= 6) << raw;
-        if (raw <= 6) {
+        EXPECT_EQ(def->implemented, raw <= 11) << raw;
+        if (raw <= 11) {
             EXPECT_GE(def->screen_count, 2) << raw;
         } else {
             EXPECT_EQ(def->screen_count, 0) << raw;
@@ -1510,6 +1510,11 @@ TEST(RegistryGen, FirstSixEventsCarryAuditedNativeBodyMetadata) {
     EXPECT_EQ(r::event_def(r::EventId::GOLDEN_IDOL)->a15_change_count, 2);
     EXPECT_EQ(r::event_def(r::EventId::GOLDEN_WING)->a15_change_count, 0);
     EXPECT_EQ(r::event_def(r::EventId::WORLD_OF_GOOP)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::LIARS_GAME)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::LIVING_WALL)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::MUSHROOMS)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::SCRAP_OOZE)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::SHINING_LIGHT)->a15_change_count, 1);
     EXPECT_EQ(r::event_def(static_cast<r::EventId>(0xFFFF)), nullptr);
 }
 

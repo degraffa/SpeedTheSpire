@@ -528,7 +528,15 @@ MONSTER_ROLL_TIMINGS = {
 # Encounter pool (generated EncounterPool) -- which Exordium.generateXxx list an
 # encounter belongs to (B3.12). Pinned/append-only. WEAK+STRONG feed the shared
 # monsterList; ELITE feeds eliteMonsterList; BOSS is the shuffled bossList.
-ENCOUNTER_POOLS = {"WEAK": 0, "STRONG": 1, "ELITE": 2, "BOSS": 3}
+ENCOUNTER_POOLS = {
+    "WEAK": 0,
+    "STRONG": 1,
+    "ELITE": 2,
+    "BOSS": 3,
+    # Fixed groups constructed by event bodies. They participate in the
+    # game-id composition lookup but never in Exordium's generated lists.
+    "EVENT": 4,
+}
 # Composition-program op (generated CompOp) -- the miscRng spawn-script instruction
 # set (B3.12). Pinned/append-only. EMIT: one fixed monster (0 draws). BOOL: one
 # randomBoolean() coin (getLouse/getSlaver/Large Slime). PICK: eager-construct every

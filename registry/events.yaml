@@ -103,26 +103,66 @@
   game_id: "Liars Game"
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 6; Sssserpent.ID (Sssserpent.java:25) is \"Liars Game\"."
   native: true
+  implemented: true
+  conditions: {pool: EVENT, draw: ALWAYS}
+  options:
+    - [AGREE_FOR_TIERED_GOLD_AND_DOUBT, DISAGREE]
+    - [AGREE_CONFIRM]
+    - [PROCEED]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: GOLD_REWARD, base: 175, a15: 150}
 - id: 8
   name: LIVING_WALL
   game_id: "Living Wall"
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 7; LivingWall.ID (LivingWall.java:26) is \"Living Wall\"."
   native: true
+  implemented: true
+  conditions: {pool: EVENT, draw: ALWAYS}
+  options:
+    - [FORGET_ONE, CHANGE_ONE, GROW_ONE_IF_UPGRADABLE]
+    - [MASTER_DECK_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 9
   name: MUSHROOMS
   game_id: "Mushrooms"
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 8; Mushrooms.ID (Mushrooms.java:34) is \"Mushrooms\"."
   native: true
+  implemented: true
+  conditions: {pool: EVENT, draw: "floor > 6"}
+  options:
+    - [FIGHT_THREE_FUNGI_BEASTS, HEAL_25_PERCENT_AND_GAIN_PARASITE]
+    - [ENTER_EVENT_COMBAT]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 10
   name: SCRAP_OOZE
   game_id: "Scrap Ooze"
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 9; ScrapOoze.ID (ScrapOoze.java:24) is \"Scrap Ooze\"."
   native: true
+  implemented: true
+  conditions: {pool: EVENT, draw: ALWAYS}
+  options:
+    - [TAKE_CURRENT_DAMAGE_AND_ROLL_RELIC, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: INITIAL_DAMAGE, base: 3, a15: 5}
 - id: 11
   name: SHINING_LIGHT
   game_id: "Shining Light"
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 10; ShiningLight.ID (ShiningLight.java:31) is \"Shining Light\"."
   native: true
+  implemented: true
+  conditions: {pool: EVENT, draw: ALWAYS}
+  options:
+    - [TAKE_TIERED_MAX_HP_PERCENT_DAMAGE_AND_UPGRADE_RANDOM_TWO, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: DAMAGE_MAX_HP_PERCENT, base: 0.20, a15: 0.30}
 
 # Exordium.initializeShrineList (Exordium.java:238-246).
 - id: 12
