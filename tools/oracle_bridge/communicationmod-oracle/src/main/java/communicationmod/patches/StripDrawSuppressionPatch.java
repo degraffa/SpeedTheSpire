@@ -11,7 +11,7 @@ import communicationmod.CommunicationMod;
  * (stage-b-design §2.2, task B1.3).
  *
  * Prefix-return the whole dungeon draw body (AbstractDungeon.render(SpriteBatch),
- * AbstractDungeon.java:2153 in the 11-30-2020 decompile) when the
+ * AbstractDungeon.java:2153 in the 12-18-2022 decompile) when the
  * `stripDrawSuppression` config flag is on. This removes essentially all
  * combat/room/effect pixel cost in one seam.
  *

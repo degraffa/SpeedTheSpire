@@ -31,12 +31,14 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 
 from campaign_paths import (
+    ORACLE_LAUNCH_TOKEN_ENV,
     campaign_dir_under_root,
     campaign_file_under_root,
     validate_campaign_id,
@@ -95,6 +97,8 @@ def build_driver_command(args) -> str:
         "--seeds", args.seeds_arg,
         "--policy", args.policy,
         "--fork-jar", args.fork_jar.replace("\\", "/"),
+        "--launch-log", args.launch_log,
+        "--launch-token", args.launch_token,
         "--policy-seed", str(args.policy_seed),
         "--timeout", str(args.command_timeout),
         "--max-actions", str(args.max_actions),
@@ -226,6 +230,25 @@ def clear_fresh_campaign_files(data_root: str, campaign_id: str,
     return removed
 
 
+def highest_launch_index(data_root: str, campaign_id: str) -> int:
+    """Highest existing append-only launch-log index, with redirect checks."""
+    campaign_dir = campaign_dir_under_root(data_root, campaign_id)
+    try:
+        entries = os.listdir(campaign_dir)
+    except FileNotFoundError:
+        return 0
+    highest = 0
+    for name in entries:
+        match = re.fullmatch(r"mts_launch([1-9][0-9]*)\.log", name)
+        if match is None:
+            continue
+        # A redirected owned-looking log must stop resume before either the
+        # driver reads it as evidence or a later launch allocates around it.
+        campaign_file_under_root(data_root, campaign_id, name)
+        highest = max(highest, int(match.group(1)))
+    return highest
+
+
 def kill_tree(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
@@ -241,16 +264,26 @@ def kill_tree(proc: subprocess.Popen) -> None:
 
 
 def launch_game(args, launch_idx: int) -> subprocess.Popen:
+    expected_log = f"mts_launch{launch_idx}.log"
+    if args.launch_log != expected_log:
+        raise ValueError(
+            f"launch #{launch_idx} must bind {expected_log!r}, got "
+            f"{args.launch_log!r}")
     java = os.path.join(args.game_dir, "jre", "bin", "java.exe")
     cmd = [java, "-jar", args.mts_jar,
            "--skip-launcher", "--mods", "basemod,CommunicationMod-oracle"]
     out = open(campaign_file_under_root(
-        args.data_root, args.campaign_id, f"mts_launch{launch_idx}.log"), "w",
+        args.data_root, args.campaign_id, args.launch_log), "x",
                encoding="utf-8", newline="\n")
+    env = os.environ.copy()
+    env[ORACLE_LAUNCH_TOKEN_ENV] = args.launch_token
     log(f"launch #{launch_idx}: {java} -jar {args.mts_jar} --skip-launcher "
         f"--mods basemod,CommunicationMod-oracle  (cwd={args.game_dir})")
-    return subprocess.Popen(cmd, cwd=args.game_dir, stdout=out,
-                            stderr=subprocess.STDOUT)
+    try:
+        return subprocess.Popen(cmd, cwd=args.game_dir, stdout=out,
+                                stderr=subprocess.STDOUT, env=env)
+    finally:
+        out.close()
 
 
 def main(argv=None) -> int:
@@ -327,19 +360,12 @@ def main(argv=None) -> int:
     config_path = os.path.join(
         os.environ["LOCALAPPDATA"], "ModTheSpire", "CommunicationMod",
         "config.properties")
-    driver_cmd = build_driver_command(args)
-    write_config(config_path, driver_cmd,
-                 oracle_block=True,
-                 strip_draw=(args.strip_draw == "true"),
-                 strip_anim=(args.strip_anim == "true"),
-                 strip_cadence=(args.strip_cadence == "true"))
-    log(f"wrote {config_path}")
-    log(f"strip: draw={args.strip_draw} anim={args.strip_anim} "
-        f"cadence={args.strip_cadence}")
-    log(f"driver command: {driver_cmd}")
-
     start = time.time()
-    launch_idx = 0
+    try:
+        launch_idx = highest_launch_index(args.data_root, args.campaign_id)
+    except ValueError as exc:
+        log(f"INVALID EXISTING LAUNCH LOG -- {exc}")
+        return EXIT_CAMPAIGN_INVALID
     kill_done = False
     timeline = []
 
@@ -369,6 +395,21 @@ def main(argv=None) -> int:
             break
 
         launch_idx += 1
+        args.launch_log = f"mts_launch{launch_idx}.log"
+        # Binding nonce, not a credential: it only proves the driver inherited
+        # this exact game process. Keep it out of diagnostics anyway.
+        args.launch_token = secrets.token_hex(32)
+        driver_cmd = build_driver_command(args)
+        write_config(config_path, driver_cmd,
+                     oracle_block=True,
+                     strip_draw=(args.strip_draw == "true"),
+                     strip_anim=(args.strip_anim == "true"),
+                     strip_cadence=(args.strip_cadence == "true"))
+        log(f"wrote {config_path} for append-only {args.launch_log}")
+        log(f"strip: draw={args.strip_draw} anim={args.strip_anim} "
+            f"cadence={args.strip_cadence}")
+        log("driver command prepared with one-use launch binding "
+            "(token omitted)")
         proc = launch_game(args, launch_idx)
         timeline.append({"event": "launch", "idx": launch_idx, "utc": utc()})
         launch_started = time.time()

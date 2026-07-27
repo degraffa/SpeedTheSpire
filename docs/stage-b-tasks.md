@@ -520,12 +520,19 @@ validator/runbook require a distinct one-seed oracle preflight.
 **Also fixed at the re-pin — the defect that hid the drift:** the artifact
 header's `sts_version`/`mts_version` were *static constants*, so every artifact
 ever written claimed the frozen stack no matter what launched. The driver now
-parses the observed stack out of the campaign's own `mts_launch<N>.log`, writes
-that into the header with a `version_source`, and refuses via the existing
-`fatal_environment_drift` status on a mismatch, on an unparseable log, or on no
-launch log at all (the GUI case). Applied retroactively to the 15 preserved
-campaign directories, the check accepts all 12 real captures and flags exactly
-`b45_rewards` — the one already known to be invalid.
+parses the observed stack out of the exact append-only `mts_launch<N>.log`
+allocated for its game process, writes that into the header with a
+`version_source`, and refuses via the existing `fatal_environment_drift` status
+on a mismatch, on an unparseable log, or when the log is not bound to this
+orchestrator launch (including the GUI case). The filename is carried in the
+driver command and a one-use binding nonce is inherited through the launched
+game; resume continues above every preserved numeric log index, so neither an
+old higher-numbered log nor persisted GUI config can become current evidence.
+In-progress resume now also binds the driver revision, preventing mixed capture
+logic under one ledger.
+Applied retroactively to the 15 preserved campaign directories, the parser
+accepts all 12 real captures and flags exactly `b45_rewards` — the one already
+known to be invalid.
 An independent second review then closed the remaining strict-evidence gaps:
 normal boss-reward claims now propagate their action count; seed identity is
 joined from request through every in-game/oracle record; run and timing JSONL
@@ -533,8 +540,9 @@ grammars are complete and bijective; campaign ids and resolved paths cannot
 escape the data root; and resume identity includes the currently requested
 fork/schema even for completed ledgers. These are capture-safety fixes only;
 the manual oracle acceptance remains the blocker.
-See the [non-task archive log](stage-b-log.md#b45-oracle-preflight) and the
-[runtime re-pin entry](stage-b-log.md#b45-oracle-stack-repin).
+See the [non-task archive log](stage-b-log.md#b45-oracle-preflight), the
+[runtime re-pin entry](stage-b-log.md#b45-oracle-stack-repin), and its
+[launch-binding fix-forward](stage-b-log.md#b45-oracle-stack-repin-fix-forward).
 
 **Landed** — commit `4f0544a`, merged at `e222dc2`, landed in `e6ec9ce`:
 `combat_rewards.{hpp,cpp}` (assembly at reward-screen open), the `RewardScreen`
@@ -858,6 +866,18 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-26 — **B4.5 runtime re-pin review fixes stale launch-log evidence;
+  B4.5 remains `[!]`.** Independent review reproduced a non-fresh resume in
+  which the orchestrator restarted numbering at `mts_launch1.log` while the
+  driver selected a preserved higher-numbered log from the prior process, so a
+  stale sanctioned stack could be copied into a new header. The same persisted
+  config could let a later GUI launch reuse that log. Launch logs are now
+  append-only across process resume and bound by exact filename plus a one-use
+  nonce inherited through the orchestrator-launched game. Redirects and missing
+  bindings fail before artifact/policy. Two missed forward provenance comments
+  now name the actual 12-18-2022 decompile. The live spot-diff remains the only
+  B4.5 blocker.
+  [Archive log.](stage-b-log.md#b45-oracle-stack-repin-fix-forward)
 - 2026-07-26 — **B4.5 strict evidence second fix-forward closes six
   independent-review findings; B4.5 remains `[!]`.** The first fix-forward's
   new terminal join exposed the driver's pre-existing boss-claim counter

@@ -506,7 +506,8 @@
 # STRONG_ATK=3, OPEN=4, IDLE=5, OPEN_NATURAL=6.
 #
 # OPEN_NATURAL (6) IS DELIBERATELY ABSENT from the table below. takeTurn has a
-# `case 6:` (:165-172), but nothing in the 11-30-2020 build ever sets move 6 --
+# `case 6:` (:165-172), but nothing in the decompiled 12-18-2022 build ever
+# sets move 6 --
 # there is no setMove(6, ...) or SetMoveAction(..., 6, ...) in Lagavulin.java or
 # anywhere else, so no telegraphed intent for it exists to record. Giving it a
 # row would mean inventing an Intent the game never displays. Whoever finds a

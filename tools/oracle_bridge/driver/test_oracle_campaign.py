@@ -249,7 +249,8 @@ def _write_launch_log(campaign_dir, index=1, **kwargs):
     return path
 
 
-def _stack_driver(root, campaign_id, state=None, max_actions=0):
+def _stack_driver(root, campaign_id, state=None, max_actions=0,
+                  launch_index=1):
     """A CampaignDriver wired just far enough to reach the artifact header."""
     driver = campaign_driver.CampaignDriver.__new__(
         campaign_driver.CampaignDriver)
@@ -261,6 +262,8 @@ def _stack_driver(root, campaign_id, state=None, max_actions=0):
         policy="random-legal",
         run_label="",
         max_actions=max_actions,
+        launch_log=f"mts_launch{launch_index}.log",
+        launch_token="unit-test-launch-token",
         fork_jar=r"D:\SteamLibrary\steamapps\common\SlayTheSpire\mods\CommunicationMod-oracle.jar",
     )
     driver.fork_hash = "A" * 64
@@ -289,18 +292,6 @@ class RuntimeStackParsingTest(unittest.TestCase):
             observed = campaign_driver.parse_launch_log(path)
             self.assertIsNone(observed["sts_version"])
             self.assertIsNone(observed["mts_version"])
-
-    def test_latest_launch_log_orders_numerically_not_lexically(self):
-        with tempfile.TemporaryDirectory() as root:
-            for index in (1, 2, 12):
-                _write_launch_log(root, index=index)
-            self.assertEqual(
-                "mts_launch12.log",
-                os.path.basename(campaign_driver.latest_launch_log(root)))
-
-    def test_latest_launch_log_is_none_without_one(self):
-        with tempfile.TemporaryDirectory() as root:
-            self.assertIsNone(campaign_driver.latest_launch_log(root))
 
     def test_check_reports_every_drifted_component_at_once(self):
         observed = {
@@ -340,6 +331,16 @@ class RuntimeStackParsingTest(unittest.TestCase):
 class RuntimeStackEnforcementTest(unittest.TestCase):
     """A drifted or unobservable stack must never reach an artifact header."""
 
+    def setUp(self):
+        self.launch_env = mock.patch.dict(
+            os.environ,
+            {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+             "unit-test-launch-token"})
+        self.launch_env.start()
+
+    def tearDown(self):
+        self.launch_env.stop()
+
     def _assert_no_artifact(self, root, campaign_id):
         run_dir = os.path.join(root, campaign_id)
         for name in (f"run_{SEED}_a20_ironclad.jsonl",
@@ -356,7 +357,7 @@ class RuntimeStackEnforcementTest(unittest.TestCase):
 
             with self.assertRaisesRegex(
                     campaign_driver.FatalEnvironmentDrift,
-                    "no mts_launch") as raised:
+                    "bound launch log") as raised:
                 driver.run_seed(SEED, 1)
 
             self.assertEqual("stack_unobservable", raised.exception.kind)
@@ -414,6 +415,64 @@ class RuntimeStackEnforcementTest(unittest.TestCase):
             self.assertEqual("stack_version_mismatch", raised.exception.kind)
             self._assert_no_artifact(root, "stock")
 
+    def test_exact_launch_binding_cannot_fall_back_to_a_stale_higher_log(self):
+        """A restarted orchestrator used to accept stale launch3 over launch1."""
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = os.path.join(root, "resume")
+            _write_launch_log(campaign_dir, index=1,
+                              sts="11-30-2020", mts="3.18.1")
+            _write_launch_log(campaign_dir, index=3)
+            driver = _stack_driver(root, "resume", launch_index=1)
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift,
+                    "mts_launch1.log") as raised:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_version_mismatch", raised.exception.kind)
+            self._assert_no_artifact(root, "resume")
+
+    def test_persisted_gui_command_cannot_reuse_a_stale_valid_log(self):
+        with tempfile.TemporaryDirectory() as root:
+            _write_launch_log(os.path.join(root, "gui"))
+            driver = _stack_driver(root, "gui")
+            with mock.patch.dict(os.environ, {}, clear=True):
+                with self.assertRaisesRegex(
+                        campaign_driver.FatalEnvironmentDrift,
+                        "not bound to the orchestrator launch") as raised:
+                    driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_unobservable", raised.exception.kind)
+            self._assert_no_artifact(root, "gui")
+
+    def test_redirected_owned_looking_launch_log_is_never_evidence(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = os.path.join(root, "redirected_log")
+            os.makedirs(campaign_dir)
+            target = os.path.join(campaign_dir, "operator_evidence.log")
+            with open(target, "w", encoding="utf-8", newline="\n") as fh:
+                fh.write(_launch_log())
+            redirected = os.path.join(campaign_dir, "mts_launch1.log")
+            try:
+                os.symlink(target, redirected)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(
+                    f"platform cannot create a file symlink: {exc}")
+            driver = _stack_driver(root, "redirected_log")
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift,
+                    "redirected") as raised:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_unobservable", raised.exception.kind)
+            self.assertTrue(os.path.lexists(redirected))
+            with open(target, encoding="utf-8") as fh:
+                self.assertEqual(_launch_log(), fh.read())
+            with self.assertRaisesRegex(ValueError, "redirected campaign path"):
+                orchestrator.highest_launch_index(root, "redirected_log")
+            self._assert_no_artifact(root, "redirected_log")
+
     def test_header_reports_the_observed_stack_not_the_constants(self):
         """The regression that matters: header versions come from the log.
 
@@ -424,7 +483,7 @@ class RuntimeStackEnforcementTest(unittest.TestCase):
         """
         with tempfile.TemporaryDirectory() as root:
             _write_launch_log(os.path.join(root, "observed"), index=3)
-            driver = _stack_driver(root, "observed")
+            driver = _stack_driver(root, "observed", launch_index=3)
 
             outcome, _floor, actions, _menu = driver.run_seed(SEED, 1)
             self.assertEqual(("action_cap", 0), (outcome, actions))
@@ -464,19 +523,19 @@ class RuntimeStackEnforcementTest(unittest.TestCase):
             with mock.patch.object(campaign_driver,
                                    "SANCTIONED_STS_VERSION", sentinel_sts), \
                  mock.patch.object(campaign_driver,
-                                   "SANCTIONED_MTS_VERSION", sentinel_mts):
-                # the sanctioned values now disagree with the log, so it refuses
-                with self.assertRaises(campaign_driver.FatalEnvironmentDrift):
-                    driver.run_seed(SEED, 1)
-            self._assert_no_artifact(root, "guard")
-
-            # and with the constants restored the same log is accepted
-            driver = _stack_driver(root, "guard")
-            driver.run_seed(SEED, 1)
+                                   "SANCTIONED_MTS_VERSION", sentinel_mts), \
+                 mock.patch.object(campaign_driver, "check_runtime_stack",
+                                   return_value=[]):
+                # Bypass the comparison only: the header must still use the
+                # parsed log, never either patched expectation.
+                driver.run_seed(SEED, 1)
             artifact = os.path.join(
                 root, "guard", f"run_{SEED}_a20_ironclad.jsonl")
             with open(artifact, encoding="utf-8") as fh:
                 header = json.loads(fh.readline())
+            self.assertEqual("12-18-2022",
+                             header["game"]["sts_version"])
+            self.assertEqual("3.30.3", header["game"]["mts_version"])
             self.assertNotIn(sentinel_sts, json.dumps(header))
             self.assertNotIn(sentinel_mts, json.dumps(header))
 
@@ -1125,6 +1184,104 @@ class StrictCampaignValidationTest(unittest.TestCase):
 
 
 class CampaignIdentityAndFreshTest(unittest.TestCase):
+    def test_launch_game_inherits_binding_and_creates_log_exclusively(self):
+        with tempfile.TemporaryDirectory() as data_root:
+            campaign_id = "bound"
+            os.makedirs(os.path.join(data_root, campaign_id))
+            args = SimpleNamespace(
+                game_dir=os.path.join(data_root, "game"),
+                mts_jar=os.path.join(data_root, "ModTheSpire.jar"),
+                data_root=data_root,
+                campaign_id=campaign_id,
+                launch_log="mts_launch1.log",
+                launch_token="one-use-test-binding",
+            )
+            os.makedirs(args.game_dir)
+            sentinel = object()
+            with mock.patch.object(
+                    orchestrator.subprocess, "Popen",
+                    return_value=sentinel) as popen:
+                self.assertIs(sentinel, orchestrator.launch_game(args, 1))
+            kwargs = popen.call_args.kwargs
+            self.assertEqual(
+                args.launch_token,
+                kwargs["env"][campaign_paths.ORACLE_LAUNCH_TOKEN_ENV])
+            self.assertTrue(kwargs["stdout"].closed)
+            launch_path = os.path.join(
+                data_root, campaign_id, args.launch_log)
+            self.assertTrue(os.path.isfile(launch_path))
+
+            with self.assertRaises(FileExistsError), \
+                    mock.patch.object(
+                        orchestrator.subprocess, "Popen") as second_popen:
+                orchestrator.launch_game(args, 1)
+            second_popen.assert_not_called()
+
+    def test_launch_indices_resume_numerically_without_overwriting(self):
+        with tempfile.TemporaryDirectory() as data_root:
+            campaign_id = "resume"
+            campaign_dir = os.path.join(data_root, campaign_id)
+            os.makedirs(campaign_dir)
+            for index in (1, 2, 12):
+                with open(os.path.join(
+                        campaign_dir, f"mts_launch{index}.log"),
+                        "w", encoding="utf-8"):
+                    pass
+            _write_campaign_json(
+                os.path.join(campaign_dir, "campaign_progress.json"),
+                _progress(
+                    campaign_id, status="in_progress",
+                    done=[], failed=[]))
+
+            seen = {}
+
+            def launch_and_report_fatal(args, launch_idx):
+                seen["index"] = launch_idx
+                seen["log"] = args.launch_log
+                seen["token"] = args.launch_token
+                _write_campaign_json(
+                    os.path.join(campaign_dir, "campaign_progress.json"),
+                    {
+                        **_progress(
+                            campaign_id, status="fatal_environment_drift",
+                            done=[], failed=[]),
+                        "fatal": {"message": "synthetic stop"},
+                    })
+                return object()
+
+            local_app_data = os.path.join(data_root, "local")
+            diagnostics = io.StringIO()
+            with redirect_stdout(diagnostics), \
+                    mock.patch.dict(
+                        os.environ, {"LOCALAPPDATA": local_app_data}), \
+                    mock.patch.object(
+                        orchestrator, "sha256_file", return_value="A" * 64), \
+                    mock.patch.object(
+                        orchestrator, "launch_game",
+                        side_effect=launch_and_report_fatal), \
+                    mock.patch.object(orchestrator, "kill_tree"), \
+                    mock.patch.object(orchestrator.time, "sleep"):
+                result = orchestrator.main([
+                    "--data-root", data_root,
+                    "--campaign-id", campaign_id,
+                    "--seeds", SEED,
+                ])
+
+            self.assertEqual(orchestrator.EXIT_FATAL_ENVIRONMENT, result)
+            self.assertEqual(13, seen["index"])
+            self.assertEqual("mts_launch13.log", seen["log"])
+            self.assertRegex(seen["token"], r"\A[0-9a-f]{64}\Z")
+            self.assertNotIn(seen["token"], diagnostics.getvalue())
+            with open(os.path.join(
+                    local_app_data, "ModTheSpire", "CommunicationMod",
+                    "config.properties"), encoding="utf-8") as fh:
+                config = fh.read()
+            self.assertIn("--launch-log mts_launch13.log", config)
+            self.assertIn(f"--launch-token {seen['token']}", config)
+            for index in (1, 2, 12):
+                self.assertTrue(os.path.exists(os.path.join(
+                    campaign_dir, f"mts_launch{index}.log")))
+
     def test_fresh_cleanup_is_bounded_to_owned_expected_files(self):
         with tempfile.TemporaryDirectory() as data_root:
             root = os.path.join(data_root, "strict")
@@ -1174,6 +1331,19 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
             progress = campaign_driver.Progress(path, heartbeat)
             with self.assertRaisesRegex(
                     campaign_driver.CampaignIdentityError, "schema_version"):
+                progress.load_or_init(
+                    "strict", [SEED], "random-legal", "A" * 64)
+
+    def test_progress_refuses_resume_across_driver_revision(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "campaign_progress.json")
+            heartbeat = os.path.join(root, "campaign_heartbeat.json")
+            stored = _progress("strict")
+            stored["driver_version"] = "b1.4.3"
+            _write_campaign_json(path, stored)
+            progress = campaign_driver.Progress(path, heartbeat)
+            with self.assertRaisesRegex(
+                    campaign_driver.CampaignIdentityError, "driver_version"):
                 progress.load_or_init(
                     "strict", [SEED], "random-legal", "A" * 64)
 

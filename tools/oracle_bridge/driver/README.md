@@ -53,22 +53,28 @@ missing block records `status: fatal_environment_drift`, and the orchestrator
 stops instead of relaunching.
 
 **The runtime stack is observed, never assumed (B4.5).** Immediately after that
-check the driver reads the campaign's own highest-numbered `mts_launch<N>.log`,
-parses ModTheSpire's `Version Info:` / `Mod list:` block, and writes **those**
-values into the artifact header (`game.sts_version`, `game.mts_version`,
-`game.basemod_version`, `game.version_source`, plus the full `mods_loaded`
-map). It refuses with the same `fatal_environment_drift` status, carrying a
-distinguishing `kind`, when the observed stack is not the sanctioned one
+check the driver reads the exact append-only `mts_launch<N>.log` allocated for
+its game process, parses ModTheSpire's `Version Info:` / `Mod list:` block, and
+writes **those** values into the artifact header (`game.sts_version`,
+`game.mts_version`, `game.basemod_version`, `game.version_source`, plus the full
+`mods_loaded` map). The orchestrator binds that filename to the driver command
+and passes a one-use token through the game process's inherited environment;
+resume continues numbering above every preserved log, while a later GUI launch
+inherits the persisted command but not the matching environment binding. It
+refuses with the same
+`fatal_environment_drift` status, carrying a distinguishing `kind`, when the
+observed stack is not the sanctioned one
 (`stack_version_mismatch` — which also covers stock `CommunicationMod` loaded
 beside the fork, and the fork being absent), when the log has no readable
 version block (`stack_unparseable`), or when there is no launch log at all
-(`stack_unobservable` — the GUI-launch case, which is exactly how the invalid
-`b45_rewards` capture arose). Before B4.5 those header fields were hard-coded
-constants, so every artifact ever written asserted the sanctioned versions
-regardless of what actually launched. The sanctioned values now live in
-`campaign_driver.py`'s `SANCTIONED_*` constants and are only ever *compared*
-against the log, never copied into a header; moving the pin means editing those
-constants **and** design §1.2 deliberately (design §11 v0.1.7).
+or it is not bound to this orchestrator launch (`stack_unobservable` — the
+GUI-launch case, which is exactly how the invalid `b45_rewards` capture arose).
+Before B4.5 those header fields were hard-coded constants, so every artifact
+ever written asserted the sanctioned versions regardless of what actually
+launched. The sanctioned values now live in `campaign_driver.py`'s
+`SANCTIONED_*` constants and are only ever *compared* against the log, never
+copied into a header; moving the pin means editing those constants **and**
+design §1.2 deliberately (design §11 v0.1.7).
 
 Run campaign acceptance with
 `validate_artifacts.py --require-oracle`; the default validator remains
@@ -89,6 +95,9 @@ failed directories are preserved rather than retried in place. `--fresh`
 removes only this invocation's known control files, launch logs, and exact
 requested-seed run/timing names. It deliberately preserves unexpected files,
 which strict validation then rejects as stale instead of silently deleting.
+An in-progress ledger also refuses resume under a different driver revision,
+preventing one campaign from mixing capture logic even when schema and fork are
+unchanged.
 Campaign ids are single safe path components; both CLIs reject rooted paths,
 separators, `.`/`..`, and every symlink/junction/reparse redirect at a campaign
 directory or direct-child file. `--fresh` never follows an owned-looking name

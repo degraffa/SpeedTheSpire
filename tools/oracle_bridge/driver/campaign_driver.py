@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
 import os
 import random
@@ -52,6 +53,7 @@ import time
 from datetime import datetime, timezone
 
 from campaign_paths import (
+    ORACLE_LAUNCH_TOKEN_ENV,
     campaign_dir_under_root,
     campaign_file_under_root,
     exact_path_without_redirect,
@@ -59,7 +61,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.4.3"
+DRIVER_VERSION = "b1.4.4"
 SCHEMA_VERSION = 1
 
 # The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
@@ -100,32 +102,10 @@ STOCK_MODID = "CommunicationMod"
 # It is the ONLY ground truth for what launched: the mod's own ModTheSpire.json
 # merely *declares* versions, and ModTheSpire does not reject a game-version
 # mismatch (PROTOCOL.md 0.1), so a declaration proves nothing.
-_LAUNCH_LOG_RE = re.compile(r"\Amts_launch([0-9]+)\.log\Z")
 _VERSION_ENTRY_RE = re.compile(r"\A\s*-\s*(?P<name>.+?)\s*\((?P<version>[^()]*)\)\s*\Z")
+_LAUNCH_LOG_RE = re.compile(r"\Amts_launch[1-9][0-9]*\.log\Z")
 _STS_ENTRY = "Slay the Spire"
 _MTS_ENTRY = "ModTheSpire"
-
-
-def latest_launch_log(campaign_dir: str):
-    """Path of the highest-numbered mts_launch<N>.log, or None.
-
-    Highest index, not newest mtime and not lexicographic order: the
-    orchestrator increments the index before each launch, so the highest one is
-    the launch this driver is a child of. (Lexicographic would rank
-    `mts_launch12.log` below `mts_launch2.log`.)
-    """
-    best = None
-    try:
-        entries = os.listdir(campaign_dir)
-    except OSError:
-        return None
-    for name in entries:
-        m = _LAUNCH_LOG_RE.match(name)
-        if m and (best is None or int(m.group(1)) > best[0]):
-            best = (int(m.group(1)), name)
-    if best is None:
-        return None
-    return os.path.join(campaign_dir, best[1])
 
 
 def parse_launch_log(path: str) -> dict:
@@ -613,6 +593,7 @@ class Progress:
                 "policy": policy,
                 "fork_jar_sha256": fork_hash,
                 "schema_version": SCHEMA_VERSION,
+                "driver_version": DRIVER_VERSION,
             }
             mismatches = [
                 f"{key}={self.data.get(key)!r} (expected {value!r})"
@@ -754,14 +735,16 @@ class CampaignDriver:
     def observed_stack(self) -> dict:
         """The runtime stack this launch ACTUALLY has, or refuse.
 
-        Ground truth is the campaign's own `mts_launch<N>.log` (see the module
-        header). Three ways this refuses, all as `fatal_environment_drift` so
-        the orchestrator stops instead of relaunching into the same wrong stack:
+        Ground truth is the campaign's exact, launch-token-bound
+        `mts_launch<N>.log` (see the module header). Three ways this refuses,
+        all as `fatal_environment_drift` so the orchestrator stops instead of
+        relaunching into the same wrong stack:
 
-          * `stack_unobservable`   -- no launch log, so nothing can be asserted.
-            This is the GUI-launch case that produced the invalid `b45_rewards`
-            campaign: a hand-started game writes no log at all. Refusing is the
-            point -- silence must never be reported as the sanctioned stack.
+          * `stack_unobservable`   -- no bound/readable launch log or the
+            orchestrator-only token is absent. This includes the GUI-launch
+            case that produced the invalid `b45_rewards` campaign. Refusing is
+            the point -- stale evidence or silence must never be reported as
+            the sanctioned stack.
           * `stack_unparseable`    -- a log with no readable Version Info block.
           * `stack_version_mismatch` -- it launched, and it is the wrong stack.
 
@@ -769,15 +752,37 @@ class CampaignDriver:
         caller must not substitute the SANCTIONED_* constants for a missing
         value; that substitution IS the defect this method exists to remove.
         """
-        path = latest_launch_log(self.run_dir())
-        if path is None:
+        # The orchestrator binds this driver to one exact append-only log and
+        # passes the same one-use launch token in the game process environment.
+        # Selecting "the highest log" is not sufficient: a resumed orchestrator
+        # used to restart numbering at 1, so a stale higher-numbered log from the
+        # prior process could be accepted as the current runtime. A later GUI
+        # launch also inherits the persisted config command but not this
+        # orchestrator-only environment token.
+        expected_token = self.args.launch_token
+        inherited_token = os.environ.get(ORACLE_LAUNCH_TOKEN_ENV)
+        if inherited_token is None or not hmac.compare_digest(
+                inherited_token, expected_token):
             raise FatalEnvironmentDrift(
-                "no mts_launch<N>.log in the campaign directory: the runtime "
-                "stack cannot be observed, so no artifact may claim one. "
-                "Launch through orchestrator.py -- a GUI launch writes no "
-                "launch log (driver/README.md)",
+                "this driver is not bound to the orchestrator launch that "
+                "created its runtime log: the inherited launch token is "
+                "missing or different. Refusing stale-log reuse; launch "
+                "through orchestrator.py (a GUI launch inherits the persisted "
+                "command but not the one-use token)",
                 kind="stack_unobservable")
-        observed = parse_launch_log(path)
+        if _LAUNCH_LOG_RE.fullmatch(self.args.launch_log) is None:
+            raise FatalEnvironmentDrift(
+                f"invalid bound launch-log name {self.args.launch_log!r}; "
+                "expected mts_launch<N>.log",
+                kind="stack_unobservable")
+        try:
+            path = self.run_file(self.args.launch_log)
+            observed = parse_launch_log(path)
+        except (OSError, ValueError) as exc:
+            raise FatalEnvironmentDrift(
+                f"bound launch log {self.args.launch_log!r} is absent, "
+                f"redirected, or unreadable: {exc}",
+                kind="stack_unobservable") from exc
         if observed["sts_version"] is None and observed["mts_version"] is None:
             raise FatalEnvironmentDrift(
                 f"{os.path.basename(path)} has no readable 'Version Info:' "
@@ -1255,6 +1260,12 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--fork-jar", required=True,
                     help="deployed CommunicationMod-oracle.jar (hashed for the "
                          "header)")
+    ap.add_argument("--launch-log", default="",
+                    help="exact append-only mts_launch<N>.log allocated by the "
+                         "orchestrator for this game process")
+    ap.add_argument("--launch-token", default="",
+                    help="one-use token also inherited through the orchestrator-"
+                         "launched game process; rejects stale/GUI launches")
     ap.add_argument("--policy-seed", type=int, default=1234,
                     help="RNG seed for the random-legal policy (driver-side)")
     ap.add_argument("--run-label", default="",

@@ -3519,6 +3519,12 @@ case). The sanctioned values are now only ever *compared* against the log, never
 copied into a header, and a test pins that property by patching the constants to
 sentinels and requiring the header still to report the log.
 
+The highest-numbered selection described above is the behavior that landed in
+`51e8199`; independent review then proved it could select a stale log after a
+non-fresh orchestrator-process resume. The separate fix-forward below preserves
+this entry as the original acceptance record and supersedes that selection rule
+with an exact per-launch binding.
+
 **Retroactive check over the 15 preserved campaign directories:** all 12 real
 captures parse as `12-18-2022 / 3.30.3 / 5.56.0` and pass; `b13_pilot_scripts`
 and `b13_scripts20` are `--script-dir` inputs, not campaigns; and the only
@@ -3532,3 +3538,48 @@ have refused it at capture time.
 `build_fork.ps1 -CheckDeterminism -NoDeploy` reports `determinism: PASS`.
 **B4.5 and B4.7 both remain open** — this clears the *environment* blocker only;
 the live capture, which a human must launch, is still outstanding.
+
+<a id="b45-oracle-stack-repin-fix-forward"></a>
+
+### B4.5 runtime re-pin launch-binding fix-forward `[x]` (non-task)
+
+**Independent-review blocker:** the re-pin driver chose the highest-numbered
+`mts_launch<N>.log`, but `orchestrator.py` restarted its local launch counter at
+zero on every process invocation and opened `mts_launch1.log` with truncating
+mode. A non-fresh resume after a prior process had written logs 1–3 therefore
+made the new child read stale log 3 while current log 1 was being rewritten.
+The same persisted CommunicationMod config let a later GUI launch reuse the
+stale valid log. Both paths defeated the capture-time observation contract and
+could stamp a sanctioned header for a process the log did not describe.
+
+**Fix-forward:** log indices now resume numerically above every preserved log,
+each log is created exclusively and never overwritten, and the driver command
+names that exact direct-child log. A one-use binding nonce is also inherited
+through the orchestrator-launched game process; it is a process-identity nonce,
+not a credential, and is omitted from diagnostics. A GUI launch inherits the
+persisted command but not the nonce, so it refuses as `stack_unobservable`.
+Existing symlinks, junctions, or reparse redirects at an owned-looking log name
+fail before read or allocation. The artifact header still contains only the
+observed version block and its source filename, never the sanctioned constants.
+An in-progress ledger also binds `driver_version`, so this capture-logic
+fix-forward cannot silently resume into artifacts produced by the prior driver.
+
+**Regression proof:** the Python campaign suite covers the original non-fresh
+stale-higher-log reproducer, GUI/persisted-config reuse without the inherited
+nonce, redirected owned-looking logs with the target preserved, numeric
+resume to the next append-only index, omission of the nonce from orchestrator
+diagnostics, and a corrected sentinel regression that actually writes a header
+while the sanctioned constants are patched. The two remaining forward source
+comments that still called the decompile `11-30-2020` now name `12-18-2022`;
+upstream manifests, archived capture headers, gate evidence, and golden fork
+hashes remain untouched.
+
+**Acceptance:** Windows-host Python `test_oracle_campaign` **51/51** and
+`py_compile` clean; WSL Debug, leak-detecting ASan/UBSan, and Release each
+**1039/1039**; stale-count, documentation-link, and whitespace checks clean.
+`build_fork.ps1 -CheckDeterminism -NoDeploy` remains byte-identical at
+**`7DC814AD240CBBD9100B2E8C92B6AA97B4ADFBED62FFED7961C6E5DE15884733`**.
+The deployed game jar remains the old `04477E4E…B2C36636` build: no Steam/game
+installation file was written. No schema, generated registry data, fixture,
+golden, or external campaign artifact changed. B4.5 and B4.7 remain open on
+their manual live captures.

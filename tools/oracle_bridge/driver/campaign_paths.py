@@ -9,6 +9,7 @@ import stat
 
 _CAMPAIGN_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _SEED_RE = re.compile(r"[0-9A-Z]+")
+ORACLE_LAUNCH_TOKEN_ENV = "SPEEDTHESPIRE_ORACLE_LAUNCH_TOKEN"
 
 
 def validate_campaign_id(campaign_id: str) -> str:

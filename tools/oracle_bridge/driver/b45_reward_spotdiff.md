@@ -63,16 +63,20 @@ The preflight is a gate, not a smoke test. All of these checks are required:
    **CommunicationMod-oracle (1.2.1-oracle.0)** in its version/mod list; it
    must not list stock `CommunicationMod`.
 
-   **The driver now enforces this itself** — it parses the campaign's own
-   `mts_launch<N>.log` before it will write an artifact header, records what it
-   observed in `game.sts_version` / `game.mts_version` /
+   **The driver now enforces this itself** — the orchestrator allocates a new
+   append-only `mts_launch<N>.log` above every preserved numeric index and binds
+   that exact filename to the child with a one-use nonce inherited through the
+   launched game. The driver parses only that bound log before it will write an
+   artifact header, records what it observed in `game.sts_version` /
+   `game.mts_version` /
    `game.basemod_version` / `game.version_source`, and refuses with
    `fatal_environment_drift` on a mismatch, on stock `CommunicationMod` being
-   loaded beside the fork, or on there being no launch log at all. So this check
-   is now a confirmation, not the only line of defence. Until B4.5 those header
-   fields were **static constants**, which is why the whole existing corpus
-   claimed `11-30-2020` while running `12-18-2022`; a header is only evidence
-   because of that change (design §11 v0.1.7).
+   loaded beside the fork, or on the log/token binding being absent (including a
+   later GUI launch with persisted config). So this check is now a confirmation,
+   not the only line of defence. Until B4.5 those header fields were **static
+   constants**, which is why the whole existing corpus claimed `11-30-2020`
+   while running `12-18-2022`; a header is only evidence because of that change
+   (design §11 v0.1.7).
 2. The deployed fork jar's SHA-256 is
    `7DC814AD240CBBD9100B2E8C92B6AA97B4ADFBED62FFED7961C6E5DE15884733`.
    (Re-derived at B4.5: amending `ModTheSpire.json` changed the jar's contents.
@@ -157,7 +161,8 @@ escapes, and any symlink/junction/reparse redirect at a campaign directory or
 direct-child file are rejected. `--fresh` never follows an owned-looking name
 to another target, including another file inside the campaign.
 The orchestrator hashes the requested fork before it accepts even an already
-complete ledger; changing fork/schema/seed/policy requires a new campaign id.
+complete ledger; changing fork/schema/seed/policy requires a new campaign id,
+and an in-progress ledger also refuses a changed driver revision.
 
 Before translation, require the oracle gate on the reward campaign too:
 
