@@ -169,12 +169,16 @@ TEST(RestSites, DreamCatcherOpensDirectCardPickAfterHealing) {
     EXPECT_EQ(static_cast<RewardItemKind>(rc.rewards.items[0].kind),
               RewardItemKind::CARDS);
     EXPECT_EQ(rc.rewards.items[0].card_count, 3);
+    // Identities, not merely the draw count. The three pool INDICES this seed
+    // rolls did not move; the pools they index are now in CardLibrary library
+    // order (pinned by the B4.5 oracle capture) rather than the interim
+    // registry-id order, so the names those indices resolve to moved with them.
     EXPECT_EQ(static_cast<CardId>(rc.rewards.items[0].card_ids[0]),
-              CardId::BLOOD_FOR_BLOOD);
+              CardId::SPOT_WEAKNESS);
     EXPECT_EQ(static_cast<CardId>(rc.rewards.items[0].card_ids[1]),
-              CardId::CARNAGE);
+              CardId::INFLAME);
     EXPECT_EQ(static_cast<CardId>(rc.rewards.items[0].card_ids[2]),
-              CardId::PERFECTED_STRIKE);
+              CardId::HEADBUTT);
     EXPECT_EQ(rc.run.card_rng.counter, 9);
     EXPECT_EQ(rc.run.card_blizz_randomizer, 4);
     EXPECT_GT(rc.run.card_rng.counter, card_counter_before);

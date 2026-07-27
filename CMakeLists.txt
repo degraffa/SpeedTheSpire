@@ -210,6 +210,12 @@ if(STS_BUILD_TESTS)
     sts_shared_deps_begin()
     add_subdirectory(tools/oracle_bridge/translator)
     sts_shared_deps_end()
+
+    # The run-level replay harness: re-drive the sim through a captured command
+    # sequence and diff RunState at every record. Must come AFTER the translator
+    # directory -- it links both oracle_translator and the nlohmann_json
+    # INTERFACE target that directory defines.
+    add_subdirectory(tools/oracle_bridge/replay)
 endif()
 
 if(STS_BUILD_TESTS)

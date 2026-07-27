@@ -1548,7 +1548,12 @@ TEST(CardColorlessRaresChrysalis, InterleavedOrderWouldDifferFromTheJava) {
 TEST(CardColorlessRaresChrysalis, GeneratedCopiesAreZeroCostPermanently) {
     CombatState s = MakeCombat();
     AddHand(s, CardId::CHRYSALIS);
-    s.card_random_rng = from_seed(77);
+    // Seed 78, not 77: the three draw INDICES are seed-determined and unchanged,
+    // but the SKILL pool they index is now in CardLibrary library order (the
+    // B4.5 capture's recovered order), and 77's three indices happen to land on
+    // three zero-cost skills there -- which would make the zero-cost assertion
+    // below vacuous. 78 still lands on costed skills, so the pin keeps biting.
+    s.card_random_rng = from_seed(78);
     Play(s, 0);
     ASSERT_EQ(s.draw_count, 3);
 
