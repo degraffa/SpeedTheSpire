@@ -695,6 +695,7 @@ TEST(FuzzTriage, ReproducerRoundTripsEveryActionVerb) {
         engine::make_action(engine::ActionVerb::END_TURN),
         engine::make_action(engine::ActionVerb::USE_POTION, 1, 0),
         engine::make_action(engine::ActionVerb::CHOOSE, engine::kChooseBoss),
+        engine::make_action(engine::ActionVerb::CONFIRM),
     };
     const std::string path = scratch("roundtrip.repro");
     ASSERT_TRUE(write_fuzz_repro(path, rf));
@@ -838,6 +839,81 @@ TEST(FuzzPolicy, EnumeratesDiscardChoicesBeyondTheHandCapacity) {
 
 TEST(FuzzPolicy, EnumeratesExhaustChoicesBeyondTheHandCapacity) {
     ExpectLargeChoiceEnumerated(engine::ChoiceKind::EXHAUST_TO_HAND);
+}
+
+// An OPTIONAL (zero-to-N) screen: every toggle plus the confirm button, and the
+// confirm is offered from the FIRST step. That is what makes the EMPTY confirm
+// -- the move a count-driven screen has no spelling for -- reachable in a soak.
+TEST(FuzzPolicy, OptionalChoiceEnumeratesTogglesAndAnImmediateEmptyConfirm) {
+    engine::RunController rc = engine::run_begin(4567, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::COMBAT);
+    rc.combat.phase =
+        static_cast<uint8_t>(engine::CombatPhase::WAITING_ON_USER);
+    rc.combat.monster_count = 1;
+    rc.combat.monsters[0].monster_id =
+        static_cast<uint16_t>(engine::MonsterId::JAW_WORM);
+    rc.combat.monsters[0].hp = 40;
+    rc.combat.monsters[0].max_hp = 40;
+    for (uint8_t i = 0; i < 4; ++i) {
+        rc.combat.card_pool[i].card_id =
+            static_cast<uint16_t>(engine::CardId::STRIKE);
+        rc.combat.hand[i] = i;
+    }
+    rc.combat.hand_count = 4;
+    rc.combat.action_count = 1;
+    rc.combat.action_head = 0;
+    engine::ActionQueueItem& choose = rc.combat.action_queue[0];
+    choose.opcode = static_cast<uint16_t>(engine::Opcode::CHOOSE_CARD);
+    choose.amount = 3;
+    choose.flags = engine::make_choose_flags(
+        engine::ChoiceKind::EXHAUST, /*random=*/false, /*copies=*/1,
+        engine::kChoiceNoTypeFilter, /*optional=*/true);
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    ASSERT_TRUE(mask.combat.choice_pending);
+    ASSERT_TRUE(mask.combat.choice_optional);
+    ASSERT_TRUE(mask.combat.can_confirm_choice);
+
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    size_t toggles = 0;
+    size_t confirms = 0;
+    for (size_t i = 0; i < n; ++i) {
+        if (moves[i].cat == MoveCat::COMBAT_CHOOSE) {
+            ++toggles;
+        }
+        if (moves[i].cat != MoveCat::CHOICE_CONFIRM) {
+            continue;
+        }
+        ++confirms;
+        EXPECT_EQ(engine::action_verb(moves[i].action),
+                  engine::ActionVerb::CONFIRM);
+        // Taking it right now IS the empty confirm: nothing is selected, so the
+        // screen closes having exhausted nothing.
+        engine::RunController probe = rc;
+        engine::StepResult result{};
+        engine::advance(std::span<engine::RunController>(&probe, 1),
+                        std::span<const engine::Action>(&moves[i].action, 1),
+                        std::span<engine::StepResult>(&result, 1));
+        EXPECT_EQ(probe.combat.hand_count, 4) << "no card was exhausted";
+        EXPECT_EQ(probe.combat.exhaust_count, 0);
+        EXPECT_EQ(probe.combat.action_count, 0) << "the screen closed";
+    }
+    EXPECT_EQ(toggles, 4u) << "every hand card is a legal pick";
+    EXPECT_EQ(confirms, 1u);
+    EXPECT_STREQ(move_cat_name(MoveCat::CHOICE_CONFIRM), "choice_confirm");
+}
+
+// MoveCat::COUNT sizes the soak's coverage arrays, so an enumerator at or above
+// it is an out-of-bounds write, not a cosmetic slip.
+TEST(FuzzPolicy, MoveCatCountIsPastEveryEnumerator) {
+    EXPECT_GT(static_cast<int>(MoveCat::COUNT),
+              static_cast<int>(MoveCat::CHOICE_CONFIRM));
+    for (int i = 0; i < static_cast<int>(MoveCat::COUNT); ++i) {
+        EXPECT_STRNE(move_cat_name(static_cast<MoveCat>(i)), "?")
+            << "MoveCat " << i << " has no name";
+    }
 }
 
 TEST(FuzzPolicy, TreasureRoomEnumeratesDistinctOpenAndSkipActions) {

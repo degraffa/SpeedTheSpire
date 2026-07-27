@@ -391,7 +391,8 @@ namespace sts {
 // combat skeleton signature; run-level advance lands with S1
 struct Action { uint32_t bits; };  // verb:8 | arg0:8 | arg1:8 | arg2:8
 // verbs: PLAY_CARD(hand_idx, target), END_TURN, USE_POTION(slot, target),
-//        CHOOSE(option_idx)  — one enum, all phases
+//        CHOOSE(option_idx), CONFIRM  — one enum, all phases
+//        (CONFIRM appended in Stage B — see §12)
 void advance(std::span<CombatState> states,
              std::span<const Action> actions,
              std::span<StepResult> results);   // heterogeneous batch, no sync
@@ -493,6 +494,21 @@ Non-freezing amendments (additive storage fixes and source-vs-paraphrase
 corrections found during Stage A execution). None change frozen mechanics; each
 cites the provenance that outranks the losing document (§1 precedence:
 decompiled Java > this design doc > the task ledger).
+
+- **Stage B — `ActionVerb::CONFIRM` appended to §7's verb set.** §7 listed four
+  verbs, which was the whole of the M1 surface: every choice the engine had
+  selected a FIXED count and ended when that count was met, so `CHOOSE` alone
+  could express it. Purity (`ExhaustAction(magic, false, true, true)`) and
+  upgraded Forethought (`handCardSelectScreen.open(msg, 99, true, true)`) open
+  screens with `anyNumber && canPickZero`: they select ZERO to N and are ended by
+  the confirm button and by nothing else, with an empty selection a legal answer
+  (`HandCardSelectScreen.update:88-101`, `.open:495-501`). A count-driven verb
+  set has no spelling for that, so the ledger allocated `ActionVerb` 4 and it
+  lands here as `CONFIRM` (no args). While such a screen is open, `CHOOSE`
+  TOGGLES a card in or out of the pending selection rather than committing it;
+  every pre-existing choice keeps its exact semantics and every pre-existing
+  verb keeps its value. Append-only API growth, not a frozen-mechanic change; no
+  `SCHEMA_VERSION` bump and no fixture touched.
 
 - **Stage B — cardQueue `canUse` gate and dead/escaped split (§5.3 paraphrase
   correction).** The old §5.3 began at the hook fan-out and misattributed

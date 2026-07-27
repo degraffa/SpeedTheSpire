@@ -71,6 +71,7 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::TREASURE_SKIP: return "treasure_skip";
         case MoveCat::EVENT_OPTION: return "event_option";
         case MoveCat::EVENT_GRID: return "event_grid";
+        case MoveCat::CHOICE_CONFIRM: return "choice_confirm";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -165,6 +166,28 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                 }
                 const engine::ActionQueueItem& front =
                     rc.combat.action_queue[rc.combat.action_head];
+                if (cm.choice_optional) {
+                    // A zero-to-N screen: every legal toggle (picking a card up
+                    // OR putting one back) plus the confirm button. The confirm
+                    // is enumerated even with NOTHING selected -- that empty
+                    // confirm is the reachability this category exists to
+                    // measure, and offering it from the first step is what makes
+                    // the random policy hit it constantly rather than only after
+                    // it happens to deselect everything again.
+                    for (int i = 0; i < rc.combat.hand_count; ++i) {
+                        if (engine::optional_choice_slot_legal(
+                                rc.combat, front, static_cast<uint8_t>(i))) {
+                            s.add(make_action(ActionVerb::CHOOSE,
+                                              static_cast<uint8_t>(i)),
+                                  MoveCat::COMBAT_CHOOSE);
+                        }
+                    }
+                    if (cm.can_confirm_choice) {
+                        s.add(make_action(ActionVerb::CONFIRM),
+                              MoveCat::CHOICE_CONFIRM);
+                    }
+                    break;
+                }
                 const engine::ChoiceKind kind =
                     engine::choose_kind_from_flags(front.flags);
                 const uint8_t type_filter =
@@ -475,6 +498,14 @@ struct CardScore {
             // their hand before passing.
             return 1;
         case MoveCat::COMBAT_CHOOSE:
+            return 50;
+        case MoveCat::CHOICE_CONFIRM:
+            // Deliberately EQUAL to a toggle. Above it, a heuristic policy would
+            // confirm the moment the screen opened and the toggles would never
+            // be exercised; below it, it would pick the whole hand up before
+            // ever pressing the button and the EMPTY confirm would be
+            // unreachable outside the random policy. Equal scores put both on
+            // the tie-break, so every prefix length gets hit.
             return 50;
         case MoveCat::USE_POTION:
         case MoveCat::USE_POTION_TARGET:

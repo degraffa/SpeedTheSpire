@@ -1430,6 +1430,120 @@ golden vector changed. Final-tree WSL Debug, leak-detecting ASan/UBSan and
 Release are green; stale-count, documentation-link and whitespace checks are
 clean.
 
+<a id="b310c"></a>
+
+### B3.10c `[x]` Colorless uncommons — mandatory optional-selection closure
+**Deps:** B3.10b + card-limbo
+**Deliverables:** Purity (`CardId` **109**) and Forethought (`CardId` **101**),
+both live. `ChoiceKind` **8** `PUT_ON_DRAW_BOTTOM`, `ActionVerb` **4**
+`CONFIRM`, fuzz `MoveCat` **25** `CHOICE_CONFIRM`, `CardFlag` bit **14**
+`FREE_TO_PLAY_ONCE`. No new opcode.
+**The real deliverable is the optional multi-select surface.** Every choice the
+engine had selected a fixed count and ended when that count was met. These two
+select **zero to N** and end on an explicit button, which is a public
+`ActionMask` change: `CHOOSE` becomes a toggle and a new verb resolves the
+accumulated selection, the empty one included.
+**Provenance:** `Purity.java:24-46`; `ExhaustAction.java:28-36,73-110`;
+`Forethought.java:24-45`; `ForethoughtAction.java:24-66`;
+`HandCardSelectScreen.java:88-101,330-341,375-390,441-447,488-542`;
+`UseCardAction.java:87,132`; `AbstractCard.java:888,2057-2062`;
+`AbstractPlayer.java:1378`; `ConfusionPower.java:46`;
+`CardGroup.java:459-461,471-473,850-861,898-902`;
+`GameStateConverter.java:538-557`.
+**Acceptance:** tier-2 per card; directed public-API scripts for the zero-card
+confirm, partial and max selection, the base forced-one with its RNG billing,
+multi-card draw-bottom order and the one-play flag lifetime; translator tests
+for the new screen shape; a fuzz enumerator test that reaches the empty confirm.
+
+**Log:** Done 2026-07-27. Both cards are live and neither is inert; with them
+the colorless UNCOMMON block 92–111 is dense, and the two interior ids that had
+been held open are pinned as filled by the test that used to pin them as holes.
+
+**The selection state needed no new storage, because the game does not store it
+either.** `HandCardSelectScreen` never marks a card in place: selecting it
+`removeCard`s it from `p.hand` and appends it to `selectedCards`, and
+deselecting appends it to the **end** of `p.hand` rather than back where it came
+from. The two groups are therefore, at every instant, one ordered sequence —
+what is left of the hand, then the picks in pick order — and that is exactly how
+the engine holds it: the picks are the trailing suffix of `hand`, and the only
+added state is a four-bit count in the open `CHOOSE_CARD`'s flags. Pick order is
+observable, because the confirm applies the picks in it, and the array carries
+that order for free. It is also what makes the oracle's `hand` / `selected`
+split translate as a plain concatenation.
+
+`ActionMask` grows three fields — `choice_optional`, `can_confirm_choice` and
+`choice_selected_count` — all false/zero for every choice that existed before,
+so a policy written against the older surface keeps working unchanged. The
+debug-only mask-equality assert behind the four-span `advance()` overload
+compares all three, and a directed test drives a whole toggle / deselect /
+confirm sequence through that overload, so they are part of what "the mask
+matches the state" means rather than fields the assert forgot. The confirm
+button is legal for as long as an optional screen is open, nothing picked
+included: `canPickZero` enables it at open and `refreshSelectedCards` never
+disables it again for an `anyNumber && canPickZero` screen.
+
+**Two Java branch guards are load-bearing and both are easy to get backwards.**
+`ExhaustAction`'s "hand.size() <= amount → exhaust the whole hand with no
+screen" is guarded by `!anyNumber`, and Purity passes `anyNumber` true — so a
+two-card hand under a three-card Purity still opens the screen, and taking none
+of them is a legal answer. Purity's `isRandom` is false, so it spends **no** RNG
+on any path, the empty-hand one included. `ForethoughtAction`'s forced path
+(`hand.size() == 1 && !chooseAny`) takes `getTopCard()` with **no**
+`cardRandomRng` draw at all — unlike the `PutOnDeckAction` forced path whose
+per-card billing was fix-forwarded earlier in this phase. Only what the Java
+bills is billed, and both facts are pinned by named tests.
+
+Draw-bottom order is pinned end to end: `moveToBottomOfDeck` → `addToBottom` →
+`group.add(0, c)`, so with several picks the last one ends up deepest and the
+first is the first of them drawn again. `FREE_TO_PLAY_ONCE` is granted per moved
+card on the strict `c.cost > 0` predicate against the reconstructed combat
+**base** cost, not `costForTurn` — so a card that is merely free for the turn
+still qualifies and a permanently-zeroed one does not. Its lifetime mirrors the
+action-local exhaust bit the card-limbo work landed: it admits the card at
+`hasEnoughEnergy`, suppresses the spend in `useCard`, and is consumed when the
+queued `UseCardAction` files the card — cleared unconditionally at the top of
+that update, so even a POWER, which lands in no pile at all, spends it. The
+terminal limbo flush clears it too. Confusion's redraw clears it as well; that
+clear was already quoted in the power's body comment with nothing to apply it
+to, and the prerequisite has now arrived.
+
+The translator's deferred `can_pick_zero` is discharged: `HAND_SELECT` is mapped
+rather than deferred, all four of its keys. The screen's `hand` is cross-checked
+against `combat_state.hand` (the same `p.hand.group`, emitted twice in one
+converter run), `selected` is appended in pick order onto the hand suffix, and
+`max_cards` / `can_pick_zero` become the synthesized open choice's `amount` and
+optional bit. What it deliberately does not claim is the **manipulation kind**:
+`getHandSelectState` emits no field for it, because in the game that lives in
+the action which opened the screen and the protocol serializes no actions at
+all. The synthesized item therefore carries the selection shape and leaves the
+kind at zero — and it exists precisely so that the concatenated hand cannot be
+silently misread as an ordinary larger hand. Everything outside the model
+refuses loudly: a mandatory screen holding a partial selection (the sim applies
+each mandatory pick immediately and has no held-aside state to translate), more
+picked than `max_cards`, a `hand` that disagrees with the combat state, a wrong
+JSON type, a missing key.
+
+Fuzz `MoveCat` 25 is its own category rather than a share of `combat_choose`,
+because the thing worth counting is that the **empty** confirm is reached and a
+shared counter could not tell a confirm from a toggle. The enumerator offers the
+confirm from the first step and scores it equal to a toggle, so the heuristic
+policies neither confirm the instant a screen opens nor pick the whole hand up
+before pressing it; `COUNT` moves to 26, and a named test pins it past every
+enumerator and every enumerator to a name. The reproducer round-trip covers the
+new verb.
+
+No `CombatState`, registry schema, fixture or golden vector changed: the flag
+bit, the fourth choice-kind bit, the optional bit and the selected-count nibble
+all fit previously-zero bits of existing words. Final-tree WSL Debug,
+leak-detecting ASan/UBSan and Release are green; stale-count,
+documentation-link and whitespace checks are clean.
+
+Integration note (recorded at landing, 2026-07-27): these two rows were the
+last members of B4.12's metadata-derived Living Wall COLORLESS transform pool,
+so its temporary completeness-dependency row in the Deferred obligations table
+is discharged and deleted in the integration commit — membership is complete
+and pinned by the generated-shape tests.
+
 <a id="b311"></a>
 
 ### B3.11 `[x]` ∥ Colorless rares

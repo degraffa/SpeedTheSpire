@@ -438,7 +438,15 @@ bool card_can_use_without_target(const CombatState& s,
          !draw_pile_has_type(s, def->requires_draw_pile_type))) {
         return false;
     }
-    if (!autoplay && s.player_energy < static_cast<int16_t>(card.cost_now)) {
+    // AbstractCard.hasEnoughEnergy (:888):
+    //     EnergyPanel.totalCount >= costForTurn || freeToPlay() || isInAutoplay
+    // -- so a freeToPlayOnce card is legal at ANY energy, exactly as an autoplay
+    // is. freeToPlay() is also true while FreeAttackPower is up (Corruption's
+    // ATTACK cousin, :2057-2062), which has no registry row, so the instance bit
+    // is the whole predicate here.
+    if (!autoplay &&
+        !has_card_flag(card.flags, CardFlag::FREE_TO_PLAY_ONCE) &&
+        s.player_energy < static_cast<int16_t>(card.cost_now)) {
         return false;
     }
     return true;
@@ -612,9 +620,16 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
     //    X-cost already consumed all energy above; otherwise deduct the
     //    per-instance runtime cost (card_pool[...].cost_now), so a cost modifier
     //    (SET_COST) is honored.
-    if (!autoplay && is_xcost) {
+    //    The freeToPlayOnce clause of the same skip (AbstractPlayer.java:1378's
+    //    `c.freeToPlay()`): the play costs nothing. It is read off the flags
+    //    SNAPSHOT taken above, because the card's own program may already have
+    //    granted or spent the bit by now, while the Java reads it at useCard
+    //    time. The bit itself is consumed later, when the queued USE_CARD files
+    //    the card (UseCardAction.java:87).
+    const bool free_once = has_card_flag(inst_flags, CardFlag::FREE_TO_PLAY_ONCE);
+    if (!autoplay && is_xcost && !free_once) {
         s.player_energy = 0;
-    } else if (!autoplay && !corruption_makes_free(s, *def)) {
+    } else if (!autoplay && !free_once && !corruption_makes_free(s, *def)) {
         s.player_energy =
             static_cast<int16_t>(s.player_energy - static_cast<int16_t>(cost_now));
     }

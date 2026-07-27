@@ -28,6 +28,7 @@
 #include "sts/engine/powers.hpp"
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -176,12 +177,18 @@ TEST(CardColorlessUncommonsRegistry, ExactRosterInCardLibraryOrder) {
     }
 }
 
-TEST(CardColorlessUncommonsRegistry, InteriorIdsStayReserved) {
-    // 101 Forethought and 109 Purity belong to mandatory next task B3.10c.
-    // They must stay empty in this branch, not quietly backfilled.
-    for (const int reserved : {101, 109}) {
-        EXPECT_EQ(card_def(static_cast<CardId>(reserved)), nullptr)
-            << "id " << reserved << " is reserved and must have no row";
+TEST(CardColorlessUncommonsRegistry, InteriorIdsAreFilledAndTheBlockIsComplete) {
+    // 101 Forethought and 109 Purity were the two interior ids held open while
+    // the engine had no OPTIONAL zero-to-N hand selection to express them with.
+    // They are exactly the cards CardLibrary.addColorlessCards puts at those
+    // alphabetical positions, and with them the colorless UNCOMMON block 92-111
+    // is dense -- so this now pins completeness where it used to pin the holes.
+    EXPECT_EQ(static_cast<int>(CardId::FORETHOUGHT), 101);
+    EXPECT_EQ(static_cast<int>(CardId::PURITY), 109);
+    for (int id = 92; id <= 111; ++id) {
+        const CardDef* d = card_def(static_cast<CardId>(id));
+        ASSERT_NE(d, nullptr) << "id " << id << " has no row";
+        EXPECT_EQ(static_cast<int>(d->id), id);
     }
 }
 
@@ -1221,6 +1228,568 @@ TEST(CardColorlessUncommonsDirected, PanicButtonNoBlockDeepBreathScript) {
     Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));   // Swift Strike: 7
     EXPECT_EQ(s.monsters[0].hp, 53);
     EXPECT_EQ(s.player_energy, 3) << "every card played this turn was free";
+}
+
+// ===========================================================================
+// OPTIONAL (zero-to-N) selection: Purity and upgraded Forethought
+// ===========================================================================
+//
+// These two are the only cards whose hand-select screen is ended by a BUTTON
+// rather than by a count, so everything below drives the public surface --
+// legal_actions() to read the screen, advance(CHOOSE) to toggle, advance(
+// CONFIRM) to press it -- and never reaches into the queue item.
+
+// Open a screen by playing `card` and return the mask that describes it.
+ActionMask OpenChoice(CombatState& s, uint8_t hand_slot) {
+    StepResult r{};
+    const Action a = make_action(ActionVerb::PLAY_CARD, hand_slot);
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(&a, 1),
+            std::span<StepResult>(&r, 1));
+    ActionMask m{};
+    legal_actions(s, m);
+    return m;
+}
+
+TEST(CardColorlessUncommonsRegistry, PurityAndForethoughtRows) {
+    const CardDef* purity = card_def(CardId::PURITY);
+    ASSERT_NE(purity, nullptr);
+    EXPECT_EQ(purity->base_cost, 0);
+    EXPECT_EQ(purity->upgraded_cost, 0);
+    EXPECT_EQ(purity->type, CardType::SKILL);
+    EXPECT_FALSE(purity->needs_target);
+    EXPECT_EQ(purity->target_kind, CardTargetKind::NONE);
+    EXPECT_TRUE(has_card_flag(purity->flags, CardFlag::EXHAUST));
+    EXPECT_TRUE(has_card_flag(purity->upgraded_flags, CardFlag::EXHAUST));
+    // magicNumber 3, upgradeMagicNumber(2) -> 5, carried as the step's amount.
+    ASSERT_EQ(purity->step_count, 1);
+    ASSERT_EQ(purity->upgraded_step_count, 1);
+    EXPECT_EQ(static_cast<int>(purity->steps[0].op), static_cast<int>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(purity->steps[0].amount, 3);
+    EXPECT_EQ(purity->upgraded_steps[0].amount, 5);
+    for (const CardEffectStep& st : {purity->steps[0], purity->upgraded_steps[0]}) {
+        EXPECT_EQ(choose_kind_from_flags(st.extra), ChoiceKind::EXHAUST);
+        EXPECT_TRUE(choose_is_optional(st.extra));
+        EXPECT_FALSE(choose_is_random(st.extra))
+            << "ExhaustAction(magic, false, true, true): isRandom is FALSE";
+    }
+
+    const CardDef* ft = card_def(CardId::FORETHOUGHT);
+    ASSERT_NE(ft, nullptr);
+    EXPECT_EQ(ft->base_cost, 0);
+    EXPECT_EQ(ft->upgraded_cost, 0) << "upgrade() changes name and text only";
+    EXPECT_EQ(ft->type, CardType::SKILL);
+    EXPECT_FALSE(ft->needs_target);
+    EXPECT_EQ(ft->flags, 0) << "Forethought does not exhaust";
+    EXPECT_EQ(ft->upgraded_flags, 0);
+    ASSERT_EQ(ft->step_count, 1);
+    ASSERT_EQ(ft->upgraded_step_count, 1);
+    // The ONLY difference between the rows is the selection mode.
+    EXPECT_EQ(choose_kind_from_flags(ft->steps[0].extra),
+              ChoiceKind::PUT_ON_DRAW_BOTTOM);
+    EXPECT_EQ(choose_kind_from_flags(ft->upgraded_steps[0].extra),
+              ChoiceKind::PUT_ON_DRAW_BOTTOM);
+    EXPECT_FALSE(choose_is_optional(ft->steps[0].extra))
+        << "base opens a MANDATORY exactly-one screen (open(msg, 1, false))";
+    EXPECT_TRUE(choose_is_optional(ft->upgraded_steps[0].extra))
+        << "upgraded opens open(msg, 99, true, true)";
+    EXPECT_EQ(ft->steps[0].amount, 1);
+    EXPECT_EQ(ft->upgraded_steps[0].amount, 99);
+}
+
+TEST(CardColorlessUncommonsRegistry, BothJoinTheColorlessCombatPool) {
+    auto pool_has = [](CardId id) {
+        return std::find(kColorlessCombatPool.begin(),
+                         kColorlessCombatPool.end(),
+                         id) != kColorlessCombatPool.end();
+    };
+    // COLORLESS, non-BASIC, and neither carries CardTags.HEALING (the one thing
+    // returnTrulyRandomColorlessCardInCombat excludes) -- Purity.java:24-28 and
+    // Forethought.java:24-26 add no tags at all.
+    EXPECT_TRUE(pool_has(CardId::PURITY));
+    EXPECT_TRUE(pool_has(CardId::FORETHOUGHT));
+    // The colour-gated red pools are untouched by two COLORLESS SKILLs.
+    for (const CardId id : kIroncladCombatPool) {
+        EXPECT_NE(id, CardId::PURITY);
+        EXPECT_NE(id, CardId::FORETHOUGHT);
+    }
+}
+
+// --- Purity ---------------------------------------------------------------
+
+TEST(CardColorlessUncommonsPurity, EmptyHandNeverOpensAScreen) {
+    // ExhaustAction.java:76-79: hand.size() == 0 -> isDone, no screen. Purity is
+    // the only card in hand, so by the time its action resolves the hand is
+    // empty (the played card is in limbo).
+    CombatState s = MakeCombat();
+    const CardPoolIndex purity = AddHand(s, CardId::PURITY);
+    const int32_t rng_before = s.card_random_rng.counter;
+
+    ActionMask m = OpenChoice(s, 0);
+    EXPECT_FALSE(m.choice_pending) << "nothing to show, so nothing to choose";
+    EXPECT_TRUE(m.can_end_turn);
+    EXPECT_TRUE(PileHas(s.exhaust, s.exhaust_count, purity));
+    EXPECT_EQ(s.card_random_rng.counter, rng_before)
+        << "isRandom is false: Purity spends no RNG on any path";
+}
+
+TEST(CardColorlessUncommonsPurity, SmallHandStillOpensTheScreen) {
+    // The branch that would auto-exhaust a hand of <= amount cards
+    // (ExhaustAction.java:80-89) is guarded by `!this.anyNumber`, and Purity
+    // passes anyNumber TRUE. So a 2-card hand under a 3-card Purity is NOT
+    // silently exhausted -- the screen opens and zero is still a legal answer.
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::PURITY);
+    const CardPoolIndex a = AddHand(s, CardId::STRIKE);
+    const CardPoolIndex b = AddHand(s, CardId::DEFEND);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_pending);
+    EXPECT_TRUE(m.choice_optional);
+    EXPECT_TRUE(m.can_confirm_choice);
+    EXPECT_EQ(m.choice_selected_count, 0);
+    EXPECT_FALSE(m.can_end_turn);
+    EXPECT_TRUE(m.can_choose[0]);
+    EXPECT_TRUE(m.can_choose[1]);
+    EXPECT_FALSE(m.can_choose[2]);
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_TRUE(PileHas(s.hand, s.hand_count, a));
+    EXPECT_TRUE(PileHas(s.hand, s.hand_count, b));
+}
+
+TEST(CardColorlessUncommonsPurity, ZeroCardConfirmExhaustsNothingButPurity) {
+    CombatState s = MakeCombat();
+    const CardPoolIndex purity = AddHand(s, CardId::PURITY);
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::DEFEND);
+    AddHand(s, CardId::BASH);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_pending);
+    ASSERT_TRUE(m.can_confirm_choice) << "canPickZero enables the button at open";
+
+    Step(s, make_action(ActionVerb::CONFIRM));
+    legal_actions(s, m);
+    EXPECT_FALSE(m.choice_pending);
+    EXPECT_EQ(s.hand_count, 3) << "the whole hand survived an empty confirm";
+    EXPECT_EQ(s.exhaust_count, 1);
+    EXPECT_EQ(s.exhaust[0], purity) << "only Purity's own exhaust=true fired";
+    EXPECT_TRUE(m.can_end_turn) << "control is back with the player";
+}
+
+TEST(CardColorlessUncommonsPurity, PartialSelectionExhaustsInPickOrder) {
+    // ExhaustAction.java:102-105 walks selectedCards.group, which the screen
+    // built in PICK order (selectHoveredCard -> selectedCards.addToTop), so the
+    // exhaust pile ends up in pick order too -- NOT hand order.
+    CombatState s = MakeCombat();
+    const CardPoolIndex purity = AddHand(s, CardId::PURITY);
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    const CardPoolIndex defend = AddHand(s, CardId::DEFEND);
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    // Pick the LAST hand card first, then the first: pick order reverses hand
+    // order, which is the only way to tell the two apart.
+    Step(s, make_action(ActionVerb::CHOOSE, 2));  // bash
+    legal_actions(s, m);
+    EXPECT_EQ(m.choice_selected_count, 1);
+    EXPECT_EQ(s.hand[s.hand_count - 1], bash) << "the pick moved to the end";
+    EXPECT_EQ(s.hand[0], strike) << "the rest of the hand kept its order";
+    EXPECT_EQ(s.hand[1], defend);
+
+    Step(s, make_action(ActionVerb::CHOOSE, 0));  // strike
+    legal_actions(s, m);
+    EXPECT_EQ(m.choice_selected_count, 2);
+    ASSERT_EQ(s.hand_count, 3);
+    EXPECT_EQ(s.hand[0], defend);
+    EXPECT_EQ(s.hand[1], bash) << "picks stay in PICK order";
+    EXPECT_EQ(s.hand[2], strike);
+
+    Step(s, make_action(ActionVerb::CONFIRM));
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.hand[0], defend);
+    ASSERT_EQ(s.exhaust_count, 3);
+    EXPECT_EQ(s.exhaust[0], bash) << "picked first, exhausted first";
+    EXPECT_EQ(s.exhaust[1], strike);
+    EXPECT_EQ(s.exhaust[2], purity) << "Purity's UseCardAction is queued LAST";
+}
+
+TEST(CardColorlessUncommonsPurity, DeselectAppendsToTheEndOfTheHand) {
+    // updateSelectedCards (:441-443) puts a deselected card back with
+    // hand.addToTop -- the END of the hand, not the slot it came from.
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::PURITY);
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    const CardPoolIndex defend = AddHand(s, CardId::DEFEND);
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    Step(s, make_action(ActionVerb::CHOOSE, 0));  // pick strike
+    legal_actions(s, m);
+    // Hand is now [defend, bash | strike]; slot 2 is the pick and is toggleable.
+    ASSERT_EQ(m.choice_selected_count, 1);
+    EXPECT_TRUE(m.can_choose[2]);
+    Step(s, make_action(ActionVerb::CHOOSE, 2));  // put strike back
+    legal_actions(s, m);
+    EXPECT_EQ(m.choice_selected_count, 0);
+    ASSERT_EQ(s.hand_count, 3);
+    EXPECT_EQ(s.hand[0], defend);
+    EXPECT_EQ(s.hand[1], bash);
+    EXPECT_EQ(s.hand[2], strike) << "back at the END, not at slot 0";
+
+    Step(s, make_action(ActionVerb::CONFIRM));
+    EXPECT_EQ(s.hand_count, 3) << "an empty confirm after a full round trip";
+    EXPECT_EQ(s.exhaust_count, 1);
+}
+
+TEST(CardColorlessUncommonsPurity, MaxSelectionIsMagicNumberAndUpgradeMovesIt) {
+    for (uint8_t up = 0; up < 2; ++up) {
+        const int cap = up == 0 ? 3 : 5;
+        CombatState s = MakeCombat();
+        AddHand(s, CardId::PURITY, up);
+        for (int i = 0; i < 6; ++i) {
+            AddHand(s, CardId::STRIKE);
+        }
+        ActionMask m = OpenChoice(s, 0);
+        ASSERT_TRUE(m.choice_optional);
+        for (int i = 0; i < cap; ++i) {
+            Step(s, make_action(ActionVerb::CHOOSE, 0));
+        }
+        legal_actions(s, m);
+        EXPECT_EQ(m.choice_selected_count, cap);
+        // The cap is reached: unpicked slots close, picked ones stay open
+        // (selectHoveredCard's `numCardsToSelect > selectedCards.size()` gate).
+        const uint8_t unpicked = static_cast<uint8_t>(s.hand_count - cap);
+        for (uint8_t i = 0; i < s.hand_count; ++i) {
+            EXPECT_EQ(m.can_choose[i], i >= unpicked)
+                << "slot " << static_cast<int>(i) << " at cap " << cap;
+        }
+        EXPECT_TRUE(m.can_confirm_choice);
+
+        Step(s, make_action(ActionVerb::CONFIRM));
+        EXPECT_EQ(s.hand_count, static_cast<uint8_t>(6 - cap));
+        EXPECT_EQ(s.exhaust_count, cap + 1) << "the picks plus Purity itself";
+    }
+}
+
+// --- Forethought ----------------------------------------------------------
+
+TEST(CardColorlessUncommonsForethought, BaseForcesTheSingleHandCardWithNoRng) {
+    // ForethoughtAction.java:37-45: hand.size() == 1 && !chooseAny takes
+    // getTopCard() -- the LAST hand entry -- with NO screen and, unlike
+    // PutOnDeckAction's forced branch, NO cardRandomRng draw.
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::FORETHOUGHT);
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+    AddDrawTop(s, CardId::STRIKE);
+    const int32_t rng_before = s.card_random_rng.counter;
+
+    ActionMask m = OpenChoice(s, 0);
+    EXPECT_FALSE(m.choice_pending) << "one eligible card is forced, not prompted";
+    EXPECT_EQ(s.card_random_rng.counter, rng_before)
+        << "ForethoughtAction bills no RNG on its forced path";
+    EXPECT_EQ(s.hand_count, 0);
+    ASSERT_EQ(s.draw_count, 2);
+    EXPECT_EQ(s.draw[0], bash) << "addToBottom == draw index 0";
+    EXPECT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE))
+        << "Bash costs 2 > 0";
+}
+
+TEST(CardColorlessUncommonsForethought, BasePromptsMandatoryOneWithNoConfirm) {
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::FORETHOUGHT);
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    const CardPoolIndex defend = AddHand(s, CardId::DEFEND);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_pending);
+    EXPECT_FALSE(m.choice_optional) << "open(msg, 1, false) is mandatory";
+    EXPECT_FALSE(m.can_confirm_choice) << "a mandatory screen has no button move";
+    EXPECT_EQ(m.choice_selected_count, 0);
+
+    // CONFIRM is not legal here and must be a clean no-op.
+    Step(s, make_action(ActionVerb::CONFIRM));
+    legal_actions(s, m);
+    EXPECT_TRUE(m.choice_pending) << "the screen is still open";
+    EXPECT_EQ(s.hand_count, 2);
+
+    Step(s, make_action(ActionVerb::CHOOSE, 1));  // defend
+    EXPECT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.hand[0], strike);
+    ASSERT_EQ(s.draw_count, 1);
+    EXPECT_EQ(s.draw[0], defend);
+    EXPECT_TRUE(has_card_flag(s.card_pool[defend].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE));
+}
+
+TEST(CardColorlessUncommonsForethought, UpgradedZeroConfirmMovesNothing) {
+    CombatState s = MakeCombat();
+    const CardPoolIndex ft = AddHand(s, CardId::FORETHOUGHT, /*upgrade=*/1);
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::DEFEND);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_pending);
+    EXPECT_TRUE(m.choice_optional);
+    Step(s, make_action(ActionVerb::CONFIRM));
+
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.draw_count, 0);
+    EXPECT_EQ(s.exhaust_count, 0) << "Forethought does not exhaust";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, ft));
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        EXPECT_FALSE(has_card_flag(s.card_pool[s.hand[i]].flags,
+                                   CardFlag::FREE_TO_PLAY_ONCE));
+    }
+}
+
+TEST(CardColorlessUncommonsForethought, UpgradedMultiCardBottomOrder) {
+    // Each moved card is addToBottom'd in pick order, and addToBottom inserts at
+    // index 0 -- so the LAST pick ends up deepest and the FIRST pick is the one
+    // drawn next of the three.
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::FORETHOUGHT, /*upgrade=*/1);
+    const CardPoolIndex strike = AddHand(s, CardId::STRIKE);
+    const CardPoolIndex defend = AddHand(s, CardId::DEFEND);
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+    const CardPoolIndex resting = AddDrawTop(s, CardId::STRIKE);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    Step(s, make_action(ActionVerb::CHOOSE, 0));  // pick strike  (1st)
+    Step(s, make_action(ActionVerb::CHOOSE, 0));  // pick defend  (2nd)
+    Step(s, make_action(ActionVerb::CHOOSE, 0));  // pick bash    (3rd)
+    legal_actions(s, m);
+    EXPECT_EQ(m.choice_selected_count, 3);
+    EXPECT_EQ(m.can_confirm_choice, true);
+
+    Step(s, make_action(ActionVerb::CONFIRM));
+    EXPECT_EQ(s.hand_count, 0);
+    ASSERT_EQ(s.draw_count, 4);
+    EXPECT_EQ(s.draw[0], bash) << "last picked, deepest";
+    EXPECT_EQ(s.draw[1], defend);
+    EXPECT_EQ(s.draw[2], strike) << "first picked, nearest the top of the three";
+    EXPECT_EQ(s.draw[3], resting) << "the pile that was already there is on top";
+}
+
+TEST(CardColorlessUncommonsForethought, FreeToPlayOnceOnlyForNonZeroCost) {
+    // `if (c.cost > 0)` is strict and reads AbstractCard.cost -- the combat BASE
+    // cost, which differs from costForTurn in both directions:
+    //   Flash of Steel is a genuine 0-cost card             -> no grant
+    //   Wound's Java cost is -2, the UNPLAYABLE sentinel    -> no grant
+    //   Bash is 2                                           -> grant
+    //   a Bash made free FOR THE TURN still has base cost 2 -> grant
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::FORETHOUGHT, /*upgrade=*/1);
+    const CardPoolIndex free_card = AddHand(s, CardId::FLASH_OF_STEEL);
+    const CardPoolIndex clutter = AddHand(s, CardId::WOUND);
+    const CardPoolIndex paid = AddHand(s, CardId::BASH);
+    const CardPoolIndex temp_free = AddHand(s, CardId::BASH);
+    s.card_pool[temp_free].cost_now = 0;
+    s.card_pool[temp_free].flags = static_cast<uint16_t>(
+        s.card_pool[temp_free].flags |
+        card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN));
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    for (int i = 0; i < 4; ++i) {
+        Step(s, make_action(ActionVerb::CHOOSE, 0));
+    }
+    Step(s, make_action(ActionVerb::CONFIRM));
+    ASSERT_EQ(s.draw_count, 4) << "an unplayable card is still selectable";
+
+    EXPECT_FALSE(has_card_flag(s.card_pool[free_card].flags,
+                               CardFlag::FREE_TO_PLAY_ONCE))
+        << "a 0-cost card gains nothing";
+    EXPECT_FALSE(has_card_flag(s.card_pool[clutter].flags,
+                               CardFlag::FREE_TO_PLAY_ONCE))
+        << "cost -2 is not > 0 either";
+    EXPECT_TRUE(has_card_flag(s.card_pool[paid].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE));
+    EXPECT_TRUE(has_card_flag(s.card_pool[temp_free].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE))
+        << "setCostForTurn(0) does not move AbstractCard.cost";
+}
+
+TEST(CardColorlessUncommonsForethought, FreeToPlayOnceSurvivesOneCostZeroPlay) {
+    // The whole lifetime, driven publicly: grant, draw it back, play it at ZERO
+    // energy (hasEnoughEnergy admits it, useCard spends nothing), then see the
+    // bit gone and the card payable again only at its real cost.
+    CombatState s = MakeCombat(/*energy=*/1);
+    AddHand(s, CardId::FORETHOUGHT, /*upgrade=*/1);
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    Step(s, make_action(ActionVerb::CHOOSE, 0));
+    Step(s, make_action(ActionVerb::CONFIRM));
+    ASSERT_EQ(s.draw_count, 1);
+    ASSERT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE));
+
+    // Draw it back. Energy is 1; Bash costs 2, so only the grant makes it legal.
+    draw_cards(s, 1);
+    ASSERT_EQ(s.hand_count, 1);
+    ASSERT_EQ(s.hand[0], bash);
+    EXPECT_EQ(s.card_pool[bash].cost_now, 2) << "the grant is not a cost change";
+    legal_actions(s, m);
+    ASSERT_TRUE(m.can_play[0]);
+    ASSERT_TRUE(m.can_play_target[0][0]);
+
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));
+    EXPECT_EQ(s.player_energy, 1) << "freeToPlay() suppresses the spend";
+    EXPECT_FALSE(has_card_flag(s.card_pool[bash].flags,
+                               CardFlag::FREE_TO_PLAY_ONCE))
+        << "UseCardAction.update:87 consumes it on the one play";
+    ASSERT_TRUE(PileHas(s.discard, s.discard_count, bash));
+
+    // Second time around it is an ordinary 2-cost card and 1 energy is not enough.
+    s.discard_count = 0;
+    s.hand[s.hand_count++] = bash;
+    legal_actions(s, m);
+    EXPECT_FALSE(m.can_play[0]) << "the free play was spent, the cost is back";
+}
+
+TEST(CardColorlessUncommonsForethought, FreeToPlayOnceDiesWithTheCombat) {
+    // A card still in limbo when the combat ends is normalized by the terminal
+    // flush, and the one-play bits do not outlive it -- the same discipline the
+    // action-local exhaust bit follows there.
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/1);
+    AddHand(s, CardId::FORETHOUGHT, /*upgrade=*/1);
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    Step(s, make_action(ActionVerb::CHOOSE, 0));
+    Step(s, make_action(ActionVerb::CONFIRM));
+    ASSERT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE));
+
+    draw_cards(s, 1);
+    legal_actions(s, m);
+    ASSERT_TRUE(m.can_play_target[0][0]);
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));  // Bash kills the monster
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_FALSE(has_card_flag(s.card_pool[bash].flags,
+                               CardFlag::FREE_TO_PLAY_ONCE));
+}
+
+// --- Shared surface -------------------------------------------------------
+
+TEST(CardColorlessUncommonsOptionalChoice, IllegalMovesAreCleanNoOps) {
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::PURITY);
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::DEFEND);
+
+    ActionMask m = OpenChoice(s, 0);
+    ASSERT_TRUE(m.choice_optional);
+    const CombatState before = s;
+
+    // Out-of-hand slot, a play and an end-turn while the screen is up.
+    Step(s, make_action(ActionVerb::CHOOSE, 7));
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0, 0));
+    Step(s, make_action(ActionVerb::END_TURN));
+    EXPECT_EQ(hash_state(s), hash_state(before))
+        << "no illegal action may move the state";
+
+    legal_actions(s, m);
+    EXPECT_TRUE(m.choice_pending);
+    EXPECT_EQ(m.choice_selected_count, 0);
+    EXPECT_FALSE(m.can_end_turn);
+    for (int i = 0; i < kHandCap; ++i) {
+        EXPECT_FALSE(m.can_play[i]);
+    }
+}
+
+TEST(CardColorlessUncommonsOptionalChoice, ConfirmIsIllegalWhenNoScreenIsOpen) {
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::STRIKE);
+    ActionMask m{};
+    legal_actions(s, m);
+    ASSERT_FALSE(m.choice_pending);
+    EXPECT_FALSE(m.can_confirm_choice);
+
+    const CombatState before = s;
+    Step(s, make_action(ActionVerb::CONFIRM));
+    EXPECT_EQ(hash_state(s), hash_state(before));
+}
+
+TEST(CardColorlessUncommonsOptionalChoice, SuppliedMaskOverloadAgreesThroughout) {
+    // The four-span overload's debug contract assert covers the three new mask
+    // fields; drive a whole optional selection through it to prove they are part
+    // of what "the mask matches the state" means.
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::PURITY);
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::DEFEND);
+
+    const Action script[] = {
+        make_action(ActionVerb::PLAY_CARD, 0),
+        make_action(ActionVerb::CHOOSE, 1),
+        make_action(ActionVerb::CHOOSE, 1),  // deselect it again
+        make_action(ActionVerb::CHOOSE, 0),
+        make_action(ActionVerb::CONFIRM),
+    };
+    for (const Action a : script) {
+        ActionMask m{};
+        legal_actions(s, m);
+        StepResult r{};
+        advance(std::span<CombatState>(&s, 1), std::span<const Action>(&a, 1),
+                std::span<StepResult>(&r, 1), std::span<const ActionMask>(&m, 1));
+    }
+    EXPECT_EQ(s.exhaust_count, 2) << "one picked card plus Purity";
+    EXPECT_EQ(s.hand_count, 1);
+}
+
+TEST(CardColorlessUncommonsDirected, PurityThenForethoughtScript) {
+    // One turn, public API only: Purity takes two of four, upgraded Forethought
+    // then tucks the survivors under the draw pile with a free play banked.
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/80);
+    AddHand(s, CardId::PURITY);                     // 0
+    AddHand(s, CardId::FORETHOUGHT, /*upgrade=*/1); // 1
+    AddHand(s, CardId::STRIKE);                     // 2
+    AddHand(s, CardId::DEFEND);                     // 3
+    const CardPoolIndex bash = AddHand(s, CardId::BASH);  // 4
+
+    ActionMask m{};
+    legal_actions(s, m);
+    ASSERT_TRUE(m.can_play[0]);
+    ASSERT_FALSE(m.choice_pending);
+
+    Step(s, make_action(ActionVerb::PLAY_CARD, 0));  // Purity
+    legal_actions(s, m);
+    ASSERT_TRUE(m.choice_optional);
+    ASSERT_EQ(s.hand_count, 4);
+    // Exhaust Strike and Defend, leaving Forethought+ and Bash.
+    Step(s, make_action(ActionVerb::CHOOSE,
+                        static_cast<uint8_t>(FindHandSlot(s, CardId::STRIKE))));
+    Step(s, make_action(ActionVerb::CHOOSE,
+                        static_cast<uint8_t>(FindHandSlot(s, CardId::DEFEND))));
+    Step(s, make_action(ActionVerb::CONFIRM));
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.exhaust_count, 3) << "Strike, Defend, then Purity";
+    EXPECT_EQ(s.player_energy, 3) << "Purity costs 0";
+
+    const int ft_slot = FindHandSlot(s, CardId::FORETHOUGHT);
+    ASSERT_GE(ft_slot, 0);
+    Step(s, make_action(ActionVerb::PLAY_CARD, static_cast<uint8_t>(ft_slot)));
+    legal_actions(s, m);
+    ASSERT_TRUE(m.choice_optional);
+    ASSERT_EQ(s.hand_count, 1) << "only Bash is left to offer";
+    Step(s, make_action(ActionVerb::CHOOSE, 0));
+    Step(s, make_action(ActionVerb::CONFIRM));
+
+    EXPECT_EQ(s.hand_count, 0);
+    ASSERT_EQ(s.draw_count, 1);
+    EXPECT_EQ(s.draw[0], bash);
+    EXPECT_TRUE(has_card_flag(s.card_pool[bash].flags,
+                              CardFlag::FREE_TO_PLAY_ONCE));
+
+    legal_actions(s, m);
+    EXPECT_TRUE(m.can_end_turn);
+    EXPECT_FALSE(m.choice_pending);
 }
 
 }  // namespace

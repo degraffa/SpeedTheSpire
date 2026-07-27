@@ -971,4 +971,144 @@ TEST(Translator, TheBombPrefixNormalizationDoesNotSwallowNearMisses) {
     }
 }
 
+// --- HAND_SELECT: the optional-selection screen, mapped rather than deferred --
+//
+// getHandSelectState (GameStateConverter.java:538-557) splits the cards in two:
+// `hand` is what is left of p.hand and `selected` is the picks, in pick order.
+// The sim keeps both as one array with the picks as the hand's trailing suffix,
+// so the translation is a concatenation plus a count -- and every shape it
+// cannot model refuses loudly instead of guessing.
+
+// The combat record's own hand array, verbatim. Card objects contain no nested
+// arrays, so the first ']' closes it.
+std::string hand_array_of(const std::string& line) {
+    const std::string key = "\"hand\":[";
+    const auto open = line.find(key);
+    EXPECT_NE(open, std::string::npos);
+    const auto close = line.find(']', open);
+    EXPECT_NE(close, std::string::npos);
+    const auto start = open + key.size() - 1;
+    return line.substr(start, close + 1 - start);
+}
+
+std::string with_hand_select_screen(const std::string& line,
+                                    const std::string& selected_json,
+                                    const std::string& max_cards,
+                                    const std::string& can_pick_zero,
+                                    const std::string& hand_override = "") {
+    const std::string anchor = "\"screen_type\":\"NONE\"";
+    std::string out = line;
+    const auto pos = out.find(anchor);
+    EXPECT_NE(pos, std::string::npos);
+    const std::string hand =
+        hand_override.empty() ? hand_array_of(line) : hand_override;
+    out.replace(pos, anchor.size(),
+                "\"screen_type\":\"HAND_SELECT\",\"screen_state\":{\"hand\":" +
+                    hand + ",\"selected\":" + selected_json +
+                    ",\"max_cards\":" + max_cards +
+                    ",\"can_pick_zero\":" + can_pick_zero + "}");
+    return out;
+}
+
+const char* kOnePick =
+    R"([{"id":"Bash","name":"Bash","uuid":"0","cost":2,"upgrades":0,)"
+    R"("type":"ATTACK","rarity":"BASIC","has_target":true,"exhausts":false,)"
+    R"("ethereal":false,"is_playable":true}])";
+
+TEST(Translator, HandSelectOptionalScreenConcatenatesPicksOntoTheHand) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    tr::TranslatedRun base =
+        tr::translate_lines({lines[0], lines[2]}, "hand-select-base");
+    ASSERT_EQ(base.records.size(), 1u);
+    const uint8_t hand_before = base.records[0].combat.hand_count;
+    ASSERT_GT(hand_before, 0);
+
+    const std::string tampered =
+        with_hand_select_screen(lines[2], kOnePick, "3", "true");
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], tampered}, "hand-select");
+    ASSERT_EQ(run.records.size(), 1u);
+    const engine::CombatState& s = run.records[0].combat;
+
+    // The pick is the LAST hand entry, and the open choice says how many are.
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(hand_before + 1));
+    EXPECT_EQ(s.card_pool[s.hand[s.hand_count - 1]].card_id,
+              static_cast<uint16_t>(engine::CardId::BASH));
+    ASSERT_EQ(s.action_count, 1);
+    const engine::ActionQueueItem& open = s.action_queue[s.action_head];
+    EXPECT_EQ(open.opcode, static_cast<uint16_t>(engine::Opcode::CHOOSE_CARD));
+    EXPECT_EQ(open.amount, 3);
+    EXPECT_TRUE(engine::choose_is_optional(open.flags));
+    EXPECT_EQ(engine::choose_selected_count(open.flags), 1);
+}
+
+TEST(Translator, HandSelectMandatoryScreenTranslatesOnlyWithNothingHeldAside) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    // can_pick_zero false + an empty selection is the ordinary mandatory block.
+    const std::string clean =
+        with_hand_select_screen(lines[2], "[]", "1", "false");
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], clean}, "hand-select-mandatory");
+    ASSERT_EQ(run.records.size(), 1u);
+    const engine::CombatState& s = run.records[0].combat;
+    ASSERT_EQ(s.action_count, 1);
+    const engine::ActionQueueItem& open = s.action_queue[s.action_head];
+    EXPECT_FALSE(engine::choose_is_optional(open.flags));
+    EXPECT_EQ(engine::choose_selected_count(open.flags), 0);
+
+    // A mandatory screen MID-selection has no sim counterpart: the sim applies
+    // each mandatory pick immediately, so those cards are already in their
+    // destination pile. Refuse rather than put them back in the hand.
+    const std::string held =
+        with_hand_select_screen(lines[2], kOnePick, "2", "false");
+    try {
+        (void)tr::translate_lines({lines[0], held}, "hand-select-held");
+        FAIL() << "expected a refusal";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("MANDATORY"), std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(Translator, HandSelectRefusesShapesItCannotModel) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+
+    // More picked than the screen allows.
+    EXPECT_THROW((void)tr::translate_lines(
+                     {lines[0],
+                      with_hand_select_screen(lines[2], kOnePick, "0", "true")},
+                     "hs-overpick"),
+                 tr::TranslateError);
+
+    // The screen's `hand` disagreeing with combat_state.hand is protocol drift:
+    // both are p.hand.group in the same converter run.
+    EXPECT_THROW((void)tr::translate_lines(
+                     {lines[0],
+                      with_hand_select_screen(lines[2], "[]", "1", "true", "[]")},
+                     "hs-hand-drift"),
+                 tr::TranslateError);
+
+    // Wrong JSON types still fail loud, as everywhere else.
+    EXPECT_THROW((void)tr::translate_lines(
+                     {lines[0],
+                      with_hand_select_screen(lines[2], "[]", "1", "\"yes\"")},
+                     "hs-bad-bool"),
+                 tr::TranslateError);
+
+    // A missing key is drift, not a default.
+    std::string missing = lines[2];
+    const std::string anchor = "\"screen_type\":\"NONE\"";
+    const auto pos = missing.find(anchor);
+    ASSERT_NE(pos, std::string::npos);
+    missing.replace(
+        pos, anchor.size(),
+        "\"screen_type\":\"HAND_SELECT\",\"screen_state\":{\"hand\":" +
+            hand_array_of(lines[2]) + ",\"selected\":[],\"max_cards\":1}");
+    EXPECT_THROW((void)tr::translate_lines({lines[0], missing}, "hs-missing"),
+                 tr::TranslateError);
+}
+
 }  // namespace

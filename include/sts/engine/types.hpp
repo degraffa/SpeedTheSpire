@@ -119,6 +119,21 @@ using RelicId = sts::registry::RelicId;
 //                 resetAttributes restores the right value. Bits 14..15 remain
 //                 available to later card mechanics.
 //                 The encoding is private engine state, never authorable YAML.
+//   FREE_TO_PLAY_ONCE -- (per-INSTANCE runtime bit, never authored in YAML)
+//                 AbstractCard.freeToPlayOnce. The card costs NO energy for its
+//                 next play and is playable regardless of the energy on hand:
+//                 AbstractCard.hasEnoughEnergy admits it (`|| this.freeToPlay()`,
+//                 AbstractCard.java:888) and AbstractPlayer.useCard's spend is
+//                 suppressed by the same predicate (:1378). It is a ONE-PLAY
+//                 lifetime exactly like EXHAUST_ON_USE_ONCE above and clears at
+//                 the same seam -- UseCardAction.update:87, before the pile
+//                 decision, so a Strange Spoon save cannot carry it forward.
+//                 Confusion's redraw also clears it (ConfusionPower.java:46) and
+//                 so does a targeted exhaust (ExhaustSpecificCardAction.java:40).
+//                 Granted by ForethoughtAction to each moved hand card whose
+//                 AbstractCard.cost is > 0 (ForethoughtAction.java:39-41,57-59);
+//                 a 0-cost card is left alone, which is why the grant reads the
+//                 reconstructed combat BASE cost, not cost_now.
 enum class CardFlag : uint16_t {
     NONE       = 0,
     EXHAUST    = 1u << 0,
@@ -132,6 +147,8 @@ enum class CardFlag : uint16_t {
     EXHAUST_ON_USE_ONCE = 1u << 8,
     AUTOPLAY_X_ENERGY = 1u << 9,
     SAVED_BASE_COST = 1u << 10,
+    // 11..13 are SAVED_BASE_COST's three-bit payload (kSavedBaseCostMask below).
+    FREE_TO_PLAY_ONCE = 1u << 14,
 };
 
 inline constexpr uint16_t kSavedBaseCostShift = 11u;
@@ -159,6 +176,16 @@ enum class ActionVerb : uint8_t {
     END_TURN = 1,    // no args
     USE_POTION = 2,  // arg0 = potion slot, arg1 = target monster slot
     CHOOSE = 3,      // arg0 = option index
+    // The hand-select screen's CONFIRM button (CardSelectConfirmButton), the one
+    // verb an OPTIONAL selection needs and no mandatory one does. A mandatory
+    // choice ends when its count is satisfied, so the button is never the thing
+    // that ends it; a zero-to-N screen (anyNumber + canPickZero) has its button
+    // enabled from the moment it opens and an EMPTY confirm is a legal, and
+    // often the only sensible, answer (HandCardSelectScreen.update:88-101,
+    // .open:495-501 -- canPickZero enables the button up front). CHOOSE then
+    // TOGGLES a card in or out of the selection instead of committing it, and
+    // this verb is what resolves whatever accumulated. No args.
+    CONFIRM = 4,
 };
 
 // --- CardInstance -------------------------------------------------------------

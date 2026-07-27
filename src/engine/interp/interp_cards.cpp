@@ -433,6 +433,36 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             }
             break;
         }
+        case ChoiceKind::PUT_ON_DRAW_BOTTOM: {
+            // ForethoughtAction (:39-42, :57-60), in the Java's order: the
+            // freeToPlayOnce grant is read and applied BEFORE the move, off
+            // `c.cost` -- AbstractCard.cost, the card's combat BASE cost, not
+            // costForTurn. instance_base_cost is that reconstruction, and it is
+            // what makes an Enlightenment'd or Confusion'd card carry its real
+            // current base here rather than the registry row. A cost of exactly
+            // 0 is left alone: `if (c.cost > 0)` is strict.
+            const CardPoolIndex pi = s.hand[slot];
+            if (instance_base_cost(s, pi) > 0) {
+                s.card_pool[pi].flags = static_cast<uint16_t>(
+                    s.card_pool[pi].flags |
+                    card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+            }
+            (void)remove_from_hand(s, slot);
+            // moveToBottomOfDeck -> CardGroup.addToBottom == group.add(0, c)
+            // (CardGroup.java:459-461): the BOTTOM of the draw pile is index 0
+            // here (PUT_ON_DRAW_TOP appends at draw_count), so everything shifts
+            // up one. Moving several cards in sequence therefore leaves the LAST
+            // one deepest and the FIRST one nearest the top -- the first card
+            // picked is the first of them drawn again.
+            if (s.draw_count < kDrawCap) {
+                for (uint8_t j = s.draw_count; j > 0; --j) {
+                    s.draw[j] = s.draw[j - 1];
+                }
+                s.draw[0] = pi;
+                ++s.draw_count;
+            }
+            break;
+        }
         case ChoiceKind::UPGRADE:
             upgrade_instance(s, s.hand[slot]);
             break;
@@ -563,6 +593,19 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
     const uint8_t type_filter = choose_type_filter_from_flags(item.flags);
     const int need = item.amount;
     if (need <= 0) {
+        return;
+    }
+    if (choose_is_optional(item.flags)) {
+        // An optional screen is ended by the confirm button, so the pump blocks
+        // on it whenever there was anything to show and it is resolved through
+        // resolve_optional_choice, not here. Reaching execute at all therefore
+        // means choice_requires_user said no -- the source pile was empty --
+        // which is the branch where ExhaustAction (:76-79) and ForethoughtAction
+        // (:33-36) set isDone and do nothing. Note this is NOT the forced-all
+        // branch below: ExhaustAction's hand.size() <= amount auto-exhaust is
+        // guarded by `!this.anyNumber` (:80), and every optional caller passes
+        // anyNumber true, so a 2-card hand under a Purity that may take 3 still
+        // opens the screen rather than silently exhausting both.
         return;
     }
     const int eligible = count_eligible(s, kind, type_filter);
@@ -816,6 +859,16 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
         is_power || has_card_flag(s.card_pool[pi].flags, CardFlag::PURGE_ON_USE);
     const bool exhaust_once = has_card_flag(
         s.card_pool[pi].flags, CardFlag::EXHAUST_ON_USE_ONCE);
+    // UseCardAction.update:87 -- `this.targetCard.freeToPlayOnce = false;` runs
+    // at the TOP of the update, before the purge/POWER/spoon/filing branches, so
+    // the one free play is spent no matter where the card ends up (and even for
+    // a POWER, which lands in no pile at all). That is the whole lifetime: the
+    // energy check and the spend both happened back at play time
+    // (AbstractCard.java:888, AbstractPlayer.java:1378), and this is the seam
+    // that stops the next play being free too. Cleared unconditionally, unlike
+    // exhaustOnUseOnce below, which :132 clears only on the filing path.
+    s.card_pool[pi].flags = static_cast<uint16_t>(
+        s.card_pool[pi].flags & ~card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
     bool to_exhaust =
         has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST) ||
         exhaust_once;
@@ -1442,8 +1495,122 @@ bool choice_requires_user(const CombatState& s,
         return false;  // nothing left to pick / auto-rolled -- never blocks
     }
     const ChoiceKind kind = choose_kind_from_flags(item.flags);
+    if (choose_is_optional(item.flags)) {
+        // The screen stays open until the player presses confirm, so the ONLY
+        // thing that can stop it opening is having nothing to show. Cards
+        // already picked still count: they are the selected suffix of `hand`,
+        // and a screen where everything has been picked is still an open screen
+        // awaiting the button. Both optional callers' guards are exactly
+        // "is the hand empty" (ExhaustAction.java:76-79,
+        // ForethoughtAction.java:33-36), and both select from the whole hand, so
+        // the hand count IS the eligible count for them.
+        return choice_pile_count(s, kind) > 0;
+    }
     return count_eligible(s, kind, choose_type_filter_from_flags(item.flags)) >
            item.amount;
+}
+
+// --- OPTIONAL (zero-to-N) selection ------------------------------------------
+//
+// The selected picks live as the trailing suffix of `hand`, their count in the
+// item's flags nibble (interp.hpp). These three helpers are the only writers of
+// that invariant, and each mirrors one HandCardSelectScreen interaction.
+
+namespace {
+
+// Where the selected suffix begins: hand[0, unselected) is what is left of the
+// hand, hand[unselected, hand_count) is selectedCards in pick order. The stored
+// count is clamped against the live hand for safety -- a hand-built or
+// translated state cannot make the split run off the array.
+[[nodiscard]] uint8_t optional_unselected_count(const CombatState& s,
+                                                const ActionQueueItem& item) noexcept {
+    const uint8_t picked = choose_selected_count(item.flags);
+    return picked >= s.hand_count ? 0u
+                                  : static_cast<uint8_t>(s.hand_count - picked);
+}
+
+}  // namespace
+
+bool optional_choice_slot_legal(const CombatState& s, const ActionQueueItem& item,
+                                uint8_t slot) noexcept {
+    if (static_cast<Opcode>(item.opcode) != Opcode::CHOOSE_CARD ||
+        !choose_is_optional(item.flags) || slot >= s.hand_count) {
+        return false;
+    }
+    const uint8_t unselected = optional_unselected_count(s, item);
+    if (slot >= unselected) {
+        return true;  // deselect: never capped (updateSelectedCards, :441-447)
+    }
+    // selectHoveredCard only takes a card while there is room for it
+    // (`numCardsToSelect > selectedCards.group.size()`, :375). Purity's cap is
+    // its magicNumber; upgraded Forethought's is the Java's literal 99, which no
+    // hand can reach.
+    const ChoiceKind kind = choose_kind_from_flags(item.flags);
+    if (!choice_slot_eligible(s, slot, kind,
+                              choose_type_filter_from_flags(item.flags))) {
+        return false;
+    }
+    return static_cast<int>(choose_selected_count(item.flags)) < item.amount;
+}
+
+void toggle_optional_choice_slot(CombatState& s, ActionQueueItem& item,
+                                 uint8_t slot) noexcept {
+    if (slot >= s.hand_count) {
+        return;
+    }
+    const uint8_t unselected = optional_unselected_count(s, item);
+    const CardPoolIndex pi = s.hand[slot];
+    if (slot < unselected) {
+        // SELECT: hand.removeCard(c) then selectedCards.addToTop(c) (:378-381).
+        // Both are list operations on ONE combined array here -- lift the card
+        // out (the rest closes up, preserving relative order) and append it at
+        // the very end, which is where addToTop puts it.
+        for (uint8_t j = static_cast<uint8_t>(slot + 1); j < s.hand_count; ++j) {
+            s.hand[j - 1] = s.hand[j];
+        }
+        s.hand[s.hand_count - 1] = pi;
+        item.flags = with_choose_selected_count(
+            item.flags,
+            static_cast<uint8_t>(choose_selected_count(item.flags) + 1));
+        return;
+    }
+    // DESELECT: `AbstractDungeon.player.hand.addToTop(e); i.remove();`
+    // (:441-443). The card goes to the END of the hand group -- NOT back to
+    // where it was picked from -- and leaves selectedCards, so in the combined
+    // array it lands at the split point and the picks before it shift up one.
+    for (uint8_t j = slot; j > unselected; --j) {
+        s.hand[j] = s.hand[j - 1];
+    }
+    s.hand[unselected] = pi;
+    item.flags = with_choose_selected_count(
+        item.flags, static_cast<uint8_t>(choose_selected_count(item.flags) - 1));
+}
+
+void resolve_optional_choice(CombatState& s, const ActionQueueItem& item) noexcept {
+    const uint8_t picked = choose_selected_count(item.flags);
+    if (picked == 0 || picked > s.hand_count) {
+        return;  // an empty confirm walks an empty selectedCards.group
+    }
+    const ChoiceKind kind = choose_kind_from_flags(item.flags);
+    const uint8_t unselected = static_cast<uint8_t>(s.hand_count - picked);
+    // Snapshot the picks in PICK ORDER first: each apply mutates the hand.
+    CardPoolIndex sel[kHandCap];
+    for (uint8_t i = 0; i < picked; ++i) {
+        sel[i] = s.hand[static_cast<uint8_t>(unselected + i)];
+    }
+    // `for (AbstractCard c : handCardSelectScreen.selectedCards.group)` --
+    // ExhaustAction.java:102-105 and ForethoughtAction.java:55-61 both iterate
+    // the selection in the order it was built, so the exhaust-pile order and the
+    // draw-bottom order are the PICK order.
+    for (uint8_t i = 0; i < picked; ++i) {
+        for (uint8_t h = 0; h < s.hand_count; ++h) {
+            if (s.hand[h] == sel[i]) {
+                apply_choice_to_slot(s, h, kind,
+                                     choose_copies_from_flags(item.flags));
+                break;
+            }
+        }
+    }
 }
 
 void prepare_choice_draw_source(CombatState& s, ActionQueueItem& item) noexcept {

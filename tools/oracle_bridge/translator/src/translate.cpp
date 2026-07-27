@@ -13,6 +13,7 @@
 
 #include "sts/diff/trace.hpp"
 #include "sts/engine/event_framework.hpp"
+#include "sts/engine/interp.hpp"  // CHOOSE_CARD encoding for the HAND_SELECT screen
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
@@ -710,8 +711,11 @@ struct OracleAnchors {
 
 // ---- combat_state (PROTOCOL §3.10) ---------------------------------------
 
-void parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
-                        eng::CombatState& cs) {
+// Returns the card_pool fill cursor it left behind: the HAND_SELECT screen state
+// (below) allocates further pool rows for the cards the select screen has lifted
+// out of the hand, and must not tread on the rows this filled.
+int parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
+                       eng::CombatState& cs) {
     FieldReader fr(j, path, ctx);
     cs.phase = static_cast<uint8_t>(eng::CombatPhase::WAITING_ON_USER);
     int pool_used = 0;  // running fill cursor into cs.card_pool (no struct field)
@@ -762,6 +766,7 @@ void parse_combat_state(const json& j, const std::string& path, Ctx& ctx,
     fr.defer("cards_discarded_this_turn");  // no matching CombatState counter
     fr.defer("times_damaged");              // damagedThisCombat; no schema field
     fr.finish();
+    return pool_used;
 }
 
 // ---- screen_state variants (PROTOCOL §3.3-3.9, §3.19) --------------------
@@ -834,8 +839,119 @@ void parse_relic(const json& j, const std::string& path, Ctx& ctx, eng::RelicSlo
     if (out) *out = rs;
 }
 
+// The HAND_SELECT screen (§3.19), mapped rather than deferred.
+//
+// getHandSelectState (GameStateConverter.java:538-557) emits FOUR things, and
+// all four are modelled state here: `hand` is p.hand.group, `selected` is
+// handCardSelectScreen.selectedCards.group IN PICK ORDER, `max_cards` is
+// numCardsToSelect and `can_pick_zero` is canPickZero. The sim keeps the same
+// two groups as ONE array -- the picks are the trailing suffix of `hand`, with
+// their count in the open CHOOSE_CARD's flags (interp.hpp) -- so the mapping is
+// a concatenation plus a count, with no information dropped and none invented.
+//
+// WHAT THIS DELIBERATELY DOES NOT CLAIM: the screen carries no indication of
+// what will be DONE with the picks. `getHandSelectState` has no field for it and
+// the reason is structural -- in the game the manipulation lives in the
+// AbstractGameAction that opened the screen, which the protocol does not
+// serialize at all. The synthesized queue item therefore carries the selection
+// SHAPE (how many may be picked, whether zero is allowed, what is picked so far)
+// and leaves the ChoiceKind at its zero value, which is why the item exists at
+// all: without it the concatenated hand would read back as an ordinary
+// seven-card hand rather than five cards with two picked, and that ambiguity
+// would be a silently wrong state rather than an honestly partial one.
+void parse_hand_select_state(FieldReader& fr, const std::string& path, Ctx& ctx,
+                             eng::CombatState* cs, int* pool_used) {
+    if (cs == nullptr || pool_used == nullptr) {
+        throw TranslateError(loc(ctx) + " HAND_SELECT at " + path +
+                             " with no combat_state — the hand-select screen "
+                             "only exists inside a combat (schema drift, "
+                             "translation aborted)");
+    }
+    const json* hand = fr.take("hand");
+    const json* selected = fr.take("selected");
+    const json& max_cards_v = fr.require("max_cards");
+    const json& pick_zero_v = fr.require("can_pick_zero");
+    if (hand == nullptr || !hand->is_array() || selected == nullptr ||
+        !selected->is_array()) {
+        throw TranslateError(loc(ctx) + " " + path +
+                             " needs array `hand` and `selected`");
+    }
+    if (!pick_zero_v.is_boolean()) {
+        throw TranslateError(loc(ctx) + " expected boolean at " + path +
+                             ".can_pick_zero");
+    }
+    const int64_t max_cards = as_i64(max_cards_v, ctx, path + ".max_cards");
+    const bool can_pick_zero = pick_zero_v.get<bool>();
+    const std::size_t picked = selected->size();
+
+    // `hand` here IS combat_state.hand -- the same p.hand.group, emitted twice
+    // by the same converter run. Cross-check rather than re-parse: if the two
+    // ever disagree the protocol has changed underneath us.
+    if (hand->size() != cs->hand_count) {
+        throw TranslateError(loc(ctx) + " " + path + ".hand has " +
+                             std::to_string(hand->size()) +
+                             " cards but combat_state.hand has " +
+                             std::to_string(cs->hand_count) +
+                             " (schema drift, translation aborted)");
+    }
+    if (static_cast<int64_t>(picked) > max_cards) {
+        throw TranslateError(loc(ctx) + " " + path + " has " +
+                             std::to_string(picked) + " selected cards but "
+                             "max_cards is " + std::to_string(max_cards));
+    }
+    if (!can_pick_zero && picked > 0) {
+        // A MANDATORY screen mid-selection. The sim has no such state to
+        // translate into: a mandatory pick is applied the moment it is made
+        // (advance.cpp's CHOOSE), so its cards are already in their destination
+        // pile and were never held aside. Refusing is the honest answer --
+        // silently concatenating would put exhausted or moved cards back in hand.
+        throw TranslateError(
+            loc(ctx) + " " + path + " is a MANDATORY hand-select (can_pick_zero "
+            "false) holding " + std::to_string(picked) + " selected card(s); the "
+            "sim applies each mandatory selection immediately and has no "
+            "held-aside state to translate (unmodelled shape, translation "
+            "aborted)");
+    }
+    if (cs->hand_count + picked > static_cast<std::size_t>(eng::kHandCap) ||
+        static_cast<std::size_t>(*pool_used) + picked >
+            static_cast<std::size_t>(eng::kCardPoolCap)) {
+        throw TranslateError(loc(ctx) + " " + path +
+                             " hand + selected overflows kHandCap/kCardPoolCap");
+    }
+    for (std::size_t i = 0; i < picked; ++i) {
+        eng::CardInstance ci = parse_card(
+            (*selected)[i], path + ".selected[" + std::to_string(i) + "]", ctx);
+        cs->card_pool[*pool_used] = ci;
+        cs->hand[cs->hand_count++] =
+            static_cast<eng::CardPoolIndex>((*pool_used)++);
+    }
+    if (cs->action_count != 0) {
+        throw TranslateError(loc(ctx) + " " + path +
+                             " would synthesize an open choice over a non-empty "
+                             "action queue");
+    }
+    eng::ActionQueueItem open{};
+    open.opcode = static_cast<uint16_t>(eng::Opcode::CHOOSE_CARD);
+    open.src = eng::kActorPlayer;
+    open.tgt = eng::kActorPlayer;
+    open.amount = static_cast<int32_t>(max_cards);
+    open.flags = eng::with_choose_selected_count(
+        can_pick_zero ? eng::kChoiceOptionalBit : 0u,
+        static_cast<uint8_t>(picked));
+    cs->action_head = 0;
+    cs->action_queue[0] = open;
+    cs->action_count = 1;
+    // All four keys are now real state, not deferred ones.
+    fr.mapped();
+    fr.mapped();
+    fr.mapped();
+    fr.mapped();
+}
+
 void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
-                        const std::string& screen_type) {
+                        const std::string& screen_type,
+                        eng::CombatState* cs = nullptr,
+                        int* pool_used = nullptr) {
     FieldReader fr(j, path, ctx);
     if (screen_type == "EVENT") {
         fr.ignore("body_text");
@@ -986,9 +1102,7 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
         defer_all(fr, {"num_cards", "any_number", "for_upgrade", "for_transform",
                        "for_purge", "confirm_up"});
     } else if (screen_type == "HAND_SELECT") {
-        defer_card_list(fr, "hand", path, ctx);
-        defer_card_list(fr, "selected", path, ctx);
-        defer_all(fr, {"max_cards", "can_pick_zero"});
+        parse_hand_select_state(fr, path, ctx, cs, pool_used);
     } else if (screen_type == "GAME_OVER") {
         fr.ignore("score");   // out-of-model presentation
         fr.defer("victory");
@@ -1092,10 +1206,12 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
 
     // combat_state (§3.10) -> CombatState + the 5 floor streams via oracle.
     bool has_combat = false;
+    int combat_pool_used = 0;
     if (const json* combat = fr.take("combat_state")) {
         out.in_combat = true;
         has_combat = true;
-        parse_combat_state(*combat, path + ".combat_state", ctx, out.combat);
+        combat_pool_used =
+            parse_combat_state(*combat, path + ".combat_state", ctx, out.combat);
         fr.mapped();
     }
 
@@ -1152,7 +1268,11 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
         fr.defer("screen_type");
     }
     if (const json* screen = fr.take("screen_state")) {
-        parse_screen_state(*screen, path + ".screen_state", ctx, screen_type);
+        // HAND_SELECT is the one variant with schema storage, so it needs the
+        // combat it belongs to and the pool cursor combat_state left off at.
+        parse_screen_state(*screen, path + ".screen_state", ctx, screen_type,
+                           has_combat ? &out.combat : nullptr,
+                           has_combat ? &combat_pool_used : nullptr);
         fr.defer("screen_state");
     }
     fr.finish();

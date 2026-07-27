@@ -131,7 +131,11 @@ enum class Opcode : uint16_t {
                        // resolves it. When the selection is FORCED (eligible <=
                        // amount) or RANDOM it auto-resolves at execute time (no
                        // block), matching ExhaustAction / PutOnDeckAction /
-                       // ArmamentsAction's "no screen" branches.
+                       // ArmamentsAction's "no screen" branches. An OPTIONAL
+                       // item (kChoiceOptionalBit) instead selects ZERO to
+                       // `amount`: advance(CHOOSE, slot) TOGGLES a card in or
+                       // out of the pending selection and advance(CONFIRM)
+                       // resolves it, empty selection included.
     PLAY_TOP_DRAW = 13, // play the top card of the draw pile, then exhaust it
                          // (Havoc / PlayTopCardAction.update). Rolls one
                          // card_random_rng draw for the played card's random-monster
@@ -584,6 +588,14 @@ inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
 //   * bit  [13]   -> a RUNTIME latch, never authored: the draw-source temp
 //                    group has already been built and its card_random_rng
 //                    draws billed (see prepare_choice_draw_source).
+//   * bit  [14]   -> OPTIONAL: the screen selects ZERO to `amount` cards and
+//                    ends on an explicit confirm (anyNumber && canPickZero).
+//                    Authored as `optional: true`.
+//   * bits[16..19]-> a RUNTIME counter, never authored: how many cards of the
+//                    hand are currently SELECTED on an open optional screen
+//                    (0..kHandCap, which is why four bits suffice). Bit 15 is
+//                    left free rather than starting the field there, so the
+//                    counter is a clean nibble.
 // MIRRORED in tools/registry_gen/stsgen/vocab.py (CHOICE_KINDS + the bit
 // layout) so a CHOOSE_CARD effect step authored in cards.yaml packs an
 // identical `extra`.
@@ -608,9 +620,22 @@ enum class ChoiceKind : uint8_t {
     // and the whole choice is dead while the hand is full (:40-43). A returned
     // SKILL costs 0 for the turn while Corruption is up (:57-59, :94-96).
     EXHAUST_TO_HAND = 5,
-    // 6-8 are NOT this batch's: 6-7 are permanent gaps and 8 belongs to the
-    // colorless-uncommon batch landing in parallel. Kinds are append-only, so
-    // they are stepped over rather than backfilled.
+    // 6-7 are permanent gaps (their owner needed no kind). Kinds are
+    // append-only, so they are stepped over rather than backfilled.
+    //
+    // Forethought / ForethoughtAction: move each selected hand card to the
+    // BOTTOM of the draw pile (CardGroup.moveToBottomOfDeck -> addToBottom ==
+    // group.add(0, c), CardGroup.java:459-461,898-902 -- so the FIRST card moved
+    // ends up nearest the top and is drawn first). A moved card whose
+    // AbstractCard.cost is > 0 additionally gains CardFlag::FREE_TO_PLAY_ONCE
+    // (ForethoughtAction.java:39-41 forced path, :57-59 selected path); a
+    // 0-cost card does not, and neither does an X-cost or unplayable one (their
+    // cost is negative in the Java). The BASE card authors this kind MANDATORY
+    // and exactly one -- auto-resolving with no screen and no RNG when the hand
+    // holds a single card (:37-45, hand.getTopCard() -- the LAST hand entry, no
+    // cardRandomRng draw anywhere, unlike PutOnDeckAction's forced path). The
+    // UPGRADED card authors it OPTIONAL (:50, open(msg, 99, true, true)).
+    PUT_ON_DRAW_BOTTOM = 8,
     //
     // The source pile is the DRAW PILE, filtered to ONE CardType (the
     // bits[10..12] filter above): choose one matching draw-pile card and put it
@@ -700,14 +725,20 @@ inline constexpr uint32_t kChoiceTypeFilterMask = 0x7u << kChoiceTypeFilterShift
 // encodings above.
 inline constexpr uint8_t kChoiceNoTypeFilter = 0xFFu;
 
+// OPTIONAL selection (bit 14): the screen opened with anyNumber && canPickZero,
+// so it selects ZERO to `amount` cards and only an explicit confirm ends it.
+// Authored as `optional: true`; MIRRORED as CHOICE_OPTIONAL_BIT in vocab.py.
+inline constexpr uint32_t kChoiceOptionalBit = 1u << 14;
+
 [[nodiscard]] constexpr uint32_t make_choose_flags(
     ChoiceKind kind, bool random, int copies = 1,
-    uint8_t type_filter = kChoiceNoTypeFilter) noexcept {
+    uint8_t type_filter = kChoiceNoTypeFilter, bool optional = false) noexcept {
     const uint32_t kv = static_cast<uint32_t>(static_cast<uint8_t>(kind));
     return (kv & 0x3u) | ((kv & 0x4u) != 0u ? kChoiceKindHighBit : 0u) |
            ((kv & 0x8u) != 0u ? kChoiceKindHighBit2 : 0u) |
            (random ? kChoiceRandomBit : 0u) |
            (static_cast<uint32_t>(copies - 1) << kChoiceCopiesShift) |
+           (optional ? kChoiceOptionalBit : 0u) |
            (type_filter == kChoiceNoTypeFilter
                 ? 0u
                 : ((static_cast<uint32_t>(type_filter) + 1u)
@@ -730,6 +761,44 @@ inline constexpr uint8_t kChoiceNoTypeFilter = 0xFFu;
 // The DUPLICATE kind's copy count (1-based; bits [4..7] store copies - 1).
 [[nodiscard]] constexpr int choose_copies_from_flags(uint32_t flags) noexcept {
     return static_cast<int>((flags >> kChoiceCopiesShift) & 0xFu) + 1;
+}
+[[nodiscard]] constexpr bool choose_is_optional(uint32_t flags) noexcept {
+    return (flags & kChoiceOptionalBit) != 0u;
+}
+
+// --- The OPTIONAL selection's accumulated picks ------------------------------
+//
+// HandCardSelectScreen does not mark a chosen card in place: selectHoveredCard
+// REMOVES it from p.hand and appends it to selectedCards (:375-383,
+// `hand.removeCard` + `selectedCards.addToTop`), and deselecting it appends it
+// back onto the END of p.hand (:441-443 / :171-177, `hand.addToTop`) -- it does
+// NOT return to where it came from. The two groups are therefore, at every
+// instant, one ordered sequence: [what is left of the hand] ++ [the picks, in
+// pick order].
+//
+// That is exactly how this engine stores it: the selected cards stay in `hand`
+// as its trailing SUFFIX, and the only extra state is how long that suffix is --
+// this nibble in the open item's flags. hand[0 .. hand_count-k) is the real
+// hand, hand[hand_count-k .. hand_count) is selectedCards in pick order, and the
+// oracle's own split (getHandSelectState emits `hand` and `selected`
+// separately) concatenates onto it one-for-one. Nothing new is stored per card,
+// and the pick ORDER -- which is observable, because the confirm applies the
+// picks in it -- is carried by the array itself.
+//
+// Slot indices are stable while the screen is open: the pump is blocked on the
+// item, so the only actions that can run are this screen's own toggles.
+inline constexpr uint32_t kChoiceSelectedShift = 16;
+inline constexpr uint32_t kChoiceSelectedMask = 0xFu << kChoiceSelectedShift;
+
+[[nodiscard]] constexpr uint8_t choose_selected_count(uint32_t flags) noexcept {
+    return static_cast<uint8_t>((flags & kChoiceSelectedMask) >>
+                                kChoiceSelectedShift);
+}
+[[nodiscard]] constexpr uint32_t with_choose_selected_count(
+    uint32_t flags, uint8_t n) noexcept {
+    return (flags & ~kChoiceSelectedMask) |
+           ((static_cast<uint32_t>(n) << kChoiceSelectedShift) &
+            kChoiceSelectedMask);
 }
 
 // Thinking Ahead: an AUTHOR-ONLY queue-time guard bit, never inspected by the
@@ -1029,8 +1098,45 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // a real player prompt? True iff it selects fewer cards than are eligible AND it
 // is not RANDOM (a RANDOM or forced-all selection auto-resolves at execute time).
 // The pump BLOCKS (phase WAITING_ON_USER) exactly when this is true.
+//
+// An OPTIONAL item is different in kind, and deliberately so: it blocks whenever
+// the source pile was non-empty when it opened, INCLUDING when every eligible
+// card has already been picked, because the screen is ended by the confirm
+// button and by nothing else. The Java's only short-circuit is the empty hand
+// (ExhaustAction.java:76-79 `p.hand.size() == 0`; ForethoughtAction.java:33-36
+// `p.hand.isEmpty()`), which is exactly "no cards to show".
 [[nodiscard]] bool choice_requires_user(const CombatState& state,
                                         const ActionQueueItem& item) noexcept;
+
+// --- OPTIONAL (zero-to-N) selection -------------------------------------------
+//
+// The three operations an open optional screen supports. `item` is the open
+// CHOOSE_CARD at the action-queue head; all three read and write its selected
+// nibble (kChoiceSelectedShift) and the hand suffix it describes.
+
+// Is `slot` a legal CHOOSE on an open optional item -- i.e. does toggling it do
+// something? An UNSELECTED hand slot is legal while the pick count is below the
+// item's `amount` (HandCardSelectScreen.selectHoveredCard's `numCardsToSelect >
+// selectedCards.size()` gate, :375); a SELECTED slot (one in the suffix) is
+// always legal, because deselecting is never capped.
+[[nodiscard]] bool optional_choice_slot_legal(const CombatState& state,
+                                              const ActionQueueItem& item,
+                                              uint8_t slot) noexcept;
+
+// Toggle hand slot `slot` in or out of the open item's selection, moving the
+// card within `hand` exactly as the screen moves it between the two groups and
+// updating the item's selected nibble. Precondition: optional_choice_slot_legal.
+void toggle_optional_choice_slot(CombatState& state, ActionQueueItem& item,
+                                 uint8_t slot) noexcept;
+
+// The confirm button: apply the item's manipulation to the accumulated picks IN
+// PICK ORDER, then leave the hand as the remaining prefix. An EMPTY selection is
+// legal and does nothing at all -- for Purity that is "exhaust no cards", for
+// upgraded Forethought "move no cards", and in both the Java simply walks an
+// empty selectedCards.group (ExhaustAction.java:102-108,
+// ForethoughtAction.java:55-64). The caller pops the item afterwards.
+void resolve_optional_choice(CombatState& state,
+                             const ActionQueueItem& item) noexcept;
 
 // Apply one player-selected CHOOSE_CARD manipulation to hand slot `slot`
 // (advance's CHOOSE dispatch). exhaust / put-on-draw-top / upgrade / duplicate
