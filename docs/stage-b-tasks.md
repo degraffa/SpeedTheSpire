@@ -327,6 +327,30 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
 
+- **B4.14-integration incident: red merge pushed; two fix-forwards; stale
+  build-tree trap eliminated** `[x]` — commits `97d350f` + `09e103d` (merged
+  after `09df37f`, the B4.14 union merge that was pushed while red — an
+  orchestrator process error: the matrix verdict was piped away and the landing
+  chained on the wrong exit code). Two distinct causes untangled: **(1) real** —
+  parallel branches each added byte-equivalent `lose_gold` /
+  `get_random_potion` helpers, ambiguous only in the union (the two-definitions
+  class the integration lessons already name); deduplicated in favor of the
+  single doors. **(2) false red** — four objects in master's `build/debug`
+  carried **truncated `.ninja_deps` records** (`#deps 0`), so no header edit
+  could ever dirty them again; three monster objects still had the schema-5
+  layout (`CombatState` 3928/`PowerSlot` 4) inside a schema-6 archive, and the
+  Cultist's init writing at stale offsets produced the fuzz `no_legal_moves`
+  dead-end that looked like an emergent three-branch defect. The union
+  **sources were green all along** (clean-build proof on all three presets).
+  Eliminated per conventions §7: `tools/check_ninja_deps.sh` (+ its own
+  compiler-free fixture test) now runs with `--repair` inside `wsl_run.sh`
+  between configure and build, so the sanctioned entry point cannot hand out a
+  silently stale binary; conventions §6 gained the trap entry. Named
+  regression: `FirstCombatEntry.NeowPayoutWalkOntoFloorOneLeavesALiveCombatMask`
+  pins the seed-42 four-press walk onto a live floor-1 combat mask. Residual
+  caution recorded: builds that bypass `wsl_run.sh` (bare `cmake --build`, an
+  IDE, future CI) bypass the guard.
+
 Changes on `master` that are **not** ledger tasks, so they have no task block to
 archive and no `#log` anchor. They are indexed here for the same reason task
 entries are: conventions §2 requires that history and this ledger never
