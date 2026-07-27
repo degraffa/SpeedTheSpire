@@ -95,6 +95,17 @@ void step(RunController& rc, Action a) {
             std::span<StepResult>(&res, 1));
 }
 
+// Leave Neow with floor 0 otherwise untouched. There is no such button in the
+// game -- every run takes one of the four blessings -- but these tests are
+// about the floor loop, and a blessing payout moves streams, the master deck
+// and the relic pools underneath them. Forcing the finished-payout screen and
+// pressing the map button exercises exactly the transition the last Neow press
+// makes; the blessing itself is neow_test's subject.
+void leave_neow(RunController& rc) {
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
+    step(rc, kProceed);
+}
+
 uint8_t first_start_column(const RunController& rc) {
     RunActionMask m{};
     legal_actions(rc, m);
@@ -113,7 +124,7 @@ uint8_t first_start_column(const RunController& rc) {
 RunController enter_floor_one_combat(std::string_view encounter) {
     RunController rc = run_begin(kSeed, kA20);
     rc.lists.monster_list[0] = encounter;
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
         << "floor-1 room did not build a combat for encounter " << encounter;

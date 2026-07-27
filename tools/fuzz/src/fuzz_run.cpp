@@ -117,6 +117,13 @@ void update_lists(XXH3_state_t* st, const engine::MonsterLists& l) noexcept {
     // dialog, plus the event-defined screen/scratch fields. POD with explicit
     // padding, so a byte hash is stable.
     XXH3_64bits_update(&st, &rc.event, sizeof(rc.event));
+    // The Neow blessing state: the four rolled options, which of its screens is
+    // up, and the grid's partial selection. Same POD-with-explicit-padding
+    // contract as the event block above. It MUST be hashed for the reason
+    // rest.screen is: a Neow press that only opens a sub-screen moves no
+    // RunState byte, and a step whose whole-controller hash is unchanged is
+    // reported as a NO_PROGRESS failure by the soak.
+    XXH3_64bits_update(&st, &rc.neow, sizeof(rc.neow));
     return static_cast<uint64_t>(XXH3_64bits_digest(&st));
 }
 

@@ -111,6 +111,30 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
     }
 }
 
+// AbstractPlayer.loseGold (AbstractPlayer.java:697-717), the gain_gold twin for
+// every run-layer gold LOSS outside a purchase flow:
+//
+//     if (room instanceof ShopRoom) relics' onSpendGold();   // NOT here
+//     if (amount > 0) { gold -= amount; if (gold < 0) gold = 0;
+//                       relics' onLoseGold(); }
+//
+// Two hooks live in that body and neither has an S1 producer at a non-shop
+// site. onSpendGold is gated on being IN a ShopRoom, so it cannot fire from an
+// event or from Neow (Maw Bank is its only S1 override); onLoseGold has no S1
+// override at all. Both are named rather than written for the same reason
+// gain_gold names its empty onGainGold fan-out: the door is where they belong
+// when a shop-side caller arrives. Non-positive amounts change nothing, and the
+// clamp is the Java's, not a defensive extra.
+inline void lose_gold(RunState& rs, int32_t amount) noexcept {
+    if (amount <= 0) {
+        return;
+    }
+    rs.gold -= amount;
+    if (rs.gold < 0) {
+        rs.gold = 0;
+    }
+}
+
 // Upgrade up to two random not-yet-upgraded master-deck cards of `wanted`
 // (WarPaint.onEquip WarPaint.java:36-59 / Whetstone.onEquip Whetstone.java:36-59
 // -- identical bodies but for the CardType). Shared by both handlers, and inline

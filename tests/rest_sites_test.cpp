@@ -45,6 +45,10 @@ uint8_t first_start_column(const RunController& rc) {
 
 RunController enter_floor_one_rest(uint8_t ascension = 0) {
     RunController rc = run_begin(kSeed, ascension);
+    // Leave Neow without taking a blessing: this suite is about the campfire,
+    // and a payout would move the streams, deck and pools under it. Forcing the
+    // finished-payout screen is the state the last Neow press leaves behind.
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
     step(rc, make_action(ActionVerb::CHOOSE));  // Neow -> map
     const uint8_t x = first_start_column(rc);
     EXPECT_NE(x, 0xFF);

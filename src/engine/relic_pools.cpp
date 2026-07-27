@@ -462,6 +462,29 @@ RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
     return RelicAcquireResult::ACQUIRED;
 }
 
+bool lose_relic(RunState& rs, RelicId id) noexcept {
+    // AbstractPlayer.loseRelic (AbstractPlayer.java:2014-2031). The Java loop
+    // calls onUnequip on every matching copy and keeps the LAST match as the
+    // one to remove; no S1 relic overrides onUnequip, so only the removal is
+    // written (see the header note).
+    const auto raw = static_cast<uint16_t>(id);
+    int last = -1;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id == raw) {
+            last = static_cast<int>(i);
+        }
+    }
+    if (last < 0) {
+        return false;  // !hasRelic -> early false, nothing touched.
+    }
+    for (uint8_t i = static_cast<uint8_t>(last + 1); i < rs.relic_count; ++i) {
+        rs.relics[static_cast<uint8_t>(i - 1)] = rs.relics[i];
+    }
+    --rs.relic_count;
+    rs.relics[rs.relic_count] = RelicSlot{};
+    return true;
+}
+
 // --- onEquip: generated per-relic action dispatch -----------------------------
 //
 // An onEquip that only initializes the relic's OWN counter (HappyFlower/

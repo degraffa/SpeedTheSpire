@@ -134,8 +134,54 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
 
     switch (phase) {
         case RunPhase::NEOW:
+            // Every Neow move shares the NEOW_PROCEED coverage bucket: the
+            // blessing's four option buttons, the card / master-deck-grid /
+            // reward sub-screens a payout opens, and the final press that opens
+            // the map. One bucket for what is really five screens is
+            // deliberate. MoveCat is a SHARED, append-only namespace
+            // (docs/stage-b-tasks.md's shared-namespace table); splitting Neow
+            // finer means the orchestrator ALLOCATING new values, not a task
+            // taking them locally. What is lost is coverage resolution inside
+            // floor 0; legality and enumeration are exact either way.
+            for (int i = 0; i < engine::kNeowOptionCount; ++i) {
+                if (mask.can_choose_neow_option[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::NEOW_PROCEED);
+                }
+            }
+            for (int i = 0; i < engine::kMasterDeckCap; ++i) {
+                if (mask.can_choose_master_deck[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::NEOW_PROCEED);
+                }
+            }
+            for (int i = 0; i < engine::kRewardCardCap; ++i) {
+                if (mask.can_take_card[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::NEOW_PROCEED);
+                }
+            }
+            for (int i = 0; i < engine::kRewardItemCap; ++i) {
+                if (mask.can_claim_reward[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::NEOW_PROCEED);
+                }
+            }
+            if (mask.can_skip_card) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseSkipCard),
+                      MoveCat::NEOW_PROCEED);
+            }
+            if (mask.can_sing) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseSing),
+                      MoveCat::NEOW_PROCEED);
+            }
             if (mask.can_proceed) {
-                s.add(make_action(ActionVerb::CHOOSE), MoveCat::NEOW_PROCEED);
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseProceed),
+                      MoveCat::NEOW_PROCEED);
             }
             break;
 

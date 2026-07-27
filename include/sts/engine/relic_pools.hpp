@@ -118,4 +118,18 @@ void initialize_relic_pools(RunState& rs) noexcept;
 [[nodiscard]] RelicAcquireResult acquire_relic(
     RunState& rs, RngStream& misc_rng, RelicId id) noexcept;
 
+// AbstractPlayer.loseRelic (AbstractPlayer.java:2014-2031): run onUnequip on
+// EVERY owned copy of `id`, then remove the LAST one (the loop overwrites
+// `toRemove` rather than breaking) and reorganize, which for a plain ArrayList
+// removal is order-preserving for the survivors -- so acquisition order, and
+// hence trigger order (trap 8), is preserved with one entry deleted. Returns
+// false and changes nothing when the run does not own `id`.
+//
+// NO S1 RELIC HAS AN onUnequip BODY, so the per-copy pass is named rather than
+// written: the only S1 caller is Neow's boss-relic swap, which removes
+// relics[0] -- the Ironclad's Burning Blood, whose only override is onVictory
+// (BurningBlood.java:30). A relic row that later needs onUnequip adds its
+// dispatch here, beside acquire_relic's onEquip fan-out.
+[[nodiscard]] bool lose_relic(RunState& rs, RelicId id) noexcept;
+
 }  // namespace sts::engine

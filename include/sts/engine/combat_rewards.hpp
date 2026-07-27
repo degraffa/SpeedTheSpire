@@ -314,6 +314,33 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
 [[nodiscard]] bool open_rest_card_reward(RunState& rs,
                                          RewardScreen& out) noexcept;
 
+// One pool-indexed reward-card draw: getCard(rarity) ->
+// CardGroup.getRandomCard(rng) -> group.get(rng.random(size - 1))
+// (AbstractDungeon.java:1500-1517; CardGroup.java:498-500). The RED reward
+// pools are the same three lists whichever stream indexes them, which is why
+// this takes the stream: combat rewards pass cardRng, Neow's card blessings
+// pass NeowEvent.rng (NeowReward.getCard, NeowReward.java:377-391).
+[[nodiscard]] CardId draw_card_from_pool(RngStream& rng,
+                                         RewardCardRarity rarity) noexcept;
+
+// CombatRewardScreen.setupItemReward's UNCONDITIONAL card row
+// (CombatRewardScreen.java:72-96): every open() from a room that is not a
+// TreasureRoom, not a RestRoom and whose event does not set noCardsInRewards
+// appends one `new RewardItem()` -- i.e. a full getRewardCards() roll. Exposed
+// because Neow's three-potion blessing opens that screen from the NeowRoom
+// (whose NeowEvent leaves noCardsInRewards at its false default,
+// AbstractEvent.java:63), so the roll HAPPENS -- cardRng draws and the pity
+// counter move -- and the row is then explicitly deleted again
+// (NeowReward.java:273-283). Skipping the roll would desync cardRng for the
+// rest of the run.
+void roll_setup_item_card_reward(RunState& rs, RoomType room,
+                                 RewardScreen& s) noexcept;
+
+// Delete the first CARDS row, preserving the order of the rest -- the loop at
+// NeowReward.java:275-283. Returns false when the screen holds no CARDS row
+// (the Java's `remove == -1` break).
+[[nodiscard]] bool remove_first_card_reward_item(RewardScreen& s) noexcept;
+
 // --- Claim -----------------------------------------------------------------
 
 // Legality of claiming item `index` right now (RewardItem.claimReward's

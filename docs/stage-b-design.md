@@ -661,11 +661,14 @@ working estimate ~55–65 rows.
 - **Neow** (NeowEvent.java, NeowReward.java): dedicated
   `rng = new Random(Settings.seed)` (NeowEvent.java:363; :289); four options
   = categories 0–3 (NeowReward.getRewardOptions :85-128), category 2 rolls a
-  drawback first (:76-83, :107); payouts consume NeowEvent.rng for cards but
-  `relicRng`/`potionRng` pools for relics/potions (NeowReward.java:190-368).
-  Category 3 (boss-relic swap) is **in S1 scope** — it is on screen every
-  run, so excluding it would diverge on every seed; this is what pulls the
-  Ironclad boss-relic pool into §5.3.
+  drawback first (:76-83, :107); payouts consume NeowEvent.rng for the RED card
+  offers and the transforms, `relicRng`/`potionRng` pools for relics/potions,
+  **and `cardRng` for the COLORLESS card identities and the CURSE drawback's
+  card** (NeowReward.java:190-368; corrected at B4.14 from the source — see
+  §11 v0.1.9, which also records the potion blessing's rolled-then-discarded
+  card row). Category 3 (boss-relic swap) is **in S1 scope** — it is on screen
+  every run, so excluding it would diverge on every seed; this is what pulls
+  the Ironclad boss-relic pool into §5.3.
 - **Shop** (ShopScreen.java): 5 colored + 2 colorless cards, 3 relics
   (2 rolled-tier + 1 shop-tier, :360-372), 3 potions (:374-384); prices =
   base × `merchantRng.random(0.9f,1.1f)` (cards, :246-276; colorless ×1.2
@@ -1229,3 +1232,63 @@ Continuing stage-a §10's numbering:
   **Note (not fixed here, this document is frozen):** `docs/stage-a-design.md`
   §4.2 and the older Logs carry the 4 B `PowerSlot` and earlier `CombatState`
   figures, which were true when written.
+- v0.1.9 (2026-07-27) — B4.14 Neow stream-attribution erratum against
+  §5.6. §5.6's Neow bullet said payouts "consume NeowEvent.rng for cards but
+  `relicRng`/`potionRng` pools for relics/potions". Read against the source
+  that is right for the RED offers and wrong for the colorless ones: it is
+  fixed inline in §5.6 and logged here, per conventions §4 (decompiled Java
+  outranks the design docs; the losing text is corrected in the same change).
+  Nothing frozen is weakened — the paraphrase was simply less specific than the
+  code.
+
+  **(a) The COLORLESS blessings draw their card IDENTITIES from `cardRng`.**
+  `NeowReward.getColorlessRewardCards` (NeowReward.java:309-330) rolls each
+  card's rarity on `NeowEvent.rng.randomBoolean(0.33f)` but then calls
+  `AbstractDungeon.getColorlessCardFromPool` (:1579-1595), which goes through
+  `CardGroup.getRandomCard(boolean useRng, CardRarity)` — and that overload's
+  `true` means `AbstractDungeon.cardRng`, hard-coded, with the caller's rng
+  never threaded through (CardGroup.java:509-524). A colorless Neow option
+  therefore moves TWO streams. The same overload **sorts** its rarity-filtered
+  view before indexing it, and `AbstractCard.compareTo` compares cardID strings
+  (AbstractCard.java:2583-2584), so the colorless per-rarity pools are
+  order-exact from the registry's `game_id` column and carry none of the
+  CardLibrary-HashMap-order deviation the RED reward pools still carry.
+
+  **(b) The CURSE drawback's card is also `cardRng`, and it is drawn AFTER the
+  payout.** `getCardWithoutRng(CardRarity.CURSE)` does not mean "no rng": its
+  CURSE arm delegates to `returnRandomCurse` -> `CardLibrary.getCurse()`, which
+  draws `cardRng.random(0, size — 1)` (AbstractDungeon.java:1519-1536,
+  :1125-1129; CardLibrary.java:1022-1029). The name distinguishes cardRng from
+  `MathUtils` for the other rarities. `NeowReward.activate` only arms a flag
+  (:192-196); the card is obtained in the next `update()` tick (:183-186), so
+  on a colorless-plus-CURSE option the payout's three cardRng draws precede the
+  curse's one.
+
+  **(c) The three-potion blessing moves `cardRng` and the card-pity counter.**
+  After three `PotionHelper.getRandomPotion()` draws — one ungated `potionRng`
+  draw each, no tier gate and none of trap 14's rejection sampling
+  (PotionHelper.java:169-172) — it calls `combatRewardScreen.open()`, whose
+  `setupItemReward` appends a full `AbstractDungeon.getRewardCards()` row for
+  any room that is neither a TreasureRoom nor a RestRoom and whose event leaves
+  `noCardsInRewards` false (CombatRewardScreen.java:72-96; AbstractEvent.java:
+  63). NeowRoom is such a room (NeowRoom.java:16-20), so the row IS rolled -
+  advancing `cardRng` and `cardBlizzRandomizer` — and is only then deleted
+  again (NeowReward.java:273-283).
+
+  **(d) The boss swap cannot return Black Blood.** `loseRelic(relics.get(0))`
+  runs before the BOSS-pool draw (NeowReward.java:243-247) and
+  `BlackBlood.canSpawn` is `hasRelic("Burning Blood")` (BlackBlood.java:33-36),
+  so the front pop is rejected and consumed. Not a correction to §5.6, which
+  is silent on it; recorded because the ordering is not obvious from the
+  bullet.
+
+  **(e) The mini-blessing gate is not an unlock check.** §1.1's fully-unlocked
+  assumption is not what makes the four-option blessing certain:
+  `bossCount` reads the profile preference `<CLASS>_SPIRITS` only when
+  `Settings.isStandardRun()` (NeowEvent.java:75-80), and that is
+  `!isDailyRun && !isTrial && !seedSet` (Settings.java:633-634), so any SEEDED
+  run takes the `seedSet ? 1 : 0` branch and gets the full blessing regardless
+  of profile. `UnlockTracker` is never consulted. §1.1 is untouched — this is
+  a stronger, independent reason for the same conclusion, and it is why the
+  mini-blessing path is out of the model's domain rather than merely assumed
+  away.

@@ -4271,3 +4271,166 @@ and the NoteForYourself availability branches), `:1882-1942` (getShrine),
 `:1387-1502` (damage), `:2313-2324` (getRandomPotion),
 `AbstractCreature.java:199-223, 386-421` (increaseMaxHp / decreaseMaxHealth /
 heal), `Ironclad.java:107-110`, and `EventRoom.java:17-41`.
+<a id="b414"></a>
+
+### B4.14 `[ ]` Neow blessing — code landed, oracle capture outstanding
+
+Done 2026-07-27 from task base
+`78a6a9e4ab5e51f8d165399cd4c016da52a0621e`. The checkbox stays `[ ]`: the
+acceptance's second leg is an oracle spot-diff of the Neow screen over ten or
+more seeds, and that needs the live game, which only a human operator can
+launch. The tier-2 leg and the directed tests are green in all three presets;
+the capture is prepared and specified in
+[b414_neow_spotdiff.md](../tools/oracle_bridge/driver/b414_neow_spotdiff.md),
+following the B4.7 precedent.
+
+`RunPhase::NEOW` was a documented stub that consumed one `CHOOSE` and walked
+onto the map. It is now the whole blessing. `run_begin` rolls the four options
+at run start off the event-scoped Neow stream, and the controller stays in that
+phase through the option dialog, the card-reward screen, the master-deck grid
+and the combat-reward screen that two thirds of the payouts open — the same
+shape the rest site uses for Smith / Toke / Dream Catcher, and for the same
+reason: those are screens of one room, not phases of the run. No new
+`RunPhase`, no new `MoveCat`, no registry id, no opcode, no schema bump; the
+one new mask field is `can_choose_neow_option[4]`.
+
+Rolling at run start rather than on the first button press is an equivalence,
+not a shortcut. `NeowEvent.rng` is `new Random(Settings.seed)` — trap 17 — a
+fresh stream that nothing else in the game reads or writes, and the intro
+screens ahead of `blessing()` consume only MathUtils flavour draws. The sim's
+Neow phase therefore *is* the blessing screen, which is also the state an
+oracle capture has to be taken in; the runbook says so explicitly, and the
+capture can tell the two apart because the mod dumps `neowRng` as null before
+the blessing exists. Five draws, in the order the four `NeowReward`
+constructors run: category 0's pick, category 1's pick, category 2's
+**drawback**, category 2's pick, and category 3's `random(0, 0)` over a
+one-element list, which still advances the stream because `Random.random(int,
+int)` increments unconditionally.
+
+Category 2's drawback-first order is load-bearing twice over: it fixes the
+stream, and it decides how long the list the reward is then picked from is.
+Three of that category's seven entries are dropped by the drawback that was
+already rolled — no second removal beside a curse, no 250 gold beside NO_GOLD,
+and the 20 % max-HP gain is skipped by an early `break` under the 10 % max-HP
+loss, which is why it is the last entry that disappears rather than a middle
+one. The named test drives a hand-held stream in both orders and requires the
+seeds to disagree, so the ordering is proved rather than asserted.
+
+**The mini-blessing is not unlock-gated, and it is unreachable here.** The
+branch is `bossCount == 0 && !Settings.isTestingNeow -> miniBlessing()`
+(NeowEvent.java:178-183). `bossCount` consults the profile preference
+`<CLASS>_SPIRITS` **only** on the `Settings.isStandardRun()` branch
+(NeowEvent.java:75-80); otherwise it is `Settings.seedSet ? 1 : 0`, and
+`isStandardRun()` is `!isDailyRun && !isTrial && !seedSet`
+(Settings.java:633-634). Every seeded run — every simulated run, every oracle
+capture — therefore gets `bossCount == 1` and the full four-option blessing
+without the profile being read at all. That is stronger than the frozen
+fully-unlocked assumption, and it does not go through `UnlockTracker`, which
+the gate never touches. The two-option mini blessing is outside the model's
+domain and is deliberately not encoded.
+
+Three things CONTRADICT the design doc's one-line summary of §5.6, which said
+payouts "consume NeowEvent.rng for cards but `relicRng`/`potionRng` pools for
+relics/potions". Per conventions §4 the losing text is corrected inline in
+§5.6 and recorded as design §11 v0.1.9 in this same commit. Each of the three
+is pinned by a named test.
+
+The **colorless blessings split their streams**. Their rarity rolls are
+`NeowEvent.rng.randomBoolean(0.33f)`, but the card identities come from
+`getColorlessCardFromPool`, which goes through `CardGroup.getRandomCard(true,
+rarity)` — and that `true` means `AbstractDungeon.cardRng`, not the caller's
+stream (CardGroup.java:509-524). The same method **sorts** its rarity-filtered
+view before indexing it, and `AbstractCard.compareTo` compares cardID strings,
+so the two colorless pools are emitted sorted by `game_id` and are order-exact:
+they carry none of the interim CardLibrary-order deviation the RED reward pools
+still carry. The `CURSE` drawback's card is a `cardRng` draw too
+(`getCardWithoutRng(CURSE)` delegates to `returnRandomCurse` ->
+`CardLibrary.getCurse()`, whose "WithoutRng" name is a false friend), and it
+lands **after** the payout's own draws, because the Java obtains it one
+`NeowReward.update` tick later; on a colorless option those two share `cardRng`
+and the order is observable.
+
+The **three-potion blessing moves `cardRng` and the card-pity counter**. It
+adds three `PotionHelper.getRandomPotion()` rows — one ungated `potionRng` draw
+each, no tier gate and none of trap 14's rejection sampling — and then opens
+the combat reward screen, whose `setupItemReward` appends a full
+`getRewardCards()` row for any room that is not a TreasureRoom or RestRoom and
+whose event leaves `noCardsInRewards` false (CombatRewardScreen.java:72-96).
+NeowRoom is such a room, so the row is rolled and only then deleted again
+(NeowReward.java:273-283). Skipping that roll would have desynced `cardRng` for
+the entire rest of the run while looking perfectly reasonable in review.
+
+The **boss swap can never return Black Blood**. `loseRelic(relics.get(0))` runs
+before the BOSS-pool draw (NeowReward.java:243-247), and `BlackBlood.canSpawn`
+is `hasRelic("Burning Blood")` — the relic that was just removed. The front pop
+is therefore rejected, consumed rather than returned, and the next entry is
+taken; both pops are relicRng-free (trap 15), which the test asserts alongside
+the pool count.
+
+The rest of the payouts route through doors that already existed: every card
+grant through `add_card_to_master_deck` (so the CURSE drawback meets a charged
+Omamori exactly as an event curse does), every relic through `acquire_relic`
+(so a War Paint blessing fires its acquisition-ordered `onEquip` off the
+floor-scoped `miscRng`), gold through `gain_gold`, and the potion rows through
+the ordinary claim path with its slot and Sozu gates. Two small doors were
+added beside their twins rather than open-coded: `lose_gold`
+(AbstractPlayer.java:697-717, whose `onSpendGold` fan-out is ShopRoom-gated and
+whose `onLoseGold` has no S1 override) and `lose_relic`
+(AbstractPlayer.java:2014-2031, order-preserving, with no S1 `onUnequip` body
+to dispatch). `PotionHelper.getRandomPotion` was published beside
+`return_random_potion` so both share one pool-index mapping.
+
+The transform payouts encode the Java's two different orders as written: the
+single transform draws, then removes, then obtains; the double removes **both**
+rows before transforming either (NeowReward.java:157-173).
+
+Translator: the **Neow `screen_state` slice, deferred by B1.5/B4.3, is
+discharged**. Neow arrives as an `EVENT` screen carrying the hard-coded id
+`"Neow Event"` (GameStateConverter.getEventState :343-355) — the one base-game
+event with no static `ID` field. That sentinel is recognised rather than joined
+through the event registry, deliberately: Neow belongs to no act's event,
+shrine or special pool, so minting an `EventId` for it would put a non-pool
+entry into the three membership bitsets that pool ids index. The option list
+keeps the ordinary EVENT validation, the near-miss id `"Neow"` is still
+refused, and the slice stores nothing — the same contract as the reward slices.
+
+Fuzz: every Neow move enumerates under the existing `NEOW_PROCEED` category —
+the four option buttons, the sub-screens, and the final press. One bucket for
+five screens is a deliberate loss of coverage resolution inside floor 0;
+`MoveCat` is a shared append-only namespace and splitting Neow finer is the
+orchestrator's allocation to make, not a task's to take. The controller hash
+gained `RunController::neow`, which it needed for the same reason it carries
+`rest.screen`: a press that only opens a sub-screen moves no `RunState` byte,
+and the soak reports an unchanged whole-controller hash as a `no_progress`
+failure. It found this immediately, before any test did.
+
+Registry generation gained three colorless pool views on the existing card
+emitter: the two sorted rarity views `getColorlessCardFromPool` indexes, and
+the unsorted whole-pool view `returnTrulyRandomColorlessCardFromAvailable`
+indexes (which does carry the interim order deviation). They are derived from
+the `color` / `rarity` / `type` / `game_id` columns that already exist, so they
+complete themselves as colorless rows land; the shop's two colorless slots will
+want the same two arrays.
+
+Every run-loop suite that used to leave Neow with one bare `CHOOSE` now goes
+through a `leave_neow` helper that forces the finished-payout screen first.
+There is no such button in the game — every run takes one of the four — but
+those tests are about the floor loop, and a real payout would move the streams,
+the deck and the relic pools underneath them. The helper carries that reasoning
+at its definition.
+
+Final-tree WSL Debug, leak-detecting ASan/UBSan and Release are each
+**1257/1257**. Registry generation, documentation links, stale-count and
+whitespace checks are clean. No schema, fixture, golden, Steam/game deployment
+or external oracle artifact changed.
+
+Java provenance: `NeowEvent.java:49-121, 162-242, 288-378`,
+`NeowReward.java:42-391`, `NeowRoom.java:14-21`, `Settings.java:633-634`,
+`AbstractDungeon.java:660-850, 852-878, 923-1045, 1125-1129, 1135-1219,
+1481-1536, 1579-1595`, `CardGroup.java:490-555`, `AbstractCard.java:2583-2584`,
+`CardLibrary.java:1022-1042`, `PotionHelper.java:67-172`,
+`CombatRewardScreen.java:72-100, 292-312`, `CardRewardScreen.java:261-301,
+441-483`, `RewardItem.java:145-157`, `AbstractRoom.java:501-510, 569-571`,
+`AbstractCreature.java:199-223`, `AbstractPlayer.java:697-734, 1545-1553,
+2014-2041`, `BurningBlood.java:30`, `Omamori.java:18-19`,
+`BlackBlood.java:33-36`, and `AbstractEvent.java:63`.

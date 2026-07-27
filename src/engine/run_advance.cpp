@@ -32,6 +32,7 @@
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
 #include "sts/engine/monster_lagavulin.hpp" // event ctor's awake variant
 #include "sts/engine/monster_looter.hpp"   // looter_stolen_gold (settlement)
+#include "sts/engine/neow.hpp"             // the floor-0 blessing + its screens
 #include "sts/engine/observation.hpp"      // encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
 #include "sts/engine/relic_hooks.hpp"      // dispatch_relics_at_battle_start / _on_victory
@@ -924,6 +925,16 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     rc.rewards.open_card_item = kNoOpenCardReward;  // value-init 0 would mean
                                                     // "item 0's pick screen is
                                                     // open"; keep it closed.
+
+    // The Neow blessing (NeowEvent.blessing, NeowEvent.java:361-378). It is
+    // rolled here rather than on the first button press because the two are
+    // provably the same roll: neow_rng is a fresh Random(seed) that nothing
+    // else in the game reads or writes (trap 17), and NeowEvent's intro
+    // screens consume only MathUtils flavour draws. RunPhase::NEOW therefore
+    // means "standing at the blessing screen", which is also the state an
+    // oracle capture must be taken in. It runs LAST in run_begin because
+    // hp_bonus reads the post-ascension max HP.
+    neow_roll_blessing(rs, rc.neow);
     return rc;
 }
 
@@ -934,9 +945,60 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
     out.phase = rc.phase;
 
     switch (static_cast<RunPhase>(rc.phase)) {
-        case RunPhase::NEOW:
-            out.can_proceed = true;
+        case RunPhase::NEOW: {
+            // Which of NeowEvent's screens is up. The dialog itself has no
+            // Proceed button while options are on it (screenNum 3 clears the
+            // remaining options and only re-adds one after activate(),
+            // NeowEvent.java:193-222), so BLESSING offers the four choices and
+            // nothing else.
+            const NeowState& n = rc.neow;
+            switch (static_cast<NeowScreen>(n.screen)) {
+                case NeowScreen::BLESSING:
+                    for (int i = 0; i < kNeowOptionCount; ++i) {
+                        out.can_choose_neow_option[i] = true;
+                    }
+                    break;
+                case NeowScreen::CARD_REWARD: {
+                    const RewardScreen& s = rc.rewards;
+                    if (!reward_card_item_open_legal(s)) {
+                        break;
+                    }
+                    const RunRewardItem& item = s.items[s.open_card_item];
+                    for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap;
+                         ++j) {
+                        out.can_take_card[j] =
+                            reward_take_card_legal(rc.run, s, j);
+                    }
+                    // skippable == true on a null-RewardItem open
+                    // (CardRewardScreen.java:450-457); the bowl button is shown
+                    // on the same condition as everywhere else, which no
+                    // floor-0 run can satisfy (Singing Bowl is a pool relic).
+                    out.can_skip_card = true;
+                    out.can_sing = run_has_relic(rc.run, RelicId::SINGING_BOWL);
+                    break;
+                }
+                case NeowScreen::GRID:
+                    for (uint16_t i = 0;
+                         i < rc.run.master_deck_count && i < kMasterDeckCap; ++i) {
+                        out.can_choose_master_deck[i] =
+                            neow_grid_card_legal(rc.run, n, i);
+                    }
+                    break;
+                case NeowScreen::ITEM_REWARD: {
+                    const RewardScreen& s = rc.rewards;
+                    out.can_proceed = true;
+                    for (uint8_t i = 0; i < s.count && i < kRewardItemCap; ++i) {
+                        out.can_claim_reward[i] =
+                            reward_claim_legal(rc.run, s, i);
+                    }
+                    break;
+                }
+                case NeowScreen::DONE:
+                    out.can_proceed = true;  // screenNum 99 -> openMap()
+                    break;
+            }
             break;
+        }
 
         case RunPhase::TREASURE_ROOM:
             out.can_open_chest =
@@ -1246,10 +1308,51 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
     }
     switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW: {
-            // The Neow blessing itself is not modelled; here CHOOSE proceeds onto
-            // the map (blessing skipped, documented).
+            // NeowEvent's dialog and the screens its payouts open. Illegal
+            // choices are non-corrupting no-ops, the same contract as
+            // MAP_CHOICE and COMBAT_REWARD below.
             if (action_verb(a) == ActionVerb::CHOOSE) {
-                rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                NeowState& n = rc.neow;
+                const uint8_t a0 = action_arg0(a);
+                switch (static_cast<NeowScreen>(n.screen)) {
+                    case NeowScreen::BLESSING:
+                        if (a0 < kNeowOptionCount) {
+                            neow_activate(rc.run, n, rc.rewards,
+                                          rc.combat.misc_rng, a0);
+                        }
+                        break;
+                    case NeowScreen::CARD_REWARD:
+                        if (a0 == kChooseSkipCard) {
+                            neow_skip_card(n, rc.rewards);
+                        } else if (a0 == kChooseSing) {
+                            if (reward_sing(rc.run, rc.rewards)) {
+                                neow_finish_payout(n);
+                            }
+                        } else if (reward_take_card(rc.run, rc.rewards, a0)) {
+                            neow_finish_payout(n);
+                        }
+                        break;
+                    case NeowScreen::GRID:
+                        (void)neow_grid_pick(rc.run, n, a0);
+                        break;
+                    case NeowScreen::ITEM_REWARD:
+                        if (a0 == kChooseProceed) {
+                            // The reward screen's Proceed returns to Neow's
+                            // final dialog button, which is what opens the map.
+                            rc.rewards = RewardScreen{};
+                            rc.rewards.open_card_item = kNoOpenCardReward;
+                            neow_finish_payout(n);
+                        } else {
+                            (void)claim_reward(rc.run, rc.combat.misc_rng,
+                                               rc.rewards, a0);
+                        }
+                        break;
+                    case NeowScreen::DONE:
+                        rc.rewards = RewardScreen{};
+                        rc.rewards.open_card_item = kNoOpenCardReward;
+                        rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                        break;
+                }
             }
             fill_run_result(rc, res);
             break;

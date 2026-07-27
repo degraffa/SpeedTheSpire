@@ -98,6 +98,23 @@ using sts::registry::kIroncladUncommonPoolCount;
 using sts::registry::kIroncladUncommonPool;
 using sts::registry::kIroncladRarePoolCount;
 using sts::registry::kIroncladRarePool;
+// The dungeon COLORLESS card pool (AbstractDungeon.addColorlessCards,
+// AbstractDungeon.java:1203-1210: every COLORLESS card that is neither BASIC
+// nor SPECIAL rarity nor a STATUS). The two rarity views are what
+// getColorlessCardFromPool indexes (AbstractDungeon.java:1579-1595), and they
+// are ORDER-EXACT rather than deviating: CardGroup.getRandomCard(useRng,
+// rarity) SORTS its rarity-filtered view and AbstractCard.compareTo compares
+// cardID strings (CardGroup.java:509-524; AbstractCard.java:2583-2584), so the
+// order is derivable from the registry's game_id column alone. Those draws come
+// off cardRng, whichever caller asked. The unsorted whole-pool view feeds
+// returnTrulyRandomColorlessCardFromAvailable (:998-1014) and DOES carry the
+// same interim order deviation as the RED pools above.
+using sts::registry::kColorlessUncommonPoolCount;
+using sts::registry::kColorlessUncommonPool;
+using sts::registry::kColorlessRarePoolCount;
+using sts::registry::kColorlessRarePool;
+using sts::registry::kColorlessPoolCount;
+using sts::registry::kColorlessPool;
 
 // --- The card table (generated from registry/cards.yaml) ---------------------
 // Each entry mirrors its use()'s addToBot order exactly; provenance is cited

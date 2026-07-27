@@ -246,6 +246,13 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
     }
 }
 
+PotionId get_random_potion(RngStream& potion_rng) noexcept {
+    // PotionHelper.getRandomPotion(): potions.get(potionRng.random(size - 1)).
+    // The pool is PotionId 1..33 in pool order, so index i -> PotionId(i + 1).
+    const int idx = random(potion_rng, kPotionPoolSize - 1);
+    return static_cast<PotionId>(idx + 1);
+}
+
 PotionId return_random_potion(RngStream& potion_rng, bool limited) noexcept {
     // AbstractDungeon.returnRandomPotion(limited): a d100 tier roll, then
     // reject-sample getRandomPotion(). The limited Entropic Brew form discards
@@ -253,11 +260,8 @@ PotionId return_random_potion(RngStream& potion_rng, bool limited) noexcept {
     const int roll = random(potion_rng, 0, 99);
     const PotionRarity tier = potion_tier_for_roll(roll);
 
-    // getRandomPotion(): potions.get(potionRng.random(size - 1)). The pool is
-    // PotionId 1..33 in pool order, so index i -> PotionId(i + 1).
     auto draw = [&potion_rng]() noexcept {
-        const int idx = random(potion_rng, kPotionPoolSize - 1);
-        return static_cast<PotionId>(idx + 1);
+        return get_random_potion(potion_rng);
     };
 
     PotionId temp = draw();
