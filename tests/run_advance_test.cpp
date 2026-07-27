@@ -1547,5 +1547,81 @@ TEST(RunCombatGold, EctoplasmSuppressesTheSettlement) {
            "inside the door";
 }
 
+// The scripted walk a fuzz seed sweep once dead-ended on, pinned by name.
+//
+// Seed 42 at ascension 20 takes Neow's first blessing (a master-deck grid
+// payout), picks deck row 4, presses the finished-payout button onto the map,
+// and steps into the floor-1 monster room. Four presses, each of which the mask
+// that offered it must call legal -- and then the assertion that matters: the
+// combat the fourth press opens has to offer SOMETHING. END_TURN is legal in
+// every WAITING_ON_USER combat by construction (legal_actions in advance.cpp
+// ends with `out.can_end_turn = waiting`), so an empty legal set here is never
+// a content gap; it means the CombatState the run layer just built does not
+// read back as the CombatState the mask code expects.
+//
+// That is not hypothetical. One build tree's static library carried three
+// monster translation units compiled against an older CombatState layout
+// (MonsterState 116 bytes rather than 212), so a monster's init wrote across
+// the live combat and the mask came back completely empty. The sources were
+// fine; only the objects were stale. The fuzz seed sweep is the broad net that
+// found it, but it reports a policy trajectory rather than a scenario -- this
+// test names the scenario, and it fails the same way for any future cause.
+TEST(FirstCombatEntry, NeowPayoutWalkOntoFloorOneLeavesALiveCombatMask) {
+    constexpr int64_t kSweepSeed = 42;
+    constexpr uint16_t kGridRow = 4;
+    constexpr uint8_t kMapColumn = 1;
+
+    RunController rc = run_begin(kSweepSeed, kA20);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::NEOW));
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::BLESSING));
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    ASSERT_TRUE(m.can_choose_neow_option[0]);
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+
+    // Category 0's grid payouts (remove / upgrade / transform one card) open the
+    // master-deck grid; row 4 is one of the starting Strikes.
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::NEOW));
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::GRID));
+    legal_actions(rc, m);
+    ASSERT_TRUE(m.can_choose_master_deck[kGridRow]);
+    step(rc, make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(kGridRow)));
+
+    // One pick was all the grid asked for, so the payout is finished and the
+    // next press is the one that opens the map.
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+    legal_actions(rc, m);
+    ASSERT_TRUE(m.can_proceed);
+    step(rc, kProceed);
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    legal_actions(rc, m);
+    ASSERT_TRUE(m.can_choose_node[kMapColumn]);
+    step(rc, make_action(ActionVerb::CHOOSE, kMapColumn));
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.run.floor, 1);
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_GE(rc.combat.monster_count, 1);
+
+    legal_actions(rc, m);
+    EXPECT_TRUE(m.combat.can_end_turn)
+        << "END_TURN is legal in every WAITING_ON_USER combat; a false here "
+           "means the combat state feeding the mask is not the one that was "
+           "built";
+    bool anything_legal = m.combat.can_end_turn;
+    for (int i = 0; i < kHandCap; ++i) {
+        anything_legal =
+            anything_legal || m.combat.can_play[i] || m.combat.can_choose[i];
+        for (int t = 0; t < kMonsterCap; ++t) {
+            anything_legal = anything_legal || m.combat.can_play_target[i][t];
+        }
+    }
+    EXPECT_TRUE(anything_legal)
+        << "a live combat with no legal action at all is the run-level dead "
+           "end this walk reproduces";
+}
+
 }  // namespace
 }  // namespace sts::engine

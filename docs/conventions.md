@@ -382,6 +382,50 @@ cleanup.
 > rejection and runs from Windows through `tools\wsl_run.cmd --script
 > tools/test_wsl_run_lock.sh`.
 
+#### A build tree can keep an object no header edit will ever rebuild
+
+**Symptom:** nothing at build time. `cmake --build` reports everything up to
+date and the tests then fail somewhere that makes no sense — in the incident
+below, a run-level legal-action mask came back **empty**, so a live combat
+offered not even END_TURN, and the seed sweep reported it as a `no_legal_moves`
+dead end. A clean build of the same commit is green.
+
+**Cause:** Ninja stores each object's real header list in `.ninja_deps`. A
+record can be written **truncated** — `ninja -t deps` shows it as `#deps 0,
+… (VALID)` — by two Ninja processes sharing one build directory (the trap
+above) or by a build killed mid-write. A well-formed record always lists at
+least the translation unit's own source file, so `#deps 0` is never a
+translation unit that includes nothing; it is damage. Ninja then believes the
+object depends on nothing, and no header edit can mark it dirty again for the
+life of the tree.
+
+**Why it costs so much:** the object stays in the archive at whatever struct
+layout it was compiled against. One `libsts_engine.a` carried three monster
+translation units at `CombatState` 3928 / `MonsterState` 116 / `PowerSlot` 4
+bytes while every other object in the same archive used 4696 / 212 / 8 — the
+layout after instanced powers landed. A monster's init wrote its fields at the
+old offsets, straight across the live combat. Nothing announced itself, and the
+merged **sources** were blamed first; they were fine.
+
+**Rule:** a test failure that a clean build does not reproduce is a build-tree
+question, not a source question. Ask `ninja -C build/<preset> -t deps` before
+reading any more code, and compare a suspect object's `DW_AT_byte_size` for a
+shared struct against a known-fresh object (`objdump --dwarf=info`) — a
+mismatch there is proof, not a hunch.
+
+> **ELIMINATED 2026-07-27: `tools/check_ninja_deps.sh`, run by `wsl_run.sh`
+> before every build.** It reads `ninja -t deps`, and with `--repair` deletes
+> exactly the objects whose recorded dependency list is empty — a missing output
+> is dirty, so Ninja recompiles them and writes correct records in their place,
+> while `.ninja_deps` as a whole is left alone rather than rebuilding the world.
+> It exits 3 when it repaired something (`wsl_run.sh` treats that as normal and
+> continues), 0 when the tree is clean, and no-ops on a directory that was never
+> configured. `tools/test_ninja_deps_guard.sh` builds a compiler-free two-edge
+> Ninja fixture — one edge writes a truncated depfile, one a well-formed one —
+> and proves the guard names only the damaged object, deletes nothing without
+> `--repair`, and that the deletion is what makes Ninja rebuild. It runs from
+> Windows through `tools\wsl_run.cmd --script tools/test_ninja_deps_guard.sh`.
+
 ---
 
 ## 7. The rule of two — document once, eliminate on recurrence

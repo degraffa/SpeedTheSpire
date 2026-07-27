@@ -186,16 +186,34 @@ fi
 test_jobs=${STS_TEST_JOBS:-$((cores > 1 ? cores : 1))}
 echo "wsl_run: ctest -j$test_jobs"
 
+# configure -> repair truncated dependency records -> build -> test, for one
+# preset. `set -e` is suppressed for a function called from an `if`, so every
+# step states its own failure explicitly.
+run_preset() {
+    local preset=$1 log=$2 deps_rc=0
+    cmake --preset "$preset" ${cmake_args[@]+"${cmake_args[@]}"} || return 1
+
+    # An object whose recorded header dependency list is EMPTY is one Ninja can
+    # never rebuild -- no header edit will mark it dirty -- so it sits in the
+    # archive at whatever struct layout it was compiled against, for the life of
+    # the build tree, while `cmake --build` keeps reporting everything up to
+    # date. The per-build-tree lock above prevents NEW corruption; it cannot see
+    # damage already recorded. check_ninja_deps.sh exits 3 when it found and
+    # repaired something, which is a normal outcome here, not a failed run.
+    bash "$root/tools/check_ninja_deps.sh" --repair "build/$preset" || deps_rc=$?
+    [ "$deps_rc" = 0 ] || [ "$deps_rc" = 3 ] || return 1
+
+    # `cmake --build` before every ctest is mandatory (conventions §6): the
+    # build is what stops discovery reporting <name>_NOT_BUILT.
+    cmake --build --preset "$preset" -- -j"$jobs" || return 1
+    ctest --preset "$preset" --parallel "$test_jobs" 2>&1 | tee "$log"
+}
+
 summary=() failed=0
 for preset in "${presets[@]}"; do
     echo "=== wsl_run: $preset ==="
     log=$(mktemp)
-    if cmake --preset "$preset" ${cmake_args[@]+"${cmake_args[@]}"} \
-        && cmake --build --preset "$preset" -- -j"$jobs" \
-        && ctest --preset "$preset" --parallel "$test_jobs" 2>&1 | tee "$log"
-    then
-        # `cmake --build` before every ctest is mandatory (conventions §6): the
-        # build above is what stops discovery reporting <name>_NOT_BUILT.
+    if run_preset "$preset" "$log"; then
         line=$(grep -E 'tests passed' "$log" | tail -1)
         summary+=("$preset: PASS  ${line:-<no ctest summary line>}")
     else
