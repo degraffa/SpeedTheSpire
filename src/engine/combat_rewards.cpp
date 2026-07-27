@@ -194,6 +194,18 @@ CardId draw_card_from_pool(RngStream& rng, RewardCardRarity rarity) noexcept {
     return draw_from_pool(rng, rarity);
 }
 
+CardId draw_colorless_card_from_pool(RngStream& card_rng,
+                                     RewardCardRarity rarity) noexcept {
+    // The two views are pre-sorted by the generator, so the draw is a single
+    // indexed read (AbstractDungeon.java:1579-1595 -> CardGroup.java:509-524).
+    if (rarity == RewardCardRarity::RARE) {
+        const int32_t i = random(card_rng, kColorlessRarePoolCount - 1);
+        return kColorlessRarePool[static_cast<std::size_t>(i)];
+    }
+    const int32_t i = random(card_rng, kColorlessUncommonPoolCount - 1);
+    return kColorlessUncommonPool[static_cast<std::size_t>(i)];
+}
+
 void roll_setup_item_card_reward(RunState& rs, RoomType room,
                                  RewardScreen& s) noexcept {
     roll_card_reward_item(rs, room, s);

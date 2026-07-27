@@ -124,6 +124,13 @@ void update_lists(XXH3_state_t* st, const engine::MonsterLists& l) noexcept {
     // RunState byte, and a step whose whole-controller hash is unchanged is
     // reported as a NO_PROGRESS failure by the soak.
     XXH3_64bits_update(&st, &rc.neow, sizeof(rc.neow));
+    // The live merchant: the whole stock, its prices, which rows are sold, the
+    // sale index, which shop screen is up and this visit's purge cost. It MUST
+    // be hashed for exactly the reason rest.screen and neow are -- opening the
+    // card-removal grid moves no RunState byte, so without this the soak would
+    // report that press as a NO_PROGRESS failure. POD with explicit padding, so
+    // the byte hash is stable.
+    XXH3_64bits_update(&st, &rc.shop, sizeof(rc.shop));
     return static_cast<uint64_t>(XXH3_64bits_digest(&st));
 }
 

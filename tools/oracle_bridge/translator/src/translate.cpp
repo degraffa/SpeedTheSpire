@@ -125,6 +125,10 @@ private:
     if (!v.is_string()) throw TranslateError(loc(c) + " expected string at " + where);
     return v.get<std::string>();
 }
+[[nodiscard]] bool as_bool(const json& v, const Ctx& c, const std::string& where) {
+    if (!v.is_boolean()) throw TranslateError(loc(c) + " expected boolean at " + where);
+    return v.get<bool>();
+}
 [[nodiscard]] float as_f32(const json& v, const Ctx& c, const std::string& where) {
     if (!v.is_number()) throw TranslateError(loc(c) + " expected number at " + where);
     // The game's chances are float literals (e.g. MONSTER_CHANCE = 0.1f). The
@@ -322,7 +326,13 @@ private:
     fr.defer("has_target");
     fr.defer("exhausts");
     fr.defer("ethereal");
-    fr.defer("price");  // shop-only overlay (§3.9)
+    // Shop-only overlay (§3.9). Still storage-less -- a shop is derived state,
+    // not RunState -- but TYPE-CHECKED now, so a price that arrives as a string
+    // or a float is drift rather than a silently deferred key.
+    if (const json* pr = fr.take("price")) {
+        (void)as_i64(*pr, ctx, path + ".price");
+    }
+    fr.defer("price");
     fr.finish();
     return ci;
 }
@@ -834,7 +844,10 @@ void parse_relic(const json& j, const std::string& path, Ctx& ctx, eng::RelicSlo
         fr.mapped();
     }
     fr.ignore("name");
-    fr.defer("price");  // shop overlay
+    if (const json* pr = fr.take("price")) {  // shop overlay, type-checked
+        (void)as_i64(*pr, ctx, path + ".price");
+    }
+    fr.defer("price");
     fr.finish();
     if (out) *out = rs;
 }
@@ -1096,6 +1109,18 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
             fr.ignore("relics");
         }
     } else if (screen_type == "SHOP_SCREEN") {
+        // The shop slice, content-validated on the same terms as the reward
+        // slice above: registry-JOINED, TYPE-CHECKED, and deliberately
+        // STORAGE-LESS. Storage-less is not an omission -- translation outputs
+        // RunState/CombatState, and a merchant is derived state the game itself
+        // rebuilds from (seed, merchantRng.counter), so there is nothing in the
+        // frozen schema for it to land in. The one piece the game DOES persist,
+        // the ramping purge cost, already has a RunState field and arrives
+        // through the oracle block, not here.
+        //
+        // cards and relics are joined by parse_card / parse_relic (both of
+        // which now also type-check the shop `price` overlay); the potion rows
+        // are joined here, the way the COMBAT_REWARD potion is.
         defer_card_list(fr, "cards", path, ctx);
         if (const json* rl = fr.take("relics")) {
             for (std::size_t i = 0; i < rl->size(); ++i)
@@ -1104,14 +1129,30 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
         }
         if (const json* pt = fr.take("potions")) {
             for (std::size_t i = 0; i < pt->size(); ++i) {
-                FieldReader p((*pt)[i], path + ".potions[" + std::to_string(i) + "]", ctx);
-                p.defer("id"); p.ignore("name"); p.defer("can_use"); p.defer("can_discard");
-                p.defer("requires_target"); p.defer("price");
+                const std::string pp = path + ".potions[" + std::to_string(i) + "]";
+                FieldReader p((*pt)[i], pp, ctx);
+                (void)join_potion(as_str(p.require("id"), ctx, pp + ".id"), ctx,
+                                  pp + ".id");
+                p.defer("id");
+                p.ignore("name");
+                p.defer("can_use");
+                p.defer("can_discard");
+                p.defer("requires_target");
+                if (const json* pr = p.take("price")) {
+                    (void)as_i64(*pr, ctx, pp + ".price");
+                }
+                p.defer("price");
                 p.finish();
             }
             fr.defer("potions");
         }
+        if (const json* pa = fr.take("purge_available")) {
+            (void)as_bool(*pa, ctx, path + ".purge_available");
+        }
         fr.defer("purge_available");
+        if (const json* pc = fr.take("purge_cost")) {
+            (void)as_i64(*pc, ctx, path + ".purge_cost");
+        }
         fr.defer("purge_cost");
     } else if (screen_type == "GRID") {
         defer_card_list(fr, "cards", path, ctx);

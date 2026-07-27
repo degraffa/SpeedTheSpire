@@ -323,6 +323,23 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
 [[nodiscard]] CardId draw_card_from_pool(RngStream& rng,
                                          RewardCardRarity rarity) noexcept;
 
+// Its COLORLESS sibling: getColorlessCardFromPool(rarity)
+// (AbstractDungeon.java:1579-1595) -> CardGroup.getRandomCard(true, rarity)
+// (CardGroup.java:509-524), which filters the colorless pool to `rarity`,
+// SORTS the filtered view (AbstractCard.compareTo == cardID compare) and
+// indexes it. UNCOMMON and RARE are the only poolable colourless rarities, so
+// the two generated views cover the whole domain.
+//
+// UNLIKE draw_card_from_pool the stream is not really the caller's choice: the
+// Java hard-codes `AbstractDungeon.cardRng` inside getRandomCard(boolean,
+// rarity), so BOTH S1 callers -- Neow's colourless blessings
+// (NeowReward.java:309-330, whose RARITY roll is on NeowEvent.rng) and the
+// shop's two colourless slots (Merchant.java:84-85) -- pass cardRng. It stays
+// a parameter so the draw is visible at the call site rather than reaching
+// into a RunState.
+[[nodiscard]] CardId draw_colorless_card_from_pool(
+    RngStream& card_rng, RewardCardRarity rarity) noexcept;
+
 // CombatRewardScreen.setupItemReward's UNCONDITIONAL card row
 // (CombatRewardScreen.java:72-96): every open() from a room that is not a
 // TreasureRoom, not a RestRoom and whose event does not set noCardsInRewards

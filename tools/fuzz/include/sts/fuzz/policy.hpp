@@ -112,7 +112,16 @@ enum class MoveCat : uint8_t {
     // legal move a count-driven screen has no spelling for -- is being reached,
     // and a shared counter could not tell a confirm from a toggle.
     CHOICE_CONFIRM = 25,
-    COUNT = 26,
+    // Every shop move: buying a card / relic / potion, opening the removal
+    // grid, confirming a card in it, and the Proceed that leaves. ONE bucket
+    // for what is really two screens and four item kinds, for the reason the
+    // NEOW_PROCEED comment in policy.cpp gives -- MoveCat is a SHARED,
+    // append-only namespace (docs/stage-b-tasks.md's shared-namespace table),
+    // so splitting it finer means the orchestrator ALLOCATING values rather
+    // than a task taking them. What is lost is coverage resolution inside one
+    // shop; legality and enumeration are exact either way.
+    SHOP = 26,
+    COUNT = 27,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

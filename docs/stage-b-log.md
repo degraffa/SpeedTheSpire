@@ -4434,3 +4434,285 @@ Java provenance: `NeowEvent.java:49-121, 162-242, 288-378`,
 `AbstractCreature.java:199-223`, `AbstractPlayer.java:697-734, 1545-1553,
 2014-2041`, `BurningBlood.java:30`, `Omamori.java:18-19`,
 `BlackBlood.java:33-36`, and `AbstractEvent.java:63`.
+<a id="b48"></a>
+
+### B4.8 `[ ]` Shop — code landed, oracle capture outstanding
+
+Done 2026-07-27 from task base
+`516f13640d6cc3f45556bef5c1d9558bf6fa4f97`. The checkbox stays `[ ]`: the
+acceptance's third leg is an oracle spot-diff of a shop floor, and that needs
+the live game, which only a human operator can launch. The other two legs are
+green — the draw-order pin and the purge ramp — and so is a bonus vector that
+needed no new capture at all (below). The capture is prepared and specified in
+[b48_shop_spotdiff.md](../tools/oracle_bridge/driver/b48_shop_spotdiff.md),
+following the B4.7 / B4.14 precedent.
+
+**The dependency override is recorded on purpose.** B4.8's `Deps:` names B4.5,
+which is `[!]` — code landed, capture-blocked. The project owner explicitly
+authorised starting B4.8 ahead of B4.5's acceptance on 2026-07-27, with the
+capture pipeline running concurrently. Nothing in the shop reads B4.5's blocked
+leg: what a merchant needs from the reward layer is the relic-pool draw, the
+`acquire_relic` door, the potion-slot inventory and the master-deck obtain
+door, and all four are landed.
+
+#### The sixteen draws
+
+A shop is built once, on room entry, in one uninterrupted sequence across three
+streams, and nothing about it is a player decision — so `generate_shop` is a
+single call and the CHOOSE flow above it only spends gold. The order, which is
+the thing this task exists to get right:
+
+| # | Stream | Consumer |
+|---|---|---|
+| — | `cardRng` x12 | five colored identities (a rarity roll plus a type-filtered pool index each) then two colourless — ATTACK, ATTACK, SKILL, SKILL, POWER, then colourless UNCOMMON and RARE |
+| 1–5 | `merchantRng` | the five colored price jitters, `random(0.9f, 1.1f)` |
+| 6–7 | `merchantRng` | the two colourless price jitters |
+| 8 | `merchantRng` | the sale slot, `random(0, 4)` — always a COLORED slot |
+| 9, 11 | `merchantRng` | relic slot 0 and slot 1 tier rolls, `random(99)` against 48 / 82 |
+| 10, 12, 13 | `merchantRng` | the three relic price jitters, `random(0.95f, 1.05f)` |
+| — | `potionRng` | three `returnRandomPotion` identities (a tier roll each plus trap-14 rejection sampling) |
+| 14–16 | `merchantRng` | the three potion price jitters, interleaved one per identity |
+
+Slot 2 is **always** the SHOP tier and rolls no tier (`ShopScreen.java:365`),
+which is why a fresh shop is sixteen `merchantRng` draws and not seventeen.
+Relic and potion identities cost `merchantRng` nothing: the pools are END-popped
+(trap 15) and the potion identity is `potionRng`'s.
+
+`ShopDrawOrder.SixteenMerchantDrawsInTheJavaOrderForAFixedState` replays all
+three streams beside the engine for a fixed state, compares every price and
+every id, and then asserts the three post-build stream states are byte-identical
+to the replay's. The table above is repeated as a comment at both the header and
+the test.
+
+#### A recorded capture already reproduces a whole merchant
+
+The strongest single check here needed no new capture. Run `STS00008` of the
+b13 twenty-seed sweep contains a SHOP_SCREEN at floor 3 with full prices, and
+its `oracle` block carries the pre-entry stream triples and the three relic
+pools. `ShopCapture.B13Seed1790050543758Floor3MatchesTheRecordedMerchant`
+rebuilds that shop from exactly those inputs and matches it entry for entry:
+Pummel (on sale, 43) / Iron Wave 59 / Armaments 59 / Rage 89 / Rupture 85,
+Finesse 99 and Secret Weapon 206, Question Card 268 / Blood Vial 172 / Medical
+Kit 161, Strength Potion 54 / Duplication Potion 85 / Flex Potion 55, purge 75
+— plus the post-build `cardRng` 9→21, `merchantRng` 0→16, `potionRng` 3→10, raw
+state included.
+
+That is not the acceptance leg (one shop, from another task's campaign, no
+purchase), but it settled a question the decompiled source could not.
+`AbstractCard.getPrice`, `AbstractRelic.getPrice` and `AbstractPotion.getPrice`
+are switches over the game's NESTED enums, and `sts-classes.jar` carries no
+inner classes at all — CFR emitted them as `$SwitchMap[...]` indices with no
+constant names, so the index→tier mapping is not recoverable from the tree. The
+value multisets are; the capture supplies the assignment for every tier a shop
+can offer (card COMMON 50 / UNCOMMON 75 / RARE 150; relic COMMON 150 /
+UNCOMMON 250 / SHOP 150; potion COMMON 50 / UNCOMMON 75). RARE and BOSS relics
+are the switch's remaining 300/300 pair and are interchangeable there, so the
+shop's answer is the same either way.
+
+#### Pricing is a pipeline, and the stages do not commute
+
+Card prices TRUNCATE (`(int)`), item prices ROUND (`MathUtils.round`), the
+colourless x1.2 is INSIDE the truncation, the sale halving is an INTEGER divide
+of the already-truncated price, and each discount is a round of an
+already-rounded number. `ShopPricing.ColorlessBumpIsInsideTheTruncation`
+derives the same jitter both ways and requires the engine to match the first.
+
+The discount tail runs in the Java's order: A16 x1.1 with `affectPurge=false`,
+then The Courier x0.8, then the Membership Card x0.5, then Smiling Mask's flat
+50. Two consequences are reproduced rather than corrected. **Ascension never
+moves the purge cost** — the only A16 call passes `affectPurge=false`, so an
+A20 shop's stock is 10 % dearer and its removal service is not. And **at init a
+Membership Card overwrites The Courier's purge discount instead of compounding
+with it**, because each `applyDiscount` recomputes `actualPurgeCost` from
+`purgeCost` rather than from the previous call's output
+(`ShopScreen.java:340-358`) — while `purgeCard`'s tail spells the same case as
+a single round of `0.8f * 0.5f`. The two call sites disagree in the game, so
+the port has two functions, `shop_purge_cost_at_init` and
+`shop_purge_cost_after_purge`, and a named test pins both (75 → 38 at init;
+100 → 40 after the ramp).
+
+#### A latent run-setup bug the purge ramp uncovered
+
+`run_begin` never initialised `RunState.purge_cost`. The field existed (B4.3
+front-loaded the storage) and nothing had ever read it, so a value-initialised
+run would have opened its first merchant offering card removal for **zero
+gold** — and then ramped from 25, not 100. `ShopScreen.purgeCost` is a STATIC
+in the game, reset only by the dungeon reset that precedes a new run
+(`CardCrawlGame.java:478` → `ShopScreen.java:241-244`), which is precisely why
+that reset exists. It is now spelled in `run_begin` beside the other
+`dungeonTransitionSetup` fields, with the reasoning at the site. A failing test
+found it, not a review: the purge-flow test expected 100 and got 25.
+
+#### Nine new generated pools, and why they do NOT deviate
+
+The five colored slots go through `getCardFromPool(rarity, type, useRng)`
+(`AbstractDungeon.java:1538-1577`) → `CardGroup.getRandomCard(type, useRng)`
+(`CardGroup.java:539-552`), which filters the rarity pool by CardType,
+**`Collections.sort`s the filtered view**, and only then indexes it with
+`cardRng`. `emit/cards.py` therefore gains nine arrays,
+`kIronclad{Common,Uncommon,Rare}{Attack,Skill,Power}Pool`, sorted by `game_id`
+— and because that sort is the game's own, they are **ORDER-EXACT**: they do
+not inherit the registry-id-order deviation the four unsorted pools carry,
+exactly as the two colourless rarity views do not. The four existing sort keys
+were not touched. A shop card-id mismatch in the spot-diff is therefore a real
+divergence, which the runbook says explicitly.
+
+`kIroncladCommonPowerPool` is deliberately **EMPTY** — the Ironclad has no
+common POWER — and that emptiness is load-bearing: it is what makes
+`getCardFromPool`'s `retVal == null && type == POWER` branch recurse to the
+next rarity up, spending NO draw on the empty pool, because `getRandomCard`
+returns null before it indexes anything. A `static_assert` pins that view empty
+and the other eight non-empty, which is what makes the Java's two other exits
+(the non-POWER fallthrough *down* the rarity ladder, and COMMON's fallthrough
+into the CURSE pool) provably unreachable rather than merely untested.
+`ShopDrawOrder.PowerSlotSkipsTheEmptyCommonViewWithoutSpendingADraw` proves the
+one-draw accounting, and that the card's OWN rarity — UNCOMMON, not the COMMON
+that was rolled — is what it gets priced as, which is what
+`ShopScreen.java:253` reads.
+
+#### Relic hooks
+
+Four are live, each cited at its body. **Maw Bank** is used up by the first coin
+spent in any shop: `AbstractPlayer.loseGold` fires every relic's `onSpendGold`
+when the current room is a ShopRoom, ahead of the `amount > 0` test, so the
+fan-out lives in the `lose_gold` door itself behind an `in_shop` flag — the
+place the door's own comment had already reserved for it — and
+`MawBank.setCounter(-2)` is the used-up encoding B4.10's entry share already
+reads. **Membership Card** bought in a shop re-prices the rest of that same
+shop, because `StoreRelic.purchaseRelic` obtains the relic and only then calls
+`applyDiscount(0.5f, true)`. **Smiling Mask** pins the purge cost to 50 the
+moment it is bought. **Meal Ticket** heals 15 on entering a shop.
+
+Four relics can never be STOCKED — Maw Bank, Smiling Mask, The Courier and Old
+Coin all AND their floor gate with `!(getCurrRoom() instanceof ShopRoom)`, and
+the merchant is built after `setCurrMapNode`. That is RNG-visible, not
+cosmetic: a closed gate makes the end-pop discard that id and pop another, so
+the pool moves. A named test stacks all three of the offenders that can reach a
+COMMON/UNCOMMON pool end and requires none of them on a shelf.
+
+The eggs' `onPreviewObtainCard` also runs, over every stocked card, as the shop
+is built (`ShopScreen.java:258-260, 268-270`; each egg forwards the preview
+straight to its own `onObtainCard`), so an egg owner's merchant DISPLAYS its
+matching cards upgraded and the instance bought is the upgraded one. `ShopSlot`
+carries an `upgrade` byte for it.
+
+#### Meal Ticket, and why the ?→Shop share is free
+
+`justEnteredRoom` fires AFTER the ?-roll has replaced the room object and after
+`setCurrMapNode` (`AbstractDungeon.java:1763-1789`), so by the time it runs a
+?→Shop and a static ShopRoom are the same room. `on_player_entry` therefore
+dispatches the fan-out for every non-Event room and, for a `?`, only after
+resolving — at which point the SHOP branch recurses into the ordinary Shop
+entry and picks the dispatch up on the way through. Both paths are named tests.
+The heal is out of combat, so Magic Flower's `onPlayerHeal` (combat-only,
+`MagicFlower.java:31-37`) cannot scale it; the fan-out is named rather than
+written, as `rest_apply_heal` already does.
+
+#### The Courier: half landed, half BLOCKED — and the blocker is real
+
+Its `x0.8` discount and its purge branch are live, because both are inside
+`ShopScreen.init` and `purgeCard`, which this task implements in full. Its
+RESTOCK is not, and the reason is not scheduling. `ShopScreen.purchaseCard`'s
+replacement draws `getCardFromPool(rollRarity(), type, false)`, and
+`useRng=false` means `MathUtils.random` — libGDX's **unseeded global**, not
+`cardRng` (`ShopScreen.java:615-617`). The replacement card's identity has no
+reproducible answer from a seed at all. The rarity roll ahead of it, and the
+relic and potion restocks, ARE seeded and could be encoded; landing half a
+relic's behaviour behind a hard blocker would be worse than naming the blocker,
+so the obligation row now carries it and the runbook asks the operator to
+capture a Courier shop specifically, to measure what the restock costs the
+seeded streams.
+
+#### A ledger correction, and a doc correction
+
+The deliverables line said "5 colored + 2 colorless w/ 0.3 rare chance". There
+is no such roll: the two colourless slots are FIXED UNCOMMON then RARE
+(`Merchant.java:84-85`). `AbstractDungeon.colorlessRareChance` is read only by
+The Courier's colourless restock (`ShopScreen.java:601`) — the half that is
+blocked. Recorded in the ledger block rather than silently dropped.
+
+Separately, B4.13's `colorlessCardPool`-shuffled-in-place obligation named "the
+shop's two colorless slots" as the future consumer that would observe the
+persisted order. The shop now exists and does **not** observe it:
+`getColorlessCardFromPool` reaches `CardGroup.getRandomCard(true, rarity)`,
+which filters into a local list and sorts it before indexing, discarding the
+source order on every read. That row's forward-looking half is corrected in
+place; it stays open only against a future reader of the unsorted whole-pool
+view.
+
+#### Run-layer shape
+
+`RunPhase::SHOP = 10` and fuzz `MoveCat::SHOP = 26` (`COUNT` 26→27), both
+pre-authorised in the ledger's allocation table and both recorded there.
+`RunController` gains a `ShopState` — transient, like `RewardScreen`,
+`TreasureChest`, `RestSiteState` and `NeowState`, because the game rebuilds a
+whole merchant from `(seed, merchantRng.counter)` on reload. It is added to the
+fuzz controller hash for the same reason `rest.screen` and `neow` are: opening
+the removal grid moves no `RunState` byte, and an unchanged whole-controller
+hash is a `NO_PROGRESS` failure to the soak.
+
+Shop slots are FIXED, not compacted. The game removes a bought row from its
+list, so the game's indices shift; nothing observable depends on those indices
+(no RNG and no relic hook reads a shop list position — `StoreRelic.slot` is a
+render x-offset), and a `sold` flag keeps a row's CHOOSE arg0 stable for the
+whole visit, which a shifting index could not. The CHOOSE layout is one dense
+index space: 0–4 colored, 5–6 colourless, 7–9 relics, 10–12 potions, 13 the
+purge service, `kChooseProceed` to leave. The removal grid is modal — while it
+is up, only its own master-deck rows are legal, the shape the rest site's
+Smith/Toke grids already use.
+
+Every purchase is a transaction: a false return means the purchase was not
+legal and both arguments are byte-stable. A bought card is APPENDED, because
+`CardGroup.addToTop` is `group.add(c)` (`CardGroup.java:455-457`) and the shop
+reaches the master deck through `FastCardObtainEffect` → `Soul.obtain` →
+`masterDeck.addToTop`.
+
+#### Translator
+
+The SHOP_SCREEN slice is discharged on the B4.11/B4.14 terms: potion ids join
+through the registry, every `price` on a card / relic / potion row is
+type-checked (both shared parsers gained that check, so the reward slice
+benefits too), `purge_cost` must be an integer and `purge_available` a boolean.
+It stays STORAGE-LESS deliberately — translation outputs
+`RunState`/`CombatState`, a merchant is derived state, and the one piece the
+game does persist already has a `RunState` field fed from the oracle block.
+Three named tests: the happy path, an unknown potion id, and the three
+type-check refusals.
+
+#### An out-of-scope defect found and reported, not fixed
+
+`add_card_to_master_deck_top` (`run_deck.hpp`) inserts at master-deck index 0
+under a comment reading "CardGroup.addToTop — the card lands at master-deck
+INDEX 0". That reading is inverted: `addToTop` is `group.add(c)`, an APPEND, and
+it is `addToBottom` that inserts at 0 (`CardGroup.java:455-461`). The repo's own
+Ascender's-Bane-at-index-0 reasoning only works under the append reading. The
+single caller is Note For Yourself (`one_time_specials.cpp`), whose Java also
+appends (`NoteForYourself.java:56-66`), so a run that takes that event puts the
+saved card in the wrong deck position — and master-deck ORDER is observable,
+because grids and event boards index it positionally. Not fixed here: it is
+another task's landed code and its tests, and B4.8 does not touch that path
+(the shop's own purchase goes through the appending door). Surfaced to the
+orchestrator.
+
+#### Acceptance
+
+Final-tree WSL Debug, leak-detecting ASan/UBSan and Release each ran the full
+suite green, 1348 tests per preset, of which 30 are the new `shop_test` and
+three are the new translator cases. `tools/check_stale_counts.sh`,
+`tools/check_doc_links.sh` and `git diff --check` are clean. No schema, no
+fixture, no golden, no registry id, no opcode, no Steam/game deployment and no
+external oracle artifact changed; the four existing generated pool sort keys
+were not touched.
+
+Java provenance: `ShopScreen.java:99-136, 130-244, 246-292, 294-305, 340-428,
+452-490, 592-672, 928-978`, `Merchant.java:38-97`, `ShopRoom.java:22-77`,
+`StoreRelic.java:24-120`, `StorePotion.java:19-101`,
+`AbstractCard.java:1915-1937, 2583-2584`, `AbstractRelic.java:173-201`,
+`AbstractPotion.java:381-394`, `AbstractDungeon.java:699-753, 825-850,
+1481-1620, 1687-1813`, `AbstractRoom.java:108-110, 148-186`,
+`CardGroup.java:455-461, 490-552`, `AbstractPlayer.java:697-737, 1545-1553`,
+`AbstractCreature.java:386-421`, `CardCrawlGame.java:465-482`,
+`MealTicket.java:17-49`, `MawBank.java:16-64`, `SmilingMask.java:131-162`,
+`Courier.java:181-212`, `MembershipCard.java:229-255`,
+`MagicFlower.java:31-37`, `MoltenEgg2.java:35-55`,
+`FastCardObtainEffect.java:19-56`, and `Soul.java:145-156`.
