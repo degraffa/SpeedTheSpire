@@ -40,6 +40,7 @@
 // Generated headers (build tree, via the registry_generated include dir).
 #include "sts/registry/card_table.hpp"
 #include "sts/registry/game_ids.hpp"
+#include "sts/registry/event_table.hpp"
 #include "sts/registry/ids.hpp"
 #include "sts/registry/manifest.hpp"
 #include "sts/registry/monster_table.hpp"
@@ -1297,7 +1298,7 @@ TEST(RegistryGen, NativeDispatchHandlerNamesFollowTheRowNameConvention) {
 #undef STS_TEST_RELIC_NAME
 }
 
-// --- 8. B4.10 event registry: canonical list order + id uniqueness -----------
+// --- 8. B4.10/B4.11 event registry: identities + native-body metadata --------
 //
 // events.yaml is metadata-only at this checkpoint (`native: true` on every row):
 // B4.10 owns list membership and selection, B4.11-B4.13 the native bodies. So
@@ -1432,6 +1433,29 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
     std::sort(gids.begin(), gids.end());
     EXPECT_EQ(std::adjacent_find(gids.begin(), gids.end()), gids.end())
         << "game_id strings must be unique -- they are the translator join key";
+}
+
+TEST(RegistryGen, FirstSixEventsCarryAuditedNativeBodyMetadata) {
+    namespace r = sts::registry;
+    for (uint16_t raw = 1; raw <= 31; ++raw) {
+        const auto id = static_cast<r::EventId>(raw);
+        const r::EventDef* def = r::event_def(id);
+        ASSERT_NE(def, nullptr) << raw;
+        EXPECT_TRUE(def->native) << raw;
+        EXPECT_EQ(def->implemented, raw <= 6) << raw;
+        if (raw <= 6) {
+            EXPECT_GE(def->screen_count, 2) << raw;
+        } else {
+            EXPECT_EQ(def->screen_count, 0) << raw;
+            EXPECT_EQ(def->a15_change_count, 0) << raw;
+        }
+    }
+    EXPECT_EQ(r::event_def(r::EventId::BIG_FISH)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::THE_CLERIC)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::DEAD_ADVENTURER)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::GOLDEN_IDOL)->a15_change_count, 2);
+    EXPECT_EQ(r::event_def(r::EventId::GOLDEN_WING)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::WORLD_OF_GOOP)->a15_change_count, 1);
 }
 
 TEST(RegistryGen, DuplicateEventIdFailsWithClearError) {

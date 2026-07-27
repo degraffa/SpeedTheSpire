@@ -70,6 +70,7 @@ set(REGISTRY_GEN_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/__init__.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/cards.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/encounters.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/events.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/ids.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/meta.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/stsgen/emit/monsters.py"
@@ -99,6 +100,7 @@ set(GEN_HEADERS
     "${GEN_OUT_ROOT}/sts/registry/potion_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/monster_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/encounter_table.hpp"
+    "${GEN_OUT_ROOT}/sts/registry/event_table.hpp"
     "${GEN_OUT_ROOT}/sts/registry/game_ids.hpp"
     "${GEN_OUT_ROOT}/sts/registry/manifest.hpp")
 

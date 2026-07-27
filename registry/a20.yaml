@@ -151,7 +151,7 @@
   scope: event
   mechanic: "harsher event branches, per event"
   provenance: "Per-event branches on ascensionLevel >= 15, e.g. WomanInBlue.<init> (WomanInBlue.java:47-51) swaps the leave option's text for a MathUtils.ceil(maxHealth * 0.05f) HP cost, and WomanInBlue.buttonEffect case 3 (WomanInBlue.java:96-98) applies that HP_LOSS damage."
-  notes: "N/A-FOR-S1 for now: no event bodies exist yet (registry/events.yaml is empty; ?-rooms park at an unimplemented stall). Each event lands its own >= 15 branch with its own row when its owning task lands it."
+  notes: "IMPLEMENTED (partial): registry/events.yaml rows 1-6 carry explicit per-event A15 columns and their native bodies consume them (The Cleric purify cost 50->75; Dead Adventurer opening risk 25->35; Golden Idol damage 25%->35% and max-HP loss 8%->10%; World of Goop gold-loss roll 20..50->35..75). Big Fish and Golden Wing explicitly record no A15 change because their Java classes have no ascension branch. Rows 7-31 remain owned by B4.12-B4.13."
 
 - id: 16
   level: 16
