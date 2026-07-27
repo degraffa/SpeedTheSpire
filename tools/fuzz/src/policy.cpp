@@ -70,6 +70,7 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::TREASURE_OPEN: return "treasure_open";
         case MoveCat::TREASURE_SKIP: return "treasure_skip";
         case MoveCat::EVENT_OPTION: return "event_option";
+        case MoveCat::EVENT_GRID: return "event_grid";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -308,6 +309,13 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             break;
 
         case RunPhase::EVENT_DIALOG:
+            for (int i = 0; i < engine::kMasterDeckCap; ++i) {
+                if (mask.can_choose_master_deck[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::EVENT_GRID);
+                }
+            }
             for (int i = 0; i < engine::kEventOptionCap; ++i) {
                 if (mask.can_choose_event_option[i]) {
                     s.add(make_action(ActionVerb::CHOOSE,
@@ -526,6 +534,8 @@ struct CardScore {
         case MoveCat::EVENT_OPTION:
             // All dialog options score equal, so the tie-break explores every
             // branch uniformly -- exactly what a coverage generator wants.
+            return 100;
+        case MoveCat::EVENT_GRID:
             return 100;
         case MoveCat::COUNT:
             break;

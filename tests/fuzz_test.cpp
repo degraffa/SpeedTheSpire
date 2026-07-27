@@ -887,6 +887,29 @@ TEST(FuzzPolicy, EventDialogEnumeratesOnlyEnabledOptionsWithItsOwnCategory) {
     EXPECT_EQ(engine::action_arg0(moves[2].action), 3);
 }
 
+TEST(FuzzPolicy, EventGridEnumeratesOnlyLegalMasterDeckCards) {
+    engine::RunController rc = engine::run_begin(8082, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::EVENT_DIALOG);
+    rc.event.event_id =
+        static_cast<uint16_t>(engine::EventId::THE_CLERIC);
+    rc.run.master_deck_count = 2;
+    rc.run.master_deck[0] =
+        engine::CardInstance{
+            static_cast<uint16_t>(engine::CardId::ASCENDERS_BANE), 0, 0, 0, 0};
+    rc.run.master_deck[1] =
+        engine::CardInstance{
+            static_cast<uint16_t>(engine::CardId::STRIKE), 0, 0, 0, 0};
+    engine::open_event_grid(rc.event, engine::EventGridKind::PURGE);
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    ASSERT_EQ(n, 1u);
+    EXPECT_EQ(moves[0].cat, MoveCat::EVENT_GRID);
+    EXPECT_EQ(engine::action_arg0(moves[0].action), 1);
+}
+
 // --- 3b. the controller hash is a CONTENT hash, not a byte hash --------------
 
 TEST(FuzzHash, ControllerHashIgnoresEncounterKeyADDRESSES) {
@@ -955,6 +978,11 @@ TEST(FuzzHash, ControllerHashIncludesEveryEventDialogStateField) {
 
     changed = rc;
     changed.event.screen = 1;
+    EXPECT_NE(hash_controller(changed), before);
+
+    changed = rc;
+    changed.event.grid_kind =
+        static_cast<uint8_t>(engine::EventGridKind::PURGE);
     EXPECT_NE(hash_controller(changed), before);
 
     changed = rc;

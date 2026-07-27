@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .emit import (emit_card_table, emit_encounter_table, emit_game_ids,
+from .emit import (emit_card_table, emit_encounter_table, emit_event_table, emit_game_ids,
                    emit_ids, emit_manifest, emit_monster_table,
                    emit_potion_table, emit_power_table, emit_relic_table)
 from .loader import load_registry
@@ -37,6 +37,7 @@ def generate(registry_dir: Path, out_dir: Path) -> list[Path]:
         "potion_table.hpp": emit_potion_table(domains),
         "monster_table.hpp": emit_monster_table(domains),
         "encounter_table.hpp": emit_encounter_table(domains),
+        "event_table.hpp": emit_event_table(domains),
         "game_ids.hpp": emit_game_ids(domains),
         "manifest.hpp": emit_manifest(domains),
     }

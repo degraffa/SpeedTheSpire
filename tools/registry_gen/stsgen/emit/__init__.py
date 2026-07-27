@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from .cards import emit_card_table
 from .encounters import emit_encounter_table
+from .events import emit_event_table
 from .ids import emit_ids
 from .meta import emit_game_ids, emit_manifest
 from .monsters import emit_monster_table
@@ -25,6 +26,7 @@ __all__ = [
     "emit_potion_table",
     "emit_monster_table",
     "emit_encounter_table",
+    "emit_event_table",
     "emit_game_ids",
     "emit_manifest",
 ]

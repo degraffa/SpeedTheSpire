@@ -3672,3 +3672,85 @@ its enumeration/hash/transition surface is covered by the synthetic directed
 tests. Documentation links, stale-count and whitespace checks pass.
 No `RunState`/`CombatState` schema, fixture, golden, or external oracle
 artifact changed.
+
+<a id="b411"></a>
+
+### B4.11 `[x]` Exordium events I
+**Deps:** B4.10 · **Provenance:** events/exordium: Big Fish, The Cleric,
+Dead Adventurer, Golden Idol, Golden Wing, World of Goop (each read in full;
+A15 branches per event)
+**Deliverables:** the 6 events as native logic + `events.yaml` metadata
+(conditions, option tables, A15 columns); Dead Adventurer's escalating
+encounter, Golden Idol's relic+curse branches.
+**Acceptance:** tier-2 per event (every option's state delta, A15 variants);
+directed script per event.
+**Inherited (shared with B4.12/B4.13, whichever first builds an event claim
+screen):** the B3.27 event-screen relic shares — Golden Idol ×1.25 gold,
+Sozu's potion block, Sacred Bark potency, and the five deferred `onEquip`
+bodies (Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) —
+see the Deferred obligations row. Event-created combats must stay Event-room
+combats: they do not advance the ordinary monster-list cursor, and generic
+combat reward assembly must not overwrite their event-defined rewards.
+**Log:** Done 2026-07-26 from task base `27ed040`; registry-first commit
+`b730b4e` added audited `implemented`, conditions, option screens and explicit
+A15 metadata to the six rows, plus generated `EventDef` metadata and
+`STS_REGISTRY_NATIVE_EVENTS`. Expanding that generated table declares and
+dispatches every implemented handler, so marking a row implemented without
+linking its native body fails the build rather than silently parking.
+
+`events/exordium_events_i.cpp` implements all six Java dialog trees. Big Fish
+uses integer one-third healing, `increaseMaxHp(5,true)`, and the
+Regret-before-screenless-relic branch. The Cleric pins 35-gold quarter healing,
+the 50/75 purify split and the no-purgeable/no-charge branch. Golden Idol pins
+the fixed relic/Circlet duplicate path, Injury obtain door, 25/35 percent
+damage and 8/10 percent max-HP loss. Golden Wing keeps the Java two-step
+damage→prompt→purge flow and reads the master-deck cards' live upgraded base
+damage for its ≥10 gate; the legacy starter-card rows whose generated upgraded
+program still mirrors base are bridged explicitly for upgraded Bash and Pommel
+Strike. World of Goop consumes its 20–50 / 35–75 constructor draw, clamps the
+displayed loss to held gold, and preserves damage-before-gain ordering.
+
+Dead Adventurer consumes one `miscRng.randomLong` into the exact JDK shuffle,
+then one enemy roll; packs the shuffled reward order plus collected count in
+its transient event state; ramps 25/35→50/60→75/85; pays successful
+GOLD/NOTHING/RELIC results immediately; and, on failure, pre-seeds the random
+25–35 gold then the uncollected suffix before entering 3 Sentries, Gremlin Nob
+or awake Lagavulin. Focused tests independently reproduce the shuffle and all
+three immediate reward kinds, and pin gold-row merging plus Golden Idol bonus
+recomputation.
+
+The shared `enter_event_combat` seam preserves all five already-advanced floor
+streams, retains `RoomType::Event`, and supports the existing
+`lagavulin_init_awake` production variant. Event battle-over assembly preserves
+pre-seeded rows, appends the ordinary event potion roll and exactly one card
+reward, adds no ordinary-room gold or Prayer Wheel row, and exits without
+advancing `monster_cursor`. The reusable event master-deck grid exposes common
+purge/upgrade/transformable legality and mutation doors while keeping
+continuation in the owning event body; Cleric and Golden Wing use its purge
+path now.
+
+The translator's storage-less EVENT screen pass now registry-joins `event_id`
+and type-checks option `disabled` and `choice_index`. Fuzzing adds the
+append-only `EVENT_GRID = 24` category, enumerates only legal deck rows, hashes
+the repurposed `EventDialogState::grid_kind` byte, and advances the incompatible
+build identity to `eventgrid1`. The `EventDialogState` size remains 8 bytes and
+the frozen `RunState`/`CombatState` schema is unchanged.
+
+Independent review fixed two gameplay/integrity defects before integration.
+The run-layer NORMAL event-damage transaction now follows the already-live
+Torii → Tungsten Rod → lethal Lizard Tail portions of
+`AbstractPlayer.damage`, including the owner-null distinction and the
+EventRoom-phase rule that keeps Magic Flower from amplifying Lizard Tail's
+revive. The generated `event_def` lookup now scans by identity instead of
+dense-indexing `id - 1`, preserving the repository-wide rule that registry ids
+may contain legal append-only gaps. Named regressions cover both changes; the
+shared `MoveCat` ledger allocation and all six native bodies' Java method
+citations were corrected in the same fix-forward.
+
+Tier-2 coverage includes every dialog option, all shuffled Dead Adventurer
+reward kinds and combats, all A15-changing constants, generic event combat
+stream/reward/cursor semantics, awake Lagavulin, EVENT translation failures,
+and fuzz enumeration/hash coverage. Final-tree WSL Debug, leak-detecting
+ASan/UBSan and Release are each **1103/1103**; documentation links,
+stale-count and whitespace checks are clean. No Steam/game deployment, fixture,
+golden, external oracle artifact or schema changed.

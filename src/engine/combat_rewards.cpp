@@ -214,8 +214,11 @@ int roll_normal_gold(RngStream& treasure_rng) noexcept {
 
 void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
                              RewardOutcome outcome, RewardScreen& out,
-                             int32_t stolen_gold_return) noexcept {
-    out = RewardScreen{};
+                             int32_t stolen_gold_return,
+                             bool preserve_existing) noexcept {
+    if (!preserve_existing) {
+        out = RewardScreen{};
+    }
     out.open_card_item = kNoOpenCardReward;
 
     // The two named gates the outcome controls (see RewardOutcome's contract):
@@ -296,7 +299,7 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
     // way (:601-607).
     {
         int chance = 0;
-        if (room == RoomType::Elite ||
+        if (room == RoomType::Elite || room == RoomType::Event ||
             ((room == RoomType::Monster || room == RoomType::Boss) &&
              !monsters_escaped)) {
             // The escape clause guards only the `instanceof MonsterRoom`
@@ -343,6 +346,40 @@ void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
     if (room == RoomType::Monster && run_has_relic(rs, RelicId::PRAYER_WHEEL)) {
         roll_card_reward_item(rs, room, out);
     }
+}
+
+bool add_event_combat_gold_reward(const RunState& rs, RewardScreen& out,
+                                  int32_t gold) noexcept {
+    if (gold <= 0) {
+        return false;
+    }
+    for (uint8_t i = 0; i < out.count; ++i) {
+        RunRewardItem& item = out.items[i];
+        if (static_cast<RewardItemKind>(item.kind) != RewardItemKind::GOLD) {
+            continue;
+        }
+        item.gold += gold;
+        item.bonus_gold =
+            run_has_relic(rs, RelicId::GOLDEN_IDOL)
+                ? mathutils_round(static_cast<float>(item.gold) * 0.25f)
+                : 0;
+        return true;
+    }
+    if (out.count >= kRewardItemCap) {
+        return false;
+    }
+    add_gold_item(rs, out, gold);
+    return true;
+}
+
+bool add_event_combat_relic_reward(RewardScreen& out, RelicId id) noexcept {
+    if (id == RelicId::NONE || out.count >= kRewardItemCap) {
+        return false;
+    }
+    RunRewardItem& item = push_item(out);
+    item.kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    item.id = static_cast<uint16_t>(id);
+    return true;
 }
 
 bool open_rest_card_reward(RunState& rs, RewardScreen& out) noexcept {

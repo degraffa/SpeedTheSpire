@@ -291,7 +291,18 @@ enum class RewardOutcome : uint8_t {
 // stole anything -- die() adds nothing for a zero accrual (Looter.java:170).
 void assemble_combat_rewards(RunState& rs, RngStream& misc_rng, RoomType room,
                              RewardOutcome outcome, RewardScreen& out,
-                             int32_t stolen_gold_return = 0) noexcept;
+                             int32_t stolen_gold_return = 0,
+                             bool preserve_existing = false) noexcept;
+
+// AbstractRoom's event bodies can pre-seed gold/relic rows before enterCombat.
+// These doors preserve list order and RewardItem.incrementGold's merge +
+// Golden Idol recomputation. Generic battle-over assembly appends potion/card
+// rows after them when preserve_existing is true.
+[[nodiscard]] bool add_event_combat_gold_reward(const RunState& rs,
+                                                RewardScreen& out,
+                                                int32_t gold) noexcept;
+[[nodiscard]] bool add_event_combat_relic_reward(RewardScreen& out,
+                                                 RelicId id) noexcept;
 
 // Dream Catcher uses AbstractDungeon.getRewardCards directly from a RestRoom,
 // then opens CardRewardScreen without an outer reward-item screen

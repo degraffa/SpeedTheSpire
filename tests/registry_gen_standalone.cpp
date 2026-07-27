@@ -10,6 +10,7 @@
 #include "sts/registry/ids.hpp"
 #include "sts/registry/card_table.hpp"
 #include "sts/registry/game_ids.hpp"
+#include "sts/registry/event_table.hpp"
 #include "sts/registry/manifest.hpp"
 #include "sts/registry/monster_table.hpp"
 #include "sts/registry/power_table.hpp"

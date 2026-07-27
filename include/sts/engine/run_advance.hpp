@@ -56,9 +56,9 @@
 //     picks MONSTER (a real monster combat, consuming monsterList) / SHOP
 //     (parks, like a map shop) / TREASURE (the chest flow) / EVENT, and an
 //     EVENT result runs the throwaway-stream selection + pool-removal
-//     bookkeeping. Event dialog BODIES are follow-on content tasks: a selected
-//     event with no body parks at ROOM_UNIMPLEMENTED with the selection
-//     committed and the EventId recorded; one with a body opens EVENT_DIALOG.
+//     bookkeeping. Implemented bodies open EVENT_DIALOG; a selected event with
+//     no body parks at ROOM_UNIMPLEMENTED with the selection committed and the
+//     EventId recorded.
 //   * shops: no room content (entering one reseeds the floor streams then
 //     parks at ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
@@ -94,6 +94,7 @@
 
 #include <cstdint>
 #include <span>
+#include <string_view>
 #include <type_traits>
 
 #include "sts/engine/advance.hpp"       // ActionMask, StepResult, combat advance/legal_actions
@@ -236,6 +237,20 @@ struct RunController {
 static_assert(std::is_trivially_copyable_v<RunController>,
               "RunController must be trivially copyable (POD batch entry)");
 
+// Native event combats reuse the ordinary combat constructor while preserving
+// the already-advanced floor streams and keeping RoomType::Event. The latter is
+// what prevents next_room_transition from consuming monster_cursor and what
+// selects EventRoom reward semantics. LAGAVULIN_AWAKE is the one constructor
+// variant MonsterHelper's "Lagavulin Event" key requests.
+enum class EventCombatVariant : uint8_t {
+    NONE = 0,
+    LAGAVULIN_AWAKE = 1,
+};
+
+[[nodiscard]] bool enter_event_combat(
+    RunController& rc, std::string_view encounter_key,
+    EventCombatVariant variant = EventCombatVariant::NONE) noexcept;
+
 // --- RunActionMask -----------------------------------------------------------
 
 // The run-level legal-action set (the run analogue of ActionMask). Which fields
@@ -256,8 +271,8 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 //                          run-owned potion masks below hold USE_POTION.
 //   REST_SITE            : menu buttons, a Smith/Toke master-deck grid, or
 //                          Dream Catcher's direct card-pick screen.
-//   EVENT_DIALOG         : can_choose_event_option[i] (CHOOSE i) over the live
-//                          event's current dialog screen.
+//   EVENT_DIALOG         : can_choose_event_option[i] (CHOOSE i) over a dialog,
+//                          or can_choose_master_deck[i] over an event grid.
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
