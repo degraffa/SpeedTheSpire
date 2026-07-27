@@ -80,7 +80,8 @@ using events::has_purgeable_card;
 using events::has_upgradable_card;
 using events::heal;
 using events::increase_max_hp;
-using events::lose_gold;
+// lose_gold resolves to sts::engine::lose_gold (relic_pickup.hpp), the single
+// lose-gold door -- an events:: duplicate was removed at integration.
 using events::mathutils_ceil;
 using events::one_proceed_menu;
 using sts::registry::EventCardRarity;
@@ -90,11 +91,11 @@ constexpr int16_t kNoOffer = -1;
 
 // PotionHelper.getRandomPotion(): a FLAT draw over the whole 33-entry Ironclad
 // potion list -- NOT AbstractDungeon.returnRandomPotion's 65/25/10 rarity gate
-// with its rejection sampling. One potionRng draw, always. The pool is
-// PotionId 1..kPotionPoolSize in pool order (potions.hpp:145-155).
-[[nodiscard]] PotionId get_random_potion(RngStream& potion_rng) noexcept {
-    return static_cast<PotionId>(random(potion_rng, kPotionPoolSize - 1) + 1);
-}
+// with its rejection sampling. One potionRng draw, always. Expressed by the
+// public sts::engine::get_random_potion (potions.hpp) -- a byte-equivalent
+// file-local duplicate briefly lived here (two concurrent branches each wrote
+// one and the union was ambiguous); it was removed at integration in favor of
+// the shared pool-index -> PotionId mapping.
 
 // RewardItem(AbstractPotion) rows. The relic/gold doors already exist
 // (combat_rewards.hpp); potions had no event-side row builder because no

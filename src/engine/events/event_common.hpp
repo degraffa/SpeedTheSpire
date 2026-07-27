@@ -62,15 +62,12 @@ inline void decrease_max_hp(RunState& rs, int amount) noexcept {
     }
 }
 
-// AbstractPlayer.loseGold: only a positive amount moves the purse, and the
-// result floors at 0. The ShopRoom onSpendGold fan-out does not apply to an
-// EventRoom, and no relic hooks a non-shop spend.
-inline void lose_gold(RunState& rs, int amount) noexcept {
-    if (amount <= 0) {
-        return;
-    }
-    rs.gold = std::max(0, rs.gold - amount);
-}
+// AbstractPlayer.loseGold is expressed by sts::engine::lose_gold
+// (src/engine/relics/relic_pickup.hpp), the run layer's single lose-gold door
+// with the named onSpendGold/onLoseGold fan-outs. A byte-equivalent duplicate
+// briefly lived here (two concurrent branches each added one and the union was
+// ambiguous at the one_time_specials call sites); it was removed at
+// integration in favor of the door.
 
 // libGDX MathUtils.ceil(float) = BIG_ENOUGH_INT - (int)(BIG_ENOUGH_FLOOR - v),
 // with BIG_ENOUGH_INT = 16384 and BIG_ENOUGH_FLOOR = 16384.0. Reproduced in the
