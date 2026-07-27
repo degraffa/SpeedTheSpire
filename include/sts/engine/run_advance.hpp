@@ -52,9 +52,15 @@
 //     consume them; shop / Neow draw sites are separate work.
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
 //     (combat_rewards.hpp).
-//   * events / shops: no room content (here: entering one reseeds the floor
-//     streams then parks at ROOM_UNIMPLEMENTED with the stalling RoomType
-//     recorded).
+//   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
+//     picks MONSTER (a real monster combat, consuming monsterList) / SHOP
+//     (parks, like a map shop) / TREASURE (the chest flow) / EVENT, and an
+//     EVENT result runs the throwaway-stream selection + pool-removal
+//     bookkeeping. Event dialog BODIES are follow-on content tasks: a selected
+//     event with no body parks at ROOM_UNIMPLEMENTED with the selection
+//     committed and the EventId recorded; one with a body opens EVENT_DIALOG.
+//   * shops: no room content (entering one reseeds the floor streams then
+//     parks at ROOM_UNIMPLEMENTED with the stalling RoomType recorded).
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
 //     encounter whose members are not all implemented resolves its composition
 //     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
@@ -94,6 +100,7 @@
 #include "sts/engine/combat_rewards.hpp"  // RewardScreen + the claim flow
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"    // MonsterLists
+#include "sts/engine/event_framework.hpp"  // EventDialogState / kEventOptionCap
 #include "sts/engine/interp.hpp"        // mathutils_round (run_setup_hp)
 #include "sts/engine/map_rooms.hpp"     // RoomType
 #include "sts/engine/rest_sites.hpp"    // RestSiteState / menu constants
@@ -117,6 +124,14 @@ enum class RunPhase : uint8_t {
     RUN_OVER = 6,          // player dead (loss) -- terminal.
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
     TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
+    EVENT_DIALOG = 9,      // a ?-room resolved to an event with a live dialog
+                           // body (event_framework.hpp). Today only the
+                           // synthetic proof body reaches it; every native
+                           // event parks at ROOM_UNIMPLEMENTED until its
+                           // content-task body lands. Value 9 is the ledger's
+                           // reserved allocation (stage-b-tasks.md shared-
+                           // namespace table); gaps are legal, values are
+                           // append-only and never renumbered.
 };
 
 // Why combat ended. AbstractRoom keeps two independent end-of-battle room
@@ -208,6 +223,14 @@ struct RunController {
     // through its reward screen for replay/hash observability. Transient like
     // RewardScreen; never added to the frozen RunState schema.
     TreasureChest treasure_chest;
+
+    // The live event dialog while phase == EVENT_DIALOG; also carries the
+    // selected EventId while parked at ROOM_UNIMPLEMENTED for a
+    // resolved-but-unimplemented event, so the selection is observable,
+    // deterministic and hash-stable. Transient (the game re-derives the event
+    // from (seed, eventRng.counter) on reload -- EventRoom.java:28); never in
+    // RunState.
+    EventDialogState event;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -233,6 +256,8 @@ static_assert(std::is_trivially_copyable_v<RunController>,
 //                          run-owned potion masks below hold USE_POTION.
 //   REST_SITE            : menu buttons, a Smith/Toke master-deck grid, or
 //                          Dream Catcher's direct card-pick screen.
+//   EVENT_DIALOG         : can_choose_event_option[i] (CHOOSE i) over the live
+//                          event's current dialog screen.
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
@@ -251,6 +276,9 @@ struct RunActionMask {
     // reuses the card-pick fields above.
     bool can_choose_rest[kRestOptionCap];
     bool can_choose_master_deck[kMasterDeckCap];
+    // EVENT_DIALOG: the current screen's options, rebuilt from the event's
+    // build_menu on every call (never cached). CHOOSE arg0 is the option index.
+    bool can_choose_event_option[kEventOptionCap];
     // USE_POTION owns a RunState slot, so its legality lives at this layer.
     // Fruit Juice and Entropic Brew can be used in stable non-combat phases.
     // During COMBAT, can_use_potion_target[slot][monster] enumerates target-

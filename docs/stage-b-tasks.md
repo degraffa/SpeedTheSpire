@@ -63,6 +63,9 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| Meal Ticket `justEnteredRoom` shop heal, including ?→Shop | B4.10 | B4.8 | `AbstractDungeon.nextRoomTransition` replaces the original EventRoom and calls `setCurrMapNode` before `AbstractPlayer.justEnteredRoom`; `MealTicket.justEnteredRoom` therefore heals 15 for a ? that resolves to Shop exactly as for a static ShopRoom. B4.10 parks both shop routes at `ROOM_UNIMPLEMENTED`; B4.8 owns the shared entry effect |
+| Maw Bank `onEnterRoom` outside original EventRooms | B4.10 | UNASSIGNED — next shared room-entry-hook owner | B4.10 implements the original-EventRoom share before ? resolution: every unused copy gains 12 through the Ectoplasm-aware gold door. `MawBank.onEnterRoom` has no room-type condition, so static monster/shop/treasure/rest/boss entries still need the same acquisition-ordered fan-out |
+| Event-created combat lifecycle and rewards | B4.10 | B4.11-B4.13 | Dialog bodies may transition through the controller-aware `TRANSITIONED` seam, but their combats must preserve Event-room semantics: do not consume the ordinary map `monster_cursor`, and do not let generic room-combat reward assembly overwrite event-defined rewards. Pin the shared helper before the first native event combat lands |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
@@ -77,7 +80,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
 | Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
-| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency; Sozu / Golden Idol at the EVENT claim sites | B3.27 | B4.10-13 | **Chest hooks DISCHARGED by B4.7:** Cursed Key and N'loth's Mask are live and tested, including boss gates and acquisition order. B4.7's source audit also corrected the inherited claim: `RewardItem.applyGoldBonus` explicitly excludes `TreasureRoom`, and an ordinary chest has no potion reward, so Golden Idol and Sozu never had a chest share to implement — only their event-screen shares remain. **B4.5's shares are discharged** — Busted Crown's reward count, the Black Star elite relic, Golden Idol ×1.25 and Sozu's block are all live at the *combat-reward* claim. The Fusion Hammer / Coffee Dripper campfire locks live in their own row below (B4.9), and Busted Crown's and Ectoplasm's energy halves stay in their own rows |
+| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency; Sozu / Golden Idol at the EVENT claim sites | B3.27 | B4.11-B4.13 (B4.10 landed framework-only — no event claim screens exist yet) | **Chest hooks DISCHARGED by B4.7:** Cursed Key and N'loth's Mask are live and tested, including boss gates and acquisition order. B4.7's source audit also corrected the inherited claim: `RewardItem.applyGoldBonus` explicitly excludes `TreasureRoom`, and an ordinary chest has no potion reward, so Golden Idol and Sozu never had a chest share to implement — only their event-screen shares remain. **B4.5's shares are discharged** — Busted Crown's reward count, the Black Star elite relic, Golden Idol ×1.25 and Sozu's block are all live at the *combat-reward* claim. The Fusion Hammer / Coffee Dripper campfire locks live in their own row below (B4.9), and Busted Crown's and Ectoplasm's energy halves stay in their own rows |
 | Fusion Hammer / Coffee Dripper campfire-option locks | B3.27, B4.9 | UNASSIGNED — next campfire/relic-lock follow-up | B4.9 deliberately preserves these whole-effect deferrals: the registered boss relic rows and pool slots are live, but their shared `energyMaster` half remains deferred and the task brief explicitly prohibited silently partially implementing the Smith/Rest locks. `build_rest_menu` therefore documents that both base buttons remain unlocked until one owner lands the relic bodies coherently. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
@@ -87,9 +90,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
-| Translator `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets | B1.5, B4.3 | B4.10 | storage exists since B4.3; needs `events.yaml` + the canonical list order (B4.10-B4.13) |
-| ?-room `eventRng` duplicate roll | B4.4 | B4.10 | B4.4 names B4.10 as owner |
-| Translator `screen_state` content (event / shop / grid / map screens) | B1.5, B4.3 | B4.8, B4.10, B4.14 | structurally consumed today (a new/renamed key still fails loud), not mapped. **The reward slice is DISCHARGED** by B4.5, which also made CARD_REWARD/COMBAT_REWARD content-validated — the `reward_type` name is now enumerated and an unknown one fails loud, where previously anything passed |
+| Translator `screen_state` content (event / shop / grid / map screens) | B1.5, B4.3 | B4.8, B4.11-B4.14 | structurally consumed today (a new/renamed key still fails loud), not mapped. **The reward slice is DISCHARGED** by B4.5, which also made CARD_REWARD/COMBAT_REWARD content-validated — the `reward_type` name is now enumerated and an unknown one fails loud, where previously anything passed. **B4.10's framework-only share is re-owned to B4.11-B4.13:** the translator output carries `RunState`/`CombatState`, not transient `RunController::event`, and no native event body/screen exists until those tasks land; mapping a synthetic-only screen would create no campaign-visible state |
 | `b14_accept2` obtain-race capture-fidelity triage | B1.3 | B5.2 | flagged explicitly by B1.3; B1.4's acceptance is unaffected |
 | Infernal-Blade-generated Blood for Blood cost model (`cost_now` only; end-of-turn reset restores 4, not the game's reduced base) | B3.6 | G7 | judged unreachable — "revisit if G7 ever hits it" |
 | Bottled trio bottling at acquisition (run-layer acquisition-choice machinery + a per-master-deck-instance innate flag) | B3.25 | UNASSIGNED — named "B4-owner" | rows + deck-content gates live so pools and B4.7 chests are complete |
@@ -185,8 +186,8 @@ keys stored soak-coverage identities.
 
 | Namespace (defined in) | Taken | Reserved / free |
 |---|---|---|
-| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–8** (`NONE`..`TREASURE_ROOM`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7) | **9 reserved for B4.10 `EVENT_DIALOG`**; 10+ free — claim here first |
-| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–22** (14–20 rest-site B4.9, 21–22 treasure B4.7; `COUNT = 23`) | 23+ free — claim here first and bump `COUNT` past every enumerator |
+| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–9** (`NONE`..`EVENT_DIALOG`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10 — landed, claiming its reservation) | 10+ free — claim here first |
+| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–23** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10; `COUNT = 24`) | 24+ free — claim here first and bump `COUNT` past every enumerator |
 
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
@@ -670,31 +671,33 @@ oracle spot-diff of a shop floor (stock, prices, sale index) zero-diff.
 **Inherited:** The Courier (floor≤48 && !in_shop gate already live, effect is a
 documented no-op) — deferred by B3.25. Shop `screen_state` translation — deferred by
 B1.5/B4.3.
+Meal Ticket's 15-HP `justEnteredRoom` heal applies both to a static ShopRoom
+and to an EventRoom replaced by a ?→Shop roll — deferred by B4.10.
 **Log:** —
 
 - **B4.9** `[x]` Rest sites — Java-order campfire menu and CHOOSE flows for Rest/Smith/Lift/Toke/Dig; base 30% + Regal Pillow heal, Dream Catcher direct card reward, Girya/Peace Pipe/Shovel effects and exact RNG/pool order; independent-audit fix-forwards close fixed master-deck/relic-cap and malformed reward-screen legality, including zero-card offers, without changing valid skip/proceed or Circlet stacking; no schema or combat `ActionMask` change; full three-preset suite green · [log](stage-b-log.md#b49)
 
-### B4.10 `[ ]` Event framework + ?-room resolution
-**Deps:** B4.4 · **Spec:** design §5.6; §10 traps 17/19 · **Provenance:**
-EventHelper.java:88-211; AbstractDungeon.java:1864-1990, 1340-1358; stage-a
-§3.4's eventRng-duplicate quirk
-**Deliverables:** the ?-room roll (float table, pity growth/reset — float
-arithmetic, trap 19), shrine-vs-event split (0.25), pool draw + removal
-bookkeeping (RunState bitsets from B4.3), event dialog framework (options as
-CHOOSE, conditional options, one-shot flags), Juzu/Tiny-Chest hooks for the
-relics that alter the table.
-**Acceptance:** tier-2: pity float sequences match hand-derivation
-bit-for-bit across 20 ?-rooms; pool-removal bookkeeping vs oracle §2.5 lists
-for ≥ 3 seeds; trap-19 named test.
-**Inherited:** the ?-room `eventRng` duplicate roll — deferred by B4.4. Un-defer the
-translator's `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets
-(RunState storage has existed since B4.3) — deferred by B1.5/B4.3, jointly with
-B4.11-B4.13's `events.yaml` rows and the canonical list order. The event-screen half
-of B3.27's inert boss/special relics (**Golden Idol** ×1.25 gold, **Sozu**'s potion
-block, **Sacred Bark** potency, and the five deferred `onEquip` bodies — Pandora's
-Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) — deferred by B3.27, each
-deferred whole because a partial would desync `miscRng` or `relicRng`.
-**Log:** —
+- **B4.10** `[x]` Event framework + ?-room resolution — the one-committed-draw
+  `eventRng` contract (roll straight from the stream; selection on a discarded
+  throwaway copy) with a byte-identity regression guard; exact Java-order
+  EventHelper.roll (asymmetric table clamps, trap-19 float pity, Tiny Chest
+  after-the-draw `== 4` force observed by all pity updates, Juzu conversion
+  before the monster-pity reset, leaving-a-shop column zeroing); ? rooms now
+  resolve to real monster/treasure/shop rooms (fixing the monster-cursor
+  consumption bug that read the static map instead of the resolved room);
+  `generate_event` selection over draw-time-filtered pools + both-list removal
+  bookkeeping into the B4.3 bitsets; the translator now maps the three oracle
+  remaining-list arrays through generated ids, validates canonical
+  removal-only order, derives cumulative fired flags, and fails loud on
+  wrong-list/duplicate/unknown entries; Ssserpent Head and unused Maw Bank
+  original-EventRoom entry hooks fire before resolution through the
+  Ectoplasm-aware gold door; `RunPhase::EVENT_DIALOG = 9` +
+  `MoveCat::EVENT_OPTION = 23` claimed per the allocation table; dialog
+  framework proven through a controller-aware synthetic seam, including
+  body-owned transitions — all 31 native bodies stay B4.11-B4.13 and park
+  after exact bookkeeping. The B3.27 event-screen relic shares and transient
+  screen-content translation pass to B4.11-B4.13 ·
+  [log](stage-b-log.md#b410)
 
 ### B4.11 `[ ]` ∥ Exordium events I
 **Deps:** B4.10 · **Provenance:** events/exordium: Big Fish, The Cleric,
@@ -705,6 +708,13 @@ A15 branches per event)
 encounter, Golden Idol's relic+curse branches.
 **Acceptance:** tier-2 per event (every option's state delta, A15 variants);
 directed script per event.
+**Inherited (shared with B4.12/B4.13, whichever first builds an event claim
+screen):** the B3.27 event-screen relic shares — Golden Idol ×1.25 gold,
+Sozu's potion block, Sacred Bark potency, and the five deferred `onEquip`
+bodies (Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) —
+see the Deferred obligations row. Event-created combats must stay Event-room
+combats: they do not advance the ordinary monster-list cursor, and generic
+combat reward assembly must not overwrite their event-defined rewards.
 **Log:** —
 
 ### B4.12 `[ ]` ∥ Exordium events II

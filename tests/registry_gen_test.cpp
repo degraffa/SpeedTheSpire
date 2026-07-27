@@ -13,6 +13,11 @@
 //                        hand-derived JawWorm.java ascension columns, including
 //                        tier-threshold resolution at the branch boundaries; a
 //                        duplicate move_id fails generation with a clear error.
+//   7. Events        -- (B4.10 checkpoint) the 31 metadata-only events.yaml rows
+//                        reproduce the three canonical dungeon lists in Java
+//                        insertion order, their game_id join keys round-trip,
+//                        an unknown id is rejected in both directions, and a
+//                        reused event id fails generation with a clear error.
 //
 // "Generated headers compile standalone" is proven by registry_gen_standalone.cpp
 // (this TU additionally includes the engine headers to run the equivalence checks).
@@ -325,6 +330,38 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
     EXPECT_EQ(r::relic_from_game_id("Circlet"), r::RelicId::CIRCLET);
     EXPECT_EQ(r::relic_from_game_id("anything"), r::RelicId::NONE);
     EXPECT_TRUE(r::potion_game_id(r::PotionId::NONE).empty());
+
+    // Events (B4.10 checkpoint): the game's event id strings round-trip. These
+    // are the strings the three dungeon lists are built from, so they are the
+    // translator's join key -- including the four whose id string is NOT the
+    // display name (FaceTrader, NoteForYourself, SecretPortal, WeMeetAgain) and
+    // the two the game itself spells oddly ("Transmorgrifier" is misspelled in
+    // Exordium.java:242 and in Transmogrifier.ID; "Liars Game" has no
+    // apostrophe).
+    EXPECT_EQ(r::event_game_id(r::EventId::BIG_FISH), "Big Fish");
+    EXPECT_EQ(r::event_game_id(r::EventId::TRANSMORGRIFIER), "Transmorgrifier");
+    EXPECT_EQ(r::event_game_id(r::EventId::LIARS_GAME), "Liars Game");
+    EXPECT_EQ(r::event_game_id(r::EventId::NLOTH), "N'loth");
+    EXPECT_EQ(r::event_from_game_id("Match and Keep!"),
+              r::EventId::MATCH_AND_KEEP);
+    EXPECT_EQ(r::event_from_game_id("FaceTrader"), r::EventId::FACE_TRADER);
+    EXPECT_EQ(r::event_from_game_id("NoteForYourself"),
+              r::EventId::NOTE_FOR_YOURSELF);
+    EXPECT_EQ(r::event_from_game_id("SecretPortal"), r::EventId::SECRET_PORTAL);
+    EXPECT_EQ(r::event_from_game_id("WeMeetAgain"), r::EventId::WE_MEET_AGAIN);
+
+    // Unknown-id rejection, both directions. A game_id the registry does not
+    // carry resolves to NONE rather than to whatever row happens to sort first,
+    // and an EventId outside the generated rows yields the empty string rather
+    // than reading off the end of the switch.
+    EXPECT_EQ(r::event_from_game_id("nope"), r::EventId::NONE);
+    EXPECT_EQ(r::event_from_game_id(""), r::EventId::NONE);
+    EXPECT_EQ(r::event_from_game_id("Big  Fish"), r::EventId::NONE)
+        << "join key is exact, not whitespace-normalised";
+    EXPECT_EQ(r::event_from_game_id("big fish"), r::EventId::NONE)
+        << "join key is case-sensitive";
+    EXPECT_TRUE(r::event_game_id(r::EventId::NONE).empty());
+    EXPECT_TRUE(r::event_game_id(static_cast<r::EventId>(9999)).empty());
 }
 
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
@@ -469,14 +506,20 @@ TEST(RegistryGen, ManifestCounts) {
     EXPECT_EQ(m::kRelicsCount, 142u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
                                        // + B3.27's 22 boss + 9 Act-1 event specials
     EXPECT_EQ(m::kPotionsCount, 33u);
-    EXPECT_EQ(m::kEventsCount, 0u);
+    EXPECT_EQ(m::kEventsCount, 31u);  // the three canonical Act-1 dungeon lists:
+                                      // Exordium.initializeEventList's 11 (ids
+                                      // 1-11) + initializeShrineList's 6 (12-17)
+                                      // + AbstractDungeon.initializeSpecialOne-
+                                      // TimeEventList's 14 (18-31). Metadata-only
+                                      // rows: B4.10 owns list membership and
+                                      // selection, B4.11-B4.13 the native bodies.
     EXPECT_EQ(m::kEncountersCount, 20u);  // B3.12: Act-1 Exordium framework (4 weak +
                                           // 10 strong + 3 elite + 3 boss)
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 389u);  // 105 + 44 + 25 + 142 + 33 + 0 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 420u);  // 105 + 44 + 25 + 142 + 33 + 31 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1252,4 +1295,170 @@ TEST(RegistryGen, NativeDispatchHandlerNamesFollowTheRowNameConvention) {
     EXPECT_EQ(std::string(#FN), "relic_native_" + ascii_lower(#ID));
     STS_REGISTRY_NATIVE_RELICS(STS_TEST_RELIC_NAME)
 #undef STS_TEST_RELIC_NAME
+}
+
+// --- 8. B4.10 event registry: canonical list order + id uniqueness -----------
+//
+// events.yaml is metadata-only at this checkpoint (`native: true` on every row):
+// B4.10 owns list membership and selection, B4.11-B4.13 the native bodies. So
+// the only thing there IS to pin is the data -- that the 31 ids reproduce the
+// three canonical dungeon lists in Java insertion order, that the game_id join
+// keys round-trip, and that this domain refuses a reused id like every other.
+//
+// Determinism is deliberately NOT re-tested per-domain here. Deterministic-
+// ByteIdentical above already generates the real registry twice and byte-
+// compares ids.hpp and game_ids.hpp, which are exactly the two headers the
+// events domain contributes to (emit_ids / emit_game_ids -- events has no table
+// emitter of its own). A per-domain determinism case would be a second copy of
+// that one shared test, which is not the shape the other seven domains use.
+//
+// Every expected value below is hand-carried from the cited Java, NOT read back
+// from the generator.
+
+namespace {
+
+struct EventRow {
+    int id;
+    sts::registry::EventId sym;
+    const char* game_id;
+};
+
+// The three canonical lists, in add() order:
+//   Exordium.initializeEventList          (Exordium.java:223-236)        -- 11
+//   Exordium.initializeShrineList         (Exordium.java:238-246)        --  6
+//   AbstractDungeon.initializeSpecialOneTimeEventList
+//                                         (AbstractDungeon.java:1340-1358) -- 14
+//
+// The special list is 14 entries counting NoteForYourself, whose add at
+// :1351-1353 is guarded by isNoteForYourselfAvailable (:1360-1378). The guard
+// wraps the add ITSELF, so there is no placeholder slot: when NFY is absent the
+// runtime list is length 13 and SecretPortal sits at runtime index 9, not 10.
+// The registry id is identity only and never moves -- which is precisely why
+// the conditional entry can hold a dense id here.
+constexpr std::array<EventRow, 31> kCanonicalEvents = {{
+    // -- Exordium.initializeEventList, positions 0-10 --
+    {1, sts::registry::EventId::BIG_FISH, "Big Fish"},
+    {2, sts::registry::EventId::THE_CLERIC, "The Cleric"},
+    {3, sts::registry::EventId::DEAD_ADVENTURER, "Dead Adventurer"},
+    {4, sts::registry::EventId::GOLDEN_IDOL, "Golden Idol"},
+    {5, sts::registry::EventId::GOLDEN_WING, "Golden Wing"},
+    {6, sts::registry::EventId::WORLD_OF_GOOP, "World of Goop"},
+    {7, sts::registry::EventId::LIARS_GAME, "Liars Game"},
+    {8, sts::registry::EventId::LIVING_WALL, "Living Wall"},
+    {9, sts::registry::EventId::MUSHROOMS, "Mushrooms"},
+    {10, sts::registry::EventId::SCRAP_OOZE, "Scrap Ooze"},
+    {11, sts::registry::EventId::SHINING_LIGHT, "Shining Light"},
+    // -- Exordium.initializeShrineList, positions 0-5 --
+    {12, sts::registry::EventId::MATCH_AND_KEEP, "Match and Keep!"},
+    {13, sts::registry::EventId::GOLDEN_SHRINE, "Golden Shrine"},
+    {14, sts::registry::EventId::TRANSMORGRIFIER, "Transmorgrifier"},
+    {15, sts::registry::EventId::PURIFIER, "Purifier"},
+    {16, sts::registry::EventId::UPGRADE_SHRINE, "Upgrade Shrine"},
+    {17, sts::registry::EventId::WHEEL_OF_CHANGE, "Wheel of Change"},
+    // -- AbstractDungeon.initializeSpecialOneTimeEventList, positions 0-13
+    //    (NFY-present numbering; see the note above) --
+    {18, sts::registry::EventId::ACCURSED_BLACKSMITH, "Accursed Blacksmith"},
+    {19, sts::registry::EventId::BONFIRE_ELEMENTALS, "Bonfire Elementals"},
+    {20, sts::registry::EventId::DESIGNER, "Designer"},
+    {21, sts::registry::EventId::DUPLICATOR, "Duplicator"},
+    {22, sts::registry::EventId::FACE_TRADER, "FaceTrader"},
+    {23, sts::registry::EventId::FOUNTAIN_OF_CLEANSING, "Fountain of Cleansing"},
+    {24, sts::registry::EventId::KNOWING_SKULL, "Knowing Skull"},
+    {25, sts::registry::EventId::LAB, "Lab"},
+    {26, sts::registry::EventId::NLOTH, "N'loth"},
+    {27, sts::registry::EventId::NOTE_FOR_YOURSELF, "NoteForYourself"},
+    {28, sts::registry::EventId::SECRET_PORTAL, "SecretPortal"},
+    {29, sts::registry::EventId::THE_JOUST, "The Joust"},
+    {30, sts::registry::EventId::WE_MEET_AGAIN, "WeMeetAgain"},
+    {31, sts::registry::EventId::THE_WOMAN_IN_BLUE, "The Woman in Blue"},
+}};
+
+}  // namespace
+
+TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
+    namespace r = sts::registry;
+    ASSERT_EQ(kCanonicalEvents.size(), r::manifest::kEventsCount)
+        << "a row landed in events.yaml without being added to this table";
+
+    std::vector<int> ids;
+    for (std::size_t i = 0; i < kCanonicalEvents.size(); ++i) {
+        const EventRow& row = kCanonicalEvents[i];
+        // Canonical order: the ids run 1..31 dense and ascending in exactly the
+        // order the three Java lists add their entries, so canonical position i
+        // holds id i+1. A row inserted mid-file, or a gap, breaks this.
+        EXPECT_EQ(row.id, static_cast<int>(i) + 1)
+            << "canonical position " << i << " (" << row.game_id << ")";
+        EXPECT_EQ(static_cast<int>(row.sym), row.id)
+            << "generated EventId for " << row.game_id;
+        EXPECT_EQ(r::event_game_id(row.sym), row.game_id) << "id " << row.id;
+        EXPECT_EQ(r::event_from_game_id(row.game_id), row.sym) << "id " << row.id;
+        ids.push_back(row.id);
+    }
+
+    // Id uniqueness, read off the GENERATED enum rather than off the YAML.
+    std::sort(ids.begin(), ids.end());
+    EXPECT_EQ(std::adjacent_find(ids.begin(), ids.end()), ids.end())
+        << "EventId values must be unique";
+    EXPECT_EQ(ids.front(), 1) << "0 is reserved for EventId::NONE";
+    EXPECT_EQ(ids.back(), 31);
+
+    // Block boundaries, so a row appended to the wrong list is caught even when
+    // the overall sequence stays dense.
+    EXPECT_EQ(static_cast<int>(r::EventId::SHINING_LIGHT), 11)
+        << "last initializeEventList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::MATCH_AND_KEEP), 12)
+        << "first initializeShrineList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::WHEEL_OF_CHANGE), 17)
+        << "last initializeShrineList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::ACCURSED_BLACKSMITH), 18)
+        << "first initializeSpecialOneTimeEventList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::THE_WOMAN_IN_BLUE), 31)
+        << "last initializeSpecialOneTimeEventList entry";
+
+    // NoteForYourself holds a real, dense id between N'loth and SecretPortal
+    // even though its runtime slot is conditional: the conditionality lives in
+    // the list build (AbstractDungeon.java:1351-1353), never in the numbering.
+    EXPECT_EQ(static_cast<int>(r::EventId::NLOTH), 26);
+    EXPECT_EQ(static_cast<int>(r::EventId::NOTE_FOR_YOURSELF), 27);
+    EXPECT_EQ(static_cast<int>(r::EventId::SECRET_PORTAL), 28);
+
+    // game_id uniqueness: the translator joins on this string, so two rows
+    // sharing one would silently make the join ambiguous -- event_from_game_id
+    // is a linear if-chain and would return whichever row the generator emitted
+    // first.
+    std::vector<std::string> gids;
+    gids.reserve(kCanonicalEvents.size());
+    for (const EventRow& row : kCanonicalEvents) { gids.emplace_back(row.game_id); }
+    std::sort(gids.begin(), gids.end());
+    EXPECT_EQ(std::adjacent_find(gids.begin(), gids.end()), gids.end())
+        << "game_id strings must be unique -- they are the translator join key";
+}
+
+TEST(RegistryGen, DuplicateEventIdFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_event_registry");
+    {
+        // Reuse id 1 (BIG_FISH). The row is otherwise well-formed -- the
+        // mandatory game_id and provenance are both present -- so the loader
+        // reaches the duplicate-id gate rather than tripping an earlier
+        // missing-field check and passing for the wrong reason.
+        std::ofstream events(bad_reg / "events.yaml", std::ios::app);
+        events << "\n- id: 1\n  name: DUPLICATE_BIG_FISH\n"
+                  "  game_id: \"Dup Big Fish\"\n"
+                  "  provenance: \"synthetic duplicate for the negative test\"\n"
+                  "  native: true\n";
+    }
+
+    const fs::path out = scratch / "bad_event_out";
+    const fs::path err = scratch / "bad_event_err.txt";
+    fs::remove_all(out);
+    const int status = run_generator(bad_reg.string(), out.string(), err.string());
+    EXPECT_NE(status, 0) << "generator should fail on a duplicate event id";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("events.yaml"), std::string::npos) << msg;  // the domain
+    EXPECT_NE(msg.find("duplicate"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("DUPLICATE_BIG_FISH"), std::string::npos) << msg;  // new row
+    EXPECT_NE(msg.find("BIG_FISH"), std::string::npos) << msg;  // what it collides with
 }

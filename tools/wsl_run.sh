@@ -110,6 +110,25 @@ for arg in "$@"; do
 done
 [ ${#presets[@]} -gt 0 ] || usage
 
+# ----------------------------------------------------- per-build-tree ownership
+# The machine-wide token pool below prevents host oversubscription. It does NOT
+# make two Ninja invocations safe when they point at this same worktree's build
+# directory: they can race while replacing one object and leave the linker a
+# truncated file. Hold one kernel lock for the whole configure/build/test
+# sequence and fail loudly before CMake starts if another wsl_run owns it.
+#
+# The lock file itself may persist forever; only the kernel lock matters. An
+# interrupted process releases it automatically when this fd closes.
+mkdir -p "$root/build"
+build_lock_path=$root/build/.wsl_run.lock
+exec {build_lock_fd}>"$build_lock_path"
+if ! flock -n "$build_lock_fd"; then
+    echo "wsl_run: refusing concurrent use of this build tree: $root/build" >&2
+    echo "wsl_run: another wsl_run process already owns it; wait for that" \
+         "invocation or use a separate worktree/build directory" >&2
+    exit 2
+fi
+
 # ------------------------------------------------------- machine-wide job gate
 # One lock file per build token, in /dev/shm so the pool is per-boot and cannot
 # survive as a stale on-disk artifact. flock -n either takes a token now or

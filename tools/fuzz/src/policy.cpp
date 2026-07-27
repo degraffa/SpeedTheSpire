@@ -69,6 +69,7 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::TOKE_CARD: return "toke_card";
         case MoveCat::TREASURE_OPEN: return "treasure_open";
         case MoveCat::TREASURE_SKIP: return "treasure_skip";
+        case MoveCat::EVENT_OPTION: return "event_option";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -306,6 +307,16 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             }
             break;
 
+        case RunPhase::EVENT_DIALOG:
+            for (int i = 0; i < engine::kEventOptionCap; ++i) {
+                if (mask.can_choose_event_option[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::EVENT_OPTION);
+                }
+            }
+            break;
+
         case RunPhase::NONE:
         case RunPhase::ROOM_UNIMPLEMENTED:
         case RunPhase::RUN_OVER:
@@ -453,15 +464,17 @@ struct CardScore {
             const engine::RoomType r = map_move_room(rc, m);
             if (kind == PolicyKind::ALWAYS_EVENT) {
                 // Steer AWAY from combat: the ?-room / shop / rest / treasure
-                // nodes exercise non-combat routing. Treasure and Rest now
-                // continue; event and shop park at the explicit unimplemented
-                // seam. Treasure scores above the generic non-combat weight so
+                // nodes exercise non-combat routing. Treasure and Rest
+                // continue; a ? now RESOLVES (B4.10) -- to a monster combat,
+                // a chest, a parked shop, or an event selection that parks
+                // until its body lands; a static shop parks directly.
+                // Treasure scores above the generic non-combat weight so
                 // this policy reliably reaches the chest phase.
                 if (r == engine::RoomType::Treasure) return 110;
                 return is_combat_room(r) ? 10 : 100;
             }
             // Every other heuristic wants depth, and depth lives in combat:
-            // most non-combat nodes still park at ROOM_UNIMPLEMENTED.
+            // shop nodes and resolved-event selections still park.
             if (r == engine::RoomType::Elite) return 110;  // longest fights
             if (r == engine::RoomType::Monster) return 100;
             if (r == engine::RoomType::Boss) return 90;
@@ -510,6 +523,10 @@ struct CardScore {
             return 100;
         case MoveCat::TREASURE_SKIP:
             return 5;
+        case MoveCat::EVENT_OPTION:
+            // All dialog options score equal, so the tie-break explores every
+            // branch uniformly -- exactly what a coverage generator wants.
+            return 100;
         case MoveCat::COUNT:
             break;
     }

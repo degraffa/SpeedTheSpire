@@ -274,6 +274,15 @@ sts_add_test(rest_sites_test)
 # grant/claim, and Matryoshka/Cursed Key/N'loth's Mask hook ordering + gates.
 sts_add_test(treasure_rooms_test)
 
+# B4.10: the ?-room roll table (incl. the asymmetric slot-99 clamps), the
+# one-committed-draw eventRng contract, trap-19 pity float sequences vs
+# bit-exact hand-derivation, Tiny Chest / Juzu / leaving-a-shop hooks,
+# membership init + NFY gate + isCursed exclusion, filtered-pool gates and
+# canonical order, generate_event vs hand-derivation with throwaway-stream
+# discipline and pool-removal bookkeeping, and the EVENT_DIALOG phase through
+# the synthetic proof body.
+sts_add_test(event_framework_test)
+
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer
@@ -306,12 +315,15 @@ sts_add_test(fixture_oracle_test
 # swap. registry_gen_standalone.cpp includes ONLY the generated headers, proving
 # they compile standalone; the main TU also links sts_engine as the oracle.
 #
-# MAKE_DIRS creates the scratch root at CONFIGURE time. This target's 24 gtest
-# cases become 24 independent ctest entries, so under -j they would otherwise
-# all race to fs::create_directories() the same root on first use. Each case
-# writes distinctly-named subdirectories under it (det_a/det_b, bad_registry,
-# bad_out, upgrade_*, ... -- audited: no name is used by two cases), so the
-# subdirectories themselves do not collide and the cases can run concurrently.
+# MAKE_DIRS creates the scratch root at CONFIGURE time. Each of this target's
+# gtest cases becomes an independent ctest entry, so under -j they would
+# otherwise all race to fs::create_directories() the same root on first use.
+# The case count is deliberately not written down here: it moves with every
+# content batch and nothing re-derives it (conventions §8) -- use `ctest -N`.
+# Each case writes distinctly-named subdirectories under the root (det_a/det_b,
+# bad_registry, bad_out, upgrade_*, bad_event_* ... -- audited: no name is used
+# by two cases), so the subdirectories themselves do not collide and the cases
+# can run concurrently.
 sts_add_test(registry_gen_test
     SOURCES registry_gen_test.cpp registry_gen_standalone.cpp
     LIBS sts_engine registry_generated

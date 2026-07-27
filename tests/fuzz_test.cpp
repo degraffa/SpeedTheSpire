@@ -26,6 +26,7 @@
 #include <string>
 #include <vector>
 
+#include "sts/engine/event_framework.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/potions.hpp"
@@ -863,6 +864,29 @@ TEST(FuzzPolicy, TreasureRoomEnumeratesDistinctOpenAndSkipActions) {
               engine::kChooseProceed);
 }
 
+TEST(FuzzPolicy, EventDialogEnumeratesOnlyEnabledOptionsWithItsOwnCategory) {
+    engine::RunController rc = engine::run_begin(8081, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::EVENT_DIALOG);
+    rc.event.event_id = engine::kSyntheticEventId;
+    rc.run.gold = 49;
+    const engine::EventDialogImpl* impl =
+        engine::event_dialog_impl(rc.event.event_id);
+    ASSERT_NE(impl, nullptr);
+    impl->on_enter(rc, rc.event);
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    ASSERT_EQ(n, 3u);
+    for (size_t i = 0; i < n; ++i) {
+        EXPECT_EQ(moves[i].cat, MoveCat::EVENT_OPTION);
+    }
+    EXPECT_EQ(engine::action_arg0(moves[0].action), 0);
+    EXPECT_EQ(engine::action_arg0(moves[1].action), 2);
+    EXPECT_EQ(engine::action_arg0(moves[2].action), 3);
+}
+
 // --- 3b. the controller hash is a CONTENT hash, not a byte hash --------------
 
 TEST(FuzzHash, ControllerHashIgnoresEncounterKeyADDRESSES) {
@@ -916,6 +940,30 @@ TEST(FuzzHash, ControllerHashIncludesTheTreasureChestDescriptor) {
     EXPECT_EQ(after.combat, before.combat);
     EXPECT_EQ(after.rewards, before.rewards);
     EXPECT_EQ(after.scalars, before.scalars);
+}
+
+TEST(FuzzHash, ControllerHashIncludesEveryEventDialogStateField) {
+    engine::RunController rc = engine::run_begin(100, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::EVENT_DIALOG);
+    rc.event.event_id = engine::kSyntheticEventId;
+    const uint64_t before = hash_controller(rc);
+
+    engine::RunController changed = rc;
+    changed.event.event_id =
+        static_cast<uint16_t>(engine::EventId::BIG_FISH);
+    EXPECT_NE(hash_controller(changed), before);
+
+    changed = rc;
+    changed.event.screen = 1;
+    EXPECT_NE(hash_controller(changed), before);
+
+    changed = rc;
+    changed.event.scratch0 = 7;
+    EXPECT_NE(hash_controller(changed), before);
+
+    changed = rc;
+    changed.event.scratch1 = -3;
+    EXPECT_NE(hash_controller(changed), before);
 }
 
 // --- 4. coverage bookkeeping --------------------------------------------------

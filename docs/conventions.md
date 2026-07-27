@@ -372,6 +372,16 @@ verify the exact failed object is under the intended preset's build directory,
 remove only that object, and rebuild it. Do not respond with a broad build-tree
 cleanup.
 
+> **ELIMINATED 2026-07-26: `tools/wsl_run.sh` now holds a non-blocking kernel
+> lock on the worktree's `build/` directory for its entire configure/build/test
+> sequence.** A second invocation against the same worktree exits 2 before
+> CMake starts and names the active ownership conflict; different worktrees
+> still build concurrently and continue sharing the machine-wide job-token
+> pool. The lock file may persist, but a killed process cannot leak the kernel
+> lock. `tools/test_wsl_run_lock.sh` proves both release-on-exit and fail-loud
+> rejection and runs from Windows through `tools\wsl_run.cmd --script
+> tools/test_wsl_run_lock.sh`.
+
 ---
 
 ## 7. The rule of two — document once, eliminate on recurrence

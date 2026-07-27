@@ -24,9 +24,11 @@
 //     they were blocked not on storage but on a COMPLETE relics.yaml, because
 //     join_relic is fail-loud and ONE unregistered game_id in any of the five
 //     arrays aborts the whole translation -- the boss and event-special tiers
-//     were the last rows missing. The event/shrine/special membership bitsets
-//     HAVE storage but stay deferred until events.yaml exists, which is that
-//     task's translator un-deferral (no further schema bump). Real
+//     were the last rows missing. B4.10 likewise un-deferred the
+//     event/shrine/special remaining-list membership bitsets once events.yaml
+//     supplied all 31 identities in canonical Java list order. Translation
+//     validates each captured list as a removal-only subsequence before
+//     collapsing it to bits, so duplicates/order drift fail loudly. Real
 //     map/boss/event-shop-flag fields and per-monster move history beyond 3
 //     remain deferred to their owning run-layer tasks. Deferred keys are still
 //     STRUCTURALLY consumed (a new/renamed oracle key still trips the drift
@@ -59,7 +61,7 @@ namespace sts::translate {
 //
 // `tolerate_unknown_ids` switches the translator from strict (default, B1.5
 // contract: an unknown content id is a fatal drift) to an ACCOUNTING mode: an
-// unknown content id (card/power/monster/relic/potion the registry does not
+// unknown content id (card/power/monster/relic/potion/event the registry does not
 // know) is TALLIED per-id and translated to NONE instead of aborting, and the
 // affected record's remaining fields are STILL field-checked. Unknown *fields*,
 // unknown RNG stream names, and oracle-anchor mismatches remain fatal in both

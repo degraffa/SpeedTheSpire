@@ -87,6 +87,8 @@ add_library(sts_engine
     rest_sites.cpp
     # Treasure-room chest construction/opening + chest relic hooks.
     treasure_rooms.cpp
+    # ?-room roll + event selection/pool bookkeeping + dialog dispatch.
+    event_framework.cpp
     run_advance.cpp
 )
 

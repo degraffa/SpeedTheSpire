@@ -22,7 +22,7 @@ tables remain).
 | `monsters.yaml` | `MonsterId` enum + `MonsterDef` stat/move table + game_id table | Jaw Worm (per-ascension-tier HP/amount columns; `ai: native`) |
 | `relics.yaml` | `RelicId` enum + game_id table | empty (skeleton has none) |
 | `potions.yaml` | `PotionId` enum + game_id table | empty |
-| `events.yaml` | `EventId` enum + game_id table | empty |
+| `events.yaml` | `EventId` enum + game_id table | Act-1 `eventList` / `shrineList` / `specialOneTimeEventList` rows, metadata-only (`native: true`) in canonical Java insertion order |
 | `encounters.yaml` | manifest row count only | empty |
 | `a20.yaml` | manifest row count only | empty (A20 table deferred) |
 

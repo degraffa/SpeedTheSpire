@@ -110,7 +110,14 @@ void update_lists(XXH3_state_t* st, const engine::MonsterLists& l) noexcept {
                           rc.boss_cursor,
                           rc.pad1,
                           rc.rest.screen};
-    return static_cast<uint64_t>(XXH3_64bits(s, sizeof(s)));
+    XXH3_state_t st;
+    XXH3_64bits_reset(&st);
+    XXH3_64bits_update(&st, s, sizeof(s));
+    // The event dialog state (B4.10): the selected EventId while parked or in
+    // dialog, plus the event-defined screen/scratch fields. POD with explicit
+    // padding, so a byte hash is stable.
+    XXH3_64bits_update(&st, &rc.event, sizeof(rc.event));
+    return static_cast<uint64_t>(XXH3_64bits_digest(&st));
 }
 
 }  // namespace
@@ -235,6 +242,7 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                 (phase == RunPhase::COMBAT ||
                  phase == RunPhase::REST_SITE ||
                  phase == RunPhase::TREASURE_ROOM ||
+                 phase == RunPhase::EVENT_DIALOG ||
                  phase == RunPhase::ROOM_UNIMPLEMENTED)) {
                 ++cov->room_entered[rc.room_type];
             }
