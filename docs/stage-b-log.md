@@ -4434,6 +4434,312 @@ Java provenance: `NeowEvent.java:49-121, 162-242, 288-378`,
 `AbstractCreature.java:199-223`, `AbstractPlayer.java:697-734, 1545-1553,
 2014-2041`, `BurningBlood.java:30`, `Omamori.java:18-19`,
 `BlackBlood.java:33-36`, and `AbstractEvent.java:63`.
+
+<a id="b45"></a>
+
+### B4.5 `[x]` Combat rewards — **oracle spot-diff PASSED; card-pool library order pinned**
+**The acceptance's oracle leg ran and passed.** Two operator-launched campaigns,
+`b45_rewards_oracle_20260727T204809Z_claude01` (seeds **STS00042, STS00043**,
+STS00044/45/46) and `b45_rewards_oracle2_20260727T204809Z_claude01`
+(**STS00048, STS00049, STS00051, STS00052**, STS00047/50), all strict-validated
+with `--require-oracle`. Six of the eleven runs reached a combat reward screen;
+the other five died in the floor-1 fight and carry none. Those six hold **13
+combat reward screens**, and **every one of the 13 zero-diffs** — assembly and
+claim, over the acceptance's whole field table: `gold`, `potions[]`,
+`master_deck[]`, `card_blizz_randomizer`, `blizzard_potion_mod`, and
+`cardRng` / `treasureRng` / `potionRng` / `relicRng`. Requirement was ≥ 3 runs;
+6 runs and 13 screens is what ran. Translation of all eleven artifacts is `OK`
+with zero unknown-field and zero unknown-id errors.
+
+**The read-out is a committed binary, not a scratch main:**
+`tools/oracle_bridge/replay/replay_run_diff`. Its default mode seeds the
+simulator from the translated RunState on the last in-combat record, calls
+`assemble_combat_rewards`, diffs the assembly against the next captured record,
+then drives the artifact's own claim commands through a `COMBAT_REWARD`
+`RunController` and diffs the post-claim `RunState` whole with
+`diff_run_states`. Because it seeds from the capture rather than re-driving the
+run, it is independent of combat fidelity — see the obligations table for what
+its `--replay` whole-run mode does and does not cover.
+
+**The card-pool library order is pinned, and it needed no guesswork.** The first
+pass diffed clean on every stream and both pity counters while 8 of 13 claims
+differed on exactly the picked card's identity — the predicted library-order
+deviation. That order turns out to be **computable**: the game fills its pools
+by walking `CardLibrary.cards`, a `HashMap<String, AbstractCard>`, whose
+iteration order is a pure function of `String.hashCode`, the final capacity and
+insertion order. `emit/cards.py` now computes it (`library_order_key`), and the
+capture **checks** the computation: 27 offered card identities across 9
+CARD_REWARD screens and 5 seeds are reproduced exactly, where the previous
+registry-id order reproduced **0 of 27**. After regeneration all 13 screens
+zero-diff including the deck column.
+
+**Two of the six runs cannot be replayed end to end, and neither affects this
+acceptance.** Their Neow boss-relic swap handed out **Philosopher's Stone**
+(STS00042) and **Fusion Hammer** (STS00043), both on the deferred
+`energyMaster` obligations row, so a whole-run `--replay` desyncs at the first
+combat's energy; STS00052's swap handed out **Astrolabe**, whose `onEquip` is
+likewise deferred. The reward read-out seeds from the captured post-combat state
+and so is untouched by all three — their 7 reward screens zero-diff like the
+rest. The whole-run replay also surfaced two genuine combat-layer gaps that are
+**not** B4.5's and are recorded as new obligations rows: monster block is never
+cleared at the monster's turn start, and Vulnerable/Weak never tick down.
+
+**Environment blocker CLEARED 2026-07-26; the capture then ran on 2026-07-27.**
+The owner
+sanctioned the installed stack, and design §1.2 is amended accordingly: the
+frozen runtime is **StS `12-18-2022` (`[V2.3.4]`) / ModTheSpire `3.30.3` /
+BaseMod `5.56.0`** (design §11 v0.1.7). Nothing was downgraded and no prior
+evidence is re-blessed — the `11-30-2020` label was a documentation error
+inherited from *upstream* CommunicationMod's declared `sts_version`, and the
+decompiled Java every `File.java:line` citation resolves against is itself
+`12-18-2022` (`CardCrawlGame.VERSION_NUM`), so the spec and the captured
+runtime were always the same build. BaseMod is pinned by **version** for the
+first time; previously only workshop item `1605833019` was recorded, which is
+why the runbook had to defer to an undefined "owner-approved frozen
+installation".
+
+That unblocked the environment; the operator then redeployed the fork and ran
+the capture. Both campaigns' headers record the sanctioned stack observed from
+their own bound `mts_launch1.log`, and
+`fork_jar_sha256: 7DC814AD240CBBD9100B2E8C92B6AA97B4ADFBED62FFED7961C6E5DE15884733`
+— the post-amendment build, so the redeploy did happen. **B4.7 still stays
+open** on its own live capture.
+
+**Safety hardening (non-acceptance):** the preserved `b45_rewards` artifacts
+were rejected because the GUI loaded stock CommunicationMod and every header
+has `oracle_block_enabled: false`; the launch environment also drifted from the
+then-frozen game/ModTheSpire versions. The driver now makes a missing oracle
+block on the first in-dungeon dump a fatal durable status before policy/artifact
+acceptance, the orchestrator stops relaunching on that status, and the
+validator/runbook require a distinct one-seed oracle preflight.
+**Also fixed at the re-pin — the defect that hid the drift:** the artifact
+header's `sts_version`/`mts_version` were *static constants*, so every artifact
+ever written claimed the frozen stack no matter what launched. The driver now
+parses the observed stack out of the exact append-only `mts_launch<N>.log`
+allocated for its game process, writes that into the header with a
+`version_source`, and refuses via the existing `fatal_environment_drift` status
+on a mismatch, on an unparseable log, or when the log is not bound to this
+orchestrator launch (including the GUI case). The filename is carried in the
+driver command and a one-use binding nonce is inherited through the launched
+game; resume continues above every preserved numeric log index, so neither an
+old higher-numbered log nor persisted GUI config can become current evidence.
+In-progress resume now also binds the driver revision, preventing mixed capture
+logic under one ledger.
+Applied retroactively to the 15 preserved campaign directories, the parser
+accepts all 12 real captures and flags exactly `b45_rewards` — the one already
+known to be invalid.
+An independent second review then closed the remaining strict-evidence gaps:
+normal boss-reward claims now propagate their action count; seed identity is
+joined from request through every in-game/oracle record; run and timing JSONL
+grammars are complete and bijective; campaign ids and resolved paths cannot
+escape the data root; and resume identity includes the currently requested
+fork/schema even for completed ledgers. These are capture-safety fixes only,
+and they are what makes the campaigns above admissible as evidence.
+See the [non-task archive log](stage-b-log.md#b45-oracle-preflight), the
+[runtime re-pin entry](stage-b-log.md#b45-oracle-stack-repin), and its
+[launch-binding fix-forward](stage-b-log.md#b45-oracle-stack-repin-fix-forward).
+
+**Landed** — commit `4f0544a`, merged at `e222dc2`, landed in `e6ec9ce`:
+`combat_rewards.{hpp,cpp}` (assembly at reward-screen open), the `RewardScreen`
+phase in `RunController` (**transient — no new storage, no schema bump**, as the
+Acceptance demanded), the CHOOSE claim flow, `kIronclad{Common,Uncommon,Rare}Pool`
+in `emit/cards.py`, and the translator's reward slice — now **content-validated**,
+where previously any `reward_type` name passed. Verified at integration that the
+three new pools are correctly RED-gated: **20/36/16 unchanged** after B3.10a added
+14 colorless cards to `cards.yaml`, which is the "confirm colorless is unreachable
+from a combat reward" deliverable proven rather than argued.
+**Three findings the brief and design §5.6 did not carry** — see the change log
+for the frozen-doc ruling: **elite card-rarity widths are 10/40** (set in
+`MonsterRoomElite`'s *constructor*, not by its `getCardRarity` override, which is
+Elite-Swarm-only) and **boss rewards are unconditionally RARE**
+(`MonsterRoomBoss.java:40-42`), so boss rewards also reset pity on every card and
+never draw the upgrade boolean; **Prayer Wheel** grants a second plain-room card
+reward (`CombatRewardScreen.java:89-94`), unmentioned anywhere; and **Smoke Bomb
+consumes the battle-over draws** (gold, elite relic pop, potion roll + ratchet),
+where B4.4 had modelled escape as a stream no-op — a fix-forward pinned by a
+named test.
+**Deps:** B4.4, B3.3-B3.9 (the RED reward pool) · **Spec:**
+design §5.6 · **Provenance:** AbstractRoom.java:291-296, 314-325, 580-617,
+108-109, 148-177; AbstractDungeon.java:1423-1498, 1597-1624
+**Deps note** (amended 2026-07-25 from a read-only scout; every citation
+verified — see the change log): **B3.10 and B3.11 removed.** The combat
+card-reward pool is **RED-only** (`Ironclad.getCardPool` →
+`CardLibrary.addRedCards`, `CardLibrary.java:1157`); colorless reaches the
+player through the shop and Neow, and the only caller of
+`getColorlessRewardCards()` is `RewardItem(CardColor)` →
+`SensoryStone.java:121`, an Act-3 event. **B3.8 stays and is promoted from a
+coverage dep to a hard mechanical blocker:** `cards.yaml` has **zero RARE
+rows**, so `rareCardPool` would be empty and `getCard(RARE)` would index an
+empty list — and RARE is reachable as soon as pity reaches 2.
+**Deliverables:** gold rolls (boss=miscRng ±5 ×0.75@A13, elite/normal=
+treasureRng — trap 18), potion drop (40 % + blizzardPotionMod ratchet, trap
+family), card rewards (3 cards, `cardRng.random(99)+cardBlizzRandomizer`
+against thresholds **`< 3` / `< 40`** — widths 3/37/60, `AbstractRoom.java:158,
+167`, confirmed at `AbstractDungeon.java:1606-1615`; coding the widths as
+thresholds is wrong by 3 points on every reward — pity reset/growth,
+no-duplicate re-roll — read the dupe loop at task, upgrade chance 0 in Act 1
+— **the `randomBoolean` draw still happens** (`Random.java:79-82`); only
+`c.rarity != RARE` short-circuits it, `AbstractDungeon.java:1470`), **confirm
+colorless is unreachable from a combat reward** with the citation above
+(re-scoped from "colorless handling"), reward-screen CHOOSE flow incl. skip.
+**Acceptance:** tier-2: pity dynamics across scripted reward sequences match
+hand-derivation; stream attribution named tests (trap 13, 18); oracle
+spot-diff: ≥ 3 bridge runs' reward screens zero-diff through the differ —
+where "reward screens zero-diff" means the **post-claim `RunState`** (gold,
+potions, deck, pity, counters). **No new storage and no schema bump.**
+Diffing the *offer* would need tools-side differ work or `RunState` growth
+(an unplanned `SCHEMA_VERSION` bump is stop-the-line, conventions §5) and is
+explicitly **not** what this acceptance asks for.
+**Inherited — four of five DISCHARGED:** Question Card / Singing Bowl / White
+Beast Statue (B3.25) — implemented and tested. Reward-screen `screen_state`
+translation (B1.5/B4.3) — done for the reward slice, and hardened: the
+`reward_type` name is now enumerated and fails loud. The **master-deck door**
+(hook audit) — every reward card obtains through `add_card_to_master_deck`, with
+the requested Ceramic-Fish-gold guard test; `remove_master_deck_card`
+legitimately gains no caller, because the game has no reward-screen removal.
+**Busted Crown**'s reward count and the **Black Star** elite relic (B3.27) — live
+at the combat-reward claim, as are Golden Idol ×1.25 and Sozu's potion block;
+their chest/event-screen shares stay with those screens' owners.
+**HANDED ON — DISCHARGED:** the CardLibrary library-order pin (B3.6). One
+`emit/cards.py` change pinned every generated pool at once, as anticipated, and
+the obligations row is struck.
+
+<a id="b45-spotdiff-readout"></a>
+
+### B4.5 oracle spot-diff read-out + pool library-order pin `[x]` — 2026-07-27
+
+**What ran.** The operator launched two campaigns on the sanctioned stack and
+both passed `validate_artifacts.py --require-oracle`:
+`b45_rewards_oracle_20260727T204809Z_claude01` (STS00042, STS00043, and
+STS00044/45/46, which died in the floor-1 fight) and
+`b45_rewards_oracle2_20260727T204809Z_claude01` (STS00048, STS00049, STS00051,
+STS00052, plus pre-reward STS00047/50). Every header carries
+`oracle_block_enabled: true`, the observed `12-18-2022` / `3.30.3` / `5.56.0`
+stack read out of its own bound `mts_launch1.log`, and the post-amendment fork
+hash `7DC814AD…5884733`. All eleven artifacts translate `OK` with **zero
+unknown-field and zero unknown-id errors**.
+
+**The verdict, per reward screen.** Thirteen combat reward screens across the
+six runs that reached one, and **all thirteen zero-diff**:
+
+| Run | Reward screens (floor) | Assembly | Claim |
+|---|---|---|---|
+| STS00042 | 1, 4, 5 | 3/3 clean | 3/3 clean |
+| STS00043 | 1, 2 | 2/2 clean | 2/2 clean |
+| STS00048 | 1 | 1/1 clean | 1/1 clean |
+| STS00049 | 1, 2 | 2/2 clean | 2/2 clean |
+| STS00051 | 1, 3, 4 | 3/3 clean | 3/3 clean |
+| STS00052 | 1, 4 | 2/2 clean | 2/2 clean |
+
+"Assembly" compares `cardRng` / `treasureRng` / `potionRng` / `relicRng`,
+`card_blizz_randomizer`, `blizzard_potion_mod` and the assembled item list
+against the captured reward screen. "Claim" drives the artifact's own claim
+commands and compares the **whole post-claim `RunState`** through
+`diff_run_states` — which is where `gold`, `potions[]` and `master_deck[]` are
+proved. Nine of the thirteen screens also had their card-pick screen opened in
+the capture, so their three offered identities are compared too.
+
+**The harness.** `tools/oracle_bridge/replay/replay_run_diff`, a committed tools
+binary rather than a scratch main. Its default mode seeds the simulator from the
+translated `RunState` of the last in-combat record, calls
+`assemble_combat_rewards` with that record's floor-scoped `miscRng`, then parks a
+`RunController` in `COMBAT_REWARD` on the captured post-assembly state to drive
+the claims. Seeding from the capture instead of re-driving the run is
+deliberate: it makes the reward read-out independent of combat fidelity, which
+matters because three of the six runs cannot be re-driven at all (below).
+
+Its `--replay` mode is the whole-run version — `run_begin(seed, 20)` plus a
+screen-driven mapping of every `action_command` — and is the closest thing the
+repo has to the B1.6 "seed a sim replay from any translated `RunState`" adapter
+without being it: it re-drives the prefix rather than resuming from a mid-run
+state, and it stops with an explicit reason at any room the run layer does not
+model (shops, out-of-combat potion discards, a grid `cancel`). That mode is a
+diagnosis tool, and it is what found everything in the next two paragraphs; the
+B1.6 obligations row stays open, narrowed.
+
+**Three runs cannot be re-driven end to end, for already-documented reasons.**
+Their Neow boss-relic swap handed out **Philosopher's Stone** (STS00042) and
+**Fusion Hammer** (STS00043) — both on the deferred `energyMaster` obligations
+row, so the sim gives 3 energy where the game gives 4 and the first combat
+diverges immediately — and **Astrolabe** (STS00052), whose `onEquip` is one of
+the five deferred BOSS bodies, so its three-card transform grid never opens.
+None of this touches the reward read-out.
+
+**Two genuine combat-layer gaps found in passing** (new obligations rows, not
+B4.5's): monster block is never cleared at the monster's turn start, so a Curl
+Up block survives into the player's next turn and absorbs damage the game had
+already discarded; and `Vulnerable` / `Weak` carry no `AT_END_OF_ROUND` binding,
+so their durations never tick down. Both were caught on STS00051's two-Louse
+floor-1 fight, where the game's Louse died to a Strike that the sim's survived
+with 7 HP behind 3 stale block.
+
+**The card-pool library order, computed rather than transcribed.** The first
+read-out diffed clean on every stream and both pity counters while 8 of the 13
+claims differed on exactly one field — the picked card's identity — which is the
+signature the runbook predicted for the CardLibrary-order deviation. The order
+turned out not to need empirical recovery at all. The game fills its pools by
+walking `CardLibrary.cards`, a `HashMap<String, AbstractCard>` keyed by cardID
+(`CardLibrary.java:409`, written only by `add()` at `:954`), and a Java HashMap's
+iteration order is a pure function of the keys, the map's final capacity and
+insertion order:
+
+    bucket = (h ^ (h >>> 16)) & (capacity - 1),   h = String.hashCode(cardID)
+
+with ties inside a bucket broken by insertion order, which Java 8's lo/hi resize
+split preserves across every rehash. `CardLibrary.initialize()` inserts 370
+cards, so the capacity settles at 512; each `addXCards()` call inserts in
+alphabetical order of the Java class name, which is the cardID with its
+separators removed bar ten rows. `emit/cards.py` now computes exactly that
+(`library_order_key`), and the resulting order **reproduces 27 of 27** captured
+offer identities across 9 CARD_REWARD screens and 5 seeds. The previous
+registry-id order reproduced **0 of 27**. Regenerating and re-running the
+read-out takes the deck column to zero as well.
+
+**Two orders fall out of the Java, and conflating them would have been the
+subtle way to get this wrong.** `CardGroup.addToTop` is `group.add(c)` — an
+APPEND despite the name (`CardGroup.java:455-457`) — so `commonCardPool` /
+`uncommonCardPool` / `rareCardPool`, which `getCard(rarity)` reads, are in plain
+library order. But `initializeCardPools` copies each into its `src*` twin with
+`addToBottom`, which is `group.add(0, c)` — a PREPEND (`:459-461`) — so every
+`src*` pool holds its rarity's library order REVERSED, and
+`returnTrulyRandomCardInCombat` concatenates them common ++ uncommon ++ rare
+(`AbstractDungeon.java:944-978`). `src_combat_order` in the emitter encodes that
+second shape for `kIroncladAttackPool`, `kIroncladSkillPool`,
+`kIroncladCombatPool`, `kColorlessCombatPool` and `kColorlessPool`; the three
+reward pools use the plain order. `kColorlessUncommonPool` /
+`kColorlessRarePool` are untouched — `getRandomCard(useRng, rarity)`
+`Collections.sort()`s its filtered view, so those were always order-exact.
+
+**The curse pool is pinned too, at a second capacity.** `CardLibrary.getCurse`
+(`:1043-1050`) walks the separate `curses` map, whose 14 entries settle at
+capacity 32 rather than 512. STS00048's Neow "obtain a curse" drew index 2 and
+the game handed over Shame; the computed order puts Shame at index 2, where the
+old order had Doubt. One data point, but it is the rule confirmed at a capacity
+the 27 offers never exercise.
+
+**Tests.** `card_pool_library_order_test` freezes the capture evidence in CI:
+the 15 COMMON and 12 UNCOMMON offer identities as `(pool, index, card)` rows,
+the curse index, each reward pool's endpoints, the reversed rarity-major `src*`
+relationship derived structurally from the reward pools, the B3.11
+type-filtered-subsequence invariant re-checked under the new order, and the
+membership counts the reorder must not disturb. Three existing tests pinned the
+old ORDER and were updated knowingly, keeping their membership assertions:
+`RestSites.DreamCatcherOpensDirectCardPickAfterHealing` (same three draw
+indices, three new names), `CardUncommonSkillsRegistry.IroncladAttackPoolMembership`
+(its two endpoint pins are now library positions, not id extremes), and
+`CardColorlessRaresChrysalis.GeneratedCopiesAreZeroCostPermanently` (seed 77 →
+78, because 77's three indices now land on three zero-cost skills, which would
+have made the zero-cost assertion vacuous).
+
+**Acceptance:** WSL Debug, leak-detecting ASan/UBSan and Release each
+**1322/1322**. Stale-count and documentation-link checks clean. No schema,
+fixture, golden, Steam/game deployment or oracle artifact changed; the two
+campaign directories were read only.
+
+Java provenance: `CardLibrary.java:409, 424-445, 465-908, 949-956, 1043-1050,
+1056-1063, 1142-1161`; `AbstractDungeon.java:944-1014, 1135-1219, 1481-1498`;
+`CardGroup.java:455-461, 502-524`; `Ironclad.java:138-150`;
+`MonsterGroup.java:98-104, 290-304`.
 <a id="b48"></a>
 
 ### B4.8 `[ ]` Shop — code landed, oracle capture outstanding

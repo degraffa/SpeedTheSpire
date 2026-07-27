@@ -15,6 +15,109 @@ from ..vocab import (
 )
 
 
+# --- CardLibrary "library order" ---------------------------------------------
+#
+# Every card pool the game builds by walking the library
+# (AbstractDungeon.initializeCardPools -> CardLibrary.addRedCards /
+# addColorlessCards, and returnTrulyRandomCardInCombat's concatenations) fills
+# in `CardLibrary.cards` iteration order, and `CardGroup.addToTop` is a plain
+# `group.add(c)` append (CardGroup.java:455-457) -- so the emitted array index
+# and the game's `group.get(i)` index must agree element for element.
+#
+# `CardLibrary.cards` is a `HashMap<String, AbstractCard>` keyed by cardID
+# (CardLibrary.java:409, written only by add() at :954), so its iteration order
+# is COMPUTABLE, not arbitrary: HashMap walks buckets 0..capacity-1 and, inside a
+# bucket, a linked list in insertion order (Java 8's resize splits each bucket
+# into lo/hi lists that preserve relative order, so insertion order survives
+# every rehash; treeification needs 8 entries in one bucket and this map's worst
+# bucket holds 4).
+#
+#   bucket = (h ^ (h >>> 16)) & (capacity - 1),   h = String.hashCode(cardID)
+#
+# CAPACITY. CardLibrary.initialize() adds 370 cards to a default-constructed
+# HashMap, which doubles from 16 while size > 0.75 * capacity and so ends at 512
+# (0.75 * 512 == 384 >= 370). That is a property of the frozen 12-18-2022 content
+# set, hence a constant here; registry_gen_test re-derives it.
+#
+# TIEBREAK. Two cards in one bucket keep their insertion order, and every pool
+# emitted below filters a SINGLE addXCards() call's cards, each of which inserts
+# in alphabetical order of the Java class name. That class name is the cardID
+# with its separators removed, bar the handful listed below.
+#
+# VERIFIED against the oracle capture: 27 offered card identities over 9
+# CARD_REWARD screens and 5 seeds are reproduced exactly by indexing the pools
+# below with the simulator's own (stream-exact) draw indices; the previous
+# registry-id order reproduced 0 of the 27.
+_CARD_LIBRARY_CAPACITY = 512
+
+# CardLibrary.curses is a second HashMap holding only the 14 CURSE rows
+# (CardLibrary.java:410/949); 14 > 0.75 * 16, so it settles one doubling in.
+_CURSE_LIBRARY_CAPACITY = 32
+
+_LIBRARY_CLASS_NAMES = {
+    # cardID -> Java class name, for the rows where stripping separators does not
+    # produce it (CardLibrary.java's import list is the authority).
+    "Ghostly": "Apparition",
+    "Void": "VoidCard",
+    "Strike_R": "Strike_Red", "Defend_R": "Defend_Red",
+    "Strike_G": "Strike_Green", "Defend_G": "Defend_Green",
+    "Strike_B": "Strike_Blue", "Defend_B": "Defend_Blue",
+    "Strike_P": "Strike_Purple", "Defend_P": "Defend_Watcher",
+}
+
+
+def _java_string_hash(s: str) -> int:
+    """java.lang.String.hashCode, as an unsigned 32-bit value."""
+    h = 0
+    for ch in s:
+        h = (h * 31 + ord(ch)) & 0xFFFFFFFF
+    return h
+
+
+def _library_key(game_id: str, capacity: int) -> tuple[int, str]:
+    h = _java_string_hash(game_id)
+    cls = _LIBRARY_CLASS_NAMES.get(
+        game_id, "".join(ch for ch in game_id if ch.isalnum() or ch == "_"))
+    return ((h ^ (h >> 16)) & (capacity - 1), cls)
+
+
+def library_order_key(row) -> tuple[int, str]:
+    """The `CardLibrary.cards` iteration-order sort key for a cards.yaml row."""
+    return _library_key(row["game_id"], _CARD_LIBRARY_CAPACITY)
+
+
+def curse_library_order_key(row) -> tuple[int, str]:
+    """The `CardLibrary.curses` iteration-order sort key (14 entries -> cap 32)."""
+    return _library_key(row["game_id"], _CURSE_LIBRARY_CAPACITY)
+
+
+def src_combat_order(pool_rows: list) -> list:
+    """Order rows the way `returnTrulyRandomCardInCombat` sees them.
+
+    Two things separate this from the plain reward-pool order.
+
+    RARITY-MAJOR. That method does not walk one list; it concatenates
+    srcCommonCardPool, then srcUncommonCardPool, then srcRareCardPool
+    (AbstractDungeon.java:944-978), so every COMMON precedes every UNCOMMON
+    precedes every RARE regardless of hash bucket.
+
+    REVERSED WITHIN A RARITY. `initializeCardPools` copies each pool into its
+    `src*` twin with `addToBottom`, which is `group.add(0, c)`
+    (CardGroup.java:459-461) -- a PREPEND. So a `src*` pool holds its rarity's
+    library order backwards, and everything indexing a `src*` pool inherits
+    that, while `getCard(rarity)` (which reads the un-copied pools) does not.
+    """
+    out: list = []
+    for tier in ("COMMON", "UNCOMMON", "RARE"):
+        tier_rows = [r for r in pool_rows if r["rarity"] == tier]
+        tier_rows.sort(key=library_order_key)
+        tier_rows.reverse()
+        out.extend(tier_rows)
+    if len(out) != len(pool_rows):
+        raise fail("src_combat_order: a pool row is outside COMMON/UNCOMMON/RARE")
+    return out
+
+
 def parse_card_flags(card_name: str, raw_flags, cost: int) -> tuple[int, int]:
     """Return (flag_bits, base_cost). YAML `flags:` names OR the game's negative
     cost sentinels (-1 == X-cost, -2 == unplayable status/curse) set the bits;
@@ -307,7 +410,13 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"        {up_ox_txt},")
         out.append("    }}};\n")
 
+    # CardLibrary.getCurse (CardLibrary.java:1043-1050) walks the SEPARATE
+    # `curses` HashMap (CardLibrary.java:410, written at :949) -- 14 entries, so
+    # its capacity settles at 32, not the 512 of the main card map -- drops the
+    # four non-poolable curses and indexes what is left with one cardRng draw.
+    # Same computable iteration order, different capacity.
     poolable_curses = [r for r in rows if r["curse_pool"]]
+    poolable_curses.sort(key=curse_library_order_key)
     out.append(f"inline constexpr int kPoolableCurseCount = {len(poolable_curses)};")
     out.append("inline constexpr std::array<CardId, kPoolableCurseCount> "
                "kPoolableCurses{{")
@@ -321,17 +430,16 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # cardRandomRng random(size - 1). MEMBERSHIP is derived from the rows'
     # color/rarity/type/healing columns, so it self-completes as B3.8's rares
     # land (B3.8 MUST set `healing: true` on Feed and Reaper -- CardTags.HEALING).
-    # ORDER: the game's pools fill in CardLibrary HashMap iteration order
-    # ("library order", design §5.1); pinning that order needs the B4.5 oracle
-    # capture, so until then the pool is emitted in registry-id order -- a
-    # DOCUMENTED interim deviation recorded in the B3.6 ledger Log. The one-draw
-    # accounting and membership are Java-exact today.
-    attack_pool = [r for r in rows
-                   if r["color"] == "RED"
-                   and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
-                   and r["ctype"] == CARD_TYPES["ATTACK"]
-                   and not r["healing"]]
-    attack_pool.sort(key=lambda r: r["id"])
+    # ORDER: `src_combat_order` below -- the rarity-major concatenation of the
+    # REVERSED per-rarity library order the three `src*CardPool`s hold. The
+    # one-draw accounting and membership were always Java-exact; the order is
+    # now Java-exact too.
+    attack_pool = src_combat_order(
+        [r for r in rows
+         if r["color"] == "RED"
+         and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+         and r["ctype"] == CARD_TYPES["ATTACK"]
+         and not r["healing"]])
     out.append(f"inline constexpr int kIroncladAttackPoolCount = "
                f"{len(attack_pool)};")
     out.append("inline constexpr std::array<CardId, kIroncladAttackPoolCount> "
@@ -351,16 +459,14 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # ORDER: Java's three-pool concatenation preserves each source pool's
     # relative order and the type filter is order-preserving, so a type-filtered
     # subsequence of the full RED combat pool is order-equivalent to the game's
-    # filtered build -- under the SAME documented interim deviation the pools
-    # above carry (registry-id order vs CardLibrary HashMap order, pending the
-    # B4.5 oracle capture). Opcode 55's filtered view therefore INHERITS that
-    # deviation; membership and the one-draw accounting are Java-exact today.
-    skill_pool = [r for r in rows
-                  if r["color"] == "RED"
-                  and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
-                  and r["ctype"] == CARD_TYPES["SKILL"]
-                  and not r["healing"]]
-    skill_pool.sort(key=lambda r: r["id"])
+    # filtered build. Both go through src_combat_order, so that subsequence
+    # relation still holds and stays pinned by its named test.
+    skill_pool = src_combat_order(
+        [r for r in rows
+         if r["color"] == "RED"
+         and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+         and r["ctype"] == CARD_TYPES["SKILL"]
+         and not r["healing"]])
     out.append(f"inline constexpr int kIroncladSkillPoolCount = "
                f"{len(skill_pool)};")
     out.append("inline constexpr std::array<CardId, kIroncladSkillPoolCount> "
@@ -372,12 +478,13 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # B3.10b Discovery: AbstractDungeon.returnTrulyRandomCardInCombat()
     # (:944-962) concatenates the player's src COMMON, UNCOMMON and RARE pools,
     # excluding HEALING-tagged cards, and spends one cardRandomRng draw per
-    # attempt. Membership is generated so later card rows self-complete it.
-    combat_pool = [r for r in rows
-                   if r["color"] == "RED"
-                   and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
-                   and not r["healing"]]
-    combat_pool.sort(key=lambda r: r["id"])
+    # attempt. Membership is generated so later card rows self-complete it, and
+    # the order is src_combat_order's rarity-major reversed library order.
+    combat_pool = src_combat_order(
+        [r for r in rows
+         if r["color"] == "RED"
+         and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+         and not r["healing"]])
     out.append(f"inline constexpr int kIroncladCombatPoolCount = "
                f"{len(combat_pool)};")
     out.append("inline constexpr std::array<CardId, kIroncladCombatPoolCount> "
@@ -390,11 +497,14 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # (:981-995) draws from every poolable COLORLESS UNCOMMON/RARE except a
     # HEALING-tagged card (Bandage Up). This reaches the final 34 members
     # automatically as B3.10c and B3.11 add the remaining colorless rows.
+    # ORDER: srcColorlessCardPool, i.e. colorlessCardPool's library order
+    # REVERSED by initializeCardPools' addToBottom copy (:1180-1183).
     colorless_pool = [r for r in rows
                       if r["color"] == "COLORLESS"
                       and r["rarity"] in ("UNCOMMON", "RARE")
                       and not r["healing"]]
-    colorless_pool.sort(key=lambda r: r["id"])
+    colorless_pool.sort(key=library_order_key)
+    colorless_pool.reverse()
     out.append(f"inline constexpr int kColorlessCombatPoolCount = "
                f"{len(colorless_pool)};")
     out.append("inline constexpr std::array<CardId, kColorlessCombatPoolCount> "
@@ -413,15 +523,14 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     # getCard(rarity) (AbstractDungeon.java:1481-1498) draws
     # pool.getRandomCard(true) == group.get(cardRng.random(size - 1))
     # (CardGroup.java:502-506): one cardRng draw indexing THIS list.
-    # ORDER: same documented interim deviation as kIroncladAttackPool -- the
-    # game's pools fill in CardLibrary HashMap iteration order ("library
-    # order"); until the B4.5 oracle capture pins that order these are emitted
-    # in registry-id order. Draw-count accounting and membership are Java-exact;
-    # only which ID a given index maps to can deviate.
+    # ORDER: PINNED by the B4.5 oracle capture. These three are the pools the
+    # capture directly exercises, and they are in plain CardLibrary iteration
+    # order -- `addToTop` appends (CardGroup.java:455-457), so no reversal --
+    # which reproduces all 27 captured offer identities.
     for tier in ("COMMON", "UNCOMMON", "RARE"):
         pool = [r for r in rows
                 if r["color"] == "RED" and r["rarity"] == tier]
-        pool.sort(key=lambda r: r["id"])
+        pool.sort(key=library_order_key)
         tname = pascal(tier)
         out.append(f"inline constexpr int kIronclad{tname}PoolCount = "
                    f"{len(pool)};")
@@ -495,10 +604,8 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     #     rarity rolls consume NeowEvent.rng (NeowReward.java:309-330).
     # (2) THE WHOLE-POOL VIEW, kColorlessPool, is what the colorless branch of
     #     returnTrulyRandomColorlessCardFromAvailable indexes
-    #     (AbstractDungeon.java:998-1014) -- unsorted, so it carries the SAME
-    #     documented interim order deviation as kIroncladAttackPool (registry-id
-    #     order until an oracle capture pins CardLibrary HashMap order).
-    #     Membership and draw counts are Java-exact either way.
+    #     (AbstractDungeon.java:998-1014). That reads srcColorlessCardPool, so
+    #     it is the library order REVERSED, exactly like kColorlessCombatPool.
     colorless_all = [r for r in rows
                      if r["color"] == "COLORLESS"
                      and r["rarity"] in ("UNCOMMON", "RARE")
@@ -514,7 +621,8 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         for r in pool:
             out.append(f"    CardId::{r['name']},  // {r['game_id']}")
         out.append("}};\n")
-    colorless_all.sort(key=lambda r: r["id"])
+    colorless_all.sort(key=library_order_key)
+    colorless_all.reverse()
     out.append(f"inline constexpr int kColorlessPoolCount = "
                f"{len(colorless_all)};")
     out.append("inline constexpr std::array<CardId, kColorlessPoolCount> "

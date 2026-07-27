@@ -6,9 +6,13 @@ through the differ**, where "zero-diff" means the **post-claim `RunState`**
 schema bump). The tier-2 leg (pity vs. hand-derivation, trap-13/18 stream
 attribution, the claim flow) is `combat_rewards_test` and runs in CI; this leg
 needs the live game, which is **launched manually by a human operator**
-(CLAUDE.md, oracle-bridge section) — an agent cannot start it. Everything up to
-the capture is prepared below; the capture and the diff read-out are the
-remaining human steps.
+(CLAUDE.md, oracle-bridge section) — an agent cannot start it.
+
+**STATUS: this runbook has been executed and B4.5's oracle leg PASSED**
+(2026-07-27; §7 records the capture). It is kept as the procedure for the next
+combat-reward capture, not as an open task. The one step that still needs a
+human is the launch in §2/§3; §4 onward is now a single binary
+(`replay_run_diff`, §5).
 
 ## 1. Environment decision — RESOLVED 2026-07-26
 
@@ -124,10 +128,11 @@ Pick three seeds and put them (base-35 strings, one per line) in
 `D:/STS_BG_Mod/_oracle_data/campaigns/b45_seeds.txt`. Prefer seeds/paths whose
 early floors avoid:
 
-- **Looter fights** (`Exordium Thugs` / `Looter`) — the Looter is the parked
-  B3.15 remainder; a Looter combat diverges at the *combat* level before the
-  reward screen is even reached, and its mugged/STOLEN_GOLD screen is
-  deliberately unmodelled.
+- ~~**Looter fights**~~ — **no longer a reason to avoid a seed.** That caveat
+  predated the Looter/mugged landing: Looter combats are implemented and the
+  mugged / STOLEN_GOLD reward screen is fully modelled (`RewardOutcome` in
+  `combat_rewards.hpp`, and the run layer's escape settlement). Treat a
+  divergence on a Looter floor as a real divergence.
 - **The emerald elite** — the elite carrying the emerald key shows an
   `EMERALD_KEY` reward item and (on claim) sets a key the sim does not store;
   that flag is documented out of S1 scope (see `map_rooms.hpp`'s
@@ -206,33 +211,62 @@ fields named by the acceptance:
 | `blizzard_potion_mod` | the +/-10 ratchet after the potion roll |
 | stream counters | `cardRng` / `treasureRng` / `potionRng` / `relicRng` (+ `miscRng` for boss gold) |
 
-The run-level replay is still manual: the generalized "seed a sim replay from
-any translated RunState" adapter was deferred by B1.6 to B4.4 and recorded
-**undischarged** in the ledger's obligations table (owner needs re-owning), so
-until it exists the sim side is driven by hand (a ~20-line gtest or scratch
-main that calls `run_begin` and feeds the artifact's `action_command` sequence
-as run-level `CHOOSE`/`PLAY_CARD` actions). `diff_run_states`
-(`tools/diff_harness`, `sts/diff/differ.hpp`) prints the field-by-field diff.
+**This is no longer done by hand.** `tools/oracle_bridge/replay/replay_run_diff`
+does the whole read-out; point it at the artifacts and read the summary:
 
-## 6. Known caveat the capture ALSO resolves: card-pool library order
+```bash
+tools/wsl_run.sh debug        # builds it among everything else
+build/debug/tools/oracle_bridge/replay/replay_run_diff \
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/$B45_REWARD_ID/run_*[!g].jsonl
+```
 
-The three generated reward pools (`kIroncladCommonPool` / `...UncommonPool` /
-`...RarePool`, like `kIroncladAttackPool` before them) are emitted in
-**registry-id order** — a documented interim deviation. The game's pools fill
-in CardLibrary HashMap iteration order ("library order"), which no oracle
-capture has pinned yet. The **index drawn** is stream-exact either way; **which
-card that index names** is not, so the *deck* column of the diff may mismatch
-on exactly the picked-card identity until the order is pinned.
+Per reward screen it prints an `ASSEMBLY` line (streams + both pity counters +
+the item list, seeded from the captured pre-battle-over `RunState`) and a
+`CLAIM` line (the whole post-claim `RunState` through `diff_run_states`, which
+is where gold / potions / deck are proved), and it exits non-zero if any file
+had a failure. `--replay` re-drives a whole run from `run_begin` instead, and
+`--combat` adds a per-record `CombatState` diff for triage; both are diagnosis
+modes, not the acceptance.
 
-**While reading the diff:** treat a deck mismatch whose *count and upgrade*
-agree but whose *card id* differs as the library-order deviation, not a stream
-bug — the stream counters and pity must still zero-diff regardless.
+## 6. Caveat the capture ALSO resolved: card-pool library order — CLOSED
 
-**To pin the order from this capture** (discharges the B3.6-deferred
-obligation): each CARD_REWARD screen in the artifact lists the offered card
-ids; together with the sim's drawn indices for the same `cardRng` states, three
-runs' offers over-determine the per-rarity pool orders. Write the recovered
-orders into `tools/registry_gen/stsgen/emit/cards.py` (replace the
-`sort(key=lambda r: r["id"])` for the four pools with an explicit library-order
-key — the "one-line gen.py fix" the ledger anticipates), regenerate, and re-run
-the diff: the deck column must then zero-diff too.
+The generated pools used to be emitted in **registry-id order**, a documented
+interim deviation: the game fills its pools in CardLibrary HashMap iteration
+order ("library order"), the **index drawn** is stream-exact either way, but
+**which card that index names** was not — so the deck column of the diff was
+expected to mismatch on exactly the picked-card identity.
+
+It did, on 8 of 13 screens, and then it was fixed. The order needed no empirical
+recovery: a Java `HashMap`'s iteration order is a pure function of the keys, the
+final capacity and insertion order, so `emit/cards.py` **computes** it
+(`library_order_key`). See §7 and
+[the log entry](../../../docs/stage-b-log.md#b45-spotdiff-readout) for the rule
+and the two distinct orders it produces. Nothing here is outstanding; if a
+future capture ever shows a deck mismatch whose count and upgrade agree but
+whose card id differs, that is now a **regression**, not the known deviation.
+
+## 7. The capture that closed this runbook — 2026-07-27
+
+Two campaigns, both strict-validated with `--require-oracle`:
+
+| Campaign | Seeds | With reward screens |
+|---|---|---|
+| `b45_rewards_oracle_20260727T204809Z_claude01` | STS00042-46 | STS00042, STS00043 |
+| `b45_rewards_oracle2_20260727T204809Z_claude01` | STS00047-52 | STS00048, STS00049, STS00051, STS00052 |
+
+The five runs not listed as having reward screens died in the floor-1 fight
+before reaching one; they are still validated members of their campaigns and
+must be preserved. The six that did carry **13 combat reward screens, and all 13
+zero-diff** — the acceptance asked for ≥ 3 runs.
+
+Two operating notes for whoever captures next:
+
+- **`random-legal` dies early and often at A20.** Five of eleven runs never
+  reached a reward screen at all, and the deepest got to floor 7. Budget seeds
+  accordingly; ~6 runs is a comfortable margin for a ≥ 3 requirement.
+- **A Neow boss-relic swap can make a run un-replayable while leaving its
+  reward screens perfectly diffable.** Three of the six drew a relic whose body
+  is on the deferred obligations table (Philosopher's Stone, Fusion Hammer,
+  Astrolabe), so `--replay` desyncs in the first combat. The default reward
+  mode seeds from the captured post-combat state and is unaffected — which is
+  precisely why it is the default.

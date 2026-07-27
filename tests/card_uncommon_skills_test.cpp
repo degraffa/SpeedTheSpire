@@ -203,8 +203,13 @@ TEST(CardUncommonSkillsRegistry, IroncladAttackPoolMembership) {
     // observable proof that the healing column is set on those two rows and only
     // on those two.
     EXPECT_EQ(kIroncladAttackPoolCount, 28);
-    EXPECT_EQ(kIroncladAttackPool[0], CardId::POMMEL_STRIKE);  // lowest id (5)
-    EXPECT_EQ(kIroncladAttackPool[27], CardId::IMMOLATE);      // highest id (86)
+    // The two endpoints are now LIBRARY-order positions, not id extremes: the
+    // pool is srcCommon ++ srcUncommon ++ srcRare, each rarity in CardLibrary
+    // iteration order REVERSED by initializeCardPools' addToBottom copy. So the
+    // head is the last COMMON attack the library iterates and the tail is the
+    // first RARE one -- both pinned by the B4.5 capture's recovered order.
+    EXPECT_EQ(kIroncladAttackPool[0], CardId::SWORD_BOOMERANG);
+    EXPECT_EQ(kIroncladAttackPool[27], CardId::IMMOLATE);
     bool has_basic = false;
     bool has_skill = false;
     bool has_bludgeon = false;

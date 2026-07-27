@@ -264,6 +264,12 @@ sts_add_test(run_advance_test)
 # Prayer Wheel).
 sts_add_test(combat_rewards_test)
 
+# Card-pool LIBRARY ORDER: the computed CardLibrary HashMap iteration order, the
+# oracle-capture offer identities that check that computation, the reward-pool
+# vs src-pool (reversed, rarity-major) split, and the membership invariants the
+# reorder must not disturb.
+sts_add_test(card_pool_library_order_test)
+
 # Rest sites: Java-float 30% heal with the ascension-negative pinned, Regal
 # Pillow/Dream Catcher, Smith and Peace Pipe grids, Girya/Shovel effects, menu
 # availability/order, and deterministic RunController masks/transitions.
