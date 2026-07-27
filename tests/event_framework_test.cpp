@@ -652,10 +652,10 @@ TEST(GenerateEvent, AllPoolsEmptyReturnsZeroWithoutCommit) {
 // =============================================================================
 
 TEST(EventDialog, DispatchMatchesImplementedRegistryPrefix) {
-    for (uint16_t id = 1; id <= 6; ++id) {
+    for (uint16_t id = 1; id <= 11; ++id) {
         EXPECT_NE(event_dialog_impl(id), nullptr) << "EventId " << id;
     }
-    for (uint16_t id = 7; id <= 31; ++id) {
+    for (uint16_t id = 12; id <= 31; ++id) {
         EXPECT_EQ(event_dialog_impl(id), nullptr) << "EventId " << id;
     }
     EXPECT_EQ(event_dialog_impl(0), nullptr);

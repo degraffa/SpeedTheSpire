@@ -442,6 +442,49 @@ bool event_grid_upgrade_card(RunState& rs, EventDialogState& es,
     return true;
 }
 
+bool event_grid_transform_card(RunState& rs, EventDialogState& es,
+                               RngStream& misc_rng,
+                               uint16_t deck_index) noexcept {
+    if (static_cast<EventGridKind>(es.grid_kind) !=
+            EventGridKind::TRANSFORMABLE ||
+        !event_grid_card_legal(rs, es, deck_index)) {
+        return false;
+    }
+    const CardId removed =
+        static_cast<CardId>(rs.master_deck[deck_index].card_id);
+    const uint8_t color = sts::registry::event_transform_color(removed);
+
+    CardId candidates[kMasterDeckCap]{};
+    int count = 0;
+    auto append_pool = [&](const auto& pool) noexcept {
+        for (CardId id : pool) {
+            if (id != removed) {
+                candidates[count++] = id;
+            }
+        }
+    };
+    if (color == 1) {
+        append_pool(sts::registry::kEventTransformRedPool);
+    } else if (color == 2) {
+        append_pool(sts::registry::kEventTransformColorlessPool);
+    } else if (color == 3) {
+        append_pool(sts::registry::kEventTransformCursePool);
+    }
+    if (count == 0 || !remove_master_deck_card(rs, deck_index)) {
+        return false;
+    }
+
+    // LivingWall.update removes first, then transformCard(..., miscRng);
+    // CardGroup.getRandomCard(Random) performs one inclusive random(count-1)
+    // draw even for a singleton pool (LivingWall.java:53-61;
+    // AbstractDungeon.java:860-877; CardGroup.java:498-500).
+    const CardId replacement =
+        candidates[random(misc_rng, count - 1)];
+    const bool obtained = add_card_to_master_deck(rs, replacement);
+    close_event_grid(es);
+    return obtained;
+}
+
 bool apply_event_damage(RunController& rc, int32_t amount,
                         EventDamageOwner owner) noexcept {
     // AbstractPlayer.damage (AbstractPlayer.java:1387-1502) runs the player's

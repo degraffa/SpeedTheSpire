@@ -81,6 +81,45 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "    }",
         "    return nullptr;",
         "}\n",
+        "// Living Wall transform pools. Membership follows transformCard:",
+        "// RED uses every non-basic reward-pool card, COLORLESS uses every",
+        "// uncommon/rare colorless card, and CURSE uses every poolable curse.",
+        "// Registry iteration order is stable and the arrays self-complete as",
+        "// later colorless content rows land.",
+    ])
+    cards = domains["cards"]
+    transform_groups = {
+        "Red": [c for c in cards
+                if str(c.get("color", "")).upper() == "RED"
+                and str(c.get("rarity", "")).upper()
+                in ("COMMON", "UNCOMMON", "RARE")],
+        "Colorless": [c for c in cards
+                      if str(c.get("color", "")).upper() == "COLORLESS"
+                      and str(c.get("rarity", "")).upper()
+                      in ("UNCOMMON", "RARE")],
+        "Curse": [c for c in cards if bool(c.get("curse_pool", False))],
+    }
+    for label, pool in transform_groups.items():
+        out.append(
+            f"inline constexpr std::array<CardId, {len(pool)}> "
+            f"kEventTransform{label}Pool{{{{")
+        for card in pool:
+            out.append(f"    CardId::{card['name']},")
+        out.append("}};")
+    out.extend([
+        "[[nodiscard]] inline constexpr uint8_t event_transform_color(",
+        "    CardId id) noexcept {",
+        "    switch (id) {",
+    ])
+    for card in cards:
+        color = str(card.get("color", "")).upper()
+        tag = 1 if color == "RED" else 2 if color == "COLORLESS" else 3 if color == "CURSE" else 0
+        out.append(f"        case CardId::{card['name']}: return {tag};")
+    out.extend([
+        "        case CardId::NONE:",
+        "        default: return 0;",
+        "    }",
+        "}\n",
         "}  // namespace sts::registry\n",
         "// Implemented native-body dispatch. Expanding this table odr-uses every",
         "// handler, so marking a row implemented without a body is a link error.",

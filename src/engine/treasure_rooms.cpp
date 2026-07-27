@@ -65,18 +65,6 @@ bool add_random_relic_item(RunState& rs, RewardScreen& out,
 // treasure_chest_open_legal preflights it), never a silently dropped curse.
 [[nodiscard]] bool cursed_key_obtain(RunState& rs) noexcept {
     const CardId curse = return_random_curse(rs.card_rng);
-    RelicSlot* omamori = nullptr;
-    for (uint8_t i = 0; i < rs.relic_count; ++i) {
-        if (static_cast<RelicId>(rs.relics[i].relic_id) ==
-            RelicId::OMAMORI) {
-            omamori = &rs.relics[i];  // getRelic returns the first match.
-            break;
-        }
-    }
-    if (omamori != nullptr && omamori->counter != 0) {
-        --omamori->counter;
-        return true;
-    }
     return add_card_to_master_deck(rs, curse);
 }
 

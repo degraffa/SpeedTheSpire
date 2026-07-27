@@ -17,7 +17,8 @@
 #     game_id: "<string>"  the game's encounter/monster-group KEY (Exordium pool
 #                          string == MonsterHelper.getEncounter key) -- join key.
 #     act: <int>           1 (Exordium) for every B3.12 entry.
-#     pool: WEAK|STRONG|ELITE|BOSS   which generateXxx list it belongs to.
+#     pool: WEAK|STRONG|ELITE|BOSS|EVENT   which generateXxx list it belongs
+#                          to; EVENT rows are lookup-only fixed groups.
 #     weight: <float>      MonsterInfo weight (pool-roll band width). BOSS = 0.0
 #                          (bosses are shuffled, not weight-rolled).
 #     excludes: [<game_id>, ...]   WEAK only, optional: strong-pool keys forbidden
@@ -288,3 +289,19 @@
   program:
     - {emit: "SlimeBoss"}
   provenance: "Exordium.initializeBoss (Exordium.java:205); MonsterHelper.getEncounter \"Slime Boss\" (MonsterHelper.java:457-459)"
+
+# =============================================================================
+# EVENT groups -- fixed groups looked up by native event bodies. These rows do
+# not enter Exordium's monster/elite/boss lists.
+# =============================================================================
+- id: 21
+  name: THE_MUSHROOM_LAIR
+  game_id: "The Mushroom Lair"
+  act: 1
+  pool: EVENT
+  weight: 0.0
+  program:
+    - {emit: "FungiBeast"}
+    - {emit: "FungiBeast"}
+    - {emit: "FungiBeast"}
+  provenance: "Mushrooms.buttonEffect (Mushrooms.java:70-80) enters MonsterHelper.getEncounter(\"The Mushroom Lair\"); MonsterHelper.getEncounter (MonsterHelper.java:430-435) constructs three FungiBeast actors."

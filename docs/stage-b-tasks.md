@@ -72,6 +72,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Per-power counter storage — Panache (every-5th), The Bomb (3-turn) | B3.2 | B3.11 | B3.2 added no `PowerSlot` counter field; Combust (B3.7) and Rampage (B3.5) were solved locally |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Purity and Forethought** (colorless uncommons, `CardId` **109** and **101** reserved) | B3.10 split | UNASSIGNED — **same owner as the Gambling Chip row below**, whoever makes the optional multi-select change | reached from a *card* batch rather than a relic, which is what makes it worth its own row: the blocker is no longer a single deferred relic but a **third** independent consumer. Purity discards zero-to-all; Forethought needs a new draw-**bottom** `ChoiceKind` **and** a `freeToPlayOnce` `CardFlag` (bits 10–15 are free; card-limbo allocated bit 8 to `EXHAUST_ON_USE_ONCE` and the dequeue fix-forward allocated transient Double Tap X-energy bit 9), and Forethought+ is itself zero-to-all. `choice_requires_user` (`interp_cards.cpp:718-728`) hard-codes a mandatory fixed count, `ActionVerb` has no confirm/skip, and the translator explicitly defers `can_pick_zero` (`translate.cpp:757`). **Do not let a reward-screen or shop skip button become this change by accident** — it is a public `ActionMask` surface change and wants its own task |
+| Living Wall's generated COLORLESS transform-pool completion | B4.12 | B3.10b, the Purity/Forethought owner above, B3.11 | B4.12 emits the event transform arrays directly from every registry card's color/rarity columns, so membership self-completes without another event-code edit as the mandatory missing colorless rows land. The live tier-2 test pins the generated shape and exact RED draw today. This is a temporary completeness dependency, **not permission to exclude or defer any colorless card**. |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | UNASSIGNED — needs an OPTIONAL multi-select `CHOOSE_CARD` | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. Every existing `ChoiceKind` selects a **mandatory fixed count**, so this needs an optional multi-select with an explicit confirm — which **changes the public `ActionMask` surface** the observation and translator layers join on, and is therefore not a local relic change. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
 | **Sling of Courage** `atBattleStart` | B3.26 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `Sling.atBattleStart` (`Sling.java:1030-1038`) grants Strength 2 when `getCurrRoom().eliteTrigger` is set. `eliteTrigger` is per-**ROOM** state the run layer sets when an elite encounter begins, and `CombatState` carries no elite marker; producing one is a run-layer change. **Twin of the Slaver's Collar row below** — same missing marker, so both wait on the blocker, not on each other. Inertness asserted by `relic_rares_shop_test` |
 | **Orange Pellets** `onUseCard` | B3.26 | UNASSIGNED — needs a new opcode | `OrangePellets.java:1218-1250`: once an ATTACK, a SKILL and a POWER have all been played, it queues `RemoveDebuffsAction(player)`, which removes **every** DEBUFF-type power on the player, **enumerated when the action resolves**. No opcode expresses that — `REMOVE_POWER` names one `PowerId` chosen at *queue* time. The three latches and their `at_turn_start` clear are live; only the removal is deferred. Inertness asserted by `relic_rares_shop_test` |
@@ -79,7 +80,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
 | Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
-| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency at EVENT acquisition/use sites | B3.27 | B4.12-B4.13 | **B4.11 event-combat shares DISCHARGED:** Dead Adventurer preserves event-defined gold/relic rows into the generic EventRoom battle-over append; Golden Idol's ×1.25 bonus is recomputed when its gold rows merge, and Sozu's existing claim door removes/discards an event-combat potion. Big Fish and Dead Adventurer roll only COMMON/UNCOMMON/RARE tiers, so none of the five deferred BOSS `onEquip` bodies is reachable from this batch; Sacred Bark changes potion use, not reward construction. **Chest hooks DISCHARGED by B4.7** and **ordinary combat-reward shares discharged by B4.5** as recorded previously. The remaining event-specific acquisition/use sites stay owned by B4.12-B4.13. |
+| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency at EVENT acquisition/use sites | B3.27 | B4.13 | **B4.11 event-combat shares DISCHARGED:** Dead Adventurer preserves event-defined gold/relic rows into the generic EventRoom battle-over append; Golden Idol's ×1.25 bonus is recomputed when its gold rows merge, and Sozu's existing claim door removes/discards an event-combat potion. **B4.12 event-specific sites DISCHARGED:** Liars Game, Mushrooms and Living Wall route every card grant through the now-Omamori-aware normal obtain door; Ectoplasm still independently suppresses Liars Game gold; Mushrooms' fixed Odd Mushroom/Circlet reward claims through the generic relic door; Scrap Ooze can roll only COMMON/UNCOMMON/RARE screenless relics; and no B4.12 option uses a potion, so none of the five deferred BOSS `onEquip` bodies or Sacred Bark is reachable. **Chest hooks DISCHARGED by B4.7** and **ordinary combat-reward shares discharged by B4.5** as recorded previously. Only B4.13's event-specific acquisition/use sites remain. |
 | Fusion Hammer / Coffee Dripper campfire-option locks | B3.27, B4.9 | UNASSIGNED — next campfire/relic-lock follow-up | B4.9 deliberately preserves these whole-effect deferrals: the registered boss relic rows and pool slots are live, but their shared `energyMaster` half remains deferred and the task brief explicitly prohibited silently partially implementing the Smith/Rest locks. `build_rest_menu` therefore documents that both base buttons remain unlocked until one owner lands the relic bodies coherently. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
@@ -430,6 +431,9 @@ precedent B3.8 set. Discovery additionally needs a choice source that is a
 today.
 **Acceptance:** tier-2 per card; Discovery `cardRandomRng` draw accounting;
 directed script.
+**Inherited:** these four rows must join B4.12's generated Living Wall
+COLORLESS transform pool. The pool is metadata-derived, so this needs no
+event-code edit and is not permission to omit any colorless card.
 **Log:** —
 
 ### B3.11 `[ ]` ∥ Colorless rares
@@ -444,6 +448,8 @@ Panache (every-5th) and The Bomb (3-turn) — deferred by B3.2 (no new `PowerSlo
 field was added there). **The opcode itself now exists:** B3.8 landed `PLAY_CARD` = 34
 as the *general* verb, and Mayhem reuses `{op: PLAY_CARD, play: [from_draw_top]}`
 unchanged — what is left here is the authoring, not the verb.
+Its rows must also complete B4.12's metadata-derived Living Wall COLORLESS
+transform pool; this needs no event-code edit and is not a content deferral.
 **Log:** —
 
 - **B3.12** `[x]` Multi-monster combat + encounter framework — `encounters.yaml` with 20 Act-1 encounters and their miscRng composition programs; `resolve_composition`/`generate_monster_lists`/`spawn_group`/`dispatch_monster_turn`; **schema 3→4** (`kMonsterCap` 5→7, `sizeof(CombatState)` 3672→3896); 20 fixtures regenerated with a byte-level zero-diff-in-meaning proof; +13 tests, 286/286 ×3 · [log](stage-b-log.md#b312)
@@ -704,13 +710,14 @@ and to an EventRoom replaced by a ?→Shop roll — deferred by B4.10.
   A15, fuzz/hash and three-preset acceptance ·
   [log](stage-b-log.md#b411)
 
-### B4.12 `[ ]` ∥ Exordium events II
-**Deps:** B4.10 · **Provenance:** events/exordium: Liars Game, Living Wall,
-Mushrooms, Scrap Ooze, Shining Light
-**Deliverables:** the 5 events (Mushrooms' combat + Parasite, Scrap Ooze's
-escalating relic odds, Shining Light's upgrade-random-two).
-**Acceptance:** as B4.11.
-**Log:** —
+- **B4.12** `[x]` ∥ Exordium events II — five native Java-order dialog
+  bodies; Liars Game's two Agree pages and obtain-before-gold payout; Living
+  Wall's arbitrary deck grids plus one-draw same-color transform; Mushrooms'
+  preserved-stream three-Fungi combat and ordered event rewards; Scrap Ooze's
+  exact 26/100 initial threshold and post-lethal ordering; Shining Light's
+  owner-aware NORMAL damage plus unconditional JDK shuffle/random-two; normal
+  curse obtains now honor Omamori centrally; tier-2 every option/A15 and full
+  three-preset acceptance · [log](stage-b-log.md#b412)
 
 ### B4.13 `[ ]` ∥ Shrines + one-time specials
 **Deps:** B4.10 · **Provenance:** events/shrines: Match and Keep, Golden

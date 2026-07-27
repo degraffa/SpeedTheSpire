@@ -3754,3 +3754,56 @@ and fuzz enumeration/hash coverage. Final-tree WSL Debug, leak-detecting
 ASan/UBSan and Release are each **1103/1103**; documentation links,
 stale-count and whitespace checks are clean. No Steam/game deployment, fixture,
 golden, external oracle artifact or schema changed.
+
+<a id="b412"></a>
+
+### B4.12 `[x]` Exordium events II
+
+Done 2026-07-26 from task base `edfbce8d718cec7aebb4278e2e123e73d3159258`.
+All five remaining Exordium event-list bodies are native and
+generated-dispatch linked, with audited conditions, option screens and
+explicit A15 metadata.
+
+Liars Game retains the intro, first Agree confirmation, payout page and final
+proceed as distinct states. Payout obtains Doubt before granting 175/150 gold.
+The shared obtain door now implements `ShowCardAndObtainEffect`'s
+first-owned-Omamori behavior, including the used-up-first-copy case; Ectoplasm
+suppresses gold independently. Cursed Key now uses the same door without
+changing its capacity preflight.
+
+Living Wall exposes arbitrary-card Forget, Change and Grow grids. Change
+removes the selected card first, consumes exactly one inclusive `miscRng`
+draw from the same-color pool excluding that card identity, then obtains the
+replacement through normal hooks. Generated RED, COLORLESS and CURSE
+transform pools derive from registry metadata and self-complete as mandatory
+colorless rows land; no colorless card is excluded or deferred.
+
+Mushrooms registers the fixed three-Fungi EVENT encounter. Fight confirmation
+draws `random(20,30)` gold before combat, pre-seeds GOLD then Odd
+Mushroom/Circlet, preserves advanced floor streams and leaves the ordinary
+monster cursor untouched; battle-over handling can add the ordinary potion
+row and then adds exactly one card row. The alternate option heals one quarter
+of max HP before obtaining Parasite.
+
+Scrap Ooze applies current null-owner NORMAL damage before its roll, starts at
+the displayed 25 percent chance (`random(99) >= 74`, 26 winning values), and
+adds 10 percentage points plus one damage on failure. Its roll and relic
+acquisition still occur after lethal damage, matching Java action ordering.
+Shining Light applies player-owner NORMAL damage, always consumes one
+`randomLong` for the exact JDK shuffle, and upgrades the first two shuffled
+eligible cards even after lethal damage.
+
+Tier-2 coverage exercises every option, changing A15 constants, exact RNG
+boundaries and ordering, arbitrary grid selections, Omamori/Ectoplasm and
+obtain hooks, event-combat rewards/streams/cursor behavior, and post-lethal
+continuations. The focused suite and final WSL Debug, leak-detecting
+ASan/UBSan and Release presets pass. Registry generation, documentation links,
+stale-count and whitespace checks pass. No translator or fuzz update was
+needed because the existing EVENT option/grid representation covers every new
+screen; no schema, fixture, golden or external oracle artifact changed.
+
+Java provenance: `Sssserpent.java:41-81`, `LivingWall.java:34-104`,
+`Mushrooms.java:45-100`, `ScrapOoze.java:37-96`,
+`ShiningLight.java:45-112`, `AbstractDungeon.java:852-878`,
+`CardGroup.java:498-506`, `ShowCardAndObtainEffect.java:30-82`,
+`Omamori.java:38-46`, and `MonsterHelper.java:389-600`.
