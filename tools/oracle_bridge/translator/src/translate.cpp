@@ -12,6 +12,7 @@
 #include <nlohmann/json.hpp>
 
 #include "sts/diff/trace.hpp"
+#include "sts/engine/event_framework.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
@@ -193,6 +194,69 @@ private:
                              "translation aborted)");
     }
     return pid;
+}
+[[nodiscard]] reg::EventId join_event(const std::string& id, const Ctx& c,
+                                      const std::string& where) {
+    if (id.empty()) return reg::EventId::NONE;
+    reg::EventId eid = reg::event_from_game_id(id);
+    if (eid == reg::EventId::NONE) {
+        if (c.tolerate_ids) {
+            tally_unknown_id(c, "event", id);
+            return reg::EventId::NONE;
+        }
+        throw TranslateError(loc(c) + " unknown event id \"" + id + "\" at " +
+                             where +
+                             " — registry has no game_id mapping (schema drift, "
+                             "translation aborted)");
+    }
+    return eid;
+}
+
+// Translate one of the three remaining-event arrays into its RunState
+// membership bitset. The game initializes each list in canonical Java order
+// and only ever removes elements, so every live dump must be a strictly
+// increasing subsequence of its registry-id block. Validating that property is
+// load-bearing: a bitset cannot represent a duplicate or an order mutation,
+// and silently accepting either would make later generate_event draws use a
+// different index order from the captured state.
+[[nodiscard]] uint32_t parse_event_membership(const json& arr,
+                                              const std::string& path,
+                                              Ctx& ctx, uint16_t first_id,
+                                              int count,
+                                              const char* pool_name) {
+    if (!arr.is_array()) {
+        throw TranslateError(loc(ctx) + " expected array at " + path);
+    }
+    uint32_t bits = 0;
+    int previous_bit = -1;
+    for (std::size_t i = 0; i < arr.size(); ++i) {
+        const std::string at = path + "[" + std::to_string(i) + "]";
+        const reg::EventId eid =
+            join_event(as_str(arr[i], ctx, at), ctx, at);
+        if (eid == reg::EventId::NONE) {
+            // Only reachable in the explicit unknown-id accounting mode.
+            // There is no representable bit for an unknown event.
+            continue;
+        }
+        const uint16_t id = static_cast<uint16_t>(eid);
+        if (id < first_id ||
+            id >= static_cast<uint16_t>(first_id + count)) {
+            throw TranslateError(
+                loc(ctx) + " event id \"" +
+                std::string(reg::event_game_id(eid)) + "\" at " + at +
+                " does not belong to oracle." + pool_name);
+        }
+        const int bit = static_cast<int>(id - first_id);
+        if (bit <= previous_bit) {
+            throw TranslateError(
+                loc(ctx) + " " + path +
+                " is not a canonical-order subsequence (duplicate or "
+                "out-of-order event at index " + std::to_string(i) + ")");
+        }
+        bits |= 1u << bit;
+        previous_bit = bit;
+    }
+    return bits;
 }
 
 // ---- card / power parsers (PROTOCOL §3.13 / §3.14) -----------------------
@@ -547,18 +611,45 @@ struct OracleAnchors {
         fr.mapped();
     }
 
-    // -- Still deferred: the remaining id-LIST items. B4.3 added their RunState
-    //    storage (event/shrine/special membership bitsets), but mapping the
-    //    golden's real values bit-for-bit needs content-id enums that do NOT
-    //    exist at HEAD -- events.yaml is empty. A fail-loud join of these ids
-    //    would throw. They translate once B4.10-B4.13 (events.yaml -> an event
-    //    id/enum + canonical list order) land the registry; that is that task's
-    //    translator un-deferral, needing no further schema bump (the storage is
-    //    already here). These defer() calls still STRUCTURALLY consume the keys
-    //    (so a genuinely new/renamed oracle key still trips the drift error). --
-    fr.defer("eventList");                // remaining events -> event_membership (needs event enum)
-    fr.defer("shrineList");               // remaining shrines -> shrine_membership (needs event enum)
-    fr.defer("specialOneTimeEventList");  // remaining specials -> special_membership (needs event enum)
+    // -- B4.10 un-deferral: remaining event/shrine/special lists (§2.5 #7).
+    //    B4.3 added the storage; events.yaml now supplies the complete
+    //    fail-loud game_id join and pins ids in the three canonical Java list
+    //    orders. Each captured list is a removal-only subsequence, so mapping
+    //    validates that order before collapsing it to a bitset. --
+    if (const json* events = fr.take("eventList")) {
+        rs.event_membership = static_cast<uint16_t>(parse_event_membership(
+            *events, path + ".eventList", ctx, eng::kEventListFirstId,
+            eng::kEventListCount, "eventList"));
+        const uint32_t initial = (1u << eng::kEventListCount) - 1u;
+        rs.event_flags |=
+            (initial & ~static_cast<uint32_t>(rs.event_membership))
+            << (eng::kEventListFirstId - 1u);
+        fr.mapped();
+    }
+    if (const json* shrines = fr.take("shrineList")) {
+        rs.shrine_membership = static_cast<uint8_t>(parse_event_membership(
+            *shrines, path + ".shrineList", ctx, eng::kShrineListFirstId,
+            eng::kShrineListCount, "shrineList"));
+        const uint32_t initial = (1u << eng::kShrineListCount) - 1u;
+        rs.event_flags |=
+            (initial & ~static_cast<uint32_t>(rs.shrine_membership))
+            << (eng::kShrineListFirstId - 1u);
+        fr.mapped();
+    }
+    if (const json* specials = fr.take("specialOneTimeEventList")) {
+        rs.special_membership = static_cast<uint16_t>(parse_event_membership(
+            *specials, path + ".specialOneTimeEventList", ctx,
+            eng::kSpecialListFirstId, eng::kSpecialListCount,
+            "specialOneTimeEventList"));
+        uint32_t initial = (1u << eng::kSpecialListCount) - 1u;
+        if (!eng::note_for_yourself_available(rs.ascension)) {
+            initial &= ~(1u << eng::kNoteForYourselfBit);
+        }
+        rs.event_flags |=
+            (initial & ~static_cast<uint32_t>(rs.special_membership))
+            << (eng::kSpecialListFirstId - 1u);
+        fr.mapped();
+    }
     fr.defer("monster_move_history");     // full per-monster history (§2.5 #9);
                                           // CombatState holds only move_history[3]
     fr.finish();

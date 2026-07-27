@@ -15,6 +15,12 @@
 //     cursors checked at each boundary.
 //   * map-choice legality against the generated edges; non-combat rooms routed to
 //     an explicit ROOM_UNIMPLEMENTED stall; heterogeneous batch advance.
+//   * ?-room resolution (B4.10): the regression guard that eventRng advances by
+//     EXACTLY one draw across a full ?-resolves-to-event flow (selection on a
+//     discarded throwaway stream, pool removal committed), each resolved kind's
+//     routing (monster combat / chest / shop park), and the fixed
+//     monster-cursor consumption for a ? that rolled MONSTER (the resolved
+//     room, not the static map node, decides the remove(0)).
 
 #include "sts/engine/run_advance.hpp"
 
@@ -299,11 +305,14 @@ TEST(RunBegin, MatchesLiveOracleFloorZeroStreams) {
 TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
     RunController rc = run_begin(kSeed, kA20);
     // Force the floor-1 room to a non-combat kind so onPlayerEntry reseeds the
-    // floor streams and then does NOTHING to them (a clean reseed snapshot). Force
-    // every row-0 column so whichever start is picked is the Event room.
+    // floor streams and then does NOTHING to them (a clean reseed snapshot).
+    // Shop, not Event: since B4.10 an Event room resolves its ?-roll (an
+    // eventRng draw + possible combat/chest entry), so Shop is now the
+    // draw-free stall. Force every row-0 column so whichever start is picked
+    // is the Shop room.
     for (int col = 0; col < kMapCols; ++col) {
         rc.run.map[run_state_map_index(col, 0)].room_type =
-            static_cast<uint8_t>(RoomType::Event);
+            static_cast<uint8_t>(RoomType::Shop);
     }
     step(rc, kProceed);                 // NEOW -> MAP_CHOICE (floor 0)
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
@@ -313,7 +322,7 @@ TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
 
     EXPECT_EQ(rc.run.floor, 1);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
-    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Event));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Shop));
 
     // The reseed uses floor 1 (post-increment). A reseed with the OLD floor (0)
     // would produce floor_stream(seed, 0) -- assert it is floor 1, proving trap 7.
@@ -329,12 +338,13 @@ TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
 
 TEST(FloorReseed, ReseedTracksFloorAcrossMultipleTransitions) {
     RunController rc = run_begin(kSeed, kA20);
-    // Force rows 0 and 1 to Event so both transitions cleanly stall (no consumption).
+    // Force rows 0 and 1 to Shop so both transitions cleanly stall (no
+    // consumption; an Event room would consume an eventRng roll since B4.10).
     for (int x = 0; x < kMapCols; ++x) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
-            static_cast<uint8_t>(RoomType::Event);
+            static_cast<uint8_t>(RoomType::Shop);
         rc.run.map[run_state_map_index(x, 1)].room_type =
-            static_cast<uint8_t>(RoomType::Event);
+            static_cast<uint8_t>(RoomType::Shop);
     }
     step(rc, kProceed);
     uint8_t x0 = first_start_column(rc);
@@ -1106,8 +1116,9 @@ TEST(FullFloorCycle, MapPickCombatRewardNextFloor) {
     ASSERT_LT(next, kMapCols);
     // Make the destination a no-consumption room so the floor-2 boundary is the
     // pristine post-increment reseed, independently comparable stream-by-stream.
+    // (Shop: an Event room is no longer draw-free since B4.10.)
     rc.run.map[run_state_map_index(next, 1)].room_type =
-        static_cast<uint8_t>(RoomType::Event);
+        static_cast<uint8_t>(RoomType::Shop);
     step(rc, make_action(ActionVerb::CHOOSE, next));
     EXPECT_EQ(rc.run.floor, 2);
     EXPECT_EQ(rc.monster_cursor, 1);  // floor-1 monster room removed on exit
@@ -1137,7 +1148,9 @@ TEST(MapChoice, LegalColumnsMatchGeneratedEdges) {
 }
 
 TEST(RoomRouting, UnimplementedNonCombatRoomsParkAtUnimplemented) {
-    for (RoomType kind : {RoomType::Event, RoomType::Shop}) {
+    // Shop only: since B4.10 an Event room resolves its ?-roll instead of
+    // stalling (see the QuestionMarkRoom suite below).
+    for (RoomType kind : {RoomType::Shop}) {
         RunController rc = run_begin(kSeed, kA20);
         for (int x = 0; x < kMapCols; ++x) {
             rc.run.map[run_state_map_index(x, 0)].room_type =
@@ -1213,6 +1226,237 @@ TEST(BatchHeterogeneity, MixedPhasesStepIndependently) {
     EXPECT_EQ(runs[3].run.hp, 65);
     EXPECT_EQ(runs[3].run.max_hp, 80);  // Fruit Juice +5 over the ascension-20 75
     EXPECT_EQ(runs[3].run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+}
+
+// =============================================================================
+// ?-room resolution (B4.10, event_framework.hpp)
+// =============================================================================
+
+// The first committed eventRng float of a fresh run of `seed` (event_rng is
+// untouched between run_begin and the first ? room). With the fresh pity
+// values (0.1/0.03/0.02) the roll table is MONSTER on slots 0-9, SHOP on
+// 10-12, TREASURE on 13-14, EVENT on 15-99, so the float alone predicts the
+// resolved kind.
+float first_event_roll_float(int64_t seed) {
+    RngStream s = from_seed(seed);
+    return random(s);
+}
+
+// Find a seed whose first ?-roll float lands in [lo, hi). (A joint condition
+// on the monster list would be unsatisfiable, not just rare: event_rng and
+// monster_rng are both fresh Random(seed), so the first event float and the
+// first encounter roll are the SAME underlying draw.)
+int64_t find_event_roll_seed(float lo, float hi) {
+    for (int64_t s = 1; s < 60000; ++s) {
+        const float f = first_event_roll_float(s);
+        if (f >= lo && f < hi) return s;
+    }
+    ADD_FAILURE() << "no seed with first event roll in [" << lo << ", " << hi
+                  << ") found in range";
+    return 1;
+}
+
+// Advance rc's event_rng until its NEXT float lands in [lo, hi) -- the state
+// several earlier ? rooms would have left behind (pity fields are set by the
+// caller). Returns false if no such point exists in a generous window.
+bool warm_event_rng_until_next_roll_in(RunController& rc, float lo, float hi) {
+    for (int i = 0; i < 4096; ++i) {
+        RngStream probe = rc.run.event_rng;
+        const float f = random(probe);
+        if (f >= lo && f < hi) return true;
+        rc.run.event_rng = probe;  // consume the draw and keep looking
+    }
+    return false;
+}
+
+// Walk a fresh run into a row-0 ? room (every row-0 node forced to Event).
+RunController enter_question_mark(int64_t seed) {
+    RunController rc = run_begin(seed, kA20);
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Event);
+    }
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    return rc;
+}
+
+int total_pool_bits(const RunState& rs) {
+    int n = 0;
+    for (int i = 0; i < 16; ++i) n += (rs.event_membership >> i) & 1;
+    for (int i = 0; i < 16; ++i) n += (rs.special_membership >> i) & 1;
+    for (int i = 0; i < 8; ++i) n += (rs.shrine_membership >> i) & 1;
+    return n;
+}
+
+// THE regression guard for the B4.10 invariant: across a full
+// ?-resolves-to-event flow -- room-type roll, selection, pool removal --
+// eventRng is byte-identical to the pre-entry stream advanced by EXACTLY one
+// draw. The selection draws happened on a discarded throwaway stream.
+TEST(QuestionMarkRoom, EventRngAdvancesByExactlyOneAcrossFullEventResolve) {
+    const int64_t seed = find_event_roll_seed(0.15f, 1.0f);  // EVENT
+    RunController rc = run_begin(seed, kA20);
+    const RngStream before = rc.run.event_rng;
+    ASSERT_EQ(before.counter, 0);
+    const int pool_before = total_pool_bits(rc.run);
+    ASSERT_EQ(pool_before, 11 + 6 + 13);  // A20: NoteForYourself absent
+
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Event);
+    }
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    // Resolved to an event; the body is unimplemented (B4.11-B4.13), so the
+    // run parks -- but only after the exact selection bookkeeping.
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Event));
+    EXPECT_NE(rc.event.event_id, 0);
+
+    // event_rng == before + exactly one committed draw; counter up by 1.
+    RngStream expect = before;
+    (void)random(expect);  // the one room-type roll
+    EXPECT_TRUE(streams_equal(rc.run.event_rng, expect));
+    EXPECT_EQ(rc.run.event_rng.counter, before.counter + 1);
+
+    // Pool removal committed exactly once, and the fired flag matches the id.
+    EXPECT_EQ(total_pool_bits(rc.run), pool_before - 1);
+    EXPECT_EQ(rc.run.event_flags, 1u << (rc.event.event_id - 1u));
+
+    // Pity floats: an EVENT result misses all three -- float ramps, bit-exact.
+    EXPECT_EQ(rc.run.event_pity_monster, 0.1f + 0.1f);
+    EXPECT_EQ(rc.run.event_pity_shop, 0.03f + 0.03f);
+    EXPECT_EQ(rc.run.event_pity_treasure, 0.02f + 0.02f);
+}
+
+TEST(QuestionMarkRoom, SsserpentHeadFiresBeforeEveryResolvedRoomKind) {
+    struct Case {
+        float lo;
+        float hi;
+        RoomType resolved;
+    };
+    const Case cases[] = {
+        {0.00f, 0.10f, RoomType::Monster},
+        {0.10f, 0.13f, RoomType::Shop},
+        {0.13f, 0.15f, RoomType::Treasure},
+        {0.15f, 1.00f, RoomType::Event},
+    };
+    for (const Case& tc : cases) {
+        SCOPED_TRACE(static_cast<int>(tc.resolved));
+        const int64_t seed = find_event_roll_seed(tc.lo, tc.hi);
+        RunController rc = run_begin(seed, kA20);
+        const int32_t gold_before = rc.run.gold;
+        ASSERT_LT(rc.run.relic_count, kRelicCap);
+        rc.run.relics[rc.run.relic_count].relic_id =
+            static_cast<uint16_t>(RelicId::SSSERPENT_HEAD);
+        ++rc.run.relic_count;
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(RoomType::Event);
+        }
+        step(rc, kProceed);
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+        // onEnterRoom receives the original EventRoom before generateRoom
+        // replaces it, so the gain is independent of the resolved kind.
+        EXPECT_EQ(rc.run.gold, gold_before + 50);
+        EXPECT_EQ(rc.room_type, static_cast<uint8_t>(tc.resolved));
+    }
+}
+
+// A ? that rolls MONSTER becomes a REAL MonsterRoom (generateRoom,
+// AbstractDungeon.java:1823-1840): it consumes monsterList and -- the bug this
+// task fixed -- its EXIT advances monster_cursor even though the static map
+// node still says Event (nextRoomTransition tests the resolved room object,
+// AbstractDungeon.java:1701-1707, never the map symbol).
+TEST(QuestionMarkRoom, MonsterRollEntersRealCombatAndConsumesMonsterList) {
+    // Jaw Worm first (winnable by play_out_combat), then warm the event
+    // stream to a MONSTER-column float -- the two cannot be seed-selected
+    // jointly (see warm_event_rng_until_next_roll_in).
+    const int64_t seed = find_jaw_worm_seed();
+    RunController rc = run_begin(seed, kA20);
+    ASSERT_TRUE(warm_event_rng_until_next_roll_in(rc, 0.0f, 0.10f));
+    const RngStream before = rc.run.event_rng;
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Event);
+    }
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Monster));
+    ASSERT_EQ(rc.combat.monster_count, 1);  // the Jaw Worm the seed guarantees
+    EXPECT_EQ(rc.monster_cursor, 0);        // consumed on EXIT, not entry
+
+    // Exactly the one roll draw; no selection happened on a MONSTER resolve.
+    RngStream expect = before;
+    (void)random(expect);
+    EXPECT_TRUE(streams_equal(rc.run.event_rng, expect));
+
+    // Pity: MONSTER hit resets monster, misses shop/treasure.
+    EXPECT_EQ(rc.run.event_pity_monster, 0.1f);
+    EXPECT_EQ(rc.run.event_pity_shop, 0.03f + 0.03f);
+    EXPECT_EQ(rc.run.event_pity_treasure, 0.02f + 0.02f);
+    // No selection => no pool removal, no fired flag.
+    EXPECT_EQ(total_pool_bits(rc.run), 11 + 6 + 13);
+    EXPECT_EQ(rc.run.event_flags, 0u);
+
+    // Win, proceed, pick the next node: leaving the resolved MonsterRoom
+    // consumes monsterList (cursor 0 -> 1) although rs.map still says Event.
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(rc.run.map[run_state_map_index(rc.cur_x, 0)].room_type,
+              static_cast<uint8_t>(RoomType::Event));  // static map unchanged
+    RunActionMask m{};
+    legal_actions(rc, m);
+    uint8_t next = kMapCols;
+    for (uint8_t x = 0; x < kMapCols; ++x) {
+        if (m.can_choose_node[x]) { next = x; break; }
+    }
+    ASSERT_LT(next, kMapCols);
+    rc.run.map[run_state_map_index(next, 1)].room_type =
+        static_cast<uint8_t>(RoomType::Shop);  // draw-free destination
+    step(rc, make_action(ActionVerb::CHOOSE, next));
+    EXPECT_EQ(rc.monster_cursor, 1);
+    EXPECT_EQ(rc.elite_cursor, 0);
+}
+
+TEST(QuestionMarkRoom, ShopRollParksWithResolvedKindAndResetsShopPity) {
+    const int64_t seed = find_event_roll_seed(0.10f, 0.13f);  // SHOP
+    RunController rc = enter_question_mark(seed);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Shop));
+    EXPECT_EQ(rc.run.event_pity_monster, 0.1f + 0.1f);
+    EXPECT_EQ(rc.run.event_pity_shop, 0.03f);        // hit -> reset
+    EXPECT_EQ(rc.run.event_pity_treasure, 0.02f + 0.02f);
+    EXPECT_EQ(rc.run.event_rng.counter, 1);
+    EXPECT_EQ(total_pool_bits(rc.run), 11 + 6 + 13);  // no selection
+}
+
+TEST(QuestionMarkRoom, TreasureRollOpensTheChestFlow) {
+    const int64_t seed = find_event_roll_seed(0.13f, 0.15f);  // TREASURE
+    RunController rc = run_begin(seed, kA20);
+    const int32_t treasure_counter_before = rc.run.treasure_rng.counter;
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Event);
+    }
+    step(rc, kProceed);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    // A real TreasureRoom: the B4.7 chest constructor ran (2 treasureRng
+    // draws) and the open/skip screen is up.
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::TREASURE_ROOM));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Treasure));
+    EXPECT_EQ(rc.run.treasure_rng.counter, treasure_counter_before + 2);
+    EXPECT_EQ(rc.run.event_pity_treasure, 0.02f);    // hit -> reset
+    EXPECT_EQ(rc.run.event_pity_monster, 0.1f + 0.1f);
+    EXPECT_EQ(rc.run.event_pity_shop, 0.03f + 0.03f);
+    EXPECT_EQ(rc.run.event_rng.counter, 1);
 }
 
 }  // namespace

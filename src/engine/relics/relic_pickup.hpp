@@ -94,9 +94,10 @@ using RelicOnObtainCardFn = RelicOnObtainCardSig*;
 // `rs.gold +=` directly silently ignores a registered boss relic; that is why
 // relic_pickup_rare.cpp's Old Coin note asked for this helper "when the boss tier
 // lands". (2) the relics' onGainGold fan-out belongs beside the write; no
-// registered S1 relic overrides onGainGold (checked across relics/: only
-// BloodyIdol and Maw Bank do, neither of which is an S1 row), so the fan-out is
-// an empty pass today and is named rather than written.
+// registered S1 relic overrides onGainGold (the corpus override is Bloody
+// Idol, which is not an S1 row), so the fan-out is an empty pass today and is
+// named rather than written. Maw Bank overrides onEnterRoom/onSpendGold, not
+// onGainGold.
 //
 // Non-positive amounts are NOT added, matching the Java's else-branch.
 inline void gain_gold(RunState& rs, int32_t amount) noexcept {

@@ -3456,3 +3456,93 @@ Normal bounded cleanup and non-strict historical validation remain unchanged.
 Verified on the Windows host: Python 34/34 and WSL Debug, ASan/UBSan, and
 Release 980/980 each; stale-count, documentation-link, whitespace, and
 golden/fixture/registry hygiene are clean.
+
+<a id="b410"></a>
+
+### B4.10 `[x]` Event framework + ?-room resolution
+**Deps:** B4.4 · **Spec:** design §5.6; §10 traps 17/19 · **Provenance:**
+EventHelper.java:88-211; AbstractDungeon.java:1864-1990, 1340-1358; stage-a
+§3.4's eventRng-duplicate quirk
+**Deliverables:** the ?-room roll (float table, pity growth/reset — float
+arithmetic, trap 19), shrine-vs-event split (0.25), pool draw + removal
+bookkeeping (RunState bitsets from B4.3), event dialog framework (options as
+CHOOSE, conditional options, one-shot flags), Juzu/Tiny-Chest hooks for the
+relics that alter the table.
+**Acceptance:** tier-2: pity float sequences match hand-derivation
+bit-for-bit across 20 ?-rooms; pool-removal bookkeeping vs oracle §2.5 lists
+for ≥ 3 seeds; trap-19 named test.
+**Inherited:** the ?-room `eventRng` duplicate roll — deferred by B4.4. Un-defer the
+translator's `eventList`/`shrineList`/`specialOneTimeEventList` membership bitsets
+(RunState storage has existed since B4.3) — deferred by B1.5/B4.3, jointly with
+B4.11-B4.13's `events.yaml` rows and the canonical list order. The event-screen half
+of B3.27's inert boss/special relics (**Golden Idol** ×1.25 gold, **Sozu**'s potion
+block, **Sacred Bark** potency, and the five deferred `onEquip` bodies — Pandora's
+Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) — deferred by B3.27, each
+deferred whole because a partial would desync `miscRng` or `relicRng`.
+**Log:** Done 2026-07-26 on task base `0b0a5c6`; registry-first commit
+`1d015bf` added append-only `events.yaml` identities 1–31 in the three
+canonical Java list orders. `event_framework.hpp/.cpp` owns the complete
+framework transaction. Entering a ? commits exactly one `eventRng.nextFloat`
+for `EventHelper.roll`; selection reconstructs a post-roll duplicate, consumes
+the shrine split/index only on that local copy, and discards it. Named tests
+pin byte-identical selection-stream state, the asymmetric 100-slot clamp, the
+20-room float-exact trap-19 pity sequence, Tiny Chest's after-draw `==4`
+force (including duplicate-import first-instance semantics), Juzu's ordering,
+and leaving-shop suppression.
+
+The three B4.3 membership bitsets now initialize in canonical Act-1 order,
+including the profile-dependent NoteForYourself gate frozen to the audited
+profile. Event and shrine candidates are rebuilt at draw time with their
+floor/gold/curse/act gates; selection removes the persistent pool bit and sets
+the cumulative `event_flags` identity bit. The translator maps all three
+oracle remaining-list arrays through generated `game_id` joins, rejects
+wrong-pool, duplicate and out-of-order content, tallies explicit tolerant-mode
+unknowns without inventing an identity, and derives fired flags from removed
+members. The A20 NoteForYourself absence is treated as never initialized, not
+as fired.
+
+The full run route now resolves ? into the real monster, shop, treasure or
+event path. A resolved monster consumes the dynamic monster-list cursor rather
+than rereading the static map room; shop/treasure reuse their existing
+transitions. `AbstractRelic.onEnterRoom` runs against the original EventRoom
+before replacement, so every held Ssserpent Head gains 50 and every unused Maw
+Bank gains 12 through the Ectoplasm-aware gold door before roll/selection; a
+low-gold Cleric regression proves Maw Bank changes eligibility before the
+event draw. Maw Bank's other-room share, Meal Ticket's static and ?→Shop
+entry heal, and event-created combat lifecycle/reward semantics are explicitly
+re-owned in the live Deferred obligations table.
+
+`RunPhase::EVENT_DIALOG = 9`, `MoveCat::EVENT_OPTION = 23`, and
+`MoveCat::COUNT = 24` claim their reserved namespaces. The transient
+`EventDialogState` lives in `RunController`; callbacks receive the controller
+so native bodies can own floor RNG, reward/grid state and immediate
+transitions, and `TRANSITIONED` prevents the framework from overwriting a
+body-installed phase. A synthetic two-screen proof body pins conditional
+options, disabled/invalid no-ops, ordinary completion and body-owned
+transition. Fuzz enumeration emits only enabled choices under the new category,
+the controller hash covers every event field, and the incompatible fuzz build
+identity advances through `rest1-treasure1-event1`. All 31 native event bodies
+remain deliberately null and park only after exact selection bookkeeping;
+B4.11-B4.13 own them and transient event-screen translation.
+
+Oracle acceptance uses compact post-roll triples copied from the preserved
+`b14_accept2` live campaign: `STS00004` selects Scrap Ooze,
+`STS00007` Living Wall, and `STS00008` Big Fish. Each regression pins the
+selected identity, exact membership removal, fired bit and unchanged selection
+stream. Source methods read in full include `EventHelper.roll/resetProbabilities`,
+`EventRoom.onPlayerEntry`, `AbstractDungeon.nextRoomTransition/generateRoom/
+generateEvent/getShrine/getEvent/initializeSpecialOneTimeEventList/
+isNoteForYourselfAvailable`, Exordium's event/shrine initializers,
+`Random(Long,int)`, `TinyChest`, `JuzuBracelet`, `SsserpentHead.onEnterRoom`,
+`MawBank.onEnterRoom/onSpendGold`, `AbstractPlayer.gainGold/loseGold/isCursed`,
+and `RelicLibrary.getRelic`.
+
+Final-tree WSL Debug, leak-detecting ASan/UBSan and Release are each
+**1083/1083**. A proportionate self-replay smoke soak is also clean: Release
+500 cases / 23,046 counted actions and the disjoint ASan sample 5 cases / 144
+counted actions, both with zero failures. `event_option` is intentionally
+never production-legal in that soak while all native bodies remain parked;
+its enumeration/hash/transition surface is covered by the synthetic directed
+tests. Documentation links, stale-count and whitespace checks pass.
+No `RunState`/`CombatState` schema, fixture, golden, or external oracle
+artifact changed.

@@ -363,7 +363,7 @@
   pool_order: 14
   pickup:
     can_spawn: true
-  provenance: "MawBank.onEnterRoom (MawBank.java:31-37) -- +12 gold on entering a non-shop room until you spend gold; a run-layer hook, no combat trigger."
+  provenance: "MawBank.onEnterRoom (MawBank.java:31-36) -- +12 gold on entering every room while not usedUp; the original EventRoom entry hook is live in B4.10 before ? resolution, while other room-entry paths remain a run-layer obligation. MawBank.onSpendGold (:39-45) is called by AbstractPlayer.loseGold only in ShopRoom (AbstractPlayer.java:697-716), so event payments do not use it."
 
 - id: 24
   name: MEAL_TICKET
@@ -1564,4 +1564,4 @@
   name: SSSERPENT_HEAD
   game_id: "SsserpentHead"
   tier: SPECIAL
-  provenance: "SsserpentHead.onEnterRoom (SsserpentHead.java:24-30) -- entering an EventRoom gains 50 gold (GOLD_AMT = 50). A run-layer (?-room) hook owned by the event layer, B4.10-B4.13; the gold itself would route through gain_gold (relics/relic_pickup.hpp) so Ectoplasm's suppression applies. The row is live."
+  provenance: "SsserpentHead.onEnterRoom (SsserpentHead.java:29-35) -- entering an EventRoom gains 50 gold (GOLD_AMT = 50). A run-layer (?-room) hook owned by the event layer, B4.10-B4.13; the gold itself routes through gain_gold (relics/relic_pickup.hpp) so Ectoplasm's suppression applies. The row and hook are live."

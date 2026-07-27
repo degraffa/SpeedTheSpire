@@ -104,7 +104,11 @@ enum class MoveCat : uint8_t {
     TOKE_CARD = 20,
     TREASURE_OPEN = 21,
     TREASURE_SKIP = 22,
-    COUNT = 23,
+    EVENT_OPTION = 23,   // B4.10 (EVENT_DIALOG). Never legal in production
+                         // soaks until an event body lands (B4.11-B4.13); the
+                         // coverage report states that as a NEVER-REACHED
+                         // line rather than inferring it.
+    COUNT = 24,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

@@ -26,6 +26,7 @@
 #include "sts/engine/cards.hpp"            // card_def / card_cost / card_flags
 #include "sts/engine/combat_rewards.hpp"   // reward assembly + the claim flow
 #include "sts/engine/encounters.hpp"       // generate_monster_lists / resolve_encounter
+#include "sts/engine/event_framework.hpp"  // ?-room roll + selection + dialog dispatch
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
@@ -552,15 +553,22 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 // onPlayerEntry dispatch for the room just entered (AbstractDungeon.java:1800).
 // Combat rooms build the combat via the encounter framework; a RestRoom opens
 // its campfire menu; Treasure constructs its chest immediately (two
-// treasureRng calls) and waits for open/skip. Every other room kind is not yet
-// implemented, so it reseeds the floor streams (for oracle-reseed visibility)
-// and parks at ROOM_UNIMPLEMENTED.
-void on_player_entry(RunController& rc, RoomType room) noexcept {
+// treasureRng calls) and waits for open/skip; an Event (?) room first resolves
+// its real kind on the one committed eventRng roll and re-enters as that kind.
+// Room kinds without content (shops) reseed the floor streams (for
+// oracle-reseed visibility) and park at ROOM_UNIMPLEMENTED.
+//
+// `left_room` is the RESOLVED kind of the room being exited (RoomType::None at
+// Neow) -- the ?-roll's shop gate reads it, because in the game the roll runs
+// before setCurrMapNode (AbstractDungeon.java:1767 vs :1783) so
+// `getCurrRoom() instanceof ShopRoom` sees the departed room.
+void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
 
     rc.room_type = static_cast<uint8_t>(room);
     rc.combat_outcome = static_cast<uint8_t>(RunCombatOutcome::NONE);
+    rc.event = EventDialogState{};  // no dialog survives a room boundary
 
     auto stall = [&](RoomType r) noexcept {
         rc.combat = CombatState{};
@@ -609,7 +617,73 @@ void on_player_entry(RunController& rc, RoomType room) noexcept {
             rc.treasure_chest = roll_treasure_chest(rc.run);
             rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
             break;
-        case RoomType::Event:
+        case RoomType::Event: {
+            // Relic.onEnterRoom sees the ORIGINAL EventRoom before the game
+            // replaces it with the rolled room (:1754-1779). In particular,
+            // Ssserpent Head gains its 50 gold even when this ? becomes a
+            // monster, shop or chest.
+            dispatch_event_room_entry_relics(rc.run);
+
+            // The ?-room resolution (AbstractDungeon.java:1763-1779). The
+            // game rolls on a counter-replay duplicate and assigns it back
+            // (:1770) -- under the one-draw invariant that equals drawing the
+            // one float straight from the persistent stream, which is what
+            // event_room_roll does. This is the ONLY eventRng advance, ever.
+            const EventRoomResult roll =
+                event_room_roll(rc.run, left_room == RoomType::Shop);
+            switch (roll) {
+                case EventRoomResult::MONSTER:
+                    // generateRoom (:1823-1840) builds a REAL MonsterRoom, so
+                    // the combat consumes monsterList and its exit advances
+                    // monster_cursor (rc.room_type carries Monster from here).
+                    on_player_entry(rc, RoomType::Monster, left_room);
+                    return;
+                case EventRoomResult::TREASURE:
+                    // A real TreasureRoom: the ordinary chest flow,
+                    // byte-identical to a map treasure node.
+                    on_player_entry(rc, RoomType::Treasure, left_room);
+                    return;
+                case EventRoomResult::SHOP:
+                    // A real ShopRoom; shop content is its own task, so it
+                    // parks with the RESOLVED kind recorded (the roll and
+                    // pity updates above are already committed).
+                    stall(RoomType::Shop);
+                    return;
+                case EventRoomResult::ELITE:
+                    // Unreachable without the DeadlyEvents/endless mods
+                    // (event_framework.hpp); park honestly if it ever appears.
+                    stall(RoomType::Elite);
+                    return;
+                case EventRoomResult::EVENT:
+                default:
+                    break;  // fall through to the event selection below
+            }
+            // EventRoom.onPlayerEntry (EventRoom.java:26-31): selection on a
+            // throwaway duplicate (discarded; rs.event_rng byte-identical),
+            // pool-removal + event_flags bookkeeping committed.
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rest = RestSiteState{};
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            const uint16_t event_id = generate_event(rc.run);
+            rc.event = EventDialogState{};
+            rc.event.event_id = event_id;
+            const EventDialogImpl* impl = event_dialog_impl(event_id);
+            if (event_id == 0 || impl == nullptr) {
+                // Selected but unimplemented (every native event until its
+                // content-task body lands), or every pool empty (id 0): park
+                // AFTER the exact selection bookkeeping, with the EventId
+                // retained in rc.event for observability.
+                rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
+                rc.room_type = static_cast<uint8_t>(RoomType::Event);
+            } else {
+                rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+                rc.room_type = static_cast<uint8_t>(RoomType::Event);
+                impl->on_enter(rc, rc.event);
+            }
+            break;
+        }
         case RoomType::Shop:
         case RoomType::None:
         default:
@@ -636,14 +710,19 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
 
     // (1) Remove the LEFT room's encounter from its list (AbstractDungeon.java:
     //     1694-1707): leaving a MonsterRoom/Elite advances that list's cursor.
-    //     (Modelled as a cursor bump == remove(0).) Neow / non-combat rooms: none.
+    //     (Modelled as a cursor bump == remove(0).) Neow / non-combat rooms:
+    //     none. The kind tested is the RESOLVED room (`getCurrRoom()
+    //     instanceof MonsterRoom` on the live room object), NOT the static map
+    //     node: generateRoom (:1823-1840) turns a MONSTER-rolling ? into a
+    //     real MonsterRoom, which consumes monsterList on exit while rs.map
+    //     still says Event. rc.room_type carries the resolved kind (set by
+    //     every on_player_entry branch), so it is the correct source; reading
+    //     rs.map here was a real bug once ? rooms resolve.
+    const RoomType left_room = static_cast<RoomType>(rc.room_type);
     if (rs.floor >= 1 && rc.cur_x != kNeowColumn) {
-        const int y = run_cur_row(rc);
-        const RoomType left =
-            static_cast<RoomType>(rs.map[run_state_map_index(rc.cur_x, y)].room_type);
-        if (left == RoomType::Monster) {
+        if (left_room == RoomType::Monster) {
             ++rc.monster_cursor;
-        } else if (left == RoomType::Elite) {
+        } else if (left_room == RoomType::Elite) {
             ++rc.elite_cursor;
         }
     }
@@ -665,8 +744,10 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
         room = static_cast<RoomType>(rs.map[run_state_map_index(dst_x, y)].room_type);
     }
 
-    // (5) onPlayerEntry (AbstractDungeon.java:1800).
-    on_player_entry(rc, room);
+    // (5) onPlayerEntry (AbstractDungeon.java:1800), with the ?-roll block
+    //     (:1763-1779) folded into the Event branch. `left_room` feeds the
+    //     roll's leaving-a-shop gate (:128-130 of EventHelper.java).
+    on_player_entry(rc, room, left_room);
 }
 
 // --- run_begin ---------------------------------------------------------------
@@ -697,11 +778,17 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
 
     // dungeonTransitionSetup: EventHelper.resetProbabilities (act-scoped pity
     // floats) + blizzardPotionMod = 0; cardBlizzRandomizer starts at +5.
+    // (ELITE_CHANCE's reset has no field here -- event_framework.hpp.)
     rs.event_pity_monster = 0.1f;
     rs.event_pity_shop = 0.03f;
     rs.event_pity_treasure = 0.02f;
     rs.card_blizz_randomizer = 5;
     rs.blizzard_potion_mod = 0;
+
+    // The three event-pool membership bitsets: initializeEventList /
+    // initializeShrineList / initializeSpecialOneTimeEventList (the last
+    // NFY-conditional), run by dungeonTransitionSetup. Draw-free.
+    init_event_pools(rs);
 
     // (1) monsterRng: generateMonsters + initializeBoss -> the encounter lists
     //     (Exordium.java:110-221; generate_monster_lists).
@@ -907,6 +994,23 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                     out.can_skip_card = true;
                     out.can_sing =
                         run_has_relic(rc.run, RelicId::SINGING_BOWL);
+                }
+            }
+            break;
+        }
+
+        case RunPhase::EVENT_DIALOG: {
+            // Options are rebuilt from the event body's build_menu on every
+            // call, never cached (the rest-site pattern). A dangling state
+            // (no body for the recorded id) exposes nothing -- but cannot
+            // arise through on_player_entry, which only opens this phase for
+            // a non-null impl.
+            const EventDialogImpl* impl = event_dialog_impl(rc.event.event_id);
+            if (impl != nullptr) {
+                EventDialogMenu menu{};
+                impl->build_menu(rc, rc.event, menu);
+                for (uint8_t i = 0; i < menu.count && i < kEventOptionCap; ++i) {
+                    out.can_choose_event_option[i] = menu.enabled[i];
                 }
             }
             break;
@@ -1228,6 +1332,33 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     rc.rewards = RewardScreen{};
                     rc.rewards.open_card_item = kNoOpenCardReward;
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                }
+            }
+            fill_run_result(rc, res);
+            break;
+        }
+
+        case RunPhase::EVENT_DIALOG: {
+            // Dialog choices; illegal ones are non-corrupting no-ops (the
+            // MAP_CHOICE contract). Legality is re-derived from the live
+            // menu, so a stale mask can never pick a disabled option.
+            if (action_verb(a) == ActionVerb::CHOOSE) {
+                const EventDialogImpl* impl =
+                    event_dialog_impl(rc.event.event_id);
+                const uint8_t a0 = action_arg0(a);
+                if (impl != nullptr && a0 < kEventOptionCap) {
+                    EventDialogMenu menu{};
+                    impl->build_menu(rc, rc.event, menu);
+                    if (a0 < menu.count && menu.enabled[a0] &&
+                        impl->choose(rc, rc.event, a0) ==
+                            EventDialogStatus::FINISHED) {
+                        // The event's proceed: back to the map, dialog state
+                        // cleared so nothing leaks across rooms. CONTINUE
+                        // keeps EVENT_DIALOG; TRANSITIONED leaves the phase /
+                        // screen exactly as the body installed it.
+                        rc.event = EventDialogState{};
+                        rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+                    }
                 }
             }
             fill_run_result(rc, res);

@@ -22,12 +22,14 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "sts/diff/trace.hpp"
 #include "sts/engine/action_queue.hpp"
+#include "sts/engine/event_framework.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/power_hooks.hpp"
 #include "sts/translate/translate.hpp"
@@ -53,6 +55,43 @@ std::vector<std::string> read_lines(const std::string& path) {
         lines.push_back(line);
     }
     return lines;
+}
+
+std::string replace_oracle_array(std::string line, const std::string& key,
+                                 const std::string& array_json) {
+    const std::string anchor = "\"" + key + "\":[";
+    const auto begin = line.find(anchor);
+    EXPECT_NE(begin, std::string::npos) << "missing oracle array " << key;
+    if (begin == std::string::npos) return line;
+    const auto close = line.find(']', begin + anchor.size());
+    EXPECT_NE(close, std::string::npos) << "unterminated oracle array " << key;
+    if (close == std::string::npos) return line;
+    line.replace(begin + key.size() + 3, close - (begin + key.size() + 3) + 1,
+                 array_json);
+    return line;
+}
+
+std::string remove_oracle_array_entry(std::string line, const std::string& key,
+                                      const std::string& entry) {
+    const std::string anchor = "\"" + key + "\":[";
+    const auto begin = line.find(anchor);
+    EXPECT_NE(begin, std::string::npos) << "missing oracle array " << key;
+    if (begin == std::string::npos) return line;
+    const auto close = line.find(']', begin + anchor.size());
+    EXPECT_NE(close, std::string::npos) << "unterminated oracle array " << key;
+    if (close == std::string::npos) return line;
+    const std::string needle = "\"" + entry + "\"";
+    const auto pos = line.find(needle, begin + anchor.size());
+    EXPECT_NE(pos, std::string::npos) << "missing " << entry << " in " << key;
+    if (pos == std::string::npos || pos >= close) return line;
+    if (pos + needle.size() < close && line[pos + needle.size()] == ',') {
+        line.erase(pos, needle.size() + 1);
+    } else if (pos > begin + anchor.size() && line[pos - 1] == ',') {
+        line.erase(pos - 1, needle.size() + 1);
+    } else {
+        line.erase(pos, needle.size());
+    }
+    return line;
 }
 
 // Bit-exact stream compare: JSON emits SIGNED longs; RngStream stores uint64,
@@ -151,6 +190,16 @@ TEST(Translator, OracleFieldsLandBitForBit) {
     EXPECT_EQ(rl.run.neow_rng.s0, 0u);
     EXPECT_EQ(rl.run.neow_rng.s1, 0u);
 
+    // B4.10 un-deferred the three remaining-event list bitsets. The A20
+    // golden carries the complete 11-event / 6-shrine / 13-special lists
+    // (NoteForYourself absent), so every canonical bit except NFY is set.
+    for (const tr::TranslatedRecord* rec : {&rl, &cb}) {
+        EXPECT_EQ(rec->run.event_membership, 0x07FFu);
+        EXPECT_EQ(rec->run.shrine_membership, 0x3Fu);
+        EXPECT_EQ(rec->run.special_membership,
+                  0x3FFFu & ~(1u << engine::kNoteForYourselfBit));
+    }
+
     // floor-scoped streams -> CombatState (from the combat record's oracle).
     expect_stream(cb.combat.monster_hp_rng, 1, -5471394293180523395LL, 630273432087629641LL, "monsterHpRng");
     expect_stream(cb.combat.shuffle_rng, 1, -5471394293180523395LL, 630273432087629641LL, "shuffleRng");
@@ -239,6 +288,128 @@ TEST(Translator, UnknownRelicInAPoolIsRefused) {
     tampered.insert(pos + anchor.size(), "\"Not A Relic\",");
     EXPECT_THROW(tr::translate_lines({lines[0], tampered}, "badpool"),
                  tr::TranslateError);
+}
+
+// B4.10: the three oracle remaining-list arrays map by generated EventId to
+// the B4.3 membership bitsets. Runtime indices shift after removals, but bit
+// meanings do not: each bit is the event's canonical init-list position.
+TEST(Translator, EventMembershipListsMapAsCanonicalSubsequences) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    std::string changed = replace_oracle_array(
+        lines[1], "eventList",
+        R"(["Big Fish","Dead Adventurer","Shining Light"])");
+    changed = replace_oracle_array(
+        std::move(changed), "shrineList",
+        R"(["Golden Shrine","Upgrade Shrine"])");
+    changed = replace_oracle_array(
+        std::move(changed), "specialOneTimeEventList",
+        R"(["Bonfire Elementals","FaceTrader","SecretPortal","The Woman in Blue"])");
+
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], changed}, "event-membership");
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.records[0].run.event_membership,
+              (1u << 0) | (1u << 2) | (1u << 10));
+    EXPECT_EQ(run.records[0].run.shrine_membership,
+              (1u << 1) | (1u << 4));
+    EXPECT_EQ(run.records[0].run.special_membership,
+              (1u << 1) | (1u << 4) | (1u << 10) | (1u << 13));
+}
+
+TEST(Translator, RemovedEventMembershipDerivesCumulativeFiredFlags) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    std::string changed =
+        remove_oracle_array_entry(lines[1], "eventList", "Big Fish");
+    changed = remove_oracle_array_entry(
+        std::move(changed), "shrineList", "Golden Shrine");
+    changed = remove_oracle_array_entry(
+        std::move(changed), "specialOneTimeEventList",
+        "Bonfire Elementals");
+
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], changed}, "event-fired-flags");
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.records[0].run.event_flags,
+              (1u << (1u - 1u)) | (1u << (13u - 1u)) |
+                  (1u << (19u - 1u)));
+    // The A20 oracle list never initialized NoteForYourself. Its absence is
+    // therefore not evidence that the event fired.
+    EXPECT_EQ(run.records[0].run.event_flags & (1u << (27u - 1u)), 0u);
+}
+
+TEST(Translator, UnknownEventInMembershipListIsRefused) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string changed = replace_oracle_array(
+        lines[1], "eventList", R"(["Big Fish","Not A Real Event"])");
+    try {
+        (void)tr::translate_lines({lines[0], changed}, "bad-event-id");
+        FAIL() << "expected TranslateError for an unknown event id";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("unknown event id"),
+                  std::string::npos)
+            << e.what();
+        EXPECT_NE(std::string(e.what()).find("Not A Real Event"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(Translator, TolerantMembershipTalliesUnknownEventWithoutInventingABit) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string changed = replace_oracle_array(
+        lines[1], "eventList", R"(["Big Fish","Not A Real Event"])");
+    tr::TranslateOptions opts;
+    opts.tolerate_unknown_ids = true;
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], changed}, "unknown-event", opts);
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.records[0].run.event_membership, 1u);
+    EXPECT_EQ(run.unknown_id_hits, 1u);
+    ASSERT_EQ(run.unknown_ids.count("event:Not A Real Event"), 1u);
+    EXPECT_EQ(run.unknown_ids.at("event:Not A Real Event"), 1u);
+}
+
+TEST(Translator, MembershipListRejectsKnownIdFromTheWrongPool) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string changed =
+        replace_oracle_array(lines[1], "shrineList", R"(["Big Fish"])");
+    try {
+        (void)tr::translate_lines({lines[0], changed}, "wrong-event-pool");
+        FAIL() << "expected TranslateError for a wrong-pool event id";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("does not belong"),
+                  std::string::npos)
+            << e.what();
+        EXPECT_NE(std::string(e.what()).find("shrineList"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
+TEST(Translator, MembershipListRejectsDuplicatesAndOrderDrift) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    for (const char* array :
+         {R"(["Big Fish","Big Fish"])",
+          R"(["The Cleric","Big Fish"])"}) {
+        const std::string changed =
+            replace_oracle_array(lines[1], "eventList", array);
+        try {
+            (void)tr::translate_lines({lines[0], changed},
+                                      "bad-event-order");
+            FAIL() << "expected TranslateError for " << array;
+        } catch (const tr::TranslateError& e) {
+            EXPECT_NE(std::string(e.what()).find(
+                          "not a canonical-order subsequence"),
+                      std::string::npos)
+                << e.what();
+        }
+    }
 }
 
 // B4.3: when the oracle DOES carry neowRng (floor-0 / Neow dumps), it maps into

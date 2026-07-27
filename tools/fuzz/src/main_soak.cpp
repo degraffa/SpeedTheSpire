@@ -47,7 +47,7 @@ namespace {
 using namespace sts::fuzz;
 
 #ifndef STS_FUZZ_BUILD_ID
-#define STS_FUZZ_BUILD_ID "stsfuzz-b51fix2-cardgate1-rest1-treasure1-schema5"
+#define STS_FUZZ_BUILD_ID "stsfuzz-b51fix2-cardgate1-rest1-treasure1-event1-schema5"
 #endif
 
 struct Options {

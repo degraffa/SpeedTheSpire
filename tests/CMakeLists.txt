@@ -274,6 +274,15 @@ sts_add_test(rest_sites_test)
 # grant/claim, and Matryoshka/Cursed Key/N'loth's Mask hook ordering + gates.
 sts_add_test(treasure_rooms_test)
 
+# B4.10: the ?-room roll table (incl. the asymmetric slot-99 clamps), the
+# one-committed-draw eventRng contract, trap-19 pity float sequences vs
+# bit-exact hand-derivation, Tiny Chest / Juzu / leaving-a-shop hooks,
+# membership init + NFY gate + isCursed exclusion, filtered-pool gates and
+# canonical order, generate_event vs hand-derivation with throwaway-stream
+# discipline and pool-removal bookkeeping, and the EVENT_DIALOG phase through
+# the synthetic proof body.
+sts_add_test(event_framework_test)
+
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer
