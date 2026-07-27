@@ -137,6 +137,16 @@ void dispatch_native_potion(CombatState& state, PotionId id, int potency,
 [[nodiscard]] PotionId return_random_potion(RngStream& potion_rng,
                                             bool limited = false) noexcept;
 
+// PotionHelper.getRandomPotion() (PotionHelper.java:169-172) -- the UNGATED
+// draw underneath the identity roll above: `potions.get(potionRng.random(size -
+// 1))`, exactly ONE draw, uniform over the whole 33-entry class pool, with no
+// tier gate and none of trap 14's rejection sampling. A caller that wants the
+// 65/25/10 distribution wants return_random_potion; a caller that reaches for
+// PotionHelper directly -- Neow's three-potion blessing does
+// (NeowReward.java:270-272) -- wants this. Exposed rather than left file-local
+// so both spellings share one pool-index -> PotionId mapping.
+[[nodiscard]] PotionId get_random_potion(RngStream& potion_rng) noexcept;
+
 // The tier a d100 roll (0..99) selects, via the 65/25/10 gate
 // (PotionHelper.POTION_COMMON_CHANCE / POTION_UNCOMMON_CHANCE). Exposed so the
 // identity-roll test can assert the gate boundaries directly.

@@ -96,6 +96,8 @@ add_library(sts_engine
     # Native event bodies, grouped by delivery batch.
     events/exordium_events_i.cpp
     events/exordium_events_ii.cpp
+    # The floor-0 Neow blessing: category tables, payouts, sub-screens.
+    neow.cpp
     run_advance.cpp
 )
 

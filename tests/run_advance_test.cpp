@@ -150,6 +150,17 @@ void step(RunController& rc, Action a) {
             std::span<StepResult>(&res, 1));
 }
 
+// Leave Neow with floor 0 otherwise untouched. There is no such button in the
+// game -- every run takes one of the four blessings -- but these tests are
+// about the floor loop, and a blessing payout moves streams, the master deck
+// and the relic pools underneath them. Forcing the finished-payout screen and
+// pressing the map button exercises exactly the transition the last Neow press
+// makes; the blessing itself is neow_test's subject.
+void leave_neow(RunController& rc) {
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
+    step(rc, kProceed);
+}
+
 StepResult step_with_result(RunController& rc, Action a) {
     StepResult res{};
     advance(std::span<RunController>(&rc, 1), std::span<const Action>(&a, 1),
@@ -177,7 +188,7 @@ PotionId hand_limited_potion_roll(RngStream& rng) {
 
 RunController enter_jaw_worm_combat() {
     RunController rc = run_begin(find_jaw_worm_seed(), kA20);
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     return rc;
@@ -314,7 +325,7 @@ TEST(FloorReseed, Trap7ReseedsFiveStreamsWithPostIncrementFloor) {
         rc.run.map[run_state_map_index(col, 0)].room_type =
             static_cast<uint8_t>(RoomType::Shop);
     }
-    step(rc, kProceed);                 // NEOW -> MAP_CHOICE (floor 0)
+    leave_neow(rc);                 // NEOW -> MAP_CHOICE (floor 0)
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 
     uint8_t x = first_start_column(rc);
@@ -346,7 +357,7 @@ TEST(FloorReseed, ReseedTracksFloorAcrossMultipleTransitions) {
         rc.run.map[run_state_map_index(x, 1)].room_type =
             static_cast<uint8_t>(RoomType::Shop);
     }
-    step(rc, kProceed);
+    leave_neow(rc);
     uint8_t x0 = first_start_column(rc);
     step(rc, make_action(ActionVerb::CHOOSE, x0));  // -> floor 1
     EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor_stream(kSeed, 1)));
@@ -385,7 +396,7 @@ TEST(RunCombat, MatchesCombatBeginForJawWormFloor) {
     rc.run.hp = 80;
     rc.run.max_hp = 80;
 
-    step(rc, kProceed);
+    leave_neow(rc);
     uint8_t x = first_start_column(rc);
     step(rc, make_action(ActionVerb::CHOOSE, x));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
@@ -412,7 +423,7 @@ TEST(RunCombat, LousePreBattleAndInnateResolveBeforePlayerControl) {
     // B3.9 Innate flag even though the deck is shuffled before encounter entry.
     rc.run.master_deck[9].card_id = static_cast<uint16_t>(CardId::WRITHE);
 
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
@@ -464,7 +475,7 @@ void set_run_relics(RunController& rc, std::initializer_list<RelicId> ids) {
 RunController enter_jaw_worm_holding(std::initializer_list<RelicId> ids) {
     RunController rc = run_begin(find_jaw_worm_seed(), kA20);
     set_run_relics(rc, ids);
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     return rc;
 }
@@ -580,7 +591,7 @@ TEST(RunCombatBattleStart, BloodVialHealsIntoTheStartingHpOfTheCombat) {
     RunController rc = run_begin(find_jaw_worm_seed(), kA20);
     set_run_relics(rc, {RelicId::BLOOD_VIAL});
     rc.run.hp = 50;
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.player_hp, 52);
@@ -591,7 +602,7 @@ TEST(RunCombatBattleStart, BloodVialHealsIntoTheStartingHpOfTheCombat) {
     RunController full = run_begin(find_jaw_worm_seed(), kA20);
     set_run_relics(full, {RelicId::BLOOD_VIAL});
     full.run.hp = full.run.max_hp;
-    step(full, kProceed);
+    leave_neow(full);
     step(full, make_action(ActionVerb::CHOOSE, first_start_column(full)));
     ASSERT_EQ(full.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(full.combat.player_hp, full.combat.player_max_hp);
@@ -629,7 +640,7 @@ TEST(RunCombatBattleStart, SeveralBattleStartRelicsAllLandBeforeTheFirstAction) 
     set_run_relics(rc, {RelicId::ANCHOR, RelicId::BAG_OF_PREPARATION,
                         RelicId::VAJRA, RelicId::BLOOD_VIAL});
     rc.run.hp = 60;
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
@@ -681,7 +692,7 @@ TEST(RunCombatBattleStart, NoRegisteredRelicBindsThePreDrawHook) {
 
 TEST(RunPotion, FruitJuiceIsLegalOutsideCombatAndMutatesPersistentHp) {
     RunController rc = run_begin(kSeed, kA20);
-    step(rc, kProceed);  // stable non-combat MAP_CHOICE state
+    leave_neow(rc);  // stable non-combat MAP_CHOICE state
     rc.run.hp = 50;
     rc.run.max_hp = 80;
     rc.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
@@ -699,7 +710,7 @@ TEST(RunPotion, FruitJuiceIsLegalOutsideCombatAndMutatesPersistentHp) {
 
 TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     RunController rc = run_begin(kSeed, kA20);
-    step(rc, kProceed);
+    leave_neow(rc);
     rc.run.hp = 50;
     rc.run.max_hp = 80;
     rc.run.relics[1] =
@@ -714,7 +725,7 @@ TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
 
 TEST(RunPotion, EntropicBrewUsesLimitedDrawsThenFillsOpenedSlots) {
     RunController rc = run_begin(kSeed, kA20);
-    step(rc, kProceed);
+    leave_neow(rc);
     rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
     rc.run.potions[1] = static_cast<uint16_t>(PotionId::BLOOD_POTION);
 
@@ -789,7 +800,7 @@ TEST(RunPotion, SmokeBombEscapeIsNotAKillAndOpensProceedChoice) {
 // the same predicate: a targeted potion can never name an escaped monster.
 TEST(RunEscape, TargetedPotionRefusesAnEscapedMonster) {
     RunController rc = run_begin(find_two_louse_seed(), kA20);
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     ASSERT_EQ(rc.combat.monster_count, 2);
@@ -823,7 +834,7 @@ int count_reward_kind(const RewardScreen& s, RewardItemKind k) {
 RunController enter_looter_combat() {
     RunController rc = run_begin(kSeed, kA20);
     rc.lists.monster_list[0] = "Looter";
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.monster_count, 1);
@@ -1018,7 +1029,7 @@ TEST(FullFloorCycle, MapPickCombatRewardNextFloor) {
     RunController rc = run_begin(seed, kA20);
 
     // Neow -> map.
-    step(rc, kProceed);
+    leave_neow(rc);
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
     EXPECT_EQ(rc.run.floor, 0);
 
@@ -1137,7 +1148,7 @@ TEST(FullFloorCycle, MapPickCombatRewardNextFloor) {
 
 TEST(MapChoice, LegalColumnsMatchGeneratedEdges) {
     RunController rc = run_begin(kSeed, kA20);
-    step(rc, kProceed);
+    leave_neow(rc);
     RunActionMask m{};
     legal_actions(rc, m);
     // Floor 0: legal starts == connected row-0 nodes.
@@ -1156,7 +1167,7 @@ TEST(RoomRouting, UnimplementedNonCombatRoomsParkAtUnimplemented) {
             rc.run.map[run_state_map_index(x, 0)].room_type =
                 static_cast<uint8_t>(kind);
         }
-        step(rc, kProceed);
+        leave_neow(rc);
         uint8_t x = first_start_column(rc);
         step(rc, make_action(ActionVerb::CHOOSE, x));
         EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
@@ -1172,7 +1183,7 @@ TEST(RoomRouting, RestRoomsOpenRestSiteMenu) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
             static_cast<uint8_t>(RoomType::Rest);
     }
-    step(rc, kProceed);
+    leave_neow(rc);
     const uint8_t x = first_start_column(rc);
     step(rc, make_action(ActionVerb::CHOOSE, x));
 
@@ -1187,13 +1198,14 @@ TEST(BatchHeterogeneity, MixedPhasesStepIndependently) {
     // PLAY_CARD/END_TURN, and non-combat USE_POTION.
     const int64_t jw = find_jaw_worm_seed();
     RunController a = run_begin(kSeed, kA20);                 // NEOW
+    a.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);   // ready to leave
     RunController b = run_begin(kSeed, kA20);
-    step(b, kProceed);                                        // MAP_CHOICE
+    leave_neow(b);                                        // MAP_CHOICE
     RunController c = run_begin(jw, kA20);
-    step(c, kProceed);
+    leave_neow(c);
     step(c, make_action(ActionVerb::CHOOSE, first_start_column(c)));  // COMBAT
     RunController d = run_begin(kSeed + 1, kA20);
-    step(d, kProceed);
+    leave_neow(d);
     d.run.hp = 60;
     d.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
 
@@ -1276,7 +1288,7 @@ RunController enter_question_mark(int64_t seed) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
             static_cast<uint8_t>(RoomType::Event);
     }
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     return rc;
 }
@@ -1305,7 +1317,7 @@ TEST(QuestionMarkRoom, EventRngAdvancesByExactlyOneAcrossFullEventResolve) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
             static_cast<uint8_t>(RoomType::Event);
     }
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
     // Resolved to an event. Implemented bodies open a dialog; later bodies
@@ -1359,7 +1371,7 @@ TEST(QuestionMarkRoom, SsserpentHeadFiresBeforeEveryResolvedRoomKind) {
             rc.run.map[run_state_map_index(x, 0)].room_type =
                 static_cast<uint8_t>(RoomType::Event);
         }
-        step(rc, kProceed);
+        leave_neow(rc);
         step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
         // onEnterRoom receives the original EventRoom before generateRoom
@@ -1386,7 +1398,7 @@ TEST(QuestionMarkRoom, MonsterRollEntersRealCombatAndConsumesMonsterList) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
             static_cast<uint8_t>(RoomType::Event);
     }
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
@@ -1449,7 +1461,7 @@ TEST(QuestionMarkRoom, TreasureRollOpensTheChestFlow) {
         rc.run.map[run_state_map_index(x, 0)].room_type =
             static_cast<uint8_t>(RoomType::Event);
     }
-    step(rc, kProceed);
+    leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
     // A real TreasureRoom: the B4.7 chest constructor ran (2 treasureRng

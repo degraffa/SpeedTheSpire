@@ -843,7 +843,24 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
         {
             const std::string id =
                 as_str(fr.require("event_id"), ctx, path + ".event_id");
-            (void)join_event(id, ctx, path + ".event_id");
+            // NEOW arrives on the EVENT screen. NeowRoom is an ordinary room
+            // with an event (NeowRoom.java:16-20), so CommunicationMod emits
+            // screen_type EVENT for it -- with a HARD-CODED sentinel id,
+            // because NeowEvent is the one base-game event class with no static
+            // `ID` field (GameStateConverter.getEventState :343-355). That
+            // sentinel is deliberately not an events.yaml row: Neow is not in
+            // any act's event/shrine/special pool, so giving it an EventId
+            // would put a non-pool entry into the three membership bitsets that
+            // pool ids index. Recognising it here is what discharges the
+            // deferred Neow screen_state slice; everything below -- the option
+            // list's shape and its choice_index typing -- is the same pass
+            // every other event screen gets, and the slice stays storage-less
+            // exactly like the reward slices (the sim DERIVES the blessing from
+            // the seed, so the acceptance diffs post-choice RunState, not the
+            // screen).
+            if (id != "Neow Event") {
+                (void)join_event(id, ctx, path + ".event_id");
+            }
             fr.defer("event_id");
         }
         if (const json* opts = fr.take("options")) {

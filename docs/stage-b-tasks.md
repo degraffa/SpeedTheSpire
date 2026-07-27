@@ -88,7 +88,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 | floor≤48 && !in_shop gate live, effect deferred |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
-| Translator `screen_state` content (shop / grid / map screens and future event variants) | B1.5, B4.3 | B4.8, B4.12-B4.14 | **EVENT slice content-validation DISCHARGED by B4.11:** `event_id` joins through the generated registry and option `disabled` / `choice_index` fields are type-checked; the content intentionally remains storage-less because translation outputs `RunState`/`CombatState`, not transient `RunController::event`. **The reward slice was discharged by B4.5.** Shop/grid/map content and any new event-variant fields remain with their owning tasks. |
+| Translator `screen_state` content (shop / grid / map screens and future event variants) | B1.5, B4.3 | B4.8 | **EVENT slice content-validation DISCHARGED by B4.11:** `event_id` joins through the generated registry and option `disabled` / `choice_index` fields are type-checked; the content intentionally remains storage-less because translation outputs `RunState`/`CombatState`, not transient `RunController::event`. **The reward slice was discharged by B4.5.** **The NEOW slice was discharged by B4.14:** Neow arrives as an `EVENT` screen with the hard-coded id `"Neow Event"` (GameStateConverter.getEventState :343-355), which is recognised as a sentinel rather than joined — it is deliberately not an `events.yaml` row, because Neow is in no act's event/shrine/special pool and an `EventId` for it would place a non-pool entry into the three membership bitsets that pool ids index; the option list still gets the ordinary EVENT validation, and a near-miss id (`"Neow"`) is still refused. Shop/grid/map content and any new event-variant fields remain with their owning tasks. |
 | `b14_accept2` obtain-race capture-fidelity triage | B1.3 | B5.2 | flagged explicitly by B1.3; B1.4's acceptance is unaffected |
 | Infernal-Blade-generated Blood for Blood cost model (`cost_now` only; end-of-turn reset restores 4, not the game's reduced base) | B3.6 | G7 | judged unreachable — "revisit if G7 ever hits it" |
 | Bottled trio bottling at acquisition (run-layer acquisition-choice machinery + a per-master-deck-instance innate flag) | B3.25 | UNASSIGNED — named "B4-owner" | rows + deck-content gates live so pools and B4.7 chests are complete |
@@ -758,7 +758,7 @@ Woman in Blue, … per the filter) with transform/remove/upgrade mechanics
 tests; Match-and-Keep's card dealing vs oracle spot-check.
 **Log:** —
 
-### B4.14 `[ ]` Neow
+### B4.14 `[ ]` Neow — **code landed; blocked on the manual oracle capture**
 **Deps:** B4.4, B4.6, B3.27 (boss pool) · **Spec:** design §5.6; §10 trap 17
 · **Provenance:** NeowEvent.java:62, 163, 289, 349-371; NeowReward.java:
 68-128, 190-368
@@ -770,8 +770,54 @@ unlock-gated (fully-unlocked profile ⇒ full blessing; record the check).
 **Acceptance:** tier-2: option sets + payouts for fixed seed match
 hand-derivation draw-for-draw; oracle spot-diff of the Neow screen across
 ≥ 10 seeds zero-diff (options AND post-choice state).
-**Inherited:** Neow `screen_state` translation — deferred by B1.5/B4.3.
-**Log:** —
+**Blocker (checkbox stays `[ ]`):** the oracle spot-diff needs the LIVE GAME,
+which only a human operator can launch (conventions §8 bridge note). The
+tier-2 leg and the directed tests are green in CI; the capture runbook is
+[b414_neow_spotdiff.md](../tools/oracle_bridge/driver/b414_neow_spotdiff.md),
+which names exactly what must match (the four option labels AND the
+post-choice `RunState` + the four stream counters). Same shape as B4.7.
+**Mini-blessing verdict — NOT an unlock gate, and unreachable here.** The
+branch is `bossCount == 0 && !Settings.isTestingNeow → miniBlessing()`
+(NeowEvent.java:178-183, mirrored at :168-173). `bossCount` reads the profile
+preference `<CLASS>_SPIRITS` **only** on the `Settings.isStandardRun()` branch
+(NeowEvent.java:75-80); otherwise it is `Settings.seedSet ? 1 : 0`. And
+`isStandardRun() == !isDailyRun && !isTrial && !seedSet` (Settings.java:
+633-634), so **every seeded run — which is every simulated run and every
+oracle capture — gets bossCount 1 and the full four-option blessing, with no
+reference to the profile at all**. That is stronger than the frozen
+fully-unlocked assumption and does not depend on `UnlockTracker`, which the
+gate never consults. The mini-blessing is therefore outside the model's
+domain and is deliberately not encoded.
+**Inherited — DISCHARGED:** Neow `screen_state` translation. NeowRoom reports
+as an `EVENT` screen carrying the hard-coded id `"Neow Event"`
+(GameStateConverter.getEventState :343-355), which is deliberately **not** an
+`events.yaml` row — Neow is in no act's event/shrine/special pool and an
+`EventId` for it would put a non-pool entry into the three membership bitsets
+that pool ids index. The translator recognises the sentinel and gives the
+option list the ordinary EVENT-screen validation; storage-less, like the
+reward slices.
+**Notes for the integrator — design §5.6 corrected (§11 v0.1.9).** Three
+findings contradict the design's one-line summary of §5.6, which said payouts
+"consume NeowEvent.rng for cards"; per conventions §4 that losing text is
+fixed inline in §5.6 and logged as §11 v0.1.9 in this same change. Each has a
+named test: (1) the COLORLESS blessings draw
+their card IDENTITIES from `cardRng`, not NeowEvent.rng —
+`getColorlessCardFromPool` goes through `CardGroup.getRandomCard(true,
+rarity)`, whose `true` means `AbstractDungeon.cardRng` (CardGroup.java:
+509-524) — while their rarity rolls stay on NeowEvent.rng; the CURSE
+drawback's card is `cardRng` too (`getCardWithoutRng(CURSE)` →
+`returnRandomCurse` → `CardLibrary.getCurse()`), and it is drawn AFTER the
+payout's own draws because the Java obtains it one `update()` tick later.
+(2) The three-potion blessing opens the COMBAT reward screen, whose
+`setupItemReward` appends a full `getRewardCards()` row for a NeowRoom
+(CombatRewardScreen.java:72-96) that `NeowReward` then deletes — so cardRng
+advances and the card-pity counter moves even though no card is offered.
+(3) The boss swap's `loseRelic` runs BEFORE its pool draw, so Black Blood
+(canSpawn = hasRelic("Burning Blood")) can never be its result. Also: the
+colorless pools are ORDER-EXACT rather than carrying the RED pools' interim
+library-order deviation, because `CardGroup` sorts the rarity-filtered view by
+cardID before indexing it.
+**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b414)
 
 - **B4.15** `[x]` A20 run-setup modifiers + negative freezes — `registry/a20.yaml` populated to one row per ascension level 1..20 (`id == level`), each IMPLEMENTED or N/A-for-S1-with-reason, machine-checked by `A20Manifest.EveryRowCarriesScopeProvenanceAndAnS1Status`; run-setup order corrected to **A11 → (A5) → A14 → A6 → A10 → starting deck**, so A14's max-HP loss precedes A6's 90 % rewrite and an A20 Ironclad is **68/75, not 72/75** (matches the G4 oracle capture); Ascender's Bane lands at master-deck **index 0**, ahead of the five Strikes, routed through `add_card_to_master_deck`; retires the A6/A10/A14 deferred-obligation row; union 641/641 ×3 · [log](stage-b-log.md#b415)
 

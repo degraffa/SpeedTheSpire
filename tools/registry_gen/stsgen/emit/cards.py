@@ -171,6 +171,13 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "ox_steps": ox_steps, "up_ox_steps": up_ox_steps,
             "id": c["id"], "color": color, "rarity": rarity,
             "healing": healing,
+            # The game's cardID string. Needed as a POOL SORT KEY, not only as a
+            # translator join key: CardGroup.getRandomCard(useRng, rarity)
+            # Collections.sort()s its rarity-filtered view, and AbstractCard.
+            # compareTo is cardID.compareTo (CardGroup.java:509-524;
+            # AbstractCard.java:2583-2584).
+            "game_id": c["game_id"],
+            "is_status": ctype == "STATUS",
         })
 
     out: list[str] = [BANNER, "#pragma once\n",
@@ -420,6 +427,55 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         for r in pool:
             out.append(f"    CardId::{r['name']},")
         out.append("}};\n")
+
+    # The dungeon COLORLESS card pool (AbstractDungeon.addColorlessCards,
+    # AbstractDungeon.java:1203-1210): every COLORLESS card whose rarity is
+    # neither BASIC nor SPECIAL and whose type is not STATUS. Two views are
+    # emitted because the game reads it two different ways.
+    #
+    # (1) THE RARITY VIEWS, kColorlessUncommonPool / kColorlessRarePool.
+    #     getColorlessCardFromPool(rarity) (AbstractDungeon.java:1579-1595) calls
+    #     colorlessCardPool.getRandomCard(true, rarity), which filters by rarity,
+    #     **Collections.sort()s the filtered list**, and indexes it with
+    #     `cardRng.random(size - 1)` (CardGroup.java:509-524). AbstractCard.
+    #     compareTo is `cardID.compareTo(other.cardID)` (AbstractCard.java:
+    #     2583-2584), so the order is a plain lexicographic sort of the game_id
+    #     strings -- these two arrays are ORDER-EXACT, with none of the
+    #     CardLibrary-HashMap-order deviation the RED reward pools carry. Sorted
+    #     here with Python's default str ordering, which matches Java's
+    #     String.compareTo for the ASCII-only cardID set.
+    #     NOTE the stream: those draws are `cardRng`, NOT the caller's rng --
+    #     Neow's colorless options therefore consume cardRng even though their
+    #     rarity rolls consume NeowEvent.rng (NeowReward.java:309-330).
+    # (2) THE WHOLE-POOL VIEW, kColorlessPool, is what the colorless branch of
+    #     returnTrulyRandomColorlessCardFromAvailable indexes
+    #     (AbstractDungeon.java:998-1014) -- unsorted, so it carries the SAME
+    #     documented interim order deviation as kIroncladAttackPool (registry-id
+    #     order until an oracle capture pins CardLibrary HashMap order).
+    #     Membership and draw counts are Java-exact either way.
+    colorless_all = [r for r in rows
+                     if r["color"] == "COLORLESS"
+                     and r["rarity"] in ("UNCOMMON", "RARE")
+                     and not r["is_status"]]
+    for tier in ("UNCOMMON", "RARE"):
+        pool = [r for r in colorless_all if r["rarity"] == tier]
+        pool.sort(key=lambda r: r["game_id"])
+        tname = pascal(tier)
+        out.append(f"inline constexpr int kColorless{tname}PoolCount = "
+                   f"{len(pool)};")
+        out.append(f"inline constexpr std::array<CardId, "
+                   f"kColorless{tname}PoolCount> kColorless{tname}Pool{{{{")
+        for r in pool:
+            out.append(f"    CardId::{r['name']},  // {r['game_id']}")
+        out.append("}};\n")
+    colorless_all.sort(key=lambda r: r["id"])
+    out.append(f"inline constexpr int kColorlessPoolCount = "
+               f"{len(colorless_all)};")
+    out.append("inline constexpr std::array<CardId, kColorlessPoolCount> "
+               "kColorlessPool{{")
+    for r in colorless_all:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
 
     # Lookup table + accessor (mirrors cards.hpp card_def()).
     out.append("inline constexpr std::array<const CardDef*, "

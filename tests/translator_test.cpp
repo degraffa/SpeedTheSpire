@@ -533,6 +533,57 @@ TEST(Translator, EventScreenStateRejectsUnknownIdsAndBadOptionTypes) {
         tr::TranslateError);
 }
 
+// The Neow slice. NeowRoom reports as an EVENT screen carrying a hard-coded
+// "Neow Event" id (GameStateConverter.getEventState :343-355) that is
+// deliberately NOT an events.yaml row: Neow belongs to no act's event / shrine
+// / special pool, and minting an EventId for it would put a non-pool entry into
+// the three membership bitsets that pool ids index. The id is therefore
+// recognised as a sentinel while the option list still gets the ordinary
+// EVENT-screen treatment, and the slice stays storage-less like the reward
+// slices above.
+TEST(Translator, NeowScreenStateIsAcceptedWithoutAnEventRegistryRow) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string tampered = with_event_screen(
+        lines[1],
+        "{\"event_id\":\"Neow Event\",\"event_name\":\"Neow\","
+        "\"body_text\":\"\",\"options\":["
+        "{\"text\":\"Transform a card\",\"label\":\"Transform a card\","
+        "\"disabled\":false,\"choice_index\":0},"
+        "{\"text\":\"Random common relic\",\"label\":\"Random common relic\","
+        "\"disabled\":false,\"choice_index\":1},"
+        "{\"text\":\"250 gold\",\"label\":\"250 gold\",\"disabled\":false,"
+        "\"choice_index\":2},"
+        "{\"text\":\"Boss relic swap\",\"label\":\"Boss relic swap\","
+        "\"disabled\":false,\"choice_index\":3}]}");
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], tampered}, "neow-screen");
+    ASSERT_EQ(run.records.size(), 1u);
+    EXPECT_EQ(run.records[0].run.gold, 99);  // screen content stores nothing
+}
+
+// The sentinel is exact: a near-miss is still an unknown event id, so a
+// CommunicationMod rename cannot slip through as "probably Neow".
+TEST(Translator, NeowSentinelDoesNotWhitelistNeighbouringIds) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    const std::string near_miss = with_event_screen(
+        lines[1], "{\"event_id\":\"Neow\",\"options\":[]}");
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], near_miss}, "neow-screen"),
+        tr::TranslateError);
+}
+
+// Under the sentinel the option list keeps every type check.
+TEST(Translator, NeowScreenStillTypeChecksItsOptions) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    const std::string bad = with_event_screen(
+        lines[1],
+        "{\"event_id\":\"Neow Event\",\"options\":[{\"disabled\":1,"
+        "\"choice_index\":\"zero\"}]}");
+    EXPECT_THROW((void)tr::translate_lines({lines[0], bad}, "neow-screen"),
+                 tr::TranslateError);
+}
+
 TEST(Translator, CombatRewardScreenStateValidatesAndJoins) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 3u);

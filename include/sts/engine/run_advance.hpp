@@ -44,12 +44,13 @@
 //     Brew run mutations outside combat.
 //   * rest sites: Rest/Smith plus the Girya, Peace Pipe and Shovel options,
 //     Regal Pillow and Dream Catcher hooks, all through CHOOSE.
+//   * NEOW (neow.hpp): the four-category blessing rolled at run start off the
+//     event-scoped neow stream, every payout, and the card / master-deck-grid /
+//     reward sub-screens they open -- all inside RunPhase::NEOW.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
-//   * Neow blessing options + payouts: not modelled (here: a single "proceed"
-//     skip, so the stream state stays right even though no blessing applies).
-//   * relic POOLS and acquisition are live, and combat/chest reward draw sites
-//     consume them; shop / Neow draw sites are separate work.
+//   * relic POOLS and acquisition are live, and combat/chest/Neow reward draw
+//     sites consume them; the shop's draw sites are separate work.
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
 //     (combat_rewards.hpp).
 //   * ? rooms RESOLVE (event_framework.hpp): the one committed eventRng roll
@@ -104,6 +105,7 @@
 #include "sts/engine/event_framework.hpp"  // EventDialogState / kEventOptionCap
 #include "sts/engine/interp.hpp"        // mathutils_round (run_setup_hp)
 #include "sts/engine/map_rooms.hpp"     // RoomType
+#include "sts/engine/neow.hpp"          // NeowState / the blessing screens
 #include "sts/engine/rest_sites.hpp"    // RestSiteState / menu constants
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/treasure_rooms.hpp"
@@ -117,7 +119,7 @@ namespace sts::engine {
 // of CombatPhase). The value-init default is NONE.
 enum class RunPhase : uint8_t {
     NONE = 0,
-    NEOW = 1,              // floor 0, Neow blessing pending (no blessing content).
+    NEOW = 1,              // floor 0, the Neow blessing and its payout screens.
     MAP_CHOICE = 2,        // choosing the next map node (an outgoing edge).
     COMBAT = 3,            // inside a combat; delegates to the embedded CombatState.
     COMBAT_REWARD = 4,     // post-combat reward screen (claim / pick / proceed).
@@ -180,8 +182,8 @@ inline constexpr uint8_t kNeowColumn = 0xFF;
 //   * kChooseSkipCard -- the card screen's Skip: close the pick screen, the
 //     CARD item stays claimable.
 //   * kChooseSing -- the Singing Bowl button: +2 max HP instead of a card.
-// NEOW keeps its pre-reward behavior (any CHOOSE proceeds; no blessing
-// content yet).
+// Neow's card screen reuses kChooseSkipCard and kChooseSing (the game opens the
+// same CardRewardScreen), and its finished-payout screen reuses kChooseProceed.
 inline constexpr uint8_t kChooseProceed = 0xFF;
 inline constexpr uint8_t kChooseSkipCard = 0xFE;
 inline constexpr uint8_t kChooseSing = 0xFD;
@@ -232,6 +234,12 @@ struct RunController {
     // from (seed, eventRng.counter) on reload -- EventRoom.java:28); never in
     // RunState.
     EventDialogState event;
+
+    // The floor-0 Neow blessing: the four rolled options and which of its
+    // screens is up. Transient for the same reason as everything above it --
+    // NeowEvent rebuilds the whole blessing from `new Random(Settings.seed)`
+    // (NeowEvent.java:363), so it is derived state, never saved.
+    NeowState neow;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -255,7 +263,12 @@ enum class EventCombatVariant : uint8_t {
 
 // The run-level legal-action set (the run analogue of ActionMask). Which fields
 // are meaningful depends on `phase`:
-//   NEOW                 : can_proceed (CHOOSE, arg0 ignored).
+//   NEOW                 : depends on rc.neow.screen -- BLESSING offers
+//                          can_choose_neow_option[0..3] (CHOOSE i); CARD_REWARD
+//                          offers can_take_card / can_skip_card / can_sing;
+//                          GRID offers can_choose_master_deck[i]; ITEM_REWARD
+//                          offers can_claim_reward[i] + can_proceed; DONE offers
+//                          can_proceed, which opens the map.
 //   TREASURE_ROOM        : can_open_chest (CHOOSE kChooseOpenChest) and
 //                          can_proceed (CHOOSE kChooseProceed) to skip it.
 //   COMBAT_REWARD        : with no card screen open -- can_proceed (CHOOSE
@@ -277,6 +290,9 @@ enum class EventCombatVariant : uint8_t {
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
     bool can_proceed;                  // NEOW / TREASURE_ROOM / reward proceed.
+    // NEOW, blessing screen: the four dialog buttons NeowEvent.blessing built
+    // (NeowEvent.java:372-376). CHOOSE arg0 is the option index.
+    bool can_choose_neow_option[kNeowOptionCount];
     bool can_open_chest;               // TREASURE_ROOM: open the fixed-row chest.
     bool can_choose_node[kMapCols];    // MAP_CHOICE: legal next-node columns.
     bool can_choose_boss;              // MAP_CHOICE: the boss edge is available.

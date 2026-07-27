@@ -285,6 +285,16 @@ sts_add_test(event_framework_test)
 sts_add_test(exordium_events_i_test)
 sts_add_test(exordium_events_ii_test)
 
+# The floor-0 Neow blessing: the four-category option roll against a draw-by-
+# draw hand derivation, trap 17 (a fresh Random(seed) that no other stream can
+# move), the category tables incl. category 2's drawback-first roll order and
+# its three conditional omissions, every payout's stream attribution -- the
+# split-stream colorless offers, the three-potion blessing's rolled-then-
+# discarded card row, and the boss swap's loseRelic-before-draw ordering -- the
+# drawbacks incl. Omamori's interception, the master-deck grids, and the
+# scripted walk from the blessing screen onto the first floor.
+sts_add_test(neow_test)
+
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction
 # paths (combat_begin, enter_combat) must keep going through it. The reproducer

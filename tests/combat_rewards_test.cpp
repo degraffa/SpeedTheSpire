@@ -1083,6 +1083,9 @@ void play_out_combat(RunController& rc) {
 TEST(RewardFlow, ChooseClaimsGoldAndCardThenProceeds) {
     const int64_t seed = find_first_monster_seed();
     RunController rc = run_begin(seed, kA20);
+    // Leave Neow without taking a blessing (see rest_sites_test for the same
+    // note): a payout would move cardRng and the pity counter this test reads.
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
     step(rc, make_action(ActionVerb::CHOOSE));  // Neow -> map
     RunActionMask m{};
     legal_actions(rc, m);

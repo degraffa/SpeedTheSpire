@@ -61,8 +61,11 @@ RelicId return_random_non_campfire_relic_key(RunState& rs, RelicTier tier,
     return id;
 }
 
-// One pool-indexed draw: getCard(rarity) -> CardGroup.getRandomCard(true) ->
-// group.get(cardRng.random(size - 1)) (CardGroup.java:502-506).
+// One pool-indexed draw: getCard(rarity) -> CardGroup.getRandomCard(...) ->
+// group.get(rng.random(size - 1)) (CardGroup.java:498-507). The STREAM is the
+// caller's: combat rewards index these lists with cardRng
+// (getRandomCard(true)), Neow's card blessings with NeowEvent.rng
+// (getRandomCard(rng)). Published as draw_card_from_pool below.
 CardId draw_from_pool(RngStream& card_rng, RewardCardRarity rarity) noexcept {
     static_assert(kIroncladCommonPoolCount == 20 &&
                       kIroncladUncommonPoolCount == 36 &&
@@ -186,6 +189,31 @@ void roll_card_reward_item(RunState& rs, RoomType room,
 }
 
 }  // namespace
+
+CardId draw_card_from_pool(RngStream& rng, RewardCardRarity rarity) noexcept {
+    return draw_from_pool(rng, rarity);
+}
+
+void roll_setup_item_card_reward(RunState& rs, RoomType room,
+                                 RewardScreen& s) noexcept {
+    roll_card_reward_item(rs, room, s);
+}
+
+bool remove_first_card_reward_item(RewardScreen& s) noexcept {
+    for (uint8_t i = 0; i < s.count; ++i) {
+        if (s.items[i].kind == static_cast<uint8_t>(RewardItemKind::CARDS)) {
+            if (s.open_card_item == i) {
+                s.open_card_item = kNoOpenCardReward;
+            } else if (s.open_card_item != kNoOpenCardReward &&
+                       s.open_card_item > i) {
+                --s.open_card_item;
+            }
+            remove_item(s, i);
+            return true;
+        }
+    }
+    return false;
+}
 
 bool run_has_relic(const RunState& rs, RelicId id) noexcept {
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
