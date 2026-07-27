@@ -199,6 +199,9 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             out.choice_from_exhaust = false;
             out.choice_from_generated = true;
             out.choice_from_draw = false;
+            out.choice_optional = false;
+            out.can_confirm_choice = false;
+            out.choice_selected_count = 0;
             out.can_end_turn = false;
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
@@ -217,15 +220,34 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             out.choice_from_draw = choice_source(kind) == ChoiceSource::DRAW;
             out.choice_from_generated = false;
             out.can_end_turn = false;
+            const bool optional = choose_is_optional(front.flags);
+            out.choice_optional = optional;
+            // The confirm button. Both in-scope optional screens open with
+            // canPickZero, which enables it immediately and never disables it
+            // again, so "the screen is open" IS "confirm is legal" -- an empty
+            // confirm included. A mandatory screen has no confirm move at all:
+            // it ends when its count is met.
+            out.can_confirm_choice = optional;
+            out.choice_selected_count =
+                optional ? choose_selected_count(front.flags) : uint8_t{0};
             // can_choose[i] over the kind's SOURCE pile: hand slots for the hand
             // kinds, discard slots for discard-to-draw-top (Headbutt), draw-pile
             // slots for the type-filtered deck-to-hand choices. For a large
             // source pile only the first kHandCap slots are reflected here;
             // advance validates any arg0 against the real source-pile count.
+            //
+            // An OPTIONAL choice reads its own predicate instead: the hand there
+            // is [unpicked] ++ [picked], every picked slot is toggleable back
+            // out, and an unpicked one is only offered while the selection has
+            // room (advance.hpp).
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
-                out.can_choose[i] = choice_slot_eligible(
-                    state, static_cast<uint8_t>(i), kind, type_filter);
+                out.can_choose[i] =
+                    optional ? optional_choice_slot_legal(
+                                   state, front, static_cast<uint8_t>(i))
+                             : choice_slot_eligible(
+                                   state, static_cast<uint8_t>(i), kind,
+                                   type_filter);
             }
             return;
         }
@@ -236,6 +258,9 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     out.choice_from_exhaust = false;
     out.choice_from_generated = false;
     out.choice_from_draw = false;
+    out.choice_optional = false;
+    out.can_confirm_choice = false;
+    out.choice_selected_count = 0;
 
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
@@ -358,7 +383,10 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
            m.choice_from_discard == fresh.choice_from_discard &&
            m.choice_from_exhaust == fresh.choice_from_exhaust &&
            m.choice_from_generated == fresh.choice_from_generated &&
-           m.choice_from_draw == fresh.choice_from_draw;
+           m.choice_from_draw == fresh.choice_from_draw &&
+           m.choice_optional == fresh.choice_optional &&
+           m.can_confirm_choice == fresh.can_confirm_choice &&
+           m.choice_selected_count == fresh.choice_selected_count;
 }
 #endif
 
@@ -466,6 +494,22 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
                 pump(s, dispatch_monster_turn);
                 break;
             }
+            if (mask.choice_optional) {
+                // TOGGLE, not commit: the card moves between the hand and the
+                // pending selection and nothing is applied until CONFIRM. The
+                // legality predicate is the same function legal_actions() built
+                // can_choose[] from, for the reason spelled out below -- except
+                // that here can_choose[] is not narrower than the rule (an
+                // optional choice always sources the ten-slot hand), so the two
+                // agree exactly.
+                if (!optional_choice_slot_legal(s, front, slot)) {
+                    break;  // illegal toggle -- no-op
+                }
+                toggle_optional_choice_slot(s, front, slot);
+                // No pump: the item stays at the head, still blocking, and the
+                // screen is still open. Only CONFIRM ends it.
+                break;
+            }
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
             // arg0 indexes the kind's SOURCE pile (hand, or discard for
             // discard-to-draw-top). choice_slot_eligible checks the bound (the
@@ -496,6 +540,21 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             // (or no eligible cards remain), the next pump pops the now-satisfied
             // CHOOSE_CARD; otherwise the pump re-blocks for the next selection.
             front.amount -= 1;
+            pump(s, dispatch_monster_turn);
+            break;
+        }
+        case ActionVerb::CONFIRM: {
+            // The hand-select screen's confirm button. Legal only while an
+            // OPTIONAL choice is open (mask.can_confirm_choice, which is exactly
+            // that condition) -- a mandatory screen has no button to press, and
+            // outside a choice there is no screen at all.
+            if (!mask.choice_pending || !mask.can_confirm_choice) {
+                break;
+            }
+            ActionQueueItem& front = s.action_queue[s.action_head];
+            resolve_optional_choice(s, front);
+            ActionQueueItem consumed{};
+            (void)pop_action_front(s, consumed);
             pump(s, dispatch_monster_turn);
             break;
         }

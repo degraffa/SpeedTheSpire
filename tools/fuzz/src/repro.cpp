@@ -46,6 +46,12 @@ std::string decode_action(Action a) {
             else if (a0 == engine::kChooseSing) os << " (sing)";
             else if (a0 == engine::kChooseBoss) os << " (boss-edge)";
             break;
+        case ActionVerb::CONFIRM:
+            // The optional hand-select screen's confirm button. No args: what it
+            // resolves is the selection built by the CHOOSE toggles already
+            // printed above it, so the log reads as toggle, toggle, confirm.
+            os << "CONFIRM";
+            break;
     }
     return os.str();
 }

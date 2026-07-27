@@ -156,6 +156,34 @@ struct ActionMask {
     // ordinary blocked-choice mask -- can_end_turn and every can_play false,
     // can_choose the only true entries -- with no skip/cancel spelling at all.
     bool choice_from_draw;
+
+    // --- OPTIONAL (zero-to-N) CHOOSE: Purity, upgraded Forethought -----------
+    // The one choice shape that is not a fixed count. The screen opened with
+    // anyNumber && canPickZero, so the player picks BETWEEN ZERO and `amount`
+    // cards and presses confirm; nothing else can end it.
+    //
+    // While `choice_optional` is true the surface reads differently:
+    //   * CHOOSE(hand_slot) TOGGLES that card in or out of the pending
+    //     selection instead of committing it. It is still gated by
+    //     `can_choose[i]`, which now covers the selected cards too -- taking a
+    //     card back out is a legal move (HandCardSelectScreen's selected cards
+    //     are clickable, :441-447).
+    //   * `choice_selected_count` is how many cards are currently picked. They
+    //     are the LAST `choice_selected_count` entries of the hand, in PICK
+    //     ORDER -- the engine keeps the game's [hand] / [selectedCards] split as
+    //     one array (interp.hpp), and that order is observable, because the
+    //     confirm applies the picks in it.
+    //   * `can_confirm_choice` is the CONFIRM verb's legality. For both in-scope
+    //     cards it is true for as long as the screen is open, including with
+    //     nothing picked: canPickZero enables the button at open
+    //     (HandCardSelectScreen.open:495-501) and refreshSelectedCards never
+    //     disables it again for an anyNumber && canPickZero screen (:337-340).
+    //
+    // All three are false / zero for a mandatory choice and when idle, so a
+    // policy written before this shape existed keeps working unchanged.
+    bool choice_optional;
+    bool can_confirm_choice;
+    uint8_t choice_selected_count;
 };
 
 static_assert(std::is_trivially_copyable_v<ActionMask>,
@@ -207,7 +235,11 @@ static_assert(std::is_trivially_copyable_v<StepResult>,
 //   PLAY_CARD  -> queue_card_play(states[i], arg0=hand_index, arg1=target),
 //                 then pump(states[i], jaw_worm_take_turn)
 //   END_TURN   -> add the end-turn sentinel, then pump(states[i], jaw_worm_take_turn)
-//   USE_POTION / CHOOSE -> no-op (out of skeleton scope; no potions/choices in M1)
+//   CHOOSE     -> resolve one selection on the open hand-select screen, or
+//                 TOGGLE one card when that screen is an optional zero-to-N
+//   CONFIRM    -> press the optional screen's confirm button, resolving whatever
+//                 is selected (including nothing)
+//   USE_POTION -> no-op here (the belt lives in RunState; the run overload owns it)
 // After pumping, results[i] is filled: terminal/reward from the post-pump state
 // and encode_observation(states[i], results[i].obs).
 //

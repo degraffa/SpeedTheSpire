@@ -259,8 +259,14 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // the same "only widens the already-live gate" shape the red RARE batch's
     // five POWER cards, Sadistic Nature, and Magnetism/Mayhem set. The registry
     // now has 12 POWER-type cards; the gate was already live and stays live.
-    // Neither gate MOVED; the number below is not merely bumped.
-    static_assert(sts::registry::manifest::kCardsCount == 124,
+    // Checked again for the two colorless UNCOMMON rows that closed the 92-111
+    // block (Forethought, Purity). BASIC: NO -- both ctors pass
+    // CardRarity.UNCOMMON (Forethought.java:25, Purity.java:25), so the
+    // hard-coded BASIC set stays exactly {STRIKE, DEFEND, BASH}. POWER: NO for
+    // either -- both pass CardType.SKILL at the same lines -- so Bottled
+    // Tornado's rarity-agnostic type scan sees no new input at all and the count
+    // of POWER-type rows stays at 12. Neither gate moved.
+    static_assert(sts::registry::manifest::kCardsCount == 126,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

@@ -269,6 +269,12 @@ void flush_limbo_at_combat_over(CombatState& s) noexcept {
             has_card_flag(s.card_pool[pi].flags,
                           CardFlag::EXHAUST_ON_USE_ONCE);
         file_card_from_limbo(s, pi, to_exhaust, remove_only);
+        // The one-play bits die with the play. EXHAUST_ON_USE_ONCE follows
+        // UseCardAction.java:132 and is consumed only on the filing path;
+        // FREE_TO_PLAY_ONCE follows :87, which runs before every branch, so it
+        // is consumed even for a card this normalization removes outright.
+        s.card_pool[pi].flags = static_cast<uint16_t>(
+            s.card_pool[pi].flags & ~card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
         if (!remove_only) {
             s.card_pool[pi].flags = static_cast<uint16_t>(
                 s.card_pool[pi].flags &

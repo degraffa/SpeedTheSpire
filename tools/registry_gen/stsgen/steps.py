@@ -24,7 +24,7 @@ from __future__ import annotations
 from .vocab import (APPLY_POWER_COUNTER_SHIFT,
                     CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
                     CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT,
-                    CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS,
+                    CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS, CHOICE_OPTIONAL_BIT,
                     CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
                     CHOICE_TYPE_FILTER_SHIFT, COLORLESS_TO_HAND_FLAGS,
                     DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
@@ -274,6 +274,17 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             extra |= CHOICE_KIND_HIGH_BIT2
         if bool(step.get("random", False)):
             extra |= CHOICE_RANDOM_BIT
+        # `optional: true` -- the screen selects ZERO to `amount` and ends on an
+        # explicit confirm (anyNumber && canPickZero). Rejected together with
+        # `random`, which is the opposite thing: RANDOM never prompts at all,
+        # so an item that is both would be a contradiction rather than a
+        # combination.
+        optional = bool(step.get("optional", False))
+        if optional:
+            if bool(step.get("random", False)):
+                raise fail(f"{owner} CHOOSE_CARD cannot be both 'optional' and "
+                           f"'random' (a random selection never prompts)")
+            extra |= CHOICE_OPTIONAL_BIT
         copies = int(step.get("copies", 1))
         if copies < 1 or copies > 16:
             raise fail(f"{owner} CHOOSE_CARD copies {copies} out of range 1..16")

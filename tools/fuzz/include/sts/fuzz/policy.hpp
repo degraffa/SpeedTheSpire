@@ -106,7 +106,13 @@ enum class MoveCat : uint8_t {
     TREASURE_SKIP = 22,
     EVENT_OPTION = 23,
     EVENT_GRID = 24,
-    COUNT = 25,
+    // The optional hand-select screen's confirm button (ActionVerb::CONFIRM).
+    // It gets its own category rather than sharing COMBAT_CHOOSE because the
+    // whole point of the soak here is to know that the EMPTY confirm -- the
+    // legal move a count-driven screen has no spelling for -- is being reached,
+    // and a shared counter could not tell a confirm from a toggle.
+    CHOICE_CONFIRM = 25,
+    COUNT = 26,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

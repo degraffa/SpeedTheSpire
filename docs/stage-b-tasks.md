@@ -70,7 +70,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
 | Stolen-gold clamp vs in-combat gold ordering | B3.11 | UNASSIGNED — B5.2 verification, or whoever models mid-combat gold timing | `fold_back_combat` settles the Hand of Greed accumulator through `gain_gold` before `settle_stolen_gold` runs, so a Looter's min(total, purse) clamp reads a purse that already contains greed gold. Diverges from the game only when the steal preceded the greed kill AND the purse was below the accrued steal (a Looter and a Hand of Greed kill in one combat, purse ≤ the steal amount); documented at the `settle_stolen_gold` site. Deliberately chosen to preserve exactly-once settlement on every combat-end path |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
-| **Gambling Chip** `atTurnStartPostDraw` | B3.26 | B3.10c for the shared optional-multi-select surface; body remains UNASSIGNED | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. B3.10c must land the explicit-confirm `ActionMask`/translator/fuzz machinery for Purity and Forethought+; it does **not** silently expand into this relic body. After B3.10c, re-own the now-unblocked body rather than deleting this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
+| **Gambling Chip** `atTurnStartPostDraw` | B3.26 | **UNBLOCKED — UNASSIGNED**; the shared surface is live, only the relic body is open | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. The explicit-confirm `ActionMask`/translator/fuzz machinery it was waiting on **landed with B3.10c** (`ActionVerb::CONFIRM`, `kChoiceOptionalBit`, the hand-suffix selection model), and B3.10c deliberately did not expand into this relic. What remains is this body alone: a new discard-kind optional `CHOOSE_CARD` queued from the relic's turn-start hook, plus the draw-back of exactly the number discarded (the count is the relic's, not the choice's, so it must be read at confirm). Whoever re-owns it should re-read `GamblingChip.java` in full rather than infer from this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
 | **Sling of Courage** `atBattleStart` | B3.26 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `Sling.atBattleStart` (`Sling.java:1030-1038`) grants Strength 2 when `getCurrRoom().eliteTrigger` is set. `eliteTrigger` is per-**ROOM** state the run layer sets when an elite encounter begins, and `CombatState` carries no elite marker; producing one is a run-layer change. **Twin of the Slaver's Collar row below** — same missing marker, so both wait on the blocker, not on each other. Inertness asserted by `relic_rares_shop_test` |
 | **Orange Pellets** `onUseCard` | B3.26 | UNASSIGNED — needs a new opcode | `OrangePellets.java:1218-1250`: once an ATTACK, a SKILL and a POWER have all been played, it queues `RemoveDebuffsAction(player)`, which removes **every** DEBUFF-type power on the player, **enumerated when the action resolves**. No opcode expresses that — `REMOVE_POWER` names one `PowerId` chosen at *queue* time. The three latches and their `at_turn_start` clear are live; only the removal is deferred. Inertness asserted by `relic_rares_shop_test` |
 | Ten `energyMaster` relics (Fusion Hammer, Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu, Philosopher's Stone, Coffee Dripper, Mark of Pain) **and Snecko Eye's `masterHandSize += 2`** | B3.27 | UNASSIGNED — next `action_queue.cpp` owner | there is no `energyMaster` / `gameHandSize` field, and the single consumer is the recharge/draw line inside `start_of_turn`. Each is deferred **whole**, with asserted inertness, because every partial would desync `miscRng` or `relicRng` |
@@ -182,7 +182,7 @@ keys stored soak-coverage identities.
 | Namespace (defined in) | Taken | Reserved / free |
 |---|---|---|
 | `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–9** (`NONE`..`EVENT_DIALOG`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10 — landed, claiming its reservation) | 10+ free — claim here first |
-| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–24** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11; `COUNT = 25`) | **25 reserved for B3.10c optional-choice confirm**; 26+ free — claim here first and bump `COUNT` past every enumerator |
+| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–25** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c — **spent**; `COUNT = 26`) | 26+ free — claim here first and bump `COUNT` past every enumerator |
 
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
@@ -207,10 +207,11 @@ twenty cards are numbered 92–111 in `CardLibrary.addColorlessCards` **library
 (alphabetical) order** (`CardLibrary.java:799-834`), and that order is worth
 preserving because the colorless pool B3.10b needs is emitted from it — getting
 it right here avoids the documented interim deviation `kIroncladAttackPool`
-still carries. So the split leaves **interior gaps** that B3.10b and B3.10c
-fill later. This is legal and explicitly fine: `loader.py`
-enforces id **uniqueness**, never monotonicity. Reserved interior ids: **101**
-(Forethought) and **109** (Purity) — mandatory B3.10c below.
+still carries. So the split left **interior gaps** that B3.10b and B3.10c filled
+later — and that worked exactly as intended: `loader.py` enforces id
+**uniqueness**, never monotonicity, so the holes cost nothing while they were
+open. The last two, **101** (Forethought) and **109** (Purity), were filled by
+B3.10c on 2026-07-27; the 92–111 block is now dense.
 
 **What was actually spent** (recorded 2026-07-26, after the wave landed — the
 unspent ids below are now **permanent gaps and must never be backfilled**):
@@ -223,20 +224,24 @@ unspent ids below are now **permanent gaps and must never be backfilled**):
 | B3.10b | `CardId`s 94/96/98/104, `PowerId` 78 `SHACKLED`, opcodes 49–52 `DARK_SHACKLES`/`DISCOVERY`/`ENLIGHTENMENT`/`RANDOM_COLORLESS_TO_HAND` | `PowerId` 79–80 |
 | card-limbo | opcode 53 `USE_CARD` | — |
 | B3.11 | `CardId`s 112–126 (all fifteen), `PowerId`s 81–84 `MAYHEM`/`MAGNETISM`/`PANACHE`/`THE_BOMB`, opcodes 54–57 `UPGRADE_ALL`/`RANDOM_CARD_TO_DRAW`/`DRAW_PILE_FETCH`/`DAMAGE_GREED`, `ChoiceKind` 9 `DRAW_TO_HAND`, `ChoiceSource` `DRAW`=4, two default-0 flag bits on opcode 52, `SCHEMA_VERSION` 5→6 | `PowerId`s 85–86, opcodes 58–59, `ChoiceKind` 10. Fuzz `MoveCat` 26 and `CardFlag` bit 15 were unused **contingencies** and are **released to free, not gapped** — bit namespaces are scarce, nothing ever encoded either value, and the permanent-gap rule's "costs nothing" rationale does not hold for bits (recorded in the B3.11 Log) |
+| B3.10c | `CardId`s 101/109, `ChoiceKind` 8 `PUT_ON_DRAW_BOTTOM`, `ActionVerb` 4 `CONFIRM`, fuzz `MoveCat` 25 `CHOICE_CONFIRM` (`COUNT` 25→26), `CardFlag` bit 14 `FREE_TO_PLAY_ONCE`, plus two previously-zero `CHOOSE_CARD` `extra` bits it owns outright (14 = optional, 16–19 = the runtime selected-card count) | — (spent its block exactly; no opcode and no `SCHEMA_VERSION` bump were needed) |
 
 `USE_CARD` did not consume the numerically earlier 49–52: B3.10b spent that
 exclusive block exactly. Nor did it backfill 41–44, which became permanent
 gaps when their owners landed. `PowerId` 79–80 are likewise permanent gaps.
 
-**B3.10c shared allocations:** `CardId` 101/109 were reserved by the original
-B3.10 split. It owns append-only `ChoiceKind` **8** (Forethought: move selected
-hand cards to draw bottom), `ActionVerb` **4** (explicit optional-choice
-confirm), fuzz `MoveCat` **25** for that verb, and `CardFlag` bit **14**
-(`FREE_TO_PLAY_ONCE`). `ChoiceKind` 6–7 remain B4.5's permanent gaps; kind 8
-therefore extends the packed kind encoding rather than backfilling them.
-B3.10b owns `CardFlag` bit 10 plus bits 11–13 as a private three-bit saved-base
-cost payload; bit 14 is disjoint and available for B3.10c. B3.10c needs no new
-opcode: it extends the existing `CHOOSE_CARD` machinery.
+**B3.10c shared allocations — SPENT 2026-07-27, all four, exactly as reserved.**
+`CardId` 101/109 (reserved by the original B3.10 split), append-only
+`ChoiceKind` **8** `PUT_ON_DRAW_BOTTOM`, `ActionVerb` **4** `CONFIRM`, fuzz
+`MoveCat` **25** `CHOICE_CONFIRM` (`COUNT` bumped to 26) and `CardFlag` bit
+**14** `FREE_TO_PLAY_ONCE`. `ChoiceKind` 6–7 remain B4.5's permanent gaps; kind
+8 extended the packed kind encoding rather than backfilling them. B3.10b owns
+`CardFlag` bit 10 plus bits 11–13 as a private three-bit saved-base cost
+payload; bit 14 was disjoint. No new opcode was needed — the work extended the
+existing `CHOOSE_CARD` machinery — and no `SCHEMA_VERSION` bump: the optional
+bit (`extra` bit 14) and the runtime selected-card count (`extra` bits 16–19)
+both fit previously-zero bits of the queue item's existing `flags` word.
+`CardFlag` bit 15 stays free.
 
 ### Wave-B allocation — 2026-07-27, B3.11 (single task, staged pipeline in one worktree)
 
@@ -447,29 +452,25 @@ committing rather than take unallocated ids or land a fragment. That was correct
   corrected the losing Discovery source claim and made unsupported card
   `native:` fail loudly · [log](stage-b-log.md#b310b)
 
-### B3.10c `[ ]` Colorless uncommons — mandatory optional-selection closure
-**Deps:** B3.10b + card-limbo.
-**Deliverables:** Purity (`CardId` **109**) and Forethought (`CardId` **101**),
-both live — **neither card may be deferred or left as an inert registry row**.
-Use the shared allocations above: `ChoiceKind` 8, `ActionVerb` 4, fuzz
-`MoveCat` 25 and `CardFlag::FREE_TO_PLAY_ONCE` bit 14; extend the existing
-`CHOOSE_CARD` machinery, public `ActionMask`, observation/translator surface and
-fuzz enumerator with an explicit confirm action. Purity exhausts any number
-from zero through 3 (5 upgraded), then exhausts itself. Forethought base moves
-exactly one chosen hand card to the **bottom** of draw (auto-resolving when only
-one exists); upgraded Forethought moves zero-to-all chosen cards. Each moved
-card whose combat base `cost > 0` receives `FREE_TO_PLAY_ONCE`; a zero-cost
-card does not. Pin the flag's one-play lifetime and draw-bottom ordering,
-including multiple selected cards.
-**Provenance:** `Purity.java:24-40`; `ExhaustAction.java:28-35,73-109`;
-`Forethought.java:24-39`; `ForethoughtAction.java:24-65`.
-**Acceptance:** tier-2 per card; directed public-API scripts for zero-card
-confirm, partial/max selections, base forced-one, bottom order, and
-`FREE_TO_PLAY_ONCE` clearing after one play.
-**Inherited:** none from these two cards may be re-deferred. The general
-optional multi-select surface also unblocks Gambling Chip, but that relic body
-remains its own obligation.
-**Log:** —
+- **B3.10c** `[x]` Colorless uncommons — mandatory optional-selection closure —
+  Purity (109) and Forethought (101), both live; the **zero-to-N CHOOSE with an
+  explicit confirm**, which is a public `ActionMask` change: `ActionVerb` 4
+  `CONFIRM`, `ChoiceKind` 8 `PUT_ON_DRAW_BOTTOM`, fuzz `MoveCat` 25
+  `CHOICE_CONFIRM` (`COUNT` 25 → 26), `CardFlag` bit 14 `FREE_TO_PLAY_ONCE`, no
+  new opcode and **no schema change** — the picks live as the hand's trailing
+  suffix with a four-bit count in the open item's flags, exactly the game's own
+  `p.hand` / `selectedCards` split, so pick order (exhaust order, draw-bottom
+  order) is carried by the array itself. `ActionMask` gains `choice_optional` /
+  `can_confirm_choice` / `choice_selected_count`, all three compared by the
+  four-span overload's mask-equality assert. Pinned against the Java: Purity's
+  `anyNumber` guard means a small hand still opens the screen rather than
+  auto-exhausting, and its `isRandom == false` means it spends no RNG on any
+  path; Forethought's forced single-card path bills **no** `cardRandomRng`, and
+  its `cost > 0` grant reads the combat BASE cost. Discharges the translator's
+  deferred `can_pick_zero` — `HAND_SELECT` is mapped, with the un-serialized
+  manipulation kind stated rather than invented and every unmodelled shape
+  refused. Colorless UNCOMMON block 92-111 now dense; `kCardsCount` 124 → 126;
+  both rows join `kColorlessCombatPool` · [log](stage-b-log.md#b310c)
 
 - **B3.11** `[x]` ∥ Colorless rares — all 15 live (none deferred, none inert), ids 112-126 in `addColorlessCards` alphabetical order; powers 81-84 MAYHEM/MAGNETISM/PANACHE/THE_BOMB — **The Bomb is the first instanced (non-merging) power**, with value-keyed queued reduce/remove because compaction makes queued slot indices stale; opcodes 54-57 `UPGRADE_ALL`/`RANDOM_CARD_TO_DRAW`/`DRAW_PILE_FETCH`/`DAMAGE_GREED`; `ChoiceKind::DRAW_TO_HAND`=9 over new `ChoiceSource::DRAW`=4 with a `requires_draw_pile_type` legality column; `kIroncladSkillPool` pinned as the in-order SKILL subsequence of the combat pool; owner-approved **schema 5→6** (`PowerSlot` +`counter`, instanced powers, combat-gold accumulator settled once through `gain_gold` at fold-back) with a mechanical layout-transform fixture proof, byte-identical over all 20 fixtures; fix-forwards: Sadistic's missing Shackled exclusion, PutOnDeck forced-path `cardRandomRng` billing (Warcry), the ≥8 choice-kind packing; Mayhem's CFR-unavailable anonymous body reconstructed from `DistilledChaosPotion.java:41` + `Havoc.java:31` and declared in provenance; discharges both B3.2-inherited rows; one new obligation row (stolen-gold clamp ordering corner) · [log](stage-b-log.md#b311)
 
@@ -890,6 +891,25 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-27 — **B3.10c landed: Purity and Forethought live, and with them the
+  engine's first NON-COUNTED choice.** Every prior `CHOOSE_CARD` selected a
+  fixed number and ended when it was met; a zero-to-N screen ends on a button,
+  so `ActionVerb` 4 `CONFIRM` is a public `advance()`/`ActionMask` addition and
+  `CHOOSE` becomes a toggle while such a screen is open. It cost **no schema
+  bump and no new opcode**: the picks are held as the hand's trailing suffix
+  with a four-bit count in the open item's `flags`, which is the game's own
+  `p.hand` / `selectedCards` split rather than a model of it — and it is why
+  pick order, the thing the confirm applies in, needs no separate storage.
+  `ChoiceKind` 8 `PUT_ON_DRAW_BOTTOM`, fuzz `MoveCat` 25 `CHOICE_CONFIRM`
+  (`COUNT` → 26) and `CardFlag` bit 14 `FREE_TO_PLAY_ONCE` are all spent exactly
+  as reserved. The translator's deferred `can_pick_zero` is discharged:
+  `HAND_SELECT` is mapped, and the one thing the protocol genuinely cannot
+  supply — which manipulation the screen was opened for, since the game keeps
+  that in the un-serialized action — is stated at the site rather than invented,
+  with every unmodelled shape refused. Gambling Chip's obligation row is now
+  **unblocked but still unassigned**: this task deliberately did not expand into
+  that relic body. `kCardsCount` 124 → 126 and the colorless UNCOMMON block
+  92-111 is dense. [Archive log.](stage-b-log.md#b310c)
 - 2026-07-27 — **B3.11 landed: all fifteen colorless rares live; the S1
   colorless card set is complete.** Four staged commits in one worktree under
   the Wave-B allocation, serially integrated after an independent full-matrix

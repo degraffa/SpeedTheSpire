@@ -248,14 +248,21 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # (ExhumeAction.update:38-113). Kind 5 packs as 1 | the high kind
                 # bit, so kinds 0-3 stay byte-identical.
                 "exhaust_to_hand": 5,
+                # Forethought / ForethoughtAction: move each selected hand card
+                # to the BOTTOM of the draw pile (moveToBottomOfDeck ->
+                # CardGroup.addToBottom == group.add(0, c)), granting the moved
+                # card a free next play when its AbstractCard.cost is > 0. Kinds
+                # 6-7 are permanent gaps, so this is 8 -- the first kind needing
+                # a FOURTH kind bit (CHOICE_KIND_HIGH_BIT2). The BASE card
+                # authors it mandatory-1; the UPGRADED card authors it with
+                # `optional: true`.
+                "put_on_draw_bottom": 8,
                 # Secret Technique / Secret Weapon: the source pile is the DRAW
                 # PILE, filtered to ONE CardType (SkillFromDeckToHandAction /
                 # AttackFromDeckToHandAction differ only in that type, so
                 # `card_type:` is REQUIRED on the step and is what separates
-                # them). Kinds 6-7 are permanent gaps and kind 8 belongs to the
-                # colorless-uncommon batch landing in parallel; kinds are
-                # append-only, so 9 steps over them rather than backfilling.
-                # Kind 9 needs a FOURTH kind bit -- see CHOICE_KIND_HIGH_BIT2.
+                # them). Kinds 6-7 are permanent gaps; kinds are append-only, so
+                # 9 steps over them rather than backfilling.
                 "draw_to_hand": 9}
 CHOICE_RANDOM_BIT = 1 << 2
 CHOICE_KIND_HIGH_BIT = 1 << 3       # ChoiceKind bit 2
@@ -272,6 +279,13 @@ CHOICE_KIND_HIGH_BIT2 = 1 << 9
 # raw type would be indistinguishable from an absent key, which is exactly the
 # silent-misauthoring hole CONDITIONAL_DRAW's required `card_type:` closes.
 CHOICE_TYPE_FILTER_SHIFT = 10
+# CHOOSE_CARD `optional: true` (bit 14): the hand-select screen opened with
+# anyNumber && canPickZero -- it selects ZERO to `amount` cards and is ended by
+# an explicit confirm, never by reaching a count. Bit 13 is the runtime
+# draw-source latch and bits 16-19 the runtime selected-card counter, so 14 is
+# the free author-visible bit. Purity (ExhaustAction(magic, false, true, true))
+# and upgraded Forethought (open(msg, 99, true, true)) are the two authors.
+CHOICE_OPTIONAL_BIT = 1 << 14
 # Thinking Ahead: an author-only queue-time guard, never read by the
 # interpreter's execute path. ThinkingAhead.use (:32-37) queues
 # PutOnDeckAction(1, false) only when AbstractDungeon.player.hand.size() > 0 AT

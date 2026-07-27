@@ -1550,13 +1550,16 @@
 # pool be emitted in library order later, avoiding the documented interim
 # deviation kIroncladAttackPool still carries (registry-id order).
 #
-# The remaining INTERIOR GAPS are deliberate placeholders, not errors:
-#   101 Forethought, 109 Purity
-#      -- the two owned by mandatory next task B3.10c (OPTIONAL zero-to-all
-#         multi-select, Forethought draw-bottom/freeToPlayOnce).
-# The loader enforces id UNIQUENESS, never contiguity, and no emitted table is a
-# dense id-indexed array, so the holes cost nothing at runtime. Never renumber to
-# close one.
+# Ids 92-111 are COMPLETE: the two interior ids held back while the engine had no
+# optional-selection machinery -- 101 Forethought and 109 Purity -- are filled in
+# below, each in its library-order position. The loader enforces id UNIQUENESS,
+# never contiguity, so nothing depended on the holes; they are simply gone.
+#
+# OPTIONAL (zero-to-N) CHOOSE_CARD steps enter the authoring vocabulary with
+# those two. `optional: true` marks a hand-select screen opened with
+# anyNumber && canPickZero: it selects between ZERO and `amount` cards and is
+# ended by an explicit confirm rather than by reaching a count. The public
+# ActionMask grows a confirm move to match (advance.hpp).
 #
 # Every row below carries `color: COLORLESS`, so none of them joins
 # kIroncladAttackPool (which is `color == "RED"`-gated) -- its count is unchanged.
@@ -1704,6 +1707,23 @@
     - {op: DAMAGE, target: CARD_TARGET, amount: 6}
     - {op: DRAW, target: SELF, amount: 1}
 
+- id: 101
+  name: FORETHOUGHT
+  game_id: "Forethought"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: []
+  provenance: "Forethought (Forethought.java:24-45): ctor (:24-26) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.NONE -- no magicNumber, no exhaust. use (:28-31) is a single addToBot ForethoughtAction(this.upgraded). upgrade (:33-40) upgradeName + a new rawDescription and NOTHING else: no cost change, no flag change, so `upgraded_flags` stays empty and the upgraded cost row is the base one. The ONLY difference between the rows is the action's `chooseAny` argument, i.e. the SELECTION MODE. ForethoughtAction.update (ForethoughtAction.java:30-66): (a) empty hand -> isDone, nothing at all (:33-36); (b) hand.size() == 1 && !chooseAny -> the FORCED path (:37-46): c = hand.getTopCard() (the LAST hand entry, CardGroup.java:471-473), `if (c.cost > 0) c.freeToPlayOnce = true`, moveToBottomOfDeck(c), done -- note NO cardRandomRng draw anywhere on this path, unlike PutOnDeckAction's forced branch which spends one per moved card; (c) !chooseAny -> handCardSelectScreen.open(msg, 1, false), a MANDATORY exactly-one screen (:47-48); (d) chooseAny -> open(msg, 99, true, true), anyNumber AND canPickZero -- the OPTIONAL zero-to-all screen with an explicit confirm (:50). On retrieval (:55-64) it walks selectedCards.group IN PICK ORDER, applying the same `cost > 0 -> freeToPlayOnce` grant and moveToBottomOfDeck to each. The cost predicate reads AbstractCard.cost -- the combat BASE cost, not costForTurn -- so a card made free for the turn only still qualifies, and a permanently-zeroed one does not. moveToBottomOfDeck -> CardGroup.addToBottom == group.add(0, c) (:459-461,898-902), so with several cards the FIRST picked ends up nearest the top of the draw pile and is drawn first. The base row's mandatory-1 selection reuses the existing forced/prompted CHOOSE_CARD machinery: eligible <= amount auto-resolves, which for hand size <= 1 is exactly branches (a) and (b)."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_bottom, amount: 1}
+  upgraded:
+    # amount 99 is ForethoughtAction's own literal (:50) -- no hand can reach it,
+    # so `optional` alone bounds the pick count at the hand size.
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_bottom, amount: 99, optional: true}
+
 - id: 102
   name: GOOD_INSTINCTS
   game_id: "Good Instincts"
@@ -1812,6 +1832,21 @@
   upgraded:
     - {op: BLOCK, target: SELF, amount: 40}
     - {op: APPLY_POWER, target: SELF, amount: 2, power: NO_BLOCK}
+
+- id: 109
+  name: PURITY
+  game_id: "Purity"
+  color: COLORLESS
+  rarity: UNCOMMON
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "Purity (Purity.java:24-46): ctor (:24-28) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. use (:30-33) is a single addToBot ExhaustAction(this.magicNumber, false, true, true) -- amount = magic, isRandom FALSE, anyNumber TRUE, canPickZero TRUE. upgrade (:35-41) is upgradeMagicNumber(2) -> 5 and touches nothing else, so both rows cost 0 and both exhaust. ExhaustAction.update (ExhaustAction.java:73-110) in branch order: hand.size() == 0 -> isDone, nothing (:76-79); `!anyNumber && hand.size() <= amount` -> exhaust the WHOLE hand with no screen (:80-89) -- NOT REACHABLE HERE, because anyNumber is true, which is the difference that matters: a 2-card hand under a Purity that may take 3 still opens the screen and may legally take none of them; isRandom -> getRandomCard(cardRandomRng) per pick (:90-94) -- also unreachable, isRandom is false, so PURITY SPENDS NO RNG AT ALL; otherwise open(TEXT[0], amount, anyNumber, canPickZero) (:96-99), the OPTIONAL zero-to-`magic` screen. On retrieval (:102-108) it walks selectedCards.group IN PICK ORDER calling moveToExhaustPile on each, so the exhaust-pile order is the PICK order and every card's onExhaust fires in it. Purity's own exhaust is not part of this action: use() queues the ExhaustAction and AbstractPlayer.useCard (:1370) queues the UseCardAction BEHIND it, so the picks exhaust first and Purity lands on top of them."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: exhaust, amount: 3, optional: true}
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: exhaust, amount: 5, optional: true}
 
 - id: 110
   name: SWIFT_STRIKE
