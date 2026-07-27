@@ -238,6 +238,23 @@ B3.10b owns `CardFlag` bit 10 plus bits 11–13 as a private three-bit saved-bas
 cost payload; bit 14 is disjoint and available for B3.10c. B3.10c needs no new
 opcode: it extends the existing `CHOOSE_CARD` machinery.
 
+### Wave-B allocation — 2026-07-27, B3.11 (single task, staged pipeline in one worktree)
+
+Allocated by the orchestrator before dispatch; every value below is exclusive
+to B3.11. Unspent values become permanent gaps at landing and are recorded in
+the spent table then.
+
+| Namespace | B3.11 block |
+|---|---|
+| `CardId` | **112–126**, mapped in `CardLibrary.addColorlessCards` alphabetical order: 112 APOTHEOSIS, 113 CHRYSALIS, 114 HAND_OF_GREED, 115 MAGNETISM, 116 MASTER_OF_STRATEGY, 117 MAYHEM, 118 METAMORPHOSIS, 119 PANACHE, 120 SADISTIC_NATURE, 121 SECRET_TECHNIQUE, 122 SECRET_WEAPON, 123 THE_BOMB, 124 THINKING_AHEAD, 125 TRANSMUTATION, 126 VIOLENCE |
+| `PowerId` | **81–86**: 81 MAYHEM, 82 MAGNETISM, 83 PANACHE, 84 THE_BOMB; 85–86 reserve |
+| Opcode | **54–59**: 54 UPGRADE_ALL, 55 RANDOM_CARD_TO_DRAW (pool-parameterized, permanent-0-cost, random draw-pile spot), 56 DRAW_PILE_FETCH (Violence), 57 DAMAGE_GREED; 58–59 reserve (e.g. if extending opcode 52's flags for Transmutation proves unclean) |
+| `ChoiceKind` | **9** DRAW_TO_HAND (+10 reserve); kind 8 stays B3.10c's |
+| `ChoiceSource` | **DRAW = 4** (append after GENERATED=3) |
+| fuzz `MoveCat` | **26** contingency only (25 stays B3.10c's); report if used |
+| `CardFlag` | bit **15** contingency only; report if used |
+| `SCHEMA_VERSION` | **5 → 6**, owner-approved 2026-07-27: `PowerSlot` counter field + non-merging (instanced) power support + `CombatState` in-combat gold accumulator, one bump, one `tools/fixture_gen/` regeneration, one design §11 entry |
+
 **`MonsterState.flags` is a two-region `uint32_t` — allocate from the right
 region.** It was a `uint16_t` and ran out (`kMonsterFlagEscaped` took the last
 bit); it was widened to 32 bits on 2026-07-26, owner-approved, as
@@ -451,7 +468,7 @@ optional multi-select surface also unblocks Gambling Chip, but that relic body
 remains its own obligation.
 **Log:** —
 
-### B3.11 `[ ]` ∥ Colorless rares
+### B3.11 `[~]` ∥ Colorless rares
 **Deps:** B3.2 · **Provenance:** cards/colorless RARE (15)
 **Deliverables:** registry entries for the 15 (Apotheosis, Chrysalis, Hand of
 Greed, Magnetism, Master of Strategy, Mayhem, Metamorphosis, Panache, Sadistic
