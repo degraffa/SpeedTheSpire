@@ -178,12 +178,24 @@ void open_neow_card_screen(RewardScreen& rewards, const RunRewardItem& item) noe
 //                ten ordinary curses minus this card's own id.
 //   otherwise -> returnTrulyRandomCardFromAvailable (:1016-1045): commonCardPool
 //                ++ srcUncommonCardPool ++ srcRareCardPool, minus this card's
-//                own id. The src* copies are byte-identical to the live pools in
-//                S1 (initializeCardPools copies them at dungeon init, :1180-1199,
-//                and nothing removes from either -- getRandomCard is a pure
-//                indexed read), so one list serves both spellings.
+//                own id.
 // A BASIC card (every Neow-era master-deck row but the starting curse) is in
 // none of these pools, so nothing is excluded from its list.
+//
+// THE THREE-POOL LIST MIXES TWO SPELLINGS, AND THE MIX IS OBSERVABLE. Only the
+// first term reads a LIVE pool. The other two read the `src*` copies, and
+// initializeCardPools builds every copy with `addToBottom`
+// (AbstractDungeon.java:1180-1199), which is `group.add(0, c)` -- a PREPEND
+// (CardGroup.java:459-461) -- so a `src*` pool holds its rarity's library order
+// BACKWARDS. The list is therefore plain-order commons, then REVERSED
+// uncommons, then REVERSED rares. Walking all three forwards was the earlier
+// reading, from before the CardLibrary order itself was pinned, and it is
+// indistinguishable from the correct one until the pools stop being symmetric:
+// the oracle capture is what separated them, on two seeds whose transformed
+// identities landed in the uncommon and rare blocks. `src_combat_order` in the
+// registry emitter encodes the same reversal for the pools whose only consumer
+// is a `src*` read; this call site cannot use those, because its FIRST block is
+// the un-copied pool.
 CardId transform_card(RngStream& neow_rng, CardId prohibited) noexcept {
     const CardDef* def = card_def(prohibited);
     const bool is_curse = def != nullptr && def->type == CardType::CURSE;
@@ -211,13 +223,13 @@ CardId transform_card(RngStream& neow_rng, CardId prohibited) noexcept {
         }
     } else {
         for (int i = 0; i < kIroncladCommonPoolCount; ++i) {
-            push(kIroncladCommonPool[static_cast<std::size_t>(i)]);
+            push(kIroncladCommonPool[static_cast<std::size_t>(i)]);  // live pool
         }
-        for (int i = 0; i < kIroncladUncommonPoolCount; ++i) {
-            push(kIroncladUncommonPool[static_cast<std::size_t>(i)]);
+        for (int i = kIroncladUncommonPoolCount - 1; i >= 0; --i) {
+            push(kIroncladUncommonPool[static_cast<std::size_t>(i)]);  // src copy
         }
-        for (int i = 0; i < kIroncladRarePoolCount; ++i) {
-            push(kIroncladRarePool[static_cast<std::size_t>(i)]);
+        for (int i = kIroncladRarePoolCount - 1; i >= 0; --i) {
+            push(kIroncladRarePool[static_cast<std::size_t>(i)]);  // src copy
         }
     }
     assert(n > 0);

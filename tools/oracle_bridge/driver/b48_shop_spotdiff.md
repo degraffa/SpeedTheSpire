@@ -112,7 +112,7 @@ setup and can be copied row for row.
 | `screen_state.potions[0..2]` id + price | `shop.potions[i]` |
 | `purge_cost` | `shop.actual_purge_cost` |
 | `merchantRng` `{counter, s0, s1}` | +16 from the pre-entry state, raw state included |
-| `cardRng`, `potionRng` | +12 and +3-or-more from the pre-entry state |
+| `cardRng`, `potionRng` | +12-or-more (a dedupe re-roll costs an extra draw) and +3-or-more from the pre-entry state |
 | `cardBlizzRandomizer` | **unchanged** — see the traps below |
 
 ### 4b. THE POST-PURCHASE STATE
@@ -191,3 +191,71 @@ block, and record the campaign id plus the seed list in its Log. Anything else
 is a divergence: follow conventions §5 — re-read the cited Java first, audit
 the fork's strip patches second, promote the reproducer to a regression
 fixture, and do not tick the box.
+
+## 6. What actually ran — 2026-07-27
+
+**No `b48_shop_oracle_*` campaign was launched, and §2's seed-picking advice was
+never needed.** `b47_treasure_oracle_20260727T204809Z_claude01`, taken for
+B4.7, walks thirty runs deep into Act 1 under the same `random-legal` policy,
+and three of them reached a merchant: **STS00054, STS00057 and STS00074** — the
+three seeds §5's bar asks for, without a new capture. All three are
+strict-validated and translate `OK`.
+
+Those three runs hold **five merchants**, because two of them enter two shop
+rooms:
+
+| Run | Floor | What the capture shows |
+|---|---|---|
+| STS00054 | 2 | entered and left without opening the screen — streams and pools only |
+| STS00054 | 7 | full shelf; buys Havoc (59) and an Explosive Potion (56) |
+| STS00057 | 5 | full shelf; **purges a card for 75**, ramping the run cost to 100 |
+| STS00074 | 3 | full shelf; buys a Skill Potion (57) and Havoc (54) |
+| STS00074 | 5 | full shelf; broke at 17 gold, buys nothing |
+
+**The read-out is a committed mode.** §4 says to drive the sim side by hand; it
+is now `replay_run_diff --shop`, which does §4a and §4b per visit:
+
+```bash
+build/debug/tools/oracle_bridge/replay/replay_run_diff --shop \
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/<campaign>/run_*.jsonl
+```
+
+Two details of the mechanism are worth recording, because §4 leaves them open.
+
+- **A shop `choose i` indexes the game's `choice_list`, not a slot.** The list
+  is the AFFORDABLE, unsold rows by lowercased display name — purge first if it
+  can be paid for, then cards, relics, potions — so it renumbers after every
+  purchase. The harness resolves the command by joining that name back to the
+  captured shelf rather than re-deriving the filter, which keeps the read-out
+  measuring the merchant instead of measuring an affordability model.
+- **The sale slot is inferred from the capture alone.** The screen carries no
+  sale flag, so the mode takes the colored slot with the smallest
+  price/base-price ratio (base from the row's own `rarity`) and requires both
+  that it be `shop.sale_index` and that the ratio really be a halving. Price
+  equality across all seven cards would already imply it; this makes the check
+  independent of the simulator's own answer.
+
+**Result: all five merchants zero-diff.** Every card id, relic id, potion id
+and price on the four visible shelves; every purge cost and `purge_available`;
+`merchantRng` +16 exactly on all five, `cardRng` +12-or-more and `potionRng`
++3-or-more, against the first in-room record, with all five relic-pool orders
+and `cardBlizzRandomizer` compared alongside. Then the whole `RunState` after every
+purchase. Three visits walk end to end clean; two stop, **after every purchase
+was verified**, at an out-of-combat potion discard the run layer has no verb for.
+
+**On the traps.** Trap 1 and trap 2 are both confirmed: the first shop of each
+run offered removal at exactly 75, STS00057's purge ramped the run-persistent
+cost to 100, and no A20 shelf moved the purge cost off those values while every
+stock price carried the x1.1. Trap 5 held on all five (16 draws, never 17), and
+trap 3's `cardBlizzRandomizer` never moved across a build. Trap 4 was not
+exercised — none of the five popped one of the four shop-gated relics — so it
+stays on the tier-2 test (`ShopDrawOrder.ShopRelicDrawsSeeTheInShopCanSpawnGate`).
+
+**On the known-benign mismatches.** No card-id mismatch occurred anywhere, as
+§4's first bullet predicts. The Courier was not owned by any of the three runs,
+so the restock question is untouched and its deferred row stands unchanged.
+
+**Frozen in CI.** STS00074's floor-3 merchant, including both purchases, is now
+`ShopCapture.B47Seed1790050543999Floor3MatchesTheRecordedMerchantAndItsPurchases`
+in `tests/shop_test.cpp` — the §1 vector's sibling, and the first one that
+exercises spending.

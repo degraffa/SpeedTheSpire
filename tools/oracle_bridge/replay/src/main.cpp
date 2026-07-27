@@ -2,7 +2,20 @@
 //
 // Usage:
 //   replay_run_diff <run.jsonl> [<run2.jsonl> ...]
+//                   [--replay | --neow | --shop]
 //                   [--verbose] [--pool-evidence] [--stop-on-diff]
+//
+// FOUR MODES, one per acceptance read-out, all over the same artifacts:
+//
+//   (default) the combat-reward spot-diff  -- B4.5, see spot_diff_one below
+//   --replay  the whole-run replay          -- diagnosis, see replay_one below
+//   --neow    the floor-0 blessing spot-diff -- B4.14, see neow_spot_diff_one
+//   --shop    the merchant spot-diff         -- B4.8,  see shop_spot_diff_one
+//
+// The three spot-diff modes all SEED the simulator from a translated RunState
+// rather than re-driving the run from `run_begin`, which is what makes them
+// independent of combat fidelity; only --replay re-drives, and only it needs
+// every intervening room to be modelled.
 //
 // WHAT IT DOES. A campaign artifact is a sequence of (game state, command)
 // records: record k holds the live game's state BEFORE its `action_command` was
@@ -53,6 +66,8 @@
 // The exit code is the number of files that ended with a divergence or an
 // unmapped command (0 == every file replayed clean to its terminal).
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -68,8 +83,10 @@
 
 #include "sts/diff/differ.hpp"
 #include "sts/engine/combat_rewards.hpp"
+#include "sts/engine/neow.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_state.hpp"
+#include "sts/engine/shop.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
 #include "sts/translate/translate.hpp"
@@ -86,6 +103,19 @@ using namespace sts::engine;
 // to interpret the command, so it does one extra light JSON pass over the same
 // file and keeps only the few presentation fields the mapping table above
 // consults (plus the CARD_REWARD offer, which is the pool-order evidence).
+
+// One SHOP_SCREEN row exactly as the merchant presented it. `name` is the
+// DISPLAY name, which is what the stock command indexes through: the game's
+// `choice_list` is a lowercased list of display names, not of slot indices, so
+// the join from `choose i` back to a slot goes through this field.
+struct StockRow {
+    std::string id;
+    std::string name;
+    std::string rarity;  // cards only; the sale-slot inference reads it
+    int price = 0;
+    int upgrades = 0;
+};
+
 struct ScreenInfo {
     std::string screen_type;
     int floor = 0;
@@ -96,7 +126,30 @@ struct ScreenInfo {
     std::vector<std::string> reward_types;   // COMBAT_REWARD: rewards[].reward_type
     std::vector<std::string> option_labels;  // EVENT: the dialog buttons
     std::string event_id;
+    std::vector<std::string> choice_list;    // the command's own index space
+    // SHOP_SCREEN only:
+    bool shop_screen = false;
+    std::vector<StockRow> shop_cards;    // 5 colored, then the 2 colorless
+    std::vector<StockRow> shop_relics;
+    std::vector<StockRow> shop_potions;
+    int purge_cost = 0;
+    bool purge_available = false;
 };
+
+void read_stock(const json& screen_state, const char* key,
+                std::vector<StockRow>& out) {
+    const auto it = screen_state.find(key);
+    if (it == screen_state.end() || !it->is_array()) return;
+    for (const json& row : *it) {
+        StockRow r;
+        r.id = row.value("id", std::string{});
+        r.name = row.value("name", std::string{});
+        r.rarity = row.value("rarity", std::string{});
+        r.price = row.value("price", 0);
+        r.upgrades = row.value("upgrades", 0);
+        out.push_back(std::move(r));
+    }
+}
 
 [[nodiscard]] std::vector<ScreenInfo> read_screens(const std::string& path) {
     std::vector<ScreenInfo> out;
@@ -112,6 +165,11 @@ struct ScreenInfo {
         s.screen_type = gs.value("screen_type", std::string{});
         s.floor = gs.value("floor", 0);
         s.room_type = gs.value("room_type", std::string{});
+        if (const auto cl = gs.find("choice_list"); cl != gs.end() && cl->is_array()) {
+            for (const json& c : *cl)
+                s.choice_list.push_back(c.is_string() ? c.get<std::string>()
+                                                      : std::string{});
+        }
         const auto ss = gs.find("screen_state");
         if (ss != gs.end() && ss->is_object()) {
             if (const auto n = ss->find("next_nodes"); n != ss->end() && n->is_array()) {
@@ -129,6 +187,14 @@ struct ScreenInfo {
             if (const auto o = ss->find("options"); o != ss->end() && o->is_array()) {
                 for (const json& opt : *o)
                     s.option_labels.push_back(opt.value("label", std::string{}));
+            }
+            if (s.screen_type == "SHOP_SCREEN") {
+                s.shop_screen = true;
+                read_stock(*ss, "cards", s.shop_cards);
+                read_stock(*ss, "relics", s.shop_relics);
+                read_stock(*ss, "potions", s.shop_potions);
+                s.purge_cost = ss->value("purge_cost", 0);
+                s.purge_available = ss->value("purge_available", false);
             }
         }
         out.push_back(std::move(s));
@@ -395,15 +461,27 @@ struct MappedCommand {
 //   map[] -- the capture's MAP screen exposes only the current node and its
 //       outgoing edges, never the whole grid, so the translator has nothing to
 //       write. Map generation has its own node-for-node oracle proof (B4.1/B4.2).
-//   purge_cost -- shop state; the run layer has no shop, so it never moves off
-//       its initial value.
-//   neow_rng -- the fork's oracle block emits 13 streams and neowRng is not one
-//       of them, so the capture carries no value to compare against.
+//   purge_cost -- shop state; the run layer has no shop room, so a replayed
+//       run never moves it. (The --shop mode DOES compare it: that mode drives
+//       the merchant directly, where the ramp is the point.)
+//   neow_rng -- the oracle block emits it, but only at floor 0: NeowEvent's rng
+//       is event-scoped, so every later dump omits the key and the translator
+//       leaves a value-init stream behind. (The --neow mode DOES compare it:
+//       every record it looks at is a floor-0 record that carries the value.)
 void neutralize_incomparable(RunState& s) noexcept {
     for (auto& c : s.master_deck) c.cost_now = 0;
     for (auto& n : s.map) n = MapNode{};
     s.purge_cost = 0;
     s.neow_rng = RngStream{};
+}
+
+// The floor-0 / merchant subset of the above. `map[]` is still unavailable from
+// a capture, and a master-deck row's display cost is still not a schema field,
+// but neither the Neow nor the shop read-out has any reason to drop purge_cost
+// or neow_rng -- both are carried by every record those modes compare.
+void neutralize_presentation_only(RunState& s) noexcept {
+    for (auto& c : s.master_deck) c.cost_now = 0;
+    for (auto& n : s.map) n = MapNode{};
 }
 
 // DURING a combat the run layer deliberately does not write the live sheet back
@@ -456,6 +534,7 @@ void step(RunController& rc, Action a) {
         case RunPhase::REST_SITE: return "REST_SITE";
         case RunPhase::TREASURE_ROOM: return "TREASURE_ROOM";
         case RunPhase::EVENT_DIALOG: return "EVENT_DIALOG";
+        case RunPhase::SHOP: return "SHOP";
     }
     return "?";
 }
@@ -466,6 +545,8 @@ struct Options {
     bool stop_on_diff = false;
     bool combat = false;   // also diff the in-combat CombatState (diagnosis aid)
     bool full_replay = false;  // whole-run replay instead of the reward spot-diff
+    bool neow = false;         // the floor-0 blessing spot-diff
+    bool shop = false;         // the merchant spot-diff
 };
 
 // One file's verdict.
@@ -810,6 +891,649 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
     return v;
 }
 
+// --- the Neow spot-diff (--neow) ---------------------------------------------
+//
+// Floor 0 is the cheapest oracle comparison in the set, because nothing has to
+// be replayed to reach it: `run_begin(seed, 20)` IS the blessing screen
+// (neow.hpp, "the sim rolls this at run start"). Three checkpoints per seed:
+//
+//   OPTIONS     at the four-button record -- the four option meanings, joined
+//               to the capture's localized labels, and the whole RunState with
+//               neowRng included (the oracle block carries it here).
+//   ACTIVATION  at the record immediately after the option was pressed -- the
+//               drawback and the payout have run. This is where a boss swap's
+//               ACQUISITION is proved: Burning Blood gone, the boss pool popped
+//               by one, relicRng untouched.
+//   POST-CHOICE at the first floor-0 MAP record -- the payout's sub-screen has
+//               resolved and Neow is finished.
+//
+// A boss relic whose onEquip body is DEFERRED (Astrolabe and Empty Cage each
+// open a grid the sim does not) reaches ACTIVATION and stops there. That is the
+// documented divergence class, and it is exactly why ACTIVATION is a checkpoint
+// of its own rather than a step on the way to the last one.
+
+// THE LABEL JOIN. The capture carries NeowReward's localized optionLabel; the
+// sim carries the meaning. The table is written in the RENDER direction -- sim
+// meaning -> the label the game would have printed -- rather than as a parse,
+// because three of the labels interpolate a number (the 10 % max-HP bonus and
+// its double, the 10 % max-HP loss, and the current-HP damage) and rendering
+// checks those numbers as part of the same comparison. A parse would have to
+// throw them away. Category 2's label is the DRAWBACK text followed by the
+// reward text, in the order they were rolled (NeowReward.java:105-122).
+[[nodiscard]] std::string neow_reward_label(NeowRewardType t, int hp_bonus) {
+    switch (t) {
+        case NeowRewardType::THREE_CARDS: return "Choose a Card to obtain";
+        case NeowRewardType::ONE_RANDOM_RARE_CARD: return "Obtain a random rare Card";
+        case NeowRewardType::REMOVE_CARD: return "Remove a Card from your deck";
+        case NeowRewardType::UPGRADE_CARD: return "Upgrade a Card";
+        case NeowRewardType::TRANSFORM_CARD: return "Transform a Card";
+        case NeowRewardType::RANDOM_COLORLESS: return "Choose a colorless Card to obtain";
+        case NeowRewardType::THREE_SMALL_POTIONS: return "Obtain 3 random Potions";
+        case NeowRewardType::RANDOM_COMMON_RELIC: return "Obtain a random common Relic";
+        case NeowRewardType::TEN_PERCENT_HP_BONUS:
+            return "Max HP +" + std::to_string(hp_bonus);
+        case NeowRewardType::THREE_ENEMY_KILL:
+            return "Enemies in your next three combats have 1 HP";
+        case NeowRewardType::HUNDRED_GOLD: return "Obtain 100 Gold";
+        case NeowRewardType::RANDOM_COLORLESS_2:
+            return "Choose a rare colorless Card to obtain";
+        case NeowRewardType::REMOVE_TWO: return "Remove 2 Cards";
+        case NeowRewardType::ONE_RARE_RELIC: return "Obtain a random rare Relic";
+        case NeowRewardType::THREE_RARE_CARDS: return "Choose a rare Card to obtain";
+        case NeowRewardType::TWO_FIFTY_GOLD: return "Gain 250 Gold";
+        case NeowRewardType::TRANSFORM_TWO_CARDS: return "Transform 2 Cards";
+        case NeowRewardType::TWENTY_PERCENT_HP_BONUS:
+            return "Max HP +" + std::to_string(hp_bonus * 2);
+        case NeowRewardType::BOSS_RELIC:
+            return "Lose your starting Relic Obtain a random boss Relic";
+        case NeowRewardType::NONE: break;
+    }
+    return "(none)";
+}
+
+[[nodiscard]] std::string neow_drawback_label(NeowDrawback d, int hp_bonus, int hp) {
+    switch (d) {
+        case NeowDrawback::TEN_PERCENT_HP_LOSS:
+            return "Lose " + std::to_string(hp_bonus) + " Max HP";
+        case NeowDrawback::NO_GOLD: return "Lose all Gold";
+        case NeowDrawback::CURSE: return "Obtain a Curse";
+        case NeowDrawback::PERCENT_DAMAGE:
+            // NeowReward.java:206 -- currentHealth / 10 * 3, integer-divided.
+            return "Take " + std::to_string(hp / 10 * 3) + " damage";
+        case NeowDrawback::NONE: break;
+    }
+    return "";
+}
+
+// The whole label for one slot, drawback first.
+[[nodiscard]] std::string neow_option_label(const NeowState& n, int slot, int hp) {
+    const auto d = static_cast<NeowDrawback>(n.option_drawback[slot]);
+    const std::string reward =
+        neow_reward_label(static_cast<NeowRewardType>(n.option_type[slot]),
+                          n.hp_bonus);
+    if (d == NeowDrawback::NONE) return reward;
+    return neow_drawback_label(d, n.hp_bonus, hp) + " " + reward;
+}
+
+// The grid screens buffer their picks, because the game's confirm button is not
+// uniform: a one-pick grid shows it (`choose` selects, `proceed` commits, and
+// `cancel` clears the selection again -- all three appear in the captures),
+// while a two-pick grid commits on its second `choose` with no button at all.
+// Rather than model the button, the harness reads the capture: picks accumulate
+// and are flushed on `proceed`, or when the grid screen is gone from the next
+// record. It also snapshots the grid's index space once, at open, because
+// CommunicationMod's `choice_list` is the UNSHRUNK filtered deck -- selecting
+// the 5th row does not renumber the 8th -- whereas the sim's legal mask drops
+// a picked row immediately.
+struct GridSession {
+    bool open = false;
+    std::vector<int> filtered;  // master-deck indices, in grid order
+    std::vector<int> pending;   // grid indices selected, not yet committed
+};
+
+void open_grid_session(const RunController& rc, GridSession& g) {
+    g.open = true;
+    g.filtered.clear();
+    g.pending.clear();
+    RunActionMask m{};
+    legal_actions(rc, m);
+    for (int i = 0; i < kMasterDeckCap; ++i)
+        if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
+}
+
+struct NeowVerdict {
+    std::string seed_string;
+    bool options_clean = false;
+    bool activation_clean = false;
+    bool post_clean = false;
+    bool post_reached = false;
+    std::string chosen;      // the rendered meaning of the option taken
+    std::string stop_reason; // why POST-CHOICE was not reached, when it was not
+};
+
+// Print a report and say whether it was empty.
+[[nodiscard]] bool report_checkpoint(const char* what, const std::string& seed,
+                                     const RunState& expected, const RunState& actual) {
+    RunState e = expected;
+    RunState a = actual;
+    neutralize_presentation_only(e);
+    neutralize_presentation_only(a);
+    const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
+    if (rep.empty()) {
+        std::printf("  %-11s OK   %s\n", what, seed.c_str());
+        return true;
+    }
+    std::printf("  %-11s DIFF %s (%zu field%s)\n%s\n", what, seed.c_str(), rep.size(),
+                rep.size() == 1 ? "" : "s", rep.to_string().c_str());
+    return false;
+}
+
+[[nodiscard]] NeowVerdict neow_spot_diff_one(const std::string& path, const Options& opts) {
+    NeowVerdict v;
+    const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
+    const std::vector<ScreenInfo> screens = read_screens(path);
+    if (screens.size() != run.records.size())
+        throw std::runtime_error("screen/record count mismatch in " + path);
+    v.seed_string = run.seed_string;
+
+    // The blessing screen is the EVENT record whose Neow dialog has all four
+    // buttons up; the intro [Talk] screen has one (PROTOCOL "Event-scoped").
+    std::size_t k = 0;
+    for (; k < screens.size(); ++k)
+        if (screens[k].event_id == "Neow Event" && screens[k].option_labels.size() == 4)
+            break;
+    if (k == screens.size()) {
+        v.stop_reason = "no four-option Neow blessing record";
+        return v;
+    }
+
+    RunController rc = run_begin(run.seed, 20);
+
+    // 1. OPTIONS.
+    bool labels_ok = true;
+    for (int i = 0; i < kNeowOptionCount; ++i) {
+        const std::string sim = neow_option_label(rc.neow, i, rc.run.hp);
+        if (sim == screens[k].option_labels[static_cast<std::size_t>(i)]) continue;
+        labels_ok = false;
+        std::printf("  OPTION %d   DIFF %s\n      game: %s\n      sim : %s\n", i,
+                    run.seed_string.c_str(),
+                    screens[k].option_labels[static_cast<std::size_t>(i)].c_str(),
+                    sim.c_str());
+    }
+    const bool state_ok =
+        report_checkpoint("OPTIONS", run.seed_string, run.records[k].run, rc.run);
+    v.options_clean = labels_ok && state_ok;
+    if (labels_ok && opts.verbose) {
+        std::printf("  OPTIONS OK  %s: [%s | %s | %s | %s]\n", run.seed_string.c_str(),
+                    neow_option_label(rc.neow, 0, rc.run.hp).c_str(),
+                    neow_option_label(rc.neow, 1, rc.run.hp).c_str(),
+                    neow_option_label(rc.neow, 2, rc.run.hp).c_str(),
+                    neow_option_label(rc.neow, 3, rc.run.hp).c_str());
+    }
+
+    // 2. Press the recorded option, then walk to the first MAP record.
+    const std::vector<std::string> p = split_ws(run.records[k].action_command);
+    if (p.size() < 2 || p[0] != "choose") {
+        v.stop_reason = "blessing command is not a choose";
+        return v;
+    }
+    const int chosen = std::stoi(p[1]);
+    if (chosen < 0 || chosen >= kNeowOptionCount) {
+        v.stop_reason = "blessing command chose slot " + std::to_string(chosen);
+        return v;
+    }
+    v.chosen = neow_option_label(rc.neow, chosen, rc.run.hp);
+    step(rc, make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(chosen)));
+
+    if (k + 1 >= run.records.size()) {
+        v.stop_reason = "artifact ends at the blessing";
+        return v;
+    }
+    v.activation_clean =
+        report_checkpoint("ACTIVATION", run.seed_string, run.records[k + 1].run, rc.run);
+
+    GridSession grid;
+    for (std::size_t j = k + 1; j < run.records.size(); ++j) {
+        const ScreenInfo& s = screens[j];
+        if (s.floor != 0) {
+            v.stop_reason = "left floor 0 without a map record";
+            return v;
+        }
+        if (s.screen_type == "MAP") {
+            v.post_reached = true;
+            v.post_clean =
+                report_checkpoint("POST-CHOICE", run.seed_string, run.records[j].run, rc.run);
+            return v;
+        }
+        if (s.screen_type != "GRID") grid = GridSession{};
+
+        const std::vector<std::string> c = split_ws(run.records[j].action_command);
+        if (c.empty()) {
+            v.stop_reason = "empty command at seq " + std::to_string(run.records[j].seq);
+            return v;
+        }
+        if (s.screen_type == "GRID") {
+            if (!grid.open) {
+                // A grid the BLESSING did not open belongs to whatever the
+                // payout handed over -- in practice a boss relic whose onEquip
+                // body is deferred (Astrolabe, Empty Cage). The acquisition
+                // above is still proved; the body is not the blessing's.
+                if (rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
+                    std::string who = "?";
+                    if (rc.run.relic_count > 0)
+                        who = std::string(sts::registry::relic_game_id(
+                            static_cast<RelicId>(
+                                rc.run.relics[rc.run.relic_count - 1].relic_id)));
+                    v.stop_reason =
+                        "the capture opens a grid the blessing did not: " + who +
+                        "'s onEquip body is deferred";
+                    return v;
+                }
+                open_grid_session(rc, grid);
+            }
+            if (c[0] == "cancel") {
+                grid.pending.clear();
+                continue;
+            }
+            if (c[0] == "choose" && c.size() >= 2) grid.pending.push_back(std::stoi(c[1]));
+            const bool closes = j + 1 >= screens.size() || screens[j + 1].screen_type != "GRID";
+            if (c[0] != "proceed" && !closes) continue;
+            for (const int g : grid.pending) {
+                if (g < 0 || g >= static_cast<int>(grid.filtered.size())) {
+                    v.stop_reason = "grid index " + std::to_string(g) + " is off the deck";
+                    return v;
+                }
+                step(rc, make_action(ActionVerb::CHOOSE,
+                                     static_cast<uint8_t>(grid.filtered[static_cast<std::size_t>(g)])));
+            }
+            if (rc.neow.screen == static_cast<uint8_t>(NeowScreen::GRID)) {
+                // The sim still wants picks the capture did not make: the grid
+                // belongs to a relic body the sim defers, not to the blessing.
+                v.stop_reason = "sim's Neow grid outlived the capture's picks "
+                                "(a deferred relic onEquip owns this grid)";
+                return v;
+            }
+            grid = GridSession{};
+            continue;
+        }
+
+        const MappedCommand m = map_command(rc, s, run.records[j].action_command);
+        if (m.kind == MapKind::UNMAPPED || m.kind == MapKind::TERMINAL) {
+            v.stop_reason = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
+                            run.records[j].action_command + "': " +
+                            (m.reason.empty() ? "run terminal" : m.reason);
+            return v;
+        }
+        // The Neow reward screen's Proceed is not the combat-reward Proceed the
+        // shared mapper defers: it closes the potion screen and finishes the
+        // payout (run_advance's NeowScreen::ITEM_REWARD arm).
+        if (s.screen_type == "COMBAT_REWARD" && c[0] == "proceed") {
+            step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+            continue;
+        }
+        for (const Action a : m.actions) step(rc, a);
+    }
+    v.stop_reason = "artifact exhausted before a map record";
+    return v;
+}
+
+// --- the merchant spot-diff (--shop) -----------------------------------------
+//
+// A shop is a pure function of the state the room entry sees, so this mode does
+// not replay anything either. Per shop VISIT:
+//
+//   STOCK      seed a RunState from the last record BEFORE the map choice that
+//              entered the room, call generate_shop, and compare the result
+//              against the captured SHOP_SCREEN: seven card ids + prices, three
+//              relics, three potions, the purge cost, and the merchant's own
+//              stream/pool accounting against the first in-room record.
+//   PURCHASES  restart from the first IN-ROOM record's RunState (which already
+//              carries the room-entry bookkeeping the merchant build is not
+//              responsible for), drive the recorded buys/purges, and diff the
+//              whole RunState against every subsequent in-room record.
+//
+// The shop's card pools are game_id-sorted by CardGroup.getRandomCard before
+// the draw (b48_shop_spotdiff.md §4's known-benign list), so unlike a combat
+// reward there is no library-order carve-out here: a card-id mismatch is a
+// divergence.
+//
+// WHY THIS DRIVES ShopState DIRECTLY AND NOT A RunController PARKED IN
+// RunPhase::SHOP. The phase exists and its CHOOSE flow has its own tests, but
+// parking a controller mid-run needs the transient run scaffolding a capture
+// cannot supply (map cursor, encounter lists and their cursors) -- the same
+// B1.6 gap the reward mode works around. A merchant needs none of it: it is a
+// pure function of the streams, the relic pools, the owned relics and the
+// ascension, all of which the translated RunState carries. Driving the module
+// keeps the read-out about the merchant.
+
+[[nodiscard]] std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return s;
+}
+
+// Which shop row a `choose i` names, resolved through the capture's own
+// choice_list: the game lists the AFFORDABLE unsold rows by display name, so
+// the index means nothing without it.
+enum class ShopPick : uint8_t { NONE, COLORED, COLORLESS, RELIC, POTION, PURGE };
+
+struct ShopTarget {
+    ShopPick what = ShopPick::NONE;
+    uint8_t index = 0;
+};
+
+[[nodiscard]] ShopTarget resolve_shop_choice(const ScreenInfo& s, int choice) {
+    ShopTarget t;
+    if (choice < 0 || choice >= static_cast<int>(s.choice_list.size())) return t;
+    const std::string want = lower(s.choice_list[static_cast<std::size_t>(choice)]);
+    if (want == "purge") {
+        t.what = ShopPick::PURGE;
+        return t;
+    }
+    for (std::size_t i = 0; i < s.shop_cards.size(); ++i) {
+        if (lower(s.shop_cards[i].name) != want) continue;
+        t.what = i < kShopColoredCount ? ShopPick::COLORED : ShopPick::COLORLESS;
+        t.index = static_cast<uint8_t>(i < kShopColoredCount ? i : i - kShopColoredCount);
+        return t;
+    }
+    for (std::size_t i = 0; i < s.shop_relics.size(); ++i) {
+        if (lower(s.shop_relics[i].name) != want) continue;
+        t.what = ShopPick::RELIC;
+        t.index = static_cast<uint8_t>(i);
+        return t;
+    }
+    for (std::size_t i = 0; i < s.shop_potions.size(); ++i) {
+        if (lower(s.shop_potions[i].name) != want) continue;
+        t.what = ShopPick::POTION;
+        t.index = static_cast<uint8_t>(i);
+        return t;
+    }
+    return t;
+}
+
+struct ShopVerdict {
+    int visits = 0;         // merchants built
+    int screens = 0;        // merchants whose stock the capture actually shows
+    int stock_clean = 0;
+    int purchase_clean = 0;  // visits whose whole in-room record walk diffed clean
+    int purchase_partial = 0;
+    int failures = 0;
+};
+
+// One stock row, sim side against capture side.
+void diff_stock_row(const char* group, std::size_t i, const std::string& game_id,
+                    int game_price, int game_upgrade, const std::string& sim_id,
+                    int sim_price, int sim_upgrade, std::vector<std::string>& out) {
+    if (game_id == sim_id && game_price == sim_price && game_upgrade == sim_upgrade)
+        return;
+    out.push_back(std::string(group) + "[" + std::to_string(i) + "]: " + game_id + "@" +
+                  std::to_string(game_price) + (game_upgrade ? "+" : "") + " -> " + sim_id +
+                  "@" + std::to_string(sim_price) + (sim_upgrade ? "+" : ""));
+}
+
+[[nodiscard]] int card_base_price_from_capture(const std::string& rarity) {
+    if (rarity == "RARE") return card_base_price(RewardCardRarity::RARE);
+    if (rarity == "UNCOMMON") return card_base_price(RewardCardRarity::UNCOMMON);
+    return card_base_price(RewardCardRarity::COMMON);
+}
+
+[[nodiscard]] ShopVerdict shop_spot_diff_one(const std::string& path, const Options& opts) {
+    ShopVerdict v;
+    const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
+    const std::vector<ScreenInfo> screens = read_screens(path);
+    if (screens.size() != run.records.size())
+        throw std::runtime_error("screen/record count mismatch in " + path);
+
+    for (std::size_t k = 0; k < screens.size(); ++k) {
+        // A visit opens at the first in-ShopRoom record of a new floor.
+        if (screens[k].room_type != "ShopRoom") continue;
+        if (k > 0 && screens[k - 1].room_type == "ShopRoom" &&
+            screens[k - 1].floor == screens[k].floor)
+            continue;
+        if (k == 0) continue;  // no pre-entry record to seed from
+        ++v.visits;
+        const int floor = screens[k].floor;
+
+        // 1. STOCK, off the pre-entry state.
+        RunState rs = run.records[k - 1].run;
+        const ShopState shop = generate_shop(rs);
+
+        std::vector<std::string> fail;
+        auto stream = [&](const char* name, const RngStream& e, const RngStream& a) {
+            if (e.s0 == a.s0 && e.s1 == a.s1 && e.counter == a.counter) return;
+            fail.push_back(std::string(name) + ": counter " + std::to_string(e.counter) +
+                           " -> " + std::to_string(a.counter) +
+                           (e.s0 == a.s0 && e.s1 == a.s1 ? "" : " (raw state too)"));
+        };
+        const RunState& entered = run.records[k].run;
+        stream("merchant_rng", entered.merchant_rng, rs.merchant_rng);
+        stream("card_rng", entered.card_rng, rs.card_rng);
+        stream("potion_rng", entered.potion_rng, rs.potion_rng);
+        if (entered.card_blizz_randomizer != rs.card_blizz_randomizer)
+            fail.push_back("card_blizz_randomizer moved across the merchant build");
+        if (entered.purge_cost != rs.purge_cost)
+            fail.push_back("purge_cost: " + std::to_string(entered.purge_cost) + " -> " +
+                           std::to_string(rs.purge_cost));
+        for (std::size_t t = 0; t < kRelicTierCount; ++t) {
+            if (entered.relic_pool_count[t] != rs.relic_pool_count[t]) {
+                fail.push_back("relic_pool[" + std::to_string(t) + "].count: " +
+                               std::to_string(entered.relic_pool_count[t]) + " -> " +
+                               std::to_string(rs.relic_pool_count[t]));
+                continue;
+            }
+            for (uint8_t i = 0; i < rs.relic_pool_count[t]; ++i) {
+                if (entered.relic_pools[t][i] == rs.relic_pools[t][i]) continue;
+                fail.push_back("relic_pool[" + std::to_string(t) + "][" +
+                               std::to_string(i) + "] differs");
+                break;
+            }
+        }
+
+        // The captured stock, when the run actually opened the merchant.
+        std::size_t sk = k;
+        for (; sk < screens.size(); ++sk) {
+            if (screens[sk].floor != floor || screens[sk].room_type != "ShopRoom") {
+                sk = screens.size();
+                break;
+            }
+            if (screens[sk].shop_screen) break;
+        }
+        if (sk < screens.size() && screens[sk].shop_screen) {
+            ++v.screens;
+            const ScreenInfo& sc = screens[sk];
+            for (std::size_t i = 0; i < sc.shop_cards.size(); ++i) {
+                const ShopSlot& slot = i < kShopColoredCount
+                                           ? shop.colored[i]
+                                           : shop.colorless[i - kShopColoredCount];
+                diff_stock_row("card", i, sc.shop_cards[i].id, sc.shop_cards[i].price,
+                               sc.shop_cards[i].upgrades,
+                               std::string(sts::registry::card_game_id(
+                                   static_cast<CardId>(slot.id))),
+                               slot.price, slot.upgrade, fail);
+            }
+            for (std::size_t i = 0; i < sc.shop_relics.size(); ++i) {
+                diff_stock_row("relic", i, sc.shop_relics[i].id, sc.shop_relics[i].price, 0,
+                               std::string(sts::registry::relic_game_id(
+                                   static_cast<RelicId>(shop.relics[i].id))),
+                               shop.relics[i].price, 0, fail);
+            }
+            for (std::size_t i = 0; i < sc.shop_potions.size(); ++i) {
+                diff_stock_row("potion", i, sc.shop_potions[i].id, sc.shop_potions[i].price, 0,
+                               std::string(sts::registry::potion_game_id(
+                                   static_cast<PotionId>(shop.potions[i].id))),
+                               shop.potions[i].price, 0, fail);
+            }
+            if (sc.purge_cost != shop.actual_purge_cost)
+                fail.push_back("purge_cost on the shelf: " + std::to_string(sc.purge_cost) +
+                               " -> " + std::to_string(shop.actual_purge_cost));
+            if (sc.purge_available != (shop.purge_available != 0))
+                fail.push_back("purge_available differs");
+            // THE SALE INDEX, inferred independently of the sim: the capture has
+            // no sale flag, but exactly one COLORED slot is priced at about half
+            // its own base (ShopScreen halves before every discount), so the
+            // cheapest price/base ratio names it.
+            int sale = -1;
+            double best = 1e9;
+            for (std::size_t i = 0; i < kShopColoredCount && i < sc.shop_cards.size(); ++i) {
+                const double ratio = static_cast<double>(sc.shop_cards[i].price) /
+                                     card_base_price_from_capture(sc.shop_cards[i].rarity);
+                if (ratio >= best) continue;
+                best = ratio;
+                sale = static_cast<int>(i);
+            }
+            if (sale != static_cast<int>(shop.sale_index) || best > 0.75)
+                fail.push_back("sale slot: the capture's cheapest colored price/base ratio "
+                               "is slot " + std::to_string(sale) + " at " +
+                               std::to_string(best) + " -> sim sale_index " +
+                               std::to_string(shop.sale_index));
+        }
+
+        if (fail.empty()) {
+            ++v.stock_clean;
+            std::printf("STOCK    OK   %s floor=%d merchantRng %u->%u cardRng %u->%u "
+                        "potionRng %u->%u purge=%d sale=%u\n",
+                        run.seed_string.c_str(), floor,
+                        run.records[k - 1].run.merchant_rng.counter, rs.merchant_rng.counter,
+                        run.records[k - 1].run.card_rng.counter, rs.card_rng.counter,
+                        run.records[k - 1].run.potion_rng.counter, rs.potion_rng.counter,
+                        shop.actual_purge_cost, shop.sale_index);
+        } else {
+            ++v.failures;
+            std::printf("STOCK    DIFF %s floor=%d\n", run.seed_string.c_str(), floor);
+            for (const auto& f : fail) std::printf("    %s\n", f.c_str());
+        }
+        if (opts.verbose && sk < screens.size() && screens[sk].shop_screen) {
+            for (std::size_t i = 0; i < screens[sk].shop_cards.size(); ++i)
+                std::printf("    card  %zu %-20s %4d\n", i, screens[sk].shop_cards[i].id.c_str(),
+                            screens[sk].shop_cards[i].price);
+        }
+
+        // 2. PURCHASES, from the first in-room record.
+        RunState buy = run.records[k].run;
+        ShopState live = shop;
+        // The floor-scoped miscRng a bought relic's onEquip would draw (War
+        // Paint / Whetstone). The translator routes the oracle block's miscRng
+        // into CombatState on EVERY record, in combat or not, so this is the
+        // real value even though the shop room is not a fight.
+        RngStream misc = run.records[k].combat.misc_rng;
+        std::string stop;
+        int compared = 0;
+        std::size_t j = k + 1;
+        GridSession grid;
+        for (; j < screens.size(); ++j) {
+            if (screens[j].floor != floor || screens[j].room_type != "ShopRoom") break;
+            RunState e = run.records[j].run;
+            RunState a = buy;
+            neutralize_presentation_only(e);
+            neutralize_presentation_only(a);
+            // neowRng is floor-0 only; a shop record carries no value for it.
+            e.neow_rng = RngStream{};
+            a.neow_rng = RngStream{};
+            const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
+            ++compared;
+            if (!rep.empty()) {
+                ++v.failures;
+                std::printf("PURCHASE DIFF %s floor=%d seq=%d (%zu field%s)\n%s\n",
+                            run.seed_string.c_str(), floor, run.records[j].seq, rep.size(),
+                            rep.size() == 1 ? "" : "s", rep.to_string().c_str());
+                stop = "divergence";
+                break;
+            }
+
+            const std::vector<std::string> c = split_ws(run.records[j].action_command);
+            if (c.empty()) break;
+            if (screens[j].screen_type == "GRID") {
+                if (!grid.open) {
+                    grid.open = true;
+                    grid.filtered.clear();
+                    grid.pending.clear();
+                    for (uint16_t i = 0; i < buy.master_deck_count; ++i)
+                        if (shop_purge_card_legal(buy, live, i))
+                            grid.filtered.push_back(i);
+                }
+                if (c[0] == "cancel") {
+                    grid.pending.clear();
+                    continue;
+                }
+                if (c[0] == "choose" && c.size() >= 2) grid.pending.push_back(std::stoi(c[1]));
+                const bool closes =
+                    j + 1 >= screens.size() || screens[j + 1].screen_type != "GRID";
+                if (c[0] != "proceed" && !closes) continue;
+                for (const int g : grid.pending) {
+                    if (g < 0 || g >= static_cast<int>(grid.filtered.size()) ||
+                        !shop_purge_card(buy, live,
+                                         static_cast<uint16_t>(
+                                             grid.filtered[static_cast<std::size_t>(g)]))) {
+                        stop = "purge grid pick " + std::to_string(g) + " was refused";
+                        break;
+                    }
+                }
+                grid = GridSession{};
+                if (!stop.empty()) break;
+                continue;
+            }
+            if (screens[j].screen_type == "MAP") {
+                // The map is up over the shop room. `return` dismisses it and
+                // the visit continues; `choose` is the step onto the next
+                // floor, so this record is the visit's last comparable state.
+                if (c[0] == "choose") break;
+                continue;
+            }
+            if (c[0] == "leave" || c[0] == "proceed" || c[0] == "return") continue;
+            if (screens[j].screen_type == "SHOP_ROOM" && c[0] == "choose") continue;
+            if (screens[j].screen_type != "SHOP_SCREEN" || c[0] != "choose") {
+                // `potion discard` is the one of these the captures actually
+                // reach: an out-of-combat discard, which the run layer has no
+                // door for (the same B1.6 gap the whole-run replay stops on).
+                stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
+                       run.records[j].action_command +
+                       "' is not a merchant action and has no run-layer analogue";
+                break;
+            }
+            const ShopTarget t =
+                resolve_shop_choice(screens[j], c.size() >= 2 ? std::stoi(c[1]) : -1);
+            bool applied = false;
+            switch (t.what) {
+                case ShopPick::COLORED:
+                    applied = shop_buy_card(buy, live, t.index, /*colorless=*/false);
+                    break;
+                case ShopPick::COLORLESS:
+                    applied = shop_buy_card(buy, live, t.index, /*colorless=*/true);
+                    break;
+                case ShopPick::RELIC:
+                    applied = shop_buy_relic(buy, misc, live, t.index);
+                    break;
+                case ShopPick::POTION:
+                    applied = shop_buy_potion(buy, live, t.index);
+                    break;
+                case ShopPick::PURGE:
+                    applied = shop_purge_legal(buy, live);  // opens the grid, spends nothing
+                    break;
+                case ShopPick::NONE:
+                    break;
+            }
+            if (!applied) {
+                stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
+                       run.records[j].action_command + "' did not resolve to a legal row";
+                break;
+            }
+        }
+        if (stop.empty()) {
+            ++v.purchase_clean;
+            std::printf("PURCHASE OK   %s floor=%d %d in-room record%s compared, gold=%d "
+                        "deck=%u purge_cost=%d\n",
+                        run.seed_string.c_str(), floor, compared, compared == 1 ? "" : "s",
+                        buy.gold, buy.master_deck_count, buy.purge_cost);
+        } else {
+            ++v.purchase_partial;
+            std::printf("PURCHASE PART %s floor=%d %d in-room record%s compared; stop: %s\n",
+                        run.seed_string.c_str(), floor, compared, compared == 1 ? "" : "s",
+                        stop.c_str());
+        }
+    }
+    return v;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -822,15 +1546,82 @@ int main(int argc, char** argv) {
         else if (a == "--stop-on-diff") opts.stop_on_diff = true;
         else if (a == "--combat") opts.combat = true;
         else if (a == "--replay") opts.full_replay = true;
+        else if (a == "--neow") opts.neow = true;
+        else if (a == "--shop") opts.shop = true;
         else files.push_back(a);
     }
-    if (files.empty()) {
+    if (files.empty() ||
+        static_cast<int>(opts.full_replay) + static_cast<int>(opts.neow) +
+                static_cast<int>(opts.shop) > 1) {
         std::fprintf(stderr,
-                     "usage: replay_run_diff <run.jsonl> [...] [--replay]\n"
+                     "usage: replay_run_diff <run.jsonl> [...] "
+                     "[--replay | --neow | --shop]\n"
                      "         [--verbose] [--pool-evidence] [--stop-on-diff] [--combat]\n"
                      "  default: per-reward-screen spot-diff seeded from the capture\n"
-                     "  --replay: whole-run replay from run_begin, diffed per record\n");
+                     "  --replay: whole-run replay from run_begin, diffed per record\n"
+                     "  --neow:   floor-0 blessing spot-diff (options / activation / "
+                     "post-choice)\n"
+                     "  --shop:   merchant spot-diff (stock, prices, sale slot, purchases)\n"
+                     "  the mode flags are mutually exclusive\n");
         return 2;
+    }
+
+    if (opts.neow) {
+        int failures = 0;
+        int full = 0;
+        int activation_only = 0;
+        for (const std::string& f : files) {
+            std::printf("=== %s\n", f.c_str());
+            try {
+                const NeowVerdict v = neow_spot_diff_one(f, opts);
+                const bool clean = v.options_clean && v.activation_clean && v.post_clean;
+                std::printf("%s %s: options %s, activation %s, post-choice %s%s%s\n",
+                            clean ? "OK   " : "PART ", v.seed_string.c_str(),
+                            v.options_clean ? "clean" : "DIFF",
+                            v.activation_clean ? "clean" : "DIFF",
+                            v.post_reached ? (v.post_clean ? "clean" : "DIFF") : "not reached",
+                            v.stop_reason.empty() ? "" : "; stop: ",
+                            v.stop_reason.c_str());
+                if (!v.chosen.empty())
+                    std::printf("      took: %s\n", v.chosen.c_str());
+                if (clean) ++full;
+                else if (v.options_clean && v.activation_clean) ++activation_only;
+                else ++failures;
+            } catch (const std::exception& e) {
+                std::printf("ERROR %s: %s\n", f.c_str(), e.what());
+                ++failures;
+            }
+        }
+        std::printf("--- %zu seed(s): %d fully zero-diff, %d clean through activation "
+                    "only, %d diverged ---\n", files.size(), full, activation_only, failures);
+        return failures;
+    }
+
+    if (opts.shop) {
+        int failures = 0;
+        ShopVerdict total{};
+        for (const std::string& f : files) {
+            std::printf("=== %s\n", f.c_str());
+            try {
+                const ShopVerdict v = shop_spot_diff_one(f, opts);
+                total.visits += v.visits;
+                total.screens += v.screens;
+                total.stock_clean += v.stock_clean;
+                total.purchase_clean += v.purchase_clean;
+                total.purchase_partial += v.purchase_partial;
+                total.failures += v.failures;
+                if (v.failures != 0) ++failures;
+            } catch (const std::exception& e) {
+                std::printf("ERROR %s: %s\n", f.c_str(), e.what());
+                ++failures;
+            }
+        }
+        std::printf("--- %zu file(s): %d merchant(s) built (%d with a visible shelf), "
+                    "stock clean %d, purchase walks clean %d (+%d partial), "
+                    "%d divergence(s) ---\n",
+                    files.size(), total.visits, total.screens, total.stock_clean,
+                    total.purchase_clean, total.purchase_partial, total.failures);
+        return failures;
     }
 
     if (!opts.full_replay) {

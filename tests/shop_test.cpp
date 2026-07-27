@@ -1026,3 +1026,153 @@ TEST(ShopCapture, B13Seed1790050543758Floor3MatchesTheRecordedMerchant) {
     // rolls read it and never move it (the capture agrees, 3 before and after).
     EXPECT_EQ(rs.card_blizz_randomizer, 3);
 }
+
+// The B4.8 acceptance capture: run STS00074 of
+// b47_treasure_oracle_20260727T204809Z_claude01, seed 1790050543999, the
+// floor-3 merchant. Where the vector above proves a merchant BUILD, this one
+// also proves what happens when the player spends: the driver's random-legal
+// policy bought the third potion and then a colored card, and the capture
+// carries the state after each. Everything below -- pre-entry streams, the four
+// end-popped pools, the shelf, the prices and the two purchases -- is
+// transcribed from that artifact.
+TEST(ShopCapture, B47Seed1790050543999Floor3MatchesTheRecordedMerchantAndItsPurchases) {
+    RunState rs{};
+    rs.run_seed = 1790050543999LL;
+    rs.ascension = 20;
+    rs.act = 1;
+    rs.floor = 3;
+    rs.hp = 21;
+    rs.max_hp = 75;
+    rs.gold = 128;
+    rs.purge_cost = 75;
+    rs.potion_slots = 2;
+    rs.card_blizz_randomizer = 1;
+    rs.card_rng = RngStream{static_cast<uint64_t>(7407002651897338544LL),
+                            static_cast<uint64_t>(5100492437124867082LL), 18, 0};
+    rs.merchant_rng = RngStream{static_cast<uint64_t>(8925859659600152053LL),
+                                static_cast<uint64_t>(597351705577579072LL), 0, 0};
+    rs.potion_rng = RngStream{static_cast<uint64_t>(301082221787037864LL),
+                              static_cast<uint64_t>(-560592513775719408LL), 6, 0};
+    give_relic(rs, RelicId::BURNING_BLOOD);
+
+    fill_pool(
+        rs, RelicPool::COMMON,
+        {RelicId::STRAWBERRY, RelicId::SMILING_MASK, RelicId::MAW_BANK,
+         RelicId::AKABEKO, RelicId::CENTENNIAL_PUZZLE, RelicId::ART_OF_WAR,
+         RelicId::TINY_CHEST, RelicId::WHETSTONE, RelicId::JUZU_BRACELET,
+         RelicId::REGAL_PILLOW, RelicId::TOY_ORNITHOPTER,
+         RelicId::ODDLY_SMOOTH_STONE, RelicId::WAR_PAINT, RelicId::VAJRA,
+         RelicId::ORICHALCUM, RelicId::BOOT, RelicId::CERAMIC_FISH,
+         RelicId::LANTERN, RelicId::OMAMORI, RelicId::NUNCHAKU,
+         RelicId::HAPPY_FLOWER, RelicId::PRESERVED_INSECT, RelicId::POTION_BELT,
+         RelicId::BLOOD_VIAL, RelicId::BAG_OF_PREPARATION, RelicId::ANCHOR,
+         RelicId::MEAL_TICKET, RelicId::RED_SKULL, RelicId::ANCIENT_TEA_SET,
+         RelicId::PEN_NIB, RelicId::DREAM_CATCHER, RelicId::BRONZE_SCALES,
+         RelicId::BAG_OF_MARBLES});
+    fill_pool(
+        rs, RelicPool::UNCOMMON,
+        {RelicId::QUESTION_CARD, RelicId::KUNAI, RelicId::SELF_FORMING_CLAY,
+         RelicId::MUMMIFIED_HAND, RelicId::BLUE_CANDLE, RelicId::PANTOGRAPH,
+         RelicId::INK_BOTTLE, RelicId::DARKSTONE_PERIAPT,
+         RelicId::WHITE_BEAST_STATUE, RelicId::SINGING_BOWL,
+         RelicId::BOTTLED_FLAME, RelicId::MOLTEN_EGG, RelicId::ETERNAL_FEATHER,
+         RelicId::SUNDIAL, RelicId::PAPER_PHROG, RelicId::HORN_CLEAT,
+         RelicId::BOTTLED_LIGHTNING, RelicId::MATRYOSHKA,
+         RelicId::BOTTLED_TORNADO, RelicId::MEAT_ON_THE_BONE,
+         RelicId::FROZEN_EGG, RelicId::MERCURY_HOURGLASS, RelicId::LETTER_OPENER,
+         RelicId::SHURIKEN, RelicId::STRIKE_DUMMY, RelicId::ORNAMENTAL_FAN,
+         RelicId::PEAR, RelicId::THE_COURIER, RelicId::GREMLIN_HORN,
+         RelicId::TOXIC_EGG});
+    fill_pool(
+        rs, RelicPool::RARE,
+        {RelicId::MANGO, RelicId::ICE_CREAM, RelicId::TUNGSTEN_ROD,
+         RelicId::FOSSILIZED_HELIX, RelicId::DU_VU_DOLL, RelicId::POCKETWATCH,
+         RelicId::PRAYER_WHEEL, RelicId::WING_BOOTS, RelicId::GINGER,
+         RelicId::TORII, RelicId::CAPTAINS_WHEEL, RelicId::PEACE_PIPE,
+         RelicId::OLD_COIN, RelicId::DEAD_BRANCH, RelicId::MAGIC_FLOWER,
+         RelicId::THREAD_AND_NEEDLE, RelicId::TURNIP, RelicId::LIZARD_TAIL,
+         RelicId::UNCEASING_TOP, RelicId::BIRD_FACED_URN, RelicId::GIRYA,
+         RelicId::CHARONS_ASHES, RelicId::INCENSE_BURNER,
+         RelicId::STONE_CALENDAR, RelicId::GAMBLING_CHIP, RelicId::SHOVEL,
+         RelicId::CALIPERS, RelicId::CHAMPION_BELT});
+    fill_pool(
+        rs, RelicPool::SHOP,
+        {RelicId::SLING_OF_COURAGE, RelicId::CHEMICAL_X, RelicId::ORANGE_PELLETS,
+         RelicId::ORRERY, RelicId::FROZEN_EYE, RelicId::DOLLYS_MIRROR,
+         RelicId::CAULDRON, RelicId::STRANGE_SPOON, RelicId::BRIMSTONE,
+         RelicId::CLOCKWORK_SOUVENIR, RelicId::PRISMATIC_SHARD,
+         RelicId::TOOLBOX, RelicId::LEES_WAFFLE, RelicId::THE_ABACUS,
+         RelicId::HAND_DRILL, RelicId::MEMBERSHIP_CARD, RelicId::MEDICAL_KIT});
+
+    ShopState shop = generate_shop(rs);
+
+    // --- the shelf, id for id and price for price ------------------------------
+    EXPECT_EQ(shop.colored[0].id, static_cast<uint16_t>(CardId::SEVER_SOUL));
+    EXPECT_EQ(shop.colored[1].id, static_cast<uint16_t>(CardId::BODY_SLAM));
+    EXPECT_EQ(shop.colored[2].id, static_cast<uint16_t>(CardId::SENTINEL));
+    EXPECT_EQ(shop.colored[3].id, static_cast<uint16_t>(CardId::HAVOC));
+    EXPECT_EQ(shop.colored[4].id, static_cast<uint16_t>(CardId::FEEL_NO_PAIN));
+    EXPECT_EQ(shop.colored[0].price, 83);
+    EXPECT_EQ(shop.colored[1].price, 58);
+    EXPECT_EQ(shop.colored[2].price, 79);
+    EXPECT_EQ(shop.colored[3].price, 54);
+    EXPECT_EQ(shop.colored[4].price, 41);  // sale slot: an UNCOMMON at 41
+    EXPECT_EQ(shop.sale_index, 4);
+    EXPECT_EQ(shop.colorless[0].id, static_cast<uint16_t>(CardId::BANDAGE_UP));
+    EXPECT_EQ(shop.colorless[1].id, static_cast<uint16_t>(CardId::METAMORPHOSIS));
+    EXPECT_EQ(shop.colorless[0].price, 108);
+    EXPECT_EQ(shop.colorless[1].price, 204);
+
+    // Two COMMON tier rolls, then the always-SHOP third slot.
+    EXPECT_EQ(shop.relics[0].id, static_cast<uint16_t>(RelicId::BAG_OF_MARBLES));
+    EXPECT_EQ(shop.relics[1].id, static_cast<uint16_t>(RelicId::TOXIC_EGG));
+    EXPECT_EQ(shop.relics[2].id, static_cast<uint16_t>(RelicId::MEDICAL_KIT));
+    EXPECT_EQ(shop.relics[0].price, 171);
+    EXPECT_EQ(shop.relics[1].price, 274);
+    EXPECT_EQ(shop.relics[2].price, 172);
+
+    EXPECT_EQ(shop.potions[0].id, static_cast<uint16_t>(PotionId::ENERGY_POTION));
+    EXPECT_EQ(shop.potions[1].id, static_cast<uint16_t>(PotionId::BLOOD_POTION));
+    EXPECT_EQ(shop.potions[2].id, static_cast<uint16_t>(PotionId::SKILL_POTION));
+    EXPECT_EQ(shop.potions[0].price, 55);
+    EXPECT_EQ(shop.potions[1].price, 57);
+    EXPECT_EQ(shop.potions[2].price, 57);
+
+    EXPECT_EQ(shop.actual_purge_cost, 75);
+    EXPECT_TRUE(shop.purge_available);
+
+    // --- the three post-build stream states ------------------------------------
+    EXPECT_EQ(rs.merchant_rng.counter, 16);
+    EXPECT_EQ(rs.merchant_rng.s0, static_cast<uint64_t>(6319263430244920371LL));
+    EXPECT_EQ(rs.merchant_rng.s1, static_cast<uint64_t>(8973596775308567784LL));
+    EXPECT_EQ(rs.card_rng.counter, 30);
+    EXPECT_EQ(rs.card_rng.s0, static_cast<uint64_t>(-2483065224940134106LL));
+    EXPECT_EQ(rs.card_rng.s1, static_cast<uint64_t>(-3978610613189658618LL));
+    EXPECT_EQ(rs.potion_rng.counter, 13);
+    EXPECT_EQ(rs.potion_rng.s0, static_cast<uint64_t>(-1231467067838940388LL));
+    EXPECT_EQ(rs.potion_rng.s1, static_cast<uint64_t>(-827854966696020424LL));
+    EXPECT_EQ(rs.card_blizz_randomizer, 1);
+
+    // --- what the run then bought ----------------------------------------------
+    // The Skill Potion off the third potion slot: 128 -> 71, into the first free
+    // slot, and the shelf row retires.
+    ASSERT_TRUE(shop_buy_potion(rs, shop, 2));
+    EXPECT_EQ(rs.gold, 71);
+    EXPECT_EQ(rs.potions[0], static_cast<uint16_t>(PotionId::SKILL_POTION));
+    EXPECT_EQ(rs.potions[1], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_TRUE(shop.potions[2].sold);
+
+    // Havoc off the fourth colored slot: 71 -> 17, appended to the deck. (This
+    // RunState carries no master deck -- the capture's thirteen rows are the
+    // spot-diff harness's business, not this vector's -- so the append lands at
+    // index 0.)
+    ASSERT_TRUE(shop_buy_card(rs, shop, 3, /*colorless=*/false));
+    EXPECT_EQ(rs.gold, 17);
+    ASSERT_EQ(rs.master_deck_count, 1);
+    EXPECT_EQ(rs.master_deck[0].card_id, static_cast<uint16_t>(CardId::HAVOC));
+    EXPECT_TRUE(shop.colored[3].sold);
+
+    // Neither purchase touches the removal service.
+    EXPECT_EQ(shop.actual_purge_cost, 75);
+    EXPECT_EQ(rs.purge_cost, 75);
+}

@@ -84,7 +84,9 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
-| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed by B4.5, still open | **PARTLY COVERED, not discharged.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does two thirds of it: its default mode genuinely seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. What is missing is the general case — resuming from an ARBITRARY mid-run translated state without re-driving the prefix (the run layer has no "restore a `RunController` from a `RunState`" door: map cursors, encounter lists and their cursors are transient and would have to be re-derived), and coverage of the rooms `--replay` still stops at (shop screens, out-of-combat potion discard, grid `cancel`) |
+| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed by B4.5, still open | **PARTLY COVERED, not discharged.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does two thirds of it: its default mode genuinely seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. What is missing is the general case — resuming from an ARBITRARY mid-run translated state without re-driving the prefix (the run layer has no "restore a `RunController` from a `RunState`" door: map cursors, encounter lists and their cursors are transient and would have to be re-derived), and coverage of the rooms `--replay` still stops at. **Narrowed again by the B4.14 + B4.8 read-outs:** the shop screen and the grid `cancel` now have working command mappings — `--shop` drives a whole merchant visit including the purge grid, and `--neow` buffers a grid's picks until the capture confirms them, which is what `cancel` needed — but both live in the dedicated spot-diff modes, not in `--replay`, so folding them back in is part of the general case. The **out-of-combat potion discard** is the one command with no run-layer analogue at all, and it is now the sole reason two shop visits and one Neow seed stop early |
+| Centennial Puzzle carries a persistent `counter` the game does not | B4.14's oracle read-out | UNASSIGNED — relic-layer owner | `relics.yaml` gives the row `initial_counter: 0` and `relic_native_centennial_puzzle` uses `slot.counter` as its once-per-combat flag. The game uses a **static `boolean usedThisCombat`** and never touches `this.counter` (`CentennialPuzzle.java:21, 33-49`), so `AbstractRelic`'s −1 default stands and CommunicationMod reports −1. Caught on STS00068 of `b47_treasure_oracle_20260727T204809Z_claude01`, whose Neow common-relic blessing handed one over: `relics[1].counter: -1 -> 0`, the only field that differs, and it is not Neow's — any acquisition from any source shows it. Two things to fix together, because the first alone breaks the second: `initial_counter` must be −1 so `RunState` matches a capture, and the once-per-combat flag then needs somewhere else to live. Note the flag is `atPreBattle`-reset in the game and the sim has no reset at all, so a second combat is a second question |
+| `kEventTransformRedPool` is emitted in registry-iteration order | B4.14's oracle read-out | B4.10 / B4.11 (event grids) | Same root cause as the `transform_card` fix B4.14 landed: `event_grid_transform_card` reaches the same `returnTrulyRandomCardFromAvailable` list (`AbstractDungeon.java:1016-1045`), which is `commonCardPool` in plain library order followed by `srcUncommonCardPool` and `srcRareCardPool` REVERSED. The generated pool is neither — `emit/events.py` builds it by walking `cards.yaml` rows ("Registry iteration order is stable"), which is the same kind of order B4.5 replaced everywhere else. No capture in hand exercises a Living Wall transform, so this is stated from the Java, not measured; the fix belongs with whoever can produce or find that capture |
 | Monster block is never cleared at the monster's turn start | B4.5's oracle replay | UNASSIGNED — combat-layer owner | Found by `replay_run_diff --replay` on STS00051 (`b45_rewards_oracle2_20260727T204809Z_claude01`), floor 1, two Louse: the game's Louse enters the player's turn 3 at 0 block, the sim's keeps the 12 Curl Up block it gained on turn 2, so a 9-damage Strike that killed it in the game left 7 HP in the sim. `MonsterGroup.applyPreTurnLogic` (`MonsterGroup.java:98-104`) is the block-clearing walk, and it is called only from `MonsterStartTurnAction` — which CFR shows as referenced by nothing, because `AbstractRoom.endTurn` queues it as an anonymous inner class the decompiler dropped (`AbstractRoom.java:409`). Whoever takes this must read the real bytecode/another decompiler for that line rather than trust the `.java` |
 | `Vulnerable` / `Weak` durations never tick down | B4.5's oracle replay | UNASSIGNED — combat-layer owner | `registry/powers.yaml` gives STRENGTH/VULNERABLE/WEAK no hook bindings at all, on the (correct, but incomplete) grounds that their EFFECT is the native damage pipeline. Their DURATION is not: `atEndOfRound` decrements and removes them, dispatched for monsters and the player by `MonsterGroup.applyEndOfTurnPowers` (`:290-304`), which the sim already calls as `dispatch_at_end_of_round`. Same STS00051 record: the game's Louse is at Vulnerable 1 on turn 3, the sim's still at 2. Note `justApplied` — a debuff a MONSTER applies to the player skips its first decrement, and the player-applied direction does not |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
@@ -575,7 +577,7 @@ parameter is gone — the open path reads `treasureRng` only
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b47)
 (the task stays unchecked until its required live-game spot-diff can run)
 
-### B4.8 `[ ]` Shop — **code landed; blocked on the manual oracle capture**
+### B4.8 `[x]` Shop
 **Deps:** B4.5, B4.6, B3.23 · **Spec:** design §5.6 · **Provenance:**
 ShopScreen.java:130-244, 246-292, 340-428, 592-672, 969-978; Merchant.java:
 57-97; ShopRoom.java:29-77; StoreRelic.java:36-120; StorePotion.java:33-101;
@@ -609,10 +611,29 @@ oracle spot-diff of a shop floor (stock, prices, sale index) zero-diff.
       every price; the sixteen-draw table is a comment in `shop.hpp` and in the
       test.
 - [x] purge ramp across two shops — `ShopPurge.RampPersistsAcrossTwoShops`.
-- [ ] oracle spot-diff — needs the live game, which only a human operator can
-      launch. Runbook:
-      [b48_shop_spotdiff.md](../tools/oracle_bridge/driver/b48_shop_spotdiff.md).
-      Same shape as B4.7 / B4.14.
+- [x] oracle spot-diff — **five merchants across three seeds, all zero-diff.**
+      Read out with `replay_run_diff --shop` over runs STS00054, STS00057 and
+      STS00074 of `b47_treasure_oracle_20260727T204809Z_claude01`, the three
+      that reached a shop. Per merchant the mode seeds a `RunState` from the
+      capture's pre-entry record, calls `generate_shop`, and compares the
+      seven card ids and prices, the three relics, the three potions, the
+      purge cost and `purge_available` against the captured shelf; the sale
+      slot is inferred from the capture alone (the one colored price at about
+      half its own base) and checked against `shop.sale_index`; and
+      `merchantRng` +16 exactly on all five, `cardRng` +12-or-more (two of them
+      spent a dedupe re-roll), `potionRng` +3-or-more, all five relic pools
+      and `card_blizz_randomizer` are compared against the first in-room
+      record. Then it restarts from that record and walks the visit, diffing
+      the whole `RunState` after every purchase. Four of the five have a
+      visible shelf (STS00054's floor-2 merchant was built and never opened,
+      so only its streams and pools are checkable — and they are clean); the
+      set covers two purchases, a potion buy, a 75-gold purge with its ramp to
+      100, and two runs holding two merchants each, where the second builds
+      off the first's end-popped pools. Three visits walk clean end to end;
+      two stop after every purchase is verified, at an out-of-combat potion
+      discard the run layer has no door for (B1.6's row). Captures recorded in
+      [b48_shop_spotdiff.md](../tools/oracle_bridge/driver/b48_shop_spotdiff.md)
+      §6.
 **A recorded capture already reproduces one whole merchant.**
 `ShopCapture.B13Seed1790050543758Floor3MatchesTheRecordedMerchant` rebuilds a
 real A20 shop — b13 sweep run `STS00008`, floor 3 — from that capture's
@@ -620,7 +641,10 @@ pre-entry stream triples and relic pools, and matches all seven cards, three
 relics, three potions, every price, the sale index and the post-build state of
 `cardRng` (9→21), `merchantRng` (0→16) and `potionRng` (3→10). That is not the
 acceptance leg (one shop, from another task's campaign, with no purchase), but
-it is what pins the three base-price tables: `sts-classes.jar` carries no inner
+it is what pins the three base-price tables — and the acceptance capture added
+a second such vector,
+`ShopCapture.B47Seed1790050543999Floor3MatchesTheRecordedMerchantAndItsPurchases`,
+which does carry the purchases: `sts-classes.jar` carries no inner
 classes, so CFR emitted `AbstractRelic.getPrice`'s switch with `$SwitchMap`
 indices and no constant names, and the tier→price assignment is not recoverable
 from the decompiled source alone.
@@ -651,7 +675,8 @@ STATIC in the game, reset only by the dungeon reset that precedes a new run
 (CardCrawlGame.java:478 → ShopScreen.java:241-244) — which is exactly why the
 reset exists. Now spelled in `run_begin` beside the other
 dungeonTransitionSetup fields.
-**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b48)
+**Log:** [implementation](stage-b-log.md#b48) ·
+[oracle spot-diff read-out](stage-b-log.md#b48-readout)
 
 - **B4.9** `[x]` Rest sites — Java-order campfire menu and CHOOSE flows for Rest/Smith/Lift/Toke/Dig; base 30% + Regal Pillow heal, Dream Catcher direct card reward, Girya/Peace Pipe/Shovel effects and exact RNG/pool order; independent-audit fix-forwards close fixed master-deck/relic-cap and malformed reward-screen legality, including zero-card offers, without changing valid skip/proceed or Circlet stacking; no schema or combat `ActionMask` change; full three-preset suite green · [log](stage-b-log.md#b49)
 
@@ -733,7 +758,7 @@ site this batch actually creates; see the obligations row.
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b413)
 (the task stays unchecked until its required live-game spot-check can run)
 
-### B4.14 `[ ]` Neow — **code landed; blocked on the manual oracle capture**
+### B4.14 `[x]` Neow
 **Deps:** B4.4, B4.6, B3.27 (boss pool) · **Spec:** design §5.6; §10 trap 17
 · **Provenance:** NeowEvent.java:62, 163, 289, 349-371; NeowReward.java:
 68-128, 190-368
@@ -745,12 +770,44 @@ unlock-gated (fully-unlocked profile ⇒ full blessing; record the check).
 **Acceptance:** tier-2: option sets + payouts for fixed seed match
 hand-derivation draw-for-draw; oracle spot-diff of the Neow screen across
 ≥ 10 seeds zero-diff (options AND post-choice state).
-**Blocker (checkbox stays `[ ]`):** the oracle spot-diff needs the LIVE GAME,
-which only a human operator can launch (conventions §8 bridge note). The
-tier-2 leg and the directed tests are green in CI; the capture runbook is
-[b414_neow_spotdiff.md](../tools/oracle_bridge/driver/b414_neow_spotdiff.md),
-which names exactly what must match (the four option labels AND the
-post-choice `RunState` + the four stream counters). Same shape as B4.7.
+- [x] tier-2 — `neow_test`: the blessing roll against two hand-derived seeds,
+      the category tables and cat-2's drawback-first order, every payout's
+      stream attribution, the drawbacks and both grids.
+- [x] oracle spot-diff, ≥ 10 seeds, options AND post-choice —
+      **35 of 41 captured seeds zero-diff on all three checkpoints.** Read out
+      with `replay_run_diff --neow` over the 41 runs of
+      `b45_rewards_oracle_20260727T204809Z_claude01` (5),
+      `b45_rewards_oracle2_...` (6) and `b47_treasure_oracle_...` (30), all
+      strict-validated. Per seed the mode compares the four option MEANINGS
+      against the capture's localized labels, then the whole translated
+      `RunState` — `neowRng` and `purge_cost` included, since a floor-0 record
+      carries both — at the blessing screen, immediately after the option is
+      pressed, and at the first map record. Six seeds are excluded and each is
+      named: STS00045/46 (Empty Cage) and STS00052/54 (Astrolabe) take a boss
+      relic whose `onEquip` opens a grid the sim defers, so they stop after the
+      ACQUISITION comparison, which is clean; STS00076 takes the three-potion
+      blessing and then discards a potion out of combat, which the run layer
+      has no door for (B1.6's row); STS00068 is the one real divergence and it
+      is not Neow's — see the obligations table's Centennial Puzzle row. The
+      capture ran the payout table wide: 12 boss swaps, 4 common-relic, 2
+      colorless (the cardRng-split trap), 2 three-potion (the pity trap), 2
+      transform-two, 1 curse-drawback-plus-colorless, and 18 distinct option
+      meanings in all. Read-out details in the Log; captures recorded in
+      [b414_neow_spotdiff.md](../tools/oracle_bridge/driver/b414_neow_spotdiff.md)
+      §6.
+**A real divergence this read-out found and fixed — the transform pool order.**
+`AbstractDungeon.returnTrulyRandomCardFromAvailable` (`:1016-1045`), which
+Neow's TRANSFORM payouts reach through `transformCard`, builds its candidate
+list from `commonCardPool` ++ `srcUncommonCardPool` ++ `srcRareCardPool` — one
+LIVE pool and two `src*` COPIES. `initializeCardPools` fills every copy with
+`addToBottom`, which is `group.add(0, c)`, a PREPEND (`AbstractDungeon.java:
+1180-1199`; `CardGroup.java:459-461`), so the last two blocks are their
+rarity's library order REVERSED. `transform_card` walked all three forwards —
+correct for the first block only, and indistinguishable from correct until
+B4.5 pinned the library order itself. Two captured seeds caught it, on four
+draws, all four now reproduced exactly: `NeowCapture.TransformTwoReproducesThe-
+CapturedIdentities` freezes them and `NeowGrid.TransformReadsTheSrcPoolsBack-
+wards` pins the shape without a seed.
 **Mini-blessing verdict — NOT an unlock gate, and unreachable here.** The
 branch is `bossCount == 0 && !Settings.isTestingNeow → miniBlessing()`
 (NeowEvent.java:178-183, mirrored at :168-173). `bossCount` reads the profile
@@ -792,7 +849,8 @@ advances and the card-pity counter moves even though no card is offered.
 colorless RARITY pools are ORDER-EXACT for a different reason than the rest —
 `CardGroup` sorts the rarity-filtered view by cardID before indexing it, so they
 never depended on the CardLibrary library order B4.5 later pinned.
-**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b414)
+**Log:** [implementation](stage-b-log.md#b414) ·
+[oracle spot-diff read-out](stage-b-log.md#b414-readout)
 
 - **B4.15** `[x]` A20 run-setup modifiers + negative freezes — `registry/a20.yaml` populated to one row per ascension level 1..20 (`id == level`), each IMPLEMENTED or N/A-for-S1-with-reason, machine-checked by `A20Manifest.EveryRowCarriesScopeProvenanceAndAnS1Status`; run-setup order corrected to **A11 → (A5) → A14 → A6 → A10 → starting deck**, so A14's max-HP loss precedes A6's 90 % rewrite and an A20 Ironclad is **68/75, not 72/75** (matches the G4 oracle capture); Ascender's Bane lands at master-deck **index 0**, ahead of the five Strikes, routed through `add_card_to_master_deck`; retires the A6/A10/A14 deferred-obligation row; union 641/641 ×3 · [log](stage-b-log.md#b415)
 
