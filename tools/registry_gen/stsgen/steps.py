@@ -21,7 +21,8 @@ authored today.
 
 from __future__ import annotations
 
-from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
+from .vocab import (APPLY_POWER_COUNTER_SHIFT,
+                    CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
                     CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT,
                     CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS,
                     CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
@@ -73,6 +74,10 @@ GENERAL_OPS = frozenset({
     # execute-time read and the generated copies are fresh library rows, so no
     # operand needs the played card's instance.
     "RANDOM_CARD_TO_DRAW",
+    # B3.11 stage D (Hand of Greed): `amount` (base damage) and `gold` are both
+    # literals and the kill test is an execute-time read of the target's HP, so
+    # the item carries identically from any domain's queue helper.
+    "DAMAGE_GREED",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -212,8 +217,30 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         if pname not in powers:
             raise fail(f"{owner} {op} references unknown power {pname!r}"
                        f"{domain.power_hint}")
-        # make_apply_power_flags: low 16 bits carry the PowerId.
-        return powers[pname]
+        # make_apply_power_flags: low 16 bits carry the PowerId. APPLY_POWER may
+        # additionally carry the applied instance's COUNTER OPERAND -- the second
+        # number a counter-carrying PowerSlot is constructed with -- in bits
+        # 16..31. Absent -> 0, which is what every APPLY_POWER step packed before
+        # this existed, so all of them stay byte-identical.
+        #
+        # Only The Bomb needs it: TheBomb.use hands ONE ApplyPowerAction three
+        # numbers (stack amount 3, ctor turns 3, ctor damage magicNumber --
+        # TheBomb.java:32), and `amount` can carry only one of them. Panache
+        # authors none because its two numbers coincide at the call site
+        # (Panache.java:32 passes magicNumber twice), so its apply path reads the
+        # item's own `amount` as the damage.
+        extra = powers[pname]
+        counter = step.get("counter")
+        if counter is None:
+            return extra
+        if op != "APPLY_POWER":
+            raise fail(f"{owner} {op} cannot author 'counter': only APPLY_POWER "
+                       f"constructs a power instance")
+        counter = int(counter)
+        if counter < -32768 or counter > 32767:
+            raise fail(f"{owner} APPLY_POWER counter {counter} out of the "
+                       f"int16 PowerSlot.counter range")
+        return extra | ((counter & 0xFFFF) << APPLY_POWER_COUNTER_SHIFT)
 
     if op == "DAMAGE":
         # `extra` = the DamageType (interp.hpp make_damage_flags). Default
@@ -316,6 +343,21 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         # `extra` = the max-HP gained when the hit leaves the target dead
         # (Feed's magicNumber -> FeedAction.increaseHpAmount, FeedAction.java:28).
         return int(step.get("max_hp", 0))
+
+    if op == "DAMAGE_GREED":
+        # `extra` = the gold banked when the hit leaves the target dead (Hand of
+        # Greed's magicNumber -> GreedAction.increaseGold, GreedAction.java:
+        # 24-27). REQUIRED and never defaulted: a silent 0 would author a plain
+        # attack onto a row that meant to pay out, and the whole point of the
+        # opcode is the payout.
+        gold = step.get("gold")
+        if gold is None:
+            raise fail(f"{owner} DAMAGE_GREED needs an explicit gold: (the "
+                       f"GreedAction increaseGold operand)")
+        gold = int(gold)
+        if gold < 0:
+            raise fail(f"{owner} DAMAGE_GREED gold {gold} must be >= 0")
+        return gold
 
     if op == "PLAY_CARD":
         # `extra` = the kPlayCard* bit set (interp.hpp), authored as a list of

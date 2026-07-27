@@ -8,6 +8,15 @@
 // draw-pile-sourced deck-to-hand verbs -- plus the DRAW_PILE_FETCH opcode and
 // the PutOnDeckAction forced-path RNG fix that Warcry and Thinking Ahead share.
 //
+// B3.11 stage D adds Hand of Greed, Panache and The Bomb -- the last three
+// colorless RARE rows -- plus the DAMAGE_GREED opcode, PowerIds PANACHE /
+// THE_BOMB, and the schema 5 -> 6 machinery those two powers needed: the
+// PowerSlot second number (`counter`), INSTANCED (non-merging) powers, and the
+// CombatState combat-gold accumulator. The load-bearing cases there are
+// Panache's two independently-moving numbers (one shared countdown, a summed
+// damage), The Bomb's per-instance fuses ticking and detonating independently,
+// and Hand of Greed banking gold only on a kill.
+//
 // B3.11 stage C adds the generated-card family -- Chrysalis, Magnetism, Mayhem,
 // Metamorphosis, Transmutation -- plus the RANDOM_CARD_TO_DRAW opcode, the two
 // new RANDOM_COLORLESS_TO_HAND flag bits and PowerIds MAYHEM / MAGNETISM. The
@@ -99,7 +108,7 @@ CardPoolIndex AddExhaust(CombatState& s, CardId id, uint8_t upgrade = 0) {
 
 void AddPlayerPower(CombatState& s, PowerId id, int16_t amount) {
     s.player_powers[s.player_power_count] =
-        PowerSlot{static_cast<uint16_t>(id), amount};
+        PowerSlot{static_cast<uint16_t>(id), amount, 0, 0};
     ++s.player_power_count;
 }
 
@@ -145,6 +154,40 @@ void Play(CombatState& s, uint8_t hand_slot = 0, uint8_t target = 0) {
 }
 
 void Pump(CombatState& s) { pump(s, default_monster_turn); }
+
+// Resolve exactly what is on the action queue, with no turn machinery around
+// it: the isolation the power-sweep cases need (the Combust precedent,
+// card_uncommon_powers_test).
+void DrainActions(CombatState& s) {
+    ActionQueueItem it{};
+    while (pop_action_front(s, it)) {
+        execute_opcode(s, it);
+    }
+}
+
+// A whole player end-of-turn through the pump (monster turn + the next
+// start-of-turn), for the cases that must cross a real turn boundary.
+void EndTurn(CombatState& s) {
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, default_monster_turn);
+}
+
+const PowerSlot* NthPlayerPower(const CombatState& s, PowerId id, int n) {
+    int seen = 0;
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id != static_cast<uint16_t>(id)) continue;
+        if (seen++ == n) return &s.player_powers[i];
+    }
+    return nullptr;
+}
+
+int CountPlayerPower(const CombatState& s, PowerId id) {
+    int n = 0;
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) ++n;
+    }
+    return n;
+}
 
 // A bare queued DRAW-source CHOOSE_CARD, for the paths Secret Technique's own
 // canUse gate normally forbids (the k == 0 no-op) and for the full-hand redirect
@@ -195,16 +238,19 @@ StepResult Step(CombatState& s, Action a) {
 // ===========================================================================
 
 TEST(CardColorlessRaresRegistry, ExactRosterAndReservedGaps) {
-    const std::array<std::pair<int, CardId>, 12> roster{{
+    const std::array<std::pair<int, CardId>, 15> roster{{
         {112, CardId::APOTHEOSIS},
         {113, CardId::CHRYSALIS},
+        {114, CardId::HAND_OF_GREED},
         {115, CardId::MAGNETISM},
         {116, CardId::MASTER_OF_STRATEGY},
         {117, CardId::MAYHEM},
         {118, CardId::METAMORPHOSIS},
+        {119, CardId::PANACHE},
         {120, CardId::SADISTIC_NATURE},
         {121, CardId::SECRET_TECHNIQUE},
         {122, CardId::SECRET_WEAPON},
+        {123, CardId::THE_BOMB},
         {124, CardId::THINKING_AHEAD},
         {125, CardId::TRANSMUTATION},
         {126, CardId::VIOLENCE},
@@ -215,16 +261,28 @@ TEST(CardColorlessRaresRegistry, ExactRosterAndReservedGaps) {
         ASSERT_NE(d, nullptr);
         EXPECT_EQ(d->id, card);
     }
-    // 114, 119, 123: owned by the last B3.11 stage. A reservation nothing
-    // asserts is indistinguishable from an omission.
-    for (const int reserved : {114, 119, 123}) {
-        EXPECT_EQ(card_def(static_cast<CardId>(reserved)), nullptr)
-            << "id " << reserved << " is reserved and must have no row";
+    // Stage D FILLED the 114/119/123 reservations the earlier stages left, so
+    // the colorless RARE block 112-126 is now CONTIGUOUS -- 15 rows, no gap.
+    // The old "these three must have no row" assertion is replaced by the
+    // roster above rather than deleted: a reservation nothing asserts is
+    // indistinguishable from an omission, and so is a filled gap.
+    for (int id = 112; id <= 126; ++id) {
+        EXPECT_NE(card_def(static_cast<CardId>(id)), nullptr)
+            << "id " << id << " is inside the colorless RARE block and must "
+               "have a row";
     }
-    // The two PowerIds the generated-card family owns, pinned next to the
-    // CardIds they are applied by.
+    // The PowerIds this family owns, pinned next to the CardIds they are
+    // applied by. 85-86 are stage D's published RESERVE and stay unissued.
     EXPECT_EQ(static_cast<int>(PowerId::MAYHEM), 81);
     EXPECT_EQ(static_cast<int>(PowerId::MAGNETISM), 82);
+    EXPECT_EQ(static_cast<int>(PowerId::PANACHE), 83);
+    EXPECT_EQ(static_cast<int>(PowerId::THE_BOMB), 84);
+    for (const int reserved : {85, 86}) {
+        EXPECT_EQ(power_def(static_cast<PowerId>(reserved)), nullptr)
+            << "PowerId " << reserved << " is reserved and must have no row";
+    }
+    // The opcode this stage owns, and its own published reserve.
+    EXPECT_EQ(static_cast<int>(Opcode::DAMAGE_GREED), 57);
 }
 
 TEST(CardColorlessRaresRegistry, CostsTypesFlagsAndTargeting) {
@@ -1960,6 +2018,565 @@ TEST(CardColorlessRaresTransmutation, OverflowPastTenIsCreatedInTheDiscard) {
     EXPECT_EQ(s.hand_count, kHandCap)
         << "the play freed one slot, the first copy refilled it";
     EXPECT_EQ(s.discard_count, 2) << "the other two were created in the discard";
+}
+
+
+// ===========================================================================
+// B3.11 stage D -- the schema-6 machinery, exercised on its own before the
+// three cards that need it.
+// ===========================================================================
+
+// PowerSlot's second number exists, is independent of `amount`, and is 0 for
+// every power that declares no meaning for it -- the property that lets every
+// pre-schema-6 power keep its semantics unchanged.
+TEST(PowerSlotCounter, DefaultsToZeroAndIsIndependentOfAmount) {
+    CombatState s = MakeCombat();
+    AddPlayerPower(s, PowerId::STRENGTH, 3);
+    ASSERT_NE(FindPlayerPower(s, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::STRENGTH)->counter, 0);
+
+    // A plain APPLY_POWER authors no counter operand, so an ordinary power's
+    // slot stays counter == 0 through apply AND through stacking.
+    CombatState t = MakeCombat();
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    it.src = kActorPlayer;
+    it.tgt = kActorPlayer;
+    it.amount = 2;
+    it.flags = make_apply_power_flags(PowerId::STRENGTH);
+    EXPECT_EQ(it.flags, static_cast<uint32_t>(PowerId::STRENGTH))
+        << "the counter operand defaults to 0, byte-identically";
+    add_to_bottom(t, it);
+    add_to_bottom(t, it);
+    DrainActions(t);
+    ASSERT_NE(FindPlayerPower(t, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(FindPlayerPower(t, PowerId::STRENGTH)->amount, 4);
+    EXPECT_EQ(FindPlayerPower(t, PowerId::STRENGTH)->counter, 0);
+}
+
+// The instance key round-trips, and the "no key" encoding is exactly what every
+// pre-existing REDUCE_POWER / REMOVE_POWER item already packed.
+TEST(PowerInstanceKey, EncodingRoundTripsAndKeylessIsUnchanged) {
+    const uint32_t keyless = make_apply_power_flags(PowerId::THE_BOMB);
+    EXPECT_FALSE(power_instance_key_present(keyless));
+
+    const uint32_t keyed = make_power_instance_flags(PowerId::THE_BOMB, 3, 40);
+    EXPECT_TRUE(power_instance_key_present(keyed));
+    EXPECT_EQ(apply_power_id_from_flags(keyed), PowerId::THE_BOMB);
+    EXPECT_EQ(power_instance_amount(keyed), 3);
+    EXPECT_EQ(power_instance_counter(keyed), 40);
+
+    // Out-of-range operands cannot be expressed and degrade to a keyless
+    // (first-match) item rather than a silently truncated wrong one.
+    EXPECT_FALSE(power_instance_key_present(
+        make_power_instance_flags(PowerId::THE_BOMB, 300, 40)));
+    EXPECT_FALSE(power_instance_key_present(
+        make_power_instance_flags(PowerId::THE_BOMB, 3, 900)));
+}
+
+// An INSTANCED power's REDUCE_POWER must survive an EARLIER instance being
+// removed first -- the exact case a slot INDEX would get wrong, because the
+// removal compacts the array before the later queued item resolves.
+TEST(PowerInstanceKey, ReduceSurvivesAnEarlierInstanceBeingCompactedAway) {
+    CombatState s = MakeCombat();
+    // Two bombs, fuse 1 then fuse 3, both 40 damage.
+    s.player_powers[0] =
+        PowerSlot{static_cast<uint16_t>(PowerId::THE_BOMB), 1, 40, 0};
+    s.player_powers[1] =
+        PowerSlot{static_cast<uint16_t>(PowerId::THE_BOMB), 3, 40, 0};
+    s.player_power_count = 2;
+
+    ActionQueueItem r0{};
+    r0.opcode = static_cast<uint16_t>(Opcode::REDUCE_POWER);
+    r0.src = kActorPlayer;
+    r0.tgt = kActorPlayer;
+    r0.amount = 1;
+    r0.flags = make_power_instance_flags(PowerId::THE_BOMB, 1, 40);
+    ActionQueueItem r1 = r0;
+    r1.flags = make_power_instance_flags(PowerId::THE_BOMB, 3, 40);
+    add_to_bottom(s, r0);
+    add_to_bottom(s, r1);
+    DrainActions(s);
+
+    ASSERT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), 1)
+        << "the fuse-1 instance was removed at zero";
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 0)->amount, 2)
+        << "the fuse-3 instance ticked, even though it moved down a slot";
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 0)->counter, 40);
+}
+
+// ===========================================================================
+// Panache (119) + PowerId::PANACHE (83)
+// ===========================================================================
+
+TEST(CardColorlessRaresPanache, RowAndProgram) {
+    const CardDef* d = card_def(CardId::PANACHE);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(card_cost(*d, 0), 0);
+    EXPECT_EQ(card_cost(*d, 1), 0);
+    EXPECT_EQ(d->type, CardType::POWER);
+    EXPECT_EQ(d->target_kind, CardTargetKind::SELF);
+    EXPECT_FALSE(d->needs_target);
+    EXPECT_EQ(card_flags(*d, 0), 0u);
+    EXPECT_EQ(card_flags(*d, 1), 0u);
+
+    for (const uint8_t up : {uint8_t{0}, uint8_t{1}}) {
+        const CardEffectView eff = card_effect_steps(*d, up);
+        ASSERT_EQ(eff.count, 1);
+        EXPECT_TRUE(StepOpIs(eff.steps[0].op, Opcode::APPLY_POWER));
+        EXPECT_EQ(eff.steps[0].amount, up == 0 ? 10 : 14);
+        // No `counter:` operand -- Panache's two numbers coincide at the Java
+        // call site, so the apply path reads `amount` as the damage.
+        EXPECT_EQ(eff.steps[0].extra,
+                  static_cast<uint32_t>(static_cast<uint16_t>(PowerId::PANACHE)));
+    }
+}
+
+TEST(CardColorlessRaresPanache, AppliesFiveCardCountdownAndTheDamageCounter) {
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::PANACHE);
+    Play(s);
+    const PowerSlot* p = FindPlayerPower(s, PowerId::PANACHE);
+    ASSERT_NE(p, nullptr);
+    EXPECT_EQ(p->amount, 5) << "CARD_AMT, not the card's magicNumber";
+    EXPECT_EQ(p->counter, 10) << "the magicNumber IS the damage";
+
+    CombatState u = MakeCombat();
+    AddHand(u, CardId::PANACHE, 1);
+    Play(u);
+    ASSERT_NE(FindPlayerPower(u, PowerId::PANACHE), nullptr);
+    EXPECT_EQ(FindPlayerPower(u, PowerId::PANACHE)->amount, 5);
+    EXPECT_EQ(FindPlayerPower(u, PowerId::PANACHE)->counter, 14);
+}
+
+// The headline case: the 5th card fires the damage at EVERY enemy.
+TEST(CardColorlessRaresPanache, FifthCardHitsAllEnemiesForTheAccumulatedDamage) {
+    CombatState s = MakeCombat(/*energy=*/9, /*monster_hp=*/60);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 60;
+    s.monsters[1].max_hp = 60;
+    AddHand(s, CardId::PANACHE);
+    for (int i = 0; i < 5; ++i) {
+        AddHand(s, CardId::DEFEND);
+    }
+    Play(s, 0);  // Panache itself
+    ASSERT_NE(FindPlayerPower(s, PowerId::PANACHE), nullptr);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 5)
+        << "a card does not count its own play: the ApplyPowerAction is still "
+           "queued when the UseCardAction fan-out for that play runs";
+
+    for (int i = 0; i < 4; ++i) {
+        Play(s, 0);
+        EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 4 - i)
+            << "after " << (i + 1) << " cards";
+    }
+    EXPECT_EQ(s.monsters[0].hp, 60);
+    EXPECT_EQ(s.monsters[1].hp, 60);
+
+    Play(s, 0);  // the 5th
+    EXPECT_EQ(s.monsters[0].hp, 50);
+    EXPECT_EQ(s.monsters[1].hp, 50);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 5)
+        << "the countdown rolls back to 5";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->counter, 10)
+        << "the damage is not consumed";
+}
+
+TEST(CardColorlessRaresPanache, CountdownResetsAtTheStartOfTurn) {
+    CombatState s = MakeCombat(/*energy=*/9);
+    AddHand(s, CardId::PANACHE);
+    AddHand(s, CardId::DEFEND);
+    AddHand(s, CardId::DEFEND);
+    Play(s, 0);
+    Play(s, 0);
+    Play(s, 0);
+    ASSERT_NE(FindPlayerPower(s, PowerId::PANACHE), nullptr);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 3);
+
+    dispatch_at_start_of_turn(s);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 5)
+        << "atStartOfTurn is a FLAT reset: partial progress is LOST";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->counter, 10)
+        << "the damage is untouched by the turn boundary";
+}
+
+TEST(CardColorlessRaresPanache, TwoPanachesShareOneCountdownAndSumTheDamage) {
+    CombatState s = MakeCombat(/*energy=*/9, /*monster_hp=*/60);
+    AddHand(s, CardId::PANACHE);
+    AddHand(s, CardId::PANACHE);
+    for (int i = 0; i < 5; ++i) {
+        AddHand(s, CardId::DEFEND);
+    }
+    Play(s, 0);
+    Play(s, 0);
+    EXPECT_EQ(CountPlayerPower(s, PowerId::PANACHE), 1)
+        << "Panache MERGES -- one slot, not two (contrast The Bomb)";
+    const PowerSlot* p = FindPlayerPower(s, PowerId::PANACHE);
+    ASSERT_NE(p, nullptr);
+    EXPECT_EQ(p->counter, 20) << "stackPower sums the damage";
+    EXPECT_EQ(p->amount, 4)
+        << "stackPower does NOT touch the countdown -- the FIRST Panache "
+           "already counted the SECOND one's play";
+
+    // 4 more cards reaches the 5th since the last reset.
+    for (int i = 0; i < 4; ++i) {
+        Play(s, 0);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 40) << "one 20-damage hit, not two 10s";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 5);
+}
+
+TEST(CardColorlessRaresPanache, DamageIgnoresStrengthAndVulnerable) {
+    CombatState s = MakeCombat(/*energy=*/9, /*monster_hp=*/60);
+    AddPlayerPower(s, PowerId::STRENGTH, 5);
+    s.monsters[0].powers[0] =
+        PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 3, 0, 0};
+    s.monsters[0].power_count = 1;
+    AddHand(s, CardId::PANACHE);
+    for (int i = 0; i < 5; ++i) {
+        AddHand(s, CardId::DEFEND);
+    }
+    Play(s, 0);
+    for (int i = 0; i < 5; ++i) {
+        Play(s, 0);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 50)
+        << "createDamageMatrix(damage, true) + THORNS: neither the player's "
+           "Strength nor the target's Vulnerable moves the number";
+}
+
+TEST(CardColorlessRaresPanache, BlockAbsorbsTheHit) {
+    CombatState s = MakeCombat(/*energy=*/9, /*monster_hp=*/60);
+    s.monsters[0].block = 4;
+    AddHand(s, CardId::PANACHE);
+    for (int i = 0; i < 5; ++i) {
+        AddHand(s, CardId::DEFEND);
+    }
+    Play(s, 0);
+    for (int i = 0; i < 5; ++i) {
+        Play(s, 0);
+    }
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[0].hp, 54)
+        << "pure damage is still damage(), not a LoseHP";
+}
+
+// A MAYHEM-autoplayed card is a successful play and MUST count; a FAILED
+// autoplay takes the dontTriggerOnUseCard filing path and must NOT.
+TEST(CardColorlessRaresPanache, AutoplayCountsButAFailedAutoplayFilingDoesNot) {
+    CombatState s = MakeCombat(/*energy=*/3);
+    AddHand(s, CardId::PANACHE);
+    Play(s, 0);
+    ASSERT_NE(FindPlayerPower(s, PowerId::PANACHE), nullptr);
+    ASSERT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 5);
+
+    // A successful draw-top autoplay (the Mayhem shape).
+    AddDrawTop(s, CardId::DEFEND);
+    ActionQueueItem play{};
+    play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+    play.src = kActorPlayer;
+    play.tgt = kActorRandomEnemy;
+    play.flags = kPlayCardFromDrawTop;
+    add_to_bottom(s, play);
+    Pump(s);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 4)
+        << "a Mayhem-autoplayed card is a real play and counts";
+
+    // A FAILED autoplay: an unplayable card off the draw top is cancelled at
+    // the dequeue-time canUse revalidation and only FILED, with no onUseCard
+    // fan-out (GameActionManager.java:285-301).
+    AddDrawTop(s, CardId::WOUND);
+    add_to_bottom(s, play);
+    Pump(s);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::PANACHE)->amount, 4)
+        << "a cancelled autoplay's no-trigger filing must NOT decrement";
+}
+
+// ===========================================================================
+// The Bomb (123) + PowerId::THE_BOMB (84, instanced)
+// ===========================================================================
+
+TEST(CardColorlessRaresTheBomb, RowAndProgram) {
+    const CardDef* d = card_def(CardId::THE_BOMB);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(card_cost(*d, 0), 2);
+    EXPECT_EQ(card_cost(*d, 1), 2) << "upgrade moves only the magicNumber";
+    EXPECT_EQ(d->type, CardType::SKILL);
+    EXPECT_EQ(d->target_kind, CardTargetKind::SELF) << "SELF, not NONE";
+    EXPECT_FALSE(d->needs_target);
+    EXPECT_EQ(card_flags(*d, 0), 0u);
+
+    for (const uint8_t up : {uint8_t{0}, uint8_t{1}}) {
+        const CardEffectView eff = card_effect_steps(*d, up);
+        ASSERT_EQ(eff.count, 1);
+        EXPECT_TRUE(StepOpIs(eff.steps[0].op, Opcode::APPLY_POWER));
+        EXPECT_EQ(eff.steps[0].amount, 3) << "Java's stack amount is the TURNS";
+        EXPECT_EQ(apply_power_id_from_flags(eff.steps[0].extra),
+                  PowerId::THE_BOMB);
+        EXPECT_EQ(apply_power_counter_from_flags(eff.steps[0].extra),
+                  up == 0 ? 40 : 50);
+    }
+    // The registry marks it instanced; nothing else in the registry is.
+    const PowerDef* pd = power_def(PowerId::THE_BOMB);
+    ASSERT_NE(pd, nullptr);
+    EXPECT_TRUE(pd->instanced);
+    EXPECT_FALSE(power_def(PowerId::PANACHE)->instanced);
+    EXPECT_FALSE(power_def(PowerId::STRENGTH)->instanced);
+}
+
+TEST(CardColorlessRaresTheBomb, ExplodesAtTheEndOfTheThirdTurnForFortyDamage) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    AddHand(s, CardId::THE_BOMB);
+    Play(s, 0);
+    const PowerSlot* b = FindPlayerPower(s, PowerId::THE_BOMB);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(b->amount, 3);
+    EXPECT_EQ(b->counter, 40);
+
+    dispatch_at_end_of_turn(s);
+    DrainActions(s);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::THE_BOMB)->amount, 2);
+    EXPECT_EQ(s.monsters[0].hp, 200);
+
+    dispatch_at_end_of_turn(s);
+    DrainActions(s);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::THE_BOMB)->amount, 1);
+    EXPECT_EQ(s.monsters[0].hp, 200);
+
+    dispatch_at_end_of_turn(s);
+    DrainActions(s);
+    EXPECT_EQ(s.monsters[0].hp, 160) << "the end of the THIRD turn";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::THE_BOMB), nullptr)
+        << "the instance is removed in the SAME end-of-turn it explodes";
+}
+
+TEST(CardColorlessRaresTheBomb, UpgradedExplodesForFifty) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    AddHand(s, CardId::THE_BOMB, 1);
+    Play(s, 0);
+    ASSERT_NE(FindPlayerPower(s, PowerId::THE_BOMB), nullptr);
+    EXPECT_EQ(FindPlayerPower(s, PowerId::THE_BOMB)->counter, 50);
+    for (int t = 0; t < 3; ++t) {
+        dispatch_at_end_of_turn(s);
+        DrainActions(s);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 150);
+}
+
+TEST(CardColorlessRaresTheBomb,
+     TwoBombsTickIndependentlyAndExplodeOnDifferentTurns) {
+    CombatState s = MakeCombat(/*energy=*/9, /*monster_hp=*/200);
+    AddHand(s, CardId::THE_BOMB);
+    AddHand(s, CardId::THE_BOMB);
+    Play(s, 0);                      // turn 1
+    dispatch_at_end_of_turn(s);
+    DrainActions(s);
+    Play(s, 0);                      // turn 2: the second bomb
+    EXPECT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), 2)
+        << "instanced: two slots, never a stack of 2";
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 0)->amount, 2);
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 1)->amount, 3);
+
+    dispatch_at_end_of_turn(s);      // end of turn 2
+    DrainActions(s);
+    EXPECT_EQ(s.monsters[0].hp, 200);
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 0)->amount, 1);
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 1)->amount, 2);
+
+    dispatch_at_end_of_turn(s);      // end of turn 3: the FIRST bomb only
+    DrainActions(s);
+    EXPECT_EQ(s.monsters[0].hp, 160);
+    ASSERT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), 1);
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 0)->amount, 1)
+        << "the survivor ticked correctly even though the exploded instance "
+           "was compacted out from in front of it";
+
+    dispatch_at_end_of_turn(s);      // end of turn 4: the SECOND bomb
+    DrainActions(s);
+    EXPECT_EQ(s.monsters[0].hp, 120);
+    EXPECT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), 0);
+}
+
+TEST(CardColorlessRaresTheBomb, BaseAndUpgradedCoexistWithDistinctDamage) {
+    CombatState s = MakeCombat(/*energy=*/9, /*monster_hp=*/300);
+    AddHand(s, CardId::THE_BOMB);
+    AddHand(s, CardId::THE_BOMB, 1);
+    Play(s, 0);
+    Play(s, 0);
+    ASSERT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), 2);
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 0)->counter, 40);
+    EXPECT_EQ(NthPlayerPower(s, PowerId::THE_BOMB, 1)->counter, 50);
+    for (int t = 0; t < 3; ++t) {
+        dispatch_at_end_of_turn(s);
+        DrainActions(s);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 210) << "40 + 50, both on the same turn";
+    EXPECT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), 0);
+}
+
+TEST(CardColorlessRaresTheBomb, NoTickWhileNobodyIsLeftInTheFight) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    AddHand(s, CardId::THE_BOMB);
+    Play(s, 0);
+    ASSERT_NE(FindPlayerPower(s, PowerId::THE_BOMB), nullptr);
+    s.monsters[0].hp = 0;
+    dispatch_at_end_of_turn(s);
+    EXPECT_EQ(s.action_count, 0)
+        << "areMonstersBasicallyDead gates BOTH queued actions";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::THE_BOMB)->amount, 3)
+        << "the fuse is FROZEN, not merely silent";
+
+    // An ESCAPED monster is also out of the fight, at full HP.
+    CombatState e = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    AddHand(e, CardId::THE_BOMB);
+    Play(e, 0);
+    e.monsters[0].flags |= kMonsterFlagEscaped;
+    dispatch_at_end_of_turn(e);
+    EXPECT_EQ(e.action_count, 0);
+    EXPECT_EQ(FindPlayerPower(e, PowerId::THE_BOMB)->amount, 3);
+}
+
+TEST(CardColorlessRaresTheBomb, DamageIgnoresStrengthAndVulnerable) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    AddPlayerPower(s, PowerId::STRENGTH, 7);
+    AddHand(s, CardId::THE_BOMB);
+    Play(s, 0);
+    s.monsters[0].powers[s.monsters[0].power_count] =
+        PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 3, 0, 0};
+    ++s.monsters[0].power_count;
+    for (int t = 0; t < 3; ++t) {
+        dispatch_at_end_of_turn(s);
+        DrainActions(s);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 160) << "pure THORNS: exactly 40";
+}
+
+TEST(CardColorlessRaresTheBomb, ExplodesThroughARealEndOfTurn) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    s.player_hp = 300;
+    s.player_max_hp = 300;
+    AddHand(s, CardId::THE_BOMB);
+    Play(s, 0);
+    EndTurn(s);
+    EndTurn(s);
+    EXPECT_EQ(s.monsters[0].hp, 200);
+    EndTurn(s);
+    EXPECT_EQ(s.monsters[0].hp, 160)
+        << "the whole pump turn boundary, not just the isolated sweep";
+    EXPECT_EQ(FindPlayerPower(s, PowerId::THE_BOMB), nullptr);
+}
+
+// The slot cap is UNCHANGED behaviour, documented rather than invented: a full
+// 24-slot list makes an application a silent no-op, and an instanced power
+// reaches that the same way any other new slot does.
+TEST(CardColorlessRaresTheBomb, ApplicationIntoAFullPowerListIsASilentNoOp) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/200);
+    for (int i = 0; i < kPowerCap; ++i) {
+        AddPlayerPower(s, PowerId::THE_BOMB, 3);
+    }
+    ASSERT_EQ(s.player_power_count, kPowerCap);
+    AddHand(s, CardId::THE_BOMB);
+    Play(s, 0);
+    EXPECT_EQ(s.player_power_count, kPowerCap) << "no 25th slot";
+    EXPECT_EQ(CountPlayerPower(s, PowerId::THE_BOMB), kPowerCap);
+    EXPECT_EQ(s.player_energy, 1) << "the play still happened and still paid";
+}
+
+// ===========================================================================
+// Hand of Greed (114) + opcode DAMAGE_GREED (57)
+// ===========================================================================
+
+TEST(CardColorlessRaresHandOfGreed, RowAndProgram) {
+    const CardDef* d = card_def(CardId::HAND_OF_GREED);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(card_cost(*d, 0), 2);
+    EXPECT_EQ(card_cost(*d, 1), 2);
+    EXPECT_EQ(d->type, CardType::ATTACK);
+    EXPECT_EQ(d->target_kind, CardTargetKind::ENEMY);
+    EXPECT_TRUE(d->needs_target);
+    EXPECT_EQ(card_flags(*d, 0), 0u);
+    EXPECT_EQ(card_flags(*d, 1), 0u);
+
+    const CardEffectView base = card_effect_steps(*d, 0);
+    ASSERT_EQ(base.count, 1);
+    EXPECT_TRUE(StepOpIs(base.steps[0].op, Opcode::DAMAGE_GREED));
+    EXPECT_EQ(base.steps[0].amount, 20);
+    EXPECT_EQ(damage_greed_gold_from_flags(base.steps[0].extra), 20);
+    const CardEffectView up = card_effect_steps(*d, 1);
+    ASSERT_EQ(up.count, 1);
+    EXPECT_EQ(up.steps[0].amount, 25);
+    EXPECT_EQ(damage_greed_gold_from_flags(up.steps[0].extra), 25);
+}
+
+TEST(CardColorlessRaresHandOfGreed,
+     LethalHitBanksExactlyTheGoldAndNonLethalBanksNothing) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/50);
+    AddHand(s, CardId::HAND_OF_GREED);
+    Play(s, 0);
+    EXPECT_EQ(s.monsters[0].hp, 30);
+    EXPECT_EQ(s.combat_gold, 0) << "a survivor pays nothing";
+
+    CombatState k = MakeCombat(/*energy=*/3, /*monster_hp=*/20);
+    AddHand(k, CardId::HAND_OF_GREED);
+    Play(k, 0);
+    EXPECT_EQ(k.monsters[0].hp, 0) << "hp lands exactly on 0";
+    EXPECT_EQ(k.combat_gold, 20);
+
+    CombatState u = MakeCombat(/*energy=*/3, /*monster_hp=*/25);
+    AddHand(u, CardId::HAND_OF_GREED, 1);
+    Play(u, 0);
+    EXPECT_EQ(u.monsters[0].hp, 0);
+    EXPECT_EQ(u.combat_gold, 25) << "the upgraded row moves BOTH numbers";
+}
+
+TEST(CardColorlessRaresHandOfGreed, BlockAbsorbedNonLethalBanksNothing) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/5);
+    s.monsters[0].block = 40;
+    AddHand(s, CardId::HAND_OF_GREED);
+    Play(s, 0);
+    EXPECT_EQ(s.monsters[0].hp, 5) << "block soaked the whole hit";
+    EXPECT_EQ(s.monsters[0].block, 20);
+    EXPECT_EQ(s.combat_gold, 0);
+}
+
+// The pipeline is the ORDINARY one -- the deliberate contrast with Panache and
+// The Bomb -- so Strength and Vulnerable BOTH apply.
+TEST(CardColorlessRaresHandOfGreed, UsesTheOrdinaryDamagePipeline) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/60);
+    AddPlayerPower(s, PowerId::STRENGTH, 4);
+    s.monsters[0].powers[0] =
+        PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 2, 0, 0};
+    s.monsters[0].power_count = 1;
+    AddHand(s, CardId::HAND_OF_GREED);
+    Play(s, 0);
+    EXPECT_EQ(s.monsters[0].hp, 24) << "floor((20 + 4) * 1.5) == 36";
+    EXPECT_EQ(s.combat_gold, 0);
+}
+
+TEST(CardColorlessRaresHandOfGreed, TwoKillsAccumulate) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/15);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 15;
+    s.monsters[1].max_hp = 15;
+    AddHand(s, CardId::HAND_OF_GREED);
+    AddHand(s, CardId::HAND_OF_GREED);
+    Play(s, 0, /*target=*/1);
+    EXPECT_EQ(s.combat_gold, 20);
+    Play(s, 0, /*target=*/0);
+    EXPECT_EQ(s.combat_gold, 40);
+}
+
+// A combat-only replay has no run layer, so nothing settles: the accumulator is
+// simply carried.
+TEST(CardColorlessRaresHandOfGreed, CombatOnlyReplayJustCarriesTheAccumulator) {
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/20);
+    AddHand(s, CardId::HAND_OF_GREED);
+    Play(s, 0);
+    ASSERT_EQ(s.combat_gold, 20);
+    Pump(s);
+    EXPECT_EQ(s.combat_gold, 20) << "no combat-layer consumer reads it back";
 }
 
 }  // namespace

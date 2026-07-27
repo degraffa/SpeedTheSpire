@@ -109,6 +109,15 @@ void dispatch_actor_powers(CombatState& s, uint8_t owner, Hook hook,
         HookContext ctx = base;
         ctx.owner = owner;
         ctx.power_amount = pv.slots[i].amount;
+        ctx.power_counter = pv.slots[i].counter;
+        // WHICH slot is responding. An INSTANCED power (The Bomb) puts several
+        // rows with the same power_id in one list, so a native body cannot
+        // re-find "its own" slot by id; and Panache mutates its countdown in
+        // place from inside the hook, exactly as PanachePower.onUseCard writes
+        // `this.amount`. The walk itself is index-based over a snapshot count,
+        // and no native body here adds or removes slots synchronously, so the
+        // index stays valid for the whole call.
+        ctx.power_slot = i;
         if (def->native) {
             dispatch_native_hook(s, hook, pid, ctx);
         } else {

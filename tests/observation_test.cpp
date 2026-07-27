@@ -102,8 +102,8 @@ CombatState make_sample_state() {
     jw.max_hp = 44;
     jw.intent = 7;
     jw.power_count = 2;
-    jw.powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 3};
-    jw.powers[1] = PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 2};
+    jw.powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 3, 0, 0};
+    jw.powers[1] = PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 2, 0, 0};
     return s;
 }
 
@@ -194,7 +194,7 @@ TEST(Observation, MonsterPowersTruncateButReportTrueCount) {
     m.power_count = kObsMonsterPowerCap + 2;
     for (int p = 0; p < kObsMonsterPowerCap + 2; ++p) {
         m.powers[p] = PowerSlot{static_cast<uint16_t>(PowerId::WEAK),
-                                static_cast<int16_t>(p + 1)};
+                                static_cast<int16_t>(p + 1), 0, 0};
     }
 
     ObsBuffer obs{};

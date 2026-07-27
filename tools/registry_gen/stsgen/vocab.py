@@ -213,6 +213,21 @@ OPCODES = {
     # temp list (the NO-ARG CardGroup.shuffle, :561-563) and takes its BOTTOM
     # card, which moves draw -> hand or draw -> DISCARD at a full hand (:51-55).
     "DRAW_PILE_FETCH": 56,
+    # B3.11 stage D addition (58-59 remain this batch's published reserve and
+    # stay UNISSUED). DAMAGE_GREED is Hand of Greed / GreedAction.update
+    # (:33-46): `target.damage(info)` through the ORDINARY pipeline -- a plain
+    # DamageInfo(p, damage, damageTypeForTurn) built by HandOfGreed.use
+    # (HandOfGreed.java:33), so Strength/Vulnerable/Weak apply and block absorbs,
+    # unlike the pure-damage matrices Panache and The Bomb queue -- followed by
+    # `extra` gold IF AND ONLY IF the hit left the target dead. The gold gate is
+    #   !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
+    # (:37); the halfDead and Minion terms have no S1 producer and are
+    # documented-inert at the opcode body, never invented as state. The gold
+    # accrues in CombatState.combat_gold and reaches RunState only at the run
+    # layer's combat fold-back, through the single gain_gold door -- so a
+    # combat-only replay never touches a run purse. `extra` carries the gold, the
+    # same second-operand shape DAMAGE_FEED (35) uses for its max-HP number.
+    "DAMAGE_GREED": 57,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -337,6 +352,14 @@ COLORLESS_TO_HAND_FLAGS = {
     "cost_zero_for_turn": 1 << 0,
     "upgraded_copy": 1 << 1,
 }
+
+# APPLY_POWER `extra` bits 16..31 -- MIRROR of interp.hpp's
+# kApplyPowerCounterShift (B3.11 stage D). The applied instance's COUNTER
+# OPERAND: the second number a counter-carrying PowerSlot (types.hpp) is
+# constructed with, authored as `counter:` on an APPLY_POWER step. Absent -> 0,
+# which is exactly what every APPLY_POWER step packed before these bits existed,
+# so all of them stay byte-identical (pinned by the kBash assert in cards.hpp).
+APPLY_POWER_COUNTER_SHIFT = 16
 
 # CardFlag bits -- MIRROR of include/sts/engine/types.hpp CardFlag (append-only).
 # YAML `flags:` names are lower-case; cards.hpp static_asserts the emitted

@@ -1895,6 +1895,21 @@
   upgraded:
     - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 5, card_type: SKILL}
 
+- id: 114
+  name: HAND_OF_GREED
+  game_id: "HandOfGreed"
+  color: COLORLESS
+  rarity: RARE
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "HandOfGreed (HandOfGreed.java:20-49): ctor (:25-29) cost 2, ATTACK, COLORLESS, RARE, CardTarget.ENEMY, baseDamage = 20 AND magicNumber = baseMagicNumber = 20 -- two separate numbers that happen to start equal and that upgrade (:36-43) moves TOGETHER, upgradeDamage(5) + upgradeMagicNumber(5) -> 25 damage / 25 gold. The game id string is \"HandOfGreed\" with NO space (:22), unlike the displayed name. use (:31-34) is a single addToBot GreedAction(m, new DamageInfo(p, this.damage, this.damageTypeForTurn), this.magicNumber). GreedAction.update (GreedAction.java:33-46), read in full: `this.target.damage(this.info)` (:36) -- an ORDINARY DamageInfo through the NORMAL pipeline, so Strength/Vulnerable/Weak all apply and block absorbs, in deliberate contrast to the pure-damage matrices Panache and The Bomb queue -- and then `if (!(!isDying && currentHealth > 0 || halfDead || hasPower(\"Minion\"))) player.gainGold(increaseGold)` (:37-38). The gate pays out exactly when the hit LEFT the target dead. Its other two terms are STRUCTURALLY constant-false in S1 and are documented inert at the opcode body with this citation rather than modelled as state nothing can write: no Act-1 monster is half-dead-capable (the game's only producers are Awakened One and the Darklings), and registry/powers.yaml has no Minion row -- searched before writing, not assumed. That is the same gate, with the same two inert terms, that DAMAGE_FEED (opcode 35, B3.8's Feed) already encodes. The clearPostCombatActions at :43-45 is queue housekeeping the pump has no counterpart for. Encoded as opcode 57 DAMAGE_GREED, which reuses op_damage unchanged and adds only the on-kill payout; the gold rides in the step's `gold:` operand, the second-operand shape DAMAGE_FEED uses for its max-HP number. gainGold is NOT called in the combat layer -- CombatState keeps no purse (design §4.4: gold is canonical in RunState while a combat is live) -- so the payout accrues in CombatState.combat_gold and the run layer settles the total through the single gain_gold door at the combat fold-back (run_advance.cpp fold_back_combat), which is what keeps Ectoplasm's suppression and the onGainGold relic seam on the path exactly once. A combat-only replay simply carries the accumulator."
+  effects:
+    - {op: DAMAGE_GREED, target: CARD_TARGET, amount: 20, gold: 20}
+  upgraded:
+    - {op: DAMAGE_GREED, target: CARD_TARGET, amount: 25, gold: 25}
+
 - id: 115
   name: MAGNETISM
   game_id: "Magnetism"
@@ -1957,6 +1972,21 @@
   upgraded:
     - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 5, card_type: ATTACK}
 
+- id: 119
+  name: PANACHE
+  game_id: "Panache"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Panache (Panache.java:20-47): ctor (:25-28) cost 0, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 10 -- and that magicNumber is the DAMAGE, not the countdown. upgrade (:35-41) upgradeMagicNumber(4) -> 14. use (:30-33) is a single addToBot ApplyPowerAction(p, p, new PanachePower(p, this.magicNumber), this.magicNumber): the SAME number twice, once as the ctor's damage and once as the stack amount. That coincidence is exactly why this row authors no `counter:` operand -- the PANACHE apply path reads the item's own `amount` as the damage, while the countdown comes from the power's hard-coded CARD_AMT (5). PowerId PANACHE (powers.yaml id 83) carries the behaviour and states the two-numbers reading of PanachePower.java in full: amount = the 5-card countdown (reset at the start of every turn, so partial progress is LOST), counter = the accumulated damage (stackPower adds to it and never touches the countdown, so two Panaches deal 20 from ONE shared counter). The 5th card played fires that damage at every enemy as PURE THORNS damage -- unmodified by the player's Strength or the target's Vulnerable/Weak."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 10, power: PANACHE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 14, power: PANACHE}
+
 - id: 120
   name: SADISTIC_NATURE
   game_id: "Sadistic Nature"
@@ -2005,6 +2035,21 @@
   upgraded_flags: []
   upgraded:
     - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: ATTACK, amount: 1}
+
+- id: 123
+  name: THE_BOMB
+  game_id: "The Bomb"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: SELF
+  flags: []
+  provenance: "TheBomb (TheBomb.java:20-48): ctor (:25-28) cost 2, SKILL, COLORLESS, RARE, CardTarget.SELF -- SELF, not NONE, even though the card takes no enemy -- magicNumber = baseMagicNumber = 40. upgrade (:40-47) upgradeMagicNumber(10) -> 50; the cost and the 3 turns never move. use (:30-33) is a single addToBot ApplyPowerAction(p, p, new TheBombPower(p, 3, this.magicNumber), 3): the stack amount is the LITERAL 3, and the ctor takes (turns = 3, damage = magicNumber) -- THREE numbers through one action, which is why `amount: 3` alone cannot carry the row and the damage rides in the step's `counter:` operand (interp.hpp kApplyPowerCounterShift; the ONLY authored user of those bits). The authored shape stays faithful to the Java: `amount` is the stack amount Java passes, 3 at both levels. PowerId THE_BOMB (powers.yaml id 84) carries the behaviour and is the registry's first `instanced: true` row -- TheBombPower's ID is \"TheBomb\" plus an ever-increasing static offset (TheBombPower.java:31-32), so two plays are two independent fuses that NEVER merge, and op_apply_power appends a fresh slot each time. It explodes at the end of the THIRD turn counting the turn it was played (3 -> 2, 2 -> 1, then the end-of-turn hook sees 1 and both reduces -- removing the instance -- and detonates), for 40 or 50 PURE THORNS damage to every enemy, unmodified by Strength or Vulnerable."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: THE_BOMB, counter: 40}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: THE_BOMB, counter: 50}
 
 - id: 124
   name: THINKING_AHEAD

@@ -85,6 +85,40 @@ namespace sts::engine {
 //   order. The fixtures stamp the DECOUPLED on-disk tag kTraceFormatV1 (=1) as
 //   before; only their state_size field moves. kTraceFormatV2 follows this
 //   constant to 5.
-inline constexpr uint32_t SCHEMA_VERSION = 5;
+// v6 (=6): the PowerSlot second number + instanced powers + the combat-gold
+//   accumulator (owner-approved 2026-07-27; the allocation is recorded in the
+//   ledger's Wave-B block). THREE changes ride one bump because they are one
+//   struct edit:
+//     (a) `PowerSlot` grows {u16 power_id, i16 amount} -> {u16 power_id,
+//         i16 amount, i16 counter, i16 pad0}: 4 -> 8 bytes (types.hpp). `counter`
+//         is the SECOND per-instance number real powers carry beside `amount`
+//         (PanachePower.damage, PanachePower.java:28; TheBombPower.damage,
+//         TheBombPower.java:26), and it is observable -- the oracle emits it by
+//         field-name reflection (GameStateConverter:895-903). Every PRE-EXISTING
+//         power keeps counter == 0 with unchanged semantics; `amount` stays the
+//         oracle-visible stack number everywhere. Combust's private hpLoss is
+//         DELIBERATELY not migrated: its CombatState.flags bits are load-bearing
+//         on committed behaviour.
+//     (b) a per-power-def `instanced` marker (registry/powers.yaml -> PowerDef):
+//         op_apply_power APPENDS a fresh slot instead of merging by power_id.
+//         The Bomb is the only user (TheBombPower's ID is "TheBomb" + a static
+//         counter, :31-32, so two bombs NEVER merge in the game). No layout
+//         change of its own -- the generated PowerDef is not serialized.
+//     (c) `CombatState.combat_gold` (uint16), the in-combat gold accrual Hand of
+//         Greed needs, settled through the run layer's single gain_gold door at
+//         the combat fold-back. It reuses the former `pad_piles[2]`, so it moves
+//         NO offset and costs NO bytes.
+//   sizeof(PowerSlot) 4 -> 8, sizeof(MonsterState) 116 -> 212,
+//   sizeof(CombatState) 3928 -> 4696, so per §8 this is a schema bump. The 20
+//   combat fixtures are REGENERATED via the checked-in generator
+//   (tools/fixture_gen/gen_combat_fixtures.cpp) under the established byte-level
+//   zero-diff-in-meaning discipline: the old bytes are transformed by a
+//   MECHANICAL expansion (4 zero bytes appended to each of the 192 PowerSlot
+//   rows, at compiler-derived offsets) and the result is byte-identical to the
+//   regenerated files -- every pre-existing byte preserved in order, every new
+//   byte zero. The fixtures stamp the DECOUPLED on-disk tag kTraceFormatV1 (=1)
+//   as before; only their state_size field moves. kTraceFormatV2 follows this
+//   constant to 6.
+inline constexpr uint32_t SCHEMA_VERSION = 6;
 
 }  // namespace sts::engine

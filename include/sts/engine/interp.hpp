@@ -437,12 +437,33 @@ enum class Opcode : uint16_t {
                               // that card draw -> hand, or draw -> DISCARD when
                               // the hand is already full (:51-55). The REAL draw
                               // pile is never reordered by the browse; only the
-                              // taken cards leave it. 57-59 stay unissued: 57 is
-                              // the next colorless-rare batch's and 58-59 are that
-                              // batch's published reserve. 58 was available to the
-                              // generated-card family and was NOT spent, because
+                              // taken cards leave it. 58-59 remain this batch's
+                              // published reserve and stay UNISSUED (see 57
+                              // below); 58 was available to the generated-card
+                              // family and was NOT spent, because
                               // RANDOM_COLORLESS_TO_HAND's two new default-0 flag
                               // bits carried Transmutation cleanly.
+    DAMAGE_GREED = 57,        // Hand of Greed / GreedAction.update (:33-46): the
+                              // ORDINARY damage pipeline (this is a plain
+                              // `target.damage(info)` at :36, so Strength /
+                              // Vulnerable / Weak all apply and block absorbs --
+                              // NOT a pure-damage matrix), and then, ONLY if the
+                              // hit left the target dead, `amount` gold. `flags`
+                              // carries the gold (HandOfGreed's magicNumber ->
+                              // GreedAction.increaseGold, :24-27), the same
+                              // second-operand shape DAMAGE_FEED (35) uses for
+                              // its max-HP number. The gold lands in
+                              // CombatState.combat_gold and reaches RunState only
+                              // at the run layer's combat fold-back, through the
+                              // single gain_gold door.
+                              //
+                              // The Java gate is
+                              //   !(!isDying && currentHealth > 0 || halfDead ||
+                              //     hasPower("Minion"))
+                              // (:37). Both of the last two terms are
+                              // STRUCTURALLY constant-false in S1 and are
+                              // documented at the site rather than invented as
+                              // state -- see op_damage_greed.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -788,11 +809,116 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
 // --- APPLY_POWER field encoding ---------------------------------------------
 // `flags` low 16 bits hold the PowerId; `amount` holds the stack count. Use
 // these helpers so no caller hand-rolls the packing.
-[[nodiscard]] constexpr uint32_t make_apply_power_flags(PowerId id) noexcept {
-    return static_cast<uint32_t>(static_cast<uint16_t>(id));
+//
+// `flags` bits 16..31 additionally carry the applied power's COUNTER OPERAND --
+// the second number a `counter`-carrying PowerSlot (types.hpp) is constructed
+// with. It defaults to 0, which is exactly what every APPLY_POWER item and every
+// generated APPLY_POWER step packed before this existed, so all of them stay
+// byte-identical (checked by the kBash pin in cards.hpp, not assumed).
+//
+// Only The Bomb authors it: TheBomb.use passes THREE numbers to one
+// ApplyPowerAction -- the stack amount 3 and the ctor's (turns=3, damage=magic)
+// (TheBomb.java:32) -- so `amount` alone cannot carry both. Panache needs no
+// operand precisely because its two numbers coincide at the call site
+// (ApplyPowerAction(p, p, PanachePower(p, magic), magic), Panache.java:32): its
+// apply path reads the item's own `amount` as the damage. Authored as
+// `counter:` on an APPLY_POWER step (MIRRORED in
+// tools/registry_gen/stsgen/steps.py).
+inline constexpr uint32_t kApplyPowerCounterShift = 16;
+
+[[nodiscard]] constexpr uint32_t make_apply_power_flags(
+    PowerId id, int counter = 0) noexcept {
+    return static_cast<uint32_t>(static_cast<uint16_t>(id)) |
+           (static_cast<uint32_t>(static_cast<uint16_t>(counter))
+            << kApplyPowerCounterShift);
 }
 [[nodiscard]] constexpr PowerId apply_power_id_from_flags(uint32_t flags) noexcept {
     return static_cast<PowerId>(static_cast<uint16_t>(flags & 0xFFFFu));
+}
+[[nodiscard]] constexpr int apply_power_counter_from_flags(uint32_t flags) noexcept {
+    return static_cast<int>(static_cast<int16_t>(
+        static_cast<uint16_t>(flags >> kApplyPowerCounterShift)));
+}
+
+// PanachePower.CARD_AMT (PanachePower.java:27): the card countdown the power is
+// constructed at (:34) and RESET to both on the 5th card (:56-57) and at the
+// start of every turn (:64-67). A hard-coded 5 in the Java, so it is a constant
+// here too rather than a registry column -- no card supplies it.
+inline constexpr int16_t kPanacheCardAmount = 5;
+
+// --- REDUCE_POWER / REMOVE_POWER instance key --------------------------------
+//
+// Both ops normally name their victim by PowerId and take the FIRST slot that
+// matches -- correct while a power_id identifies at most one slot. An INSTANCED
+// power (powers.yaml `instanced: true`) breaks that: The Bomb appends a fresh
+// slot per play, so a creature can hold several at once with different fuses,
+// and Java's ReducePowerAction has an exact-INSTANCE overload for precisely this
+// case (ReducePowerAction.java:28-33 stores the AbstractPower itself; :41-51
+// reduces or RemoveSpecificPowerAction's THAT object).
+//
+// A slot INDEX cannot be the handle. The end-of-turn sweep queues one reduce per
+// bomb, in list order, and a reduce that empties its slot COMPACTS the array --
+// so every later queued index is already stale by the time it resolves (bombs at
+// [fuse 1, fuse 3]: the first reduce removes slot 0 and the second would then
+// address an empty slot 1 and silently tick nothing).
+//
+// The handle is therefore the slot's own STATE: {power_id, amount, counter},
+// captured when the reduce is queued. That is exact, not approximate. The only
+// slots it cannot tell apart are ones with an identical id, amount AND counter,
+// which are byte-identical rows -- interchangeable by construction, so resolving
+// to either yields the same multiset and leaves the other for the sibling reduce.
+// And nothing can change the captured amount in between: only a slot's own
+// queued reduce writes it.
+//
+// Packing (flags): bits 0..15 PowerId (unchanged) | bits 16..23 the expected
+// `amount` | bits 24..31 the expected `counter`. Bits 16..23 == 0 means NO
+// instance key, which is exactly what every pre-existing REDUCE_POWER /
+// REMOVE_POWER item packs -- a real key always has amount >= 1, because a slot
+// standing at 0 has already been removed. Both fields are bytes: The Bomb's fuse
+// is 1..3 and its damage 40/50, and a future instanced power whose numbers do
+// not fit must widen this deliberately rather than silently truncate (the
+// queueing helper asserts the range).
+inline constexpr uint32_t kPowerInstanceAmountShift = 16;
+inline constexpr uint32_t kPowerInstanceAmountMask = 0xFFu << kPowerInstanceAmountShift;
+inline constexpr uint32_t kPowerInstanceCounterShift = 24;
+inline constexpr uint32_t kPowerInstanceCounterMask = 0xFFu << kPowerInstanceCounterShift;
+
+[[nodiscard]] constexpr bool power_instance_key_present(uint32_t flags) noexcept {
+    return (flags & kPowerInstanceAmountMask) != 0u;
+}
+[[nodiscard]] constexpr int power_instance_amount(uint32_t flags) noexcept {
+    return static_cast<int>((flags & kPowerInstanceAmountMask) >>
+                            kPowerInstanceAmountShift);
+}
+[[nodiscard]] constexpr int power_instance_counter(uint32_t flags) noexcept {
+    return static_cast<int>((flags & kPowerInstanceCounterMask) >>
+                            kPowerInstanceCounterShift);
+}
+// Build the flags for an instance-targeted REDUCE_POWER / REMOVE_POWER. Values
+// outside 1..255 / 0..255 cannot be expressed, and the caller gets a key-free
+// (first-match) item rather than a wrong one -- callers are asserted, not
+// silently truncated, at the one queueing site (power_the_bomb.cpp).
+[[nodiscard]] constexpr uint32_t make_power_instance_flags(
+    PowerId id, int slot_amount, int slot_counter) noexcept {
+    if (slot_amount < 1 || slot_amount > 255 || slot_counter < 0 ||
+        slot_counter > 255) {
+        return static_cast<uint32_t>(static_cast<uint16_t>(id));
+    }
+    return static_cast<uint32_t>(static_cast<uint16_t>(id)) |
+           (static_cast<uint32_t>(slot_amount) << kPowerInstanceAmountShift) |
+           (static_cast<uint32_t>(slot_counter) << kPowerInstanceCounterShift);
+}
+
+// --- DAMAGE_GREED field encoding ---------------------------------------------
+// `amount` is the base damage; `flags` is the gold banked when the hit kills
+// (HandOfGreed magicNumber -> GreedAction.increaseGold, GreedAction.java:24-27).
+// The same whole-word second-operand shape DAMAGE_FEED uses. Authored as `gold:`
+// on the step (MIRRORED in tools/registry_gen/stsgen/steps.py).
+[[nodiscard]] constexpr uint32_t make_damage_greed_flags(int gold) noexcept {
+    return static_cast<uint32_t>(gold);
+}
+[[nodiscard]] constexpr int damage_greed_gold_from_flags(uint32_t flags) noexcept {
+    return static_cast<int>(flags);
 }
 
 // --- DAMAGE damage-type encoding ---------------------------------------------

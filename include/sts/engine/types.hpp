@@ -201,16 +201,42 @@ static_assert(sizeof(CardInstance) == 8,
 // monster). `amount` is signed because some real powers (not in the
 // skeleton) can go negative in-game bookkeeping; the three skeleton powers
 // (Strength, Vulnerable, Weak) are all non-negative stack counts in practice.
+//
+// `counter` is the SECOND per-instance number a power may carry. Several real
+// AbstractPower subclasses hold a private field beside `amount`, and the two are
+// independent: PanachePower keeps `amount` = the 5-card countdown and a private
+// `damage` that stackPower alone grows (PanachePower.java:28,34-35,46-50), and
+// TheBombPower keeps `amount` = the fuse in turns and a private `damage` fixed at
+// construction (TheBombPower.java:26,29-38). Both numbers are observable -- the
+// oracle emits `amount` and, by reflection over the field name, `damage`
+// (GameStateConverter.convertCreaturePowersToJson:895-903) -- so the second one
+// belongs in the serialized slot, not in a side table.
+//
+// CONVENTION: `amount` stays the ORACLE-VISIBLE stack number for every power, so
+// every existing power keeps `counter == 0` with unchanged semantics and every
+// amount-based read (damage hooks, Artifact charges, reduce/remove) is untouched.
+// A power that uses `counter` says what it means in its registry row.
+//
+// The `counter`-carrying powers are the ONLY consumers; Combust's private hpLoss
+// deliberately stays where it is (CombatState.flags, combat_state.hpp) -- those
+// bits are load-bearing on committed behaviour and moving them is out of scope.
 struct PowerSlot {
     uint16_t power_id;  // PowerId; NONE marks an empty slot.
     int16_t amount;
+    int16_t counter;    // second per-instance number (0 for every power that
+                        // does not declare a meaning for it)
+    int16_t pad0;       // explicit padding: keeps the row a deliberate 8 bytes
+                        // (a power-of-two stride for the two 24-slot arrays)
+                        // rather than an incidental 6, and is value-init zeroed
+                        // so byte-hashing stays padding-stable (design §4.1).
 };
 
 static_assert(std::is_trivially_copyable_v<PowerSlot>,
               "PowerSlot must be trivially copyable (design doc §4.1: "
               "snapshot = memcpy)");
-static_assert(sizeof(PowerSlot) == 4,
-              "PowerSlot must be exactly 4 bytes (design doc §4.2: u16+i16)");
+static_assert(sizeof(PowerSlot) == 8,
+              "PowerSlot must be exactly 8 bytes (u16+i16+i16+i16; was u16+i16 "
+              "== 4 before the schema-6 counter widening)");
 
 // --- Action ---------------------------------------------------------------
 

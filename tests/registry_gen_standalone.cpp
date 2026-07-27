@@ -30,8 +30,10 @@ static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
 // Master of Strategy, 120 Sadistic Nature, 124 Thinking Ahead) and stage B's 3
 // (121 Secret Technique, 122 Secret Weapon, 126 Violence) and stage C's 5 (113
 // Chrysalis, 115 Magnetism, 117 Mayhem, 118 Metamorphosis, 125 Transmutation);
-// ids 114/119/123 are reserved gaps owned by the last B3.11 stage.
-static_assert(sts::registry::manifest::kCardsCount == 121);
+// stage D's 3, which FILL the 114/119/123 gaps the earlier stages reserved
+// (114 Hand of Greed, 119 Panache, 123 The Bomb) -- with them the colorless RARE
+// block 112-126 is complete and holds no gap.
+static_assert(sts::registry::manifest::kCardsCount == 124);
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 // Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only

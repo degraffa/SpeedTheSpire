@@ -246,7 +246,21 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // here -- canSpawn (:93-95) only asks whether ANY POWER is in the master
     // deck -- so a COLORLESS POWER changes the predicate's inputs and nothing
     // else in this file.
-    static_assert(sts::registry::manifest::kCardsCount == 121,
+    // Checked for the three colorless RARE rows added alongside this comment
+    // (Hand of Greed, Panache, The Bomb). BASIC: NO for all three -- every ctor
+    // passes CardRarity.RARE (HandOfGreed.java:26, Panache.java:26,
+    // TheBomb.java:26), so the hard-coded BASIC set stays exactly
+    // {STRIKE, DEFEND, BASH}. POWER: YES for exactly ONE of them --
+    // Panache.java:26 passes CardType.POWER (Hand of Greed is CardType.ATTACK
+    // and The Bomb is CardType.SKILL). Answering the gate's question rather than
+    // bumping the number: ctx.deck_has_power is a plain type scan with NO rarity
+    // and no color clause (CardHelper.hasCardType, :80-86), so one more POWER row
+    // can only make an already-satisfiable predicate satisfiable in more decks --
+    // the same "only widens the already-live gate" shape the red RARE batch's
+    // five POWER cards, Sadistic Nature, and Magnetism/Mayhem set. The registry
+    // now has 12 POWER-type cards; the gate was already live and stays live.
+    // Neither gate MOVED; the number below is not merely bumped.
+    static_assert(sts::registry::manifest::kCardsCount == 124,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "
@@ -263,8 +277,10 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // post-`continue` body would model a rarity filter the Java does not have.
     // The two are indistinguishable today (no BASIC red row is a POWER), but the
     // faithful structure is the one that stays correct if that ever changes.
-    // The registry has 8 POWER-type cards (Combust/Dark Embrace/Evolve/Feel No
-    // Pain/Fire Breathing/Inflame/Metallicize/Rupture), so this gate is live.
+    // The registry has 12 POWER-type cards -- the eight red ones (Combust/Dark
+    // Embrace/Evolve/Feel No Pain/Fire Breathing/Inflame/Metallicize/Rupture)
+    // plus the four colorless (Sadistic Nature, Magnetism, Mayhem, Panache) --
+    // so this gate is live.
     ctx.deck_has_nonbasic_attack = false;
     ctx.deck_has_nonbasic_skill = false;
     ctx.deck_has_power = false;

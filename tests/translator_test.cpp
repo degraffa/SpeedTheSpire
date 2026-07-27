@@ -902,4 +902,73 @@ TEST(Translator, NonCombustPowerMiscRemainsDeferred) {
     EXPECT_EQ(combust_hp_loss(with_misc.records[0].combat), 0u);
     EXPECT_EQ(with_misc.stats.deferred, baseline.stats.deferred + 1u);
 }
+
+// --- B3.11 stage D: the two `counter`-carrying powers import their second
+// --- number, and The Bomb's per-instance oracle id joins ---------------------
+//
+// GameStateConverter emits a power's `damage` by REFLECTION over the field name
+// (convertCreaturePowersToJson, GameStateConverter.java:895-903), so it is
+// present for exactly the powers that declare a private `damage` -- which is
+// exactly the set that maps onto PowerSlot.counter.
+
+TEST(Translator, PanacheImportsCountdownAndDamageCounter) {
+    tr::TranslatedRun run = translate_with_player_power(
+        R"({"id":"Panache","name":"Panache","amount":3,"damage":24})",
+        "panache-import");
+    ASSERT_EQ(run.records.size(), 1u);
+    const engine::CombatState& s = run.records[0].combat;
+    ASSERT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(s.player_powers[0].power_id,
+              static_cast<uint16_t>(engine::PowerId::PANACHE));
+    EXPECT_EQ(s.player_powers[0].amount, 3) << "the oracle-visible countdown";
+    EXPECT_EQ(s.player_powers[0].counter, 24) << "the private damage";
+}
+
+// TheBombPower's ID is "TheBomb" + an ever-increasing static offset
+// (TheBombPower.java:31-32), so the oracle reports a DIFFERENT id string per
+// instance and the registry's exact game_id table cannot hold them.
+TEST(Translator, TheBombPerInstanceOracleIdsAllJoinToOnePowerId) {
+    for (const char* json : {
+             R"({"id":"TheBomb0","name":"Bomb","amount":3,"damage":40})",
+             R"({"id":"TheBomb1","name":"Bomb","amount":2,"damage":50})",
+             R"({"id":"TheBomb17","name":"Bomb","amount":1,"damage":40})",
+             R"({"id":"TheBomb","name":"Bomb","amount":3,"damage":40})",
+         }) {
+        SCOPED_TRACE(json);
+        tr::TranslatedRun run = translate_with_player_power(json, "bomb-import");
+        ASSERT_EQ(run.records.size(), 1u);
+        const engine::CombatState& s = run.records[0].combat;
+        ASSERT_EQ(s.player_power_count, 1);
+        EXPECT_EQ(s.player_powers[0].power_id,
+                  static_cast<uint16_t>(engine::PowerId::THE_BOMB));
+    }
+}
+
+TEST(Translator, TheBombImportsFuseAndDamagePerInstance) {
+    tr::TranslatedRun run = translate_with_player_power(
+        R"({"id":"TheBomb2","name":"Bomb","amount":2,"damage":50})",
+        "bomb-fields");
+    ASSERT_EQ(run.records.size(), 1u);
+    const engine::CombatState& s = run.records[0].combat;
+    ASSERT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(s.player_powers[0].amount, 2) << "the fuse in turns";
+    EXPECT_EQ(s.player_powers[0].counter, 50) << "this instance's damage";
+}
+
+// The suffix normalization is DELIBERATELY narrow: only digits, and only after
+// the exact lookup has failed. A near-miss must still fail loud rather than be
+// swallowed into The Bomb.
+TEST(Translator, TheBombPrefixNormalizationDoesNotSwallowNearMisses) {
+    for (const char* json : {
+             R"({"id":"TheBombX","name":"x","amount":1})",
+             R"({"id":"TheBomb1a","name":"x","amount":1})",
+             R"({"id":"TheBombardier","name":"x","amount":1})",
+         }) {
+        SCOPED_TRACE(json);
+        EXPECT_THROW(
+            translate_with_player_power(json, "bomb-near-miss"),
+            tr::TranslateError);
+    }
+}
+
 }  // namespace

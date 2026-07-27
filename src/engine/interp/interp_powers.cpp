@@ -70,12 +70,81 @@ namespace {
     return actor_has_power_slot(s, tgt, id);
 }
 
+// Resolve a power-slot list for `tgt`. Returns false (and leaves the outputs
+// untouched) for an actor lane that owns no list.
+[[nodiscard]] bool power_list_for(CombatState& s, uint8_t tgt, PowerSlot*& slots,
+                                  uint8_t*& count) noexcept {
+    if (tgt == kActorPlayer) {
+        slots = s.player_powers;
+        count = &s.player_power_count;
+        return true;
+    }
+    if (tgt < kMonsterCap) {
+        slots = s.monsters[tgt].powers;
+        count = &s.monsters[tgt].power_count;
+        return true;
+    }
+    return false;
+}
+
+// The slot REMOVE_POWER / REDUCE_POWER act on: the first slot carrying `pid`,
+// or -- when the item carries an instance key (interp.hpp
+// power_instance_key_present) -- the first slot whose {amount, counter} also
+// match. Returns `count` when nothing matches.
+[[nodiscard]] uint8_t find_target_slot(const PowerSlot* slots, uint8_t count,
+                                       uint16_t pid, uint32_t flags) noexcept {
+    const bool keyed = power_instance_key_present(flags);
+    const int want_amount = power_instance_amount(flags);
+    const int want_counter = power_instance_counter(flags);
+    for (uint8_t i = 0; i < count; ++i) {
+        if (slots[i].power_id != pid) {
+            continue;
+        }
+        if (keyed && (slots[i].amount != want_amount ||
+                      slots[i].counter != want_counter)) {
+            continue;
+        }
+        return i;
+    }
+    return count;
+}
+
+// Drop slot `i` from a list, shifting the tail down and zeroing the vacated
+// row. Carries the three per-power side effects a destroyed instance has.
+void remove_slot_at(CombatState& s, uint8_t tgt, PowerSlot* slots,
+                    uint8_t* count, uint8_t i) noexcept {
+    const PowerId id = static_cast<PowerId>(slots[i].power_id);
+    for (uint8_t j = static_cast<uint8_t>(i + 1); j < *count; ++j) {
+        slots[j - 1] = slots[j];
+    }
+    --*count;
+    slots[*count] = PowerSlot{};  // zero the vacated tail slot
+    if (id == PowerId::CURL_UP && tgt < kMonsterCap) {
+        // RemoveSpecificPowerAction destroys the CurlUpPower instance;
+        // its private triggered latch leaves with it.
+        s.monsters[tgt].flags &= ~kMonsterFlagCurlUpTriggered;
+    }
+    if (id == PowerId::FRAIL && tgt == kActorPlayer) {
+        s.flags &= ~kCombatFlagFrailJustApplied;
+    }
+    if (id == PowerId::COMBUST && tgt == kActorPlayer) {
+        s.flags &= ~kCombatFlagCombustHpLossMask;
+    }
+}
+
 }  // namespace
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
 // slot of the same id, else appends a new slot (hard cap kPowerCap -- overflow
 // is a silent no-op here rather than an assert, since a malformed item must not
-// crash; real card play never overflows 24 skeleton powers).
+// crash; real card play never overflows 24 skeleton powers). A power the
+// registry marks `instanced` skips the merge entirely and ALWAYS appends -- see
+// that branch below for the Java shape it models.
+//
+// `counter` is the applied instance's SECOND number (PowerSlot.counter,
+// types.hpp), carried in the item's flags bits 16..31. It is 0 for every power
+// that declares no meaning for it, so the whole feature is inert for the
+// pre-existing set.
 //
 // Interception (ApplyPowerAction.java:106-138): (1) the SOURCE's powers'
 // onApplyPower fire FIRST (Sadistic queues damage on a debuffed target); (2) if
@@ -83,7 +152,7 @@ namespace {
 // consumed and the power does NOT land. Both are no-ops without Sadistic/Artifact,
 // so skeleton APPLY_POWER (Bash's Vulnerable, Bellow's Strength) is unchanged.
 void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
-                    int amount) noexcept {
+                    int amount, int counter) noexcept {
     if (id == PowerId::NONE) {
         return;
     }
@@ -151,18 +220,31 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     }
     PowerSlot* slots = nullptr;
     uint8_t* count = nullptr;
-    if (tgt == kActorPlayer) {
-        slots = s.player_powers;
-        count = &s.player_power_count;
-    } else if (tgt < kMonsterCap) {
-        slots = s.monsters[tgt].powers;
-        count = &s.monsters[tgt].power_count;
-    } else {
+    if (!power_list_for(s, tgt, slots, count)) {
         return;
     }
     const uint16_t pid = static_cast<uint16_t>(id);
-    for (uint8_t i = 0; i < *count; ++i) {
+    // INSTANCED powers never merge. TheBombPower's ID is the literal "TheBomb"
+    // concatenated with a static, ever-increasing counter (TheBombPower.java:
+    // 31-32), so AbstractCreature.getPower never finds an existing instance and
+    // ApplyPowerAction always adds a NEW AbstractPower -- each play is its own
+    // fuse with its own damage. The registry marks such a power `instanced`
+    // (powers.yaml -> PowerDef::instanced); the append path below is the whole
+    // implementation.
+    const bool instanced = applied_def != nullptr && applied_def->instanced;
+    for (uint8_t i = 0; !instanced && i < *count; ++i) {
         if (slots[i].power_id == pid) {
+            // PanachePower.stackPower (PanachePower.java:46-50) grows ONLY its
+            // private damage: `this.damage += stackAmount`, with the 5-card
+            // countdown in `amount` left exactly where it stood. Partial
+            // progress therefore SURVIVES a re-application -- a second Panache
+            // does not restart the count -- which is the opposite of the
+            // AbstractPower default this branch implements for everything else.
+            if (id == PowerId::PANACHE) {
+                slots[i].counter =
+                    static_cast<int16_t>(slots[i].counter + amount);
+                return;
+            }
             if (id == PowerId::COMBUST && tgt == kActorPlayer) {
                 uint32_t hp_loss =
                     (s.flags & kCombatFlagCombustHpLossMask) >> kCombatFlagCombustHpLossShift;
@@ -190,6 +272,12 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
             return;
         }
     }
+    // SLOT-CAP behaviour is UNCHANGED and deliberately so: a full 24-slot list
+    // makes the application a silent no-op (the pre-existing contract at the top
+    // of this function -- a malformed or extreme item must not crash). An
+    // INSTANCED power reaches this the same way any other new slot does, so a
+    // 25th simultaneous Bomb is simply not applied; no new behaviour is invented
+    // here for it.
     if (*count >= kPowerCap) {
         return;
     }
@@ -209,78 +297,78 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         s.flags = (s.flags & ~kCombatFlagCombustHpLossMask) |
                   (1u << kCombatFlagCombustHpLossShift);
     }
-    slots[*count].power_id = pid;
-    slots[*count].amount = static_cast<int16_t>(amount);
+    // Whole-row assignment, not field-by-field: `counter`/`pad0` must be written
+    // (not inherited) so a slot recycled after a removal cannot carry a stale
+    // second number, and so byte-hashing stays padding-stable.
+    PowerSlot fresh{};
+    fresh.power_id = pid;
+    fresh.amount = static_cast<int16_t>(amount);
+    fresh.counter = static_cast<int16_t>(counter);
+    if (id == PowerId::PANACHE) {
+        // PanachePower's ctor (PanachePower.java:30-38) does NOT take the stack
+        // amount as its amount: it hard-codes `this.amount = 5` (CARD_AMT, :27)
+        // and takes the ctor argument as the private `damage`. Panache.use passes
+        // the SAME magicNumber for both the ApplyPowerAction stack amount and the
+        // ctor argument (Panache.java:32), so the item's `amount` IS the damage
+        // and the countdown is the constant 5. That coincidence is why this row
+        // authors no `counter:` operand.
+        fresh.amount = kPanacheCardAmount;
+        fresh.counter = static_cast<int16_t>(amount);
+    }
+    slots[*count] = fresh;
     ++*count;
 }
 
-// REMOVE_POWER (RemoveSpecificPowerAction): drop PowerId(flags) from tgt's power
-// list (shifting the tail down). No-op if the actor lacks the power.
-void op_remove_power(CombatState& s, uint8_t tgt, PowerId id) noexcept {
+// REMOVE_POWER (RemoveSpecificPowerAction): drop PowerId(flags low16) from tgt's
+// power list (shifting the tail down). No-op if the actor lacks the power.
+// `flags` may additionally carry an INSTANCE KEY (interp.hpp) naming one
+// specific slot of an instanced power; without one this is the historical
+// first-match-by-id.
+void op_remove_power(CombatState& s, uint8_t tgt, PowerId id,
+                     uint32_t flags) noexcept {
     PowerSlot* slots = nullptr;
     uint8_t* count = nullptr;
-    if (tgt == kActorPlayer) {
-        slots = s.player_powers;
-        count = &s.player_power_count;
-    } else if (tgt < kMonsterCap) {
-        slots = s.monsters[tgt].powers;
-        count = &s.monsters[tgt].power_count;
-    } else {
+    if (!power_list_for(s, tgt, slots, count)) {
         return;
     }
-    const uint16_t pid = static_cast<uint16_t>(id);
-    for (uint8_t i = 0; i < *count; ++i) {
-        if (slots[i].power_id == pid) {
-            for (uint8_t j = static_cast<uint8_t>(i + 1); j < *count; ++j) {
-                slots[j - 1] = slots[j];
-            }
-            --*count;
-            slots[*count] = PowerSlot{};  // zero the vacated tail slot
-            if (id == PowerId::CURL_UP && tgt < kMonsterCap) {
-                // RemoveSpecificPowerAction destroys the CurlUpPower instance;
-                // its private triggered latch leaves with it.
-                s.monsters[tgt].flags &= ~kMonsterFlagCurlUpTriggered;
-            }
-            if (id == PowerId::FRAIL && tgt == kActorPlayer) {
-                s.flags &= ~kCombatFlagFrailJustApplied;
-            }
-            if (id == PowerId::COMBUST && tgt == kActorPlayer) {
-                s.flags &= ~kCombatFlagCombustHpLossMask;
-            }
-            return;
-        }
+    const uint8_t i =
+        find_target_slot(slots, *count, static_cast<uint16_t>(id), flags);
+    if (i >= *count) {
+        return;
     }
+    remove_slot_at(s, tgt, slots, count, i);
 }
 
 // REDUCE_POWER (ReducePowerAction): subtract `amount` from one power and remove
 // the slot when it reaches zero. Kept as a queued opcode so an atEndOfRound power
 // cannot mutate/compact the list while the dispatcher is still iterating it.
-void op_reduce_power(CombatState& s, uint8_t tgt, PowerId id,
-                     int amount) noexcept {
+//
+// ReducePowerAction.update (:36-53) resolves its victim ONCE -- by id
+// (getPower(powerID)) or by the exact INSTANCE it was handed (:39-43) -- and then
+// either reducePower or, when the reduction would not leave a positive amount,
+// addToTop RemoveSpecificPowerAction on THAT object (:45-51). The instance-key
+// path here is that second constructor; see interp.hpp for why the key is the
+// slot's own {amount, counter} rather than its index.
+void op_reduce_power(CombatState& s, uint8_t tgt, PowerId id, int amount,
+                     uint32_t flags) noexcept {
     if (amount <= 0) {
         return;
     }
     PowerSlot* slots = nullptr;
-    uint8_t count = 0;
-    if (tgt == kActorPlayer) {
-        slots = s.player_powers;
-        count = s.player_power_count;
-    } else if (tgt < kMonsterCap) {
-        slots = s.monsters[tgt].powers;
-        count = s.monsters[tgt].power_count;
-    } else {
+    uint8_t* count = nullptr;
+    if (!power_list_for(s, tgt, slots, count)) {
         return;
     }
-    const uint16_t pid = static_cast<uint16_t>(id);
-    for (uint8_t i = 0; i < count; ++i) {
-        if (slots[i].power_id != pid) {
-            continue;
-        }
-        slots[i].amount = static_cast<int16_t>(slots[i].amount - amount);
-        if (slots[i].amount <= 0) {
-            op_remove_power(s, tgt, id);
-        }
+    const uint8_t i =
+        find_target_slot(slots, *count, static_cast<uint16_t>(id), flags);
+    if (i >= *count) {
         return;
+    }
+    slots[i].amount = static_cast<int16_t>(slots[i].amount - amount);
+    if (slots[i].amount <= 0) {
+        // The SAME slot, by index -- not a second first-match-by-id lookup, which
+        // would pick the wrong instance of an instanced power.
+        remove_slot_at(s, tgt, slots, count, i);
     }
 }
 

@@ -13,7 +13,14 @@
 static_assert(std::is_trivially_copyable_v<sts::engine::CardInstance>);
 static_assert(sizeof(sts::engine::CardInstance) == 8);
 static_assert(std::is_trivially_copyable_v<sts::engine::PowerSlot>);
-static_assert(sizeof(sts::engine::PowerSlot) == 4);
+// 8 since the schema-6 widening ({power_id, amount} + {counter, pad0}); the row
+// was a bare u16+i16 == 4 before it.
+static_assert(sizeof(sts::engine::PowerSlot) == 8);
+// A value-initialized slot is all zeroes INCLUDING the second number -- the
+// property every pre-schema-6 power relies on to keep its old semantics, and the
+// one the regenerated fixtures' new bytes are proven against.
+static_assert(sts::engine::PowerSlot{}.counter == 0);
+static_assert(sts::engine::PowerSlot{}.pad0 == 0);
 static_assert(std::is_trivially_copyable_v<sts::engine::Action>);
 static_assert(sizeof(sts::engine::Action) == 4);
 

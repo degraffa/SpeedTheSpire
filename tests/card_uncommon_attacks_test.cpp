@@ -78,7 +78,7 @@ void AddPower(CombatState& s, uint8_t actor, PowerId id, int16_t amount) {
                                              : s.monsters[actor].powers;
     uint8_t* count = actor == kActorPlayer ? &s.player_power_count
                                            : &s.monsters[actor].power_count;
-    slots[*count] = PowerSlot{static_cast<uint16_t>(id), amount};
+    slots[*count] = PowerSlot{static_cast<uint16_t>(id), amount, 0, 0};
     ++*count;
 }
 

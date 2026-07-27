@@ -76,8 +76,11 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_block(s, item.tgt, item.amount, item.flags);
             return;
         case Opcode::APPLY_POWER:
+            // `flags` low 16 = the PowerId, high 16 = the applied instance's
+            // counter operand (0 for every power but The Bomb).
             op_apply_power(s, item.src, item.tgt,
-                           apply_power_id_from_flags(item.flags), item.amount);
+                           apply_power_id_from_flags(item.flags), item.amount,
+                           apply_power_counter_from_flags(item.flags));
             return;
         case Opcode::DRAW: {
             // DrawCardAction.update:69-73: while the player has No Draw,
@@ -179,11 +182,15 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_use_card(s, item);
             return;
         case Opcode::REMOVE_POWER:
-            op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags));
+            // The whole flags word: an instanced power's item additionally
+            // carries the {amount, counter} instance key (interp.hpp).
+            op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags),
+                            item.flags);
             return;
         case Opcode::REDUCE_POWER:
             op_reduce_power(s, item.tgt,
-                            apply_power_id_from_flags(item.flags), item.amount);
+                            apply_power_id_from_flags(item.flags), item.amount,
+                            item.flags);
             return;
         case Opcode::DROPKICK:
             op_dropkick(s, item);
@@ -364,6 +371,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;
         case Opcode::UPGRADE_ALL:
             op_upgrade_all(s);
+            return;
+        case Opcode::DAMAGE_GREED:
+            // Hand of Greed: the ordinary damage pipeline, then `flags` gold
+            // into the combat accumulator if the hit left the target dead.
+            op_damage_greed(s, item.src, item.tgt, item.amount,
+                            damage_greed_gold_from_flags(item.flags));
             return;
         case Opcode::DRAW_PILE_FETCH:
             // Violence / DrawPileToHandAction.update: `amount` cards of the

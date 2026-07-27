@@ -169,6 +169,10 @@ void cmp_power_slot(DiffReport& r, const std::string& base, const PowerSlot& e,
                     const PowerSlot& a) {
     cmp_power_id(r, base + ".power_id", e.power_id, a.power_id);
     cmp_i(r, base + ".amount", e.amount, a.amount);
+    // The schema-6 second number (Panache's accumulated damage, The Bomb's
+    // per-instance damage). 0 for every power that declares no meaning for it,
+    // so this line reports nothing on a state built from pre-schema-6 content.
+    cmp_i(r, base + ".counter", e.counter, a.counter);
 }
 
 void cmp_powers(DiffReport& r, const std::string& base, const PowerSlot* e,
@@ -346,6 +350,9 @@ DiffReport diff_states(const CombatState& e, const CombatState& a) {
     cmp_pile(r, "discard", e.discard, e.discard_count, a.discard, a.discard_count);
     cmp_pile(r, "exhaust", e.exhaust, e.exhaust_count, a.exhaust, a.exhaust_count);
     cmp_pile(r, "limbo", e.limbo, e.limbo_count, a.limbo, a.limbo_count);
+
+    // -- in-combat gold accrual (settled into RunState at the fold-back) --
+    cmp_u(r, "combat_gold", e.combat_gold, a.combat_gold);
 
     // -- monsters --
     cmp_u(r, "monster_count", e.monster_count, a.monster_count);

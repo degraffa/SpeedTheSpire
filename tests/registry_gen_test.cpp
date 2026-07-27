@@ -450,7 +450,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 121u);  // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 124u);  // B3.7: prior 67 + 8 red uncommon POWER cards
                                       // + the 16 red RARE cards (ids 76-91)
                                       // + B3.10a/B3.10b's 18 colorless UNCOMMONs.
                                       // Their ids run 92-111 with TWO interior
@@ -468,12 +468,17 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.11 stage C's 5 (113 Chrysalis,
                                       // 115 Magnetism, 117 Mayhem, 118
                                       // Metamorphosis, 125 Transmutation); ids
-                                      // 114/119/123 are reserved gaps owned by
+                                      // 114/119/123 were reserved gaps owned by
                                       // the last B3.11 stage, so the row count
-                                      // adds 4 then 3 then 5, not 15.
+                                      // added 4 then 3 then 5, not 15
+                                      // + B3.11 stage D's 3, which FILL exactly
+                                      // those three gaps (114 Hand of Greed, 119
+                                      // Panache, 123 The Bomb). With them the
+                                      // colorless RARE block 112-126 is complete
+                                      // and holds no gap at all.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 47u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 49u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -506,7 +511,13 @@ TEST(RegistryGen, ManifestCounts) {
                                       // + B3.11 stage C's Mayhem (81) and
                                       // Magnetism (82), the two colorless-RARE
                                       // POWER cards' start-of-turn generators;
-                                      // 79-80 and 83-86 stay other stages' gaps
+                                      // 79-80 stay another stage's gap
+                                      // + B3.11 stage D's Panache (83) and The
+                                      // Bomb (84), the first two rows to use the
+                                      // schema-6 PowerSlot.counter and (for The
+                                      // Bomb) the registry's first `instanced`
+                                      // row; 85-86 are that batch's published
+                                      // RESERVE and stay unissued
     EXPECT_EQ(m::kMonstersCount, 25u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
@@ -538,7 +549,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 439u);  // 121 + 47 + 25 + 142 + 33 + 31 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 444u);  // 124 + 49 + 25 + 142 + 33 + 31 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

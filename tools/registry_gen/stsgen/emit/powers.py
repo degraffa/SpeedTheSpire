@@ -26,6 +26,15 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
             raise fail(f"powers.yaml: power {p['name']} has unknown stack "
                        f"{stack!r} (known: {sorted(POWER_STACK)})")
         native = bool(p.get("native", False))
+        # `instanced: true` -- op_apply_power APPENDS a fresh slot instead of
+        # merging by power_id. The Java shape this models is a power whose ID is
+        # not a constant: TheBombPower builds `POWER_ID + bombIdOffset` and
+        # increments the static offset in its ctor (TheBombPower.java:31-32), so
+        # AbstractCreature.getPower never matches an existing instance and every
+        # application is a distinct AbstractPower with its own fields. A power
+        # marked here must also have per-instance removal that names ONE slot
+        # (interp.hpp's REDUCE_POWER/REMOVE_POWER instance key).
+        instanced = bool(p.get("instanced", False))
 
         raw_hooks = p.get("hooks") or {}
         if not isinstance(raw_hooks, dict):
@@ -57,7 +66,7 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
         max_hooks = max(max_hooks, len(bindings))
         rows.append({"name": p["name"], "type": POWER_TYPES[ptype],
                      "stack": POWER_STACK[stack], "native": native,
-                     "bindings": bindings})
+                     "instanced": instanced, "bindings": bindings})
 
     out: list[str] = [BANNER, "#pragma once\n",
                       "#include <array>", "#include <cstdint>\n",
@@ -113,6 +122,11 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
     out.append("    PowerType type;")
     out.append("    PowerStack stack;")
     out.append("    bool native;")
+    out.append("    // op_apply_power APPENDS a fresh slot for this power instead "
+               "of merging")
+    out.append("    // by power_id -- the game's non-constant-ID powers "
+               "(TheBombPower.java:31-32).")
+    out.append("    bool instanced;")
     out.append("    uint8_t hook_count;")
     out.append("    std::array<PowerHookBinding, kMaxPowerHooks> hooks;")
     out.append("    [[nodiscard]] constexpr const PowerHookBinding* "
@@ -146,6 +160,7 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
                    f"{next(k for k, v in POWER_TYPES.items() if v == r['type'])}, "
                    f"PowerStack::{stack_name.upper()}, "
                    f"{'true' if r['native'] else 'false'}, "
+                   f"{'true' if r['instanced'] else 'false'}, "
                    f"{len(r['bindings'])},")
         out.append("    {{")
         out.extend(pad_bindings(r["bindings"]))
