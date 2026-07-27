@@ -3736,10 +3736,21 @@ the repurposed `EventDialogState::grid_kind` byte, and advances the incompatible
 build identity to `eventgrid1`. The `EventDialogState` size remains 8 bytes and
 the frozen `RunState`/`CombatState` schema is unchanged.
 
+Independent review fixed two gameplay/integrity defects before integration.
+The run-layer NORMAL event-damage transaction now follows the already-live
+Torii → Tungsten Rod → lethal Lizard Tail portions of
+`AbstractPlayer.damage`, including the owner-null distinction and the
+EventRoom-phase rule that keeps Magic Flower from amplifying Lizard Tail's
+revive. The generated `event_def` lookup now scans by identity instead of
+dense-indexing `id - 1`, preserving the repository-wide rule that registry ids
+may contain legal append-only gaps. Named regressions cover both changes; the
+shared `MoveCat` ledger allocation and all six native bodies' Java method
+citations were corrected in the same fix-forward.
+
 Tier-2 coverage includes every dialog option, all shuffled Dead Adventurer
 reward kinds and combats, all A15-changing constants, generic event combat
 stream/reward/cursor semantics, awake Lagavulin, EVENT translation failures,
 and fuzz enumeration/hash coverage. Final-tree WSL Debug, leak-detecting
-ASan/UBSan and Release are each **1101/1101**; documentation links,
+ASan/UBSan and Release are each **1103/1103**; documentation links,
 stale-count and whitespace checks are clean. No Steam/game deployment, fixture,
 golden, external oracle artifact or schema changed.

@@ -1456,6 +1456,7 @@ TEST(RegistryGen, FirstSixEventsCarryAuditedNativeBodyMetadata) {
     EXPECT_EQ(r::event_def(r::EventId::GOLDEN_IDOL)->a15_change_count, 2);
     EXPECT_EQ(r::event_def(r::EventId::GOLDEN_WING)->a15_change_count, 0);
     EXPECT_EQ(r::event_def(r::EventId::WORLD_OF_GOOP)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(static_cast<r::EventId>(0xFFFF)), nullptr);
 }
 
 TEST(RegistryGen, DuplicateEventIdFailsWithClearError) {

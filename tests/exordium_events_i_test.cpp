@@ -74,6 +74,54 @@ void give_relic(RunState& rs, RelicId id) {
     ++rs.relic_count;
 }
 
+int relic_counter(const RunState& rs, RelicId id) {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id == static_cast<uint16_t>(id)) {
+            return rs.relics[i].counter;
+        }
+    }
+    return 0;
+}
+
+TEST(EventDamage, NormalDamageHonorsOwnerAndRunRelics) {
+    {
+        RunController rc = event_controller(EventId::GOLDEN_WING);
+        rc.run.hp = 10;
+        give_relic(rc.run, RelicId::TUNGSTEN_ROD);
+        EXPECT_TRUE(
+            apply_event_damage(rc, 7, EventDamageOwner::PLAYER));
+        EXPECT_EQ(rc.run.hp, 4);
+    }
+    {
+        RunController null_owner = event_controller(EventId::GOLDEN_IDOL);
+        null_owner.run.hp = 10;
+        give_relic(null_owner.run, RelicId::TORII);
+        EXPECT_TRUE(apply_event_damage(
+            null_owner, 5, EventDamageOwner::NULL_SOURCE));
+        EXPECT_EQ(null_owner.run.hp, 5);
+
+        RunController player_owner = event_controller(EventId::GOLDEN_WING);
+        player_owner.run.hp = 10;
+        give_relic(player_owner.run, RelicId::TORII);
+        EXPECT_TRUE(
+            apply_event_damage(player_owner, 5, EventDamageOwner::PLAYER));
+        EXPECT_EQ(player_owner.run.hp, 9);
+    }
+}
+
+TEST(EventDamage, LizardTailRevivesOutsideCombatWithoutMagicFlowerBonus) {
+    RunController rc = event_controller(EventId::WORLD_OF_GOOP);
+    rc.run.hp = 5;
+    rc.run.max_hp = 75;
+    give_relic(rc.run, RelicId::LIZARD_TAIL);
+    give_relic(rc.run, RelicId::MAGIC_FLOWER);
+
+    EXPECT_TRUE(apply_event_damage(rc, 11, EventDamageOwner::PLAYER));
+    EXPECT_EQ(rc.run.hp, 37);
+    EXPECT_EQ(relic_counter(rc.run, RelicId::LIZARD_TAIL), -2);
+    EXPECT_EQ(static_cast<RunPhase>(rc.phase), RunPhase::EVENT_DIALOG);
+}
+
 TEST(BigFish, AllThreeOptionsApplyTheirExactImmediateMutations) {
     {
         RunController rc = event_controller(EventId::BIG_FISH);

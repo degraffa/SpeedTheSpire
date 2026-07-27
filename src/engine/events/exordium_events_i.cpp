@@ -157,6 +157,7 @@ void one_proceed_menu(EventDialogMenu& out) noexcept {
     out.enabled[0] = true;
 }
 
+// BigFish.<init>/buttonEffect (BigFish.java:38-78), read in full.
 // Big Fish -------------------------------------------------------------------
 
 void big_fish_enter(RunController& /*rc*/, EventDialogState& es) {
@@ -199,6 +200,7 @@ constexpr EventDialogImpl kBigFish = {
     &big_fish_choose,
 };
 
+// Cleric.<init>/update/buttonEffect (Cleric.java:34-91), read in full.
 // The Cleric -----------------------------------------------------------------
 
 constexpr int cleric_purify_cost(const RunState& rs) noexcept {
@@ -260,6 +262,8 @@ constexpr EventDialogImpl kCleric = {
     &cleric_choose,
 };
 
+// DeadAdventurer.<init>/buttonEffect/getMonster/randomReward
+// (DeadAdventurer.java:61-207), read in full.
 // Dead Adventurer ------------------------------------------------------------
 
 enum class DeadReward : uint8_t {
@@ -404,6 +408,8 @@ constexpr EventDialogImpl kDeadAdventurer = {
     &dead_choose,
 };
 
+// GoldenIdolEvent.<init>/buttonEffect (GoldenIdolEvent.java:47-133), read in
+// full.
 // Golden Idol ---------------------------------------------------------------
 
 void golden_idol_enter(RunController& /*rc*/, EventDialogState& es) {
@@ -478,6 +484,8 @@ constexpr EventDialogImpl kGoldenIdol = {
     &golden_idol_choose,
 };
 
+// GoldenWing.<init>/buttonEffect/purgeLogic (GoldenWing.java:48-136), read in
+// full.
 // Golden Wing ---------------------------------------------------------------
 
 constexpr uint8_t kWingIntro = 0;
@@ -547,6 +555,7 @@ constexpr EventDialogImpl kGoldenWing = {
     &golden_wing_choose,
 };
 
+// GoopPuddle.<init>/buttonEffect (GoopPuddle.java:38-85), read in full.
 // World of Goop -------------------------------------------------------------
 
 void goop_enter(RunController& rc, EventDialogState& es) {

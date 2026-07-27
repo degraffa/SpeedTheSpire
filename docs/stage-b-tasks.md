@@ -185,7 +185,7 @@ keys stored soak-coverage identities.
 | Namespace (defined in) | Taken | Reserved / free |
 |---|---|---|
 | `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–9** (`NONE`..`EVENT_DIALOG`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10 — landed, claiming its reservation) | 10+ free — claim here first |
-| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–23** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10; `COUNT = 24`) | 24+ free — claim here first and bump `COUNT` past every enumerator |
+| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–24** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11; `COUNT = 25`) | 25+ free — claim here first and bump `COUNT` past every enumerator |
 
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 

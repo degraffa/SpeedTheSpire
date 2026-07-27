@@ -3,6 +3,7 @@
 
 #include "sts/engine/event_framework.hpp"
 
+#include <algorithm>
 #include <cstdint>
 
 #include "relics/relic_pickup.hpp"    // gain_gold (Ectoplasm door)
@@ -443,21 +444,55 @@ bool event_grid_upgrade_card(RunState& rs, EventDialogState& es,
 
 bool apply_event_damage(RunController& rc, int32_t amount,
                         EventDamageOwner owner) noexcept {
+    // AbstractPlayer.damage (AbstractPlayer.java:1387-1502) runs the player's
+    // onAttacked relics before onLoseHpLast, then checks Fairy Potion and
+    // Lizard Tail after the HP write. Event dialogs have no block or combat
+    // powers, but the already-live relic effects remain observable here.
+    //
     // GoldenIdol uses DamageInfo(null, n); GoldenWing/Goop use player-owned
-    // DamageInfo. The owner is intentionally not erased from the API. In the
-    // RunState-only event layer neither source has powers/block, and the S1
-    // run-layer relic roster has no owner-dependent onAttacked override, so the
-    // persistent result is the same direct NORMAL damage.
-    (void)owner;
+    // DamageInfo. Torii.onAttacked (Torii.java:31-38) requires a non-null owner,
+    // so retaining owner is load-bearing even though this batch's player-owned
+    // hits (7/11) are above its threshold. Boot and Fairy Potion remain their
+    // separately recorded deferrals.
     if (amount <= 0 || rc.run.hp <= 0) {
         return rc.run.hp > 0;
     }
-    int hp = static_cast<int>(rc.run.hp) - amount;
+    int damage = amount;
+    if (owner == EventDamageOwner::PLAYER && damage > 1 && damage <= 5 &&
+        has_relic(rc.run, RelicId::TORII)) {
+        damage = 1;
+    }
+    // TungstenRod.onLoseHpLast (TungstenRod.java:26-32) is owner-independent
+    // and is the final damage modifier.
+    if (damage > 0 && has_relic(rc.run, RelicId::TUNGSTEN_ROD)) {
+        --damage;
+    }
+    if (damage == 0) {
+        return true;
+    }
+
+    int hp = static_cast<int>(rc.run.hp) - damage;
     if (hp < 0) {
         hp = 0;
     }
     rc.run.hp = static_cast<int16_t>(hp);
     if (hp == 0) {
+        // AbstractPlayer.damage (:1494-1497) consumes an armed Lizard Tail
+        // before declaring death. LizardTail.onTrigger (LizardTail.java:36-45)
+        // heals maxHealth/2 (minimum 1) and marks the relic used. Magic Flower
+        // does not amplify this heal in an EventRoom: its onPlayerHeal body is
+        // explicitly phase==COMBAT-gated (MagicFlower.java:31-38).
+        for (uint8_t i = 0; i < rc.run.relic_count; ++i) {
+            RelicSlot& slot = rc.run.relics[i];
+            if (slot.relic_id ==
+                    static_cast<uint16_t>(RelicId::LIZARD_TAIL) &&
+                slot.counter == -1) {
+                slot.counter = -2;
+                rc.run.hp = static_cast<int16_t>(
+                    std::max(1, static_cast<int>(rc.run.max_hp) / 2));
+                return true;
+            }
+        }
         rc.event = EventDialogState{};
         rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
         return false;
