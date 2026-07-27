@@ -73,11 +73,24 @@ against the vendored upstream source (§11, and tools/oracle_bridge/PROTOCOL.md)
 Unchanged from stage-a §1 (decompiled tree, class tree, `sts-classes.jar`)
 plus the Stage B additions:
 
-- **The installed game:** `D:\SteamLibrary\steamapps\common\SlayTheSpire`
-  (`desktop-1.0.jar`, patch dated `11-30-2020` per CommunicationMod's declared
-  `sts_version`), with its bundled JRE.
-- **ModTheSpire 3.18.1 + BaseMod** (Steam workshop items 1605060445,
-  1605833019, both installed locally).
+- **The installed game (the frozen runtime):**
+  `D:\SteamLibrary\steamapps\common\SlayTheSpire` (`desktop-1.0.jar`), patch
+  **`12-18-2022`** (`[V2.3.4]`), with its bundled JRE. Evidence:
+  `CardCrawlGame.VERSION_NUM = "[V2.3.4] (12-18-2022)"` /
+  `TRUE_VERSION_NUM = "2022-12-18"` (CardCrawlGame.java:125-126) in the
+  decompiled tree — which is decompiled from *this* install's
+  `sts-classes.jar`, so the canonical Java of §1.2 and the runtime are the same
+  build — corroborated by the `Version Info:` block of every campaign's
+  `mts_launch<N>.log`. (Through B4.7 this line read `11-30-2020`, *inferred*
+  from CommunicationMod's declared `sts_version`; the inference was wrong and
+  no `11-30-2020` build was ever installed. Corrected at B4.5, see §11 v0.1.7.)
+- **ModTheSpire `3.30.3` + BaseMod `5.56.0`** (Steam workshop items 1605060445,
+  1605833019, both installed locally). Both are auto-updating workshop items
+  with no pinning mechanism, so these versions are **sanctioned observations,
+  not enforceable pins**: every capture must re-observe them from its own
+  `mts_launch<N>.log`, which `campaign_driver.py` now does before it will write
+  an artifact header. (Also corrected at B4.5 from `3.18.1` + an unversioned
+  BaseMod; see §11 v0.1.7.)
 - **CommunicationMod v1.2.1** — local jar at Steam workshop item
   `2131373661\CommunicationMod.jar` (`ModTheSpire.json`: version 1.2.1,
   sts_version 11-30-2020, depends on basemod). Upstream source:
@@ -85,6 +98,13 @@ plus the Stage B additions:
   (commit `70ca84b1e8daff3eb4fe7f66775ce39926133c7f`), matching the local
   workshop jar (`ModTheSpire.json` version 1.2.1, sts_version 11-30-2020) and
   the source `pom.xml` (`<version>1.2.1</version>`). Resolved at B0.1 (§11).
+  **Those `11-30-2020` values are upstream's own declarations and are correct
+  as written** — they describe the build upstream targeted, not this project's
+  runtime, and are the origin of the mislabelling corrected above. The
+  SpeedTheSpire *fork* declares the sanctioned stack instead
+  (`communicationmod-oracle/src/main/resources/ModTheSpire.json`); ModTheSpire
+  treats `mts_version` as a hard minimum and `sts_version` as a launcher-only
+  warning, read out in `tools/oracle_bridge/PROTOCOL.md` §0.1.
 - **JDK 8** (`C:\Program Files\Java\jdk1.8.0_171`) for building the fork —
   the game runs Java 8; mods must target it. (Java 25 remains the
   golden-capture JVM, stage-a §3.7 — two different toolchains, two different
@@ -247,8 +267,8 @@ a build artifact, never committed. The fork carries three patch families:
    **[scope at B1.1]**.
 
 Upstream drift policy: the fork pins upstream v1.2.1 and never tracks later
-upstream changes during S1 (the game itself is frozen at 11-30-2020, so
-there is nothing to chase).
+upstream changes during S1 (the game itself is frozen at `12-18-2022` — §1.2,
+corrected at B4.5, §11 v0.1.7 — so there is nothing to chase).
 
 ### 2.5 The oracle state block — the concrete fork-patch list (frozen scope)
 
@@ -270,8 +290,11 @@ inventory S1 diffing needs is:
 | 10 | `Settings.seed` echo + `floorNum` + act id + ascension (sanity anchors for every record) | AbstractDungeon.java |
 
 Everything in the table is reachable via public/static fields or trivial
-accessors on the 11-30-2020 build (spot-checked for #1; the rest verified at
-B1.2, with reflection as the fallback for anything private). The block is
+accessors on the `12-18-2022` build (§1.2; spot-checked for #1; the rest
+verified at B1.2, with reflection as the fallback for anything private). The
+line numbers cited in this table resolve against that build's decompiled tree,
+which is what they were always read from — only the *label* was wrong before
+B4.5 (§11 v0.1.7). The block is
 emitted under a single `"oracle"` key, gated by a fork config flag, so stock
 CommunicationMod consumers are unaffected.
 
@@ -1064,3 +1087,70 @@ Continuing stage-a §10's numbering:
   `include/sts/engine/combat_rewards.hpp`'s S2 note on SAPPHIRE_KEY and
   `PROTOCOL.md` §3.6's `rewards[].link` note, both updated in the same change;
   the disposition (`I`, out of S1) is unchanged — only the reason was wrong.
+- v0.1.7 (2026-07-26) — B4.5 frozen-environment erratum against §1.2: the
+  sanctioned runtime stack is **Slay the Spire `12-18-2022` (`[V2.3.4]`),
+  ModTheSpire `3.30.3`, BaseMod `5.56.0`**, not `11-30-2020` / `3.18.1` /
+  unversioned. Owner decision, recorded under conventions §4 (frozen text fixed
+  inline **and** logged here), following the v0.1.3 / v0.1.6 form.
+
+  **What was actually wrong.** §1.2 derived the game's patch date by
+  *inference*: "patch dated `11-30-2020` **per CommunicationMod's declared
+  `sts_version`**". That inference read a property of *upstream's* mod manifest
+  as a property of *this* install. Upstream v1.2.1 genuinely targets
+  `11-30-2020` (`pom.xml:16-17`), and its declaration is still quoted verbatim
+  and unaltered in §1.2 and `PROTOCOL.md` §0 — it was never evidence about the
+  local game. ModTheSpire never contradicted it either, because `sts_version`
+  is a mod-select-GUI warning string and the scripted launch passes
+  `--skip-launcher`, which never constructs a `ModPanel` (`PROTOCOL.md` §0.1).
+
+  **The correction is not a change of runtime — the runtime was never
+  `11-30-2020`.** `CardCrawlGame.VERSION_NUM = "[V2.3.4] (12-18-2022)"`
+  (CardCrawlGame.java:125-126) in `D:\STS_BG_Mod\SlayTheSpireDecompiled`, the
+  §1.2 canonical Java every `File.java:line` citation in these docs resolves
+  against, which was decompiled from *this install's* `sts-classes.jar`. So the
+  decompiled spec the simulator was implemented against and the runtime every
+  oracle campaign was captured on are **the same build**, and always have been.
+  Only the label was wrong. This retires the residual risk an amendment would
+  otherwise carry ("the sim may have been verified against the wrong build"):
+  there is no second build, and none of §1.2's `File.java:line` citations move.
+
+  **Consequently no evidence is invalidated and nothing is re-blessed.** The G4
+  gate corpus `b13_on20b`, B1.2 stream verification, the B1.3 strip-equivalence
+  A/B, B4.1's map goldens and the `oracle_gate_check` pass all stand exactly as
+  recorded. `docs/stage-b-log.md`'s entries — including the G4 evidence at
+  §"g4" and the fork-hash citations — are **not** rewritten: each was true when
+  written, and the audit trail they preserve is what made this discoverable. A
+  new log entry records the re-pin instead.
+
+  **What did change, mechanically.** (a) The fork manifest
+  `communicationmod-oracle/src/main/resources/ModTheSpire.json` now declares
+  `sts_version 12-18-2022` / `mts_version 3.30.3`. That file is a runtime
+  manifest, not metadata: `mts_version` is parsed as a semver and enforced as a
+  hard **minimum** by `Patcher.initializeMods`/`sideloadMods`, failing with a
+  modal dialog (an indefinite hang under `--skip-launcher`) if the installed MTS
+  is older — so the pin is now enforced against a *downgrade*, while `sts_version`
+  remains load-inert. Read out in `PROTOCOL.md` §0.1. (b) Editing that file
+  changes the fork jar's content, so its pinned SHA-256 was re-derived; the
+  forward-looking citations were updated and the historical ones were not.
+  (c) BaseMod is pinned **by version (`5.56.0`)** for the first time — the repo
+  had only ever recorded workshop item `1605833019`, which is why
+  `driver/b45_reward_spotdiff.md` had to defer to an undefined "owner-approved
+  frozen installation".
+
+  **Why sanctioning rather than downgrading.** No downgrade procedure or depot
+  manifest id exists anywhere in the repo; ModTheSpire and BaseMod are
+  auto-updating workshop items with no pinning mechanism, so a restore would be
+  two unrecorded steps with nothing preventing recurrence; and the only
+  unlock-related backup on disk (`_oracle_data\STSUnlockProgress.pre-unlock.bak`)
+  is a **pre**-unlock snapshot, so restoring it would undo the §1.1 fully-unlocked
+  profile assumption rather than preserve it.
+
+  **The defect that hid this, also fixed.** `campaign_driver.py` stamped
+  `GAME_STS_VERSION`/`GAME_MTS_VERSION` as static constants into every artifact
+  header, so every artifact ever written *claimed* the frozen versions
+  regardless of what launched — the headers were unfalsifiable on precisely this
+  field. The driver now parses the observed stack out of the campaign's own
+  `mts_launch<N>.log`, writes **that** into the header, and refuses with the
+  existing `fatal_environment_drift` status when it mismatches the sanctioned
+  values, cannot be observed at all, or when stock `CommunicationMod` is loaded
+  beside the fork. A header can no longer assert a stack that did not run.

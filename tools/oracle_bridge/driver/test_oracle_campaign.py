@@ -218,6 +218,269 @@ def _write_timing(path, campaign_id, seed=SEED, attempt=1):
     }])
 
 
+# --- runtime-stack observation (B4.5; design 11 v0.1.7) --------------------
+#
+# The defect these cover: the artifact header used to carry static constants, so
+# every artifact claimed the sanctioned stack no matter what launched. A launch
+# log is now the only thing that can put versions in a header.
+
+def _launch_log(sts="12-18-2022", mts="3.30.3", mods=None, java="1.8.0_144"):
+    """A ModTheSpire launch log, verbatim in the shape MTS actually emits."""
+    if mods is None:
+        mods = [("basemod", "5.56.0"),
+                ("CommunicationMod-oracle", "1.2.1-oracle.0")]
+    lines = ["Running with debug mode turned ON...", "",
+             "Version Info:", f" - Java version ({java})"]
+    if sts is not None:
+        lines.append(f" - Slay the Spire ({sts})")
+    if mts is not None:
+        lines.append(f" - ModTheSpire ({mts})")
+    lines.append("Mod list:")
+    lines.extend(f" - {name} ({version})" for name, version in mods)
+    lines += ["", "Begin patching...", "Patching enums...Done."]
+    return "\n".join(lines) + "\n"
+
+
+def _write_launch_log(campaign_dir, index=1, **kwargs):
+    os.makedirs(campaign_dir, exist_ok=True)
+    path = os.path.join(campaign_dir, f"mts_launch{index}.log")
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(_launch_log(**kwargs))
+    return path
+
+
+def _stack_driver(root, campaign_id, state=None, max_actions=0):
+    """A CampaignDriver wired just far enough to reach the artifact header."""
+    driver = campaign_driver.CampaignDriver.__new__(
+        campaign_driver.CampaignDriver)
+    driver.args = SimpleNamespace(
+        data_root=root,
+        campaign_id=campaign_id,
+        policy_seed=1234,
+        menu_timeout=1.0,
+        policy="random-legal",
+        run_label="",
+        max_actions=max_actions,
+        fork_jar=r"D:\SteamLibrary\steamapps\common\SlayTheSpire\mods\CommunicationMod-oracle.jar",
+    )
+    driver.fork_hash = "A" * 64
+    driver.progress = mock.Mock()
+    driver.stepper = _StartStepper(
+        state if state is not None else _action(_oracle())["state_json"])
+    return driver
+
+
+class RuntimeStackParsingTest(unittest.TestCase):
+    def test_parses_version_info_and_mod_list(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = _write_launch_log(root)
+            observed = campaign_driver.parse_launch_log(path)
+            self.assertEqual("12-18-2022", observed["sts_version"])
+            self.assertEqual("3.30.3", observed["mts_version"])
+            self.assertEqual({"basemod": "5.56.0",
+                              "CommunicationMod-oracle": "1.2.1-oracle.0"},
+                             observed["mods"])
+            self.assertEqual([], campaign_driver.check_runtime_stack(observed))
+
+    def test_java_version_is_not_mistaken_for_the_game(self):
+        """' - Java version (…)' sits in the same block and must not leak."""
+        with tempfile.TemporaryDirectory() as root:
+            path = _write_launch_log(root, sts=None, mts=None)
+            observed = campaign_driver.parse_launch_log(path)
+            self.assertIsNone(observed["sts_version"])
+            self.assertIsNone(observed["mts_version"])
+
+    def test_latest_launch_log_orders_numerically_not_lexically(self):
+        with tempfile.TemporaryDirectory() as root:
+            for index in (1, 2, 12):
+                _write_launch_log(root, index=index)
+            self.assertEqual(
+                "mts_launch12.log",
+                os.path.basename(campaign_driver.latest_launch_log(root)))
+
+    def test_latest_launch_log_is_none_without_one(self):
+        with tempfile.TemporaryDirectory() as root:
+            self.assertIsNone(campaign_driver.latest_launch_log(root))
+
+    def test_check_reports_every_drifted_component_at_once(self):
+        observed = {
+            "sts_version": "11-30-2020",
+            "mts_version": "3.18.1",
+            "mods": {"basemod": "5.27.0",
+                     "CommunicationMod-oracle": "1.2.1-oracle.0"},
+        }
+        problems = campaign_driver.check_runtime_stack(observed)
+        joined = " | ".join(problems)
+        self.assertIn("Slay the Spire", joined)
+        self.assertIn("ModTheSpire", joined)
+        self.assertIn("basemod", joined)
+        self.assertEqual(3, len(problems))
+
+    def test_check_rejects_stock_communicationmod_beside_the_fork(self):
+        observed = {
+            "sts_version": "12-18-2022",
+            "mts_version": "3.30.3",
+            "mods": {"basemod": "5.56.0",
+                     "CommunicationMod": "1.2.1",
+                     "CommunicationMod-oracle": "1.2.1-oracle.0"},
+        }
+        problems = campaign_driver.check_runtime_stack(observed)
+        self.assertTrue(any("stock CommunicationMod" in p for p in problems),
+                        problems)
+
+    def test_check_rejects_a_missing_fork(self):
+        observed = {"sts_version": "12-18-2022", "mts_version": "3.30.3",
+                    "mods": {"basemod": "5.56.0"}}
+        problems = campaign_driver.check_runtime_stack(observed)
+        self.assertTrue(
+            any("CommunicationMod-oracle is not in" in p for p in problems),
+            problems)
+
+
+class RuntimeStackEnforcementTest(unittest.TestCase):
+    """A drifted or unobservable stack must never reach an artifact header."""
+
+    def _assert_no_artifact(self, root, campaign_id):
+        run_dir = os.path.join(root, campaign_id)
+        for name in (f"run_{SEED}_a20_ironclad.jsonl",
+                     f"run_{SEED}_a20_ironclad.timing.jsonl"):
+            self.assertFalse(os.path.exists(os.path.join(run_dir, name)),
+                             f"{name} must not exist")
+
+    def test_missing_launch_log_refuses_before_artifact_or_policy(self):
+        """The GUI-launch case that produced the invalid b45_rewards capture."""
+        with tempfile.TemporaryDirectory() as root:
+            driver = _stack_driver(root, "no_log")
+            driver._policy_command = mock.Mock(
+                side_effect=AssertionError("policy must not run"))
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift,
+                    "no mts_launch") as raised:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_unobservable", raised.exception.kind)
+            driver._policy_command.assert_not_called()
+            self._assert_no_artifact(root, "no_log")
+
+    def test_unparseable_launch_log_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_dir = os.path.join(root, "garbled")
+            os.makedirs(campaign_dir)
+            with open(os.path.join(campaign_dir, "mts_launch1.log"),
+                      "w", encoding="utf-8") as fh:
+                fh.write("Begin patching...\nPatching enums...Done.\n")
+            driver = _stack_driver(root, "garbled")
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift, "Version Info") as r:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_unparseable", r.exception.kind)
+            self._assert_no_artifact(root, "garbled")
+
+    def test_drifted_versions_refuse_before_artifact_or_policy(self):
+        """The exact drift that went unnoticed, now fatal instead of silent."""
+        with tempfile.TemporaryDirectory() as root:
+            _write_launch_log(os.path.join(root, "drift"),
+                              sts="11-30-2020", mts="3.18.1")
+            driver = _stack_driver(root, "drift")
+            driver._policy_command = mock.Mock(
+                side_effect=AssertionError("policy must not run"))
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift,
+                    "runtime stack drift") as raised:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_version_mismatch", raised.exception.kind)
+            driver._policy_command.assert_not_called()
+            self._assert_no_artifact(root, "drift")
+
+    def test_stock_communicationmod_beside_the_fork_refuses(self):
+        with tempfile.TemporaryDirectory() as root:
+            _write_launch_log(
+                os.path.join(root, "stock"),
+                mods=[("basemod", "5.56.0"),
+                      ("CommunicationMod", "1.2.1"),
+                      ("CommunicationMod-oracle", "1.2.1-oracle.0")])
+            driver = _stack_driver(root, "stock")
+
+            with self.assertRaisesRegex(
+                    campaign_driver.FatalEnvironmentDrift,
+                    "stock CommunicationMod") as raised:
+                driver.run_seed(SEED, 1)
+
+            self.assertEqual("stack_version_mismatch", raised.exception.kind)
+            self._assert_no_artifact(root, "stock")
+
+    def test_header_reports_the_observed_stack_not_the_constants(self):
+        """The regression that matters: header versions come from the log.
+
+        Asserted against a log that is sanctioned but whose BaseMod version
+        differs from the constant would be a drift; instead this pins that the
+        header's values are literally the parsed ones, and names the file they
+        came from, so the claim is auditable from the artifact alone.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            _write_launch_log(os.path.join(root, "observed"), index=3)
+            driver = _stack_driver(root, "observed")
+
+            outcome, _floor, actions, _menu = driver.run_seed(SEED, 1)
+            self.assertEqual(("action_cap", 0), (outcome, actions))
+
+            artifact = os.path.join(
+                root, "observed", f"run_{SEED}_a20_ironclad.jsonl")
+            with open(artifact, encoding="utf-8") as fh:
+                header = json.loads(fh.readline())
+
+            self.assertEqual(
+                {"sts_version": "12-18-2022",
+                 "mts_version": "3.30.3",
+                 "basemod": campaign_driver.BASEMOD_WORKSHOP,
+                 "basemod_version": "5.56.0",
+                 "version_source": "mts_launch3.log"},
+                header["game"])
+            self.assertEqual(
+                {"basemod": "5.56.0",
+                 "CommunicationMod-oracle": "1.2.1-oracle.0"},
+                header["mods_loaded"])
+            # and it still satisfies the validator's header contract
+            self.assertEqual(set(), validate_artifacts.HEADER_KEYS
+                             - header.keys())
+
+    def test_no_constant_can_reach_a_header(self):
+        """Guard the shape of the defect, not just one instance of it.
+
+        A future edit that reintroduces `"sts_version": SANCTIONED_STS_VERSION`
+        would pass every test above (the sanctioned log agrees with the
+        constants). So patch the constants to values no log will ever contain
+        and require that the header still reports the log.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            _write_launch_log(os.path.join(root, "guard"))
+            driver = _stack_driver(root, "guard")
+            sentinel_sts, sentinel_mts = "00-00-0000", "0.0.0"
+            with mock.patch.object(campaign_driver,
+                                   "SANCTIONED_STS_VERSION", sentinel_sts), \
+                 mock.patch.object(campaign_driver,
+                                   "SANCTIONED_MTS_VERSION", sentinel_mts):
+                # the sanctioned values now disagree with the log, so it refuses
+                with self.assertRaises(campaign_driver.FatalEnvironmentDrift):
+                    driver.run_seed(SEED, 1)
+            self._assert_no_artifact(root, "guard")
+
+            # and with the constants restored the same log is accepted
+            driver = _stack_driver(root, "guard")
+            driver.run_seed(SEED, 1)
+            artifact = os.path.join(
+                root, "guard", f"run_{SEED}_a20_ironclad.jsonl")
+            with open(artifact, encoding="utf-8") as fh:
+                header = json.loads(fh.readline())
+            self.assertNotIn(sentinel_sts, json.dumps(header))
+            self.assertNotIn(sentinel_mts, json.dumps(header))
+
+
 class CampaignDriverPreflightTest(unittest.TestCase):
     def test_first_dungeon_dump_without_oracle_creates_no_artifact(self):
         with tempfile.TemporaryDirectory() as root:

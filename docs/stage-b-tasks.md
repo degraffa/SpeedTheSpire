@@ -489,15 +489,43 @@ to avoid and why), pass its distinct one-seed preflight, launch via
 CardLibrary library-order deviation; the captured offers are what pins the
 one-line `gen.py` fix, after which it re-diffs to zero.
 
+**Environment blocker CLEARED 2026-07-26 — the capture is not.** The owner
+sanctioned the installed stack, and design §1.2 is amended accordingly: the
+frozen runtime is **StS `12-18-2022` (`[V2.3.4]`) / ModTheSpire `3.30.3` /
+BaseMod `5.56.0`** (design §11 v0.1.7). Nothing was downgraded and no prior
+evidence is re-blessed — the `11-30-2020` label was a documentation error
+inherited from *upstream* CommunicationMod's declared `sts_version`, and the
+decompiled Java every `File.java:line` citation resolves against is itself
+`12-18-2022` (`CardCrawlGame.VERSION_NUM`), so the spec and the captured
+runtime were always the same build. BaseMod is pinned by **version** for the
+first time; previously only workshop item `1605833019` was recorded, which is
+why the runbook had to defer to an undefined "owner-approved frozen
+installation".
+
+**This unblocks the environment only. B4.5 and B4.7 both stay open** — the
+remaining blocker is the live capture itself, which per CLAUDE.md a human must
+launch. **Two operator steps now precede it:** the fork jar's
+`ModTheSpire.json` was amended, so its pinned SHA-256 is re-derived to
+`7DC814AD240CBBD9100B2E8C92B6AA97B4ADFBED62FFED7961C6E5DE15884733`
+(determinism PASS) and **the fork must be redeployed to `<game>\mods\`** — the
+deployed jar is still the pre-amendment `04477E4E…` build.
+
 **Safety hardening (non-acceptance):** the preserved `b45_rewards` artifacts
 were rejected because the GUI loaded stock CommunicationMod and every header
 has `oracle_block_enabled: false`; the launch environment also drifted from the
-frozen game/ModTheSpire versions. The driver now makes a missing oracle block
-on the first in-dungeon dump a fatal durable status before policy/artifact
+then-frozen game/ModTheSpire versions. The driver now makes a missing oracle
+block on the first in-dungeon dump a fatal durable status before policy/artifact
 acceptance, the orchestrator stops relaunching on that status, and the
-validator/runbook require a distinct one-seed oracle preflight. The choice
-between restoring the frozen stack and formally amending it remains blocked on
-the owner; this hardening does **not** close B4.5.
+validator/runbook require a distinct one-seed oracle preflight.
+**Also fixed at the re-pin — the defect that hid the drift:** the artifact
+header's `sts_version`/`mts_version` were *static constants*, so every artifact
+ever written claimed the frozen stack no matter what launched. The driver now
+parses the observed stack out of the campaign's own `mts_launch<N>.log`, writes
+that into the header with a `version_source`, and refuses via the existing
+`fatal_environment_drift` status on a mismatch, on an unparseable log, or on no
+launch log at all (the GUI case). Applied retroactively to the 15 preserved
+campaign directories, the check accepts all 12 real captures and flags exactly
+`b45_rewards` — the one already known to be invalid.
 An independent second review then closed the remaining strict-evidence gaps:
 normal boss-reward claims now propagate their action count; seed identity is
 joined from request through every in-game/oracle record; run and timing JSONL
@@ -505,7 +533,8 @@ grammars are complete and bijective; campaign ids and resolved paths cannot
 escape the data root; and resume identity includes the currently requested
 fork/schema even for completed ledgers. These are capture-safety fixes only;
 the manual oracle acceptance remains the blocker.
-See the [non-task archive log](stage-b-log.md#b45-oracle-preflight).
+See the [non-task archive log](stage-b-log.md#b45-oracle-preflight) and the
+[runtime re-pin entry](stage-b-log.md#b45-oracle-stack-repin).
 
 **Landed** — commit `4f0544a`, merged at `e222dc2`, landed in `e6ec9ce`:
 `combat_rewards.{hpp,cpp}` (assembly at reward-screen open), the `RewardScreen`

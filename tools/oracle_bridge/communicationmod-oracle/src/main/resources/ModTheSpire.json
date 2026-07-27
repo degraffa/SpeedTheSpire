@@ -4,7 +4,7 @@
   "author_list": ["Forgotten Arbiter", "SpeedTheSpire oracle fork"],
   "description": "Oracle fork of Communication Mod for the SpeedTheSpire simulator bridge (upstream v1.2.1)",
   "version": "1.2.1-oracle.0",
-  "sts_version": "11-30-2020",
-  "mts_version": "3.18.1",
+  "sts_version": "12-18-2022",
+  "mts_version": "3.30.3",
   "dependencies": ["basemod"]
 }

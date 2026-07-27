@@ -4,7 +4,17 @@ This directory vendors upstream `ForgottenArbiter/CommunicationMod` v1.2.1
 (commit `70ca84b1e8daff3eb4fe7f66775ce39926133c7f`, MIT — see `LICENSE`),
 forked per stage-b-design §2.4. Upstream's own docs are in `README.md`
 (untouched, for drift auditing). Fork policy: pinned at v1.2.1, never tracks
-later upstream (the game is frozen at 11-30-2020).
+later upstream (the game is frozen at `12-18-2022`, design §1.2).
+
+**The fork's `ModTheSpire.json` deliberately does not match upstream's.**
+Upstream v1.2.1 declares `sts_version 11-30-2020` / `mts_version 3.18.1`; the
+fork declares the stack it is actually sanctioned against, `12-18-2022` /
+`3.30.3` (design §1.2, amended at B4.5 — §11 v0.1.7). Those two fields have
+**different** ModTheSpire semantics and only one can refuse a launch:
+`mts_version` is a hard *minimum* enforced by `Patcher` (a modal dialog, i.e. a
+hang under `--skip-launcher`, if the installed MTS is older), while
+`sts_version` is a mod-select-GUI warning that `--skip-launcher` never reaches.
+Full read-out in `../PROTOCOL.md` §0.1 — check it before editing either field.
 
 ## Fork identity
 
@@ -36,9 +46,13 @@ powershell -ExecutionPolicy Bypass -File ..\build_fork.ps1 -CheckDeterminism
   sources stay untouched) and packaging the already-relocated gson classes
   **extracted from the stock workshop jar** — byte-identical gson bytecode to
   the jar that produced the B0.2 baseline, and no new dependency download.
-- **Determinism:** entries ordinal-sorted, timestamps pinned (2020-11-30),
-  no manifest; `-CheckDeterminism` runs the full pipeline twice and compares
-  SHA256. The jar hash is what campaign artifact headers cite (design §2.7).
+- **Determinism:** entries ordinal-sorted, timestamps pinned to a fixed epoch
+  (`build_fork.ps1:45`, arbitrary — it is a reproducibility constant, **not** a
+  game-version claim, and is deliberately left alone when the runtime pin
+  moves), no manifest; `-CheckDeterminism` runs the full pipeline twice and
+  compares SHA256. The jar hash is what campaign artifact headers cite
+  (design §2.7). **Editing `ModTheSpire.json` changes this hash** — re-derive it
+  and update the forward-looking citations (`../driver/b45_reward_spotdiff.md`).
 - **Output:** `<repo>/build/oracle_fork/CommunicationMod-oracle.jar`,
   deployed to `<game>\mods\CommunicationMod-oracle.jar` (skip with
   `-NoDeploy`). The jar is a build artifact — never committed.

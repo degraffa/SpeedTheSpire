@@ -3456,3 +3456,79 @@ Normal bounded cleanup and non-strict historical validation remain unchanged.
 Verified on the Windows host: Python 34/34 and WSL Debug, ASan/UBSan, and
 Release 980/980 each; stale-count, documentation-link, whitespace, and
 golden/fixture/registry hygiene are clean.
+
+<a id="b45-oracle-stack-repin"></a>
+
+### B4.5 oracle runtime re-pin `[x]` (non-task) — 2026-07-26
+
+**Owner decision, executed under conventions §4.** The frozen oracle runtime is
+amended to **Slay the Spire `12-18-2022` (`[V2.3.4]`), ModTheSpire `3.30.3`,
+BaseMod `5.56.0`**, replacing `11-30-2020` / `3.18.1` / unversioned. Frozen text
+fixed inline in design §1.2 (and §2.4, §2.5, which restated it) and recorded in
+that document's change log as **§11 v0.1.7**, following the v0.1.3 / v0.1.6 form.
+
+**Nothing about the runtime changed — the label was wrong from the start.**
+Design §1.2 *inferred* the game's patch date from CommunicationMod's declared
+`sts_version`, i.e. read a property of upstream's mod manifest as a property of
+this install. `CardCrawlGame.VERSION_NUM = "[V2.3.4] (12-18-2022)"`
+(CardCrawlGame.java:125-126) in `D:\STS_BG_Mod\SlayTheSpireDecompiled` — the
+canonical Java every `File.java:line` citation in these docs resolves against,
+decompiled from *this install's* `sts-classes.jar` — shows the decompiled spec
+and the captured runtime are the same build, and always were. No `11-30-2020`
+build was ever installed. This retires the residual risk an amendment would
+otherwise carry: there is no second build, and no cited line number moves.
+
+**No prior entry in this archive is rewritten, and none needed to be.** The G4
+gate corpus `b13_on20b`, B1.2 stream verification, the B1.3 strip-equivalence
+A/B, B4.1's map goldens and the `oracle_gate_check` pass all stand as recorded.
+The fork-hash citations at `:300`, `:587`, `:632`, `:635`, `:2374` and the G4
+line in the ledger are **historical**: `04477E4E…B2C36636` genuinely was the
+artifact hash when each was written, and that audit trail is what made the drift
+discoverable. Likewise `tests/golden/map_paths/oracle_maps.txt` and
+`tests/map_gen_test.cpp` correctly record which fork build produced their
+goldens. Only forward-looking statements of the *current requirement* moved.
+
+**Re-pinned artifacts.** `communicationmod-oracle/.../ModTheSpire.json` now
+declares `sts_version 12-18-2022` / `mts_version 3.30.3`. That file is a runtime
+manifest, not metadata, and the two fields differ: read out of the installed
+`ModTheSpire.jar` with `javap`, `mts_version` is deserialized as a **semver** and
+enforced as a hard *minimum* by both `Patcher.initializeMods` and
+`Patcher.sideloadMods` (`ERROR: … requires ModTheSpire v… or greater!` plus a
+modal `JOptionPane`, which under `--skip-launcher` is a hang), while
+`sts_version` is only a `ModPanel` mod-select warning string that
+`--skip-launcher` never reaches. So the change is load-inert against the
+installed stack and additionally makes an MTS *downgrade* fail loudly. Recorded
+in `PROTOCOL.md` §0.1, which keeps the four upstream-provenance rows verbatim —
+they are true statements about upstream's artifact and were not edited.
+Rebuilding gave sha256
+**`7DC814AD240CBBD9100B2E8C92B6AA97B4ADFBED62FFED7961C6E5DE15884733`**,
+`determinism: PASS`. Built with `-NoDeploy`: **the game install was not
+written to, and the fork must be redeployed before the next capture.**
+
+**The defect that hid the drift, fixed.** `campaign_driver.py` stamped
+`GAME_STS_VERSION` / `GAME_MTS_VERSION` into every artifact header as static
+constants, making headers unfalsifiable on precisely the field the decision
+turned on. The driver now parses ModTheSpire's `Version Info:` / `Mod list:`
+block out of the campaign's own highest-numbered `mts_launch<N>.log`, writes the
+**observed** values plus a `version_source` and a `mods_loaded` map into the
+header, and refuses through the existing `fatal_environment_drift` status with a
+distinguishing `kind`: `stack_version_mismatch` (wrong versions, stock
+`CommunicationMod` loaded beside the fork, or the fork absent),
+`stack_unparseable`, or `stack_unobservable` (no launch log — the GUI-launch
+case). The sanctioned values are now only ever *compared* against the log, never
+copied into a header, and a test pins that property by patching the constants to
+sentinels and requiring the header still to report the log.
+
+**Retroactive check over the 15 preserved campaign directories:** all 12 real
+captures parse as `12-18-2022 / 3.30.3 / 5.56.0` and pass; `b13_pilot_scripts`
+and `b13_scripts20` are `--script-dir` inputs, not campaigns; and the only
+campaign flagged is `b45_rewards` — the one already known to be invalid, caught
+as `stack_unobservable` because its GUI launch wrote no log. The new check would
+have refused it at capture time.
+
+**Acceptance:** Python `test_oracle_campaign` **47/47** on the Windows host
+(34 before, 13 added); WSL `debug`/`asan`/`release` green; `check_stale_counts.sh`,
+`check_doc_links.sh` and `git diff --check` clean;
+`build_fork.ps1 -CheckDeterminism -NoDeploy` reports `determinism: PASS`.
+**B4.5 and B4.7 both remain open** — this clears the *environment* blocker only;
+the live capture, which a human must launch, is still outstanding.

@@ -40,8 +40,11 @@ foreach ($p in @($Javac, $DesktopJar, $MtsJar, $BaseModJar, $StockJar, $ForkDir)
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-# Zip entry timestamps are the one nondeterministic input; pin them to the
-# game build date. Value is arbitrary but frozen - changing it changes the hash.
+# Zip entry timestamps are the one nondeterministic input; pin them to a fixed
+# epoch. The value is arbitrary and frozen - changing it changes the hash for no
+# benefit. It is NOT a claim about the game's build date (that is 12-18-2022;
+# design 1.2 / 11 v0.1.7) and is deliberately left alone when the runtime pin
+# moves; it merely happens to be the date upstream CommunicationMod targeted.
 $FixedStamp = [DateTimeOffset]::new(2020, 11, 30, 0, 0, 0, [TimeSpan]::Zero)
 
 function Build-ForkJar([string]$Work) {

@@ -10,27 +10,39 @@ needs the live game, which is **launched manually by a human operator**
 the capture is prepared below; the capture and the diff read-out are the
 remaining human steps.
 
-## 1. Stop-line environment decision
+## 1. Environment decision — RESOLVED 2026-07-26
 
-The preserved `b45_rewards` campaign is **not acceptance evidence**. Its
-headers say `oracle_block_enabled: false`: a GUI launch loaded stock
-`CommunicationMod`, which shares the fork's config namespace and therefore
-still spawned the driver. Separately, the installed launch log reported Slay
-the Spire `12-18-2022`, ModTheSpire `3.30.3`, and BaseMod `5.56.0`, while the
-frozen environment names Slay the Spire `11-30-2020` and ModTheSpire `3.18.1`.
-Those newer versions are recorded as the observed drift, **not sanctioned**.
+**The stack question is settled: the installed stack is sanctioned.** The
+frozen environment is now **Slay the Spire `12-18-2022` (`[V2.3.4]`),
+ModTheSpire `3.30.3`, BaseMod `5.56.0`** (design §1.2, amended at §11 v0.1.7).
+This runbook is no longer blocked on it.
 
-Do not run the B4.5 campaign until the owner either restores the frozen stack
-or formally approves a frozen-design/environment amendment. This runbook
-continues to express the existing frozen choice; it does not make that
-decision.
+Nothing was downgraded, and nothing needed to be: the `11-30-2020` label was a
+documentation error inherited from *upstream* CommunicationMod's declared
+`sts_version`, never an observation of this install. The decompiled Java that
+every `File.java:line` citation in these docs resolves against is itself
+`12-18-2022` (`CardCrawlGame.VERSION_NUM`), so the spec the simulator was built
+from and the runtime every campaign was captured on are the same build. No
+prior evidence is invalidated and none is re-blessed.
+
+The preserved `b45_rewards` campaign is still **not acceptance evidence**, for
+the reason that always applied: its headers say `oracle_block_enabled: false`
+because a GUI launch loaded stock `CommunicationMod`, which shares the fork's
+config namespace and therefore still spawned the driver. Preserve it; never
+reuse or overwrite it.
+
+**What the operator must still do before the capture:** redeploy the fork jar.
+`ModTheSpire.json` was amended, so the jar was rebuilt and its pinned SHA-256
+changed (§2 check 2). The jar currently in `<game>\mods\` is the **old** build.
+Run `build_fork.ps1` *without* `-NoDeploy`, or copy
+`build\oracle_fork\CommunicationMod-oracle.jar` into `<game>\mods\` by hand.
 
 ## 2. One-seed preflight (operator, Windows host)
 
-After the environment decision is resolved, allocate a **new, immutable
-campaign tag for this attempt** (UTC timestamp plus an operator suffix is
-recommended). Never rerun a failed or completed B4.5 id: preserve its directory
-as evidence and allocate another tag. In the same `cmd.exe` window:
+Allocate a **new, immutable campaign tag for this attempt** (UTC timestamp plus
+an operator suffix is recommended). Never rerun a failed or completed B4.5 id:
+preserve its directory as evidence and allocate another tag. In the same
+`cmd.exe` window:
 
 ```bat
 set B45_TAG=20260726T210000Z_alex01
@@ -46,15 +58,26 @@ C:\Python39\python.exe orchestrator.py ^
 
 The preflight is a gate, not a smoke test. All of these checks are required:
 
-1. `mts_launch1.log` names **Slay the Spire (11-30-2020)**,
-   **ModTheSpire (3.18.1)**, and
+1. `mts_launch1.log` names **Slay the Spire (12-18-2022)**,
+   **ModTheSpire (3.30.3)**, **basemod (5.56.0)** and
    **CommunicationMod-oracle (1.2.1-oracle.0)** in its version/mod list; it
-   must not list stock `CommunicationMod`. The BaseMod line must match the
-   owner-approved frozen installation. A different or unresolved BaseMod
-   version stops the campaign rather than being inferred from the hard-coded
-   artifact header.
+   must not list stock `CommunicationMod`.
+
+   **The driver now enforces this itself** — it parses the campaign's own
+   `mts_launch<N>.log` before it will write an artifact header, records what it
+   observed in `game.sts_version` / `game.mts_version` /
+   `game.basemod_version` / `game.version_source`, and refuses with
+   `fatal_environment_drift` on a mismatch, on stock `CommunicationMod` being
+   loaded beside the fork, or on there being no launch log at all. So this check
+   is now a confirmation, not the only line of defence. Until B4.5 those header
+   fields were **static constants**, which is why the whole existing corpus
+   claimed `11-30-2020` while running `12-18-2022`; a header is only evidence
+   because of that change (design §11 v0.1.7).
 2. The deployed fork jar's SHA-256 is
-   `04477E4EAA07FC14774F9A687AC971EFBDB64EA7ECCB56804481B008B2C36636`.
+   `7DC814AD240CBBD9100B2E8C92B6AA97B4ADFBED62FFED7961C6E5DE15884733`.
+   (Re-derived at B4.5: amending `ModTheSpire.json` changed the jar's contents.
+   The previous pin `04477E4E…B2C36636` is the **pre-amendment** build — if you
+   see it here, the fork has not been redeployed yet; see §1.)
    Verify the deployed file itself:
 
    ```powershell

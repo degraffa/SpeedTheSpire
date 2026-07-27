@@ -8,7 +8,9 @@
 // This mirrors CampfireUI.initializeButtons: Rest, Smith, then each relic's
 // addCampfireOption in relic acquisition order.
 //
-// Provenance (methods read in full from the decompiled 11-30-2020 game):
+// Provenance (methods read in full from the decompiled game -- 12-18-2022,
+// design 1.2; the tree these line numbers resolve against is unchanged, only
+// its mislabelling was corrected, design 11 v0.1.7):
 //   * CampfireUI.initializeButtons (CampfireUI.java:81-107)
 //   * RestOption.<init> / CampfireSleepEffect.<init> / update
 //     (RestOption.java:25-39; CampfireSleepEffect.java:38-82)

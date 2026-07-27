@@ -21,6 +21,48 @@ no `.jar`/`.class`/build artifacts (verified by `find`); the single binary is
 `src/main/resources/Icon.png` (626 B mod-badge, loaded at
 CommunicationMod.java:219 — a build input, not a build output).
 
+### 0.1 The fork's own runtime pin (amended 2026-07-26, B4.5)
+
+The four rows above describe **upstream**, and every one of them is still
+literally true: upstream v1.2.1 really was authored against StS `11-30-2020` /
+MTS `3.18.1`, and the stock workshop jar really does declare that. They are
+evidence about someone else's artifact and are **not** this project's pin.
+
+The **fork's** pin — the sanctioned runtime the oracle bridge captures on — is
+separate, and since B4.5 it is stated where it is actually enforced:
+
+| Item | Value | Evidence |
+|---|---|---|
+| Slay the Spire | `12-18-2022` (`[V2.3.4]`) | `CardCrawlGame.VERSION_NUM`/`TRUE_VERSION_NUM` (CardCrawlGame.java:125-126) in the decompiled tree; `Version Info:` in every campaign's `mts_launch<N>.log` |
+| ModTheSpire | `3.30.3` | `Version Info:` in every campaign's `mts_launch<N>.log` |
+| BaseMod | `5.56.0` (workshop item `1605833019`) | `Mod list:` in every campaign's `mts_launch<N>.log` |
+| Fork manifest | `src/main/resources/ModTheSpire.json` `sts_version`/`mts_version` | this repo |
+
+**Why the fork manifest deliberately diverges from upstream's.** Those two
+fields are not inert metadata — ModTheSpire reads both, with *different*
+semantics, and only one of them can refuse a launch:
+
+- **`mts_version` is a hard minimum.** `ModInfo.MTS_Version` is parsed as a
+  **semver** (`ModInfo$VersionDeserializer`), and both `Patcher.initializeMods`
+  and `Patcher.sideloadMods` compare it against `Loader.MTS_VERSION`; if the
+  declared version is *greater* than the installed one the mod is refused with
+  `ERROR: <name> requires ModTheSpire v<X> or greater!` on stdout **and a modal
+  `JOptionPane` dialog** — which under the scripted `--skip-launcher` launch is
+  an indefinite hang, not a clean failure. Declaring `3.30.3` therefore turns
+  the sanctioned MTS floor into something ModTheSpire itself enforces; it is
+  safe only while the installed MTS is ≥ `3.30.3`, which for an auto-updating
+  workshop item it is. A *downgrade* below the pin now fails loudly by design.
+- **`sts_version` is a launcher warning only.** It is consumed solely by
+  `ModPanel` (the mod-select GUI), which string-compares it to
+  `Loader.STS_VERSION` and, on mismatch, sets a status tooltip reading "This
+  mod explicitly supports StS …. You are running StS …. You may encounter
+  problems running it." Nothing gates on it, and `--skip-launcher` never builds
+  a `ModPanel` at all. Correcting it to `12-18-2022` changes **no** load
+  behavior — it only stops the manifest asserting something false.
+
+All of the above was read from the installed `ModTheSpire.jar`
+(`1605060445`) with `javap`, not from memory or upstream docs.
+
 ## 1. Message framing (settles design [confirm at B0.1] #1)
 
 ### 1.1 Process model

@@ -45,6 +45,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -58,14 +59,137 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.4.2"
+DRIVER_VERSION = "b1.4.3"
 SCHEMA_VERSION = 1
 
-# Static provenance for the artifact header (design 1.2; PROTOCOL.md 0).
-GAME_STS_VERSION = "11-30-2020"
-GAME_MTS_VERSION = "3.18.1"
+# The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
+#
+# These are EXPECTATIONS, never the values reported in an artifact. Until B4.5
+# they were `GAME_STS_VERSION`/`GAME_MTS_VERSION` and were stamped straight into
+# every artifact header -- so every artifact ever written claimed the frozen
+# stack no matter what actually launched, and an entire corpus (including the G4
+# gate corpus b13_on20b) was captured on a stack nobody could see from the
+# artifacts. The header now reports what `observe_runtime_stack` READ from the
+# launch log, and a mismatch refuses. Do not reintroduce a code path that copies
+# a constant below into a header.
+SANCTIONED_STS_VERSION = "12-18-2022"
+SANCTIONED_MTS_VERSION = "3.30.3"
+SANCTIONED_BASEMOD_VERSION = "5.56.0"
 BASEMOD_WORKSHOP = "1605833019"
 MODS = ["basemod", "CommunicationMod-oracle"]
+
+# The fork's modid, and the stock mod it must never be loaded beside: both carry
+# the same patch classes and share SpireConfig("CommunicationMod", ...), so a
+# stock CommunicationMod loaded alongside the fork still spawns this driver and
+# still produces plausible-looking artifacts -- with no oracle block. That is
+# exactly how the invalid `b45_rewards` capture happened.
+FORK_MODID = "CommunicationMod-oracle"
+STOCK_MODID = "CommunicationMod"
+
+# ModTheSpire prints this block once per launch, before any mod initializes:
+#
+#     Version Info:
+#      - Java version (1.8.0_144)
+#      - Slay the Spire (12-18-2022)
+#      - ModTheSpire (3.30.3)
+#     Mod list:
+#      - basemod (5.56.0)
+#      - CommunicationMod-oracle (1.2.1-oracle.0)
+#
+# orchestrator.py captures it to `mts_launch<N>.log` in the campaign directory.
+# It is the ONLY ground truth for what launched: the mod's own ModTheSpire.json
+# merely *declares* versions, and ModTheSpire does not reject a game-version
+# mismatch (PROTOCOL.md 0.1), so a declaration proves nothing.
+_LAUNCH_LOG_RE = re.compile(r"\Amts_launch([0-9]+)\.log\Z")
+_VERSION_ENTRY_RE = re.compile(r"\A\s*-\s*(?P<name>.+?)\s*\((?P<version>[^()]*)\)\s*\Z")
+_STS_ENTRY = "Slay the Spire"
+_MTS_ENTRY = "ModTheSpire"
+
+
+def latest_launch_log(campaign_dir: str):
+    """Path of the highest-numbered mts_launch<N>.log, or None.
+
+    Highest index, not newest mtime and not lexicographic order: the
+    orchestrator increments the index before each launch, so the highest one is
+    the launch this driver is a child of. (Lexicographic would rank
+    `mts_launch12.log` below `mts_launch2.log`.)
+    """
+    best = None
+    try:
+        entries = os.listdir(campaign_dir)
+    except OSError:
+        return None
+    for name in entries:
+        m = _LAUNCH_LOG_RE.match(name)
+        if m and (best is None or int(m.group(1)) > best[0]):
+            best = (int(m.group(1)), name)
+    if best is None:
+        return None
+    return os.path.join(campaign_dir, best[1])
+
+
+def parse_launch_log(path: str) -> dict:
+    """Extract the observed runtime stack from one ModTheSpire launch log.
+
+    Returns {"sts_version", "mts_version", "mods": {modid: version}}; a value is
+    None when the log did not name it. Only the FIRST `Version Info:` block is
+    read -- one log is one launch, and a relaunch gets its own file.
+    """
+    observed = {"sts_version": None, "mts_version": None, "mods": {}}
+    section = None
+    seen_version_info = False
+    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if stripped == "Version Info:":
+                if seen_version_info:
+                    break          # a second block: different launch, stop
+                seen_version_info, section = True, "version"
+                continue
+            if stripped == "Mod list:":
+                section = "mods"
+                continue
+            if section is None:
+                continue
+            m = _VERSION_ENTRY_RE.match(line)
+            if m is None:
+                # Any non-entry line ends the block. Do NOT `break`: the two
+                # blocks are adjacent but not contiguous in every MTS build.
+                section = None
+                continue
+            name, version = m.group("name"), m.group("version")
+            if section == "version":
+                if name == _STS_ENTRY:
+                    observed["sts_version"] = version
+                elif name == _MTS_ENTRY:
+                    observed["mts_version"] = version
+            else:
+                observed["mods"][name] = version
+    return observed
+
+
+def check_runtime_stack(observed: dict) -> list:
+    """Every way `observed` fails the sanctioned stack, as a list of strings."""
+    problems = []
+    for label, got, want in (
+        ("Slay the Spire", observed.get("sts_version"), SANCTIONED_STS_VERSION),
+        ("ModTheSpire", observed.get("mts_version"), SANCTIONED_MTS_VERSION),
+        ("basemod", (observed.get("mods") or {}).get("basemod"),
+         SANCTIONED_BASEMOD_VERSION),
+    ):
+        if got != want:
+            problems.append(f"{label}: observed {got!r}, sanctioned {want!r}")
+    mods = observed.get("mods") or {}
+    if FORK_MODID not in mods:
+        problems.append(
+            f"{FORK_MODID} is not in the launch log's mod list "
+            f"(loaded: {sorted(mods)})")
+    if STOCK_MODID in mods:
+        problems.append(
+            f"stock {STOCK_MODID} loaded alongside the fork: both carry the "
+            "same patch classes and share the fork's config namespace, so the "
+            "driver attaches and writes artifacts with no oracle block")
+    return problems
 
 # base-35 seed alphabet (SeedHelper.CHARACTERS; stage-a 3.5). getLong() below is
 # a bit-exact port -- validated STS12345 -> 1790052133945 at build time.
@@ -627,6 +751,50 @@ class CampaignDriver:
         return campaign_file_under_root(
             self.args.data_root, self.args.campaign_id, name)
 
+    def observed_stack(self) -> dict:
+        """The runtime stack this launch ACTUALLY has, or refuse.
+
+        Ground truth is the campaign's own `mts_launch<N>.log` (see the module
+        header). Three ways this refuses, all as `fatal_environment_drift` so
+        the orchestrator stops instead of relaunching into the same wrong stack:
+
+          * `stack_unobservable`   -- no launch log, so nothing can be asserted.
+            This is the GUI-launch case that produced the invalid `b45_rewards`
+            campaign: a hand-started game writes no log at all. Refusing is the
+            point -- silence must never be reported as the sanctioned stack.
+          * `stack_unparseable`    -- a log with no readable Version Info block.
+          * `stack_version_mismatch` -- it launched, and it is the wrong stack.
+
+        Returns the observed values (plus `version_source`) for the header. The
+        caller must not substitute the SANCTIONED_* constants for a missing
+        value; that substitution IS the defect this method exists to remove.
+        """
+        path = latest_launch_log(self.run_dir())
+        if path is None:
+            raise FatalEnvironmentDrift(
+                "no mts_launch<N>.log in the campaign directory: the runtime "
+                "stack cannot be observed, so no artifact may claim one. "
+                "Launch through orchestrator.py -- a GUI launch writes no "
+                "launch log (driver/README.md)",
+                kind="stack_unobservable")
+        observed = parse_launch_log(path)
+        if observed["sts_version"] is None and observed["mts_version"] is None:
+            raise FatalEnvironmentDrift(
+                f"{os.path.basename(path)} has no readable 'Version Info:' "
+                "block; refusing to write an artifact whose runtime stack "
+                "cannot be established",
+                kind="stack_unparseable")
+        problems = check_runtime_stack(observed)
+        if problems:
+            raise FatalEnvironmentDrift(
+                "runtime stack drift observed in "
+                f"{os.path.basename(path)}: " + "; ".join(problems)
+                + ". Refusing artifact/policy. Either restore the sanctioned "
+                "stack or amend design 1.2 (and these constants) deliberately",
+                kind="stack_version_mismatch")
+        observed["version_source"] = os.path.basename(path)
+        return observed
+
     def strip_flags(self, seed: str, attempt: int) -> dict:
         return {"run_label": self.args.run_label,
                 "campaign_id": self.args.campaign_id,
@@ -714,15 +882,23 @@ class CampaignDriver:
                 f"getLong={expect_long!r}; refusing artifact/policy",
                 kind="seed_identity_mismatch")
 
+        observed = self.observed_stack()
+
         header = {
             "record_kind": "header",
             "schema_version": SCHEMA_VERSION,
             "driver_version": DRIVER_VERSION,
             "created_utc": _utc(),
-            "game": {"sts_version": GAME_STS_VERSION,
-                     "mts_version": GAME_MTS_VERSION,
-                     "basemod": BASEMOD_WORKSHOP},
+            # OBSERVED, not declared -- see observed_stack() and the module
+            # header's note on SANCTIONED_*. `version_source` names the file
+            # these came from so the claim is auditable from the artifact alone.
+            "game": {"sts_version": observed["sts_version"],
+                     "mts_version": observed["mts_version"],
+                     "basemod": BASEMOD_WORKSHOP,
+                     "basemod_version": observed["mods"].get("basemod"),
+                     "version_source": observed["version_source"]},
             "mods": MODS,
+            "mods_loaded": observed["mods"],
             "fork_jar_sha256": self.fork_hash,
             "fork_jar_path": self.args.fork_jar.replace("\\", "/"),
             "oracle_block_enabled": ("oracle" in gs),

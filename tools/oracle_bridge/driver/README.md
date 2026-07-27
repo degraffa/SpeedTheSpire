@@ -50,7 +50,27 @@ An oracle campaign is valid only when the explicitly selected
 `CommunicationMod-oracle` fork emits `game_state.oracle`. The driver checks the
 first in-dungeon dump before it creates an artifact or advances the policy; a
 missing block records `status: fatal_environment_drift`, and the orchestrator
-stops instead of relaunching. Run campaign acceptance with
+stops instead of relaunching.
+
+**The runtime stack is observed, never assumed (B4.5).** Immediately after that
+check the driver reads the campaign's own highest-numbered `mts_launch<N>.log`,
+parses ModTheSpire's `Version Info:` / `Mod list:` block, and writes **those**
+values into the artifact header (`game.sts_version`, `game.mts_version`,
+`game.basemod_version`, `game.version_source`, plus the full `mods_loaded`
+map). It refuses with the same `fatal_environment_drift` status, carrying a
+distinguishing `kind`, when the observed stack is not the sanctioned one
+(`stack_version_mismatch` — which also covers stock `CommunicationMod` loaded
+beside the fork, and the fork being absent), when the log has no readable
+version block (`stack_unparseable`), or when there is no launch log at all
+(`stack_unobservable` — the GUI-launch case, which is exactly how the invalid
+`b45_rewards` capture arose). Before B4.5 those header fields were hard-coded
+constants, so every artifact ever written asserted the sanctioned versions
+regardless of what actually launched. The sanctioned values now live in
+`campaign_driver.py`'s `SANCTIONED_*` constants and are only ever *compared*
+against the log, never copied into a header; moving the pin means editing those
+constants **and** design §1.2 deliberately (design §11 v0.1.7).
+
+Run campaign acceptance with
 `validate_artifacts.py --require-oracle`; the default validator remains
 backward-compatible with old, deliberately non-oracle B1.4 artifacts.
 Strict campaign validation requires a complete, failure-free progress and

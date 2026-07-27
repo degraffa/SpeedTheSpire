@@ -204,7 +204,9 @@ it.
   opcode renumber or an unplanned `SCHEMA_VERSION` bump is needed; a task's
   real scope turns out materially larger than its ledger entry (propose the
   split as a ledger change-log entry first); the B0.2 profile-unlock audit
-  fails or the game/mod environment drifts from the frozen 11-30-2020 build;
+  fails or the game/mod environment drifts from the frozen build **as design
+  §1.2 currently names it** (do not restate the versions here — that number
+  went stale once already and nothing re-derived it; B4.5 / design §11 v0.1.7);
   or two documents conflict and the fix isn't mechanical. Otherwise proceed
   autonomously — reversible, in-scope work never waits for permission.
 

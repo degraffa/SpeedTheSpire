@@ -148,8 +148,9 @@ survives triage and would change a frozen mechanic; the bridge throughput
 floor becoming unreachable; any registry-id/opcode renumber or an unplanned
 `SCHEMA_VERSION` bump; a task whose real scope is materially larger than its
 ledger entry (propose the split as a ledger change-log entry first); a failed
-B0.2 profile-unlock audit or any drift in the frozen 11-30-2020 game/mod
-environment; two documents in conflict where the fix isn't mechanical.
+B0.2 profile-unlock audit or any drift in the frozen game/mod environment as
+design §1.2 currently names it (deliberately not restated here — see
+conventions §5); two documents in conflict where the fix isn't mechanical.
 
 Otherwise proceed autonomously: reversible, in-scope work never waits for
 permission.
