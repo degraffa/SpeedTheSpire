@@ -221,7 +221,14 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // plain type scan with no rarity or color clause (CardHelper.hasCardType,
     // :80-86). The registry now has 9 POWER-type cards; the gate was already
     // live and stays live.
-    static_assert(sts::registry::manifest::kCardsCount == 113,
+    // Checked for the three colorless RARE rows added alongside this comment
+    // (Secret Technique, Secret Weapon, Violence): BOTH answers are NO. All
+    // three ctors pass CardRarity.RARE (SecretTechnique.java:25 /
+    // SecretWeapon.java:25 / Violence.java:25), so the hard-coded BASIC set is
+    // still exactly {STRIKE, DEFEND, BASH}; and all three are CardType.SKILL,
+    // so the POWER-type count stays at 9 and Bottled Tornado's gate is
+    // untouched. Neither gate moved; the number below is not merely bumped.
+    static_assert(sts::registry::manifest::kCardsCount == 116,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

@@ -273,6 +273,26 @@ void queue_cancelled_autoplay_filing(CombatState& s,
     return true;
 }
 
+// SecretTechnique.canUse (SecretTechnique.java:35-50) and SecretWeapon.canUse
+// (SecretWeapon.java:35-50) are the same shape as Clash's: super.canUse() first,
+// then a walk of p.drawPile.group setting a flag when any card has the wanted
+// CardType, and canUse = false (with a cantUseMessage) when none does. So the
+// card is UNPLAYABLE while the draw pile holds no card of that type. The scan
+// covers the whole draw pile, and the played card is in the hand at this point
+// (or in limbo for an autoplay), never in the draw pile, so it cannot satisfy
+// its own predicate.
+[[nodiscard]] bool draw_pile_has_type(const CombatState& s,
+                                      uint8_t card_type) noexcept {
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        const CardDef* def =
+            card_def(static_cast<CardId>(s.card_pool[s.draw[i]].card_id));
+        if (def != nullptr && static_cast<uint8_t>(def->type) == card_type) {
+            return true;
+        }
+    }
+    return false;
+}
+
 [[nodiscard]] bool normality_vetoes_play(const CombatState& s) noexcept {
     if (s.cards_played_this_turn < 3) {
         return false;
@@ -413,7 +433,9 @@ bool card_can_use_without_target(const CombatState& s,
         (def->type == CardType::ATTACK &&
          has_player_power(s, PowerId::ENTANGLE)) ||
         velvet_choker_vetoes_play(s) || normality_vetoes_play(s) ||
-        (def->requires_all_attacks && !all_hand_cards_are_attacks(s))) {
+        (def->requires_all_attacks && !all_hand_cards_are_attacks(s)) ||
+        (def->requires_draw_pile_type != kNoDrawPileType &&
+         !draw_pile_has_type(s, def->requires_draw_pile_type))) {
         return false;
     }
     if (!autoplay && s.player_energy < static_cast<int16_t>(card.cost_now)) {

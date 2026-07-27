@@ -17,8 +17,11 @@
 #include "sts/engine/piles.hpp"         // exhaust_card / shuffle_discard_into_draw / limbo
 #include "sts/engine/power_hooks.hpp"   // dispatch_on_exhaust (USE_CARD filing)
 #include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strange Spoon)
+#include "sts/engine/rng_jdk.hpp"       // JdkRandom / jdk_shuffle (temp-list shuffle)
 #include "sts/engine/rng_stream.hpp"    // random / random_boolean (spoon roll)
 #include "sts/engine/types.hpp"
+
+#include <span>
 
 namespace sts::engine {
 
@@ -60,6 +63,8 @@ void capture_purge_copy_x_energy(CombatState& s, CardPoolIndex pi,
             return s.discard_count;
         case ChoiceSource::EXHAUST:
             return s.exhaust_count;
+        case ChoiceSource::DRAW:
+            return s.draw_count;
         case ChoiceSource::HAND:
         default:
             return s.hand_count;
@@ -72,9 +77,96 @@ void capture_purge_copy_x_energy(CombatState& s, CardPoolIndex pi,
             return s.discard;
         case ChoiceSource::EXHAUST:
             return s.exhaust;
+        case ChoiceSource::DRAW:
+            return s.draw;
         case ChoiceSource::HAND:
         default:
             return s.hand;
+    }
+}
+
+// Does pool instance `pi` have CardType `type` (a raw CardType byte)?
+[[nodiscard]] bool instance_has_type(const CombatState& s, CardPoolIndex pi,
+                                     uint8_t type) noexcept {
+    const CardDef* def = card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+    return def != nullptr && static_cast<uint8_t>(def->type) == type;
+}
+
+// CardGroup.addToRandomSpot into a FRESH `new CardGroup(UNSPECIFIED)` -- the
+// browse list SkillFromDeckToHandAction (:35-39),
+// AttackFromDeckToHandAction (:35-39) and DrawPileToHandAction (:37-41) all
+// build the same way, walking the REAL draw pile front to back
+// (`for (AbstractCard c : this.p.drawPile.group)`) and inserting every
+// type-matching card.
+//
+// CardGroup.addToRandomSpot (CardGroup.java:463-469) in full:
+//
+//     if (this.group.size() == 0) { this.group.add(c); }
+//     else { this.group.add(AbstractDungeon.cardRandomRng.random(
+//                               this.group.size() - 1), c); }
+//
+// so the EMPTY-group branch is a plain append that draws NOTHING, and every
+// later insert spends exactly ONE cardRandomRng draw over the inclusive range
+// [0, size-1]. k matching cards therefore cost exactly k-1 draws. (Note the
+// insert index can never be `size`, so a card is never appended past the end
+// once the group is non-empty -- that skew is part of the browse order and is
+// reproduced here rather than approximated by a uniform shuffle.)
+//
+// Returns the temp group's size; `tmp` must have room for kDrawCap entries.
+// s.draw[i] is the same list index as drawPile.group.get(i) (index 0 == bottom,
+// draw_count-1 == top), so the walk order matches the Java's iteration order.
+int build_draw_temp_group(CombatState& s, uint8_t type,
+                          CardPoolIndex* tmp) noexcept {
+    int n = 0;
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        const CardPoolIndex pi = s.draw[i];
+        if (!instance_has_type(s, pi, type)) {
+            continue;
+        }
+        if (n == 0) {
+            tmp[n++] = pi;  // group.size() == 0 -> plain add, NO rng
+            continue;
+        }
+        const int32_t pos = random(s.card_random_rng, n - 1);  // ONE draw
+        for (int j = n; j > pos; --j) {
+            tmp[j] = tmp[j - 1];
+        }
+        tmp[pos] = pi;
+        ++n;
+    }
+    return n;
+}
+
+// Remove pool instance `pi` from the draw pile (shifting the tail down). Returns
+// false when it is not there (defensive).
+bool remove_from_draw(CombatState& s, CardPoolIndex pi) noexcept {
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        if (s.draw[i] != pi) {
+            continue;
+        }
+        for (uint8_t j = static_cast<uint8_t>(i + 1); j < s.draw_count; ++j) {
+            s.draw[j - 1] = s.draw[j];
+        }
+        --s.draw_count;
+        return true;
+    }
+    return false;
+}
+
+// drawPile.removeCard(card) + hand.addToTop(card), with the "hand is full"
+// redirect the deck-to-hand actions share: at hand.size() == 10 the card is
+// moveToDiscardPile'd out of the draw pile instead and a hand-is-full dialog is
+// shown (SkillFromDeckToHandAction.java:46-48 / :72-74,
+// DrawPileToHandAction.java:51-55). The card is CONSUMED either way -- it always
+// leaves the draw pile.
+void draw_card_to_hand_or_discard(CombatState& s, CardPoolIndex pi) noexcept {
+    if (!remove_from_draw(s, pi)) {
+        return;
+    }
+    if (s.hand_count < kHandCap) {
+        s.hand[s.hand_count++] = pi;  // hand.addToTop == append
+    } else if (s.discard_count < kDiscardCap) {
+        s.discard[s.discard_count++] = pi;
     }
 }
 
@@ -344,6 +436,13 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
         case ChoiceKind::EXHAUST_TO_HAND:
             exhaust_slot_to_hand(s, slot);
             break;
+        case ChoiceKind::DRAW_TO_HAND:
+            // The selected DRAW-pile card leaves the real draw pile for the
+            // hand (or the discard, at a full hand). The unchosen cards keep
+            // their draw-pile positions -- only the temp browse list was ever
+            // randomized, and it is discarded.
+            draw_card_to_hand_or_discard(s, s.draw[slot]);
+            break;
     }
 }
 
@@ -351,11 +450,12 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
 // the hand kinds, discard slots for discard-to-draw-top). The just-played source
 // card needs no exclusion here: it sits in the LIMBO pile while its own choice
 // is open (AbstractPlayer.useCard:1369-1375), so no source pile contains it.
-[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind) noexcept {
+[[nodiscard]] int count_eligible(const CombatState& s, ChoiceKind kind,
+                                 uint8_t type_filter) noexcept {
     const uint8_t src_count = choice_pile_count(s, kind);
     int n = 0;
     for (uint8_t i = 0; i < src_count; ++i) {
-        if (choice_slot_eligible(s, i, kind)) {
+        if (choice_slot_eligible(s, i, kind, type_filter)) {
             ++n;
         }
     }
@@ -447,25 +547,69 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
 void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
     const ChoiceKind kind = choose_kind_from_flags(item.flags);
     const bool is_random = choose_is_random(item.flags);
+    const uint8_t type_filter = choose_type_filter_from_flags(item.flags);
     const int need = item.amount;
     if (need <= 0) {
         return;
     }
-    const int eligible = count_eligible(s, kind);
+    const int eligible = count_eligible(s, kind, type_filter);
+    if (eligible <= need && kind == ChoiceKind::PUT_ON_DRAW_TOP && !is_random) {
+        // PutOnDeckAction.update's NO-SCREEN branch, in full
+        // (PutOnDeckAction.java:33-54). The action first clamps
+        // `amount = min(amount, hand.size())` (:37-39); the screen then opens
+        // only while `hand.group.size() > amount` (:45-49), so this branch is
+        // reached exactly when the caller asked for at least the whole hand --
+        // the outcome is FORCED, nothing is chosen. It is nevertheless:
+        //
+        //     for (i = 0; i < this.p.hand.size(); ++i) {
+        //         this.p.hand.moveToDeck(
+        //             this.p.hand.getRandomCard(AbstractDungeon.cardRandomRng),
+        //             this.isRandom);
+        //     }
+        //
+        // getRandomCard(rng) is `group.get(rng.random(size - 1))`
+        // (CardGroup.java:498-500) -- ONE cardRandomRng draw per moved card,
+        // spent even though the result cannot change what ends up on the deck.
+        // An EMPTY hand runs zero iterations and draws nothing.
+        //
+        // The loop bound is re-read each iteration off a list moveToDeck is
+        // SHRINKING, so with h >= 2 cards the Java moves only ceil(h/2) of
+        // them. That is reproduced here rather than "corrected", by writing the
+        // same shrinking loop -- but it is unreachable today: every authored
+        // put-on-draw-top step selects amount 1 (Warcry, Thinking Ahead), and
+        // amount 1 reaches this branch only at h <= 1, where the two readings
+        // coincide.
+        //
+        // THIS BILLING IS PER-KIND, NOT BLANKET. Each ChoiceKind is backed by a
+        // different Java action with its own forced-path behaviour --
+        // ArmamentsAction upgrades its single candidate directly with no rng at
+        // all, ExhaustAction's non-random branch exhausts the hand in order --
+        // so the draws belong to this kind only.
+        for (int i = 0; i < static_cast<int>(s.hand_count); ++i) {
+            const int32_t pick =
+                random(s.card_random_rng, static_cast<int32_t>(s.hand_count) - 1);
+            apply_choice_to_slot(s, static_cast<uint8_t>(pick),
+                                 ChoiceKind::PUT_ON_DRAW_TOP);
+        }
+        return;
+    }
     if (eligible <= need) {
         // Forced: apply to ALL eligible cards. Snapshot pool indices first (the
         // apply mutates the source pile). (ExhaustAction: hand.size() <= amount ->
         // exhaust whole hand; ArmamentsAction: exactly one upgradeable -> upgrade
-        // it; PutOnDeckAction: hand.size() <= amount -> move all;
-        // DiscardPileToTopOfDeckAction: <= 1 discard card -> auto-move it.) The
-        // eligible-<=-need bound keeps the snapshot within kHandCap (every in-scope
-        // discard-source choice has need == 1).
+        // it; DiscardPileToTopOfDeckAction: <= 1 discard card -> auto-move it;
+        // Skill/AttackFromDeckToHandAction: exactly one matching draw-pile card
+        // -> take it with no screen, :44-64, and zero matches -> a silent
+        // no-op, :40-43.) PutOnDeckAction took its own branch above -- its
+        // forced path is the one that spends rng. The eligible-<=-need bound
+        // keeps the snapshot within kHandCap (every in-scope discard- and
+        // draw-source choice has need == 1).
         CardPoolIndex picked[kHandCap];
         int m = 0;
         const uint8_t sc = choice_pile_count(s, kind);
         const CardPoolIndex* src_pile = choice_pile_cards(s, kind);
         for (uint8_t i = 0; i < sc && m < kHandCap; ++i) {
-            if (choice_slot_eligible(s, i, kind)) {
+            if (choice_slot_eligible(s, i, kind, type_filter)) {
                 picked[m++] = src_pile[i];
             }
         }
@@ -1011,6 +1155,54 @@ void op_upgrade_all(CombatState& s) noexcept {
     upgrade_pile(s.exhaust, s.exhaust_count);
 }
 
+// DRAW_PILE_FETCH (Violence / DrawPileToHandAction.update, :31-71). Read in
+// order, because each early-out sits at a different point in the rng stream:
+//
+//   :33-36  an EMPTY draw pile ends the action BEFORE the temp list exists --
+//           zero draws of either stream.
+//   :37-41  build the temp browse group of every matching draw-pile card via
+//           addToRandomSpot -- k matches, k-1 card_random_rng draws.
+//   :42-45  ZERO matches ends the action here, having spent exactly what the
+//           build spent (for k == 0 that is nothing).
+//   :46-67  `amount` iterations. An empty temp list `continue`s with NO rng at
+//           all (:47) -- so asking for more than the draw pile holds is free
+//           past the last real pick. Otherwise tmp.shuffle() -- the NO-ARG
+//           CardGroup.shuffle (:561-563), i.e.
+//           Collections.shuffle(group, new java.util.Random(
+//               AbstractDungeon.shuffleRng.randomLong())) -- ONE shuffle_rng
+//           draw seeding a JDK LCG that drives the same Fisher-Yates the deck
+//           reshuffle uses (jdk_shuffle). getBottomCard() (:49) is
+//           group.get(0), removed from the temp list (:50) and then moved
+//           draw -> hand, or draw -> DISCARD at a full hand (:51-55) -- either
+//           way it is consumed out of the draw pile.
+//
+// There is NO canUse gate on Violence (Violence.java has no canUse override),
+// so all three whiff paths above are genuinely reachable from a legal play.
+void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept {
+    if (s.draw_count == 0) {
+        return;  // :33-36 -- before the build, so ZERO draws
+    }
+    CardPoolIndex tmp[kDrawCap];
+    int n = build_draw_temp_group(s, type, tmp);
+    if (n == 0) {
+        return;  // :42-45 -- after the build (which cost nothing for k == 0)
+    }
+    for (int i = 0; i < amount; ++i) {
+        if (n == 0) {
+            continue;  // :47 -- no shuffle, no draw
+        }
+        JdkRandom rng(random_long(s.shuffle_rng));
+        jdk_shuffle(std::span<CardPoolIndex>(tmp, static_cast<std::size_t>(n)),
+                    rng);
+        const CardPoolIndex pi = tmp[0];  // getBottomCard == group.get(0)
+        for (int j = 1; j < n; ++j) {
+            tmp[j - 1] = tmp[j];
+        }
+        --n;
+        draw_card_to_hand_or_discard(s, pi);
+    }
+}
+
 void prepare_discovery_choice(CombatState& s,
                               ActionQueueItem& item) noexcept {
     if (discovery_choice_prepared(item)) {
@@ -1059,7 +1251,17 @@ void resolve_discovery_choice(CombatState& s,
 // --- Public: CHOOSE_CARD queries ---------------------------------------------
 
 bool choice_slot_eligible(const CombatState& s, uint8_t slot,
-                          ChoiceKind kind) noexcept {
+                          ChoiceKind kind, uint8_t type_filter) noexcept {
+    if (kind == ChoiceKind::DRAW_TO_HAND) {
+        // Secret Technique / Secret Weapon. The browse list is exactly the
+        // draw-pile cards of one CardType (SkillFromDeckToHandAction.java:36-39
+        // / AttackFromDeckToHandAction.java:36-39), so eligibility IS that type
+        // test against a real draw-pile slot. A full hand is NOT an
+        // ineligibility here, unlike Exhume: the action still runs and the
+        // chosen card is consumed into the discard pile instead (:46-48).
+        return slot < s.draw_count &&
+               instance_has_type(s, s.draw[slot], type_filter);
+    }
     if (kind == ChoiceKind::EXHAUST_TO_HAND) {
         // Exhume. Three of ExhumeAction's early-outs collapse into eligibility:
         //   * a FULL hand kills the whole action (ExhumeAction.java:40-43), so no
@@ -1118,7 +1320,29 @@ bool choice_requires_user(const CombatState& s,
         return false;  // nothing left to pick / auto-rolled -- never blocks
     }
     const ChoiceKind kind = choose_kind_from_flags(item.flags);
-    return count_eligible(s, kind) > item.amount;
+    return count_eligible(s, kind, choose_type_filter_from_flags(item.flags)) >
+           item.amount;
+}
+
+void prepare_choice_draw_source(CombatState& s, ActionQueueItem& item) noexcept {
+    if (static_cast<Opcode>(item.opcode) != Opcode::CHOOSE_CARD ||
+        (item.flags & kChoiceDrawTempBuiltBit) != 0u) {
+        return;
+    }
+    const ChoiceKind kind = choose_kind_from_flags(item.flags);
+    if (choice_source(kind) != ChoiceSource::DRAW) {
+        return;
+    }
+    item.flags |= kChoiceDrawTempBuiltBit;
+    // SkillFromDeckToHandAction.update / AttackFromDeckToHandAction.update do
+    // this on their FIRST update tick (:34-39), before any of the size-0 /
+    // size-1 / grid branches -- so the cost lands whether or not a screen ever
+    // opens. Only the DRAWS matter: a selection names a real draw-pile slot,
+    // and the real draw pile is not touched by the browse, so the temp list's
+    // ORDER is unobservable and the built list is discarded here.
+    CardPoolIndex tmp[kDrawCap];
+    (void)build_draw_temp_group(s, choose_type_filter_from_flags(item.flags),
+                                tmp);
 }
 
 void apply_choice_selection(CombatState& s, uint8_t slot, ChoiceKind kind,

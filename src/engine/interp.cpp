@@ -355,6 +355,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::UPGRADE_ALL:
             op_upgrade_all(s);
             return;
+        case Opcode::DRAW_PILE_FETCH:
+            // Violence / DrawPileToHandAction.update: `amount` cards of the
+            // CardType in `flags` out of the draw pile and into the hand.
+            op_draw_pile_fetch(s, item.amount,
+                               draw_pile_fetch_type_from_flags(item.flags));
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

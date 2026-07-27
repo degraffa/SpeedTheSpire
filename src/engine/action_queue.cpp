@@ -525,6 +525,15 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             r.outcome = PumpOutcome::WAITING_ON_USER;
             return r;
         }
+        // A DRAW-source CHOOSE_CARD (Secret Technique / Secret Weapon) bills its
+        // temp browse group's card_random_rng draws the first time the item is
+        // reached here -- SkillFromDeckToHandAction / AttackFromDeckToHandAction
+        // build that group on the action's first update tick, before they know
+        // whether a screen will open, so the cost lands on the blocking path AND
+        // on both auto-resolve paths. A latch bit in the item makes it once even
+        // though a blocked item is re-examined every pump step. No-op for every
+        // other choice kind.
+        prepare_choice_draw_source(s, front);
         if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
             choice_requires_user(s, front)) {
             s.phase = static_cast<uint8_t>(CombatPhase::WAITING_ON_USER);

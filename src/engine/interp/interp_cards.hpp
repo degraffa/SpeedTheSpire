@@ -73,4 +73,10 @@ void op_random_colorless_to_hand(CombatState& s, int count) noexcept;
 // discardPile, exhaustPile, in that order.
 void op_upgrade_all(CombatState& s) noexcept;
 
+// DRAW_PILE_FETCH (Violence) -- pull up to `amount` cards of CardType `type`
+// (the raw CardType byte, interp.hpp draw_pile_fetch_type_from_flags) out of the
+// draw pile into the hand. Dual-stream: k-1 card_random_rng draws for the temp
+// browse group, then ONE shuffle_rng draw per non-empty pick.
+void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept;
+
 }  // namespace sts::engine

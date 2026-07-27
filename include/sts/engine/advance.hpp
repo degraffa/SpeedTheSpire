@@ -139,6 +139,23 @@ struct ActionMask {
     // Discovery's generated three-card reward-style offer. When true, CHOOSE
     // arg0 is an offer slot 0..2, not a pile slot; can_choose[0..2] are true.
     bool choice_from_generated;
+
+    // --- Draw-source CHOOSE (Secret Technique / Secret Weapon) ---
+    // A DRAW_TO_HAND choice selects from the DRAW PILE, filtered to one CardType
+    // (SKILL for Secret Technique, ATTACK for Secret Weapon). When
+    // `choice_from_draw` is true, the CHOOSE action arg0 is a DRAW-pile slot and
+    // only the matching-type slots are eligible; `can_choose[i]` reflects the
+    // first min(draw_count, kHandCap) of them on the same convenience terms as
+    // `choice_from_discard` above. Mutually exclusive with the other three
+    // source flags, and false when idle.
+    //
+    // Such a choice is always MANDATORY and always exactly one card: the grid
+    // screen opens with anyNumber == false and, in combat, with no cancel button
+    // (GridCardSelectScreen.open, :437-457 -- the button is shown only for
+    // upgrade/transform/purge/shop screens, :446-448). That shows up here as the
+    // ordinary blocked-choice mask -- can_end_turn and every can_play false,
+    // can_choose the only true entries -- with no skip/cancel spelling at all.
+    bool choice_from_draw;
 };
 
 static_assert(std::is_trivially_copyable_v<ActionMask>,

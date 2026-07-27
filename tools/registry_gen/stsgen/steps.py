@@ -22,8 +22,10 @@ authored today.
 from __future__ import annotations
 
 from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
-                    CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT, CHOICE_KINDS,
+                    CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT,
+                    CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS,
                     CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
+                    CHOICE_TYPE_FILTER_SHIFT,
                     DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
@@ -62,6 +64,10 @@ GENERAL_OPS = frozenset({
     # exhaust) and the canUpgrade gate are read at execute time; no operand
     # needs the played card's instance.
     "UPGRADE_ALL",
+    # B3.11 stage B (Violence): `amount` and the CardType filter are literals
+    # and the draw pile / hand are execute-time reads, so the item carries
+    # identically from any domain's queue helper.
+    "DRAW_PILE_FETCH",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -229,7 +235,11 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             raise fail(f"{owner} CHOOSE_CARD has unknown choose "
                        f"{step.get('choose')!r} (known: {sorted(CHOICE_KINDS)})")
         kv = CHOICE_KINDS[kind]
-        extra = (kv & 0x3) | ((kv >> 2) * CHOICE_KIND_HIGH_BIT)
+        extra = (kv & 0x3)
+        if kv & 0x4:
+            extra |= CHOICE_KIND_HIGH_BIT
+        if kv & 0x8:
+            extra |= CHOICE_KIND_HIGH_BIT2
         if bool(step.get("random", False)):
             extra |= CHOICE_RANDOM_BIT
         copies = int(step.get("copies", 1))
@@ -253,6 +263,24 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
                 raise fail(f"{owner} CHOOSE_CARD has unknown guard {guard!r} "
                            f"(known: ['hand_nonempty'])")
             extra |= CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT
+        # `card_type` (draw_to_hand only): the CardType the DRAW-pile source is
+        # filtered to. REQUIRED for that kind and REJECTED for every other one --
+        # SkillFromDeckToHandAction and AttackFromDeckToHandAction are the same
+        # action but for this type, so a defaulted or ignored key would silently
+        # author Secret Technique's semantics onto Secret Weapon's row.
+        ct = step.get("card_type")
+        if kind == "draw_to_hand":
+            if ct is None:
+                raise fail(f"{owner} CHOOSE_CARD choose: draw_to_hand needs an "
+                           f"explicit card_type: (known: {sorted(CARD_TYPES)})")
+            ctu = str(ct).upper()
+            if ctu not in CARD_TYPES:
+                raise fail(f"{owner} CHOOSE_CARD has unknown card_type {ct!r} "
+                           f"(known: {sorted(CARD_TYPES)})")
+            extra |= (CARD_TYPES[ctu] + 1) << CHOICE_TYPE_FILTER_SHIFT
+        elif ct is not None:
+            raise fail(f"{owner} CHOOSE_CARD 'card_type' is only meaningful for "
+                       f"choose: draw_to_hand")
         return extra
 
     if op == "MAKE_CARD":
@@ -318,6 +346,22 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         ct = str(ct).upper()
         if ct not in CARD_TYPES:
             raise fail(f"{owner} CONDITIONAL_DRAW has unknown card_type "
+                       f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
+        return CARD_TYPES[ct]
+
+    if op == "DRAW_PILE_FETCH":
+        # `extra` = the CardType to pull out of the draw pile
+        # (DrawPileToHandAction's `typeToCheck` ctor argument, :23-28). Required
+        # and never defaulted, for the same reason CONDITIONAL_DRAW's is: ATTACK
+        # packs as 0, so an omitted key would be indistinguishable from Violence's
+        # exact semantics on a row that meant something else.
+        ct = step.get("card_type")
+        if ct is None:
+            raise fail(f"{owner} DRAW_PILE_FETCH needs an explicit "
+                       f"card_type: (known: {sorted(CARD_TYPES)})")
+        ct = str(ct).upper()
+        if ct not in CARD_TYPES:
+            raise fail(f"{owner} DRAW_PILE_FETCH has unknown card_type "
                        f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
         return CARD_TYPES[ct]
 

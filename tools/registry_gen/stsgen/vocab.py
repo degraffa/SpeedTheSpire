@@ -178,6 +178,22 @@ OPCODES = {
     # upgraded past 1). The played Apotheosis is in the LIMBO pile throughout
     # and is in none of the four piles scanned.
     "UPGRADE_ALL": 54,
+    # B3.11 stage B addition (55 and 57-59 stay unissued -- 55 and 57 belong to
+    # later B3.11 stages and 58-59 are this batch's published reserve).
+    # DRAW_PILE_FETCH is Violence / DrawPileToHandAction.update (:31-71): pull
+    # `amount` cards of the CardType in `extra` out of the DRAW PILE into the
+    # hand. DUAL-STREAM accounting, and the order of the early-outs is what
+    # makes it exact: an EMPTY draw pile ends the action at :33-36 BEFORE the
+    # temp browse group exists (zero draws of either stream); the group is then
+    # built with CardGroup.addToRandomSpot (:463-469), whose empty-group branch
+    # is a free plain append and whose every later insert is ONE cardRandomRng
+    # draw, so k matches cost k-1; ZERO matches ends it at :42-45 having spent
+    # exactly that (nothing). Each of the `amount` iterations then skips with NO
+    # rng while the temp list is empty (:47), else spends ONE shuffleRng
+    # randomLong seeding a java.util.Random for Collections.shuffle over the
+    # temp list (the NO-ARG CardGroup.shuffle, :561-563) and takes its BOTTOM
+    # card, which moves draw -> hand or draw -> DISCARD at a full hand (:51-55).
+    "DRAW_PILE_FETCH": 56,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -197,12 +213,31 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # choose one exhausted card and return it to the hand
                 # (ExhumeAction.update:38-113). Kind 5 packs as 1 | the high kind
                 # bit, so kinds 0-3 stay byte-identical.
-                "exhaust_to_hand": 5}
+                "exhaust_to_hand": 5,
+                # Secret Technique / Secret Weapon: the source pile is the DRAW
+                # PILE, filtered to ONE CardType (SkillFromDeckToHandAction /
+                # AttackFromDeckToHandAction differ only in that type, so
+                # `card_type:` is REQUIRED on the step and is what separates
+                # them). Kinds 6-7 are permanent gaps and kind 8 belongs to the
+                # colorless-uncommon batch landing in parallel; kinds are
+                # append-only, so 9 steps over them rather than backfilling.
+                # Kind 9 needs a FOURTH kind bit -- see CHOICE_KIND_HIGH_BIT2.
+                "draw_to_hand": 9}
 CHOICE_RANDOM_BIT = 1 << 2
-CHOICE_KIND_HIGH_BIT = 1 << 3
+CHOICE_KIND_HIGH_BIT = 1 << 3       # ChoiceKind bit 2
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
 # default (1 copy) encodes as 0 and every pre-B3.6 packed extra is byte-identical.
 CHOICE_COPIES_SHIFT = 4
+# ChoiceKind bit 3, for kinds 8+. Bits 0-1 hold the low kind bits, 2 is RANDOM,
+# 3 is kind bit 2, 4-7 are `copies`, 8 is the queue-time guard -- so the next
+# free bit is 9. kind = bits[0..1] | bit3 << 2 | bit9 << 3, which leaves every
+# kind 0-7 packing byte-identical.
+CHOICE_KIND_HIGH_BIT2 = 1 << 9
+# CHOOSE_CARD `card_type` (draw_to_hand only): bits [10..12] hold CardType + 1,
+# so 0 means "no filter". The +1 is load-bearing -- CardType ATTACK is 0, so a
+# raw type would be indistinguishable from an absent key, which is exactly the
+# silent-misauthoring hole CONDITIONAL_DRAW's required `card_type:` closes.
+CHOICE_TYPE_FILTER_SHIFT = 10
 # Thinking Ahead: an author-only queue-time guard, never read by the
 # interpreter's execute path. ThinkingAhead.use (:32-37) queues
 # PutOnDeckAction(1, false) only when AbstractDungeon.player.hand.size() > 0 AT

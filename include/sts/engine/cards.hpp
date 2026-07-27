@@ -61,6 +61,10 @@ using CardEffectStep = sts::registry::CardEffectStep;
 using CardDef = sts::registry::CardDef;
 
 using sts::registry::kMaxCardSteps;
+// CardDef::requires_draw_pile_type's "no such predicate" sentinel (255, outside
+// the CardType range). Read by card_can_use_without_target -- Secret Technique
+// needs a SKILL in the draw pile, Secret Weapon an ATTACK.
+using sts::registry::kNoDrawPileType;
 using sts::registry::kPoolableCurseCount;
 using sts::registry::kPoolableCurses;
 // The Ironclad in-combat ATTACK transform pool (Infernal Blade /
@@ -262,7 +266,9 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::USE_CARD) ==
             static_cast<uint16_t>(Opcode::USE_CARD) &&
         static_cast<uint16_t>(sts::registry::Opcode::UPGRADE_ALL) ==
-            static_cast<uint16_t>(Opcode::UPGRADE_ALL),
+            static_cast<uint16_t>(Opcode::UPGRADE_ALL) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DRAW_PILE_FETCH) ==
+            static_cast<uint16_t>(Opcode::DRAW_PILE_FETCH),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

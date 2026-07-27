@@ -374,6 +374,28 @@ enum class Opcode : uint16_t {
                               // upgrade COUNT keeps climbing past 1. The played
                               // Apotheosis sits in the LIMBO pile throughout and
                               // is in none of the four piles scanned.
+    DRAW_PILE_FETCH = 56,     // Violence / DrawPileToHandAction.update (:31-71):
+                              // pull up to `amount` cards of the CardType carried
+                              // in `flags` out of the DRAW PILE into the hand.
+                              // An EMPTY draw pile early-outs at :33-36 BEFORE
+                              // the temp list is built, so it costs ZERO rng.
+                              // Otherwise a temp CardGroup is filled with every
+                              // matching draw-pile card via
+                              // CardGroup.addToRandomSpot (:463-469) -- k matches
+                              // cost k-1 card_random_rng draws, the first insert
+                              // into an EMPTY group being free -- and a zero-match
+                              // list then early-outs at :42-45 having spent
+                              // exactly those (zero) draws. Each of the `amount`
+                              // iterations then: skips silently while the temp
+                              // list is empty (:47, NO rng at all), else spends
+                              // ONE shuffle_rng randomLong seeding a fresh
+                              // java.util.Random for Collections.shuffle over the
+                              // temp list (the NO-ARG CardGroup.shuffle(),
+                              // :561-563), pops its BOTTOM card (:49-50) and moves
+                              // that card draw -> hand, or draw -> DISCARD when
+                              // the hand is already full (:51-55). The REAL draw
+                              // pile is never reordered by the browse; only the
+                              // taken cards leave it. 55 and 57-59 stay unissued.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -388,6 +410,20 @@ enum class Opcode : uint16_t {
     return static_cast<uint32_t>(card_type);
 }
 [[nodiscard]] constexpr uint8_t conditional_draw_type_from_flags(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>(flags & 0xFFu);
+}
+
+// --- DRAW_PILE_FETCH field encoding ------------------------------------------
+// `amount` is how many cards to pull (Violence's magicNumber, 3 base / 4
+// upgraded); `flags` low byte carries the CardType to match in the draw pile
+// (DrawPileToHandAction's `typeToCheck`, :21-28), in the same raw-CardType
+// spelling CONDITIONAL_DRAW uses above and for the same include-order reason.
+[[nodiscard]] constexpr uint32_t make_draw_pile_fetch_flags(
+    uint8_t card_type) noexcept {
+    return static_cast<uint32_t>(card_type);
+}
+[[nodiscard]] constexpr uint8_t draw_pile_fetch_type_from_flags(
     uint32_t flags) noexcept {
     return static_cast<uint8_t>(flags & 0xFFu);
 }
@@ -438,8 +474,21 @@ inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
 //                    magicNumber: 1 base / 2 upgraded). Storing copies-1 keeps
 //                    the default (1 copy) at 0, so an extra authored before
 //                    DUPLICATE existed stays byte-identical.
-// MIRRORED in tools/registry_gen/gen.py (CHOICE_KINDS + the bit layout) so a
-// CHOOSE_CARD effect step authored in cards.yaml packs an identical `extra`.
+//   * bit  [8]    -> the author-only queue-time hand-nonempty guard (below).
+//   * bit  [9]    -> ChoiceKind bit 3 -- kinds 8+ need a fourth kind bit, and
+//                    every lower position is taken, so it lives here.
+//                    kind = bits[0..1] | bit3 << 2 | bit9 << 3, which leaves
+//                    kinds 0..7 packing exactly as before (append-only).
+//   * bits[10..12]-> the CARD-TYPE FILTER, stored as CardType + 1 so that 0
+//                    means "no filter" and every previously-authored extra
+//                    stays byte-identical (CardType::ATTACK is 0, so a raw
+//                    type could not be distinguished from "absent").
+//   * bit  [13]   -> a RUNTIME latch, never authored: the draw-source temp
+//                    group has already been built and its card_random_rng
+//                    draws billed (see prepare_choice_draw_source).
+// MIRRORED in tools/registry_gen/stsgen/vocab.py (CHOICE_KINDS + the bit
+// layout) so a CHOOSE_CARD effect step authored in cards.yaml packs an
+// identical `extra`.
 enum class ChoiceKind : uint8_t {
     EXHAUST = 0,         // move each selected hand card to the exhaust pile
     PUT_ON_DRAW_TOP = 1, // move each selected hand card to the top of the draw pile
@@ -461,6 +510,25 @@ enum class ChoiceKind : uint8_t {
     // and the whole choice is dead while the hand is full (:40-43). A returned
     // SKILL costs 0 for the turn while Corruption is up (:57-59, :94-96).
     EXHAUST_TO_HAND = 5,
+    // 6-8 are NOT this batch's: 6-7 are permanent gaps and 8 belongs to the
+    // colorless-uncommon batch landing in parallel. Kinds are append-only, so
+    // they are stepped over rather than backfilled.
+    //
+    // The source pile is the DRAW PILE, filtered to ONE CardType (the
+    // bits[10..12] filter above): choose one matching draw-pile card and put it
+    // in the hand -- SkillFromDeckToHandAction / AttackFromDeckToHandAction,
+    // which differ only in that type. Both build a temp CardGroup of the
+    // matching cards first (billed by prepare_choice_draw_source), then: zero
+    // matches is a silent no-op (:40-43), exactly one is auto-taken with no
+    // screen (:44-64), and two or more open a MANDATORY exactly-one grid select
+    // with no cancel button in combat (:65 ->
+    // GridCardSelectScreen.open(group, numCards, tipMsg, forUpgrade=false),
+    // :463-465 -> :437-457, where the cancel button is shown only for
+    // upgrade/transform/purge/shop screens, :446-448). The chosen card leaves
+    // the REAL draw pile for the hand, or for the DISCARD pile when the hand is
+    // already full (:46-48 / :72-74); the unchosen cards keep their draw-pile
+    // order, because only the temp browse list was ever randomized.
+    DRAW_TO_HAND = 9,
 };
 
 // Which pile a CHOOSE_CARD of this kind selects from. `arg0` of a CHOOSE action
@@ -470,6 +538,8 @@ enum class ChoiceSource : uint8_t {
     DISCARD = 1,
     EXHAUST = 2,
     GENERATED = 3,  // Discovery's three-card offer packed in its queue item
+    DRAW = 4,       // the draw pile, filtered to one CardType (Secret Technique /
+                    // Secret Weapon). arg0 of a CHOOSE indexes the DRAW pile.
 };
 
 [[nodiscard]] constexpr ChoiceSource choice_source(ChoiceKind k) noexcept {
@@ -478,6 +548,8 @@ enum class ChoiceSource : uint8_t {
             return ChoiceSource::DISCARD;
         case ChoiceKind::EXHAUST_TO_HAND:
             return ChoiceSource::EXHAUST;
+        case ChoiceKind::DRAW_TO_HAND:
+            return ChoiceSource::DRAW;
         default:
             return ChoiceSource::HAND;
     }
@@ -516,19 +588,43 @@ inline constexpr uint8_t kDiscoveryChoiceCount = 3;
 }
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
-inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;
+inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;   // ChoiceKind bit 2
 inline constexpr uint32_t kChoiceCopiesShift = 4;
+inline constexpr uint32_t kChoiceKindHighBit2 = 1u << 9;  // ChoiceKind bit 3
+// The card-type filter (bits [10..12]), stored as CardType + 1 so that the
+// absent value is 0 and every previously-packed `extra` is byte-identical --
+// CardType::ATTACK is 0, so a raw type would be indistinguishable from "none".
+inline constexpr uint32_t kChoiceTypeFilterShift = 10;
+inline constexpr uint32_t kChoiceTypeFilterMask = 0x7u << kChoiceTypeFilterShift;
+// The "no card-type filter" sentinel. Not a CardType value; CardType is a
+// generated enum below this header in the include order, so filters travel as
+// raw bytes here exactly like the DAMAGE damage-type and CONDITIONAL_DRAW
+// encodings above.
+inline constexpr uint8_t kChoiceNoTypeFilter = 0xFFu;
 
-[[nodiscard]] constexpr uint32_t make_choose_flags(ChoiceKind kind, bool random,
-                                                   int copies = 1) noexcept {
+[[nodiscard]] constexpr uint32_t make_choose_flags(
+    ChoiceKind kind, bool random, int copies = 1,
+    uint8_t type_filter = kChoiceNoTypeFilter) noexcept {
     const uint32_t kv = static_cast<uint32_t>(static_cast<uint8_t>(kind));
-    return (kv & 0x3u) | ((kv >> 2) != 0u ? kChoiceKindHighBit : 0u) |
+    return (kv & 0x3u) | ((kv & 0x4u) != 0u ? kChoiceKindHighBit : 0u) |
+           ((kv & 0x8u) != 0u ? kChoiceKindHighBit2 : 0u) |
            (random ? kChoiceRandomBit : 0u) |
-           (static_cast<uint32_t>(copies - 1) << kChoiceCopiesShift);
+           (static_cast<uint32_t>(copies - 1) << kChoiceCopiesShift) |
+           (type_filter == kChoiceNoTypeFilter
+                ? 0u
+                : ((static_cast<uint32_t>(type_filter) + 1u)
+                   << kChoiceTypeFilterShift));
 }
 [[nodiscard]] constexpr ChoiceKind choose_kind_from_flags(uint32_t flags) noexcept {
     return static_cast<ChoiceKind>(static_cast<uint8_t>(
-        (flags & 0x3u) | ((flags & kChoiceKindHighBit) != 0u ? 0x4u : 0u)));
+        (flags & 0x3u) | ((flags & kChoiceKindHighBit) != 0u ? 0x4u : 0u) |
+        ((flags & kChoiceKindHighBit2) != 0u ? 0x8u : 0u)));
+}
+// The CardType a choice's source pile is filtered to, or kChoiceNoTypeFilter.
+[[nodiscard]] constexpr uint8_t choose_type_filter_from_flags(
+    uint32_t flags) noexcept {
+    const uint32_t v = (flags & kChoiceTypeFilterMask) >> kChoiceTypeFilterShift;
+    return v == 0u ? kChoiceNoTypeFilter : static_cast<uint8_t>(v - 1u);
 }
 [[nodiscard]] constexpr bool choose_is_random(uint32_t flags) noexcept {
     return (flags & kChoiceRandomBit) != 0u;
@@ -564,6 +660,16 @@ inline constexpr uint32_t kChoiceQueueGuardHandNonemptyBit = 1u << 8;
     uint32_t flags) noexcept {
     return (flags & kChoiceQueueGuardHandNonemptyBit) != 0u;
 }
+
+// A RUNTIME latch on a queued draw-source CHOOSE_CARD, never authored in YAML:
+// its temp browse group has been built and the card_random_rng draws that build
+// costs have been billed. SkillFromDeckToHandAction / AttackFromDeckToHandAction
+// build that group on the action's FIRST update tick (:34-39), before they know
+// whether a screen will open at all, so the billing must happen once when the
+// item starts resolving -- on the blocking path AND on both auto-resolve paths
+// (zero matches, one match). The latch is what makes it once: a blocked item
+// stays at the queue head across many pump steps.
+inline constexpr uint32_t kChoiceDrawTempBuiltBit = 1u << 13;
 
 // --- MAKE_CARD field encoding -----------------------------------------------
 // Card creation into a pile (MakeTempCardInHand/Discard, ShuffleIntoDrawPile).
@@ -706,8 +812,15 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // PUT_ON_DRAW_TOP accept any hand card; DISCARD_TO_DRAW_TOP accepts any discard
 // card; DUPLICATE (Dual Wield) accepts ATTACK or POWER hand cards only
 // (DualWieldAction.isDualWieldable:95-97).
+// DRAW_TO_HAND additionally filters by CardType: `type_filter` is the raw
+// CardType byte a draw-source choice was authored with
+// (choose_type_filter_from_flags of the open item), and every caller that holds
+// the item must pass it -- SkillFromDeckToHandAction and
+// AttackFromDeckToHandAction share this kind and differ ONLY in that type, so
+// defaulting it would silently make every draw-pile card eligible for both.
 [[nodiscard]] bool choice_slot_eligible(
-    const CombatState& state, uint8_t slot, ChoiceKind kind) noexcept;
+    const CombatState& state, uint8_t slot, ChoiceKind kind,
+    uint8_t type_filter = kChoiceNoTypeFilter) noexcept;
 
 // Does the CHOOSE_CARD `item` (assumed at the front of the action queue) require
 // a real player prompt? True iff it selects fewer cards than are eligible AND it
@@ -737,6 +850,18 @@ void apply_choice_selection(CombatState& state, uint8_t slot, ChoiceKind kind,
 // persists the three-card offer exactly once. resolve_discovery_choice creates
 // the selected base copy at cost 0 for this turn; the caller pops the completed
 // queue item and resumes the pump.
+// Draw-source CHOOSE_CARD lifecycle. Called by the pump on every CHOOSE_CARD it
+// meets at the queue head, BEFORE the block-or-auto decision. For a DRAW-source
+// kind whose kChoiceDrawTempBuiltBit is still clear it replays
+// SkillFromDeckToHandAction / AttackFromDeckToHandAction's temp-group build
+// (:34-39) purely for its card_random_rng cost -- k matching draw-pile cards
+// spend k-1 draws (CardGroup.addToRandomSpot, :463-469) -- and sets the latch.
+// The resulting browse ORDER is deliberately discarded: nothing observable
+// depends on it, because a selection names a real draw-pile slot and the real
+// draw pile is never reordered. Every other kind is untouched.
+void prepare_choice_draw_source(CombatState& state,
+                                ActionQueueItem& item) noexcept;
+
 void prepare_discovery_choice(CombatState& state,
                               ActionQueueItem& item) noexcept;
 void resolve_discovery_choice(CombatState& state,

@@ -1844,23 +1844,22 @@
   upgraded:
     - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: VULNERABLE}
 
-# --- Colorless RARE cards (B3.11, stage A) ------------------------------------
+# --- Colorless RARE cards (B3.11, stages A and B) -----------------------------
 # CardLibrary.addColorlessCards (CardLibrary.java:799-834) adds the colorless
 # cards ALPHABETICALLY; ids 112-126 map 1:1 onto the fifteen RAREs in that
 # order (the twenty UNCOMMONs above exhaust at 111). B3.11 is split into
-# several stages, each with its own orchestrator-allocated id subset; this
-# stage owns exactly 112, 116, 120, 124.
+# several stages, each with its own orchestrator-allocated id subset: stage A
+# owns 112, 116, 120, 124 and stage B owns 121, 122, 126.
 #
-# The remaining INTERIOR GAPS (113-115, 117-119, 121-123, 125-126) are
-# deliberate placeholders owned by LATER B3.11 stages, not errors -- the same
-# sparse-id shape 101/109 used for B3.10c. The loader enforces id UNIQUENESS,
-# never contiguity, so the holes cost nothing at runtime. Never renumber to
-# close one.
+# The remaining INTERIOR GAPS (113-115, 117-119, 123, 125) are deliberate
+# placeholders owned by LATER B3.11 stages, not errors -- the same sparse-id
+# shape 101/109 used for B3.10c. The loader enforces id UNIQUENESS, never
+# contiguity, so the holes cost nothing at runtime. Never renumber to close one.
 #
 # Every row below carries `color: COLORLESS`, so none of them joins
 # kIroncladAttackPool / kIroncladCombatPool (both `color == "RED"`-gated); all
-# four join kColorlessCombatPool (COLORLESS + UNCOMMON/RARE, minus HEALING --
-# none of these four is HEALING-tagged).
+# seven join kColorlessCombatPool (COLORLESS + UNCOMMON/RARE, minus HEALING --
+# none of these seven is HEALING-tagged).
 
 - id: 112
   name: APOTHEOSIS
@@ -1908,6 +1907,40 @@
   upgraded:
     - {op: APPLY_POWER, target: SELF, amount: 7, power: SADISTIC}
 
+- id: 121
+  name: SECRET_TECHNIQUE
+  game_id: "Secret Technique"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  requires_draw_pile_type: SKILL
+  provenance: "SecretTechnique (SecretTechnique.java:19-66): ctor (:24-27) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true, NO magicNumber. use (:29-32) is a single addToBot SkillFromDeckToHandAction(1). canUse (:35-50) is Clash's shape -- super.canUse() first, then a walk of p.drawPile.group that sets hasSkill on any CardType.SKILL member; with none it sets cantUseMessage and returns false -- encoded as the `requires_draw_pile_type: SKILL` CardDef column, consumed by the centralized card_can_use_without_target so the public ActionMask and the dequeue-time autoplay revalidation read ONE authority (a failed autoplay takes the no-trigger UseCardAction filing path). upgrade (:52-60) sets exhaust = false ONLY -- no magicNumber, no cost change -- so `upgraded_flags: []` is the whole upgraded row and the two programs are identical (Thinking Ahead / Limit Break precedent). SkillFromDeckToHandAction.update (:32-86): on the first tick it builds a temp CardGroup of every SKILL in the draw pile via CardGroup.addToRandomSpot (:35-39), whose empty-group branch is a free plain append and whose every later insert is ONE cardRandomRng random(size-1) draw (CardGroup.java:463-469) -- so k skills cost exactly k-1 draws, billed even when no screen opens. Then k == 0 is a silent no-op (:40-43, normally unreachable behind canUse but encoded because autoplay revalidation can race it); k == 1 is auto-taken with no screen (:44-64); k >= 2 opens gridSelectScreen.open(tmp, amount, TEXT[0], false) (:65), i.e. GridCardSelectScreen.java:463-465 -> :437-457 with anyNumber false and, in combat, NO cancel button (:446-448 shows it only for upgrade/transform/purge/shop screens) -- a MANDATORY exactly-one pick with no zero option. The taken card leaves the REAL draw pile for the hand (addToTop), or is moveToDiscardPile'd out of the draw pile when hand.size() == 10 (:46-48 / :72-74); the unchosen cards keep their draw-pile order, because only the throwaway browse list was ever randomized."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: SKILL, amount: 1}
+  upgraded_flags: []
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: SKILL, amount: 1}
+
+- id: 122
+  name: SECRET_WEAPON
+  game_id: "Secret Weapon"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  requires_draw_pile_type: ATTACK
+  provenance: "SecretWeapon (SecretWeapon.java:19-66) is SecretTechnique with ATTACK everywhere SKILL appears, and the two Java actions are likewise identical but for that CardType -- which is exactly why the encoding puts the type in the step's `card_type:` rather than in two ChoiceKinds. ctor (:24-27) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true. use (:29-32) addToBot AttackFromDeckToHandAction(1). canUse (:35-50) walks p.drawPile.group for a CardType.ATTACK and refuses without one -> `requires_draw_pile_type: ATTACK`. upgrade (:52-60) sets exhaust = false ONLY -> `upgraded_flags: []`. AttackFromDeckToHandAction.update (:32-86) matches SkillFromDeckToHandAction line for line: the same addToRandomSpot temp build costing k-1 cardRandomRng draws (:35-39), the same k == 0 silent no-op (:40-43), the same k == 1 no-screen auto-take (:44-64), the same k >= 2 mandatory single-pick grid with no combat cancel (:65), and the same hand-full moveToDiscardPile redirect (:46-48 / :72-74). The card is COLORLESS and the filter is a CardType, so the ATTACK it finds may be any colour."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: ATTACK, amount: 1}
+  upgraded_flags: []
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: ATTACK, amount: 1}
+
 - id: 124
   name: THINKING_AHEAD
   game_id: "Thinking Ahead"
@@ -1925,3 +1958,18 @@
   upgraded:
     - {op: DRAW, target: SELF, amount: 2}
     - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1, guard: hand_nonempty}
+
+- id: 126
+  name: VIOLENCE
+  game_id: "Violence"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "Violence (Violence.java:19-47): ctor (:24-28) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. use (:31-33) is a single addToBot DrawPileToHandAction(magicNumber, CardType.ATTACK). upgrade (:36-41) is upgradeMagicNumber(1) -> 4 and does NOT touch exhaust, so both flag rows carry it. There is NO canUse override, so unlike Secret Technique / Secret Weapon this card is always playable and CAN whiff -- all three no-op paths below are reachable from a legal play, which is why they are encoded rather than assumed away. DrawPileToHandAction.update (:31-71) is DUAL-STREAM, and the ORDER of its early-outs is what makes the accounting exact: an EMPTY draw pile ends the action at :33-36 BEFORE the temp browse group is built, so it spends nothing on either stream; the group is then filled with every ATTACK in the draw pile via CardGroup.addToRandomSpot (:37-41), whose empty-group branch is a free plain append and whose every later insert is ONE cardRandomRng random(size-1) draw (CardGroup.java:463-469), i.e. k attacks cost exactly k-1; ZERO attacks then ends it at :42-45 having spent exactly what that build spent (nothing, for k == 0). Each of the `amount` iterations (:46-67) skips with NO rng at all while the temp list is empty (:47) -- so asking for more attacks than the deck holds is free past the last real pick -- else calls tmp.shuffle(), the NO-ARG CardGroup.shuffle (CardGroup.java:561-563) == Collections.shuffle(group, new java.util.Random(AbstractDungeon.shuffleRng.randomLong())): ONE shuffleRng draw seeding a JDK LCG that drives the same Fisher-Yates the deck reshuffle uses. It then takes getBottomCard() (:49, group.get(0)), removes it from the temp list (:50), and moves it draw -> hand, or draw -> DISCARD when hand.size() == 10 (:51-55) -- consumed out of the draw pile either way. Encoded as ONE opcode (DRAW_PILE_FETCH) rather than N CHOOSE_CARD steps because there is no player choice anywhere in the action: the picks are rng-driven, and the per-iteration guard's input (the temp list) is destroyed by the iteration before it."
+  effects:
+    - {op: DRAW_PILE_FETCH, target: SELF, amount: 3, card_type: ATTACK}
+  upgraded:
+    - {op: DRAW_PILE_FETCH, target: SELF, amount: 4, card_type: ATTACK}
