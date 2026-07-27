@@ -8,6 +8,7 @@
 #include <span>
 
 #include "../relics/relic_pickup.hpp"
+#include "event_common.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_rewards.hpp"
 #include "sts/engine/relic_pools.hpp"
@@ -20,11 +21,11 @@ namespace sts::engine {
 
 namespace {
 
-void one_proceed_menu(EventDialogMenu& out) noexcept {
-    out = EventDialogMenu{};
-    out.count = 1;
-    out.enabled[0] = true;
-}
+// Shared with every other event translation unit; see event_common.hpp.
+using events::grid_has_card;
+using events::has_upgradable_card;
+using events::heal;
+using events::one_proceed_menu;
 
 [[nodiscard]] bool owns_relic(const RunState& rs, RelicId id) noexcept {
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
@@ -35,59 +36,8 @@ void one_proceed_menu(EventDialogMenu& out) noexcept {
     return false;
 }
 
-void heal(RunState& rs, int amount) noexcept {
-    if (amount <= 0 || rs.hp <= 0) {
-        return;
-    }
-    rs.hp = static_cast<int16_t>(
-        std::min(static_cast<int>(rs.max_hp),
-                 static_cast<int>(rs.hp) + amount));
-}
-
-[[nodiscard]] bool has_upgradable_card(const RunState& rs) noexcept {
-    EventDialogState probe{};
-    open_event_grid(probe, EventGridKind::UPGRADE);
-    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
-        if (event_grid_card_legal(rs, probe, i)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-[[nodiscard]] bool has_grid_card(const RunState& rs,
-                                 EventGridKind kind) noexcept {
-    EventDialogState probe{};
-    open_event_grid(probe, kind);
-    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
-        if (event_grid_card_legal(rs, probe, i)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-[[nodiscard]] RelicSpawnContext event_relic_context(
-    const RunState& rs) noexcept {
-    RelicSpawnContext ctx{};
-    ctx.floor = rs.floor;
-    fill_deck_spawn_gates(rs, ctx);
-    fill_campfire_relic_count(rs, ctx);
-    fill_boss_spawn_gates(rs, ctx);
-    return ctx;
-}
-
 [[nodiscard]] RelicId draw_screenless_event_relic(RunState& rs) noexcept {
-    const RelicTier tier = return_random_relic_tier(rs);
-    const RelicSpawnContext ctx = event_relic_context(rs);
-    RelicId id = return_random_relic_key(rs, tier, ctx);
-    while (id == RelicId::BOTTLED_FLAME ||
-           id == RelicId::BOTTLED_LIGHTNING ||
-           id == RelicId::BOTTLED_TORNADO ||
-           id == RelicId::WHETSTONE) {
-        id = return_random_relic_key(rs, tier, ctx);
-    }
-    return id;
+    return events::draw_event_relic(rs, /*screenless=*/true);
 }
 
 // Sssserpent.<init>/buttonEffect (Sssserpent.java:41-81), read in full.
@@ -181,7 +131,7 @@ EventDialogStatus living_wall_choose(RunController& rc, EventDialogState& es,
     // LivingWall.buttonEffect only opens the grid when its source group is
     // non-empty, but still advances the dialog to RESULT either way
     // (LivingWall.java:68-89).
-    if (has_grid_card(rc.run, kind)) {
+    if (grid_has_card(rc.run, kind)) {
         open_event_grid(es, kind);
     }
     return EventDialogStatus::CONTINUE;

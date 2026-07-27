@@ -284,6 +284,11 @@ sts_add_test(treasure_rooms_test)
 sts_add_test(event_framework_test)
 sts_add_test(exordium_events_i_test)
 sts_add_test(exordium_events_ii_test)
+# The six shrine-list bodies, incl. Match and Keep's three-stream deal and the
+# Wheel's six spin results; and the Act-1-reachable one-time specials together
+# with the getShrine gate evidence for the six the filter excludes.
+sts_add_test(shrines_test)
+sts_add_test(one_time_specials_test)
 
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction

@@ -21,13 +21,15 @@
 //   * the dialog phase plumbing through the synthetic proof body: menu
 //     rebuild, a conditional (gold-gated) option, multi-screen flow, illegal
 //     CHOOSE as a non-corrupting no-op, and FINISHED -> MAP_CHOICE.
-//   * every native EventId dispatches to nullptr today (bodies are
-//     B4.11-B4.13), so a selected native event parks after bookkeeping.
+//   * dialog dispatch agrees row-for-row with the registry's `implemented`
+//     column, so an event with no linked body parks after bookkeeping and the
+//     six act-gated one-time specials stay unreachable.
 
 #include "sts/engine/event_framework.hpp"
 
 #include <bit>
 #include <cstdint>
+#include <initializer_list>
 
 #include <gtest/gtest.h>
 
@@ -36,6 +38,7 @@
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_state.hpp"
+#include "sts/registry/event_table.hpp"
 
 namespace sts::engine {
 namespace {
@@ -651,12 +654,27 @@ TEST(GenerateEvent, AllPoolsEmptyReturnsZeroWithoutCommit) {
 // Dialog dispatch + the EVENT_DIALOG phase (through the synthetic proof body)
 // =============================================================================
 
-TEST(EventDialog, DispatchMatchesImplementedRegistryPrefix) {
-    for (uint16_t id = 1; id <= 11; ++id) {
-        EXPECT_NE(event_dialog_impl(id), nullptr) << "EventId " << id;
+TEST(EventDialog, DispatchMatchesImplementedRegistryRows) {
+    // The dispatch table is generated from the registry's `implemented` column,
+    // so the two must agree row for row -- including the deliberate holes left
+    // by the six one-time specials whose getShrine gates exclude them from
+    // Act 1 (AbstractDungeon.java:1894-1933).
+    for (uint16_t id = 1; id <= 31; ++id) {
+        const sts::registry::EventDef* def =
+            sts::registry::event_def(static_cast<EventId>(id));
+        ASSERT_NE(def, nullptr) << "EventId " << id;
+        if (def->implemented) {
+            EXPECT_NE(event_dialog_impl(id), nullptr) << "EventId " << id;
+        } else {
+            EXPECT_EQ(event_dialog_impl(id), nullptr) << "EventId " << id;
+        }
     }
-    for (uint16_t id = 12; id <= 31; ++id) {
-        EXPECT_EQ(event_dialog_impl(id), nullptr) << "EventId " << id;
+    // Named so that flipping one of them on without an Act-1 reachability
+    // argument fails here rather than passing silently.
+    for (const EventId id : {EventId::DESIGNER, EventId::DUPLICATOR,
+                             EventId::KNOWING_SKULL, EventId::NLOTH,
+                             EventId::SECRET_PORTAL, EventId::THE_JOUST}) {
+        EXPECT_EQ(event_dialog_impl(static_cast<uint16_t>(id)), nullptr);
     }
     EXPECT_EQ(event_dialog_impl(0), nullptr);
     EXPECT_NE(event_dialog_impl(kSyntheticEventId), nullptr);

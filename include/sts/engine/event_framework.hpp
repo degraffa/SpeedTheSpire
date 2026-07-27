@@ -256,22 +256,40 @@ struct EventDialogMenu {
 
 static_assert(std::is_trivially_copyable_v<EventDialogMenu>);
 
+// Match and Keep deals a fixed twelve-card board (six identities, each dealt
+// twice) and the player flips ten of them across five attempts
+// (GremlinMatchGame.java:55-92, 179-244). That board is per-visit screen state
+// the game holds in the event object, so it lives here beside `scratch*`
+// rather than in the save-parity RunState. No other Act-1 dialog uses it.
+inline constexpr int kEventBoardCap = 12;
+
+struct EventBoardCard {
+    uint16_t card_id;  // CardId; 0 (CardId::NONE) in an unused slot
+    uint8_t upgrade;   // makeStatEquivalentCopy preserves the preview upgrade
+    uint8_t taken;     // 1 once the pair was matched and left the board
+};
+
+static_assert(std::is_trivially_copyable_v<EventBoardCard>);
+
 // The transient dialog state: which event is live and where its dialog is.
 // Lives in RunController (transient screen flow), NOT RunState -- the game
 // derives it (a reload reconstructs the event from (seed, eventRng.counter)
-// via EventRoom.onPlayerEntry). `screen`/`scratch*` are event-defined
-// storage for multi-page dialogs and per-visit counters (each event body
-// owns their meanings); value-init means "no event".
+// via EventRoom.onPlayerEntry). `screen`/`scratch*`/`board` are event-defined
+// storage for multi-page dialogs, per-visit counters and the one card board
+// (each event body owns their meanings); value-init means "no event".
 struct EventDialogState {
     uint16_t event_id;  // EventId as u16 (0 = none); kSyntheticEventId in tests
     uint8_t screen;     // event-defined page index (0 = entry screen)
     uint8_t grid_kind;  // EventGridKind; 0 while an ordinary dialog is visible
     int16_t scratch0;   // event-defined
     int16_t scratch1;   // event-defined
+    int16_t scratch2;   // event-defined (We Meet Again offers three trades)
+    int16_t scratch3;   // event-defined
+    EventBoardCard board[kEventBoardCap];  // Match and Keep only
 };
 
 static_assert(std::is_trivially_copyable_v<EventDialogState>);
-static_assert(sizeof(EventDialogState) == 8);
+static_assert(sizeof(EventDialogState) == 12 + 4 * kEventBoardCap);
 
 // Reusable event-origin master-deck grid. The current body selects the screen
 // transition; this enum supplies the common legality predicate and mutation

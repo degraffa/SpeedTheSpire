@@ -88,6 +88,32 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     return true;
 }
 
+// CardGroup.addToTop -- the card lands at master-deck INDEX 0 and every later
+// row shifts up. Only one Act-1 site uses it: NoteForYourself.buttonEffect
+// (NoteForYourself.java:56-66), which also bypasses ShowCardAndObtainEffect
+// entirely -- it runs every relic's onObtainCard by hand BEFORE the insert and
+// onMasterDeckChange after it, so there is no Omamori door on this path (and
+// the card it grants is never a curse). Deck ORDER is observable: grids and the
+// event board index the master deck positionally.
+[[nodiscard]] inline bool add_card_to_master_deck_top(
+    RunState& run, CardId id, uint8_t upgrade = 0) noexcept {
+    const CardDef* def = card_def(id);
+    if (def == nullptr || run.master_deck_count >= kMasterDeckCap) {
+        return false;
+    }
+    CardInstance c{};
+    c.card_id = static_cast<uint16_t>(id);
+    c.upgrade = upgrade;
+    dispatch_relics_on_obtain_card(run, c, *def);
+    for (uint16_t i = run.master_deck_count; i > 0; --i) {
+        run.master_deck[i] = run.master_deck[static_cast<uint16_t>(i - 1)];
+    }
+    run.master_deck[0] = c;
+    ++run.master_deck_count;
+    dispatch_relics_on_master_deck_change(run);
+    return true;
+}
+
 // Removes one master-deck row, preserving order. Returns false for an invalid
 // row without changing the run. The generated per-card removal field is zero
 // for every poolable curse except Parasite.

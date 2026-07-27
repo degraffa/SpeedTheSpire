@@ -78,7 +78,9 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | `dispatch_relics_at_pre_battle` at the **run** entry (`run_advance.cpp` `enter_combat`) | B3.27 | UNASSIGNED — next `run_advance.cpp` owner | one line; it is wired only in `advance.cpp`'s `combat_begin` today, so a run-layer combat gives Snecko Eye no Confusion |
 | Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
-| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency at EVENT acquisition/use sites | B3.27 | B4.13 | **B4.11 event-combat shares DISCHARGED:** Dead Adventurer preserves event-defined gold/relic rows into the generic EventRoom battle-over append; Golden Idol's ×1.25 bonus is recomputed when its gold rows merge, and Sozu's existing claim door removes/discards an event-combat potion. **B4.12 event-specific sites DISCHARGED:** Liars Game, Mushrooms and Living Wall route every card grant through the now-Omamori-aware normal obtain door; Ectoplasm still independently suppresses Liars Game gold; Mushrooms' fixed Odd Mushroom/Circlet reward claims through the generic relic door; Scrap Ooze can roll only COMMON/UNCOMMON/RARE screenless relics; and no B4.12 option uses a potion, so none of the five deferred BOSS `onEquip` bodies or Sacred Bark is reachable. **Chest hooks DISCHARGED by B4.7** and **ordinary combat-reward shares discharged by B4.5** as recorded previously. Only B4.13's event-specific acquisition/use sites remain. |
+| Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency at EVENT acquisition/use sites | B3.27 | UNASSIGNED — no remaining S1 event site; re-own if an Act-2/3 event batch creates one | **B4.11 event-combat shares DISCHARGED:** Dead Adventurer preserves event-defined gold/relic rows into the generic EventRoom battle-over append; Golden Idol's ×1.25 bonus is recomputed when its gold rows merge, and Sozu's existing claim door removes/discards an event-combat potion. **B4.12 event-specific sites DISCHARGED:** Liars Game, Mushrooms and Living Wall route every card grant through the now-Omamori-aware normal obtain door; Ectoplasm still independently suppresses Liars Game gold; Mushrooms' fixed Odd Mushroom/Circlet reward claims through the generic relic door; Scrap Ooze can roll only COMMON/UNCOMMON/RARE screenless relics; and no B4.12 option uses a potion, so none of the five deferred BOSS `onEquip` bodies or Sacred Bark is reachable. **Chest hooks DISCHARGED by B4.7** and **ordinary combat-reward shares discharged by B4.5** as recorded previously. **B4.13 event-specific sites DISCHARGED:** every card grant across the six shrines and the eight Act-1 specials (Golden Shrine's Regret, the Wheel's Decay, Accursed Blacksmith's Pain, Match and Keep's matched card) goes through the Omamori-aware obtain door; the one exception, NoteForYourself's `addToTop`, matches the Java, which bypasses `ShowCardAndObtainEffect` and grants a non-curse. Every relic grant (Warped Tongs, Spirit Poop/Circlet, the five FaceTrader faces, the Wheel's and We Meet Again's screenless draws) goes through the generic `acquire_relic` door, and the Wheel's relic result presents through the ordinary reward screen. **Sacred Bark stays DEFERRED and is now demonstrably out of S1 event scope:** Lab and The Woman in Blue are the only S1 events that hand out potions, and both do it as reward-screen rows claimed through `claim_reward`, which grants a potion *identity* into a slot and never reads potency — no event USES a potion, so no potency site exists. The five BOSS `onEquip` bodies remain equally unreachable: no S1 event can grant a BOSS-tier relic. |
+| NoteForYourself's `NOTE_CARD` / `NOTE_UPGRADE` player-profile pin | B4.13 | B4.13's pending oracle capture | `NoteForYourself.initializeObtainCard` (`NoteForYourself.java:97-106`) reads two **cross-run player-profile preferences**, defaulting to `"Iron Wave"` and `0`. The engine pins the frozen audited reference profile at those documented defaults, exactly as `note_for_yourself_available` already pins that profile's `ASCENSION_LEVEL` read (`event_framework.hpp`). It is the only behaviour in the shrine/special batch a live capture could contradict without the Java being wrong: the capture must read the reference profile's actual NOTE_* values and either confirm the pin or replace it with a modelled write on the note-giving path. |
+| `colorlessCardPool` is shuffled IN PLACE by `returnColorlessCard` | B4.13 | UNASSIGNED — the shop's two colorless slots | `AbstractDungeon.returnColorlessCard(rarity)` (`AbstractDungeon.java:1100-1113`) JDK-shuffles the persistent `colorlessCardPool.group` before picking, so the new ORDER survives into the next reader of that list. Match and Keep is the only Act-1 caller and the port shuffles a local copy. Nothing in Act 1 observes the persisted order — `transformCard`'s COLORLESS branch reads the untouched `srcColorlessCardPool` (`:998-1014`) — but a shop with colorless slots would, and it would need the pool order to become run state. |
 | Fusion Hammer / Coffee Dripper campfire-option locks | B3.27, B4.9 | UNASSIGNED — next campfire/relic-lock follow-up | B4.9 deliberately preserves these whole-effect deferrals: the registered boss relic rows and pool slots are live, but their shared `energyMaster` half remains deferred and the task brief explicitly prohibited silently partially implementing the Smith/Rest locks. `build_rest_menu` therefore documents that both base buttons remain unlocked until one owner lands the relic bodies coherently. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
@@ -744,19 +746,45 @@ and to an EventRoom replaced by a ?→Shop roll — deferred by B4.10.
   curse obtains now honor Omamori centrally; tier-2 every option/A15 and full
   three-preset acceptance · [log](stage-b-log.md#b412)
 
-### B4.13 `[ ]` ∥ Shrines + one-time specials
+### B4.13 `[ ]` ∥ Shrines + one-time specials — **code landed; blocked on the manual oracle capture**
 **Deps:** B4.10 · **Provenance:** events/shrines: Match and Keep, Golden
 Shrine, Transmorgrifier, Purifier, Upgrade Shrine, Wheel of Change + the
 AbstractDungeon.java:1340-1358 one-time list filtered to Act-1 reachability
-(floor/hp/gold gates, AbstractDungeon.java:1949-1980 — record the excluded
-ones with their gate evidence in the Log)
-**Deliverables:** the 6 shrines + reachable specials (Accursed Blacksmith,
-Bonfire Elementals, Duplicator, Fountain of Cleansing, Lab, N'loth?, The
-Woman in Blue, … per the filter) with transform/remove/upgrade mechanics
-(cardRandomRng vs miscRng attribution read per event).
+(the per-key gates live in **getShrine, AbstractDungeon.java:1886-1936** — the
+`:1949-1980` range this brief originally cited is getEvent's *event-list*
+filter and governs the eleven ordinary events, not the specials)
+**Deliverables:** the 6 shrines + reachable specials with
+transform/remove/upgrade mechanics (cardRandomRng vs miscRng attribution read
+per event).
+**Reachable set — corrected against the Java, not the brief's guess.** Eight
+specials reach Act 1: **Accursed Blacksmith, Bonfire Elementals, FaceTrader,
+Fountain of Cleansing, Lab, NoteForYourself, WeMeetAgain, The Woman in Blue**.
+Six do not, each on an act gate: Designer, Duplicator, Knowing Skull, N'loth,
+SecretPortal, The Joust. The brief's candidate list was wrong three ways —
+**Duplicator** is TheCity/TheBeyond only (:1899-1903), **N'loth** is TheCity
+only (its `!id.equals("TheCity") && !id.equals("TheCity")` is a decompiler
+duplication of one test, answering the brief's "N'loth?" with *no*), and
+**FaceTrader**, which the brief never named, *is* reachable because its gate
+is TheCity **or** Exordium (:1904-1908). Per-gate evidence is in the Log and
+is machine-checked (`one_time_specials_test`: every non-act condition
+satisfied at act 1 and the six still absent; each reappearing in its gating
+act).
 **Acceptance:** tier-2 per event; transform draw-stream attribution named
 tests; Match-and-Keep's card dealing vs oracle spot-check.
-**Log:** —
+**Pending oracle spot-check — what it must confirm.** Match and Keep's deal is
+implemented against a three-stream reading (cardRng for the three
+`getCard(rarity)` draws and every `returnRandomCurse`; shuffleRng for
+`returnColorlessCard`'s `randomLong`; miscRng for the board shuffle) and is
+pinned tier-2 against an independent hand-derivation, but the *identities* it
+produces inherit the repo's existing pool-ORDER deviation (registry-id order
+rather than CardLibrary HashMap order — the Deferred obligations row B4.5's
+capture already owns), so only a live capture can close it. The same capture
+must also confirm **NoteForYourself's NOTE_CARD / NOTE_UPGRADE profile pin**
+(see the new obligations row).
+**Inherited — DISCHARGED in code:** the B3.27 event-screen shares for every
+site this batch actually creates; see the obligations row.
+**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b413)
+(the task stays unchecked until its required live-game spot-check can run)
 
 ### B4.14 `[ ]` Neow
 **Deps:** B4.4, B4.6, B3.27 (boss pool) · **Spec:** design §5.6; §10 trap 17

@@ -165,36 +165,90 @@
       - {field: DAMAGE_MAX_HP_PERCENT, base: 0.20, a15: 0.30}
 
 # Exordium.initializeShrineList (Exordium.java:238-246).
+#
+# Every shrine is drawn UNCONDITIONALLY: getShrine seeds its filtered list with
+# `tmp.addAll(shrineList)` (AbstractDungeon.java:1884) and only the
+# specialOneTimeEventList block below it carries per-key gates. So each row's
+# `draw` is ALWAYS and the only conditionality is the per-option greying-out
+# each body applies.
 - id: 12
   name: MATCH_AND_KEEP
   game_id: "Match and Keep!"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 0; GremlinMatchGame.ID (GremlinMatchGame.java:36) is \"Match and Keep!\"."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 0; GremlinMatchGame.ID (GremlinMatchGame.java:36) is \"Match and Keep!\"; body GremlinMatchGame.java:55-92, 179-285."
   native: true
+  implemented: true
+  conditions: {pool: SHRINE, draw: ALWAYS}
+  options:
+    - [ACKNOWLEDGE]
+    - [BEGIN_PLAY]
+    - [FLIP_ONE_OF_TWELVE_BOARD_CARDS]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: FOURTH_DEALT_IDENTITY, base: COLORLESS_UNCOMMON, a15: RANDOM_CURSE}
 - id: 13
   name: GOLDEN_SHRINE
   game_id: "Golden Shrine"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 1; GoldShrine.ID (GoldShrine.java:24) is \"Golden Shrine\"."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 1; GoldShrine.ID (GoldShrine.java:24) is \"Golden Shrine\"; body GoldShrine.java:39-101."
   native: true
+  implemented: true
+  conditions: {pool: SHRINE, draw: ALWAYS}
+  options:
+    - [PRAY_FOR_TIERED_GOLD, DESECRATE_FOR_275_GOLD_AND_REGRET, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: PRAY_GOLD, base: 100, a15: 50}
 - id: 14
   name: TRANSMORGRIFIER
   game_id: "Transmorgrifier"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 2; Transmogrifier.ID (Transmogrifier.java:22) is \"Transmorgrifier\"."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 2; Transmogrifier.ID (Transmogrifier.java:22) is \"Transmorgrifier\"; body Transmogrifier.java:32-84."
   native: true
+  implemented: true
+  conditions: {pool: SHRINE, draw: ALWAYS}
+  options:
+    - [TRANSFORM_ONE, LEAVE]
+    - [TRANSFORMABLE_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 15
   name: PURIFIER
   game_id: "Purifier"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 3; PurificationShrine.ID (PurificationShrine.java:21) is \"Purifier\"."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 3; PurificationShrine.ID (PurificationShrine.java:21) is \"Purifier\"; body PurificationShrine.java:31-81."
   native: true
+  implemented: true
+  conditions: {pool: SHRINE, draw: ALWAYS}
+  options:
+    - [PURIFY_ONE, LEAVE]
+    - [PURIFY_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 16
   name: UPGRADE_SHRINE
   game_id: "Upgrade Shrine"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 4; UpgradeShrine.ID (UpgradeShrine.java:24) is \"Upgrade Shrine\"."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 4; UpgradeShrine.ID (UpgradeShrine.java:24) is \"Upgrade Shrine\"; body UpgradeShrine.java:34-92."
   native: true
+  implemented: true
+  conditions: {pool: SHRINE, draw: ALWAYS}
+  options:
+    - [UPGRADE_ONE_IF_UPGRADABLE, LEAVE]
+    - [UPGRADE_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 17
   name: WHEEL_OF_CHANGE
   game_id: "Wheel of Change"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 5; GremlinWheelGame.ID (GremlinWheelGame.java:48) is \"Wheel of Change\"."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 5; GremlinWheelGame.ID (GremlinWheelGame.java:48) is \"Wheel of Change\"; body GremlinWheelGame.java:84-313."
   native: true
+  implemented: true
+  conditions: {pool: SHRINE, draw: ALWAYS}
+  options:
+    - [SPIN_THE_WHEEL]
+    - [APPLY_SPIN_RESULT]
+    - [PURGE_GRID_ONE_ON_RESULT_4, PROCEED]
+  a15:
+    changes:
+      - {field: HP_LOSS_PERCENT, base: 0.10, a15: 0.15}
 
 # AbstractDungeon.initializeSpecialOneTimeEventList
 # (AbstractDungeon.java:1340-1358).
@@ -211,16 +265,48 @@
 # uniformly `shrines/`: KnowingSkull and TheJoust are `city/` and SecretPortal
 # is `beyond/` (EventHelper.java:18 imports it from there). Those three rows
 # carry a package-qualified path; the remaining eleven are `shrines/`.
+#
+# B4.13 ACT-1 REACHABILITY. getShrine's per-key switch (AbstractDungeon.java:
+# 1886-1936) decides which of these ever enters an Exordium draw list. Eight
+# reach Act 1 and are implemented (ids 18, 19, 22, 23, 25, 27, 30, 31); six
+# cannot and stay unimplemented, each with its gate:
+#   20 Designer      TheCity/TheBeyond AND gold >= 75      (:1894-1898)
+#   21 Duplicator    TheCity/TheBeyond                     (:1899-1903)
+#   24 Knowing Skull TheCity AND currentHealth > 12        (:1909-1913)
+#   26 N'loth        TheCity AND relics.size() >= 2        (:1914-1918)
+#   28 SecretPortal  playtime >= 800s AND TheBeyond        (:1929-1933)
+#   29 The Joust     TheCity AND gold >= 50                (:1919-1923)
+# Note that the two act gates the B4.13 brief listed as candidates are wrong in
+# both directions: Duplicator is act-2/3 only, N'loth is act-2 only (its
+# `!id.equals("TheCity") && !id.equals("TheCity")` is a decompiler duplication
+# of one test, not a two-act disjunction), while FaceTrader -- which the brief
+# did not name -- IS Act-1 reachable because its gate is TheCity **or**
+# Exordium (:1904-1908).
 - id: 18
   name: ACCURSED_BLACKSMITH
   game_id: "Accursed Blacksmith"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 0; AccursedBlacksmith.ID (AccursedBlacksmith.java:22)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 0; AccursedBlacksmith.ID (AccursedBlacksmith.java:22); body AccursedBlacksmith.java:35-105; unconditional getShrine add (:1935)."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: ALWAYS}
+  options:
+    - [FORGE_ONE_IF_UPGRADABLE, RUMMAGE_FOR_PAIN_AND_WARPED_TONGS, LEAVE]
+    - [UPGRADE_GRID_ONE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 19
   name: BONFIRE_ELEMENTALS
   game_id: "Bonfire Elementals"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 1; Bonfire.ID (Bonfire.java:26)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 1; Bonfire.ID (Bonfire.java:26); body Bonfire.java:38-152; unconditional getShrine add (:1935)."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: ALWAYS}
+  options:
+    - [APPROACH_THE_BONFIRE]
+    - [OFFER_A_CARD]
+    - [PURGE_GRID_ONE_PAYING_BY_RARITY]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 20
   name: DESIGNER
   game_id: "Designer"
@@ -234,13 +320,28 @@
 - id: 22
   name: FACE_TRADER
   game_id: "FaceTrader"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 4; FaceTrader.ID (FaceTrader.java:27)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 4; FaceTrader.ID (FaceTrader.java:27); body FaceTrader.java:36-122; getShrine gate TheCity OR Exordium (:1904-1908) -- Act-1 reachable."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: "act == 1 or act == 2"}
+  options:
+    - [APPROACH]
+    - [TOUCH_FOR_TIERED_GOLD_AND_TENTH_MAX_HP_DAMAGE, TRADE_FOR_A_RANDOM_UNOWNED_FACE, LEAVE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: GOLD_REWARD, base: 75, a15: 50}
 - id: 23
   name: FOUNTAIN_OF_CLEANSING
   game_id: "Fountain of Cleansing"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 5; FountainOfCurseRemoval.ID (FountainOfCurseRemoval.java:21)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 5; FountainOfCurseRemoval.ID (FountainOfCurseRemoval.java:21); body FountainOfCurseRemoval.java:31-86; getShrine gate player.isCursed (:1889-1893)."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: "player is cursed (AbstractPlayer.isCursed)"}
+  options:
+    - [DRINK_TO_REMOVE_EVERY_CURSE, LEAVE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 24
   name: KNOWING_SKULL
   game_id: "Knowing Skull"
@@ -249,8 +350,15 @@
 - id: 25
   name: LAB
   game_id: "Lab"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 7; Lab.ID (Lab.java:24)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 7; Lab.ID (Lab.java:24); body Lab.java:32-66; unconditional getShrine add (:1935)."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: ALWAYS}
+  options:
+    - [TAKE_TIERED_POTIONS]
+  a15:
+    changes:
+      - {field: POTION_COUNT, base: 3, a15: 2}
 - id: 26
   name: NLOTH
   game_id: "N'loth"
@@ -259,8 +367,18 @@
 - id: 27
   name: NOTE_FOR_YOURSELF
   game_id: "NoteForYourself"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 9, present only when isNoteForYourselfAvailable (:1360-1378) is true (:1351-1353); NoteForYourself.ID (NoteForYourself.java:25)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 9, present only when isNoteForYourselfAvailable (:1360-1378) is true (:1351-1353); NoteForYourself.ID (NoteForYourself.java:25); body NoteForYourself.java:36-106; unconditional getShrine add (:1935) once the list holds it."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: "list membership only -- ascension < 15 under the pinned reference profile"}
+  options:
+    - [READ_THE_NOTE]
+    - [TAKE_THE_CARD_AND_GIVE_ONE_BACK, LEAVE]
+    - [PURGE_GRID_ONE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: LIST_MEMBERSHIP, base: PRESENT, a15: ABSENT}
 - id: 28
   name: SECRET_PORTAL
   game_id: "SecretPortal"
@@ -274,10 +392,24 @@
 - id: 30
   name: WE_MEET_AGAIN
   game_id: "WeMeetAgain"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 12 with NoteForYourself present, 11 without; WeMeetAgain.ID (WeMeetAgain.java:32)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 12 with NoteForYourself present, 11 without; WeMeetAgain.ID (WeMeetAgain.java:32); body WeMeetAgain.java:45-140; unconditional getShrine add (:1935)."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: ALWAYS}
+  options:
+    - [GIVE_A_HELD_POTION, GIVE_TIERED_GOLD_IF_50_OR_MORE, GIVE_A_NON_BASIC_NON_CURSE_CARD, REFUSE]
+    - [PROCEED]
+  a15: {changes: []}
 - id: 31
   name: THE_WOMAN_IN_BLUE
   game_id: "The Woman in Blue"
-  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 13 with NoteForYourself present, 12 without; WomanInBlue.ID (WomanInBlue.java:29)."
+  provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 13 with NoteForYourself present, 12 without; WomanInBlue.ID (WomanInBlue.java:29); body WomanInBlue.java:41-111; getShrine gate gold >= 50, act-independent (:1924-1928)."
   native: true
+  implemented: true
+  conditions: {pool: SPECIAL, draw: "gold >= 50"}
+  options:
+    - [BUY_ONE_POTION_FOR_20, BUY_TWO_POTIONS_FOR_30, BUY_THREE_POTIONS_FOR_40, REFUSE]
+    - [PROCEED]
+  a15:
+    changes:
+      - {field: REFUSAL_HP_LOSS_MAX_HP_PERCENT, base: 0.0, a15: 0.05}
