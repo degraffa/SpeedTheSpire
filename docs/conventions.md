@@ -353,6 +353,25 @@ therefore shares only the deps with **no sub-build** (xxHash, nlohmann). Do not
 measured 278 MB → 186 MB, not the ~2 MB you would expect. Prefer a pinned
 release asset (`URL` + `URL_HASH`); that took the same dependency to 1.9 MB.
 
+#### Two build commands in one build tree corrupt each other's objects
+
+**Symptom:** a link fails with `file format not recognized` for an object that
+compiled cleanly before and compiles cleanly again when rebuilt alone.
+
+**Cause:** two agents ran `tools/wsl_run.cmd debug` concurrently in the same
+task worktree. Their Ninja processes wrote the same generated object at the
+same time. The machine-wide build-token pool limits aggregate parallel jobs;
+it does **not** serialize separate build invocations that share one build
+directory.
+
+**Rule:** one agent owns build/test execution for a worktree at a time. A
+reviewer working in that same tree either waits for the owner's matrix or does
+source-only review; an independently building reviewer needs a separate
+worktree/build directory. If this symptom occurs, stop the competing build,
+verify the exact failed object is under the intended preset's build directory,
+remove only that object, and rebuild it. Do not respond with a broad build-tree
+cleanup.
+
 ---
 
 ## 7. The rule of two — document once, eliminate on recurrence
