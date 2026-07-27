@@ -992,6 +992,31 @@ TEST(FuzzHash, ControllerHashIncludesEveryEventDialogStateField) {
     changed = rc;
     changed.event.scratch1 = -3;
     EXPECT_NE(hash_controller(changed), before);
+
+    changed = rc;
+    changed.event.scratch2 = 11;
+    EXPECT_NE(hash_controller(changed), before);
+
+    changed = rc;
+    changed.event.scratch3 = -11;
+    EXPECT_NE(hash_controller(changed), before);
+
+    // Match and Keep's board: every slot and every per-slot field, so a
+    // divergent deal or a divergent match cannot hash the same.
+    for (int i = 0; i < engine::kEventBoardCap; ++i) {
+        changed = rc;
+        changed.event.board[i].card_id =
+            static_cast<uint16_t>(engine::CardId::STRIKE);
+        EXPECT_NE(hash_controller(changed), before) << "board slot " << i;
+
+        changed = rc;
+        changed.event.board[i].upgrade = 1;
+        EXPECT_NE(hash_controller(changed), before) << "board slot " << i;
+
+        changed = rc;
+        changed.event.board[i].taken = 1;
+        EXPECT_NE(hash_controller(changed), before) << "board slot " << i;
+    }
 }
 
 // --- 4. coverage bookkeeping --------------------------------------------------

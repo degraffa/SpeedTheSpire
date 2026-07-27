@@ -1491,19 +1491,46 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
 
 TEST(RegistryGen, ExordiumEventsCarryAuditedNativeBodyMetadata) {
     namespace r = sts::registry;
+    // The only unimplemented rows are the six one-time specials whose
+    // getShrine gates cannot be met in Act 1 (AbstractDungeon.java:1894-1933):
+    // Designer, Duplicator, Knowing Skull, N'loth, SecretPortal, The Joust.
+    const auto act_gated_out = [](uint16_t raw) {
+        return raw == 20 || raw == 21 || raw == 24 || raw == 26 ||
+               raw == 28 || raw == 29;
+    };
     for (uint16_t raw = 1; raw <= 31; ++raw) {
         const auto id = static_cast<r::EventId>(raw);
         const r::EventDef* def = r::event_def(id);
         ASSERT_NE(def, nullptr) << raw;
         EXPECT_TRUE(def->native) << raw;
-        EXPECT_EQ(def->implemented, raw <= 11) << raw;
-        if (raw <= 11) {
-            EXPECT_GE(def->screen_count, 2) << raw;
+        EXPECT_EQ(def->implemented, !act_gated_out(raw)) << raw;
+        if (!act_gated_out(raw)) {
+            // Lab is the one single-screen dialog: its only button opens the
+            // potion reward screen and the event is over (Lab.java:46-61).
+            EXPECT_GE(def->screen_count,
+                      raw == static_cast<uint16_t>(r::EventId::LAB) ? 1 : 2)
+                << raw;
         } else {
             EXPECT_EQ(def->screen_count, 0) << raw;
             EXPECT_EQ(def->a15_change_count, 0) << raw;
         }
     }
+    EXPECT_EQ(r::event_def(r::EventId::MATCH_AND_KEEP)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::GOLDEN_SHRINE)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::TRANSMORGRIFIER)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::PURIFIER)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::UPGRADE_SHRINE)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::WHEEL_OF_CHANGE)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::ACCURSED_BLACKSMITH)->a15_change_count,
+              0);
+    EXPECT_EQ(r::event_def(r::EventId::BONFIRE_ELEMENTALS)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::FACE_TRADER)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::FOUNTAIN_OF_CLEANSING)->a15_change_count,
+              0);
+    EXPECT_EQ(r::event_def(r::EventId::LAB)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::NOTE_FOR_YOURSELF)->a15_change_count, 1);
+    EXPECT_EQ(r::event_def(r::EventId::WE_MEET_AGAIN)->a15_change_count, 0);
+    EXPECT_EQ(r::event_def(r::EventId::THE_WOMAN_IN_BLUE)->a15_change_count, 1);
     EXPECT_EQ(r::event_def(r::EventId::BIG_FISH)->a15_change_count, 0);
     EXPECT_EQ(r::event_def(r::EventId::THE_CLERIC)->a15_change_count, 1);
     EXPECT_EQ(r::event_def(r::EventId::DEAD_ADVENTURER)->a15_change_count, 1);

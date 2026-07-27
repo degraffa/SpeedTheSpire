@@ -3975,3 +3975,185 @@ Java provenance: `Sssserpent.java:41-81`, `LivingWall.java:34-104`,
 `ShiningLight.java:45-112`, `AbstractDungeon.java:852-878`,
 `CardGroup.java:498-506`, `ShowCardAndObtainEffect.java:30-82`,
 `Omamori.java:38-46`, and `MonsterHelper.java:389-600`.
+
+<a id="b413"></a>
+
+### B4.13 `[ ]` Shrines + one-time specials — code landed; blocked on the manual oracle capture
+
+Done 2026-07-27 from task base `78a6a9e4ab5e51f8d165399cd4c016da52a0621e`. All
+six Exordium shrines and all eight Act-1-reachable one-time specials are native
+bodies with audited registry metadata and generated dispatch; the ledger entry
+stays unchecked because its Acceptance names a Match-and-Keep dealing
+spot-check against the live game, which cannot run here.
+
+**Which specials are reachable, and the evidence for the six that are not.**
+The authority is `AbstractDungeon.getShrine`'s per-key switch
+(`AbstractDungeon.java:1886-1936`), evaluated against `id.equals("Exordium")`.
+(The task brief cited `:1949-1980` for these gates; that range is
+`getEvent`'s filter over the eleven ordinary *events* and does not mention a
+single special. The ledger entry now carries the correction.) Eight rows enter
+an Act-1 draw list and are implemented — Accursed Blacksmith, Bonfire
+Elementals, Lab and WeMeetAgain fall through to the unconditional
+`tmp.add(e)` at `:1935`; FaceTrader passes on `TheCity` **or** `Exordium`
+(`:1904-1908`); Fountain of Cleansing needs `player.isCursed` (`:1889-1893`);
+The Woman in Blue needs `gold >= 50` and carries **no act test at all**
+(`:1924-1928`); and NoteForYourself is unconditional once
+`isNoteForYourselfAvailable` has put it in the list at all (`:1351-1353`).
+Six are excluded, each by an act gate that Act 1 cannot satisfy:
+
+| Excluded | Gate (AbstractDungeon.java) | Why Act 1 fails it |
+|---|---|---|
+| Designer | `(TheCity or TheBeyond) and gold >= 75` (:1894-1898) | act gate; the gold half is irrelevant in Act 1 |
+| Duplicator | `TheCity or TheBeyond` (:1899-1903) | act gate only |
+| Knowing Skull | `TheCity and currentHealth > 12` (:1909-1913) | act gate |
+| N'loth | `TheCity and relics.size() >= 2` (:1914-1918) | act gate |
+| SecretPortal | `playtime >= 800s and TheBeyond` (:1929-1933) | act gate, **and** a wall-clock playtime the engine does not model |
+| The Joust | `TheCity and gold >= 50` (:1919-1923) | act gate |
+
+Two of those correct the brief's candidate list. **Duplicator is not Act-1
+reachable** — it is `TheCity`/`TheBeyond` only. **N'loth is not either**: its
+condition decompiles as `!id.equals("TheCity") && !id.equals("TheCity")`,
+which is one test duplicated by the decompiler rather than a two-act
+disjunction, so it is TheCity-only and the brief's "N'loth?" resolves to *no*.
+Conversely **FaceTrader, which the brief did not name, IS reachable**, because
+its gate is the `TheCity` **or** `Exordium` disjunction. All of this is
+machine-checked rather than asserted: `one_time_specials_test` builds an Act-1
+state that satisfies every non-act condition in the table (500 gold, 70 HP, a
+cursed deck, two relics) and shows the six still absent from
+`build_shrine_pool`, then walks the same state into acts 2 and 3 and shows
+each reappearing — including FaceTrader's asymmetry, present in acts 1 and 2
+and gone in act 3, and SecretPortal staying out even in TheBeyond because the
+playtime half is unmodelled.
+
+**RNG attribution, read per event rather than assumed.** It is not uniform,
+and three streams are involved. Transmorgrifier bills **miscRng**
+(`transformCard(c, false, AbstractDungeon.miscRng)`, `Transmogrifier.java:49`)
+and is byte-identical to Living Wall's Change, so it reuses the shared
+transform door. The Wheel of Change bills one `miscRng.random(0, 5)` for the
+spin (`GremlinWheelGame.java:229`) and then **relicRng** through
+`returnRandomScreenlessRelic` on the relic result; the
+`MathUtils.random(-10, 10)` beside it is libGDX's global generator driving the
+stop angle and is not a game stream. Match and Keep's constructor spends all
+three: **cardRng** for the three `getCard(rarity)` pool reads and for every
+`returnRandomCurse` (`CardLibrary.getCurse`, `CardLibrary.java:1022-1029`),
+**shuffleRng** for `returnColorlessCard`'s `randomLong`
+(`AbstractDungeon.java:1101`), and **miscRng** for the twelve-card board
+shuffle. FaceTrader spends one `miscRng.randomLong` on the face shuffle and no
+pool draw at all — the five faces are a hand-written list. We Meet Again
+spends miscRng **three times and conditionally**: a `randomLong` for the
+potion pick only when a potion is held, `random(50, min(gold, 150))` only at
+50+ gold, and a `randomLong` for the card pick only when the deck holds a
+non-BASIC non-CURSE card. Lab and The Woman in Blue bill **potionRng** through
+`PotionHelper.getRandomPotion` — a **flat** draw over the 33-entry list, not
+`returnRandomPotion`'s rarity-gated rejection sampling, which is a different
+method and a different draw count. Golden Shrine, Purifier, Upgrade Shrine,
+Accursed Blacksmith, Bonfire Elementals, Fountain of Cleansing and
+NoteForYourself consume no stream at all, and tests assert the counters do not
+move rather than leaving that implicit. `cardRandomRng` is billed by nothing
+in this batch.
+
+**Bodies.** Golden Shrine pays 100 (50 at A15) on Pray and, on Desecrate,
+gains 275 gold **before** obtaining Regret — the opposite order to Liars Game,
+so each is written the way its own Java writes it. Transmorgrifier, Purifier
+and Upgrade Shrine are the reusable event grid's transform / purge / upgrade
+doors with the Java's own greying-out (Upgrade Shrine's first button is
+disabled with nothing upgradable). The Wheel of Change keeps the spin, the
+result acknowledgement and the leave page as three distinct states because the
+gold payout happens in `preApplyResult` at spin time and only the other five
+results land in `applyResult`; the relic result opens an ordinary reward
+screen and the card-removal result opens a purge grid, both leaving the run on
+the map afterwards, matching the room going `COMPLETE` and `EventRoom.update`
+ceasing to tick the event (`EventRoom.java:33-41`).
+
+Match and Keep deals in the constructor — before any player input — six
+identities (rare, uncommon, common, then a colorless uncommon or, at A15, a
+second curse; then a curse; then `Ironclad.getStartCardForEvent`'s Bash),
+duplicates each by `makeStatEquivalentCopy`, and JDK-shuffles all twelve. The
+board is per-visit screen state, so it lives in the transient
+`EventDialogState` beside `scratch*` rather than in the save-parity RunState;
+the twelve slots are offered directly as dialog options, which fits the
+existing `kEventOptionCap` of 12 and needed no new fuzz `MoveCat`. Five
+attempts resolve pairs: a match removes both slots and obtains the chosen copy
+through the Omamori-aware door, a miss flips both back, and the attempt is
+spent either way. The relics' `onPreviewObtainCard` pass is the eggs' existing
+documented deferral and is deliberately not run here: it changes only the
+upgrade shown on the board, because a matched card is obtained through
+`add_card_to_master_deck`, whose `onObtainCard` pass upgrades exactly the same
+types — the resulting master deck is identical and no save-parity state
+diverges.
+
+Accursed Blacksmith's Rummage obtains Pain and then the fixed Warped Tongs
+(owning the relic is live; its `shuffleRng`-consuming upgrade body remains its
+own deferral). Bonfire Elementals pays by the offered card's **rarity** —
+nothing for BASIC, 5 HP for COMMON/SPECIAL, a full heal for UNCOMMON, +10 max
+HP and then a full heal for RARE, and Spirit Poop (Circlet if already owned)
+for a CURSE — and pays **before** the removal, which is observable when the
+offering is Parasite. Fountain of Cleansing walks the master deck backwards
+removing every curse but the unpurgeable ones. Lab and The Woman in Blue hand
+their potions over as reward-screen rows. NoteForYourself inserts its card at
+master-deck **index 0** (`addToTop`, not append) after a hand-rolled
+`onObtainCard` pass and before `onMasterDeckChange`, bypassing
+`ShowCardAndObtainEffect` exactly as the Java does, then opens the give-away
+grid over the deck including the card just taken. We Meet Again offers a held
+potion, a gold sum and a non-BASIC non-CURSE card, greys out whichever it
+could not construct, and buys one screenless relic for any of the three.
+
+**Two recorded modelling decisions, both now carried as obligations rows.**
+`returnColorlessCard` shuffles the persistent `colorlessCardPool.group` **in
+place**; this port shuffles a local copy, which is unobservable in Act 1
+(`transformCard`'s COLORLESS branch reads the untouched
+`srcColorlessCardPool`) but would matter to a shop with colorless slots.
+`NoteForYourself.initializeObtainCard` reads the cross-run player-profile
+preferences `NOTE_CARD` and `NOTE_UPGRADE`; the engine pins the frozen audited
+reference profile at the game's own documented defaults (Iron Wave, no
+upgrade), the same pin `note_for_yourself_available` already takes for that
+profile's ascension read. That pin is the one behaviour in this batch a live
+capture could contradict without the Java being wrong, and the pending
+capture must confirm it.
+
+**Shared surfaces.** `EventDialogState` grew from 8 bytes to hold the card
+board and a third and fourth `scratch` slot; it is transient RunController
+state, so no schema, fixture or golden artifact changed, and the fuzz
+controller hash — which hashes the struct wholesale — now has per-field
+coverage for every new slot. The soak build identity gains a `shrines1`
+segment because reproducers from earlier builds can no longer replay an event
+floor. The four event translation units now share `event_common.hpp`, an
+internal header holding the AbstractCreature/AbstractDungeon shims that had
+been copied per-TU; `emit/events.py` additionally emits the registry `rarity`
+column as `event_card_rarity`, which Bonfire Elementals, We Meet Again and
+Match and Keep all need and `CardDef` does not carry — derived from the same
+column the per-rarity pools are built from, so the two cannot drift. No
+registry id, opcode, `ChoiceKind`, `RunPhase` or fuzz `MoveCat` was taken; the
+events registry gained no row (all fourteen already existed and were flipped
+to `implemented`). Nothing under `src/engine/interp/`, `card_play.cpp`, the
+combat observation surface, the translator's combat-choice slices or any Neow
+path was touched.
+
+**Acceptance.** Tier-2 covers every implemented row's generated metadata
+(native/implemented, screen and A15 change counts) and its linked body; every
+option of every screen through the public `legal_actions` / `advance` API;
+draw-count attribution named per stream, including Match and Keep's deal
+against a bit-for-bit independent hand-derivation at both A0 and A15 and the
+zero-draw events proved zero-draw; every A15 branch; all six Wheel results;
+Bonfire's full rarity table; and the gate evidence above. WSL Debug,
+leak-detecting ASan/UBSan and Release are all green — `ctest -N` in the built
+tree is the source of truth for the target list. Registry generation,
+`tools/check_stale_counts.sh`, `tools/check_doc_links.sh` and
+`git diff --check` are clean.
+
+Java provenance (each read in full): `GremlinMatchGame.java:55-92, 179-285`,
+`GoldShrine.java:39-101`, `Transmogrifier.java:32-84`,
+`PurificationShrine.java:31-81`, `UpgradeShrine.java:34-92`,
+`GremlinWheelGame.java:84-313`, `AccursedBlacksmith.java:35-105`,
+`Bonfire.java:38-152`, `FaceTrader.java:36-122`,
+`FountainOfCurseRemoval.java:31-86`, `Lab.java:32-66`,
+`NoteForYourself.java:36-106`, `WeMeetAgain.java:45-140`,
+`WomanInBlue.java:41-111`, `AbstractDungeon.java:1340-1379` (the one-time list
+and the NoteForYourself availability branches), `:1882-1942` (getShrine),
+`:852-878` and `:998-1045` (transformCard and its pools), `:1100-1113`
+(returnColorlessCard), `:1481-1517` (getCard), `:681-688`
+(returnRandomScreenlessRelic), `CardLibrary.java:1022-1042` (getCurse),
+`PotionHelper.java:164-172`, `AbstractPlayer.java:697-712` (loseGold),
+`:1387-1502` (damage), `:2313-2324` (getRandomPotion),
+`AbstractCreature.java:199-223, 386-421` (increaseMaxHp / decreaseMaxHealth /
+heal), `Ironclad.java:107-110`, and `EventRoom.java:17-41`.

@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "../relics/relic_pickup.hpp"
+#include "event_common.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_rewards.hpp"
 #include "sts/engine/relic_pools.hpp"
@@ -22,78 +23,18 @@ namespace sts::engine {
 
 namespace {
 
+// The AbstractCreature / AbstractDungeon shims these bodies share with every
+// other event translation unit live in event_common.hpp.
+using events::acquire_event_relic;
+using events::decrease_max_hp;
+using events::draw_event_relic;
+using events::has_purgeable_card;
+using events::heal;
+using events::increase_max_hp;
+
 [[nodiscard]] bool owns_relic(const RunState& rs, RelicId id) noexcept {
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
         if (rs.relics[i].relic_id == static_cast<uint16_t>(id)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-void heal(RunState& rs, int amount) noexcept {
-    if (amount <= 0 || rs.hp <= 0) {
-        return;
-    }
-    const int next = std::min(static_cast<int>(rs.max_hp),
-                              static_cast<int>(rs.hp) + amount);
-    rs.hp = static_cast<int16_t>(next);
-}
-
-void increase_max_hp(RunState& rs, int amount) noexcept {
-    if (amount <= 0) {
-        return;
-    }
-    rs.max_hp = static_cast<int16_t>(static_cast<int>(rs.max_hp) + amount);
-    heal(rs, amount);
-}
-
-void decrease_max_hp(RunState& rs, int amount) noexcept {
-    if (amount <= 0) {
-        return;
-    }
-    const int next = std::max(1, static_cast<int>(rs.max_hp) - amount);
-    rs.max_hp = static_cast<int16_t>(next);
-    if (rs.hp > rs.max_hp) {
-        rs.hp = rs.max_hp;
-    }
-}
-
-[[nodiscard]] RelicSpawnContext event_relic_context(
-    const RunState& rs) noexcept {
-    RelicSpawnContext ctx{};
-    ctx.floor = rs.floor;
-    fill_deck_spawn_gates(rs, ctx);
-    fill_campfire_relic_count(rs, ctx);
-    fill_boss_spawn_gates(rs, ctx);
-    return ctx;
-}
-
-[[nodiscard]] RelicId draw_event_relic(RunState& rs,
-                                       bool screenless) noexcept {
-    const RelicTier tier = return_random_relic_tier(rs);
-    const RelicSpawnContext ctx = event_relic_context(rs);
-    RelicId id = return_random_relic_key(rs, tier, ctx);
-    while (screenless &&
-           (id == RelicId::BOTTLED_FLAME ||
-            id == RelicId::BOTTLED_LIGHTNING ||
-            id == RelicId::BOTTLED_TORNADO ||
-            id == RelicId::WHETSTONE)) {
-        id = return_random_relic_key(rs, tier, ctx);
-    }
-    return id;
-}
-
-void acquire_event_relic(RunController& rc, bool screenless) noexcept {
-    const RelicId id = draw_event_relic(rc.run, screenless);
-    (void)acquire_relic(rc.run, rc.combat.misc_rng, id);
-}
-
-[[nodiscard]] bool has_purgeable_card(const RunState& rs) noexcept {
-    EventDialogState probe{};
-    open_event_grid(probe, EventGridKind::PURGE);
-    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
-        if (event_grid_card_legal(rs, probe, i)) {
             return true;
         }
     }
@@ -151,11 +92,7 @@ void acquire_event_relic(RunController& rc, bool screenless) noexcept {
     return false;
 }
 
-void one_proceed_menu(EventDialogMenu& out) noexcept {
-    out = EventDialogMenu{};
-    out.count = 1;
-    out.enabled[0] = true;
-}
+using events::one_proceed_menu;
 
 // BigFish.<init>/buttonEffect (BigFish.java:38-78), read in full.
 // Big Fish -------------------------------------------------------------------

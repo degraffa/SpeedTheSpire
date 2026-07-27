@@ -120,6 +120,48 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "        default: return 0;",
         "    }",
         "}\n",
+        "// B4.13: the master-deck card RARITY, which CardDef does not carry.",
+        "// Bonfire Elementals pays out by the offered card's rarity",
+        "// (Bonfire.java:117-152), We Meet Again excludes BASIC",
+        "// (WeMeetAgain.java:68-79) and Match and Keep deals one card per",
+        "// rarity band (GremlinMatchGame.java:63-78). Emitted from the same",
+        "// registry `rarity` column the pool builders read, so it cannot drift",
+        "// from kIroncladCommonPool / kIroncladUncommonPool / kIroncladRarePool.",
+        "enum class EventCardRarity : uint8_t {",
+        "    NONE = 0,",
+        "    BASIC = 1,",
+        "    COMMON = 2,",
+        "    UNCOMMON = 3,",
+        "    RARE = 4,",
+        "    SPECIAL = 5,",
+        "    CURSE = 6,",
+        "};\n",
+        "[[nodiscard]] inline constexpr EventCardRarity event_card_rarity(",
+        "    CardId id) noexcept {",
+        "    switch (id) {",
+    ])
+    rarity_tags = {
+        "BASIC": "BASIC",
+        "COMMON": "COMMON",
+        "UNCOMMON": "UNCOMMON",
+        "RARE": "RARE",
+        "SPECIAL": "SPECIAL",
+        "CURSE": "CURSE",
+    }
+    for card in cards:
+        # An absent/unknown column maps to NONE, exactly as
+        # event_transform_color maps an unknown color to 0: cards.yaml's schema
+        # does not make `rarity` mandatory, so this emitter must not be the
+        # thing that rejects a row the loader accepts.
+        tag = rarity_tags.get(str(card.get("rarity", "")).upper(), "NONE")
+        out.append(
+            f"        case CardId::{card['name']}: "
+            f"return EventCardRarity::{tag};")
+    out.extend([
+        "        case CardId::NONE:",
+        "        default: return EventCardRarity::NONE;",
+        "    }",
+        "}\n",
         "}  // namespace sts::registry\n",
         "// Implemented native-body dispatch. Expanding this table odr-uses every",
         "// handler, so marking a row implemented without a body is a link error.",
