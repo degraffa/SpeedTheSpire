@@ -68,6 +68,15 @@ void probe_monster_turn(CombatState& s, uint8_t mi) noexcept {
     s.monsters[mi].flags |= 0x1u;  // "acted" marker
 }
 
+// A second probe for the applyPreTurnLogic ordering test below: it records the
+// block the monster had WHEN ITS MOVE RAN, then grants some, so the test can tell
+// "cleared before the move" from "cleared after it".
+int g_pre_turn_block_seen = -1;
+void probe_monster_turn_recording_block(CombatState& s, uint8_t mi) noexcept {
+    g_pre_turn_block_seen = s.monsters[mi].block;
+    s.monsters[mi].block = static_cast<int16_t>(s.monsters[mi].block + 7);
+}
+
 // --- Layout / size-budget guard ---------------------------------------------
 
 TEST(ActionQueueLayout, PreTurnRingPresentWithinBudget) {
@@ -201,6 +210,93 @@ TEST(ActionQueueMonster, DeadMonsterSlotIsNotQueued) {
     EXPECT_EQ(s.monsters[0].flags & 0x1u, 0x1u);
     EXPECT_EQ(s.monsters[1].flags & 0x1u, 0x0u);
     EXPECT_EQ(s.turn, 2);
+}
+
+// --- applyPreTurnLogic: the monster-side turn-start walk ---------------------
+//
+// MonsterGroup.applyPreTurnLogic (MonsterGroup.java:98-105) clears a live
+// monster's block unless it has Barricade, then fires its start-of-turn powers.
+// Its caller is MonsterStartTurnAction, which the decompiled tree shows as
+// referenced by nothing -- `AbstractRoom.endTurn` queues it from an anonymous
+// inner class CFR dropped (AbstractRoom.java:409). The call site is pinned in
+// bytecode instead: `AbstractRoom.endTurn (bytecode AbstractRoom$1, javap) --
+// CFR-dropped anonymous class`, whose update() addToBot()s EndTurnAction,
+// WaitAction(1.2f) and (unless skipMonsterTurn) MonsterStartTurnAction before
+// clearing monsterAttacksQueued. Those actions drain before GameActionManager's
+// !monsterAttacksQueued branch, so the walk lands between the end-of-turn discard
+// and queueMonsters -- pump_step step 4.
+
+// The property that matters, and the one the sim got wrong: the clear is at the
+// start of the MONSTER's turn, not the player's. So block a monster gained on its
+// own turn is still up for the whole of the player's next turn, and is discarded
+// only when the monster comes round again.
+TEST(PreTurnLogic, MonsterBlockSurvivesThePlayersTurnAndIsClearedAtTheMonstersOwn) {
+    CombatState s = make_combat(/*monsters=*/1);
+    s.monsters[0].block = 12;  // e.g. a Curl Up trigger during the player's turn
+
+    // The player is still acting: nothing has cleared anything.
+    EXPECT_EQ(s.monsters[0].block, 12);
+
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    g_monster_turns = 0;
+    pump(s, probe_monster_turn);
+
+    EXPECT_EQ(g_monster_turns, 1);
+    EXPECT_EQ(s.turn, 2);
+    EXPECT_EQ(s.monsters[0].block, 0)
+        << "loseBlock() ran at the top of the monster's turn, so the player's "
+           "turn 2 faces a bare monster";
+}
+
+// Barricade is a bare presence test (BarricadePower's amount is the -1 marker),
+// exactly as on the player path in start_of_turn.
+TEST(PreTurnLogic, BarricadeKeepsAMonstersBlockAcrossItsTurn) {
+    CombatState s = make_combat(/*monsters=*/2);
+    s.monsters[0].block = 12;
+    s.monsters[1].block = 12;
+    s.monsters[1].powers[0].power_id = static_cast<uint16_t>(PowerId::BARRICADE);
+    s.monsters[1].powers[0].amount = -1;  // BarricadePower.java:22
+    s.monsters[1].power_count = 1;
+
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, probe_monster_turn);
+
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[1].block, 12) << "hasPower(\"Barricade\") skips loseBlock()";
+}
+
+// `if (m.isDying || m.isEscaping) continue` -- the walk skips them, so a corpse's
+// block is left exactly as it was rather than tidied away.
+TEST(PreTurnLogic, DeadAndEscapedMonstersAreSkipped) {
+    CombatState s = make_combat(/*monsters=*/3);
+    s.monsters[0].block = 12;
+    s.monsters[1].block = 12;
+    s.monsters[1].hp = 0;                              // isDying
+    s.monsters[2].block = 12;
+    s.monsters[2].flags |= kMonsterFlagEscaped;        // isEscaping
+
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s, probe_monster_turn);
+
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[1].block, 12) << "isDying is skipped";
+    EXPECT_EQ(s.monsters[2].block, 12) << "isEscaping is skipped";
+}
+
+// The ordering claim, stated as a test rather than only as a comment: the clear
+// happens BEFORE the monster acts, so a move that grants block on the same turn
+// keeps every point of it.
+TEST(PreTurnLogic, TheClearPrecedesTheMonstersOwnMove) {
+    CombatState s = make_combat(/*monsters=*/1);
+    s.monsters[0].block = 12;
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+
+    g_pre_turn_block_seen = -1;
+    pump(s, probe_monster_turn_recording_block);
+
+    EXPECT_EQ(g_pre_turn_block_seen, 0)
+        << "the monster's move ran after loseBlock(), not before";
+    EXPECT_EQ(s.monsters[0].block, 7) << "the 7 its move granted is untouched";
 }
 
 // --- Trap 9: cardQueue front-insertion is index 1 when busy ------------------

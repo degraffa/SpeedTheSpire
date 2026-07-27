@@ -19,10 +19,11 @@
 // THE REPRODUCER. A sleeping Lagavulin's usePreBattleAction gives it 8 block AND
 // a MetallicizePower(8) (Lagavulin.java:102-114, ARMOR_AMT :66), and
 // MetallicizePower binds atEndOfTurnPreEndTurnCards (MetallicizePower.java:38-42)
-// -- an end-of-round hook, on a power that exists before the player acts. Monster
-// block never decays (MonsterStartTurnAction is uncalled), so the armour is a
-// running total and the spurious pass is directly visible: 16 on turn 1 instead
-// of 8, and +8 on every later turn.
+// -- an end-of-round hook, on a power that exists before the player acts. So a
+// spurious end-of-round pass during combat construction is directly visible as 16
+// block on turn 1 instead of 8. From turn 2 on the armour HOLDS at 8: the monster
+// phase's applyPreTurnLogic clears the block before Metallicize re-grants it, so
+// each tick replaces the previous one rather than adding to it.
 //
 // Provenance (read in full): AbstractRoom.update (AbstractRoom.java:229-258);
 // GainEnergyAndEnableControlsAction.java:22-38; GameActionManager.getNextAction
@@ -172,12 +173,14 @@ TEST(CombatStart, LagavulinArmourTicksOncePerCompletedRound) {
     step(rc, make_action(ActionVerb::END_TURN));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.turn, 2);
-    EXPECT_EQ(rc.combat.monsters[0].block, static_cast<int16_t>(2 * kArmor));
+    EXPECT_EQ(rc.combat.monsters[0].block, kArmor)
+        << "one tick, not two: applyPreTurnLogic cleared the pre-battle 8 at the "
+           "start of the monster's turn, then Metallicize granted 8 again";
 
     step(rc, make_action(ActionVerb::END_TURN));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.turn, 3);
-    EXPECT_EQ(rc.combat.monsters[0].block, static_cast<int16_t>(3 * kArmor));
+    EXPECT_EQ(rc.combat.monsters[0].block, kArmor);
 }
 
 // =============================================================================

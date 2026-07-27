@@ -82,13 +82,19 @@ inline constexpr int kMonsterQueueCap = 5;
 // action ring's element type/idiom rather than trimmed to a tight bound.
 inline constexpr int kPreTurnActionQueueCap = 16;
 
-// CombatState.flags bit for FrailPower.justApplied on the player. Shame and
-// Act-1 monster Frail applications construct FrailPower(..., true), so a newly
-// created instance skips its first atEndOfRound decrement. Stacking an existing
-// instance preserves the current latch (ApplyPowerAction stacks the existing
-// object rather than replacing it). The reserved header flags keep this state
-// inside the frozen POD without a schema/layout change.
-inline constexpr uint32_t kCombatFlagFrailJustApplied = 1u << 0;
+// CombatState.flags BIT 0 IS RETIRED -- deliberately left unallocated.
+//
+// It used to be kCombatFlagFrailJustApplied: FrailPower.justApplied, for the
+// PLAYER's instance only. That was always the shape's limit, and it became the
+// bug when Vulnerable and Weak needed the same latch: those two can sit on the
+// player and all five monsters at once, so one whole-combat bit cannot describe
+// them, and a monster-owned Frail could never tick either. The latch for all
+// three duration debuffs now lives per-instance in the slot's own
+// `PowerSlot.counter` (types.hpp; src/engine/powers/power_duration_debuff.hpp).
+//
+// The bit is not reused. A stale reader that still tested bit 0 would silently
+// see "not just applied" instead of failing, and the symbol is gone so any such
+// reader is a compile error instead.
 
 // CombatState.flags bit for the room's cannotLose latch (monster split framework).
 // Set by the CANNOT_LOSE opcode and cleared by CAN_LOSE (CannotLoseAction.java:

@@ -78,6 +78,71 @@ void resolve_pending_use_card_actions_at_terminal(CombatState& s) noexcept {
     return false;
 }
 
+// MonsterGroup.applyPreTurnLogic (MonsterGroup.java:98-105): the monster-side
+// turn-start walk. For every monster that is neither dying nor escaping, clear
+// its block unless it has Barricade, then fire its start-of-turn powers.
+//
+// WHERE IT IS CALLED FROM, AND WHY THE .java DOES NOT SAY SO. The decompiled tree
+// shows `MonsterStartTurnAction` -- applyPreTurnLogic's only caller -- as
+// referenced by nothing, because `AbstractRoom.endTurn` ends with
+// `addToBottom((AbstractGameAction)new /* Unavailable Anonymous Inner Class!! */)`
+// (AbstractRoom.java:409): CFR dropped the anonymous class that queues it. The
+// call site is therefore grounded in BYTECODE --
+// `AbstractRoom.endTurn (bytecode AbstractRoom$1, javap) -- CFR-dropped anonymous
+// class`. `javap -c com.megacrit.cardcrawl.rooms.AbstractRoom` shows endTurn at
+// offsets 167-178 constructing `AbstractRoom$1` and passing it to
+// `GameActionManager.addToBottom`, and `javap -c AbstractRoom$1` shows update()
+// as, in order:
+//
+//     addToBot(new EndTurnAction())                              // 0-8
+//     addToBot(new WaitAction(1.2f))                             // 11-21
+//     if (!this$0.skipMonsterTurn)                               // 24-31
+//         addToBot(new MonsterStartTurnAction())                 // 34-42
+//     AbstractDungeon.actionManager.monsterAttacksQueued = false // 45-51
+//
+// `javap -c MonsterStartTurnAction` then shows update() calling
+// `AbstractDungeon.getCurrRoom().monsters.applyPreTurnLogic()` (offsets 16-22).
+//
+// THAT FIXES THE ORDER, and it is why this runs where it does. Those three
+// actions drain out of `actions` before GameActionManager's update loop can reach
+// its `!monsterAttacksQueued` branch (GameActionManager.java:303-307), so
+// applyPreTurnLogic resolves after the end-of-turn discard and IMMEDIATELY BEFORE
+// queueMonsters -- which is exactly pump_step step 4 below. It is also strictly
+// BEFORE the monster's move and strictly AFTER the previous round's
+// applyEndOfTurnPowers, which is what keeps a Metallicize monster's armour at one
+// tick rather than a running total.
+//
+// `loseBlock()` is the no-argument overload -- `loseBlock(this.currentBlock)`
+// (AbstractCreature.java:485-487) -- a flat zeroing, with no Calipers-style
+// partial retention on the monster side. The single gate is
+// `hasPower("Barricade")`, a bare presence test as on the player path in
+// start_of_turn. There is no BackAttack or intent gate: beyond isDying/isEscaping
+// the walk is unconditional.
+void apply_pre_turn_logic(CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        MonsterState& m = s.monsters[i];
+        if (monster_dead_or_escaped(m)) {
+            continue;
+        }
+        bool has_barricade = false;
+        for (uint8_t p = 0; p < m.power_count; ++p) {
+            if (m.powers[p].power_id == static_cast<uint16_t>(PowerId::BARRICADE)) {
+                has_barricade = true;
+                break;
+            }
+        }
+        if (!has_barricade) {
+            m.block = 0;  // loseBlock()
+        }
+        // m.applyStartOfTurnPowers() (AbstractCreature.java:529-533) -- the
+        // monster side of AT_START_OF_TURN, which nothing dispatched before. No
+        // S1 monster-ownable power binds that hook today, so it is a no-op in
+        // every current fixture; it is here because it is the other half of the
+        // method, and omitting half a method is how the block clear went missing.
+        dispatch_monster_at_start_of_turn(s, i);
+    }
+}
+
 // queueMonsters equivalent (GameActionManager.java:306 ->
 // MonsterGroup.queueMonsters, MonsterGroup.java:117-122): enqueue every live
 // monster, in slot order. The Java guard is `isDeadOrEscaped() && !halfDead`;
@@ -600,8 +665,16 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     // 4. else if !monsterAttacksQueued -> set it, queue all live monsters.
     if (s.monster_attacks_queued == 0) {
         s.monster_attacks_queued = 1;
+        // MonsterStartTurnAction, queued by AbstractRoom.endTurn's CFR-dropped
+        // anonymous class and resolved out of `actions` before this branch can be
+        // reached -- see apply_pre_turn_logic above for the javap evidence that
+        // pins both the call site and this ordering.
+        apply_pre_turn_logic(s);
         // skipMonsterTurn (GameActionManager.java:305) is tied to mechanics the
         // skeleton lacks (e.g. Entangled); future extension point, not queued.
+        // Note it gates BOTH lines here in the Java: MonsterStartTurnAction is
+        // only queued when it is clear (AbstractRoom$1 offsets 24-31), exactly as
+        // queueMonsters is (GameActionManager.java:304-306).
         queue_monsters(s);
         r.outcome = PumpOutcome::QUEUED_MONSTERS;
         return r;

@@ -276,6 +276,14 @@ void dispatch_at_start_of_turn_post_draw(CombatState& s) noexcept {
                           HookContext{});
 }
 
+void dispatch_monster_at_start_of_turn(CombatState& s,
+                                       uint8_t monster_index) noexcept {
+    if (monster_index >= s.monster_count) {
+        return;
+    }
+    dispatch_actor_powers(s, monster_index, Hook::AT_START_OF_TURN, HookContext{});
+}
+
 void dispatch_on_gained_block(CombatState& s, uint8_t actor,
                               int32_t amount) noexcept {
     if (amount <= 0) {

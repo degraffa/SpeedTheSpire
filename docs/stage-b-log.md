@@ -2099,6 +2099,53 @@ with base/A3/A8/A18 columns. Tier-2 `lagavulin_test`, 8 named cases.
   28 / monsters 14 / relics 65 / potions 33 / events 0 / encounters 20 / a20 20
   / **total 255**.
 
+> **CORRECTION APPENDED 2026-07-27 — the 8 / 16 / 24 armour claim above is
+> wrong; the sleeping armour holds at 8.** This Log is append-only, so the
+> original bullet stands as written and this note supersedes it.
+>
+> The bullet reads *"Monster block never decays in this build, which is what
+> makes the armour stand at 8 / 16 / 24: `MonsterGroup.applyPreTurnLogic`
+> (`MonsterGroup.java:98-105`) has exactly one caller,
+> `MonsterStartTurnAction.java:22`, and that action is never constructed."* The
+> premise is a **decompiler artifact**, not a fact about the game.
+> `AbstractRoom.endTurn` queues `MonsterStartTurnAction` from an anonymous inner
+> class CFR dropped, leaving
+> `addToBottom((AbstractGameAction)new /* Unavailable Anonymous Inner Class!! */)`
+> at `AbstractRoom.java:409` — which is why a grep of the `.java` tree finds
+> no constructor call.
+>
+> Grounded in bytecode instead, cited as `AbstractRoom.endTurn (bytecode
+> AbstractRoom$1, javap) -- CFR-dropped anonymous class`. `javap -c` (JDK 8,
+> against the game's own `desktop-1.0.jar`, read-only — nothing from it is
+> committed) shows `AbstractRoom.endTurn` at offsets 167-178 constructing
+> `AbstractRoom$1` and passing it to `GameActionManager.addToBottom`, and
+> `AbstractRoom$1.update()` as, in order: `addToBot(new EndTurnAction())` (0-8),
+> `addToBot(new WaitAction(1.2f))` (11-21), `if (!this$0.skipMonsterTurn)
+> addToBot(new MonsterStartTurnAction())` (24-42), then
+> `actionManager.monsterAttacksQueued = false` (45-51).
+> `MonsterStartTurnAction.update()` calls
+> `AbstractDungeon.getCurrRoom().monsters.applyPreTurnLogic()` (16-22).
+>
+> The consequence for this task's subject: those actions drain out of `actions`
+> before `GameActionManager` can reach its `!monsterAttacksQueued` branch
+> (`GameActionManager.java:303-307`), so `applyPreTurnLogic` — and its
+> Barricade-gated `loseBlock()` — runs at the top of the monster's turn, one
+> full phase **before** `applyEndOfTurnPowers` (`:331`) lets a sleeping
+> Lagavulin's Metallicize grant its 8. Each round's tick therefore **replaces**
+> the last rather than adding to it, and the armour a player sees is **8 on
+> every sleeping turn**. The turn-1 defect this task actually fixed —
+> `combat_begin` / `enter_combat` priming turn 1 with an end-of-round pass the
+> game never runs, measured as 16 block on turn 1 instead of 8 — is
+> unaffected and still correct.
+>
+> The block clear landed 2026-07-27 as non-task work; see the ledger's
+> [Landed non-task work](stage-b-tasks.md#landed-non-task-work). The pin moved
+> with it: `LagavulinSleep.ArmourGrowsEightEachRoundAndStopsWhenTheShellOpens`
+> is now
+> `LagavulinSleep.ArmourHoldsAtEightEachRoundAndIsGoneOnceTheShellOpens`, and
+> `CombatStart.LagavulinArmourTicksOncePerCompletedRound` expects 8 on each of
+> turns 2 and 3 rather than 16 and 24.
+
 <a id="b320"></a>
 
 ### B3.20 `[x]` ∥ Boss: Slime Boss

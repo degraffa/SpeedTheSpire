@@ -86,13 +86,19 @@
   name: VULNERABLE
   game_id: "Vulnerable"
   type: DEBUFF
-  provenance: "VulnerablePower.atDamageReceive (VulnerablePower.java:61-73) -- damage * 1.5f; POWER_ID (VulnerablePower.java:21)"
+  native: true
+  hooks:
+    at_end_of_round: []     # native: justApplied latch, then decrement/remove
+  provenance: "VulnerablePower (VulnerablePower.java:20-74), read in full. EFFECT: atDamageReceive (:61-73) -- damage * 1.5f on NORMAL; that half is the native damage pipeline and binds no hook. DURATION: atEndOfRound (:44-53) -- `if (justApplied) { justApplied = false; return; } if (amount == 0) addToBot(RemoveSpecificPowerAction) else addToBot(new ReducePowerAction(owner, owner, POWER_ID, 1))`. The amount==0 branch is unreachable through this path (ReducePowerAction 1-from-1 removes, ReducePowerAction.java:45-51) and is implemented anyway because the Java writes it. justApplied is set in the ctor (:36-38) under `actionManager.turnHasEnded && isSourceMonster` -- BOTH clauses, unlike Weak/Frail. The engine reads the turnHasEnded clause directly (CombatState.turn_has_ended) and that alone is exact for every in-scope applier: during the enemy phase only a monster applies Vulnerable, and the two S1 player-side appliers that pass isSourceMonster=false to the PLAYER -- Berserk (Berserk.java:33) and a Fungi Beast's Spore Cloud on death (SporeCloudPower.java, VulnerablePower(player, amount, true)) -- both land while turnHasEnded is 0, so both correctly take no latch. Latch storage is the slot's own PowerSlot.counter (types.hpp), so it is per-instance across the player and all monsters. POWER_ID (:21); isTurnBased (:40)."
 
 - id: 3
   name: WEAK
   game_id: "Weakened"
   type: DEBUFF
-  provenance: "WeakPower.atDamageGive (WeakPower.java:61-70) -- damage * 0.75f; POWER_ID (WeakPower.java:21)"
+  native: true
+  hooks:
+    at_end_of_round: []     # native: justApplied latch, then decrement/remove
+  provenance: "WeakPower (WeakPower.java:20-71), read in full. EFFECT: atDamageGive (:61-70) -- damage * 0.75f on NORMAL; the native damage pipeline, no hook. DURATION: atEndOfRound (:44-53), byte-for-byte the same body as Vulnerable's. justApplied is set in the ctor (:35-37) under `if (isSourceMonster)` ALONE -- no turnHasEnded clause, which is the one place the three duration debuffs differ. In S1 scope that predicate is exactly `the owner is the player`: every application to the player passes true (Act-1 monsters, and the Doubt curse's own end-of-turn ApplyPowerAction, Doubt.java:35), and every application to a monster passes false (player cards, Weak Potion, Champion's Belt). Latch storage is the slot's own PowerSlot.counter. POWER_ID \"Weakened\" (:21); isTurnBased (:39); priority 99 (:40) -- ordering only, no engine consumer."
 
 # --- B3.2 framework powers (hook bindings for the §5.3-5.5 dispatch order) ----
 
@@ -273,7 +279,7 @@
   native: true
   hooks:
     at_end_of_round: []     # native: justApplied skip, then decrement/remove
-  provenance: "FrailPower (FrailPower.java:22-64): DEBUFF; modifyBlock returns blockAmount*0.75f; a monster-sourced new instance sets justApplied, whose first atEndOfRound clears the latch without decrementing, then later rounds reduce 1/remove at zero. Shame applies new FrailPower(player,1,true) (Shame.java:24-26). Native: card BLOCK's float modify-block pass applies x0.75 and floors once after all powers; direct GainBlockAction items carry kBlockNoPowers and bypass it. CombatState.flags kCombatFlagFrailJustApplied stores the player instance latch without changing the frozen POD layout; stacking an existing instance preserves its latch, matching ApplyPowerAction.stackPower. POWER_ID \"Frail\" (:22)."
+  provenance: "FrailPower (FrailPower.java:22-64): DEBUFF; modifyBlock returns blockAmount*0.75f; a monster-sourced new instance sets justApplied (ctor :32-34, `if (isSourceMonster)` alone -- Weak's predicate, not Vulnerable's), whose first atEndOfRound clears the latch without decrementing, then later rounds reduce 1/remove at zero (:40-52). Shame applies new FrailPower(player,1,true) (Shame.java:34). In S1 scope `isSourceMonster` is exactly `the owner is the player`, as for Weak. Native: card BLOCK's float modify-block pass applies x0.75 and floors once after all powers; direct GainBlockAction items carry kBlockNoPowers and bypass it. Latch storage is the slot's own PowerSlot.counter (types.hpp), shared with Vulnerable and Weak -- it replaces the former player-only CombatState.flags bit, which could not reach a monster-owned instance; stacking an existing instance preserves its latch, matching ApplyPowerAction.stackPower. POWER_ID \"Frail\" (:22)."
 # --- B3.17 large-slime marker ------------------------------------------------
 - id: 22
   name: SPLIT

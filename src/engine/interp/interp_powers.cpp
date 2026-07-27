@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "interp_ops.hpp"                   // actor_powers
+#include "../powers/power_duration_debuff.hpp"  // duration_debuff_starts_just_applied
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"            // Opcode, make_apply_power_flags
@@ -124,9 +125,11 @@ void remove_slot_at(CombatState& s, uint8_t tgt, PowerSlot* slots,
         // its private triggered latch leaves with it.
         s.monsters[tgt].flags &= ~kMonsterFlagCurlUpTriggered;
     }
-    if (id == PowerId::FRAIL && tgt == kActorPlayer) {
-        s.flags &= ~kCombatFlagFrailJustApplied;
-    }
+    // Frail's justApplied latch used to be cleared here, out of a
+    // CombatState.flags bit. It now lives in the slot's own `counter`
+    // (power_duration_debuff.hpp), which this function has already zeroed with
+    // the rest of the row -- so removal needs no special case for Frail, Weak or
+    // Vulnerable.
     if (id == PowerId::COMBUST && tgt == kActorPlayer) {
         s.flags &= ~kCombatFlagCombustHpLossMask;
     }
@@ -287,12 +290,6 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // stacked; only the new-slot path clears it.
         s.monsters[tgt].flags &= ~kMonsterFlagCurlUpTriggered;
     }
-    if (id == PowerId::FRAIL && tgt == kActorPlayer) {
-        // All in-scope player Frail constructors pass isSourceMonster=true
-        // (Shame and Act-1 monsters). Only a NEW instance gets justApplied;
-        // stacking returned above and therefore preserves the existing latch.
-        s.flags |= kCombatFlagFrailJustApplied;
-    }
     if (id == PowerId::COMBUST && tgt == kActorPlayer) {
         s.flags = (s.flags & ~kCombatFlagCombustHpLossMask) |
                   (1u << kCombatFlagCombustHpLossShift);
@@ -314,6 +311,16 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // authors no `counter:` operand.
         fresh.amount = kPanacheCardAmount;
         fresh.counter = static_cast<int16_t>(amount);
+    }
+    // justApplied for the three DURATION debuffs (Vulnerable / Weak / Frail).
+    // Their ctors set it (VulnerablePower.java:36-38, WeakPower.java:35-37,
+    // FrailPower.java:32-34) and the slot's own `counter` carries it, so it is
+    // per-instance across the player and every monster. Only a NEW instance is
+    // latched: stacking returned above, which is exactly ApplyPowerAction's
+    // behaviour -- addPower hands the amount to the LIVE object and throws away
+    // the freshly constructed one, latch and all (AbstractCreature.java:506-513).
+    if (duration_debuff_starts_just_applied(s, tgt, id)) {
+        fresh.counter = 1;
     }
     slots[*count] = fresh;
     ++*count;
