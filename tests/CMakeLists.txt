@@ -282,6 +282,7 @@ sts_add_test(treasure_rooms_test)
 # discipline and pool-removal bookkeeping, and the EVENT_DIALOG phase through
 # the synthetic proof body.
 sts_add_test(event_framework_test)
+sts_add_test(exordium_events_i_test)
 
 # How a combat STARTS: the turn-1 block (begin_first_turn) must not run
 # getNextAction step 6's applyEndOfTurnPowers pass, and both combat-construction

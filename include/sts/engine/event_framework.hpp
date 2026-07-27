@@ -265,13 +265,46 @@ static_assert(std::is_trivially_copyable_v<EventDialogMenu>);
 struct EventDialogState {
     uint16_t event_id;  // EventId as u16 (0 = none); kSyntheticEventId in tests
     uint8_t screen;     // event-defined page index (0 = entry screen)
-    uint8_t pad;        // explicit padding
+    uint8_t grid_kind;  // EventGridKind; 0 while an ordinary dialog is visible
     int16_t scratch0;   // event-defined
     int16_t scratch1;   // event-defined
 };
 
 static_assert(std::is_trivially_copyable_v<EventDialogState>);
 static_assert(sizeof(EventDialogState) == 8);
+
+// Reusable event-origin master-deck grid. The current body selects the screen
+// transition; this enum supplies the common legality predicate and mutation
+// door. Cleric/Golden Wing exercise PURGE now; UPGRADE/TRANSFORMABLE reserve
+// the same non-overlapping screen shape for Living Wall and shrine bodies.
+enum class EventGridKind : uint8_t {
+    NONE = 0,
+    PURGE = 1,
+    UPGRADE = 2,
+    TRANSFORMABLE = 3,
+};
+
+void open_event_grid(EventDialogState& es, EventGridKind kind) noexcept;
+void close_event_grid(EventDialogState& es) noexcept;
+[[nodiscard]] bool event_grid_card_legal(const RunState& rs,
+                                         const EventDialogState& es,
+                                         uint16_t deck_index) noexcept;
+[[nodiscard]] bool event_grid_remove_card(RunState& rs,
+                                          EventDialogState& es,
+                                          uint16_t deck_index) noexcept;
+[[nodiscard]] bool event_grid_upgrade_card(RunState& rs,
+                                           EventDialogState& es,
+                                           uint16_t deck_index) noexcept;
+
+// Event damage keeps the Java DamageInfo owner explicit even though the two
+// owners used by this batch currently produce the same RunState HP delta.
+enum class EventDamageOwner : uint8_t {
+    NULL_SOURCE = 0,
+    PLAYER = 1,
+};
+
+[[nodiscard]] bool apply_event_damage(RunController& rc, int32_t amount,
+                                      EventDamageOwner owner) noexcept;
 
 // What a dialog choice did to the flow.
 enum class EventDialogStatus : uint8_t {
@@ -294,12 +327,10 @@ struct EventDialogImpl {
                                 uint8_t option);
 };
 
-// The per-event dispatch. Returns nullptr for every event id whose body is
-// not implemented -- ALL 31 native events today (their bodies are the
-// follow-on content tasks). A null here parks the run at ROOM_UNIMPLEMENTED,
+// The per-event dispatch. Implemented native rows are emitted by the registry;
+// an unimplemented id returns nullptr and parks the run at ROOM_UNIMPLEMENTED,
 // but only AFTER generate_event has committed the exact selection and
-// pool-removal bookkeeping, so the parked state is byte-identical to the
-// pre-body prefix of the eventual full flow.
+// pool-removal bookkeeping.
 [[nodiscard]] const EventDialogImpl* event_dialog_impl(uint16_t event_id) noexcept;
 
 // The framework's proof body (the "minimal synthetic seam"): a two-screen

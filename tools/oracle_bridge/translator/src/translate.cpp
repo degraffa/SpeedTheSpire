@@ -788,14 +788,34 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
     if (screen_type == "EVENT") {
         fr.ignore("body_text");
         fr.ignore("event_name");
-        fr.defer("event_id");
+        {
+            const std::string id =
+                as_str(fr.require("event_id"), ctx, path + ".event_id");
+            (void)join_event(id, ctx, path + ".event_id");
+            fr.defer("event_id");
+        }
         if (const json* opts = fr.take("options")) {
+            if (!opts->is_array()) {
+                throw TranslateError(loc(ctx) + " expected array at " + path +
+                                     ".options");
+            }
             for (std::size_t i = 0; i < opts->size(); ++i) {
-                FieldReader o((*opts)[i], path + ".options[" + std::to_string(i) + "]", ctx);
+                const std::string op =
+                    path + ".options[" + std::to_string(i) + "]";
+                FieldReader o((*opts)[i], op, ctx);
                 o.ignore("text");
                 o.ignore("label");
-                o.defer("disabled");
-                o.defer("choice_index");
+                if (const json* disabled = o.take("disabled")) {
+                    if (!disabled->is_boolean()) {
+                        throw TranslateError(loc(ctx) + " expected boolean at " +
+                                             op + ".disabled");
+                    }
+                    o.defer("disabled");
+                }
+                if (const json* choice = o.take("choice_index")) {
+                    (void)as_i64(*choice, ctx, op + ".choice_index");
+                    o.defer("choice_index");
+                }
                 o.finish();
             }
             fr.defer("options");

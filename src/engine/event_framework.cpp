@@ -9,7 +9,10 @@
 #include "sts/engine/cards.hpp"       // card_def / CardType (isCursed)
 #include "sts/engine/relics.hpp"      // RelicId (Tiny Chest / Juzu Bracelet)
 #include "sts/engine/rng_stream.hpp"  // random() wrappers
+#include "sts/engine/rest_sites.hpp"  // shared purge/upgrade legality
 #include "sts/engine/run_advance.hpp" // RunController for dialog bodies
+#include "sts/engine/run_deck.hpp"    // remove_master_deck_card
+#include "sts/registry/event_table.hpp" // generated implemented-body dispatch
 
 namespace sts::engine {
 
@@ -388,6 +391,80 @@ uint16_t generate_event(RunState& rs) noexcept {
     return id;
 }
 
+void open_event_grid(EventDialogState& es, EventGridKind kind) noexcept {
+    es.grid_kind = static_cast<uint8_t>(kind);
+}
+
+void close_event_grid(EventDialogState& es) noexcept {
+    es.grid_kind = static_cast<uint8_t>(EventGridKind::NONE);
+}
+
+bool event_grid_card_legal(const RunState& rs, const EventDialogState& es,
+                           uint16_t deck_index) noexcept {
+    if (deck_index >= rs.master_deck_count) {
+        return false;
+    }
+    switch (static_cast<EventGridKind>(es.grid_kind)) {
+        case EventGridKind::PURGE:
+            return rest_card_purgeable(rs.master_deck[deck_index]);
+        case EventGridKind::UPGRADE:
+            return rest_card_upgradeable(rs.master_deck[deck_index]);
+        case EventGridKind::TRANSFORMABLE:
+            // Living Wall uses getPurgeableCards for this screen too
+            // (LivingWall.java:68-72).
+            return rest_card_purgeable(rs.master_deck[deck_index]);
+        case EventGridKind::NONE:
+        default:
+            return false;
+    }
+}
+
+bool event_grid_remove_card(RunState& rs, EventDialogState& es,
+                            uint16_t deck_index) noexcept {
+    if (static_cast<EventGridKind>(es.grid_kind) != EventGridKind::PURGE ||
+        !event_grid_card_legal(rs, es, deck_index) ||
+        !remove_master_deck_card(rs, deck_index)) {
+        return false;
+    }
+    close_event_grid(es);
+    return true;
+}
+
+bool event_grid_upgrade_card(RunState& rs, EventDialogState& es,
+                             uint16_t deck_index) noexcept {
+    if (static_cast<EventGridKind>(es.grid_kind) != EventGridKind::UPGRADE ||
+        !event_grid_card_legal(rs, es, deck_index)) {
+        return false;
+    }
+    ++rs.master_deck[deck_index].upgrade;
+    close_event_grid(es);
+    return true;
+}
+
+bool apply_event_damage(RunController& rc, int32_t amount,
+                        EventDamageOwner owner) noexcept {
+    // GoldenIdol uses DamageInfo(null, n); GoldenWing/Goop use player-owned
+    // DamageInfo. The owner is intentionally not erased from the API. In the
+    // RunState-only event layer neither source has powers/block, and the S1
+    // run-layer relic roster has no owner-dependent onAttacked override, so the
+    // persistent result is the same direct NORMAL damage.
+    (void)owner;
+    if (amount <= 0 || rc.run.hp <= 0) {
+        return rc.run.hp > 0;
+    }
+    int hp = static_cast<int>(rc.run.hp) - amount;
+    if (hp < 0) {
+        hp = 0;
+    }
+    rc.run.hp = static_cast<int16_t>(hp);
+    if (hp == 0) {
+        rc.event = EventDialogState{};
+        rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+        return false;
+    }
+    return true;
+}
+
 // --- Dialog dispatch ---------------------------------------------------------
 
 namespace {
@@ -453,15 +530,23 @@ constexpr EventDialogImpl kSyntheticImpl = {
 
 }  // namespace
 
+#define STS_DECLARE_EVENT_BODY(id, fn) \
+    const EventDialogImpl* fn() noexcept;
+STS_REGISTRY_NATIVE_EVENTS(STS_DECLARE_EVENT_BODY)
+#undef STS_DECLARE_EVENT_BODY
+
 const EventDialogImpl* event_dialog_impl(uint16_t event_id) noexcept {
-    // Every native event (EventId 1-31) is a follow-on content-task body;
-    // nullptr parks the run at ROOM_UNIMPLEMENTED after the selection
-    // bookkeeping committed. Bodies land here as cases, replacing nulls
-    // without renumbering anything.
     if (event_id == kSyntheticEventId) {
         return &kSyntheticImpl;
     }
-    return nullptr;
+    switch (static_cast<EventId>(event_id)) {
+#define STS_DISPATCH_EVENT_BODY(id, fn) \
+        case EventId::id: return fn();
+        STS_REGISTRY_NATIVE_EVENTS(STS_DISPATCH_EVENT_BODY)
+#undef STS_DISPATCH_EVENT_BODY
+        default:
+            return nullptr;
+    }
 }
 
 }  // namespace sts::engine

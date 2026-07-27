@@ -89,6 +89,8 @@ add_library(sts_engine
     treasure_rooms.cpp
     # ?-room roll + event selection/pool bookkeeping + dialog dispatch.
     event_framework.cpp
+    # Native event bodies, grouped by delivery batch.
+    events/exordium_events_i.cpp
     run_advance.cpp
 )
 

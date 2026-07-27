@@ -1308,9 +1308,13 @@ TEST(QuestionMarkRoom, EventRngAdvancesByExactlyOneAcrossFullEventResolve) {
     step(rc, kProceed);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
 
-    // Resolved to an event; the body is unimplemented (B4.11-B4.13), so the
-    // run parks -- but only after the exact selection bookkeeping.
-    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED));
+    // Resolved to an event. Implemented bodies open a dialog; later bodies
+    // park. Both happen only after the exact selection bookkeeping.
+    const RunPhase expected_phase =
+        event_dialog_impl(rc.event.event_id) == nullptr
+            ? RunPhase::ROOM_UNIMPLEMENTED
+            : RunPhase::EVENT_DIALOG;
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(expected_phase));
     EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Event));
     EXPECT_NE(rc.event.event_id, 0);
 

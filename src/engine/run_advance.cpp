@@ -30,6 +30,7 @@
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
+#include "sts/engine/monster_lagavulin.hpp" // event ctor's awake variant
 #include "sts/engine/monster_looter.hpp"   // looter_stolen_gold (settlement)
 #include "sts/engine/observation.hpp"      // encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
@@ -350,7 +351,9 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
                             static_cast<RoomType>(rc.room_type),
                             reward_outcome_for(outcome,
                                                have_monsters_escaped(rc.combat)),
-                            rc.rewards, stolen_return);
+                            rc.rewards, stolen_return,
+                            static_cast<RoomType>(rc.room_type) ==
+                                RoomType::Event);
 
     const float combat_reward = res.reward;
     res = StepResult{};  // reward screens have no combat observation view.
@@ -364,12 +367,21 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
 // The five floor streams are re-derived here (identical to the caller's reseed) so
 // the build is a pure function of (run, floor, encounter).
 bool enter_combat(RunController& rc, std::string_view enc_key,
-                  RoomType room) noexcept {
+                  RoomType room, bool preserve_floor_streams = false,
+                  EventCombatVariant variant = EventCombatVariant::NONE) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
 
     CombatState s{};                              // value-init: byte-clean scratch
-    reseed_floor_streams(s, seed, floor);
+    if (preserve_floor_streams) {
+        s.monster_hp_rng = rc.combat.monster_hp_rng;
+        s.ai_rng = rc.combat.ai_rng;
+        s.shuffle_rng = rc.combat.shuffle_rng;
+        s.card_random_rng = rc.combat.card_random_rng;
+        s.misc_rng = rc.combat.misc_rng;
+    } else {
+        reseed_floor_streams(s, seed, floor);
+    }
 
     // (1) Composition (miscRng): MonsterHelper.getEncounter (encounters.hpp).
     ResolvedGroup grp{};
@@ -458,7 +470,13 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 
     // (6) Spawn the resolved group (monster_hp_rng HP rolls + ai_rng rollMove, in
     //     spawn order).
-    spawn_group(s, std::span<const MonsterId>(ids, grp.count));
+    if (variant == EventCombatVariant::LAGAVULIN_AWAKE &&
+        grp.count == 1 && ids[0] == MonsterId::LAGAVULIN) {
+        s.monster_count = 1;
+        lagavulin_init_awake(s, 0);
+    } else {
+        spawn_group(s, std::span<const MonsterId>(ids, grp.count));
+    }
 
     // (7) Monster pre-battle actions run after every member is spawned and
     //     before turn 1. Louses roll and apply Curl Up here.
@@ -702,6 +720,15 @@ void fill_run_result(const RunController& rc, StepResult& r) noexcept {
 }
 
 }  // namespace
+
+bool enter_event_combat(RunController& rc, std::string_view encounter_key,
+                        EventCombatVariant variant) noexcept {
+    // AbstractEvent.enterCombat keeps the EventRoom object alive. Preserve the
+    // constructor/buttonEffect draws already consumed from the five floor
+    // streams, and retain RoomType::Event so leaving never pops monsterList.
+    return enter_combat(rc, encounter_key, RoomType::Event,
+                        /*preserve_floor_streams=*/true, variant);
+}
 
 // --- next_room_transition ----------------------------------------------------
 
@@ -1007,10 +1034,19 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             // a non-null impl.
             const EventDialogImpl* impl = event_dialog_impl(rc.event.event_id);
             if (impl != nullptr) {
-                EventDialogMenu menu{};
-                impl->build_menu(rc, rc.event, menu);
-                for (uint8_t i = 0; i < menu.count && i < kEventOptionCap; ++i) {
-                    out.can_choose_event_option[i] = menu.enabled[i];
+                if (rc.event.grid_kind !=
+                    static_cast<uint8_t>(EventGridKind::NONE)) {
+                    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+                        out.can_choose_master_deck[i] =
+                            event_grid_card_legal(rc.run, rc.event, i);
+                    }
+                } else {
+                    EventDialogMenu menu{};
+                    impl->build_menu(rc, rc.event, menu);
+                    for (uint8_t i = 0;
+                         i < menu.count && i < kEventOptionCap; ++i) {
+                        out.can_choose_event_option[i] = menu.enabled[i];
+                    }
                 }
             }
             break;
@@ -1346,7 +1382,13 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 const EventDialogImpl* impl =
                     event_dialog_impl(rc.event.event_id);
                 const uint8_t a0 = action_arg0(a);
-                if (impl != nullptr && a0 < kEventOptionCap) {
+                if (impl != nullptr &&
+                    rc.event.grid_kind !=
+                        static_cast<uint8_t>(EventGridKind::NONE)) {
+                    if (event_grid_card_legal(rc.run, rc.event, a0)) {
+                        (void)impl->choose(rc, rc.event, a0);
+                    }
+                } else if (impl != nullptr && a0 < kEventOptionCap) {
                     EventDialogMenu menu{};
                     impl->build_menu(rc, rc.event, menu);
                     if (a0 < menu.count && menu.enabled[a0] &&

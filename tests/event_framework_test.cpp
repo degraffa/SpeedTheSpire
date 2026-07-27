@@ -651,10 +651,11 @@ TEST(GenerateEvent, AllPoolsEmptyReturnsZeroWithoutCommit) {
 // Dialog dispatch + the EVENT_DIALOG phase (through the synthetic proof body)
 // =============================================================================
 
-TEST(EventDialog, EveryNativeEventIsUnimplementedToday) {
-    // Bodies are B4.11-B4.13; until each lands, its selection parks. The
-    // synthetic proof body is the only live impl.
-    for (uint16_t id = 1; id <= 31; ++id) {
+TEST(EventDialog, DispatchMatchesImplementedRegistryPrefix) {
+    for (uint16_t id = 1; id <= 6; ++id) {
+        EXPECT_NE(event_dialog_impl(id), nullptr) << "EventId " << id;
+    }
+    for (uint16_t id = 7; id <= 31; ++id) {
         EXPECT_EQ(event_dialog_impl(id), nullptr) << "EventId " << id;
     }
     EXPECT_EQ(event_dialog_impl(0), nullptr);

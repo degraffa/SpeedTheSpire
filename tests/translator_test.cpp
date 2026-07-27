@@ -488,6 +488,51 @@ std::string with_reward_screen(const std::string& line,
     return out;
 }
 
+std::string with_event_screen(const std::string& line,
+                              const std::string& screen_state_json) {
+    const std::string anchor = "\"screen_type\":\"NONE\"";
+    std::string out = line;
+    const auto pos = out.find(anchor);
+    EXPECT_NE(pos, std::string::npos);
+    out.replace(pos, anchor.size(),
+                "\"screen_type\":\"EVENT\",\"screen_state\":" +
+                    screen_state_json);
+    return out;
+}
+
+TEST(Translator, EventScreenStateValidatesKnownIdsAndOptionTypes) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string tampered = with_event_screen(
+        lines[1],
+        "{\"event_id\":\"Big Fish\",\"event_name\":\"Big Fish\","
+        "\"body_text\":\"Choose\",\"options\":["
+        "{\"text\":\"Banana\",\"label\":\"Heal\",\"disabled\":false,"
+        "\"choice_index\":0}]}");
+    tr::TranslatedRun run =
+        tr::translate_lines({lines[0], tampered}, "event-screen");
+    ASSERT_EQ(run.records.size(), 1u);
+}
+
+TEST(Translator, EventScreenStateRejectsUnknownIdsAndBadOptionTypes) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string unknown = with_event_screen(
+        lines[1],
+        "{\"event_id\":\"Totally Fake Event\",\"options\":[]}");
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], unknown}, "event-screen"),
+        tr::TranslateError);
+
+    const std::string bad_bool = with_event_screen(
+        lines[1],
+        "{\"event_id\":\"Big Fish\",\"options\":[{\"disabled\":1,"
+        "\"choice_index\":\"zero\"}]}");
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], bad_bool}, "event-screen"),
+        tr::TranslateError);
+}
+
 TEST(Translator, CombatRewardScreenStateValidatesAndJoins) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 3u);
