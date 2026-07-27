@@ -97,6 +97,21 @@ struct HookContext {
                                          // (PowerSlot.amount) -- drives stack-scaled
                                          // effects (a hook step's `amount: 0` sentinel
                                          // substitutes this; native bodies read it).
+    int32_t power_counter = 0;           // the responding power's SECOND number
+                                         // (PowerSlot.counter, types.hpp); 0 for every
+                                         // power that declares no meaning for it.
+    uint8_t power_slot = 0;              // the responding power's INDEX in its owner's
+                                         // list. `this` in Java terms: a native body
+                                         // that mutates its own slot (Panache's
+                                         // countdown) or names it in a queued
+                                         // instance-targeted action (The Bomb's
+                                         // ReducePowerAction) needs to know WHICH slot
+                                         // is speaking, which a PowerId cannot say for
+                                         // an INSTANCED power. Valid only for the
+                                         // duration of the dispatch call; like
+                                         // damage_type above it is a transient
+                                         // dispatch field, in NO serialized struct, so
+                                         // it has no fixture impact.
     uint8_t damage_type = 0;             // for on_attacked / was_hp_lost: the incoming
                                          // DamageInfo.DamageType (interp.hpp DamageType;
                                          // 0 == NORMAL). Plated Armor's wasHPLost reads

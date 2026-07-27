@@ -54,7 +54,7 @@ TEST(StateHash, CombatMemcpyRoundTripIsEqual) {
     a.player_energy = 3;
     a.cards_played_this_turn = 2;
     a.player_power_count = 1;
-    a.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 2};
+    a.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 2, 0, 0};
     a.card_pool[0] = CardInstance{static_cast<uint16_t>(CardId::BASH), 0, 2, 0, 0};
     a.hand[0] = 0;
     a.hand_count = 1;

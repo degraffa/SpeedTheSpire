@@ -72,8 +72,8 @@ CombatState MakeBase() {
     s.stance = 0;
     s.cards_played_this_turn = 2;
     s.player_power_count = 2;
-    s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 3};
-    s.player_powers[1] = PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 2};
+    s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 3, 0, 0};
+    s.player_powers[1] = PowerSlot{static_cast<uint16_t>(PowerId::VULNERABLE), 2, 0, 0};
 
     // card pool (rows 0..5 occupied; the rest are value-init NONE)
     for (int i = 0; i < 6; ++i) {
@@ -104,7 +104,7 @@ CombatState MakeBase() {
     s.monsters[0].move_history[0] = 1;
     s.monsters[0].intent = 1;
     s.monsters[0].power_count = 1;
-    s.monsters[0].powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 5};
+    s.monsters[0].powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::STRENGTH), 5, 0, 0};
     s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
     s.monsters[1].hp = 40;
     s.monsters[1].max_hp = 44;

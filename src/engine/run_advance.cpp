@@ -39,6 +39,7 @@
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
 #include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
+#include "relics/relic_pickup.hpp"         // gain_gold (the one run-layer gold door)
 #include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
 
@@ -72,14 +73,36 @@ void reseed_floor_streams(CombatState& s, int64_t seed, int32_t floor) noexcept 
     s.misc_rng = floor_stream(seed, floor);
 }
 
-// Fold CombatState-owned persistent fields back into RunState. Gold, potion
-// slots, and the master deck are already canonical in rc.run while combat is
-// live (CombatState deliberately has no duplicate copies), so combat mutations
-// to those fields route there directly. HP/max-HP and relic counters are the
-// actual mirrors and must be copied on both kill and Smoke Bomb escape.
+// Fold CombatState-owned persistent fields back into RunState. Potion slots and
+// the master deck are already canonical in rc.run while combat is live
+// (CombatState deliberately has no duplicate copies), so combat mutations to
+// those route there directly. HP/max-HP and relic counters are the actual
+// mirrors and must be copied on both kill and Smoke Bomb escape.
+//
+// THE SINGLE COMBAT FOLD-BACK, and therefore the one place combat-earned gold
+// settles. It is called on EVERY combat-end path and on each exactly once:
+// enter_combat_reward (victory / mugged / Smoke Bomb) and
+// finish_combat_after_action's defeat branch. Gold is NOT a mirror -- there is
+// no CombatState copy of the purse to fold -- but an in-combat PRODUCER
+// (Hand of Greed, opcode DAMAGE_GREED) has nowhere else to put its payout, so it
+// accrues in CombatState.combat_gold and is settled here through gain_gold, the
+// one run-layer gold door (Ectoplasm's suppression and the onGainGold relic
+// fan-out live behind it, relics/relic_pickup.hpp -- a raw `rs.gold +=` here
+// would silently ignore a registered boss relic). The accumulator is ZEROED as
+// it settles, so the settlement is idempotent even if a future caller folds
+// twice.
+//
+// The game gains this gold DURING combat (AbstractPlayer.gainGold the instant
+// GreedAction sees the kill, GreedAction.java:38), so settling at the fold is
+// the same total; a combat-only replay, which never folds, simply carries the
+// accumulator and leaves RunState alone.
 void fold_back_combat(RunController& rc) noexcept {
     rc.run.hp = rc.combat.player_hp;
     rc.run.max_hp = rc.combat.player_max_hp;
+    if (rc.combat.combat_gold > 0) {
+        gain_gold(rc.run, static_cast<int32_t>(rc.combat.combat_gold));
+        rc.combat.combat_gold = 0;
+    }
     const uint8_t n =
         rc.combat.relic_count < rc.run.relic_count ? rc.combat.relic_count
                                                    : rc.run.relic_count;
@@ -263,9 +286,15 @@ bool have_monsters_escaped(const CombatState& s) noexcept {
 // no gold field, so the engine accrues the UNCLAMPED count on the monster
 // record (looter_stolen_gold) and settles min(total, gold) here instead --
 // equal to the game's per-steal clamps whenever the thief's steals are the
-// combat's only gold movement, which holds at this layer: every Act-1 group
-// fields at most one thief, and no landed combat effect touches RunState.gold
-// while a combat is live (gold moves again only at reward claim, after this).
+// combat's only gold movement. Every Act-1 group fields at most one thief, and
+// gold moves again only at reward claim, after this. ONE combat effect now also
+// produces gold -- Hand of Greed (DAMAGE_GREED) -- and its accumulator is
+// settled by fold_back_combat, which runs just BEFORE this on both combat-end
+// paths. So a Greed payout is already in the purse this clamp reads, which
+// models the game whenever the greed kill preceded the steal (the game's
+// gainGold is immediate) and over-credits the thief only in the corner where the
+// steal came first AND the purse was below the steal amount. Nothing else in the
+// combat layer touches RunState.gold while a combat is live.
 //
 // Returns the portion carried by DEAD thieves -- exactly what Looter.die()
 // feeds addStolenGoldToRewards (its clamped accrual, Looter.java:170-172),

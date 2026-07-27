@@ -61,6 +61,10 @@ using CardEffectStep = sts::registry::CardEffectStep;
 using CardDef = sts::registry::CardDef;
 
 using sts::registry::kMaxCardSteps;
+// CardDef::requires_draw_pile_type's "no such predicate" sentinel (255, outside
+// the CardType range). Read by card_can_use_without_target -- Secret Technique
+// needs a SKILL in the draw pile, Secret Weapon an ATTACK.
+using sts::registry::kNoDrawPileType;
 using sts::registry::kPoolableCurseCount;
 using sts::registry::kPoolableCurses;
 // The Ironclad in-combat ATTACK transform pool (Infernal Blade /
@@ -70,6 +74,12 @@ using sts::registry::kPoolableCurses;
 // order is a known, documented deviation until an oracle capture pins it).
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
+// The SKILL sibling of the pool above: returnTrulyRandomCardInCombat(SKILL) is
+// the SAME method with one CardType changed (Chrysalis.java:34 vs Infernal
+// Blade's / Metamorphosis.java:34's ATTACK). Same generator derivation and the
+// SAME documented pool-ORDER deviation -- opcode 55's filtered view inherits it.
+using sts::registry::kIroncladSkillPoolCount;
+using sts::registry::kIroncladSkillPool;
 // Full non-healing RED combat pool (Discovery / returnTrulyRandomCardInCombat).
 using sts::registry::kIroncladCombatPoolCount;
 using sts::registry::kIroncladCombatPool;
@@ -260,13 +270,27 @@ static_assert(
             sts::registry::Opcode::RANDOM_COLORLESS_TO_HAND) ==
             static_cast<uint16_t>(Opcode::RANDOM_COLORLESS_TO_HAND) &&
         static_cast<uint16_t>(sts::registry::Opcode::USE_CARD) ==
-            static_cast<uint16_t>(Opcode::USE_CARD),
+            static_cast<uint16_t>(Opcode::USE_CARD) &&
+        static_cast<uint16_t>(sts::registry::Opcode::UPGRADE_ALL) ==
+            static_cast<uint16_t>(Opcode::UPGRADE_ALL) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DRAW_PILE_FETCH) ==
+            static_cast<uint16_t>(Opcode::DRAW_PILE_FETCH) &&
+        static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_GREED) ==
+            static_cast<uint16_t>(Opcode::DAMAGE_GREED),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
 static_assert(kBash.steps[1].extra == make_apply_power_flags(PowerId::VULNERABLE),
               "generated APPLY_POWER `extra` must use the make_apply_power_flags "
               "packing (interp.hpp)");
+// The counter operand added to that packing (bits 16..31) DEFAULTS to 0, which
+// is what every APPLY_POWER step packed before it existed. Bash is the pin: an
+// operand-free row must stay byte-identical, not merely compile.
+static_assert(kBash.steps[1].extra ==
+                  static_cast<uint32_t>(
+                      static_cast<uint16_t>(PowerId::VULNERABLE)),
+              "an APPLY_POWER step that authors no `counter:` must pack the bare "
+              "PowerId, unchanged from before the counter operand existed");
 
 // Card-flag bit constants: the generated header emits kCardFlag*
 // mirroring gen.py's CARD_FLAGS; pin them byte-equal to the engine's CardFlag

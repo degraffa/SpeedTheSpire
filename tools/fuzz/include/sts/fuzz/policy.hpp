@@ -117,13 +117,14 @@ struct Move {
 };
 
 // Proven upper bound on simultaneously-legal moves. A combat CHOOSE may source
-// the 128-slot discard/exhaust pile (not merely the ten-slot hand), while each
-// potion slot contributes either one non-target move or at most kMonsterCap
-// targeted moves. Those two sets may coexist while a choice is open.
+// the 128-slot discard/exhaust/draw pile (not merely the ten-slot hand), while
+// each potion slot contributes either one non-target move or at most
+// kMonsterCap targeted moves. Those two sets may coexist while a choice is open.
 inline constexpr size_t kMoveCap =
     static_cast<size_t>(engine::kDiscardCap) +
     static_cast<size_t>(engine::kPotionCap * engine::kMonsterCap);
 static_assert(engine::kDiscardCap >= engine::kExhaustCap);
+static_assert(engine::kDiscardCap >= engine::kDrawCap);
 static_assert(engine::kDiscardCap >= engine::kMasterDeckCap);
 static_assert(kMoveCap >= 163);
 

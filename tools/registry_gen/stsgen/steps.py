@@ -21,10 +21,13 @@ authored today.
 
 from __future__ import annotations
 
-from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
-                    CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT, CHOICE_KINDS,
-                    CHOICE_RANDOM_BIT, DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS,
-                    STEP_TARGETS, fail)
+from .vocab import (APPLY_POWER_COUNTER_SHIFT,
+                    CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
+                    CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT,
+                    CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS,
+                    CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
+                    CHOICE_TYPE_FILTER_SHIFT, COLORLESS_TO_HAND_FLAGS,
+                    DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
 # Which ops a domain MAY author is a property of the queueing helper that turns a
@@ -58,6 +61,23 @@ GENERAL_OPS = frozenset({
     # the other three read only literal operands plus execute-time combat state.
     "DARK_SHACKLES", "DISCOVERY", "ENLIGHTENMENT",
     "RANDOM_COLORLESS_TO_HAND",
+    # B3.11 stage A (Apotheosis): every pile it scans (hand/draw/discard/
+    # exhaust) and the canUpgrade gate are read at execute time; no operand
+    # needs the played card's instance.
+    "UPGRADE_ALL",
+    # B3.11 stage B (Violence): `amount` and the CardType filter are literals
+    # and the draw pile / hand are execute-time reads, so the item carries
+    # identically from any domain's queue helper.
+    "DRAW_PILE_FETCH",
+    # B3.11 stage C (Chrysalis / Metamorphosis): `amount` is the loop count and
+    # the CardType selecting the pool rides in `extra`; the draw pile is an
+    # execute-time read and the generated copies are fresh library rows, so no
+    # operand needs the played card's instance.
+    "RANDOM_CARD_TO_DRAW",
+    # B3.11 stage D (Hand of Greed): `amount` (base damage) and `gold` are both
+    # literals and the kill test is an execute-time read of the target's HP, so
+    # the item carries identically from any domain's queue helper.
+    "DAMAGE_GREED",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -197,8 +217,30 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         if pname not in powers:
             raise fail(f"{owner} {op} references unknown power {pname!r}"
                        f"{domain.power_hint}")
-        # make_apply_power_flags: low 16 bits carry the PowerId.
-        return powers[pname]
+        # make_apply_power_flags: low 16 bits carry the PowerId. APPLY_POWER may
+        # additionally carry the applied instance's COUNTER OPERAND -- the second
+        # number a counter-carrying PowerSlot is constructed with -- in bits
+        # 16..31. Absent -> 0, which is what every APPLY_POWER step packed before
+        # this existed, so all of them stay byte-identical.
+        #
+        # Only The Bomb needs it: TheBomb.use hands ONE ApplyPowerAction three
+        # numbers (stack amount 3, ctor turns 3, ctor damage magicNumber --
+        # TheBomb.java:32), and `amount` can carry only one of them. Panache
+        # authors none because its two numbers coincide at the call site
+        # (Panache.java:32 passes magicNumber twice), so its apply path reads the
+        # item's own `amount` as the damage.
+        extra = powers[pname]
+        counter = step.get("counter")
+        if counter is None:
+            return extra
+        if op != "APPLY_POWER":
+            raise fail(f"{owner} {op} cannot author 'counter': only APPLY_POWER "
+                       f"constructs a power instance")
+        counter = int(counter)
+        if counter < -32768 or counter > 32767:
+            raise fail(f"{owner} APPLY_POWER counter {counter} out of the "
+                       f"int16 PowerSlot.counter range")
+        return extra | ((counter & 0xFFFF) << APPLY_POWER_COUNTER_SHIFT)
 
     if op == "DAMAGE":
         # `extra` = the DamageType (interp.hpp make_damage_flags). Default
@@ -225,7 +267,11 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             raise fail(f"{owner} CHOOSE_CARD has unknown choose "
                        f"{step.get('choose')!r} (known: {sorted(CHOICE_KINDS)})")
         kv = CHOICE_KINDS[kind]
-        extra = (kv & 0x3) | ((kv >> 2) * CHOICE_KIND_HIGH_BIT)
+        extra = (kv & 0x3)
+        if kv & 0x4:
+            extra |= CHOICE_KIND_HIGH_BIT
+        if kv & 0x8:
+            extra |= CHOICE_KIND_HIGH_BIT2
         if bool(step.get("random", False)):
             extra |= CHOICE_RANDOM_BIT
         copies = int(step.get("copies", 1))
@@ -234,7 +280,40 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         if copies != 1 and kind != "duplicate":
             raise fail(f"{owner} CHOOSE_CARD 'copies' is only meaningful for "
                        f"choose: duplicate")
-        return extra | ((copies - 1) << CHOICE_COPIES_SHIFT)
+        extra |= (copies - 1) << CHOICE_COPIES_SHIFT
+        # `guard: hand_nonempty` (Thinking Ahead): queue this step only when
+        # CombatState::hand_count > 0 at the instant card_play.cpp
+        # queue_effect_step reaches it -- ThinkingAhead.use's play-time
+        # hand.size() > 0 check (:34). For an ordinary HAND play this is a
+        # structural no-op (the played card still counts itself there --
+        # hand.removeCard runs after use(), AbstractPlayer.java:1369-1374); it
+        # only bites for an AUTOPLAY (the card was never a hand member). See
+        # CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT.
+        guard = step.get("guard")
+        if guard is not None:
+            if guard != "hand_nonempty":
+                raise fail(f"{owner} CHOOSE_CARD has unknown guard {guard!r} "
+                           f"(known: ['hand_nonempty'])")
+            extra |= CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT
+        # `card_type` (draw_to_hand only): the CardType the DRAW-pile source is
+        # filtered to. REQUIRED for that kind and REJECTED for every other one --
+        # SkillFromDeckToHandAction and AttackFromDeckToHandAction are the same
+        # action but for this type, so a defaulted or ignored key would silently
+        # author Secret Technique's semantics onto Secret Weapon's row.
+        ct = step.get("card_type")
+        if kind == "draw_to_hand":
+            if ct is None:
+                raise fail(f"{owner} CHOOSE_CARD choose: draw_to_hand needs an "
+                           f"explicit card_type: (known: {sorted(CARD_TYPES)})")
+            ctu = str(ct).upper()
+            if ctu not in CARD_TYPES:
+                raise fail(f"{owner} CHOOSE_CARD has unknown card_type {ct!r} "
+                           f"(known: {sorted(CARD_TYPES)})")
+            extra |= (CARD_TYPES[ctu] + 1) << CHOICE_TYPE_FILTER_SHIFT
+        elif ct is not None:
+            raise fail(f"{owner} CHOOSE_CARD 'card_type' is only meaningful for "
+                       f"choose: draw_to_hand")
+        return extra
 
     if op == "MAKE_CARD":
         # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24).
@@ -264,6 +343,21 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         # `extra` = the max-HP gained when the hit leaves the target dead
         # (Feed's magicNumber -> FeedAction.increaseHpAmount, FeedAction.java:28).
         return int(step.get("max_hp", 0))
+
+    if op == "DAMAGE_GREED":
+        # `extra` = the gold banked when the hit leaves the target dead (Hand of
+        # Greed's magicNumber -> GreedAction.increaseGold, GreedAction.java:
+        # 24-27). REQUIRED and never defaulted: a silent 0 would author a plain
+        # attack onto a row that meant to pay out, and the whole point of the
+        # opcode is the payout.
+        gold = step.get("gold")
+        if gold is None:
+            raise fail(f"{owner} DAMAGE_GREED needs an explicit gold: (the "
+                       f"GreedAction increaseGold operand)")
+        gold = int(gold)
+        if gold < 0:
+            raise fail(f"{owner} DAMAGE_GREED gold {gold} must be >= 0")
+        return gold
 
     if op == "PLAY_CARD":
         # `extra` = the kPlayCard* bit set (interp.hpp), authored as a list of
@@ -301,6 +395,54 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             raise fail(f"{owner} CONDITIONAL_DRAW has unknown card_type "
                        f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
         return CARD_TYPES[ct]
+
+    if op == "DRAW_PILE_FETCH":
+        # `extra` = the CardType to pull out of the draw pile
+        # (DrawPileToHandAction's `typeToCheck` ctor argument, :23-28). Required
+        # and never defaulted, for the same reason CONDITIONAL_DRAW's is: ATTACK
+        # packs as 0, so an omitted key would be indistinguishable from Violence's
+        # exact semantics on a row that meant something else.
+        ct = step.get("card_type")
+        if ct is None:
+            raise fail(f"{owner} DRAW_PILE_FETCH needs an explicit "
+                       f"card_type: (known: {sorted(CARD_TYPES)})")
+        ct = str(ct).upper()
+        if ct not in CARD_TYPES:
+            raise fail(f"{owner} DRAW_PILE_FETCH has unknown card_type "
+                       f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
+        return CARD_TYPES[ct]
+
+    if op == "RANDOM_CARD_TO_DRAW":
+        # `extra` = the CardType the RED combat pool is filtered to
+        # (returnTrulyRandomCardInCombat(type)'s argument -- CardType.SKILL for
+        # Chrysalis.java:34, CardType.ATTACK for Metamorphosis.java:34).
+        # Required and never defaulted, for the same reason CONDITIONAL_DRAW's
+        # and DRAW_PILE_FETCH's are: ATTACK packs as 0, so an omitted key would
+        # silently author Metamorphosis's semantics onto Chrysalis's row.
+        ct = step.get("card_type")
+        if ct is None:
+            raise fail(f"{owner} RANDOM_CARD_TO_DRAW needs an explicit "
+                       f"card_type: (known: {sorted(CARD_TYPES)})")
+        ct = str(ct).upper()
+        if ct not in CARD_TYPES:
+            raise fail(f"{owner} RANDOM_CARD_TO_DRAW has unknown card_type "
+                       f"{step.get('card_type')!r} (known: {sorted(CARD_TYPES)})")
+        return CARD_TYPES[ct]
+
+    if op == "RANDOM_COLORLESS_TO_HAND":
+        # `extra` = the COLORLESS_TO_HAND_FLAGS bit set, authored as a list
+        # (`generated: [cost_zero_for_turn, upgraded_copy]`). Absent -> 0, which
+        # is exactly what Jack of All Trades' two rows packed before these bits
+        # existed, so they stay byte-identical.
+        bits = 0
+        for name in (step.get("generated") or []):
+            key = str(name).lower()
+            if key not in COLORLESS_TO_HAND_FLAGS:
+                raise fail(f"{owner} RANDOM_COLORLESS_TO_HAND has unknown "
+                           f"generated flag {name!r} (known: "
+                           f"{sorted(COLORLESS_TO_HAND_FLAGS)})")
+            bits |= COLORLESS_TO_HAND_FLAGS[key]
+        return bits
 
     if op in ("DAMAGE_UPGRADE_SCALE", "DAMAGE_RAMPAGE"):
         # Dynamic per-instance damage: `increment` is the first-upgrade

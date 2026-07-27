@@ -53,7 +53,18 @@ namespace {
     // updateDescription / onDeath (SporeCloudPower.java:28-42).
     // Checked for the Looter's Thievery, which needs no case: ThieveryPower's
     // ONLY override is updateDescription (ThieveryPower.java:27-30).
-    static_assert(sts::registry::manifest::kPowersCount == 45,
+    // Checked for Mayhem and Magnetism (the two colorless-RARE POWER cards'
+    // start-of-turn generators), neither of which needs a
+    // case in EITHER block pass: MayhemPower's only overrides are
+    // updateDescription and atStartOfTurn (MayhemPower.java:28-39) and
+    // MagnetismPower's are updateDescription, stackPower and atStartOfTurn
+    // (MagnetismPower.java:30-49) -- no modifyBlock, no modifyBlockLast.
+    // Checked for Panache and The Bomb, neither of which needs a case in EITHER
+    // block pass: PanachePower's only overrides are updateDescription,
+    // stackPower, onUseCard and atStartOfTurn (PanachePower.java:40-67) and
+    // TheBombPower's are atEndOfTurn and updateDescription (TheBombPower.java:
+    // 40-53). Both are damage SOURCES and touch no block path at all.
+    static_assert(sts::registry::manifest::kPowersCount == 49,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

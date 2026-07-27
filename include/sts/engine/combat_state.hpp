@@ -430,9 +430,13 @@ inline constexpr uint32_t kMonsterFlagEscaped = 1u << 24;
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 // 20 = 8 (id/hp/max_hp/block) + 4 (flags u32) + 3 (move_history) + 1 (intent)
 // + 1 (power_count) + 1 (pad0) + 2 (pad1). Was 16 + 4*kPowerCap before the
-// flags widening (schema v5).
-static_assert(sizeof(MonsterState) == 20 + 4 * kPowerCap,
+// flags widening (schema v5) and 20 + 4*kPowerCap before the PowerSlot counter
+// widening (schema v6, sizeof(PowerSlot) 4 -> 8).
+static_assert(sizeof(MonsterState) == 20 + 8 * kPowerCap,
               "MonsterState layout drifted -- update SCHEMA_VERSION");
+static_assert(sizeof(PowerSlot) == 8,
+              "the MonsterState size assert above spells the PowerSlot stride "
+              "as a literal 8; keep the two in step");
 
 // --- CombatState ------------------------------------------------------------
 
@@ -473,7 +477,23 @@ struct CombatState {
     uint8_t exhaust_count;
     uint8_t limbo_count;
     uint8_t monster_count;            // live length of monsters[]
-    uint8_t pad_piles[2];             // explicit padding to a 2-byte boundary
+    // Gold EARNED INSIDE this combat, held here until the run layer's single
+    // combat fold-back settles it (run_advance.cpp fold_back_combat -> the one
+    // gain_gold door). The game has no such field: AbstractPlayer.gainGold writes
+    // the run purse the instant GreedAction sees a kill (GreedAction.java:38), and
+    // CombatState deliberately keeps no duplicate of RunState.gold, so an in-combat
+    // producer needs somewhere to accrue. uint16 is ample -- Hand of Greed pays
+    // 20/25 per kill and a combat has at most 7 monster records.
+    //
+    // A COMBAT-ONLY replay (no run layer) simply carries the accumulator: nothing
+    // in the combat layer reads it back, so no combat behaviour depends on it.
+    //
+    // It occupies what was `pad_piles[2]`, so it costs ZERO bytes and moves no
+    // offset -- the turn_has_ended precedent below (a real field living in what
+    // would otherwise be ring padding). The 2 bytes of COMPILER padding before
+    // monsters[] (MonsterState is 4-aligned) were already implicit and are
+    // unchanged; value-initialization zeroes them (design §4.1).
+    uint16_t combat_gold;
 
     // -- monsters (design doc §4.2) --
     MonsterState monsters[kMonsterCap];
@@ -566,7 +586,11 @@ static_assert(std::is_trivially_copyable_v<CombatState>,
 //
 // This is a CEILING, not a target. sizeof(CombatState) was 3896 B when the
 // ceiling was raised; the schema-v5 flags widening (MonsterState 112 -> 116 B,
-// plus alignment padding) grew it to 3928 B, still far inside the budget.
+// plus alignment padding) grew it to 3928 B, and the schema-v6 PowerSlot counter
+// widening (4 -> 8 B per slot, over 24 player slots + 7 x 24 monster slots =
+// 192 rows, MonsterState 116 -> 212 B) grew it to 4696 B -- +768, still inside
+// the budget with ~3.4 KB to spare. The combat-gold accumulator added in the
+// same bump costs nothing: it reuses the former pad_piles[2].
 static_assert(sizeof(CombatState) <= 8192,
               "CombatState exceeds its 8 KB budget (design doc §4.2)");
 

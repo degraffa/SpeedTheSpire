@@ -1463,5 +1463,77 @@ TEST(QuestionMarkRoom, TreasureRollOpensTheChestFlow) {
     EXPECT_EQ(rc.run.event_rng.counter, 1);
 }
 
+
+// =============================================================================
+// B3.11 stage D -- the combat-gold accumulator's run-layer settlement
+// =============================================================================
+//
+// Hand of Greed is the first in-combat gold PRODUCER. CombatState keeps no
+// purse, so the payout accrues in CombatState.combat_gold and the run layer
+// settles it at fold_back_combat -- the SINGLE combat fold-back -- through
+// gain_gold, the one run-layer gold door. These tests pin "exactly once", "on
+// every combat-end path", and "through the door, not around it"; the combat-side
+// accrual itself is covered by card_colorless_rares_test.
+
+TEST(RunCombatGold, VictoryFoldSettlesTheAccumulatorExactlyOnce) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_EQ(rc.run.gold, 99);
+    rc.combat.combat_gold = 45;
+
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.gold, 99 + 45) << "settled at the fold-back";
+    EXPECT_EQ(rc.combat.combat_gold, 0)
+        << "zeroed as it settles, so a second fold cannot double-count";
+}
+
+TEST(RunCombatGold, DefeatFoldSettlesToo) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_EQ(rc.run.gold, 99);
+    rc.combat.combat_gold = 30;
+    // Arrange a loss: the Jaw Worm's next attack is lethal.
+    rc.combat.player_hp = 1;
+    rc.combat.player_block = 0;
+    for (int turn = 0; turn < 8 &&
+                       rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+         ++turn) {
+        step(rc, make_action(ActionVerb::END_TURN));
+    }
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::DEFEAT));
+    EXPECT_EQ(rc.run.gold, 99 + 30)
+        << "the game gains this gold DURING combat, so a defeat keeps it";
+    EXPECT_EQ(rc.combat.combat_gold, 0);
+}
+
+TEST(RunCombatGold, ZeroAccumulatorLeavesThePurseUntouched) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_EQ(rc.run.gold, 99);
+    ASSERT_EQ(rc.combat.combat_gold, 0);
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.gold, 99) << "no producer ran, no gain_gold call";
+}
+
+// Routed through the DOOR, not around it: Ectoplasm returns from gainGold before
+// the `+=` (AbstractPlayer.gainGold:719-737), so a settlement that wrote
+// rs.gold directly would silently ignore a registered boss relic.
+TEST(RunCombatGold, EctoplasmSuppressesTheSettlement) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_EQ(rc.run.gold, 99);
+    ASSERT_LT(rc.run.relic_count, kRelicCap);
+    rc.run.relics[rc.run.relic_count].relic_id =
+        static_cast<uint16_t>(RelicId::ECTOPLASM);
+    ++rc.run.relic_count;
+    rc.combat.combat_gold = 45;
+
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.gold, 99) << "Ectoplasm suppresses the gain entirely";
+    EXPECT_EQ(rc.combat.combat_gold, 0)
+        << "the accumulator is consumed either way -- the suppression happens "
+           "inside the door";
+}
+
 }  // namespace
 }  // namespace sts::engine

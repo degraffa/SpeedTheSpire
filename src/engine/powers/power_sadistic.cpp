@@ -16,14 +16,27 @@ namespace sts::engine {
 
 void power_native_sadistic(CombatState& s, Hook hook,
                            const HookContext& ctx) noexcept {
-    // SadisticPower.onApplyPower (source side): on applying a DEBUFF to a
-    // DIFFERENT creature that has no Artifact, deal `amount` THORNS damage
-    // to that target. (Shackled excluded; no Shackled power in scope.)
+    // SadisticPower.onApplyPower (SadisticPower.java:41-45), source side: on
+    // applying a DEBUFF -- other than Shackled -- to a DIFFERENT creature that
+    // has no Artifact, deal `amount` THORNS damage to that target.
+    // `source == this.owner` (:42) needs no separate check here:
+    // dispatch_on_apply_power_source (power_hooks.cpp) is the ONLY caller of
+    // Hook::ON_APPLY_POWER and always dispatches on the SOURCE actor's own
+    // power list (`dispatch_actor_powers(s, source, ...)`), so a Sadistic on
+    // any actor OTHER than the source never receives this hook -- the Java
+    // condition holds structurally, by construction of the dispatch.
     if (hook != Hook::ON_APPLY_POWER) {
         return;
     }
     const PowerId applied =
         static_cast<PowerId>(ctx.applied_power_id);
+    if (applied == PowerId::SHACKLED) {
+        // !power.ID.equals("Shackled") (SadisticPower.java:42). This branch
+        // was dead code guarding against a power the registry did not yet
+        // have until Dark Shackles' PowerId::SHACKLED (Dark Shackles' own
+        // debuff) landed and made it reachable.
+        return;
+    }
     const PowerDef* ap = power_def(applied);
     const bool is_debuff = ap != nullptr && ap->type == PowerType::DEBUFF;
     if (!is_debuff || ctx.target == ctx.owner) {

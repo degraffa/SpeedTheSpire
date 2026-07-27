@@ -106,6 +106,26 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         is_strike = bool(c.get("strike", False))
         requires_all_attacks = bool(c.get("requires_all_attacks", False))
 
+        # `requires_draw_pile_type` is Secret Technique's / Secret Weapon's
+        # canUse predicate (SecretTechnique.java:35-50 / SecretWeapon.java:35-50):
+        # unplayable unless the DRAW PILE holds at least one card of this
+        # CardType. Same centralized-canUse shape as requires_all_attacks -- the
+        # column feeds card_can_use_without_target, so the public ActionMask and
+        # the dequeue-time autoplay revalidation read one authority. Absent ->
+        # kNoDrawPileType (255), which is NOT a CardType value: ATTACK is 0, so
+        # an "absent == 0" spelling would gate every card on having an Attack in
+        # the draw pile.
+        rdpt_raw = c.get("requires_draw_pile_type")
+        if rdpt_raw is None:
+            requires_draw_pile_type = 255
+        else:
+            rdpt = str(rdpt_raw).upper()
+            if rdpt not in CARD_TYPES:
+                raise fail(f"cards.yaml: card {c['name']} has unknown "
+                           f"requires_draw_pile_type {rdpt_raw!r} "
+                           f"(known: {sorted(CARD_TYPES)})")
+            requires_draw_pile_type = CARD_TYPES[rdpt]
+
         # B3.9 trigger column: WHEN the effect program runs (default ON_PLAY). The
         # passive statuses/curses (Burn/Void/Pain/...) run their program at an
         # end-of-turn / on-draw / on-other-card-played hook instead of on play.
@@ -144,6 +164,7 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "up_cost": up_base_cost, "up_flags": up_flags_bits,
             "up_steps": up_steps, "is_strike": is_strike,
             "requires_all_attacks": requires_all_attacks,
+            "requires_draw_pile_type": requires_draw_pile_type,
             "trigger": CARD_TRIGGERS[trig],
             "curse_pool": curse_pool,
             "on_remove_max_hp_loss": on_remove_max_hp_loss,
@@ -198,6 +219,11 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    StepTarget target;")
     out.append("};\n")
     out.append(f"inline constexpr int kMaxCardSteps = {max_steps};\n")
+    out.append("// CardDef::requires_draw_pile_type sentinel: this card has NO")
+    out.append("// draw-pile-type canUse predicate. Deliberately outside the")
+    out.append("// CardType range -- ATTACK is 0, so \"absent == 0\" would gate")
+    out.append("// every card on holding an Attack in the draw pile.")
+    out.append("inline constexpr uint8_t kNoDrawPileType = 255;\n")
     out.append("// Two effect-program rows per card (design doc §4.2: base +")
     out.append("// upgraded, indexed by CardInstance.upgrade). A card with no")
     out.append("// `upgraded:` block emits upgraded_* byte-identical to base.")
@@ -217,6 +243,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    std::array<CardEffectStep, kMaxCardSteps> upgraded_steps;")
     out.append("    bool is_strike;                // CardTags.STRIKE (B3.3)")
     out.append("    bool requires_all_attacks;     // Clash canUse predicate (B3.3)")
+    out.append("    uint8_t requires_draw_pile_type;  // CardType this card's canUse")
+    out.append("                                     // needs in the draw pile, or")
+    out.append("                                     // kNoDrawPileType (B3.11)")
     out.append("    CardTrigger trigger;           // WHEN effects run (B3.9)")
     out.append("    bool curse_pool;               // CardLibrary.getCurse member (B3.9)")
     out.append("    uint8_t on_remove_max_hp_loss; // master-deck removal hook (B3.9)")
@@ -255,6 +284,7 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         up_ox_txt = ",\n        ".join(pad(r["up_ox_steps"]))
         out.append(f"    {'true' if r['is_strike'] else 'false'}, "
                    f"{'true' if r['requires_all_attacks'] else 'false'}, "
+                   f"{r['requires_draw_pile_type']}, "
                    f"CardTrigger::{trig_name.upper()}, "
                    f"{'true' if r['curse_pool'] else 'false'}, "
                    f"{r['on_remove_max_hp_loss']},")
@@ -297,6 +327,35 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("inline constexpr std::array<CardId, kIroncladAttackPoolCount> "
                "kIroncladAttackPool{{")
     for r in attack_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
+    # B3.11 stage C: the SKILL sibling of the pool above -- Chrysalis
+    # (Chrysalis.java:34) passes CardType.SKILL to the SAME
+    # returnTrulyRandomCardInCombat(type) (:964-979) that Infernal Blade and
+    # Metamorphosis pass ATTACK to, so the two are one emission shape with one
+    # filter changed. EMITTING the type-filtered pool (rather than filtering
+    # kIroncladCombatPool at runtime) is what makes the opcode's pick a single
+    # indexed read with no per-call scan, and it keeps the ONE draw over
+    # [0, size-1] structurally identical to the ATTACK pool's.
+    # ORDER: Java's three-pool concatenation preserves each source pool's
+    # relative order and the type filter is order-preserving, so a type-filtered
+    # subsequence of the full RED combat pool is order-equivalent to the game's
+    # filtered build -- under the SAME documented interim deviation the pools
+    # above carry (registry-id order vs CardLibrary HashMap order, pending the
+    # B4.5 oracle capture). Opcode 55's filtered view therefore INHERITS that
+    # deviation; membership and the one-draw accounting are Java-exact today.
+    skill_pool = [r for r in rows
+                  if r["color"] == "RED"
+                  and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+                  and r["ctype"] == CARD_TYPES["SKILL"]
+                  and not r["healing"]]
+    skill_pool.sort(key=lambda r: r["id"])
+    out.append(f"inline constexpr int kIroncladSkillPoolCount = "
+               f"{len(skill_pool)};")
+    out.append("inline constexpr std::array<CardId, kIroncladSkillPoolCount> "
+               "kIroncladSkillPool{{")
+    for r in skill_pool:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 

@@ -198,6 +198,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             out.choice_from_discard = false;
             out.choice_from_exhaust = false;
             out.choice_from_generated = true;
+            out.choice_from_draw = false;
             out.can_end_turn = false;
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
@@ -208,19 +209,23 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
         if (static_cast<Opcode>(front.opcode) == Opcode::CHOOSE_CARD &&
             choice_requires_user(state, front)) {
             const ChoiceKind kind = choose_kind_from_flags(front.flags);
+            const uint8_t type_filter =
+                choose_type_filter_from_flags(front.flags);
             out.choice_pending = true;
             out.choice_from_discard = choice_source(kind) == ChoiceSource::DISCARD;
             out.choice_from_exhaust = choice_source(kind) == ChoiceSource::EXHAUST;
+            out.choice_from_draw = choice_source(kind) == ChoiceSource::DRAW;
             out.choice_from_generated = false;
             out.can_end_turn = false;
             // can_choose[i] over the kind's SOURCE pile: hand slots for the hand
-            // kinds, discard slots for discard-to-draw-top (Headbutt). For a large
-            // discard pile only the first kHandCap slots are reflected here; advance
-            // validates any arg0 against the real source-pile count.
+            // kinds, discard slots for discard-to-draw-top (Headbutt), draw-pile
+            // slots for the type-filtered deck-to-hand choices. For a large
+            // source pile only the first kHandCap slots are reflected here;
+            // advance validates any arg0 against the real source-pile count.
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
                 out.can_choose[i] = choice_slot_eligible(
-                    state, static_cast<uint8_t>(i), kind);
+                    state, static_cast<uint8_t>(i), kind, type_filter);
             }
             return;
         }
@@ -230,6 +235,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     out.choice_from_discard = false;
     out.choice_from_exhaust = false;
     out.choice_from_generated = false;
+    out.choice_from_draw = false;
 
     for (int i = 0; i < kHandCap; ++i) {
         out.can_choose[i] = false;
@@ -351,7 +357,8 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
            m.choice_pending == fresh.choice_pending &&
            m.choice_from_discard == fresh.choice_from_discard &&
            m.choice_from_exhaust == fresh.choice_from_exhaust &&
-           m.choice_from_generated == fresh.choice_from_generated;
+           m.choice_from_generated == fresh.choice_from_generated &&
+           m.choice_from_draw == fresh.choice_from_draw;
 }
 #endif
 
@@ -474,7 +481,8 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             // may legally name a discard slot beyond that (advance.hpp,
             // "Discard-source CHOOSE"). Gating on the array would reject legal
             // selections; gating on the function it is built from does not.
-            if (!choice_slot_eligible(s, slot, kind)) {
+            if (!choice_slot_eligible(s, slot, kind,
+                                      choose_type_filter_from_flags(front.flags))) {
                 break;  // illegal selection -- no-op
             }
             // DUPLICATE carries its clone count in the packed flags

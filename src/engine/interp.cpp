@@ -76,8 +76,11 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_block(s, item.tgt, item.amount, item.flags);
             return;
         case Opcode::APPLY_POWER:
+            // `flags` low 16 = the PowerId, high 16 = the applied instance's
+            // counter operand (0 for every power but The Bomb).
             op_apply_power(s, item.src, item.tgt,
-                           apply_power_id_from_flags(item.flags), item.amount);
+                           apply_power_id_from_flags(item.flags), item.amount,
+                           apply_power_counter_from_flags(item.flags));
             return;
         case Opcode::DRAW: {
             // DrawCardAction.update:69-73: while the player has No Draw,
@@ -179,11 +182,15 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_use_card(s, item);
             return;
         case Opcode::REMOVE_POWER:
-            op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags));
+            // The whole flags word: an instanced power's item additionally
+            // carries the {amount, counter} instance key (interp.hpp).
+            op_remove_power(s, item.tgt, apply_power_id_from_flags(item.flags),
+                            item.flags);
             return;
         case Opcode::REDUCE_POWER:
             op_reduce_power(s, item.tgt,
-                            apply_power_id_from_flags(item.flags), item.amount);
+                            apply_power_id_from_flags(item.flags), item.amount,
+                            item.flags);
             return;
         case Opcode::DROPKICK:
             op_dropkick(s, item);
@@ -288,7 +295,17 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_enlightenment(s, item.amount != 0);
             return;
         case Opcode::RANDOM_COLORLESS_TO_HAND:
-            op_random_colorless_to_hand(s, item.amount);
+            // Jack of All Trades (flags 0) and Transmutation's per-X repetition
+            // (kColorlessToHand* -- cost 0 for the turn, and the upgraded row's
+            // copy on the upgraded card).
+            op_random_colorless_to_hand(s, item.amount, item.flags);
+            return;
+        case Opcode::RANDOM_CARD_TO_DRAW:
+            // Chrysalis / Metamorphosis: `amount` picks over the RED combat pool
+            // filtered to the CardType in `flags`, ALL rolled before ANY of the
+            // `amount` random-spot draw-pile insertions.
+            op_random_card_to_draw(s, item.amount,
+                                   random_card_to_draw_type_from_flags(item.flags));
             return;
         case Opcode::CANNOT_LOSE:
             // CannotLoseAction.update (CannotLoseAction.java:12-15): latch the
@@ -351,6 +368,21 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
                 return;
             }
             s.monsters[item.tgt].flags |= kMonsterFlagEscaped;
+            return;
+        case Opcode::UPGRADE_ALL:
+            op_upgrade_all(s);
+            return;
+        case Opcode::DAMAGE_GREED:
+            // Hand of Greed: the ordinary damage pipeline, then `flags` gold
+            // into the combat accumulator if the hit left the target dead.
+            op_damage_greed(s, item.src, item.tgt, item.amount,
+                            damage_greed_gold_from_flags(item.flags));
+            return;
+        case Opcode::DRAW_PILE_FETCH:
+            // Violence / DrawPileToHandAction.update: `amount` cards of the
+            // CardType in `flags` out of the draw pile and into the hand.
+            op_draw_pile_fetch(s, item.amount,
+                               draw_pile_fetch_type_from_flags(item.flags));
             return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))

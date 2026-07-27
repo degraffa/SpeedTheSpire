@@ -201,7 +201,7 @@ CombatState make_constructed_combat() {
 
 void give_player_power(CombatState& s, PowerId id, int16_t amount) {
     s.player_powers[s.player_power_count] =
-        PowerSlot{static_cast<uint16_t>(id), amount};
+        PowerSlot{static_cast<uint16_t>(id), amount, 0, 0};
     ++s.player_power_count;
 }
 

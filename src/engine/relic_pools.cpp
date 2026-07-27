@@ -211,7 +211,56 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // CardType.ATTACK -- there is no POWER among them -- so Bottled Tornado's
     // rarity-agnostic type scan is unchanged too. Neither gate moved; the number
     // is not merely bumped.
-    static_assert(sts::registry::manifest::kCardsCount == 109,
+    // Checked for the four colorless RARE rows added alongside this comment
+    // (Apotheosis, Master of Strategy, Sadistic Nature, Thinking Ahead): the
+    // BASIC answer is NO for all four (their ctors pass CardRarity.RARE, so
+    // the hard-coded BASIC set stays exactly {STRIKE, DEFEND, BASH}), but the
+    // POWER answer is YES for Sadistic Nature (SadisticNature.java:26,
+    // CardType.POWER) -- the same "only widens the already-live gate" shape
+    // the red RARE batch's five POWER cards set, since ctx.deck_has_power is a
+    // plain type scan with no rarity or color clause (CardHelper.hasCardType,
+    // :80-86). The registry now has 9 POWER-type cards; the gate was already
+    // live and stays live.
+    // Checked for the three colorless RARE rows added alongside this comment
+    // (Secret Technique, Secret Weapon, Violence): BOTH answers are NO. All
+    // three ctors pass CardRarity.RARE (SecretTechnique.java:25 /
+    // SecretWeapon.java:25 / Violence.java:25), so the hard-coded BASIC set is
+    // still exactly {STRIKE, DEFEND, BASH}; and all three are CardType.SKILL,
+    // so the POWER-type count stays at 9 and Bottled Tornado's gate is
+    // untouched. Neither gate moved; the number below is not merely bumped.
+    // Checked for the five colorless RARE rows added alongside this comment
+    // (Chrysalis, Magnetism, Mayhem, Metamorphosis, Transmutation). BASIC: NO
+    // for all five -- every ctor passes CardRarity.RARE (Chrysalis.java:26,
+    // Magnetism.java:26, Mayhem.java:26, Metamorphosis.java:26,
+    // Transmutation.java:26), so the hard-coded BASIC set stays exactly
+    // {STRIKE, DEFEND, BASH}. POWER: YES for TWO of them -- Magnetism.java:26
+    // and Mayhem.java:26 both pass CardType.POWER (Chrysalis, Metamorphosis and
+    // Transmutation are CardType.SKILL). That is the same "only widens the
+    // already-live gate" shape the red RARE batch's five POWER cards and
+    // Sadistic Nature set: ctx.deck_has_power is a plain type scan with NO
+    // rarity and no color clause (CardHelper.hasCardType, :80-86), so two more
+    // POWER rows can only make an already-satisfiable predicate satisfiable in
+    // more decks. The registry now has 11 POWER-type cards; the gate was
+    // already live and stays live. And the follow-up question these two raise
+    // has a definite answer: Bottled Tornado does not SELECT the bottled card
+    // here -- canSpawn (:93-95) only asks whether ANY POWER is in the master
+    // deck -- so a COLORLESS POWER changes the predicate's inputs and nothing
+    // else in this file.
+    // Checked for the three colorless RARE rows added alongside this comment
+    // (Hand of Greed, Panache, The Bomb). BASIC: NO for all three -- every ctor
+    // passes CardRarity.RARE (HandOfGreed.java:26, Panache.java:26,
+    // TheBomb.java:26), so the hard-coded BASIC set stays exactly
+    // {STRIKE, DEFEND, BASH}. POWER: YES for exactly ONE of them --
+    // Panache.java:26 passes CardType.POWER (Hand of Greed is CardType.ATTACK
+    // and The Bomb is CardType.SKILL). Answering the gate's question rather than
+    // bumping the number: ctx.deck_has_power is a plain type scan with NO rarity
+    // and no color clause (CardHelper.hasCardType, :80-86), so one more POWER row
+    // can only make an already-satisfiable predicate satisfiable in more decks --
+    // the same "only widens the already-live gate" shape the red RARE batch's
+    // five POWER cards, Sadistic Nature, and Magnetism/Mayhem set. The registry
+    // now has 12 POWER-type cards; the gate was already live and stays live.
+    // Neither gate MOVED; the number below is not merely bumped.
+    static_assert(sts::registry::manifest::kCardsCount == 124,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "
@@ -228,8 +277,10 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // post-`continue` body would model a rarity filter the Java does not have.
     // The two are indistinguishable today (no BASIC red row is a POWER), but the
     // faithful structure is the one that stays correct if that ever changes.
-    // The registry has 8 POWER-type cards (Combust/Dark Embrace/Evolve/Feel No
-    // Pain/Fire Breathing/Inflame/Metallicize/Rupture), so this gate is live.
+    // The registry has 12 POWER-type cards -- the eight red ones (Combust/Dark
+    // Embrace/Evolve/Feel No Pain/Fire Breathing/Inflame/Metallicize/Rupture)
+    // plus the four colorless (Sadistic Nature, Magnetism, Mayhem, Panache) --
+    // so this gate is live.
     ctx.deck_has_nonbasic_attack = false;
     ctx.deck_has_nonbasic_skill = false;
     ctx.deck_has_power = false;

@@ -257,8 +257,8 @@ TEST(CardUncommonPowersDeathGuards, DarkEmbraceAndCombustDoNothingAfterCombat) {
 
 TEST(CardUncommonPowersEvolve, NoDrawSuppressesStatusResponse) {
     CombatState s = MakeCombat();
-    s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::EVOLVE), 2};
-    s.player_powers[1] = PowerSlot{static_cast<uint16_t>(PowerId::NO_DRAW), -1};
+    s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::EVOLVE), 2, 0, 0};
+    s.player_powers[1] = PowerSlot{static_cast<uint16_t>(PowerId::NO_DRAW), -1, 0, 0};
     s.player_power_count = 2;
     s.card_pool[0].card_id = static_cast<uint16_t>(CardId::WOUND);
     dispatch_on_card_draw(s, 0, s.card_pool[0].card_id);

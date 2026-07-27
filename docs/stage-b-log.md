@@ -1430,6 +1430,109 @@ golden vector changed. Final-tree WSL Debug, leak-detecting ASan/UBSan and
 Release are green; stale-count, documentation-link and whitespace checks are
 clean.
 
+<a id="b311"></a>
+
+### B3.11 `[x]` ∥ Colorless rares
+**Deps:** B3.2 · **Provenance:** cards/colorless RARE (15)
+**Deliverables:** registry entries for the 15 (Apotheosis, Chrysalis, Hand of
+Greed, Magnetism, Master of Strategy, Mayhem, Metamorphosis, Panache, Sadistic
+Nature, Secret Technique, Secret Weapon, The Bomb, Thinking Ahead,
+Transmutation, Violence — verified from source), all mandatory and live.
+**Acceptance:** tier-2 per card; directed script.
+**Inherited:** the recursive-play authoring (Mayhem) and per-power counter
+storage (Panache, The Bomb) — both discharged here.
+
+**Log:** Done 2026-07-27. All fifteen rares are live. Landed as four staged
+commits in one worktree under the ledger's Wave-B allocation — ids 112–126 in
+`addColorlessCards` alphabetical order, PowerIds 81–84, opcodes 54–57,
+`ChoiceKind` 9, `ChoiceSource::DRAW` = 4 — plus the orchestrator's ledger/log
+commit; serially integrated after an independent full-matrix re-run.
+
+Stage A (Apotheosis, Master of Strategy, Sadistic Nature, Thinking Ahead).
+`UPGRADE_ALL` = 54 upgrades hand, draw, discard **and exhaust** in the Java
+pile order behind the shared `canUpgrade` gate (Searing Blow's always-true
+override included; the played copy sits in limbo and is never self-upgraded,
+`ApotheosisAction.java:25-45`). Two source-driven corrections: the native
+Sadistic body predated `PowerId::SHACKLED` and lacked the Java's Shackled
+exclusion (`SadisticPower.java:42`) — fixed RED-first now that Dark Shackles
+makes it reachable; and the dispatch brief's Thinking Ahead premise was wrong —
+`AbstractPlayer.useCard` runs `use()` **before** `hand.removeCard`
+(`AbstractPlayer.java:1358-1384`), so the empty-hand put-back skip is
+autoplay-only, encoded as a queue-time `hand_nonempty` guard and proven from
+both directions.
+
+Stage B (Secret Technique, Secret Weapon, Violence). `ChoiceSource::DRAW` with
+a card-type filter and mandatory-1 `DRAW_TO_HAND` — the combat grid shows no
+cancel button (`GridCardSelectScreen.java:446-448`), auto-takes a single match
+and no-ops on zero; a `requires_draw_pile_type` `CardDef` column feeds both the
+public mask and autoplay revalidation, so a Mayhem-flipped Secret card with no
+match takes the no-trigger filing path. The browse's temp group bills
+`cardRandomRng` exactly k−1 times (`CardGroup.addToRandomSpot` appends free on
+an empty group, `CardGroup.java:463-469`); Violence adds one `shuffleRng`-fed
+JDK shuffle per non-empty pick and takes the bottom card
+(`DrawPileToHandAction.java:30-71`), pinned by a hand-derived seeded case.
+Fix-forward with stop-the-line honors: the forced (screenless) put-on-deck path
+bills one `cardRandomRng` draw per moved card (`PutOnDeckAction.java:45-53`) —
+the sim billed none for Warcry; demonstrated RED, no committed fixture reaches
+the path. The choice-kind flag packing was wrong for kinds ≥ 8 and is fixed
+(`(kv & 0x4)`, high bit at `extra` bit 9, filter bits 10–12, latch 13) — the
+groundwork B3.10c's kind 8 now builds on instead of colliding with. Java's own
+shrinking-loop bug in `PutOnDeckAction`'s forced branch is reproduced, not
+corrected (unreachable at every authored amount, documented at the site).
+
+Stage C (Chrysalis, Magnetism, Mayhem, Metamorphosis, Transmutation).
+`RANDOM_CARD_TO_DRAW` = 55 reproduces the Java stream order exactly — all N
+pool rolls in `use()`, then N random-spot insertions as the queued actions
+resolve — with permanent-for-combat zero cost on copies whose base cost was
+positive (X-cost untouched), `Chrysalis.java:31-42`. `kIroncladSkillPool` is
+emitted and pinned as the in-order SKILL subsequence of the combat pool, so
+opcode 55's filtered view inherits the existing HashMap-order capture
+obligation rather than adding one. Magnetism rolls at **hook time** — the pool
+call is a constructor argument in `MagnetismPower.atStartOfTurn`
+(`MagnetismPower.java:30-38`), and a queued roll would interleave with
+Mayhem's own start-of-turn consumption — then queues the same
+make-card-in-hand body the Java queues, spilling to discard at the hand cap.
+Mayhem is the power row plus an `at_start_of_turn` body queueing
+`{op: PLAY_CARD, play: [from_draw_top]}` per stack, unchanged and without
+Havoc's exhaust; the one-draw random-target roll at execution matches the
+verified parallel. **Declared evidence gap:** `MayhemPower.java:37` is a
+CFR-unavailable anonymous class; the body is reconstructed from
+`DistilledChaosPotion.java:41` and `Havoc.java:31` and the provenance string
+says so. Transmutation rides the live X-cost repetition loop; opcode 52 gained
+two default-0 flag bits (cost-zero-for-turn, upgraded-copy) with Jack of All
+Trades' byte-identity pinned by a named test; opcode 58–59 stayed unissued.
+
+Stage D (Panache, The Bomb, Hand of Greed) — the owner-approved schema bump,
+`SCHEMA_VERSION` 5 → 6 (design §11 entry recorded). `PowerSlot` widened 4 → 8
+bytes with an `int16 counter`; `CombatState` 3928 → 4696 against the 8192
+ceiling, with the combat-gold accumulator occupying former padding at zero
+byte cost. Fixtures were regenerated with a **generalized** proof: the old→new
+transformation derived mechanically from both compiled layouts, applied to the
+old bytes, required byte-identical to the regenerated files — pass over all 20
+fixtures / 112 records. Panache maps the oracle-visible countdown to `amount`
+and stacked damage to `counter` (`PanachePower.java:30-67`: stack adds damage
+only, start-of-turn resets the counter, pure-THORNS all-enemies at zero);
+The Bomb is the first **instanced** power — apply always appends, and queued
+reduce/remove carry a value key rather than a slot index because compaction
+makes queued indices stale (regression-tested); `DAMAGE_GREED` = 57 runs the
+normal damage pipeline then banks gold on the Java fatal gate
+(`GreedAction.java:32-48`; halfDead/Minion structurally inert in Act 1, cited
+at the site), settled exactly once through `gain_gold` at combat fold-back.
+The translator normalizes `TheBomb<digits>` through its single power-id door
+and imports the reflection-emitted `damage` field into `counter` for PANACHE
+and THE_BOMB only. **Recorded deviation:** fold-back settlement runs before
+`settle_stolen_gold`, over-crediting a thief only when a steal preceded a
+Hand of Greed kill and the purse was below the clamp — carried as a new
+obligation row rather than left as a comment.
+
+Unused contingencies fuzz `MoveCat` 26 and `CardFlag` bit 15 are released back
+to free rather than gapped: bit namespaces are scarce, nothing ever encoded
+them, and the permanent-gap rule's "costs nothing" rationale does not hold for
+bits. Both B3.2-inherited obligation rows are discharged. Final-tree WSL
+Debug, leak-detecting ASan/UBSan and Release are green twice — once per stage
+agent, once by the integrating orchestrator on the final tree; stale-count,
+doc-link and whitespace checks clean.
+
 <a id="b312"></a>
 
 ### B3.12 `[x]` Multi-monster combat + encounter framework

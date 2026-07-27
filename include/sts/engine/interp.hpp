@@ -340,6 +340,10 @@ enum class Opcode : uint16_t {
                               // cardRandomRng draws over the generated non-
                               // healing colorless combat pool; base copies enter
                               // hand/discard and duplicates are allowed.
+                              // `flags` (kColorlessToHand* below, both default
+                              // 0) additionally re-cost the copy for the turn
+                              // and/or generate it upgraded -- Transmutation's
+                              // per-X-repetition body.
     // --- The played card's filing action (allocated at 53) -------------------
     // 49-52 are the preceding colorless-card block; the lower permanent gaps
     // 41-44 are never backfilled.
@@ -363,6 +367,103 @@ enum class Opcode : uint16_t {
                               // no S1 binder (BeatOfDeath / Rebound / Slow /
                               // TimeMaze / TimeWarp are all out of scope), so
                               // its seam is a named comment in op_use_card.
+    // --- Colorless-rare addition (append-only from 54) ------------------------
+    UPGRADE_ALL = 54,         // Apotheosis / ApotheosisAction.update (:25-34):
+                              // upgrade every eligible card in hand, drawPile,
+                              // discardPile, exhaustPile IN THAT ORDER.
+                              // canUpgrade() (AbstractCard.java:672-680) gates
+                              // each one: false for CURSE/STATUS, else
+                              // !upgraded; Searing Blow overrides canUpgrade to
+                              // always-true (SearingBlow.java:58-60), so its
+                              // upgrade COUNT keeps climbing past 1. The played
+                              // Apotheosis sits in the LIMBO pile throughout and
+                              // is in none of the four piles scanned.
+    RANDOM_CARD_TO_DRAW = 55, // Chrysalis (SKILL) / Metamorphosis (ATTACK) --
+                              // Chrysalis.use:31-42 and Metamorphosis.use:31-42
+                              // are the SAME loop with one CardType changed, so
+                              // the type rides in `flags` (make_random_card_to_
+                              // draw_flags) and `amount` is the loop count (3
+                              // base / 5 upgraded).
+                              // THE WHOLE LOOP IS ONE OPCODE because the rng
+                              // ORDER cannot be expressed as N independent
+                              // steps. use() performs ALL `amount` pool rolls
+                              // FIRST -- returnTrulyRandomCardInCombat(type)
+                              // (AbstractDungeon.java:964-979), ONE
+                              // cardRandomRng random(size-1) each over the
+                              // type-filtered RED combat pool, interleaved only
+                              // with addToBot, which consumes nothing -- and the
+                              // `amount` queued MakeTempCardInDrawPileActions
+                              // resolve AFTERWARDS, each spending ONE
+                              // cardRandomRng draw in CardGroup.addToRandomSpot
+                              // (:463-469; the EMPTY-pile branch is a free plain
+                              // append). Net stream: N rolls, THEN N inserts. An
+                              // encoding that interleaved roll/insert would pick
+                              // different cards AND different positions.
+                              // Nothing can interleave between the two halves in
+                              // the Java either: the N MakeTempCardInDrawPile-
+                              // Actions are consecutive queue entries that queue
+                              // nothing themselves, and the played card's
+                              // USE_CARD (with its Strange Spoon roll) sits
+                              // BEHIND all of them (AbstractPlayer.useCard:1370).
+                              // Each generated copy is a BASE library copy whose
+                              // cost, when > 0, is zeroed PERMANENTLY for the
+                              // combat -- Chrysalis.java:35-39 writes BOTH
+                              // card.cost and card.costForTurn, the MADNESS
+                              // (opcode 48) model, NOT setCostForTurn's
+                              // this-turn one. X-cost (-1) and already-0 cards
+                              // are untouched, exactly as the `cost > 0` guard
+                              // says. makeStatEquivalentCopy carries cost and
+                              // costForTurn through both copy hops
+                              // (AbstractCard.java:838-840), so the zero
+                              // survives into the draw pile.
+    DRAW_PILE_FETCH = 56,     // Violence / DrawPileToHandAction.update (:31-71):
+                              // pull up to `amount` cards of the CardType carried
+                              // in `flags` out of the DRAW PILE into the hand.
+                              // An EMPTY draw pile early-outs at :33-36 BEFORE
+                              // the temp list is built, so it costs ZERO rng.
+                              // Otherwise a temp CardGroup is filled with every
+                              // matching draw-pile card via
+                              // CardGroup.addToRandomSpot (:463-469) -- k matches
+                              // cost k-1 card_random_rng draws, the first insert
+                              // into an EMPTY group being free -- and a zero-match
+                              // list then early-outs at :42-45 having spent
+                              // exactly those (zero) draws. Each of the `amount`
+                              // iterations then: skips silently while the temp
+                              // list is empty (:47, NO rng at all), else spends
+                              // ONE shuffle_rng randomLong seeding a fresh
+                              // java.util.Random for Collections.shuffle over the
+                              // temp list (the NO-ARG CardGroup.shuffle(),
+                              // :561-563), pops its BOTTOM card (:49-50) and moves
+                              // that card draw -> hand, or draw -> DISCARD when
+                              // the hand is already full (:51-55). The REAL draw
+                              // pile is never reordered by the browse; only the
+                              // taken cards leave it. 58-59 remain this batch's
+                              // published reserve and stay UNISSUED (see 57
+                              // below); 58 was available to the generated-card
+                              // family and was NOT spent, because
+                              // RANDOM_COLORLESS_TO_HAND's two new default-0 flag
+                              // bits carried Transmutation cleanly.
+    DAMAGE_GREED = 57,        // Hand of Greed / GreedAction.update (:33-46): the
+                              // ORDINARY damage pipeline (this is a plain
+                              // `target.damage(info)` at :36, so Strength /
+                              // Vulnerable / Weak all apply and block absorbs --
+                              // NOT a pure-damage matrix), and then, ONLY if the
+                              // hit left the target dead, `amount` gold. `flags`
+                              // carries the gold (HandOfGreed's magicNumber ->
+                              // GreedAction.increaseGold, :24-27), the same
+                              // second-operand shape DAMAGE_FEED (35) uses for
+                              // its max-HP number. The gold lands in
+                              // CombatState.combat_gold and reaches RunState only
+                              // at the run layer's combat fold-back, through the
+                              // single gain_gold door.
+                              //
+                              // The Java gate is
+                              //   !(!isDying && currentHealth > 0 || halfDead ||
+                              //     hasPower("Minion"))
+                              // (:37). Both of the last two terms are
+                              // STRUCTURALLY constant-false in S1 and are
+                              // documented at the site rather than invented as
+                              // state -- see op_damage_greed.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -380,6 +481,50 @@ enum class Opcode : uint16_t {
     uint32_t flags) noexcept {
     return static_cast<uint8_t>(flags & 0xFFu);
 }
+
+// --- DRAW_PILE_FETCH field encoding ------------------------------------------
+// `amount` is how many cards to pull (Violence's magicNumber, 3 base / 4
+// upgraded); `flags` low byte carries the CardType to match in the draw pile
+// (DrawPileToHandAction's `typeToCheck`, :21-28), in the same raw-CardType
+// spelling CONDITIONAL_DRAW uses above and for the same include-order reason.
+[[nodiscard]] constexpr uint32_t make_draw_pile_fetch_flags(
+    uint8_t card_type) noexcept {
+    return static_cast<uint32_t>(card_type);
+}
+[[nodiscard]] constexpr uint8_t draw_pile_fetch_type_from_flags(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>(flags & 0xFFu);
+}
+
+// --- RANDOM_CARD_TO_DRAW field encoding --------------------------------------
+// `amount` is the number of cards to generate (Chrysalis / Metamorphosis
+// magicNumber, 3 base / 5 upgraded); `flags` low byte carries the CardType the
+// RED combat pool is filtered to (returnTrulyRandomCardInCombat's argument --
+// SKILL for Chrysalis, ATTACK for Metamorphosis), in the same raw-CardType
+// spelling CONDITIONAL_DRAW and DRAW_PILE_FETCH use above and for the same
+// include-order reason.
+[[nodiscard]] constexpr uint32_t make_random_card_to_draw_flags(
+    uint8_t card_type) noexcept {
+    return static_cast<uint32_t>(card_type);
+}
+[[nodiscard]] constexpr uint8_t random_card_to_draw_type_from_flags(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>(flags & 0xFFu);
+}
+
+// --- RANDOM_COLORLESS_TO_HAND field encoding ---------------------------------
+// `amount` is the number of independent pool draws; `flags` carries the two bits
+// below. BOTH default to 0, which is exactly the `extra` Jack of All Trades'
+// rows packed before they existed, so those rows and their tests are
+// byte-identical (checked, not assumed -- no test encoded a non-zero extra on
+// this opcode). MIRRORED in tools/registry_gen/stsgen/vocab.py
+// (COLORLESS_TO_HAND_FLAGS), authored as `generated: [...]` on the step.
+//
+// TransmutationAction.update (:44-51) is the only setter of either bit; it runs
+// upgrade() BEFORE setCostForTurn(0), so the this-turn zero replaces the
+// UPGRADED row's cost when both bits are set.
+inline constexpr uint32_t kColorlessToHandCostZeroForTurn = 1u << 0;
+inline constexpr uint32_t kColorlessToHandUpgradedCopy = 1u << 1;
 
 // --- PLAY_CARD field encoding ------------------------------------------------
 // The general "play this card again / play the next card off the deck" verb.
@@ -427,8 +572,21 @@ inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
 //                    magicNumber: 1 base / 2 upgraded). Storing copies-1 keeps
 //                    the default (1 copy) at 0, so an extra authored before
 //                    DUPLICATE existed stays byte-identical.
-// MIRRORED in tools/registry_gen/gen.py (CHOICE_KINDS + the bit layout) so a
-// CHOOSE_CARD effect step authored in cards.yaml packs an identical `extra`.
+//   * bit  [8]    -> the author-only queue-time hand-nonempty guard (below).
+//   * bit  [9]    -> ChoiceKind bit 3 -- kinds 8+ need a fourth kind bit, and
+//                    every lower position is taken, so it lives here.
+//                    kind = bits[0..1] | bit3 << 2 | bit9 << 3, which leaves
+//                    kinds 0..7 packing exactly as before (append-only).
+//   * bits[10..12]-> the CARD-TYPE FILTER, stored as CardType + 1 so that 0
+//                    means "no filter" and every previously-authored extra
+//                    stays byte-identical (CardType::ATTACK is 0, so a raw
+//                    type could not be distinguished from "absent").
+//   * bit  [13]   -> a RUNTIME latch, never authored: the draw-source temp
+//                    group has already been built and its card_random_rng
+//                    draws billed (see prepare_choice_draw_source).
+// MIRRORED in tools/registry_gen/stsgen/vocab.py (CHOICE_KINDS + the bit
+// layout) so a CHOOSE_CARD effect step authored in cards.yaml packs an
+// identical `extra`.
 enum class ChoiceKind : uint8_t {
     EXHAUST = 0,         // move each selected hand card to the exhaust pile
     PUT_ON_DRAW_TOP = 1, // move each selected hand card to the top of the draw pile
@@ -450,6 +608,25 @@ enum class ChoiceKind : uint8_t {
     // and the whole choice is dead while the hand is full (:40-43). A returned
     // SKILL costs 0 for the turn while Corruption is up (:57-59, :94-96).
     EXHAUST_TO_HAND = 5,
+    // 6-8 are NOT this batch's: 6-7 are permanent gaps and 8 belongs to the
+    // colorless-uncommon batch landing in parallel. Kinds are append-only, so
+    // they are stepped over rather than backfilled.
+    //
+    // The source pile is the DRAW PILE, filtered to ONE CardType (the
+    // bits[10..12] filter above): choose one matching draw-pile card and put it
+    // in the hand -- SkillFromDeckToHandAction / AttackFromDeckToHandAction,
+    // which differ only in that type. Both build a temp CardGroup of the
+    // matching cards first (billed by prepare_choice_draw_source), then: zero
+    // matches is a silent no-op (:40-43), exactly one is auto-taken with no
+    // screen (:44-64), and two or more open a MANDATORY exactly-one grid select
+    // with no cancel button in combat (:65 ->
+    // GridCardSelectScreen.open(group, numCards, tipMsg, forUpgrade=false),
+    // :463-465 -> :437-457, where the cancel button is shown only for
+    // upgrade/transform/purge/shop screens, :446-448). The chosen card leaves
+    // the REAL draw pile for the hand, or for the DISCARD pile when the hand is
+    // already full (:46-48 / :72-74); the unchosen cards keep their draw-pile
+    // order, because only the temp browse list was ever randomized.
+    DRAW_TO_HAND = 9,
 };
 
 // Which pile a CHOOSE_CARD of this kind selects from. `arg0` of a CHOOSE action
@@ -459,6 +636,8 @@ enum class ChoiceSource : uint8_t {
     DISCARD = 1,
     EXHAUST = 2,
     GENERATED = 3,  // Discovery's three-card offer packed in its queue item
+    DRAW = 4,       // the draw pile, filtered to one CardType (Secret Technique /
+                    // Secret Weapon). arg0 of a CHOOSE indexes the DRAW pile.
 };
 
 [[nodiscard]] constexpr ChoiceSource choice_source(ChoiceKind k) noexcept {
@@ -467,6 +646,8 @@ enum class ChoiceSource : uint8_t {
             return ChoiceSource::DISCARD;
         case ChoiceKind::EXHAUST_TO_HAND:
             return ChoiceSource::EXHAUST;
+        case ChoiceKind::DRAW_TO_HAND:
+            return ChoiceSource::DRAW;
         default:
             return ChoiceSource::HAND;
     }
@@ -505,19 +686,43 @@ inline constexpr uint8_t kDiscoveryChoiceCount = 3;
 }
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
-inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;
+inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;   // ChoiceKind bit 2
 inline constexpr uint32_t kChoiceCopiesShift = 4;
+inline constexpr uint32_t kChoiceKindHighBit2 = 1u << 9;  // ChoiceKind bit 3
+// The card-type filter (bits [10..12]), stored as CardType + 1 so that the
+// absent value is 0 and every previously-packed `extra` is byte-identical --
+// CardType::ATTACK is 0, so a raw type would be indistinguishable from "none".
+inline constexpr uint32_t kChoiceTypeFilterShift = 10;
+inline constexpr uint32_t kChoiceTypeFilterMask = 0x7u << kChoiceTypeFilterShift;
+// The "no card-type filter" sentinel. Not a CardType value; CardType is a
+// generated enum below this header in the include order, so filters travel as
+// raw bytes here exactly like the DAMAGE damage-type and CONDITIONAL_DRAW
+// encodings above.
+inline constexpr uint8_t kChoiceNoTypeFilter = 0xFFu;
 
-[[nodiscard]] constexpr uint32_t make_choose_flags(ChoiceKind kind, bool random,
-                                                   int copies = 1) noexcept {
+[[nodiscard]] constexpr uint32_t make_choose_flags(
+    ChoiceKind kind, bool random, int copies = 1,
+    uint8_t type_filter = kChoiceNoTypeFilter) noexcept {
     const uint32_t kv = static_cast<uint32_t>(static_cast<uint8_t>(kind));
-    return (kv & 0x3u) | ((kv >> 2) != 0u ? kChoiceKindHighBit : 0u) |
+    return (kv & 0x3u) | ((kv & 0x4u) != 0u ? kChoiceKindHighBit : 0u) |
+           ((kv & 0x8u) != 0u ? kChoiceKindHighBit2 : 0u) |
            (random ? kChoiceRandomBit : 0u) |
-           (static_cast<uint32_t>(copies - 1) << kChoiceCopiesShift);
+           (static_cast<uint32_t>(copies - 1) << kChoiceCopiesShift) |
+           (type_filter == kChoiceNoTypeFilter
+                ? 0u
+                : ((static_cast<uint32_t>(type_filter) + 1u)
+                   << kChoiceTypeFilterShift));
 }
 [[nodiscard]] constexpr ChoiceKind choose_kind_from_flags(uint32_t flags) noexcept {
     return static_cast<ChoiceKind>(static_cast<uint8_t>(
-        (flags & 0x3u) | ((flags & kChoiceKindHighBit) != 0u ? 0x4u : 0u)));
+        (flags & 0x3u) | ((flags & kChoiceKindHighBit) != 0u ? 0x4u : 0u) |
+        ((flags & kChoiceKindHighBit2) != 0u ? 0x8u : 0u)));
+}
+// The CardType a choice's source pile is filtered to, or kChoiceNoTypeFilter.
+[[nodiscard]] constexpr uint8_t choose_type_filter_from_flags(
+    uint32_t flags) noexcept {
+    const uint32_t v = (flags & kChoiceTypeFilterMask) >> kChoiceTypeFilterShift;
+    return v == 0u ? kChoiceNoTypeFilter : static_cast<uint8_t>(v - 1u);
 }
 [[nodiscard]] constexpr bool choose_is_random(uint32_t flags) noexcept {
     return (flags & kChoiceRandomBit) != 0u;
@@ -526,6 +731,43 @@ inline constexpr uint32_t kChoiceCopiesShift = 4;
 [[nodiscard]] constexpr int choose_copies_from_flags(uint32_t flags) noexcept {
     return static_cast<int>((flags >> kChoiceCopiesShift) & 0xFu) + 1;
 }
+
+// Thinking Ahead: an AUTHOR-ONLY queue-time guard bit, never inspected by the
+// interpreter's execute path (op_choose_card / choice_slot_eligible etc. never
+// read it). ThinkingAhead.use (:32-37) queues PutOnDeckAction(1, false) only
+// when AbstractDungeon.player.hand.size() > 0 at the instant use() reads it
+// (:34). AbstractPlayer.useCard (AbstractPlayer.java:1358-1384) runs c.use()
+// at :1369 and only removes the played card from hand.group at :1374 --
+// AFTER use() returns -- so for an ORDINARY HAND PLAY the played card is
+// STILL counted in that read (hand.size() >= 1 always, since it counts
+// itself): the guard is a structural no-op there. It matters only when the
+// card is AUTOPLAYED off the draw pile (PlayTopCardAction / Havoc), where it
+// was never a hand.group member and hand.size() reflects the real hand.
+// card_play.cpp queue_effect_step processes one card's steps in that same
+// synchronous, nothing-executed-yet order, so checking CombatState::hand_count
+// when it reaches a step carrying this bit reproduces the Java read exactly
+// in both cases -- self-inclusive for a hand play (op_play_card /
+// op_play_top_draw limbo_add an autoplayed card BEFORE its own effects queue,
+// so it is correctly absent from hand there). A step so gated is simply never
+// queued when the check fails. Bit 8 -- clear of kind[0..1]/RANDOM[2]/
+// kind-hi[3]/copies[4..7]. MIRRORED in tools/registry_gen/stsgen/vocab.py
+// (CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT), authored as `guard: hand_nonempty`
+// on a CHOOSE_CARD step.
+inline constexpr uint32_t kChoiceQueueGuardHandNonemptyBit = 1u << 8;
+[[nodiscard]] constexpr bool choose_queue_guard_hand_nonempty(
+    uint32_t flags) noexcept {
+    return (flags & kChoiceQueueGuardHandNonemptyBit) != 0u;
+}
+
+// A RUNTIME latch on a queued draw-source CHOOSE_CARD, never authored in YAML:
+// its temp browse group has been built and the card_random_rng draws that build
+// costs have been billed. SkillFromDeckToHandAction / AttackFromDeckToHandAction
+// build that group on the action's FIRST update tick (:34-39), before they know
+// whether a screen will open at all, so the billing must happen once when the
+// item starts resolving -- on the blocking path AND on both auto-resolve paths
+// (zero matches, one match). The latch is what makes it once: a blocked item
+// stays at the queue head across many pump steps.
+inline constexpr uint32_t kChoiceDrawTempBuiltBit = 1u << 13;
 
 // --- MAKE_CARD field encoding -----------------------------------------------
 // Card creation into a pile (MakeTempCardInHand/Discard, ShuffleIntoDrawPile).
@@ -567,11 +809,116 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
 // --- APPLY_POWER field encoding ---------------------------------------------
 // `flags` low 16 bits hold the PowerId; `amount` holds the stack count. Use
 // these helpers so no caller hand-rolls the packing.
-[[nodiscard]] constexpr uint32_t make_apply_power_flags(PowerId id) noexcept {
-    return static_cast<uint32_t>(static_cast<uint16_t>(id));
+//
+// `flags` bits 16..31 additionally carry the applied power's COUNTER OPERAND --
+// the second number a `counter`-carrying PowerSlot (types.hpp) is constructed
+// with. It defaults to 0, which is exactly what every APPLY_POWER item and every
+// generated APPLY_POWER step packed before this existed, so all of them stay
+// byte-identical (checked by the kBash pin in cards.hpp, not assumed).
+//
+// Only The Bomb authors it: TheBomb.use passes THREE numbers to one
+// ApplyPowerAction -- the stack amount 3 and the ctor's (turns=3, damage=magic)
+// (TheBomb.java:32) -- so `amount` alone cannot carry both. Panache needs no
+// operand precisely because its two numbers coincide at the call site
+// (ApplyPowerAction(p, p, PanachePower(p, magic), magic), Panache.java:32): its
+// apply path reads the item's own `amount` as the damage. Authored as
+// `counter:` on an APPLY_POWER step (MIRRORED in
+// tools/registry_gen/stsgen/steps.py).
+inline constexpr uint32_t kApplyPowerCounterShift = 16;
+
+[[nodiscard]] constexpr uint32_t make_apply_power_flags(
+    PowerId id, int counter = 0) noexcept {
+    return static_cast<uint32_t>(static_cast<uint16_t>(id)) |
+           (static_cast<uint32_t>(static_cast<uint16_t>(counter))
+            << kApplyPowerCounterShift);
 }
 [[nodiscard]] constexpr PowerId apply_power_id_from_flags(uint32_t flags) noexcept {
     return static_cast<PowerId>(static_cast<uint16_t>(flags & 0xFFFFu));
+}
+[[nodiscard]] constexpr int apply_power_counter_from_flags(uint32_t flags) noexcept {
+    return static_cast<int>(static_cast<int16_t>(
+        static_cast<uint16_t>(flags >> kApplyPowerCounterShift)));
+}
+
+// PanachePower.CARD_AMT (PanachePower.java:27): the card countdown the power is
+// constructed at (:34) and RESET to both on the 5th card (:56-57) and at the
+// start of every turn (:64-67). A hard-coded 5 in the Java, so it is a constant
+// here too rather than a registry column -- no card supplies it.
+inline constexpr int16_t kPanacheCardAmount = 5;
+
+// --- REDUCE_POWER / REMOVE_POWER instance key --------------------------------
+//
+// Both ops normally name their victim by PowerId and take the FIRST slot that
+// matches -- correct while a power_id identifies at most one slot. An INSTANCED
+// power (powers.yaml `instanced: true`) breaks that: The Bomb appends a fresh
+// slot per play, so a creature can hold several at once with different fuses,
+// and Java's ReducePowerAction has an exact-INSTANCE overload for precisely this
+// case (ReducePowerAction.java:28-33 stores the AbstractPower itself; :41-51
+// reduces or RemoveSpecificPowerAction's THAT object).
+//
+// A slot INDEX cannot be the handle. The end-of-turn sweep queues one reduce per
+// bomb, in list order, and a reduce that empties its slot COMPACTS the array --
+// so every later queued index is already stale by the time it resolves (bombs at
+// [fuse 1, fuse 3]: the first reduce removes slot 0 and the second would then
+// address an empty slot 1 and silently tick nothing).
+//
+// The handle is therefore the slot's own STATE: {power_id, amount, counter},
+// captured when the reduce is queued. That is exact, not approximate. The only
+// slots it cannot tell apart are ones with an identical id, amount AND counter,
+// which are byte-identical rows -- interchangeable by construction, so resolving
+// to either yields the same multiset and leaves the other for the sibling reduce.
+// And nothing can change the captured amount in between: only a slot's own
+// queued reduce writes it.
+//
+// Packing (flags): bits 0..15 PowerId (unchanged) | bits 16..23 the expected
+// `amount` | bits 24..31 the expected `counter`. Bits 16..23 == 0 means NO
+// instance key, which is exactly what every pre-existing REDUCE_POWER /
+// REMOVE_POWER item packs -- a real key always has amount >= 1, because a slot
+// standing at 0 has already been removed. Both fields are bytes: The Bomb's fuse
+// is 1..3 and its damage 40/50, and a future instanced power whose numbers do
+// not fit must widen this deliberately rather than silently truncate (the
+// queueing helper asserts the range).
+inline constexpr uint32_t kPowerInstanceAmountShift = 16;
+inline constexpr uint32_t kPowerInstanceAmountMask = 0xFFu << kPowerInstanceAmountShift;
+inline constexpr uint32_t kPowerInstanceCounterShift = 24;
+inline constexpr uint32_t kPowerInstanceCounterMask = 0xFFu << kPowerInstanceCounterShift;
+
+[[nodiscard]] constexpr bool power_instance_key_present(uint32_t flags) noexcept {
+    return (flags & kPowerInstanceAmountMask) != 0u;
+}
+[[nodiscard]] constexpr int power_instance_amount(uint32_t flags) noexcept {
+    return static_cast<int>((flags & kPowerInstanceAmountMask) >>
+                            kPowerInstanceAmountShift);
+}
+[[nodiscard]] constexpr int power_instance_counter(uint32_t flags) noexcept {
+    return static_cast<int>((flags & kPowerInstanceCounterMask) >>
+                            kPowerInstanceCounterShift);
+}
+// Build the flags for an instance-targeted REDUCE_POWER / REMOVE_POWER. Values
+// outside 1..255 / 0..255 cannot be expressed, and the caller gets a key-free
+// (first-match) item rather than a wrong one -- callers are asserted, not
+// silently truncated, at the one queueing site (power_the_bomb.cpp).
+[[nodiscard]] constexpr uint32_t make_power_instance_flags(
+    PowerId id, int slot_amount, int slot_counter) noexcept {
+    if (slot_amount < 1 || slot_amount > 255 || slot_counter < 0 ||
+        slot_counter > 255) {
+        return static_cast<uint32_t>(static_cast<uint16_t>(id));
+    }
+    return static_cast<uint32_t>(static_cast<uint16_t>(id)) |
+           (static_cast<uint32_t>(slot_amount) << kPowerInstanceAmountShift) |
+           (static_cast<uint32_t>(slot_counter) << kPowerInstanceCounterShift);
+}
+
+// --- DAMAGE_GREED field encoding ---------------------------------------------
+// `amount` is the base damage; `flags` is the gold banked when the hit kills
+// (HandOfGreed magicNumber -> GreedAction.increaseGold, GreedAction.java:24-27).
+// The same whole-word second-operand shape DAMAGE_FEED uses. Authored as `gold:`
+// on the step (MIRRORED in tools/registry_gen/stsgen/steps.py).
+[[nodiscard]] constexpr uint32_t make_damage_greed_flags(int gold) noexcept {
+    return static_cast<uint32_t>(gold);
+}
+[[nodiscard]] constexpr int damage_greed_gold_from_flags(uint32_t flags) noexcept {
+    return static_cast<int>(flags);
 }
 
 // --- DAMAGE damage-type encoding ---------------------------------------------
@@ -668,8 +1015,15 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // PUT_ON_DRAW_TOP accept any hand card; DISCARD_TO_DRAW_TOP accepts any discard
 // card; DUPLICATE (Dual Wield) accepts ATTACK or POWER hand cards only
 // (DualWieldAction.isDualWieldable:95-97).
+// DRAW_TO_HAND additionally filters by CardType: `type_filter` is the raw
+// CardType byte a draw-source choice was authored with
+// (choose_type_filter_from_flags of the open item), and every caller that holds
+// the item must pass it -- SkillFromDeckToHandAction and
+// AttackFromDeckToHandAction share this kind and differ ONLY in that type, so
+// defaulting it would silently make every draw-pile card eligible for both.
 [[nodiscard]] bool choice_slot_eligible(
-    const CombatState& state, uint8_t slot, ChoiceKind kind) noexcept;
+    const CombatState& state, uint8_t slot, ChoiceKind kind,
+    uint8_t type_filter = kChoiceNoTypeFilter) noexcept;
 
 // Does the CHOOSE_CARD `item` (assumed at the front of the action queue) require
 // a real player prompt? True iff it selects fewer cards than are eligible AND it
@@ -699,6 +1053,18 @@ void apply_choice_selection(CombatState& state, uint8_t slot, ChoiceKind kind,
 // persists the three-card offer exactly once. resolve_discovery_choice creates
 // the selected base copy at cost 0 for this turn; the caller pops the completed
 // queue item and resumes the pump.
+// Draw-source CHOOSE_CARD lifecycle. Called by the pump on every CHOOSE_CARD it
+// meets at the queue head, BEFORE the block-or-auto decision. For a DRAW-source
+// kind whose kChoiceDrawTempBuiltBit is still clear it replays
+// SkillFromDeckToHandAction / AttackFromDeckToHandAction's temp-group build
+// (:34-39) purely for its card_random_rng cost -- k matching draw-pile cards
+// spend k-1 draws (CardGroup.addToRandomSpot, :463-469) -- and sets the latch.
+// The resulting browse ORDER is deliberately discarded: nothing observable
+// depends on it, because a selection names a real draw-pile slot and the real
+// draw pile is never reordered. Every other kind is untouched.
+void prepare_choice_draw_source(CombatState& state,
+                                ActionQueueItem& item) noexcept;
+
 void prepare_discovery_choice(CombatState& state,
                               ActionQueueItem& item) noexcept;
 void resolve_discovery_choice(CombatState& state,

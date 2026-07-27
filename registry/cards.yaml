@@ -1843,3 +1843,258 @@
     - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
   upgraded:
     - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: VULNERABLE}
+
+# --- Colorless RARE cards (B3.11, stages A and B) -----------------------------
+# CardLibrary.addColorlessCards (CardLibrary.java:799-834) adds the colorless
+# cards ALPHABETICALLY; ids 112-126 map 1:1 onto the fifteen RAREs in that
+# order (the twenty UNCOMMONs above exhaust at 111). B3.11 is split into
+# several stages, each with its own orchestrator-allocated id subset: stage A
+# owns 112, 116, 120, 124; stage B owns 121, 122, 126; stage C owns 113, 115,
+# 117, 118, 125 -- the generated-card family.
+#
+# The remaining INTERIOR GAPS (114, 119, 123) are deliberate placeholders owned
+# by the LAST B3.11 stage, not errors -- the same sparse-id shape 101/109 used
+# for B3.10c. The loader enforces id UNIQUENESS, never contiguity, so the holes
+# cost nothing at runtime. Never renumber to close one.
+#
+# Every row below carries `color: COLORLESS`, so none of them joins
+# kIroncladAttackPool / kIroncladSkillPool / kIroncladCombatPool (all three
+# `color == "RED"`-gated); all twelve join kColorlessCombatPool (COLORLESS +
+# UNCOMMON/RARE, minus HEALING -- none of these twelve is HEALING-tagged), which
+# is the pool Jack of All Trades, Magnetism and Transmutation all draw from, so
+# each stage-C row is also a possible OUTPUT of two of its own siblings.
+
+- id: 112
+  name: APOTHEOSIS
+  game_id: "Apotheosis"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  upgraded_cost: 1
+  target: NONE
+  flags: [exhaust]
+  provenance: "Apotheosis (Apotheosis.java:19-46): ctor (:24-27) cost 2, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true. use (:29-32) is a single addToBot ApotheosisAction(). upgrade (:34-40) is upgradeBaseCost(1) ONLY -- no magicNumber, so the effect program is identical at both levels and only the cost row differs. ApotheosisAction.update (ApotheosisAction.java:25-34) calls upgradeAllCardsInGroup on p.hand, p.drawPile, p.discardPile, p.exhaustPile IN THAT ORDER (:28-31); each member is skipped unless canUpgrade() (:38), then upgrade() + applyPowers() (:42-43) -- superFlash() (:39-41, HAND only) is presentation. canUpgrade (AbstractCard.java:672-680): false for CURSE/STATUS, else !upgraded -- EXCEPT SearingBlow.canUpgrade (SearingBlow.java:58-60) overrides to always-true, so its upgrade COUNT keeps climbing past 1 (the sim already stores `upgrade` as a count, not a bit, for exactly this card -- see the Searing Blow row). The played Apotheosis is cardInUse (limbo) for the whole of this resolution (AbstractPlayer.useCard:1373-1375) and is in NONE of the four CardGroups scanned, so it never upgrades itself. Fused into ONE opcode (not four CHOOSE_CARD-shaped steps) because there is no player choice anywhere in this action -- every eligible card in all four piles upgrades unconditionally."
+  effects:
+    - {op: UPGRADE_ALL, target: SELF}
+  upgraded:
+    - {op: UPGRADE_ALL, target: SELF}
+
+- id: 113
+  name: CHRYSALIS
+  game_id: "Chrysalis"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: NONE
+  flags: [exhaust]
+  provenance: "Chrysalis (Chrysalis.java:20-56): ctor (:25-29) cost 2, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. upgrade (:44-50) upgradeMagicNumber(2) -> 5 and does NOT touch the cost or the exhaust flag, so both rows cost 2 and both exhaust. use (:31-42) is the loop `for (i < magicNumber) { card = returnTrulyRandomCardInCombat(SKILL).makeCopy(); if (card.cost > 0) { card.cost = 0; card.costForTurn = 0; card.isCostModified = true; } addToBot(new MakeTempCardInDrawPileAction(card, 1, true, true)); }`. Metamorphosis (id 118) is the SAME method with CardType.ATTACK, which is why the type is a step operand rather than a second opcode. POOL: returnTrulyRandomCardInCombat(type) (AbstractDungeon.java:964-979) concatenates srcCommonCardPool, srcUncommonCardPool and srcRareCardPool IN THAT ORDER, keeping only members of that CardType without CardTags.HEALING, then takes ONE cardRandomRng.random(list.size()-1) -- the generated kIroncladSkillPool, the SKILL sibling of the kIroncladAttackPool Infernal Blade already draws from, emitted by the same generator rule and inheriting the same documented registry-id pool-ORDER deviation. STREAM ORDER is the reason this is ONE fused opcode (RANDOM_CARD_TO_DRAW) and not N steps: use() performs ALL N pool rolls up front (addToBot consumes no rng), and the N queued MakeTempCardInDrawPileActions resolve afterwards, each spending ONE cardRandomRng draw in CardGroup.addToRandomSpot (CardGroup.java:463-469; an EMPTY draw pile is a free plain append). The net stream is N rolls THEN N inserts -- an interleaved roll/insert/roll/insert encoding picks different cards AND different positions. Nothing can slip between the halves: the N actions are consecutive queue entries that queue nothing themselves, and the played Chrysalis's own UseCardAction (with its Strange Spoon roll) is queued BEHIND all of them (AbstractPlayer.useCard:1370). DESTINATION: the 4-arg MakeTempCardInDrawPileAction ctor (:44-46) is (card, 1, shuffleInto = true, autoPosition = true) with toBottom = false, so ShowCardAndAddToDrawPileEffect's ctor (:27-52) takes the randomSpot branch at :47-48 -- drawPile.addToRandomSpot. COST: the zeroing writes BOTH card.cost and card.costForTurn, so it is PERMANENT for the combat, the MADNESS (opcode 48) model and NOT setCostForTurn's this-turn one; makeStatEquivalentCopy carries cost and costForTurn through both copy hops (AbstractCard.java:838-840), so the zero survives into the pile. The `cost > 0` guard leaves an X-cost card (Java cost -1, CardFlag::XCOST here) and an already-free card alone."
+  effects:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 3, card_type: SKILL}
+  upgraded:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 5, card_type: SKILL}
+
+- id: 114
+  name: HAND_OF_GREED
+  game_id: "HandOfGreed"
+  color: COLORLESS
+  rarity: RARE
+  type: ATTACK
+  cost: 2
+  target: ENEMY
+  flags: []
+  provenance: "HandOfGreed (HandOfGreed.java:20-49): ctor (:25-29) cost 2, ATTACK, COLORLESS, RARE, CardTarget.ENEMY, baseDamage = 20 AND magicNumber = baseMagicNumber = 20 -- two separate numbers that happen to start equal and that upgrade (:36-43) moves TOGETHER, upgradeDamage(5) + upgradeMagicNumber(5) -> 25 damage / 25 gold. The game id string is \"HandOfGreed\" with NO space (:22), unlike the displayed name. use (:31-34) is a single addToBot GreedAction(m, new DamageInfo(p, this.damage, this.damageTypeForTurn), this.magicNumber). GreedAction.update (GreedAction.java:33-46), read in full: `this.target.damage(this.info)` (:36) -- an ORDINARY DamageInfo through the NORMAL pipeline, so Strength/Vulnerable/Weak all apply and block absorbs, in deliberate contrast to the pure-damage matrices Panache and The Bomb queue -- and then `if (!(!isDying && currentHealth > 0 || halfDead || hasPower(\"Minion\"))) player.gainGold(increaseGold)` (:37-38). The gate pays out exactly when the hit LEFT the target dead. Its other two terms are STRUCTURALLY constant-false in S1 and are documented inert at the opcode body with this citation rather than modelled as state nothing can write: no Act-1 monster is half-dead-capable (the game's only producers are Awakened One and the Darklings), and registry/powers.yaml has no Minion row -- searched before writing, not assumed. That is the same gate, with the same two inert terms, that DAMAGE_FEED (opcode 35, B3.8's Feed) already encodes. The clearPostCombatActions at :43-45 is queue housekeeping the pump has no counterpart for. Encoded as opcode 57 DAMAGE_GREED, which reuses op_damage unchanged and adds only the on-kill payout; the gold rides in the step's `gold:` operand, the second-operand shape DAMAGE_FEED uses for its max-HP number. gainGold is NOT called in the combat layer -- CombatState keeps no purse (design §4.4: gold is canonical in RunState while a combat is live) -- so the payout accrues in CombatState.combat_gold and the run layer settles the total through the single gain_gold door at the combat fold-back (run_advance.cpp fold_back_combat), which is what keeps Ectoplasm's suppression and the onGainGold relic seam on the path exactly once. A combat-only replay simply carries the accumulator."
+  effects:
+    - {op: DAMAGE_GREED, target: CARD_TARGET, amount: 20, gold: 20}
+  upgraded:
+    - {op: DAMAGE_GREED, target: CARD_TARGET, amount: 25, gold: 25}
+
+- id: 115
+  name: MAGNETISM
+  game_id: "Magnetism"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 2
+  upgraded_cost: 1
+  target: SELF
+  flags: []
+  provenance: "Magnetism (Magnetism.java:20-47): ctor (:25-28) cost 2, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 1. use (:30-33) is a single addToBot ApplyPowerAction(p, p, MagnetismPower(p, magicNumber), magicNumber). upgrade (:35-41) is upgradeBaseCost(1) ONLY -- cost 2 -> 1, with NO upgradeMagicNumber -- so the effect program is identical at both levels and only the cost row differs (the Apotheosis precedent, id 112). PowerId MAGNETISM (powers.yaml id 82) carries the behaviour: a native AT_START_OF_TURN body that gates on areMonstersBasicallyDead and then, per stack, spends ONE cardRandomRng draw over kColorlessCombatPool AT HOOK TIME and queues the MakeTempCardInHandAction the Java queues -- see that row for the full reading of MagnetismPower.java:30-49 and for why the roll timing is native rather than a queued RANDOM_COLORLESS_TO_HAND."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAGNETISM}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAGNETISM}
+
+- id: 116
+  name: MASTER_OF_STRATEGY
+  game_id: "Master of Strategy"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "MasterOfStrategy (MasterOfStrategy.java:19-47): ctor (:24-28) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. use (:30-33) is a single addToBot DrawCardAction(p, magicNumber). upgrade (:40-46) upgradeMagicNumber(1) -> 4."
+  effects:
+    - {op: DRAW, target: SELF, amount: 3}
+  upgraded:
+    - {op: DRAW, target: SELF, amount: 4}
+
+- id: 117
+  name: MAYHEM
+  game_id: "Mayhem"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 2
+  upgraded_cost: 1
+  target: SELF
+  flags: []
+  provenance: "Mayhem (Mayhem.java:20-47): ctor (:25-28) cost 2, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 1. use (:30-33) is a single addToBot ApplyPowerAction(p, p, MayhemPower(p, magicNumber), magicNumber). upgrade (:40-46) is upgradeBaseCost(1) ONLY -- cost 2 -> 1, no upgradeMagicNumber -- so both rows carry the identical program and only the cost differs (the Apotheosis / Magnetism precedent). PowerId MAYHEM (powers.yaml id 81) carries the behaviour: a native AT_START_OF_TURN body queueing, per stack, one PLAY_CARD off the DRAW TOP at a random living monster with NO exhaust flag. That row states the CFR evidence gap in full (MayhemPower.java:37 is an undecompilable anonymous inner class) and the DistilledChaosPotion.java:41 / Havoc.java:31 reconstruction it rests on."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAYHEM}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: MAYHEM}
+
+- id: 118
+  name: METAMORPHOSIS
+  game_id: "Metamorphosis"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: NONE
+  flags: [exhaust]
+  provenance: "Metamorphosis (Metamorphosis.java:20-56) is Chrysalis with CardType.ATTACK everywhere CardType.SKILL appears, which is exactly why the encoding puts the type in the step's `card_type:` rather than in two opcodes. ctor (:25-29) cost 2, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. upgrade (:44-50) upgradeMagicNumber(2) -> 5, cost and exhaust unchanged. use (:31-42) is the same loop, calling returnTrulyRandomCardInCombat(CardType.ATTACK) (:34) -- the generated kIroncladAttackPool, the very pool Infernal Blade (opcode 33) already draws from, so this row needed no new pool at all. Every accounting note on the Chrysalis row (id 113) applies unchanged: N pool rolls THEN N CardGroup.addToRandomSpot inserts, a free append into an empty draw pile, base library copies, and the permanent both-fields cost zeroing gated on `cost > 0` -- which is the one place the ATTACK filter differs observably, since the RED attack pool DOES contain an X-cost card (Whirlwind, cost -1) that the guard must leave at X."
+  effects:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 3, card_type: ATTACK}
+  upgraded:
+    - {op: RANDOM_CARD_TO_DRAW, target: SELF, amount: 5, card_type: ATTACK}
+
+- id: 119
+  name: PANACHE
+  game_id: "Panache"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "Panache (Panache.java:20-47): ctor (:25-28) cost 0, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 10 -- and that magicNumber is the DAMAGE, not the countdown. upgrade (:35-41) upgradeMagicNumber(4) -> 14. use (:30-33) is a single addToBot ApplyPowerAction(p, p, new PanachePower(p, this.magicNumber), this.magicNumber): the SAME number twice, once as the ctor's damage and once as the stack amount. That coincidence is exactly why this row authors no `counter:` operand -- the PANACHE apply path reads the item's own `amount` as the damage, while the countdown comes from the power's hard-coded CARD_AMT (5). PowerId PANACHE (powers.yaml id 83) carries the behaviour and states the two-numbers reading of PanachePower.java in full: amount = the 5-card countdown (reset at the start of every turn, so partial progress is LOST), counter = the accumulated damage (stackPower adds to it and never touches the countdown, so two Panaches deal 20 from ONE shared counter). The 5th card played fires that damage at every enemy as PURE THORNS damage -- unmodified by the player's Strength or the target's Vulnerable/Weak."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 10, power: PANACHE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 14, power: PANACHE}
+
+- id: 120
+  name: SADISTIC_NATURE
+  game_id: "Sadistic Nature"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "SadisticNature (SadisticNature.java:20-46): ctor (:24-27) cost 0, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 5. use (:29-32) is a single addToBot ApplyPowerAction(p, p, SadisticPower(p, magicNumber), magicNumber). upgrade (:34-40) upgradeMagicNumber(2) -> 7. PowerId SADISTIC (registry id 10) already carries a native onApplyPower body (source side, power_sadistic.cpp): applying a DEBUFF -- other than Shackled -- to a DIFFERENT creature with no Artifact deals `amount` THORNS damage to that target (SadisticPower.onApplyPower, SadisticPower.java:41-46). This stage fixes that native body: it predated PowerId::SHACKLED (B3.10b) and was missing the `!power.ID.equals(\"Shackled\")` exclusion (:42) -- see power_sadistic.cpp and the CardColorlessRaresSadisticNature.ShackledDoesNotTriggerSadistic test. `source == this.owner` (:42) needs no separate check: the engine's ON_APPLY_POWER dispatch only ever scans the applying actor's OWN power list, so it holds structurally."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: SADISTIC}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 7, power: SADISTIC}
+
+- id: 121
+  name: SECRET_TECHNIQUE
+  game_id: "Secret Technique"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  requires_draw_pile_type: SKILL
+  provenance: "SecretTechnique (SecretTechnique.java:19-66): ctor (:24-27) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true, NO magicNumber. use (:29-32) is a single addToBot SkillFromDeckToHandAction(1). canUse (:35-50) is Clash's shape -- super.canUse() first, then a walk of p.drawPile.group that sets hasSkill on any CardType.SKILL member; with none it sets cantUseMessage and returns false -- encoded as the `requires_draw_pile_type: SKILL` CardDef column, consumed by the centralized card_can_use_without_target so the public ActionMask and the dequeue-time autoplay revalidation read ONE authority (a failed autoplay takes the no-trigger UseCardAction filing path). upgrade (:52-60) sets exhaust = false ONLY -- no magicNumber, no cost change -- so `upgraded_flags: []` is the whole upgraded row and the two programs are identical (Thinking Ahead / Limit Break precedent). SkillFromDeckToHandAction.update (:32-86): on the first tick it builds a temp CardGroup of every SKILL in the draw pile via CardGroup.addToRandomSpot (:35-39), whose empty-group branch is a free plain append and whose every later insert is ONE cardRandomRng random(size-1) draw (CardGroup.java:463-469) -- so k skills cost exactly k-1 draws, billed even when no screen opens. Then k == 0 is a silent no-op (:40-43, normally unreachable behind canUse but encoded because autoplay revalidation can race it); k == 1 is auto-taken with no screen (:44-64); k >= 2 opens gridSelectScreen.open(tmp, amount, TEXT[0], false) (:65), i.e. GridCardSelectScreen.java:463-465 -> :437-457 with anyNumber false and, in combat, NO cancel button (:446-448 shows it only for upgrade/transform/purge/shop screens) -- a MANDATORY exactly-one pick with no zero option. The taken card leaves the REAL draw pile for the hand (addToTop), or is moveToDiscardPile'd out of the draw pile when hand.size() == 10 (:46-48 / :72-74); the unchosen cards keep their draw-pile order, because only the throwaway browse list was ever randomized."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: SKILL, amount: 1}
+  upgraded_flags: []
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: SKILL, amount: 1}
+
+- id: 122
+  name: SECRET_WEAPON
+  game_id: "Secret Weapon"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  requires_draw_pile_type: ATTACK
+  provenance: "SecretWeapon (SecretWeapon.java:19-66) is SecretTechnique with ATTACK everywhere SKILL appears, and the two Java actions are likewise identical but for that CardType -- which is exactly why the encoding puts the type in the step's `card_type:` rather than in two ChoiceKinds. ctor (:24-27) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true. use (:29-32) addToBot AttackFromDeckToHandAction(1). canUse (:35-50) walks p.drawPile.group for a CardType.ATTACK and refuses without one -> `requires_draw_pile_type: ATTACK`. upgrade (:52-60) sets exhaust = false ONLY -> `upgraded_flags: []`. AttackFromDeckToHandAction.update (:32-86) matches SkillFromDeckToHandAction line for line: the same addToRandomSpot temp build costing k-1 cardRandomRng draws (:35-39), the same k == 0 silent no-op (:40-43), the same k == 1 no-screen auto-take (:44-64), the same k >= 2 mandatory single-pick grid with no combat cancel (:65), and the same hand-full moveToDiscardPile redirect (:46-48 / :72-74). The card is COLORLESS and the filter is a CardType, so the ATTACK it finds may be any colour."
+  effects:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: ATTACK, amount: 1}
+  upgraded_flags: []
+  upgraded:
+    - {op: CHOOSE_CARD, target: SELF, choose: draw_to_hand, card_type: ATTACK, amount: 1}
+
+- id: 123
+  name: THE_BOMB
+  game_id: "The Bomb"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  target: SELF
+  flags: []
+  provenance: "TheBomb (TheBomb.java:20-48): ctor (:25-28) cost 2, SKILL, COLORLESS, RARE, CardTarget.SELF -- SELF, not NONE, even though the card takes no enemy -- magicNumber = baseMagicNumber = 40. upgrade (:40-47) upgradeMagicNumber(10) -> 50; the cost and the 3 turns never move. use (:30-33) is a single addToBot ApplyPowerAction(p, p, new TheBombPower(p, 3, this.magicNumber), 3): the stack amount is the LITERAL 3, and the ctor takes (turns = 3, damage = magicNumber) -- THREE numbers through one action, which is why `amount: 3` alone cannot carry the row and the damage rides in the step's `counter:` operand (interp.hpp kApplyPowerCounterShift; the ONLY authored user of those bits). The authored shape stays faithful to the Java: `amount` is the stack amount Java passes, 3 at both levels. PowerId THE_BOMB (powers.yaml id 84) carries the behaviour and is the registry's first `instanced: true` row -- TheBombPower's ID is \"TheBomb\" plus an ever-increasing static offset (TheBombPower.java:31-32), so two plays are two independent fuses that NEVER merge, and op_apply_power appends a fresh slot each time. It explodes at the end of the THIRD turn counting the turn it was played (3 -> 2, 2 -> 1, then the end-of-turn hook sees 1 and both reduces -- removing the instance -- and detonates), for 40 or 50 PURE THORNS damage to every enemy, unmodified by Strength or Vulnerable."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: THE_BOMB, counter: 40}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: THE_BOMB, counter: 50}
+
+- id: 124
+  name: THINKING_AHEAD
+  game_id: "Thinking Ahead"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "ThinkingAhead (ThinkingAhead.java:21-53): ctor (:26-29) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true, no magicNumber. use (:32-37): addToBot DrawCardAction(p, 2) (a LITERAL 2, not a magicNumber -- it never moves on upgrade); THEN, only if AbstractDungeon.player.hand.size() > 0 AT THE INSTANT use() reads it (:34), addToBot PutOnDeckAction(p, p, 1, false). CORRECTED FROM THE ORIGINAL BRIEF, which claimed the played card is already out of hand at that read: AbstractPlayer.useCard (AbstractPlayer.java:1358-1384) runs c.use() at :1369 and only removes the card from hand.group at :1374, hand.removeCard(c) -- AFTER use() returns. So for an ORDINARY HAND PLAY the played Thinking Ahead is STILL counted in hand.size() at its own read: the guard is a structural no-op there (hand.size() >= 1 always, since it counts itself), and the put-back offer is unconditional for a hand play. The guard is reachable only when Thinking Ahead is AUTOPLAYED off the draw pile (PlayTopCardAction / Havoc) -- there it was never a hand.group member, so hand.size() reflects the real (possibly empty) hand and the put-back can be genuinely skipped. upgrade (:44-52) sets exhaust = false ONLY -- no magicNumber change, so `upgraded_flags: []` is the whole upgraded row (Limit Break / Brutality precedent). Encoded with the Warcry pattern (DRAW then a put-on-draw-top CHOOSE_CARD, cards.yaml id 10) PLUS a queue-time guard (`guard: hand_nonempty`, interp.hpp kChoiceQueueGuardHandNonemptyBit): card_play.cpp queue_effect_step processes a card's steps synchronously, none executed yet, so CombatState::hand_count when it reaches this step is the same pre-draw value Java's use() reads -- self-inclusive for a hand play, correctly excluding the card for an autoplay (op_play_top_draw's limbo_add puts an autoplayed card straight into limbo, never into hand, matching PlayTopCardAction never adding it to hand.group)."
+  effects:
+    - {op: DRAW, target: SELF, amount: 2}
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1, guard: hand_nonempty}
+  upgraded_flags: []
+  upgraded:
+    - {op: DRAW, target: SELF, amount: 2}
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1, guard: hand_nonempty}
+
+- id: 125
+  name: TRANSMUTATION
+  game_id: "Transmutation"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: -1
+  target: SELF
+  flags: [exhaust]
+  provenance: "Transmutation (Transmutation.java:20-51): ctor (:25-28) cost -1 (X), SKILL, COLORLESS, RARE, CardTarget.SELF, exhaust = true. upgrade (:43-50) only calls upgradeName + rewrites the description -- it sets `upgraded` and touches NOTHING else, so the exhaust flag is KEPT on the upgraded row and the two rows differ solely by the generated copies' upgrade level. use (:30-36) clamps energyOnUse UP to EnergyPanel.totalCount and queues TransmutationAction(p, upgraded, freeToPlayOnce, energyOnUse). TransmutationAction.update (:33-57) verbatim: effect = EnergyPanel.totalCount, overridden by energyOnUse when that is not -1; Chemical X adds 2; and `if (effect > 0)` guards BOTH the generation loop AND the energy spend -- so X == 0 without Chemical X does NOTHING AT ALL: no cards, NO cardRandomRng draws, and no energy consumed. Each of the `effect` iterations is: returnTrulyRandomColorlessCardInCombat().makeCopy() (AbstractDungeon.java:981-996 -- srcColorlessCardPool minus CardTags.HEALING, ONE cardRandomRng random(size-1)); then `if (upgraded) c.upgrade()`; then c.setCostForTurn(0); then addToBot(new MakeTempCardInHandAction(c, 1)). The queued MakeTempCardInHandActions consume no rng, so the stream is exactly `effect` sequential pool draws. DUPLICATES ARE ALLOWED (each draw is independent) and each copy takes MakeTempCardInHandAction's hand-cap spill to the discard pile (:71-77). The 0-cost is THIS TURN ONLY -- setCostForTurn (AbstractCard.java:2001-2011), the COST_MODIFIED_FOR_TURN model opcode 33 uses, in deliberate contrast to Chrysalis/Metamorphosis's permanent zeroing; note setCostForTurn is a NO-OP while costForTurn < 0, so a generated X-cost colorless card (this very card is in the pool) stays X-cost. The upgrade runs BEFORE the re-cost, so on the upgraded row it is the UPGRADED card's cost that the this-turn zero replaces. Encoded as ONE RANDOM_COLORLESS_TO_HAND per X repetition (amount 1): CardFlag::XCOST makes card_play.cpp repeat the WHOLE program energyOnUse (+2 with Chemical X) times and then zero the energy, the Whirlwind precedent, so X == 0 falls out as ZERO repetitions -- the Java's `effect > 0` guard needs no separate expression, and the energy is zeroed only on a non-autoplay play, matching `if (!freeToPlayOnce) p.energy.use(EnergyPanel.totalCount)` given that nothing between the snapshot and the spend changes the total. The two new default-0 `extra` bits (interp.hpp kColorlessToHand*) are what let opcode 52 carry this without a new opcode; Jack of All Trades authors neither and its rows are byte-identical."
+  effects:
+    - {op: RANDOM_COLORLESS_TO_HAND, target: SELF, amount: 1, generated: [cost_zero_for_turn]}
+  upgraded:
+    - {op: RANDOM_COLORLESS_TO_HAND, target: SELF, amount: 1, generated: [cost_zero_for_turn, upgraded_copy]}
+
+- id: 126
+  name: VIOLENCE
+  game_id: "Violence"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "Violence (Violence.java:19-47): ctor (:24-28) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. use (:31-33) is a single addToBot DrawPileToHandAction(magicNumber, CardType.ATTACK). upgrade (:36-41) is upgradeMagicNumber(1) -> 4 and does NOT touch exhaust, so both flag rows carry it. There is NO canUse override, so unlike Secret Technique / Secret Weapon this card is always playable and CAN whiff -- all three no-op paths below are reachable from a legal play, which is why they are encoded rather than assumed away. DrawPileToHandAction.update (:31-71) is DUAL-STREAM, and the ORDER of its early-outs is what makes the accounting exact: an EMPTY draw pile ends the action at :33-36 BEFORE the temp browse group is built, so it spends nothing on either stream; the group is then filled with every ATTACK in the draw pile via CardGroup.addToRandomSpot (:37-41), whose empty-group branch is a free plain append and whose every later insert is ONE cardRandomRng random(size-1) draw (CardGroup.java:463-469), i.e. k attacks cost exactly k-1; ZERO attacks then ends it at :42-45 having spent exactly what that build spent (nothing, for k == 0). Each of the `amount` iterations (:46-67) skips with NO rng at all while the temp list is empty (:47) -- so asking for more attacks than the deck holds is free past the last real pick -- else calls tmp.shuffle(), the NO-ARG CardGroup.shuffle (CardGroup.java:561-563) == Collections.shuffle(group, new java.util.Random(AbstractDungeon.shuffleRng.randomLong())): ONE shuffleRng draw seeding a JDK LCG that drives the same Fisher-Yates the deck reshuffle uses. It then takes getBottomCard() (:49, group.get(0)), removes it from the temp list (:50), and moves it draw -> hand, or draw -> DISCARD when hand.size() == 10 (:51-55) -- consumed out of the draw pile either way. Encoded as ONE opcode (DRAW_PILE_FETCH) rather than N CHOOSE_CARD steps because there is no player choice anywhere in the action: the picks are rng-driven, and the per-iteration guard's input (the temp list) is destroyed by the iteration before it."
+  effects:
+    - {op: DRAW_PILE_FETCH, target: SELF, amount: 3, card_type: ATTACK}
+  upgraded:
+    - {op: DRAW_PILE_FETCH, target: SELF, amount: 4, card_type: ATTACK}

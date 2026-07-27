@@ -28,6 +28,12 @@ void op_dropkick(CombatState& s, const ActionQueueItem& item) noexcept;
 void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
                     int max_hp_gain) noexcept;
 
+// DAMAGE_GREED (Hand of Greed): damage, then `gold` into CombatState.combat_gold
+// when the hit left tgt dead. See the definition for the two structurally-inert
+// terms of the Java gate.
+void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
+                     int gold) noexcept;
+
 // VAMPIRE_DAMAGE_ALL (Reaper): hit every live monster, then queue the summed heal.
 void op_vampire_damage_all(CombatState& s, int base) noexcept;
 

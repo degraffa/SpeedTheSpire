@@ -1154,3 +1154,78 @@ Continuing stage-a §10's numbering:
   existing `fatal_environment_drift` status when it mismatches the sanctioned
   values, cannot be observed at all, or when stock `CommunicationMod` is loaded
   beside the fork. A header can no longer assert a stack that did not run.
+- v0.1.8 (2026-07-27) — `PowerSlot` gains a second number, powers may be
+  **instanced**, `CombatState` gains a combat-gold accumulator, and
+  **`SCHEMA_VERSION` 5 → 6**. **Decision made by the project owner on
+  2026-07-27**; this entry records it. Three changes ride one bump because they
+  are one struct edit, landed together by B3.11's last stage (Hand of Greed,
+  Panache, The Bomb).
+  **(a) `PowerSlot` 4 → 8 bytes.** `{uint16_t power_id, int16_t amount}` becomes
+  `{uint16_t power_id, int16_t amount, int16_t counter, int16_t pad0}`
+  (`include/sts/engine/types.hpp`). Real `AbstractPower` subclasses carry a
+  private field *beside* `amount`, and the two move independently:
+  `PanachePower` keeps `amount` = a 5-card countdown and `damage` = an
+  accumulated payload that only `stackPower` grows (PanachePower.java:28,34-35,
+  46-50), and `TheBombPower` keeps `amount` = a fuse in turns and `damage` =
+  a per-instance payload fixed at construction (TheBombPower.java:26,29-38).
+  The second number is **observable** — the oracle emits it by field-name
+  reflection (`GameStateConverter.convertCreaturePowersToJson`:895-903) — so it
+  belongs in the serialized slot rather than a side table.
+  **The convention that keeps this cheap:** `amount` stays the oracle-visible
+  stack number for *every* power, so all 47 pre-existing powers keep
+  `counter == 0` with unchanged semantics and every amount-based read (the
+  damage/block hooks, Artifact charges, reduce/remove) is untouched. `pad0` is
+  explicit padding, making the row a deliberate 8 rather than an incidental 6.
+  **Deliberately NOT migrated:** Combust's private `hpLoss`, which stays in
+  `CombatState.flags`. Those bits are load-bearing on committed behaviour and
+  moving them buys nothing here.
+  **(b) Instanced (non-merging) powers.** A per-`PowerDef` `instanced` marker
+  (authored as `instanced: true` in `registry/powers.yaml`) makes
+  `op_apply_power` **append** a fresh slot rather than merge by `power_id`. It
+  models a power whose ID is not a constant: `TheBombPower` builds
+  `POWER_ID + bombIdOffset` from an ever-increasing static counter
+  (TheBombPower.java:31-32), so `getPower` never matches and every play is a
+  distinct object with its own fuse and damage. The Bomb is the only user.
+  **The consequence that needed real design, not just an append:** removal and
+  reduction can no longer be first-match-by-id. `ReducePowerAction` has an exact
+  *instance* overload for precisely this (ReducePowerAction.java:28-33,45-51),
+  and a slot **index** cannot stand in for it — the end-of-turn sweep queues one
+  reduce per bomb and a reduce that empties its slot compacts the array, so
+  every later queued index is stale before it resolves. `REDUCE_POWER` /
+  `REMOVE_POWER` therefore carry an optional **instance key** in their flags
+  word: the slot's own `{amount, counter}`, captured at queue time. That is
+  exact — the only rows it cannot distinguish are byte-identical ones, which are
+  interchangeable by construction — and its absent encoding (amount byte 0) is
+  what every pre-existing item already packs, so no queued item changed.
+  **(c) `CombatState.combat_gold` (uint16).** Hand of Greed is the first
+  in-combat gold producer; the game's `GreedAction` calls
+  `AbstractPlayer.gainGold` immediately (GreedAction.java:38), but `CombatState`
+  deliberately keeps no duplicate of the run purse, so the payout accrues here
+  and the run layer settles it at `fold_back_combat` — the single combat
+  fold-back, reached on every combat-end path and on each exactly once —
+  through `gain_gold`, the one run-layer gold door (which is what keeps
+  Ectoplasm's suppression and the `onGainGold` seam on the path). The
+  accumulator is zeroed as it settles; a combat-only replay simply carries it.
+  It **occupies the former `pad_piles[2]`**, so it costs no bytes and moves no
+  offset — the `turn_has_ended` precedent.
+  **Sizes, measured by compiled `offsetof`/`sizeof` probes rather than
+  predicted:** `sizeof(PowerSlot)` **4 → 8**, `sizeof(MonsterState)`
+  **116 → 212**, `sizeof(CombatState)` **3928 → 4696** (+768 = 192 slot rows ×
+  4 B, over 24 player slots + 7 × 24 monster slots) — still ~3.4 KB under the
+  8192 ceiling raised in v0.1.4.
+  **Fixtures:** all 20 combat fixtures were **regenerated** via the checked-in
+  generator, never hand-edited. The v0.1.5 entry's caution applies again in a
+  new shape: this is not B3.12/B4.3's *single* zero-run insertion, because a
+  `PowerSlot` widening inserts a run per slot, 192 of them. The proof was
+  generalized rather than weakened — offsets taken from probes compiled against
+  both the old and the new headers (nothing hand-derived), the old→new byte
+  transformation derived **mechanically** from those two layouts, applied to the
+  old bytes, and required to be **byte-identical** to the regenerated files
+  across 20 fixtures / 112 records. Passing therefore means every pre-existing
+  byte is preserved in order at its new offset, every one of the 86 016
+  newly-occupied bytes is zero, and header magic / `schema_version` (v1) /
+  `record_count` / seed and every per-record action+aux word are unchanged; only
+  `state_size` moves, 3928 → 4696.
+  **Note (not fixed here, this document is frozen):** `docs/stage-a-design.md`
+  §4.2 and the older Logs carry the 4 B `PowerSlot` and earlier `CombatState`
+  figures, which were true when written.

@@ -47,7 +47,10 @@ add_library(sts_engine
     powers/power_frail.cpp
     powers/power_lose_dexterity.cpp
     powers/power_lose_strength.cpp
+    powers/power_magnetism.cpp
+    powers/power_mayhem.cpp
     powers/power_next_turn_block.cpp
+    powers/power_panache.cpp
     powers/power_plated_armor.cpp
     powers/power_rage.cpp
     powers/power_regen.cpp
@@ -56,6 +59,7 @@ add_library(sts_engine
     powers/power_sadistic.cpp
     powers/power_sharp_hide.cpp
     powers/power_spore_cloud.cpp
+    powers/power_the_bomb.cpp
     powers/power_thorns.cpp
     relic_hooks.cpp
     # Native relic combat bodies, one TU per RelicTier (see

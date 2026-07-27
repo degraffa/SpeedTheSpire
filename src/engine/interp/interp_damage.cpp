@@ -67,7 +67,23 @@ namespace {
     // is "none". NoBlockPower declares atEndOfRound (NoBlockPower.java:39-50),
     // updateDescription (:52-55) and modifyBlockLast (:58-60) -- the last of those
     // is on the BLOCK path (interp_block.cpp), not this pipeline.
-    static_assert(sts::registry::manifest::kPowersCount == 45,
+    // Checked for Mayhem and Magnetism (the two colorless-RARE POWER cards'
+    // start-of-turn generators), neither of which needs a
+    // case in ANY of this file's three passes: MayhemPower's only overrides are
+    // updateDescription and atStartOfTurn (MayhemPower.java:28-39) and
+    // MagnetismPower's are updateDescription, stackPower and atStartOfTurn
+    // (MagnetismPower.java:30-49). Both are card GENERATORS -- they touch no
+    // damage number at all.
+    // Checked for Panache and The Bomb, neither of which needs a case in ANY of
+    // this file's three passes -- and both LOOK like damage powers, which is
+    // exactly why they were read in full. PanachePower's only overrides are
+    // updateDescription, stackPower, onUseCard and atStartOfTurn
+    // (PanachePower.java:40-67); TheBombPower's are atEndOfTurn and
+    // updateDescription (TheBombPower.java:40-53). Each QUEUES damage; neither
+    // SCALES anyone else's, which is the only question these switches ask. Their
+    // own damage is moreover PURE (createDamageMatrix(..., true), DamageInfo.
+    // java:126-136) and typed THORNS, so it does not reach this pipeline at all.
+    static_assert(sts::registry::manifest::kPowersCount == 49,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -115,7 +131,13 @@ namespace {
     // Checked for No Block: same answer as the pass above -- its only override
     // outside its own lifecycle is modifyBlockLast (NoBlockPower.java:58-60), on
     // the BLOCK path, so no case is needed here either.
-    static_assert(sts::registry::manifest::kPowersCount == 45,
+    // Checked for Mayhem and Magnetism: same answer as the pass above -- neither
+    // overrides any atDamage* hook (MayhemPower.java:28-39 /
+    // MagnetismPower.java:30-49).
+    // Checked for Panache and The Bomb: same answer as the pass above -- both
+    // QUEUE damage and neither overrides any atDamage* hook
+    // (PanachePower.java:40-67 / TheBombPower.java:40-53).
+    static_assert(sts::registry::manifest::kPowersCount == 49,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -172,7 +194,13 @@ namespace {
     // ONLY override is updateDescription (ThieveryPower.java:27-30).
     // Checked for No Block: it overrides no atDamage* hook at all (its whole
     // damage-side surface is empty -- NoBlockPower.java:39-60), so no case here.
-    static_assert(sts::registry::manifest::kPowersCount == 45,
+    // Checked for Mayhem and Magnetism: neither overrides atDamageFinalReceive
+    // (MayhemPower.java:28-39 / MagnetismPower.java:30-49). All three of this
+    // file's counts moved together, as the note above requires.
+    // Checked for Panache and The Bomb: neither overrides atDamageFinalReceive
+    // (PanachePower.java:40-67 / TheBombPower.java:40-53). All three of this
+    // file's counts moved together again.
+    static_assert(sts::registry::manifest::kPowersCount == 49,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -512,6 +540,52 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
     }
     s.player_max_hp = static_cast<int16_t>(s.player_max_hp + max_hp_gain);
     heal_player_with_relics(s, max_hp_gain);
+}
+
+// DAMAGE_GREED (GreedAction.update, GreedAction.java:33-46): the ORDINARY damage
+// pipeline -- HandOfGreed.use builds a plain DamageInfo(p, damage,
+// damageTypeForTurn) (HandOfGreed.java:33) and the action just calls
+// target.damage(info) (:36), so Strength/Vulnerable/Weak all apply and block
+// absorbs, unlike the pure-damage matrices Panache and The Bomb queue -- and
+// then, only if the hit left the target dead, `gold` into the run's purse.
+//
+// The Java gate (:37), read literally, is
+//     !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
+// i.e. pay out when the target is dying-or-at-zero AND is neither halfDead nor a
+// Minion. Both of those exclusions are STRUCTURALLY constant-false in S1 and are
+// recorded here rather than modelled as state that nothing can set:
+//   * halfDead -- no Act-1 monster is half-dead-capable (the game's only
+//     producers are Awakened One and the Darklings, both out of scope), which is
+//     exactly the reading combat_state.hpp's liveness-predicate comment already
+//     records for every other halfDead term in the engine. There is no halfDead
+//     field to consult, and inventing one would be state with no writer.
+//   * hasPower("Minion") -- registry/powers.yaml has NO Minion row (searched
+//     before writing this, not assumed), so no creature in the registry can carry
+//     it. When a Minion power lands, this is the site that must gain the test.
+// So the live test is "did this hit take the target to zero", which is the same
+// shape DAMAGE_FEED (op_damage_feed above) already uses for the identical Java
+// condition, with the same two terms inert for the same reasons.
+//
+// gainGold itself is NOT called here: the combat layer has no purse. The gold
+// accrues in CombatState.combat_gold and the run layer settles the total through
+// the single gain_gold door at the combat fold-back (run_advance.cpp
+// fold_back_combat) -- so Ectoplasm's suppression and the onGainGold relic seam
+// still see it exactly once, and a combat-only replay simply carries the number.
+void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
+                     int gold) noexcept {
+    if (tgt >= kMonsterCap) {
+        return;
+    }
+    op_damage(s, src, tgt, base);
+    if (s.monsters[tgt].hp > 0 || gold <= 0) {
+        return;
+    }
+    int32_t total = static_cast<int32_t>(s.combat_gold) + gold;
+    if (total > 0xFFFF) {
+        total = 0xFFFF;  // saturate rather than wrap (unreachable in S1: 7
+                         // monster records x 25 gold is 175)
+    }
+    s.combat_gold = static_cast<uint16_t>(total);
 }
 
 // VAMPIRE_DAMAGE_ALL (VampireDamageAllEnemiesAction.update, :53-77): damage every

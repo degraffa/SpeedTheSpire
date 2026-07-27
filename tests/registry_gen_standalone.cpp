@@ -23,9 +23,17 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-// 91 (through the red rares) + B3.10a's 14 colorless UNCOMMON rows; their ids
-// run 92-111 but six interior ids are reserved gaps, so the ROW count adds 14.
-static_assert(sts::registry::manifest::kCardsCount == 109);
+// 91 (through the red rares) + the 18 colorless UNCOMMON rows B3.10a/B3.10b
+// landed; their ids run 92-111 but TWO interior ids (101 Forethought, 109
+// Purity) are reserved gaps owned by mandatory B3.10c, so the ROW count adds
+// 18, not 20. + B3.11 stage A's 4 colorless RARE rows (112 Apotheosis, 116
+// Master of Strategy, 120 Sadistic Nature, 124 Thinking Ahead) and stage B's 3
+// (121 Secret Technique, 122 Secret Weapon, 126 Violence) and stage C's 5 (113
+// Chrysalis, 115 Magnetism, 117 Mayhem, 118 Metamorphosis, 125 Transmutation);
+// stage D's 3, which FILL the 114/119/123 gaps the earlier stages reserved
+// (114 Hand of Greed, 119 Panache, 123 The Bomb) -- with them the colorless RARE
+// block 112-126 is complete and holds no gap.
+static_assert(sts::registry::manifest::kCardsCount == 124);
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 // Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only
@@ -34,6 +42,13 @@ static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 h
 // colorless uncommons add NONE: the pool builder is `color == "RED"`-gated, and
 // all fourteen are COLORLESS, so the count is unchanged by that batch.
 static_assert(sts::registry::kIroncladAttackPoolCount == 28);
+// Chrysalis's SKILL sibling of that pool (B3.11 stage C), derived by the SAME
+// generator rule with CardType.SKILL substituted -- returnTrulyRandomCardIn-
+// Combat(SKILL). Also RED-gated, so the colorless batches add none, and its
+// membership is disjoint from the ATTACK pool's by construction. (The two
+// counts landing on the same number is a coincidence of the Ironclad card set,
+// not a shared constant.)
+static_assert(sts::registry::kIroncladSkillPoolCount == 28);
 
 // Power table (B3.2): the constexpr PowerDef evaluates at compile time with
 // nothing but the generated headers in scope.

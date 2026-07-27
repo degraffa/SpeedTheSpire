@@ -167,12 +167,20 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                     rc.combat.action_queue[rc.combat.action_head];
                 const engine::ChoiceKind kind =
                     engine::choose_kind_from_flags(front.flags);
+                const uint8_t type_filter =
+                    engine::choose_type_filter_from_flags(front.flags);
                 int source_count = rc.combat.hand_count;
                 if (cm.choice_from_discard) source_count = rc.combat.discard_count;
                 if (cm.choice_from_exhaust) source_count = rc.combat.exhaust_count;
+                // A draw-source choice (Secret Technique / Secret Weapon)
+                // enumerates DRAW-pile slots, filtered to one CardType --
+                // choice_slot_eligible applies that filter, so most of the pile
+                // is normally rejected below.
+                if (cm.choice_from_draw) source_count = rc.combat.draw_count;
                 for (int i = 0; i < source_count; ++i) {
                     if (engine::choice_slot_eligible(
-                            rc.combat, static_cast<uint8_t>(i), kind)) {
+                            rc.combat, static_cast<uint8_t>(i), kind,
+                            type_filter)) {
                         s.add(make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(i)),
                               MoveCat::COMBAT_CHOOSE);
                     }

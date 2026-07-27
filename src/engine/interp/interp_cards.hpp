@@ -67,6 +67,28 @@ void op_madness(CombatState& s) noexcept;
 // DARK_SHACKLES / ENLIGHTENMENT / RANDOM_COLORLESS_TO_HAND.
 void op_dark_shackles(CombatState& s, uint8_t target, int amount) noexcept;
 void op_enlightenment(CombatState& s, bool for_rest_of_combat) noexcept;
-void op_random_colorless_to_hand(CombatState& s, int count) noexcept;
+// RANDOM_COLORLESS_TO_HAND -- `count` independent colorless-combat-pool draws
+// into the hand. `flags` is the kColorlessToHand* set (interp.hpp): 0 for Jack
+// of All Trades, cost-zero-for-turn [| upgraded-copy] for Transmutation's
+// per-X-repetition body.
+void op_random_colorless_to_hand(CombatState& s, int count,
+                                 uint32_t flags) noexcept;
+
+// RANDOM_CARD_TO_DRAW (Chrysalis / Metamorphosis) -- `count` picks over the RED
+// combat pool filtered to CardType `type` (the raw CardType byte, interp.hpp
+// random_card_to_draw_type_from_flags), ALL rolled before ANY of the `count`
+// random-spot draw-pile insertions. Generated base copies with a registry cost
+// > 0 are zeroed permanently for the combat.
+void op_random_card_to_draw(CombatState& s, int count, uint8_t type) noexcept;
+
+// UPGRADE_ALL (Apotheosis) -- upgrade every eligible card in hand, drawPile,
+// discardPile, exhaustPile, in that order.
+void op_upgrade_all(CombatState& s) noexcept;
+
+// DRAW_PILE_FETCH (Violence) -- pull up to `amount` cards of CardType `type`
+// (the raw CardType byte, interp.hpp draw_pile_fetch_type_from_flags) out of the
+// draw pile into the hand. Dual-stream: k-1 card_random_rng draws for the temp
+// browse group, then ONE shuffle_rng draw per non-empty pick.
+void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept;
 
 }  // namespace sts::engine

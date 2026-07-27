@@ -147,10 +147,39 @@ private:
     }
     return cid;
 }
+// The ONE non-exact power-id case in the protocol: a power whose POWER_ID is not
+// a constant. TheBombPower's ctor builds `POWER_ID + bombIdOffset` from an
+// ever-increasing static counter (TheBombPower.java:22,27,31-32), so the oracle
+// reports "TheBomb0", "TheBomb1", ... -- one distinct string per instance, none
+// of which the registry's exact game_id table can hold. Normalizing the numeric
+// suffix back to the "TheBomb" prefix is the whole fix.
+//
+// SCOPED DELIBERATELY NARROW: it fires only for the literal prefix "TheBomb"
+// followed by one or more DIGITS and nothing else, so it can neither swallow an
+// unrelated unknown id nor collide with a future power whose id merely starts
+// the same way. It is applied only after the exact lookup has failed, so no
+// existing join changes. This was checked against the whole power surface --
+// join_power is the single power-id door (parse_power is its only caller) and
+// TheBombPower is the only game power that builds a non-constant ID.
+[[nodiscard]] std::string normalize_instanced_power_id(const std::string& id) {
+    constexpr std::string_view kBombPrefix = "TheBomb";
+    if (id.size() <= kBombPrefix.size() ||
+        id.compare(0, kBombPrefix.size(), kBombPrefix) != 0) {
+        return id;
+    }
+    for (std::size_t i = kBombPrefix.size(); i < id.size(); ++i) {
+        if (id[i] < '0' || id[i] > '9') return id;
+    }
+    return std::string(kBombPrefix);
+}
+
 [[nodiscard]] eng::PowerId join_power(const std::string& id, const Ctx& c,
                                       const std::string& where) {
     if (id.empty()) return eng::PowerId::NONE;
     eng::PowerId pid = reg::power_from_game_id(id);
+    if (pid == eng::PowerId::NONE) {
+        pid = reg::power_from_game_id(normalize_instanced_power_id(id));
+    }
     if (pid == eng::PowerId::NONE) {
         if (c.tolerate_ids) { tally_unknown_id(c, "power", id); return eng::PowerId::NONE; }
         throw TranslateError(loc(c) + " unknown power id \"" + id + "\" at " + where +
@@ -309,7 +338,30 @@ private:
         fr.mapped();
     }
     fr.ignore("name");
-    fr.defer("damage");        // optional intent damage (§3.14)
+    // GameStateConverter emits `damage` by REFLECTION over the field name
+    // (convertCreaturePowersToJson, GameStateConverter.java:895-903:
+    // getFieldIfExists(power, "damage")), so it is present for exactly the powers
+    // that declare a private `damage` -- which is exactly the set that maps onto
+    // the schema-6 PowerSlot.counter. It is imported for the two such powers in
+    // the registry and left deferred for every other power that happens to carry
+    // one, matching the narrow claim the Combust `misc` case below makes:
+    //   * Panache -- the accumulated damage (PanachePower.java:28,48). `amount`
+    //     is the 5-card countdown and joins on its own, above.
+    //   * The Bomb -- the per-instance damage (TheBombPower.java:26,35). `amount`
+    //     is the fuse in turns. Each instance is its own slot (`instanced`), and
+    //     the oracle's per-instance id is normalized by join_power above.
+    if (ps.power_id == static_cast<uint16_t>(eng::PowerId::PANACHE) ||
+        ps.power_id == static_cast<uint16_t>(eng::PowerId::THE_BOMB)) {
+        const int64_t dmg = as_i64(fr.require("damage"), ctx, path + ".damage");
+        if (dmg < -32768 || dmg > 32767) {
+            throw TranslateError(loc(ctx) + " power damage at " + path +
+                                 ".damage must fit PowerSlot.counter (int16)");
+        }
+        ps.counter = static_cast<int16_t>(dmg);
+        fr.mapped();
+    } else {
+        fr.defer("damage");    // optional intent damage (§3.14)
+    }
     fr.defer("card");          // optional nested card (Nightmare etc.)
     if (ps.power_id == static_cast<uint16_t>(eng::PowerId::COMBUST) &&
         player_combat_flags != nullptr) {

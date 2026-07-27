@@ -169,6 +169,65 @@ OPCODES = {
     # card-pool index), never authored in YAML, but pinned in the enum for the
     # cards.hpp drift check -- the SET_MOVE / ESCAPE precedent.
     "USE_CARD": 53,
+    # B3.11 stage A addition (the one new opcode this stage; 55-59 are reserved
+    # for later B3.11 stages and stay unissued here). ApotheosisAction.update
+    # (:25-34): upgrade every eligible card in hand, drawPile, discardPile,
+    # exhaustPile IN THAT ORDER -- canUpgrade() (AbstractCard.java:672-680)
+    # gates each one (false for CURSE/STATUS, else !upgraded; Searing Blow
+    # overrides canUpgrade to always-true, SearingBlow.java:58-60, so it can be
+    # upgraded past 1). The played Apotheosis is in the LIMBO pile throughout
+    # and is in none of the four piles scanned.
+    "UPGRADE_ALL": 54,
+    # B3.11 stage C addition. RANDOM_CARD_TO_DRAW is the Chrysalis /
+    # Metamorphosis generator (Chrysalis.use:31-42, Metamorphosis.use:31-42 --
+    # the same loop with CardType.SKILL vs ATTACK, which is why the type rides
+    # in `extra` rather than in two opcodes). ONE op for the WHOLE loop because
+    # the Java's rng ORDER cannot be expressed as N independent steps: use()
+    # performs ALL `amount` pool rolls first (returnTrulyRandomCardInCombat(type),
+    # AbstractDungeon.java:964-979 -- ONE cardRandomRng random(size-1) each,
+    # interleaved only with addToBot, which consumes nothing), and the `amount`
+    # MakeTempCardInDrawPileActions then resolve afterwards, each spending ONE
+    # cardRandomRng draw in CardGroup.addToRandomSpot (:463-469; an EMPTY draw
+    # pile costs zero). Net stream: N rolls, THEN N inserts -- an interleaved
+    # roll/insert/roll/insert encoding produces different cards AND different
+    # positions. Each generated BASE copy whose cost is > 0 is zeroed
+    # PERMANENTLY for the combat (both cost and costForTurn, Chrysalis.java:
+    # 35-39) -- the MADNESS model, not the setCostForTurn one; an X-cost (-1)
+    # or already-0 card is left alone.
+    "RANDOM_CARD_TO_DRAW": 55,
+    # B3.11 stage B addition (57-59 stay unissued -- 57 belongs to a later
+    # B3.11 stage and 58-59 are that batch's published reserve; stage C did
+    # NOT need 58, since RANDOM_COLORLESS_TO_HAND's two new `extra` bits
+    # carried Transmutation, see COLORLESS_TO_HAND_FLAGS below).
+    # DRAW_PILE_FETCH is Violence / DrawPileToHandAction.update (:31-71): pull
+    # `amount` cards of the CardType in `extra` out of the DRAW PILE into the
+    # hand. DUAL-STREAM accounting, and the order of the early-outs is what
+    # makes it exact: an EMPTY draw pile ends the action at :33-36 BEFORE the
+    # temp browse group exists (zero draws of either stream); the group is then
+    # built with CardGroup.addToRandomSpot (:463-469), whose empty-group branch
+    # is a free plain append and whose every later insert is ONE cardRandomRng
+    # draw, so k matches cost k-1; ZERO matches ends it at :42-45 having spent
+    # exactly that (nothing). Each of the `amount` iterations then skips with NO
+    # rng while the temp list is empty (:47), else spends ONE shuffleRng
+    # randomLong seeding a java.util.Random for Collections.shuffle over the
+    # temp list (the NO-ARG CardGroup.shuffle, :561-563) and takes its BOTTOM
+    # card, which moves draw -> hand or draw -> DISCARD at a full hand (:51-55).
+    "DRAW_PILE_FETCH": 56,
+    # B3.11 stage D addition (58-59 remain this batch's published reserve and
+    # stay UNISSUED). DAMAGE_GREED is Hand of Greed / GreedAction.update
+    # (:33-46): `target.damage(info)` through the ORDINARY pipeline -- a plain
+    # DamageInfo(p, damage, damageTypeForTurn) built by HandOfGreed.use
+    # (HandOfGreed.java:33), so Strength/Vulnerable/Weak apply and block absorbs,
+    # unlike the pure-damage matrices Panache and The Bomb queue -- followed by
+    # `extra` gold IF AND ONLY IF the hit left the target dead. The gold gate is
+    #   !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
+    # (:37); the halfDead and Minion terms have no S1 producer and are
+    # documented-inert at the opcode body, never invented as state. The gold
+    # accrues in CombatState.combat_gold and reaches RunState only at the run
+    # layer's combat fold-back, through the single gain_gold door -- so a
+    # combat-only replay never touches a run purse. `extra` carries the gold, the
+    # same second-operand shape DAMAGE_FEED (35) uses for its max-HP number.
+    "DAMAGE_GREED": 57,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -188,12 +247,47 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # choose one exhausted card and return it to the hand
                 # (ExhumeAction.update:38-113). Kind 5 packs as 1 | the high kind
                 # bit, so kinds 0-3 stay byte-identical.
-                "exhaust_to_hand": 5}
+                "exhaust_to_hand": 5,
+                # Secret Technique / Secret Weapon: the source pile is the DRAW
+                # PILE, filtered to ONE CardType (SkillFromDeckToHandAction /
+                # AttackFromDeckToHandAction differ only in that type, so
+                # `card_type:` is REQUIRED on the step and is what separates
+                # them). Kinds 6-7 are permanent gaps and kind 8 belongs to the
+                # colorless-uncommon batch landing in parallel; kinds are
+                # append-only, so 9 steps over them rather than backfilling.
+                # Kind 9 needs a FOURTH kind bit -- see CHOICE_KIND_HIGH_BIT2.
+                "draw_to_hand": 9}
 CHOICE_RANDOM_BIT = 1 << 2
-CHOICE_KIND_HIGH_BIT = 1 << 3
+CHOICE_KIND_HIGH_BIT = 1 << 3       # ChoiceKind bit 2
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
 # default (1 copy) encodes as 0 and every pre-B3.6 packed extra is byte-identical.
 CHOICE_COPIES_SHIFT = 4
+# ChoiceKind bit 3, for kinds 8+. Bits 0-1 hold the low kind bits, 2 is RANDOM,
+# 3 is kind bit 2, 4-7 are `copies`, 8 is the queue-time guard -- so the next
+# free bit is 9. kind = bits[0..1] | bit3 << 2 | bit9 << 3, which leaves every
+# kind 0-7 packing byte-identical.
+CHOICE_KIND_HIGH_BIT2 = 1 << 9
+# CHOOSE_CARD `card_type` (draw_to_hand only): bits [10..12] hold CardType + 1,
+# so 0 means "no filter". The +1 is load-bearing -- CardType ATTACK is 0, so a
+# raw type would be indistinguishable from an absent key, which is exactly the
+# silent-misauthoring hole CONDITIONAL_DRAW's required `card_type:` closes.
+CHOICE_TYPE_FILTER_SHIFT = 10
+# Thinking Ahead: an author-only queue-time guard, never read by the
+# interpreter's execute path. ThinkingAhead.use (:32-37) queues
+# PutOnDeckAction(1, false) only when AbstractDungeon.player.hand.size() > 0 AT
+# THE INSTANT use() reads it (:34). AbstractPlayer.useCard (AbstractPlayer.
+# java:1358-1384) runs c.use() at :1369 and only removes the played card from
+# hand.group at :1374 -- AFTER use() returns -- so for an ORDINARY HAND PLAY
+# the played card is STILL counted at that read (hand.size() >= 1 always,
+# since it counts itself): the guard is a structural no-op there. It matters
+# only when the card is AUTOPLAYED off the draw pile (PlayTopCardAction /
+# Havoc), where it was never a hand.group member. card_play.cpp
+# queue_effect_step processes a card's steps in that same synchronous order,
+# none of them executed yet, so checking CombatState::hand_count when it
+# reaches THIS step reproduces the Java read exactly in both cases. Packed
+# into bit 8 -- clear of kind[0-1]/RANDOM[2]/kind-hi[3]/copies[4-7] -- and
+# authored as `guard: hand_nonempty` on a CHOOSE_CARD step.
+CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT = 1 << 8
 # StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
 # Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
 # RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
@@ -241,6 +335,31 @@ PLAY_CARD_FLAGS = {
     "from_draw_top": 1 << 3,
     "queue_front": 1 << 4,
 }
+
+# RANDOM_COLORLESS_TO_HAND `extra` bits -- MIRROR of interp.hpp's
+# kColorlessToHand* constants (B3.11 stage C). BOTH default to 0, so Jack of All
+# Trades' rows (which author neither) keep the `extra = 0` they packed before
+# these bits existed -- verified byte-identical rather than assumed.
+#   cost_zero_for_turn -- TransmutationAction.java:49 `c.setCostForTurn(0)`:
+#       the generated copy costs 0 for THIS TURN ONLY (COST_MODIFIED_FOR_TURN,
+#       the RANDOM_ATTACK_TO_HAND / Infernal Blade model). Jack of All Trades
+#       does NOT set it (JackOfAllTrades never re-costs its copies).
+#   upgraded_copy -- TransmutationAction.java:46-48 `if (this.upgraded)
+#       c.upgrade()`: upgraded Transmutation generates UPGRADED copies. The
+#       upgrade runs BEFORE setCostForTurn, so the cost the this-turn zero
+#       replaces is the UPGRADED row's cost.
+COLORLESS_TO_HAND_FLAGS = {
+    "cost_zero_for_turn": 1 << 0,
+    "upgraded_copy": 1 << 1,
+}
+
+# APPLY_POWER `extra` bits 16..31 -- MIRROR of interp.hpp's
+# kApplyPowerCounterShift (B3.11 stage D). The applied instance's COUNTER
+# OPERAND: the second number a counter-carrying PowerSlot (types.hpp) is
+# constructed with, authored as `counter:` on an APPLY_POWER step. Absent -> 0,
+# which is exactly what every APPLY_POWER step packed before these bits existed,
+# so all of them stay byte-identical (pinned by the kBash assert in cards.hpp).
+APPLY_POWER_COUNTER_SHIFT = 16
 
 # CardFlag bits -- MIRROR of include/sts/engine/types.hpp CardFlag (append-only).
 # YAML `flags:` names are lower-case; cards.hpp static_asserts the emitted
