@@ -1843,3 +1843,85 @@
     - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
   upgraded:
     - {op: APPLY_POWER, target: ALL_ENEMY, amount: 2, power: VULNERABLE}
+
+# --- Colorless RARE cards (B3.11, stage A) ------------------------------------
+# CardLibrary.addColorlessCards (CardLibrary.java:799-834) adds the colorless
+# cards ALPHABETICALLY; ids 112-126 map 1:1 onto the fifteen RAREs in that
+# order (the twenty UNCOMMONs above exhaust at 111). B3.11 is split into
+# several stages, each with its own orchestrator-allocated id subset; this
+# stage owns exactly 112, 116, 120, 124.
+#
+# The remaining INTERIOR GAPS (113-115, 117-119, 121-123, 125-126) are
+# deliberate placeholders owned by LATER B3.11 stages, not errors -- the same
+# sparse-id shape 101/109 used for B3.10c. The loader enforces id UNIQUENESS,
+# never contiguity, so the holes cost nothing at runtime. Never renumber to
+# close one.
+#
+# Every row below carries `color: COLORLESS`, so none of them joins
+# kIroncladAttackPool / kIroncladCombatPool (both `color == "RED"`-gated); all
+# four join kColorlessCombatPool (COLORLESS + UNCOMMON/RARE, minus HEALING --
+# none of these four is HEALING-tagged).
+
+- id: 112
+  name: APOTHEOSIS
+  game_id: "Apotheosis"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 2
+  upgraded_cost: 1
+  target: NONE
+  flags: [exhaust]
+  provenance: "Apotheosis (Apotheosis.java:19-46): ctor (:24-27) cost 2, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true. use (:29-32) is a single addToBot ApotheosisAction(). upgrade (:34-40) is upgradeBaseCost(1) ONLY -- no magicNumber, so the effect program is identical at both levels and only the cost row differs. ApotheosisAction.update (ApotheosisAction.java:25-34) calls upgradeAllCardsInGroup on p.hand, p.drawPile, p.discardPile, p.exhaustPile IN THAT ORDER (:28-31); each member is skipped unless canUpgrade() (:38), then upgrade() + applyPowers() (:42-43) -- superFlash() (:39-41, HAND only) is presentation. canUpgrade (AbstractCard.java:672-680): false for CURSE/STATUS, else !upgraded -- EXCEPT SearingBlow.canUpgrade (SearingBlow.java:58-60) overrides to always-true, so its upgrade COUNT keeps climbing past 1 (the sim already stores `upgrade` as a count, not a bit, for exactly this card -- see the Searing Blow row). The played Apotheosis is cardInUse (limbo) for the whole of this resolution (AbstractPlayer.useCard:1373-1375) and is in NONE of the four CardGroups scanned, so it never upgrades itself. Fused into ONE opcode (not four CHOOSE_CARD-shaped steps) because there is no player choice anywhere in this action -- every eligible card in all four piles upgrades unconditionally."
+  effects:
+    - {op: UPGRADE_ALL, target: SELF}
+  upgraded:
+    - {op: UPGRADE_ALL, target: SELF}
+
+- id: 116
+  name: MASTER_OF_STRATEGY
+  game_id: "Master of Strategy"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "MasterOfStrategy (MasterOfStrategy.java:19-47): ctor (:24-28) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, magicNumber = baseMagicNumber = 3, exhaust = true. use (:30-33) is a single addToBot DrawCardAction(p, magicNumber). upgrade (:40-46) upgradeMagicNumber(1) -> 4."
+  effects:
+    - {op: DRAW, target: SELF, amount: 3}
+  upgraded:
+    - {op: DRAW, target: SELF, amount: 4}
+
+- id: 120
+  name: SADISTIC_NATURE
+  game_id: "Sadistic Nature"
+  color: COLORLESS
+  rarity: RARE
+  type: POWER
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "SadisticNature (SadisticNature.java:20-46): ctor (:24-27) cost 0, POWER, COLORLESS, RARE, CardTarget.SELF, magicNumber = baseMagicNumber = 5. use (:29-32) is a single addToBot ApplyPowerAction(p, p, SadisticPower(p, magicNumber), magicNumber). upgrade (:34-40) upgradeMagicNumber(2) -> 7. PowerId SADISTIC (registry id 10) already carries a native onApplyPower body (source side, power_sadistic.cpp): applying a DEBUFF -- other than Shackled -- to a DIFFERENT creature with no Artifact deals `amount` THORNS damage to that target (SadisticPower.onApplyPower, SadisticPower.java:41-46). This stage fixes that native body: it predated PowerId::SHACKLED (B3.10b) and was missing the `!power.ID.equals(\"Shackled\")` exclusion (:42) -- see power_sadistic.cpp and the CardColorlessRaresSadisticNature.ShackledDoesNotTriggerSadistic test. `source == this.owner` (:42) needs no separate check: the engine's ON_APPLY_POWER dispatch only ever scans the applying actor's OWN power list, so it holds structurally."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 5, power: SADISTIC}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 7, power: SADISTIC}
+
+- id: 124
+  name: THINKING_AHEAD
+  game_id: "Thinking Ahead"
+  color: COLORLESS
+  rarity: RARE
+  type: SKILL
+  cost: 0
+  target: NONE
+  flags: [exhaust]
+  provenance: "ThinkingAhead (ThinkingAhead.java:21-53): ctor (:26-29) cost 0, SKILL, COLORLESS, RARE, CardTarget.NONE, exhaust = true, no magicNumber. use (:32-37): addToBot DrawCardAction(p, 2) (a LITERAL 2, not a magicNumber -- it never moves on upgrade); THEN, only if AbstractDungeon.player.hand.size() > 0 AT THE INSTANT use() reads it (:34), addToBot PutOnDeckAction(p, p, 1, false). CORRECTED FROM THE ORIGINAL BRIEF, which claimed the played card is already out of hand at that read: AbstractPlayer.useCard (AbstractPlayer.java:1358-1384) runs c.use() at :1369 and only removes the card from hand.group at :1374, hand.removeCard(c) -- AFTER use() returns. So for an ORDINARY HAND PLAY the played Thinking Ahead is STILL counted in hand.size() at its own read: the guard is a structural no-op there (hand.size() >= 1 always, since it counts itself), and the put-back offer is unconditional for a hand play. The guard is reachable only when Thinking Ahead is AUTOPLAYED off the draw pile (PlayTopCardAction / Havoc) -- there it was never a hand.group member, so hand.size() reflects the real (possibly empty) hand and the put-back can be genuinely skipped. upgrade (:44-52) sets exhaust = false ONLY -- no magicNumber change, so `upgraded_flags: []` is the whole upgraded row (Limit Break / Brutality precedent). Encoded with the Warcry pattern (DRAW then a put-on-draw-top CHOOSE_CARD, cards.yaml id 10) PLUS a queue-time guard (`guard: hand_nonempty`, interp.hpp kChoiceQueueGuardHandNonemptyBit): card_play.cpp queue_effect_step processes a card's steps synchronously, none executed yet, so CombatState::hand_count when it reaches this step is the same pre-draw value Java's use() reads -- self-inclusive for a hand play, correctly excluding the card for an autoplay (op_play_top_draw's limbo_add puts an autoplayed card straight into limbo, never into hand, matching PlayTopCardAction never adding it to hand.group)."
+  effects:
+    - {op: DRAW, target: SELF, amount: 2}
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1, guard: hand_nonempty}
+  upgraded_flags: []
+  upgraded:
+    - {op: DRAW, target: SELF, amount: 2}
+    - {op: CHOOSE_CARD, target: SELF, choose: put_on_draw_top, amount: 1, guard: hand_nonempty}

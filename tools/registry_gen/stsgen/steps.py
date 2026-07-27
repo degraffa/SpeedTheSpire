@@ -23,8 +23,8 @@ from __future__ import annotations
 
 from .vocab import (CARD_MAKE_UPGRADED_BIT, CARD_PILES, CARD_TYPES,
                     CHOICE_COPIES_SHIFT, CHOICE_KIND_HIGH_BIT, CHOICE_KINDS,
-                    CHOICE_RANDOM_BIT, DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS,
-                    STEP_TARGETS, fail)
+                    CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
+                    DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
 # Which ops a domain MAY author is a property of the queueing helper that turns a
@@ -58,6 +58,10 @@ GENERAL_OPS = frozenset({
     # the other three read only literal operands plus execute-time combat state.
     "DARK_SHACKLES", "DISCOVERY", "ENLIGHTENMENT",
     "RANDOM_COLORLESS_TO_HAND",
+    # B3.11 stage A (Apotheosis): every pile it scans (hand/draw/discard/
+    # exhaust) and the canUpgrade gate are read at execute time; no operand
+    # needs the played card's instance.
+    "UPGRADE_ALL",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -234,7 +238,22 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         if copies != 1 and kind != "duplicate":
             raise fail(f"{owner} CHOOSE_CARD 'copies' is only meaningful for "
                        f"choose: duplicate")
-        return extra | ((copies - 1) << CHOICE_COPIES_SHIFT)
+        extra |= (copies - 1) << CHOICE_COPIES_SHIFT
+        # `guard: hand_nonempty` (Thinking Ahead): queue this step only when
+        # CombatState::hand_count > 0 at the instant card_play.cpp
+        # queue_effect_step reaches it -- ThinkingAhead.use's play-time
+        # hand.size() > 0 check (:34). For an ordinary HAND play this is a
+        # structural no-op (the played card still counts itself there --
+        # hand.removeCard runs after use(), AbstractPlayer.java:1369-1374); it
+        # only bites for an AUTOPLAY (the card was never a hand member). See
+        # CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT.
+        guard = step.get("guard")
+        if guard is not None:
+            if guard != "hand_nonempty":
+                raise fail(f"{owner} CHOOSE_CARD has unknown guard {guard!r} "
+                           f"(known: ['hand_nonempty'])")
+            extra |= CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT
+        return extra
 
     if op == "MAKE_CARD":
         # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24).

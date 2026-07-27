@@ -352,6 +352,9 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             }
             s.monsters[item.tgt].flags |= kMonsterFlagEscaped;
             return;
+        case Opcode::UPGRADE_ALL:
+            op_upgrade_all(s);
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

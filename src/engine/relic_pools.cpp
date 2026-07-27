@@ -211,7 +211,17 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // CardType.ATTACK -- there is no POWER among them -- so Bottled Tornado's
     // rarity-agnostic type scan is unchanged too. Neither gate moved; the number
     // is not merely bumped.
-    static_assert(sts::registry::manifest::kCardsCount == 109,
+    // Checked for the four colorless RARE rows added alongside this comment
+    // (Apotheosis, Master of Strategy, Sadistic Nature, Thinking Ahead): the
+    // BASIC answer is NO for all four (their ctors pass CardRarity.RARE, so
+    // the hard-coded BASIC set stays exactly {STRIKE, DEFEND, BASH}), but the
+    // POWER answer is YES for Sadistic Nature (SadisticNature.java:26,
+    // CardType.POWER) -- the same "only widens the already-live gate" shape
+    // the red RARE batch's five POWER cards set, since ctx.deck_has_power is a
+    // plain type scan with no rarity or color clause (CardHelper.hasCardType,
+    // :80-86). The registry now has 9 POWER-type cards; the gate was already
+    // live and stays live.
+    static_assert(sts::registry::manifest::kCardsCount == 113,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

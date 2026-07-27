@@ -363,6 +363,17 @@ enum class Opcode : uint16_t {
                               // no S1 binder (BeatOfDeath / Rebound / Slow /
                               // TimeMaze / TimeWarp are all out of scope), so
                               // its seam is a named comment in op_use_card.
+    // --- Colorless-rare addition (append-only from 54) ------------------------
+    UPGRADE_ALL = 54,         // Apotheosis / ApotheosisAction.update (:25-34):
+                              // upgrade every eligible card in hand, drawPile,
+                              // discardPile, exhaustPile IN THAT ORDER.
+                              // canUpgrade() (AbstractCard.java:672-680) gates
+                              // each one: false for CURSE/STATUS, else
+                              // !upgraded; Searing Blow overrides canUpgrade to
+                              // always-true (SearingBlow.java:58-60), so its
+                              // upgrade COUNT keeps climbing past 1. The played
+                              // Apotheosis sits in the LIMBO pile throughout and
+                              // is in none of the four piles scanned.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -525,6 +536,33 @@ inline constexpr uint32_t kChoiceCopiesShift = 4;
 // The DUPLICATE kind's copy count (1-based; bits [4..7] store copies - 1).
 [[nodiscard]] constexpr int choose_copies_from_flags(uint32_t flags) noexcept {
     return static_cast<int>((flags >> kChoiceCopiesShift) & 0xFu) + 1;
+}
+
+// Thinking Ahead: an AUTHOR-ONLY queue-time guard bit, never inspected by the
+// interpreter's execute path (op_choose_card / choice_slot_eligible etc. never
+// read it). ThinkingAhead.use (:32-37) queues PutOnDeckAction(1, false) only
+// when AbstractDungeon.player.hand.size() > 0 at the instant use() reads it
+// (:34). AbstractPlayer.useCard (AbstractPlayer.java:1358-1384) runs c.use()
+// at :1369 and only removes the played card from hand.group at :1374 --
+// AFTER use() returns -- so for an ORDINARY HAND PLAY the played card is
+// STILL counted in that read (hand.size() >= 1 always, since it counts
+// itself): the guard is a structural no-op there. It matters only when the
+// card is AUTOPLAYED off the draw pile (PlayTopCardAction / Havoc), where it
+// was never a hand.group member and hand.size() reflects the real hand.
+// card_play.cpp queue_effect_step processes one card's steps in that same
+// synchronous, nothing-executed-yet order, so checking CombatState::hand_count
+// when it reaches a step carrying this bit reproduces the Java read exactly
+// in both cases -- self-inclusive for a hand play (op_play_card /
+// op_play_top_draw limbo_add an autoplayed card BEFORE its own effects queue,
+// so it is correctly absent from hand there). A step so gated is simply never
+// queued when the check fails. Bit 8 -- clear of kind[0..1]/RANDOM[2]/
+// kind-hi[3]/copies[4..7]. MIRRORED in tools/registry_gen/stsgen/vocab.py
+// (CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT), authored as `guard: hand_nonempty`
+// on a CHOOSE_CARD step.
+inline constexpr uint32_t kChoiceQueueGuardHandNonemptyBit = 1u << 8;
+[[nodiscard]] constexpr bool choose_queue_guard_hand_nonempty(
+    uint32_t flags) noexcept {
+    return (flags & kChoiceQueueGuardHandNonemptyBit) != 0u;
 }
 
 // --- MAKE_CARD field encoding -----------------------------------------------

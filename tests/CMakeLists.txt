@@ -479,6 +479,16 @@ sts_add_test(card_rares_test)
 # modifyBlockLast TWO-PASS order No Block's correctness depends on.
 sts_add_test(card_colorless_uncommons_test)
 
+# B3.11 stage A: the four colorless RARE cards this stage owns (Apotheosis,
+# Master of Strategy, Sadistic Nature, Thinking Ahead) and the UPGRADE_ALL
+# opcode. Per-card base/upgraded tier-2 behaviour; the Sadistic native-power
+# Shackled exclusion fix (B3.10b landed PowerId::SHACKLED, making the
+# exclusion reachable); Thinking Ahead's queue-time hand.size() guard (the
+# played card is already in limbo when it is read); UPGRADE_ALL's pile order
+# and canUpgrade gate, including Searing Blow's always-upgradable override and
+# the played Apotheosis's own limbo immunity.
+sts_add_test(card_colorless_rares_test)
+
 # The played-card limbo window (AbstractPlayer.useCard:1369-1375): while a
 # card's own queued effects resolve, the card is cardInUse -- in NO pile --
 # until the queued UseCardAction files it away. Pins the reshuffle-membership,

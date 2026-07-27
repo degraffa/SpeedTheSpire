@@ -450,7 +450,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 109u);  // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 113u);  // B3.7: prior 67 + 8 red uncommon POWER cards
                                       // + the 16 red RARE cards (ids 76-91)
                                       // + B3.10a/B3.10b's 18 colorless UNCOMMONs.
                                       // Their ids run 92-111 with TWO interior
@@ -458,6 +458,13 @@ TEST(RegistryGen, ManifestCounts) {
                                       // so the row COUNT is 18, not 20 --
                                       // exactly the sparse-id case the note
                                       // below describes.
+                                      // + B3.11 stage A's 4 colorless RARE rows
+                                      // (112 Apotheosis, 116 Master of
+                                      // Strategy, 120 Sadistic Nature, 124
+                                      // Thinking Ahead); ids 113-115/117-119/
+                                      // 121-123/125-126 are reserved gaps
+                                      // owned by later B3.11 stages, so the
+                                      // row count adds 4, not 15.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
     EXPECT_EQ(m::kPowersCount, 45u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
@@ -521,7 +528,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 425u);  // 109 + 45 + 25 + 142 + 33 + 31 + 20 + 20
+    EXPECT_EQ(m::kTotalCount, 429u);  // 113 + 45 + 25 + 142 + 33 + 31 + 20 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

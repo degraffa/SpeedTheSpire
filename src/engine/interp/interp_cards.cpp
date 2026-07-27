@@ -211,6 +211,29 @@ CardPoolIndex remove_from_hand(CombatState& s, uint8_t slot) noexcept {
     return pi;
 }
 
+// AbstractCard.canUpgrade (AbstractCard.java:672-680) in order:
+//   type == CURSE  -> false
+//   type == STATUS -> false
+//   otherwise      -> !upgraded
+// SearingBlow.canUpgrade (SearingBlow.java:58-60) OVERRIDES the whole base
+// method with `return true`, so it is tested FIRST here -- an override runs
+// INSTEAD OF, not after, the base body. Shared by choice_slot_eligible's
+// UPGRADE kind (Armaments, a single hand card) and op_upgrade_all (Apotheosis,
+// all four piles) so the two never drift apart.
+[[nodiscard]] bool can_upgrade_instance(const CombatState& s,
+                                        CardPoolIndex pi) noexcept {
+    const CardInstance& c = s.card_pool[pi];
+    if (c.card_id == static_cast<uint16_t>(CardId::SEARING_BLOW)) {
+        return c.upgrade != UINT8_MAX;
+    }
+    const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+    if (def == nullptr || def->type == CardType::CURSE ||
+        def->type == CardType::STATUS) {
+        return false;
+    }
+    return c.upgrade == 0;
+}
+
 // Upgrade the pool instance in place (in-combat upgrade, ArmamentsAction:
 // c.upgrade() + applyPowers()). `upgrade` is a count; re-seed cost_now/flags from
 // the registry's upgraded row so the new cost/flags take effect (upgradeBaseCost).
@@ -964,6 +987,30 @@ void op_random_colorless_to_hand(CombatState& s, int count) noexcept {
     }
 }
 
+// UPGRADE_ALL (Apotheosis / ApotheosisAction.update, :25-34): upgradeAllCards-
+// InGroup runs over p.hand, p.drawPile, p.discardPile, p.exhaustPile IN THAT
+// ORDER (:28-31), and canUpgrade() (:38) gates each member (shared with
+// Armaments' single-card choice via can_upgrade_instance). c.upgrade() +
+// applyPowers() is upgrade_instance, the same in-place mutation Armaments
+// uses. The played Apotheosis itself is in the LIMBO pile for the whole of
+// this resolution (resolve_card_play), so it sits in none of the four piles
+// scanned and is never upgraded -- matching the Java, where the card mid-use()
+// is in no CardGroup either.
+void op_upgrade_all(CombatState& s) noexcept {
+    auto upgrade_pile = [&s](const CardPoolIndex* pile, uint8_t count) noexcept {
+        for (uint8_t i = 0; i < count; ++i) {
+            const CardPoolIndex pi = pile[i];
+            if (can_upgrade_instance(s, pi)) {
+                upgrade_instance(s, pi);
+            }
+        }
+    };
+    upgrade_pile(s.hand, s.hand_count);
+    upgrade_pile(s.draw, s.draw_count);
+    upgrade_pile(s.discard, s.discard_count);
+    upgrade_pile(s.exhaust, s.exhaust_count);
+}
+
 void prepare_discovery_choice(CombatState& s,
                               ActionQueueItem& item) noexcept {
     if (discovery_choice_prepared(item)) {
@@ -1039,34 +1086,17 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot,
         return false;
     }
     if (kind == ChoiceKind::UPGRADE) {
-        // AbstractCard.canUpgrade (AbstractCard.java:672-680) in order:
-        //   type == CURSE  -> false
-        //   type == STATUS -> false
-        //   otherwise      -> !upgraded
-        // SearingBlow.canUpgrade (SearingBlow.java:58-60) OVERRIDES the whole
-        // base method with `return true`, so it is tested FIRST here -- an
-        // override runs instead of, not after, the base body. (Searing Blow is
-        // an ATTACK, so the type rejections would not have fired for it either
-        // way; the ordering is written to mirror Java dispatch, not to rely on
-        // that coincidence.) Its unbounded timesUpgraded is a u8 here, so the
-        // only extra guard is saturation.
-        const CardInstance& c = s.card_pool[s.hand[slot]];
-        if (c.card_id == static_cast<uint16_t>(CardId::SEARING_BLOW)) {
-            return c.upgrade != UINT8_MAX;
-        }
-        // Curses and statuses are never upgrade targets. This is reachable in
-        // combat: Writhe is an innate curse that opens in hand, and Wound /
-        // Burn / Slimed enter hand mid-combat. Beyond mis-targeting, the
-        // eligible COUNT feeds choice_requires_user / op_choose_card's
-        // forced-vs-prompted branch (ArmamentsAction.java:46-60 counts exactly
-        // the canUpgrade() cards), so an inflated count would change whether a
-        // hand-select screen opens at all.
-        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
-        if (def == nullptr || def->type == CardType::CURSE ||
-            def->type == CardType::STATUS) {
-            return false;
-        }
-        return c.upgrade == 0;
+        // (Searing Blow is an ATTACK, so the type rejections would not have
+        // fired for it either way; can_upgrade_instance's override-first
+        // ordering is written to mirror Java dispatch, not to rely on that
+        // coincidence.) Curses and statuses are never upgrade targets -- this
+        // is reachable in combat: Writhe is an innate curse that opens in
+        // hand, and Wound / Burn / Slimed enter hand mid-combat. Beyond
+        // mis-targeting, the eligible COUNT feeds choice_requires_user /
+        // op_choose_card's forced-vs-prompted branch (ArmamentsAction.java:
+        // 46-60 counts exactly the canUpgrade() cards), so an inflated count
+        // would change whether a hand-select screen opens at all.
+        return can_upgrade_instance(s, s.hand[slot]);
     }
     if (kind == ChoiceKind::DUPLICATE) {
         // Dual Wield: only ATTACK or POWER cards can be duplicated

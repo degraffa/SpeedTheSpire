@@ -69,4 +69,8 @@ void op_dark_shackles(CombatState& s, uint8_t target, int amount) noexcept;
 void op_enlightenment(CombatState& s, bool for_rest_of_combat) noexcept;
 void op_random_colorless_to_hand(CombatState& s, int count) noexcept;
 
+// UPGRADE_ALL (Apotheosis) -- upgrade every eligible card in hand, drawPile,
+// discardPile, exhaustPile, in that order.
+void op_upgrade_all(CombatState& s) noexcept;
+
 }  // namespace sts::engine

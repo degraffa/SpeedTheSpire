@@ -23,9 +23,13 @@ namespace {
 static_assert(static_cast<int>(sts::registry::CardId::STRIKE) == 1);
 static_assert(static_cast<int>(sts::registry::PowerId::VULNERABLE) == 2);
 static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
-// 91 (through the red rares) + B3.10a's 14 colorless UNCOMMON rows; their ids
-// run 92-111 but six interior ids are reserved gaps, so the ROW count adds 14.
-static_assert(sts::registry::manifest::kCardsCount == 109);
+// 91 (through the red rares) + the 18 colorless UNCOMMON rows B3.10a/B3.10b
+// landed; their ids run 92-111 but TWO interior ids (101 Forethought, 109
+// Purity) are reserved gaps owned by mandatory B3.10c, so the ROW count adds
+// 18, not 20. + B3.11 stage A's 4 colorless RARE rows (112 Apotheosis, 116
+// Master of Strategy, 120 Sadistic Nature, 124 Thinking Ahead); ids 113-115/
+// 117-119/121-123/125-126 are reserved gaps owned by later B3.11 stages.
+static_assert(sts::registry::manifest::kCardsCount == 113);
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 // Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only

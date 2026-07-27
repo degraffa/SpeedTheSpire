@@ -65,6 +65,25 @@ namespace {
 void queue_effect_step(CombatState& s, const CardEffectStep& step,
                        uint8_t resolved_target,
                        CardPoolIndex source_index) noexcept {
+    // Thinking Ahead's queue-time guard (ThinkingAhead.java:32-37): a
+    // CHOOSE_CARD step authored `guard: hand_nonempty` is queued only when the
+    // hand is non-empty AT THIS INSTANT -- the same synchronous moment
+    // use()/resolve_card_play's queueing loop reads it, before any of this
+    // card's own already-queued-but-not-yet-executed steps (its DRAW) have
+    // run and BEFORE move_played_card_to_limbo (below) removes the played
+    // card from hand.group -- exactly where AbstractPlayer.useCard's
+    // hand.removeCard(c) sits, AFTER c.use() (:1369) at :1374. For an
+    // ordinary HAND play the played card is therefore STILL in `s.hand` here
+    // and counts itself (hand_count >= 1 always): the guard is a structural
+    // no-op there. It only blocks an AUTOPLAY (op_play_card /
+    // op_play_top_draw put the instance straight into limbo before its
+    // effects are queued, so it is genuinely absent from `s.hand`). A gated
+    // step that fails the guard is simply never queued -- no ActionQueueItem,
+    // no CHOOSE_CARD prompt, nothing to auto-resolve.
+    if (step.op == static_cast<decltype(step.op)>(Opcode::CHOOSE_CARD) &&
+        choose_queue_guard_hand_nonempty(step.extra) && s.hand_count == 0) {
+        return;
+    }
     ActionQueueItem item{};
     item.opcode = static_cast<uint16_t>(step.op);
     item.src = kActorPlayer;

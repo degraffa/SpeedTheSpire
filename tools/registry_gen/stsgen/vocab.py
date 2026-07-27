@@ -169,6 +169,15 @@ OPCODES = {
     # card-pool index), never authored in YAML, but pinned in the enum for the
     # cards.hpp drift check -- the SET_MOVE / ESCAPE precedent.
     "USE_CARD": 53,
+    # B3.11 stage A addition (the one new opcode this stage; 55-59 are reserved
+    # for later B3.11 stages and stay unissued here). ApotheosisAction.update
+    # (:25-34): upgrade every eligible card in hand, drawPile, discardPile,
+    # exhaustPile IN THAT ORDER -- canUpgrade() (AbstractCard.java:672-680)
+    # gates each one (false for CURSE/STATUS, else !upgraded; Searing Blow
+    # overrides canUpgrade to always-true, SearingBlow.java:58-60, so it can be
+    # upgraded past 1). The played Apotheosis is in the LIMBO pile throughout
+    # and is in none of the four piles scanned.
+    "UPGRADE_ALL": 54,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -194,6 +203,22 @@ CHOICE_KIND_HIGH_BIT = 1 << 3
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
 # default (1 copy) encodes as 0 and every pre-B3.6 packed extra is byte-identical.
 CHOICE_COPIES_SHIFT = 4
+# Thinking Ahead: an author-only queue-time guard, never read by the
+# interpreter's execute path. ThinkingAhead.use (:32-37) queues
+# PutOnDeckAction(1, false) only when AbstractDungeon.player.hand.size() > 0 AT
+# THE INSTANT use() reads it (:34). AbstractPlayer.useCard (AbstractPlayer.
+# java:1358-1384) runs c.use() at :1369 and only removes the played card from
+# hand.group at :1374 -- AFTER use() returns -- so for an ORDINARY HAND PLAY
+# the played card is STILL counted at that read (hand.size() >= 1 always,
+# since it counts itself): the guard is a structural no-op there. It matters
+# only when the card is AUTOPLAYED off the draw pile (PlayTopCardAction /
+# Havoc), where it was never a hand.group member. card_play.cpp
+# queue_effect_step processes a card's steps in that same synchronous order,
+# none of them executed yet, so checking CombatState::hand_count when it
+# reaches THIS step reproduces the Java read exactly in both cases. Packed
+# into bit 8 -- clear of kind[0-1]/RANDOM[2]/kind-hi[3]/copies[4-7] -- and
+# authored as `guard: hand_nonempty` on a CHOOSE_CARD step.
+CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT = 1 << 8
 # StepTarget: cards.hpp. SELF=0 (player), CARD_TARGET=1 (the played-on monster).
 # Stage B B3.1 adds ALL_ENEMY=2 (execute-time fan-out over live monsters) and
 # RANDOM_ENEMY=3 (one card_random_rng draw per resolved step).
