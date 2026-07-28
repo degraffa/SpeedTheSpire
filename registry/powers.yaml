@@ -10,6 +10,14 @@
 #                          additive amount stacking, AbstractPower.stackPower's
 #                          this.amount += stackAmount; `none` == non-stacking marker
 #                          for a later bespoke consumer). Optional (default intensity).
+#     priority: <int>      AbstractPower.priority (AbstractPower.java:66, default 5).
+#                          Optional; give it ONLY when the power's ctor overrides the
+#                          default. ApplyPowerAction.java:167 keeps the live power
+#                          list sorted by it (stable, so insertion order breaks ties;
+#                          AbstractPower.compareTo :366-368), and op_apply_power
+#                          reproduces that sort -- slot order feeds compute_damage
+#                          and every hook fan-out, so a wrong priority is a wrong
+#                          damage number, not a cosmetic field.
 #     native: true         (optional) the power's hook BODIES are hand-written C++
 #                          rather than a data-bound effect program -- for the
 #                          irreducibly bespoke powers (guards, counters,
@@ -95,10 +103,11 @@
   name: WEAK
   game_id: "Weakened"
   type: DEBUFF
+  priority: 99
   native: true
   hooks:
     at_end_of_round: []     # native: justApplied latch, then decrement/remove
-  provenance: "WeakPower (WeakPower.java:20-71), read in full. EFFECT: atDamageGive (:61-70) -- damage * 0.75f on NORMAL; the native damage pipeline, no hook. DURATION: atEndOfRound (:44-53), byte-for-byte the same body as Vulnerable's. justApplied is set in the ctor (:35-37) under `if (isSourceMonster)` ALONE -- no turnHasEnded clause, which is the one place the three duration debuffs differ. In S1 scope that predicate is exactly `the owner is the player`: every application to the player passes true (Act-1 monsters, and the Doubt curse's own end-of-turn ApplyPowerAction, Doubt.java:35), and every application to a monster passes false (player cards, Weak Potion, Champion's Belt). Latch storage is the slot's own PowerSlot.counter. POWER_ID \"Weakened\" (:21); isTurnBased (:39); priority 99 (:40) -- ordering only, no engine consumer."
+  provenance: "WeakPower (WeakPower.java:20-71), read in full. EFFECT: atDamageGive (:61-70) -- damage * 0.75f on NORMAL; the native damage pipeline, no hook. DURATION: atEndOfRound (:44-53), byte-for-byte the same body as Vulnerable's. justApplied is set in the ctor (:35-37) under `if (isSourceMonster)` ALONE -- no turnHasEnded clause, which is the one place the three duration debuffs differ. In S1 scope that predicate is exactly `the owner is the player`: every application to the player passes true (Act-1 monsters, and the Doubt curse's own end-of-turn ApplyPowerAction, Doubt.java:35), and every application to a monster passes false (player cards, Weak Potion, Champion's Belt). Latch storage is the slot's own PowerSlot.counter. POWER_ID \"Weakened\" (:21); isTurnBased (:39); priority 99 (:40) -- consumed by op_apply_power's ApplyPowerAction re-sort (ApplyPowerAction.java:167): Weak sorts behind every default-5 power, so atDamageGive always multiplies AFTER Strength adds."
 
 # --- B3.2 framework powers (hook bindings for the §5.3-5.5 dispatch order) ----
 
@@ -276,10 +285,11 @@
   name: FRAIL
   game_id: "Frail"
   type: DEBUFF
+  priority: 10
   native: true
   hooks:
     at_end_of_round: []     # native: justApplied skip, then decrement/remove
-  provenance: "FrailPower (FrailPower.java:22-64): DEBUFF; modifyBlock returns blockAmount*0.75f; a monster-sourced new instance sets justApplied (ctor :32-34, `if (isSourceMonster)` alone -- Weak's predicate, not Vulnerable's), whose first atEndOfRound clears the latch without decrementing, then later rounds reduce 1/remove at zero (:40-52). Shame applies new FrailPower(player,1,true) (Shame.java:34). In S1 scope `isSourceMonster` is exactly `the owner is the player`, as for Weak. Native: card BLOCK's float modify-block pass applies x0.75 and floors once after all powers; direct GainBlockAction items carry kBlockNoPowers and bypass it. Latch storage is the slot's own PowerSlot.counter (types.hpp), shared with Vulnerable and Weak -- it replaces the former player-only CombatState.flags bit, which could not reach a monster-owned instance; stacking an existing instance preserves its latch, matching ApplyPowerAction.stackPower. POWER_ID \"Frail\" (:22)."
+  provenance: "FrailPower (FrailPower.java:22-64): DEBUFF; modifyBlock returns blockAmount*0.75f; a monster-sourced new instance sets justApplied (ctor :32-34, `if (isSourceMonster)` alone -- Weak's predicate, not Vulnerable's), whose first atEndOfRound clears the latch without decrementing, then later rounds reduce 1/remove at zero (:40-52). Shame applies new FrailPower(player,1,true) (Shame.java:34). In S1 scope `isSourceMonster` is exactly `the owner is the player`, as for Weak. Native: card BLOCK's float modify-block pass applies x0.75 and floors once after all powers; direct GainBlockAction items carry kBlockNoPowers and bypass it. Latch storage is the slot's own PowerSlot.counter (types.hpp), shared with Vulnerable and Weak -- it replaces the former player-only CombatState.flags bit, which could not reach a monster-owned instance; stacking an existing instance preserves its latch, matching ApplyPowerAction.stackPower. POWER_ID \"Frail\" (:22); priority 10 (:29) -- the ApplyPowerAction.java:167 sort places Frail behind the default-5 powers and ahead of Weak (99)."
 # --- B3.17 large-slime marker ------------------------------------------------
 - id: 22
   name: SPLIT
@@ -352,10 +362,11 @@
   name: INTANGIBLE
   game_id: "IntangiblePlayer"
   type: BUFF
+  priority: 75
   hooks:
     at_end_of_round:
       - {op: REDUCE_POWER, target: SELF, amount: 1, power: INTANGIBLE}
-  provenance: "IntangiblePlayerPower (IntangiblePlayerPower.java:14-55): POWER_ID \"IntangiblePlayer\", BUFF, priority 75. atEndOfRound (:51-55) -- amount 0 -> RemoveSpecificPowerAction, else addToBot ReducePowerAction(owner, owner, POWER_ID, 1); the REDUCE_POWER opcode already removes the slot at <= 0 (interp_powers.cpp op_reduce_power), and ApplyPowerAction never lands amount 0, so the two Java branches collapse to one step. The DAMAGE CAP is bespoke and lives at TWO sites, matching the Java: atDamageFinalReceive (:44-49) inside DamageInfo.applyPowers, and the separate pre-decrementBlock guard in AbstractPlayer.damage (:1397-1399, `damageAmount > 1 && hasPower(\"IntangiblePlayer\")`) which also caps THORNS and HP_LOSS because those skip applyPowers. Applied by Incense Burner (relics.yaml INCENSE_BURNER)."
+  provenance: "IntangiblePlayerPower (IntangiblePlayerPower.java:14-55): POWER_ID \"IntangiblePlayer\", BUFF, priority 75 (:31, mirrored above for the ApplyPowerAction.java:167 sort). atEndOfRound (:51-55) -- amount 0 -> RemoveSpecificPowerAction, else addToBot ReducePowerAction(owner, owner, POWER_ID, 1); the REDUCE_POWER opcode already removes the slot at <= 0 (interp_powers.cpp op_reduce_power), and ApplyPowerAction never lands amount 0, so the two Java branches collapse to one step. The DAMAGE CAP is bespoke and lives at TWO sites, matching the Java: atDamageFinalReceive (:44-49) inside DamageInfo.applyPowers, and the separate pre-decrementBlock guard in AbstractPlayer.damage (:1397-1399, `damageAmount > 1 && hasPower(\"IntangiblePlayer\")`) which also caps THORNS and HP_LOSS because those skip applyPowers. Applied by Incense Burner (relics.yaml INCENSE_BURNER)."
 
 # --- Act-1 elite monster power (Gremlin Nob's Bellow) -------------------------
 # Artifact, the Sentry's pre-battle power, is NOT a new row: it landed with the
@@ -491,6 +502,7 @@
   name: CONFUSION
   game_id: "Confusion"
   type: DEBUFF
+  priority: 0
   stack: none
   native: true
   hooks:
@@ -499,7 +511,7 @@
   # neither atDamageGive / atDamageReceive / atDamageFinalReceive
   # (interp_damage.cpp) nor modifyBlock (interp_block.cpp) -- its ONLY override is
   # onCardDraw -- so none of those four needed a case.
-  provenance: "ConfusionPower.onCardDraw (ConfusionPower.java:38-48) -- if card.cost >= 0: newCost = AbstractDungeon.cardRandomRng.random(3) (INCLUSIVE 0..3, stage-a trap 3), and if newCost != cost set BOTH card.cost and card.costForTurn to it and mark isCostModified; freeToPlayOnce = false either way. The DRAW IS UNCONDITIONAL within the cost >= 0 branch -- it happens before the != comparison, so a card that rolls its own cost still consumes one draw; a card with cost < 0 (X-cost, or an unplayable curse/status) consumes NONE. Applied only by SneckoEye.atPreBattle (SneckoEye.java:39-43); the ctor (:23-31) takes no amount, hence stack: none. POWER_ID \"Confusion\" (:18)."
+  provenance: "ConfusionPower.onCardDraw (ConfusionPower.java:38-48) -- if card.cost >= 0: newCost = AbstractDungeon.cardRandomRng.random(3) (INCLUSIVE 0..3, stage-a trap 3), and if newCost != cost set BOTH card.cost and card.costForTurn to it and mark isCostModified; freeToPlayOnce = false either way. The DRAW IS UNCONDITIONAL within the cost >= 0 branch -- it happens before the != comparison, so a card that rolls its own cost still consumes one draw; a card with cost < 0 (X-cost, or an unplayable curse/status) consumes NONE. Applied only by SneckoEye.atPreBattle (SneckoEye.java:39-43); the ctor (:23-31) takes no amount, hence stack: none. POWER_ID \"Confusion\" (:18); priority 0 (:30) -- the ApplyPowerAction.java:167 sort places Confusion ahead of every other registered power."
 
 # --- B3.15 monster-applied powers (ids 73-74) ---------------------------------
 # Both names were searched for in this file before being appended: neither

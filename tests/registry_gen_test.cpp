@@ -1319,6 +1319,36 @@ TEST(RegistryGen, NativePowerDispatchListCoversExactlyNativeRows) {
            "powers.yaml rows";
 }
 
+TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
+    // AbstractPower.priority defaults to 5 (AbstractPower.java:66); a ctor
+    // overrides it. The registry mirrors every override because
+    // op_apply_power's ApplyPowerAction re-sort (ApplyPowerAction.java:167,
+    // AbstractPower.compareTo :366-368) orders the live power list by it.
+    // The complete override set for registered powers, from a full grep of
+    // `this.priority` across the decompiled powers directory: Weak 99
+    // (WeakPower.java:40), Frail 10 (FrailPower.java:29), IntangiblePlayer 75
+    // (IntangiblePlayerPower.java:31), Confusion 0 (ConfusionPower.java:30).
+    namespace r = sts::registry;
+    EXPECT_EQ(r::power_def(r::PowerId::WEAK)->priority, 99);
+    EXPECT_EQ(r::power_def(r::PowerId::FRAIL)->priority, 10);
+    EXPECT_EQ(r::power_def(r::PowerId::INTANGIBLE)->priority, 75);
+    EXPECT_EQ(r::power_def(r::PowerId::CONFUSION)->priority, 0);
+    // Every other row carries the default.
+    for (int i = 0; i < kIdProbeLimit; ++i) {
+        const auto id = static_cast<r::PowerId>(i);
+        if (id == r::PowerId::WEAK || id == r::PowerId::FRAIL ||
+            id == r::PowerId::INTANGIBLE || id == r::PowerId::CONFUSION) {
+            continue;
+        }
+        const r::PowerDef* d = r::power_def(id);
+        if (d != nullptr) {
+            EXPECT_EQ(d->priority, r::kDefaultPowerPriority)
+                << "PowerId " << i
+                << " carries a non-default priority the Java does not";
+        }
+    }
+}
+
 TEST(RegistryGen, NativeRelicDispatchListCoversExactlyNativeRows) {
     std::vector<int> from_macro;
 #define STS_TEST_NATIVE_RELIC(ID, FN) \

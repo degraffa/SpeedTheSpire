@@ -135,6 +135,39 @@ void remove_slot_at(CombatState& s, uint8_t tgt, PowerSlot* slots,
     }
 }
 
+// The sort key of ApplyPowerAction.java:167's Collections.sort:
+// AbstractPower.compareTo (AbstractPower.java:366-368) is
+// `this.priority - other.priority`, the field defaulting to 5
+// (AbstractPower.java:66). The registry mirrors every ctor override
+// (powers.yaml `priority:`); an id with no row takes the default.
+[[nodiscard]] uint8_t power_sort_priority(uint16_t pid) noexcept {
+    const PowerDef* def = power_def(static_cast<PowerId>(pid));
+    return def != nullptr ? def->priority : sts::registry::kDefaultPowerPriority;
+}
+
+// ApplyPowerAction.java:167: `Collections.sort(this.target.powers)` runs after
+// every NEW power is appended (the !hasBuffAlready branch ONLY -- the stacking
+// branch :140-161 never re-sorts, and the synchronous AbstractCreature.addPower
+// :506-527 never sorts at all). Collections.sort is a stable merge sort, so the
+// live list is priority-major with insertion order preserved inside a priority
+// class. Reproduced as an in-place insertion sort (stable; the list is at most
+// kPowerCap = 24 slots) over WHOLE PowerSlot rows, so an instanced power's
+// per-slot amount/counter travel with their slot. Safe against queued
+// REMOVE/REDUCE items: instance keys match {amount, counter} values, never a
+// slot index (interp.hpp power_instance_key_present).
+void sort_powers_like_the_game(PowerSlot* slots, uint8_t count) noexcept {
+    for (uint8_t i = 1; i < count; ++i) {
+        const PowerSlot key = slots[i];
+        const uint8_t kp = power_sort_priority(key.power_id);
+        int j = static_cast<int>(i) - 1;
+        while (j >= 0 && power_sort_priority(slots[j].power_id) > kp) {
+            slots[j + 1] = slots[j];
+            --j;
+        }
+        slots[j + 1] = key;
+    }
+}
+
 }  // namespace
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
@@ -324,6 +357,12 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     }
     slots[*count] = fresh;
     ++*count;
+    // The new-power branch ends with the whole-list re-sort
+    // (ApplyPowerAction.java:165-167). Slot order is load-bearing: it is the
+    // iteration order of compute_damage's atDamage* walks and of every
+    // per-power hook fan-out, so Weak (99) lands behind Strength (5) no matter
+    // which was applied first -- (base + Str) * 0.75, never (base * 0.75) + Str.
+    sort_powers_like_the_game(slots, *count);
 }
 
 // REMOVE_POWER (RemoveSpecificPowerAction): drop PowerId(flags low16) from tgt's
