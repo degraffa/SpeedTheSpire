@@ -49,6 +49,8 @@ using engine::MonsterId;
 using engine::MonsterQueueItem;
 using engine::PowerId;
 using engine::PowerSlot;
+using engine::RelicId;
+using engine::RelicSlot;
 using engine::RngStream;
 using engine::SCHEMA_VERSION;
 
@@ -351,6 +353,29 @@ TEST(DifferGroupMonsters, ScalarFields) {
     DiffReport r4 = diff_states(base, mut4);
     EXPECT_TRUE(r4.mentions("monster_count")) << r4.to_string();
     EXPECT_EQ(r4.size(), 1u) << r4.to_string();
+}
+
+// Runic Dome hides enemy intents in the OBSERVATION encoder only. The capture
+// diff must not notice: MonsterState::intent carries the game's move_id, which
+// is the semantic anchor both sides of the pipeline agree on -- the oracle fork
+// blanks the DISPLAY intent string under Runic Dome and the translator
+// deliberately ignores that string and reads move_id (translate.cpp's
+// fr.ignore("intent")). So an intent mismatch must still be reported with the
+// relic owned, and owning the relic must not by itself produce or mask a diff.
+TEST(DifferGroupMonsters, RunicDomeDoesNotTouchTheDiffSurface) {
+    CombatState base = MakeBase();
+    base.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RUNIC_DOME), -1};
+    base.relic_count = 1;
+
+    CombatState same = base;
+    EXPECT_TRUE(diff_states(base, same).empty())
+        << "owning Runic Dome invented a difference";
+
+    CombatState mut = base;
+    mut.monsters[0].intent = static_cast<uint8_t>(base.monsters[0].intent + 1);
+    DiffReport r = diff_states(base, mut);
+    EXPECT_TRUE(r.mentions("monsters[0].intent")) << r.to_string();
+    EXPECT_EQ(r.size(), 1u) << r.to_string();
 }
 
 TEST(DifferGroupMonsterPowers, PowerSlot) {
