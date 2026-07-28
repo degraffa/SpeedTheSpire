@@ -148,13 +148,15 @@ enum class RunPhase : uint8_t {
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
     TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
     EVENT_DIALOG = 9,      // a ?-room resolved to an event with a live dialog
-                           // body (event_framework.hpp). Today only the
-                           // synthetic proof body reaches it; every native
-                           // event parks at ROOM_UNIMPLEMENTED until its
-                           // content-task body lands. Value 9 is the ledger's
-                           // reserved allocation (stage-b-tasks.md shared-
-                           // namespace table); gaps are legal, values are
-                           // append-only and never renumbered.
+                           // body (event_framework.hpp). Most native events
+                           // have one (the events.yaml rows marked
+                           // `implemented: true`); a selected event with NO
+                           // registered body parks at ROOM_UNIMPLEMENTED
+                           // instead, with the selection bookkeeping committed
+                           // and the EventId retained in rc.event. Value 9 is
+                           // the ledger's reserved allocation (stage-b-tasks.md
+                           // shared-namespace table); gaps are legal, values
+                           // are append-only and never renumbered.
     SHOP = 10,             // the merchant's floor, or its card-removal grid
                            // (shop.hpp). Reached from a static ShopRoom map
                            // node AND from a ? room whose eventRng roll came up
