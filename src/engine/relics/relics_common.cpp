@@ -144,11 +144,35 @@ void relic_native_lantern(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
                             const RelicHookContext& /*ctx*/) noexcept {
-    // RedSkull.onBloodied (routed through wasHPLost): when the HP loss drops
-    // the player to <=50% max HP and Red Skull is not already active, gain 3
-    // Strength. slot.counter is the isActive flag (0 = inactive). The
-    // onNotBloodied -3 on healing back over 50% is DEFERRED (needs a
-    // heal-cross hook). Strength IS registered (id 1).
+    // slot.counter is the suppression latch: 1 while the grant must not fire
+    // (isActive, OR the combat was entered already bloodied), 0 while armed.
+    //
+    // AT_BATTLE_START seeds it from starting HP, reproducing two Java facts at
+    // once: preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
+    // (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP never
+    // fires the damage-side onBloodied cross (AbstractPlayer.java:1476-1481 --
+    // it fires only when isBloodied flips false->true); and RedSkull.
+    // atBattleStart resets isActive = false (RedSkull.java:37), so a latch a
+    // previous combat left behind (fold_back_combat persists the counter into
+    // the run slot) re-arms here. The int-division seed and the float damage
+    // cross agree for integer HP: cur <= max/2  ==  cur*2 <= max.
+    //
+    // NOT MODELLED, deliberately: the action atBattleStart QUEUES at
+    // RedSkull.java:38 is an unavailable anonymous inner class in this
+    // decompiled tree (it reads/writes isActive per the synthetic
+    // access$000/002, :76-83) -- its body is not evidence-derivable and stays
+    // a recorded deferral rather than an invention.
+    if (hook == RelicHook::AT_BATTLE_START) {
+        slot.counter =
+            (static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) ? 1 : 0;
+        return;
+    }
+    // RedSkull.onBloodied (RedSkull.java:41-52, routed through wasHPLost):
+    // when the HP loss drops the player to <=50% max HP while the latch is
+    // clear, gain 3 Strength (addToTop ApplyPowerAction(StrengthPower 3),
+    // :47) and latch (isActive = true, :49). The onNotBloodied -3 on healing
+    // back over 50% (:54-63) is DEFERRED (needs a heal-cross hook). Strength
+    // IS registered (id 1).
     if (hook == RelicHook::WAS_HP_LOST && slot.counter == 0 &&
         static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
         slot.counter = 1;
@@ -158,7 +182,7 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
         gain.tgt = kActorPlayer;
         gain.amount = 3;
         gain.flags = make_apply_power_flags(PowerId::STRENGTH);
-        add_to_top(s, gain);  // addToTop (RedSkull.java:54)
+        add_to_top(s, gain);  // addToTop (RedSkull.java:47)
     }
 }
 

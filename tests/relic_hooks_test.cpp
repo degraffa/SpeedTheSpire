@@ -340,6 +340,47 @@ TEST(RelicHooks, RedSkullGainsStrengthWhenBloodied) {
     EXPECT_EQ(s2.action_count, 0);
 }
 
+TEST(RelicHooks, RedSkullDoesNotFireWhenCombatBeganBloodied) {
+    // preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
+    // (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
+    // never fires the damage-side onBloodied cross (:1476-1481 fires only on
+    // the false->true flip). The battle-start hook seeds the slot latch from
+    // starting HP; an HP loss while already bloodied then grants nothing.
+    CombatState s = MakeState();
+    s.player_hp = 38;               // 76 <= 80 -> entered combat bloodied
+    Relics r; r.add(RelicId::RED_SKULL);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "the seed itself queues nothing";
+    EXPECT_EQ(r.slots[0].counter, 1) << "entered bloodied -> latch suppressed";
+
+    s.player_hp = 30;
+    dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/8);
+    EXPECT_EQ(s.action_count, 0)
+        << "no onBloodied cross for a combat that began bloodied";
+}
+
+TEST(RelicHooks, RedSkullReArmsAtEveryBattleStart) {
+    // fold_back_combat persists the mirrored counter into the run's RelicSlot,
+    // so a combat where Red Skull fired leaves counter == 1 behind. The game
+    // resets isActive at every atBattleStart (RedSkull.java:37) and re-derives
+    // isBloodied from starting HP (AbstractPlayer.java:1575): entering the
+    // next combat above half HP must re-arm the grant.
+    CombatState s = MakeState();
+    s.player_hp = 60;               // 120 > 80 -> not bloodied at entry
+    Relics r; r.add(RelicId::RED_SKULL);
+    r.slots[0].counter = 1;         // stale isActive from the previous combat
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(r.slots[0].counter, 0) << "atBattleStart resets isActive";
+
+    s.player_hp = 35;               // 70 <= 80 -> the cross happens in-combat
+    dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/25);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
+    EXPECT_EQ(queued(s, 0).amount, 3);
+    EXPECT_EQ(r.slots[0].counter, 1);
+}
+
 // --- Counter relics (persist counter in the RelicSlot) -----------------------
 
 TEST(RelicHooks, NunchakuGrantsEnergyEveryTenthAttack) {
