@@ -169,7 +169,32 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     // Post: phase == WAITING_ON_USER, turn == 1, energy == kIroncladBaseEnergy,
     // hand_count == kStartOfTurnDrawCount (5), draw_count == n - 5.
 
+    // initializeDeck's overflow draw for a >5-card placeOnTop collection --
+    // see the declaration (advance.hpp) for the preTurnActions derivation of
+    // why it runs after the turn-1 pump. This entry point has no relic mirror,
+    // so there is no atBattleStart drain between the pump and this call.
+    queue_innate_overflow_draw(state, innate_count);
+
     return state;
+}
+
+void queue_innate_overflow_draw(CombatState& state,
+                                uint8_t innate_count) noexcept {
+    // CardGroup.initializeDeck:951-954. The threshold and the queued amount
+    // both read masterHandSize (5); the ordering contract is on the
+    // declaration in advance.hpp. A no-op leaves the state byte-untouched, so
+    // every existing <=5-innate combat (all 20 fixtures included) is
+    // unchanged.
+    if (innate_count <= static_cast<uint8_t>(kStartOfTurnDrawCount)) {
+        return;
+    }
+    ActionQueueItem draw{};
+    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+    draw.src = kActorPlayer;
+    draw.tgt = kActorPlayer;
+    draw.amount = static_cast<int32_t>(innate_count) - kStartOfTurnDrawCount;
+    add_to_bottom(state, draw);
+    pump(state, dispatch_monster_turn);
 }
 
 void legal_actions(const CombatState& state, ActionMask& out) noexcept {

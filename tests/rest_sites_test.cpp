@@ -447,6 +447,34 @@ TEST(RestSites, SmithGridWritesExistingUpgradeCountByMasterDeckIndex) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
+TEST(RestSites, SmithingABottledCardKeepsTheBottleBit) {
+    // The Smith grid is getUpgradableCards() with NO bottled exclusion
+    // (CampfireSmithEffect.java:62), so a bottled card CAN be upgraded -- and
+    // upgrading keeps the bottle: the flags live on the instance and
+    // AbstractPlayer.bottledCardUpgradeCheck (AbstractPlayer.java:2106) only
+    // re-points the relic's display reference, never clears the card's flag.
+    RunController rc = enter_floor_one_rest();
+    rc.run.master_deck_count = 2;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0,
+                     kMasterCardInBottleFlame, 0};
+    rc.run.master_deck[1] =
+        CardInstance{static_cast<uint16_t>(CardId::DEFEND), 0, 0, 0, 0};
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         option_index(rc.run, RestOptionKind::SMITH)));
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::SMITH));
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_choose_master_deck[0])
+        << "a bottled card stays smithable (no exclusion on the Smith grid)";
+
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.master_deck[0].upgrade, 1);
+    EXPECT_EQ(rc.run.master_deck[0].flags, kMasterCardInBottleFlame)
+        << "upgrading a bottled card keeps the bottle";
+}
+
 TEST(RestSites, PeacePipeTokeUsesPurgeableGridAndMasterDeckRemovalDoor) {
     RunController rc = enter_floor_one_rest(20);
     set_relics(rc.run,

@@ -43,6 +43,7 @@
 #include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
 #include "sts/engine/relics.hpp"       // RelicDef / kRelicDefs
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/run_deck.hpp"     // the master-deck bottle bits
 
 namespace sts::engine {
 namespace {
@@ -452,6 +453,145 @@ TEST(RunCombat, LousePreBattleAndInnateResolveBeforePlayerControl) {
     EXPECT_EQ(rc.combat.card_queue_count, 0);
     EXPECT_EQ(rc.combat.monster_queue_count, 0);
     EXPECT_TRUE(hand_contains(rc.combat, CardId::WRITHE));
+}
+
+// =============================================================================
+// The Bottled trio's master-deck marker (run_deck.hpp) -- combat construction
+// =============================================================================
+//
+// CardGroup.initializeDeck (CardGroup.java:928-955): after the one shuffle,
+// `if (c.isInnate) placeOnTop; else if (inBottleFlame || inBottleLightning ||
+// inBottleTornado) placeOnTop;` -- Bottled and Innate share ONE top-placement
+// list, and :951-954 queues DrawCardAction(placeOnTop.size() - masterHandSize)
+// into preTurnActions when that list exceeds the hand size.
+
+// Count how many hand+draw slots reference card-pool row `pi`.
+int pool_index_occurrences(const CombatState& s, uint8_t pi) {
+    int cnt = 0;
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.hand[i] == pi) ++cnt;
+    }
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        if (s.draw[i] == pi) ++cnt;
+    }
+    return cnt;
+}
+
+bool hand_holds_pool_index(const CombatState& s, uint8_t pi) {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.hand[i] == pi) return true;
+    }
+    return false;
+}
+
+TEST(RunCombatBottle, BottledMasterCardOpensInHandLikeInnate) {
+    RunController rc = run_begin(kSeed, kA20);
+    // A20 deck: Ascender's Bane at 0, then 5 Strikes / 4 Defends / Bash.
+    // Bottle the first Strike (a Strike IS offerable by the game's bottle
+    // grid: getPurgeableCards().getAttacks() has no rarity clause -- only
+    // canSpawn reads rarity, BottledFlame.java:43 vs :93-99).
+    ASSERT_EQ(rc.run.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::STRIKE));
+    rc.run.master_deck[1].flags = kMasterCardInBottleFlame;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    // The combat instance carries INNATE (OR-ed in at pool build; the builder
+    // is index-aligned with the master deck), and the bottled instance is in
+    // the opening hand.
+    EXPECT_TRUE(has_card_flag(rc.combat.card_pool[1].flags, CardFlag::INNATE));
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 1));
+    // The master-deck bottle bit itself must NOT leak into combat flags: the
+    // pool flags are the registry's plus INNATE, nothing else.
+    const CardDef* strike = card_def(CardId::STRIKE);
+    ASSERT_NE(strike, nullptr);
+    EXPECT_EQ(rc.combat.card_pool[1].flags,
+              static_cast<uint16_t>(card_flags(*strike, 0) |
+                                    static_cast<uint16_t>(CardFlag::INNATE)));
+    // The run-side marker survives the combat construction untouched.
+    EXPECT_EQ(rc.run.master_deck[1].flags, kMasterCardInBottleFlame);
+}
+
+TEST(RunCombatBottle, ABottledCardThatIsAlsoInnateIsAddedOnce) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Writhe is Innate by registry; stamping a bottle bit on the same instance
+    // exercises the Java's if/else-if single-add (CardGroup.java:933-941).
+    rc.run.master_deck[1].card_id = static_cast<uint16_t>(CardId::WRITHE);
+    rc.run.master_deck[1].flags = kMasterCardInBottleLightning;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    EXPECT_EQ(pool_index_occurrences(rc.combat, 1), 1)
+        << "innate+bottled must place the instance exactly once";
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 1));
+    const int deck_n = static_cast<int>(rc.run.master_deck_count);
+    EXPECT_EQ(static_cast<int>(rc.combat.hand_count) +
+                  static_cast<int>(rc.combat.draw_count),
+              deck_n);
+}
+
+TEST(RunCombatBottle, SixTopPlacedCardsAllOpenInHandViaTheOverflowDraw) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Four Writhes (registry-innate) + two bottled instances = a 6-card
+    // placeOnTop collection; masterHandSize is 5, so initializeDeck queues the
+    // 1-card overflow draw (CardGroup.java:951-954).
+    for (uint16_t i = 1; i <= 4; ++i) {
+        rc.run.master_deck[i].card_id = static_cast<uint16_t>(CardId::WRITHE);
+    }
+    ASSERT_EQ(rc.run.master_deck[5].card_id,
+              static_cast<uint16_t>(CardId::STRIKE));
+    rc.run.master_deck[5].flags = kMasterCardInBottleFlame;
+    ASSERT_EQ(rc.run.master_deck[6].card_id,
+              static_cast<uint16_t>(CardId::DEFEND));
+    rc.run.master_deck[6].flags = kMasterCardInBottleLightning;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase,
+              static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    EXPECT_EQ(rc.combat.hand_count, 6)
+        << "the 6th top-placed card is drawn by the preTurnActions overflow";
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 5));
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 6));
+    int writhes_in_hand = 0;
+    for (uint8_t i = 0; i < rc.combat.hand_count; ++i) {
+        if (rc.combat.card_pool[rc.combat.hand[i]].card_id ==
+            static_cast<uint16_t>(CardId::WRITHE)) {
+            ++writhes_in_hand;
+        }
+    }
+    EXPECT_EQ(writhes_in_hand, 4);
+    EXPECT_EQ(rc.combat.draw_count,
+              static_cast<uint8_t>(rc.run.master_deck_count - 6));
+    // The overflow draw resolved before control returned: nothing pending,
+    // energy already recharged by the ordinary turn-1 block.
+    EXPECT_EQ(rc.combat.action_count, 0);
+    EXPECT_EQ(rc.combat.player_energy, 3);
+}
+
+TEST(RunCombatBottle, StandaloneCombatBeginRunsTheSameOverflowDraw) {
+    // combat_begin has no master-deck instances, so a bottle cannot be
+    // expressed here -- but six registry-innate Writhes reach the same
+    // initializeDeck overflow, and the two builders must not drift.
+    std::vector<CardId> deck;
+    for (int i = 0; i < 6; ++i) deck.push_back(CardId::WRITHE);
+    for (int i = 0; i < 6; ++i) deck.push_back(CardId::STRIKE);
+    CombatState s = combat_begin(kSeed, 1, std::span<const CardId>(deck));
+
+    ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.hand_count, 6);
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        EXPECT_EQ(s.card_pool[s.hand[i]].card_id,
+                  static_cast<uint16_t>(CardId::WRITHE));
+    }
+    EXPECT_EQ(s.draw_count, 6);
+    EXPECT_EQ(s.action_count, 0);
 }
 
 // =============================================================================

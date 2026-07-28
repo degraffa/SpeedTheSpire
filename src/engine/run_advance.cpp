@@ -486,6 +486,19 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         s.card_pool[i].upgrade = up;
         s.card_pool[i].cost_now = card_cost(*def, up);
         s.card_pool[i].flags = card_flags(*def, up);
+        // A bottled master-deck instance (run_deck.hpp bottle bits) joins the
+        // opening-draw top placement exactly as an Innate card does:
+        // CardGroup.initializeDeck's collection is `if (c.isInnate) placeOnTop
+        // ... else if (inBottleFlame || inBottleLightning || inBottleTornado)
+        // placeOnTop` (CardGroup.java:933-941) -- one list, shuffle order
+        // preserved, and the if/else-if means a card that is BOTH Innate and
+        // bottled is added once, which OR-ing into the same flag reproduces.
+        // The bottle bits themselves stay master-deck-only: combat flags are
+        // registry-derived (the run_deck.hpp encoding note), so nothing below
+        // ever reads the master bits again.
+        if (master_card_bottled(rc.run.master_deck[i])) {
+            s.card_pool[i].flags |= static_cast<uint16_t>(CardFlag::INNATE);
+        }
         s.card_pool[i].misc = 0;
     }
 
@@ -614,6 +627,14 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     // responds: the queue is empty, so the pump falls straight through to
     // WAITING_ON_USER, which is already the phase.
     pump(s, dispatch_monster_turn);
+
+    // (11) initializeDeck's overflow draw when the innate/bottled placeOnTop
+    //      collection exceeds masterHandSize (CardGroup.java:951-954). It rides
+    //      preTurnActions, which drain only after `actions` empties
+    //      (GameActionManager.java:190-191) -- i.e. after the turn-1 block AND
+    //      the atBattleStart bodies above, which is exactly this position. See
+    //      queue_innate_overflow_draw's declaration (advance.hpp).
+    queue_innate_overflow_draw(s, innate_count);
 
     rc.combat = s;
     rc.room_type = static_cast<uint8_t>(room);
