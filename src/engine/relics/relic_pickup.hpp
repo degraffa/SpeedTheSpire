@@ -134,6 +134,42 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
     }
 }
 
+// AbstractCreature.heal (AbstractCreature.java:385-415) reached through
+// AbstractPlayer.heal (AbstractPlayer.java:1544-1552) -- the gold door's HP
+// twin, for every run-layer heal that happens OUTSIDE a combat:
+//
+//     for (AbstractRelic r : player.relics) amount = r.onPlayerHeal(amount);
+//     for (AbstractPower p : powers)        amount = p.onHeal(amount);
+//     currentHealth += amount; if (currentHealth > maxHealth) currentHealth = maxHealth;
+//
+// TWO fan-outs are NAMED rather than written, and both are identity out here:
+//
+//   * onPlayerHeal -- Magic Flower is the only S1 override and its whole body
+//     is gated on `getCurrRoom().phase == RoomPhase.COMBAT`
+//     (MagicFlower.java:30-37), so out of combat it returns the amount
+//     unchanged. A room-ENTRY heal is by construction not in a combat: the
+//     onEnterRoom fan-out runs at AbstractDungeon.java:1755-1757, before
+//     setCurrMapNode and before any room's onPlayerEntry. The in-combat seam is
+//     the separate one relic_hooks.hpp documents; nothing routes through both.
+//   * powers' onHeal -- no power survives a room boundary (powers.clear() runs
+//     in resetPlayer, AbstractDungeon.java:1671), so the list is empty.
+//
+// AbstractCreature.heal also carries the NOT-BLOODIED cross at :403-408 (the
+// relics' onNotBloodied when the heal lifts the player back over half max HP).
+// Red Skull is its only S1 override and that body is a DEFERRED row
+// (docs/stage-b-tasks.md, "Red Skull onNotBloodied"); out of combat its -3
+// Strength half is phase-gated off anyway. Written here as the note the row's
+// owner needs, not as a silent omission.
+//
+// Non-positive amounts still clamp, exactly as the Java's unguarded += does.
+inline void heal_out_of_combat(RunState& rs, int32_t amount) noexcept {
+    int32_t hp = static_cast<int32_t>(rs.hp) + amount;
+    if (hp > rs.max_hp) {
+        hp = rs.max_hp;
+    }
+    rs.hp = static_cast<int16_t>(hp);
+}
+
 // AbstractPlayer.loseGold (AbstractPlayer.java:697-717), the gain_gold twin for
 // every run-layer gold LOSS outside a purchase flow:
 //

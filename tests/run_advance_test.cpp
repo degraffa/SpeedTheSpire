@@ -1604,6 +1604,103 @@ TEST(QuestionMarkRoom, SsserpentHeadFiresBeforeEveryResolvedRoomKind) {
     }
 }
 
+// THE double-fire regression. on_player_entry RECURSES for a ? that rolls
+// Monster/Treasure/Shop, but the game fires onEnterRoom exactly once per
+// nextRoomTransition, against the PRE-roll EventRoom (AbstractDungeon.java:
+// 1755-1757, before the roll at :1766-1781 and setCurrMapNode at :1783).
+// Maw Bank has no room-type gate, so wiring it at the justEnteredRoom site --
+// or at the top of the recursive entry -- would pay 12 gold TWICE on a
+// ?->Shop. Exactly 12, on every resolved kind.
+TEST(QuestionMarkRoom, MawBankPaysExactlyTwelveOnceAcrossEveryResolvedKind) {
+    struct Case {
+        float lo;
+        float hi;
+        RoomType resolved;
+    };
+    const Case cases[] = {
+        {0.00f, 0.10f, RoomType::Monster},
+        {0.10f, 0.13f, RoomType::Shop},
+        {0.13f, 0.15f, RoomType::Treasure},
+        {0.15f, 1.00f, RoomType::Event},
+    };
+    for (const Case& tc : cases) {
+        SCOPED_TRACE(static_cast<int>(tc.resolved));
+        const int64_t seed = find_event_roll_seed(tc.lo, tc.hi);
+        RunController rc = run_begin(seed, kA20);
+        const int32_t gold_before = rc.run.gold;
+        set_run_relics(rc, {RelicId::MAW_BANK});
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(RoomType::Event);
+        }
+        leave_neow(rc);
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+        EXPECT_EQ(rc.run.gold, gold_before + 12);
+        EXPECT_EQ(rc.room_type, static_cast<uint8_t>(tc.resolved));
+        // Entry does NOT use the relic up -- only onSpendGold does
+        // (MawBank.java:38-44), and that is a ShopRoom-only fan-out.
+        EXPECT_EQ(rc.run.relics[0].counter, 0);
+    }
+}
+
+// MawBank.onEnterRoom (MawBank.java:31-36) tests nothing about the room, and
+// the fan-out at AbstractDungeon.java:1755-1757 is likewise unconditional, so
+// every STATIC map node pays too -- the half B4.10 left open.
+TEST(RoomEntryRelics, MawBankPaysOnEveryStaticRoomKind) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Elite, RoomType::Rest, RoomType::Shop,
+          RoomType::Treasure}) {
+        SCOPED_TRACE(static_cast<int>(room));
+        RunController rc = run_begin(kSeed, kA20);
+        const int32_t gold_before = rc.run.gold;
+        set_run_relics(rc, {RelicId::MAW_BANK});
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(room);
+        }
+        leave_neow(rc);
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+        EXPECT_EQ(rc.room_type, static_cast<uint8_t>(room));
+        EXPECT_EQ(rc.run.gold, gold_before + 12);
+    }
+}
+
+// The boss node is reached by DungeonMap.java:77-87 assigning `nextRoom` a
+// MonsterRoomBoss and calling nextRoomTransitionStart(), so it runs the same
+// unconditional onEnterRoom loop. MonsterRoomBoss is NOT exempt.
+TEST(RoomEntryRelics, MawBankPaysOnTheBossEntry) {
+    RunController rc = run_begin(kSeed, kA20);
+    const int32_t gold_before = rc.run.gold;
+    set_run_relics(rc, {RelicId::MAW_BANK});
+    leave_neow(rc);
+    next_room_transition(rc, 0, /*to_boss=*/true);
+    ASSERT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    EXPECT_EQ(rc.run.gold, gold_before + 12);
+}
+
+// Two floors, one relic: the gain repeats until a shop purchase sets the
+// counter to -2 (dispatch_relics_on_spend_gold, relics/relic_pickup.hpp), and
+// then never again on any later entry.
+TEST(RoomEntryRelics, MawBankRepeatsEveryFloorUntilUsedUp) {
+    RunController rc = run_begin(kSeed, kA20);
+    const int32_t gold_before = rc.run.gold;
+    set_run_relics(rc, {RelicId::MAW_BANK});
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+        rc.run.map[run_state_map_index(x, 1)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+    }
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.run.gold, gold_before + 12);
+
+    rc.run.relics[0].counter = -2;  // a shop coin was spent
+    next_room_transition(rc, rc.cur_x, /*to_boss=*/false);
+    EXPECT_EQ(rc.run.gold, gold_before + 12);
+}
+
 // A ? that rolls MONSTER becomes a REAL MonsterRoom (generateRoom,
 // AbstractDungeon.java:1823-1840): it consumes monsterList and -- the bug this
 // task fixed -- its EXIT advances monster_cursor even though the static map

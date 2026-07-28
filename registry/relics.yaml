@@ -366,7 +366,7 @@
   pool_order: 14
   pickup:
     can_spawn: true
-  provenance: "MawBank.onEnterRoom (MawBank.java:31-36) -- +12 gold on entering every room while not usedUp; the original EventRoom entry hook is live in B4.10 before ? resolution, while other room-entry paths remain a run-layer obligation. MawBank.onSpendGold (:39-45) is called by AbstractPlayer.loseGold only in ShopRoom (AbstractPlayer.java:697-716), so event payments do not use it."
+  provenance: "MawBank.onEnterRoom (MawBank.java:31-36) -- +12 gold on entering EVERY room while not usedUp. The method carries no room-type condition and AbstractDungeon's fan-out (AbstractDungeon.java:1755-1757) is likewise unconditional, so monster/elite/rest/shop/treasure/boss and the pre-roll ? all pay; the boss node reaches the same transition through DungeonMap.java:77-87. LIVE for every kind through dispatch_on_enter_room_relics (event_framework.hpp), called once per transition from on_player_entry with the ? recursion suppressed so a ?->Shop pays once. usedUp is counter == -2 (MawBank.setCounter, :47-53). MawBank.onSpendGold (:39-44) is called by AbstractPlayer.loseGold only in ShopRoom (AbstractPlayer.java:697-716), so event payments do not use it."
 
 - id: 24
   name: MEAL_TICKET

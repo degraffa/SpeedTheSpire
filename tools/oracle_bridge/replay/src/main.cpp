@@ -1535,7 +1535,7 @@ struct TreasureVerdict {
             entered_node_symbol(screens[k - 1], run.records[k - 1].action_command);
         const bool via_question = symbol == "?";
         if (via_question) {
-            dispatch_event_room_entry_relics(rs);
+            dispatch_on_enter_room_relics(rs, RoomType::Event);
             const EventRoomResult roll =
                 event_room_roll(rs, screens[k - 1].room_type == "ShopRoom");
             if (roll != EventRoomResult::TREASURE)
@@ -1876,10 +1876,11 @@ struct TreasureVerdict {
 // this mode seeds like the merchant and the chest do. Per captured ? that
 // stayed an event:
 //
-//   ROLL       `dispatch_event_room_entry_relics` (the onEnterRoom fan-out the
-//              game runs against the ORIGINAL EventRoom, AbstractDungeon.java:
-//              1754-1779 -- Ssserpent Head's 50 gold and Maw Bank's 12 fire even
-//              on a ? that becomes something else) followed by
+//   ROLL       `dispatch_on_enter_room_relics(rs, RoomType::Event)` (the
+//              onEnterRoom fan-out the game runs against the ORIGINAL
+//              EventRoom, AbstractDungeon.java:1755-1757 -- Ssserpent Head's 50
+//              gold and Maw Bank's 12 fire even on a ? that becomes something
+//              else) followed by
 //              `event_room_roll`, which draws THE one committed eventRng float
 //              (EventHelper.java:100-187).
 //   SELECTION  `generate_event`, whose two selection draws are made on a
@@ -2297,7 +2298,7 @@ struct EventVerdict {
         // an off-by-one floor silently changes the DRAW LIST the pool index
         // addresses.
         ++rs.floor;
-        dispatch_event_room_entry_relics(rs);
+        dispatch_on_enter_room_relics(rs, RoomType::Event);
         const bool leaving_shop = screens[k - 1].room_type == "ShopRoom";
         const RngStream before = rs.event_rng;
         const EventRoomResult roll = event_room_roll(rs, leaving_shop);

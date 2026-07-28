@@ -634,7 +634,17 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
 // Neow) -- the ?-roll's shop gate reads it, because in the game the roll runs
 // before setCurrMapNode (AbstractDungeon.java:1767 vs :1783) so
 // `getCurrRoom() instanceof ShopRoom` sees the departed room.
-void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexcept {
+//
+// `fire_on_enter_room` is FALSE on exactly one path: the ? recursion below,
+// which re-enters as the RESOLVED kind. The game fires onEnterRoom once per
+// nextRoomTransition, against the PRE-roll EventRoom (AbstractDungeon.java:
+// 1755-1757 vs the roll at :1766-1781), so the outer entry already ran it and
+// the inner one must not. It is a parameter rather than a `room != Event` test
+// precisely because that predicate is the one the recursion breaks: the inner
+// call arrives as Monster/Treasure/Shop and would pass it. Maw Bank has no room
+// gate, so a second call would pay 12 gold twice on a ?->Shop.
+void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
+                          bool fire_on_enter_room) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
 
@@ -650,6 +660,15 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
         rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
         rc.room_type = static_cast<uint8_t>(r);
     };
+
+    // AbstractRelic.onEnterRoom, against the room being ARRIVED at and before
+    // anything else in this transition (AbstractDungeon.java:1755-1757): the
+    // pre-roll, pre-setCurrMapNode, once-per-transition hook. Ssserpent Head,
+    // Maw Bank and Eternal Feather live here; the contract is written out at
+    // dispatch_on_enter_room_relics (event_framework.hpp).
+    if (fire_on_enter_room) {
+        dispatch_on_enter_room_relics(rc.run, room);
+    }
 
     // AbstractRelic.justEnteredRoom for the room actually arrived in
     // (AbstractDungeon.java:1785-1789). An EventRoom is EXCLUDED here on
@@ -701,11 +720,12 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
             rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
             break;
         case RoomType::Event: {
-            // Relic.onEnterRoom sees the ORIGINAL EventRoom before the game
-            // replaces it with the rolled room (:1754-1779). In particular,
-            // Ssserpent Head gains its 50 gold even when this ? becomes a
-            // monster, shop or chest.
-            dispatch_event_room_entry_relics(rc.run);
+            // Relic.onEnterRoom already ran, above, against RoomType::Event --
+            // the ORIGINAL EventRoom, before the game replaces it with the
+            // rolled room (:1755-1757 vs :1766-1781). In particular, Ssserpent
+            // Head has its 50 gold and an unused Maw Bank its 12 even when this
+            // ? becomes a monster, shop or chest, and the recursions below pass
+            // fire_on_enter_room=false so neither is paid twice.
 
             // The ?-room resolution (AbstractDungeon.java:1763-1779). The
             // game rolls on a counter-replay duplicate and assigns it back
@@ -719,18 +739,21 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
                     // generateRoom (:1823-1840) builds a REAL MonsterRoom, so
                     // the combat consumes monsterList and its exit advances
                     // monster_cursor (rc.room_type carries Monster from here).
-                    on_player_entry(rc, RoomType::Monster, left_room);
+                    on_player_entry_impl(rc, RoomType::Monster, left_room,
+                                         /*fire_on_enter_room=*/false);
                     return;
                 case EventRoomResult::TREASURE:
                     // A real TreasureRoom: the ordinary chest flow,
                     // byte-identical to a map treasure node.
-                    on_player_entry(rc, RoomType::Treasure, left_room);
+                    on_player_entry_impl(rc, RoomType::Treasure, left_room,
+                                         /*fire_on_enter_room=*/false);
                     return;
                 case EventRoomResult::SHOP:
                     // A real ShopRoom, byte-identical to a map shop node --
                     // including the justEnteredRoom fan-out the recursion
                     // performs, which is where Meal Ticket's heal comes from.
-                    on_player_entry(rc, RoomType::Shop, left_room);
+                    on_player_entry_impl(rc, RoomType::Shop, left_room,
+                                         /*fire_on_enter_room=*/false);
                     return;
                 case EventRoomResult::ELITE:
                     // Unreachable without the DeadlyEvents/endless mods
@@ -790,6 +813,13 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
             stall(room);  // no room content for this kind yet
             break;
     }
+}
+
+// The one entry point every real room transition uses -- the OUTER entry, which
+// is the one nextRoomTransition fires onEnterRoom for. Only the ? resolution
+// re-enters, and it calls the _impl form with the hook suppressed.
+void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexcept {
+    on_player_entry_impl(rc, room, left_room, /*fire_on_enter_room=*/true);
 }
 
 // Fill a non-combat StepResult: no observation (obs is combat-only), terminal iff

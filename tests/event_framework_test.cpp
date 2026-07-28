@@ -168,30 +168,30 @@ TEST(EventRoomRoll, DrawsExactlyOneCommittedEventRngDraw) {
     EXPECT_EQ(rs.event_rng.counter, before.counter + 1);
 }
 
-TEST(EventRoomEntryRelics, SsserpentHeadAndMawBankFanOutThroughTheGoldDoor) {
+TEST(OnEnterRoomRelics, SsserpentHeadAndMawBankFanOutThroughTheGoldDoor) {
     // Relic.onEnterRoom iterates every slot, so duplicate imported copies each
     // fire. gain_gold is the shared door: Ectoplasm suppresses the whole gain.
     RunState gains = fresh_run_state(kSeed, 20);
     give_relic(gains, RelicId::SSSERPENT_HEAD);
     give_relic(gains, RelicId::MAW_BANK);
     give_relic(gains, RelicId::SSSERPENT_HEAD);
-    dispatch_event_room_entry_relics(gains);
+    dispatch_on_enter_room_relics(gains, RoomType::Event);
     EXPECT_EQ(gains.gold, 211);  // 99 + 50 + 12 + 50
 
     RunState blocked = fresh_run_state(kSeed, 20);
     give_relic(blocked, RelicId::SSSERPENT_HEAD);
     give_relic(blocked, RelicId::MAW_BANK);
     give_relic(blocked, RelicId::ECTOPLASM);
-    dispatch_event_room_entry_relics(blocked);
+    dispatch_on_enter_room_relics(blocked, RoomType::Event);
     EXPECT_EQ(blocked.gold, 99);
 
     RunState used = fresh_run_state(kSeed, 20);
     give_relic(used, RelicId::MAW_BANK, -2);
-    dispatch_event_room_entry_relics(used);
+    dispatch_on_enter_room_relics(used, RoomType::Event);
     EXPECT_EQ(used.gold, 99);
 }
 
-TEST(EventRoomEntryRelics, MawBankGainPrecedesEventEligibilityAndSelection) {
+TEST(OnEnterRoomRelics, MawBankGainPrecedesEventEligibilityAndSelection) {
     RunState rs = fresh_run_state(kSeed, 20);
     rs.gold = 23;
     rs.event_membership =
@@ -204,10 +204,66 @@ TEST(EventRoomEntryRelics, MawBankGainPrecedesEventEligibilityAndSelection) {
 
     uint16_t before[kEventListCount]{};
     EXPECT_EQ(build_event_pool(rs, before, kEventListCount), 0);
-    dispatch_event_room_entry_relics(rs);
+    dispatch_on_enter_room_relics(rs, RoomType::Event);
     EXPECT_EQ(rs.gold, 35);
     EXPECT_EQ(generate_event(rs),
               static_cast<uint16_t>(EventId::THE_CLERIC));
+}
+
+// MawBank.onEnterRoom (MawBank.java:31-36) carries NO room-type condition, and
+// AbstractDungeon.nextRoomTransition's fan-out (AbstractDungeon.java:1755-1757)
+// is likewise unconditional on the room kind -- including the boss node, which
+// DungeonMap.java:77-87 reaches by assigning `nextRoom` a MonsterRoomBoss and
+// calling nextRoomTransitionStart(). So every room kind pays.
+TEST(OnEnterRoomRelics, MawBankPaysOnEveryRoomKindWhileUnused) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Elite, RoomType::Rest,
+          RoomType::Shop, RoomType::Treasure, RoomType::Boss}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        give_relic(rs, RelicId::MAW_BANK);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.gold, 111) << "room " << static_cast<int>(room);
+        EXPECT_EQ(relic_counter(rs, RelicId::MAW_BANK), 0);
+    }
+}
+
+// The Java guard is `nextRoom != null` (AbstractDungeon.java:1754); RoomType::
+// None IS that null room, so nothing fires. Unreachable through the map (every
+// placed node carries a kind), pinned so a future stall path cannot pay 12 gold.
+TEST(OnEnterRoomRelics, NoRoomFiresNothing) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    give_relic(rs, RelicId::MAW_BANK);
+    give_relic(rs, RelicId::SSSERPENT_HEAD);
+    dispatch_on_enter_room_relics(rs, RoomType::None);
+    EXPECT_EQ(rs.gold, 99);
+}
+
+// SsserpentHead.onEnterRoom (SsserpentHead.java:29-35) IS gated -- `room
+// instanceof EventRoom`. The fan-out sees the PRE-roll room, so the gate holds
+// for every ? entry and for no static node.
+TEST(OnEnterRoomRelics, SsserpentHeadIsEventOnlyWhileMawBankIsNot) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Elite, RoomType::Rest, RoomType::Shop,
+          RoomType::Treasure, RoomType::Boss}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        give_relic(rs, RelicId::SSSERPENT_HEAD);
+        give_relic(rs, RelicId::MAW_BANK);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.gold, 111) << "room " << static_cast<int>(room);
+    }
+}
+
+// The used-up encoding is counter == -2 (MawBank.setCounter, MawBank.java:
+// 46-53), the same one dispatch_relics_on_spend_gold writes.
+TEST(OnEnterRoomRelics, MawBankUsedUpPaysOnNoRoomKind) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Elite, RoomType::Rest,
+          RoomType::Shop, RoomType::Treasure, RoomType::Boss}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        give_relic(rs, RelicId::MAW_BANK, -2);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.gold, 99) << "room " << static_cast<int>(room);
+    }
 }
 
 TEST(EventRoomRoll, ResultMatchesHandDerivedTableLookupAcrossSeeds) {

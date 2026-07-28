@@ -64,23 +64,44 @@ void build_event_roll_table(int monster_size, int shop_size, int treasure_size,
          EventRoomResult::TREASURE);
 }
 
-// --- The roll ----------------------------------------------------------------
+// --- The room-entry relic fan-out ---------------------------------------------
 
-void dispatch_event_room_entry_relics(RunState& rs) noexcept {
+void dispatch_on_enter_room_relics(RunState& rs, RoomType room) noexcept {
     // AbstractDungeon.nextRoomTransition iterates every relic's onEnterRoom
-    // against nextRoom.room BEFORE an EventRoom is rolled/replaced
-    // (AbstractDungeon.java:1754-1779). SsserpentHead.onEnterRoom
-    // (SsserpentHead.java:29-35) therefore fires for every ? entry, including
-    // one that later resolves to combat, shop or treasure. MawBank.onEnterRoom
-    // (MawBank.java:31-36) has no room-type condition and likewise fires here
-    // while unused. This is a fan-out, not getRelic: a malformed duplicate
-    // import fires once per copy as the Java relic iteration does.
+    // against nextRoom.room (AbstractDungeon.java:1755-1757) -- unconditional on
+    // the room kind, BEFORE the ? roll replaces an EventRoom (:1766-1781) and
+    // before setCurrMapNode (:1783). The full contract, and why this must NOT
+    // be reached by on_player_entry's ? recursion, is in event_framework.hpp.
+    //
+    // `nextRoom != null` is the Java's only guard (:1754); RoomType::None is
+    // that null room.
+    if (room == RoomType::None) {
+        return;
+    }
+    // A fan-out, not getRelic: a malformed duplicate import fires once per copy
+    // as the Java relic iteration does.
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
-        const RelicId id = static_cast<RelicId>(rs.relics[i].relic_id);
-        if (id == RelicId::SSSERPENT_HEAD) {
-            gain_gold(rs, 50);
-        } else if (id == RelicId::MAW_BANK && rs.relics[i].counter != -2) {
-            gain_gold(rs, 12);
+        switch (static_cast<RelicId>(rs.relics[i].relic_id)) {
+            case RelicId::SSSERPENT_HEAD:
+                // `if (room instanceof EventRoom)` (SsserpentHead.java:29-35).
+                // The PRE-roll room is what is tested, so a ? that later
+                // becomes a monster, shop or chest still pays.
+                if (room == RoomType::Event) {
+                    gain_gold(rs, 50);
+                }
+                break;
+            case RelicId::MAW_BANK:
+                // `if (!this.usedUp) { flash(); player.gainGold(12); }`
+                // (MawBank.java:31-36) -- NO room condition whatsoever, so
+                // every kind pays, boss node included. usedUp is encoded as
+                // counter == -2 (setCounter, MawBank.java:47-53), the same
+                // encoding dispatch_relics_on_spend_gold writes.
+                if (rs.relics[i].counter != -2) {
+                    gain_gold(rs, 12);
+                }
+                break;
+            default:
+                break;
         }
     }
 }
