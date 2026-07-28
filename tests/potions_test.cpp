@@ -841,6 +841,107 @@ TEST(Potions, LiquidMemoriesWithADoubledPotencyForcesATwoCardDiscardPile) {
     EXPECT_EQ(s.card_pool[41].cost_now, 0);
 }
 
+// --- NATIVE with body: Gambler's Brew (ChoiceKind::HAND_TO_DISCARD_THEN_DRAW) -
+//
+// GamblersBrew.use (GamblersBrew.java:36-41) queues GamblingChipAction(player,
+// true) -- the SAME action the Gambling Chip relic queues with notChip false --
+// but only when the hand is non-empty. The relic half is covered in
+// relic_rares_shop_test.
+
+TEST(Potions, GamblersBrewQueuesTheOptionalDiscardScreen) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+
+    ASSERT_TRUE(use_potion(s, PotionId::GAMBLERS_BREW, 0));
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(item.flags),
+              ChoiceKind::HAND_TO_DISCARD_THEN_DRAW);
+    EXPECT_TRUE(choose_is_optional(item.flags));
+    EXPECT_FALSE(choose_is_random(item.flags));
+    EXPECT_EQ(item.amount, 99) << "GamblingChipAction's own literal";
+    EXPECT_TRUE(choice_requires_user(s, item));
+    EXPECT_EQ(potion_def(PotionId::GAMBLERS_BREW)->potency, 0);
+}
+
+// `if (!AbstractDungeon.player.hand.isEmpty())` (GamblersBrew.java:38) is on the
+// POTION, not inside the action, so an empty hand queues NOTHING AT ALL -- not
+// even a screen that immediately closes. (The relic has no such guard.)
+TEST(Potions, GamblersBrewWithAnEmptyHandQueuesNothing) {
+    CombatState s = MakeCombat();
+    ASSERT_EQ(s.hand_count, 0);
+    ASSERT_TRUE(use_potion(s, PotionId::GAMBLERS_BREW, 0));
+    EXPECT_EQ(s.action_count, 0) << "the guard is on the potion";
+}
+
+// The confirm discards every pick IN PICK ORDER and then queues ONE
+// DrawCardAction sized by the pick count, at the TOP of the queue
+// (GamblingChipAction.java:53-58).
+TEST(Potions, GamblersBrewDiscardsThePicksInOrderThenDrawsThatMany) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+    seed_hand_card(s, 2, CardId::CLEAVE);
+    for (uint8_t i = 0; i < 4; ++i) {  // four cards to draw back from
+        s.card_pool[20 + i].card_id = static_cast<uint16_t>(CardId::BASH);
+        s.draw[i] = static_cast<CardPoolIndex>(20 + i);
+    }
+    s.draw_count = 4;
+
+    ASSERT_TRUE(use_potion(s, PotionId::GAMBLERS_BREW, 0));
+    ActionQueueItem item = s.action_queue[s.action_head];
+    toggle_optional_choice_slot(s, item, 2);  // pick Cleave first
+    toggle_optional_choice_slot(s, item, 0);  // then Strike
+    ASSERT_EQ(choose_selected_count(item.flags), 2);
+    // The engine pops the finished CHOOSE_CARD before resolving, which is what
+    // makes the action's addToTop land on the real head; mirror that here.
+    ActionQueueItem consumed{};
+    ASSERT_TRUE(pop_action_front(s, consumed));
+    resolve_optional_choice(s, item);
+
+    ASSERT_EQ(s.discard_count, 2);
+    EXPECT_EQ(s.card_pool[s.discard[0]].card_id,
+              static_cast<uint16_t>(CardId::CLEAVE)) << "picked first";
+    EXPECT_EQ(s.card_pool[s.discard[1]].card_id,
+              static_cast<uint16_t>(CardId::STRIKE)) << "picked second";
+    ASSERT_EQ(s.hand_count, 1) << "before the draw resolves";
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+              static_cast<uint16_t>(CardId::DEFEND));
+
+    ASSERT_EQ(s.action_count, 1) << "ONE DrawCardAction, not one per card";
+    const ActionQueueItem& draw = s.action_queue[s.action_head];
+    EXPECT_EQ(draw.opcode, static_cast<uint16_t>(Opcode::DRAW));
+    EXPECT_EQ(draw.amount, 2) << "selectedCards.size(), read at confirm";
+
+    drain_actions(s);
+    EXPECT_EQ(s.hand_count, 3) << "1 kept + 2 drawn back";
+    EXPECT_EQ(s.draw_count, 2);
+}
+
+// `if (!selectedCards.group.isEmpty())` (GamblingChipAction.java:52) wraps BOTH
+// halves: an empty confirm queues no draw and discards nothing.
+TEST(Potions, GamblersBrewConfirmedWithNoPicksDoesNothingAtAll) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+    s.card_pool[20].card_id = static_cast<uint16_t>(CardId::BASH);
+    s.draw[0] = 20;
+    s.draw_count = 1;
+
+    ASSERT_TRUE(use_potion(s, PotionId::GAMBLERS_BREW, 0));
+    const ActionQueueItem item = s.action_queue[s.action_head];
+    ActionQueueItem consumed{};
+    ASSERT_TRUE(pop_action_front(s, consumed));
+    resolve_optional_choice(s, item);
+
+    EXPECT_EQ(s.action_count, 0) << "no DrawCardAction was queued";
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.draw_count, 1);
+}
+
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
 // Powers registered by the potion-support-powers follow-up (Dexterity, Lose
 // Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
@@ -1110,7 +1211,7 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
                         PotionId::ELIXIR, PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::LIQUID_MEMORIES,
-                        PotionId::FRUIT_JUICE,
+                        PotionId::GAMBLERS_BREW, PotionId::FRUIT_JUICE,
                         PotionId::ENTROPIC_BREW, PotionId::SMOKE_BOMB}) {
         EXPECT_TRUE(potion_use_implemented(id))
             << "native id " << static_cast<int>(id) << " has a body";
@@ -1120,7 +1221,7 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::GAMBLERS_BREW, PotionId::DISTILLED_CHAOS,
+    for (PotionId id : {PotionId::DISTILLED_CHAOS,
                         PotionId::DUPLICATION_POTION,
                         PotionId::FAIRY_POTION}) {
         EXPECT_FALSE(potion_use_implemented(id))

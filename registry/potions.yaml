@@ -341,9 +341,24 @@
   game_id: "GamblersBrew"
   rarity: UNCOMMON
   potency: 0
-  # Discard any number, draw that many -> card CHOOSE (B3.4). Deferred native.
+  # Discard ANY NUMBER of chosen hand cards (including none), then draw exactly
+  # that many. IMPLEMENTED (native, potions.cpp) on the new
+  # ChoiceKind::HAND_TO_DISCARD_THEN_DRAW (12), which it SHARES WITH THE RELIC
+  # GAMBLING CHIP -- GamblersBrew.use queues GamblingChipAction(player, true)
+  # and GamblingChip.atTurnStartPostDraw queues GamblingChipAction(player), i.e.
+  # the same action one boolean apart, and that boolean picks only the prompt
+  # string. Both go through the one shared builder, queue_gambling_chip_choice.
+  # ORDERING (easy to get backwards): the Java addToTops the DrawCardAction
+  # BEFORE the discard loop, but the addToTop only queues while the loop is
+  # synchronous -- so the observable order is discard every pick in PICK ORDER,
+  # then draw exactly that many, with the draw at the TOP of the queue. An empty
+  # confirm does nothing at all: no draw, no discard.
+  # The empty-hand guard is ON THE POTION (GamblersBrew.java:38), not in the
+  # action, so an empty hand queues nothing; the relic has no such guard.
+  # SACRED BARK: nothing to double -- getPotency is 0, and the screen's 99 is
+  # GamblingChipAction's literal, not a potency.
   native: true
-  provenance: "GamblersBrew.use (GamblersBrew.java:37), getPotency (:44) -- discard-then-draw grid choice"
+  provenance: "GamblersBrew.use (GamblersBrew.java:36-41), getPotency (:43-46) -- `if (!player.hand.isEmpty()) addToBot(new GamblingChipAction(player, true))`; GamblingChipAction.update (GamblingChipAction.java:39-63) opens handCardSelectScreen(99, anyNumber, canPickZero) then, only for a non-empty selection, addToTop(DrawCardAction(size)) followed by a synchronous moveToDiscardPile loop in pick order"
 
 - id: 24
   name: ESSENCE_OF_STEEL

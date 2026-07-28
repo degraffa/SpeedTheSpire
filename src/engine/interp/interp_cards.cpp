@@ -507,6 +507,23 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
         case ChoiceKind::DISCARD_TO_HAND_FREE:
             discard_slot_to_hand_free(s, slot);
             break;
+        case ChoiceKind::HAND_TO_DISCARD_THEN_DRAW: {
+            // `AbstractDungeon.player.hand.moveToDiscardPile(c)`
+            // (GamblingChipAction.java:55). The draw-back is NOT here -- it is
+            // one add_to_top for the WHOLE selection at confirm time, in
+            // resolve_optional_choice, because the Java queues a single
+            // DrawCardAction sized by selectedCards.size() rather than one per
+            // card.
+            //
+            // GameActionManager.incrementDiscard(false) (:56) and
+            // c.triggerOnManualDiscard() (:57) are named at the ChoiceKind's
+            // definition: neither has an S1 counterpart to fire.
+            const CardPoolIndex pi = remove_from_hand(s, slot);
+            if (s.discard_count < kDiscardCap) {
+                s.discard[s.discard_count++] = pi;
+            }
+            break;
+        }
         case ChoiceKind::DUPLICATE: {
             const CardPoolIndex pi = s.hand[slot];
             for (int k = 0; k < copies; ++k) {
@@ -1874,6 +1891,48 @@ void resolve_optional_choice(CombatState& s, const ActionQueueItem& item) noexce
             }
         }
     }
+    if (kind == ChoiceKind::HAND_TO_DISCARD_THEN_DRAW) {
+        // GamblingChipAction.java:53 -- `addToTop(new DrawCardAction(p,
+        // selectedCards.group.size()))`. ONE DrawCardAction for the whole
+        // selection, sized by the pick count read AT CONFIRM.
+        //
+        // Order: the Java's addToTop runs BEFORE the discard loop textually, but
+        // it only queues, while the loop is synchronous inside the same
+        // update(). So the observable sequence is discard-all-then-draw, which
+        // is what this is. The `picked == 0` early return above is the
+        // `if (!selectedCards.group.isEmpty())` guard at :52 -- an empty confirm
+        // queues no draw at all.
+        //
+        // add_to_TOP, not bottom: the draw must resolve ahead of anything queued
+        // behind this action (Gambling Chip's atTurnStartPostDraw queues a
+        // RelicAboveCreatureAction alongside it, and other relics' turn-start
+        // hooks queue after). The caller pops the finished CHOOSE_CARD item
+        // BEFORE calling this, so the head this prepends to is the real one.
+        ActionQueueItem draw{};
+        draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+        draw.src = kActorPlayer;
+        draw.tgt = kActorPlayer;
+        draw.amount = static_cast<int32_t>(picked);
+        add_to_top(s, draw);
+    }
+}
+
+void queue_gambling_chip_choice(CombatState& s) noexcept {
+    // handCardSelectScreen.open(TEXT[..], 99, true, true)
+    // (GamblingChipAction.java:43/:45): amount 99, anyNumber true, canPickZero
+    // true -- the identical optional screen Elixir and upgraded Forethought
+    // open. 99 is the action's literal and is the value the pick cap is compared
+    // against, so it is authored as-is; the SELECTION is bounded by hand size,
+    // which is <= kHandCap, so the 4-bit selected-count nibble is safe.
+    ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;  // hand-source choice: no exclusion index
+    item.amount = 99;
+    item.flags = make_choose_flags(ChoiceKind::HAND_TO_DISCARD_THEN_DRAW,
+                                   /*random=*/false, /*copies=*/1,
+                                   kChoiceNoTypeFilter, /*optional=*/true);
+    add_to_bottom(s, item);
 }
 
 void prepare_choice_draw_source(CombatState& s, ActionQueueItem& item) noexcept {

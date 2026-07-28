@@ -92,6 +92,7 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::POWER_POTION:           //  one body, pool selector in the
         case PotionId::COLORLESS_POTION:       //  item's src byte)
         case PotionId::LIQUID_MEMORIES:        // dispatch_native_potion, below
+        case PotionId::GAMBLERS_BREW:          // dispatch_native_potion, below
         case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
                                                // (run_advance's step_potion
                                                // still intercepts it first)
@@ -337,6 +338,33 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             add_to_bottom(s, item);  // addToBot (LiquidMemories.java:39)
             break;
         }
+        case PotionId::GAMBLERS_BREW: {
+            // GamblersBrew.use (GamblersBrew.java:36-41):
+            //     if (!AbstractDungeon.player.hand.isEmpty())
+            //         this.addToBot(new GamblingChipAction(player, true));
+            // getPotency (:43-46) is 0 -- the potion has no number.
+            //
+            // THE EMPTY-HAND GUARD IS ON THE POTION, not in the action, so an
+            // empty hand queues NOTHING at all. (Gambling Chip has no such
+            // guard; its action opens a screen on an empty hand, which the
+            // engine treats as "nothing to show" -- see queue_gambling_chip_
+            // choice, the shared builder both consumers call.)
+            //
+            // The action itself is GamblingChipAction with notChip = true, and
+            // that boolean picks only the prompt STRING (:42-46). The relic
+            // passes false. So the two are one body, expressed as one
+            // ChoiceKind -- see HAND_TO_DISCARD_THEN_DRAW in interp.hpp for the
+            // full derivation, including why the draw-back is folded into
+            // resolve_optional_choice rather than given an opcode.
+            //
+            // SACRED BARK: nothing to double. getPotency is 0, and the screen's
+            // 99 is GamblingChipAction's literal (:43/:45), not a potency.
+            if (s.hand_count == 0) {
+                break;  // GamblersBrew.java:38 -- not even queued
+            }
+            queue_gambling_chip_choice(s);  // addToBot (:39)
+            break;
+        }
         // --- Deferred native bodies (each lands with its dependency) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
@@ -344,12 +372,9 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // (powers.yaml ids 14-19; Steroid reuses LoseStrength id 13) -- so they no
         // longer route here (use_potion sends them through queue_use_step).
         // Still native + DEFERRED, each on a verb owned elsewhere:
-        // In-combat card CHOOSE: GAMBLERS_BREW, LIQUID_MEMORIES.
-        // (BLESSING_OF_THE_FORGE, ELIXIR and the four DISCOVERY potions are no
-        // longer among them -- Blessing needed only the already-live CHOOSE_CARD
-        // UPGRADE kind, Elixir only the already-live OPTIONAL EXHAUST one, and
-        // the discover four only a pool selector and a copy count on the
-        // already-live DISCOVERY opcode; all six are implemented above.)
+        // The in-combat card-CHOOSE group is now EMPTY: Blessing of the Forge,
+        // Elixir, the four DISCOVERY potions, Liquid Memories and Gambler's Brew
+        // are all implemented above.
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
         // opcode, NOT a missing power row).

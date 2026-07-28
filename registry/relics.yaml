@@ -1002,8 +1002,8 @@
   pool_order: 20
   native: true
   hooks:
-    at_turn_start_post_draw: []  # DEFERRED body: needs an optional multi-select screen
-  provenance: "GamblingChip (GamblingChip.java:426-453): atBattleStartPreDraw clears a PRIVATE `activated` flag; atTurnStartPostDraw -- if !activated, set it and addToBot GamblingChipAction(player), which opens a hand-select screen discarding ZERO-to-all chosen cards and then draws exactly as many as were discarded. DEFERRED: the engine's CHOOSE_CARD screen has no OPTIONAL multi-select with an explicit confirm (every existing ChoiceKind selects a mandatory fixed count), and adding one changes the public ActionMask surface the observation and translator layers join on. Explicit empty native body (relics/relics_rare.cpp). Only atTurnStartPostDraw is bound: atBattleStartPreDraw has no dispatch site, and an unfired hook would be inert code."
+    at_turn_start_post_draw: []  # native body: relics/relics_rare.cpp
+  provenance: "GamblingChip (GamblingChip.java, read in full -- the file is 48 lines, NOT the 426-453 range this row used to cite): a private `activated` field (:18) cleared by atBattleStartPreDraw (:30-32); atTurnStartPostDraw (:34-42) is `if (!activated) { activated = true; flash(); addToBot(RelicAboveCreatureAction); addToBot(new GamblingChipAction(player)); }`. ONCE PER COMBAT, not every turn -- the latch IS the relic. IMPLEMENTED: the deferral's stated blocker (no OPTIONAL multi-select with an explicit confirm) arrived with the optional-choice machinery, and the body is now ChoiceKind::HAND_TO_DISCARD_THEN_DRAW queued through the shared queue_gambling_chip_choice builder that Gambler's Brew also calls -- GamblingChipAction is ONE action and its notChip boolean selects only a prompt string (GamblingChipAction.java:42-46). The draw count is selectedCards.size() read AT CONFIRM; there is no relic-side count. RelicSlot.counter carries `activated` (the -1 unset default IS 'not activated'). Only atTurnStartPostDraw is bound: atBattleStartPreDraw has no dispatch site and a fresh CombatState already starts at -1, so binding it would be inert code."
 
 - id: 87
   name: PEACE_PIPE

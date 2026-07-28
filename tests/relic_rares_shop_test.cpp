@@ -10,6 +10,7 @@
 // captures is covered by relic_pools_test. What is here is the mechanics.
 
 #include <cstdint>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -20,6 +21,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/piles.hpp"         // shuffle_discard_into_draw (Abacus)
+#include "sts/engine/potions.hpp"       // use_potion (the Gambling Chip / Gambler's Brew twin)
 #include "sts/engine/power_hooks.hpp"
 #include "sts/engine/powers.hpp"
 #include "sts/engine/relic_hooks.hpp"
@@ -1328,14 +1330,14 @@ TEST(RelicRaresShop, NoShopRelicGatesItsOwnSpawn) {
 // first rather than changing behaviour nobody was watching.
 // ============================================================================
 
-// Gambling Chip carries an explicit EMPTY native body (an optional
-// multi-select screen). Dead Branch, Sling of Courage and Orange Pellets have
-// LEFT this list -- see their own tests below.
+// THIS LIST IS NOW EMPTY. Dead Branch, Sling of Courage and Orange Pellets left
+// it in the relic-tail stage; Gambling Chip left it here, when the optional
+// multi-select screen its deferral named as the blocker turned out to have
+// already landed. The scaffold is kept rather than deleted so the next deferred
+// native body has a home to go into.
 TEST(RelicRaresShop, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
     struct Case { RelicId id; RelicHook hook; };
-    const Case cases[] = {
-        {RelicId::GAMBLING_CHIP, RelicHook::AT_TURN_START_POST_DRAW},
-    };
+    const std::vector<Case> cases{};
     for (const Case& c : cases) {
         CombatState s = MakeState();
         const RelicView rv = give(s, c.id);
@@ -1350,6 +1352,105 @@ TEST(RelicRaresShop, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
         EXPECT_EQ(s.card_random_rng.counter, before.counter);
         EXPECT_EQ(rv.relics[0].counter, -1) << "and mutates no counter";
     }
+    EXPECT_TRUE(cases.empty()) << "no relic native body is deferred any more";
+}
+
+// ============================================================================
+// Gambling Chip -- ONCE per combat, and the same action Gambler's Brew queues
+// ============================================================================
+//
+// GamblingChip.java in full (48 lines): a private `activated` field (:18)
+// cleared by atBattleStartPreDraw (:30-32), and
+//
+//   public void atTurnStartPostDraw() {                              (:34-42)
+//       if (!this.activated) {
+//           this.activated = true;
+//           this.flash();
+//           this.addToBot(new RelicAboveCreatureAction(player, this));
+//           this.addToBot(new GamblingChipAction(AbstractDungeon.player));
+//       }
+//   }
+
+TEST(RelicRaresShop, GamblingChipQueuesTheOptionalDiscardScreenOnceOnly) {
+    CombatState s = MakeState();
+    put_in_hand(s, CardId::STRIKE);
+    put_in_hand(s, CardId::DEFEND);
+    const RelicView rv = give(s, RelicId::GAMBLING_CHIP);
+    ASSERT_EQ(rv.relics[0].counter, -1) << "-1 unset == not activated";
+    s.card_random_rng = from_seed(3);
+    const RngStream before = s.card_random_rng;
+    RelicHookContext ctx{};
+
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(it.flags),
+              ChoiceKind::HAND_TO_DISCARD_THEN_DRAW);
+    EXPECT_TRUE(choose_is_optional(it.flags));
+    EXPECT_EQ(it.amount, 99);
+    EXPECT_EQ(s.card_random_rng.counter, before.counter)
+        << "the relic itself spends no rng";
+    EXPECT_NE(rv.relics[0].counter, -1) << "activated = true";
+
+    // Every LATER turn start finds the latch set and does nothing. That is the
+    // fact the relic is entirely made of, and the one a per-turn reading loses.
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    EXPECT_EQ(s.action_count, 1) << "once per combat, not once per turn";
+}
+
+// The relic has NO empty-hand guard -- that guard is Gambler's Brew's, on the
+// potion (GamblersBrew.java:38). GamblingChipAction opens its screen regardless,
+// and an empty hand is simply "nothing to show", so the pump does not block.
+TEST(RelicRaresShop, GamblingChipQueuesEvenOnAnEmptyHandAndThenBlocksOnNothing) {
+    CombatState s = MakeState();
+    ASSERT_EQ(s.hand_count, 0);
+    const RelicView rv = give(s, RelicId::GAMBLING_CHIP);
+    RelicHookContext ctx{};
+
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+
+    ASSERT_EQ(s.action_count, 1) << "no guard on the relic side";
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_FALSE(choice_requires_user(s, it)) << "an empty hand shows nothing";
+    drain(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.discard_count, 0);
+}
+
+// The relic and the potion queue the IDENTICAL item: GamblingChipAction is ONE
+// action and `notChip` selects only a prompt string
+// (GamblingChipAction.java:42-46). If these two ever diverge, the shared builder
+// has been forked -- which is exactly how the same discard-then-draw-back logic
+// would end up written twice.
+TEST(RelicRaresShop, GamblingChipAndGamblersBrewQueueTheSameItem) {
+    CombatState relic_state = MakeState();
+    put_in_hand(relic_state, CardId::STRIKE);
+    const RelicView rv = give(relic_state, RelicId::GAMBLING_CHIP);
+    RelicHookContext ctx{};
+    dispatch_relic_hook(relic_state, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    ASSERT_EQ(relic_state.action_count, 1);
+    const ActionQueueItem from_relic = queued(relic_state, 0);
+
+    CombatState potion_state = MakeState();
+    put_in_hand(potion_state, CardId::STRIKE);
+    ASSERT_TRUE(use_potion(potion_state, PotionId::GAMBLERS_BREW, 0));
+    ASSERT_EQ(potion_state.action_count, 1);
+    const ActionQueueItem from_potion =
+        potion_state.action_queue[potion_state.action_head];
+
+    EXPECT_EQ(from_relic.opcode, from_potion.opcode);
+    EXPECT_EQ(from_relic.src, from_potion.src);
+    EXPECT_EQ(from_relic.tgt, from_potion.tgt);
+    EXPECT_EQ(from_relic.amount, from_potion.amount);
+    EXPECT_EQ(from_relic.flags, from_potion.flags);
 }
 
 // Sling of Courage: Strength 2 at battle start, ELITE ROOMS ONLY

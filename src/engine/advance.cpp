@@ -555,10 +555,18 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             if (!mask.choice_pending || !mask.can_confirm_choice) {
                 break;
             }
-            ActionQueueItem& front = s.action_queue[s.action_head];
-            resolve_optional_choice(s, front);
+            // POP FIRST, then resolve off the popped copy. The Java action is
+            // already off the queue while its update() runs -- and one kind,
+            // HAND_TO_DISCARD_THEN_DRAW (Gambler's Brew / Gambling Chip),
+            // add_to_TOPs a DrawCardAction from inside its resolution
+            // (GamblingChipAction.java:53). Resolving before the pop would put
+            // that draw at the head, and the pop would then throw the DRAW away
+            // instead of the finished CHOOSE_CARD. The order is invisible to
+            // every other kind: resolve_optional_choice reads only the item's
+            // flags and the hand suffix, and the pop touches neither.
             ActionQueueItem consumed{};
             (void)pop_action_front(s, consumed);
+            resolve_optional_choice(s, consumed);
             pump(s, dispatch_monster_turn);
             break;
         }

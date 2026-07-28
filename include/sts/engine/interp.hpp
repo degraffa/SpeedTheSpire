@@ -784,6 +784,53 @@ enum class ChoiceKind : uint8_t {
     //
     // NO RNG anywhere in this action, on any path.
     DISCARD_TO_HAND_FREE = 11,
+    //
+    // Gambler's Brew AND Gambling Chip -- literally one Java action, one boolean
+    // apart. GamblersBrew.use (GamblersBrew.java:36-41) queues
+    // `GamblingChipAction(player, true)`; GamblingChip.atTurnStartPostDraw
+    // (GamblingChip.java:34-42) queues `GamblingChipAction(player)`, i.e.
+    // notChip = false. The boolean picks a PROMPT STRING (:42-46) and nothing
+    // else, so the two consumers share this kind outright.
+    //
+    // GamblingChipAction.update (GamblingChipAction.java:39-63):
+    //   :41-49  first tick -- handCardSelectScreen.open(TEXT[..], 99, true,
+    //           true), the SAME optional zero-to-all screen Elixir and
+    //           Forethought+ open, then a WaitAction and tickDuration.
+    //   :51-61  on retrieval, and ONLY if the selection is non-empty:
+    //               addToTop(new DrawCardAction(p, selectedCards.size()));
+    //               for (c : selectedCards.group) {
+    //                   hand.moveToDiscardPile(c);
+    //                   GameActionManager.incrementDiscard(false);
+    //                   c.triggerOnManualDiscard();
+    //               }
+    //
+    // ORDERING, which is easy to get backwards: the addToTop only QUEUES, while
+    // the discard loop at :54-58 is synchronous inside the same update(). So the
+    // observable order is DISCARD EVERY PICK (in pick order), THEN draw exactly
+    // that many -- and the draw sits at the TOP of the queue, ahead of anything
+    // queued behind this action. An EMPTY confirm does nothing at all: no draw,
+    // no discard. The count is `selectedCards.size()`, read AT CONFIRM, for both
+    // consumers alike -- there is no relic-side count.
+    //
+    // The draw-back is folded into resolve_optional_choice rather than given a
+    // fused opcode: the discard half is an ordinary per-slot manipulation and
+    // the DRAW is just an add_to_top of the existing opcode 4, so an opcode
+    // would only duplicate the CHOOSE lifecycle.
+    //
+    // RNG: this action spends none itself. The queued DRAW may reshuffle
+    // (shuffle_rng) and fires onCardDraw per drawn card, so with Snecko Eye's
+    // Confusion up each drawn card costs one card_random_rng draw.
+    //
+    // TWO JAVA CALLS WITH NO S1 COUNTERPART, named rather than invented:
+    //   * `c.triggerOnManualDiscard()` -- the binders are Silent's
+    //     Reflex/Tactician and Watcher's Sands of Time. No S1 Ironclad card
+    //     overrides it, so there is nothing to fire.
+    //   * `GameActionManager.incrementDiscard(false)` -- nothing in the engine
+    //     reads a discard-this-turn counter (no such field exists), so the
+    //     increment has no observable consumer. Whoever registers the first
+    //     card that reads one owns adding it here and at the end-of-turn
+    //     discard.
+    HAND_TO_DISCARD_THEN_DRAW = 12,
 };
 
 // Which pile a CHOOSE_CARD of this kind selects from. `arg0` of a CHOOSE action
@@ -1338,6 +1385,23 @@ void resolve_optional_choice(CombatState& state,
 // spill past a full hand to the discard (MakeTempCardInHandAction:71-77).
 void apply_choice_selection(CombatState& state, uint8_t slot, ChoiceKind kind,
                             int copies = 1, bool prompted = false) noexcept;
+
+// Queue GamblingChipAction (GamblingChipAction.java:39-63) -- the optional
+// zero-to-all hand select whose confirm discards every pick and then draws
+// exactly that many. add_to_bottom, matching both call sites' addToBot.
+//
+// EXPOSED AS A SHARED BUILDER because the action has TWO consumers that are one
+// boolean apart, and that boolean is presentation-only: Gambler's Brew passes
+// notChip = true (GamblersBrew.java:39) and Gambling Chip passes false
+// (GamblingChip.java:40), which selects only the prompt string (:42-46). Writing
+// the item twice is how the same discard-then-draw-back logic would end up
+// spelled two ways.
+//
+// The differences that ARE real live at the CALL sites, not here: Gambler's Brew
+// carries its own `!hand.isEmpty()` guard (GamblersBrew.java:38) and so queues
+// nothing at all on an empty hand, and Gambling Chip fires at most ONCE PER
+// COMBAT off a private `activated` latch (GamblingChip.java:31/36-37).
+void queue_gambling_chip_choice(CombatState& state) noexcept;
 
 // DISCOVERY choice lifecycle. prepare_discovery_choice rejection-samples and
 // persists the three-card offer exactly once. resolve_discovery_choice creates

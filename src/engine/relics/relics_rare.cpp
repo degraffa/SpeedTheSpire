@@ -301,19 +301,51 @@ void relic_native_dead_branch(CombatState& s, RelicHook hook,
     add_to_bottom(s, make);  // addToBot (DeadBranch.java:29)
 }
 
-void relic_native_gambling_chip(CombatState& /*s*/, RelicHook /*hook*/,
-                                RelicSlot& /*slot*/,
+void relic_native_gambling_chip(CombatState& s, RelicHook hook,
+                                RelicSlot& slot,
                                 const RelicHookContext& /*ctx*/) noexcept {
-    // GamblingChip.atTurnStartPostDraw (GamblingChip.java:445-453): the first
-    // turn-start of a combat queues GamblingChipAction(player), which opens a
-    // hand-select screen, discards ZERO-to-all chosen cards, and then draws
-    // exactly as many as were discarded.
+    // GamblingChip.java, read in full -- the file is 48 lines, not the 426-453
+    // range the deferral note cited:
     //
-    // DEFERRED: every existing ChoiceKind selects a MANDATORY fixed count, so the
-    // engine has no optional multi-select with an explicit confirm. Adding one
-    // changes the public ActionMask surface in advance.hpp -- the shape the
-    // observation and translator layers join on -- which is a bigger, shared
-    // change than a relic body.
+    //   private boolean activated = false;                             (:18)
+    //   public void atBattleStartPreDraw() { this.activated = false; } (:30-32)
+    //   public void atTurnStartPostDraw() {                            (:34-42)
+    //       if (!this.activated) {
+    //           this.activated = true;
+    //           this.flash();
+    //           this.addToBot(new RelicAboveCreatureAction(player, this));
+    //           this.addToBot(new GamblingChipAction(AbstractDungeon.player));
+    //       }
+    //   }
+    //
+    // ONCE PER COMBAT, NOT EVERY TURN. atTurnStartPostDraw fires every turn but
+    // the `activated` latch lets the body run only on the first. `slot.counter`
+    // carries the latch: the registry row leaves it at the -1 unset default,
+    // which IS "not yet activated", and a fresh CombatState starts there -- so
+    // no combat-scoped reset is needed at this hook, and binding
+    // atBattleStartPreDraw (the Java's reset) would be inert code, since the
+    // engine has no dispatch site for it.
+    //
+    // The queued action is the SAME GamblingChipAction Gambler's Brew queues,
+    // one presentation-only boolean apart (notChip false here, true there,
+    // selecting only the prompt string, GamblingChipAction.java:42-46), so this
+    // calls the shared builder rather than hand-writing a second item. The draw
+    // count is `selectedCards.size()` read AT CONFIRM -- there is no
+    // relic-side count.
+    //
+    // RelicAboveCreatureAction (:39) is pure presentation and is not modeled.
+    //
+    // This body was deferred on the grounds that "every existing ChoiceKind
+    // selects a MANDATORY fixed count, so the engine has no optional
+    // multi-select with an explicit confirm". That prerequisite ARRIVED --
+    // kChoiceOptionalBit, ActionVerb::CONFIRM and the runtime selected-count
+    // nibble are live -- which is exactly the conventions §8 signal that a
+    // comment justifying inert code by a missing prerequisite has gone stale.
+    if (hook != RelicHook::AT_TURN_START_POST_DRAW || slot.counter != -1) {
+        return;
+    }
+    slot.counter = 1;               // this.activated = true (:36)
+    queue_gambling_chip_choice(s);  // addToBot (:40)
 }
 
 }  // namespace sts::engine

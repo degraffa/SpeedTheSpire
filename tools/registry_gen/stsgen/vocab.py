@@ -323,7 +323,13 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # destination field -- the kind IS the destination -- and nothing
                 # else in the enum moves a discard card into the hand. Kind 10 is
                 # a permanent gap, so this is 11.
-                "discard_to_hand_free": 11}
+                "discard_to_hand_free": 11,
+                # Gambler's Brew AND Gambling Chip -- literally one Java action
+                # (GamblingChipAction), one presentation-only boolean apart.
+                # Move each selected hand card to the DISCARD pile, then draw
+                # exactly as many as were discarded, the count read AT CONFIRM.
+                # Authored OPTIONAL with amount 99 (the action's own literal).
+                "hand_to_discard_then_draw": 12}
 CHOICE_RANDOM_BIT = 1 << 2
 CHOICE_KIND_HIGH_BIT = 1 << 3       # ChoiceKind bit 2
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the
