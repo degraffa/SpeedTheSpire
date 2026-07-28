@@ -5383,3 +5383,62 @@ Match and Keep. Full tables and traps:
 (`ctest -N`). The capture-id join is `event_id`, NOT `event_name` — for six of
 the eighteen ids they differ (the game's misspelling `Transmorgrifier` is the
 *id*); `EventJoin.UnknownNameFailsLoud` pins that a name is refused.
+
+---
+
+<a id="b413-readout"></a>
+## B4.13 oracle read-outs — the arrival sweep and the Match and Keep deal (2026-07-28)
+
+The task's ledger block, moved here on landing. **Acceptance was:** tier-2 per
+event; transform draw-stream attribution named tests; Match-and-Keep's card
+dealing vs oracle spot-check. The first two landed with the code (see
+[#b413](#b413)); the third closed in two halves:
+
+**ARRIVAL half — 88 of 88 captured ?-room sightings zero-diff.**
+`replay_run_diff --event` (branch `replay-readout-modes`) over all 161
+oracle-carrying runs of the ten campaigns reads out, per sighting, the
+onEnterRoom fan-out, the one committed `eventRng` draw, `generate_event`'s
+byte-identical stream, the capture-id → `EventId` join (the join is
+`event_id`, NOT the display `event_name` — they differ for six of the
+eighteen ids, and the game's misspelling `Transmorgrifier` is the id), and
+the WHOLE arrival `RunState` (three pity floats, three membership bitsets,
+`event_flags`, gold, every relic counter): 88 sightings, 87 zero-diff plus 1
+clean but for the known B1.3 obtain race (recognised narrowly), 0 diverged,
+across 18 distinct events, with Fountain of Cleansing's `isCursed` and The
+Cleric's `gold >= 35` gates observed live on filtered pools.
+
+**DEAL half — Match-and-Keep's card dealing vs oracle spot-check, 6 of 6
+sightings zero-diff.** Match and Keep is the only Act-1 body that spends RNG
+in its *constructor* (`GremlinMatchGame.java:55-61`, run at
+`EventRoom.onPlayerEntry`), so the deal happens AT ARRIVAL — the `--event`
+mode now runs the body's own `on_enter` before the arrival diff and compares
+what it dealt. Over campaign `b4x_greedy_pilot_20260728T041406Z_claude01`
+(six k3-prescanned seeds, 6/6 fired the event, both matched and unmatched
+branches): all six **DEAL OK** — `cardRng` +5 (the three `getCard(rarity)`
+draws and BOTH `returnRandomCurse` calls) folded into the whole-`RunState`
+arrival diff, `miscRng` +1 (the board shuffle's `randomLong`, `:58`), and
+`shuffleRng` compared explicitly. The board comparison is honest about what
+a capture exposes: labels key by SCREEN POSITION via the fork patch's
+`(i%4) + 4*(i%3)` table (`placeCards`, `:280-281`) with six of twelve slots
+moved; the choice list is compacted to face-down cards; a matched pair's
+identity never appears on screen. So the read-out is **30 screen positions
+named by a capture and compared position-for-position, 30 attempt outcomes
+reproduced as pair predicates, 60 grid rounds walked** through the engine's
+own deal, plus the kept-card multiset — the only witness for a matched
+pair's identity and the only thing that settles the fifth attempt. Floor
+streams are DERIVED as `floor_stream(seed, floor)`, never copied from the
+capture, so the unmoved `shuffleRng` is that formula checked live. The
+pre-existing 88-sighting corpus re-runs byte-identical. **One honest gap
+remains and is out of S1's capture reach:** every capture is A20, so
+`initializeCards` takes the `ascensionLevel >= 15` branch (`:66-71`) and
+draws a second curse; the `< 15` branch — the only `shuffleRng` consumer and
+the only path through `draw_colorless_uncommon` — stays on its tier-2 test
+and would need a sub-A15 capture, as would NoteForYourself's pool
+membership. Read-out shape and per-sighting tables:
+[`b47_treasure_spotdiff.md`](../tools/oracle_bridge/driver/b47_treasure_spotdiff.md)
+§8c; frozen in `tests/replay_mk_board_test.cpp`.
+
+NoteForYourself's NOTE_CARD/NOTE_UPGRADE profile pin was discharged
+separately by direct reference-profile inspection (no `NOTE_*` key in any
+preferences file; the event is unreachable at A20 in both game and sim) —
+recorded in the ledger's Landed non-task work.

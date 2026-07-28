@@ -1326,71 +1326,22 @@ dungeonTransitionSetup fields.
   curse obtains now honor Omamori centrally; tier-2 every option/A15 and full
   three-preset acceptance · [log](stage-b-log.md#b412)
 
-### B4.13 `[ ]` ∥ Shrines + one-time specials — **code landed; blocked on the manual oracle capture**
-**Deps:** B4.10 · **Provenance:** events/shrines: Match and Keep, Golden
-Shrine, Transmorgrifier, Purifier, Upgrade Shrine, Wheel of Change + the
-AbstractDungeon.java:1340-1358 one-time list filtered to Act-1 reachability
-(the per-key gates live in **getShrine, AbstractDungeon.java:1886-1936** — the
-`:1949-1980` range this brief originally cited is getEvent's *event-list*
-filter and governs the eleven ordinary events, not the specials)
-**Deliverables:** the 6 shrines + reachable specials with
-transform/remove/upgrade mechanics (cardRandomRng vs miscRng attribution read
-per event).
-**Reachable set — corrected against the Java, not the brief's guess.** Eight
-specials reach Act 1: **Accursed Blacksmith, Bonfire Elementals, FaceTrader,
-Fountain of Cleansing, Lab, NoteForYourself, WeMeetAgain, The Woman in Blue**.
-Six do not, each on an act gate: Designer, Duplicator, Knowing Skull, N'loth,
-SecretPortal, The Joust. The brief's candidate list was wrong three ways —
-**Duplicator** is TheCity/TheBeyond only (:1899-1903), **N'loth** is TheCity
-only (its `!id.equals("TheCity") && !id.equals("TheCity")` is a decompiler
-duplication of one test, answering the brief's "N'loth?" with *no*), and
-**FaceTrader**, which the brief never named, *is* reachable because its gate
-is TheCity **or** Exordium (:1904-1908). Per-gate evidence is in the Log and
-is machine-checked (`one_time_specials_test`: every non-act condition
-satisfied at act 1 and the six still absent; each reappearing in its gating
-act).
-**Acceptance:** tier-2 per event; transform draw-stream attribution named
-tests; Match-and-Keep's card dealing vs oracle spot-check.
-**Pending oracle spot-check — what it must confirm.** Match and Keep's deal is
-implemented against a three-stream reading (cardRng for the three
-`getCard(rarity)` draws and every `returnRandomCurse`; shuffleRng for
-`returnColorlessCard`'s `randomLong`; miscRng for the board shuffle) and is
-pinned tier-2 against an independent hand-derivation. The pool-ORDER caveat this
-row used to carry is **gone**: B4.5's capture pinned the CardLibrary library
-order for every generated pool, so the *identities* Match and Keep deals are now
-Java-exact by construction, and only the deal's own stream reading is left for a
-live capture to confirm. **NoteForYourself's NOTE_CARD / NOTE_UPGRADE profile
-pin no longer waits on this capture** — it was discharged by direct
-reference-profile inspection (no `NOTE_*` key exists in any preferences file,
-so the Java defaults the engine pins apply), and the event is unreachable at
-A20 in both game and sim; see [Landed non-task work](#landed-non-task-work).
-This task's capture leg is Match and Keep's deal alone.
-**Inherited — DISCHARGED in code:** the B3.27 event-screen shares for every
-site this batch actually creates; see the obligations row.
-**ARRIVAL half discharged — 88 of 88 captured ?-room sightings zero-diff
-(2026-07-28).** `replay_run_diff --event` (the `replay-readout-modes` branch)
-over all 161 oracle-carrying runs of the ten campaigns reads out, per
-sighting, the onEnterRoom fan-out, the one committed `eventRng` draw,
-`generate_event`'s byte-identical stream, the capture-id → `EventId` join
-(the join is `event_id`, NOT the display `event_name` — they differ for six
-of the eighteen ids, and the game's misspelling `Transmorgrifier` is the id),
-and the WHOLE arrival `RunState` (three pity floats, three membership
-bitsets, `event_flags`, gold, every relic counter): **88 sightings, 87
-zero-diff plus 1 clean but for the known B1.3 obtain race (recognised
-narrowly), 0 diverged**, across 18 distinct events — eventList 10/11,
-shrineList 4/6 (Transmorgrifier, Purifier, Upgrade Shrine, Wheel of Change)
-and 4 Act-1 specials, with Fountain of Cleansing's `isCursed` and The
-Cleric's `gold >= 35` gates observed live on filtered pools. **This does NOT
-close the task**: Match and Keep is in no capture, so its card-dealing
-spot-check — now the task's ONLY remaining leg — is untouched
-(NoteForYourself's profile pin was separately discharged by direct profile
-inspection; see [Landed non-task work](#landed-non-task-work)). Option FLOW
-is deliberately out of scope for the arrival mode and stays `--replay`'s.
-Tables and traps:
-[b47_treasure_spotdiff.md](../tools/oracle_bridge/driver/b47_treasure_spotdiff.md)
-§8b.
-**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b413)
-(the task stays unchecked until its required live-game spot-check can run)
+- **B4.13** `[x]` ∥ Shrines + one-time specials — the 6 shrines + the eight
+  Act-1-reachable specials (reachable set corrected against getShrine's
+  per-key gates; machine-checked in `one_time_specials_test`), with
+  transform/remove/upgrade mechanics and per-event stream attribution.
+  Acceptance closed 2026-07-28 in two oracle halves: the ARRIVAL sweep (88 of
+  88 captured ?-room sightings zero-diff via `--event`, 18 distinct events,
+  live gate evidence) and the **Match and Keep DEAL read-out** (6 of 6
+  captured interactions DEAL OK — 30 capture-named screen positions
+  position-for-position through the fork patch's `(i%4)+4*(i%3)` layout, 30
+  attempt outcomes, 60 grid rounds walked, kept-card multisets; cardRng +5,
+  miscRng +1, shuffleRng unmoved with floor streams DERIVED not copied).
+  NoteForYourself's profile pin discharged by direct profile inspection.
+  Honest residue, out of S1 capture reach (A20-only pipeline): the
+  `ascension < 15` colorless branch — the only `shuffleRng` consumer — and
+  NoteForYourself's pool membership stay tier-2-only ·
+  [log](stage-b-log.md#b413) · [read-out](stage-b-log.md#b413-readout)
 
 ### B4.14 `[x]` Neow
 **Deps:** B4.4, B4.6, B3.27 (boss pool) · **Spec:** design §5.6; §10 trap 17
