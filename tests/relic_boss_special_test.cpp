@@ -377,6 +377,65 @@ TEST(RelicBossSpecial, PhilosophersStoneGivesEveryMonsterOneStrengthDirectly) {
     }
 }
 
+// PhilosopherStone.onSpawnMonster (PhilosopherStone.java:50-54) gives the SAME
+// +1 Strength to a monster spawned mid-combat, fanned out from
+// SpawnMonsterAction.update (SpawnMonsterAction.java:44-50). Act 1 reaches it
+// through the three Exordium splits (SlimeBoss, AcidSlime_L, SpikeSlime_L), each
+// of which queues SPAWN_MONSTER items -- the opcode driven directly here.
+TEST(RelicBossSpecial, PhilosophersStoneStrengthensEveryMidCombatSpawn) {
+    auto spawn = [](CombatState& s, uint8_t slot, MonsterId id, int16_t hp) {
+        ActionQueueItem it{};
+        it.opcode = kOp(Opcode::SPAWN_MONSTER);
+        it.src = 0;
+        it.tgt = slot;
+        it.amount = hp;
+        it.flags = static_cast<uint32_t>(id);
+        execute_opcode(s, it);
+    };
+
+    CombatState base = MakeState();
+    base.ai_rng = from_seed(11);
+    spawn(base, 1, MonsterId::SPIKE_SLIME_MEDIUM, 12);
+    ASSERT_EQ(base.monster_count, 2);
+    EXPECT_EQ(monster_power(base, 1, PowerId::STRENGTH), nullptr);
+
+    CombatState s = MakeState();
+    give(s, RelicId::PHILOSOPHERS_STONE);
+    s.ai_rng = from_seed(11);
+    spawn(s, 1, MonsterId::SPIKE_SLIME_MEDIUM, 12);
+    ASSERT_EQ(s.monster_count, 2);
+    const PowerSlot* p = monster_power(s, 1, PowerId::STRENGTH);
+    ASSERT_NE(p, nullptr) << "the spawned monster never got its Strength";
+    EXPECT_EQ(p->amount, 1);
+    // addPower is SYNCHRONOUS in the Java too -- nothing is queued.
+    EXPECT_EQ(s.action_count, 0);
+    // The monster already on the field is untouched: onSpawnMonster takes the
+    // ONE new monster, not the group.
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), nullptr);
+
+    // RNG-neutral. init()'s rollMove does not read Strength, so the child's
+    // aiRng draw and the move it lands on are identical with and without the
+    // relic -- which is what makes the Java's before-init ordering and this
+    // engine's after-init ordering equivalent rather than merely close.
+    EXPECT_EQ(s.ai_rng.counter, base.ai_rng.counter);
+    EXPECT_EQ(s.ai_rng.s0, base.ai_rng.s0);
+    EXPECT_EQ(s.monsters[1].move_history[0], base.monsters[1].move_history[0]);
+    EXPECT_EQ(s.monsters[1].intent, base.monsters[1].intent);
+    EXPECT_EQ(s.monsters[1].hp, 12);
+
+    // The fan-out is per relic SLOT, matching `for (AbstractRelic r : relics)`.
+    CombatState twice = MakeState();
+    Relics r;
+    r.add(RelicId::PHILOSOPHERS_STONE);
+    r.add(RelicId::PHILOSOPHERS_STONE);
+    install(twice, r);
+    twice.ai_rng = from_seed(11);
+    spawn(twice, 1, MonsterId::SPIKE_SLIME_MEDIUM, 12);
+    const PowerSlot* q = monster_power(twice, 1, PowerId::STRENGTH);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(q->amount, 2);
+}
+
 TEST(RelicBossSpecial, MarkOfPainShufflesTwoWoundsIntoTheDrawPile) {
     CombatState s = MakeState();
     put_in_draw(s, CardId::STRIKE);
