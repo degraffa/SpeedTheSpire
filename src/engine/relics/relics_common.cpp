@@ -26,12 +26,31 @@ void relic_native_blood_vial(CombatState& s, RelicHook hook,
 }
 
 void relic_native_centennial_puzzle(CombatState& s, RelicHook hook,
-                                    RelicSlot& slot,
+                                    RelicSlot& /*slot*/,
                                     const RelicHookContext& /*ctx*/) noexcept {
-    // CentennialPuzzle.wasHPLost: the FIRST HP loss in a combat draws 3.
-    // slot.counter is the once-per-combat flag (0 = not yet fired).
-    if (hook == RelicHook::WAS_HP_LOST && slot.counter == 0) {
-        slot.counter = 1;
+    // CentennialPuzzle.wasHPLost (CentennialPuzzle.java:40-49): the FIRST HP
+    // loss of a combat addToTop(DrawCardAction(player, NUM_CARDS)) with
+    // NUM_CARDS == 3 (:20, :44).
+    //
+    // The once-per-combat gate is `private static boolean usedThisCombat`
+    // (:21) -- combat-global, read+set at :41/:46, reset by atPreBattle (:34).
+    // It is deliberately NOT this relic's `slot.counter`: nothing in
+    // CentennialPuzzle.java ever writes `this.counter`, so the counter stays at
+    // AbstractRelic's -1 for the whole run and any write here folds out to
+    // RunState and diverges from the capture. The latch lives in
+    // kCombatFlagCentennialPuzzleUsed (combat_state.hpp), whose per-combat reset
+    // is enter_combat's fresh `CombatState s{}` -- see that constant for the
+    // full derivation.
+    //
+    // The Java also gates on getCurrRoom().phase == RoomPhase.COMBAT (:41); a
+    // CombatState only exists inside a combat, and dispatch_relics_was_hp_lost
+    // is reached solely from the in-combat damage path (power_hooks.cpp), so
+    // that clause is structurally true at every call site here. The
+    // damageAmount > 0 half of the same condition is enforced by
+    // dispatch_relics_was_hp_lost (relic_hooks.cpp).
+    if (hook == RelicHook::WAS_HP_LOST &&
+        (s.flags & kCombatFlagCentennialPuzzleUsed) == 0u) {
+        s.flags |= kCombatFlagCentennialPuzzleUsed;  // usedThisCombat = true (:46)
         ActionQueueItem draw{};
         draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
         draw.src = kActorPlayer;
