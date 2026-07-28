@@ -762,6 +762,22 @@ public class GameStateConverter {
         jsonCard.put("has_target", card.target== AbstractCard.CardTarget.SELF_AND_ENEMY || card.target == AbstractCard.CardTarget.ENEMY);
         jsonCard.put("exhausts", card.exhaust);
         jsonCard.put("ethereal", card.isEthereal);
+        // SpeedTheSpire fork addition (Wave-C track 2, PROTOCOL §3.13): the
+        // Bottled trio's per-instance flags, emitted only when set (the same
+        // absent-means-default shape `misc` uses, so captures made by earlier
+        // fork builds and stock consumers are unaffected). The sim stores them
+        // as master-deck flag bits (engine run_deck.hpp) and the differ
+        // compares master_deck[i].flags, so without this field a bottled bit
+        // could never be validated end-to-end.
+        if(card.inBottleFlame) {
+            jsonCard.put("in_bottle_flame", true);
+        }
+        if(card.inBottleLightning) {
+            jsonCard.put("in_bottle_lightning", true);
+        }
+        if(card.inBottleTornado) {
+            jsonCard.put("in_bottle_tornado", true);
+        }
         return jsonCard;
     }
 

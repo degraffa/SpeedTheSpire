@@ -32,6 +32,7 @@
 #include "sts/engine/event_framework.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/power_hooks.hpp"
+#include "sts/engine/run_deck.hpp"  // the master-deck bottle bits
 #include "sts/translate/translate.hpp"
 
 namespace {
@@ -1234,6 +1235,52 @@ TEST(Translator, HandSelectRefusesShapesItCannotModel) {
             hand_array_of(lines[2]) + ",\"selected\":[],\"max_cards\":1}");
     EXPECT_THROW((void)tr::translate_lines({lines[0], missing}, "hs-missing"),
                  tr::TranslateError);
+}
+
+// --- The fork's Bottled trio booleans (PROTOCOL §3.13 fork addition) --------
+
+TEST(Translator, BottleFlagsMapOnTheDeckWalkOnly) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+
+    // Run-level record: bottle the first deck Strike. The key lands as the
+    // master-deck bottle bit (engine run_deck.hpp). Absence -- every capture
+    // made before the fork addition, this golden included -- means 0, which
+    // the untouched neighbour row pins.
+    {
+        std::string runline = lines[1];
+        const std::string anchor = "\"deck\":[{\"id\":\"Strike_R\",";
+        const auto pos = runline.find(anchor);
+        ASSERT_NE(pos, std::string::npos) << "deck anchor missing from golden";
+        runline.insert(pos + anchor.size(), "\"in_bottle_flame\":true,");
+        tr::TranslatedRun run =
+            tr::translate_lines({lines[0], runline}, "bottle-deck");
+        ASSERT_EQ(run.records.size(), 1u);
+        EXPECT_EQ(run.records[0].run.master_deck[0].flags,
+                  engine::kMasterCardInBottleFlame);
+        EXPECT_EQ(run.records[0].run.master_deck[1].flags, 0);
+    }
+
+    // Combat record: the same key on a combat pile card is consumed and
+    // DROPPED -- combat flags are registry-derived CardFlags (bit 0 there is
+    // EXHAUST), so the bottle bit must NOT leak in.
+    {
+        std::string combat = lines[2];
+        const std::string anchor = "\"draw_pile\":[{\"id\":\"Strike_R\",";
+        const auto pos = combat.find(anchor);
+        ASSERT_NE(pos, std::string::npos) << "draw anchor missing from golden";
+        combat.insert(pos + anchor.size(), "\"in_bottle_flame\":true,");
+        tr::TranslatedRun run =
+            tr::translate_lines({lines[0], combat}, "bottle-combat");
+        ASSERT_EQ(run.records.size(), 1u);
+        ASSERT_TRUE(run.records[0].in_combat);
+        for (int i = 0; i < engine::kCardPoolCap; ++i) {
+            EXPECT_EQ(run.records[0].combat.card_pool[i].flags &
+                          engine::kMasterCardBottleMask,
+                      0u)
+                << "combat card_pool[" << i << "]";
+        }
+    }
 }
 
 }  // namespace

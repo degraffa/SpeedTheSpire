@@ -67,3 +67,26 @@ runs got past floor 0. Left for the harness's next owner as a coverage
 feature, deliberately not folded into this wave: it is disjoint from the five
 bodies and the mapping deserves its own tests (stock indexing joins through
 display names — see `StockRow`).
+
+## Stage 3 re-run (the Bottled trio landing) — no regression
+
+Same command set as above (offline, no game, no capture pipeline), re-run
+after stage 3 landed the bottled master-deck marker, the pending-bottle
+overlay and the `getGroupWithoutBottledCards` exclusions. All twelve
+artifacts — STS00042–46 (`b45_rewards_oracle`), STS00047–52
+(`b45_rewards_oracle2`), STS00054 (`b47_treasure_oracle`) — reproduce their
+pre-stage-3 verdicts exactly:
+
+| Run | Verdict | Same as baseline? |
+|---|---|---|
+| STS00044 / 45 / 46 / 47 / 48 / 49 / 50 / 51 | **CLEAN to terminal**, zero divergence | yes |
+| STS00052 | zero divergence over 43 records; stop seq 42 `SHOP_ROOM` mapping frontier | yes |
+| STS00054 | zero divergence over 33 records; stop seq 32, same frontier | yes |
+| STS00042 | first div seq 18 (1 field) | yes — the pre-existing `energyMaster` deferral (track 1's row) |
+| STS00043 | first div seq 15 | yes — same row |
+
+No existing capture takes a bottle (the trio's `canSpawn` deck gates plus
+these runs' actual draws), so this proves non-regression only; the positive
+end-to-end proof needs the fork redeploy + a bottle-taking capture — the new
+Deferred-obligations row (`docs/stage-b-tasks.md`) names the next
+capture-campaign owner.
