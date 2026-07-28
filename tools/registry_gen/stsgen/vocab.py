@@ -315,7 +315,15 @@ CHOICE_KINDS = {"exhaust": 0, "put_on_draw_top": 1, "upgrade": 2,
                 # `card_type:` is REQUIRED on the step and is what separates
                 # them). Kinds 6-7 are permanent gaps; kinds are append-only, so
                 # 9 steps over them rather than backfilling.
-                "draw_to_hand": 9}
+                "draw_to_hand": 9,
+                # Liquid Memories / BetterDiscardPileToHandAction's
+                # (numberOfCards, newCost) ctor: the source pile is the DISCARD
+                # pile and the destination is the HAND, at cost 0 FOR THE TURN.
+                # It needs its own kind because the packed encoding has no
+                # destination field -- the kind IS the destination -- and nothing
+                # else in the enum moves a discard card into the hand. Kind 10 is
+                # a permanent gap, so this is 11.
+                "discard_to_hand_free": 11}
 CHOICE_RANDOM_BIT = 1 << 2
 CHOICE_KIND_HIGH_BIT = 1 << 3       # ChoiceKind bit 2
 # CHOOSE_CARD `copies` (duplicate kind only): bits [4..7] hold copies - 1, so the

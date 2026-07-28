@@ -1366,7 +1366,6 @@ TEST(RunPotion, SmokeBombIsStillRefusedByADeadBossInTheGroup) {
 TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
     RunController rc = enter_jaw_worm_combat();
     for (PotionId id : {PotionId::GAMBLERS_BREW,
-                        PotionId::LIQUID_MEMORIES,
                         PotionId::DISTILLED_CHAOS,
                         PotionId::DUPLICATION_POTION}) {
         rc.run.potions[0] = static_cast<uint16_t>(id);
@@ -1389,6 +1388,7 @@ TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
                         PotionId::SKILL_POTION,           // combat native (DISCOVERY)
                         PotionId::POWER_POTION,           // combat native (DISCOVERY)
                         PotionId::COLORLESS_POTION,       // combat native (DISCOVERY)
+                        PotionId::LIQUID_MEMORIES,        // combat native (CHOOSE)
                         PotionId::SNECKO_OIL,             // data program (op 60)
                         PotionId::SMOKE_BOMB}) {          // run-layer native
         rc.run.potions[0] = static_cast<uint16_t>(id);

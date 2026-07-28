@@ -752,6 +752,38 @@ enum class ChoiceKind : uint8_t {
     // already full (:46-48 / :72-74); the unchosen cards keep their draw-pile
     // order, because only the temp browse list was ever randomized.
     DRAW_TO_HAND = 9,
+    // 10 is a permanent gap (kinds are append-only).
+    //
+    // Liquid Memories / BetterDiscardPileToHandAction's (count, newCost) ctor
+    // (BetterDiscardPileToHandAction.java:40-48, setCost = true, newCost = 0,
+    // optional = false). The source pile is the DISCARD pile and the
+    // destination is the HAND, at cost 0 FOR THE TURN.
+    //
+    // WHY IT NEEDS ITS OWN KIND rather than flags on DISCARD_TO_DRAW_TOP: the
+    // packed CHOOSE_CARD encoding has no destination field at all -- the kind IS
+    // the destination -- and the two differ in destination, in the cost write,
+    // and in the hand-full behaviour. Nothing else in the enum sources from the
+    // discard.
+    //
+    // update (:50-117), in branch order:
+    //   :53-56   empty discard, or numberOfCards <= 0 -> isDone, nothing.
+    //   :57-75   `discardPile.size() <= numberOfCards && !optional` -> FORCED,
+    //            NO SCREEN: snapshot the discard and move each card, IN DISCARD
+    //            ORDER. That is the eligible <= amount branch op_choose_card
+    //            already takes.
+    //   :76-86   otherwise a MANDATORY exactly-`numberOfCards` grid select over
+    //            the discard pile (`optional` is false on this ctor, so the
+    //            zero-pickable overload at :78/:83 is unreachable).
+    //   :90-110  resolution applies the same per-card body as the forced branch.
+    //
+    // THE PER-CARD BODY, and its one trap: `if (hand.size() < 10) { addToHand;
+    // setCostForTurn(0); discardPile.removeCard; }` -- the guard wraps the
+    // REMOVAL too, so a card that does not fit STAYS IN THE DISCARD PILE. There
+    // is no spill-to-discard here, unlike MakeTempCardInHandAction, and no
+    // partial move: it is all three writes or none.
+    //
+    // NO RNG anywhere in this action, on any path.
+    DISCARD_TO_HAND_FREE = 11,
 };
 
 // Which pile a CHOOSE_CARD of this kind selects from. `arg0` of a CHOOSE action
@@ -768,6 +800,7 @@ enum class ChoiceSource : uint8_t {
 [[nodiscard]] constexpr ChoiceSource choice_source(ChoiceKind k) noexcept {
     switch (k) {
         case ChoiceKind::DISCARD_TO_DRAW_TOP:
+        case ChoiceKind::DISCARD_TO_HAND_FREE:
             return ChoiceSource::DISCARD;
         case ChoiceKind::EXHAUST_TO_HAND:
             return ChoiceSource::EXHAUST;

@@ -91,6 +91,7 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::SKILL_POTION:           // (the four DISCOVERY potions --
         case PotionId::POWER_POTION:           //  one body, pool selector in the
         case PotionId::COLORLESS_POTION:       //  item's src byte)
+        case PotionId::LIQUID_MEMORIES:        // dispatch_native_potion, below
         case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
                                                // (run_advance's step_potion
                                                // still intercepts it first)
@@ -288,6 +289,52 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             item.amount = 0;  // the "offer not yet generated" sentinel
             item.flags = 0;
             add_to_bottom(s, item);
+            break;
+        }
+        case PotionId::LIQUID_MEMORIES: {
+            // LiquidMemories.use (LiquidMemories.java:37-40) is one addToBot:
+            //     addToBot(new BetterDiscardPileToHandAction(this.potency, 0));
+            // the (numberOfCards, newCost) ctor
+            // (BetterDiscardPileToHandAction.java:40-48), which sets
+            // setCost = true, newCost = 0, optional = FALSE. getPotency (:42-45)
+            // is 1. NOTE there is no RoomPhase guard on this one at all, unlike
+            // Elixir and Snecko Oil -- the run layer's is the only gate.
+            //
+            // The whole action is ChoiceKind::DISCARD_TO_HAND_FREE with
+            // amount = potency: a MANDATORY exactly-`amount` choice over the
+            // discard pile whose per-card body is addToHand + setCostForTurn(0)
+            // + removeCard, all three under one `hand.size() < 10` guard. See
+            // the kind's derivation in interp.hpp and its body
+            // (discard_slot_to_hand_free) for the branch table.
+            //
+            // TWO BRANCHES FALL OUT OF THE EXISTING MACHINERY rather than being
+            // written:
+            //   * `discardPile.isEmpty() || numberOfCards <= 0` (:53-56) is a
+            //     silent no-op -- count_eligible is 0, so op_choose_card's
+            //     forced arm applies to nothing and choice_requires_user is
+            //     false, i.e. the pump does not block.
+            //   * `discardPile.size() <= numberOfCards && !optional` (:57-75) is
+            //     the FORCED, screen-less move of the whole discard pile in
+            //     discard order -- which is exactly op_choose_card's
+            //     `eligible <= need` arm. So a 1-card discard under potency 1
+            //     prompts for nothing and spends no rng, and this action spends
+            //     no rng on ANY path.
+            //
+            // SACRED BARK doubles potency 1 -> 2, and here potency IS the
+            // MANDATORY PICK COUNT: the screen then requires exactly two picks
+            // (:83/:85), and the forced branch widens to a 2-card discard pile.
+            // The relic has no engine hook, so `def->potency` is what arrives.
+            //
+            // Native rather than data for the standing reason: CHOOSE_CARD is a
+            // CARD_CONTEXT op and the potion domain admits only GENERAL ops.
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+            item.src = kActorPlayer;
+            item.tgt = kActorPlayer;
+            item.amount = potency;  // BetterDiscardPileToHandAction.numberOfCards
+            item.flags = make_choose_flags(ChoiceKind::DISCARD_TO_HAND_FREE,
+                                           /*random=*/false);
+            add_to_bottom(s, item);  // addToBot (LiquidMemories.java:39)
             break;
         }
         // --- Deferred native bodies (each lands with its dependency) ---

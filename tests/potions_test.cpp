@@ -696,6 +696,151 @@ TEST(Potions, AnAuthoredDiscoveryItemDefaultsToTheFullCombatPoolAndOneCopy) {
     EXPECT_EQ(discovery_copies(authored), 1);
 }
 
+// --- NATIVE with body: Liquid Memories (ChoiceKind::DISCARD_TO_HAND_FREE) ----
+//
+// LiquidMemories.use (LiquidMemories.java:37-40) is one addToBot of
+// BetterDiscardPileToHandAction(potency, 0) -- the (numberOfCards, newCost)
+// ctor, setCost true / newCost 0 / optional FALSE. getPotency is 1.
+
+void seed_discard_card(CombatState& s, uint8_t pi, CardId id) {
+    const CardDef* def = card_def(id);
+    ASSERT_NE(def, nullptr);
+    s.card_pool[pi].card_id = static_cast<uint16_t>(id);
+    s.card_pool[pi].cost_now = card_cost(*def, 0);
+    s.card_pool[pi].flags = card_flags(*def, 0);
+    s.discard[s.discard_count++] = pi;
+}
+
+TEST(Potions, LiquidMemoriesQueuesAMandatoryDiscardSourceChoice) {
+    CombatState s = MakeCombat();
+    seed_discard_card(s, 40, CardId::BASH);
+    seed_discard_card(s, 41, CardId::CLEAVE);
+    seed_discard_card(s, 42, CardId::STRIKE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_MEMORIES, 0));
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(item.flags),
+              ChoiceKind::DISCARD_TO_HAND_FREE);
+    EXPECT_EQ(choice_source(choose_kind_from_flags(item.flags)),
+              ChoiceSource::DISCARD);
+    EXPECT_FALSE(choose_is_optional(item.flags)) << "optional is false on this ctor";
+    EXPECT_FALSE(choose_is_random(item.flags));
+    EXPECT_EQ(item.amount, 1) << "potency is numberOfCards";
+    EXPECT_TRUE(choice_requires_user(s, item))
+        << "3 discard cards > 1 wanted -> a real grid select";
+    EXPECT_EQ(potion_def(PotionId::LIQUID_MEMORIES)->potency, 1);
+}
+
+// The chosen discard card enters the hand at cost 0 FOR THE TURN -- setCostForTurn
+// (:66/:95), not a permanent write. COST_MODIFIED_FOR_TURN must therefore be SET
+// (the opposite of Snecko Oil / Confusion), so the end-of-turn sweep restores the
+// real cost.
+TEST(Potions, LiquidMemoriesMovesThePickedCardToHandAtCostZeroThisTurn) {
+    CombatState s = MakeCombat();
+    seed_discard_card(s, 40, CardId::BASH);    // cost 2
+    seed_discard_card(s, 41, CardId::CLEAVE);  // cost 1
+    seed_discard_card(s, 42, CardId::STRIKE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_MEMORIES, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    apply_choice_selection(s, /*slot=*/0, choose_kind_from_flags(item.flags),
+                           /*copies=*/1, /*prompted=*/true);  // the Bash
+
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.hand[0], 40);
+    EXPECT_EQ(s.card_pool[40].cost_now, 0);
+    EXPECT_TRUE(has_card_flag(s.card_pool[40].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN))
+        << "setCostForTurn is THIS-TURN -- the base cost must be restorable";
+    ASSERT_EQ(s.discard_count, 2) << "and it leaves the discard pile";
+    EXPECT_EQ(s.discard[0], 41);
+    EXPECT_EQ(s.discard[1], 42);
+    EXPECT_EQ(s.card_random_rng.counter, 0) << "this action spends no rng";
+}
+
+// `discardPile.size() <= numberOfCards && !optional` (:57-75) is the FORCED,
+// screen-less branch: the whole discard pile moves, in DISCARD ORDER, with no
+// prompt. With potency 1 and a 1-card discard that means no prompt at all.
+TEST(Potions, LiquidMemoriesWithASingleDiscardCardIsForcedAndUnprompted) {
+    CombatState s = MakeCombat();
+    seed_discard_card(s, 40, CardId::BASH);
+
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_MEMORIES, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item)) << "size <= numberOfCards";
+    drain_actions(s);
+
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.hand[0], 40);
+    EXPECT_EQ(s.card_pool[40].cost_now, 0);
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.card_random_rng.counter, 0);
+}
+
+// `discardPile.isEmpty() || numberOfCards <= 0` (:53-56) ends the action with
+// nothing done -- and, here, without blocking the pump.
+TEST(Potions, LiquidMemoriesWithAnEmptyDiscardIsASilentNoOp) {
+    CombatState s = MakeCombat();
+    ASSERT_EQ(s.discard_count, 0);
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_MEMORIES, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item));
+    drain_actions(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.discard_count, 0);
+}
+
+// THE TRAP. The per-card body is `if (hand.size() < 10) { addToHand;
+// setCostForTurn(0); discardPile.removeCard; }` -- the guard wraps the REMOVAL,
+// so a card that does not fit STAYS IN THE DISCARD PILE at its original cost.
+// It is emphatically NOT MakeTempCardInHandAction's spill-to-discard.
+TEST(Potions, LiquidMemoriesLeavesTheCardInTheDiscardWhenTheHandIsFull) {
+    CombatState s = MakeCombat();
+    for (uint8_t i = 0; i < 10; ++i) {
+        seed_hand_card(s, static_cast<uint8_t>(50 + i), CardId::STRIKE);
+    }
+    ASSERT_EQ(s.hand_count, 10);
+    seed_discard_card(s, 40, CardId::BASH);
+    const uint8_t base_cost = s.card_pool[40].cost_now;
+    ASSERT_GT(base_cost, 0);
+
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_MEMORIES, 0));
+    drain_actions(s);
+
+    EXPECT_EQ(s.hand_count, 10) << "nothing was added";
+    ASSERT_EQ(s.discard_count, 1) << "and nothing was removed either";
+    EXPECT_EQ(s.discard[0], 40);
+    EXPECT_EQ(s.card_pool[40].cost_now, base_cost)
+        << "the re-cost is inside the same guard as the move";
+    EXPECT_FALSE(has_card_flag(s.card_pool[40].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN));
+}
+
+// SACRED BARK'S SHAPE: potency IS numberOfCards, so 1 -> 2 makes the grid select
+// require exactly TWO picks and widens the forced branch to a 2-card discard.
+// The relic has no engine hook, so the doubled amount is stamped directly.
+TEST(Potions, LiquidMemoriesWithADoubledPotencyForcesATwoCardDiscardPile) {
+    CombatState s = MakeCombat();
+    seed_discard_card(s, 40, CardId::BASH);
+    seed_discard_card(s, 41, CardId::CLEAVE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::LIQUID_MEMORIES, 0));
+    ActionQueueItem& item = s.action_queue[s.action_head];
+    item.amount = 2;  // Sacred Bark: potency 1 -> 2
+    EXPECT_FALSE(choice_requires_user(s, item))
+        << "discardPile.size() <= numberOfCards -> forced, no screen";
+
+    drain_actions(s);
+    ASSERT_EQ(s.hand_count, 2) << "the whole discard pile moves";
+    EXPECT_EQ(s.hand[0], 40) << "in DISCARD ORDER";
+    EXPECT_EQ(s.hand[1], 41);
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.card_pool[40].cost_now, 0);
+    EXPECT_EQ(s.card_pool[41].cost_now, 0);
+}
+
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
 // Powers registered by the potion-support-powers follow-up (Dexterity, Lose
 // Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
@@ -964,7 +1109,8 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     for (PotionId id : {PotionId::BLOOD_POTION, PotionId::BLESSING_OF_THE_FORGE,
                         PotionId::ELIXIR, PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
-                        PotionId::COLORLESS_POTION, PotionId::FRUIT_JUICE,
+                        PotionId::COLORLESS_POTION, PotionId::LIQUID_MEMORIES,
+                        PotionId::FRUIT_JUICE,
                         PotionId::ENTROPIC_BREW, PotionId::SMOKE_BOMB}) {
         EXPECT_TRUE(potion_use_implemented(id))
             << "native id " << static_cast<int>(id) << " has a body";
@@ -974,8 +1120,7 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::GAMBLERS_BREW,
-                        PotionId::LIQUID_MEMORIES, PotionId::DISTILLED_CHAOS,
+    for (PotionId id : {PotionId::GAMBLERS_BREW, PotionId::DISTILLED_CHAOS,
                         PotionId::DUPLICATION_POTION,
                         PotionId::FAIRY_POTION}) {
         EXPECT_FALSE(potion_use_implemented(id))

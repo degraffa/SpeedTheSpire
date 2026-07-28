@@ -381,6 +381,41 @@ void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
     }
 }
 
+// Liquid Memories / BetterDiscardPileToHandAction's per-card body, shared by its
+// forced branch (:62-72) and its post-select resolution (:91-102) -- the two are
+// character-for-character the same three lines:
+//
+//     if (this.player.hand.size() < 10) {
+//         this.player.hand.addToHand(c);
+//         if (this.setCost) c.setCostForTurn(this.newCost);   // newCost = 0
+//         this.player.discardPile.removeCard(c);
+//     }
+//     c.lighten(false); c.applyPowers();                      // presentation
+//
+// THE GUARD WRAPS THE REMOVAL. A card that does not fit is not moved, not
+// re-costed, and NOT taken out of the discard pile -- it simply stays there.
+// There is no spill-to-discard (that is MakeTempCardInHandAction's rule, and
+// reaching for it here would be wrong) and no partial application.
+//
+// setCostForTurn is THIS-TURN, not permanent (contrast Confusion / Snecko Oil,
+// which write card.cost). set_cost_for_turn already implements
+// AbstractCard.setCostForTurn (AbstractCard.java:2001-2011) exactly, including
+// the X-cost no-op while costForTurn < 0 and the COST_MODIFIED_FOR_TURN /
+// SAVED_BASE_COST bookkeeping that lets the end-of-turn sweep restore the real
+// base -- so it is called rather than re-derived.
+void discard_slot_to_hand_free(CombatState& s, uint8_t slot) noexcept {
+    if (slot >= s.discard_count || s.hand_count >= kHandCap) {
+        return;  // `hand.size() < 10` -- no move, no re-cost, no removal
+    }
+    const CardPoolIndex pi = s.discard[slot];
+    for (uint8_t j = static_cast<uint8_t>(slot + 1); j < s.discard_count; ++j) {
+        s.discard[j - 1] = s.discard[j];
+    }
+    --s.discard_count;
+    s.hand[s.hand_count++] = pi;
+    set_cost_for_turn(s, pi, 0);
+}
+
 // Dual Wield: add one stat-equivalent clone of pool instance `src_pi` to
 // the hand, spilling to the discard when the hand is full (MakeTempCardInHand-
 // Action.update:71-77). makeStatEquivalentCopy (AbstractCard.java:826-848)
@@ -468,6 +503,9 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             break;
         case ChoiceKind::DISCARD_TO_DRAW_TOP:
             discard_slot_to_draw_top(s, slot);
+            break;
+        case ChoiceKind::DISCARD_TO_HAND_FREE:
+            discard_slot_to_hand_free(s, slot);
             break;
         case ChoiceKind::DUPLICATE: {
             const CardPoolIndex pi = s.hand[slot];
@@ -1671,9 +1709,17 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot,
                static_cast<uint16_t>(CardId::EXHUME);
     }
     if (choice_source_is_discard(kind)) {
-        // Discard-to-draw-top: any discard card is a legal pick
-        // (DiscardPileToTopOfDeckAction has no eligibility filter). The
-        // just-played source card is in the LIMBO pile, never in this one.
+        // Any discard card is a legal pick, for both discard-source kinds:
+        // DiscardPileToTopOfDeckAction has no eligibility filter, and
+        // BetterDiscardPileToHandAction has none either. The just-played source
+        // card is in the LIMBO pile, never in this one.
+        //
+        // A FULL HAND IS NOT AN INELIGIBILITY for DISCARD_TO_HAND_FREE, unlike
+        // Exhume: BetterDiscardPileToHandAction still opens its screen and still
+        // consumes the pick, and it is the PER-CARD body that declines to move a
+        // card that does not fit (:63-69 / :92-98), leaving it in the discard.
+        // Making it ineligible here would change the eligible COUNT, and that
+        // count decides forced-vs-prompted.
         return slot < s.discard_count;
     }
     if (slot >= s.hand_count) {

@@ -383,9 +383,25 @@
   game_id: "LiquidMemories"
   rarity: UNCOMMON
   potency: 1
-  # Return `potency` chosen cards from discard to hand, cost 0 this turn -> card CHOOSE (B3.4). Deferred native.
+  # Return `potency` chosen cards from the DISCARD pile to hand, at cost 0 FOR
+  # THE TURN. IMPLEMENTED (native, potions.cpp) on the new
+  # ChoiceKind::DISCARD_TO_HAND_FREE (11) -- the one genuinely new choice kind
+  # this potion needed, because the packed CHOOSE_CARD encoding has no
+  # destination field: the KIND is the destination, and nothing else in the enum
+  # moves a discard card into the hand.
+  # potency IS the MANDATORY pick count (BetterDiscardPileToHandAction's
+  # numberOfCards), so Sacred Bark (1 -> 2) makes the screen require exactly two
+  # picks. NO RoomPhase guard on this potion at all, unlike Elixir/Snecko Oil.
+  # Spends NO rng on any path.
+  # Two of the action's branches fall out of the existing machinery rather than
+  # being written: an empty discard is a silent no-op (zero eligible), and
+  # `discardPile.size() <= numberOfCards` is the FORCED, screen-less move of the
+  # whole discard pile in discard order, which is op_choose_card's eligible <=
+  # amount arm. The per-card body's `hand.size() < 10` guard wraps the REMOVAL
+  # too, so a card that does not fit stays in the discard pile -- there is no
+  # spill-to-discard here.
   native: true
-  provenance: "LiquidMemories.use (LiquidMemories.java:38), getPotency (:43) -- discard->hand grid choice, temp cost 0"
+  provenance: "LiquidMemories.use (LiquidMemories.java:37-40), getPotency (:42-45) -- addToBot BetterDiscardPileToHandAction(potency, 0), the (numberOfCards, newCost) ctor (BetterDiscardPileToHandAction.java:40-48: setCost true, newCost 0, optional false); update (:50-117) forced branch :57-75, mandatory grid select :76-86, resolution :90-110, each moving a card only while hand.size() < 10"
 
 - id: 28
   name: CULTIST_POTION
