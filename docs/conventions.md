@@ -242,7 +242,7 @@ All three have test presets, so `ctest --preset release` works. (It did not
 until 2026-07-25; older notes telling you to use `ctest --test-dir
 build/release` are stale, though that form still works.)
 
-#### Two ways the test suite lies to you
+#### Three ways the test suite lies to you
 
 **`cmake --build` before every `ctest`.** Test discovery is `PRE_TEST`, so a
 test whose binary is missing or stale is reported as `<name>_NOT_BUILT (Not
@@ -255,6 +255,14 @@ tests reports success. All three presets now set `execution.noTestsAction:
 error` so this fails loudly instead; do not remove it. This was found by
 accident, not by design — assume any *new* test target is not running until you
 have seen its name in `ctest -N`.
+
+**`ctest -N` destroys the recorded results of the last real run.** A bare `-N`
+listing overwrites `Testing/Temporary/LastTest.log` with an empty stanza, so
+any tool that reads recorded pass/fail state from that log (e.g.
+`tools/verify_report/check_tier2_coverage.py`) sees nothing if a `-N` ran in
+between. Run `-N` before the suite, not after — or snapshot/restore the log
+around it, as the coverage checker itself does. (Found 2026-07-27 building the
+G6 coverage checker.)
 
 ### Calling WSL from the Windows host — use `tools/wsl_run.sh`
 

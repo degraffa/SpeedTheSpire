@@ -68,7 +68,6 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
-| STS00042 replay stop at seq 32 — untriaged | replay-gaps sweep (observed in passing) | UNASSIGNED — next replay-fidelity owner | Run STS00042 (campaign b45_rewards_oracle, the FIRST five-seed campaign) stops with "event command 'choose' arrived while the sim is in 3 [COMBAT], not an event dialog" at seq 32, identical before and after the replay-gaps fixes. The six-run frontier table covers only the second campaign; the first campaign's runs (STS00042-46) have never had full `--replay` triage. Classify: harness mapping vs a real event/combat-boundary divergence |
 | Stolen-gold clamp vs in-combat gold ordering | B3.11 | UNASSIGNED — B5.2 verification, or whoever models mid-combat gold timing | `fold_back_combat` settles the Hand of Greed accumulator through `gain_gold` before `settle_stolen_gold` runs, so a Looter's min(total, purse) clamp reads a purse that already contains greed gold. Diverges from the game only when the steal preceded the greed kill AND the purse was below the accrued steal (a Looter and a Hand of Greed kill in one combat, purse ≤ the steal amount); documented at the `settle_stolen_gold` site. Deliberately chosen to preserve exactly-once settlement on every combat-end path |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | **UNBLOCKED — UNASSIGNED**; the shared surface is live, only the relic body is open | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. The explicit-confirm `ActionMask`/translator/fuzz machinery it was waiting on **landed with B3.10c** (`ActionVerb::CONFIRM`, `kChoiceOptionalBit`, the hand-suffix selection model), and B3.10c deliberately did not expand into this relic. What remains is this body alone: a new discard-kind optional `CHOOSE_CARD` queued from the relic's turn-start hook, plus the draw-back of exactly the number discarded (the count is the relic's, not the choice's, so it must be read at confirm). Whoever re-owns it should re-read `GamblingChip.java` in full rather than infer from this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
@@ -79,15 +78,14 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Slaver's Collar `beforeEnergyPrep` | B3.27 | UNASSIGNED — **whoever adds an elite/boss room marker to `CombatState`** | `SlaversCollar.beforeEnergyPrep` (`SlaversCollar.java:46-57`), called by name from `AbstractPlayer.preBattlePrep` (`:1589-1591`): `++energyMaster` when the room's `eliteTrigger` is set **or** any monster is `EnemyType.BOSS`; `onVictory` undoes it. `CombatState` carries no elite/boss room marker. **Twin of the Sling of Courage row above** — same blocker, so neither row owns the other. Row, pool slot and `relicRng` draw are live |
 | Warped Tongs | B3.27 | UNASSIGNED — needs a new opcode | `UpgradeRandomCardAction` is `shuffleRng`-consuming; `CHOOSE_CARD` RANDOM+UPGRADE is a different stream and a different filter |
 | Pandora's Box / Tiny House / Astrolabe / Empty Cage / Calling Bell `onEquip`; Sacred Bark potency at EVENT acquisition/use sites | B3.27 | UNASSIGNED — no remaining S1 event site; re-own if an Act-2/3 event batch creates one | **B4.11 event-combat shares DISCHARGED:** Dead Adventurer preserves event-defined gold/relic rows into the generic EventRoom battle-over append; Golden Idol's ×1.25 bonus is recomputed when its gold rows merge, and Sozu's existing claim door removes/discards an event-combat potion. **B4.12 event-specific sites DISCHARGED:** Liars Game, Mushrooms and Living Wall route every card grant through the now-Omamori-aware normal obtain door; Ectoplasm still independently suppresses Liars Game gold; Mushrooms' fixed Odd Mushroom/Circlet reward claims through the generic relic door; Scrap Ooze can roll only COMMON/UNCOMMON/RARE screenless relics; and no B4.12 option uses a potion, so none of the five deferred BOSS `onEquip` bodies or Sacred Bark is reachable. **Chest hooks DISCHARGED by B4.7** and **ordinary combat-reward shares discharged by B4.5** as recorded previously. **B4.13 event-specific sites DISCHARGED:** every card grant across the six shrines and the eight Act-1 specials (Golden Shrine's Regret, the Wheel's Decay, Accursed Blacksmith's Pain, Match and Keep's matched card) goes through the Omamori-aware obtain door; the one exception, NoteForYourself's `addToTop`, matches the Java, which bypasses `ShowCardAndObtainEffect` and grants a non-curse. Every relic grant (Warped Tongs, Spirit Poop/Circlet, the five FaceTrader faces, the Wheel's and We Meet Again's screenless draws) goes through the generic `acquire_relic` door, and the Wheel's relic result presents through the ordinary reward screen. **Sacred Bark stays DEFERRED and is now demonstrably out of S1 event scope:** Lab and The Woman in Blue are the only S1 events that hand out potions, and both do it as reward-screen rows claimed through `claim_reward`, which grants a potion *identity* into a slot and never reads potency — no event USES a potion, so no potency site exists. The five BOSS `onEquip` bodies remain equally unreachable: no S1 event can grant a BOSS-tier relic. |
-| NoteForYourself's `NOTE_CARD` / `NOTE_UPGRADE` player-profile pin | B4.13 | B4.13's pending oracle capture | `NoteForYourself.initializeObtainCard` (`NoteForYourself.java:97-106`) reads two **cross-run player-profile preferences**, defaulting to `"Iron Wave"` and `0`. The engine pins the frozen audited reference profile at those documented defaults, exactly as `note_for_yourself_available` already pins that profile's `ASCENSION_LEVEL` read (`event_framework.hpp`). It is the only behaviour in the shrine/special batch a live capture could contradict without the Java being wrong: the capture must read the reference profile's actual NOTE_* values and either confirm the pin or replace it with a modelled write on the note-giving path. |
 | `colorlessCardPool` is shuffled IN PLACE by `returnColorlessCard` | B4.13 | UNASSIGNED — but the named consumer turned out not to be one | `AbstractDungeon.returnColorlessCard(rarity)` (`AbstractDungeon.java:1100-1113`) JDK-shuffles the persistent `colorlessCardPool.group` before picking, so the new ORDER survives into the next reader of that list. Match and Keep is the only Act-1 caller and the port shuffles a local copy. **B4.8 corrects this row's forward-looking half:** it named "a shop with colorless slots" as the consumer that would observe the persisted order, and the shop now exists and does **not**. `getColorlessCardFromPool` reaches `CardGroup.getRandomCard(true, rarity)` (`CardGroup.java:509-524`), which filters the group into a local `tmp` and **`Collections.sort`s it** before indexing, so the source order is discarded on every read. Nothing in Act 1 observes the persisted order at all — `transformCard`'s COLORLESS branch reads the untouched `srcColorlessCardPool` (`:998-1014`). The row stays open only against a future reader of the UNSORTED whole-pool view. |
 | Fusion Hammer / Coffee Dripper campfire-option locks | B3.27, B4.9 | UNASSIGNED — next campfire/relic-lock follow-up | B4.9 deliberately preserves these whole-effect deferrals: the registered boss relic rows and pool slots are live, but their shared `energyMaster` half remains deferred and the task brief explicitly prohibited silently partially implementing the Smith/Rest locks. `build_rest_menu` therefore documents that both base buttons remain unlocked until one owner lands the relic bodies coherently. |
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
-| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed to ONE thing by the potion-belt/grid-buffer fix | **NARROWED TO THE MID-RUN RESUME, AND NOTHING ELSE.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does the rest: its default mode seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. The **room-coverage half of this row is closed** — see [Landed non-task work](#landed-non-task-work). The grid buffering `--neow` and `--shop` had is now shared code in `command_map.hpp` and `--replay` uses it, so `cancel` is a mapped command; the out-of-combat `potion discard` gained a real run-layer door (`ActionVerb::DISCARD_POTION` + `can_discard_potion[]`), so it is no longer the command with no analogue; and a capture that drives a grid the sim never opened now stops with the DEFERRED BODY named instead of an index complaint. Across the six b45 reward runs `--replay` now leaves **no stop attributable to the harness**: four reach their terminal (STS00047/48/49/50 `CLEAN`), STS00051 reaches its terminal with only the `kEventTransformRedPool` order row below, and STS00052 stops on Astrolabe's deferred `onEquip`. **What remains of this row is the general mid-run resume alone**: restoring a `RunController` from an ARBITRARY translated `RunState` without re-driving the prefix. The run layer still has no door for it — map cursors, encounter lists and their cursors are transient and would have to be re-derived — which is also why `--shop` drives `ShopState` directly rather than parking a controller in `RunPhase::SHOP`. Folding the three spot-diff modes into `--replay` is no longer part of the gap: they now share the mapping table and its grid session, and differ only in what they seed from |
-| Centennial Puzzle carries a persistent `counter` the game does not | B4.14's oracle read-out | UNASSIGNED — relic-layer owner | `relics.yaml` gives the row `initial_counter: 0` and `relic_native_centennial_puzzle` uses `slot.counter` as its once-per-combat flag. The game uses a **static `boolean usedThisCombat`** and never touches `this.counter` (`CentennialPuzzle.java:21, 33-49`), so `AbstractRelic`'s −1 default stands and CommunicationMod reports −1. Caught on STS00068 of `b47_treasure_oracle_20260727T204809Z_claude01`, whose Neow common-relic blessing handed one over: `relics[1].counter: -1 -> 0`, the only field that differs, and it is not Neow's — any acquisition from any source shows it. Two things to fix together, because the first alone breaks the second: `initial_counter` must be −1 so `RunState` matches a capture, and the once-per-combat flag then needs somewhere else to live. Note the flag is `atPreBattle`-reset in the game and the sim has no reset at all, so a second combat is a second question |
-| `kEventTransformRedPool` is emitted in registry-iteration order | B4.14's oracle read-out | B4.10 / B4.11 (event grids) | Same root cause as the `transform_card` fix B4.14 landed: `event_grid_transform_card` reaches the same `returnTrulyRandomCardFromAvailable` list (`AbstractDungeon.java:1016-1045`), which is `commonCardPool` in plain library order followed by `srcUncommonCardPool` and `srcRareCardPool` REVERSED. The generated pool is neither — `emit/events.py` builds it by walking `cards.yaml` rows ("Registry iteration order is stable"), which is the same kind of order B4.5 replaced everywhere else. **NO LONGER "stated from the Java, not measured" — the capture the row asked for was already in hand.** The event-exit mapping fix (see [Landed non-task work](#landed-non-task-work)) let `--replay` run past floor 2 of **STS00051** (`b45_rewards_oracle2_20260727T204809Z_claude01`), whose floor-2 Living Wall takes the **Change** option and transforms the grid's index 5. Every stream and both pity counters match at that record and stay matched to the run's terminal, so the `miscRng` draw and its `count` are right and the POOL ORDER alone is wrong: the game produced **Havoc**, `kEventTransformRedPool` produced **Iron Wave** (`master_deck[11].card_id: Havoc(8) -> Iron Wave(18)`, the single differing field for 19 consecutive records — it read 20 until the grid-buffer fix stopped `--replay` committing a grid pick one record early, see [Landed non-task work](#landed-non-task-work)). It is the whole remaining divergence of that run — the floor-4 `hp` gap from seq 41 is one downstream play of the wrong card, worth exactly Iron Wave's 5 Block. Whoever fixes the emitted order has a ready-made end-to-end check: STS00051 replays CLEAN to its terminal iff the pool order is right |
+| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed to ONE thing by the potion-belt/grid-buffer fix | **NARROWED TO THE MID-RUN RESUME, AND NOTHING ELSE.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does the rest: its default mode seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. The **room-coverage half of this row is closed** — see [Landed non-task work](#landed-non-task-work). The grid buffering `--neow` and `--shop` had is now shared code in `command_map.hpp` and `--replay` uses it, so `cancel` is a mapped command; the out-of-combat `potion discard` gained a real run-layer door (`ActionVerb::DISCARD_POTION` + `can_discard_potion[]`), so it is no longer the command with no analogue; and a capture that drives a grid the sim never opened now stops with the DEFERRED BODY named instead of an index complaint. Across all eleven b45 runs (both campaigns; campaign 1 triaged at [`b45c1_replay_triage.md`](../tools/oracle_bridge/driver/b45c1_replay_triage.md)) `--replay` now leaves **no stop attributable to the harness**: STS00044/47/48/49/50 reach their terminals `CLEAN`, STS00051 replays `CLEAN` too since the `kEventTransformRedPool` order fix, and every remaining stop names a documented deferred body (STS00042 Philosopher's Stone and STS00043 Fusion Hammer on the `energyMaster` row, STS00045/46 Empty Cage and STS00052 Astrolabe on the boss `onEquip` row). **What remains of this row is the general mid-run resume alone**: restoring a `RunController` from an ARBITRARY translated `RunState` without re-driving the prefix. The run layer still has no door for it — map cursors, encounter lists and their cursors are transient and would have to be re-derived — which is also why `--shop` drives `ShopState` directly rather than parking a controller in `RunPhase::SHOP`. Folding the three spot-diff modes into `--replay` is no longer part of the gap: they now share the mapping table and its grid session, and differ only in what they seed from |
+| `run_advance.hpp`'s `RunPhase::EVENT_DIALOG` comment is stale | seed_scan's read-out | UNASSIGNED — next `run_advance.hpp` owner | the comment claims "every native event parks at `ROOM_UNIMPLEMENTED` until its content-task body lands", but 25 of 31 `events.yaml` rows are `implemented: true` and a 20,000-run scan produced **zero** `room_unimplemented` end reasons — conventions §8's "a comment asserting X does not exist yet is a bug signal", caught by exactly that sweep rule. Comment-only fix; re-read the surrounding dispatch before rewording |
+| Run-level relic tests seed counters by hand, not from the registry | fix-centennial-counter's read-out | UNASSIGNED — test-hygiene follow-up | the test helper `set_run_relics` (`tests/run_advance_test.cpp:472`) hardcodes `RelicSlot{id, 0}` rather than seeding each relic's registry `initial_counter`, so run-level relic tests can silently disagree with `acquire_relic` about starting counters — the same defect class as the discharged Centennial Puzzle row, one layer up. Test-only; the Centennial tests seed −1 explicitly to sidestep it. Fixing the helper will perturb tests that unknowingly rely on 0 — re-derive each affected expectation, don't mass-edit |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
@@ -328,6 +326,214 @@ rows change Bottled Tornado's gate — so it is answered, not bumped. (For B3.10
 twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
+
+- **`--replay` triage of b45 campaign 1 (STS00042-46)** `[x]` — branch
+  `triage-sts00042`. Discharges the **"STS00042 replay stop at seq 32 —
+  untriaged"** obligation row; full read-out in
+  [`b45c1_replay_triage.md`](../tools/oracle_bridge/driver/b45c1_replay_triage.md).
+  - **The row asked the wrong question, because the stop is not the frontier.**
+    STS00042 diverges at **seq 18**, fourteen records before the seq-32 message,
+    and the cause was already on this table: Neow's boss swap hands the run
+    **Philosopher's Stone**, whose `onEquip` is
+    `++AbstractDungeon.player.energy.energyMaster`
+    (`PhilosopherStone.java:55-58`) — one of the ten rows in `relics.yaml`'s
+    shared ENERGY MASTER deferral. The relic's other half is LIVE and matches:
+    `atBattleStart`'s +1 Strength (`:41-48`) gives the sim's Cultist the same
+    `Strength 1` the capture shows. The fingerprint is `player.energy: 4 -> 3`
+    on the FIRST combat record (seq 4, before a card is played; Ironclad's base
+    is 3), which makes seq 6's 2-cost Bash unaffordable in the sim — so the
+    Cultist keeps 8 HP and its Vulnerable, the sim's floor-1 fight never ends,
+    and seq 32 is merely the first multi-option event page handed to a
+    controller still parked in COMBAT. **There is no event/combat-boundary
+    defect, and none is ruled in either**: the sim never left floor 1, so the
+    artifact does not exercise that boundary at all.
+  - **Five-run frontier table** (`b45_rewards_oracle_20260727T204809Z_claude01`):
+    STS00042 Philosopher's Stone, 33 records, first diff seq 18, deferred
+    `energyMaster`; STS00043 Fusion Hammer (`FusionHammer.java:47-49`), 67
+    records to its terminal, first diff seq 15, same deferral; **STS00044
+    CLEAN** — zero-diff to terminal, and the control that makes the attribution
+    an observation rather than a story (same campaign and policy, no
+    `energyMaster` relic); STS00045 and STS00046 both stop at seq 2 on **Empty
+    Cage**'s deferred `onEquip` grid, with seq 0-2 zero-diff so the acquisition
+    is proved. **No real engine divergence and no stop attributable to the
+    mapping table** — the same place the six-run campaign-2 table landed.
+  - **Harness, reporting only.** A stop reason now names the sim's phase instead
+    of a bare enum ordinal (`phase_name` moved from `main.cpp` into
+    `command_map.hpp`, shared with the `DIFF` line) — the row above had to gloss
+    "3 [COMBAT]" before it could ask anything. And `--replay`'s summary now
+    prints the **first divergence** beside the stop, because "why did the replay
+    end" is a different question from "where did the two sides first disagree",
+    and reading the first as the second is what produced this row. It says
+    `none` out loud too, which is what separates STS00045/46 (stopped early,
+    zero divergence — a coverage limit) from STS00043 (ran to terminal, diverged
+    at seq 15). Named tests in `replay_command_map_test`:
+    `AnEventDesyncStopNamesTheSimsPhaseRatherThanItsOrdinal`,
+    `AnUnsimulatedGridStopAlsoNamesThePhaseRatherThanItsOrdinal`,
+    `EveryRunPhaseHasAName`. The campaign-2 six-run table is byte-for-byte
+    unmoved.
+  - **Nothing was added to this table.** Every divergence found resolves to an
+    existing row (the ten `energyMaster` relics; the five boss `onEquip`
+    bodies), so there is no new obligation and no stop-the-line.
+  - A mapping nuance is recorded in the read-out, deliberately left: the EVENT
+    branch's one-button-page elision also swallows records when the sim is
+    desynced into COMBAT. Tightening it to `MAP_CHOICE` would truncate desynced
+    replays earlier and cost the per-record diffs this triage depended on; the
+    new first-divergence line removes the reason it mattered. The next mapping
+    owner decides it deliberately.
+  - **Capture-planning note:** at A20 under `random-legal`, 3 of these 5 runs
+    took a Neow boss swap into a deferred-body relic (two `energyMaster`, two
+    Empty Cage). A campaign meant for `--replay` fidelity should expect roughly
+    half its runs to be un-replayable for that reason alone — steer the policy
+    or the seed list around the boss swap.
+
+- **Centennial Puzzle: the counter that never was** `[x]` — branch
+  `fix-centennial-counter`. Discharges the **"Centennial Puzzle carries a
+  persistent `counter` the game does not"** obligation row. `relics.yaml`'s
+  `CENTENNIAL_PUZZLE` row drops `initial_counter: 0` and takes the `-1`
+  default, matching `AbstractRelic`'s untouched counter — `CentennialPuzzle.java`
+  never writes `this.counter` (`:21, 33-49`), so translated `RunState` now
+  matches a capture at every point and the STS00068 signature
+  `relics[1].counter: -1 -> 0` cannot recur from any acquisition source. The
+  once-per-combat flag moved to `kCombatFlagCentennialPuzzleUsed`,
+  previously-zero bit 4 of `CombatState.flags` (`combat_state.hpp`) — the exact
+  analogue of the game's **static** `usedThisCombat`, whose `atPreBattle` reset
+  (`:33-34`) is reproduced structurally by `enter_combat`'s fresh
+  value-initialized `CombatState`, so a second combat in one run re-arms (it
+  never did before: there was no reset at all). The draw is **3 cards**
+  (`NUM_CARDS = 3`, `:20, 44`). No struct grew; `SCHEMA_VERSION` untouched (the
+  B3.10c previously-zero-bits precedent). The row's own provenance was also
+  corrected: it claimed a "`this.counter` gate", which is what the defect was
+  built on. Tests, all five verified RED against the old behavior:
+  `RelicAcquisition.CentennialPuzzleKeepsAbstractRelicsMinusOneCounter`,
+  `RelicHooks.CentennialPuzzleDrawsThreeOnFirstHpLoss` /
+  `.CentennialPuzzleDoesNotFireTwiceInOneCombat` /
+  `.CentennialPuzzleReArmsWhenTheCombatStateIsFresh`,
+  `RunCombatWasHpLost.CentennialPuzzleReArmsInASecondCombat`. One nuance
+  recorded: `CombatState.flags` is walked by the replay tool's opt-in combat
+  triage print (never a pass/fail signal, `replay/src/main.cpp`), same as the
+  existing Mugged/CannotLose/PlayerEscaped bits — no new class of noise. The
+  test-helper gap this fix exposed is filed as its own row above.
+
+- **Event transform pool order: the second rendering is gone, not corrected**
+  `[x]` — branch `fix-event-transform-pool`. Discharges the
+  **"`kEventTransformRedPool` is emitted in registry-iteration order"**
+  obligation row. Fixing the emitted order would have left two independent
+  expressions of one Java method (`returnTrulyRandomCardFromAvailable`,
+  `AbstractDungeon.java:1016-1045`), which is the drift that produced the bug —
+  B4.14 fixed `neow.cpp`'s copy and the emitter's copy stayed wrong. So
+  `emit/events.py` no longer emits `kEventTransform{Red,Colorless,Curse}Pool`
+  or `event_transform_color` at all: their membership was already exactly
+  `kIronclad{Common,Uncommon,Rare}Pool` / `kColorlessPool` / `kPoolableCurses`,
+  only in a third order. `neow.cpp`'s `transform_card` moved to
+  `card_pools.hpp` as the ONE authority (split into `transform_card_list` + the
+  draw so the order is pinnable without a seed) and `event_grid_transform_card`
+  calls it; only the `Random` differs between the two call sites. **The
+  ready-made check passed: STS00051 of
+  `b45_rewards_oracle2_20260727T204809Z_claude01` now replays `CLEAN` to its
+  terminal** — `69 records compared (6 on reward screens), 0
+  library-order-only`, where it read `19 library-order-only` before; the
+  19-record `master_deck[11].card_id: Havoc(8) -> Iron Wave(18)` diff and its
+  downstream floor-4 `hp` gap are both gone, and `--replay` over all eight
+  replayed b45 runs reports 0 library-order-only everywhere. Pinned by
+  `CardPoolLibraryOrder.TransformCardListIsCommonsThenBothSrcPoolsBackwards`
+  (seed-free, all three blocks position by position) and
+  `LivingWallCapture.STS00051FloorTwoProducesHavoc` (the capture's own
+  `miscRng` state, one draw, Havoc). **A second order bug of the same kind was
+  forced out by the removal and fixed with it:** `shrines.cpp`'s
+  `draw_colorless_uncommon` was using the deleted colorless array as a stand-in
+  for the LIVE `colorlessCardPool` that `returnColorlessCard` shuffles
+  (`AbstractDungeon.java:1100-1113`) — `addColorlessCards` fills that pool with
+  the APPENDING `addToTop` (`:1203-1210`), so it is plain library order, and
+  the draw now reads `kColorlessPool` (the `src*` twin) BACKWARDS. Membership
+  unchanged; Match and Keep is the only consumer.
+
+- **`seed_scan`: the capture seed pre-scanner** `[x]` — branch `seed-prescan`.
+  Campaigns picked seeds blindly (`STS%05d` sequential), so rare capture
+  targets were a lottery. Event selection is a pure function of `RunState`
+  (`generate_event`, `event_framework.cpp:359-395`, fired record at `:392`),
+  so a full A20 run costs microseconds and the question "can this seed's Act 1
+  contain X" is answerable before the game is driven at all. New
+  `tools/oracle_bridge/planner/` — `seed_scan_core` + the `seed_scan`
+  executable: scans (seed range) × (policies) × (policy seeds) through
+  `fuzz::run_case`, recording per case the seed string + int, policy, policy
+  seed, end reason, max floor, decoded `event_flags`, treasure entry and boss
+  reach; TSV/JSONL results plus a capture-ready seed list under
+  `--need-event` / `--need-treasure` / `--need-boss` / `--min-floor` /
+  `--min-hit-count`. **`--min-hit-count` is the design point**: the capture
+  runs a DIFFERENT policy from the scan, so a single-combination hit means
+  "reachable", not "will be reached" — Match and Keep! qualifies 152 → 91 →
+  36 → 9 seeds at k = 1..4. Acceptance run: STS00100-STS05099 ×
+  {random, greedy_damage} × {0,1} = 20,000 full runs in 6.58 s; Match and
+  Keep! on 1.44 % of rows; **91 candidate seeds at k=2** (plus 128 treasure
+  k=2 and 28 boss-reach k=1), lists under
+  `D:\STS_BG_Mod\_oracle_data\seed_scan\`. `--verify-determinism` zero
+  mismatches and a cross-process re-run byte-identical. The run loop was NOT
+  forked: `fuzz::run_case` gained one optional pass-A-only `StepObserver`
+  (passes B/C never call it, so an observer cannot perturb the determinism
+  comparator), and a `static_assert` ties the planner's event-name table to
+  the generated `kEventTable` size so a new `events.yaml` row fails
+  compilation rather than reporting unknown. Two port disagreements recorded
+  in `SeedString.CampaignDriverVectorSTS12345` (the C++ codec already existed
+  in `seed_string.hpp`, contrary to the dispatching brief — the test adds the
+  cross-port pin `STS12345 → 1790052133945` and notes Python folds
+  out-of-alphabet to index 0 where the Java/C++ use −1, unreachable for real
+  seeds). The stale `EVENT_DIALOG` comment it caught is filed as its own row
+  above. `seed_scan` is single-threaded on purpose: ~3,000 rows/s makes a
+  100k-seed sweep ~2 minutes, not worth the determinism surface threading
+  would add.
+
+- **Greedy live-capture policy + script argument validation** `[x]` — branch
+  `greedy-driver-policy`. Added `--policy greedy`
+  (`tools/oracle_bridge/driver/greedy_policy.py`, plumbed through
+  `campaign_driver.py` and `orchestrator.py`): the same `expand_legal_actions`
+  expansion as random-legal, ranked by a pure scorer that mirrors
+  `tools/fuzz/src/policy.cpp` `move_score`/`score_card` in combat (lethal
+  first; `damage*4+block` unthreatened, `block*4+damage` under an attack
+  intent; focus fire +2; `end` last) and **inverts** its map weights
+  (non-combat > monster > elite, boss when offered) because depth, not fight
+  variety, is the goal. Screen defaults claim relic/gold/potion and never a
+  `SAPPHIRE_KEY` row — `RewardItem.claimReward` (`RewardItem.java:255-330`)
+  case 6 sets `relicLink.isDone/ignoreReward`, retiring the RELIC row
+  ungranted. Per-card numbers live in the committed `cards_sidetable.json`,
+  derived from `registry/cards.yaml` by the committed `gen_cards_sidetable.py`
+  (registry_gen writes into the build tree, is never committed, and needs
+  PyYAML, which the stdlib-only Windows-host driver cannot have);
+  `CardSideTableTest` re-derives it and fails on drift. Added `cmd_args_ready`
+  beside `cmd_verb_ready`: script mode now ends as the named divergence
+  `cmd_arg_invalid` instead of firing a mis-indexed `choose`/`play` into the
+  8-error budget; `choose <name>` and absent collections pass through.
+  `DRIVER_VERSION` b1.4.4 → b1.4.5 (in-flight campaigns refuse to resume, by
+  design — greedy campaigns start under a new `--campaign-id`). Acceptance:
+  `python -m unittest test_oracle_campaign` on the Windows host — 93 tests, 0
+  failures/errors/skips, including a replay harness that pushes all 1626
+  in-game states of the 30 `b47_treasure_oracle_20260727T204809Z_claude01`
+  runs through the policy and asserts every emitted command is legal on that
+  state, plus coverage-floor asserts so it cannot pass vacuously. **No live
+  leg run yet** — first greedy leg must raise `--max-actions` /
+  `--campaign-timeout` for deep runs, and the never-enter-shop /
+  never-take-card defaults should be re-checked against the depth they
+  actually buy (a greedy campaign yields no SHOP_SCREEN captures, by design).
+
+- **NoteForYourself's NOTE_CARD / NOTE_UPGRADE pin: confirmed by direct
+  profile inspection, not a capture** `[x]` — discharges the
+  **"NoteForYourself `NOTE_CARD` / `NOTE_UPGRADE` player-profile pin"**
+  obligation row on stronger evidence than the capture it asked for.
+  `CardCrawlGame.playerPref = SaveHelper.getPrefs("STSPlayer")`
+  (`CardCrawlGame.java:221`), and **no file in the reference install's whole
+  preferences directory contains a `NOTE_CARD` or `NOTE_UPGRADE` key**
+  (checked 2026-07-27 across every file in
+  `D:\SteamLibrary\steamapps\common\SlayTheSpire\preferences\`), so the Java
+  defaults — `getString("NOTE_CARD", "Iron Wave")`,
+  `getInteger("NOTE_UPGRADE", 0)` (`NoteForYourself.java:98, 103`) — apply,
+  which is exactly the engine's pin (`one_time_specials.cpp`). A capture could
+  never have read this out anyway: `isNoteForYourselfAvailable` is false at
+  `ascensionLevel >= 15` (`AbstractDungeon.java:1360-1379`;
+  `event_framework.hpp` collapses it to `ascension < 15` under the pinned
+  profile), the capture pipeline is A20-only, and S1 itself is A20 — so the
+  event is unreachable in both game and sim within S1's domain, and the only
+  `NOTE_*` write site (`AbstractDungeon.java:1709-1710`, the note-giving path)
+  can never execute in an S1 run. No modelled write is needed; B4.13's pending
+  capture leg shrinks to Match and Keep's deal alone.
 
 - **Replay harness: the potion belt, the grid buffer, and a grid the sim never
   opened** `[x]` — discharges the **STS00052 shop screen `potions[0]
@@ -1145,8 +1351,12 @@ pinned tier-2 against an independent hand-derivation. The pool-ORDER caveat this
 row used to carry is **gone**: B4.5's capture pinned the CardLibrary library
 order for every generated pool, so the *identities* Match and Keep deals are now
 Java-exact by construction, and only the deal's own stream reading is left for a
-live capture to confirm. The same capture must also confirm **NoteForYourself's
-NOTE_CARD / NOTE_UPGRADE profile pin** (see the obligations row).
+live capture to confirm. **NoteForYourself's NOTE_CARD / NOTE_UPGRADE profile
+pin no longer waits on this capture** — it was discharged by direct
+reference-profile inspection (no `NOTE_*` key exists in any preferences file,
+so the Java defaults the engine pins apply), and the event is unreachable at
+A20 in both game and sim; see [Landed non-task work](#landed-non-task-work).
+This task's capture leg is Match and Keep's deal alone.
 **Inherited — DISCHARGED in code:** the B3.27 event-screen shares for every
 site this batch actually creates; see the obligations row.
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b413)
@@ -1251,8 +1461,16 @@ never depended on the CardLibrary library order B4.5 later pinned.
 ### G6 `[ ]` **Gate: S1 rules complete (M3)** — tag `g6-s1-content`
 **Deps:** all B3.*, all B4.*
 Checklist (evidence linked in Log):
-- [ ] 100 % tier-2 registry coverage: every manifest row has named passing
-      tests (scripted check, `tools/verify_report/`).
+- [x] 100 % tier-2 registry coverage: every manifest row has named passing
+      tests (scripted check, `tools/verify_report/`). Evidence:
+      `tools/verify_report/check_tier2_coverage.sh debug` on the Wave-1c
+      integration tree — every manifest row covered (rows re-derived from the
+      regenerated manifest; one genuinely uncovered row found and honestly
+      closed: encounters/THE_MUSHROOM_LAIR gained a real registry-data test
+      case, not checker tuning), `VERDICT: PASS` exit 0; report at
+      `build/debug/verify_report/tier2_coverage.{md,json}`; determinism and
+      fail-loud both proven (an injected test failure flips the row UNCOVERED
+      and the exit code). Re-run at the gate tag per protocol.
 - [ ] Sim-only soak: 1,000-seed random-policy full Act-1 runs complete (win,
       die, or legal-action exhaustion — never an assert/illegal state) in
       debug + asan.
