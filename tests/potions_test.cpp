@@ -17,10 +17,12 @@
 // (potion_use_implemented).
 
 #include <cstdint>
+#include <span>
 
 #include "gtest/gtest.h"
 
 #include "sts/engine/action_queue.hpp"
+#include "sts/engine/advance.hpp"  // legal_actions/advance: the DISCOVERY screen
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
@@ -756,6 +758,172 @@ TEST(Potions, AnAuthoredDiscoveryItemDefaultsToTheFullCombatPoolAndOneCopy) {
     authored.tgt = kActorPlayer;
     EXPECT_EQ(discovery_pool(authored), DiscoveryPool::COMBAT);
     EXPECT_EQ(discovery_copies(authored), 1);
+}
+
+// --- The DISCOVERY screen's SKIP and its per-tick regeneration cost ----------
+//
+// DiscoveryAction.update opens customCombatOpen(cards, TEXT[1],
+// this.cardType != null) (DiscoveryAction.java:49): the third parameter is the
+// screen's `skippable` (CardRewardScreen.java:485-500). cardType is non-null
+// for exactly the typed ctor, so Attack/Skill/Power Potion screens carry the
+// Skip button and the colorless ctor's (and the Discovery card's) do not.
+//
+// And the action regenerates its offer at the top of EVERY update tick (:47,
+// outside the duration branch): 1 open tick whose offer is latched, then
+// kDiscoveryWastedRegens full regenerations burned when the pick or skip
+// closes the screen (the fork-STEP derivation and the seven-capture pin table
+// live on the constant, interp.hpp).
+
+// One advance() step against a single state (the public API, so the CHOOSE
+// dispatch's legality gate is exercised, not bypassed).
+StepResult StepCombat(CombatState& s, Action a) {
+    StepResult r{};
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(&a, 1),
+            std::span<StepResult>(&r, 1));
+    return r;
+}
+
+// Replay one generateCardChoices call on an independent probe stream: draws
+// until it holds three distinct cardIDs, one draw per attempt. Returns the
+// number of draws spent (3 + duplicate retries).
+int ProbeGenerateOffer(RngStream& probe, const CardId* pool, int pool_count) {
+    CardId got[kDiscoveryChoiceCount]{};
+    uint8_t n = 0;
+    int draws = 0;
+    while (n < kDiscoveryChoiceCount) {
+        const int32_t pick =
+            random(probe, static_cast<int32_t>(pool_count) - 1);
+        ++draws;
+        const CardId id = pool[static_cast<unsigned>(pick)];
+        bool dupe = false;
+        for (uint8_t i = 0; i < n; ++i) {
+            dupe = dupe || got[i] == id;
+        }
+        if (!dupe) {
+            got[n++] = id;
+        }
+    }
+    return draws;
+}
+
+TEST(Potions, DiscoverPotionScreensAreSkippableExactlyWhenTyped) {
+    struct Row { PotionId id; bool skippable; };
+    const Row rows[] = {
+        {PotionId::ATTACK_POTION, true},      // DiscoveryAction(CardType, n)
+        {PotionId::SKILL_POTION, true},       //   -> cardType != null
+        {PotionId::POWER_POTION, true},
+        {PotionId::COLORLESS_POTION, false},  // DiscoveryAction(true, n)
+    };                                        //   -> cardType stays null
+    for (const Row& r : rows) {
+        CombatState s = MakeCombat();
+        s.card_random_rng = from_seed(3);  // prepare needs a live stream
+        ASSERT_TRUE(use_potion(s, r.id, 0));
+        pump(s);  // blocks at the prepared DISCOVERY head
+        ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+        ActionMask m{};
+        legal_actions(s, m);
+        ASSERT_TRUE(m.choice_from_generated) << static_cast<int>(r.id);
+        EXPECT_EQ(m.can_skip_choice, r.skippable) << static_cast<int>(r.id);
+    }
+    // The Discovery CARD's authored item rides the COMBAT pool (the default
+    // ctor, cardType null) -- not skippable either.
+    ActionQueueItem authored{};
+    authored.opcode = static_cast<uint16_t>(Opcode::DISCOVERY);
+    authored.src = kActorPlayer;
+    authored.tgt = kActorPlayer;
+    EXPECT_FALSE(discovery_skippable(authored));
+}
+
+// SKIP: consumes the item, creates nothing, refunds nothing -- the close just
+// lets the action tick out with cardRewardScreen.discoveryCard still null
+// (SkipCardButton.java:64-66 closes without writing it; DiscoveryAction.java:
+// 53-85's retrieve is a no-op on null) -- and STILL burns the five wasted
+// regenerations (:47 runs on every one of those ticks).
+TEST(Potions, DiscoverPotionSkipConsumesTheItemCreatesNothingAndBurnsRegens) {
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(7);
+    ASSERT_TRUE(use_potion(s, PotionId::SKILL_POTION, 0));
+    pump(s);
+    ASSERT_EQ(s.action_count, 1);
+
+    RngStream probe = from_seed(7);
+    ProbeGenerateOffer(probe, kIroncladSkillPool.data(),
+                       kIroncladSkillPoolCount);  // the open tick's offer
+    ASSERT_EQ(s.card_random_rng.counter, probe.counter)
+        << "screen-open cost is the latched offer alone";
+
+    StepCombat(s, make_action(ActionVerb::CHOOSE, kChooseSkipCard));
+
+    for (int r = 0; r < kDiscoveryWastedRegens; ++r) {
+        ProbeGenerateOffer(probe, kIroncladSkillPool.data(),
+                           kIroncladSkillPoolCount);
+    }
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "the close burns exactly kDiscoveryWastedRegens regenerations";
+    EXPECT_EQ(s.action_count, 0) << "the DISCOVERY item is consumed";
+    EXPECT_EQ(s.hand_count, 0) << "skip creates nothing";
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+}
+
+// PICK spends the SAME wasted regenerations as skip -- line :47 runs no matter
+// what the screen returned. The seed battery keeps the counter identity honest
+// across duplicate retries landing INSIDE a wasted regeneration (the capture
+// pin: STS01861 seq 90, a skip whose close cost 16 draws, not 15).
+TEST(Potions, DiscoverPotionPickBurnsTheSameWastedRegens) {
+    int closes_with_duplicate_retry = 0;
+    for (int64_t seed = 1; seed <= 24; ++seed) {
+        CombatState s = MakeCombat();
+        s.card_random_rng = from_seed(seed);
+        ASSERT_TRUE(use_potion(s, PotionId::ATTACK_POTION, 0));
+        pump(s);
+        ASSERT_EQ(s.action_count, 1);
+        const CardId chosen =
+            discovery_choice_card(s.action_queue[s.action_head], 0);
+
+        RngStream probe = from_seed(seed);
+        ProbeGenerateOffer(probe, kIroncladAttackPool.data(),
+                           kIroncladAttackPoolCount);  // open tick
+
+        StepCombat(s, make_action(ActionVerb::CHOOSE, 0));
+
+        int close_draws = 0;
+        for (int r = 0; r < kDiscoveryWastedRegens; ++r) {
+            close_draws += ProbeGenerateOffer(probe, kIroncladAttackPool.data(),
+                                              kIroncladAttackPoolCount);
+        }
+        if (close_draws > kDiscoveryWastedRegens * kDiscoveryChoiceCount) {
+            ++closes_with_duplicate_retry;
+        }
+        EXPECT_EQ(s.card_random_rng.counter, probe.counter) << "seed " << seed;
+        ASSERT_EQ(s.hand_count, 1) << "seed " << seed;
+        EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+                  static_cast<uint16_t>(chosen));
+        EXPECT_EQ(s.card_pool[s.hand[0]].cost_now, 0);
+    }
+    EXPECT_GT(closes_with_duplicate_retry, 0)
+        << "the battery must cover a duplicate retry inside a wasted regen";
+}
+
+// The negative control: on a NON-skippable discovery screen (Colorless
+// Potion), CHOOSE(kChooseSkipCard) is a documented no-op -- the screen stays
+// open, the item stays queued, and no rng is spent.
+TEST(Potions, DiscoverPotionSkipOnAColorlessScreenIsANoOp) {
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(11);
+    ASSERT_TRUE(use_potion(s, PotionId::COLORLESS_POTION, 0));
+    pump(s);
+    ASSERT_EQ(s.action_count, 1);
+    const int32_t counter_before = s.card_random_rng.counter;
+
+    StepCombat(s, make_action(ActionVerb::CHOOSE, kChooseSkipCard));
+
+    EXPECT_EQ(s.action_count, 1) << "the DISCOVERY item is NOT consumed";
+    EXPECT_EQ(s.card_random_rng.counter, counter_before);
+    ActionMask m{};
+    legal_actions(s, m);
+    EXPECT_TRUE(m.choice_pending) << "the screen is still open";
+    EXPECT_FALSE(m.can_skip_choice);
 }
 
 // --- NATIVE with body: Liquid Memories (ChoiceKind::DISCARD_TO_HAND_FREE) ----

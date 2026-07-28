@@ -249,6 +249,12 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             out.can_confirm_choice = false;
             out.choice_selected_count = 0;
             out.can_end_turn = false;
+            // Skip is a legal close for a TYPED discovery only (Attack/Skill/
+            // Power Potion): customCombatOpen's `skippable` is
+            // `this.cardType != null` (DiscoveryAction.java:49,
+            // CardRewardScreen.java:485-500). The Discovery card and the
+            // Colorless Potion open the same screen with the button hidden.
+            out.can_skip_choice = discovery_skippable(front);
             for (int i = 0; i < kHandCap; ++i) {
                 out.can_play[i] = false;
                 out.can_choose[i] = i < kDiscoveryChoiceCount;
@@ -265,6 +271,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             out.choice_from_exhaust = choice_source(kind) == ChoiceSource::EXHAUST;
             out.choice_from_draw = choice_source(kind) == ChoiceSource::DRAW;
             out.choice_from_generated = false;
+            out.can_skip_choice = false;
             out.can_end_turn = false;
             const bool optional = choose_is_optional(front.flags);
             out.choice_optional = optional;
@@ -303,6 +310,7 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
     out.choice_from_discard = false;
     out.choice_from_exhaust = false;
     out.choice_from_generated = false;
+    out.can_skip_choice = false;
     out.choice_from_draw = false;
     out.choice_optional = false;
     out.can_confirm_choice = false;
@@ -429,6 +437,7 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
            m.choice_from_discard == fresh.choice_from_discard &&
            m.choice_from_exhaust == fresh.choice_from_exhaust &&
            m.choice_from_generated == fresh.choice_from_generated &&
+           m.can_skip_choice == fresh.can_skip_choice &&
            m.choice_from_draw == fresh.choice_from_draw &&
            m.choice_optional == fresh.choice_optional &&
            m.can_confirm_choice == fresh.can_confirm_choice &&
@@ -531,10 +540,34 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             ActionQueueItem& front = s.action_queue[s.action_head];
             const uint8_t slot = action_arg0(a);
             if (mask.choice_from_generated) {
+                // Closing the screen -- pick OR skip -- resumes the frozen
+                // DiscoveryAction, whose remaining ticks each regenerate and
+                // discard a full offer (kDiscoveryWastedRegens, interp.hpp: the
+                // derivation and the seven-capture table). Java order within
+                // those ticks: tick 2 regenerates and THEN retrieves the
+                // chosen card (DiscoveryAction.java:47 before :53-85), ticks
+                // 3..6 only regenerate. The skip path is the same ticks with
+                // discoveryCard still null (SkipCardButton closes the screen
+                // without writing it, SkipCardButton.java:64-66;
+                // CardRewardScreen sets it only on a card pick, :234), so it
+                // consumes the item, creates nothing, and refunds nothing.
+                if (slot == kChooseSkipCard) {
+                    if (!mask.can_skip_choice) {
+                        break;  // non-skippable screen -- documented no-op
+                    }
+                    discard_discovery_regens(s, front, kDiscoveryWastedRegens);
+                    ActionQueueItem consumed{};
+                    (void)pop_action_front(s, consumed);
+                    pump(s, dispatch_monster_turn);
+                    break;
+                }
                 if (slot >= kDiscoveryChoiceCount || !mask.can_choose[slot]) {
                     break;
                 }
-                resolve_discovery_choice(s, front, slot);
+                discard_discovery_regens(s, front, 1);  // tick 2's regen...
+                resolve_discovery_choice(s, front, slot);  // ...then retrieve
+                discard_discovery_regens(s, front,
+                                         kDiscoveryWastedRegens - 1);
                 ActionQueueItem consumed{};
                 (void)pop_action_front(s, consumed);
                 pump(s, dispatch_monster_turn);

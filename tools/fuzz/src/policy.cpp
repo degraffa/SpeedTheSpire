@@ -209,6 +209,14 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                                   MoveCat::COMBAT_CHOOSE);
                         }
                     }
+                    // A TYPED discovery screen also carries the Skip button
+                    // (advance.hpp can_skip_choice) -- enumerate it so the
+                    // soak exercises the skip's wasted-regen burn too.
+                    if (cm.can_skip_choice) {
+                        s.add(make_action(ActionVerb::CHOOSE,
+                                          engine::kChooseSkipCard),
+                              MoveCat::COMBAT_CHOOSE);
+                    }
                     break;
                 }
                 const engine::ActionQueueItem& front =
