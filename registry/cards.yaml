@@ -13,10 +13,18 @@
 #     provenance: "<Class.method (File.java:line) -- read in full>"
 #     effects:             base effect program, stage-a §6 {op, target, amount, flags}
 #       - {op: <OPCODE>, target: CARD_TARGET|SELF, amount: <int>[, power: <SYMBOL>]}
-#     upgraded:            OPTIONAL full upgraded program (not a delta). Absent here:
-#                          the skeleton deck is all base cards (stage-a design §9);
-#                          codegen emits base rows only until CardDef gains the
-#                          upgrade dimension (a later task).
+#     upgraded:            full upgraded program (not a delta), selected by
+#                          CardInstance.upgrade > 0 (cards.hpp card_effect_steps).
+#                          REQUIRED on every ATTACK/SKILL/POWER row: the game
+#                          upgrades every card except CURSE and STATUS
+#                          (AbstractCard.canUpgrade, AbstractCard.java:672-680),
+#                          and codegen fails generation on a missing block
+#                          (stsgen/emit/cards.py) -- an absent block used to
+#                          silently emit upgraded == base, which shipped the G6
+#                          §8.0 Strike+/Defend+ divergence. STATUS/CURSE rows
+#                          may omit it (emitted upgraded == base, unreachable
+#                          via campfire/Neow; Burn's upgraded row is authored
+#                          because Hexaghost deals upgraded Burns directly).
 #     native:              UNSUPPORTED and rejected by codegen. Cards are
 #                          effect-program driven; there is no native-card dispatch.
 #
@@ -25,10 +33,11 @@
 # packs its numeric PowerId into the step's `extra` field (make_apply_power_flags).
 #
 # Skeleton content (stage-a design §9). Ids pinned STRIKE=1..POMMEL_STRIKE=5 and
-# re-asserted in the generated header (design doc B §4.4). Effect programs and base
-# amounts mirror cards.hpp exactly (each use()'s addToBot order, base stats only;
-# Strength/Vulnerable modifiers are applied by the DAMAGE pipeline at resolution,
-# never baked here).
+# re-asserted in the generated header (design doc B §4.4). Effect programs mirror
+# each use()'s addToBot order; base amounts come from the constructor, upgraded
+# amounts from upgrade() (both read in full from the decompiled Java).
+# Strength/Vulnerable modifiers are applied by the DAMAGE pipeline at
+# resolution, never baked here.
 
 - id: 1
   name: STRIKE
@@ -40,9 +49,11 @@
   target: ENEMY
   flags: []
   strike: true  # CardTags.STRIKE + STARTER_STRIKE (Strike_Red.java:35-36); Perfected Strike counts it
-  provenance: "Strike_Red.use (Strike_Red.java) -> DamageAction(6); ID (Strike_Red.java:29)"
+  provenance: "Strike_Red.use (Strike_Red.java) -> DamageAction(6); ID (Strike_Red.java:29); upgrade() (Strike_Red.java:57-62) upgradeDamage(3) -> 9"
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 6}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 9}
 
 - id: 2
   name: DEFEND
@@ -53,9 +64,11 @@
   cost: 1
   target: SELF
   flags: []
-  provenance: "Defend_Red.use (Defend_Red.java) -> GainBlockAction(5); ID (Defend_Red.java:24)"
+  provenance: "Defend_Red.use (Defend_Red.java) -> GainBlockAction(5); ID (Defend_Red.java:24); upgrade() (Defend_Red.java:43-48) upgradeBlock(3) -> 8"
   effects:
     - {op: BLOCK, target: SELF, amount: 5}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 8}
 
 - id: 3
   name: BASH
@@ -66,10 +79,13 @@
   cost: 2
   target: ENEMY
   flags: []
-  provenance: "Bash.use (Bash.java) -> DamageAction(8), ApplyPowerAction(Vulnerable,2); ID (Bash.java:30)"
+  provenance: "Bash.use (Bash.java) -> DamageAction(8), ApplyPowerAction(Vulnerable,2); ID (Bash.java:30); upgrade() (Bash.java:54-60) upgradeDamage(2) -> 10, upgradeMagicNumber(1) -> Vulnerable 3"
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 8}
     - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 10}
+    - {op: APPLY_POWER, target: CARD_TARGET, amount: 3, power: VULNERABLE}
 
 - id: 4
   name: SHRUG_IT_OFF
@@ -80,9 +96,12 @@
   cost: 1
   target: SELF
   flags: []
-  provenance: "ShrugItOff.use (ShrugItOff.java) -> GainBlockAction(8), DrawCardAction(1); ID (ShrugItOff.java:23)"
+  provenance: "ShrugItOff.use (ShrugItOff.java) -> GainBlockAction(8), DrawCardAction(1); ID (ShrugItOff.java:23); upgrade() (ShrugItOff.java:43-48) upgradeBlock(3) -> 11, draw stays the literal 1"
   effects:
     - {op: BLOCK, target: SELF, amount: 8}
+    - {op: DRAW, target: SELF, amount: 1}
+  upgraded:
+    - {op: BLOCK, target: SELF, amount: 11}
     - {op: DRAW, target: SELF, amount: 1}
 
 - id: 5
@@ -95,10 +114,13 @@
   target: ENEMY
   flags: []
   strike: true  # CardTags.STRIKE (PommelStrike.java:34); Perfected Strike counts it
-  provenance: "PommelStrike.use (PommelStrike.java) -> DamageAction(9), DrawCardAction(1); ID (PommelStrike.java:27)"
+  provenance: "PommelStrike.use (PommelStrike.java) -> DamageAction(9), DrawCardAction(magicNumber); ID (PommelStrike.java:27); upgrade() (PommelStrike.java:44-52) upgradeDamage(1) -> 10, upgradeMagicNumber(1) -> draw 2"
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 9}
     - {op: DRAW, target: SELF, amount: 1}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 10}
+    - {op: DRAW, target: SELF, amount: 2}
 
 # --- B3.4 red common skills (ids 6-10; skeleton already has Shrug It Off) -----
 # CHOOSE-in-combat: a CHOOSE_CARD step opens the hand-select screen (interp.hpp);

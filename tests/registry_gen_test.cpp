@@ -989,12 +989,13 @@ TEST(RegistryGen, DuplicateMoveIdFailsWithClearError) {
 }
 
 // --- 7. B3.1 card-flag + two-row (upgrade) codegen --------------------------
-// The skeleton cards carry no flags and no distinct `upgraded:` block, so the
-// generated flags are 0 and the upgraded program mirrors the base program
-// byte-for-byte (the safe default). The generated kCardFlag* constants match the
-// engine's CardFlag (pinned by the cards.hpp static_assert; re-checked here as a
-// value equality for good measure).
-TEST(RegistryGen, CardFlagsAndUpgradeDefaultsForSkeleton) {
+// The skeleton cards carry no flags (generated flags 0), and each carries a
+// DISTINCT upgraded program whose numbers are hand-derived from the decompiled
+// Java upgrade() bodies (G6 campaign §8.0: the missing-block default silently
+// made Strike+ deal 6). The generated kCardFlag* constants match the engine's
+// CardFlag (pinned by the cards.hpp static_assert; re-checked here as a value
+// equality for good measure).
+TEST(RegistryGen, CardFlagsAndUpgradedProgramsForSkeleton) {
     namespace r = sts::registry;
 
     EXPECT_EQ(r::kCardFlagExhaust,
@@ -1004,24 +1005,101 @@ TEST(RegistryGen, CardFlagsAndUpgradeDefaultsForSkeleton) {
     EXPECT_EQ(r::kCardFlagXcost,
               sts::engine::card_flag_bit(sts::engine::CardFlag::XCOST));
 
-    for (int id = 1; id <= 5; ++id) {
-        const r::CardDef* g = r::card_def(static_cast<r::CardId>(id));
-        ASSERT_NE(g, nullptr) << "id " << id;
-        EXPECT_EQ(g->flags, 0u) << "skeleton card " << id << " has no flags";
-        // No `upgraded:` in the YAML -> upgraded mirrors base.
-        EXPECT_EQ(g->upgraded_cost, g->base_cost) << "id " << id;
-        EXPECT_EQ(g->upgraded_flags, g->flags) << "id " << id;
-        ASSERT_EQ(g->upgraded_step_count, g->step_count) << "id " << id;
+    // {id, base amounts, upgraded amounts} per step, hand-derived from the Java:
+    //   1 STRIKE        [DMG 6]        -> [DMG 9]        Strike_Red.java:57-62
+    //   2 DEFEND        [BLK 5]        -> [BLK 8]        Defend_Red.java:43-48
+    //   3 BASH          [DMG 8, VUL 2] -> [DMG 10, VUL 3] Bash.java:54-60
+    //   4 SHRUG_IT_OFF  [BLK 8, DRW 1] -> [BLK 11, DRW 1] ShrugItOff.java:43-48
+    //   5 POMMEL_STRIKE [DMG 9, DRW 1] -> [DMG 10, DRW 2] PommelStrike.java:44-52
+    struct Expect {
+        int id;
+        std::array<int32_t, 2> base;
+        std::array<int32_t, 2> up;
+        int steps;
+    };
+    const std::array<Expect, 5> table{{
+        {1, {6, 0}, {9, 0}, 1},
+        {2, {5, 0}, {8, 0}, 1},
+        {3, {8, 2}, {10, 3}, 2},
+        {4, {8, 1}, {11, 1}, 2},
+        {5, {9, 1}, {10, 2}, 2},
+    }};
+    for (const Expect& e : table) {
+        const r::CardDef* g = r::card_def(static_cast<r::CardId>(e.id));
+        ASSERT_NE(g, nullptr) << "id " << e.id;
+        EXPECT_EQ(g->flags, 0u) << "skeleton card " << e.id << " has no flags";
+        // None of the five upgrades touch cost or flags (no upgradeBaseCost in
+        // any of the five upgrade() bodies).
+        EXPECT_EQ(g->upgraded_cost, g->base_cost) << "id " << e.id;
+        EXPECT_EQ(g->upgraded_flags, g->flags) << "id " << e.id;
+        ASSERT_EQ(g->step_count, e.steps) << "id " << e.id;
+        ASSERT_EQ(g->upgraded_step_count, e.steps) << "id " << e.id;
+        for (int s = 0; s < e.steps; ++s) {
+            const auto si = static_cast<std::size_t>(s);
+            // Same opcode sequence and APPLY_POWER packing, upgraded amounts.
+            EXPECT_EQ(static_cast<int>(g->upgraded_steps[si].op),
+                      static_cast<int>(g->steps[si].op))
+                << "id " << e.id << " step " << s;
+            EXPECT_EQ(g->upgraded_steps[si].extra, g->steps[si].extra)
+                << "id " << e.id << " step " << s;
+            EXPECT_EQ(g->steps[si].amount, e.base[si])
+                << "id " << e.id << " step " << s;
+            EXPECT_EQ(g->upgraded_steps[si].amount, e.up[si])
+                << "id " << e.id << " step " << s;
+        }
+    }
+
+    // STATUS/CURSE rows have no upgraded form (AbstractCard.canUpgrade,
+    // AbstractCard.java:672-680, refuses both types); a row that authors no
+    // `upgraded:` block still emits upgraded == base, and that default remains
+    // pinned here on WOUND (id 24).
+    {
+        const r::CardDef* g = r::card_def(static_cast<r::CardId>(24));
+        ASSERT_NE(g, nullptr);
+        ASSERT_EQ(g->type, r::CardType::STATUS);
+        EXPECT_EQ(g->upgraded_cost, g->base_cost);
+        EXPECT_EQ(g->upgraded_flags, g->flags);
+        ASSERT_EQ(g->upgraded_step_count, g->step_count);
         for (int s = 0; s < r::kMaxCardSteps; ++s) {
             const auto si = static_cast<std::size_t>(s);
             EXPECT_EQ(static_cast<int>(g->upgraded_steps[si].op),
-                      static_cast<int>(g->steps[si].op)) << "id " << id << " step " << s;
+                      static_cast<int>(g->steps[si].op)) << "step " << s;
             EXPECT_EQ(g->upgraded_steps[si].amount, g->steps[si].amount)
-                << "id " << id << " step " << s;
-            EXPECT_EQ(g->upgraded_steps[si].extra, g->steps[si].extra)
-                << "id " << id << " step " << s;
+                << "step " << s;
         }
     }
+}
+
+// The guard behind the table above: a row for a card the game CAN upgrade
+// (every type except STATUS and CURSE -- AbstractCard.canUpgrade,
+// AbstractCard.java:672-680) that authors no `upgraded:` block must FAIL
+// generation, not silently emit upgraded == base. That silent default is
+// exactly how the G6 §8.0 Strike+/Defend+ divergence shipped.
+TEST(RegistryGen, UpgradableCardWithoutUpgradedBlockFailsLoudly) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_no_upgrade_registry");
+    {
+        std::ofstream cards(bad_reg / "cards.yaml", std::ios::app);
+        cards << "\n- id: 902\n  name: SYNTH_NO_UPGRADE\n"
+                 "  game_id: \"SynthNoUpgrade\"\n"
+                 "  color: RED\n  rarity: COMMON\n"
+                 "  type: ATTACK\n  cost: 1\n  target: ENEMY\n  flags: []\n"
+                 "  provenance: \"synthetic missing-upgraded negative test\"\n"
+                 "  effects:\n"
+                 "    - {op: DAMAGE, target: CARD_TARGET, amount: 5}\n";
+    }
+
+    const fs::path out = scratch / "bad_no_upgrade_out";
+    const fs::path err = scratch / "bad_no_upgrade_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "generator must reject an upgradable card with no `upgraded:` block";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("cards.yaml"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("SYNTH_NO_UPGRADE"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("upgraded"), std::string::npos) << msg;
 }
 
 // A card WITH an `upgraded:` block (and a `flags:`/X-cost `cost:`) emits a

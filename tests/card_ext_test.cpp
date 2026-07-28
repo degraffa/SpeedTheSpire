@@ -359,17 +359,19 @@ TEST(CardExtUpgrade, HelpersSelectBaseVsUpgradedByBit) {
 }
 
 TEST(CardExtUpgrade, ResolveUsesTheUpgradeSelectedProgram) {
-    // The skeleton cards have no distinct `upgraded:` block, so upgraded == base:
-    // playing an upgraded Strike must still resolve (through the upgrade path)
-    // and deal the base 6 -- proving resolve_card_play reads the upgrade bit
-    // without diverging. (Distinct upgraded content is covered by the
-    // synthetic-registry codegen test in registry_gen_test.)
+    // Playing an upgraded Strike resolves through the upgrade-selected program
+    // and deals 9 (upgradeDamage(3): 6+3, Strike_Red.java:57-62) -- proving
+    // resolve_card_play reads the upgrade count. This test once pinned 6 here
+    // under a comment claiming the skeleton cards had no distinct `upgraded:`
+    // block; that gap WAS the G6 §8.0 class-(a) divergence (Strike+ dealt 6
+    // live), fixed with the five starter `upgraded:` rows. Full per-card
+    // upgraded coverage lives in cards_test.cpp (CardTableUpgraded.*).
     CombatState s = MakeState(CardId::STRIKE, 1);
     s.card_pool[0].upgrade = 1;
 
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
-    EXPECT_EQ(s.monsters[0].hp, 50 - 6);
+    EXPECT_EQ(s.monsters[0].hp, 50 - 9);
 }
 
 }  // namespace

@@ -178,13 +178,27 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         flags, base_cost = parse_card_flags(c["name"], c.get("flags"), cost)
         steps = program(c["name"], c.get("effects"))
 
-        # Upgraded program (design doc §4.2: a FULL program, not a delta). Absent
-        # -> upgraded == base (safe default; real content lands per-card in B3.3+).
+        # Upgraded program (design doc §4.2: a FULL program, not a delta).
+        # REQUIRED for every type the game can upgrade: AbstractCard.canUpgrade
+        # (AbstractCard.java:672-680) refuses only CURSE and STATUS, so any
+        # other row without an `upgraded:` block is a defect, not a default --
+        # the old silent upgraded==base fallback is how the G6 §8.0
+        # Strike+/Defend+ divergence shipped. STATUS/CURSE rows may omit the
+        # block (the emitted upgraded==base pair is unreachable in play; Burn
+        # authors one anyway because Hexaghost deals upgraded Burns directly).
         if "upgraded" in c and c["upgraded"] is not None:
             up_steps = program(c["name"], c["upgraded"])
             up_cost = int(c.get("upgraded_cost", cost))
             up_flags_bits, up_base_cost = parse_card_flags(
                 c["name"], c.get("upgraded_flags", c.get("flags")), up_cost)
+        elif ctype not in ("STATUS", "CURSE"):
+            raise fail(
+                f"cards.yaml: card {c['name']} (type {ctype}) has no "
+                "`upgraded:` block. Every card except STATUS/CURSE upgrades "
+                "in game (AbstractCard.canUpgrade, AbstractCard.java:672-680); "
+                "author the full upgraded program from the card's upgrade() -- "
+                "if the upgrade changes nothing the engine models, author it "
+                "explicitly identical to base")
         else:
             up_steps = list(steps)
             up_base_cost = base_cost
@@ -338,8 +352,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("// every card on holding an Attack in the draw pile.")
     out.append("inline constexpr uint8_t kNoDrawPileType = 255;\n")
     out.append("// Two effect-program rows per card (design doc §4.2: base +")
-    out.append("// upgraded, indexed by CardInstance.upgrade). A card with no")
-    out.append("// `upgraded:` block emits upgraded_* byte-identical to base.")
+    out.append("// upgraded, indexed by CardInstance.upgrade). Only STATUS/CURSE")
+    out.append("// rows may omit `upgraded:` (emitting upgraded_* == base);")
+    out.append("// every other row fails generation without one.")
     out.append("struct CardDef {")
     out.append("    CardId id;")
     out.append("    uint8_t base_cost;")

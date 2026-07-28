@@ -2204,10 +2204,13 @@ class CardSideTableTest(unittest.TestCase):
         self.assertEqual(len(document["cards"]), provenance["source_rows"])
 
     def test_starter_card_numbers_are_the_registry_numbers(self):
+        # Upgraded columns per the Java: Strike+ 9 (Strike_Red.java:57-62),
+        # Defend+ 8 (Defend_Red.java:43-48), Bash+ 10 (Bash.java:54-60). These
+        # once pinned base==upgraded, which was the G6 §8.0 registry gap.
         table = greedy_policy.load_side_table(_SIDE_TABLE)
-        self.assertEqual([6, 6], table["Strike_R"]["damage"])
-        self.assertEqual([5, 5], table["Defend_R"]["block"])
-        self.assertEqual([8, 8], table["Bash"]["damage"])
+        self.assertEqual([6, 9], table["Strike_R"]["damage"])
+        self.assertEqual([5, 8], table["Defend_R"]["block"])
+        self.assertEqual([8, 10], table["Bash"]["damage"])
         self.assertTrue(table["Cleave"]["aoe"])
         self.assertTrue(table["Body Slam"]["damage_from_block"])
 
