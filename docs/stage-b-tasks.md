@@ -84,7 +84,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
 | `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed to ONE thing by the potion-belt/grid-buffer fix | **NARROWED TO THE MID-RUN RESUME, AND NOTHING ELSE.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does the rest: its default mode seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. The **room-coverage half of this row is closed** — see [Landed non-task work](#landed-non-task-work). The grid buffering `--neow` and `--shop` had is now shared code in `command_map.hpp` and `--replay` uses it, so `cancel` is a mapped command; the out-of-combat `potion discard` gained a real run-layer door (`ActionVerb::DISCARD_POTION` + `can_discard_potion[]`), so it is no longer the command with no analogue; and a capture that drives a grid the sim never opened now stops with the DEFERRED BODY named instead of an index complaint. Across all eleven b45 runs (both campaigns; campaign 1 triaged at [`b45c1_replay_triage.md`](../tools/oracle_bridge/driver/b45c1_replay_triage.md)) `--replay` now leaves **no stop attributable to the harness**: STS00044/47/48/49/50 reach their terminals `CLEAN`, STS00051 replays `CLEAN` too since the `kEventTransformRedPool` order fix, and every remaining stop names a documented deferred body (STS00042 Philosopher's Stone and STS00043 Fusion Hammer on the `energyMaster` row, STS00045/46 Empty Cage and STS00052 Astrolabe on the boss `onEquip` row). **What remains of this row is the general mid-run resume alone**: restoring a `RunController` from an ARBITRARY translated `RunState` without re-driving the prefix. The run layer still has no door for it — map cursors, encounter lists and their cursors are transient and would have to be re-derived — which is also why `--shop` drives `ShopState` directly rather than parking a controller in `RunPhase::SHOP`. Folding the three spot-diff modes into `--replay` is no longer part of the gap: they now share the mapping table and its grid session, and differ only in what they seed from |
-| `run_advance.hpp`'s `RunPhase::EVENT_DIALOG` comment is stale | seed_scan's read-out | UNASSIGNED — next `run_advance.hpp` owner | the comment claims "every native event parks at `ROOM_UNIMPLEMENTED` until its content-task body lands", but 25 of 31 `events.yaml` rows are `implemented: true` and a 20,000-run scan produced **zero** `room_unimplemented` end reasons — conventions §8's "a comment asserting X does not exist yet is a bug signal", caught by exactly that sweep rule. Comment-only fix; re-read the surrounding dispatch before rewording |
+| Archived soak kv summaries predating the `victories` counter no longer parse | fix-postboss-shop | UNASSIGNED — next soak-tooling owner | `coverage_from_kv` is strict about the field set, so kv summaries written by pre-6d7efc4 `fuzz_soak` binaries fail to parse (missing `victories`) — loud by design, but any tooling that re-ingests ARCHIVED campaign summaries (e.g. `--merge` across old shards, B5.4's report join) must regenerate them from the runs instead. Related caution, same branch: `fuzz_repro` exits 1 on NOT-REPRODUCED — which is the PASS verdict on a fixed build — so any CI wiring that equates exit 0 with success will misread it |
 | Run-level relic tests seed counters by hand, not from the registry | fix-centennial-counter's read-out | UNASSIGNED — test-hygiene follow-up | the test helper `set_run_relics` (`tests/run_advance_test.cpp:472`) hardcodes `RelicSlot{id, 0}` rather than seeding each relic's registry `initial_counter`, so run-level relic tests can silently disagree with `acquire_relic` about starting counters — the same defect class as the discharged Centennial Puzzle row, one layer up. Test-only; the Centennial tests seed −1 explicitly to sidestep it. Fixing the helper will perturb tests that unknowingly rely on 0 — re-derive each affected expectation, don't mass-edit |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
@@ -446,6 +446,43 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
   the APPENDING `addToTop` (`:1203-1210`), so it is plain library order, and
   the draw now reads `kColorlessPool` (the `src*` twin) BACKWARDS. Membership
   unchanged; Match and Keep is the only consumer.
+
+- **The victory terminal and the shop that was never counted** `[x]` — branch
+  `fix-postboss-shop` (6d7efc4 + 690585a). Two defects surfaced by a 300-seed
+  `always_event` fuzz probe, the first fuzz coverage ever to reach the Act-1
+  boss (B5.1's acceptance predates every depth improvement).
+  - **Act-1 completion was unimplemented.** `step_one`'s COMBAT_REWARD proceed
+    branch unconditionally routed to `MAP_CHOICE`; after a boss win the boss
+    column has no outgoing edges, so `legal_actions` returned an all-false
+    mask in a non-terminal phase (`no_legal_moves`). Contract established from
+    the frozen design + the Java before coding: stage-b-design §1.1 ends the
+    run when the Act-1 boss's rewards are claimed (boss chest / act transition
+    are S2 — the game's same press goes to `goToTreasureRoom`,
+    `ProceedButton.java:111-113, 179-187`, never the map). Fix: proceed from a
+    Boss-room reward screen → `RunPhase::RUN_OVER` with `terminal=true,
+    reward=+1.0f`; victory is `combat_outcome=KILLED && room_type=Boss`,
+    spelled once as `run_is_victory()` (`run_advance.hpp`). **No new RunPhase
+    value was spent — the namespace table stays 0-10.** Coverage gained a
+    `victories` counter so wins aren't filed as deaths (see the new
+    obligations row for the archived-kv consequence).
+  - **The "shop reachability regression" was a counting bug.** Shops were
+    entered all along — the probe's own move table shows `shop 506/506` moves
+    taken, and SHOP moves only enumerate inside `RunPhase::SHOP` — but
+    `execute()`'s room-entry accounting (`tools/fuzz/src/fuzz_run.cpp`) was
+    never taught B4.8's phase: pre-B4.8 shops were counted via the
+    ROOM_UNIMPLEMENTED arm, which is exactly why the regression window
+    matched B4.8's landing. Fix: SHOP added to the phase list. Post-fix
+    probe: shop entered 196/300 runs, `deaths 299 victories 1`, failures 0.
+  - RED-first (4/1422 failed pre-fix, all new: `BossVictory.*` ×2,
+    `FuzzGuard.Seed116AlwaysEventReachesTheVictoryTerminal`,
+    `FuzzCoverage.ShopEntryCountsInTheRoomsTable`); the seed-116 reproducer
+    now replays NOT-REPRODUCED (the fixed-build pass verdict, exit 1 by
+    design); probe trajectories byte-identical through step 131 pre/post
+    (28259 actions both runs) — the fixes alter no RNG or policy stream, only
+    the terminal and the bookkeeping. The stale `EVENT_DIALOG` comment row
+    was discharged in the same branch (690585a) by its named owner
+    assignment. Three-preset suite green on the branch; re-derive counts from
+    `ctest -N`, never from this entry.
 
 - **`seed_scan`: the capture seed pre-scanner** `[x]` — branch `seed-prescan`.
   Campaigns picked seeds blindly (`STS%05d` sequential), so rare capture
@@ -1464,9 +1501,18 @@ Checklist (evidence linked in Log):
       `build/debug/verify_report/tier2_coverage.{md,json}`; determinism and
       fail-loud both proven (an injected test failure flips the row UNCOVERED
       and the exit code). Re-run at the gate tag per protocol.
-- [ ] Sim-only soak: 1,000-seed random-policy full Act-1 runs complete (win,
+- [x] Sim-only soak: 1,000-seed random-policy full Act-1 runs complete (win,
       die, or legal-action exhaustion — never an assert/illegal state) in
-      debug + asan.
+      debug + asan. Evidence: `fuzz_soak --seeds 1000 --policies random` on
+      the `fix-postboss-shop` tree (6d7efc4) — debug `failures: 0` exit 0,
+      asan `failures: 0` exit 0, all 1000 cases `run_over`. Run
+      POST-victory-terminal deliberately: an earlier formally-clean 1000-seed
+      run on 40cfbc2 was rejected as gate evidence because random play never
+      reaches the boss, and a 300-seed `always_event` probe then proved the
+      WIN terminal was missing (`no_legal_moves` after the boss-reward
+      proceed) — the leg's "win" word was untestable on that tree. The probe
+      also re-ran clean post-fix: 300/300 `run_over`, `deaths 299 victories
+      1`, shop entered 196. Re-run at the gate tag per protocol.
 - [ ] Oracle spot campaign: ≥ 20 full-run seeds, Neow through boss reward,
       **zero un-triaged diffs** through the run-level differ.
 - [ ] All Stage A tests + fixtures still green (schema bumps accounted).
