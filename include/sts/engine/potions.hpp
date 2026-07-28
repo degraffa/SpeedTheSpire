@@ -117,9 +117,8 @@ bool use_potion(CombatState& state, PotionId id, uint8_t target) noexcept;
 // (run_advance.cpp intercepts them before use_potion), so a direct combat-layer
 // call for those two is a documented no-op. Every remaining native potion's
 // body is DEFERRED to its dependency (an in-combat CHOOSE verb, recursive play,
-// cost randomization, the out-of-combat revive) -- and use_potion now REFUSES
-// those rather than no-op'ing, see potion_use_implemented. Exposed for the
-// tier-2 test.
+// the out-of-combat revive) -- and use_potion now REFUSES those rather than
+// no-op'ing, see potion_use_implemented. Exposed for the tier-2 test.
 void dispatch_native_potion(CombatState& state, PotionId id, int potency,
                             uint8_t target) noexcept;
 

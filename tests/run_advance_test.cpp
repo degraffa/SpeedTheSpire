@@ -1314,7 +1314,7 @@ TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
     for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
-                        PotionId::LIQUID_MEMORIES, PotionId::SNECKO_OIL,
+                        PotionId::LIQUID_MEMORIES,
                         PotionId::DISTILLED_CHAOS,
                         PotionId::DUPLICATION_POTION}) {
         rc.run.potions[0] = static_cast<uint16_t>(id);
@@ -1332,6 +1332,7 @@ TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
                         PotionId::FIRE_POTION,            // data program, targeted
                         PotionId::BLOOD_POTION,           // combat native
                         PotionId::BLESSING_OF_THE_FORGE,  // combat native
+                        PotionId::SNECKO_OIL,             // data program (op 60)
                         PotionId::SMOKE_BOMB}) {          // run-layer native
         rc.run.potions[0] = static_cast<uint16_t>(id);
         RunActionMask mask{};
@@ -1402,8 +1403,11 @@ TEST(RunPotionDiscard, DiscardingOutOfCombatEmptiesTheSlotAndMovesNothingElse) {
 TEST(RunPotionDiscard, ADeferredPotionBodyIsStillDiscardable) {
     // The use door is closed on a still-deferred body (potion_use_implemented);
     // the discard door is not, because a discard never runs the body.
+    // The example was SNECKO_OIL until RANDOMIZE_HAND_COST (opcode 60) landed
+    // and un-deferred it; DUPLICATION_POTION is blocked on the recursive-play
+    // opcode, which is out of the potions stage's scope.
     RunController rc = enter_jaw_worm_combat();
-    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SNECKO_OIL);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::DUPLICATION_POTION);
     RunActionMask mask{};
     legal_actions(rc, mask);
     EXPECT_FALSE(mask.can_use_potion[0]);

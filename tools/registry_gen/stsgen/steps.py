@@ -84,6 +84,13 @@ GENERAL_OPS = frozenset({
     # each carries identically from any domain's queue helper. GENERAL_OPS, not
     # CARD_CONTEXT_OPS -- neither needs the played card's instance.
     "REMOVE_DEBUFFS", "UPGRADE_RANDOM_CARD",
+    # Wave-C potions stage (Snecko Oil). RANDOMIZE_HAND_COST has no operand at
+    # all -- the hand it walks and every cost it rolls are read at EXECUTE time.
+    # That is also what lets Snecko Oil be a DATA program rather than a native
+    # branch: unlike the CHOOSE_CARD family, nothing about the item depends on a
+    # played card's instance, so potions.cpp's queue_use_step carries it
+    # identically to card_play.cpp's.
+    "RANDOMIZE_HAND_COST",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance

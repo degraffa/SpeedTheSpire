@@ -197,7 +197,10 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // UPGRADE kind and is implemented above.)
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
-        // opcode, NOT a missing power row). Cost randomization: SNECKO_OIL.
+        // opcode, NOT a missing power row).
+        // SNECKO_OIL is NO LONGER among them: RANDOMIZE_HAND_COST (opcode 60)
+        // landed and its row is now a two-step DATA program, so it never reaches
+        // this switch at all.
         // Out-of-combat revive: FAIRY_POTION (never USED at all).
         // IMPLEMENTED, but at the RUN layer, so they never arrive here:
         // FRUIT_JUICE and ENTROPIC_BREW (max-HP / slot mutation) --

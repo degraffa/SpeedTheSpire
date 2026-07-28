@@ -258,6 +258,28 @@ OPCODES = {
     # non-empty test, so an empty hand or a hand with nothing upgradeable costs
     # ZERO shuffleRng -- that is the single most load-bearing stream fact here.
     "UPGRADE_RANDOM_CARD": 64,
+    # Wave-C track 1, potions stage: 60 out of the 60-62 block that stage owns.
+    # 61-62 are RELEASED unspent.
+    #
+    # RANDOMIZE_HAND_COST is RandomizeHandCostAction.update
+    # (RandomizeHandCostAction.java:26-38): walk p.hand.group in hand-slot order
+    # and roll a new PERMANENT cost (`card.costForTurn = card.cost = newCost`)
+    # for every card whose BASE cost is non-negative. No operand -- the hand is
+    # an execute-time read.
+    #
+    # It needs its own opcode rather than a queue-time expansion into SET_COST
+    # items because SET_COST names one card-pool index and one literal cost, both
+    # fixed when the item is QUEUED, whereas here both the membership and every
+    # value are decided at RESOLVE. Snecko Oil queues this behind its own
+    # DrawCardAction (SneckoOil.java:42-45), so the hand it walks includes the
+    # five freshly drawn cards; a queue-time expansion would randomize the
+    # PRE-draw hand and spend the wrong number of cardRandomRng draws.
+    #
+    # STREAM: one cardRandomRng.random(3) (0..3 INCLUSIVE) per hand card with a
+    # non-negative base cost, in hand order -- INCLUDING one that rolls its own
+    # current cost, because the `||` short-circuits and the assignment sits in
+    # its RIGHT operand. X-cost / unplayable cards (card.cost < 0) cost nothing.
+    "RANDOMIZE_HAND_COST": 60,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

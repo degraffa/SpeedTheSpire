@@ -37,9 +37,11 @@
 # in-combat card CHOOSE = B3.4 (Elixir, Attack/Skill/Power/Colorless, Gamblers Brew,
 # Liquid Memories -- Blessing of the Forge is NO LONGER among them: it needs only
 # the already-live CHOOSE_CARD UPGRADE kind); RECURSIVE PLAY = a later opcode
-# (Distilled Chaos, Duplication); cost randomization (Snecko Oil); run-layer max-HP
+# (Distilled Chaos, Duplication); run-layer max-HP
 # / potion-slot mutation = B4.x (Fruit Juice, Entropic Brew); combat escape = B3.15
-# (Smoke Bomb); out-of-combat revive (Fairy). Every row still carries its real
+# (Smoke Bomb); out-of-combat revive (Fairy). Snecko Oil is NO LONGER among them
+# either: the wave-C potions stage added RANDOMIZE_HAND_COST (opcode 60), so its
+# row is a two-step DATA program. Every row still carries its real
 # potency/rarity/game_id so the registry, translator join, and identity roll are complete.
 
 # --- Ironclad-specific (PotionHelper.java:92-96) ----------------------------
@@ -360,9 +362,26 @@
   game_id: "SneckoOil"
   rarity: RARE
   potency: 5
-  # Draw `potency` cards, randomize their costs (0..3 via a per-card rng draw) -> cost randomization verb. Deferred native.
-  native: true
-  provenance: "SneckoOil.use (SneckoOil.java:41), getPotency (:49) -- DrawCardAction(potency) + SetRandomCost per drawn card"
+  # UN-DEFERRED (wave-C potions stage): a two-step DATA program on the new
+  # RANDOMIZE_HAND_COST opcode (60). SneckoOil.use (SneckoOil.java:41-46) is
+  # exactly two addToBots -- DrawCardAction(player, potency) then
+  # RandomizeHandCostAction() -- so the draw resolves FIRST and the randomize
+  # sees the POST-draw hand: it re-costs the WHOLE hand, including the five cards
+  # just drawn, not only the drawn ones. (This row used to say "randomize THEIR
+  # costs"; that was the wrong reading of the second addToBot.)
+  # RandomizeHandCostAction.update (:26-38) rolls one cardRandomRng.random(3)
+  # (0..3 INCLUSIVE) per hand card whose BASE cost is non-negative, in hand
+  # order, writing `costForTurn = cost = newCost` -- PERMANENT for the instance,
+  # not this-turn. A card that rolls its own current cost still spends the draw;
+  # an X-cost or unplayable card spends none.
+  # The RoomPhase.COMBAT guard at :42 is the run layer's, exactly as for Blessing
+  # of the Forge: a potion USE is offered only in RunPhase::COMBAT
+  # (combat_potion_legal) or through the two-potion out-of-combat whitelist,
+  # which this is not on.
+  effects:
+    - {op: DRAW, target: SELF, amount: 5}
+    - {op: RANDOMIZE_HAND_COST, target: SELF}
+  provenance: "SneckoOil.use (SneckoOil.java:41-46), getPotency (:49-51) -- addToBot DrawCardAction(player, potency) then addToBot RandomizeHandCostAction; RandomizeHandCostAction.update (RandomizeHandCostAction.java:26-38) rolls one cardRandomRng.random(3) per hand card with cost >= 0"
 
 - id: 31
   name: FAIRY_POTION

@@ -413,6 +413,136 @@ TEST(Potions, CultistPotionGrantsRitual) {
     EXPECT_EQ(player_power_stack(s, PowerId::RITUAL), 1);
 }
 
+// --- Snecko Oil (RANDOMIZE_HAND_COST, opcode 60) -----------------------------
+//
+// SneckoOil.use (SneckoOil.java:41-46) is exactly two addToBots:
+//     addToBot(new DrawCardAction(player, this.potency));   // potency 5
+//     addToBot(new RandomizeHandCostAction());
+// so the DRAW resolves FIRST and the randomize walks the POST-draw hand. It
+// re-costs the WHOLE hand, not merely the drawn cards -- the single fact most
+// easily got backwards, and the one these tests exist to pin.
+
+// The reference stream, re-derived independently of the engine:
+// RandomizeHandCostAction.update (:26-38) spends one card_random_rng random(3)
+// per hand card whose BASE cost is non-negative, in hand order, and writes only
+// when the roll differs from that base cost.
+int expected_cost_after_roll(RngStream& ref, int base_cost) {
+    const int32_t rolled = random(ref, 3);
+    return rolled == base_cost ? base_cost : static_cast<int>(rolled);
+}
+
+TEST(Potions, SneckoOilDrawsFiveThenRandomizesTheWholeHand) {
+    CombatState s = MakeCombat();
+    // Two cards already in hand. STRIKE and DEFEND both cost 1.
+    s.card_pool[20].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[20].cost_now = 1;
+    s.card_pool[21].card_id = static_cast<uint16_t>(CardId::DEFEND);
+    s.card_pool[21].cost_now = 1;
+    s.hand[0] = 20;
+    s.hand[1] = 21;
+    s.hand_count = 2;
+    seed_draw_pile(s, 5);  // five STRIKEs, cost 1 each
+
+    s.card_random_rng = from_seed(29);
+    RngStream ref = from_seed(29);
+
+    ASSERT_TRUE(use_potion(s, PotionId::SNECKO_OIL, 0));
+    drain_actions(s);
+
+    ASSERT_EQ(s.hand_count, 7) << "potency 5 drawn on top of the 2 already held";
+    EXPECT_EQ(s.draw_count, 0);
+    // The pre-existing hand cards come FIRST in hand order, so they are rolled
+    // first -- the randomize is not restricted to the drawn five.
+    for (uint8_t i = 0; i < 7; ++i) {
+        EXPECT_EQ(s.card_pool[s.hand[i]].cost_now,
+                  expected_cost_after_roll(ref, 1))
+            << "hand slot " << static_cast<int>(i);
+    }
+    EXPECT_EQ(s.card_random_rng.counter, 7)
+        << "one draw per hand card with a non-negative base cost";
+    EXPECT_EQ(s.card_random_rng.s0, ref.s0);
+    EXPECT_EQ(s.card_random_rng.s1, ref.s1);
+    EXPECT_EQ(potion_def(PotionId::SNECKO_OIL)->potency, 5);
+}
+
+// `card.cost < 0` short-circuits the whole per-card body, so an unplayable
+// status costs NO draw at all -- the `||` is short-circuit and the assignment
+// sits in its RIGHT operand (RandomizeHandCostAction.java:30).
+TEST(Potions, SneckoOilSpendsNoDrawOnAnUnplayableCard) {
+    CombatState s = MakeCombat();
+    s.card_pool[20].card_id = static_cast<uint16_t>(CardId::WOUND);
+    s.card_pool[20].cost_now = card_cost(*card_def(CardId::WOUND), 0);
+    s.card_pool[20].flags = card_flags(*card_def(CardId::WOUND), 0);
+    ASSERT_TRUE(has_card_flag(s.card_pool[20].flags, CardFlag::UNPLAYABLE));
+    s.card_pool[21].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[21].cost_now = 1;
+    s.hand[0] = 20;
+    s.hand[1] = 21;
+    s.hand_count = 2;
+    // Empty draw pile: DRAW with nothing to draw and nothing to reshuffle adds
+    // no cards and spends no rng, so the only draws here are the randomize's.
+    s.card_random_rng = from_seed(29);
+
+    ASSERT_TRUE(use_potion(s, PotionId::SNECKO_OIL, 0));
+    drain_actions(s);
+
+    EXPECT_EQ(s.card_random_rng.counter, 1) << "only the STRIKE is rolled";
+    EXPECT_EQ(s.card_pool[20].cost_now,
+              card_cost(*card_def(CardId::WOUND), 0))
+        << "the Wound's cost is untouched";
+}
+
+// The write is `costForTurn = cost = newCost` -- PERMANENT for the instance --
+// so COST_MODIFIED_FOR_TURN must be CLEARED, not set, or the end-of-turn sweep
+// would restore the registry cost and silently undo the potion.
+TEST(Potions, SneckoOilCostIsPermanentNotThisTurnOnly) {
+    CombatState s = MakeCombat();
+    // Seed hunt: a roll that actually differs from BASH's base cost of 2.
+    int64_t seed = 0;
+    int32_t rolled = 0;
+    for (int64_t candidate = 1; candidate < 200; ++candidate) {
+        RngStream probe = from_seed(candidate);
+        const int32_t r = random(probe, 3);
+        if (r != 2) {
+            seed = candidate;
+            rolled = r;
+            break;
+        }
+    }
+    ASSERT_NE(seed, 0);
+
+    s.card_pool[20].card_id = static_cast<uint16_t>(CardId::BASH);
+    s.card_pool[20].cost_now = card_cost(*card_def(CardId::BASH), 0);
+    ASSERT_EQ(s.card_pool[20].cost_now, 2);
+    s.hand[0] = 20;
+    s.hand_count = 1;
+    s.card_random_rng = from_seed(seed);
+
+    ASSERT_TRUE(use_potion(s, PotionId::SNECKO_OIL, 0));
+    drain_actions(s);
+
+    EXPECT_EQ(s.card_pool[20].cost_now, rolled);
+    EXPECT_FALSE(has_card_flag(s.card_pool[20].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN))
+        << "the new cost is card.cost, not costForTurn alone";
+}
+
+// The two-step program is the potion's whole body: DRAW then RANDOMIZE_HAND_COST,
+// in that queue order. Pinning the QUEUE (not just the outcome) is what catches
+// a re-authoring that randomizes before drawing.
+TEST(Potions, SneckoOilQueuesDrawAheadOfTheRandomize) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::SNECKO_OIL, 0));
+    ASSERT_EQ(s.action_count, 2);
+    const ActionQueueItem& first = s.action_queue[s.action_head];
+    const ActionQueueItem& second =
+        s.action_queue[(s.action_head + 1) % kActionQueueCap];
+    EXPECT_EQ(first.opcode, static_cast<uint16_t>(Opcode::DRAW));
+    EXPECT_EQ(first.amount, 5);
+    EXPECT_EQ(second.opcode,
+              static_cast<uint16_t>(Opcode::RANDOMIZE_HAND_COST));
+}
+
 // --- Registry-level coverage of the DEFERRED native potions ------------------
 // Their runtime bodies land with their dependency (B3.4 powers / CHOOSE verb /
 // run layer); the registry row (rarity, potency, native flag) is complete now.
@@ -499,11 +629,14 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     }
     // The card-CHOOSE group, recursive play, cost randomization, and the
     // out-of-combat revive are all still deferred.
+    // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
+    // row is now a DATA program, so the gate answers from the registry.
+    EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
     for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
                         PotionId::LIQUID_MEMORIES, PotionId::DISTILLED_CHAOS,
-                        PotionId::DUPLICATION_POTION, PotionId::SNECKO_OIL,
+                        PotionId::DUPLICATION_POTION,
                         PotionId::FAIRY_POTION}) {
         EXPECT_FALSE(potion_use_implemented(id))
             << "deferred id " << static_cast<int>(id) << " must not be usable";

@@ -114,4 +114,8 @@ void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept;
 void randomize_card_cost(CombatState& s, CardPoolIndex pi,
                          bool clear_free_to_play_once) noexcept;
 
+// RANDOMIZE_HAND_COST (Snecko Oil / RandomizeHandCostAction) -- randomize_card_cost
+// over every hand slot in hand order, freeToPlayOnce untouched. No operand.
+void op_randomize_hand_cost(CombatState& s) noexcept;
+
 }  // namespace sts::engine

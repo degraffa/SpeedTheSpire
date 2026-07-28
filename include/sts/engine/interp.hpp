@@ -525,6 +525,49 @@ enum class Opcode : uint16_t {
                               // and an empty hand returns even earlier (:31-34),
                               // so a hand with nothing upgradeable costs ZERO
                               // shuffle_rng draws.
+    // Wave-C track 1, potions stage. 60 out of the 60-62 block that stage owns;
+    // 61-62 are RELEASED unspent (an opcode gap costs nothing -- the numbering
+    // is append-only, never dense).
+    RANDOMIZE_HAND_COST = 60, // Snecko Oil / RandomizeHandCostAction.update
+                              // (RandomizeHandCostAction.java:26-38): walk
+                              // p.hand.group in HAND-SLOT ORDER and roll a new
+                              // PERMANENT cost for every card whose BASE cost is
+                              // non-negative. No operand at all -- the hand is an
+                              // execute-time read -- so it is GENERAL_OPS and any
+                              // domain's queue helper carries it identically.
+                              //
+                              //   for (AbstractCard card : this.p.hand.group) {
+                              //       int newCost;
+                              //       if (card.cost < 0 ||
+                              //           card.cost == (newCost =
+                              //             cardRandomRng.random(3))) continue;
+                              //       card.costForTurn = card.cost = newCost;
+                              //       card.isCostModified = true;
+                              //   }
+                              //
+                              // WHY IT IS NOT A LOOP OF SET_COST ITEMS: SET_COST
+                              // names one card-pool index and one literal cost,
+                              // both chosen at QUEUE time. Here the membership
+                              // (the hand) and every value (a draw each) are
+                              // decided at RESOLVE time, and Snecko Oil queues
+                              // this BEHIND its own DrawCardAction, so the hand
+                              // it sees INCLUDES the five cards that action drew
+                              // (SneckoOil.java:42-45, two addToBots). A
+                              // queue-time expansion would randomize the PRE-draw
+                              // hand and spend the wrong number of draws.
+                              //
+                              // STREAM. One card_random_rng random(3) (0..3
+                              // INCLUSIVE) per hand card with a non-negative base
+                              // cost, in hand order -- INCLUDING cards that roll
+                              // their own current cost, because the `||` is
+                              // short-circuit and the assignment sits in its
+                              // RIGHT operand. X-cost / unplayable cards
+                              // (card.cost < 0) cost NOTHING. The per-card body
+                              // is randomize_card_cost, shared with
+                              // ConfusionPower.onCardDraw -- see that helper for
+                              // the equality and freeToPlayOnce differences,
+                              // which are exactly where two hand-written copies
+                              // diverged before.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------

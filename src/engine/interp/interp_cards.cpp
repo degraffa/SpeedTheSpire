@@ -1500,6 +1500,26 @@ void randomize_card_cost(CombatState& s, CardPoolIndex pi,
     }
 }
 
+// RANDOMIZE_HAND_COST (Snecko Oil / RandomizeHandCostAction.update,
+// RandomizeHandCostAction.java:26-38). The whole body is the per-card helper
+// above run over `p.hand.group` in iteration order, i.e. hand-slot order, with
+// freeToPlayOnce left alone -- the action never mentions the field.
+//
+// The hand is read HERE, at resolve, not at queue time. SneckoOil.use
+// (SneckoOil.java:42-45) queues DrawCardAction(potency) and then this, both
+// addToBot, so the hand this walks already contains the drawn cards. With
+// Confusion also up, each of those draws has ALREADY spent its own
+// card_random_rng draw at onCardDraw before this pass spends one per hand card;
+// the two are consecutive stretches of one stream, in that order.
+//
+// No bound check on hand_count is needed beyond the array's own: hand_count is
+// <= kHandCap by construction everywhere that writes it.
+void op_randomize_hand_cost(CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        randomize_card_cost(s, s.hand[i], /*clear_free_to_play_once=*/false);
+    }
+}
+
 void prepare_discovery_choice(CombatState& s,
                               ActionQueueItem& item) noexcept {
     if (discovery_choice_prepared(item)) {

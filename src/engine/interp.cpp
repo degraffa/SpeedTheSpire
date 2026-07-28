@@ -399,6 +399,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // the pre-filtered hand, and none at all when nothing is eligible.
             op_upgrade_random_card(s);
             return;
+        case Opcode::RANDOMIZE_HAND_COST:
+            // Snecko Oil / RandomizeHandCostAction: one card_random_rng random(3)
+            // per hand card whose BASE cost is non-negative, in hand order, and
+            // the resulting cost is PERMANENT for the instance.
+            op_randomize_hand_cost(s);
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }
