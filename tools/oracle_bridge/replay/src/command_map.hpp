@@ -226,15 +226,17 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 }
 
 // A capture that opens a grid the sim never opened is NOT a mapping bug to be
-// papered over with an index guess -- it is a body the engine defers, and the
-// honest outcome is a stop that names it. The five BOSS `onEquip` bodies
-// (Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) are the
-// producers that actually occur in the b45 captures: a Neow boss-relic blessing
-// hands one over, the relic's onEquip opens a transform / removal grid, and the
-// sim -- which took the relic, popped its pool and moved every stream correctly
-// -- has no grid to drive. Name the relic that was just acquired, because that
-// is the deferred body, and reporting "grid index has no legal master-deck
-// slot" instead is what made this look like an index-mapping defect.
+// papered over with an index guess -- the honest outcome is a stop that names
+// the most likely owner. Until Wave-C track 2 this classification had exactly
+// one producer: the five BOSS `onEquip` bodies (Pandora's Box, Tiny House,
+// Astrolabe, Empty Cage, Calling Bell) were deferred, so a Neow boss swap's
+// grid was always a grid the sim could not open, and the message could assert
+// the deferral as fact. Those five bodies are now LIVE (the sim opens
+// Astrolabe's / Empty Cage's grids itself), so a stop here means either a
+// STILL-deferred body in the running build (a future relic, another track's
+// tree) or a real divergence upstream -- the sim took a different screen path
+// than the capture. The relic named is the best available suspect, not a
+// verdict; keep the positional inference honest about that.
 [[nodiscard]] inline std::string unsimulated_grid_reason(const RunController& rc) {
     std::string who = "?";
     if (rc.run.relic_count > 0) {
@@ -244,7 +246,8 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
     return "the capture opens a master-deck grid the sim never opened (sim phase " +
            std::string(phase_name(rc.phase)) +
            "): the most recently acquired relic is " + who +
-           ", whose onEquip body is deferred";
+           " -- either its onEquip body is deferred in this build, or the sim "
+           "diverged from the capture before this grid";
 }
 
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,

@@ -925,9 +925,11 @@ struct NeowVerdict {
         if (s.screen_type == "GRID") {
             if (!grid.open) {
                 // A grid the BLESSING did not open belongs to whatever the
-                // payout handed over -- in practice a boss relic whose onEquip
-                // body is deferred (Astrolabe, Empty Cage). The acquisition
-                // above is still proved; the body is not the blessing's.
+                // payout handed over. Since Wave-C track 2 the boss relics'
+                // grids (Astrolabe, Empty Cage) are LIVE and the sim opens
+                // them itself, so reaching this stop now means a body still
+                // deferred in the running build or an upstream divergence --
+                // the same honesty note as unsimulated_grid_reason.
                 if (rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
                     std::string who = "?";
                     if (rc.run.relic_count > 0)
@@ -936,7 +938,8 @@ struct NeowVerdict {
                                 rc.run.relics[rc.run.relic_count - 1].relic_id)));
                     v.stop_reason =
                         "the capture opens a grid the blessing did not: " + who +
-                        "'s onEquip body is deferred";
+                        "'s onEquip body is deferred in this build, or the sim "
+                        "diverged earlier";
                     return v;
                 }
                 open_grid_session(rc, grid);

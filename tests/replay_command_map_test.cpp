@@ -261,14 +261,17 @@ TEST(ReplayCommandMap, AGridProceedIsTheCommitAndNotAScreenExit) {
         << "the commit applies the buffered picks; it is not a kChooseProceed";
 }
 
-// The classification. STS00052 takes Neow's boss-relic blessing, is handed an
-// Astrolabe, and the capture then drives Astrolabe's onEquip transform grid --
-// which the engine never opens, because that onEquip is one of the five
-// deferred BOSS bodies. The ACQUISITION is right (the relic is in the list, its
-// pool is popped, every stream matches), so the honest outcome is a stop that
-// names the body. The old table said "grid choose index has no legal
-// master-deck slot", which reads as an index-mapping defect and is not one.
-TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheDeferredRelicBody) {
+// The classification, RE-POINTED after Wave-C track 2. Until the five BOSS
+// onEquip bodies landed, STS00045/46/52's captures drove a boss relic's grid
+// the engine never opened and this stop could assert the deferral as FACT.
+// Astrolabe's grid is now live (the sim opens NeowScreen::GRID itself, and the
+// GRID_PICK path below is what a replay takes), so a sim-has-no-grid state
+// with a GRID capture command is either a body still deferred in the running
+// build or an upstream divergence -- the reason must name the last-acquired
+// relic as the SUSPECT without promising it is the cause. The state here is
+// synthetic (BLESSING with a grid command) precisely because a live tree can
+// only reach it by diverging.
+TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheLastRelicAsTheSuspect) {
     RunController rc = at_phase(RunPhase::NEOW);
     rc.neow.screen = static_cast<uint8_t>(NeowScreen::BLESSING);
     rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ASTROLABE), 0};
@@ -278,6 +281,24 @@ TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheDeferredRelicBody) {
     EXPECT_EQ(m.kind, MapKind::UNMAPPED);
     EXPECT_NE(m.reason.find("Astrolabe"), std::string::npos) << m.reason;
     EXPECT_NE(m.reason.find("deferred"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("diverged"), std::string::npos)
+        << "the reason must no longer assert the deferral as fact: " << m.reason;
+}
+
+// The LIVE half of the same screen: with the sim's Astrolabe grid actually
+// open (NeowScreen::GRID), the identical capture command is an ordinary
+// buffered grid pick, not a stop. This is the pairing that keeps the fallback
+// above honest -- the classification fires only when the sim really has no
+// grid.
+TEST(ReplayCommandMap, ALiveNeowGridTakesTheBufferedPickPathInstead) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ASTROLABE), 0};
+    rc.run.relic_count = 1;
+
+    const MappedCommand m = map_command(rc, grid_screen(), "choose 3");
+    EXPECT_EQ(m.kind, MapKind::GRID_PICK) << m.reason;
+    EXPECT_EQ(m.grid_index, 3);
 }
 
 // Same readability rule as the EVENT stop above: this reason also carried a
