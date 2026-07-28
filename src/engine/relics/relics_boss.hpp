@@ -5,12 +5,15 @@
 // EVERY `native: true` row, so a forgotten body is a link error, not a silent
 // no-op.
 //
-// The tier's inert relics are NOT in this file. A boss relic whose only effect is
-// `++energyMaster`, a run-layer marker, or an observation-layer change binds no
-// hook at all and therefore has no handler; its row, its pool slot and its
-// relicRng draw are what make it correct (registry/relics.yaml carries the reason
-// per row, and the BOSS section header carries the shared energyMaster deferral).
-// This header holds only the relics that DO respond to a combat hook.
+// The tier's HOOKLESS relics are NOT in this file, and "hookless" is not the
+// same as "inert". A boss relic whose effect is `++energyMaster`, a campfire
+// lock, a run-layer marker or an observation-layer change binds no hook and
+// therefore has no handler: it is read at its consumer instead -- energy_master
+// (action_queue.cpp), build_rest_menu's veto sweep (rest_sites.cpp),
+// encode_observation (observation.hpp), gain_gold, the potion doors. Those reads
+// are what make the row correct, alongside its pool slot and its relicRng draw;
+// registry/relics.yaml carries the reason per row. This header holds only the
+// relics that DO respond to a combat hook.
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/relic_hooks.hpp"  // RelicHook, RelicHookContext

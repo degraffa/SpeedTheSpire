@@ -2164,3 +2164,19 @@
     - {op: DRAW_PILE_FETCH, target: SELF, amount: 3, card_type: ATTACK}
   upgraded:
     - {op: DRAW_PILE_FETCH, target: SELF, amount: 4, card_type: ATTACK}
+
+# --- Wave-C track 2: Calling Bell's Curse of the Bell (CardId 127, allocated
+# --- in the ledger's Wave-C table; 128 stays the unspent reserve) -------------
+
+# CURSE (special): Curse of the Bell -- Calling Bell's unremovable curse.
+- id: 127
+  name: CURSE_OF_THE_BELL
+  game_id: "CurseOfTheBell"
+  color: CURSE
+  rarity: SPECIAL
+  type: CURSE
+  cost: -2
+  target: NONE
+  flags: []
+  provenance: "CurseOfTheBell (CurseOfTheBell.java:24): cost -2 CURSE, CardColor.CURSE, CardRarity.SPECIAL, CardTarget.NONE; use() and upgrade() are no-ops and there is NO isEthereal flag (unlike Ascender's Bane it stays in hand). Granted only by CallingBell.onEquip (CallingBell.java:42). UNREMOVABLE: CardGroup.getPurgeableCards excludes it by name (CardGroup.java:981), expressed at rest_card_purgeable (rest_sites.cpp) beside Ascender's Bane. NOT in the returnRandomCurse pool: CardLibrary.getCurse walks the poolable curses and AbstractDungeon.addCurseCards skips SPECIAL rarity (AbstractDungeon.java:1213-1219), so no curse_pool key. canUpgrade() is false for every CURSE (AbstractCard.java:672-679). Combat behavior = unplayable inert curse (cost -2 unplayable sentinel). No effect program."
+  effects: []

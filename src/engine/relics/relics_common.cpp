@@ -93,17 +93,60 @@ void relic_native_nunchaku(CombatState& s, RelicHook hook, RelicSlot& slot,
     }
 }
 
-void relic_native_pen_nib(CombatState& /*s*/, RelicHook hook, RelicSlot& slot,
+namespace {
+
+// The one action both PenNib call sites queue: addToBot ApplyPowerAction(player,
+// player, PenNibPower(player, 1), 1, true) (PenNib.java:51 and :60). Spelled
+// once so the two sites cannot drift.
+void queue_pen_nib_power(CombatState& s) noexcept {
+    ActionQueueItem gain{};
+    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    gain.src = kActorPlayer;
+    gain.tgt = kActorPlayer;
+    gain.amount = 1;
+    gain.flags = make_apply_power_flags(PowerId::PEN_NIB);
+    add_to_bottom(s, gain);
+}
+
+}  // namespace
+
+void relic_native_pen_nib(CombatState& s, RelicHook hook, RelicSlot& slot,
                           const RelicHookContext& ctx) noexcept {
-    // PenNib.onUseCard: counts ATTACKs; the 10th is empowered (double
-    // damage) then the counter resets. The double-damage PenNibPower has no
-    // registry/powers.yaml row, so the empowerment is DEFERRED; the COUNTER is
-    // live here so the accounting is already correct when the power lands.
-    // counter persists in the RelicSlot (design §4.3).
+    // PenNib (PenNib.java:36-62; the ledger and this row previously cited
+    // :40-56 / :44-47, both wrong). `counter` starts at 0 (the ctor, :28) and is
+    // RUN-persistent -- fold_back_combat copies it into RunState.relics.
+    //
+    // onUseCard (:36-52):
+    //     if (card.type == ATTACK) {
+    //         ++counter;
+    //         if (counter == 10) { counter = 0; flash(); pulse = false; }
+    //         else if (counter == 9) { beginPulse(); pulse = true;
+    //             hand.refreshHandLayout();
+    //             addToBot(RelicAboveCreatureAction);            -- cosmetic
+    //             addToBot(ApplyPowerAction(p, p, PenNibPower(p, 1), 1, true)); }
+    //     }
+    //
+    // The 9-vs-10 asymmetry is the whole mechanic and is easy to get backwards:
+    // the power is granted AFTER the NINTH attack, so the TENTH attack is the
+    // empowered one, and reaching ten RESETS the counter without granting. The
+    // 5-arg ApplyPowerAction's trailing boolean is a speed flag, not a semantic
+    // one. `pulse` and refreshHandLayout are presentation.
+    //
+    // atBattleStart (:54-62): `if (counter == 9)` re-grant, WITHOUT touching the
+    // counter. Reachable precisely because the counter survives the combat that
+    // set it to 9 -- a fresh combat can therefore open with the power already up.
+    if (hook == RelicHook::AT_BATTLE_START) {
+        if (slot.counter == 9) {
+            queue_pen_nib_power(s);  // addToBot (PenNib.java:60)
+        }
+        return;
+    }
     if (hook == RelicHook::ON_USE_CARD && ctx.card_is_attack) {
         ++slot.counter;
-        if (slot.counter >= 10) {
-            slot.counter = 0;  // PenNib.java:44-47 (empowerment: DEFERRED)
+        if (slot.counter == 10) {
+            slot.counter = 0;  // (:40-43) -- reset, no grant
+        } else if (slot.counter == 9) {
+            queue_pen_nib_power(s);  // addToBot (PenNib.java:51)
         }
     }
 }
@@ -142,34 +185,141 @@ void relic_native_lantern(CombatState& s, RelicHook hook, RelicSlot& slot,
     }
 }
 
+namespace {
+
+// The one action all three Red Skull sites queue, differing only in sign and in
+// which end of the queue it goes on: ApplyPowerAction(player, player,
+// StrengthPower(player, N), N) with STR_AMT == 3 (RedSkull.java:23).
+//
+// It goes through the ORDINARY APPLY_POWER door, which is the whole of the
+// Artifact interaction: StrengthPower's ctor types an instance built with a
+// non-positive amount as a DEBUFF (StrengthPower.java:37 -> updateDescription
+// :81-89), and ApplyPowerAction.java:131-138 spends one Artifact stack
+// (ArtifactPower.onSpecificTrigger, ArtifactPower.java:33-40) and returns
+// WITHOUT applying. op_apply_power already reproduces both halves
+// (interp_powers.cpp's negative_stat_flip -> apply_power_blocked_by_artifact),
+// so an Artifact charge eats the -3 and the Strength stays, with no
+// Red-Skull-shaped special case anywhere.
+void queue_red_skull_strength(CombatState& s, int32_t amount,
+                              bool to_top) noexcept {
+    ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;
+    item.amount = amount;
+    item.flags = make_apply_power_flags(PowerId::STRENGTH);
+    if (to_top) {
+        add_to_top(s, item);
+    } else {
+        add_to_bottom(s, item);
+    }
+}
+
+}  // namespace
+
 void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
                             const RelicHookContext& /*ctx*/) noexcept {
-    // RedSkull.onBloodied (routed through wasHPLost): when the HP loss drops
-    // the player to <=50% max HP and Red Skull is not already active, gain 3
-    // Strength. slot.counter is the isActive flag (0 = inactive). The
-    // onNotBloodied -3 on healing back over 50% is DEFERRED (needs a
-    // heal-cross hook). Strength IS registered (id 1).
+    // slot.counter IS RedSkull's `isActive` (RedSkull.java:24): 1 while the +3
+    // is standing, 0 while armed. It is the run-persistent RelicSlot counter
+    // (fold_back_combat mirrors it into RunState), and AT_BATTLE_START rewrites
+    // it unconditionally, so nothing a previous combat or a run-layer crossing
+    // left behind can leak into this one.
+    //
+    // AT_BATTLE_START reproduces three Java facts:
+    //
+    //  * preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
+    //    (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
+    //    never fires the damage-side onBloodied cross (:1476-1481 fires only on
+    //    the false->true flip);
+    //  * RedSkull.atBattleStart resets isActive = false (:37) every combat;
+    //  * ...and then addToBot's an action (:38) whose body decides what an
+    //    already-bloodied entry is worth.
+    //
+    // THAT ACTION'S BODY IS NOT DECOMPILABLE HERE: `new /* Unavailable
+    // Anonymous Inner Class!! */` (:38), one of the 145 files with that CFR
+    // hole; all the class file tells us is that it reads and writes isActive
+    // (the synthetic access$000/002, :76-83). Its behaviour is therefore
+    // OWNER-SPECIFIED (project owner, 2026-07-28): becoming bloodied grants +3
+    // Strength, and entering combat already bloodied is becoming bloodied.
+    // PENDING ORACLE-CAPTURE VALIDATION -- a Red Skull run capture is what
+    // turns this from a specification into evidence. What the Java DOES pin is
+    // the queue end: the call at :38 is `addToBot`, not addToTop.
+    //
+    // The entry grant is also what makes `counter == isActive` exact rather
+    // than approximate: with it, the latch is set on exactly the crossings that
+    // set isActive, which is what lets the heal-side cross below use the
+    // counter as its guard.
+    if (hook == RelicHook::AT_BATTLE_START) {
+        const bool bloodied = player_is_bloodied(s);
+        slot.counter = bloodied ? 1 : 0;  // isActive = false (:37), then the
+        if (bloodied) {                   // :38 action's owner-specified body
+            queue_red_skull_strength(s, 3, /*to_top=*/false);
+        }
+        return;
+    }
+    // RedSkull.onBloodied (RedSkull.java:41-52, routed through wasHPLost):
+    // when the HP loss drops the player to <=50% max HP while the latch is
+    // clear, gain 3 Strength (addToTop ApplyPowerAction(StrengthPower 3),
+    // :47) and latch (isActive = true, :49). Strength IS registered (id 1).
     if (hook == RelicHook::WAS_HP_LOST && slot.counter == 0 &&
-        static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
-        slot.counter = 1;
-        ActionQueueItem gain{};
-        gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-        gain.src = kActorPlayer;
-        gain.tgt = kActorPlayer;
-        gain.amount = 3;
-        gain.flags = make_apply_power_flags(PowerId::STRENGTH);
-        add_to_top(s, gain);  // addToTop (RedSkull.java:54)
+        player_is_bloodied(s)) {
+        slot.counter = 1;                          // isActive = true (:49)
+        queue_red_skull_strength(s, 3, /*to_top=*/true);  // addToTop (:47)
+    }
+}
+
+void dispatch_relics_on_not_bloodied(CombatState& s, RelicSlot* relics,
+                                     uint8_t count) noexcept {
+    // RedSkull.onNotBloodied (RedSkull.java:54-63) -- decompilable in full,
+    // unlike the atBattleStart action above:
+    //
+    //     if (this.isActive && getCurrRoom().phase == RoomPhase.COMBAT) {
+    //         addToTop(new ApplyPowerAction(p, p, new StrengthPower(p, -3), -3));
+    //     }
+    //     this.stopPulse();            // presentation
+    //     this.isActive = false;       // :61 -- OUTSIDE the guarded block
+    //     player.hand.applyPowers();   // presentation (this engine has no bake)
+    //
+    // The phase clause is structurally true here: this fan-out is reached only
+    // from heal_player_with_relics, which takes a CombatState. The run-layer
+    // twin, where the clause is false and only the :61 latch write survives, is
+    // heal_out_of_combat (relics/relic_pickup.hpp).
+    //
+    // isActive == 0 makes the :61 write a no-op, so the guarded and unguarded
+    // halves collapse into one branch -- and that is also why the caller does
+    // NOT need to carry AbstractCreature.heal:404's `&& isBloodied` conjunct as
+    // a separate latch: the only body this fan-out reaches re-tests isActive
+    // itself, at :56.
+    //
+    // Repeated crossings are CUMULATIVE DELTAS, not an invariant: nothing here
+    // remembers whether the +3 it is undoing actually landed, so an Artifact
+    // that eats the -3 leaves the Strength standing and the next cross-down
+    // adds another +3 on top of it.
+    //
+    // Per SLOT, matching the Java's `for (AbstractRelic r : relics)` -- two
+    // copies of one relic would each fire (Red Skull is not duplicable in S1;
+    // the loop shape is the point).
+    for (uint8_t i = 0; i < count; ++i) {
+        RelicSlot& slot = relics[i];
+        if (slot.relic_id != static_cast<uint16_t>(RelicId::RED_SKULL) ||
+            slot.counter == 0) {
+            continue;
+        }
+        slot.counter = 0;                                  // isActive = false (:61)
+        queue_red_skull_strength(s, -3, /*to_top=*/true);  // addToTop (:58)
     }
 }
 
 // --- DEFERRED combat bodies --------------------------------------------------
 //
-// These six commons are registered `native: true` with their hook
-// inventory (so the row, the pool accounting and the acquisition-order wiring
-// are all in place) but have NO combat body. Five are genuinely DEFERRED, each
-// needing something the engine does not model; the sixth (Toy Ornithopter) is
-// live on the run-level potion route instead. They are DELIBERATELY EMPTY
-// definitions, not omissions.
+// The commons below are registered `native: true` with their hook inventory (so
+// the row, the pool accounting and the acquisition-order wiring are all in
+// place) but have NO combat body. Toy Ornithopter is live on the run-level
+// potion route instead; anything else still here is genuinely DEFERRED and says
+// why. They are DELIBERATELY EMPTY definitions, not omissions.
+//
+// Bodies that have LEFT this block keep their implementation where the empty
+// definition stood, so the citation and the code stay together.
 //
 // Why a definition at all: the dispatch table is generated from
 // registry/relics.yaml (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp)
@@ -185,51 +335,183 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
 // powers follow-up: Thorns/Dexterity are registered, so both became DATA
 // at_battle_start APPLY_POWER relics and never route here at all.)
 
-// Akabeko.atBattleStart (Akabeko.java:31-35) -- addToTop ApplyPowerAction(
-// VigorPower 8). DEFERRED: registry/powers.yaml has no VIGOR row, so the power
-// this relic applies cannot be named -- the effect is unrepresentable.
-void relic_native_akabeko(CombatState& /*s*/, RelicHook /*hook*/,
-                          RelicSlot& /*slot*/,
-                          const RelicHookContext& /*ctx*/) noexcept {}
+void relic_native_akabeko(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
+                          const RelicHookContext& /*ctx*/) noexcept {
+    // Akabeko.atBattleStart (Akabeko.java:30-35):
+    //     flash();
+    //     addToTop(ApplyPowerAction(player, player, VigorPower(player, 8), 8));
+    //     addToTop(RelicAboveCreatureAction(player, this));   -- cosmetic
+    //
+    // Unconditional -- no room, HP or deck gate of any kind. VIGOR = 8 (:19).
+    // The two addToTop pushes reverse; with the cosmetic dropped, one add_to_top
+    // is the whole body.
+    if (hook != RelicHook::AT_BATTLE_START) {
+        return;
+    }
+    ActionQueueItem gain{};
+    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    gain.src = kActorPlayer;
+    gain.tgt = kActorPlayer;
+    gain.amount = 8;
+    gain.flags = make_apply_power_flags(PowerId::VIGOR);
+    add_to_top(s, gain);  // addToTop (Akabeko.java:33)
+}
 
-// AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter == -2, gain
-// 2 energy on the first turn; onEnterRestRoom (:77-80) arms it. DEFERRED
-// because there is nowhere to ARM it from: rest rooms are not implemented
-// (entering one parks at ROOM_UNIMPLEMENTED, run_advance.cpp), so
-// onEnterRestRoom never fires. NOTE: the armed flag itself is no longer the
-// obstacle -- RelicSlot.counter survives across rooms, because fold_back_combat
-// copies each combat counter back into RunState.relics at combat end.
-void relic_native_ancient_tea_set(CombatState& /*s*/, RelicHook /*hook*/,
-                                  RelicSlot& /*slot*/,
-                                  const RelicHookContext& /*ctx*/) noexcept {}
+void relic_native_ancient_tea_set(CombatState& s, RelicHook hook,
+                                  RelicSlot& slot,
+                                  const RelicHookContext& /*ctx*/) noexcept {
+    // AncientTeaSet.atTurnStart (AncientTeaSet.java:49-61):
+    //     if (this.firstTurn) {
+    //         if (this.counter == -2) {
+    //             pulse = false; this.counter = -1; flash();
+    //             addToTop(new GainEnergyAction(2));
+    //             addToTop(RelicAboveCreatureAction);   -- cosmetic
+    //         }
+    //         this.firstTurn = false;
+    //     }
+    // atPreBattle (:63-66) sets firstTurn = true; onEnterRestRoom (:76-81) sets
+    // counter = -2, which is the ARMING half and lives at the run layer.
+    //
+    // RelicSlot.counter IS the cross-room state, exactly: -2 armed, -1 spent,
+    // and fold_back_combat already carries it between rooms. That is the GAME'S
+    // OWN encoding -- AncientTeaSet writes this.counter directly and
+    // CommunicationMod reports it -- so unlike Centennial Puzzle / Orange Pellets
+    // / Art of War there is nothing to move out of the counter here. The earlier
+    // note claiming this relic needed "state beyond RelicSlot.counter" was wrong;
+    // so was its successor claiming rest rooms do not exist, which they have
+    // since.
+    //
+    // `firstTurn` needs no storage. This hook runs from start_of_turn BEFORE
+    // `++s.turn` (action_queue.cpp) and combat construction leaves s.turn == 0,
+    // so the first atTurnStart of a combat is exactly `s.turn == 0`. A skipped
+    // turn cannot re-arm it mid-combat, which is the property the Java's one-shot
+    // boolean has.
+    //
+    // The +2 is addToTop while turn 1's own energy comes from an ADD onto a
+    // just-zeroed panel (GainEnergyAndEnableControlsAction, AbstractRoom.java:241
+    // -> EnergyPanel.addEnergy, EnergyPanel.java:59-66), so both are additive and
+    // the ordering between them is harmless.
+    if (hook != RelicHook::AT_TURN_START || s.turn != 0 || slot.counter != -2) {
+        return;
+    }
+    slot.counter = -1;  // (:54)
+    ActionQueueItem e{};
+    e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+    e.src = kActorPlayer;
+    e.tgt = kActorPlayer;
+    e.amount = 2;  // ENERGY_AMT (AncientTeaSet.java:22)
+    add_to_top(s, e);  // addToTop (:56)
+}
 
-// ArtOfWar.onUseCard / atTurnStart (ArtOfWar.java:76-83, 64-74) -- +1 energy at
-// turn start if no ATTACK was played last turn. DEFERRED: it needs two
-// independent per-relic flags (firstTurn + gainEnergyNext). RelicSlot.counter
-// is a signed 16-bit field and could carry both as bits, so this is a missing
-// DECISION about how a relic encodes multi-flag state, not missing storage.
-void relic_native_art_of_war(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_art_of_war(CombatState& s, RelicHook hook,
                              RelicSlot& /*slot*/,
-                             const RelicHookContext& /*ctx*/) noexcept {}
+                             const RelicHookContext& ctx) noexcept {
+    // ArtOfWar (ArtOfWar.java:52-82):
+    //     atPreBattle (:52-61) : firstTurn = true; gainEnergyNext = true;
+    //     atTurnStart (:63-74) : if (gainEnergyNext && !firstTurn) {
+    //                                addToBot(RelicAboveCreatureAction);  -- cosmetic
+    //                                addToBot(new GainEnergyAction(1)); }
+    //                            firstTurn = false;
+    //                            gainEnergyNext = true;
+    //     onUseCard   (:76-82) : if (card.type == ATTACK) gainEnergyNext = false;
+    //
+    // Net: +1 energy at the start of turn N (N >= 2) iff no ATTACK was played
+    // during turn N-1.
+    //
+    // ONE bit of storage, not two. `firstTurn` is `s.turn == 0` (this hook runs
+    // before start_of_turn's ++s.turn), and `gainEnergyNext` is stored INVERTED
+    // as kCombatFlagArtOfWarAttackPlayed so the value-initialised default is
+    // already atPreBattle's `gainEnergyNext = true`. See that constant for why a
+    // flags bit rather than RelicSlot.counter.
+    //
+    // THE LINE ORDER IS LOAD-BEARING: `gainEnergyNext = true` is the LAST
+    // statement of atTurnStart, AFTER the check. Clearing the latch before the
+    // test would grant every turn.
+    if (hook == RelicHook::ON_USE_CARD) {
+        if (ctx.card_is_attack) {
+            s.flags |= kCombatFlagArtOfWarAttackPlayed;  // gainEnergyNext = false
+        }
+        return;
+    }
+    if (hook != RelicHook::AT_TURN_START) {
+        return;
+    }
+    if (s.turn != 0 && (s.flags & kCombatFlagArtOfWarAttackPlayed) == 0u) {
+        ActionQueueItem e{};
+        e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+        e.src = kActorPlayer;
+        e.tgt = kActorPlayer;
+        e.amount = 1;
+        add_to_bottom(s, e);  // addToBot (ArtOfWar.java:71)
+    }
+    s.flags &= ~kCombatFlagArtOfWarAttackPlayed;  // gainEnergyNext = true (:73)
+}
 
-// Boot.onAttackToChangeDamage (Boot.java:30-38) -- if owner != null and the type
-// is neither HP_LOSS nor THORNS and 0 < dmg < 5, return 5. DEFERRED: this is a
-// DAMAGE-pipeline modifier, and the pipeline (interp/interp_damage.cpp
-// op_damage) is float-exact and frozen; it is not a hook-queue effect.
+// Boot.onAttackToChangeDamage (Boot.java:30-38) -- LIVE, but NOT here.
+//
+// The body lives at `apply_boot` in interp/interp_damage.cpp, inside op_damage's
+// INTEGER TAIL, immediately after the block subtraction and before Buffer /
+// Thorns / Torii / Tungsten Rod -- exactly where AbstractMonster.damage:639-643
+// and AbstractPlayer.damage:1399-1403 run the player's relics'
+// onAttackToChangeDamage. Read that function for the ordering derivation and for
+// why the number Boot sees is the UNBLOCKED residue rather than the pre-block
+// output. The frozen float pipeline (compute_damage) is untouched: this is an
+// integer step, and it sits beside two relic modifiers that were already there.
+//
+// This definition stays EMPTY and stays here on purpose. The generated dispatch
+// odr-uses a handler for every `native: true` row, so deleting it is a link
+// error; and the row's `on_attack: []` binding is documentation of WHICH Java
+// hook the bespoke site reproduces. RelicHook::ON_ATTACK (value 12) remains
+// allocated and unfired -- it has no dispatcher, and RelicHookContext carries no
+// damage in/out channel, so wiring one for a single relic would be a far larger
+// change than the eight-line helper. Magic Flower, Torii and Tungsten Rod are the
+// same shape.
 void relic_native_boot(CombatState& /*s*/, RelicHook /*hook*/,
                        RelicSlot& /*slot*/,
                        const RelicHookContext& /*ctx*/) noexcept {}
 
-// PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an ELITE
-// room, set every monster's HP to 75%. DEFERRED: a relic hook is handed only a
-// CombatState, and CombatState carries no room kind -- so the body cannot tell
-// an elite fight from an ordinary one. (Elite ROOMS do exist: RunController
-// tracks room_type, and run_advance.cpp enters elite combats. Discharging this
-// needs that fact plumbed into the combat hook, plus a monster-HP scaling
-// opcode.)
-void relic_native_preserved_insect(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_preserved_insect(CombatState& s, RelicHook hook,
                                    RelicSlot& /*slot*/,
-                                   const RelicHookContext& /*ctx*/) noexcept {}
+                                   const RelicHookContext& /*ctx*/) noexcept {
+    // PreservedInsect.atBattleStart (PreservedInsect.java:30-41):
+    //     if (getCurrRoom().eliteTrigger) {
+    //         flash();
+    //         for (m : getCurrRoom().monsters.monsters) {
+    //             if (m.currentHealth <= (int)((float)m.maxHealth * (1.0f - 0.25f))) continue;
+    //             m.currentHealth = (int)((float)m.maxHealth * (1.0f - 0.25f));
+    //             m.healthBarUpdatedEvent();
+    //         }
+    //         addToTop(RelicAboveCreatureAction(player, this));  -- cosmetic
+    //     }
+    //
+    // This is a CURRENT-health CLAMP, not an HP-init change: maxHealth is
+    // untouched, so every max-HP-relative gate downstream (the large slimes'
+    // split at maxHealth/2, Lagavulin's wake, health-bar denominators) still
+    // reads the UNSCALED max. It also never RAISES health -- the `continue`
+    // makes it one-directional.
+    //
+    // FLOAT EXACTNESS: the Java is a C-style truncation of a float product,
+    // `(int)((float)maxHealth * 0.75f)`, not MathUtils.floor and not the integer
+    // `maxHealth * 3 / 4`. Written the same way here so the two agree bit for
+    // bit at every maxHealth (MODIFIER_AMT = 0.25f, PreservedInsect.java:19;
+    // 1.0f - 0.25f is exact in binary, so the constant folds to 0.75f).
+    //
+    // Applied ONCE, at battle start: monsters spawned later (slime splits) are
+    // not scaled, which is the Java's shape -- the loop runs in atBattleStart
+    // and nowhere else.
+    if (hook != RelicHook::AT_BATTLE_START || !combat_is_elite_room(s.flags)) {
+        return;
+    }
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        MonsterState& m = s.monsters[i];
+        const int32_t capped = static_cast<int32_t>(
+            static_cast<float>(m.max_hp) * (1.0f - 0.25f));
+        if (m.hp <= capped) {
+            continue;
+        }
+        m.hp = static_cast<int16_t>(capped);
+    }
+}
 
 // Toy Ornithopter -- heal 5 on potion use. NOT deferred and NOT missing: it is
 // LIVE, dispatched on the RunState-owned potion route

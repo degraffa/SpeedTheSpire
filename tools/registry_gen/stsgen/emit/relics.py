@@ -21,6 +21,16 @@ PICKUP_SURFACES = {
                   "relic_pools.cpp", None),
     "on_equip": ("STS_REGISTRY_RELIC_ON_EQUIP", "relic_on_equip_",
                  "relic_pools.cpp", None),
+    "on_equip_screen": (
+        "STS_REGISTRY_RELIC_ON_EQUIP_SCREEN", "relic_on_equip_screen_",
+        "relic_pools.cpp",
+        "An onEquip whose body needs MORE than (RunState, miscRng, slot): a "
+        "RelicEquipContext carrying cardRandomRng, a RewardScreen and the "
+        "screen-request out-fields (relic_pools.hpp). The plain 3-argument "
+        "acquire_relic REFUSES an id on this list (NEEDS_EQUIP_CONTEXT, "
+        "nothing mutated) so an acquisition site that cannot present the "
+        "requested screen fails loudly instead of running the body half-way. "
+        "A row lists on_equip OR on_equip_screen, never both."),
     "on_obtain_card": ("STS_REGISTRY_RELIC_ON_OBTAIN_CARD",
                        "relic_on_obtain_card_", "run_deck.cpp", None),
 }
@@ -54,6 +64,10 @@ def parse_pickup(r: dict) -> set[str]:
                        f"literally `true`, got {value!r} -- omit the key to mean "
                        f"'no override' (there is no false spelling)")
         surfaces.add(key)
+    if "on_equip" in surfaces and "on_equip_screen" in surfaces:
+        raise fail(f"relics.yaml: relic {r['name']} lists BOTH on_equip and "
+                   f"on_equip_screen -- one Java onEquip body has exactly one "
+                   f"rendering; pick the surface whose signature it needs")
     return surfaces
 
 

@@ -43,6 +43,7 @@
 #include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
 #include "sts/engine/relics.hpp"       // RelicDef / kRelicDefs
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/run_deck.hpp"     // the master-deck bottle bits
 
 namespace sts::engine {
 namespace {
@@ -188,12 +189,40 @@ PotionId hand_limited_potion_roll(RngStream& rng) {
     return candidate;
 }
 
+PotionId hand_unlimited_potion_roll(RngStream& rng) {
+    // AbstractDungeon.returnRandomPotion() -- the NO-ARG overload -- is
+    // returnRandomPotion(false) (AbstractDungeon.java:825-827): d100 tier roll,
+    // then reject-sample by rarity alone. No spam check, no first-candidate
+    // discard, and Fruit Juice is a legal result. limited therefore changes the
+    // DRAW COUNT, not just the identity: the limited loop always redraws at
+    // least once.
+    const PotionRarity tier = potion_tier_for_roll(random(rng, 0, 99));
+    PotionId candidate =
+        static_cast<PotionId>(random(rng, kPotionPoolSize - 1) + 1);
+    while (potion_def(candidate)->rarity != tier) {
+        candidate = static_cast<PotionId>(random(rng, kPotionPoolSize - 1) + 1);
+    }
+    return candidate;
+}
+
 RunController enter_jaw_worm_combat() {
     RunController rc = run_begin(find_jaw_worm_seed(), kA20);
     leave_neow(rc);
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     return rc;
+}
+
+// The opcode bodies are internal to sts_engine, so a test drives them the way
+// the pump does: build the queue item and execute it. Enough damage to make the
+// HP write lethal, which is what AbstractPlayer.damage's revive block reads.
+void deal_lethal_to_player(CombatState& s) {
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    it.src = 0;
+    it.tgt = kActorPlayer;
+    it.amount = 9999;
+    execute_opcode(s, it);
 }
 
 // =============================================================================
@@ -221,7 +250,15 @@ TEST(RunBegin, NeowHasGenerateSeedsFloorStreamsAtFloorZero) {
     EXPECT_TRUE(streams_equal(rc.combat.ai_rng, floor0));
     EXPECT_TRUE(streams_equal(rc.combat.shuffle_rng, floor0));
     EXPECT_TRUE(streams_equal(rc.combat.card_random_rng, floor0));
-    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor0));
+    // miscRng alone starts ONE draw in: Exordium's constructor ends with
+    // changeBGM, whose MainMusic.getSong Exordium arm draws miscRng.random(1)
+    // to pick the act's track (Exordium.java:58; MainMusic.java:56-66). Found
+    // empirically via STS00052's Astrolabe transforms -- every identity one
+    // draw behind the capture with all counters equal -- and floor-0-only,
+    // because nextRoomTransition's per-floor reseed discards the offset.
+    RngStream misc = floor0;
+    (void)random(misc, 1);
+    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, misc));
 }
 
 TEST(RunBegin, RelicRngConsumesFivePoolShuffleDraws) {
@@ -447,6 +484,227 @@ TEST(RunCombat, LousePreBattleAndInnateResolveBeforePlayerControl) {
 }
 
 // =============================================================================
+// The Bottled trio's master-deck marker (run_deck.hpp) -- combat construction
+// =============================================================================
+//
+// CardGroup.initializeDeck (CardGroup.java:928-955): after the one shuffle,
+// `if (c.isInnate) placeOnTop; else if (inBottleFlame || inBottleLightning ||
+// inBottleTornado) placeOnTop;` -- Bottled and Innate share ONE top-placement
+// list, and :951-954 queues DrawCardAction(placeOnTop.size() - masterHandSize)
+// into preTurnActions when that list exceeds the hand size.
+
+// Count how many hand+draw slots reference card-pool row `pi`.
+int pool_index_occurrences(const CombatState& s, uint8_t pi) {
+    int cnt = 0;
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.hand[i] == pi) ++cnt;
+    }
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        if (s.draw[i] == pi) ++cnt;
+    }
+    return cnt;
+}
+
+bool hand_holds_pool_index(const CombatState& s, uint8_t pi) {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        if (s.hand[i] == pi) return true;
+    }
+    return false;
+}
+
+TEST(RunCombatBottle, BottledMasterCardOpensInHandLikeInnate) {
+    RunController rc = run_begin(kSeed, kA20);
+    // A20 deck: Ascender's Bane at 0, then 5 Strikes / 4 Defends / Bash.
+    // Bottle the first Strike (a Strike IS offerable by the game's bottle
+    // grid: getPurgeableCards().getAttacks() has no rarity clause -- only
+    // canSpawn reads rarity, BottledFlame.java:43 vs :93-99).
+    ASSERT_EQ(rc.run.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::STRIKE));
+    rc.run.master_deck[1].flags = kMasterCardInBottleFlame;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    // The combat instance carries INNATE (OR-ed in at pool build; the builder
+    // is index-aligned with the master deck), and the bottled instance is in
+    // the opening hand.
+    EXPECT_TRUE(has_card_flag(rc.combat.card_pool[1].flags, CardFlag::INNATE));
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 1));
+    // The master-deck bottle bit itself must NOT leak into combat flags: the
+    // pool flags are the registry's plus INNATE, nothing else.
+    const CardDef* strike = card_def(CardId::STRIKE);
+    ASSERT_NE(strike, nullptr);
+    EXPECT_EQ(rc.combat.card_pool[1].flags,
+              static_cast<uint16_t>(card_flags(*strike, 0) |
+                                    static_cast<uint16_t>(CardFlag::INNATE)));
+    // The run-side marker survives the combat construction untouched.
+    EXPECT_EQ(rc.run.master_deck[1].flags, kMasterCardInBottleFlame);
+}
+
+TEST(RunCombatBottle, ABottledCardThatIsAlsoInnateIsAddedOnce) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Writhe is Innate by registry; stamping a bottle bit on the same instance
+    // exercises the Java's if/else-if single-add (CardGroup.java:933-941).
+    rc.run.master_deck[1].card_id = static_cast<uint16_t>(CardId::WRITHE);
+    rc.run.master_deck[1].flags = kMasterCardInBottleLightning;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    EXPECT_EQ(pool_index_occurrences(rc.combat, 1), 1)
+        << "innate+bottled must place the instance exactly once";
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 1));
+    const int deck_n = static_cast<int>(rc.run.master_deck_count);
+    EXPECT_EQ(static_cast<int>(rc.combat.hand_count) +
+                  static_cast<int>(rc.combat.draw_count),
+              deck_n);
+}
+
+TEST(RunCombatBottle, SixTopPlacedCardsAllOpenInHandViaTheOverflowDraw) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Four Writhes (registry-innate) + two bottled instances = a 6-card
+    // placeOnTop collection; masterHandSize is 5, so initializeDeck queues the
+    // 1-card overflow draw (CardGroup.java:951-954).
+    for (uint16_t i = 1; i <= 4; ++i) {
+        rc.run.master_deck[i].card_id = static_cast<uint16_t>(CardId::WRITHE);
+    }
+    ASSERT_EQ(rc.run.master_deck[5].card_id,
+              static_cast<uint16_t>(CardId::STRIKE));
+    rc.run.master_deck[5].flags = kMasterCardInBottleFlame;
+    ASSERT_EQ(rc.run.master_deck[6].card_id,
+              static_cast<uint16_t>(CardId::DEFEND));
+    rc.run.master_deck[6].flags = kMasterCardInBottleLightning;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase,
+              static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    EXPECT_EQ(rc.combat.hand_count, 6)
+        << "the 6th top-placed card is drawn by the preTurnActions overflow";
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 5));
+    EXPECT_TRUE(hand_holds_pool_index(rc.combat, 6));
+    int writhes_in_hand = 0;
+    for (uint8_t i = 0; i < rc.combat.hand_count; ++i) {
+        if (rc.combat.card_pool[rc.combat.hand[i]].card_id ==
+            static_cast<uint16_t>(CardId::WRITHE)) {
+            ++writhes_in_hand;
+        }
+    }
+    EXPECT_EQ(writhes_in_hand, 4);
+    EXPECT_EQ(rc.combat.draw_count,
+              static_cast<uint8_t>(rc.run.master_deck_count - 6));
+    // The overflow draw resolved before control returned: nothing pending,
+    // energy already recharged by the ordinary turn-1 block.
+    EXPECT_EQ(rc.combat.action_count, 0);
+    EXPECT_EQ(rc.combat.player_energy, 3);
+}
+
+// =============================================================================
+// The pending-bottle overlay (claim -> modal grid -> pick), run_advance.hpp
+// =============================================================================
+
+TEST(BottleOverlay, ClaimingABottleOpensTheModalGridAndThePickBottlesTheCard) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Park the controller on a reward screen holding a Bottled Flame row --
+    // the shape elite rewards, chests (open_treasure_chest routes here) and
+    // event reward screens all produce.
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.rewards.count = 1;
+    rc.rewards.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    rc.rewards.items[0].id = static_cast<uint16_t>(RelicId::BOTTLED_FLAME);
+    const uint8_t relics_before = rc.run.relic_count;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_claim_reward[0]);
+
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    // Relic granted (append order), the item consumed, the overlay up.
+    ASSERT_EQ(rc.run.relic_count, relics_before + 1);
+    EXPECT_EQ(rc.run.relics[relics_before].relic_id,
+              static_cast<uint16_t>(RelicId::BOTTLED_FLAME));
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::FLAME));
+    EXPECT_EQ(rc.rewards.count, 0);
+
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_proceed)
+        << "the grid is modal (RoomPhase.INCOMPLETE, BottledFlame.java:49)";
+    // Eligible rows = purgeable ATTACKs. A20 deck: Ascender's Bane 0 (not
+    // purgeable), Strikes 1-5 and Bash 10 (attacks), Defends 6-9 (skills).
+    EXPECT_FALSE(mask.can_choose_master_deck[0]);
+    EXPECT_TRUE(mask.can_choose_master_deck[1]);
+    EXPECT_FALSE(mask.can_choose_master_deck[6]);
+    EXPECT_TRUE(mask.can_choose_master_deck[10]);
+
+    // An ineligible pick is a non-corrupting no-op; the overlay stays.
+    step(rc, make_action(ActionVerb::CHOOSE, 6));
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::FLAME));
+    EXPECT_EQ(rc.run.master_deck[6].flags, 0);
+
+    // The pick bottles the INSTANCE and closes the overlay; the phase and the
+    // relic's counter (-1, never written) are untouched.
+    step(rc, make_action(ActionVerb::CHOOSE, 10));
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::NONE));
+    EXPECT_EQ(rc.run.master_deck[10].flags, kMasterCardInBottleFlame);
+    EXPECT_EQ(rc.run.relics[relics_before].counter, -1);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed) << "the reward screen is back";
+}
+
+TEST(BottleOverlay, ABottleWithNoEligibleCardIsClaimedScreenlessAndUnbottled) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Bottled Tornado with no POWER card in the deck: the :41 guard opens no
+    // screen; the relic is granted, permanently unbottled.
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.rewards.count = 1;
+    rc.rewards.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    rc.rewards.items[0].id = static_cast<uint16_t>(RelicId::BOTTLED_TORNADO);
+    const uint8_t relics_before = rc.run.relic_count;
+
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    ASSERT_EQ(rc.run.relic_count, relics_before + 1);
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::NONE));
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        EXPECT_EQ(rc.run.master_deck[i].flags, 0);
+    }
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed);
+}
+
+TEST(RunCombatBottle, StandaloneCombatBeginRunsTheSameOverflowDraw) {
+    // combat_begin has no master-deck instances, so a bottle cannot be
+    // expressed here -- but six registry-innate Writhes reach the same
+    // initializeDeck overflow, and the two builders must not drift.
+    std::vector<CardId> deck;
+    for (int i = 0; i < 6; ++i) deck.push_back(CardId::WRITHE);
+    for (int i = 0; i < 6; ++i) deck.push_back(CardId::STRIKE);
+    CombatState s = combat_begin(kSeed, 1, std::span<const CardId>(deck));
+
+    ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.hand_count, 6);
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        EXPECT_EQ(s.card_pool[s.hand[i]].card_id,
+                  static_cast<uint16_t>(CardId::WRITHE));
+    }
+    EXPECT_EQ(s.draw_count, 6);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// =============================================================================
 // atBattleStart relics, through the REAL combat-entry path
 // =============================================================================
 //
@@ -505,6 +763,50 @@ const PowerSlot* monster_power_slot(const CombatState& s, uint8_t mi, PowerId id
         }
     }
     return nullptr;
+}
+
+// --- The elite-room marker's PRODUCER ---------------------------------------
+//
+// kCombatFlagEliteRoom (combat_state.hpp) is AbstractRoom.eliteTrigger. Only
+// MonsterRoomElite's ctor sets it among ROOM kinds (MonsterRoomElite.java:33);
+// MonsterRoomBoss does not (MonsterRoomBoss.java:22-24), and an ordinary
+// MonsterRoom never did. The consumers are Sling of Courage, Preserved Insect
+// and Slaver's Collar.
+TEST(RunCombatBattleStart, OnlyEliteRoomsMarkTheCombat) {
+    for (const RoomType kind : {RoomType::Monster, RoomType::Elite}) {
+        RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+        leave_neow(rc);
+        const uint8_t x = first_start_column(rc);
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(kind);
+        step(rc, make_action(ActionVerb::CHOOSE, x));
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+            << "room kind " << static_cast<int>(kind);
+        EXPECT_EQ(combat_is_elite_room(rc.combat.flags),
+                  kind == RoomType::Elite);
+    }
+}
+
+// End-to-end through the real run path: Sling of Courage's Strength 2 reaches
+// the live combat in an elite room and nowhere else (Sling.java:30-37).
+TEST(RunCombatBattleStart, SlingOfCourageReachesTheLiveEliteCombat) {
+    for (const RoomType kind : {RoomType::Monster, RoomType::Elite}) {
+        RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+        set_run_relics(rc, {RelicId::SLING_OF_COURAGE});
+        leave_neow(rc);
+        const uint8_t x = first_start_column(rc);
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(kind);
+        step(rc, make_action(ActionVerb::CHOOSE, x));
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+        const PowerSlot* str = player_power(rc.combat, PowerId::STRENGTH);
+        if (kind == RoomType::Elite) {
+            ASSERT_NE(str, nullptr) << "no Strength in an elite room";
+            EXPECT_EQ(str->amount, 2);
+        } else {
+            EXPECT_EQ(str, nullptr) << "Strength granted outside an elite room";
+        }
+    }
 }
 
 // Control: with no battle-start relic the combat is untouched. Establishes the
@@ -796,6 +1098,168 @@ TEST(RunCombatBattleStart, PocketwatchGrantsTheTurnTwoBonusDraw) {
 }
 
 // =============================================================================
+// atPreBattle relics, through the REAL combat-entry path
+// =============================================================================
+//
+// applyPreCombatLogic (AbstractPlayer.java:1885-1890) is the LAST line of
+// preBattlePrep (:1607) and therefore fires BEFORE AbstractRoom's turn-1 block
+// queues the opening DrawCardAction (:242). enter_combat carries the call at its
+// step (8b), between the relic-mirror copy and begin_first_turn.
+//
+// Same argument as the atBattleStart section above: the dispatcher had direct
+// call coverage in relic_boss_special_test and passed all of it while the RUN
+// entry point never called it, so only entry through enter_combat can tell
+// "wired" from "unreachable".
+
+// Snecko Eye is the only registered relic that binds the hook. Its Confusion
+// must be on the player before the opening hand is drawn -- that is the entire
+// difference between atPreBattle and atBattleStart -- so the opening hand is
+// cost-rolled, and each rolled card costs one cardRandomRng draw.
+TEST(RunCombatPreBattle, SneckoEyeConfusesTheRunLayerOpeningHand) {
+    RunController base = enter_jaw_worm_holding({});
+    ASSERT_EQ(base.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(base.combat.hand_count, 5);
+    EXPECT_EQ(base.combat.card_random_rng.counter, 0)
+        << "no relic -- nothing should touch cardRandomRng at combat start";
+
+    RunController rc = enter_jaw_worm_holding({RelicId::SNECKO_EYE});
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    // The power itself reached the live combat.
+    const PowerSlot* conf = player_power(rc.combat, PowerId::CONFUSION);
+    ASSERT_NE(conf, nullptr) << "Confusion never reached the run-layer combat";
+
+    // masterHandSize += 2 lands on the opening hand as well.
+    ASSERT_EQ(rc.combat.hand_count, 7);
+
+    // Exactly one cardRandomRng draw per drawn card with cost >= 0 -- i.e. every
+    // drawn card that is neither X-cost nor unplayable (Ascender's Bane at A20 is
+    // the one that can qualify out). The count is derived from the hand that
+    // actually landed, not assumed.
+    int32_t expect_rolls = 0;
+    for (uint8_t i = 0; i < rc.combat.hand_count; ++i) {
+        const CardInstance& c = rc.combat.card_pool[rc.combat.hand[i]];
+        if (!has_card_flag(c.flags, CardFlag::XCOST) &&
+            !has_card_flag(c.flags, CardFlag::UNPLAYABLE)) {
+            ++expect_rolls;
+            EXPECT_LE(c.cost_now, 3) << "hand slot " << static_cast<int>(i)
+                                     << " escaped the random(3) roll";
+        }
+    }
+    EXPECT_GT(expect_rolls, 0) << "an all-unplayable opening hand proves nothing";
+    EXPECT_EQ(rc.combat.card_random_rng.counter, expect_rolls);
+}
+
+// The ORDER pin, and the reason the call site is where it is. atPreBattle sits
+// between the relic-mirror copy (it reads the mirror) and begin_first_turn (the
+// opening draw must see the power). Moving it after begin_first_turn would leave
+// the opening hand un-rolled and spend zero cardRandomRng draws before the
+// player's first action, so the first hand would escape -- exactly the bug
+// atPreBattle exists to prevent.
+TEST(RunCombatPreBattle, TheOpeningHandIsRolledNotJustLaterDraws) {
+    RunController base = enter_jaw_worm_holding({});
+    RunController rc = enter_jaw_worm_holding({RelicId::SNECKO_EYE});
+    ASSERT_EQ(base.combat.hand_count, 5);
+    ASSERT_EQ(rc.combat.hand_count, 7);
+
+    // Same shuffle, same draw order: Snecko Eye consumes no shuffleRng and the
+    // first five slots hold the same card instances as the base run.
+    for (uint8_t i = 0; i < 5; ++i) {
+        ASSERT_EQ(rc.combat.hand[i], base.combat.hand[i])
+            << "draw order moved -- the comparison below would be meaningless";
+    }
+    // At least one of them has a cost the base run does not have. With a 4-way
+    // roll over >= 5 playable cards this is not a coin flip, and the exact
+    // per-card values are pinned by the unit tests over ConfusionPower.
+    bool any_changed = false;
+    for (uint8_t i = 0; i < 5; ++i) {
+        any_changed = any_changed ||
+                      rc.combat.card_pool[rc.combat.hand[i]].cost_now !=
+                          base.combat.card_pool[base.combat.hand[i]].cost_now;
+    }
+    EXPECT_TRUE(any_changed) << "the opening hand escaped Confusion";
+}
+
+// =============================================================================
+// The Wave-C coupling: Snecko Eye's hand size x the innate overflow threshold
+// =============================================================================
+//
+// wave-combat derived the per-combat hand size at the draw lines
+// (game_hand_size: Snecko Eye's masterHandSize += 2, SneckoEye.java:31);
+// wave-runlayer landed initializeDeck's overflow draw. In the Java those read
+// ONE field -- CardGroup.initializeDeck:951-953 thresholds and sizes the
+// preTurnActions draw on AbstractDungeon.player.masterHandSize, the same field
+// preBattlePrep snapshots into gameHandSize (AbstractPlayer.java:1579) -- so
+// on the union the overflow threshold must move together with the turn draw.
+// A constant-5 threshold (each track's correct-for-itself value) would queue a
+// spurious DRAW where the game queues none.
+
+TEST(RunCombatBottle, SneckoEyeRaisesTheInnateOverflowThresholdWithTheDraw) {
+    RunController rc = run_begin(kSeed, kA20);
+    set_run_relics(rc, {RelicId::SNECKO_EYE});
+    // Four registry-innate Writhes + two bottled instances = the same 6-card
+    // placeOnTop collection SixTopPlacedCardsAllOpenInHandViaTheOverflowDraw
+    // proves overflows a 5-card hand. Under Snecko Eye the hand is 7, so
+    // 6 <= 7: the game queues NO overflow draw and the ordinary turn-1 draw
+    // of 7 already contains all six.
+    for (uint16_t i = 1; i <= 4; ++i) {
+        rc.run.master_deck[i].card_id = static_cast<uint16_t>(CardId::WRITHE);
+    }
+    ASSERT_EQ(rc.run.master_deck[5].card_id,
+              static_cast<uint16_t>(CardId::STRIKE));
+    rc.run.master_deck[5].flags = kMasterCardInBottleFlame;
+    ASSERT_EQ(rc.run.master_deck[6].card_id,
+              static_cast<uint16_t>(CardId::DEFEND));
+    rc.run.master_deck[6].flags = kMasterCardInBottleLightning;
+
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase,
+              static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    EXPECT_EQ(rc.combat.hand_count, 7)
+        << "game_hand_size under Snecko Eye is 7; a constant-5 overflow "
+           "threshold would queue a spurious DRAW(1) and open 8";
+    for (uint8_t pi = 1; pi <= 6; ++pi) {
+        EXPECT_TRUE(hand_holds_pool_index(rc.combat, pi))
+            << "top-placed pool index " << static_cast<int>(pi)
+            << " must be in the opening hand";
+    }
+    EXPECT_EQ(rc.combat.draw_count,
+              static_cast<uint8_t>(rc.run.master_deck_count - 7));
+    EXPECT_EQ(rc.combat.action_count, 0);
+}
+
+// The threshold is the ENLARGED hand in both directions: eight top-placed
+// cards under Snecko Eye still overflow, by exactly 8 - 7 = 1.
+TEST(RunCombatBottle, EightTopPlacedUnderSneckoEyeOverflowByExactlyOne) {
+    RunController rc = run_begin(kSeed, kA20);
+    set_run_relics(rc, {RelicId::SNECKO_EYE});
+    for (uint16_t i = 1; i <= 8; ++i) {
+        rc.run.master_deck[i].card_id = static_cast<uint16_t>(CardId::WRITHE);
+    }
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase,
+              static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    EXPECT_EQ(rc.combat.hand_count, 8)
+        << "7 from the turn-1 draw + the (8 - 7)-card preTurnActions overflow";
+    int writhes = 0;
+    for (uint8_t i = 0; i < rc.combat.hand_count; ++i) {
+        if (rc.combat.card_pool[rc.combat.hand[i]].card_id ==
+            static_cast<uint16_t>(CardId::WRITHE)) {
+            ++writhes;
+        }
+    }
+    EXPECT_EQ(writhes, 8) << "every top-placed card opens in hand";
+    EXPECT_EQ(rc.combat.action_count, 0);
+}
+
+// =============================================================================
 // wasHPLost relics across a run: Centennial Puzzle's per-combat re-arm
 // =============================================================================
 //
@@ -920,20 +1384,119 @@ TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     EXPECT_EQ(rc.run.hp, 60);  // Fruit Juice +5, then Toy Ornithopter +5.
 }
 
-TEST(RunPotion, EntropicBrewUsesLimitedDrawsThenFillsOpenedSlots) {
-    RunController rc = run_begin(kSeed, kA20);
+TEST(RunPotion, EntropicBrewOutOfCombatDrawsAreUnlimited) {
+    // EntropicBrew.use (EntropicBrew.java:46-48): OUT of combat the non-Sozu
+    // branch rolls potionSlots x returnRandomPotion() -- the no-arg overload,
+    // limited=false (AbstractDungeon.java:825-827). Only the IN-combat branch
+    // (:40-42) passes limited=true.
+    //
+    // The two flags OFTEN coincide: when a candidate mismatches the rolled
+    // tier anyway, the limited discard overlaps the rarity rejection. So a
+    // fixed seed can silently pin nothing -- hunt for a seed whose sequence
+    // DISTINGUISHES the flag (first candidate already matching the tier, or a
+    // Fruit Juice result) and assert the engine takes the unlimited branch
+    // there.
+    int64_t seed = 0;
+    RngStream expected_rng{};
+    PotionId first = PotionId::NONE;
+    PotionId second = PotionId::NONE;
+    for (int64_t cand = 1; cand <= 500 && seed == 0; ++cand) {
+        RunController probe = run_begin(cand, kA20);
+        leave_neow(probe);
+        RngStream unlimited = probe.run.potion_rng;
+        RngStream limited = probe.run.potion_rng;
+        const PotionId u0 = hand_unlimited_potion_roll(unlimited);
+        const PotionId u1 = hand_unlimited_potion_roll(unlimited);
+        (void)hand_limited_potion_roll(limited);
+        (void)hand_limited_potion_roll(limited);
+        if (!streams_equal(unlimited, limited)) {
+            seed = cand;
+            expected_rng = unlimited;
+            first = u0;
+            second = u1;
+        }
+    }
+    ASSERT_NE(seed, 0) << "no seed in 1..500 distinguishes the limited flag";
+
+    RunController rc = run_begin(seed, kA20);
     leave_neow(rc);
     rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
     rc.run.potions[1] = static_cast<uint16_t>(PotionId::BLOOD_POTION);
 
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng))
+        << "out-of-combat draws must be limited=false (seed " << seed << ")";
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(first));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
+    // The second unlimited roll happened even though no slot was open for it
+    // (the Java constructs every effect before any obtain resolves); its
+    // identity is pinned by the stream compare above.
+    (void)second;
+}
+
+TEST(RunPotion, EntropicBrewWithSozuOutOfCombatRollsNothing) {
+    // EntropicBrew.use:43-45: out of combat the Sozu check comes BEFORE any
+    // roll -- potionRng does not move at all and nothing is obtained; the Brew
+    // itself is still consumed (PotionPopUp destroys the used potion
+    // regardless of which use() branch ran).
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SOZU), -1};
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::BLOOD_POTION);
+    const RngStream rng_before = rc.run.potion_rng;
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, rng_before))
+        << "the Sozu branch precedes every potionRng draw";
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
+}
+
+TEST(RunPotion, EntropicBrewInCombatUnderSozuRollsButObtainsNothing) {
+    // In combat the rolls are NOT gated on Sozu: EntropicBrew.use:39-42 rolls
+    // returnRandomPotion(true) potionSlots times unconditionally; each queued
+    // ObtainPotionAction is then suppressed at resolve while Sozu is owned
+    // (ObtainPotionAction.java:29-38 -- flash, no obtainPotion). Net: the
+    // stream moves by the full limited sequence, the belt gains nothing.
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SOZU), -1};
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+
+    RngStream expected_rng = rc.run.potion_rng;
+    (void)hand_limited_potion_roll(expected_rng);
+    (void)hand_limited_potion_roll(expected_rng);  // A20: two slots.
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]);
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
+}
+
+TEST(RunPotion, EntropicBrewInCombatDrawsLimitedAndFills) {
+    // The in-combat branch keeps limited=true (EntropicBrew.java:40-42) and,
+    // without Sozu, every obtain lands in the belt front-first.
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+
     RngStream expected_rng = rc.run.potion_rng;
     const PotionId first = hand_limited_potion_roll(expected_rng);
-    (void)hand_limited_potion_roll(expected_rng);  // A20 has two slots -> two rolls.
+    const PotionId second = hand_limited_potion_roll(expected_rng);
 
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]);
     step(rc, make_action(ActionVerb::USE_POTION, 0));
     EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
     EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(first));
-    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(second));
 }
 
 TEST(RunPotion, TargetPotionDelegatesToCombatPumpAndConsumesSlot) {
@@ -1156,6 +1719,160 @@ TEST(RunEscape, SmokeBombAfterAMugKeepsTheMuggedScreenAndItsRewards) {
     EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::CARDS), 1);
 }
 
+// SmokeBomb.canUse (SmokeBomb.java:50-63) asks the MONSTERS, not the room:
+//
+//     for (AbstractMonster m : getCurrRoom().monsters.monsters) {
+//         if (m.hasPower("BackAttack")) return false;
+//         if (m.type != AbstractMonster.EnemyType.BOSS) continue;
+//         return false;
+//     }
+//
+// combat_potion_legal tested `room_type == RoomType::Boss` instead. The two
+// agree in every state the S1 run layer can currently PRODUCE -- all three
+// BOSS-typed rows are Act-1 bosses that only appear in a Boss room, and a Boss
+// room always holds one -- so these two tests deliberately construct the
+// disagreement directly, which is the only way to see it. They are the
+// regression guard for the day an Act-2+ encounter or an event spawn puts a
+// BOSS-typed monster somewhere else.
+
+TEST(RunPotion, SmokeBombReadsTheMonsterTypeNotTheRoomType) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_NE(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SMOKE_BOMB);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]) << "an ordinary fight allows the escape";
+
+    // Same non-boss ROOM, but the group now holds a BOSS-typed monster.
+    rc.combat.monsters[0].monster_id =
+        static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    RunActionMask boss_mask{};
+    legal_actions(rc, boss_mask);
+    EXPECT_FALSE(boss_mask.can_use_potion[0])
+        << "m.type == EnemyType.BOSS refuses it wherever the monster is";
+}
+
+// The loop in canUse has NO liveness gate: it walks `monsters.monsters`, the
+// whole group, and a dead or escaped monster is still a member. That is not
+// hypothetical for the Slime Boss, which stays in the group after it splits.
+TEST(RunPotion, SmokeBombIsStillRefusedByADeadBossInTheGroup) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SMOKE_BOMB);
+    ASSERT_GE(rc.combat.monster_count, 1);
+    // A live ordinary monster to fight, plus a dead boss still in the group.
+    rc.combat.monsters[rc.combat.monster_count].monster_id =
+        static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    rc.combat.monsters[rc.combat.monster_count].hp = 0;
+    rc.combat.monsters[rc.combat.monster_count].max_hp = 140;
+    ++rc.combat.monster_count;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_use_potion[0])
+        << "the Java loop never asks whether the boss is alive";
+}
+
+// --- Fairy in a Bottle: the belt <-> combat mirror ----------------------------
+//
+// FairyPotion is never USED (canUse() is false) -- it fires from
+// AbstractPlayer.damage on any lethal HP write. The belt lives in RunState and
+// CombatState has none, so enter_combat mirrors the COUNT into
+// CombatState.flags, the combat consumes from the mirror, and fold_back_combat
+// burns the real slots by comparing the belt against what is left.
+
+TEST(RunPotion, EnteringCombatArmsTheHeldFairies) {
+    RunController rc = enter_jaw_worm_combat();
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0)
+        << "no fairy held -> nothing armed";
+
+    RunController armed = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(armed);
+    armed.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    armed.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(armed, make_action(ActionVerb::CHOOSE, first_start_column(armed)));
+    ASSERT_EQ(armed.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(combat_fairy_armed(armed.combat.flags), 2);
+}
+
+// A fairy consumed IN COMBAT burns its real slot at fold-back -- leftmost first,
+// and only the number actually spent.
+TEST(RunPotion, AConsumedFairyBurnsItsSlotAtFoldBack) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 2);
+
+    // One lethal hit: the mirror drops to 1 and the player survives it.
+    deal_lethal_to_player(rc.combat);
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 1);
+    ASSERT_GT(rc.combat.player_hp, 0);
+    const int16_t revived_hp = rc.combat.player_hp;
+
+    // End the fight so the real fold-back runs.
+    rc.combat.monsters[0].hp = 0;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE))
+        << "leftmost first";
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::FAIRY_POTION))
+        << "only the one that fired is burned";
+    EXPECT_GE(rc.run.hp, revived_hp) << "the revive survived the fold-back";
+}
+
+// A combat in which nothing fired must burn nothing -- fold_back_combat runs on
+// every combat end, including a defeat.
+TEST(RunPotion, AnUnusedFairySurvivesFoldBack) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    rc.combat.monsters[0].hp = 0;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FAIRY_POTION));
+}
+
+// A Fairy is DISCARDABLE in combat (AbstractPotion.canDiscard has no combat
+// gate), and that is the only mid-combat belt mutation there is. Left alone,
+// the mirror would let a thrown-away fairy still revive.
+TEST(RunPotion, DiscardingAFairyInCombatDisarmsIt) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 1);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_discard_potion[0]) << "a fairy is throwable in combat";
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0)
+        << "a discarded fairy must not revive";
+    deal_lethal_to_player(rc.combat);
+    EXPECT_EQ(rc.combat.player_hp, 0);
+}
+
+// combat_potion_legal rejects FAIRY_POTION by name and must keep doing so: the
+// revive is not a USE (canUse() is `return false`, FairyPotion.java:47-50).
+TEST(RunPotion, AFairyIsNeverAUsableAction) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_use_potion[0]);
+    EXPECT_TRUE(mask.can_discard_potion[0]);
+}
+
 // --- The potion legality trap -------------------------------------------------
 //
 // RunState.potions[] is populated from real captures by the oracle translator
@@ -1169,11 +1886,7 @@ TEST(RunEscape, SmokeBombAfterAMugKeepsTheMuggedScreenAndItsRewards) {
 
 TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
     RunController rc = enter_jaw_worm_combat();
-    for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
-                        PotionId::SKILL_POTION, PotionId::POWER_POTION,
-                        PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
-                        PotionId::LIQUID_MEMORIES, PotionId::SNECKO_OIL,
-                        PotionId::DISTILLED_CHAOS,
+    for (PotionId id : {PotionId::DISTILLED_CHAOS,
                         PotionId::DUPLICATION_POTION}) {
         rc.run.potions[0] = static_cast<uint16_t>(id);
         RunActionMask mask{};
@@ -1190,6 +1903,14 @@ TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
                         PotionId::FIRE_POTION,            // data program, targeted
                         PotionId::BLOOD_POTION,           // combat native
                         PotionId::BLESSING_OF_THE_FORGE,  // combat native
+                        PotionId::ELIXIR,                 // combat native (CHOOSE)
+                        PotionId::ATTACK_POTION,          // combat native (DISCOVERY)
+                        PotionId::SKILL_POTION,           // combat native (DISCOVERY)
+                        PotionId::POWER_POTION,           // combat native (DISCOVERY)
+                        PotionId::COLORLESS_POTION,       // combat native (DISCOVERY)
+                        PotionId::LIQUID_MEMORIES,        // combat native (CHOOSE)
+                        PotionId::GAMBLERS_BREW,          // combat native (CHOOSE)
+                        PotionId::SNECKO_OIL,             // data program (op 60)
                         PotionId::SMOKE_BOMB}) {          // run-layer native
         rc.run.potions[0] = static_cast<uint16_t>(id);
         RunActionMask mask{};
@@ -1204,13 +1925,13 @@ TEST(RunPotion, ForcingADeferredPotionKeepsTheSlot) {
     // Belt and braces: even if a caller submits the action the mask refused,
     // the slot is not consumed and combat state is untouched.
     RunController rc = enter_jaw_worm_combat();
-    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ELIXIR);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::DUPLICATION_POTION);
     const int hp_before = rc.combat.monsters[0].hp;
     const int16_t player_hp_before = rc.combat.player_hp;
 
     step(rc, make_action(ActionVerb::USE_POTION, 0));
 
-    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::ELIXIR))
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::DUPLICATION_POTION))
         << "the slot must survive an illegal use";
     EXPECT_EQ(rc.combat.monsters[0].hp, hp_before);
     EXPECT_EQ(rc.combat.player_hp, player_hp_before);
@@ -1260,8 +1981,11 @@ TEST(RunPotionDiscard, DiscardingOutOfCombatEmptiesTheSlotAndMovesNothingElse) {
 TEST(RunPotionDiscard, ADeferredPotionBodyIsStillDiscardable) {
     // The use door is closed on a still-deferred body (potion_use_implemented);
     // the discard door is not, because a discard never runs the body.
+    // The example was SNECKO_OIL until RANDOMIZE_HAND_COST (opcode 60) landed
+    // and un-deferred it; DUPLICATION_POTION is blocked on the recursive-play
+    // opcode, which is out of the potions stage's scope.
     RunController rc = enter_jaw_worm_combat();
-    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SNECKO_OIL);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::DUPLICATION_POTION);
     RunActionMask mask{};
     legal_actions(rc, mask);
     EXPECT_FALSE(mask.can_use_potion[0]);
@@ -1695,6 +2419,149 @@ TEST(QuestionMarkRoom, SsserpentHeadFiresBeforeEveryResolvedRoomKind) {
         EXPECT_EQ(rc.run.gold, gold_before + 50);
         EXPECT_EQ(rc.room_type, static_cast<uint8_t>(tc.resolved));
     }
+}
+
+// THE double-fire regression. on_player_entry RECURSES for a ? that rolls
+// Monster/Treasure/Shop, but the game fires onEnterRoom exactly once per
+// nextRoomTransition, against the PRE-roll EventRoom (AbstractDungeon.java:
+// 1755-1757, before the roll at :1766-1781 and setCurrMapNode at :1783).
+// Maw Bank has no room-type gate, so wiring it at the justEnteredRoom site --
+// or at the top of the recursive entry -- would pay 12 gold TWICE on a
+// ?->Shop. Exactly 12, on every resolved kind.
+TEST(QuestionMarkRoom, MawBankPaysExactlyTwelveOnceAcrossEveryResolvedKind) {
+    struct Case {
+        float lo;
+        float hi;
+        RoomType resolved;
+    };
+    const Case cases[] = {
+        {0.00f, 0.10f, RoomType::Monster},
+        {0.10f, 0.13f, RoomType::Shop},
+        {0.13f, 0.15f, RoomType::Treasure},
+        {0.15f, 1.00f, RoomType::Event},
+    };
+    for (const Case& tc : cases) {
+        SCOPED_TRACE(static_cast<int>(tc.resolved));
+        const int64_t seed = find_event_roll_seed(tc.lo, tc.hi);
+        RunController rc = run_begin(seed, kA20);
+        const int32_t gold_before = rc.run.gold;
+        set_run_relics(rc, {RelicId::MAW_BANK});
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(RoomType::Event);
+        }
+        leave_neow(rc);
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+        EXPECT_EQ(rc.run.gold, gold_before + 12);
+        EXPECT_EQ(rc.room_type, static_cast<uint8_t>(tc.resolved));
+        // Entry does NOT use the relic up -- only onSpendGold does
+        // (MawBank.java:38-44), and that is a ShopRoom-only fan-out.
+        EXPECT_EQ(rc.run.relics[0].counter, 0);
+    }
+}
+
+// MawBank.onEnterRoom (MawBank.java:31-36) tests nothing about the room, and
+// the fan-out at AbstractDungeon.java:1755-1757 is likewise unconditional, so
+// every STATIC map node pays too -- the half B4.10 left open.
+TEST(RoomEntryRelics, MawBankPaysOnEveryStaticRoomKind) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Elite, RoomType::Rest, RoomType::Shop,
+          RoomType::Treasure}) {
+        SCOPED_TRACE(static_cast<int>(room));
+        RunController rc = run_begin(kSeed, kA20);
+        const int32_t gold_before = rc.run.gold;
+        set_run_relics(rc, {RelicId::MAW_BANK});
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(room);
+        }
+        leave_neow(rc);
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+        EXPECT_EQ(rc.room_type, static_cast<uint8_t>(room));
+        EXPECT_EQ(rc.run.gold, gold_before + 12);
+    }
+}
+
+// The boss node is reached by DungeonMap.java:77-87 assigning `nextRoom` a
+// MonsterRoomBoss and calling nextRoomTransitionStart(), so it runs the same
+// unconditional onEnterRoom loop. MonsterRoomBoss is NOT exempt.
+TEST(RoomEntryRelics, MawBankPaysOnTheBossEntry) {
+    RunController rc = run_begin(kSeed, kA20);
+    const int32_t gold_before = rc.run.gold;
+    set_run_relics(rc, {RelicId::MAW_BANK});
+    leave_neow(rc);
+    next_room_transition(rc, 0, /*to_boss=*/true);
+    ASSERT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    EXPECT_EQ(rc.run.gold, gold_before + 12);
+}
+
+// EternalFeather.onEnterRoom (EternalFeather.java:29-35) heals
+// (masterDeck.size() / 5) * 3 on entering a RestRoom. It is NOT a campfire
+// option: the fan-out runs at AbstractDungeon.java:1755-1757, before
+// setCurrMapNode (:1783) and before RestRoom.onPlayerEntry (:1800) builds the
+// CampfireUI (RestRoom.java:33-43). So the HP is already there when the menu
+// opens, and it lands whether or not the player then rests.
+TEST(RoomEntryRelics, EternalFeatherHealsBeforeTheCampfireMenuOpens) {
+    RunController rc = run_begin(kSeed, kA20);
+    set_run_relics(rc, {RelicId::ETERNAL_FEATHER});
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+    }
+    leave_neow(rc);
+    rc.run.hp = 20;
+    // A20 Ironclad: the 10-card starter plus Ascender's Bane.
+    ASSERT_EQ(rc.run.master_deck_count, 11);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::MENU));
+    EXPECT_EQ(rc.run.hp, 26);  // 11 / 5 * 3 == 6, integer division FIRST
+}
+
+// A ? can never roll REST (EventHelper.RoomResult has no REST arm), so the
+// pre-roll/post-roll distinction is invisible for this relic specifically --
+// but it shares the fan-out with Maw Bank, for which it is not. Pinned so the
+// gate stays on the ARRIVING map node's kind and never on a resolved one.
+TEST(RoomEntryRelics, EternalFeatherDoesNotHealOnANonRestEntry) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Shop,
+          RoomType::Treasure}) {
+        SCOPED_TRACE(static_cast<int>(room));
+        RunController rc = run_begin(kSeed, kA20);
+        set_run_relics(rc, {RelicId::ETERNAL_FEATHER});
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(room);
+        }
+        leave_neow(rc);
+        rc.run.hp = 20;
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+        EXPECT_EQ(rc.run.hp, 20);
+    }
+}
+
+// Two floors, one relic: the gain repeats until a shop purchase sets the
+// counter to -2 (dispatch_relics_on_spend_gold, relics/relic_pickup.hpp), and
+// then never again on any later entry.
+TEST(RoomEntryRelics, MawBankRepeatsEveryFloorUntilUsedUp) {
+    RunController rc = run_begin(kSeed, kA20);
+    const int32_t gold_before = rc.run.gold;
+    set_run_relics(rc, {RelicId::MAW_BANK});
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+        rc.run.map[run_state_map_index(x, 1)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+    }
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.run.gold, gold_before + 12);
+
+    rc.run.relics[0].counter = -2;  // a shop coin was spent
+    next_room_transition(rc, rc.cur_x, /*to_boss=*/false);
+    EXPECT_EQ(rc.run.gold, gold_before + 12);
 }
 
 // A ? that rolls MONSTER becomes a REAL MonsterRoom (generateRoom,

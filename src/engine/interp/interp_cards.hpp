@@ -85,10 +85,37 @@ void op_random_card_to_draw(CombatState& s, int count, uint8_t type) noexcept;
 // discardPile, exhaustPile, in that order.
 void op_upgrade_all(CombatState& s) noexcept;
 
+// UPGRADE_RANDOM_CARD (Warped Tongs / UpgradeRandomCardAction) -- upgrade ONE
+// random upgradeable hand card, in place, for the combat. Spends exactly ONE
+// shuffle_rng.random_long() and ONLY when the eligible subset is non-empty.
+void op_upgrade_random_card(CombatState& s) noexcept;
+
 // DRAW_PILE_FETCH (Violence) -- pull up to `amount` cards of CardType `type`
 // (the raw CardType byte, interp.hpp draw_pile_fetch_type_from_flags) out of the
 // draw pile into the hand. Dual-stream: k-1 card_random_rng draws for the temp
 // browse group, then ONE shuffle_rng draw per non-empty pick.
 void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept;
+
+// The shared per-card cost roll: `if (card.cost >= 0) { newCost =
+// cardRandomRng.random(3); if (card.cost != newCost) card.costForTurn =
+// card.cost = newCost; }`. ONE card_random_rng draw for any instance whose base
+// cost is non-negative -- even when the roll changes nothing -- and none at all
+// for an XCOST/UNPLAYABLE one. The comparison is against the BASE cost
+// (instance_base_cost), so a live this-turn modification survives an equal roll
+// untouched, and the write is permanent (COST_MODIFIED_FOR_TURN is cleared, not
+// set).
+//
+// `clear_free_to_play_once` is the ONLY difference between the two Java bodies
+// that reach here: ConfusionPower.onCardDraw (ConfusionPower.java:38-48) ends
+// its `cost >= 0` branch with `card.freeToPlayOnce = false`, OUTSIDE the
+// equality `if`; RandomizeHandCostAction (RandomizeHandCostAction.java:26-38)
+// never touches the field. One body with one boolean is deliberate: the two were
+// separately hand-written once and diverged in precisely this area.
+void randomize_card_cost(CombatState& s, CardPoolIndex pi,
+                         bool clear_free_to_play_once) noexcept;
+
+// RANDOMIZE_HAND_COST (Snecko Oil / RandomizeHandCostAction) -- randomize_card_cost
+// over every hand slot in hand order, freeToPlayOnce untouched. No operand.
+void op_randomize_hand_cost(CombatState& s) noexcept;
 
 }  // namespace sts::engine

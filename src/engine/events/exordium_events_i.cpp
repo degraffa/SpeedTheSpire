@@ -301,7 +301,13 @@ EventDialogStatus dead_choose(RunController& rc, EventDialogState& es,
         const EventCombatVariant variant =
             which == 2 ? EventCombatVariant::LAGAVULIN_AWAKE
                        : EventCombatVariant::NONE;
-        (void)enter_event_combat(rc, encounters[which], variant);
+        // DeadAdventurer.java:116 sets `getCurrRoom().eliteTrigger = true` in the
+        // same branch that installs the encounter -- the only Act-1 producer of
+        // that flag outside MonsterRoomElite. It is what makes Sling of Courage /
+        // Preserved Insect / Slaver's Collar treat this event fight as the elite
+        // it is (kCombatFlagEliteRoom, combat_state.hpp).
+        (void)enter_event_combat(rc, encounters[which], variant,
+                                 /*elite_trigger=*/true);
         rc.event = EventDialogState{};
         return EventDialogStatus::TRANSITIONED;
     }

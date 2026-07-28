@@ -157,6 +157,145 @@ inline constexpr uint32_t kCombatFlagCentennialPuzzleUsed = 1u << 4;
 inline constexpr uint32_t kCombatFlagCombustHpLossShift = 8u;
 inline constexpr uint32_t kCombatFlagCombustHpLossMask = 0xFFu << kCombatFlagCombustHpLossShift;
 
+// CombatState.flags: how many Fairy in a Bottle potions the belt still holds.
+//
+// FairyPotion is never USED (canUse() is `return false`, FairyPotion.java:47-50).
+// It fires from AbstractPlayer.damage (AbstractPlayer.java:1482-1497), the
+// ORDINARY damage path, on ANY lethal HP write:
+//
+//     if (this.currentHealth < 1) {
+//         if (!this.hasRelic("Mark of the Bloom")) {
+//             if (this.hasPotion("FairyPotion")) {
+//                 for (AbstractPotion p : this.potions) {
+//                     if (!p.ID.equals("FairyPotion")) continue;
+//                     p.flash(); this.currentHealth = 0; p.use(this);
+//                     topPanel.destroyPotion(p.slot);
+//                     return;                              // <-- no death
+//                 }
+//             } else if (hasRelic("Lizard Tail") && counter == -1) { ... }
+//         }
+//         this.isDead = true; ...
+//     }
+//
+// WHY A COMBAT-STATE MIRROR AND NOT A RUN-LAYER CHECK. potions.hpp records a
+// deliberate layer boundary: the potion BELT lives in RunState and CombatState
+// has none. But the fix cannot live at the run layer either, because
+// AbstractPlayer.damage RETURNS -- the player is alive for the REST OF THE SAME
+// ACTION, while the engine's pump ends the combat on its next step's
+// combat-over check and finish_combat_after_action would already have routed to
+// RUN_OVER. A post-hoc run-layer revive would be observably wrong. So only the
+// FACT of an armed Fairy is mirrored in, exactly as the relic mirror does, and
+// the run layer burns the real slots at fold-back.
+//
+// A COUNT rather than a bit, because multiple Fairies are legal (kPotionCap is
+// 5; at A20 potion_slot_count is 2) and the Java loop `return`s on the FIRST
+// match -- exactly ONE is consumed per lethal event and a second held Fairy
+// survives for a later one. Three bits cover the whole belt with margin. Bit 19
+// of this stage's 16-19 allocation is RELEASED unspent.
+//
+// Storage rationale is Centennial Puzzle's and the elite-room bit's below: bits
+// 16-18 were previously zero, so no offset, no sizeof and no SCHEMA_VERSION
+// move, and enter_combat's fresh `CombatState s{}` is the per-combat reset. A
+// standalone combat built by combat_begin (advance.cpp) has no belt at all, so
+// the count stays 0 there -- the right answer rather than a gap, since a bare
+// CombatState caller genuinely holds no potions.
+inline constexpr uint32_t kCombatFlagFairyArmedShift = 16u;
+inline constexpr uint32_t kCombatFlagFairyArmedMask =
+    0x7u << kCombatFlagFairyArmedShift;
+
+[[nodiscard]] inline constexpr uint8_t combat_fairy_armed(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>((flags & kCombatFlagFairyArmedMask) >>
+                                kCombatFlagFairyArmedShift);
+}
+[[nodiscard]] inline constexpr uint32_t with_combat_fairy_armed(
+    uint32_t flags, uint8_t n) noexcept {
+    return (flags & ~kCombatFlagFairyArmedMask) |
+           ((static_cast<uint32_t>(n) << kCombatFlagFairyArmedShift) &
+            kCombatFlagFairyArmedMask);
+}
+
+// CombatState.flags bit for the ROOM's `eliteTrigger` (AbstractRoom.java:99,
+// default false). It is per-ROOM state in the game and per-COMBAT here, which
+// is exact: a room hosts one combat and the flag is set before that combat is
+// constructed, never during it.
+//
+// The COMPLETE producer list, from `grep -rn eliteTrigger com/`:
+//   * MonsterRoomElite ctor          (MonsterRoomElite.java:33)
+//   * DeadAdventurer, an ACT-1 EVENT (DeadAdventurer.java:116) -- set on an
+//     EventRoom just before its combat, which is why the marker cannot be
+//     derived from RoomType alone and enter_combat takes it as an argument
+//   * Colosseum                      (Colosseum.java:75) -- Act 2, no S1 row
+// MonsterRoomBoss does NOT set it (MonsterRoomBoss.java:22-24 sets only
+// mapSymbol). A BOSS room is therefore NOT an elite room, and Sling of Courage
+// / Preserved Insect do NOT fire there -- see energy_master (action_queue.cpp)
+// for the one consumer that wants "elite OR boss" and builds it from this bit
+// plus the monsters' own EnemyType.
+//
+// The COMPLETE consumer list: Sling.atBattleStart (Sling.java:30-37),
+// PreservedInsect.atBattleStart (PreservedInsect.java:30-41),
+// SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57), and
+// AbstractCreature.java:371 -- a render-scale tweak with no state effect.
+//
+// Storage rationale is the Centennial Puzzle one directly above: bit 20 was
+// previously zero, so no offset, no sizeof and no SCHEMA_VERSION move, and
+// enter_combat's fresh `CombatState s{}` is the per-combat reset. A
+// standalone combat built by combat_begin (advance.cpp) has no room, so the
+// bit stays clear there -- the same answer the game gives for an
+// AbstractRoom whose ctor never set it.
+inline constexpr uint32_t kCombatFlagEliteRoom = 1u << 20;
+
+[[nodiscard]] inline bool combat_is_elite_room(uint32_t flags) noexcept {
+    return (flags & kCombatFlagEliteRoom) != 0u;
+}
+
+// CombatState.flags bits for Orange Pellets' three type latches.
+//
+// OrangePellets declares them as `private static boolean SKILL / POWER / ATTACK`
+// (OrangePellets.java:21-23) -- STATICS, i.e. combat-global rather than per-relic
+// -instance, which is the same shape as Centennial Puzzle's usedThisCombat and
+// the same reason they may not live in RelicSlot.counter: the game never writes
+// OrangePellets.counter, so it stays at AbstractRelic's -1 and any write here
+// would fold out to RunState and diverge from the capture.
+//
+// Their only clear is atTurnStart (:34-39); atPreBattle does NOT touch them. A
+// fresh value-initialised CombatState is equivalent because turn 1's atTurnStart
+// runs before any card can be played (AbstractRoom.java:253) -- said explicitly
+// rather than implying the game resets them at combat start, because it does not.
+//
+// Bits 21-23 were previously zero, so no offset, no sizeof, no SCHEMA_VERSION.
+inline constexpr uint32_t kCombatFlagOrangePelletsAttack = 1u << 21;
+inline constexpr uint32_t kCombatFlagOrangePelletsSkill = 1u << 22;
+inline constexpr uint32_t kCombatFlagOrangePelletsPower = 1u << 23;
+// CombatState.flags bit for Art of War's `gainEnergyNext`, stored INVERTED as
+// "an ATTACK has been played this turn".
+//
+// ArtOfWar (ArtOfWar.java:23-24, :52-82) keeps two per-combat booleans:
+//     atPreBattle : firstTurn = true; gainEnergyNext = true;
+//     atTurnStart : if (gainEnergyNext && !firstTurn) addToBot GainEnergyAction(1);
+//                   firstTurn = false; gainEnergyNext = true;
+//     onUseCard   : if (card.type == ATTACK) gainEnergyNext = false;
+// i.e. +1 energy at the start of turn N (N >= 2) iff no ATTACK was played during
+// turn N-1.
+//
+// Only ONE of the two needs storage. `firstTurn` is derivable: the relic hook
+// runs from start_of_turn BEFORE `++s.turn` (action_queue.cpp), and combat
+// construction leaves s.turn == 0, so the first atTurnStart of a combat is
+// exactly `s.turn == 0`. Storing `gainEnergyNext` INVERTED keeps the
+// value-initialised default correct with no atPreBattle write: a fresh
+// CombatState means "no attack played yet", which is what atPreBattle's
+// `gainEnergyNext = true` says.
+//
+// A flags bit and not RelicSlot.counter for the usual reason: ArtOfWar's counter
+// is never written in the game, stays at AbstractRelic's -1, and
+// fold_back_combat would carry any write into RunState where the differ compares
+// it (the Centennial Puzzle divergence class).
+inline constexpr uint32_t kCombatFlagArtOfWarAttackPlayed = 1u << 24;
+
+inline constexpr uint32_t kCombatFlagOrangePelletsMask =
+    kCombatFlagOrangePelletsAttack | kCombatFlagOrangePelletsSkill |
+    kCombatFlagOrangePelletsPower;
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;

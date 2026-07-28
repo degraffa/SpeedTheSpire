@@ -559,6 +559,215 @@ TEST(NeowPayout, BossSwapWithoutBlackBloodTakesExactlyOnePop) {
     EXPECT_EQ(rc.run.relic_pool_count[boss], count - 1);
 }
 
+// =============================================================================
+// The boss swap's on_equip_screen bodies (Wave-C track 2): the five relics'
+// screens driven end-to-end through the controller. Each test forces the boss
+// pool's front so the swap lands on the wanted relic.
+// =============================================================================
+
+namespace {
+void force_boss_front(RunController& rc, RelicId id) {
+    rc.run.relic_pools[static_cast<int>(RelicPool::BOSS)][0] =
+        static_cast<uint16_t>(id);
+}
+}  // namespace
+
+// Empty Cage: choose-2 removal grid over the purgeable deck, applied when the
+// second pick lands (EmptyCage.java:55; GridCardSelectScreen.java:189-209 --
+// no confirmation popup at numCards != 1), then Neow's DONE -> map.
+TEST(NeowPayout, BossSwapOntoEmptyCageDrivesTheTwoPickRemovalGrid) {
+    RunController rc = run_begin(42, kA20);
+    force_boss_front(rc, RelicId::EMPTY_CAGE);
+    force_option(rc, 0, NeowRewardType::BOSS_RELIC);
+    const uint16_t deck0 = rc.run.master_deck_count;  // 11 at A20
+    step(rc, choose(0));
+
+    EXPECT_TRUE(owns(rc.run, RelicId::EMPTY_CAGE));
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::GRID));
+    EXPECT_EQ(rc.neow.grid_mode, static_cast<uint8_t>(NeowGridMode::REMOVE));
+    EXPECT_EQ(rc.neow.grid_needed, 2);
+
+    RunActionMask m = mask_of(rc);
+    const uint8_t bane = deck_index_of(rc.run, CardId::ASCENDERS_BANE);
+    EXPECT_FALSE(m.can_choose_master_deck[bane])
+        << "getPurgeableCards excludes Ascender's Bane";
+    const uint8_t strike = deck_index_of(rc.run, CardId::STRIKE);
+    const uint8_t bash = deck_index_of(rc.run, CardId::BASH);
+    EXPECT_TRUE(m.can_choose_master_deck[strike]);
+    step(rc, choose(strike));
+    EXPECT_EQ(rc.run.master_deck_count, deck0) << "applied only when complete";
+    step(rc, choose(bash));
+
+    EXPECT_EQ(rc.run.master_deck_count, deck0 - 2);
+    EXPECT_EQ(count_card(rc.run, CardId::BASH), 0);
+    EXPECT_EQ(count_card(rc.run, CardId::STRIKE), 4);
+    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+    step(rc, choose(kChooseProceed));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+// Astrolabe: choose-3 transform+upgrade grid. The three miscRng transform
+// draws happen when the THIRD pick completes the set, in click order, each
+// through the shared transform_card list with autoUpgrade (Astrolabe.java:
+// 65-79; AbstractDungeon.java:873-876).
+TEST(NeowPayout, BossSwapOntoAstrolabeTransformsThreePicksOnMiscRng) {
+    RunController rc = run_begin(42, kA20);
+    force_boss_front(rc, RelicId::ASTROLABE);
+    force_option(rc, 0, NeowRewardType::BOSS_RELIC);
+    step(rc, choose(0));
+
+    EXPECT_TRUE(owns(rc.run, RelicId::ASTROLABE));
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::GRID));
+    EXPECT_EQ(rc.neow.grid_mode,
+              static_cast<uint8_t>(NeowGridMode::TRANSFORM_UPGRADE));
+    EXPECT_EQ(rc.neow.grid_needed, 3);
+    const uint16_t deck0 = rc.run.master_deck_count;  // 11: untouched so far
+
+    // Picks: a Strike, a Defend, the Bash -- in that click order.
+    const uint8_t pick0 = deck_index_of(rc.run, CardId::STRIKE);
+    const uint8_t pick1 = deck_index_of(rc.run, CardId::DEFEND);
+    const uint8_t pick2 = deck_index_of(rc.run, CardId::BASH);
+    // Independent replay of the three transform draws off the pre-pick misc.
+    RngStream probe = rc.combat.misc_rng;
+    const CardId t0 = transform_card(probe, CardId::STRIKE);
+    const CardId t1 = transform_card(probe, CardId::DEFEND);
+    const CardId t2 = transform_card(probe, CardId::BASH);
+
+    step(rc, choose(pick0));
+    step(rc, choose(pick1));
+    EXPECT_EQ(rc.run.master_deck_count, deck0) << "no draw before the set completes";
+    step(rc, choose(pick2));
+
+    EXPECT_EQ(rc.combat.misc_rng.counter, probe.counter);
+    ASSERT_EQ(rc.run.master_deck_count, deck0);
+    // The three transforms append in click order, upgraded.
+    EXPECT_EQ(rc.run.master_deck[deck0 - 3].card_id, static_cast<uint16_t>(t0));
+    EXPECT_EQ(rc.run.master_deck[deck0 - 2].card_id, static_cast<uint16_t>(t1));
+    EXPECT_EQ(rc.run.master_deck[deck0 - 1].card_id, static_cast<uint16_t>(t2));
+    EXPECT_EQ(rc.run.master_deck[deck0 - 3].upgrade, 1);
+    EXPECT_EQ(count_card(rc.run, CardId::BASH), 0);
+    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+}
+
+// Pandora's Box is screenless at the run layer (its confirmation grid has no
+// choice): nine starter replacements land synchronously, in reverse draw
+// order, and the payout ends at DONE.
+TEST(NeowPayout, BossSwapOntoPandorasBoxReplacesTheNineStartersSynchronously) {
+    RunController rc = run_begin(42, kA20);
+    force_boss_front(rc, RelicId::PANDORAS_BOX);
+    force_option(rc, 0, NeowRewardType::BOSS_RELIC);
+    // The expected deck, built by hand from the pre-swap deck: the surviving
+    // rows keep their relative order, then the nine draws land REVERSED.
+    std::vector<uint16_t> want;
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        const uint16_t id = rc.run.master_deck[i].card_id;
+        if (id != static_cast<uint16_t>(CardId::STRIKE) &&
+            id != static_cast<uint16_t>(CardId::DEFEND)) {
+            want.push_back(id);
+        }
+    }
+    RngStream probe = rc.combat.card_random_rng;
+    CardId expect[9];
+    for (auto& e : expect) {
+        e = sts::registry::kIroncladTrulyRandomPool[static_cast<std::size_t>(
+            random(probe, sts::registry::kIroncladTrulyRandomPoolCount - 1))];
+    }
+    for (int i = 8; i >= 0; --i) {
+        want.push_back(static_cast<uint16_t>(expect[i]));
+    }
+    step(rc, choose(0));
+
+    EXPECT_TRUE(owns(rc.run, RelicId::PANDORAS_BOX));
+    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+    EXPECT_EQ(rc.combat.card_random_rng.counter, probe.counter)
+        << "exactly nine cardRandomRng draws";
+    ASSERT_EQ(rc.run.master_deck_count, want.size());
+    EXPECT_EQ(count_card(rc.run, CardId::STRIKE), 0);
+    EXPECT_EQ(count_card(rc.run, CardId::DEFEND), 0);
+    EXPECT_EQ(count_card(rc.run, CardId::BASH), 1);
+    EXPECT_EQ(count_card(rc.run, CardId::ASCENDERS_BANE), 1);
+    for (std::size_t i = 0; i < want.size(); ++i) {
+        EXPECT_EQ(rc.run.master_deck[i].card_id, want[i]) << "deck row " << i;
+    }
+}
+
+// Tiny House opens the same ITEM_REWARD screen the three-potion blessing uses:
+// GOLD(50) + POTION(miscRng flat draw) + the KEPT setupItemReward card row.
+TEST(NeowPayout, BossSwapOntoTinyHouseOpensItsRewardScreenAndClaims) {
+    RunController rc = run_begin(42, kA20);
+    force_boss_front(rc, RelicId::TINY_HOUSE);
+    force_option(rc, 0, NeowRewardType::BOSS_RELIC);
+    const int16_t max0 = rc.run.max_hp;
+    const int16_t hp0 = rc.run.hp;
+    const int32_t gold0 = rc.run.gold;
+    const int32_t misc0 = rc.combat.misc_rng.counter;
+    step(rc, choose(0));
+
+    EXPECT_TRUE(owns(rc.run, RelicId::TINY_HOUSE));
+    EXPECT_EQ(rc.run.max_hp, max0 + 5);
+    EXPECT_EQ(rc.run.hp, hp0 + 5) << "increaseMaxHp(5, true) heals too";
+    EXPECT_EQ(rc.combat.misc_rng.counter, misc0 + 2)
+        << "the shuffle seed + the flat potion draw";
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::ITEM_REWARD));
+    ASSERT_EQ(rc.rewards.count, 3);
+    EXPECT_EQ(rc.rewards.items[0].kind,
+              static_cast<uint8_t>(RewardItemKind::GOLD));
+    EXPECT_EQ(rc.rewards.items[0].gold, 50);
+    EXPECT_EQ(rc.rewards.items[1].kind,
+              static_cast<uint8_t>(RewardItemKind::POTION));
+    EXPECT_EQ(rc.rewards.items[2].kind,
+              static_cast<uint8_t>(RewardItemKind::CARDS));
+    int upgraded = 0;
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        upgraded += rc.run.master_deck[i].upgrade > 0 ? 1 : 0;
+    }
+    EXPECT_EQ(upgraded, 1) << "only the shuffled list's first card";
+
+    // Claim the gold, then leave: ITEM_REWARD proceed -> DONE -> map.
+    RunActionMask m = mask_of(rc);
+    ASSERT_TRUE(m.can_claim_reward[0]);
+    step(rc, choose(0));
+    EXPECT_EQ(rc.run.gold, gold0 + 50);
+    step(rc, choose(kChooseProceed));
+    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+    step(rc, choose(kChooseProceed));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+// Calling Bell: the Bell Curse lands at the deck's end, the discarded card
+// assembly moves cardRng + the pity counter, and the screen offers exactly the
+// three counter-neutral tier pops as claimable RELIC rows.
+TEST(NeowPayout, BossSwapOntoCallingBellOffersThreeRelicsAndTheCurse) {
+    RunController rc = run_begin(42, kA20);
+    force_boss_front(rc, RelicId::CALLING_BELL);
+    force_option(rc, 0, NeowRewardType::BOSS_RELIC);
+    const int32_t relic_rng0 = rc.run.relic_rng.counter;
+    const int32_t card_rng0 = rc.run.card_rng.counter;
+    step(rc, choose(0));
+
+    EXPECT_TRUE(owns(rc.run, RelicId::CALLING_BELL));
+    ASSERT_EQ(rc.run.master_deck_count, 12);
+    EXPECT_EQ(rc.run.master_deck[11].card_id,
+              static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL));
+    EXPECT_EQ(rc.run.relic_rng.counter, relic_rng0)
+        << "three front-pops, zero relicRng draws";
+    EXPECT_GT(rc.run.card_rng.counter, card_rng0)
+        << "the discarded card assembly still spends cardRng";
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::ITEM_REWARD));
+    ASSERT_EQ(rc.rewards.count, 3);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(rc.rewards.items[i].kind,
+                  static_cast<uint8_t>(RewardItemKind::RELIC));
+    }
+    // Claiming the first row equips it (its own onEquip fires at claim time).
+    const RelicId first = static_cast<RelicId>(rc.rewards.items[0].id);
+    RunActionMask m = mask_of(rc);
+    ASSERT_TRUE(m.can_claim_reward[0]);
+    step(rc, choose(0));
+    EXPECT_TRUE(owns(rc.run, first));
+    EXPECT_EQ(rc.rewards.count, 2);
+}
+
 // NeowReward.getRewardCards: three cards off NeowEvent.rng, per card one
 // rollRarity randomBoolean plus the pool draw(s), and -- unlike
 // AbstractDungeon.getRewardCards -- NO trailing upgrade-chance draws and no
@@ -1103,4 +1312,29 @@ TEST(NeowFlow, IllegalPressesAreInertAtEveryScreen) {
     EXPECT_EQ(rc.neow.grid_done, 0);
     step(rc, choose(200));  // out of range
     EXPECT_EQ(rc.run.master_deck_count, copy.run.master_deck_count);
+}
+
+TEST(NeowGrid, BottledCardsStayEligibleOnNeowAndRelicGrids) {
+    // NeowReward's remove/transform grids open the PLAIN getPurgeableCards
+    // (NeowReward.java:253/:257/:286/:290) with NO getGroupWithoutBottledCards
+    // pass -- and the two relic grids sharing this legality (Empty Cage,
+    // EmptyCage.java:55; Astrolabe, Astrolabe.java:39) read the same plain
+    // group. A bottled card therefore STAYS choosable here, unlike on the
+    // event/shop/Toke grids. (Unreachable with a real bottle at floor 0 --
+    // bottles cannot be owned before Neow -- but the predicate must not
+    // over-exclude, per the master_card_purgeable_unbottled site map.)
+    RunState rs{};
+    rs.master_deck_count = 1;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+
+    NeowState st{};
+    st.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    st.grid_mode = static_cast<uint8_t>(NeowGridMode::REMOVE);
+    st.grid_needed = 1;
+    EXPECT_TRUE(neow_grid_card_legal(rs, st, 0));
+    st.grid_mode = static_cast<uint8_t>(NeowGridMode::TRANSFORM_UPGRADE);
+    EXPECT_TRUE(neow_grid_card_legal(rs, st, 0));
+    st.grid_mode = static_cast<uint8_t>(NeowGridMode::UPGRADE);
+    EXPECT_TRUE(neow_grid_card_legal(rs, st, 0));
 }

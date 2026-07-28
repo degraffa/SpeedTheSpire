@@ -66,6 +66,18 @@ using RelicOnEquipSig = void(RunState& rs, RngStream& misc_rng,
                              RelicSlot& slot) noexcept;
 using RelicOnEquipFn = RelicOnEquipSig*;
 
+// The screen-opening sibling (`pickup: on_equip_screen`): an onEquip body that
+// needs more than (RunState, miscRng, slot). The extension shape -- why a
+// second surface rather than a widened RelicOnEquipSig, and how the fail-loud
+// refusal in the plain acquire_relic works -- is documented at RelicEquipContext
+// (include/sts/engine/relic_pools.hpp), which is the definition site of the
+// contract. A relic row lists on_equip OR on_equip_screen, never both (the
+// emitter rejects the pair).
+using RelicOnEquipScreenSig = void(RunState& rs, RngStream& misc_rng,
+                                   RelicSlot& slot,
+                                   RelicEquipContext& ctx) noexcept;
+using RelicOnEquipScreenFn = RelicOnEquipScreenSig*;
+
 // One relic's onObtainCard body. `card` is the master-deck row just appended
 // (mutable: the eggs upgrade it in place); `def` is its registry row, already
 // resolved by the caller so each handler does not repeat the lookup. Handlers run
@@ -81,7 +93,18 @@ using RelicOnObtainCardFn = RelicOnObtainCardSig*;
 // body, not to nullptr.
 [[nodiscard]] RelicCanSpawnFn relic_can_spawn_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept;
+[[nodiscard]] RelicOnEquipScreenFn relic_on_equip_screen_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnObtainCardFn relic_on_obtain_card_fn(RelicId id) noexcept;
+
+// Astrolabe's transform application, shared between the screenless <=3 branch
+// of its on_equip_screen body and the NeowGridMode::TRANSFORM_UPGRADE grid arm
+// (neow.cpp applies it when the 3-pick set completes). `deck_indices` are
+// master-deck rows in PICK order (Astrolabe.update feeds giveCards the grid's
+// selectedCards in click order; the screenless branch feeds master-deck order).
+// Defined in relic_pickup_boss.cpp with the full Java accounting.
+void relic_astrolabe_transform_cards(RunState& rs, RngStream& misc_rng,
+                                     const uint16_t* deck_indices,
+                                     int count) noexcept;
 
 // AbstractPlayer.gainGold (AbstractPlayer.java:719-737), the ONE door every
 // run-layer gold gain goes through:
@@ -108,6 +131,78 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
     }
     if (amount > 0) {
         rs.gold += amount;
+    }
+}
+
+// AbstractCreature.heal (AbstractCreature.java:385-415) reached through
+// AbstractPlayer.heal (AbstractPlayer.java:1544-1552) -- the gold door's HP
+// twin, for every run-layer heal that happens OUTSIDE a combat:
+//
+//     for (AbstractRelic r : player.relics) amount = r.onPlayerHeal(amount);
+//     for (AbstractPower p : powers)        amount = p.onHeal(amount);
+//     currentHealth += amount; if (currentHealth > maxHealth) currentHealth = maxHealth;
+//
+// TWO fan-outs are NAMED rather than written, and both are identity out here:
+//
+//   * onPlayerHeal -- Magic Flower is the only S1 override and its whole body
+//     is gated on `getCurrRoom().phase == RoomPhase.COMBAT`
+//     (MagicFlower.java:30-37), so out of combat it returns the amount
+//     unchanged. A room-ENTRY heal is by construction not in a combat: the
+//     onEnterRoom fan-out runs at AbstractDungeon.java:1755-1757, before
+//     setCurrMapNode and before any room's onPlayerEntry. The in-combat seam is
+//     the separate one relic_hooks.hpp documents; nothing routes through both.
+//   * powers' onHeal -- no power survives a room boundary (powers.clear() runs
+//     in resetPlayer, AbstractDungeon.java:1671), so the list is empty.
+//
+// AbstractCreature.heal also carries the NOT-BLOODIED cross at :404-408 (the
+// relics' onNotBloodied when the heal lifts the player back over half max HP).
+// Red Skull is its only mechanical override in the whole game, and OUT HERE
+// exactly half of its body survives -- see the fan-out below, which this door
+// calls.
+//
+// Non-positive amounts still clamp, exactly as the Java's unguarded += does.
+//
+// RedSkull.onNotBloodied out of combat (RedSkull.java:54-63). The -3 Strength
+// is inside `if (this.isActive && getCurrRoom().phase == RoomPhase.COMBAT)`
+// (:56) and is therefore phase-gated OFF here -- which is the only answer that
+// could work anyway, since no power list survives a room boundary
+// (powers.clear() in resetPlayer, AbstractDungeon.java:1671). But
+// `this.isActive = false` (:61) sits OUTSIDE that block and runs regardless, so
+// a run-layer cross-up still disarms the relic.
+//
+// That latch write is OBSERVATIONALLY INERT in this engine and is written
+// anyway, because inert-by-accident and inert-by-derivation are different
+// things: relic_native_red_skull's AT_BATTLE_START rewrites the counter
+// unconditionally from starting HP (preBattlePrep's isBloodied pre-seed,
+// AbstractPlayer.java:1575, plus atBattleStart's isActive = false,
+// RedSkull.java:37), so the NEXT combat's entry grant is re-derived and cannot
+// read a stale latch. The game reaches the same place by a second road --
+// RedSkull.onVictory (:66-69) also clears isActive, which is why that hook is
+// NOT bound on the row: binding it would change nothing the re-seed does not
+// already guarantee. Keeping the write here is what makes "counter == isActive"
+// true at every point in a run rather than only inside a combat.
+//
+// A fan-out over every held copy rather than a getRelic, matching the Java's
+// relic iteration.
+inline void dispatch_relics_on_not_bloodied_out_of_combat(RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        RelicSlot& slot = rs.relics[i];
+        if (slot.relic_id == static_cast<uint16_t>(RelicId::RED_SKULL)) {
+            slot.counter = 0;  // isActive = false (RedSkull.java:61)
+        }
+    }
+}
+
+inline void heal_out_of_combat(RunState& rs, int32_t amount) noexcept {
+    int32_t hp = static_cast<int32_t>(rs.hp) + amount;
+    if (hp > rs.max_hp) {
+        hp = rs.max_hp;
+    }
+    rs.hp = static_cast<int16_t>(hp);
+    // The cross, on the CLAMPED value: `currentHealth > maxHealth / 2.0f`
+    // (AbstractCreature.java:404), whose exact integer form is hp * 2 > max.
+    if (hp * 2 > rs.max_hp) {
+        dispatch_relics_on_not_bloodied_out_of_combat(rs);
     }
 }
 
@@ -145,6 +240,29 @@ inline void dispatch_relics_on_spend_gold(RunState& rs) noexcept {
     }
 }
 
+// AbstractRelic.onEnterRestRoom, fired from RestRoom.onPlayerEntry
+// (RestRoom.java:33-43, specifically :38-42) at AbstractDungeon.java:1800 --
+// i.e. AFTER the onEnterRoom and justEnteredRoom fan-outs, not instead of them.
+//
+// Ancient Tea Set is the only implementor in the whole game
+// (AncientTeaSet.onEnterRestRoom, AncientTeaSet.java:76-81): `flash();
+// this.counter = -2; this.pulse = true;`. counter == -2 is the ARMED encoding
+// the game itself uses, so this is a plain RunState.relics write that
+// fold_back_combat/enter_combat already carry into the next combat, where
+// relic_native_ancient_tea_set consumes it to -1 on turn 1.
+//
+// A fan-out over every held copy rather than a getRelic, matching the Java's
+// relic iteration, and inline here beside the other run-layer relic fan-outs so
+// the rest-room entry site needs exactly one call.
+inline void dispatch_relics_on_enter_rest_room(RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        RelicSlot& slot = rs.relics[i];
+        if (slot.relic_id == static_cast<uint16_t>(RelicId::ANCIENT_TEA_SET)) {
+            slot.counter = -2;  // setCounter(-2) == armed (AncientTeaSet.java:78)
+        }
+    }
+}
+
 inline void lose_gold(RunState& rs, int32_t amount,
                       bool in_shop = false) noexcept {
     if (in_shop) {
@@ -159,7 +277,7 @@ inline void lose_gold(RunState& rs, int32_t amount,
     }
 }
 
-// Upgrade up to two random not-yet-upgraded master-deck cards of `wanted`
+// Upgrade up to two random canUpgrade()-eligible master-deck cards of `wanted`
 // (WarPaint.onEquip WarPaint.java:36-59 / Whetstone.onEquip Whetstone.java:36-59
 // -- identical bodies but for the CardType). Shared by both handlers, and inline
 // here rather than file-local in relic_pools.cpp because the handlers moved out
@@ -169,6 +287,37 @@ inline void lose_gold(RunState& rs, int32_t amount,
 // even when the filtered list has fewer than two cards, so the draw happens
 // unconditionally -- that consumption is part of the RNG contract, not an
 // optimization to skip.
+//
+// The eligibility test is canUpgrade(), NOT `upgrade == 0`. Both Java bodies
+// spell `if (!c.canUpgrade() || c.type != <TYPE>) continue;`
+// (WarPaint.java:37-40 / Whetstone.java:37-40), and SearingBlow.canUpgrade
+// (SearingBlow.java:58-60) OVERRIDES the base with `return true`, so an already
+// upgraded Searing Blow stays eligible and can be upgraded again. `upgrade == 0`
+// silently excluded it -- and, because the shuffle is over the FILTERED list, a
+// wrongly-sized candidate list changes which cards are picked, not merely how
+// many. The CURSE/STATUS half of canUpgrade is already implied by the
+// `type == wanted` test above (wanted is ATTACK or SKILL), so Searing Blow is
+// the whole of the difference.
+// AbstractCard.canUpgrade (AbstractCard.java:672-680) for a master-deck
+// instance: CURSE and STATUS are never upgradeable, everything else is
+// upgradeable while `!upgraded`. SearingBlow.canUpgrade (SearingBlow.java:58-60)
+// replaces the whole body with `return true`, so it is tested FIRST -- an
+// override runs INSTEAD OF, not after, the base. The in-combat twin is
+// can_upgrade_instance (interp_cards.cpp) and the rest-site twin is
+// rest_card_upgradeable (rest_sites.cpp); all three answer the same Java method
+// over a different carrier.
+[[nodiscard]] inline bool can_upgrade(const CardInstance& card) noexcept {
+    if (card.card_id == static_cast<uint16_t>(CardId::SEARING_BLOW)) {
+        return card.upgrade != UINT8_MAX;
+    }
+    const CardDef* def = card_def(static_cast<CardId>(card.card_id));
+    if (def == nullptr || def->type == CardType::CURSE ||
+        def->type == CardType::STATUS) {
+        return false;
+    }
+    return card.upgrade == 0;
+}
+
 inline void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
                                  CardType wanted) noexcept {
     uint16_t candidates[kMasterDeckCap]{};
@@ -176,7 +325,7 @@ inline void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         const CardInstance& card = rs.master_deck[i];
         const CardDef* def = card_def(static_cast<CardId>(card.card_id));
-        if (def != nullptr && def->type == wanted && card.upgrade == 0) {
+        if (def != nullptr && def->type == wanted && can_upgrade(card)) {
             candidates[count++] = i;
         }
     }
@@ -185,7 +334,14 @@ inline void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
     jdk_shuffle(std::span<uint16_t>(candidates, count), jdk);
     const uint16_t take = count < 2 ? count : 2;
     for (uint16_t i = 0; i < take; ++i) {
-        rs.master_deck[candidates[i]].upgrade = 1;
+        // AbstractCard.upgrade() INCREMENTS timesUpgraded; SearingBlow.upgrade
+        // (SearingBlow.java:48-54) does the same and is the only card for which
+        // the distinction is visible, since every other card is filtered out by
+        // canUpgrade() once its count reaches 1. A blind `= 1` silently reset a
+        // Searing Blow+2 back to +1 -- the other half of the same defect the
+        // canUpgrade() filter above fixes. can_upgrade already refuses UINT8_MAX,
+        // so the increment cannot wrap.
+        ++rs.master_deck[candidates[i]].upgrade;
     }
 }
 

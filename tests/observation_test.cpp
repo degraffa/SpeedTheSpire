@@ -144,6 +144,63 @@ TEST(Observation, UnusedHandSlotsReadSentinels) {
     }
 }
 
+// RunicDome: "you can no longer see enemy Intents" is two RENDERING guards in
+// the game (AbstractMonster.java:258 and :749, both a negated
+// player.hasRelic("Runic Dome")) and touches no game state -- so the engine
+// expresses it in the observation, which is its view-of-the-board, and nowhere
+// else. The hidden value is 0: registry/monsters.yaml documents move_id as
+// unique per monster and never 0, and the empty-slot encoding already uses 0.
+TEST(Observation, RunicDomeHidesEveryMonsterIntentAndNothingElse) {
+    const CombatState plain = make_sample_state();
+    ObsBuffer visible{};
+    encode_observation(plain, visible);
+    ASSERT_EQ(visible.monsters[0].intent, 7) << "probe is wrong";
+
+    CombatState domed = make_sample_state();
+    domed.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RUNIC_DOME), -1};
+    domed.relic_count = 1;
+    ObsBuffer hidden{};
+    encode_observation(domed, hidden);
+
+    EXPECT_EQ(hidden.monsters[0].intent, 0) << "the intent is still readable";
+    // EVERY other observed field is untouched -- the suppression is one field at
+    // one write site, not a redaction of the monster.
+    EXPECT_EQ(hidden.monsters[0].monster_id, visible.monsters[0].monster_id);
+    EXPECT_EQ(hidden.monsters[0].hp, visible.monsters[0].hp);
+    EXPECT_EQ(hidden.monsters[0].max_hp, visible.monsters[0].max_hp);
+    EXPECT_EQ(hidden.monsters[0].occupied, visible.monsters[0].occupied);
+    EXPECT_EQ(hidden.monsters[0].power_count, visible.monsters[0].power_count);
+    for (int p = 0; p < kObsMonsterPowerCap; ++p) {
+        EXPECT_EQ(hidden.monsters[0].powers[p].power_id,
+                  visible.monsters[0].powers[p].power_id);
+        EXPECT_EQ(hidden.monsters[0].powers[p].amount,
+                  visible.monsters[0].powers[p].amount);
+    }
+    EXPECT_EQ(hidden.player_hp, visible.player_hp);
+    EXPECT_EQ(hidden.player_energy, visible.player_energy);
+    EXPECT_EQ(hidden.hand_count, visible.hand_count);
+
+    // And it hides EVERY occupied slot, not just the first.
+    CombatState two = make_sample_state();
+    two.monster_count = 2;
+    two.monsters[1] = two.monsters[0];
+    two.monsters[1].intent = 3;
+    two.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RUNIC_DOME), -1};
+    two.relic_count = 1;
+    ObsBuffer both{};
+    encode_observation(two, both);
+    EXPECT_EQ(both.monsters[0].intent, 0);
+    EXPECT_EQ(both.monsters[1].intent, 0);
+
+    // THE SUPPRESSION MUST NOT REACH THE SIMULATED STATE. MonsterState::intent
+    // is the game's move_id, which the whole capture-diff pipeline anchors on
+    // (the oracle fork blanks only the DISPLAY string; the translator ignores
+    // that string and reads move_id). Encoding leaves it alone.
+    EXPECT_EQ(domed.monsters[0].intent, 7)
+        << "Runic Dome reached MonsterState -- every capture diff is now wrong";
+    EXPECT_EQ(two.monsters[1].intent, 3);
+}
+
 TEST(Observation, MonsterFieldsRoundTrip) {
     const CombatState s = make_sample_state();
     ObsBuffer obs{};

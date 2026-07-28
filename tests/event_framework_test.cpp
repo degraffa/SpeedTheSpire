@@ -37,6 +37,7 @@
 #include "sts/engine/relics.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/run_deck.hpp"  // the master-deck bottle bits
 #include "sts/engine/run_state.hpp"
 #include "sts/registry/event_table.hpp"
 
@@ -168,30 +169,30 @@ TEST(EventRoomRoll, DrawsExactlyOneCommittedEventRngDraw) {
     EXPECT_EQ(rs.event_rng.counter, before.counter + 1);
 }
 
-TEST(EventRoomEntryRelics, SsserpentHeadAndMawBankFanOutThroughTheGoldDoor) {
+TEST(OnEnterRoomRelics, SsserpentHeadAndMawBankFanOutThroughTheGoldDoor) {
     // Relic.onEnterRoom iterates every slot, so duplicate imported copies each
     // fire. gain_gold is the shared door: Ectoplasm suppresses the whole gain.
     RunState gains = fresh_run_state(kSeed, 20);
     give_relic(gains, RelicId::SSSERPENT_HEAD);
     give_relic(gains, RelicId::MAW_BANK);
     give_relic(gains, RelicId::SSSERPENT_HEAD);
-    dispatch_event_room_entry_relics(gains);
+    dispatch_on_enter_room_relics(gains, RoomType::Event);
     EXPECT_EQ(gains.gold, 211);  // 99 + 50 + 12 + 50
 
     RunState blocked = fresh_run_state(kSeed, 20);
     give_relic(blocked, RelicId::SSSERPENT_HEAD);
     give_relic(blocked, RelicId::MAW_BANK);
     give_relic(blocked, RelicId::ECTOPLASM);
-    dispatch_event_room_entry_relics(blocked);
+    dispatch_on_enter_room_relics(blocked, RoomType::Event);
     EXPECT_EQ(blocked.gold, 99);
 
     RunState used = fresh_run_state(kSeed, 20);
     give_relic(used, RelicId::MAW_BANK, -2);
-    dispatch_event_room_entry_relics(used);
+    dispatch_on_enter_room_relics(used, RoomType::Event);
     EXPECT_EQ(used.gold, 99);
 }
 
-TEST(EventRoomEntryRelics, MawBankGainPrecedesEventEligibilityAndSelection) {
+TEST(OnEnterRoomRelics, MawBankGainPrecedesEventEligibilityAndSelection) {
     RunState rs = fresh_run_state(kSeed, 20);
     rs.gold = 23;
     rs.event_membership =
@@ -204,10 +205,146 @@ TEST(EventRoomEntryRelics, MawBankGainPrecedesEventEligibilityAndSelection) {
 
     uint16_t before[kEventListCount]{};
     EXPECT_EQ(build_event_pool(rs, before, kEventListCount), 0);
-    dispatch_event_room_entry_relics(rs);
+    dispatch_on_enter_room_relics(rs, RoomType::Event);
     EXPECT_EQ(rs.gold, 35);
     EXPECT_EQ(generate_event(rs),
               static_cast<uint16_t>(EventId::THE_CLERIC));
+}
+
+// MawBank.onEnterRoom (MawBank.java:31-36) carries NO room-type condition, and
+// AbstractDungeon.nextRoomTransition's fan-out (AbstractDungeon.java:1755-1757)
+// is likewise unconditional on the room kind -- including the boss node, which
+// DungeonMap.java:77-87 reaches by assigning `nextRoom` a MonsterRoomBoss and
+// calling nextRoomTransitionStart(). So every room kind pays.
+TEST(OnEnterRoomRelics, MawBankPaysOnEveryRoomKindWhileUnused) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Elite, RoomType::Rest,
+          RoomType::Shop, RoomType::Treasure, RoomType::Boss}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        give_relic(rs, RelicId::MAW_BANK);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.gold, 111) << "room " << static_cast<int>(room);
+        EXPECT_EQ(relic_counter(rs, RelicId::MAW_BANK), 0);
+    }
+}
+
+// The Java guard is `nextRoom != null` (AbstractDungeon.java:1754); RoomType::
+// None IS that null room, so nothing fires. Unreachable through the map (every
+// placed node carries a kind), pinned so a future stall path cannot pay 12 gold.
+TEST(OnEnterRoomRelics, NoRoomFiresNothing) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    give_relic(rs, RelicId::MAW_BANK);
+    give_relic(rs, RelicId::SSSERPENT_HEAD);
+    dispatch_on_enter_room_relics(rs, RoomType::None);
+    EXPECT_EQ(rs.gold, 99);
+}
+
+// SsserpentHead.onEnterRoom (SsserpentHead.java:29-35) IS gated -- `room
+// instanceof EventRoom`. The fan-out sees the PRE-roll room, so the gate holds
+// for every ? entry and for no static node.
+TEST(OnEnterRoomRelics, SsserpentHeadIsEventOnlyWhileMawBankIsNot) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Elite, RoomType::Rest, RoomType::Shop,
+          RoomType::Treasure, RoomType::Boss}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        give_relic(rs, RelicId::SSSERPENT_HEAD);
+        give_relic(rs, RelicId::MAW_BANK);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.gold, 111) << "room " << static_cast<int>(room);
+    }
+}
+
+// EternalFeather.onEnterRoom (EternalFeather.java:29-35):
+//     if (room instanceof RestRoom) { flash();
+//         int amountToGain = player.masterDeck.size() / 5 * 3;
+//         player.heal(amountToGain); }
+// INTEGER DIVISION FIRST, then x3 -- a 14-card deck heals 6, not 8.
+TEST(OnEnterRoomRelics, EternalFeatherHealsFiveCardStepsOnRestEntry) {
+    struct Case {
+        int deck;
+        int heal;
+    };
+    const Case cases[] = {{0, 0},  {4, 0},  {5, 3},   {9, 3},
+                          {10, 6}, {14, 6}, {15, 9}};
+    for (const Case& tc : cases) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        rs.hp = 20;
+        rs.max_hp = 75;
+        for (int i = 0; i < tc.deck; ++i) add_card(rs, CardId::STRIKE);
+        give_relic(rs, RelicId::ETERNAL_FEATHER);
+        dispatch_on_enter_room_relics(rs, RoomType::Rest);
+        EXPECT_EQ(rs.hp, 20 + tc.heal) << "deck " << tc.deck;
+    }
+}
+
+TEST(OnEnterRoomRelics, EternalFeatherFiresOnNoOtherRoomKind) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Elite, RoomType::Shop,
+          RoomType::Treasure, RoomType::Boss, RoomType::None}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        rs.hp = 20;
+        for (int i = 0; i < 15; ++i) add_card(rs, CardId::STRIKE);
+        give_relic(rs, RelicId::ETERNAL_FEATHER);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.hp, 20) << "room " << static_cast<int>(room);
+    }
+}
+
+// AbstractCreature.heal clamps to maxHealth (AbstractCreature.java:399-402).
+TEST(OnEnterRoomRelics, EternalFeatherClampsToMaxHp) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.max_hp = 75;
+    rs.hp = 73;
+    for (int i = 0; i < 15; ++i) add_card(rs, CardId::STRIKE);  // would heal 9
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    dispatch_on_enter_room_relics(rs, RoomType::Rest);
+    EXPECT_EQ(rs.hp, 75);
+}
+
+// MAGIC FLOWER DOES NOT SCALE THIS. MagicFlower.onPlayerHeal
+// (MagicFlower.java:30-37) returns the amount unchanged unless
+// `getCurrRoom().phase == RoomPhase.COMBAT`, and the onEnterRoom fan-out runs at
+// AbstractDungeon.java:1755-1757 -- before setCurrMapNode, before any room's
+// onPlayerEntry, and therefore never inside a combat. Named as a test the way
+// the discharged Meal Ticket row named it, so a future in-combat heal-modifier
+// change cannot quietly start scaling a room-entry heal.
+TEST(OnEnterRoomRelics, EternalFeatherIsNotScaledByMagicFlower) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.hp = 20;
+    rs.max_hp = 75;
+    for (int i = 0; i < 10; ++i) add_card(rs, CardId::STRIKE);
+    give_relic(rs, RelicId::MAGIC_FLOWER);
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    dispatch_on_enter_room_relics(rs, RoomType::Rest);
+    EXPECT_EQ(rs.hp, 26);  // 6, not MathUtils.round(6 * 1.5f) == 9
+}
+
+// One loop, acquisition order (relic_hooks.hpp:11-19): the gold and the heal
+// come from the same pass, and a duplicate copy fires per copy.
+TEST(OnEnterRoomRelics, RestEntryFansOutMawBankAndEternalFeatherTogether) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.hp = 20;
+    rs.max_hp = 75;
+    for (int i = 0; i < 11; ++i) add_card(rs, CardId::STRIKE);
+    give_relic(rs, RelicId::MAW_BANK);
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    dispatch_on_enter_room_relics(rs, RoomType::Rest);
+    EXPECT_EQ(rs.gold, 111);
+    EXPECT_EQ(rs.hp, 32);  // 11/5*3 == 6, twice
+}
+
+// The used-up encoding is counter == -2 (MawBank.setCounter, MawBank.java:
+// 46-53), the same one dispatch_relics_on_spend_gold writes.
+TEST(OnEnterRoomRelics, MawBankUsedUpPaysOnNoRoomKind) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Elite, RoomType::Rest,
+          RoomType::Shop, RoomType::Treasure, RoomType::Boss}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        give_relic(rs, RelicId::MAW_BANK, -2);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.gold, 99) << "room " << static_cast<int>(room);
+    }
 }
 
 TEST(EventRoomRoll, ResultMatchesHandDerivedTableLookupAcrossSeeds) {
@@ -771,6 +908,60 @@ TEST(EventDialog, DisabledAndOutOfRangeChoicesAreNonCorruptingNoOps) {
     // Leaving still works.
     dialog_step(rc, 2);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+// =============================================================================
+// Bottled-card exclusion on the event grids (getGroupWithoutBottledCards)
+// =============================================================================
+//
+// Every S1 event PURGE/TRANSFORMABLE grid opens
+// getGroupWithoutBottledCards(getPurgeableCards()) (Cleric.java:76-78,
+// LivingWall.java:96-103, Bonfire.java:101-102, PurificationShrine.java:62,
+// Transmogrifier.java:65, GremlinWheelGame.java:286-287,
+// NoteForYourself.java:65, GoldenWing.java:110). The UPGRADE grid does NOT
+// exclude: LivingWall's Grow opens getUpgradableCards() (:109). And because
+// events::has_purgeable_card is grid_has_card(PURGE) over the same legality,
+// every event's purge/transform OPTION gate picks up the exclusion too.
+
+TEST(EventGridBottle, PurgeAndTransformGridsExcludeBottledCardsUpgradeKeepsThem) {
+    RunState rs{};
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);
+
+    EventDialogState es{};
+    open_event_grid(es, EventGridKind::PURGE);
+    EXPECT_FALSE(event_grid_card_legal(rs, es, 0))
+        << "a bottled card is not on any S1 event purge grid";
+    EXPECT_TRUE(event_grid_card_legal(rs, es, 1));
+
+    open_event_grid(es, EventGridKind::TRANSFORMABLE);
+    EXPECT_FALSE(event_grid_card_legal(rs, es, 0));
+    EXPECT_TRUE(event_grid_card_legal(rs, es, 1));
+
+    open_event_grid(es, EventGridKind::UPGRADE);
+    EXPECT_TRUE(event_grid_card_legal(rs, es, 0))
+        << "upgrade grids keep bottled cards (LivingWall.java:109)";
+}
+
+TEST(EventGridBottle, AnAllBottledPurgeableDeckClosesTheEventPurgeGates) {
+    // events::has_purgeable_card is grid_has_card(PURGE): when every purgeable
+    // card is bottled, the purge/transform option gates read false and no
+    // event opens an empty grid.
+    RunState rs{};
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ASCENDERS_BANE);
+
+    EventDialogState probe{};
+    open_event_grid(probe, EventGridKind::PURGE);
+    bool any = false;
+    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
+        any = any || event_grid_card_legal(rs, probe, i);
+    }
+    EXPECT_FALSE(any);
 }
 
 }  // namespace

@@ -381,6 +381,41 @@ void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
     }
 }
 
+// Liquid Memories / BetterDiscardPileToHandAction's per-card body, shared by its
+// forced branch (:62-72) and its post-select resolution (:91-102) -- the two are
+// character-for-character the same three lines:
+//
+//     if (this.player.hand.size() < 10) {
+//         this.player.hand.addToHand(c);
+//         if (this.setCost) c.setCostForTurn(this.newCost);   // newCost = 0
+//         this.player.discardPile.removeCard(c);
+//     }
+//     c.lighten(false); c.applyPowers();                      // presentation
+//
+// THE GUARD WRAPS THE REMOVAL. A card that does not fit is not moved, not
+// re-costed, and NOT taken out of the discard pile -- it simply stays there.
+// There is no spill-to-discard (that is MakeTempCardInHandAction's rule, and
+// reaching for it here would be wrong) and no partial application.
+//
+// setCostForTurn is THIS-TURN, not permanent (contrast Confusion / Snecko Oil,
+// which write card.cost). set_cost_for_turn already implements
+// AbstractCard.setCostForTurn (AbstractCard.java:2001-2011) exactly, including
+// the X-cost no-op while costForTurn < 0 and the COST_MODIFIED_FOR_TURN /
+// SAVED_BASE_COST bookkeeping that lets the end-of-turn sweep restore the real
+// base -- so it is called rather than re-derived.
+void discard_slot_to_hand_free(CombatState& s, uint8_t slot) noexcept {
+    if (slot >= s.discard_count || s.hand_count >= kHandCap) {
+        return;  // `hand.size() < 10` -- no move, no re-cost, no removal
+    }
+    const CardPoolIndex pi = s.discard[slot];
+    for (uint8_t j = static_cast<uint8_t>(slot + 1); j < s.discard_count; ++j) {
+        s.discard[j - 1] = s.discard[j];
+    }
+    --s.discard_count;
+    s.hand[s.hand_count++] = pi;
+    set_cost_for_turn(s, pi, 0);
+}
+
 // Dual Wield: add one stat-equivalent clone of pool instance `src_pi` to
 // the hand, spilling to the discard when the hand is full (MakeTempCardInHand-
 // Action.update:71-77). makeStatEquivalentCopy (AbstractCard.java:826-848)
@@ -469,6 +504,26 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
         case ChoiceKind::DISCARD_TO_DRAW_TOP:
             discard_slot_to_draw_top(s, slot);
             break;
+        case ChoiceKind::DISCARD_TO_HAND_FREE:
+            discard_slot_to_hand_free(s, slot);
+            break;
+        case ChoiceKind::HAND_TO_DISCARD_THEN_DRAW: {
+            // `AbstractDungeon.player.hand.moveToDiscardPile(c)`
+            // (GamblingChipAction.java:55). The draw-back is NOT here -- it is
+            // one add_to_top for the WHOLE selection at confirm time, in
+            // resolve_optional_choice, because the Java queues a single
+            // DrawCardAction sized by selectedCards.size() rather than one per
+            // card.
+            //
+            // GameActionManager.incrementDiscard(false) (:56) and
+            // c.triggerOnManualDiscard() (:57) are named at the ChoiceKind's
+            // definition: neither has an S1 counterpart to fire.
+            const CardPoolIndex pi = remove_from_hand(s, slot);
+            if (s.discard_count < kDiscardCap) {
+                s.discard[s.discard_count++] = pi;
+            }
+            break;
+        }
         case ChoiceKind::DUPLICATE: {
             const CardPoolIndex pi = s.hand[slot];
             for (int k = 0; k < copies; ++k) {
@@ -1330,6 +1385,58 @@ void op_upgrade_all(CombatState& s) noexcept {
     upgrade_pile(s.exhaust, s.exhaust_count);
 }
 
+// UPGRADE_RANDOM_CARD (Warped Tongs / UpgradeRandomCardAction.update,
+// UpgradeRandomCardAction.java:28-50), read in full and reproduced in ORDER,
+// because every early-out sits at a different point in the shuffleRng stream:
+//
+//   :31-34  an EMPTY hand ends the action -- ZERO draws.
+//   :35-39  build `upgradeable` from the hand, skipping `!c.canUpgrade() ||
+//           c.type == STATUS`. CardGroup.addToTop is `group.add(c)` -- an APPEND
+//           (CardGroup.java:455-457) -- so the temp group is in HAND ORDER.
+//   :40-45  IF the subset is non-empty: `upgradeable.shuffle()` then
+//           `group.get(0).upgrade()`. Otherwise the action ends having drawn
+//           NOTHING.
+//
+// THE STREAM FACT: the no-arg CardGroup.shuffle() is `Collections.shuffle(group,
+// new java.util.Random(AbstractDungeon.shuffleRng.randomLong()))`
+// (CardGroup.java:561-563) -- ONE shuffle_rng draw seeding a JDK Fisher-Yates
+// over the PRE-FILTERED group, and only when that group is non-empty. A hand
+// with nothing upgradeable therefore costs zero. This is why the action needed
+// its own opcode instead of CHOOSE_CARD{RANDOM, UPGRADE}, which draws
+// card_random_rng once over the WHOLE hand: different stream, different set.
+//
+// The filter is canUpgrade(), NOT `upgrade == 0`: SearingBlow.canUpgrade
+// (SearingBlow.java:58-60) overrides the base with `return true`, so an already
+// upgraded Searing Blow stays eligible. can_upgrade_instance is that predicate,
+// shared with Armaments and Apotheosis so the three cannot drift.
+// The explicit `type == STATUS` test at :37 is redundant -- canUpgrade already
+// rejects CURSE and STATUS (AbstractCard.java:672-680) -- and is kept in this
+// note so the filter is visibly derived rather than invented.
+//
+// `superFlash()` and `applyPowers()` (:43-44) are presentation: this engine has
+// no preview layer, and upgrade_instance already re-seeds cost_now/flags from the
+// upgraded registry row, which is the only state applyPowers would touch.
+void op_upgrade_random_card(CombatState& s) noexcept {
+    if (s.hand_count == 0) {
+        return;  // (:31-34) -- no draw
+    }
+    CardPoolIndex eligible[kHandCap]{};
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        if (can_upgrade_instance(s, pi)) {
+            eligible[n++] = pi;  // addToTop == append, so HAND ORDER (:38)
+        }
+    }
+    if (n == 0) {
+        return;  // (:40) -- the shuffle is INSIDE the non-empty test: no draw
+    }
+    JdkRandom jr(random_long(s.shuffle_rng));
+    jdk_shuffle(std::span<CardPoolIndex>(eligible, static_cast<std::size_t>(n)),
+                jr);
+    upgrade_instance(s, eligible[0]);  // group.get(0).upgrade() (:42-43)
+}
+
 // DRAW_PILE_FETCH (Violence / DrawPileToHandAction.update, :31-71). Read in
 // order, because each early-out sits at a different point in the rng stream:
 //
@@ -1378,21 +1485,162 @@ void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept {
     }
 }
 
+// The shared per-card cost roll behind ConfusionPower.onCardDraw and
+// RandomizeHandCostAction. The two Java bodies are near-twins that differ in
+// EXACTLY one line, so they are one helper with one boolean rather than two
+// hand copies that drift:
+//
+//   ConfusionPower.onCardDraw (ConfusionPower.java:38-48)
+//     if (card.cost >= 0) {
+//         int newCost = cardRandomRng.random(3);
+//         if (card.cost != newCost) { card.costForTurn = card.cost = newCost;
+//                                     card.isCostModified = true; }
+//         card.freeToPlayOnce = false;              <-- OUTSIDE the inner if
+//     }
+//
+//   RandomizeHandCostAction.update (RandomizeHandCostAction.java:26-38)
+//     for (AbstractCard card : p.hand.group) {
+//         int newCost;
+//         if (card.cost < 0 || card.cost == (newCost = cardRandomRng.random(3)))
+//             continue;                             <-- no freeToPlayOnce line
+//         card.costForTurn = card.cost = newCost;
+//         card.isCostModified = true;
+//     }
+//
+// Four things are load-bearing and shared:
+//
+// (1) THE DRAW IS UNCONDITIONAL once cost >= 0. It happens BEFORE the equality
+//     test (`||` is short-circuit and the assignment sits in its RIGHT operand),
+//     so a card that rolls its own current cost still consumes exactly one
+//     card_random_rng draw.
+// (2) `card.cost < 0` cards consume NO draw. In the Java those are the X-cost
+//     rows (cost -1) and the unplayable status/curse rows (cost < -1); here that
+//     is exactly the XCOST / UNPLAYABLE instance flags, which the generator sets
+//     from those same negative sentinels (stsgen/emit/cards.py parse_card_flags)
+//     and which nothing ever clears.
+// (3) THE COMPARISON IS AGAINST card.cost -- the BASE cost, not costForTurn --
+//     so it is instance_base_cost, not cost_now. On equality the Java writes
+//     NOTHING, so a live this-turn cost modification survives intact.
+// (4) The write is `costForTurn = cost = newCost`, i.e. PERMANENT for the
+//     instance. cost_now is therefore written WITHOUT setting
+//     COST_MODIFIED_FOR_TURN, and any such bit already on the instance is
+//     cleared -- after the assignment the Java's cost and costForTurn are equal,
+//     so leaving it set would make the end-of-turn sweep (reset_cost_for_turn)
+//     restore the REGISTRY cost and silently undo the randomization.
+//
+// `clear_free_to_play_once` is the one difference: true for Confusion (:46),
+// false for RandomizeHandCostAction, which never touches the field. Note that
+// Confusion clears it on the EQUALITY path too -- that line is outside the
+// inner `if`, and only the whole `cost >= 0` branch gates it.
+void randomize_card_cost(CombatState& s, CardPoolIndex pi,
+                         bool clear_free_to_play_once) noexcept {
+    if (pi >= kCardPoolCap) {
+        return;
+    }
+    CardInstance& c = s.card_pool[pi];
+    if (has_card_flag(c.flags, CardFlag::XCOST) ||
+        has_card_flag(c.flags, CardFlag::UNPLAYABLE)) {
+        return;  // (2) card.cost < 0: no draw, no change
+    }
+    const int32_t new_cost = random(s.card_random_rng, 3);  // (1) random(3) == 0..3
+    if (new_cost != instance_base_cost(s, pi)) {            // (3)
+        c.cost_now = static_cast<uint8_t>(new_cost);        // (4)
+        c.flags = static_cast<uint16_t>(
+            c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+            ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
+    }
+    if (clear_free_to_play_once) {
+        c.flags = static_cast<uint16_t>(
+            c.flags & ~card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+    }
+}
+
+// RANDOMIZE_HAND_COST (Snecko Oil / RandomizeHandCostAction.update,
+// RandomizeHandCostAction.java:26-38). The whole body is the per-card helper
+// above run over `p.hand.group` in iteration order, i.e. hand-slot order, with
+// freeToPlayOnce left alone -- the action never mentions the field.
+//
+// The hand is read HERE, at resolve, not at queue time. SneckoOil.use
+// (SneckoOil.java:42-45) queues DrawCardAction(potency) and then this, both
+// addToBot, so the hand this walks already contains the drawn cards. With
+// Confusion also up, each of those draws has ALREADY spent its own
+// card_random_rng draw at onCardDraw before this pass spends one per hand card;
+// the two are consecutive stretches of one stream, in that order.
+//
+// No bound check on hand_count is needed beyond the array's own: hand_count is
+// <= kHandCap by construction everywhere that writes it.
+void op_randomize_hand_cost(CombatState& s) noexcept {
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        randomize_card_cost(s, s.hand[i], /*clear_free_to_play_once=*/false);
+    }
+}
+
+// The pool a DISCOVERY item draws its three offers from. All five are the same
+// rejection sampler over a different list -- DiscoveryAction.generateCardChoices
+// (DiscoveryAction.java:105-120) calls returnTrulyRandomCardInCombat(type)
+// (AbstractDungeon.java:964-979) and generateColorlessCardChoices (:89-103)
+// calls returnTrulyRandomColorlessCardInCombat (:981-995), and each of those is
+// exactly ONE cardRandomRng.random(size - 1) over its concatenated,
+// HEALING-filtered list.
+struct DiscoveryPoolView {
+    const CardId* cards;
+    int count;
+};
+
+[[nodiscard]] DiscoveryPoolView discovery_pool_view(DiscoveryPool pool) noexcept {
+    switch (pool) {
+        case DiscoveryPool::ATTACK:
+            return {kIroncladAttackPool.data(), kIroncladAttackPoolCount};
+        case DiscoveryPool::SKILL:
+            return {kIroncladSkillPool.data(), kIroncladSkillPoolCount};
+        case DiscoveryPool::POWER:
+            return {kIroncladPowerPool.data(), kIroncladPowerPoolCount};
+        case DiscoveryPool::COLORLESS:
+            return {kColorlessCombatPool.data(), kColorlessCombatPoolCount};
+        case DiscoveryPool::COMBAT:
+        default:
+            return {kIroncladCombatPool.data(), kIroncladCombatPoolCount};
+    }
+}
+
+// KNOWN AMBIGUITY, deliberately unresolved and carried in the ledger's Deferred
+// obligations table ("DiscoveryAction may regenerate its three-card offer on
+// EVERY update tick", owner: next capture-campaign owner).
+//
+// DiscoveryAction.update computes `generatedCards` at DiscoveryAction.java:47 --
+// OUTSIDE the duration branch -- and only the FIRST tick's list reaches the
+// screen (:49). If update() runs again before retrieveCard, generateCardChoices
+// runs again and its cardRandomRng draws are spent for nothing. Whether that
+// happens, and how often, depends on how many frames the action is updated for,
+// which is animation-driven and CANNOT be settled from the source.
+//
+// This latch is the generate-once reading, which is also what the already-landed
+// Discovery CARD does -- so if the game really double-rolls, the card is wrong
+// too and it is a stop-the-line question, not a potion-only one. It needs an
+// oracle capture (G4 is live). Do not "fix" it from source.
 void prepare_discovery_choice(CombatState& s,
                               ActionQueueItem& item) noexcept {
     if (discovery_choice_prepared(item)) {
         return;
     }
-    static_assert(kIroncladCombatPoolCount >= kDiscoveryChoiceCount,
-                  "Discovery needs at least three combat-pool cards");
+    // The rejection sampler loops until it holds three DISTINCT cardIDs
+    // (:107-118 `while (derp.size() != 3)`), so a pool with fewer than three
+    // members would spin forever in the game and here. Every pool is generated,
+    // so this is a compile-time guarantee rather than a runtime hope.
+    static_assert(kIroncladCombatPoolCount >= kDiscoveryChoiceCount &&
+                      kIroncladAttackPoolCount >= kDiscoveryChoiceCount &&
+                      kIroncladSkillPoolCount >= kDiscoveryChoiceCount &&
+                      kIroncladPowerPoolCount >= kDiscoveryChoiceCount &&
+                      kColorlessCombatPoolCount >= kDiscoveryChoiceCount,
+                  "every Discovery pool needs at least three distinct cards, "
+                  "or generateCardChoices' rejection loop cannot terminate");
+    const DiscoveryPoolView pv = discovery_pool_view(discovery_pool(item));
     CardId offered[kDiscoveryChoiceCount]{};
     uint8_t count = 0;
     while (count < kDiscoveryChoiceCount) {
         const int32_t pick = random(
-            s.card_random_rng,
-            static_cast<int32_t>(kIroncladCombatPoolCount) - 1);
-        const CardId id =
-            kIroncladCombatPool[static_cast<unsigned>(pick)];
+            s.card_random_rng, static_cast<int32_t>(pv.count) - 1);
+        const CardId id = pv.cards[static_cast<unsigned>(pick)];
         bool duplicate = false;
         for (uint8_t i = 0; i < count; ++i) {
             if (offered[i] == id) {
@@ -1411,6 +1659,26 @@ void prepare_discovery_choice(CombatState& s,
         static_cast<int32_t>(static_cast<uint16_t>(offered[2]));
 }
 
+// DiscoveryAction.update's selection half (DiscoveryAction.java:53-85). It ALWAYS
+// makes TWO makeStatEquivalentCopy()s of the chosen card (:55-56) and
+// setCostForTurn(0)s both (:61-62), then fans them out by `amount`:
+//
+//   amount == 1 (:65-71)  one copy to hand, or to DISCARD if the hand is full;
+//                         the second copy is dropped on the floor (disCard2 =
+//                         null) and never reaches a pile.
+//   amount == 2           hand + 2 <= 10 -> both to hand (:72-74);
+//                         hand == 9      -> first to hand, second to discard
+//                                           (:75-77);
+//                         otherwise      -> both to discard (:78-80).
+//
+// Those four cases ARE sequential add-with-spill: at hand 8 both fit, at hand 9
+// the first fills the hand and the second spills, at hand 10 both spill. So the
+// fan-out is reproduced exactly by calling add_library_copy_to_hand once per
+// copy -- its per-card spill (interp_cards.cpp add_library_copy_to_hand) is the
+// same rule -- rather than by transcribing the branch table. Both copies are of
+// the SAME card.
+//
+// MasterRealityPower's upgrade (:57-60) is Watcher-only and out of S1 scope.
 void resolve_discovery_choice(CombatState& s,
                               const ActionQueueItem& item,
                               uint8_t slot) noexcept {
@@ -1418,7 +1686,11 @@ void resolve_discovery_choice(CombatState& s,
         return;
     }
     const CardId id = discovery_choice_card(item, slot);
-    if (id != CardId::NONE) {
+    if (id == CardId::NONE) {
+        return;
+    }
+    const int copies = discovery_copies(item);
+    for (int i = 0; i < copies; ++i) {
         add_library_copy_to_hand(s, id, /*free_this_turn=*/true);
     }
 }
@@ -1454,9 +1726,17 @@ bool choice_slot_eligible(const CombatState& s, uint8_t slot,
                static_cast<uint16_t>(CardId::EXHUME);
     }
     if (choice_source_is_discard(kind)) {
-        // Discard-to-draw-top: any discard card is a legal pick
-        // (DiscardPileToTopOfDeckAction has no eligibility filter). The
-        // just-played source card is in the LIMBO pile, never in this one.
+        // Any discard card is a legal pick, for both discard-source kinds:
+        // DiscardPileToTopOfDeckAction has no eligibility filter, and
+        // BetterDiscardPileToHandAction has none either. The just-played source
+        // card is in the LIMBO pile, never in this one.
+        //
+        // A FULL HAND IS NOT AN INELIGIBILITY for DISCARD_TO_HAND_FREE, unlike
+        // Exhume: BetterDiscardPileToHandAction still opens its screen and still
+        // consumes the pick, and it is the PER-CARD body that declines to move a
+        // card that does not fit (:63-69 / :92-98), leaving it in the discard.
+        // Making it ineligible here would change the eligible COUNT, and that
+        // count decides forced-vs-prompted.
         return slot < s.discard_count;
     }
     if (slot >= s.hand_count) {
@@ -1611,6 +1891,48 @@ void resolve_optional_choice(CombatState& s, const ActionQueueItem& item) noexce
             }
         }
     }
+    if (kind == ChoiceKind::HAND_TO_DISCARD_THEN_DRAW) {
+        // GamblingChipAction.java:53 -- `addToTop(new DrawCardAction(p,
+        // selectedCards.group.size()))`. ONE DrawCardAction for the whole
+        // selection, sized by the pick count read AT CONFIRM.
+        //
+        // Order: the Java's addToTop runs BEFORE the discard loop textually, but
+        // it only queues, while the loop is synchronous inside the same
+        // update(). So the observable sequence is discard-all-then-draw, which
+        // is what this is. The `picked == 0` early return above is the
+        // `if (!selectedCards.group.isEmpty())` guard at :52 -- an empty confirm
+        // queues no draw at all.
+        //
+        // add_to_TOP, not bottom: the draw must resolve ahead of anything queued
+        // behind this action (Gambling Chip's atTurnStartPostDraw queues a
+        // RelicAboveCreatureAction alongside it, and other relics' turn-start
+        // hooks queue after). The caller pops the finished CHOOSE_CARD item
+        // BEFORE calling this, so the head this prepends to is the real one.
+        ActionQueueItem draw{};
+        draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+        draw.src = kActorPlayer;
+        draw.tgt = kActorPlayer;
+        draw.amount = static_cast<int32_t>(picked);
+        add_to_top(s, draw);
+    }
+}
+
+void queue_gambling_chip_choice(CombatState& s) noexcept {
+    // handCardSelectScreen.open(TEXT[..], 99, true, true)
+    // (GamblingChipAction.java:43/:45): amount 99, anyNumber true, canPickZero
+    // true -- the identical optional screen Elixir and upgraded Forethought
+    // open. 99 is the action's literal and is the value the pick cap is compared
+    // against, so it is authored as-is; the SELECTION is bounded by hand size,
+    // which is <= kHandCap, so the 4-bit selected-count nibble is safe.
+    ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;  // hand-source choice: no exclusion index
+    item.amount = 99;
+    item.flags = make_choose_flags(ChoiceKind::HAND_TO_DISCARD_THEN_DRAW,
+                                   /*random=*/false, /*copies=*/1,
+                                   kChoiceNoTypeFilter, /*optional=*/true);
+    add_to_bottom(s, item);
 }
 
 void prepare_choice_draw_source(CombatState& s, ActionQueueItem& item) noexcept {

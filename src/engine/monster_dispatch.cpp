@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstddef>
 
+#include "interp/interp_powers.hpp"        // op_apply_power (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
@@ -281,6 +282,35 @@ MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
     }
 }
 
+namespace {
+
+// The onSpawnMonster relic fan-out, in acquisition order. Philosopher's Stone is
+// the whole of it: PhilosopherStone.onSpawnMonster (PhilosopherStone.java:50-54)
+// is
+//     monster.addPower(new StrengthPower(monster, 1));
+//     AbstractDungeon.onModifyPower();
+// -- a DIRECT AbstractCreature.addPower, synchronous, not an ApplyPowerAction,
+// exactly like its atBattleStart sibling (relics/relics_boss.cpp), so it applies
+// rather than queues. op_apply_power is reused for the slot append/stack, and
+// the same inertness argument the atBattleStart body spells out holds verbatim
+// for this call shape (src == tgt == the monster; Strength(+1) is a BUFF, so the
+// Artifact nullify cannot fire; Champion Belt needs Vulnerable; Ginger/Turnip
+// need the player).
+//
+// Duplicates are per SLOT, matching the Java's `for (AbstractRelic r : relics)`.
+void dispatch_on_spawn_monster_relics(CombatState& state,
+                                      uint8_t monster_index) noexcept {
+    for (uint8_t i = 0; i < state.relic_count; ++i) {
+        if (state.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::PHILOSOPHERS_STONE)) {
+            op_apply_power(state, monster_index, monster_index, PowerId::STRENGTH,
+                           1);
+        }
+    }
+}
+
+}  // namespace
+
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
                            int16_t hp) noexcept {
     assert(state.monster_count < kMonsterCap &&
@@ -308,6 +338,28 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     assert(fn != nullptr && "spawn_monster_at_slot: monster is not mid-combat "
                             "spawnable (monster_spawn_at_hp_fn)");
     fn(state, slot, hp);  // m.init(): the child's aiRng roll, at resolve time
+
+    // relics.onSpawnMonster (SpawnMonsterAction.update, SpawnMonsterAction.java:
+    // 44-50). A hand-written fan-out rather than a registry RelicHook: the
+    // generated hook table has no on_spawn_monster surface, Philosopher's Stone
+    // is its ONLY implementor in the whole game (`grep -rn onSpawnMonster com/`
+    // finds AbstractRelic's empty base and this one override), and adding a hook
+    // id would move kRelicHookCount for a single relic. Velvet Choker's canPlay
+    // veto is the same precedent.
+    //
+    // PLACEMENT vs the Java, which runs the relic loop BEFORE m.init(): here the
+    // fan-out is AFTER, and that is forced and equivalent, both of which matter:
+    //   * forced -- the monster RECORD does not exist until the lines above
+    //     write it, and the spawn-at-hp init zeroes power_count
+    //     (spawn_fields_at_hp, monster_slime.cpp), so a Strength written first
+    //     would be erased.
+    //   * equivalent -- the two things the Java does between the relic loop and
+    //     the slot insert are init()'s rollMove, which does not read Strength
+    //     (so the aiRng draw is unaffected), and applyPowers(), which bakes the
+    //     telegraphed damage. This engine has no bake: monster damage is
+    //     computed when the move's effects are queued at take-turn time
+    //     (queue_monster_move_effects above), which is strictly after this.
+    dispatch_on_spawn_monster_relics(state, slot);
 }
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,

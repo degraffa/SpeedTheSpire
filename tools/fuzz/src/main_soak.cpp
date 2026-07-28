@@ -33,6 +33,7 @@
 #include <iostream>
 #include <mutex>
 #include <limits>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <unordered_set>

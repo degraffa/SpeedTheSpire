@@ -92,18 +92,16 @@ inline void decrease_max_hp(RunState& rs, int amount) noexcept {
 
 // returnRandomScreenlessRelic(returnRandomRelicTier()): one relicRng tier roll,
 // then pool pops that are RE-ROLLED (never put back) while the key is one of
-// the four relics with no screenless presentation.
+// the four relics with no screenless presentation. The re-roll loop itself now
+// lives in relic_pools.cpp (return_random_screenless_relic) because Calling
+// Bell's onEquip is a second caller with a FIXED tier -- this wrapper's whole
+// remaining job is rolling the tier first, which is the event-body shape.
 [[nodiscard]] inline RelicId draw_event_relic(RunState& rs,
                                               bool screenless) noexcept {
     const RelicTier tier = return_random_relic_tier(rs);
     const RelicSpawnContext ctx = event_relic_context(rs);
-    RelicId id = return_random_relic_key(rs, tier, ctx);
-    while (screenless &&
-           (id == RelicId::BOTTLED_FLAME || id == RelicId::BOTTLED_LIGHTNING ||
-            id == RelicId::BOTTLED_TORNADO || id == RelicId::WHETSTONE)) {
-        id = return_random_relic_key(rs, tier, ctx);
-    }
-    return id;
+    return screenless ? return_random_screenless_relic(rs, tier, ctx)
+                      : return_random_relic_key(rs, tier, ctx);
 }
 
 inline void acquire_event_relic(RunController& rc, bool screenless) noexcept {

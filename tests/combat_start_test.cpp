@@ -69,6 +69,7 @@
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"
+#include "sts/engine/interp.hpp"  // Opcode / ChoiceKind (the union order pin)
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/powers.hpp"
 #include "sts/engine/run_state.hpp"  // kMapCols
@@ -428,6 +429,42 @@ TEST(CombatStart, SharedTurnOneBlockRunsAtBattleStartBeforeAtTurnStart) {
         << "atBattleStart's counter = 0 (AbstractRoom.java:245) must precede "
            "turn 1's atTurnStart ++ (:253): the wrong order reads 0, the Java "
            "reads 1 (the capture's value at STS00683 seq 141)";
+}
+
+// THE UNION PIN (final-integrate). Gambling Chip's atTurnStartPostDraw body is
+// addToBot (GamblingChip.java:36-43), dispatched from the shared block's
+// post-draw relic line (AbstractRoom.java:254) -- so its optional discard screen
+// must open on the hand AS EXTENDED by every atBattleStart draw queued before
+// it: Bag of Preparation's addToBot DrawCardAction(2) (BagOfPreparation.java:
+// 30-35, fired at :245) sits between the opening draw and the chip's action.
+// The Java's queue at combat start is [Draw(gameHandSize), ..., BagDraw(2),
+// GamblingChipAction], so the screen shows 7 cards, not 5. An engine that
+// dispatched AT_BATTLE_START after the turn-1 pump (the pre-merge run-layer
+// shape) would block the chip's screen on a 5-card hand and only then draw
+// Bag's 2 -- the observable difference between the two orders that the Stone
+// Calendar counter test above cannot see.
+TEST(CombatStart, GamblingChipScreenOpensOnTheBagOfPreparationExtendedHand) {
+    CombatState s = make_constructed_combat();
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::BAG_OF_PREPARATION),
+                            int16_t{-1}};
+    s.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::GAMBLING_CHIP),
+                            int16_t{-1}};  // -1 unset == not activated
+    s.relic_count = 2;
+
+    begin_first_turn(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(kStartOfTurnDrawCount + 2))
+        << "Bag of Preparation's 2 must be in hand BEFORE the chip's screen "
+           "blocks the pump (queue order Draw(5), BagDraw(2), GamblingChip)";
+    ASSERT_GE(s.action_count, uint8_t{1})
+        << "the chip's optional screen must be open (blocked at queue front)";
+    const ActionQueueItem front =
+        s.action_queue[s.action_head % kActionQueueCap];
+    EXPECT_EQ(front.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(front.flags),
+              ChoiceKind::HAND_TO_DISCARD_THEN_DRAW);
+    EXPECT_NE(s.relics[1].counter, -1) << "activated = true, once per combat";
 }
 
 TEST(CombatStart, NeitherConstructionPathHandRollsTurnOnePriming) {

@@ -16,6 +16,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // on_monster_damaged (split interrupt)
+#include "sts/engine/potions.hpp"          // potion_def (Fairy in a Bottle potency)
 #include "sts/engine/power_hooks.hpp"       // power hook dispatch (wasHPLost/onAttacked)
 #include "sts/engine/relic_hooks.hpp"       // player_has_relic (Paper Phrog) + onMonsterDeath dispatch
 #include "sts/engine/types.hpp"
@@ -83,7 +84,13 @@ namespace {
     // SCALES anyone else's, which is the only question these switches ask. Their
     // own damage is moreover PURE (createDamageMatrix(..., true), DamageInfo.
     // java:126-136) and typed THORNS, so it does not reach this pipeline at all.
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    // Checked for Vigor and Pen Nib, the two relic-granted powers: BOTH override
+    // atDamageGive and BOTH have a case below. Vigor
+    // (com.megacrit.cardcrawl.powers.watcher.VigorPower:41-47) adds its amount;
+    // PenNibPower (:51-57) doubles. Neither overrides atDamageReceive,
+    // atDamageFinalReceive, modifyBlock or modifyBlockLast -- both classes were
+    // read in full -- so those three switches take the count move and no case.
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -92,6 +99,23 @@ namespace {
         case PowerId::STRENGTH:                        // StrengthPower.java:96
             return dmg + static_cast<float>(p.amount) *
                              static_cast<float>(strength_mult);
+        case PowerId::VIGOR:
+            // VigorPower.atDamageGive (VigorPower.java:41-47): `damage +=
+            // (float)this.amount`. Priority 5 (the AbstractPower default -- the
+            // ctor sets none), so the sort puts it in the same class as
+            // Strength: both are additive, so their relative order is
+            // exact-arithmetic-safe, but both must land BEFORE Pen Nib's
+            // doubling, and the sort is what guarantees that.
+            return dmg + static_cast<float>(p.amount);
+        case PowerId::PEN_NIB:
+            // PenNibPower.atDamageGive (PenNibPower.java:51-57): `damage * 2.0f`,
+            // a FLAT double that never reads the slot's amount. Priority 6
+            // (PenNibPower.java:36) puts it after every priority-5 addend and
+            // before Frail(10)/Intangible(75)/Weak(99), so the game computes
+            // ((base + Str + Vigor) * 2) * 0.75 under a Weak -- reproduced here
+            // by slot ORDER (sort_powers_like_the_game, interp_powers.cpp),
+            // not by a special case in this walk.
+            return dmg * 2.0f;
         case PowerId::WEAK:
             return dmg * 0.75f;                         // WeakPower.java:67
         default:
@@ -137,7 +161,7 @@ namespace {
     // Checked for Panache and The Bomb: same answer as the pass above -- both
     // QUEUE damage and neither overrides any atDamage* hook
     // (PanachePower.java:40-67 / TheBombPower.java:40-53).
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -200,7 +224,7 @@ namespace {
     // Checked for Panache and The Bomb: neither overrides atDamageFinalReceive
     // (PanachePower.java:40-67 / TheBombPower.java:40-53). All three of this
     // file's counts moved together again.
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -281,6 +305,57 @@ void cards_took_player_damage(CombatState& s) noexcept;
     return 0;
 }
 
+// The PLAYER-AS-ATTACKER relic pass, AbstractMonster.damage:639-643 (and its
+// twin AbstractPlayer.damage:1399-1403 for a player hitting itself). Boot is the
+// only relic in the game that overrides it.
+//
+// PLACEMENT IS THE WHOLE FINDING, and the deferral note this replaces had it
+// backwards. `onAttackToChangeDamage` reads like an attacker-side pre-block
+// modifier, and it is NOT: both call sites run `damageAmount =
+// this.decrementBlock(info, damageAmount);` FIRST and only then walk the
+// player's relics. So the number Boot sees is the UNBLOCKED RESIDUE, and a
+// 4-damage hit into 2 block deals 5, not 4 -- while a 3-damage hit fully soaked
+// by 3 block deals 0, because `damageAmount > 0` fails. That is also what the
+// relic's own text says ("unblocked attack damage"), and it is why the
+// pre-block insertion point would have been wrong in the direction that inflates
+// every partially-blocked hit.
+//
+// Ordering against the other two integer-tail modifiers, straight off the two
+// Java methods: onAttackToChangeDamage (here) precedes the victim's
+// onAttackedToChangeDamage (Buffer, :646/:1405-1407), which precedes onAttacked
+// (Thorns, and Torii on the player side, :1425-1432), which precedes
+// onLoseHpLast (Tungsten Rod, :1433-1435). Boot is therefore the FIRST of the
+// four and Torii/Tungsten Rod stay last -- they are victim-side and Boot is
+// attacker-side, so on the player's own turn they never even see the same hit.
+//
+// Boot.onAttackToChangeDamage (Boot.java:30-38):
+//     if (info.owner != null && info.type != HP_LOSS && info.type != THORNS
+//         && damageAmount > 0 && damageAmount < 5) { flash();
+//         addToBot(RelicAboveCreatureAction); return 5; }
+// THRESHOLD = 5 (:19); the description's "4" (:27) is display text.
+//
+// `info.owner != null` needs no expression: every hit this engine produces has an
+// actor. The gate that DOES matter is the enclosing `if (info.owner ==
+// AbstractDungeon.player)` at the call site -- Boot fires only when the PLAYER is
+// the attacker, which is `src == kActorPlayer` here. The queued
+// RelicAboveCreatureAction is cosmetic and deliberately dropped, but note that
+// the Java hook does touch the action queue from inside a damage computation.
+//
+// RelicHook::ON_ATTACK (value 12) stays allocated and unfired: it has no
+// dispatcher, and RelicHookContext carries no damage in/out channel, so building
+// one for a single relic would be a much larger change than this. The row's
+// `on_attack: []` binding is documentation of WHICH Java hook this bespoke site
+// reproduces -- the Magic Flower / Torii / Tungsten Rod precedent.
+[[nodiscard]] int apply_boot(const CombatState& s, uint8_t src, int dmg,
+                             DamageType type) noexcept {
+    if (src == kActorPlayer && type != DamageType::HP_LOSS &&
+        type != DamageType::THORNS && dmg > 0 && dmg < 5 &&
+        player_has_relic(s, RelicId::BOOT)) {
+        return 5;
+    }
+    return dmg;
+}
+
 // Step 3 (AbstractPlayer.java:1430-1432): the player's relics' onAttacked, run
 // AFTER the victim powers' onAttacked (Thorns / Flame Barrier). Torii.onAttacked
 // (Torii.java:1197-1205) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
@@ -307,15 +382,65 @@ void cards_took_player_damage(CombatState& s) noexcept;
     return dmg;
 }
 
-// Step 5 (AbstractPlayer.java:1487-1493): once the HP write has taken the player
-// below 1, an armed Lizard Tail (counter == -1) revives instead of dying --
-// currentHealth is pinned at 0, onTrigger heals maxHealth/2 (min 1) and sets the
-// counter to -2, and damage() RETURNS so the death branch never runs
-// (LizardTail.java:672-690). Mark of the Bloom and Fairy Potion, which gate this
-// in the Java, have no rows, so their tests are constant-true here.
-void try_lizard_tail(CombatState& s) noexcept {
+// Step 5 (AbstractPlayer.java:1482-1497): once the HP write has taken the player
+// below 1, a revive source may fire INSTEAD of dying -- currentHealth is pinned
+// at 0, the source heals, and damage() RETURNS so the death branch never runs.
+// There are TWO sources, and the Java's structure decides between them:
+//
+//     if (!hasRelic("Mark of the Bloom")) {
+//         if (hasPotion("FairyPotion")) { ...consume ONE fairy...; return; }
+//         else if (hasRelic("Lizard Tail") && counter == -1) { ...; return; }
+//     }
+//
+// So Mark of the Bloom BLOCKS BOTH, and a held Fairy takes precedence: because
+// the Lizard Tail arm is an `else if` on `hasPotion`, holding a Fairy means the
+// Lizard Tail is not even CONSULTED, let alone spent. Mark of the Bloom is an
+// Act-2+ boss relic with no S1 row, so its test is genuinely constant-true here.
+// FAIRY_POTION, however, DOES have a row (PotionId 31) -- an earlier version of
+// this comment said it did not, which is what kept the fairy arm from existing.
+//
+// The FAIRY half reads CombatState.flags' armed count, mirrored in at combat
+// entry from the run's belt: see kCombatFlagFairyArmedShift (combat_state.hpp)
+// for why the belt itself cannot be consulted from here and why a post-hoc
+// run-layer revive would be observably wrong. Consuming decrements the mirror;
+// the run layer burns the real slots at fold-back by comparing the belt against
+// what is left. Exactly ONE fairy is consumed per lethal event -- the Java loop
+// `return`s on the first match -- so a second held Fairy survives for later.
+//
+// FairyPotion.use (FairyPotion.java:36-45):
+//     float percent = this.potency / 100.0f;
+//     int healAmt = (int)((float)player.maxHealth * percent);
+//     if (healAmt < 1) healAmt = 1;
+//     player.heal(healAmt, true);
+// The MIN-1 clamp is on the HEAL, not on the result, and HP is pinned to 0
+// BEFORE the heal, so the outcome is exactly healAmt (clamped to maxHealth by
+// heal, AbstractCreature.java:386-395) and never hp + healAmt. Routed through
+// the shared in-combat heal seam so Magic Flower's x1.5 applies: its
+// onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:31-38) and this site
+// IS combat. Sacred Bark doubles potency 30 -> 60, i.e. a revive at 60% of max
+// HP; the relic has no engine hook, so def->potency is what arrives.
+//
+// LizardTail.onTrigger heals maxHealth/2 (min 1) and sets the counter to -2
+// (LizardTail.java:672-690).
+void try_player_revive(CombatState& s) noexcept {
     if (s.player_hp > 0) {
         return;
+    }
+    const uint8_t fairies = combat_fairy_armed(s.flags);
+    if (fairies > 0) {
+        s.flags = with_combat_fairy_armed(s.flags,
+                                          static_cast<uint8_t>(fairies - 1));
+        s.player_hp = 0;  // this.currentHealth = 0, BEFORE the heal
+        const PotionDef* def = potion_def(PotionId::FAIRY_POTION);
+        const int potency = def == nullptr ? 0 : def->potency;
+        const float percent = static_cast<float>(potency) / 100.0f;
+        int heal =
+            static_cast<int>(static_cast<float>(s.player_max_hp) * percent);
+        if (heal < 1) {
+            heal = 1;  // FairyPotion.java:40-42 -- on the HEAL, not the result
+        }
+        heal_player_with_relics(s, heal);
+        return;  // the `else if`: a Lizard Tail is not consulted at all
     }
     for (uint8_t i = 0; i < s.relic_count; ++i) {
         RelicSlot& slot = s.relics[i];
@@ -401,6 +526,12 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         const RelicView rv = player_relics(s);
         dispatch_relics_on_block_broken(s, rv.relics, rv.count, tgt);
     }
+    // The PLAYER-AS-ATTACKER relic pass, immediately after decrementBlock and
+    // BEFORE the victim's onAttackedToChangeDamage (AbstractMonster.java:639-643
+    // / AbstractPlayer.java:1399-1403). The Boot -- see apply_boot for why this
+    // is a post-block site, which is the opposite of what the hook's name
+    // suggests.
+    dmg = apply_boot(s, src, dmg, type);
     // The victim's powers' onAttackedToChangeDamage (AbstractPlayer.java:
     // 1412-1415), between decrementBlock and the onAttacked fan-out. Buffer.
     dmg = apply_buffer(s, tgt, dmg);
@@ -435,7 +566,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         cards_took_player_damage(s);
     }
     if (tgt == kActorPlayer) {
-        try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
+        try_player_revive(s);  // AbstractPlayer.java:1482-1497
     }
     // Monster death edge -> the dying monster's OWN powers' onDeath, then relics
     // onMonsterDeath (AbstractMonster.die:925-937; Spore Cloud and Gremlin Horn).
@@ -500,7 +631,7 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         cards_took_player_damage(s);
     }
     if (tgt == kActorPlayer) {
-        try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
+        try_player_revive(s);  // AbstractPlayer.java:1482-1497
     }
     // A direct HP loss can also kill a monster -> the same die() power-then-relic
     // dispatch (AbstractMonster.die:925-937), before the override seam as above.

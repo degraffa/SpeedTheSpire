@@ -271,14 +271,18 @@ TEST(ReplayCommandMap, AGridProceedIsTheCommitAndNotAScreenExit) {
         << "the commit applies the buffered picks; it is not a kChooseProceed";
 }
 
-// The classification. STS00052 takes Neow's boss-relic blessing, is handed an
-// Astrolabe, and the capture then drives Astrolabe's onEquip transform grid --
-// which the engine never opens, because that onEquip is one of the five
-// deferred BOSS bodies. The ACQUISITION is right (the relic is in the list, its
-// pool is popped, every stream matches), so the honest outcome is a stop that
-// names the body. The old table said "grid choose index has no legal
-// master-deck slot", which reads as an index-mapping defect and is not one.
-TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheDeferredRelicBody) {
+// The classification, RE-POINTED after Wave-C track 2 and reconciled with the
+// G6 classifier at integration. Until the five BOSS onEquip bodies landed,
+// STS00045/46/52's captures drove a boss relic's grid the engine never opened
+// and this stop could assert the deferral as FACT. Astrolabe's grid is now
+// live (the sim opens NeowScreen::GRID itself, and the GRID_PICK path below is
+// what a replay takes), and the classifier knows the build's own
+// deferred-whole set (`relic_on_equip_deferred`), so for a relic whose body is
+// LIVE the reason must rule the deferral out by name and point at the
+// divergence instead -- naming the relic as inspected, not as the verdict. The
+// state here is synthetic (BLESSING with a grid command) precisely because a
+// live tree can only reach it by diverging.
+TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheLastRelicAsTheSuspect) {
     RunController rc = at_phase(RunPhase::NEOW);
     rc.neow.screen = static_cast<uint8_t>(NeowScreen::BLESSING);
     rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ASTROLABE), 0};
@@ -288,6 +292,24 @@ TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheDeferredRelicBody) {
     EXPECT_EQ(m.kind, MapKind::UNMAPPED);
     EXPECT_NE(m.reason.find("Astrolabe"), std::string::npos) << m.reason;
     EXPECT_NE(m.reason.find("deferred"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("diverged"), std::string::npos)
+        << "the reason must no longer assert the deferral as fact: " << m.reason;
+}
+
+// The LIVE half of the same screen: with the sim's Astrolabe grid actually
+// open (NeowScreen::GRID), the identical capture command is an ordinary
+// buffered grid pick, not a stop. This is the pairing that keeps the fallback
+// above honest -- the classification fires only when the sim really has no
+// grid.
+TEST(ReplayCommandMap, ALiveNeowGridTakesTheBufferedPickPathInstead) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ASTROLABE), 0};
+    rc.run.relic_count = 1;
+
+    const MappedCommand m = map_command(rc, grid_screen(), "choose 3");
+    EXPECT_EQ(m.kind, MapKind::GRID_PICK) << m.reason;
+    EXPECT_EQ(m.grid_index, 3);
 }
 
 // Same readability rule as the EVENT stop above: this reason also carried a
@@ -627,17 +649,24 @@ TEST(ReplayCommandMap, AMatchAndKeepListTheSimCannotMatchDoesNotTranslate) {
     EXPECT_EQ(action_arg0(m.actions[0]), 3);
 }
 
-// The five deferred BOSS onEquip bodies (relic_pickup_boss.cpp) are the set the
-// deferral message is allowed to name, and the list is here because a deferred
-// override is indistinguishable from an implemented one through
-// `relic_on_equip_fn` -- both are real function pointers, by design.
-TEST(ReplayCommandMap, TheDeferredOnEquipSetIsExactlyTheFiveBossBodies) {
+// The deferred-whole onEquip set is what the deferral message is allowed to
+// name, and the list is here because a deferred surface is indistinguishable
+// from an implemented one through `relic_on_equip_fn` -- both are real
+// function pointers, by design. RE-DERIVED at the Wave-C integration: the
+// five BOSS bodies this test used to pin as deferred are LIVE on the
+// `on_equip_screen` surface (relic_pickup_boss.cpp), so they now belong on
+// the FALSE side; what remains deferred whole is Dolly's Mirror (its own
+// raw-deck grid) plus Orrery and Cauldron (reward-screen assembly) -- see
+// `relic_on_equip_deferred`'s comment for the derivation.
+TEST(ReplayCommandMap, TheDeferredOnEquipSetMatchesTheUnionTree) {
     using sts::replay::relic_on_equip_deferred;
+    for (const RelicId id : {RelicId::ORRERY, RelicId::DOLLYS_MIRROR,
+                             RelicId::CAULDRON})
+        EXPECT_TRUE(relic_on_equip_deferred(id)) << static_cast<int>(id);
     for (const RelicId id : {RelicId::PANDORAS_BOX, RelicId::TINY_HOUSE,
                              RelicId::ASTROLABE, RelicId::EMPTY_CAGE,
-                             RelicId::CALLING_BELL})
-        EXPECT_TRUE(relic_on_equip_deferred(id)) << static_cast<int>(id);
-    for (const RelicId id : {RelicId::BURNING_BLOOD, RelicId::NONE})
+                             RelicId::CALLING_BELL, RelicId::BURNING_BLOOD,
+                             RelicId::NONE})
         EXPECT_FALSE(relic_on_equip_deferred(id)) << static_cast<int>(id);
 }
 

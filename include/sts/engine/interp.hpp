@@ -471,6 +471,103 @@ enum class Opcode : uint16_t {
                               // STRUCTURALLY constant-false in S1 and are
                               // documented at the site rather than invented as
                               // state -- see op_damage_greed.
+    // Wave-C track 1, relic-tail stage. 63-64 out of the 63-66 block that stage
+    // owns; 65-66 are RELEASED unspent, and 60-62 stay the potions stage's.
+    REMOVE_DEBUFFS = 63,      // Orange Pellets / RemoveDebuffsAction.update
+                              // (RemoveDebuffsAction.java:23-30): `for (p :
+                              // c.powers) if (p.type == DEBUFF) addToTop(new
+                              // RemoveSpecificPowerAction(c, c, p.ID));`.
+                              // `tgt` is the creature; no other operand.
+                              //
+                              // WHY IT CANNOT BE A LIST OF REMOVE_POWER ITEMS:
+                              // the enumeration happens when the ACTION
+                              // RESOLVES. REMOVE_POWER names one PowerId chosen
+                              // at QUEUE time, so a debuff that lands between
+                              // the queue and the resolve survives the game's
+                              // version and would survive a queue-time
+                              // expansion too -- reachable, since Orange
+                              // Pellets queues addToBot behind the played
+                              // card's own actions.
+                              //
+                              // The addToTop per power means the removals
+                              // resolve in REVERSE power-list order. Only
+                              // observable if a removal's onRemove is read by a
+                              // later one -- none is today -- but it is free,
+                              // so it is reproduced rather than approximated.
+                              //
+                              // The DEBUFF predicate is the LIVE-INSTANCE type,
+                              // not PowerDef::type alone: StrengthPower and
+                              // DexterityPower recompute this.type from the
+                              // sign of amount (StrengthPower.java:81-89,
+                              // DexterityPower.java:74-82), so a NEGATIVE
+                              // Strength stack IS removed and a positive one is
+                              // not. That is the same two-term test
+                              // op_apply_power builds at apply time
+                              // (interp_powers.cpp negative_stat_flip).
+    UPGRADE_RANDOM_CARD = 64, // Warped Tongs / UpgradeRandomCardAction.update
+                              // (UpgradeRandomCardAction.java:28-50): filter the
+                              // hand to `canUpgrade() && type != STATUS`, and IF
+                              // that subset is non-empty shuffle it and upgrade
+                              // element 0. No operand at all.
+                              //
+                              // WHY IT IS NOT CHOOSE_CARD{RANDOM, UPGRADE}: a
+                              // DIFFERENT STREAM over a DIFFERENT SET. That path
+                              // draws card_random_rng once over the WHOLE hand;
+                              // this spends one shuffle_rng.random_long()
+                              // seeding a JDK Fisher-Yates over the PRE-FILTERED
+                              // group (the no-arg CardGroup.shuffle,
+                              // CardGroup.java:561-563) and takes index 0.
+                              // Reusing the other path would silently move
+                              // shuffleRng.
+                              //
+                              // THE STREAM FACT THAT MATTERS: the shuffle sits
+                              // INSIDE `if (upgradeable.size() > 0)` (:40-45),
+                              // and an empty hand returns even earlier (:31-34),
+                              // so a hand with nothing upgradeable costs ZERO
+                              // shuffle_rng draws.
+    // Wave-C track 1, potions stage. 60 out of the 60-62 block that stage owns;
+    // 61-62 are RELEASED unspent (an opcode gap costs nothing -- the numbering
+    // is append-only, never dense).
+    RANDOMIZE_HAND_COST = 60, // Snecko Oil / RandomizeHandCostAction.update
+                              // (RandomizeHandCostAction.java:26-38): walk
+                              // p.hand.group in HAND-SLOT ORDER and roll a new
+                              // PERMANENT cost for every card whose BASE cost is
+                              // non-negative. No operand at all -- the hand is an
+                              // execute-time read -- so it is GENERAL_OPS and any
+                              // domain's queue helper carries it identically.
+                              //
+                              //   for (AbstractCard card : this.p.hand.group) {
+                              //       int newCost;
+                              //       if (card.cost < 0 ||
+                              //           card.cost == (newCost =
+                              //             cardRandomRng.random(3))) continue;
+                              //       card.costForTurn = card.cost = newCost;
+                              //       card.isCostModified = true;
+                              //   }
+                              //
+                              // WHY IT IS NOT A LOOP OF SET_COST ITEMS: SET_COST
+                              // names one card-pool index and one literal cost,
+                              // both chosen at QUEUE time. Here the membership
+                              // (the hand) and every value (a draw each) are
+                              // decided at RESOLVE time, and Snecko Oil queues
+                              // this BEHIND its own DrawCardAction, so the hand
+                              // it sees INCLUDES the five cards that action drew
+                              // (SneckoOil.java:42-45, two addToBots). A
+                              // queue-time expansion would randomize the PRE-draw
+                              // hand and spend the wrong number of draws.
+                              //
+                              // STREAM. One card_random_rng random(3) (0..3
+                              // INCLUSIVE) per hand card with a non-negative base
+                              // cost, in hand order -- INCLUDING cards that roll
+                              // their own current cost, because the `||` is
+                              // short-circuit and the assignment sits in its
+                              // RIGHT operand. X-cost / unplayable cards
+                              // (card.cost < 0) cost NOTHING. The per-card body
+                              // is randomize_card_cost, shared with
+                              // ConfusionPower.onCardDraw -- see that helper for
+                              // the equality and freeToPlayOnce differences,
+                              // which are exactly where two hand-written copies
+                              // diverged before.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
@@ -655,6 +752,85 @@ enum class ChoiceKind : uint8_t {
     // already full (:46-48 / :72-74); the unchosen cards keep their draw-pile
     // order, because only the temp browse list was ever randomized.
     DRAW_TO_HAND = 9,
+    // 10 is a permanent gap (kinds are append-only).
+    //
+    // Liquid Memories / BetterDiscardPileToHandAction's (count, newCost) ctor
+    // (BetterDiscardPileToHandAction.java:40-48, setCost = true, newCost = 0,
+    // optional = false). The source pile is the DISCARD pile and the
+    // destination is the HAND, at cost 0 FOR THE TURN.
+    //
+    // WHY IT NEEDS ITS OWN KIND rather than flags on DISCARD_TO_DRAW_TOP: the
+    // packed CHOOSE_CARD encoding has no destination field at all -- the kind IS
+    // the destination -- and the two differ in destination, in the cost write,
+    // and in the hand-full behaviour. Nothing else in the enum sources from the
+    // discard.
+    //
+    // update (:50-117), in branch order:
+    //   :53-56   empty discard, or numberOfCards <= 0 -> isDone, nothing.
+    //   :57-75   `discardPile.size() <= numberOfCards && !optional` -> FORCED,
+    //            NO SCREEN: snapshot the discard and move each card, IN DISCARD
+    //            ORDER. That is the eligible <= amount branch op_choose_card
+    //            already takes.
+    //   :76-86   otherwise a MANDATORY exactly-`numberOfCards` grid select over
+    //            the discard pile (`optional` is false on this ctor, so the
+    //            zero-pickable overload at :78/:83 is unreachable).
+    //   :90-110  resolution applies the same per-card body as the forced branch.
+    //
+    // THE PER-CARD BODY, and its one trap: `if (hand.size() < 10) { addToHand;
+    // setCostForTurn(0); discardPile.removeCard; }` -- the guard wraps the
+    // REMOVAL too, so a card that does not fit STAYS IN THE DISCARD PILE. There
+    // is no spill-to-discard here, unlike MakeTempCardInHandAction, and no
+    // partial move: it is all three writes or none.
+    //
+    // NO RNG anywhere in this action, on any path.
+    DISCARD_TO_HAND_FREE = 11,
+    //
+    // Gambler's Brew AND Gambling Chip -- literally one Java action, one boolean
+    // apart. GamblersBrew.use (GamblersBrew.java:36-41) queues
+    // `GamblingChipAction(player, true)`; GamblingChip.atTurnStartPostDraw
+    // (GamblingChip.java:34-42) queues `GamblingChipAction(player)`, i.e.
+    // notChip = false. The boolean picks a PROMPT STRING (:42-46) and nothing
+    // else, so the two consumers share this kind outright.
+    //
+    // GamblingChipAction.update (GamblingChipAction.java:39-63):
+    //   :41-49  first tick -- handCardSelectScreen.open(TEXT[..], 99, true,
+    //           true), the SAME optional zero-to-all screen Elixir and
+    //           Forethought+ open, then a WaitAction and tickDuration.
+    //   :51-61  on retrieval, and ONLY if the selection is non-empty:
+    //               addToTop(new DrawCardAction(p, selectedCards.size()));
+    //               for (c : selectedCards.group) {
+    //                   hand.moveToDiscardPile(c);
+    //                   GameActionManager.incrementDiscard(false);
+    //                   c.triggerOnManualDiscard();
+    //               }
+    //
+    // ORDERING, which is easy to get backwards: the addToTop only QUEUES, while
+    // the discard loop at :54-58 is synchronous inside the same update(). So the
+    // observable order is DISCARD EVERY PICK (in pick order), THEN draw exactly
+    // that many -- and the draw sits at the TOP of the queue, ahead of anything
+    // queued behind this action. An EMPTY confirm does nothing at all: no draw,
+    // no discard. The count is `selectedCards.size()`, read AT CONFIRM, for both
+    // consumers alike -- there is no relic-side count.
+    //
+    // The draw-back is folded into resolve_optional_choice rather than given a
+    // fused opcode: the discard half is an ordinary per-slot manipulation and
+    // the DRAW is just an add_to_top of the existing opcode 4, so an opcode
+    // would only duplicate the CHOOSE lifecycle.
+    //
+    // RNG: this action spends none itself. The queued DRAW may reshuffle
+    // (shuffle_rng) and fires onCardDraw per drawn card, so with Snecko Eye's
+    // Confusion up each drawn card costs one card_random_rng draw.
+    //
+    // TWO JAVA CALLS WITH NO S1 COUNTERPART, named rather than invented:
+    //   * `c.triggerOnManualDiscard()` -- the binders are Silent's
+    //     Reflex/Tactician and Watcher's Sands of Time. No S1 Ironclad card
+    //     overrides it, so there is nothing to fire.
+    //   * `GameActionManager.incrementDiscard(false)` -- nothing in the engine
+    //     reads a discard-this-turn counter (no such field exists), so the
+    //     increment has no observable consumer. Whoever registers the first
+    //     card that reads one owns adding it here and at the end-of-turn
+    //     discard.
+    HAND_TO_DISCARD_THEN_DRAW = 12,
 };
 
 // Which pile a CHOOSE_CARD of this kind selects from. `arg0` of a CHOOSE action
@@ -671,6 +847,7 @@ enum class ChoiceSource : uint8_t {
 [[nodiscard]] constexpr ChoiceSource choice_source(ChoiceKind k) noexcept {
     switch (k) {
         case ChoiceKind::DISCARD_TO_DRAW_TOP:
+        case ChoiceKind::DISCARD_TO_HAND_FREE:
             return ChoiceSource::DISCARD;
         case ChoiceKind::EXHAUST_TO_HAND:
             return ChoiceSource::EXHAUST;
@@ -711,6 +888,57 @@ inline constexpr uint8_t kDiscoveryChoiceCount = 3;
             static_cast<uint16_t>(static_cast<uint32_t>(item.amount) & 0xFFFFu));
     }
     return CardId::NONE;
+}
+
+// --- DISCOVERY's pool selector and copy count --------------------------------
+//
+// DiscoveryAction has three ctors (DiscoveryAction.java:25-43) and its consumers
+// differ in exactly two ways: WHICH POOL the three offers are drawn from, and
+// HOW MANY copies of the chosen card are created.
+//
+//   Discovery (the card)  -- DiscoveryAction(), the full RED combat pool,
+//                            amount 1 (:25-29).
+//   Attack / Skill / Power Potion -- DiscoveryAction(CardType, potency), the
+//                            type-filtered RED pool, amount = potency
+//                            (AttackPotion.java:40-42 and siblings).
+//   Colorless Potion      -- DiscoveryAction(true, potency), the colorless pool
+//                            (ColorlessPotion.java:38-40).
+//
+// `flags` and `amount` are already fully consumed by the persisted offer, but a
+// DISCOVERY item uses NEITHER of ActionQueueItem's two actor bytes -- there is
+// no source or target creature anywhere in DiscoveryAction. So the selector
+// rides in `src` and the copy count in `tgt`. ActionQueueItem stays 12 bytes, so
+// there is no SCHEMA_VERSION bump and no fixture regeneration; this is the same
+// trick the offer itself already plays with flags/amount.
+//
+// THE DEFAULTS ARE THE ACTOR SENTINELS, deliberately. Every queue helper writes
+// src = kActorPlayer and, for a SELF-targeted step, tgt = kActorPlayer, so an
+// AUTHORED DISCOVERY step (registry/cards.yaml's Discovery) arrives carrying
+// 0xFF in both. Reading 0xFF as "full combat pool" and "one copy" therefore
+// leaves every previously-authored item byte-identical AND correct, with no
+// generator packer needed. A native writer that wants anything else stamps a
+// real value.
+enum class DiscoveryPool : uint8_t {
+    COMBAT = 0,     // kIroncladCombatPool  -- returnTrulyRandomCardInCombat()
+    ATTACK = 1,     // kIroncladAttackPool  -- ...InCombat(CardType.ATTACK)
+    SKILL = 2,      // kIroncladSkillPool   -- ...InCombat(CardType.SKILL)
+    POWER = 3,      // kIroncladPowerPool   -- ...InCombat(CardType.POWER)
+    COLORLESS = 4,  // kColorlessCombatPool -- returnTrulyRandomColorlessCardInCombat()
+};
+
+[[nodiscard]] constexpr DiscoveryPool discovery_pool(
+    const ActionQueueItem& item) noexcept {
+    return item.src == kActorPlayer ? DiscoveryPool::COMBAT
+                                    : static_cast<DiscoveryPool>(item.src);
+}
+
+// How many stat-equivalent copies of the chosen card are created. This is
+// DiscoveryAction's `amount` field, which is the potion's POTENCY -- 1 base, 2
+// with Sacred Bark (AbstractPotion.getPotency doubles it). The Discovery CARD
+// passes no amount and gets the ctor default of 1 (:28).
+[[nodiscard]] constexpr int discovery_copies(
+    const ActionQueueItem& item) noexcept {
+    return item.tgt == kActorPlayer ? 1 : static_cast<int>(item.tgt);
 }
 
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
@@ -1157,6 +1385,23 @@ void resolve_optional_choice(CombatState& state,
 // spill past a full hand to the discard (MakeTempCardInHandAction:71-77).
 void apply_choice_selection(CombatState& state, uint8_t slot, ChoiceKind kind,
                             int copies = 1, bool prompted = false) noexcept;
+
+// Queue GamblingChipAction (GamblingChipAction.java:39-63) -- the optional
+// zero-to-all hand select whose confirm discards every pick and then draws
+// exactly that many. add_to_bottom, matching both call sites' addToBot.
+//
+// EXPOSED AS A SHARED BUILDER because the action has TWO consumers that are one
+// boolean apart, and that boolean is presentation-only: Gambler's Brew passes
+// notChip = true (GamblersBrew.java:39) and Gambling Chip passes false
+// (GamblingChip.java:40), which selects only the prompt string (:42-46). Writing
+// the item twice is how the same discard-then-draw-back logic would end up
+// spelled two ways.
+//
+// The differences that ARE real live at the CALL sites, not here: Gambler's Brew
+// carries its own `!hand.isEmpty()` guard (GamblersBrew.java:38) and so queues
+// nothing at all on an empty hand, and Gambling Chip fires at most ONCE PER
+// COMBAT off a private `activated` latch (GamblingChip.java:31/36-37).
+void queue_gambling_chip_choice(CombatState& state) noexcept;
 
 // DISCOVERY choice lifecycle. prepare_discovery_choice rejection-samples and
 // persists the three-card offer exactly once. resolve_discovery_choice creates

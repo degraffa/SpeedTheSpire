@@ -86,6 +86,13 @@ bool potion_use_implemented(PotionId id) noexcept {
     switch (id) {
         case PotionId::BLOOD_POTION:           // dispatch_native_potion, below
         case PotionId::BLESSING_OF_THE_FORGE:  // dispatch_native_potion, below
+        case PotionId::ELIXIR:                 // dispatch_native_potion, below
+        case PotionId::ATTACK_POTION:          // dispatch_native_potion, below
+        case PotionId::SKILL_POTION:           // (the four DISCOVERY potions --
+        case PotionId::POWER_POTION:           //  one body, pool selector in the
+        case PotionId::COLORLESS_POTION:       //  item's src byte)
+        case PotionId::LIQUID_MEMORIES:        // dispatch_native_potion, below
+        case PotionId::GAMBLERS_BREW:          // dispatch_native_potion, below
         case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
                                                // (run_advance's step_potion
                                                // still intercepts it first)
@@ -93,9 +100,14 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::ENTROPIC_BREW:          // run layer: use_entropic_brew
             return true;
         default:
-            // DEFERRED: no body anywhere. FAIRY_POTION lands here too, which is
-            // correct -- it is never USED (AbstractPotion.isThrown false, it
-            // triggers on death), and combat_potion_legal rejects it by name.
+            // DEFERRED: no body anywhere -- which, as of the potions stage, is
+            // DISTILLED_CHAOS and DUPLICATION_POTION only, both blocked on the
+            // recursive-play opcode.
+            // FAIRY_POTION lands here too and that is still correct, but for a
+            // different reason: it is IMPLEMENTED and it is never USED. canUse()
+            // is `return false` (FairyPotion.java:47-50); the body fires from
+            // the lethal-HP-write path (try_player_revive / apply_event_damage),
+            // not from a USE action, and combat_potion_legal rejects it by name.
             return false;
     }
 }
@@ -184,6 +196,180 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             add_to_bottom(s, item);   // addToBot (BlessingOfTheForge.java:45)
             break;
         }
+        case PotionId::ELIXIR: {
+            // Elixir.use (Elixir.java:44-49): in RoomPhase.COMBAT, a single
+            // addToBot(new ExhaustAction(false, true, true)). getPotency (:51-54)
+            // is 0 -- the potion has no number of its own.
+            //
+            // The 3-arg ctor is (isRandom, anyNumber, canPickZero) and forwards
+            // amount 99 (ExhaustAction.java:56-58). Walk ExhaustAction.update
+            // (:73-110) in branch order with those values:
+            //   :76-79  empty hand      -> isDone, nothing happens.
+            //   :80-89  `!anyNumber && hand.size() <= amount` -- UNREACHABLE,
+            //           anyNumber is true. This is the branch that would exhaust
+            //           the whole hand with no screen.
+            //   :90-94  isRandom -- UNREACHABLE, isRandom is false. So ELIXIR
+            //           SPENDS NO card_random_rng AT ALL, on any path.
+            //   :96-99  open(TEXT[0], 99, true, true) -- the OPTIONAL zero-to-99
+            //           screen, ended only by the confirm button.
+            //   :102-108 on retrieval, walk selectedCards.group IN PICK ORDER
+            //           calling moveToExhaustPile, so the exhaust-pile order is
+            //           the pick order and each card's onExhaust fires in it.
+            //
+            // That is EXACTLY Purity's authored program with the amount raised
+            // (registry/cards.yaml:1856,
+            //  {op: CHOOSE_CARD, choose: exhaust, amount: 3, optional: true}),
+            // whose provenance block reasons through the same branch table --
+            // Purity is ExhaustAction(magicNumber, false, true, true). So there
+            // is no new machinery here: kChoiceOptionalBit, ActionVerb::CONFIRM
+            // and optional_choice_slot_legal / toggle_optional_choice_slot /
+            // resolve_optional_choice all already carry it.
+            //
+            // amount 99 IS THE CORRECT AUTHORED VALUE and must not be "tidied"
+            // down to kHandCap: optional_choice_slot_legal compares the pick
+            // count against item.amount, and 99 is what the Java compares
+            // against. The 4-bit runtime selected-count nibble
+            // (kChoiceSelectedShift) is safe regardless, because the SELECTION
+            // is capped by hand size, which is <= kHandCap == 10.
+            //
+            // Like Blessing of the Forge this cannot be a data program:
+            // CHOOSE_CARD is a CARD_CONTEXT op and the potion domain admits only
+            // GENERAL ops (tools/registry_gen/stsgen/steps.py). Hence the
+            // hand-built item. And like Blessing's, the RoomPhase.COMBAT guard
+            // at Elixir.java:46 is the run layer's -- a potion USE is offered
+            // only in RunPhase::COMBAT, and Elixir is not on the two-potion
+            // out-of-combat whitelist (noncombat_potion_legal).
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+            item.src = kActorPlayer;
+            item.tgt = kActorPlayer;  // hand-source choice: no exclusion index
+            item.amount = 99;         // ExhaustAction.java:56-58
+            item.flags = make_choose_flags(ChoiceKind::EXHAUST, /*random=*/false,
+                                           /*copies=*/1, kChoiceNoTypeFilter,
+                                           /*optional=*/true);
+            add_to_bottom(s, item);   // addToBot (Elixir.java:47)
+            break;
+        }
+        case PotionId::ATTACK_POTION:
+        case PotionId::SKILL_POTION:
+        case PotionId::POWER_POTION:
+        case PotionId::COLORLESS_POTION: {
+            // The four "discover" potions are ONE shape with one argument
+            // changed. Each use() is a single addToBot:
+            //   AttackPotion.java:40-42     DiscoveryAction(CardType.ATTACK, potency)
+            //   SkillPotion.java:40-42      DiscoveryAction(CardType.SKILL, potency)
+            //   PowerPotion.java:40-42      DiscoveryAction(CardType.POWER, potency)
+            //   ColorlessPotion.java:38-40  DiscoveryAction(true, potency)
+            // All four getPotency return 1, all four isThrown false, none takes
+            // a target. Their initializeData reads hasRelic("SacredBark") only
+            // to pick a description string -- the actual doubling is
+            // AbstractPotion.getPotency's, and it doubles POTENCY, which for
+            // these is DiscoveryAction's `amount`, i.e. THE NUMBER OF COPIES
+            // CREATED (1 -> 2). It does NOT change the three-card offer or the
+            // pool. That is why the copy count is the second operand here.
+            //
+            // Opcode DISCOVERY (50) already does the whole lifecycle -- the
+            // rejection-sampled three-card offer persisted in the item, the pump
+            // intercept, the can_choose[0..2] mask, and the cost-0-this-turn
+            // creation. What this adds is the POOL SELECTOR and the COPY COUNT,
+            // in the item's otherwise-unused src/tgt bytes (interp.hpp
+            // discovery_pool / discovery_copies). No struct change, so no
+            // SCHEMA_VERSION bump.
+            //
+            // NATIVE rather than a data program even though DISCOVERY is in
+            // GENERAL_OPS: a data step's `extra` becomes item.flags
+            // (queue_use_step above), and for a DISCOVERY item flags IS the
+            // offer slot -- a naively authored row would mispack the item and
+            // make discovery_choice_prepared read garbage. Authoring these as
+            // data needs a generator packer for DISCOVERY's pool/copies first;
+            // until then the domain check cannot catch the mistake, so the
+            // hand-built item is the safe form.
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::DISCOVERY);
+            item.src = static_cast<uint8_t>(
+                id == PotionId::ATTACK_POTION    ? DiscoveryPool::ATTACK
+                : id == PotionId::SKILL_POTION   ? DiscoveryPool::SKILL
+                : id == PotionId::POWER_POTION   ? DiscoveryPool::POWER
+                                                 : DiscoveryPool::COLORLESS);
+            item.tgt = static_cast<uint8_t>(potency);  // DiscoveryAction.amount
+            item.amount = 0;  // the "offer not yet generated" sentinel
+            item.flags = 0;
+            add_to_bottom(s, item);
+            break;
+        }
+        case PotionId::LIQUID_MEMORIES: {
+            // LiquidMemories.use (LiquidMemories.java:37-40) is one addToBot:
+            //     addToBot(new BetterDiscardPileToHandAction(this.potency, 0));
+            // the (numberOfCards, newCost) ctor
+            // (BetterDiscardPileToHandAction.java:40-48), which sets
+            // setCost = true, newCost = 0, optional = FALSE. getPotency (:42-45)
+            // is 1. NOTE there is no RoomPhase guard on this one at all, unlike
+            // Elixir and Snecko Oil -- the run layer's is the only gate.
+            //
+            // The whole action is ChoiceKind::DISCARD_TO_HAND_FREE with
+            // amount = potency: a MANDATORY exactly-`amount` choice over the
+            // discard pile whose per-card body is addToHand + setCostForTurn(0)
+            // + removeCard, all three under one `hand.size() < 10` guard. See
+            // the kind's derivation in interp.hpp and its body
+            // (discard_slot_to_hand_free) for the branch table.
+            //
+            // TWO BRANCHES FALL OUT OF THE EXISTING MACHINERY rather than being
+            // written:
+            //   * `discardPile.isEmpty() || numberOfCards <= 0` (:53-56) is a
+            //     silent no-op -- count_eligible is 0, so op_choose_card's
+            //     forced arm applies to nothing and choice_requires_user is
+            //     false, i.e. the pump does not block.
+            //   * `discardPile.size() <= numberOfCards && !optional` (:57-75) is
+            //     the FORCED, screen-less move of the whole discard pile in
+            //     discard order -- which is exactly op_choose_card's
+            //     `eligible <= need` arm. So a 1-card discard under potency 1
+            //     prompts for nothing and spends no rng, and this action spends
+            //     no rng on ANY path.
+            //
+            // SACRED BARK doubles potency 1 -> 2, and here potency IS the
+            // MANDATORY PICK COUNT: the screen then requires exactly two picks
+            // (:83/:85), and the forced branch widens to a 2-card discard pile.
+            // The relic has no engine hook, so `def->potency` is what arrives.
+            //
+            // Native rather than data for the standing reason: CHOOSE_CARD is a
+            // CARD_CONTEXT op and the potion domain admits only GENERAL ops.
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+            item.src = kActorPlayer;
+            item.tgt = kActorPlayer;
+            item.amount = potency;  // BetterDiscardPileToHandAction.numberOfCards
+            item.flags = make_choose_flags(ChoiceKind::DISCARD_TO_HAND_FREE,
+                                           /*random=*/false);
+            add_to_bottom(s, item);  // addToBot (LiquidMemories.java:39)
+            break;
+        }
+        case PotionId::GAMBLERS_BREW: {
+            // GamblersBrew.use (GamblersBrew.java:36-41):
+            //     if (!AbstractDungeon.player.hand.isEmpty())
+            //         this.addToBot(new GamblingChipAction(player, true));
+            // getPotency (:43-46) is 0 -- the potion has no number.
+            //
+            // THE EMPTY-HAND GUARD IS ON THE POTION, not in the action, so an
+            // empty hand queues NOTHING at all. (Gambling Chip has no such
+            // guard; its action opens a screen on an empty hand, which the
+            // engine treats as "nothing to show" -- see queue_gambling_chip_
+            // choice, the shared builder both consumers call.)
+            //
+            // The action itself is GamblingChipAction with notChip = true, and
+            // that boolean picks only the prompt STRING (:42-46). The relic
+            // passes false. So the two are one body, expressed as one
+            // ChoiceKind -- see HAND_TO_DISCARD_THEN_DRAW in interp.hpp for the
+            // full derivation, including why the draw-back is folded into
+            // resolve_optional_choice rather than given an opcode.
+            //
+            // SACRED BARK: nothing to double. getPotency is 0, and the screen's
+            // 99 is GamblingChipAction's literal (:43/:45), not a potency.
+            if (s.hand_count == 0) {
+                break;  // GamblersBrew.java:38 -- not even queued
+            }
+            queue_gambling_chip_choice(s);  // addToBot (:39)
+            break;
+        }
         // --- Deferred native bodies (each lands with its dependency) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
@@ -191,14 +377,24 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // (powers.yaml ids 14-19; Steroid reuses LoseStrength id 13) -- so they no
         // longer route here (use_potion sends them through queue_use_step).
         // Still native + DEFERRED, each on a verb owned elsewhere:
-        // In-combat card CHOOSE: ELIXIR, ATTACK/SKILL/POWER/COLORLESS_
-        // POTION, GAMBLERS_BREW, LIQUID_MEMORIES. (BLESSING_OF_THE_FORGE is no
-        // longer among them -- it needed only the already-live CHOOSE_CARD
-        // UPGRADE kind and is implemented above.)
+        // The in-combat card-CHOOSE group is now EMPTY: Blessing of the Forge,
+        // Elixir, the four DISCOVERY potions, Liquid Memories and Gambler's Brew
+        // are all implemented above.
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
-        // opcode, NOT a missing power row). Cost randomization: SNECKO_OIL.
-        // Out-of-combat revive: FAIRY_POTION (never USED at all).
+        // opcode, NOT a missing power row). THAT IS THE WHOLE REMAINING LIST.
+        // SNECKO_OIL is NO LONGER among them: RANDOMIZE_HAND_COST (opcode 60)
+        // landed and its row is now a two-step DATA program, so it never reaches
+        // this switch at all.
+        // FAIRY_POTION is a case apart and is NOT deferred any more: it is
+        // IMPLEMENTED, but it has no USE body to put here because it is never
+        // USED (canUse() is `return false`, FairyPotion.java:47-50). It fires
+        // from the lethal-HP-write path instead -- try_player_revive
+        // (interp/interp_damage.cpp) in combat, apply_event_damage
+        // (event_framework.cpp) out of it -- so potion_use_implemented
+        // correctly still answers FALSE for it and combat_potion_legal still
+        // rejects it by name. (Its registry row's "out-of-combat" note was
+        // wrong: AbstractPlayer.damage serves both.)
         // IMPLEMENTED, but at the RUN layer, so they never arrive here:
         // FRUIT_JUICE and ENTROPIC_BREW (max-HP / slot mutation) --
         // run_advance's step_potion intercepts both ahead of use_potion.
@@ -225,14 +421,14 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             // proceed); this combat-layer body is the half a bare CombatState
             // caller gets.
             //
-            // A SEPARATE GAP, recorded where the next reader will look:
-            // SmokeBomb.canUse (:50-62) rejects the potion when any monster in
-            // the group is `type == EnemyType.BOSS` (or has BackAttack, an
-            // Act-3 power). It never asks the ROOM. combat_potion_legal
-            // (run_advance.cpp) tests `room_type == RoomType::Boss` instead.
-            // The two agree everywhere in Act 1, and `enemy_type` is a live
-            // registry column with a MonsterDef::is_boss() accessor, so the
-            // exact test is available whenever run_advance.cpp is open.
+            // The legality half lives in combat_potion_legal (run_advance.cpp),
+            // which now applies SmokeBomb.canUse (:50-63) as written: reject
+            // when ANY MONSTER IN THE GROUP is `type == EnemyType.BOSS`, walking
+            // the whole group with no liveness gate, rather than asking whether
+            // the ROOM is a boss room. (It tested `room_type == RoomType::Boss`
+            // until the wave-C potions stage closed this gap.) The BackAttack
+            // clause at :54-56 is an Act-3 power with no S1 row and is named at
+            // that site rather than invented as state.
             s.flags |= kCombatFlagPlayerEscaped;
             break;
         default:

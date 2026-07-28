@@ -28,6 +28,12 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id,
 void op_reduce_power(CombatState& s, uint8_t tgt, PowerId id, int amount,
                      uint32_t flags = 0) noexcept;
 
+// REMOVE_DEBUFFS (Orange Pellets / RemoveDebuffsAction). Enumerate `tgt`'s power
+// list AT RESOLVE TIME and queue one addToTop REMOVE_POWER per DEBUFF-typed
+// slot -- see the opcode's note in interp.hpp for why the enumeration cannot
+// happen at queue time and for the live-instance DEBUFF predicate.
+void op_remove_debuffs(CombatState& s, uint8_t tgt) noexcept;
+
 // SPOT_WEAKNESS.
 void op_spot_weakness(CombatState& s, uint8_t tgt, int amount) noexcept;
 

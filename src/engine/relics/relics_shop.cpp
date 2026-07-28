@@ -91,35 +91,102 @@ void relic_native_medical_kit(CombatState& s, RelicHook hook, RelicSlot& /*slot*
 
 // --- DEFERRED combat bodies --------------------------------------------------
 
-void relic_native_orange_pellets(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_orange_pellets(CombatState& s, RelicHook hook,
                                  RelicSlot& /*slot*/,
-                                 const RelicHookContext& /*ctx*/) noexcept {
-    // OrangePellets (OrangePellets.java:1218-1250): atTurnStart clears three
-    // private ATTACK/SKILL/POWER booleans; onUseCard sets the one matching the
-    // played card's type and, once all three are set, addToBot
-    // RemoveDebuffsAction(player) and clears them again.
+                                 const RelicHookContext& ctx) noexcept {
+    // OrangePellets (OrangePellets.java, 65 lines; the row and ledger row 75
+    // previously cited :1218-1250, which does not exist).
     //
-    // DEFERRED as a whole rather than half-implemented: the latch bookkeeping is
-    // only observable through the effect it gates, and that effect has no
-    // representation. RemoveDebuffsAction removes EVERY DEBUFF-type power from
-    // the player, enumerated when the ACTION resolves; the REMOVE_POWER opcode
-    // names one PowerId chosen at queue time, so reproducing it needs a new
-    // opcode whose numbering is append-only and shared. Tracking the latches
-    // without the removal would leave state nothing reads, which is worse than an
-    // honest no-op.
+    // atTurnStart (:34-39): SKILL = POWER = ATTACK = false.
+    // onUseCard (:41-58):
+    //     if (card.type == ATTACK) ATTACK = true;
+    //     else if (card.type == SKILL) SKILL = true;
+    //     else if (card.type == POWER) POWER = true;
+    //     if (ATTACK && SKILL && POWER) {
+    //         flash();
+    //         addToBot(RelicAboveCreatureAction);          -- cosmetic
+    //         addToBot(new RemoveDebuffsAction(player));
+    //         SKILL = false; POWER = false; ATTACK = false;
+    //     }
+    //
+    // IT CAN FIRE MORE THAN ONCE PER TURN: the latches are cleared ON FIRE, so
+    // three more cards of the three types re-arm it within the same turn. The
+    // relic's public counter is never touched and stays -1.
+    //
+    // The latches are CombatState.flags bits, not RelicSlot.counter -- they are
+    // `private static` in the Java (combat-global, not per-instance) and the
+    // counter is oracle-visible; see kCombatFlagOrangePellets* for the full
+    // derivation, including why a value-initialised CombatState is the correct
+    // stand-in for an atPreBattle reset the game does not actually do.
+    if (hook == RelicHook::AT_TURN_START) {
+        s.flags &= ~kCombatFlagOrangePelletsMask;  // (:36-38)
+        return;
+    }
+    if (hook != RelicHook::ON_USE_CARD) {
+        return;
+    }
+    const CardDef* cd = card_def(static_cast<CardId>(ctx.card_id));
+    if (cd == nullptr) {
+        return;
+    }
+    // The Java's if/else-if chain: a CURSE or STATUS play sets nothing.
+    switch (cd->type) {
+        case CardType::ATTACK:
+            s.flags |= kCombatFlagOrangePelletsAttack;
+            break;
+        case CardType::SKILL:
+            s.flags |= kCombatFlagOrangePelletsSkill;
+            break;
+        case CardType::POWER:
+            s.flags |= kCombatFlagOrangePelletsPower;
+            break;
+        default:
+            break;
+    }
+    if ((s.flags & kCombatFlagOrangePelletsMask) !=
+        kCombatFlagOrangePelletsMask) {
+        return;
+    }
+    ActionQueueItem clear{};
+    clear.opcode = static_cast<uint16_t>(Opcode::REMOVE_DEBUFFS);
+    clear.src = kActorPlayer;
+    clear.tgt = kActorPlayer;
+    add_to_bottom(s, clear);  // addToBot (OrangePellets.java:55)
+    s.flags &= ~kCombatFlagOrangePelletsMask;  // (:56-58) -- re-armable
 }
 
-void relic_native_sling_of_courage(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_sling_of_courage(CombatState& s, RelicHook hook,
                                    RelicSlot& /*slot*/,
                                    const RelicHookContext& /*ctx*/) noexcept {
-    // Sling.atBattleStart (Sling.java:1030-1038): if getCurrRoom().eliteTrigger,
-    // addToTop ApplyPowerAction(player, player, StrengthPower 2).
+    // Sling.atBattleStart (Sling.java:30-37 -- the ledger's :1030-1038 was off by
+    // exactly 1000; the file is 44 lines):
+    //     if (AbstractDungeon.getCurrRoom().eliteTrigger) {
+    //         flash();
+    //         addToTop(ApplyPowerAction(player, player, StrengthPower(player, 2), 2));
+    //         addToTop(RelicAboveCreatureAction(player, this));   -- cosmetic
+    //     }
     //
-    // DEFERRED: eliteTrigger is per-ROOM state the run layer sets when an elite
-    // encounter begins, and CombatState carries no elite marker at all. The gap
-    // is a producer, not a consumer: the body below is one queue_self_power_top
-    // call the moment a combat can answer "did this encounter come from an elite
-    // room?".
+    // eliteTrigger is a BOSS-EXCLUDING test: MonsterRoomBoss never sets the field
+    // (MonsterRoomBoss.java:22-24), so this relic does NOT fire on the Act-1 boss.
+    // Sling and Slaver's Collar are therefore NOT twins -- the collar ORs an
+    // EnemyType.BOSS scan on top (SlaversCollar.java:47-51) and this does not.
+    //
+    // The two addToTop pushes reverse, leaving the cosmetic
+    // RelicAboveCreatureAction in front of the ApplyPowerAction; with the cosmetic
+    // dropped, one add_to_top is the whole body. atBattleStart is dispatched after
+    // this engine's turn-1 pump (run_advance.cpp step 10), so the Strength lands
+    // before control returns to the player -- state-equivalent, because nothing
+    // reads Strength between the opening draw and the first card play.
+    if (hook != RelicHook::AT_BATTLE_START || !combat_is_elite_room(s.flags)) {
+        return;
+    }
+    ActionQueueItem gain{};
+    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    gain.src = kActorPlayer;
+    gain.tgt = kActorPlayer;
+    gain.amount = 2;
+    gain.flags = make_apply_power_flags(PowerId::STRENGTH);
+    add_to_top(s, gain);  // addToTop (Sling.java:34)
 }
 
 }  // namespace sts::engine

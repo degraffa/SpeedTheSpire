@@ -327,8 +327,10 @@ struct Options {
 // evidence. When the two answers differ the stop is DOWNSTREAM, and reading it
 // as the frontier is a documented, expensive mistake: STS00042 of
 // `b45_rewards_oracle_20260727T204809Z_claude01` diverged at seq 18 (Fusion
-// Hammer's / Philosopher's Stone's deferred `energyMaster` +1, so the sim was a
-// card short every turn and never finished the floor-1 fight) and stopped
+// Hammer's / Philosopher's Stone's then-deferred `energyMaster` +1 -- SINCE
+// LANDED, so that run wants re-running; the lesson here does not depend on it --
+// so the sim was an energy short every turn and never finished the fight) and
+// stopped
 // fourteen records later at seq 32, the first multi-option event page the stuck
 // controller was handed. The obligation row was filed off the stop, and asked
 // whether the ENGINE had an event/combat-boundary defect. It does not. So the
@@ -982,9 +984,11 @@ struct NeowVerdict {
         if (s.screen_type == "GRID") {
             if (!grid.open) {
                 // A grid the BLESSING did not open belongs to whatever the
-                // payout handed over -- in practice a boss relic whose onEquip
-                // body is deferred (Astrolabe, Empty Cage). The acquisition
-                // above is still proved; the body is not the blessing's.
+                // payout handed over. Since Wave-C track 2 the boss relics'
+                // grids (Astrolabe, Empty Cage) are LIVE and the sim opens
+                // them itself, so reaching this stop now means a body still
+                // deferred in the running build or an upstream divergence --
+                // the same honesty note as unsimulated_grid_reason.
                 if (rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
                     std::string who = "?";
                     if (rc.run.relic_count > 0)
@@ -993,7 +997,8 @@ struct NeowVerdict {
                                 rc.run.relics[rc.run.relic_count - 1].relic_id)));
                     v.stop_reason =
                         "the capture opens a grid the blessing did not: " + who +
-                        "'s onEquip body is deferred";
+                        "'s onEquip body is deferred in this build, or the sim "
+                        "diverged earlier";
                     return v;
                 }
                 open_grid_session(rc, grid);
@@ -1589,7 +1594,7 @@ struct TreasureVerdict {
             entered_node_symbol(screens[k - 1], run.records[k - 1].action_command);
         const bool via_question = symbol == "?";
         if (via_question) {
-            dispatch_event_room_entry_relics(rs);
+            dispatch_on_enter_room_relics(rs, RoomType::Event);
             const EventRoomResult roll =
                 event_room_roll(rs, screens[k - 1].room_type == "ShopRoom");
             if (roll != EventRoomResult::TREASURE)
@@ -1930,10 +1935,11 @@ struct TreasureVerdict {
 // this mode seeds like the merchant and the chest do. Per captured ? that
 // stayed an event:
 //
-//   ROLL       `dispatch_event_room_entry_relics` (the onEnterRoom fan-out the
-//              game runs against the ORIGINAL EventRoom, AbstractDungeon.java:
-//              1754-1779 -- Ssserpent Head's 50 gold and Maw Bank's 12 fire even
-//              on a ? that becomes something else) followed by
+//   ROLL       `dispatch_on_enter_room_relics(rs, RoomType::Event)` (the
+//              onEnterRoom fan-out the game runs against the ORIGINAL
+//              EventRoom, AbstractDungeon.java:1755-1757 -- Ssserpent Head's 50
+//              gold and Maw Bank's 12 fire even on a ? that becomes something
+//              else) followed by
 //              `event_room_roll`, which draws THE one committed eventRng float
 //              (EventHelper.java:100-187).
 //   SELECTION  `generate_event`, whose two selection draws are made on a
@@ -2351,7 +2357,7 @@ struct EventVerdict {
         // an off-by-one floor silently changes the DRAW LIST the pool index
         // addresses.
         ++rs.floor;
-        dispatch_event_room_entry_relics(rs);
+        dispatch_on_enter_room_relics(rs, RoomType::Event);
         const bool leaving_shop = screens[k - 1].room_type == "ShopRoom";
         const RngStream before = rs.event_rng;
         const EventRoomResult roll = event_room_roll(rs, leaving_shop);

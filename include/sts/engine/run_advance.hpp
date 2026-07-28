@@ -310,6 +310,20 @@ struct RunController {
     // NeowEvent rebuilds the whole blessing from `new Random(Settings.seed)`
     // (NeowEvent.java:363), so it is derived state, never saved.
     NeowState neow;
+
+    // The PENDING-BOTTLE OVERLAY: MasterBottleKind (run_deck.hpp), non-NONE
+    // while a just-acquired bottle relic's mandatory 1-pick card grid is up.
+    // A Bottled relic's onEquip opens the grid AT THE CLAIM SITE -- combat /
+    // chest / event reward claim, shop purchase -- over whatever screen is
+    // showing, and parks the room INCOMPLETE until the pick
+    // (BottledFlame.java:41-53). That is a MODAL overlay orthogonal to
+    // RunPhase, so it lives here rather than inside any one phase's screen
+    // struct: while non-NONE, legal_actions offers ONLY the eligible
+    // can_choose_master_deck[] rows (bottle_pick_legal) and step_one applies
+    // the pick before any phase dispatch. Transient like every screen field
+    // above; the phase itself never changes while the overlay is up.
+    uint8_t pending_bottle;
+    uint8_t pad2[3];  // explicit padding (value-init zeroed, hash-stable).
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
@@ -325,9 +339,15 @@ enum class EventCombatVariant : uint8_t {
     LAGAVULIN_AWAKE = 1,
 };
 
+// `elite_trigger` carries AbstractRoom.eliteTrigger for the ONE Act-1 event that
+// sets it on its own EventRoom before fighting: DeadAdventurer.java:116. It
+// reaches CombatState as kCombatFlagEliteRoom (combat_state.hpp), which is what
+// makes Sling of Courage / Preserved Insect / Slaver's Collar fire on that
+// event combat exactly as they do in a MonsterRoomElite.
 [[nodiscard]] bool enter_event_combat(
     RunController& rc, std::string_view encounter_key,
-    EventCombatVariant variant = EventCombatVariant::NONE) noexcept;
+    EventCombatVariant variant = EventCombatVariant::NONE,
+    bool elite_trigger = false) noexcept;
 
 // --- RunActionMask -----------------------------------------------------------
 

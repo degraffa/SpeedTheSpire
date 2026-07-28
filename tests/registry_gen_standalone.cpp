@@ -33,8 +33,9 @@ static_assert(static_cast<int>(sts::registry::MonsterId::JAW_WORM) == 1);
 // Chrysalis, 115 Magnetism, 117 Mayhem, 118 Metamorphosis, 125 Transmutation);
 // stage D's 3, which FILL the 114/119/123 gaps the earlier stages reserved
 // (114 Hand of Greed, 119 Panache, 123 The Bomb) -- with them the colorless RARE
-// block 112-126 is complete and holds no gap.
-static_assert(sts::registry::manifest::kCardsCount == 126);
+// block 112-126 is complete and holds no gap. + Wave-C track 2's 127 Curse of
+// the Bell (Calling Bell's SPECIAL curse; 128 stays the unspent reserve).
+static_assert(sts::registry::manifest::kCardsCount == 127);
 static_assert(sts::registry::kPoolableCurseCount == 10);    // CardLibrary.getCurse
 static_assert(sts::registry::kMaxCardSteps == 5);  // B3.5: upgraded Pummel, 5 hits
 // Infernal Blade's in-combat ATTACK pool. The red rares add FIVE attacks but only

@@ -313,6 +313,20 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                               MoveCat::REWARD_CLAIM);
                     }
                 }
+                // The pending-bottle overlay: claiming a Bottled trio relic
+                // replaces the claim mask with the mandatory 1-pick
+                // master-deck grid (run_advance.hpp). Mask-driven like every
+                // other arm, and it shares REWARD_CLAIM rather than spending
+                // a new MoveCat -- the same one-bucket-per-phase call the
+                // NEOW_PROCEED and SHOP comments make (MoveCat is a shared,
+                // append-only namespace; docs/stage-b-tasks.md).
+                for (int i = 0; i < engine::kMasterDeckCap; ++i) {
+                    if (mask.can_choose_master_deck[i]) {
+                        s.add(make_action(ActionVerb::CHOOSE,
+                                          static_cast<uint8_t>(i)),
+                              MoveCat::REWARD_CLAIM);
+                    }
+                }
                 if (mask.can_proceed) {
                     s.add(make_action(ActionVerb::CHOOSE, engine::kChooseProceed),
                           MoveCat::REWARD_PROCEED);

@@ -64,7 +64,11 @@ namespace {
     // stackPower, onUseCard and atStartOfTurn (PanachePower.java:40-67) and
     // TheBombPower's are atEndOfTurn and updateDescription (TheBombPower.java:
     // 40-53). Both are damage SOURCES and touch no block path at all.
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    // Checked for Vigor and Pen Nib: both are attacker-side atDamageGive
+    // scalers and neither overrides modifyBlock or modifyBlockLast
+    // (VigorPower and PenNibPower read in full), so this guard moves and no
+    // case is added in either block pass.
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

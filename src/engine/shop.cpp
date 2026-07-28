@@ -480,20 +480,37 @@ bool shop_buy_relic_legal(const RunState& rs, const ShopState& shop,
            relic_acquire_legal(rs, static_cast<RelicId>(slot.id));
 }
 
-bool shop_buy_relic(RunState& rs, RngStream& misc_rng, ShopState& shop,
-                    uint8_t index) noexcept {
+namespace {
+
+// Shared body of the two shop_buy_relic overloads (contract on the
+// declarations in shop.hpp).
+bool shop_buy_relic_impl(RunState& rs, RngStream& misc_rng, ShopState& shop,
+                         uint8_t index,
+                         RelicEquipContext* equip_ctx) noexcept {
     if (!shop_buy_relic_legal(rs, shop, index)) {
         return false;
     }
     ShopSlot& slot = shop.relics[index];
     const RelicId id = static_cast<RelicId>(slot.id);
+    // Fail-loud BEFORE any mutation: without an equip context an
+    // on_equip_screen id (a Bottled trio relic in the shop's tier-rolled
+    // stock) would hit acquire_relic's NEEDS_EQUIP_CONTEXT refusal AFTER the
+    // gold was spent and the slot marked sold -- a paid-for relic silently
+    // not granted. Refuse the purchase whole instead.
+    if (equip_ctx == nullptr && relic_on_equip_screen_fn(id) != nullptr) {
+        return false;
+    }
     // StoreRelic.purchaseRelic (:83-120): loseGold, then instantObtain, and
     // ONLY THEN the two shop-relic side effects -- so a Membership Card bought
     // here discounts the rest of its own shop, and the applyDiscount it calls
     // sees itself already owned.
     lose_gold(rs, static_cast<int32_t>(slot.price), /*in_shop=*/true);
     slot.sold = 1;
-    (void)acquire_relic(rs, misc_rng, id);
+    if (equip_ctx != nullptr) {
+        (void)acquire_relic(rs, misc_rng, id, *equip_ctx);
+    } else {
+        (void)acquire_relic(rs, misc_rng, id);
+    }
     if (id == RelicId::MEMBERSHIP_CARD) {
         apply_price_discount(shop, 0.5f);
         shop.actual_purge_cost = static_cast<int16_t>(
@@ -504,6 +521,18 @@ bool shop_buy_relic(RunState& rs, RngStream& misc_rng, ShopState& shop,
         shop.actual_purge_cost = kSmilingMaskPurgeCost;
     }
     return true;
+}
+
+}  // namespace
+
+bool shop_buy_relic(RunState& rs, RngStream& misc_rng, ShopState& shop,
+                    uint8_t index) noexcept {
+    return shop_buy_relic_impl(rs, misc_rng, shop, index, nullptr);
+}
+
+bool shop_buy_relic(RunState& rs, RngStream& misc_rng, ShopState& shop,
+                    uint8_t index, RelicEquipContext& equip_ctx) noexcept {
+    return shop_buy_relic_impl(rs, misc_rng, shop, index, &equip_ctx);
 }
 
 bool shop_potion_slot_available(const RunState& rs) noexcept {
@@ -559,9 +588,13 @@ bool shop_purge_legal(const RunState& rs, const ShopState& shop) noexcept {
     }
     // gridSelectScreen.open over getGroupWithoutBottledCards(getPurgeableCards())
     // (:973): an empty grid has nothing to confirm, so the service is dead even
-    // though the game would still open the screen.
+    // though the game would still open the screen. The bottled exclusion is
+    // part of that filter, so a deck whose only purgeable cards are bottled
+    // has no purge service either (the sim's grids have no cancel button; an
+    // openable-but-empty grid would be a dead end, and the state outcome of
+    // open-then-cancel is identical to never opening).
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
-        if (rest_card_purgeable(rs.master_deck[i])) {
+        if (master_card_purgeable_unbottled(rs.master_deck[i])) {
             return true;
         }
     }
@@ -570,8 +603,10 @@ bool shop_purge_legal(const RunState& rs, const ShopState& shop) noexcept {
 
 bool shop_purge_card_legal(const RunState& rs, const ShopState& shop,
                            uint16_t deck_index) noexcept {
+    // The grid row filter is the same getGroupWithoutBottledCards pass the
+    // service gate above cites (ShopScreen.java:973).
     return shop_purge_legal(rs, shop) && deck_index < rs.master_deck_count &&
-           rest_card_purgeable(rs.master_deck[deck_index]);
+           master_card_purgeable_unbottled(rs.master_deck[deck_index]);
 }
 
 bool shop_purge_card(RunState& rs, ShopState& shop,
@@ -603,17 +638,13 @@ void dispatch_just_entered_room_relics(RunState& rs, bool in_shop) noexcept {
         if (rs.relics[i].relic_id != static_cast<uint16_t>(RelicId::MEAL_TICKET)) {
             continue;
         }
-        // AbstractCreature.heal (AbstractCreature.java:386-418): the
-        // onPlayerHeal fan-out then a clamp to max HP. Magic Flower is the only
-        // S1 override and its body is gated on RoomPhase.COMBAT
-        // (MagicFlower.java:31-37), so out here it returns the amount
-        // unchanged; the fan-out is therefore identity and is named rather than
-        // written, exactly as rest_apply_heal names it.
-        int hp = static_cast<int>(rs.hp) + kMealTicketHeal;
-        if (hp > rs.max_hp) {
-            hp = rs.max_hp;
-        }
-        rs.hp = static_cast<int16_t>(hp);
+        // AbstractCreature.heal (AbstractCreature.java:386-418) through the
+        // shared out-of-combat door, which owns the derivation of why both
+        // fan-outs (onPlayerHeal, powers' onHeal) are identity out here --
+        // Wave-C integration consolidated the three hand-spelled copies of
+        // this clamp (this one, rest_apply_heal, heal_out_of_combat) into the
+        // one door.
+        heal_out_of_combat(rs, kMealTicketHeal);
     }
 }
 

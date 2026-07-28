@@ -17,6 +17,8 @@
 #include "sts/engine/piles.hpp"   // reset_cost_for_turn (end-turn sweep)
 #include "sts/engine/power_hooks.hpp"  // start/end-of-turn power dispatch
 #include "sts/engine/relic_hooks.hpp"  // start/end-of-turn relic dispatch
+#include "sts/registry/manifest.hpp"   // generated kRelicsCount
+#include "sts/registry/monster_table.hpp"  // monster_def, MonsterDef::is_boss
 
 namespace sts::engine {
 
@@ -25,6 +27,101 @@ namespace sts::engine {
 // actually draws when popped. Kept in lockstep here.
 static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
               "start-of-turn DrawCard opcode must match interp.hpp Opcode::DRAW");
+
+// --- energyMaster / masterHandSize (see the derivation note in the header) ---
+
+bool combat_is_elite_or_boss(const CombatState& s) noexcept {
+    // SlaversCollar.beforeEnergyPrep (SlaversCollar.java:47-51):
+    //     boolean isEliteOrBoss = getCurrRoom().eliteTrigger;
+    //     for (m : getMonsters().monsters) if (m.type == EnemyType.BOSS) isEliteOrBoss = true;
+    // The loop has no liveness gate -- it walks the whole monster GROUP, and it
+    // runs in preBattlePrep, before anything can have died anyway.
+    if (combat_is_elite_room(s.flags)) {
+        return true;
+    }
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        const auto* def = sts::registry::monster_def(
+            static_cast<MonsterId>(s.monsters[i].monster_id));
+        if (def != nullptr && def->is_boss()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+int16_t energy_master(const CombatState& s) noexcept {
+    // The COMPLETE set of energyMaster writers in the game, from
+    // `grep -rn energyMaster com/`: these ten relics' onEquip (one `++` each,
+    // one matching `--` in onUnequip), SlaversCollar.beforeEnergyPrep (the
+    // conditional per-combat `++` handled below), and VoidEssence, an Act-4
+    // blight with no S1 row.
+    //
+    // This is a deliberate SUBSET switch over the relic table, so it carries a
+    // row-count pin rather than the link-error property the generated dispatch
+    // surfaces have (relic_pools.cpp:18-30 states that distinction).
+    static_assert(sts::registry::manifest::kRelicsCount == 142,
+                  "new relic: does its onEquip touch "
+                  "AbstractDungeon.player.energy.energyMaster? Only the ten "
+                  "listed below do today, plus Slaver's Collar's conditional "
+                  "per-combat increment. If the new one does, it belongs in "
+                  "this switch.");
+    int32_t master = kIroncladBaseEnergy;
+    // Per SLOT, not per distinct id: the Java increment is per relic instance,
+    // and the mirror preserves duplicates.
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        switch (static_cast<RelicId>(s.relics[i].relic_id)) {
+            case RelicId::FUSION_HAMMER:        // FusionHammer.java:47-49
+            case RelicId::VELVET_CHOKER:        // VelvetChoker.java:48-50
+            case RelicId::RUNIC_DOME:           // RunicDome.java:45-47
+            case RelicId::CURSED_KEY:           // CursedKey.java:68-70
+            case RelicId::BUSTED_CROWN:         // BustedCrown.java:46-48
+            case RelicId::ECTOPLASM:            // Ectoplasm.java:45-47
+            case RelicId::SOZU:                 // Sozu.java:45-47
+            case RelicId::PHILOSOPHERS_STONE:   // PhilosopherStone.java:57-59
+            case RelicId::COFFEE_DRIPPER:       // CoffeeDripper.java:47-49
+            case RelicId::MARK_OF_PAIN:         // MarkOfPain.java:38-40
+                ++master;
+                break;
+            case RelicId::SLAVERS_COLLAR:
+                // SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57),
+                // called BY NAME from AbstractPlayer.preBattlePrep
+                // (AbstractPlayer.java:1589-1590) -- between
+                // drawPile.initializeDeck (:1583) and energy.prep() (:1591), so
+                // the increment is in force for the whole combat including its
+                // first recharge. Not an atPreBattle hook, and deliberately not
+                // modelled as one.
+                //
+                // Balanced against onVictory by construction rather than by
+                // stored state -- the derivation note in action_queue.hpp spells
+                // out why the delta between combats is provably 0.
+                if (combat_is_elite_or_boss(s)) {
+                    ++master;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    return static_cast<int16_t>(master);
+}
+
+int32_t game_hand_size(const CombatState& s) noexcept {
+    // The complete set of masterHandSize writers that are S1 registry rows:
+    // Snecko Eye alone (SneckoEye.java:29-32). The only other writers in the
+    // game are the in-combat DrawPower / DrawReductionPower (DrawPower.java:38,
+    // :43; DrawReductionPower.java:37, :51), which write gameHandSize -- the
+    // per-combat snapshot -- not the master, and neither has a registry row.
+    static_assert(sts::registry::manifest::kRelicsCount == 142,
+                  "new relic: does its onEquip touch "
+                  "AbstractPlayer.masterHandSize? Only Snecko Eye does today.");
+    int32_t hand = kStartOfTurnDrawCount;
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        if (s.relics[i].relic_id == static_cast<uint16_t>(RelicId::SNECKO_EYE)) {
+            hand += 2;  // SneckoEye.HAND_MODIFICATION (SneckoEye.java:18)
+        }
+    }
+    return hand;
+}
 
 namespace {
 
@@ -236,7 +333,12 @@ void queue_start_of_turn_draw(CombatState& s) noexcept {
     draw.opcode = kOpcodeDrawCard;
     draw.src = kActorPlayer;
     draw.tgt = kActorPlayer;
-    draw.amount = kStartOfTurnDrawCount;
+    // gameHandSize, not the bare base: Snecko Eye's onEquip adds 2 to
+    // masterHandSize (SneckoEye.java:29-32), which preBattlePrep copies into
+    // gameHandSize (AbstractPlayer.java:1579) and BOTH draw sites then read --
+    // turn 1 at AbstractRoom.java:242 and turn N at GameActionManager.java:361.
+    // Deriving it in this shared helper is what keeps the two sites identical.
+    draw.amount = game_hand_size(s);
     draw.flags = 0;
     add_to_bottom(s, draw);
 }
@@ -342,16 +444,23 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // = EnergyPanel.addEnergy (AbstractPlayer.java:1555-1558) with NO Ice Cream
     // test -- an add onto a panel EnergyManager.prep() has just zeroed
     // (EnergyManager.java:21-24), i.e. exactly the plain SET below.
+    //
+    // BOTH branches use energy_master(s), not the bare constant, and that is not
+    // symmetry for its own sake: Ice Cream's ADD is `EnergyPanel.addEnergy(
+    // this.energy)` (EnergyManager.java:31), and `this.energy` is the value
+    // prep() copied out of energyMaster -- so Fusion Hammer + Ice Cream carries
+    // +4 per turn, not +3. The turn-1 route reaches the master too, by the
+    // different path traced above (AbstractRoom.java:240).
+    const int32_t master = energy_master(s);
     if (when == TurnStart::kSubsequentTurn &&
         player_has_relic(s, RelicId::ICE_CREAM)) {
-        int32_t charged =
-            static_cast<int32_t>(s.player_energy) + kIroncladBaseEnergy;
+        int32_t charged = static_cast<int32_t>(s.player_energy) + master;
         if (charged > 999) {
             charged = 999;
         }
         s.player_energy = static_cast<int16_t>(charged);
     } else {
-        s.player_energy = kIroncladBaseEnergy;
+        s.player_energy = static_cast<int16_t>(master);
     }
     // NOTE: monster_attacks_queued is deliberately NOT reset here -- it is
     // cleared at the end-turn sentinel instead (see action_queue.hpp note (2)).
@@ -411,7 +520,8 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     // only enqueues a well-formed item here; the DRAW opcode does the drawing
     // when it is popped. kSubsequentTurn ONLY: the combat-start block queued its
     // draw at the TOP of this function (AbstractRoom.java:242 -- before the
-    // relic hooks), so queueing here again would draw twice.
+    // relic hooks), so queueing here again would draw twice. Both sites draw
+    // game_hand_size(s) -- the Snecko-enlarged field -- via the shared helper.
     if (when == TurnStart::kSubsequentTurn) {
         queue_start_of_turn_draw(s);
     }

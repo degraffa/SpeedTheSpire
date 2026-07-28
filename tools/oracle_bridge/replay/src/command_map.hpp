@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/run_deck.hpp"  // MasterBottleKind (the bottle overlay)
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
@@ -41,6 +42,7 @@ using sts::engine::kEventOptionCap;
 using sts::engine::kMasterDeckCap;
 using sts::engine::legal_actions;
 using sts::engine::make_action;
+using sts::engine::MasterBottleKind;
 using sts::engine::NeowScreen;
 using sts::engine::RelicId;
 using sts::engine::RestScreen;
@@ -219,12 +221,26 @@ struct GridSession {
 // getUpgradableCards additionally drops the already-upgraded) and indexes that
 // list; the run layer addresses the stable master-deck index and publishes
 // which of those are legal, so row i is "the i-th legal master-deck index".
+//
+// ONE ordering exception: a Bottled trio grid (the pending-bottle overlay,
+// RunController.pending_bottle) is built by getCardsOfType, whose addToBottom
+// is a PREPEND (CardGroup.java:1052-1058 -> :459-461), so the game's grid rows
+// run in REVERSE master-deck order -- unlike getPurgeableCards, whose plain
+// `group.add(c)` (CardGroup.java:978-985) keeps deck order. The session
+// snapshots the legal indices DESCENDING for that grid so "the game's row i"
+// still maps positionally.
 inline void open_grid_session(const RunController& rc, GridSession& g) {
     g.open = true;
     g.filtered.clear();
     g.pending.clear();
     RunActionMask m{};
     legal_actions(rc, m);
+    if (rc.pending_bottle !=
+        static_cast<uint8_t>(MasterBottleKind::NONE)) {
+        for (int i = kMasterDeckCap - 1; i >= 0; --i)
+            if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
+        return;
+    }
     for (int i = 0; i < kMasterDeckCap; ++i)
         if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
 }
@@ -233,6 +249,12 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 // gates it behind its own sub-screen field, so this is the disjunction of those
 // -- the run-layer analogue of "GridCardSelectScreen is up".
 [[nodiscard]] inline bool sim_grid_open(const RunController& rc) noexcept {
+    // The pending-bottle overlay is a master-deck grid over ANY phase (the
+    // bottle was claimed on a reward screen or bought in a shop; the game
+    // parks the room INCOMPLETE under the gridSelectScreen).
+    if (rc.pending_bottle != static_cast<uint8_t>(MasterBottleKind::NONE)) {
+        return true;
+    }
     switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW:
             return rc.neow.screen == static_cast<uint8_t>(NeowScreen::GRID);
@@ -250,20 +272,27 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
     }
 }
 
-// The five relics whose `onEquip` the engine defers WHOLE
-// (src/engine/relics/relic_pickup_boss.cpp, "the DEFERRED run-layer bodies").
-// Each is an explicit empty body carrying its citation, so a deferred override
-// cannot be told from an implemented one through `relic_on_equip_fn` -- it maps
-// to a real function pointer either way, by design. Naming them here is
-// therefore a list and not a lookup; it is short, it is pinned by
-// `replay_command_map_test`, and the alternative is the misattribution below.
+// The relics whose `onEquip` the engine defers WHOLE. Re-derived at the Wave-C
+// integration: the five BOSS bodies this list used to name (Pandora's Box,
+// Tiny House, Astrolabe, Empty Cage, Calling Bell) are LIVE on the
+// `on_equip_screen` surface (relic_pickup_boss.cpp) -- the sim opens their
+// grids itself, so naming them here would repeat the misattribution this
+// function exists to prevent, one build later. What remains deferred whole
+// (registry/relics.yaml provenance, each row re-read): DOLLYS_MIRROR (the only
+// one whose deferred onEquip is itself a master-deck grid, DollysMirror.java:
+// 33-43), and ORRERY / CAULDRON (reward-screen assembly, Orrery.java:1270-1276
+// / Cauldron.java:1075-1092 -- no grid of their own, but a capture that drives
+// their unmodelled reward screens desyncs and can surface here, so ruling them
+// "modelled" would be false). A deferred surface cannot be told from an
+// implemented one through `relic_on_equip_fn` -- it maps to a real function
+// pointer either way, by design. Naming them here is therefore a list and not
+// a lookup; it is short, it is pinned by `replay_command_map_test`, and the
+// alternative is the misattribution below.
 [[nodiscard]] inline bool relic_on_equip_deferred(RelicId id) noexcept {
     switch (id) {
-        case RelicId::PANDORAS_BOX:
-        case RelicId::TINY_HOUSE:
-        case RelicId::ASTROLABE:
-        case RelicId::EMPTY_CAGE:
-        case RelicId::CALLING_BELL:
+        case RelicId::ORRERY:
+        case RelicId::DOLLYS_MIRROR:
+        case RelicId::CAULDRON:
             return true;
         default:
             return false;
@@ -335,8 +364,9 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
         return where + ": no deferred relic onEquip explains it -- the sim's "
                        "most recent relic is " +
                who +
-               ", whose onEquip is modelled, so the two sides are on different "
-               "screens (read the `first divergence:` line, not this stop)";
+               ", whose onEquip is modelled, so the sim diverged from the "
+               "capture before this grid (read the `first divergence:` line, "
+               "not this stop)";
     }
     return where +
            ": no relic onEquip can be pending in that phase, so the two sides "
