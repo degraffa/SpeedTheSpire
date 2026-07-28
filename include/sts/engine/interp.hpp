@@ -1334,6 +1334,47 @@ enum class DamageType : uint8_t {
     return static_cast<DamageType>(static_cast<uint8_t>(flags & 0xFFu));
 }
 
+// --- DAMAGE pure-matrix / null-source bits (flags bits 8..9) -----------------
+// Two INDEPENDENT properties the DamageType byte cannot carry, split exactly
+// as the Java splits them:
+//   * kDamagePure -- DamageInfo.createDamageMatrix(amount, /*isPureDamage=*/
+//     true) (DamageInfo.java:126-136) never calls info.applyPowers, so the
+//     landed number is the raw base: no attacker atDamageGive (Strength/Weak),
+//     no target atDamageReceive (Vulnerable), no stance, no final passes.
+//     op_damage skips compute_damage entirely for a pure item -- no float op
+//     runs at all, so the FP contract for the surviving (non-pure) paths is
+//     untouched.
+//   * kDamageNullSource -- the DamageInfo was built with a NULL owner
+//     (DamageAllEnemiesAction(null, ...), ExplosivePotion.java:52). The
+//     victim's onAttacked loop still RUNS in the game (AbstractPlayer.damage:
+//     1425-1426 / AbstractMonster.damage:667 iterate unconditionally); it is
+//     each power BODY's `info.owner != null` gate that fails (CurlUpPower.
+//     java:38, ThornsPower.java:52, FlameBarrierPower.java:54, AngryPower.
+//     java:36), so op_damage still dispatches ON_ATTACKED and the bodies read
+//     HookContext::source_null -- a future owner-INsensitive body fires,
+//     exactly as it would in the game. Relic sites whose Java gate includes an
+//     owner test (Boot's `info.owner == player` call site, Torii.java:32's
+//     `info.owner != null`) test the bit directly in op_damage's helpers.
+// They are orthogonal because the game combines them freely: Explosive Potion
+// is pure + null-source NORMAL; Panache/The Bomb are pure matrices with a
+// REAL owner (typed THORNS at their call sites); Fire Potion's THORNS item
+// keeps a real owner and needs neither bit.
+// Bits 8..9 were claimed from the free bits 8+ by the wave2-engine track; no
+// other DAMAGE-item flag bits are allocated above the DamageType byte.
+inline constexpr uint32_t kDamagePure = 1u << 8;
+inline constexpr uint32_t kDamageNullSource = 1u << 9;
+[[nodiscard]] constexpr bool damage_is_pure(uint32_t flags) noexcept {
+    return (flags & kDamagePure) != 0u;
+}
+[[nodiscard]] constexpr bool damage_source_is_null(uint32_t flags) noexcept {
+    return (flags & kDamageNullSource) != 0u;
+}
+[[nodiscard]] constexpr uint32_t make_damage_flags(DamageType t, bool pure,
+                                                   bool null_source) noexcept {
+    return make_damage_flags(t) | (pure ? kDamagePure : 0u) |
+           (null_source ? kDamageNullSource : 0u);
+}
+
 // --- BLOCK opcode: skip the owner's block-modifier powers (Dexterity) --------
 // DexterityPower.modifyBlock (+amount, floor 0) is applied by AbstractCard.
 // applyPowers, so ONLY card block gets Dexterity; a power/relic/potion block calls

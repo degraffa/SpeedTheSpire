@@ -124,24 +124,26 @@
   game_id: "Explosive Potion"
   rarity: COMMON
   potency: 10
-  # THORNS is a DELIBERATE MODEL SUBSTITUTION, not the Java's literal type. The
-  # game's action is DamageAllEnemiesAction(null, createDamageMatrix(potency,
+  # The FAITHFUL shape, replacing the old THORNS model substitution. The game's
+  # action is DamageAllEnemiesAction(null, createDamageMatrix(potency,
   # /*isPureDamage=*/true), NORMAL, NONE): the PURE matrix skips
   # info.applyPowers (DamageInfo.java:126-134; no player Strength/Weak, no
-  # target Vulnerable), and the NULL source fails every registered onAttacked
-  # power's `info.owner != null` gate (CurlUpPower.java:38; Thorns /
-  # Flame Barrier / Angry carry the same gate), so nothing triggers. In this
-  # engine THORNS means exactly skip-applyPowers + skip-onAttacked
-  # (interp_damage.cpp op_damage), which coincides bit-for-bit with
-  # pure+null-source-NORMAL for the entire currently-registered content set.
-  # The limit of the coincidence -- an owner-INsensitive onAttacked power (e.g.
-  # Act-2 Malleable) -- is a ledger Deferred-obligations row; the faithful fix
-  # there is a pure-damage flag bit + null-source sentinel in the DAMAGE flags
-  # word. Typing pins: Potions.ExplosivePotionIgnoresTargetVulnerable /
-  # IgnoresPlayerStrength / DoesNotTriggerCurlUp.
+  # target Vulnerable) -- `pure: true`, kDamagePure -- and the NULL source
+  # fails every registered onAttacked power's `info.owner != null` gate
+  # (CurlUpPower.java:38; Thorns :52 / Flame Barrier :54 / Angry :36 carry the
+  # same gate) -- `null_source: true`, kDamageNullSource. The dispatch itself
+  # still RUNS (the game's power loop is unconditional), so an
+  # owner-INsensitive onAttacked body would fire, exactly as in the game.
+  # NOTE the substitution's limit was narrower than the old comment claimed:
+  # Act-2 Malleable IS owner-gated (MalleablePower.java:64), and a whole-tree
+  # sweep of the live onAttacked overriders found none that distinguishes the
+  # two models -- the retype is exactness, not a live fix. Typing pins:
+  # Potions.ExplosivePotionIgnoresTargetVulnerable / IgnoresPlayerStrength /
+  # DoesNotTriggerCurlUp / ExplosivePotionStepIsPureNullSourceNormal, and the
+  # DamagePure.* model tests (damage_pipeline_test.cpp).
   effects:
-    - {op: DAMAGE, target: ALL_ENEMY, amount: 10, damage_type: THORNS}
-  provenance: "ExplosivePotion.use (ExplosivePotion.java:52), getPotency (:56) -- DamageAllEnemiesAction(null, createDamageMatrix(potency, true), NORMAL): pure matrix + null source, modelled as THORNS"
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 10, pure: true, null_source: true}
+  provenance: "ExplosivePotion.use (ExplosivePotion.java:52), getPotency (:56) -- DamageAllEnemiesAction(null, createDamageMatrix(potency, true), NORMAL): pure + null-source NORMAL matrix"
 
 - id: 8
   name: FIRE_POTION
@@ -167,9 +169,18 @@
   # atDamageFinalReceive overriders in the tree are Flight, Forcefield and the
   # two Intangibles, none reachable in Act 1 Exordium -- whoever lands the first
   # Act-2 atDamageFinalReceive power owns reproducing it, and until then THORNS
-  # typing gives the identical answer.
+  # typing gives the identical answer. The DAMAGE flags word now carries the
+  # pure-matrix bits (kDamagePure/kDamageNullSource, interp.hpp) the ledger row
+  # named as this quirk's future home -- but Fire Potion deliberately sets
+  # NEITHER: its DamageInfo has a REAL owner (the player), and
+  # applyEnemyPowersOnly is not the pure skip -- it DOES consult the target's
+  # receive hooks (with the quirk above) at USE time. Its exact S1 semantics
+  # are already what plain THORNS typing lands (flat potency); the future
+  # Act-2 owner should model the quirk as a use-time precompute, not by
+  # setting `pure` here.
   # Explosive Potion (id 7) is correctly NORMAL and must NOT be swept along:
-  # ExplosivePotion.java:46 passes DamageType.NORMAL to DamageAllEnemiesAction.
+  # ExplosivePotion.java:52 passes DamageType.NORMAL to DamageAllEnemiesAction
+  # (the `:46` this line cited before was the use() signature).
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 20, damage_type: THORNS}
   provenance: "FirePotion.use (FirePotion.java:43), getPotency (:50) -- DamageAction THORNS applyEnemyPowersOnly, potency"

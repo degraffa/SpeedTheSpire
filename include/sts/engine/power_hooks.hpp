@@ -118,6 +118,16 @@ struct HookContext {
                                          // it (no decrement on THORNS/HP_LOSS). Transient
                                          // dispatch field -- NOT part of any serialized
                                          // struct, so no fixture impact.
+    bool source_null = false;            // for on_attacked / was_hp_lost: the incoming
+                                         // DamageInfo had a NULL owner (interp.hpp
+                                         // kDamageNullSource -- Explosive Potion's
+                                         // matrix). `source` still reads the queue
+                                         // slot's src byte (there is no null actor
+                                         // encoding), so a body's Java-side
+                                         // `info.owner != null` gate tests THIS field
+                                         // (CurlUpPower.java:38 and siblings).
+                                         // Transient dispatch field -- NOT part of any
+                                         // serialized struct, so no fixture impact.
 };
 
 // --- Card-play fan-outs (distinct source orders) ----------------------------
@@ -196,18 +206,24 @@ void dispatch_on_gained_block(CombatState& state, uint8_t actor,
 // `attacker`, AFTER block absorption and REGARDLESS of whether damage penetrated
 // (`amount` is the post-block damage). Thorns reflects THORNS damage to the
 // attacker here. op_damage dispatches this only for NORMAL src != tgt damage
-// (THORNS/HP_LOSS never trigger it -- no thorns-vs-thorns loop). No-op unless a
-// power binds ON_ATTACKED.
+// (THORNS/HP_LOSS never trigger it -- no thorns-vs-thorns loop), but it DOES
+// dispatch a null-source NORMAL hit (Explosive Potion's matrix): the game's
+// loop runs unconditionally and each body's `info.owner != null` gate is what
+// fails, via `source_null` (-> HookContext::source_null). No-op unless a power
+// binds ON_ATTACKED.
 void dispatch_on_attacked(CombatState& state, uint8_t victim, uint8_t attacker,
-                          int32_t amount) noexcept;
+                          int32_t amount, bool source_null = false) noexcept;
 
 // wasHPLost: the victim's powers, after an HP write of `amount` (>0). `source` is
 // the actor that caused the loss (self for LOSE_HP / a card; the attacker for
 // unblocked DAMAGE). `damage_type` is the incoming DamageInfo.DamageType (interp.hpp
 // DamageType; 0 == NORMAL, default). Rupture's guard fires only when `source ==
-// victim`; Plated Armor's fires only for a NORMAL attack from a distinct attacker.
+// victim`; Plated Armor's fires only for a NORMAL attack from a distinct attacker
+// with a NON-NULL owner (PlatedArmorPower.java:58), which is what `source_null`
+// carries (-> HookContext::source_null).
 void dispatch_was_hp_lost(CombatState& state, uint8_t victim, uint8_t source,
-                          int32_t amount, uint8_t damage_type = 0) noexcept;
+                          int32_t amount, uint8_t damage_type = 0,
+                          bool source_null = false) noexcept;
 
 // onDeath (AbstractMonster.die: `if (currentHealth <= 0 && triggerRelics) for
 // (AbstractPower p : this.powers) p.onDeath();`, AbstractMonster.java:928-932):

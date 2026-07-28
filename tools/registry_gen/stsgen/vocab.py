@@ -400,6 +400,20 @@ CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3, "POWER": 4}
 # player's own Strength/Vulnerable do NOT scale the self-damage (but block still
 # absorbs it, unlike LOSE_HP). MIRROR of interp.hpp make_damage_flags.
 DAMAGE_TYPES = {"NORMAL": 0, "THORNS": 1, "HP_LOSS": 2}
+# DAMAGE `flags` bits 8..9 (interp.hpp kDamagePure / kDamageNullSource). Two
+# independent step keys, MIRRORS of the C++ constants:
+#   pure: true        -- DamageInfo.createDamageMatrix(amount, true) (DamageInfo.
+#                        java:126-136): applyPowers never runs, the landed number
+#                        is the raw base whatever the DamageType.
+#   null_source: true -- the DamageInfo was built with a NULL owner
+#                        (DamageAllEnemiesAction(null, ...), ExplosivePotion.
+#                        java:52): every body-level `info.owner != null` gate
+#                        (onAttacked powers, Boot's call site, Torii, Plated
+#                        Armor's wasHPLost) fails.
+# Explosive Potion authors both on one NORMAL step; Panache/The Bomb's matrices
+# are pure with a REAL owner but are native bodies, not YAML steps.
+DAMAGE_PURE_BIT = 1 << 8
+DAMAGE_NULL_SOURCE_BIT = 1 << 9
 # CardTrigger (cards.hpp CardTrigger): WHEN a card's effect program runs. Default
 # ON_PLAY (the played-card path, every ATTACK/SKILL + playable Slimed). The
 # unplayable statuses/curses instead run their `effects` program at a passive

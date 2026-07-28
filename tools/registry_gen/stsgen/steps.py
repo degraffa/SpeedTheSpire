@@ -27,6 +27,7 @@ from .vocab import (APPLY_POWER_COUNTER_SHIFT,
                     CHOICE_KIND_HIGH_BIT2, CHOICE_KINDS, CHOICE_OPTIONAL_BIT,
                     CHOICE_QUEUE_GUARD_HAND_NONEMPTY_BIT, CHOICE_RANDOM_BIT,
                     CHOICE_TYPE_FILTER_SHIFT, COLORLESS_TO_HAND_FLAGS,
+                    DAMAGE_NULL_SOURCE_BIT, DAMAGE_PURE_BIT,
                     DAMAGE_TYPES, OPCODES, PLAY_CARD_FLAGS, STEP_TARGETS, fail)
 
 # --- Op capability groups ----------------------------------------------------
@@ -261,19 +262,29 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
         return extra | ((counter & 0xFFFF) << APPLY_POWER_COUNTER_SHIFT)
 
     if op == "DAMAGE":
-        # `extra` = the DamageType (interp.hpp make_damage_flags). Default
-        # NORMAL (0) keeps every existing DAMAGE step byte-identical; a
+        # `extra` low byte = the DamageType (interp.hpp make_damage_flags).
+        # Default NORMAL (0) keeps every existing DAMAGE step byte-identical; a
         # status/curse self-hit sets THORNS (Burn/Decay) so it skips the
         # NORMAL-only power pipeline (no self Strength/Vulnerable scaling). A
         # relic's DamageAllEnemies hit is THORNS the same way (Mercury Hourglass
         # -- createDamageMatrix(n, true) + DamageType.THORNS,
         # MercuryHourglass.java:37).
+        # Bits 8..9: `pure` / `null_source` (interp.hpp kDamagePure /
+        # kDamageNullSource -- see vocab.py's bit comment). Explosive Potion's
+        # matrix is the faithful shape both exist for: pure + null_source on a
+        # NORMAL step (ExplosivePotion.java:52). Both default off, keeping
+        # every pre-existing step byte-identical.
         dt = str(step.get("damage_type", "NORMAL")).upper()
         if dt not in DAMAGE_TYPES:
             raise fail(f"{owner} DAMAGE has unknown damage_type "
                        f"{step.get('damage_type')!r} "
                        f"(known: {sorted(DAMAGE_TYPES)})")
-        return DAMAGE_TYPES[dt]
+        extra = DAMAGE_TYPES[dt]
+        if bool(step.get("pure", False)):
+            extra |= DAMAGE_PURE_BIT
+        if bool(step.get("null_source", False)):
+            extra |= DAMAGE_NULL_SOURCE_BIT
+        return extra
 
     if op == "CHOOSE_CARD":
         # `extra` packs the ChoiceKind + RANDOM bit (interp.hpp make_choose_flags).

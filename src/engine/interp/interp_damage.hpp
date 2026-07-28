@@ -13,10 +13,14 @@
 
 namespace sts::engine {
 
-// DAMAGE (see the definition for the full DamageInfo provenance).
+// DAMAGE (see the definition for the full DamageInfo provenance). `pure` is
+// the kDamagePure matrix bit (createDamageMatrix(amount, true): skip
+// applyPowers, DamageInfo.java:126-136); `source_null` is the kDamageNullSource
+// bit (a null-owner DamageInfo: the on-attacked/relic owner gates fail).
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                int strength_mult = 1,
-               DamageType type = DamageType::NORMAL) noexcept;
+               DamageType type = DamageType::NORMAL,
+               bool pure = false, bool source_null = false) noexcept;
 
 // LOSE_HP / LOSE_HP_PER_HAND.
 void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept;

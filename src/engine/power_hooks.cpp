@@ -302,17 +302,22 @@ void dispatch_on_gained_block(CombatState& s, uint8_t actor,
 }
 
 void dispatch_on_attacked(CombatState& s, uint8_t victim, uint8_t attacker,
-                          int32_t amount) noexcept {
+                          int32_t amount, bool source_null) noexcept {
     HookContext ctx{};
     ctx.source = attacker;
     ctx.amount = amount;
+    ctx.source_null = source_null;
     // The victim's powers onAttacked (Thorns). op_damage has already gated this to
-    // NORMAL damage from a distinct attacker, so no THORNS/HP_LOSS re-entry.
+    // NORMAL damage from a distinct attacker, so no THORNS/HP_LOSS re-entry. A
+    // null-source NORMAL hit (Explosive Potion's matrix) arrives here too --
+    // the `info.owner != null` gates live in the bodies, per the Java's
+    // unconditional loop.
     dispatch_actor_powers(s, victim, Hook::ON_ATTACKED, ctx);
 }
 
 void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
-                          int32_t amount, uint8_t damage_type) noexcept {
+                          int32_t amount, uint8_t damage_type,
+                          bool source_null) noexcept {
     if (amount <= 0) {
         return;  // damage:1438 gates the wasHPLost block on damageAmount > 0
     }
@@ -320,6 +325,7 @@ void dispatch_was_hp_lost(CombatState& s, uint8_t victim, uint8_t source,
     ctx.source = source;
     ctx.amount = amount;
     ctx.damage_type = damage_type;
+    ctx.source_null = source_null;
     dispatch_actor_powers(s, victim, Hook::WAS_HP_LOST, ctx);
     // AbstractPlayer.damage:1445-1449 -- powers' wasHPLost first, THEN the
     // player's relics' wasHPLost (acquisition order; no source/type guard at the

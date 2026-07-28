@@ -147,12 +147,12 @@ TEST(Potions, ExplosivePotionHitsAllEnemies) {
 // onAttacked power's `info.owner != null` gate (CurlUpPower.java:38 -- and
 // THORNS/FLAME_BARRIER/ANGRY carry the same gate), so nothing triggers.
 //
-// The registry row is DELIBERATELY typed THORNS: in this engine's model,
-// THORNS means exactly skip-applyPowers + skip-onAttacked (interp_damage.cpp
-// op_damage), which coincides bit-for-bit with the game's pure+null-source
-// NORMAL for the entire currently-registered content set. The substitution's
-// limit (an owner-INsensitive onAttacked power would break the coincidence)
-// is recorded on the row and in the ledger's Deferred obligations.
+// The registry row is now the FAITHFUL shape itself: a NORMAL step carrying
+// kDamagePure + kDamageNullSource (interp.hpp bits 8..9). op_damage skips the
+// modifier pipeline for the pure bit and still dispatches ON_ATTACKED for the
+// null-source bit -- the `info.owner != null` gates live in the power bodies,
+// as in the Java. (The old THORNS stand-in coincided with this for every
+// registered power; the DamagePure.* tests pin where the models part ways.)
 
 // NEGATIVE CONTROL baked into the expectation: NORMAL-typed (the row's state
 // before this change) this reads 50 - floor(10 * 1.5) = 35.
@@ -193,6 +193,24 @@ TEST(Potions, ExplosivePotionDoesNotTriggerCurlUp) {
         << "null-source hit must not trigger onAttacked (CurlUpPower.java:38)";
     EXPECT_EQ(monster_power_stack(s, 0, PowerId::CURL_UP), 10)
         << "Curl Up is not consumed by a null-source hit";
+}
+
+// The registry row is the faithful shape itself: a NORMAL-typed DAMAGE step
+// carrying kDamagePure (bit 8: createDamageMatrix(potency, true) skips
+// applyPowers, DamageInfo.java:126-134) and kDamageNullSource (bit 9:
+// DamageAllEnemiesAction(null, ...) -- the null owner fails every registered
+// onAttacked power's `info.owner != null` gate). The former THORNS stand-in
+// coincided with this behavior for the whole registered content set; the
+// DamagePure.* tests (damage_pipeline_test.cpp) pin where the two models
+// part ways.
+TEST(Potions, ExplosivePotionStepIsPureNullSourceNormal) {
+    const PotionDef* def = potion_def(PotionId::EXPLOSIVE_POTION);
+    ASSERT_NE(def, nullptr);
+    ASSERT_EQ(def->step_count, 1);
+    EXPECT_EQ(def->steps[0].extra, (1u << 8) | (1u << 9))
+        << "Explosive Potion must be the pure/null-source NORMAL matrix "
+           "(ExplosivePotion.java:52), not the THORNS stand-in";
+    EXPECT_EQ(def->steps[0].extra & 0xFFu, 0u) << "DamageType must be NORMAL";
 }
 
 TEST(Potions, FirePotionDamagesTarget) {

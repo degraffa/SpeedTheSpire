@@ -30,9 +30,12 @@ void power_native_plated_armor(CombatState& s, Hook hook,
     }
     if (hook == Hook::WAS_HP_LOST) {
         // Lose 1 stack on a real attack from a distinct creature; NOT on a
-        // THORNS / HP_LOSS / self loss (PlatedArmorPower.java:54-58). The
-        // ReducePowerAction removes the power at 0.
-        if (ctx.damage_type == static_cast<uint8_t>(DamageType::THORNS) ||
+        // THORNS / HP_LOSS / self / NULL-OWNER loss (`info.owner != null`,
+        // PlatedArmorPower.java:57-58 -- a null-source pure-matrix hit,
+        // kDamageNullSource, does not shed a stack). The ReducePowerAction
+        // removes the power at 0.
+        if (ctx.source_null ||
+            ctx.damage_type == static_cast<uint8_t>(DamageType::THORNS) ||
             ctx.damage_type == static_cast<uint8_t>(DamageType::HP_LOSS) ||
             ctx.source == ctx.owner || ctx.amount <= 0) {
             return;
