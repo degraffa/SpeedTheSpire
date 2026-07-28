@@ -926,6 +926,74 @@ TEST(Potions, DiscoverPotionSkipOnAColorlessScreenIsANoOp) {
     EXPECT_FALSE(m.can_skip_choice);
 }
 
+// --- NATIVE with body: Distilled Chaos (USE-time rolls + PLAY_CARD top) ------
+//
+// DistilledChaosPotion.use (DistilledChaosPotion.java:38-43):
+//     for (int i = 0; i < this.potency; ++i)
+//         this.addToBot(new PlayTopCardAction(
+//             AbstractDungeon.getCurrRoom().monsters.getRandomMonster(
+//                 null, true, AbstractDungeon.cardRandomRng), false));
+// getPotency (:46-48) is 3. NO new opcode: PlayTopCardAction is exactly
+// PLAY_CARD + kPlayCardFromDrawTop (op_play_card -- the both-piles-empty
+// no-op, the empty-draw reshuffle, top card to limbo, autoplay queue), the
+// body Mayhem already reuses. THE LOAD-BEARING DIFFERENCE from Mayhem:
+// getRandomMonster is a CONSTRUCTOR ARGUMENT, evaluated synchronously inside
+// use() -- all `potency` cardRandomRng target rolls are spent BEFORE any play
+// resolves -- so the body rolls at USE time and bakes each target into its
+// queued item (the power_magnetism USE-time-roll precedent), where Mayhem's
+// anonymous action defers its roll to queue-drain (kActorRandomEnemy).
+// Capture pin: every witnessed drink spends exactly 3 cardRandomRng draws by
+// the next record (STS01857 seq 20, STS02110 seq 31, STS01314 seq 49 and 69
+// -- identical in both g6 campaigns, counters 0 -> 3).
+
+TEST(Potions, DistilledChaosRollsAllTargetsAtUseTimeAndBakesThem) {
+    CombatState s = MakeCombat(3);
+    seed_draw_pile(s, 5);
+    s.card_random_rng = from_seed(9);
+
+    RngStream probe = from_seed(9);
+    uint8_t expected_tgt[3];
+    for (int i = 0; i < 3; ++i) {
+        // getRandomMonster(null, true, cardRandomRng): one draw over the LIVE
+        // monsters, [0, aliveCount-1] inclusive -- all three are alive here.
+        expected_tgt[i] = static_cast<uint8_t>(random(probe, 2));
+    }
+
+    ASSERT_TRUE(use_potion(s, PotionId::DISTILLED_CHAOS, 0));
+
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "all potency rolls are spent at USE time, before any play resolves";
+    ASSERT_EQ(s.action_count, 3);
+    for (int i = 0; i < 3; ++i) {
+        const ActionQueueItem& it =
+            s.action_queue[(s.action_head + i) % kActionQueueCap];
+        EXPECT_EQ(it.opcode, static_cast<uint16_t>(Opcode::PLAY_CARD)) << i;
+        EXPECT_EQ(it.flags & kPlayCardFromDrawTop, kPlayCardFromDrawTop) << i;
+        EXPECT_EQ(it.flags & kPlayCardExhaust, 0u)
+            << "exhausts = false -- the played card files normally";
+        EXPECT_EQ(it.tgt, expected_tgt[i])
+            << "target " << i << " baked at use, not deferred to execute";
+    }
+    EXPECT_EQ(potion_def(PotionId::DISTILLED_CHAOS)->potency, 3);
+}
+
+TEST(Potions, DistilledChaosPlaysTheTopThreeAndSpendsNothingMoreAtResolve) {
+    CombatState s = MakeCombat(2, /*monster_hp=*/60);
+    seed_draw_pile(s, 5);  // five STRIKEs
+    s.card_random_rng = from_seed(4);
+    ASSERT_TRUE(use_potion(s, PotionId::DISTILLED_CHAOS, 0));
+    const int32_t counter_after_use = s.card_random_rng.counter;
+
+    pump(s);
+
+    EXPECT_EQ(s.card_random_rng.counter, counter_after_use)
+        << "a STRIKE play spends no cardRandomRng -- the rolls were the use()'s";
+    EXPECT_EQ(s.draw_count, 2) << "three cards left the draw-pile top";
+    EXPECT_EQ(s.discard_count, 3) << "exhausts=false: the plays file normally";
+    const int dealt = (60 - s.monsters[0].hp) + (60 - s.monsters[1].hp);
+    EXPECT_EQ(dealt, 18) << "three autoplayed base STRIKEs landed (3 x 6)";
+}
+
 // --- NATIVE with body: Liquid Memories (ChoiceKind::DISCARD_TO_HAND_FREE) ----
 //
 // LiquidMemories.use (LiquidMemories.java:37-40) is one addToBot of
@@ -1441,18 +1509,18 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
                         PotionId::ELIXIR, PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::LIQUID_MEMORIES,
-                        PotionId::GAMBLERS_BREW, PotionId::FRUIT_JUICE,
+                        PotionId::GAMBLERS_BREW, PotionId::DISTILLED_CHAOS,
+                        PotionId::FRUIT_JUICE,
                         PotionId::ENTROPIC_BREW, PotionId::SMOKE_BOMB}) {
         EXPECT_TRUE(potion_use_implemented(id))
             << "native id " << static_cast<int>(id) << " has a body";
     }
-    // The card-CHOOSE group, recursive play, cost randomization, and the
-    // out-of-combat revive are all still deferred.
+    // DISTILLED_CHAOS left the deferred list: no "recursive play" opcode was
+    // ever needed -- PLAY_CARD + kPlayCardFromDrawTop IS PlayTopCardAction.
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::DISTILLED_CHAOS,
-                        PotionId::DUPLICATION_POTION,
+    for (PotionId id : {PotionId::DUPLICATION_POTION,
                         PotionId::FAIRY_POTION}) {
         EXPECT_FALSE(potion_use_implemented(id))
             << "deferred id " << static_cast<int>(id) << " must not be usable";

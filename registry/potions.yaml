@@ -404,9 +404,16 @@
   game_id: "DistilledChaos"
   rarity: UNCOMMON
   potency: 3
-  # Play the top `potency` cards of the draw pile -> recursive play (a later opcode, cf. B3.2 Double Tap deferral). Deferred native.
+  # Play the top `potency` cards of the draw pile, each at a monster rolled AT
+  # USE TIME. NO new opcode was ever needed: PlayTopCardAction is exactly
+  # PLAY_CARD + kPlayCardFromDrawTop (op_play_card -- the body Mayhem reuses).
+  # Native because the use() rolls getRandomMonster(null, true, cardRandomRng)
+  # as a CONSTRUCTOR ARGUMENT -- all `potency` target rolls are spent
+  # synchronously inside use(), before any play resolves -- and a data step's
+  # RANDOM_ENEMY target would defer the roll to execute time (one stream
+  # position later per play). Body: dispatch_native_potion (potions.cpp).
   native: true
-  provenance: "DistilledChaosPotion.use (DistilledChaosPotion.java:39), getPotency (:46) -- play top potency draw-pile cards"
+  provenance: "DistilledChaosPotion.use (DistilledChaosPotion.java:38-43), getPotency (:46-48) -- for i < potency: addToBot(PlayTopCardAction(monsters.getRandomMonster(null, true, cardRandomRng), false)); the getRandomMonster call is evaluated at use() time, per iteration, so the rolls precede every play"
 
 - id: 27
   name: LIQUID_MEMORIES

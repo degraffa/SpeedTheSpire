@@ -1886,8 +1886,9 @@ TEST(RunPotion, AFairyIsNeverAUsableAction) {
 
 TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
     RunController rc = enter_jaw_worm_combat();
-    for (PotionId id : {PotionId::DISTILLED_CHAOS,
-                        PotionId::DUPLICATION_POTION}) {
+    // DISTILLED_CHAOS left this list: PLAY_CARD + kPlayCardFromDrawTop was
+    // PlayTopCardAction all along, so its body landed with no new opcode.
+    for (PotionId id : {PotionId::DUPLICATION_POTION}) {
         rc.run.potions[0] = static_cast<uint16_t>(id);
         RunActionMask mask{};
         legal_actions(rc, mask);
@@ -1910,6 +1911,7 @@ TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
                         PotionId::COLORLESS_POTION,       // combat native (DISCOVERY)
                         PotionId::LIQUID_MEMORIES,        // combat native (CHOOSE)
                         PotionId::GAMBLERS_BREW,          // combat native (CHOOSE)
+                        PotionId::DISTILLED_CHAOS,        // combat native (PLAY_CARD top)
                         PotionId::SNECKO_OIL,             // data program (op 60)
                         PotionId::SMOKE_BOMB}) {          // run-layer native
         rc.run.potions[0] = static_cast<uint16_t>(id);
