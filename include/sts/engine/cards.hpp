@@ -162,10 +162,13 @@ using sts::registry::card_def;
 // --- Upgrade plumbing (two-row lookup by the `upgrade` bit) ------------------
 // The generated CardDef carries BOTH a base program (steps/step_count/base_cost/
 // flags) and an upgraded program (upgraded_steps/upgraded_step_count/
-// upgraded_cost/upgraded_flags). A card with no `upgraded:` block in the YAML
-// gets an upgraded program byte-identical to its base (so an upgraded instance
-// of an as-yet-un-upgraded card behaves like base -- safe default; the real
-// upgraded content is authored per-card). `upgrade` is a COUNT
+// upgraded_cost/upgraded_flags). Every row for a card the game can upgrade
+// (every type except STATUS/CURSE -- AbstractCard.canUpgrade,
+// AbstractCard.java:672-680) MUST author its `upgraded:` block; the generator
+// fails generation on a missing one (stsgen/emit/cards.py). Only STATUS/CURSE
+// rows may omit it, emitting upgraded == base -- a pair no campfire/Neow
+// upgrade can reach. (The old silent upgraded==base fallback for any row is
+// how the G6 §8.0 Strike+/Defend+ divergence shipped.) `upgrade` is a COUNT
 // (CardInstance.upgrade, u8): 0 == base, >0 == upgraded. (Infinitely-upgradeable
 // Searing Blow needs the count rather than a bit -- storage is already a u8
 // count, so it is covered.)

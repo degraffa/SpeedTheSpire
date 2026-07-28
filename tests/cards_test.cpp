@@ -189,6 +189,116 @@ TEST(CardTable, PommelStrikeDealsNineAndDrawsOne) {
     EXPECT_EQ(s.cards_played_this_turn, 1);
 }
 
+// --- Upgraded-program table tests (G6 campaign §8.0 regression) --------------
+//
+// Every expected value is hand-derived from the card's upgrade() in the
+// decompiled Java (read in full), never from the registry:
+//   Strike+        DAMAGE 9        upgradeDamage(3): 6+3   (Strike_Red.java:57-62)
+//   Defend+        BLOCK 8         upgradeBlock(3): 5+3    (Defend_Red.java:43-48)
+//   Bash+          DAMAGE 10,      upgradeDamage(2): 8+2 +
+//                  Vulnerable 3    upgradeMagicNumber(1): 2+1 (Bash.java:54-60)
+//   Shrug It Off+  BLOCK 11,       upgradeBlock(3): 8+3; draw stays a literal 1
+//                  DRAW 1          (ShrugItOff.java:43-48 touches only block)
+//   Pommel Strike+ DAMAGE 10,      upgradeDamage(1): 9+1 +
+//                  DRAW 2          upgradeMagicNumber(1): 1+1 (PommelStrike.java:44-52)
+// None of the five upgrades change cost or targeting (no upgradeBaseCost in any
+// of the five upgrade() bodies), which the energy assertions below re-check.
+
+CombatState MakeUpgradedCardTestState(CardId id, uint8_t cost) {
+    CombatState s = MakeCardTestState(id, cost);
+    s.card_pool[0].upgrade = 1;
+    return s;
+}
+
+TEST(CardTableUpgraded, StrikeUpgradedDealsNine) {
+    CombatState s = MakeUpgradedCardTestState(CardId::STRIKE, 1);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 9);       // DAMAGE 9, not base 6
+    EXPECT_EQ(s.player_energy, 3 - 1);         // cost unchanged by upgrade
+    ASSERT_EQ(s.discard_count, 1);
+    EXPECT_EQ(s.discard[0], 0);
+}
+
+TEST(CardTableUpgraded, DefendUpgradedGainsEightBlock) {
+    CombatState s = MakeUpgradedCardTestState(CardId::DEFEND, 1);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.player_block, 8);              // BLOCK 8, not base 5
+    EXPECT_EQ(s.monsters[0].hp, 50);
+    EXPECT_EQ(s.player_energy, 3 - 1);
+}
+
+TEST(CardTableUpgraded, BashUpgradedDealsTenAndAppliesVulnerableThree) {
+    CombatState s = MakeUpgradedCardTestState(CardId::BASH, 2);
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 10);      // DAMAGE 10, not base 8
+    ASSERT_EQ(s.monsters[0].power_count, 1);
+    EXPECT_EQ(s.monsters[0].powers[0].power_id,
+              static_cast<uint16_t>(PowerId::VULNERABLE));
+    EXPECT_EQ(s.monsters[0].powers[0].amount, 3);  // Vulnerable 3, not base 2
+    EXPECT_EQ(s.player_energy, 3 - 2);         // cost 2, unchanged by upgrade
+}
+
+TEST(CardTableUpgraded, ShrugItOffUpgradedGainsElevenBlockAndDrawsOne) {
+    CombatState s = MakeUpgradedCardTestState(CardId::SHRUG_IT_OFF, 1);
+    s.card_pool[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[1].cost_now = 1;
+    s.draw[0] = 1;
+    s.draw_count = 1;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.player_block, 11);             // BLOCK 11, not base 8
+    ASSERT_EQ(s.hand_count, 1);                // DRAW still exactly 1
+    EXPECT_EQ(s.hand[0], 1);
+    EXPECT_EQ(s.draw_count, 0);
+    EXPECT_EQ(s.player_energy, 3 - 1);
+}
+
+TEST(CardTableUpgraded, PommelStrikeUpgradedDealsTenAndDrawsTwo) {
+    CombatState s = MakeUpgradedCardTestState(CardId::POMMEL_STRIKE, 1);
+    s.card_pool[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[1].cost_now = 1;
+    s.card_pool[2].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    s.card_pool[2].cost_now = 1;
+    s.draw[0] = 1;
+    s.draw[1] = 2;
+    s.draw_count = 2;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 10);      // DAMAGE 10, not base 9
+    ASSERT_EQ(s.hand_count, 2);                // DRAW 2, not base 1
+    EXPECT_EQ(s.draw_count, 0);
+    EXPECT_EQ(s.player_energy, 3 - 1);
+}
+
+// The STS01068 live reproducer in miniature (G6 runbook §8.0): Strike+ into a
+// 3-HP monster holding 9 block under Vulnerable. 9 * 1.5 = 13 (floor), 9
+// blocked, 4 through -> dead. The base-program bug dealt 6 * 1.5 = 9, fully
+// blocked, and the monster survived at 3 HP -- desyncing the whole run.
+TEST(CardTableUpgraded, StrikeUpgradedIntoVulnerableBlockedTargetKills) {
+    CombatState s = MakeUpgradedCardTestState(CardId::STRIKE, 1);
+    s.monsters[0].hp = 3;
+    s.monsters[0].block = 9;
+    s.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::VULNERABLE);
+    s.monsters[0].powers[0].amount = 2;
+    s.monsters[0].power_count = 1;
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0) << "9 * 1.5 = 13; 9 blocked, 4 through, 3 HP dead";
+    EXPECT_EQ(s.monsters[0].block, 0);
+}
+
 TEST(CardTable, QueueCardPlayRejectsOutOfRangeHandIndex) {
     CombatState s = MakeCardTestState(CardId::STRIKE, 1);
     EXPECT_FALSE(queue_card_play(s, 5, 0));  // hand_count == 1
