@@ -56,6 +56,9 @@
 //   * SsserpentHead.onEnterRoom           SsserpentHead.java:29-35
 //   * MawBank.onEnterRoom                 MawBank.java:31-36
 //   * MawBank.setCounter (the -2 usedUp)  MawBank.java:47-53
+//   * EternalFeather.onEnterRoom          EternalFeather.java:29-35
+//   * RestRoom.onPlayerEntry              RestRoom.java:33-43
+//   * MagicFlower.onPlayerHeal            MagicFlower.java:30-37
 //   * DungeonMap boss-node transition     DungeonMap.java:77-87
 //   * AbstractPlayer.isCursed             AbstractPlayer.java:741-748
 //

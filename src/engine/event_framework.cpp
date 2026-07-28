@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 
-#include "relics/relic_pickup.hpp"    // gain_gold (Ectoplasm door)
+#include "relics/relic_pickup.hpp"    // gain_gold / heal_out_of_combat doors
 #include "sts/engine/card_pools.hpp"  // transform_card (the ONE transformCard list)
 #include "sts/engine/cards.hpp"       // card_def / CardType (isCursed)
 #include "sts/engine/relics.hpp"      // RelicId (Tiny Chest / Juzu Bracelet)
@@ -98,6 +98,30 @@ void dispatch_on_enter_room_relics(RunState& rs, RoomType room) noexcept {
                 // encoding dispatch_relics_on_spend_gold writes.
                 if (rs.relics[i].counter != -2) {
                     gain_gold(rs, 12);
+                }
+                break;
+            case RelicId::ETERNAL_FEATHER:
+                // `if (room instanceof RestRoom) { flash();
+                //    int amountToGain = player.masterDeck.size() / 5 * 3;
+                //    player.heal(amountToGain); }`
+                // (EternalFeather.java:29-35). INTEGER DIVISION FIRST, then x3:
+                // a 14-card deck heals 6, not 8.
+                //
+                // This is the room ENTRY, not the campfire. RestRoom's own
+                // onPlayerEntry -- which builds the CampfireUI and fires
+                // onEnterRestRoom (RestRoom.java:33-43) -- runs later, at
+                // AbstractDungeon.java:1800. So the heal lands before the menu
+                // exists and whether or not the player then rests, and it is
+                // NOT rest_apply_heal (which is the REST option's body).
+                //
+                // Magic Flower cannot scale it: MagicFlower.onPlayerHeal
+                // (MagicFlower.java:30-37) is gated on
+                // `getCurrRoom().phase == RoomPhase.COMBAT`, and this fan-out
+                // precedes even setCurrMapNode. heal_out_of_combat names that
+                // fan-out and the not-bloodied cross in full.
+                if (room == RoomType::Rest) {
+                    heal_out_of_combat(
+                        rs, static_cast<int32_t>(rs.master_deck_count) / 5 * 3);
                 }
                 break;
             default:

@@ -1679,6 +1679,52 @@ TEST(RoomEntryRelics, MawBankPaysOnTheBossEntry) {
     EXPECT_EQ(rc.run.gold, gold_before + 12);
 }
 
+// EternalFeather.onEnterRoom (EternalFeather.java:29-35) heals
+// (masterDeck.size() / 5) * 3 on entering a RestRoom. It is NOT a campfire
+// option: the fan-out runs at AbstractDungeon.java:1755-1757, before
+// setCurrMapNode (:1783) and before RestRoom.onPlayerEntry (:1800) builds the
+// CampfireUI (RestRoom.java:33-43). So the HP is already there when the menu
+// opens, and it lands whether or not the player then rests.
+TEST(RoomEntryRelics, EternalFeatherHealsBeforeTheCampfireMenuOpens) {
+    RunController rc = run_begin(kSeed, kA20);
+    set_run_relics(rc, {RelicId::ETERNAL_FEATHER});
+    for (int x = 0; x < kMapCols; ++x) {
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(RoomType::Rest);
+    }
+    leave_neow(rc);
+    rc.run.hp = 20;
+    // A20 Ironclad: the 10-card starter plus Ascender's Bane.
+    ASSERT_EQ(rc.run.master_deck_count, 11);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::MENU));
+    EXPECT_EQ(rc.run.hp, 26);  // 11 / 5 * 3 == 6, integer division FIRST
+}
+
+// A ? can never roll REST (EventHelper.RoomResult has no REST arm), so the
+// pre-roll/post-roll distinction is invisible for this relic specifically --
+// but it shares the fan-out with Maw Bank, for which it is not. Pinned so the
+// gate stays on the ARRIVING map node's kind and never on a resolved one.
+TEST(RoomEntryRelics, EternalFeatherDoesNotHealOnANonRestEntry) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Shop,
+          RoomType::Treasure}) {
+        SCOPED_TRACE(static_cast<int>(room));
+        RunController rc = run_begin(kSeed, kA20);
+        set_run_relics(rc, {RelicId::ETERNAL_FEATHER});
+        for (int x = 0; x < kMapCols; ++x) {
+            rc.run.map[run_state_map_index(x, 0)].room_type =
+                static_cast<uint8_t>(room);
+        }
+        leave_neow(rc);
+        rc.run.hp = 20;
+        step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+        EXPECT_EQ(rc.run.hp, 20);
+    }
+}
+
 // Two floors, one relic: the gain repeats until a shop purchase sets the
 // counter to -2 (dispatch_relics_on_spend_gold, relics/relic_pickup.hpp), and
 // then never again on any later entry.

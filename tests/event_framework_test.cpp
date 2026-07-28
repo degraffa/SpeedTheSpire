@@ -253,6 +253,86 @@ TEST(OnEnterRoomRelics, SsserpentHeadIsEventOnlyWhileMawBankIsNot) {
     }
 }
 
+// EternalFeather.onEnterRoom (EternalFeather.java:29-35):
+//     if (room instanceof RestRoom) { flash();
+//         int amountToGain = player.masterDeck.size() / 5 * 3;
+//         player.heal(amountToGain); }
+// INTEGER DIVISION FIRST, then x3 -- a 14-card deck heals 6, not 8.
+TEST(OnEnterRoomRelics, EternalFeatherHealsFiveCardStepsOnRestEntry) {
+    struct Case {
+        int deck;
+        int heal;
+    };
+    const Case cases[] = {{0, 0},  {4, 0},  {5, 3},   {9, 3},
+                          {10, 6}, {14, 6}, {15, 9}};
+    for (const Case& tc : cases) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        rs.hp = 20;
+        rs.max_hp = 75;
+        for (int i = 0; i < tc.deck; ++i) add_card(rs, CardId::STRIKE);
+        give_relic(rs, RelicId::ETERNAL_FEATHER);
+        dispatch_on_enter_room_relics(rs, RoomType::Rest);
+        EXPECT_EQ(rs.hp, 20 + tc.heal) << "deck " << tc.deck;
+    }
+}
+
+TEST(OnEnterRoomRelics, EternalFeatherFiresOnNoOtherRoomKind) {
+    for (const RoomType room :
+         {RoomType::Monster, RoomType::Event, RoomType::Elite, RoomType::Shop,
+          RoomType::Treasure, RoomType::Boss, RoomType::None}) {
+        RunState rs = fresh_run_state(kSeed, 20);
+        rs.hp = 20;
+        for (int i = 0; i < 15; ++i) add_card(rs, CardId::STRIKE);
+        give_relic(rs, RelicId::ETERNAL_FEATHER);
+        dispatch_on_enter_room_relics(rs, room);
+        EXPECT_EQ(rs.hp, 20) << "room " << static_cast<int>(room);
+    }
+}
+
+// AbstractCreature.heal clamps to maxHealth (AbstractCreature.java:399-402).
+TEST(OnEnterRoomRelics, EternalFeatherClampsToMaxHp) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.max_hp = 75;
+    rs.hp = 73;
+    for (int i = 0; i < 15; ++i) add_card(rs, CardId::STRIKE);  // would heal 9
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    dispatch_on_enter_room_relics(rs, RoomType::Rest);
+    EXPECT_EQ(rs.hp, 75);
+}
+
+// MAGIC FLOWER DOES NOT SCALE THIS. MagicFlower.onPlayerHeal
+// (MagicFlower.java:30-37) returns the amount unchanged unless
+// `getCurrRoom().phase == RoomPhase.COMBAT`, and the onEnterRoom fan-out runs at
+// AbstractDungeon.java:1755-1757 -- before setCurrMapNode, before any room's
+// onPlayerEntry, and therefore never inside a combat. Named as a test the way
+// the discharged Meal Ticket row named it, so a future in-combat heal-modifier
+// change cannot quietly start scaling a room-entry heal.
+TEST(OnEnterRoomRelics, EternalFeatherIsNotScaledByMagicFlower) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.hp = 20;
+    rs.max_hp = 75;
+    for (int i = 0; i < 10; ++i) add_card(rs, CardId::STRIKE);
+    give_relic(rs, RelicId::MAGIC_FLOWER);
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    dispatch_on_enter_room_relics(rs, RoomType::Rest);
+    EXPECT_EQ(rs.hp, 26);  // 6, not MathUtils.round(6 * 1.5f) == 9
+}
+
+// One loop, acquisition order (relic_hooks.hpp:11-19): the gold and the heal
+// come from the same pass, and a duplicate copy fires per copy.
+TEST(OnEnterRoomRelics, RestEntryFansOutMawBankAndEternalFeatherTogether) {
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.hp = 20;
+    rs.max_hp = 75;
+    for (int i = 0; i < 11; ++i) add_card(rs, CardId::STRIKE);
+    give_relic(rs, RelicId::MAW_BANK);
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    give_relic(rs, RelicId::ETERNAL_FEATHER);
+    dispatch_on_enter_room_relics(rs, RoomType::Rest);
+    EXPECT_EQ(rs.gold, 111);
+    EXPECT_EQ(rs.hp, 32);  // 11/5*3 == 6, twice
+}
+
 // The used-up encoding is counter == -2 (MawBank.setCounter, MawBank.java:
 // 46-53), the same one dispatch_relics_on_spend_gold writes.
 TEST(OnEnterRoomRelics, MawBankUsedUpPaysOnNoRoomKind) {

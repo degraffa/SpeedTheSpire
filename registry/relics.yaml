@@ -704,7 +704,7 @@
   game_id: "Eternal Feather"
   tier: UNCOMMON
   pool_order: 5
-  provenance: "EternalFeather.onEnterRoom (EternalFeather.java:29-35) -- entering a RestRoom heals masterDeck.size()/5*3 (int division). A run-layer rest-room hook; rest rooms are B4.9 -- no combat trigger, row registered for pool/translator completeness."
+  provenance: "EternalFeather.onEnterRoom (EternalFeather.java:29-35) -- entering a RestRoom heals masterDeck.size()/5*3 (INTEGER DIVISION FIRST, then x3: a 14-card deck heals 6). LIVE through dispatch_on_enter_room_relics (event_framework.hpp), the once-per-transition onEnterRoom fan-out at AbstractDungeon.java:1755-1757 -- so the heal lands BEFORE RestRoom.onPlayerEntry builds the campfire menu (RestRoom.java:33-43, reached at :1800) and whether or not the player then rests. It is NOT the REST option body (rest_apply_heal). HP goes through heal_out_of_combat (relics/relic_pickup.hpp); Magic Flower cannot scale it because MagicFlower.onPlayerHeal (MagicFlower.java:30-37) is gated on RoomPhase.COMBAT. No combat hook, no native body."
 
 - id: 57
   name: FROZEN_EGG
