@@ -331,8 +331,80 @@ TEST(MatchDealCompare, ABoardThatLostThePairingInvariantIsCaught) {
     EXPECT_FALSE(d.ok);
     bool named = false;
     for (const std::string& p : d.problems)
-        if (p.find("exactly twice") != std::string::npos) named = true;
-    EXPECT_TRUE(named);
+        if (p.find("returnRandomCurse") != std::string::npos) named = true;
+    EXPECT_TRUE(named) << (d.problems.empty() ? "" : d.problems.front());
+}
+
+// --- the shape check admits the collision the Java admits, and no more -------
+//
+// `initializeCards` (GremlinMatchGame.java:63-91) duplicates its whole six-slot
+// list, so the twelve slots are a PERFECT PAIRING -- every identity an even
+// number of times. That is all the duplication proves. It does NOT prove the
+// six slots are distinct: on the `ascensionLevel >= 15` branch two of them are
+// back-to-back `AbstractDungeon.returnRandomCurse()` calls (:70-71) with no
+// dedup, so a legitimate board can hold FOUR copies of one curse.
+//
+// STS00683 of the G6 campaign dealt exactly that (four `Regret`) and the old
+// `n != 2` test scored it DIFF -- while the same read-out's numbers said the
+// board was right: five capture-named positions compared, five attempt outcomes
+// reproduced, ten grid rounds walked. A wrong board cannot do that.
+TEST(MatchDealCompare, TheDoubleCurseDealIsALegalBoard) {
+    const MatchBoardObservation obs = decode_match_grid(sts00212_grids(), 2);
+    ASSERT_TRUE(obs.ok) << obs.problem;
+    std::array<std::string, kMatchBoardSlots> board = sts00212_board();
+    // The two curse slots drew the same curse: Shame's pair becomes Decay's, so
+    // Decay stands at four copies. Positions 2 and 7 are the two the capture
+    // never named, so nothing positional changes and every attempt outcome
+    // stays what it was.
+    board[2] = "Decay";
+    board[7] = "Decay";
+    const MatchDealDiff d = compare_match_deal(obs, board);
+    ASSERT_TRUE(d.ok) << d.problems.front();
+    EXPECT_EQ(d.identity_checks, 5);
+    EXPECT_EQ(d.pair_checks, 5);
+}
+
+TEST(MatchDealCompare, ThreeCopiesIsStillImpossible) {
+    const MatchBoardObservation obs = decode_match_grid(sts00212_grids(), 2);
+    ASSERT_TRUE(obs.ok) << obs.problem;
+    std::array<std::string, kMatchBoardSlots> board = sts00212_board();
+    board[7] = "Decay";  // Decay x3, Shame x1 -- not a pairing at all
+    const MatchDealDiff d = compare_match_deal(obs, board);
+    EXPECT_FALSE(d.ok);
+    ASSERT_FALSE(d.problems.empty());
+    EXPECT_NE(d.problems.front().find("3 copies"), std::string::npos)
+        << d.problems.front();
+}
+
+// Only the two curse draws can collide -- the other four slots come from
+// disjoint pools (RARE, UNCOMMON, COMMON-or-colorless, getStartCardForEvent) --
+// so ONE quadruple is the most a legal deal can carry.
+TEST(MatchDealCompare, TwoQuadruplesAreStillImpossible) {
+    const MatchBoardObservation obs = decode_match_grid(sts00212_grids(), 2);
+    ASSERT_TRUE(obs.ok) << obs.problem;
+    std::array<std::string, kMatchBoardSlots> board = sts00212_board();
+    board[2] = "Decay";       // Decay x4
+    board[7] = "Decay";
+    board[9] = "Berserk";     // Berserk x4 as well
+    board[10] = "Berserk";
+    const MatchDealDiff d = compare_match_deal(obs, board);
+    EXPECT_FALSE(d.ok);
+    bool named = false;
+    for (const std::string& p : d.problems)
+        if (p.find("4 copies each") != std::string::npos) named = true;
+    EXPECT_TRUE(named) << (d.problems.empty() ? "" : d.problems.front());
+}
+
+TEST(MatchDealCompare, ABoardOfOneIdentityIsStillImpossible) {
+    const MatchBoardObservation obs = decode_match_grid(sts00212_grids(), 2);
+    ASSERT_TRUE(obs.ok) << obs.problem;
+    std::array<std::string, kMatchBoardSlots> board;
+    board.fill("Regret");
+    const MatchDealDiff d = compare_match_deal(obs, board);
+    EXPECT_FALSE(d.ok);
+    ASSERT_FALSE(d.problems.empty());
+    EXPECT_NE(d.problems.front().find("12 copies"), std::string::npos)
+        << d.problems.front();
 }
 
 TEST(MatchDealCompare, AFailedDecodeIsReportedRatherThanCountedClean) {

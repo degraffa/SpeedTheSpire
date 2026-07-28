@@ -59,6 +59,16 @@ using sts::replay::sim_grid_open;
     return s;
 }
 
+// The same page WITH the fork's per-button `choice_index`, which is what a real
+// capture carries. -1 stands for the field's ABSENCE, which is how a DISABLED
+// button appears.
+[[nodiscard]] ScreenInfo event_page_indexed(std::vector<std::string> labels,
+                                            std::vector<int> choice_index) {
+    ScreenInfo s = event_page(std::move(labels));
+    s.option_choice_index = std::move(choice_index);
+    return s;
+}
+
 // --- the terminal [Leave] page ----------------------------------------------
 //
 // Every finished event dialog ends on a one-button page, and pressing that
@@ -339,6 +349,66 @@ TEST(ReplayCommandMap, AMapReturnIsAPureUiDismissal) {
     EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
 }
 
+// --- an event's two index spaces --------------------------------------------
+//
+// `screen_state.options[]` lists every dialog button, disabled ones included,
+// and the run layer's option ordinal is that same full-list position (an event
+// body publishes `count` buttons plus an `enabled[]` mask). A `choose N`
+// command indexes `choice_list`, which is the ENABLED buttons only -- and each
+// option's `choice_index` is precisely its position in THAT space.
+//
+// STS00856 of the G6 campaign is the live cost of conflating them. Golden Wing
+// offers [Pray, Locked(disabled), Leave] with choice_index [0, -, 1]; greedy
+// pressed `choose 1` = Leave, the untranslated 1 named the LOCKED gold branch,
+// the sim's own enabled[] mask refused it, and the sim stayed on the intro
+// page. The next record's exit press (`choose 0` on a one-button page) was then
+// applied to the intro page's option 0 -- Pray -- costing the sim 7 HP the run
+// never lost (`hp: 60 -> 53` at seq 25) and leaving it a floor behind for the
+// rest of the artifact.
+TEST(ReplayCommandMap, AnEventChooseIsTranslatedOutOfTheChoiceListIndexSpace) {
+    const ScreenInfo golden_wing =
+        event_page_indexed({"Pray", "Locked", "Leave"}, {0, -1, 1});
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::EVENT_DIALOG), golden_wing, "choose 1");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
+    EXPECT_EQ(action_arg0(m.actions[0]), 2)
+        << "`choose 1` is the second ENABLED button, which is option 2";
+}
+
+TEST(ReplayCommandMap, APageWithNoDisabledButtonIsUnchangedByTheTranslation) {
+    const ScreenInfo page =
+        event_page_indexed({"Dig", "Pray", "Leave"}, {0, 1, 2});
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::EVENT_DIALOG), page, "choose 2");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), 2);
+}
+
+// An artifact written before the fork emitted `choice_index` carries no such
+// field, and every page in it is one the identity mapping was right about.
+TEST(ReplayCommandMap, ACaptureWithoutChoiceIndexFallsBackToTheIdentity) {
+    const MappedCommand m = map_command(at_phase(RunPhase::EVENT_DIALOG),
+                                        event_page({"Dig", "Pray", "Leave"}),
+                                        "choose 1");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), 1);
+}
+
+// The translation fails LOUD rather than falling back when the index space says
+// the two sides disagree: guessing here is what produced the STS00856 shape.
+TEST(ReplayCommandMap, AnEventChooseNamingNoEnabledButtonStopsInsteadOfGuessing) {
+    const ScreenInfo golden_wing =
+        event_page_indexed({"Pray", "Locked", "Leave"}, {0, -1, 1});
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::EVENT_DIALOG), golden_wing, "choose 2");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("choice_index"), std::string::npos) << m.reason;
+}
+
 TEST(ReplayCommandMap, ARewardScreenProceedIsDeferredToTheMapChoiceThatMoves) {
     ScreenInfo s;
     s.screen_type = "COMBAT_REWARD";
@@ -354,6 +424,221 @@ TEST(ReplayCommandMap, ARewardScreenProceedIsDeferredToTheMapChoiceThatMoves) {
     ASSERT_EQ(move.kind, MapKind::LEAVE_ROOM) << move.reason;
     ASSERT_EQ(move.actions.size(), 1u);
     EXPECT_EQ(action_arg0(move.actions[0]), 3);
+}
+
+// --- Neow's three-potion payout is a COMBAT_REWARD screen that MUST be left --
+//
+// The lazy-leave elision above is right for a combat-reward ROOM and wrong for
+// the NeowRoom. `NeowRewardType::THREE_SMALL_POTIONS` delivers through
+// `combatRewardScreen.open()` (NeowReward.java:268-283), so the capture's
+// screen label is `COMBAT_REWARD` and says nothing about which of the two it
+// is; the SIM's phase does, exactly as it does for an event's exit page.
+//
+// Both G6 runs whose blessing was "Obtain 3 random Potions" -- STS00283 and
+// STS00700 -- went `COMBAT_REWARD` `proceed` (seq 5) straight to a `MAP` (seq
+// 6) with no page between, and both diverged at seq 7 on one field, `floor: 1
+// -> 0`: the NOOP left the sim in NEOW, the map `choose` became LEAVE_ROOM, and
+// its CHOOSE(dst) was executed by `ITEM_REWARD`'s else branch as
+// `claim_reward(dst)`. Seq 0-6 were zero-diff on both, and `--neow` reads both
+// out fully clean, so the engine half was never at fault.
+TEST(ReplayCommandMap, NeowsPotionRewardScreenIsLeftRatherThanNoOpped) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
+    ScreenInfo s;
+    s.screen_type = "COMBAT_REWARD";
+
+    const MappedCommand m = map_command(rc, s, "proceed");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    // Two presses, because the run layer spells in two states what the game
+    // passed through in one frame: ITEM_REWARD -> DONE (neow_finish_payout),
+    // then DONE -> RunPhase::MAP_CHOICE (run_advance.cpp:1478-1494).
+    ASSERT_EQ(m.actions.size(), 2u);
+    for (const auto& a : m.actions) {
+        EXPECT_EQ(action_verb(a), ActionVerb::CHOOSE);
+        EXPECT_EQ(action_arg0(a), kChooseProceed);
+    }
+}
+
+TEST(ReplayCommandMap, ClaimingAPotionOnNeowsRewardScreenIsStillAPlainChoose) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
+    ScreenInfo s;
+    s.screen_type = "COMBAT_REWARD";
+
+    const MappedCommand m = map_command(rc, s, "choose 1");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), 1);
+}
+
+// The discriminator is the Neow SUB-SCREEN, not merely the NEOW phase: only
+// ITEM_REWARD is the screen a `proceed` closes.
+TEST(ReplayCommandMap, AProceedElsewhereInNeowKeepsTheLazyLeaveElision) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::CARD_REWARD);
+    ScreenInfo s;
+    s.screen_type = "COMBAT_REWARD";
+    EXPECT_EQ(map_command(rc, s, "proceed").kind, MapKind::NOOP);
+}
+
+// --- the grid stop must not blame a relic that is not the cause --------------
+//
+// STS02009 of the G6 campaign stopped with "the most recently acquired relic is
+// Burning Blood, whose onEquip body is deferred". Burning Blood is the Ironclad
+// STARTING relic and its onEquip is modelled; nothing had just been acquired.
+// The reason read `rc.run.relics`' last entry unconditionally, so on a run that
+// never took a relic it named the one the player started with -- and asserted a
+// deferral that does not exist. The real cause was a desync: the sim had been
+// in COMBAT since seq 61 while the capture opened a master-deck grid.
+TEST(ReplayCommandMap, AGridStopInCombatBlamesTheDesyncNotTheStartingRelic) {
+    RunController rc = at_phase(RunPhase::COMBAT);
+    rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::BURNING_BLOOD), 0};
+    rc.run.relic_count = 1;
+
+    const MappedCommand m = map_command(rc, grid_screen(), "choose 1");
+    ASSERT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("COMBAT"), std::string::npos) << m.reason;
+    EXPECT_EQ(m.reason.find("Burning Blood"), std::string::npos)
+        << "the relic list has nothing to do with a grid opened mid-combat: "
+        << m.reason;
+    EXPECT_EQ(m.reason.find("deferred"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("first divergence"), std::string::npos)
+        << "the stop must point the reader at the frontier: " << m.reason;
+}
+
+// Even on a phase where a pickup COULD have just happened, a relic whose
+// onEquip is modelled is not an explanation -- and saying so is not the same as
+// saying nothing, because it rules the relic out by name.
+TEST(ReplayCommandMap, AGridStopDoesNotClaimAModelledOnEquipIsDeferred) {
+    RunController rc = at_phase(RunPhase::MAP_CHOICE);
+    rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::BURNING_BLOOD), 0};
+    rc.run.relic_count = 1;
+
+    const MappedCommand m = map_command(rc, grid_screen(), "choose 1");
+    ASSERT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("Burning Blood"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("modelled"), std::string::npos) << m.reason;
+    EXPECT_EQ(m.reason.find("body is deferred"), std::string::npos) << m.reason;
+}
+
+// --- Match and Keep's board is indexed by screen position, not by option -----
+//
+// The fork's `getOrderedCards()` offers the cards still ON THE BOARD and still
+// FACE DOWN, sorted by SCREEN POSITION, so `choose N` names the N-th smallest
+// still-offered position. The run layer's option index is the BOARD SLOT: its
+// `match_menu` publishes twelve options and enables `board[i].taken == 0 &&
+// scratch1 != i`. Same set of cards, two index spaces, related by
+// `match_screen_position` -- and passing N through addresses an unrelated card
+// while still DOING something, which is why the desync compounds instead of
+// stopping. (STS00683 lost the Double Tap it matched; STS00856 a Shame.)
+[[nodiscard]] ScreenInfo match_play_page(std::vector<std::string> labels) {
+    ScreenInfo s;
+    s.screen_type = "EVENT";
+    s.event_id = "Match and Keep!";
+    s.option_labels = std::move(labels);
+    for (std::size_t i = 0; i < s.option_labels.size(); ++i)
+        s.option_choice_index.push_back(static_cast<int>(i));
+    return s;
+}
+
+// A controller parked on a live Match and Keep board with every card face down
+// and nothing taken. `event.screen == 2` is the body's PLAY page
+// (src/engine/events/shrines.cpp), and `scratch0` is the attempt count.
+[[nodiscard]] RunController at_match_board() {
+    RunController rc = at_phase(RunPhase::EVENT_DIALOG);
+    rc.event.event_id = static_cast<uint16_t>(sts::registry::EventId::MATCH_AND_KEEP);
+    rc.event.screen = 2;
+    rc.event.scratch0 = 5;
+    rc.event.scratch1 = -1;
+    for (int i = 0; i < 12; ++i) {
+        rc.event.board[i].card_id = static_cast<uint16_t>(i / 2 + 1);
+        rc.event.board[i].upgrade = 0;
+        rc.event.board[i].taken = 0;
+    }
+    return rc;
+}
+
+TEST(ReplayCommandMap, AMatchAndKeepPickIsTranslatedThroughTheScreenPermutation) {
+    const RunController rc = at_match_board();
+    // A full board offers all twelve, ascending by screen position: entry j IS
+    // position j, whose board slot is match_group_index(j).
+    std::vector<std::string> labels;
+    for (int p = 0; p < 12; ++p) labels.push_back("card" + std::to_string(p));
+
+    for (int n : {0, 1, 5, 10, 11}) {
+        const MappedCommand m =
+            map_command(rc, match_play_page(labels), "choose " + std::to_string(n));
+        ASSERT_EQ(m.kind, MapKind::ACTIONS) << n << ": " << m.reason;
+        ASSERT_EQ(m.actions.size(), 1u);
+        EXPECT_EQ(action_arg0(m.actions[0]),
+                  sts::replay::match_group_index(n))
+            << "`choose " << n << "` is screen position " << n
+            << ", which is board slot " << sts::replay::match_group_index(n);
+    }
+}
+
+// The label re-states the answer on every face-down entry, so the alignment is
+// checked at each pick rather than assumed.
+TEST(ReplayCommandMap, AMatchAndKeepLabelThatContradictsTheAlignmentStops) {
+    const RunController rc = at_match_board();
+    std::vector<std::string> labels;
+    for (int p = 0; p < 12; ++p) labels.push_back("card" + std::to_string(p));
+    labels[3] = "card7";  // position 3's entry claims to be position 7
+    const MappedCommand m = map_command(rc, match_play_page(labels), "choose 3");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("card7"), std::string::npos) << m.reason;
+}
+
+// A REVEALED card is labelled by cardID and carries no position, so it cannot
+// re-state anything -- and must not be rejected for that.
+TEST(ReplayCommandMap, AMatchAndKeepRevealedEntryIsAcceptedWithoutAPositionLabel) {
+    const RunController rc = at_match_board();
+    std::vector<std::string> labels;
+    for (int p = 0; p < 12; ++p) labels.push_back("card" + std::to_string(p));
+    labels[4] = "Reaper";
+    const MappedCommand m = map_command(rc, match_play_page(labels), "choose 4");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    EXPECT_EQ(action_arg0(m.actions[0]), sts::replay::match_group_index(4));
+}
+
+// The one-button pages of the SAME event stay on the ordinary path -- the
+// translation is the board's, not the event's.
+TEST(ReplayCommandMap, MatchAndKeepsOneButtonPagesAreOrdinaryEventChoices) {
+    const RunController rc = at_match_board();
+    const MappedCommand m = map_command(rc, match_play_page({"Continue"}), "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), 0);
+}
+
+// A capture offering a different number of cards than the sim still has face
+// down is a board desync, and the ordinary path is not a safe fallback for it.
+TEST(ReplayCommandMap, AMatchAndKeepListTheSimCannotMatchDoesNotTranslate) {
+    RunController rc = at_match_board();
+    rc.event.board[0].taken = 1;
+    rc.event.board[1].taken = 1;  // the sim offers ten, the capture twelve
+    std::vector<std::string> labels;
+    for (int p = 0; p < 12; ++p) labels.push_back("card" + std::to_string(p));
+    const MappedCommand m = map_command(rc, match_play_page(labels), "choose 3");
+    // Falls back to the plain option path, which then addresses an ordinal the
+    // sim's mask refuses -- but the point here is that the permutation is NOT
+    // applied to a list it cannot have come from.
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    EXPECT_EQ(action_arg0(m.actions[0]), 3);
+}
+
+// The five deferred BOSS onEquip bodies (relic_pickup_boss.cpp) are the set the
+// deferral message is allowed to name, and the list is here because a deferred
+// override is indistinguishable from an implemented one through
+// `relic_on_equip_fn` -- both are real function pointers, by design.
+TEST(ReplayCommandMap, TheDeferredOnEquipSetIsExactlyTheFiveBossBodies) {
+    using sts::replay::relic_on_equip_deferred;
+    for (const RelicId id : {RelicId::PANDORAS_BOX, RelicId::TINY_HOUSE,
+                             RelicId::ASTROLABE, RelicId::EMPTY_CAGE,
+                             RelicId::CALLING_BELL})
+        EXPECT_TRUE(relic_on_equip_deferred(id)) << static_cast<int>(id);
+    for (const RelicId id : {RelicId::BURNING_BLOOD, RelicId::NONE})
+        EXPECT_FALSE(relic_on_equip_deferred(id)) << static_cast<int>(id);
 }
 
 }  // namespace

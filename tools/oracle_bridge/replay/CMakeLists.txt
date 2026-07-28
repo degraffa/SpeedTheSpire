@@ -43,6 +43,12 @@ target_link_libraries(replay_command_map INTERFACE replay_readout_shapes)
 add_library(replay_mk_board INTERFACE)
 target_include_directories(replay_mk_board INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
+# `command_map.hpp` includes it too: Match and Keep's play screen is the one
+# EVENT page whose `choose N` indexes SCREEN POSITIONS rather than option
+# ordinals, and the permutation that relates the two lives here. The dependency
+# is declared rather than left to the shared include directory so the
+# command-map target keeps standing on its own.
+target_link_libraries(replay_command_map INTERFACE replay_mk_board)
 
 add_executable(replay_run_diff src/main.cpp)
 target_link_libraries(replay_run_diff

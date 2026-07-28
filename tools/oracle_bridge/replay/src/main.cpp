@@ -201,8 +201,16 @@ void read_stock(const json& screen_state, const char* key,
             s.chest_type = ss->value("chest_type", std::string{});
             s.chest_open = ss->value("chest_open", false);
             if (const auto o = ss->find("options"); o != ss->end() && o->is_array()) {
-                for (const json& opt : *o)
+                for (const json& opt : *o) {
                     s.option_labels.push_back(opt.value("label", std::string{}));
+                    // A DISABLED button carries no `choice_index`: it occupies a
+                    // slot in the sim's option ordinals but none in the
+                    // command's index space. Keeping the two lists parallel,
+                    // with -1 for such a button, is what lets `map_command`
+                    // translate a `choose N` between them -- see
+                    // `ScreenInfo::option_choice_index`.
+                    s.option_choice_index.push_back(opt.value("choice_index", -1));
+                }
             }
             if (s.screen_type == "SHOP_SCREEN") {
                 s.shop_screen = true;
@@ -557,8 +565,45 @@ struct SpotVerdict {
     int assembly_clean = 0;
     int claim_clean = 0;
     int claim_library_order_only = 0;
+    int theft_seeded = 0;  // screens whose STOLEN_GOLD amount came from the capture
     int failures = 0;
 };
+
+// --- the one input this mode cannot derive: a killed thief's returned gold ---
+//
+// A KNOWN-BENIGN SHAPE, named here rather than left to surface as an
+// unexplained diff. The engine models the row fully: `settle_stolen_gold`
+// (run_advance.cpp:329-393) reads `looter_stolen_gold(ms)` off the
+// **MonsterState** -- the Looter's steal count lives in `MonsterState.pad0`
+// (monster_looter.hpp:92-103) -- and hands the dead thieves' share to
+// `assemble_combat_rewards`, which puts a STOLEN_GOLD item AHEAD of every
+// battle-over item (combat_rewards.cpp:276-279) where it also counts toward the
+// >= 4 potion-suppression threshold.
+//
+// This mode seeds a translated **RunState** and re-drives nothing, on purpose
+// (that independence from combat fidelity is the whole point of the mode), and
+// the accumulator is combat state the capture does not carry: CommunicationMod
+// publishes no per-monster steal count, so the translated `MonsterState.pad0`
+// is 0 no matter what the thief did. Assembling with 0 dropped the row
+// entirely, which read as `reward items: [STOLEN_GOLD,GOLD,...] -> [GOLD,...]`
+// and then, downstream, as a claim exactly the stolen amount short -- three
+// such failures in the G6 campaign, every one of them 60 gold (STS00462 f7,
+// STS00683 f5, STS01314 f7).
+//
+// So the amount is taken from the capture's own reward row, exactly as this
+// mode already takes its RunState, its miscRng and its room type from the
+// capture. What that seeds is ONE number; what it leaves proved is everything
+// downstream of it -- the row's POSITION in the list, its effect on the potion
+// threshold, the rest of the assembly's stream draws, and the claim, which is
+// where the sim's gold has to land on the capture's to the unit. A screen that
+// needed the seed is counted and printed separately so a read-out line never
+// implies the theft itself was reproduced.
+[[nodiscard]] int32_t captured_stolen_gold(const std::vector<CaptureRewardRow>& rows) {
+    int32_t total = 0;
+    for (const CaptureRewardRow& r : rows)
+        if (r.type == "STOLEN_GOLD") total += r.gold;
+    return total;
+}
 
 // Compare only the fields the reward ASSEMBLY moves. Everything else on the
 // state (hp after Burning Blood, the room bookkeeping) belongs to the combat
@@ -613,8 +658,15 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
         RunState rs = run.records[k - 1].run;
         RngStream misc = run.records[k - 1].combat.misc_rng;
         RewardScreen screen{};
+        // The one seeded input; see `captured_stolen_gold`. It is already
+        // deducted from `rs.gold`, which is what the parameter's contract
+        // requires (combat_rewards.hpp:286-291): the game deducts at steal time
+        // (DamageAction.stealGold), so the captured pre-battle-over purse this
+        // mode seeds from already reflects every steal.
+        const int32_t stolen = captured_stolen_gold(open.reward_rows);
+        if (stolen > 0) ++v.theft_seeded;
         assemble_combat_rewards(rs, misc, room_type_from_capture(open.room_type),
-                                RewardOutcome::KILLED, screen);
+                                RewardOutcome::KILLED, screen, stolen);
 
         std::vector<std::string> afail;
         diff_assembly_fields(run.records[k].run, rs, afail);
@@ -635,7 +687,12 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
                         run.seed_string.c_str(), floor, run.records[k].seq);
             for (uint8_t i = 0; i < screen.count; ++i)
                 std::printf("%s%s", i ? "," : "", reward_kind_name(screen.items[i].kind));
-            std::printf("]\n");
+            std::printf("]");
+            if (stolen > 0)
+                std::printf(" (STOLEN_GOLD %d seeded from the capture: the "
+                            "thief's accrual is MonsterState, which this mode "
+                            "does not re-drive)", stolen);
+            std::printf("\n");
         } else {
             ok = false;
             ++v.failures;
@@ -2682,6 +2739,7 @@ int main(int argc, char** argv) {
                 total.assembly_clean += v.assembly_clean;
                 total.claim_clean += v.claim_clean;
                 total.claim_library_order_only += v.claim_library_order_only;
+                total.theft_seeded += v.theft_seeded;
                 total.failures += v.failures;
                 if (v.failures != 0) ++failures;
             } catch (const std::exception& e) {
@@ -2689,9 +2747,14 @@ int main(int argc, char** argv) {
                 ++failures;
             }
         }
-        std::printf("--- %zu file(s): %d reward screen(s), assembly clean %d, "
-                    "claim clean %d (+%d library-order-only), %d failing file(s) ---\n",
-                    files.size(), total.screens, total.assembly_clean, total.claim_clean,
+        // `theft seeded` is reported beside the clean counts, never folded into
+        // them: those screens are clean, but one input of theirs came from the
+        // capture rather than from the sim (see `captured_stolen_gold`).
+        std::printf("--- %zu file(s): %d reward screen(s), assembly clean %d "
+                    "(%d with a capture-seeded STOLEN_GOLD row), claim clean %d "
+                    "(+%d library-order-only), %d failing file(s) ---\n",
+                    files.size(), total.screens, total.assembly_clean,
+                    total.theft_seeded, total.claim_clean,
                     total.claim_library_order_only, failures);
         return failures;
     }

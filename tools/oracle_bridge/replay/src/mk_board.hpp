@@ -345,11 +345,39 @@ struct MatchDealDiff {
         return d;
     }
 
-    // The deal's own structural invariant: six identities, each dealt exactly
-    // twice (`retVal.addAll(retVal2)` after six `makeStatEquivalentCopy`,
-    // GremlinMatchGame.java:84-86). Checked on the SIM side because a deal that
-    // lost the pairing would otherwise satisfy every positional check below and
-    // still be wrong.
+    // --- the deal's structural invariant, stated as the Java actually states it
+    //
+    // `initializeCards` (GremlinMatchGame.java:63-91) builds SIX deal slots and
+    // then duplicates the whole list -- `retVal2` collects one
+    // `makeStatEquivalentCopy` per slot and `retVal.addAll(retVal2)` (:84-86)
+    // appends them. So what the twelve slots are guaranteed to be is a PERFECT
+    // PAIRING: every identity appears an EVEN number of times. That, and only
+    // that, is what the duplication proves.
+    //
+    // WHAT IT DOES NOT PROVE, and what this check used to assume: that the six
+    // deal slots are DISTINCT. On the `ascensionLevel >= 15` branch (:66-71)
+    // two of them are `AbstractDungeon.returnRandomCurse()` calls, back to back
+    // at :70-71, with no dedup between them and no dedup afterwards. Two equal
+    // curses is an ordinary outcome of that pair of draws, and the board it
+    // deals legitimately holds FOUR copies of one curse. STS00683 of the G6
+    // campaign is that board (four `Regret`), and the old `n != 2` test scored
+    // it as a divergence -- while the read-out's own numbers said the board was
+    // right: five capture-named positions compared, five attempt outcomes
+    // reproduced, ten grid rounds walked. A wrong board cannot do that.
+    //
+    // The relaxation is exactly the collision the Java admits and no wider:
+    //
+    //   * every position filled, and every count EVEN (the pairing itself);
+    //   * every count 2 or 4 -- a count of 6 would need THREE equal deal slots,
+    //     and only two of the six can collide (the other four come from
+    //     disjoint pools: RARE, UNCOMMON, a COMMON or colorless UNCOMMON, and
+    //     `getStartCardForEvent`, :72-79);
+    //   * at MOST ONE identity at 4, for the same reason -- one collision is
+    //     all the two curse draws can produce.
+    //
+    // A board of twelve copies of one card, three copies of anything, or two
+    // different quadruples still fails loud.
+    int quads = 0;
     for (int p = 0; p < kMatchBoardSlots; ++p) {
         if (sim_board[static_cast<std::size_t>(p)].empty()) {
             d.problems.push_back("the sim's board has no card at screen position " +
@@ -357,18 +385,30 @@ struct MatchDealDiff {
             continue;
         }
         int n = 0;
-        for (int q = 0; q < kMatchBoardSlots; ++q)
-            if (sim_board[static_cast<std::size_t>(q)] ==
+        int first = p;
+        for (int q = 0; q < kMatchBoardSlots; ++q) {
+            if (sim_board[static_cast<std::size_t>(q)] !=
                 sim_board[static_cast<std::size_t>(p)])
-                ++n;
-        if (n != 2) {
-            d.problems.push_back(
-                "the sim's board holds " + std::to_string(n) + " copies of \"" +
-                sim_board[static_cast<std::size_t>(p)] +
-                "\"; initializeCards deals every identity exactly twice "
-                "(GremlinMatchGame.java:84-86)");
-            break;  // one report is enough; the whole board is suspect
+                continue;
+            if (q < first) first = q;
+            ++n;
         }
+        if (n == 4 && first == p) ++quads;
+        if (n == 2 || n == 4) continue;
+        d.problems.push_back(
+            "the sim's board holds " + std::to_string(n) + " copies of \"" +
+            sim_board[static_cast<std::size_t>(p)] +
+            "\"; initializeCards deals six slots and duplicates the whole list, "
+            "so every identity appears 2 times -- or 4 when the two "
+            "returnRandomCurse draws collide (GremlinMatchGame.java:70-71,84-86)");
+        break;  // one report is enough; the whole board is suspect
+    }
+    if (quads > 1) {
+        d.problems.push_back(
+            "the sim's board holds " + std::to_string(quads) +
+            " identities at 4 copies each; only the two adjacent "
+            "returnRandomCurse draws can collide, so at most one identity can "
+            "be dealt twice (GremlinMatchGame.java:70-71)");
     }
 
     for (int p = 0; p < kMatchBoardSlots; ++p) {
