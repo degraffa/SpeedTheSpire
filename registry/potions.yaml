@@ -124,9 +124,24 @@
   game_id: "Explosive Potion"
   rarity: COMMON
   potency: 10
+  # THORNS is a DELIBERATE MODEL SUBSTITUTION, not the Java's literal type. The
+  # game's action is DamageAllEnemiesAction(null, createDamageMatrix(potency,
+  # /*isPureDamage=*/true), NORMAL, NONE): the PURE matrix skips
+  # info.applyPowers (DamageInfo.java:126-134; no player Strength/Weak, no
+  # target Vulnerable), and the NULL source fails every registered onAttacked
+  # power's `info.owner != null` gate (CurlUpPower.java:38; Thorns /
+  # Flame Barrier / Angry carry the same gate), so nothing triggers. In this
+  # engine THORNS means exactly skip-applyPowers + skip-onAttacked
+  # (interp_damage.cpp op_damage), which coincides bit-for-bit with
+  # pure+null-source-NORMAL for the entire currently-registered content set.
+  # The limit of the coincidence -- an owner-INsensitive onAttacked power (e.g.
+  # Act-2 Malleable) -- is a ledger Deferred-obligations row; the faithful fix
+  # there is a pure-damage flag bit + null-source sentinel in the DAMAGE flags
+  # word. Typing pins: Potions.ExplosivePotionIgnoresTargetVulnerable /
+  # IgnoresPlayerStrength / DoesNotTriggerCurlUp.
   effects:
-    - {op: DAMAGE, target: ALL_ENEMY, amount: 10}
-  provenance: "ExplosivePotion.use (ExplosivePotion.java:46), getPotency (:56) -- DamageAllEnemiesAction NORMAL potency"
+    - {op: DAMAGE, target: ALL_ENEMY, amount: 10, damage_type: THORNS}
+  provenance: "ExplosivePotion.use (ExplosivePotion.java:52), getPotency (:56) -- DamageAllEnemiesAction(null, createDamageMatrix(potency, true), NORMAL): pure matrix + null source, modelled as THORNS"
 
 - id: 8
   name: FIRE_POTION

@@ -120,6 +120,10 @@ TEST(Potions, EnergyPotionGainsEnergy) {
     EXPECT_EQ(potion_def(PotionId::ENERGY_POTION)->potency, 2);
 }
 
+// NOTE: this fixture is power-free on BOTH sides, so it is deliberately BLIND
+// to the row's damage TYPING -- 10 lands as 10 whether the step is NORMAL or
+// THORNS. The three tests after it are the typing pins; this one only pins
+// the fan-out and the potency.
 TEST(Potions, ExplosivePotionHitsAllEnemies) {
     CombatState s = MakeCombat(3, 50);  // three live monsters, no powers
     ASSERT_TRUE(use_potion(s, PotionId::EXPLOSIVE_POTION, 0));
@@ -128,6 +132,64 @@ TEST(Potions, ExplosivePotionHitsAllEnemies) {
         EXPECT_EQ(s.monsters[i].hp, 40) << "monster " << i;  // 50 - 10
     }
     EXPECT_EQ(potion_def(PotionId::EXPLOSIVE_POTION)->potency, 10);
+}
+
+// ExplosivePotion.use (ExplosivePotion.java:52) builds its matrix with
+// DamageInfo.createDamageMatrix(potency, /*isPureDamage=*/true) -- the PURE
+// branch skips info.applyPowers entirely (DamageInfo.java:126-134), so neither
+// the player's Strength/Weak nor the target's Vulnerable ever touches the
+// number -- and hands it to DamageAllEnemiesAction with source == NULL, whose
+// per-monster hit is `damage(new DamageInfo(null, dmg, NORMAL))`
+// (DamageAllEnemiesAction.java:82). The null owner fails every registered
+// onAttacked power's `info.owner != null` gate (CurlUpPower.java:38 -- and
+// THORNS/FLAME_BARRIER/ANGRY carry the same gate), so nothing triggers.
+//
+// The registry row is DELIBERATELY typed THORNS: in this engine's model,
+// THORNS means exactly skip-applyPowers + skip-onAttacked (interp_damage.cpp
+// op_damage), which coincides bit-for-bit with the game's pure+null-source
+// NORMAL for the entire currently-registered content set. The substitution's
+// limit (an owner-INsensitive onAttacked power would break the coincidence)
+// is recorded on the row and in the ledger's Deferred obligations.
+
+// NEGATIVE CONTROL baked into the expectation: NORMAL-typed (the row's state
+// before this change) this reads 50 - floor(10 * 1.5) = 35.
+TEST(Potions, ExplosivePotionIgnoresTargetVulnerable) {
+    CombatState s = MakeCombat(1, 50);
+    give_monster_power(s, 0, PowerId::VULNERABLE, 1);
+    ASSERT_TRUE(use_potion(s, PotionId::EXPLOSIVE_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(s.monsters[0].hp, 40);  // 50 - 10 flat, not 35
+}
+
+// NORMAL-typed this read 50 - (10 + 3) = 37: the pure matrix never runs
+// applyPowers, so the player's Strength cannot ride along.
+TEST(Potions, ExplosivePotionIgnoresPlayerStrength) {
+    CombatState s = MakeCombat(1, 50);
+    s.player_powers[s.player_power_count].power_id =
+        static_cast<uint16_t>(PowerId::STRENGTH);
+    s.player_powers[s.player_power_count].amount = 3;
+    ++s.player_power_count;
+    ASSERT_TRUE(use_potion(s, PotionId::EXPLOSIVE_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(s.monsters[0].hp, 40);  // 50 - 10 flat, not 37
+}
+
+// The null-source half on its own: Curl Up's onAttacked gate is
+// `info.owner != null && info.type == NORMAL` (CurlUpPower.java:38); the
+// game's null source fails it, so the Louse stays curled and gains no block.
+// NORMAL-typed, the sim's on-attacked dispatch triggered it (block gained,
+// power consumed) -- the wrongly-spent Curl Up behind the STS00509 floor-11
+// triple-Louse residual, where the sim killed a Louse the game left at 3 HP.
+TEST(Potions, ExplosivePotionDoesNotTriggerCurlUp) {
+    CombatState s = MakeCombat(1, 50);
+    give_monster_power(s, 0, PowerId::CURL_UP, 10);
+    ASSERT_TRUE(use_potion(s, PotionId::EXPLOSIVE_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(s.monsters[0].hp, 40);   // the 10 still lands
+    EXPECT_EQ(s.monsters[0].block, 0)  // ...but Curl Up never fires
+        << "null-source hit must not trigger onAttacked (CurlUpPower.java:38)";
+    EXPECT_EQ(monster_power_stack(s, 0, PowerId::CURL_UP), 10)
+        << "Curl Up is not consumed by a null-source hit";
 }
 
 TEST(Potions, FirePotionDamagesTarget) {
