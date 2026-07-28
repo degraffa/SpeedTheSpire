@@ -1021,6 +1021,123 @@ TEST(RunPotion, ForcingADeferredPotionKeepsTheSlot) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
 }
 
+// --- DISCARD_POTION ----------------------------------------------------------
+//
+// The belt's throw-away button. `potion discard i` in a capture is
+// CommandExecutor.executePotionCommand's non-use branch, which skips
+// `potion.use` and the whole relic `onUsePotion` fan-out and goes straight to
+// `topPanel.destroyPotion(slot)` -- `potions.set(slot, new PotionSlot(slot))`,
+// TopPanel.java:529-531. So the effect is one emptied slot: no RNG, no stream,
+// no hook. It is refused only by AbstractPotion.canDiscard
+// (AbstractPotion.java:398-400), which is false inside a We Meet Again dialog
+// and true everywhere else -- including in combat, which is why this is not
+// gated the way can_use_potion is.
+
+TEST(RunPotionDiscard, DiscardingOutOfCombatEmptiesTheSlotAndMovesNothingElse) {
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FEAR_POTION);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::BLOCK_POTION);
+    const RunState before = rc.run;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_discard_potion[0]);
+    ASSERT_FALSE(mask.can_use_potion[0])
+        << "Fear Potion is not usable out of combat -- discard is a wider door";
+
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOCK_POTION))
+        << "the other slots are untouched, and nothing is compacted";
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    // Every stream, the deck, the purse and the relics are unchanged: a
+    // discard is the one potion verb that consumes nothing.
+    RunState after = rc.run;
+    RunState expected = before;
+    expected.potions[0] = static_cast<uint16_t>(PotionId::NONE);
+    EXPECT_EQ(std::memcmp(&after, &expected, sizeof(RunState)), 0);
+}
+
+TEST(RunPotionDiscard, ADeferredPotionBodyIsStillDiscardable) {
+    // The use door is closed on a still-deferred body (potion_use_implemented);
+    // the discard door is not, because a discard never runs the body.
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SNECKO_OIL);
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_use_potion[0]);
+    EXPECT_TRUE(mask.can_discard_potion[0]);
+
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "a discard is not a turn action: it neither pumps nor ends the fight";
+}
+
+TEST(RunPotionDiscard, ToyOrnithopterDoesNotHealForAPotionThrownAway) {
+    // PotionPopUp and CommandExecutor both run the relic onUsePotion fan-out on
+    // the USE path only, so the one registered S1 consumer stays silent here.
+    // The mirror of RunPotion.ToyOrnithopterTriggersOutsideCombat above, whose
+    // USE of the same Fruit Juice in the same slot heals for 10.
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    rc.run.hp = 50;
+    rc.run.max_hp = 80;
+    rc.run.relics[1] =
+        RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), 0};
+    rc.run.relic_count = 2;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
+
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.hp, 50) << "no Toy Ornithopter heal on the discard path";
+    EXPECT_EQ(rc.run.max_hp, 80) << "and Fruit Juice's own body did not run";
+}
+
+TEST(RunPotionDiscard, AnEmptySlotAndAnOutOfRangeSlotAreBothRefused) {
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    const RunState before = rc.run;
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    for (uint8_t i = 0; i < kPotionCap; ++i) {
+        EXPECT_FALSE(mask.can_discard_potion[i])
+            << "slot " << static_cast<int>(i) << " is empty at run start";
+    }
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+    step(rc, make_action(ActionVerb::DISCARD_POTION, kPotionCap + 3));
+    EXPECT_EQ(std::memcmp(&rc.run, &before, sizeof(RunState)), 0)
+        << "an illegal discard is a non-corrupting no-op";
+}
+
+TEST(RunPotionDiscard, WeMeetAgainConfiscatesTheBelt) {
+    // AbstractPotion.canDiscard's only clause. The run layer's event dialog is
+    // the room's `event`, so the gate is (phase == EVENT_DIALOG && the live
+    // event is We Meet Again) -- an ordinary event dialog does not close it.
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FEAR_POTION);
+    rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+
+    rc.event.event_id = static_cast<uint16_t>(EventId::WE_MEET_AGAIN);
+    RunActionMask blocked{};
+    legal_actions(rc, blocked);
+    EXPECT_FALSE(blocked.can_discard_potion[0]);
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FEAR_POTION));
+
+    rc.event.event_id = static_cast<uint16_t>(EventId::LIVING_WALL);
+    RunActionMask allowed{};
+    legal_actions(rc, allowed);
+    EXPECT_TRUE(allowed.can_discard_potion[0]);
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+}
+
 // =============================================================================
 // Full floor cycle
 // =============================================================================

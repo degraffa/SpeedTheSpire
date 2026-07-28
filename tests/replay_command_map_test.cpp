@@ -26,18 +26,26 @@ namespace {
 using sts::engine::action_arg0;
 using sts::engine::action_verb;
 using sts::engine::ActionVerb;
+using sts::engine::EventGridKind;
 using sts::engine::kChooseProceed;
+using sts::engine::NeowScreen;
+using sts::engine::RelicId;
+using sts::engine::RelicSlot;
+using sts::engine::RestScreen;
 using sts::engine::RunController;
 using sts::engine::RunPhase;
+using sts::engine::ShopScreenKind;
 using sts::replay::map_command;
 using sts::replay::MapKind;
 using sts::replay::MappedCommand;
 using sts::replay::ScreenInfo;
+using sts::replay::sim_grid_open;
 
-// The mapping reads only `rc.phase` on every path exercised here (the GRID path
-// additionally reads the master deck through legal_actions, and is not one of
-// these cases), so a value-initialized controller with the phase set is the
-// whole fixture.
+// The mapping reads `rc.phase` and, on the GRID path, the sub-screen field that
+// phase owns plus the relic list -- never the master deck, since the grid's
+// index space belongs to the caller's GridSession. So a value-initialized
+// controller with the phase set is the whole fixture, and the GRID cases just
+// set one more field on it.
 [[nodiscard]] RunController at_phase(RunPhase phase) {
     RunController rc{};
     rc.phase = static_cast<uint8_t>(phase);
@@ -135,6 +143,146 @@ TEST(ReplayCommandMap, NeowsLeaveRepeatedAfterItsMapIsUpIsAUiBounce) {
     const RunController rc = at_phase(RunPhase::MAP_CHOICE);
     const MappedCommand m = map_command(rc, event_page({"Leave"}), "choose 0");
     EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+}
+
+// --- the potion belt ---------------------------------------------------------
+//
+// `potion discard i` is the top panel's own button, and the top panel is drawn
+// over whatever screen is up. CommandExecutor.executePotionCommand never looks
+// at the screen: it bounds-checks the slot, asks canDiscard, and calls
+// topPanel.destroyPotion, which is `potions.set(slot, new PotionSlot(slot))`
+// and nothing else (TopPanel.java:529-531). The run layer's DISCARD_POTION is
+// dispatched ahead of its own phase switch for the same reason, so ONE entry
+// covers every screen -- and that is what these pin, because the entry used to
+// exist nowhere and a MAP record carrying it ended the replay outright.
+
+TEST(ReplayCommandMap, APotionDiscardIsTheSameMappingOnEveryScreen) {
+    for (const char* screen : {"MAP", "SHOP_SCREEN", "COMBAT_REWARD", "NONE",
+                               "EVENT", "GRID", "REST"}) {
+        ScreenInfo s;
+        s.screen_type = screen;
+        const MappedCommand m =
+            map_command(at_phase(RunPhase::MAP_CHOICE), s, "potion discard 1");
+        ASSERT_EQ(m.kind, MapKind::ACTIONS) << screen << ": " << m.reason;
+        ASSERT_EQ(m.actions.size(), 1u) << screen;
+        EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::DISCARD_POTION) << screen;
+        EXPECT_EQ(action_arg0(m.actions[0]), 1) << screen;
+    }
+}
+
+// The sibling verb must not be swept up with it: `potion use` needs a live
+// target and stays the combat branch's business.
+TEST(ReplayCommandMap, APotionUseIsStillTheCombatScreensTargetedVerb) {
+    ScreenInfo s;
+    s.screen_type = "NONE";
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::COMBAT), s, "potion use 0 2");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::USE_POTION);
+    EXPECT_EQ(action_arg0(m.actions[0]), 0);
+}
+
+// --- grid screens ------------------------------------------------------------
+//
+// GridCardSelectScreen selects on click and commits on a button; the run layer
+// does both at once and can undo neither. So a grid command is not a run-layer
+// action at all -- it is an edit to a pending selection the CALLER holds
+// (GridSession), and the table's only job is to say which of the three edits it
+// is.
+
+[[nodiscard]] RunController at_neow_grid() {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    return rc;
+}
+
+[[nodiscard]] ScreenInfo grid_screen() {
+    ScreenInfo s;
+    s.screen_type = "GRID";
+    return s;
+}
+
+TEST(ReplayCommandMap, AGridChooseIsBufferedRatherThanAppliedImmediately) {
+    const MappedCommand m = map_command(at_neow_grid(), grid_screen(), "choose 3");
+    ASSERT_EQ(m.kind, MapKind::GRID_PICK) << m.reason;
+    EXPECT_EQ(m.grid_index, 3);
+    EXPECT_TRUE(m.actions.empty())
+        << "nothing may reach the run layer until the capture confirms";
+}
+
+// The gap this closes. STS00047's Neow removal grid reads `choose 2`, `cancel`,
+// `choose 0`, `proceed`: the player eyed one Strike, changed their mind, and
+// removed a different one. Because the pick was never applied, honouring the
+// cancel costs nothing -- but the old table called `cancel` unmappable ("a grid
+// pick cannot be undone") and ended that replay at seq 3, four records in.
+TEST(ReplayCommandMap, AGridCancelDropsThePendingSelectionInsteadOfStopping) {
+    const MappedCommand m = map_command(at_neow_grid(), grid_screen(), "cancel");
+    EXPECT_EQ(m.kind, MapKind::GRID_CANCEL) << m.reason;
+    EXPECT_TRUE(m.actions.empty());
+}
+
+TEST(ReplayCommandMap, AGridProceedIsTheCommitAndNotAScreenExit) {
+    const MappedCommand m = map_command(at_neow_grid(), grid_screen(), "proceed");
+    EXPECT_EQ(m.kind, MapKind::GRID_COMMIT) << m.reason;
+    EXPECT_TRUE(m.actions.empty())
+        << "the commit applies the buffered picks; it is not a kChooseProceed";
+}
+
+// The classification. STS00052 takes Neow's boss-relic blessing, is handed an
+// Astrolabe, and the capture then drives Astrolabe's onEquip transform grid --
+// which the engine never opens, because that onEquip is one of the five
+// deferred BOSS bodies. The ACQUISITION is right (the relic is in the list, its
+// pool is popped, every stream matches), so the honest outcome is a stop that
+// names the body. The old table said "grid choose index has no legal
+// master-deck slot", which reads as an index-mapping defect and is not one.
+TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheDeferredRelicBody) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::BLESSING);
+    rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ASTROLABE), 0};
+    rc.run.relic_count = 1;
+
+    const MappedCommand m = map_command(rc, grid_screen(), "choose 3");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("Astrolabe"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("deferred"), std::string::npos) << m.reason;
+}
+
+// sim_grid_open is the discriminator that classification turns on, so it has to
+// know every phase that owns a master-deck grid: a phase it did not know would
+// misreport a perfectly live grid as a deferred body.
+TEST(ReplayCommandMap, EveryPhaseWithAMasterDeckGridIsRecognised) {
+    RunController rc{};
+    EXPECT_FALSE(sim_grid_open(rc));
+
+    rc.phase = static_cast<uint8_t>(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    EXPECT_TRUE(sim_grid_open(rc));
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::CARD_REWARD);
+    EXPECT_FALSE(sim_grid_open(rc));
+
+    rc = RunController{};
+    rc.phase = static_cast<uint8_t>(RunPhase::REST_SITE);
+    rc.rest.screen = static_cast<uint8_t>(RestScreen::SMITH);
+    EXPECT_TRUE(sim_grid_open(rc));
+    rc.rest.screen = static_cast<uint8_t>(RestScreen::TOKE);
+    EXPECT_TRUE(sim_grid_open(rc));
+    rc.rest.screen = static_cast<uint8_t>(RestScreen::MENU);
+    EXPECT_FALSE(sim_grid_open(rc)) << "the campfire menu is not a grid";
+
+    rc = RunController{};
+    rc.phase = static_cast<uint8_t>(RunPhase::SHOP);
+    rc.shop.screen = static_cast<uint8_t>(ShopScreenKind::PURGE_GRID);
+    EXPECT_TRUE(sim_grid_open(rc));
+    rc.shop.screen = static_cast<uint8_t>(ShopScreenKind::MENU);
+    EXPECT_FALSE(sim_grid_open(rc));
+
+    rc = RunController{};
+    rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+    rc.event.grid_kind = static_cast<uint8_t>(EventGridKind::PURGE);
+    EXPECT_TRUE(sim_grid_open(rc));
+    rc.event.grid_kind = static_cast<uint8_t>(EventGridKind::NONE);
+    EXPECT_FALSE(sim_grid_open(rc));
 }
 
 // --- the neighbouring elisions, pinned so the EVENT fix cannot disturb them --

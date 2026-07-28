@@ -186,6 +186,17 @@ enum class ActionVerb : uint8_t {
     // TOGGLES a card in or out of the selection instead of committing it, and
     // this verb is what resolves whatever accumulated. No args.
     CONFIRM = 4,
+    // Throw a potion away without using it -- the top panel's own belt button,
+    // which is up on every screen the potion belt is drawn on, in combat and
+    // out of it. It is NOT a weakened USE_POTION: `potion.use` and the whole
+    // relic `onUsePotion` fan-out run on the USE branch only, and both branches
+    // then end at `topPanel.destroyPotion(slot)`, which is
+    // `potions.set(slot, new PotionSlot(slot))` and nothing else
+    // (TopPanel.java:529-531). So a discard consumes no RNG, moves no stream and
+    // fires no hook; the only thing that refuses it is AbstractPotion.canDiscard
+    // (AbstractPotion.java:398-400), which is true everywhere except inside a
+    // We Meet Again dialog. arg0 = potion slot; no other args.
+    DISCARD_POTION = 5,
 };
 
 // --- CardInstance -------------------------------------------------------------

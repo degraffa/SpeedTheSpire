@@ -26,12 +26,15 @@
 // turned into a committed, re-runnable binary instead of a scratch main.
 //
 // WHAT IT COVERS, HONESTLY. It generalizes over runs, seeds and floors, but not
-// over every room kind: a command the run layer has no analogue for (a shop
-// screen, a potion discard) ends the replay with an explicit `STOP` reason and
-// a count of how many records were verified first. It is therefore a REPLAY
-// harness for the room content that is modelled, not the "seed a sim replay
-// from any translated RunState" adapter -- that one resumes from a mid-run
-// state without re-driving the prefix, and is still open.
+// over every room kind: a command the run layer has no analogue for ends the
+// replay with an explicit `STOP` reason and a count of how many records were
+// verified first. The reason is the point -- a stop should say WHICH deferred
+// body it hit, not describe the symptom, which is why a capture driving a grid
+// the sim never opened now names the relic whose `onEquip` is deferred instead
+// of complaining about the index. It is therefore a REPLAY harness for the room
+// content that is modelled, not the "seed a sim replay from any translated
+// RunState" adapter -- that one resumes from a mid-run state without re-driving
+// the prefix, and is still open.
 //
 // SCREEN-DRIVEN COMMAND MAPPING. CommunicationMod commands are screen-relative,
 // so the artifact's `screen_type` (parsed here, alongside the translator's
@@ -49,9 +52,13 @@
 //   NONE    play i [t]      -> PLAY_CARD(i-1, t)  the game's index is 1-based
 //   NONE    end             -> END_TURN
 //   NONE    potion use s t  -> USE_POTION(s, t)
+//   (any)   potion discard s-> DISCARD_POTION(s)   screen-independent: the belt
+//                                                  is on the top panel
 //   CHEST   proceed         -> CHOOSE(kChooseProceed)
 //   REST    choose i        -> CHOOSE(i)
-//   GRID    choose i        -> CHOOSE(i)
+//   GRID    choose i        -> buffer the pick     see GridSession
+//   GRID    cancel          -> drop the buffer
+//   GRID    proceed         -> flush the buffer as CHOOSE(master-deck index)
 //   HAND_SELECT choose i    -> CHOOSE(i)
 //
 // WHY `proceed` IS DEFERRED. Pressing Proceed on a reward screen that still has
@@ -324,6 +331,7 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         throw std::runtime_error("screen/record count mismatch in " + path);
 
     RunController rc = run_begin(run.seed, 20);
+    GridSession grid;
 
     for (std::size_t k = 0; k < run.records.size(); ++k) {
         const sts::translate::TranslatedRecord& rec = run.records[k];
@@ -386,6 +394,11 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         if (opts.pool_evidence && s.screen_type == "CARD_REWARD")
             print_pool_evidence(run.seed_string, s.floor, rc, s);
 
+        // A grid session lives across records, so it is opened here rather than
+        // in the table: the first GRID record snapshots the index space, and it
+        // is dropped again the moment the capture leaves the screen.
+        if (s.screen_type != "GRID") grid = GridSession{};
+
         const MappedCommand m = map_command(rc, s, rec.action_command);
         if (m.kind == MapKind::TERMINAL) {
             v.stop_reason = "run terminal";
@@ -396,6 +409,45 @@ void print_pool_evidence(const std::string& seed_string, int floor,
             v.stop_reason = "seq " + std::to_string(rec.seq) + " cmd '" +
                             rec.action_command + "': " + m.reason;
             return v;
+        }
+        if (m.kind == MapKind::GRID_PICK || m.kind == MapKind::GRID_CANCEL ||
+            m.kind == MapKind::GRID_COMMIT) {
+            if (!grid.open) open_grid_session(rc, grid);
+            if (m.kind == MapKind::GRID_CANCEL) {
+                grid.pending.clear();
+                continue;
+            }
+            if (m.kind == MapKind::GRID_PICK) grid.pending.push_back(m.grid_index);
+            // A two-pick grid has no confirm button: it commits on the pick that
+            // fills it, and the only evidence of that is the screen being gone
+            // from the next record. Flush on either signal.
+            const bool closes =
+                k + 1 >= screens.size() || screens[k + 1].screen_type != "GRID";
+            if (m.kind != MapKind::GRID_COMMIT && !closes) continue;
+            for (const int g : grid.pending) {
+                if (g < 0 || g >= static_cast<int>(grid.filtered.size())) {
+                    v.stop_reason = "seq " + std::to_string(rec.seq) + ": grid index " +
+                                    std::to_string(g) + " is off the sim's " +
+                                    std::to_string(grid.filtered.size()) +
+                                    "-row grid";
+                    return v;
+                }
+                step(rc, make_action(ActionVerb::CHOOSE,
+                                     static_cast<uint8_t>(
+                                         grid.filtered[static_cast<std::size_t>(g)])));
+            }
+            if (sim_grid_open(rc)) {
+                // The sim wants picks the capture did not make, so the two are
+                // not looking at the same grid. Stop: handing the next command
+                // to a controller still parked on a grid would apply it to the
+                // wrong screen. (The --neow mode carries the same guard.)
+                v.stop_reason = "seq " + std::to_string(rec.seq) +
+                                ": the sim's grid outlived the capture's " +
+                                std::to_string(grid.pending.size()) + " pick(s)";
+                return v;
+            }
+            grid = GridSession{};
+            continue;
         }
         if (m.kind == MapKind::LEAVE_ROOM &&
             rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD)) {
@@ -711,31 +763,11 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
     return neow_drawback_label(d, n.hp_bonus, hp) + " " + reward;
 }
 
-// The grid screens buffer their picks, because the game's confirm button is not
-// uniform: a one-pick grid shows it (`choose` selects, `proceed` commits, and
-// `cancel` clears the selection again -- all three appear in the captures),
-// while a two-pick grid commits on its second `choose` with no button at all.
-// Rather than model the button, the harness reads the capture: picks accumulate
-// and are flushed on `proceed`, or when the grid screen is gone from the next
-// record. It also snapshots the grid's index space once, at open, because
-// CommunicationMod's `choice_list` is the UNSHRUNK filtered deck -- selecting
-// the 5th row does not renumber the 8th -- whereas the sim's legal mask drops
-// a picked row immediately.
-struct GridSession {
-    bool open = false;
-    std::vector<int> filtered;  // master-deck indices, in grid order
-    std::vector<int> pending;   // grid indices selected, not yet committed
-};
-
-void open_grid_session(const RunController& rc, GridSession& g) {
-    g.open = true;
-    g.filtered.clear();
-    g.pending.clear();
-    RunActionMask m{};
-    legal_actions(rc, m);
-    for (int i = 0; i < kMasterDeckCap; ++i)
-        if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
-}
+// `GridSession` and `open_grid_session` moved to command_map.hpp when --replay
+// grew the same need. The buffering is part of what a captured grid command
+// MEANS -- the game selects on click and commits on a button, the run layer
+// does both at once -- so it belongs beside the table and its gtest rather than
+// inside one mode. This mode's use of it is unchanged.
 
 struct NeowVerdict {
     std::string seed_string;
@@ -1178,6 +1210,26 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
 
             const std::vector<std::string> c = split_ws(run.records[j].action_command);
             if (c.empty()) break;
+            // The belt is drawn over the shop room too, and the captures use
+            // it: STS00052 throws away the Fear Potion it had just bought,
+            // three records after the purchase. This is not a merchant action
+            // at all -- it moves no gold and no stream -- but it DOES empty a
+            // RunState potion slot, so a walk that skipped it diffed the slot
+            // against the capture for the rest of the visit. That is exactly
+            // what the "STS00052 shop screen potions[0] FearPotion" row was.
+            if (c[0] == "potion" && c.size() >= 3 && c[1] == "discard") {
+                const int slot = std::stoi(c[2]);
+                if (slot < 0 || slot >= kPotionCap ||
+                    buy.potions[static_cast<std::size_t>(slot)] ==
+                        static_cast<uint16_t>(PotionId::NONE)) {
+                    stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
+                           run.records[j].action_command + "' names an empty slot";
+                    break;
+                }
+                buy.potions[static_cast<std::size_t>(slot)] =
+                    static_cast<uint16_t>(PotionId::NONE);
+                continue;
+            }
             if (screens[j].screen_type == "GRID") {
                 if (!grid.open) {
                     grid.open = true;
@@ -1218,9 +1270,6 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
             if (c[0] == "leave" || c[0] == "proceed" || c[0] == "return") continue;
             if (screens[j].screen_type == "SHOP_ROOM" && c[0] == "choose") continue;
             if (screens[j].screen_type != "SHOP_SCREEN" || c[0] != "choose") {
-                // `potion discard` is the one of these the captures actually
-                // reach: an out-of-combat discard, which the run layer has no
-                // door for (the same B1.6 gap the whole-run replay stops on).
                 stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
                        run.records[j].action_command +
                        "' is not a merchant action and has no run-layer analogue";

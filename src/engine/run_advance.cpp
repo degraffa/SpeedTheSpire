@@ -188,6 +188,29 @@ void clear_potion_slot(RunState& rs, uint8_t slot) noexcept {
     rs.potions[slot] = static_cast<uint16_t>(PotionId::NONE);
 }
 
+// AbstractPotion.canDiscard (AbstractPotion.java:398-400) in full: the belt's
+// throw-away button is live for any occupied slot, in any room, in combat and
+// out of it, and the one thing that takes it away is a We Meet Again dialog --
+// that event confiscates the belt for the duration of its offer, and canUse
+// (:404-410) carries the same clause ahead of its own combat gates.
+// CommandExecutor rejects an empty slot before it ever reaches canDiscard
+// (`selectedPotion instanceof PotionSlot`), which is the row-exists test here.
+//
+// Note what is deliberately NOT tested: potion_use_implemented. A deferred
+// potion BODY is no obstacle to throwing the potion away, because a discard
+// never runs the body -- destroyPotion is the whole effect. So this door is
+// open across the entire still-deferred potion set instead of waiting on it.
+bool potion_discard_legal(const RunController& rc, uint8_t slot) noexcept {
+    if (slot >= rc.run.potion_slots || slot >= kPotionCap) {
+        return false;
+    }
+    if (rc.run.potions[slot] == static_cast<uint16_t>(PotionId::NONE)) {
+        return false;
+    }
+    return !(rc.phase == static_cast<uint8_t>(RunPhase::EVENT_DIALOG) &&
+             static_cast<EventId>(rc.event.event_id) == EventId::WE_MEET_AGAIN);
+}
+
 void use_fruit_juice(RunController& rc, uint8_t slot) noexcept {
     const int amount = potion_def(PotionId::FRUIT_JUICE)->potency;
     if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
@@ -1233,6 +1256,18 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             out.can_use_potion[slot] = noncombat_potion_legal(rc, slot);
         }
     }
+
+    // The discard button, by contrast, is NOT restricted to the non-combat
+    // phases above: TopPanel draws the belt through a fight too, and
+    // canDiscard has no combat clause. The parked/terminal phases are still
+    // excluded, on this layer's standing rule that nothing is legal there.
+    if (phase != RunPhase::ROOM_UNIMPLEMENTED && phase != RunPhase::RUN_OVER &&
+        phase != RunPhase::NONE) {
+        for (uint8_t slot = 0; slot < rc.run.potion_slots && slot < kPotionCap;
+             ++slot) {
+            out.can_discard_potion[slot] = potion_discard_legal(rc, slot);
+        }
+    }
 }
 
 // --- advance (run overload) -------------------------------------------------
@@ -1377,8 +1412,38 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
     return true;
 }
 
+// DISCARD_POTION, dispatched beside step_potion and ahead of the phase switch
+// for the same reason: the potion belt is a RunState-owned inventory that the
+// top panel exposes on every screen, so its verbs belong to no single phase.
+// The whole effect is TopPanel.destroyPotion (TopPanel.java:529-531) -- the
+// slot is emptied and nothing else happens. In particular NO relic hook fires:
+// CommandExecutor's `onUsePotion` fan-out and PotionPopUp's are both on the
+// USE path, so Toy Ornithopter does not heal for a potion thrown away.
+bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept {
+    if (action_verb(a) != ActionVerb::DISCARD_POTION) {
+        return false;
+    }
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    const uint8_t slot = action_arg0(a);
+    if (slot < kPotionCap && mask.can_discard_potion[slot]) {
+        clear_potion_slot(rc.run, slot);
+    }
+    // An illegal discard is a non-corrupting no-op, the same contract every
+    // other run-layer verb keeps.
+    if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+        fill_combat_result(rc.combat, res);
+    } else {
+        fill_run_result(rc, res);
+    }
+    return true;
+}
+
 void step_one(RunController& rc, Action a, StepResult& res) noexcept {
     if (step_potion(rc, a, res)) {
+        return;
+    }
+    if (step_discard_potion(rc, a, res)) {
         return;
     }
     switch (static_cast<RunPhase>(rc.phase)) {
