@@ -117,12 +117,30 @@
   game_id: "Fire Potion"
   rarity: COMMON
   potency: 20
-  # THORNS-typed with applyEnemyPowersOnly (player Strength/Weak do NOT scale it;
-  # enemy Vulnerable does). The DAMAGE opcode is NORMAL-typed today (damage-TYPE
-  # is B3.2's deferred item); coincides with THORNS when the player has no
-  # Strength/Weak, which the tier-2 test uses. Seam noted in the B3.23 Log.
+  # FLAT 20 -- nothing scales it. FirePotion.use builds `new DamageInfo(player,
+  # potency, DamageType.THORNS)` and calls applyEnemyPowersOnly (NOT applyPowers),
+  # and TWO independent facts each pin the number on their own:
+  #   (a) THE TYPE. VulnerablePower.atDamageReceive (VulnerablePower.java:62-73)
+  #       is gated `if (type == DamageType.NORMAL)`, as are StrengthPower's and
+  #       WeakPower's atDamageGive hooks -- so no enemy Vulnerable and no player
+  #       Strength/Weak can touch a THORNS DamageInfo. (An earlier revision of
+  #       this comment claimed enemy Vulnerable DID scale it; that was wrong.)
+  #   (b) applyEnemyPowersOnly (DamageInfo.java:102-120) never runs OWNER powers
+  #       at all, and both its loops pass `this.output` -- never reassigned --
+  #       rather than the running `tmp`, each iteration overwriting tmp. With no
+  #       powers on the target tmp stays `base`; with powers only
+  #       `powers[last].atDamageFinalReceive(base, type)` survives, applied to
+  #       the RAW base with no accumulation, and its clamp/floor order is
+  #       reversed relative to applyPowers (:116-119 vs :67-70).
+  # NOT MODELED, deliberately: (b)'s last-power quirk. The only
+  # atDamageFinalReceive overriders in the tree are Flight, Forcefield and the
+  # two Intangibles, none reachable in Act 1 Exordium -- whoever lands the first
+  # Act-2 atDamageFinalReceive power owns reproducing it, and until then THORNS
+  # typing gives the identical answer.
+  # Explosive Potion (id 7) is correctly NORMAL and must NOT be swept along:
+  # ExplosivePotion.java:46 passes DamageType.NORMAL to DamageAllEnemiesAction.
   effects:
-    - {op: DAMAGE, target: CARD_TARGET, amount: 20}
+    - {op: DAMAGE, target: CARD_TARGET, amount: 20, damage_type: THORNS}
   provenance: "FirePotion.use (FirePotion.java:43), getPotency (:50) -- DamageAction THORNS applyEnemyPowersOnly, potency"
 
 - id: 9

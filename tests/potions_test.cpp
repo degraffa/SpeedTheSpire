@@ -139,14 +139,53 @@ TEST(Potions, FirePotionDamagesTarget) {
     EXPECT_EQ(potion_def(PotionId::FIRE_POTION)->potency, 20);
 }
 
-TEST(Potions, FirePotionScaledByTargetVulnerable) {
-    // THORNS applyEnemyPowersOnly: enemy Vulnerable (target-side) scales it x1.5;
-    // the player has no Strength, so NORMAL and THORNS coincide on the number.
+// FirePotion.use (FirePotion.java:43-47) builds `new DamageInfo(player, potency,
+// DamageType.THORNS)` and calls info.applyEnemyPowersOnly(target) -- NOT
+// applyPowers. The number is flat `potency`, and TWO independent reasons say so:
+//
+//   (a) THE TYPE. VulnerablePower.atDamageReceive (VulnerablePower.java:62-73)
+//       is gated `if (type == DamageType.NORMAL)`, and so are StrengthPower's
+//       and WeakPower's atDamageGive hooks. A THORNS DamageInfo cannot be
+//       scaled by any of them.
+//   (b) applyEnemyPowersOnly ITSELF (DamageInfo.java:102-120) runs only the
+//       TARGET's powers -- never the owner's, so player Strength/Weak are not
+//       even consulted -- and both of its loops pass `this.output` (never
+//       reassigned) rather than the running `tmp`, each iteration OVERWRITING
+//       tmp. With no powers on the target tmp stays `base`; with powers only
+//       `powers[last].atDamageFinalReceive(base, type)` survives. The only
+//       atDamageFinalReceive overriders in the tree are Flight, Forcefield and
+//       the two Intangibles -- none reachable in Act 1 Exordium. That quirk is
+//       deliberately NOT modeled; it belongs to whoever lands the first Act-2
+//       atDamageFinalReceive power.
+//
+// So Strength on the player and Vulnerable on the target must BOTH leave the
+// number at exactly 20. NEGATIVE CONTROL for the damage TYPE: with the registry
+// row NORMAL-typed (its state before this change) the pipeline reads
+// 50 - floor((20 + 3) * 1.5) = 50 - 34, i.e. 16.
+TEST(Potions, FirePotionIsFlatAndUnscaledByStrengthOrVulnerable) {
     CombatState s = MakeCombat(1, 50);
+    s.player_powers[s.player_power_count].power_id =
+        static_cast<uint16_t>(PowerId::STRENGTH);
+    s.player_powers[s.player_power_count].amount = 3;
+    ++s.player_power_count;
     give_monster_power(s, 0, PowerId::VULNERABLE, 1);
     ASSERT_TRUE(use_potion(s, PotionId::FIRE_POTION, 0));
     drain_actions(s);
-    EXPECT_EQ(s.monsters[0].hp, 20);  // 50 - floor(20 * 1.5) = 50 - 30
+    EXPECT_EQ(s.monsters[0].hp, 30);  // 50 - 20 flat
+}
+
+// The owner-side half of (b), on its own: Weak on the PLAYER is an atDamageGive
+// hook, and applyEnemyPowersOnly never runs owner powers at all. NEGATIVE
+// CONTROL: NORMAL-typed this reads 50 - floor(20 * 0.75) = 50 - 15, i.e. 35.
+TEST(Potions, FirePotionIsUnscaledByPlayerWeak) {
+    CombatState s = MakeCombat(1, 50);
+    s.player_powers[s.player_power_count].power_id =
+        static_cast<uint16_t>(PowerId::WEAK);
+    s.player_powers[s.player_power_count].amount = 2;
+    ++s.player_power_count;
+    ASSERT_TRUE(use_potion(s, PotionId::FIRE_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(s.monsters[0].hp, 30);  // 50 - 20 flat
 }
 
 TEST(Potions, StrengthPotionGrantsStrength) {
