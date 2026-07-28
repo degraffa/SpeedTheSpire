@@ -36,6 +36,7 @@
 
 #include <gtest/gtest.h>
 
+#include "sts/engine/card_pools.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/registry/card_table.hpp"
 
@@ -162,6 +163,59 @@ TEST(CardPoolLibraryOrder, CombatPoolIsTheReversedRarityMajorConcatenation) {
         EXPECT_EQ(kIroncladCombatPool[static_cast<unsigned>(i)],
                   want[static_cast<std::size_t>(i)])
             << "combat-pool position " << i;
+    }
+}
+
+// transformCard's list is a THIRD shape, and it is the one that mixes the two
+// orders above -- the trap this file exists to catch, in its purest form.
+// returnTrulyRandomCardFromAvailable (AbstractDungeon.java:1016-1045) reads
+// `commonCardPool` -- the LIVE pool, plain library order -- and then
+// `srcUncommonCardPool` and `srcRareCardPool`, the PREPEND-filled copies
+// (:1180-1199, CardGroup.java:459-461), which hold their rarity's library order
+// REVERSED. Walking all three forwards is right for the first block and wrong
+// for the other two.
+//
+// Pinned at the three block boundaries, seed-free, against the raw emitted
+// arrays -- the same shape as NeowGrid.TransformReadsTheSrcPoolsBackwards, but
+// on the engine's own list builder rather than a test transcription of it. Both
+// event grids (Living Wall, Transmorgrifier) and both Neow transform payouts go
+// through this one function, so this is the only place the order is stated.
+TEST(CardPoolLibraryOrder, TransformCardListIsCommonsThenBothSrcPoolsBackwards) {
+    // DEFEND is BASIC: in none of the three pools, so nothing is excluded and
+    // the list is the whole concatenation.
+    CardId list[kTransformCardListCap]{};
+    const int n = transform_card_list(CardId::DEFEND, list);
+    ASSERT_EQ(n, kIroncladCommonPoolCount + kIroncladUncommonPoolCount +
+                     kIroncladRarePoolCount);
+
+    // Block 1 -- commonCardPool, FORWARDS.
+    EXPECT_EQ(list[0], kIroncladCommonPool[0]);
+    EXPECT_EQ(list[kIroncladCommonPoolCount - 1],
+              kIroncladCommonPool[kIroncladCommonPoolCount - 1]);
+    // Block 2 -- srcUncommonCardPool, BACKWARDS.
+    EXPECT_EQ(list[kIroncladCommonPoolCount],
+              kIroncladUncommonPool[kIroncladUncommonPoolCount - 1]);
+    EXPECT_EQ(list[kIroncladCommonPoolCount + kIroncladUncommonPoolCount - 1],
+              kIroncladUncommonPool[0]);
+    // Block 3 -- srcRareCardPool, BACKWARDS.
+    EXPECT_EQ(list[kIroncladCommonPoolCount + kIroncladUncommonPoolCount],
+              kIroncladRarePool[kIroncladRarePoolCount - 1]);
+    EXPECT_EQ(list[n - 1], kIroncladRarePool[0]);
+
+    // ...and every position in between, so a same-endpoint reshuffle cannot
+    // slip through.
+    int at = 0;
+    for (int i = 0; i < kIroncladCommonPoolCount; ++i, ++at) {
+        EXPECT_EQ(list[at], kIroncladCommonPool[static_cast<unsigned>(i)])
+            << "common block position " << i;
+    }
+    for (int i = kIroncladUncommonPoolCount - 1; i >= 0; --i, ++at) {
+        EXPECT_EQ(list[at], kIroncladUncommonPool[static_cast<unsigned>(i)])
+            << "uncommon block, src index " << i;
+    }
+    for (int i = kIroncladRarePoolCount - 1; i >= 0; --i, ++at) {
+        EXPECT_EQ(list[at], kIroncladRarePool[static_cast<unsigned>(i)])
+            << "rare block, src index " << i;
     }
 }
 

@@ -96,9 +96,24 @@ using sts::registry::event_card_rarity;
 // srcColorlessCardPool (AbstractDungeon.java:998-1014), and the only other
 // consumer is the shop's two colorless slots, which do not exist yet; the
 // ledger's Deferred obligations table carries it for whoever builds them.
+//
+// THE INPUT ORDER IS LOAD-BEARING and it is the LIVE pool's, not the `src*`
+// twin's. `addColorlessCards` fills `colorlessCardPool` with `addToTop`, which
+// is `group.add(c)` -- an APPEND (AbstractDungeon.java:1203-1210,
+// CardGroup.java:455-457) -- so the live pool is plain CardLibrary library
+// order, while the emitted `kColorlessPool` models `srcColorlessCardPool`,
+// which `initializeCardPools` fills with the PREPENDING `addToBottom`
+// (:1185-1187, CardGroup.java:459-461) and which therefore holds the SAME
+// membership REVERSED. Reading it backwards here restores the live order, so
+// one emitted array serves both readings -- the same discipline the RED pools
+// use. It used to read a separately emitted `kEventTransformColorlessPool`
+// whose order was a plain walk of `cards.yaml` rows, i.e. neither.
 [[nodiscard]] CardId draw_colorless_uncommon(RngStream& shuffle_rng) noexcept {
-    std::array<CardId, sts::registry::kEventTransformColorlessPool.size()> pool =
-        sts::registry::kEventTransformColorlessPool;
+    std::array<CardId, static_cast<std::size_t>(kColorlessPoolCount)> pool{};
+    for (int i = 0; i < kColorlessPoolCount; ++i) {
+        pool[static_cast<std::size_t>(i)] = kColorlessPool[
+            static_cast<std::size_t>(kColorlessPoolCount - 1 - i)];
+    }
     JdkRandom jdk(random_long(shuffle_rng));
     jdk_shuffle(std::span<CardId>(pool), jdk);
     for (CardId id : pool) {

@@ -81,45 +81,28 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "    }",
         "    return nullptr;",
         "}\n",
-        "// Living Wall transform pools. Membership follows transformCard:",
-        "// RED uses every non-basic reward-pool card, COLORLESS uses every",
-        "// uncommon/rare colorless card, and CURSE uses every poolable curse.",
-        "// Registry iteration order is stable and the arrays self-complete as",
-        "// later colorless content rows land.",
+        "// THE EVENT-GRID TRANSFORM POOLS ARE DELIBERATELY NOT EMITTED HERE.",
+        "// Living Wall / Transmorgrifier reach AbstractDungeon.transformCard",
+        "// (AbstractDungeon.java:860-878) and its",
+        "// returnTrulyRandomCardFromAvailable list (:1016-1045) -- the SAME list",
+        "// Neow's transform grid reaches, differing only in which Random is",
+        "// passed. `sts::engine::transform_card` (card_pools.hpp) is its one",
+        "// authority; it reads kIroncladCommonPool forwards and then",
+        "// kIroncladUncommonPool / kIroncladRarePool BACKWARDS, because",
+        "// initializeCardPools copies the src* pools with the PREPENDING",
+        "// addToBottom (:1180-1199, CardGroup.java:459-461).",
+        "//",
+        "// This file used to emit kEventTransform{Red,Colorless,Curse}Pool: the",
+        "// same MEMBERSHIP as kIronclad{Common,Uncommon,Rare}Pool / kColorlessPool",
+        "// / kPoolableCurses, in a THIRD order (a plain walk of cards.yaml rows).",
+        "// That second rendering drifted from the first and was the whole",
+        "// remaining divergence of replayed run STS00051, whose floor-2 Living",
+        "// Wall the game answered with Havoc and the emitted pool with Iron Wave.",
+        "// Re-emitting a pool for this call site re-creates that failure mode:",
+        "// the order lives in exactly one place now, next to the Java it cites.",
     ])
     cards = domains["cards"]
-    transform_groups = {
-        "Red": [c for c in cards
-                if str(c.get("color", "")).upper() == "RED"
-                and str(c.get("rarity", "")).upper()
-                in ("COMMON", "UNCOMMON", "RARE")],
-        "Colorless": [c for c in cards
-                      if str(c.get("color", "")).upper() == "COLORLESS"
-                      and str(c.get("rarity", "")).upper()
-                      in ("UNCOMMON", "RARE")],
-        "Curse": [c for c in cards if bool(c.get("curse_pool", False))],
-    }
-    for label, pool in transform_groups.items():
-        out.append(
-            f"inline constexpr std::array<CardId, {len(pool)}> "
-            f"kEventTransform{label}Pool{{{{")
-        for card in pool:
-            out.append(f"    CardId::{card['name']},")
-        out.append("}};")
     out.extend([
-        "[[nodiscard]] inline constexpr uint8_t event_transform_color(",
-        "    CardId id) noexcept {",
-        "    switch (id) {",
-    ])
-    for card in cards:
-        color = str(card.get("color", "")).upper()
-        tag = 1 if color == "RED" else 2 if color == "COLORLESS" else 3 if color == "CURSE" else 0
-        out.append(f"        case CardId::{card['name']}: return {tag};")
-    out.extend([
-        "        case CardId::NONE:",
-        "        default: return 0;",
-        "    }",
-        "}\n",
         "// B4.13: the master-deck card RARITY, which CardDef does not carry.",
         "// Bonfire Elementals pays out by the offered card's rarity",
         "// (Bonfire.java:117-152), We Meet Again excludes BASIC",

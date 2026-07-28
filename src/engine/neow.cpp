@@ -87,19 +87,6 @@ CardId colorless_from_pool(RngStream& card_rng, RewardCardRarity rarity) noexcep
     return draw_colorless_card_from_pool(card_rng, rarity);
 }
 
-// CardDef carries no colour column, so colour is read where it is already
-// expressed: membership of the generated colorless pool. That pool IS the set
-// transformCard's COLORLESS branch would draw from, so the two agree by
-// construction rather than by a second table.
-bool card_is_colorless(CardId id) noexcept {
-    for (int i = 0; i < kColorlessPoolCount; ++i) {
-        if (kColorlessPool[static_cast<std::size_t>(i)] == id) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool offer_contains(const RunRewardItem& item, int upto, CardId id) noexcept {
     for (int j = 0; j < upto; ++j) {
         if (item.card_ids[j] == static_cast<uint16_t>(id)) {
@@ -167,76 +154,6 @@ void open_neow_card_screen(RewardScreen& rewards, const RunRewardItem& item) noe
     rewards.open_card_item = 0;
 }
 
-// --- Transform ----------------------------------------------------------------
-
-// AbstractDungeon.transformCard(c, false, rng) (AbstractDungeon.java:860-878)
-// branching on the transformed card's COLOR, each branch one draw off the
-// passed rng:
-//   COLORLESS -> returnTrulyRandomColorlessCardFromAvailable (:1007-1014): the
-//                whole colorless pool minus this card's own id.
-//   CURSE     -> CardLibrary.getCurse(c, rng) (CardLibrary.java:1031-1038): the
-//                ten ordinary curses minus this card's own id.
-//   otherwise -> returnTrulyRandomCardFromAvailable (:1016-1045): commonCardPool
-//                ++ srcUncommonCardPool ++ srcRareCardPool, minus this card's
-//                own id.
-// A BASIC card (every Neow-era master-deck row but the starting curse) is in
-// none of these pools, so nothing is excluded from its list.
-//
-// THE THREE-POOL LIST MIXES TWO SPELLINGS, AND THE MIX IS OBSERVABLE. Only the
-// first term reads a LIVE pool. The other two read the `src*` copies, and
-// initializeCardPools builds every copy with `addToBottom`
-// (AbstractDungeon.java:1180-1199), which is `group.add(0, c)` -- a PREPEND
-// (CardGroup.java:459-461) -- so a `src*` pool holds its rarity's library order
-// BACKWARDS. The list is therefore plain-order commons, then REVERSED
-// uncommons, then REVERSED rares. Walking all three forwards was the earlier
-// reading, from before the CardLibrary order itself was pinned, and it is
-// indistinguishable from the correct one until the pools stop being symmetric:
-// the oracle capture is what separated them, on two seeds whose transformed
-// identities landed in the uncommon and rare blocks. `src_combat_order` in the
-// registry emitter encodes the same reversal for the pools whose only consumer
-// is a `src*` read; this call site cannot use those, because its FIRST block is
-// the un-copied pool.
-CardId transform_card(RngStream& neow_rng, CardId prohibited) noexcept {
-    const CardDef* def = card_def(prohibited);
-    const bool is_curse = def != nullptr && def->type == CardType::CURSE;
-
-    CardId list[kIroncladCommonPoolCount + kIroncladUncommonPoolCount +
-                kIroncladRarePoolCount]{};
-    static_assert(kColorlessPoolCount <= static_cast<int>(sizeof(list) /
-                                                          sizeof(list[0])));
-    static_assert(kPoolableCurseCount <= static_cast<int>(sizeof(list) /
-                                                          sizeof(list[0])));
-    int n = 0;
-    auto push = [&](CardId id) noexcept {
-        if (id != prohibited) {
-            list[n++] = id;
-        }
-    };
-
-    if (is_curse) {
-        for (int i = 0; i < kPoolableCurseCount; ++i) {
-            push(kPoolableCurses[static_cast<std::size_t>(i)]);
-        }
-    } else if (card_is_colorless(prohibited)) {
-        for (int i = 0; i < kColorlessPoolCount; ++i) {
-            push(kColorlessPool[static_cast<std::size_t>(i)]);
-        }
-    } else {
-        for (int i = 0; i < kIroncladCommonPoolCount; ++i) {
-            push(kIroncladCommonPool[static_cast<std::size_t>(i)]);  // live pool
-        }
-        for (int i = kIroncladUncommonPoolCount - 1; i >= 0; --i) {
-            push(kIroncladUncommonPool[static_cast<std::size_t>(i)]);  // src copy
-        }
-        for (int i = kIroncladRarePoolCount - 1; i >= 0; --i) {
-            push(kIroncladRarePool[static_cast<std::size_t>(i)]);  // src copy
-        }
-    }
-    assert(n > 0);
-    const int32_t i = random(neow_rng, n - 1);
-    return list[static_cast<std::size_t>(i)];
-}
-
 // --- Grid application ---------------------------------------------------------
 
 void apply_grid(RunState& rs, NeowState& st) noexcept {
@@ -266,8 +183,10 @@ void apply_grid(RunState& rs, NeowState& st) noexcept {
         return;
     }
 
-    // TRANSFORM. The single and double cases DIFFER in order and both orders
-    // are encoded as written:
+    // TRANSFORM. The list itself is `transform_card` (card_pools.hpp), the one
+    // authority for AbstractDungeon.transformCard, shared with the event grids;
+    // only the stream differs (NeowEvent.rng here, miscRng there). The single
+    // and double cases DIFFER in order and both orders are encoded as written:
     //   TRANSFORM_CARD (:157-162):  transform draw, THEN removeCard, then obtain.
     //   TRANSFORM_TWO  (:163-173):  removeCard both, THEN transform+obtain each.
     if (st.grid_done == 1) {
