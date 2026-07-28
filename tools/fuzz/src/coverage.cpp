@@ -98,6 +98,7 @@ void visit_scalars(C& c, F&& f) {
     f("combats_killed", c.combats_killed);
     f("combats_smoked", c.combats_smoked);
     f("deaths", c.deaths);
+    f("victories", c.victories);
     f("reward_screens", c.reward_screens);
     f("cards_taken", c.cards_taken);
     f("cards_skipped", c.cards_skipped);
@@ -439,13 +440,14 @@ std::string Coverage::report(double elapsed_s) const {
     os << "\n-- run-layer events --\n";
     std::snprintf(buf, sizeof(buf),
                   "  combats entered %12llu   killed %12llu   smoke-bomb escapes %8llu\n"
-                  "  deaths          %12llu   reward screens %6llu\n"
+                  "  deaths          %12llu   victories %10llu   reward screens %6llu\n"
                   "  cards taken     %12llu   cards skipped %7llu\n"
                   "  potions used    %12llu   relics held (sum) %10llu\n",
                   static_cast<unsigned long long>(combats_entered),
                   static_cast<unsigned long long>(combats_killed),
                   static_cast<unsigned long long>(combats_smoked),
                   static_cast<unsigned long long>(deaths),
+                  static_cast<unsigned long long>(victories),
                   static_cast<unsigned long long>(reward_screens),
                   static_cast<unsigned long long>(cards_taken),
                   static_cast<unsigned long long>(cards_skipped),

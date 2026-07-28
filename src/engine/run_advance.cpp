@@ -1552,6 +1552,28 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     s = RewardScreen{};
                     s.open_card_item = kNoOpenCardReward;
                     rc.treasure_chest = TreasureChest{};
+                    if (static_cast<RoomType>(rc.room_type) == RoomType::Boss) {
+                        // The Act-1 boss reward's Proceed is the S1 VICTORY
+                        // terminal. In the game this press never opens the
+                        // map: at a COMBAT_REWARD in a MonsterRoomBoss it
+                        // goes to the boss chest (ProceedButton.update,
+                        // ProceedButton.java:111-113 -> goToTreasureRoom
+                        // :179-187, a TreasureRoomBoss) and from there to the
+                        // next act -- both S2 content by the frozen scope
+                        // boundary (stage-b-design §1.1: "the run terminates
+                        // when the act-1 boss's combat rewards are claimed").
+                        // combat_outcome keeps KILLED and room_type keeps
+                        // Boss, which is exactly what run_is_victory() reads;
+                        // routing to MAP_CHOICE here was the probe-found
+                        // no_legal_moves dead end (the boss column has no
+                        // outgoing map edges).
+                        rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+                        fill_run_result(rc, res);
+                        res.reward = 1.0f;  // the run-level win: the +1
+                                            // analogue of the DEFEAT path's
+                                            // -1 (finish_combat_after_action)
+                        break;
+                    }
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
                 } else {
                     // Claim item a0 (CARDS opens the pick screen). Relic

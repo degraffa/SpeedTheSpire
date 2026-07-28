@@ -29,7 +29,9 @@ namespace sts::fuzz {
 // Why a run stopped. Only the first three are ordinary; the last three are
 // findings and are reported separately from the totals.
 enum class EndReason : uint8_t {
-    RUN_OVER = 0,             // player died -- terminal, expected
+    RUN_OVER = 0,             // RunPhase::RUN_OVER -- terminal, expected
+                              // (a death OR the S1 boss victory; the
+                              // victories/deaths counters carry the split)
     ROOM_UNIMPLEMENTED = 1,   // parked on unmodelled room content -- expected today
     NO_LEGAL_MOVES = 2,       // mask empty in a non-terminal phase -- suspicious
     ACTION_CAP = 3,           // hit --max-actions; the run was still going
@@ -111,7 +113,11 @@ struct Coverage {
     uint64_t combats_entered = 0;
     uint64_t combats_killed = 0;
     uint64_t combats_smoked = 0;
-    uint64_t deaths = 0;
+    uint64_t deaths = 0;      // RUN_OVER terminals that were a death
+    uint64_t victories = 0;   // RUN_OVER terminals that were the S1 boss
+                              // victory (engine::run_is_victory) -- the two
+                              // share one phase and one EndReason, so the
+                              // split lives here, not in a new enumerator
     uint64_t reward_screens = 0;
     uint64_t cards_taken = 0;
     uint64_t cards_skipped = 0;

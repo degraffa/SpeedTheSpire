@@ -258,13 +258,28 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                     ++cov->escapes;
                 }
             } else if (phase == RunPhase::RUN_OVER) {
-                ++cov->deaths;
+                // One terminal phase, two outcomes: the S1 boss victory
+                // (engine::run_is_victory) is not a death and must not be
+                // filed as one.
+                if (engine::run_is_victory(rc)) {
+                    ++cov->victories;
+                } else {
+                    ++cov->deaths;
+                }
             }
+            // Every phase a room ENTRY can land in. RunPhase::SHOP was missing
+            // here when B4.8 moved shops off ROOM_UNIMPLEMENTED parking, so a
+            // 300-seed probe printed "shop entered 0" while its own move table
+            // showed hundreds of SHOP moves taken -- a COUNTING hole, not a
+            // reachability one (FuzzCoverage.ShopEntryCountsInTheRoomsTable
+            // pins the distinction). A new room-entry phase must be added here
+            // too, or its rooms vanish from the table the same way.
             if (rc.room_type < kRoomTypeCount &&
                 (phase == RunPhase::COMBAT ||
                  phase == RunPhase::REST_SITE ||
                  phase == RunPhase::TREASURE_ROOM ||
                  phase == RunPhase::EVENT_DIALOG ||
+                 phase == RunPhase::SHOP ||
                  phase == RunPhase::ROOM_UNIMPLEMENTED)) {
                 ++cov->room_entered[rc.room_type];
             }

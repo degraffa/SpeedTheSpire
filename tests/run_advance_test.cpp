@@ -1842,5 +1842,112 @@ TEST(FirstCombatEntry, NeowPayoutWalkOntoFloorOneLeavesALiveCombatMask) {
            "end this walk reproduces";
 }
 
+// =============================================================================
+// The Act-1 boss victory terminal (stage-b-design §1.1)
+// =============================================================================
+//
+// "The run terminates when the act-1 boss's combat rewards are claimed"
+// (stage-b-design §1.1's S2+ boundary). In the game the boss reward's Proceed
+// never opens the map: at a COMBAT_REWARD in a MonsterRoomBoss it goes to the
+// boss chest (ProceedButton.update, ProceedButton.java:111-113 ->
+// goToTreasureRoom :179-187, a TreasureRoomBoss), and from there to the next
+// act -- both S2 content. So the sim's boss-reward Proceed is the run's
+// VICTORY terminal: RUN_OVER, with run_is_victory() telling it apart from a
+// death by (room_type == Boss, combat_outcome == KILLED).
+//
+// The regression these tests pin was found by a 300-seed always_event fuzz
+// probe (seed 116): the proceed used to route to MAP_CHOICE, where the boss
+// column has no outgoing map edges, so the run advertised an EMPTY action
+// mask while claiming not to be terminal -- the soak's no_legal_moves.
+
+RunController enter_boss_combat(int64_t seed) {
+    RunController rc = run_begin(seed, kA20);
+    leave_neow(rc);
+    // Jump the floor loop straight onto the boss edge -- next_room_transition
+    // is public precisely so a directed test can aim a specific room.
+    next_room_transition(rc, 0, /*to_boss=*/true);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    return rc;
+}
+
+// Make the kill mechanical without bypassing the combat layer: every member
+// dies to the first attack, and the win still runs the whole battle-over path
+// (onVictory relics, fold-back, reward assembly).
+void weaken_all_monsters(RunController& rc) {
+    for (uint8_t i = 0; i < rc.combat.monster_count; ++i) {
+        rc.combat.monsters[i].hp = 1;
+        rc.combat.monsters[i].block = 0;
+    }
+}
+
+TEST(BossVictory, BossRewardProceedIsTheRunOverVictoryTerminal) {
+    RunController rc = enter_boss_combat(kSeed);
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    ASSERT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::KILLED));
+    EXPECT_FALSE(run_is_victory(rc))
+        << "the reward screen is still up -- not terminal yet";
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    ASSERT_TRUE(m.can_proceed);
+    const StepResult res =
+        step_with_result(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER))
+        << "the boss reward's proceed must END the run (stage-b-design §1.1), "
+           "not open a map the boss column has no edges into";
+    EXPECT_TRUE(run_is_victory(rc));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::KILLED));
+    EXPECT_TRUE(res.terminal);
+    EXPECT_EQ(res.reward, 1.0f)
+        << "the run-level win is the +1 analogue of the DEFEAT path's -1";
+    EXPECT_EQ(rc.rewards.count, 0) << "the screen cleared on the way out";
+}
+
+TEST(BossVictory, VictoryMaskIsEmptyBecauseRunOver) {
+    RunController rc = enter_boss_combat(kSeed);
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+
+    // The mask is empty BECAUSE the phase is terminal -- byte-identical to a
+    // value-initialized mask but for the phase echo.
+    RunActionMask m{};
+    legal_actions(rc, m);
+    RunActionMask none{};
+    none.phase = rc.phase;
+    EXPECT_EQ(std::memcmp(&m, &none, sizeof m), 0)
+        << "RUN_OVER offers nothing; any set flag here is a bug";
+
+    // And a step against the terminal is a non-corrupting no-op that stays
+    // terminal (the parked/terminal contract fill_run_result implements).
+    const StepResult res = step_with_result(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_TRUE(res.terminal);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_TRUE(run_is_victory(rc));
+}
+
+TEST(BossVictory, ADeathAtTheBossIsNotAVictory) {
+    RunController rc = enter_boss_combat(kSeed);
+    // Arrange a loss: the boss's first attack is lethal.
+    rc.combat.player_hp = 1;
+    rc.combat.player_block = 0;
+    for (int turn = 0;
+         turn < 12 && rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+         ++turn) {
+        step(rc, make_action(ActionVerb::END_TURN));
+    }
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::DEFEAT));
+    EXPECT_FALSE(run_is_victory(rc))
+        << "a DEFEAT at the boss shares the phase but never the victory read";
+}
+
 }  // namespace
 }  // namespace sts::engine
