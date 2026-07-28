@@ -106,6 +106,38 @@ TEST(ReplayCommandMap, AMultiOptionEventPageOutsideAnEventStopsInsteadOfGuessing
     EXPECT_FALSE(m.reason.empty());
 }
 
+// A STOP REASON IS READ BY A HUMAN, SO IT SPELLS THE PHASE. STS00042 of
+// `b45_rewards_oracle_20260727T204809Z_claude01` stopped with "the sim is in 3,
+// not an event dialog", and the obligation row filed off that message had to
+// gloss the integer itself ("3 [COMBAT]") before it could even ask its question
+// -- then asked the wrong one, because a bare enum ordinal says nothing about
+// what the sim was actually doing. `phase_name` already existed for the
+// per-record `DIFF` line; the reasons now use the same spelling.
+TEST(ReplayCommandMap, AnEventDesyncStopNamesTheSimsPhaseRatherThanItsOrdinal) {
+    const RunController rc = at_phase(RunPhase::COMBAT);
+    const MappedCommand m =
+        map_command(rc, event_page({"Touch", "Trade", "Leave"}), "choose 0");
+    ASSERT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("COMBAT"), std::string::npos) << m.reason;
+    EXPECT_EQ(m.reason.find(" in 3,"), std::string::npos)
+        << "a bare ordinal is what made this stop unreadable: " << m.reason;
+}
+
+TEST(ReplayCommandMap, EveryRunPhaseHasAName) {
+    // A phase whose name is missing would print "?" into a stop reason -- the
+    // same unreadable outcome the ordinal produced, arriving silently.
+    for (const RunPhase p :
+         {RunPhase::NONE, RunPhase::NEOW, RunPhase::MAP_CHOICE, RunPhase::COMBAT,
+          RunPhase::COMBAT_REWARD, RunPhase::ROOM_UNIMPLEMENTED, RunPhase::RUN_OVER,
+          RunPhase::REST_SITE, RunPhase::TREASURE_ROOM, RunPhase::EVENT_DIALOG,
+          RunPhase::SHOP}) {
+        const std::string name = sts::replay::phase_name(static_cast<uint8_t>(p));
+        EXPECT_FALSE(name.empty());
+        EXPECT_STRNE(name.c_str(), "?")
+            << "unnamed RunPhase ordinal " << static_cast<int>(p);
+    }
+}
+
 // --- Neow's two framing screens ---------------------------------------------
 //
 // Neow arrives as an EVENT screen but is not an events.yaml row; the run layer
@@ -246,6 +278,19 @@ TEST(ReplayCommandMap, AGridTheSimNeverOpenedNamesTheDeferredRelicBody) {
     EXPECT_EQ(m.kind, MapKind::UNMAPPED);
     EXPECT_NE(m.reason.find("Astrolabe"), std::string::npos) << m.reason;
     EXPECT_NE(m.reason.find("deferred"), std::string::npos) << m.reason;
+}
+
+// Same readability rule as the EVENT stop above: this reason also carried a
+// bare `rc.phase` ordinal.
+TEST(ReplayCommandMap, AnUnsimulatedGridStopAlsoNamesThePhaseRatherThanItsOrdinal) {
+    RunController rc = at_phase(RunPhase::NEOW);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::BLESSING);
+    rc.run.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::ASTROLABE), 0};
+    rc.run.relic_count = 1;
+
+    const MappedCommand m = map_command(rc, grid_screen(), "choose 3");
+    ASSERT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("NEOW"), std::string::npos) << m.reason;
 }
 
 // sim_grid_open is the discriminator that classification turns on, so it has to

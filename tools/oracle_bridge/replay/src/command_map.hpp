@@ -84,6 +84,36 @@ struct ScreenInfo {
     bool purge_available = false;
 };
 
+// --- naming the sim's phase --------------------------------------------------
+
+// A STOP REASON IS READ BY A HUMAN. Both reasons below used to interpolate
+// `rc.phase` as a bare enum ordinal, and the cost of that is on the record: the
+// obligation row filed against STS00042 of the first b45 campaign quoted "the
+// sim is in 3, not an event dialog", had to gloss the integer itself ("3
+// [COMBAT]") before it could state the problem, and then asked whether the stop
+// was an event/combat-boundary defect -- when the sim had in fact been stuck in
+// a floor-1 fight for fourteen records by then. The name does not answer that
+// question either, but it stops the reader having to look up an enum before
+// they can start. `main.cpp` prints the same spelling on every `DIFF` line, so
+// the function lives here where both callers can reach it and the table's gtest
+// can prove no ordinal is unnamed.
+[[nodiscard]] inline const char* phase_name(uint8_t p) noexcept {
+    switch (static_cast<RunPhase>(p)) {
+        case RunPhase::NONE: return "NONE";
+        case RunPhase::NEOW: return "NEOW";
+        case RunPhase::MAP_CHOICE: return "MAP_CHOICE";
+        case RunPhase::COMBAT: return "COMBAT";
+        case RunPhase::COMBAT_REWARD: return "COMBAT_REWARD";
+        case RunPhase::ROOM_UNIMPLEMENTED: return "ROOM_UNIMPLEMENTED";
+        case RunPhase::RUN_OVER: return "RUN_OVER";
+        case RunPhase::REST_SITE: return "REST_SITE";
+        case RunPhase::TREASURE_ROOM: return "TREASURE_ROOM";
+        case RunPhase::EVENT_DIALOG: return "EVENT_DIALOG";
+        case RunPhase::SHOP: return "SHOP";
+    }
+    return "?";
+}
+
 // --- command parsing ---------------------------------------------------------
 
 [[nodiscard]] inline std::vector<std::string> split_ws(const std::string& s) {
@@ -194,7 +224,7 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
             static_cast<RelicId>(rc.run.relics[rc.run.relic_count - 1].relic_id)));
     }
     return "the capture opens a master-deck grid the sim never opened (sim phase " +
-           std::to_string(static_cast<int>(rc.phase)) +
+           std::string(phase_name(rc.phase)) +
            "): the most recently acquired relic is " + who +
            ", whose onEquip body is deferred";
 }
@@ -321,8 +351,7 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
             // to whatever phase is live -- in MAP_CHOICE it would pick a node
             // and move the run.
             m.reason = "event command '" + verb + "' arrived while the sim is in " +
-                       std::to_string(static_cast<int>(rc.phase)) +
-                       ", not an event dialog";
+                       std::string(phase_name(rc.phase)) + ", not an event dialog";
             return m;
         }
         if (verb == "choose") {
