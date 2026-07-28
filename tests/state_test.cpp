@@ -9,7 +9,9 @@
 // The static_asserts live in the headers (source of truth); the ones here are
 // regression guards.
 
+#include <cstddef>
 #include <cstring>
+#include <string>
 #include <type_traits>
 
 #include <gtest/gtest.h>
@@ -147,6 +149,129 @@ TEST(StateHash, TwoValueInitializedRunStatesHashEqual) {
     RunState b{};
     EXPECT_EQ(hash_state(a), hash_state(b));
     EXPECT_EQ(std::memcmp(&a, &b, sizeof(RunState)), 0);
+}
+
+// --- No IMPLICIT padding anywhere in RunState (the byte-compare premise) ----
+//
+// WHY THE TWO TESTS ABOVE ARE NOT ENOUGH, and what they missed.
+//
+// They compare two objects whose storage the runtime happened to hand over
+// clean -- a fresh stack frame, a fresh heap page. They therefore pass whether
+// or not the struct has indeterminate padding, which is the definition of a
+// vacuous guard. Under it, a real defect survived: `RunState` carried SIX
+// undeclared bytes between `pad_relic_pools` and `monster_rng`, and neither
+// `RunState{}` nor a copy of one is required to write them. Aggregate
+// initialization ([dcl.init.list]/3 reaches the aggregate bullet before the
+// empty-list value-init bullet) initializes each MEMBER; an implicitly-defined
+// copy constructor performs a MEMBERWISE copy ([class.copy.ctor]/14). Padding is
+// not a member in either sentence. The header comment at that block asserted
+// the opposite -- "the compiler inserts (value-init-zeroed) padding ahead of
+// this block" -- and nothing tested it.
+//
+// It surfaced as Translator.RoundTripDeterministic failing on `win-debug` only:
+// translating one file twice produced two records whose bytes differed at
+// exactly offset 1962, inside that gap. It reads like "the translator is
+// nondeterministic"; it was a struct-layout claim nobody had checked. On Linux
+// the same code passed because freshly mapped pages arrive zeroed, and a
+// runtime probe does not reproduce it either -- clang-cl bulk-writes a
+// stack-local `RunState{}`, so only the exact allocation shape the translator
+// happens to use exposes the gap.
+//
+// So the guard is not a probe. It is the layout itself: walk the declared
+// members in order and require each to start where the previous one ended. That
+// is deterministic on every host and every optimisation level, it fails the
+// moment a future field leaves a hole, and its failure message names the hole.
+//
+// SCOPE, stated rather than implied: this audits RunState's OWN member list.
+// Padding *inside* a nested type (CardInstance, RelicSlot, MapNode, RngStream)
+// would not be caught here -- those are separately fixed-layout PODs with their
+// own asserts, and none of them is where this bug lived.
+
+namespace {
+
+struct MemberSpan {
+    std::size_t begin;
+    std::size_t end;
+    const char* name;
+};
+
+#define STS_MEMBER_SPAN(T, m) \
+    MemberSpan{offsetof(T, m), offsetof(T, m) + sizeof(T::m), #m}
+
+}  // namespace
+
+TEST(StateLayout, RunStateHasNoImplicitPadding) {
+    const MemberSpan members[] = {
+        STS_MEMBER_SPAN(RunState, run_seed),
+        STS_MEMBER_SPAN(RunState, master_deck),
+        STS_MEMBER_SPAN(RunState, master_deck_count),
+        STS_MEMBER_SPAN(RunState, hp),
+        STS_MEMBER_SPAN(RunState, max_hp),
+        STS_MEMBER_SPAN(RunState, pad_gold_align),
+        STS_MEMBER_SPAN(RunState, gold),
+        STS_MEMBER_SPAN(RunState, ascension),
+        STS_MEMBER_SPAN(RunState, act),
+        STS_MEMBER_SPAN(RunState, floor),
+        STS_MEMBER_SPAN(RunState, relics),
+        STS_MEMBER_SPAN(RunState, relic_count),
+        STS_MEMBER_SPAN(RunState, pad_relic),
+        STS_MEMBER_SPAN(RunState, potions),
+        STS_MEMBER_SPAN(RunState, map),
+        STS_MEMBER_SPAN(RunState, boss_ids),
+        STS_MEMBER_SPAN(RunState, keys),
+        STS_MEMBER_SPAN(RunState, pad_keys),
+        STS_MEMBER_SPAN(RunState, event_flags),
+        STS_MEMBER_SPAN(RunState, shop_flags),
+        STS_MEMBER_SPAN(RunState, card_blizz_randomizer),
+        STS_MEMBER_SPAN(RunState, blizzard_potion_mod),
+        STS_MEMBER_SPAN(RunState, event_pity_monster),
+        STS_MEMBER_SPAN(RunState, event_pity_shop),
+        STS_MEMBER_SPAN(RunState, event_pity_treasure),
+        STS_MEMBER_SPAN(RunState, purge_cost),
+        STS_MEMBER_SPAN(RunState, potion_slots),
+        STS_MEMBER_SPAN(RunState, pad_potion_slots),
+        STS_MEMBER_SPAN(RunState, event_membership),
+        STS_MEMBER_SPAN(RunState, special_membership),
+        STS_MEMBER_SPAN(RunState, shrine_membership),
+        STS_MEMBER_SPAN(RunState, pad_membership),
+        STS_MEMBER_SPAN(RunState, relic_pools),
+        STS_MEMBER_SPAN(RunState, relic_pool_count),
+        STS_MEMBER_SPAN(RunState, pad_relic_pools),
+        STS_MEMBER_SPAN(RunState, pad_rng_align),
+        STS_MEMBER_SPAN(RunState, monster_rng),
+        STS_MEMBER_SPAN(RunState, event_rng),
+        STS_MEMBER_SPAN(RunState, merchant_rng),
+        STS_MEMBER_SPAN(RunState, card_rng),
+        STS_MEMBER_SPAN(RunState, treasure_rng),
+        STS_MEMBER_SPAN(RunState, relic_rng),
+        STS_MEMBER_SPAN(RunState, potion_rng),
+        STS_MEMBER_SPAN(RunState, map_rng),
+        STS_MEMBER_SPAN(RunState, neow_rng),
+    };
+
+    // Report EVERY hole in one run. Stopping at the first one costs a rebuild
+    // per gap, and the fix is one edit per gap.
+    std::string holes;
+    std::size_t cursor = 0;
+    for (const MemberSpan& m : members) {
+        if (m.begin != cursor) {
+            holes += "\n  [" + std::to_string(cursor) + ", " +
+                     std::to_string(m.begin) + ") before RunState::" + m.name +
+                     "  (" + std::to_string(m.begin - cursor) + " bytes)";
+        }
+        cursor = m.end;
+    }
+    if (cursor != sizeof(RunState)) {
+        holes += "\n  [" + std::to_string(cursor) + ", " +
+                 std::to_string(sizeof(RunState)) + ") tail  (" +
+                 std::to_string(sizeof(RunState) - cursor) + " bytes)";
+    }
+    EXPECT_TRUE(holes.empty())
+        << "RunState has bytes that belong to no member:" << holes
+        << "\nNeither `RunState{}` nor a memberwise copy is required to write "
+           "them, and RunState is compared with memcmp and hashed by bytes. "
+           "Declare an explicit pad member covering each gap -- that changes no "
+           "offsets, it only makes the bytes initialised.";
 }
 
 // A mutated state must not collide with a fresh one -- guards against a

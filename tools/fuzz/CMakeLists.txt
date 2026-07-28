@@ -19,6 +19,10 @@ add_library(fuzz_core STATIC
     src/fuzz_run.cpp
     src/coverage.cpp
     src/repro.cpp
+    # The ONE translation unit allowed to include <windows.h>: it defines VOID,
+    # which turns the generated CardId::VOID into `void`. See
+    # include/sts/fuzz/headless.hpp.
+    src/headless.cpp
 )
 target_include_directories(fuzz_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(fuzz_core PUBLIC sts_engine registry_generated PRIVATE xxhash)

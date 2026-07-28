@@ -83,6 +83,40 @@ foreach(_gt gtest gtest_main gmock gmock_main)
     endif()
 endforeach()
 
+# A bash that can run an in-tree .sh script named by a HOST path.
+#
+# On Linux this is whatever `bash` is on PATH. On Windows it must NOT be:
+# `bash` on the Windows PATH is C:\Windows\System32\bash.exe, the WSL launcher,
+# which cannot execute a script named `D:\...` -- and CMake's find_program would
+# happily hand it over. Git for Windows ships a real MSYS bash that resolves
+# `D:/...` correctly, so it is searched for by its own install paths first and
+# System32 is excluded outright.
+#
+# STS_TEST_BASH may end up empty. tests/host_shell.hpp turns that into a named
+# GTEST_SKIP at the two call sites, not a failure -- a host without bash cannot
+# run a bash script, and pretending otherwise would be the kind of red result
+# that teaches people to ignore red results.
+if(WIN32)
+    find_program(STS_TEST_BASH
+        NAMES bash.exe
+        HINTS
+            "$ENV{ProgramFiles}/Git/bin"
+            "$ENV{ProgramFiles}/Git/usr/bin"
+            "$ENV{ProgramW6432}/Git/bin"
+            "$ENV{ProgramFiles\(x86\)}/Git/bin"
+            "C:/Program Files/Git/bin"
+            "C:/Program Files/Git/usr/bin"
+        NO_DEFAULT_PATH)
+else()
+    find_program(STS_TEST_BASH NAMES bash)
+endif()
+if(STS_TEST_BASH)
+    message(STATUS "Test bash: ${STS_TEST_BASH}")
+else()
+    message(STATUS "Test bash: none found -- the two soak-script tests will SKIP")
+    set(STS_TEST_BASH "")
+endif()
+
 # Every target below is declared with sts_add_test (cmake/StsAddTest.cmake),
 # which supplies the shape all 39 suites shared by hand: one executable, a
 # GTest::gtest_main link, sts_set_warnings, sts_enable_sanitizers, and
@@ -594,6 +628,7 @@ sts_add_test(fuzz_test
         STS_FUZZ_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/fuzz_scratch"
         STS_FUZZ_SOAK_BIN="$<TARGET_FILE:fuzz_soak>"
         STS_FUZZ_REPRO_BIN="$<TARGET_FILE:fuzz_repro>"
+        STS_TEST_BASH="${STS_TEST_BASH}"
         STS_FUZZ_SOAK_SCRIPT="${CMAKE_SOURCE_DIR}/tools/fuzz/soak.sh")
 
 # The capture planner (tools/oracle_bridge/planner). Tests the TOOL: that the

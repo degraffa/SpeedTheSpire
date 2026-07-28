@@ -92,6 +92,28 @@ static_assert(std::is_trivially_copyable_v<MapNode>);
 static_assert(sizeof(MapNode) == 2);
 
 // --- RunState ---------------------------------------------------------------
+//
+// PADDING IS DECLARED, NOT LEFT TO THE COMPILER. RunState is compared with
+// `memcmp` (tools/diff_harness/src/differ.cpp, and a dozen tests) and hashed
+// over its bytes, so every byte in it must be *initialised*. Neither of the two
+// ways this struct is normally produced writes a byte that belongs to no
+// member: `RunState{}` on an aggregate is aggregate-initialisation, which
+// initialises members ([dcl.init.list]/3 reaches the aggregate bullet first),
+// and an implicitly-defined copy constructor performs a memberwise copy
+// ([class.copy.ctor]/14). Compiler-inserted padding is therefore indeterminate
+// -- it merely *tends* to read as zero, because fresh stack frames and fresh
+// heap pages tend to be zero.
+//
+// That tendency held on Linux and did not hold on Windows: two translations of
+// one capture produced records differing at exactly one byte,
+// Translator.RoundTripDeterministic went red on `win-debug` alone, and the
+// report read as translator nondeterminism. It was two undeclared alignment
+// gaps, one of which this file's own comment claimed was "value-init-zeroed".
+//
+// So every gap is an explicit `pad_*` member. That changes no offset and no
+// size; it only makes the bytes members, which is what makes them written.
+// `StateLayout.RunStateHasNoImplicitPadding` (tests/state_test.cpp) walks the
+// declared member list and fails, by name, on any new hole.
 
 struct RunState {
     // Schema stamp (design doc §8) -- compile-time, no per-instance storage.
@@ -109,6 +131,7 @@ struct RunState {
     //    widths (int16) so combat_begin()/fold is a plain copy. --
     int16_t hp;
     int16_t max_hp;
+    uint8_t pad_gold_align[2];        // explicit padding (see the PADDING note)
     int32_t gold;
     uint8_t ascension;                // A0..A20
     uint8_t act;                      // 1..4
@@ -192,11 +215,13 @@ struct RunState {
     uint16_t relic_pools[kRelicTierCount][kRelicPoolCap];
     uint8_t  relic_pool_count[kRelicTierCount];
     uint8_t  pad_relic_pools[3];      // pad kRelicTierCount(5) -> 8
+    uint8_t  pad_rng_align[6];        // explicit padding (see the PADDING note)
 
     // -- RNG: the 7 run-scoped streams (design doc §3.4) + the act-scoped mapRng
     //    (design doc §3.6). See the STREAM COUNT note at the top of this file.
-    //    RngStream is 8-byte aligned, so RunState is 8-byte aligned; the
-    //    compiler inserts (value-init-zeroed) padding ahead of this block. --
+    //    RngStream is 8-byte aligned, so RunState is 8-byte aligned; the six
+    //    bytes of alignment slack ahead of this block are `pad_rng_align`
+    //    rather than compiler padding, so they are actually initialised. --
     RngStream monster_rng;            // encounter rolls
     RngStream event_rng;              // ?-room resolution, event rolls
     RngStream merchant_rng;           // shop stock/prices

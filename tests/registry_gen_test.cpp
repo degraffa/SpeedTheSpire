@@ -55,6 +55,8 @@
 #include "sts/engine/monster_jaw_worm.hpp"
 #include "sts/engine/types.hpp"
 
+#include "host_shell.hpp"
+
 namespace fs = std::filesystem;
 
 namespace {
@@ -64,35 +66,18 @@ const char* kGenPy = STS_REGISTRY_GEN_PY;
 const char* kRegistryDir = STS_REGISTRY_DIR;
 const char* kScratchDir = STS_GEN_SCRATCH;
 
-std::string quote(const std::string& s) { return "\"" + s + "\""; }
+// Host-shell portability -- including the cmd.exe rule that once made all 9
+// RegistryGen cases fail on Windows -- lives in tests/host_shell.hpp.
+using sts::testing::run_shell;
+using sts::testing::shell_quote;
 
 // Run the generator against `registry_dir`, writing headers under `out_dir` and
 // stderr into `err_file`. Returns the process exit status.
 int run_generator(const std::string& registry_dir, const std::string& out_dir,
                   const std::string& err_file) {
-    std::string cmd = quote(kPython) + " " + quote(kGenPy) +
-                      " --registry " + quote(registry_dir) + " --out " +
-                      quote(out_dir) + " 2> " + quote(err_file);
-#ifdef _WIN32
-    // std::system() on Windows runs `cmd.exe /C <string>`, and cmd has a quoting
-    // rule with no POSIX analogue: when the string starts with a quote, it strips
-    // the FIRST and LAST quote in the whole string and treats what remains as the
-    // command. Every path here is quoted (they contain spaces -- "C:\Program
-    // Files\..."), so the string always starts with one, and cmd tore the line
-    // apart:
-    //
-    //   The filename, directory name, or volume label syntax is incorrect.
-    //
-    // which surfaced as all 9 RegistryGen cases failing on Windows with a
-    // generator exit status of 1 and no other explanation.
-    //
-    // The documented fix is an extra enclosing pair (`cmd /C ""a b" "c d""`):
-    // the outer pair is what gets stripped, leaving the inner quoting intact.
-    // Deliberately not applied on POSIX, where /bin/sh would treat the extra
-    // quotes as part of the program name.
-    cmd = "\"" + cmd + "\"";
-#endif
-    return std::system(cmd.c_str());
+    return run_shell(shell_quote(kPython) + " " + shell_quote(kGenPy) +
+                     " --registry " + shell_quote(registry_dir) + " --out " +
+                     shell_quote(out_dir) + " 2> " + shell_quote(err_file));
 }
 
 std::vector<unsigned char> read_bytes(const fs::path& p) {

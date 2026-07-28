@@ -36,6 +36,8 @@
 #include "sts/fuzz/policy.hpp"
 #include "sts/fuzz/repro.hpp"
 
+#include "host_shell.hpp"
+
 using namespace sts::fuzz;
 namespace engine = sts::engine;
 
@@ -62,15 +64,11 @@ std::string scratch(const std::string& name) {
     return std::string(STS_FUZZ_SCRATCH) + "/" + name;
 }
 
-std::string shell_quote(const std::string& value) {
-    std::string out = "'";
-    for (const char c : value) {
-        if (c == '\'') out += "'\\''";
-        else out += c;
-    }
-    out += "'";
-    return out;
-}
+// Host-shell portability lives in one place -- see tests/host_shell.hpp for the
+// cmd.exe quoting rule, the null device, and which bash is safe to invoke.
+using sts::testing::shell_quote;
+using sts::testing::run_shell;
+constexpr const char* kNull = sts::testing::kNullDevice;
 
 std::string read_text(const std::string& path) {
     std::ifstream is(path, std::ios::binary);
@@ -239,7 +237,7 @@ TEST(FuzzTriage, DriverWritesActionableReproducerForInjectedMismatch) {
         shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
         " --inject-nondeterminism 0:3 --quiet >" + shell_quote(child_log) +
         " 2>&1";
-    const int child_rc = std::system(command.c_str());
+    const int child_rc = run_shell(command);
     EXPECT_NE(child_rc, 0) << "the deliberate mismatch unexpectedly exited clean";
     const std::string driver_text = read_text(child_log);
     EXPECT_NE(driver_text.find("=== FUZZ FAILURE: hash_mismatch ==="),
@@ -276,7 +274,7 @@ TEST(FuzzTriage, DriverWritesActionableReproducerForInjectedMismatch) {
         shell_quote(STS_FUZZ_REPRO_BIN) + " " +
         shell_quote(repros[0].string()) + " --regen >" +
         shell_quote(replay_log) + " 2>&1";
-    const int replay_rc = std::system(replay_command.c_str());
+    const int replay_rc = run_shell(replay_command);
     // The mismatch was intentionally injected in the driver, not the engine,
     // so a clean standalone process correctly reports NOT REPRODUCED. What
     // matters here is that both independent reproducer forms replay pass A.
@@ -325,15 +323,15 @@ TEST(FuzzDriver, SeedSweepWritesAMergeableSummary) {
         " --threads 2 --max-actions 2000 --verify-repro-every 1 --out " +
         shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
         " --shard 1/2 --quiet >>" + shell_quote(child_log) + " 2>&1";
-    ASSERT_EQ(std::system(command0.c_str()), 0) << read_text(child_log);
-    ASSERT_EQ(std::system(command1.c_str()), 0) << read_text(child_log);
+    ASSERT_EQ(run_shell(command0), 0) << read_text(child_log);
+    ASSERT_EQ(run_shell(command1), 0) << read_text(child_log);
     EXPECT_NE(read_text(kv0).find("STSFUZZ_SUMMARY v1\n"), std::string::npos);
     EXPECT_NE(read_text(kv1).find("shard 1\n"), std::string::npos);
 
     const std::string merge_command =
         shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) + " " +
         shell_quote(kv1) + " >" + shell_quote(merge_log) + " 2>&1";
-    ASSERT_EQ(std::system(merge_command.c_str()), 0) << read_text(merge_log);
+    ASSERT_EQ(run_shell(merge_command), 0) << read_text(merge_log);
     const std::string merged = read_text(merge_log);
     EXPECT_NE(merged.find("cases (seed x policy x policy-seed) : 4"),
               std::string::npos);
@@ -343,14 +341,14 @@ TEST(FuzzDriver, SeedSweepWritesAMergeableSummary) {
     const std::string duplicate_command =
         shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) + " " +
         shell_quote(kv0) + " >" + shell_quote(merge_log) + " 2>&1";
-    EXPECT_NE(std::system(duplicate_command.c_str()), 0);
+    EXPECT_NE(run_shell(duplicate_command), 0);
     EXPECT_NE(read_text(merge_log).find("duplicate/overlapping shard"),
               std::string::npos);
 
     const std::string incomplete_command =
         shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) +
         " >" + shell_quote(merge_log) + " 2>&1";
-    EXPECT_NE(std::system(incomplete_command.c_str()), 0);
+    EXPECT_NE(run_shell(incomplete_command), 0);
     EXPECT_NE(read_text(merge_log).find("incomplete shard set"),
               std::string::npos);
 
@@ -360,13 +358,21 @@ TEST(FuzzDriver, SeedSweepWritesAMergeableSummary) {
     corrupted.replace(global_cases, std::strlen("global_cases 4"),
                       "global_cases 5");
     {
-        std::ofstream os(bad_kv);
+        // BINARY, and every other writer in this file too. The summary format
+        // is LF-terminated (that is what `fuzz_soak` writes, checked with
+        // `cat -A`), and a text-mode ofstream on Windows expands each '\n' to
+        // "\r\n". This test's whole point is that ONE field is corrupted; a
+        // text-mode write corrupts every LINE as well, the parser then rejects
+        // the file for the wrong reason, and the assertion on the specific
+        // "global_cases does not match" message fails while the driver is in
+        // fact behaving correctly.
+        std::ofstream os(bad_kv, std::ios::binary);
         os << corrupted;
     }
     const std::string bad_merge =
         shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(bad_kv) +
         " >" + shell_quote(merge_log) + " 2>&1";
-    EXPECT_NE(std::system(bad_merge.c_str()), 0);
+    EXPECT_NE(run_shell(bad_merge), 0);
     EXPECT_NE(read_text(merge_log).find(
                   "global_cases does not match its sweep configuration"),
               std::string::npos);
@@ -376,12 +382,12 @@ TEST(FuzzDriver, SeedSweepWritesAMergeableSummary) {
         " --seed-start 41 --seeds 2 --policies random,greedy_damage"
         " --threads 2 --max-actions 1999 --verify-repro-every 1 --out " +
         shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
-        " --shard 1/2 --quiet >/dev/null 2>&1";
-    ASSERT_EQ(std::system(incompatible_shard.c_str()), 0);
+        " --shard 1/2 --quiet >" + kNull + " 2>&1";
+    ASSERT_EQ(run_shell(incompatible_shard), 0);
     const std::string incompatible_merge =
         shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv0) + " " +
         shell_quote(kv1) + " >" + shell_quote(merge_log) + " 2>&1";
-    EXPECT_NE(std::system(incompatible_merge.c_str()), 0);
+    EXPECT_NE(run_shell(incompatible_merge), 0);
     EXPECT_NE(read_text(merge_log).find("incompatible summary"),
               std::string::npos);
 
@@ -417,7 +423,7 @@ TEST(FuzzTriage, AbortLeavesAnActionableInFlightJournal) {
         " --threads 1 --max-actions 2000 --out " +
         shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
         " --inject-abort 0:3 --quiet >" + shell_quote(child_log) + " 2>&1";
-    const int child_rc = std::system(command.c_str());
+    const int child_rc = run_shell(command);
     EXPECT_NE(child_rc, 0) << "the deliberate abort unexpectedly exited clean";
 
     const std::string text = read_text(journal);
@@ -437,7 +443,7 @@ TEST(FuzzTriage, AbortLeavesAnActionableInFlightJournal) {
     const std::string replay_command =
         shell_quote(STS_FUZZ_REPRO_BIN) + " " + replay_args + " --emit " +
         shell_quote(emitted) + " >" + shell_quote(regen_log) + " 2>&1";
-    const int replay_rc = std::system(replay_command.c_str());
+    const int replay_rc = run_shell(replay_command);
     EXPECT_EQ(replay_rc, 0)
         << "journal case id was not actionable:\n" << read_text(regen_log);
 
@@ -479,7 +485,7 @@ TEST(FuzzTriage, DriverWritesReproducerForImmediateNoProgress) {
         shell_quote(STS_FUZZ_SCRATCH) + " --label " + label +
         " --inject-no-progress 0:3 --quiet >" + shell_quote(child_log) +
         " 2>&1";
-    EXPECT_NE(std::system(command.c_str()), 0);
+    EXPECT_NE(run_shell(command), 0);
     const std::string text = read_text(child_log);
     EXPECT_NE(text.find("=== FUZZ FAILURE: no_progress ==="), std::string::npos);
     std::vector<std::filesystem::path> repros;
@@ -499,7 +505,7 @@ TEST(FuzzTriage, DriverWritesReproducerForImmediateNoProgress) {
     const std::string merge_command =
         shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " + shell_quote(kv) +
         " >" + shell_quote(merge_log) + " 2>&1";
-    EXPECT_NE(std::system(merge_command.c_str()), 0);
+    EXPECT_NE(run_shell(merge_command), 0);
     EXPECT_NE(read_text(merge_log).find("failures: 1"), std::string::npos);
     std::filesystem::remove(repros[0]);
     std::remove(child_log.c_str());
@@ -561,7 +567,7 @@ TEST(FuzzTriage, ReproducerRejectsAnUnknownKey) {
 TEST(FuzzTriage, ReproducerRequiresEveryCaseIdentityFieldExactlyOnce) {
     const std::string missing = scratch("missing_case_field.repro");
     {
-        std::ofstream os(missing);
+        std::ofstream os(missing, std::ios::binary);
         os << "STSFUZZ v1\nseed 1\nascension 20\npolicy random\nactions 0\n";
     }
     ReproFile r;
@@ -571,7 +577,7 @@ TEST(FuzzTriage, ReproducerRequiresEveryCaseIdentityFieldExactlyOnce) {
 
     const std::string duplicate = scratch("duplicate_case_field.repro");
     {
-        std::ofstream os(duplicate);
+        std::ofstream os(duplicate, std::ios::binary);
         os << "STSFUZZ v1\nseed 1\nseed 2\nascension 20\npolicy random\n"
               "policy_seed 3\nactions 0\n";
     }
@@ -584,7 +590,7 @@ TEST(FuzzTriage, ReproducerRequiresEveryCaseIdentityFieldExactlyOnce) {
 TEST(FuzzTriage, ReproducerRejectsOverflowAndTrailingActionData) {
     const std::string path = scratch("bad_action.repro");
     {
-        std::ofstream os(path);
+        std::ofstream os(path, std::ios::binary);
         os << "STSFUZZ v1\nseed 1\nascension 20\npolicy random\n"
               "policy_seed 3\nactions 1\n4294967296 not-a-comment\n";
     }
@@ -597,7 +603,7 @@ TEST(FuzzTriage, ReproducerRejectsOverflowAndTrailingActionData) {
 TEST(FuzzTriage, ReproducerValidatesFailureKindHashesAndStepRange) {
     const std::string path = scratch("bad_failure_record.repro");
     auto write_record = [&](const std::string& body) {
-        std::ofstream os(path);
+        std::ofstream os(path, std::ios::binary);
         os << "STSFUZZ v1\nseed 1\nascension 20\npolicy random\n"
               "policy_seed 3\n"
            << body;
@@ -1201,96 +1207,107 @@ TEST(FuzzGuard, Seed116AlwaysEventReachesTheVictoryTerminal) {
 }
 
 TEST(FuzzDriver, RejectsZeroWorkMalformedAndPartialCaseCli) {
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
-                           " --seeds garbage --quiet >/dev/null 2>&1").c_str()),
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds garbage --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
-                           " --seeds 0 --quiet >/dev/null 2>&1").c_str()),
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --seeds 0 --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
-                           " --reps 0 --quiet >/dev/null 2>&1").c_str()),
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
+                           " --reps 0 --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seed-start 9223372036854775807 --seeds 2"
-                           " --quiet >/dev/null 2>&1").c_str()),
+                           " --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds 1 --progress-secs nan"
-                           " --quiet >/dev/null 2>&1").c_str()),
+                           " --quiet >" + kNull + " 2>&1"),
               0);
     for (const char* policies :
          {"random,random", ",random", "random,,greedy_damage", "random,"}) {
-        EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+        EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                                " --seeds 1 --policies " + policies +
-                               " --quiet >/dev/null 2>&1").c_str()),
+                               " --quiet >" + kNull + " 2>&1"),
                   0)
             << policies;
     }
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds 1 --policies random"
                            " --policies greedy_damage"
-                           " --quiet >/dev/null 2>&1").c_str()),
+                           " --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds 1 --inject-nondeterminism 0:1"
                            " --inject-abort 0:1"
-                           " --quiet >/dev/null 2>&1").c_str()),
+                           " --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds 1 --inject-no-progress 0:1"
                            " --inject-no-progress 0:2"
-                           " --quiet >/dev/null 2>&1").c_str()),
+                           " --quiet >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_REPRO_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_REPRO_BIN) +
                            " --seed 1 --policy random --policy-seed 2"
-                           " >/dev/null 2>&1").c_str()),
+                           " >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_REPRO_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_REPRO_BIN) +
                            " dummy.repro --seed 1 --ascension 20"
                            " --policy random --policy-seed 2"
-                           " >/dev/null 2>&1").c_str()),
+                           " >" + kNull + " 2>&1"),
               0);
 }
 
 TEST(FuzzDriver, RejectsMissingArtifactDirectoryAndMalformedSummary) {
     const std::string absent = scratch("does_not_exist/subdir");
     std::filesystem::remove_all(scratch("does_not_exist"));
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds 1 --out " + shell_quote(absent) +
-                           " --quiet >/dev/null 2>&1").c_str()),
+                           " --quiet >" + kNull + " 2>&1"),
               0);
 
     const std::string malformed = scratch("malformed_summary.kv");
     {
-        std::ofstream os(malformed);
+        std::ofstream os(malformed, std::ios::binary);
         os << "STSFUZZ_SUMMARY v1\nbuild_id bad\n";
     }
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " +
                            shell_quote(malformed) +
-                           " >/dev/null 2>&1").c_str()),
+                           " >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) + " --quiet --merge " +
+    EXPECT_NE(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + " --quiet --merge " +
                            shell_quote(malformed) +
-                           " >/dev/null 2>&1").c_str()),
+                           " >" + kNull + " 2>&1"),
               0);
-    EXPECT_NE(std::system((std::string("bash ") +
+    const std::string bash = sts::testing::bash_program();
+    if (bash.empty()) {
+        // Everything above already ran; only the script arm is unrunnable.
+        GTEST_SKIP() << "no host bash found (STS_TEST_BASH empty) -- "
+                        "tools/fuzz/soak.sh cannot be exercised here";
+    }
+    EXPECT_NE(run_shell(bash +
                            shell_quote(STS_FUZZ_SOAK_SCRIPT) + " --main-bin " +
                            shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seed-start 9223372036854775807 --seeds 2"
-                           " --dry-run >/dev/null 2>&1").c_str()),
+                           " --dry-run >" + kNull + " 2>&1"),
               0);
     std::remove(malformed.c_str());
 }
 
 TEST(FuzzRunner, SanitizerPercentageUsesCeilingDivision) {
+    const std::string bash = sts::testing::bash_program();
+    if (bash.empty()) {
+        GTEST_SKIP() << "no host bash found (STS_TEST_BASH empty) -- "
+                        "tools/fuzz/soak.sh cannot be exercised here";
+    }
     const std::string log = scratch("asan_ceiling.log");
     const std::string command =
-        std::string("bash ") + shell_quote(STS_FUZZ_SOAK_SCRIPT) +
+        bash + shell_quote(STS_FUZZ_SOAK_SCRIPT) +
         " --main-bin " + shell_quote(STS_FUZZ_SOAK_BIN) + " --asan-bin " +
         shell_quote(STS_FUZZ_SOAK_BIN) +
         " --seeds 101 --asan-percent 1 --dry-run >" + shell_quote(log) +
         " 2>&1";
-    ASSERT_EQ(std::system(command.c_str()), 0) << read_text(log);
+    ASSERT_EQ(run_shell(command), 0) << read_text(log);
     const std::string text = read_text(log);
     EXPECT_NE(text.find("--seeds 2"), std::string::npos) << text;
     EXPECT_NE(text.find("asan: "), std::string::npos) << text;

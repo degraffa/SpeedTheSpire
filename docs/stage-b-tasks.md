@@ -427,7 +427,18 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
   [`wavec_track2_replay_triage.md`](../tools/oracle_bridge/driver/wavec_track2_replay_triage.md)).
   `win-debug` builds clean after `8d6cbae`; its six remaining test failures
   reproduce byte-for-byte at the fork commit `09f8847` (pre-existing win-preset
-  rot, reported, not chased). **PARKED, honestly** — nothing below is silently
+  rot, reported, not chased). **RESOLVED 2026-07-28 on `wave2-harness` stage 1
+  — and one of the six was not rot.** Five were the host-shell family
+  (`std::system` + POSIX quoting + `>/dev/null` + WSL's `bash` under `cmd.exe`),
+  eliminated into `tests/host_shell.hpp` per §7 of
+  [conventions.md](conventions.md); fixing the quoting then exposed a REAL hang
+  (`fuzz_soak`'s deliberate abort waiting on a Windows Error Reporting dialog),
+  fixed by `sts::fuzz::make_crashes_headless()`. The sixth,
+  `Translator.RoundTripDeterministic`, was **not environmental**: `RunState`
+  carried two undeclared alignment gaps, and neither `RunState{}` nor a
+  memberwise copy is required to write them — a latent defect under every
+  `memcmp` of the struct that Linux's zeroed pages had been hiding. Both win
+  presets now pass the full suite. **PARKED, honestly** — nothing below is silently
   dropped: Red Skull `atBattleStart`'s anonymous-inner-class action (needs an
   oracle capture; row open) — **annotated 2026-07-28: un-parked as far as it
   can be without a capture. The relic's whole body landed on this branch under
@@ -441,8 +452,9 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
   track 1 stage 4, owned by the next capture-campaign owner), the fork-redeploy
   + bottle-taking capture (row filed by track 2 stage 3d, same owner), the
   `SHOP_ROOM` `--replay` mapping arm (ledger row "replay generalized" owns it;
-  master's `badc58f` did not add it), and the six pre-existing `win-debug` test
-  failures plus four pre-fork stale "does not exist yet" comments
+  master's `badc58f` did not add it — **DONE, `wave2-harness` stage 2**), and the
+  six pre-existing `win-debug` test failures (**DONE, stage 1 above**) plus four
+  pre-fork stale "does not exist yet" comments
   (`shrines.cpp:97`, `monster_looter.hpp:68`, `run_state.hpp:177`, Frozen Egg's
   provenance) left for a repo-hygiene pass — all four predate `09f8847`.
 

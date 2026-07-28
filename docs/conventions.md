@@ -585,6 +585,37 @@ until `git worktree list` was unreadable, and the `remove` → `branch -d` →
 > resolves Git-for-Windows' own `bash.exe` rather than the `bash` on the
 > PowerShell `PATH`, which is WSL's.
 
+**`std::system()` is not portable, and its failures are invisible.** The
+signature says "run this command"; what actually runs it is `/bin/sh` on Linux
+and `cmd.exe /C` on Windows, and the two disagree about quoting (`'` means
+nothing to cmd, and cmd strips the first and last quote of a command that starts
+with one), about the null device (`>/dev/null` tries to create `\dev\null`), and
+about whether `bash` is Git-for-Windows' or the WSL launcher on `PATH`. All
+three cost real time here. The quoting one was diagnosed and fixed **in place**
+in `registry_gen_test.cpp`, with a long comment — and then hit again in
+`fuzz_test.cpp`, which had its own POSIX-quoting `shell_quote` and five failing
+tests. The null-device one is worse than a failure: in an `EXPECT_NE(rc, 0)`
+test the redirect fails, the assertion passes for the wrong reason, and **the
+program under test never ran at all**.
+
+> **ELIMINATED 2026-07-28: `tests/host_shell.hpp` — `sts::testing::run_shell`,
+> `shell_quote`, `kNullDevice` and `bash_program`, used by both call sites.** It
+> is the only sanctioned `std::system()` in `tests/`. CMake finds a bash that can
+> run a script named by a host path (Git-for-Windows on Windows, explicitly NOT
+> `C:\Windows\System32\bash.exe`) and passes it as `STS_TEST_BASH`; a host with
+> none turns into a named `GTEST_SKIP`, not a red result.
+>
+> A related Windows-only hazard the same fix uncovered, since fixing the quoting
+> is what first let the child actually launch: **a crash is a dialog box unless
+> you say otherwise.** `fuzz_soak`'s deliberate `--inject-abort` handed the
+> process to Windows Error Reporting, which waits for a mouse — the child sat at
+> 0% CPU and hung the whole `win-debug` suite until it was killed by hand.
+> `sts::fuzz::make_crashes_headless()` (`tools/fuzz/src/headless.cpp`) is called
+> first thing in `main`. That file is also **the only translation unit in the
+> tool allowed to include `<windows.h>`**, which defines `VOID` and so turns the
+> generated `CardId::VOID` into `void`; the isolation is load-bearing, not
+> stylistic.
+
 **A comment asserting "X does not exist yet" is a bug signal.** Two real defects
 were found this way, not by a failing test: a spawn gate hard-coded `false`
 under a comment reading "always false until POWER cards land" — and they had
@@ -600,6 +631,31 @@ entries are `extern` declarations, so an unimplemented row is a **link error**
 instead of a shrug. When adding a new dispatch surface, reproduce that property
 and *demonstrate* it (add a row with no body, capture the linker error, revert)
 rather than assuming it holds.
+
+**A struct compared with `memcmp` must declare its padding.** `RunState` is
+byte-compared (`tools/diff_harness/src/differ.cpp`, a dozen tests) and hashed
+over its bytes, and it carried two undeclared alignment gaps. Neither of the two
+ways it is normally produced writes a byte that belongs to no member:
+`RunState{}` on an aggregate is aggregate-initialisation, which initialises
+MEMBERS ([dcl.init.list]/3 reaches the aggregate bullet before the empty-list
+value-init bullet), and an implicitly-defined copy constructor performs a
+MEMBERWISE copy ([class.copy.ctor]/14). Padding is not a member in either
+sentence, so it merely *tends* to read as zero — because fresh stack frames and
+fresh heap pages tend to be zero. That tendency held on Linux and not on
+Windows: two translations of one capture differed at exactly one byte,
+`Translator.RoundTripDeterministic` went red on `win-debug` alone, and it read
+as translator nondeterminism. The file's own comment asserted the padding was
+"value-init-zeroed", and the two tests that claimed to check it compared two
+objects the runtime had handed over clean — a vacuous guard.
+
+> **ELIMINATED 2026-07-28: explicit `pad_*` members for every gap, plus
+> `StateLayout.RunStateHasNoImplicitPadding`** (`tests/state_test.cpp`), which
+> walks the declared member list and requires each member to start where the
+> previous one ended. It is the layout itself rather than a runtime probe —
+> deterministic on every host and optimisation level, where a probe is not
+> (clang-cl bulk-writes a stack-local `RunState{}`, so the defect does not
+> reproduce that way) — and its failure message names the byte range and the
+> member it precedes. Adding a pad member changes no offset and no size.
 
 **Hoisting a lookup out of a loop can be slower.** Moving a relic-array scan
 above a hand loop measured ~22% slower on `bench_advance`: the relic mirror is a

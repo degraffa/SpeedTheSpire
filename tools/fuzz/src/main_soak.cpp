@@ -41,6 +41,7 @@
 
 #include "sts/fuzz/coverage.hpp"
 #include "sts/fuzz/fuzz_run.hpp"
+#include "sts/fuzz/headless.hpp"
 #include "sts/fuzz/repro.hpp"
 
 namespace {
@@ -373,6 +374,9 @@ int64_t seed_at_offset(int64_t first, uint64_t offset) {
 }  // namespace
 
 int main(int argc, char** argv) {
+    // A crash is a normal outcome for this binary; on Windows it must not stop
+    // to tell anyone about it. See sts/fuzz/headless.hpp.
+    sts::fuzz::make_crashes_headless();
     Options o;
     std::vector<std::string> merge_files;
     bool merge_mode = false;
