@@ -42,6 +42,7 @@
 #include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
 #include "sts/engine/shop.hpp"             // merchant stock / purchases / purge
 #include "relics/relic_pickup.hpp"         // gain_gold (the one run-layer gold door)
+#include "sts/registry/monster_table.hpp"  // monster_def / MonsterDef::is_boss (Smoke Bomb)
 #include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
 
@@ -154,9 +155,43 @@ bool combat_potion_legal(const RunController& rc, uint8_t slot,
     if (!potion_use_implemented(id)) {
         return false;
     }
-    if (id == PotionId::SMOKE_BOMB &&
-        rc.room_type == static_cast<uint8_t>(RoomType::Boss)) {
-        return false;  // SmokeBomb.canUse rejects bosses.
+    // SmokeBomb.canUse (SmokeBomb.java:50-63) asks the MONSTERS, never the room:
+    //
+    //     for (AbstractMonster m : getCurrRoom().monsters.monsters) {
+    //         if (m.hasPower("BackAttack")) return false;
+    //         if (m.type != AbstractMonster.EnemyType.BOSS) continue;
+    //         return false;
+    //     }
+    //
+    // This used to test `rc.room_type == RoomType::Boss` instead. The two agree
+    // in every state the S1 run layer can currently PRODUCE -- all three
+    // BOSS-typed rows (SLIME_BOSS, THE_GUARDIAN, HEXAGHOST) are Act-1 bosses and
+    // only ever appear in a Boss room, and a Boss room in S1 always holds one --
+    // so this changes no reachable outcome today. It is still the wrong test:
+    // RunState/CombatState are populated from real captures by the oracle
+    // translator, so an imported state can pair either half with the other, and
+    // the moment a BOSS-typed monster appears outside a boss room (an Act-2+
+    // encounter, or an event spawn) the room test silently offers an escape the
+    // game refuses. The exact test is available -- `enemy_type` is a live
+    // registry column with a MonsterDef::is_boss() accessor -- so it is used.
+    //
+    // NO LIVENESS GATE, deliberately: the Java walks `monsters.monsters`, the
+    // whole group, and a dead or escaped monster is still a member of it. That
+    // matters for the Slime Boss, which stays in the group after it splits.
+    // (The general "anything left to fight" test below is AbstractPotion.canUse's
+    // areMonstersBasicallyDead, a different clause.)
+    //
+    // BackAttack is an Act-3 power (Snecko / Spiker ambush) with no S1 registry
+    // row, so that first clause is constant-false here. Named rather than
+    // invented as state; whoever registers BackAttack owns adding it.
+    if (id == PotionId::SMOKE_BOMB) {
+        for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+            const auto* mdef = sts::registry::monster_def(
+                static_cast<MonsterId>(rc.combat.monsters[m].monster_id));
+            if (mdef != nullptr && mdef->is_boss()) {
+                return false;
+            }
+        }
     }
     // "Any monster left to use it on" is the in-the-fight predicate, matching
     // every other liveness read. (The WAITING_ON_USER gate above already makes

@@ -1298,6 +1298,60 @@ TEST(RunEscape, SmokeBombAfterAMugKeepsTheMuggedScreenAndItsRewards) {
     EXPECT_EQ(count_reward_kind(rc.rewards, RewardItemKind::CARDS), 1);
 }
 
+// SmokeBomb.canUse (SmokeBomb.java:50-63) asks the MONSTERS, not the room:
+//
+//     for (AbstractMonster m : getCurrRoom().monsters.monsters) {
+//         if (m.hasPower("BackAttack")) return false;
+//         if (m.type != AbstractMonster.EnemyType.BOSS) continue;
+//         return false;
+//     }
+//
+// combat_potion_legal tested `room_type == RoomType::Boss` instead. The two
+// agree in every state the S1 run layer can currently PRODUCE -- all three
+// BOSS-typed rows are Act-1 bosses that only appear in a Boss room, and a Boss
+// room always holds one -- so these two tests deliberately construct the
+// disagreement directly, which is the only way to see it. They are the
+// regression guard for the day an Act-2+ encounter or an event spawn puts a
+// BOSS-typed monster somewhere else.
+
+TEST(RunPotion, SmokeBombReadsTheMonsterTypeNotTheRoomType) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_NE(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SMOKE_BOMB);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]) << "an ordinary fight allows the escape";
+
+    // Same non-boss ROOM, but the group now holds a BOSS-typed monster.
+    rc.combat.monsters[0].monster_id =
+        static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    RunActionMask boss_mask{};
+    legal_actions(rc, boss_mask);
+    EXPECT_FALSE(boss_mask.can_use_potion[0])
+        << "m.type == EnemyType.BOSS refuses it wherever the monster is";
+}
+
+// The loop in canUse has NO liveness gate: it walks `monsters.monsters`, the
+// whole group, and a dead or escaped monster is still a member. That is not
+// hypothetical for the Slime Boss, which stays in the group after it splits.
+TEST(RunPotion, SmokeBombIsStillRefusedByADeadBossInTheGroup) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::SMOKE_BOMB);
+    ASSERT_GE(rc.combat.monster_count, 1);
+    // A live ordinary monster to fight, plus a dead boss still in the group.
+    rc.combat.monsters[rc.combat.monster_count].monster_id =
+        static_cast<uint16_t>(MonsterId::SLIME_BOSS);
+    rc.combat.monsters[rc.combat.monster_count].hp = 0;
+    rc.combat.monsters[rc.combat.monster_count].max_hp = 140;
+    ++rc.combat.monster_count;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_use_potion[0])
+        << "the Java loop never asks whether the boss is alive";
+}
+
 // --- The potion legality trap -------------------------------------------------
 //
 // RunState.potions[] is populated from real captures by the oracle translator

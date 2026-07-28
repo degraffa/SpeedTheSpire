@@ -284,14 +284,14 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             // proceed); this combat-layer body is the half a bare CombatState
             // caller gets.
             //
-            // A SEPARATE GAP, recorded where the next reader will look:
-            // SmokeBomb.canUse (:50-62) rejects the potion when any monster in
-            // the group is `type == EnemyType.BOSS` (or has BackAttack, an
-            // Act-3 power). It never asks the ROOM. combat_potion_legal
-            // (run_advance.cpp) tests `room_type == RoomType::Boss` instead.
-            // The two agree everywhere in Act 1, and `enemy_type` is a live
-            // registry column with a MonsterDef::is_boss() accessor, so the
-            // exact test is available whenever run_advance.cpp is open.
+            // The legality half lives in combat_potion_legal (run_advance.cpp),
+            // which now applies SmokeBomb.canUse (:50-63) as written: reject
+            // when ANY MONSTER IN THE GROUP is `type == EnemyType.BOSS`, walking
+            // the whole group with no liveness gate, rather than asking whether
+            // the ROOM is a boss room. (It tested `room_type == RoomType::Boss`
+            // until the wave-C potions stage closed this gap.) The BackAttack
+            // clause at :54-56 is an Act-3 power with no S1 row and is named at
+            // that site rather than invented as state.
             s.flags |= kCombatFlagPlayerEscaped;
             break;
         default:
