@@ -212,6 +212,18 @@ RunController enter_jaw_worm_combat() {
     return rc;
 }
 
+// The opcode bodies are internal to sts_engine, so a test drives them the way
+// the pump does: build the queue item and execute it. Enough damage to make the
+// HP write lethal, which is what AbstractPlayer.damage's revive block reads.
+void deal_lethal_to_player(CombatState& s) {
+    ActionQueueItem it{};
+    it.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    it.src = 0;
+    it.tgt = kActorPlayer;
+    it.amount = 9999;
+    execute_opcode(s, it);
+}
+
 // =============================================================================
 // run_begin: Neow-pending stream state
 // =============================================================================
@@ -1350,6 +1362,106 @@ TEST(RunPotion, SmokeBombIsStillRefusedByADeadBossInTheGroup) {
     legal_actions(rc, mask);
     EXPECT_FALSE(mask.can_use_potion[0])
         << "the Java loop never asks whether the boss is alive";
+}
+
+// --- Fairy in a Bottle: the belt <-> combat mirror ----------------------------
+//
+// FairyPotion is never USED (canUse() is false) -- it fires from
+// AbstractPlayer.damage on any lethal HP write. The belt lives in RunState and
+// CombatState has none, so enter_combat mirrors the COUNT into
+// CombatState.flags, the combat consumes from the mirror, and fold_back_combat
+// burns the real slots by comparing the belt against what is left.
+
+TEST(RunPotion, EnteringCombatArmsTheHeldFairies) {
+    RunController rc = enter_jaw_worm_combat();
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0)
+        << "no fairy held -> nothing armed";
+
+    RunController armed = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(armed);
+    armed.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    armed.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(armed, make_action(ActionVerb::CHOOSE, first_start_column(armed)));
+    ASSERT_EQ(armed.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(combat_fairy_armed(armed.combat.flags), 2);
+}
+
+// A fairy consumed IN COMBAT burns its real slot at fold-back -- leftmost first,
+// and only the number actually spent.
+TEST(RunPotion, AConsumedFairyBurnsItsSlotAtFoldBack) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 2);
+
+    // One lethal hit: the mirror drops to 1 and the player survives it.
+    deal_lethal_to_player(rc.combat);
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 1);
+    ASSERT_GT(rc.combat.player_hp, 0);
+    const int16_t revived_hp = rc.combat.player_hp;
+
+    // End the fight so the real fold-back runs.
+    rc.combat.monsters[0].hp = 0;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE))
+        << "leftmost first";
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::FAIRY_POTION))
+        << "only the one that fired is burned";
+    EXPECT_GE(rc.run.hp, revived_hp) << "the revive survived the fold-back";
+}
+
+// A combat in which nothing fired must burn nothing -- fold_back_combat runs on
+// every combat end, including a defeat.
+TEST(RunPotion, AnUnusedFairySurvivesFoldBack) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    rc.combat.monsters[0].hp = 0;
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FAIRY_POTION));
+}
+
+// A Fairy is DISCARDABLE in combat (AbstractPotion.canDiscard has no combat
+// gate), and that is the only mid-combat belt mutation there is. Left alone,
+// the mirror would let a thrown-away fairy still revive.
+TEST(RunPotion, DiscardingAFairyInCombatDisarmsIt) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    leave_neow(rc);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(combat_fairy_armed(rc.combat.flags), 1);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_discard_potion[0]) << "a fairy is throwable in combat";
+    step(rc, make_action(ActionVerb::DISCARD_POTION, 0));
+
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(combat_fairy_armed(rc.combat.flags), 0)
+        << "a discarded fairy must not revive";
+    deal_lethal_to_player(rc.combat);
+    EXPECT_EQ(rc.combat.player_hp, 0);
+}
+
+// combat_potion_legal rejects FAIRY_POTION by name and must keep doing so: the
+// revive is not a USE (canUse() is `return false`, FairyPotion.java:47-50).
+TEST(RunPotion, AFairyIsNeverAUsableAction) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_use_potion[0]);
+    EXPECT_TRUE(mask.can_discard_potion[0]);
 }
 
 // --- The potion legality trap -------------------------------------------------

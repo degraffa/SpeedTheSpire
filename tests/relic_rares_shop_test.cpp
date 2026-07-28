@@ -683,6 +683,90 @@ TEST(RelicRaresShop, LizardTailRevivesOnceAtHalfMaxHp) {
     EXPECT_EQ(s.player_hp, 0) << "a used-up Lizard Tail does not fire again";
 }
 
+// ============================================================================
+// Fairy in a Bottle -- the OTHER revive source at the same site
+// ============================================================================
+//
+// AbstractPlayer.damage (:1482-1497):
+//     if (!hasRelic("Mark of the Bloom")) {
+//         if (hasPotion("FairyPotion")) { ...consume ONE...; return; }
+//         else if (hasRelic("Lizard Tail") && counter == -1) { ...; return; }
+//     }
+// The combat layer has no belt, so the ARMED COUNT is mirrored into
+// CombatState.flags at combat entry (kCombatFlagFairyArmedShift).
+//
+// FairyPotion.use (FairyPotion.java:36-45) heals
+// (int)((float)maxHealth * potency/100f), floored UP to 1, onto an HP already
+// pinned at 0 -- so the result IS the heal, never hp + heal. potency is 30.
+
+TEST(RelicRaresShop, FairyInABottleRevivesAtThirtyPercentOfMaxHp) {
+    CombatState s = MakeState();
+    ASSERT_EQ(s.player_max_hp, 80);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 24) << "(int)(80 * 0.30f), not hp + 24";
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0) << "exactly one consumed";
+}
+
+// The Java loop `return`s on the first match, so ONE fairy is spent per lethal
+// event and a second survives for a later one.
+TEST(RelicRaresShop, FairyInABottleSpendsExactlyOnePerLethalEvent) {
+    CombatState s = MakeState();
+    s.flags = with_combat_fairy_armed(s.flags, 2);
+
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 24);
+    EXPECT_EQ(combat_fairy_armed(s.flags), 1) << "one left";
+
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 24) << "the second fairy fires too";
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0);
+
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 0) << "and then the player dies";
+}
+
+// The Lizard Tail arm is an `else if` on `hasPotion`, so while a Fairy is held
+// the relic is not even CONSULTED -- its counter must be untouched.
+TEST(RelicRaresShop, FairyInABottleBeatsLizardTailAndLeavesItArmed) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::LIZARD_TAIL, /*counter=*/-1);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 24) << "the FAIRY's 30%, not the tail's 50%";
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the Lizard Tail is still armed";
+
+    // With the fairy gone, the tail takes the next lethal hit.
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 40) << "maxHealth/2";
+    EXPECT_EQ(rv.relics[0].counter, -2);
+}
+
+// The revive is a player heal on a COMBAT site, so Magic Flower's phase-gated
+// x1.5 applies exactly as it does to the Lizard Tail's: round(24 * 1.5) = 36.
+TEST(RelicRaresShop, MagicFlowerMultipliesTheFairyRevive) {
+    CombatState s = MakeState();
+    give(s, RelicId::MAGIC_FLOWER);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 36);
+}
+
+// It fires from the HP-LOSS path too, not only from an attack: the Java hook is
+// on AbstractPlayer.damage, which LoseHPAction also routes through
+// (LoseHPAction.java:41).
+TEST(RelicRaresShop, FairyInABottleAlsoFiresOnASelfInflictedHpLoss) {
+    CombatState s = MakeState();
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+    op_lose_hp(s, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 24);
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0);
+}
+
 // The revive is a player HEAL, so Magic Flower multiplies it
 // (MagicFlower.onPlayerHeal, MagicFlower.java:728-735): 40 -> round(60.0) = 60.
 TEST(RelicRaresShop, MagicFlowerMultipliesTheLizardTailRevive) {

@@ -16,6 +16,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/monster_dispatch.hpp"  // on_monster_damaged (split interrupt)
+#include "sts/engine/potions.hpp"          // potion_def (Fairy in a Bottle potency)
 #include "sts/engine/power_hooks.hpp"       // power hook dispatch (wasHPLost/onAttacked)
 #include "sts/engine/relic_hooks.hpp"       // player_has_relic (Paper Phrog) + onMonsterDeath dispatch
 #include "sts/engine/types.hpp"
@@ -381,15 +382,65 @@ void cards_took_player_damage(CombatState& s) noexcept;
     return dmg;
 }
 
-// Step 5 (AbstractPlayer.java:1487-1493): once the HP write has taken the player
-// below 1, an armed Lizard Tail (counter == -1) revives instead of dying --
-// currentHealth is pinned at 0, onTrigger heals maxHealth/2 (min 1) and sets the
-// counter to -2, and damage() RETURNS so the death branch never runs
-// (LizardTail.java:672-690). Mark of the Bloom and Fairy Potion, which gate this
-// in the Java, have no rows, so their tests are constant-true here.
-void try_lizard_tail(CombatState& s) noexcept {
+// Step 5 (AbstractPlayer.java:1482-1497): once the HP write has taken the player
+// below 1, a revive source may fire INSTEAD of dying -- currentHealth is pinned
+// at 0, the source heals, and damage() RETURNS so the death branch never runs.
+// There are TWO sources, and the Java's structure decides between them:
+//
+//     if (!hasRelic("Mark of the Bloom")) {
+//         if (hasPotion("FairyPotion")) { ...consume ONE fairy...; return; }
+//         else if (hasRelic("Lizard Tail") && counter == -1) { ...; return; }
+//     }
+//
+// So Mark of the Bloom BLOCKS BOTH, and a held Fairy takes precedence: because
+// the Lizard Tail arm is an `else if` on `hasPotion`, holding a Fairy means the
+// Lizard Tail is not even CONSULTED, let alone spent. Mark of the Bloom is an
+// Act-2+ boss relic with no S1 row, so its test is genuinely constant-true here.
+// FAIRY_POTION, however, DOES have a row (PotionId 31) -- an earlier version of
+// this comment said it did not, which is what kept the fairy arm from existing.
+//
+// The FAIRY half reads CombatState.flags' armed count, mirrored in at combat
+// entry from the run's belt: see kCombatFlagFairyArmedShift (combat_state.hpp)
+// for why the belt itself cannot be consulted from here and why a post-hoc
+// run-layer revive would be observably wrong. Consuming decrements the mirror;
+// the run layer burns the real slots at fold-back by comparing the belt against
+// what is left. Exactly ONE fairy is consumed per lethal event -- the Java loop
+// `return`s on the first match -- so a second held Fairy survives for later.
+//
+// FairyPotion.use (FairyPotion.java:36-45):
+//     float percent = this.potency / 100.0f;
+//     int healAmt = (int)((float)player.maxHealth * percent);
+//     if (healAmt < 1) healAmt = 1;
+//     player.heal(healAmt, true);
+// The MIN-1 clamp is on the HEAL, not on the result, and HP is pinned to 0
+// BEFORE the heal, so the outcome is exactly healAmt (clamped to maxHealth by
+// heal, AbstractCreature.java:386-395) and never hp + healAmt. Routed through
+// the shared in-combat heal seam so Magic Flower's x1.5 applies: its
+// onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:31-38) and this site
+// IS combat. Sacred Bark doubles potency 30 -> 60, i.e. a revive at 60% of max
+// HP; the relic has no engine hook, so def->potency is what arrives.
+//
+// LizardTail.onTrigger heals maxHealth/2 (min 1) and sets the counter to -2
+// (LizardTail.java:672-690).
+void try_player_revive(CombatState& s) noexcept {
     if (s.player_hp > 0) {
         return;
+    }
+    const uint8_t fairies = combat_fairy_armed(s.flags);
+    if (fairies > 0) {
+        s.flags = with_combat_fairy_armed(s.flags,
+                                          static_cast<uint8_t>(fairies - 1));
+        s.player_hp = 0;  // this.currentHealth = 0, BEFORE the heal
+        const PotionDef* def = potion_def(PotionId::FAIRY_POTION);
+        const int potency = def == nullptr ? 0 : def->potency;
+        const float percent = static_cast<float>(potency) / 100.0f;
+        int heal =
+            static_cast<int>(static_cast<float>(s.player_max_hp) * percent);
+        if (heal < 1) {
+            heal = 1;  // FairyPotion.java:40-42 -- on the HEAL, not the result
+        }
+        heal_player_with_relics(s, heal);
+        return;  // the `else if`: a Lizard Tail is not consulted at all
     }
     for (uint8_t i = 0; i < s.relic_count; ++i) {
         RelicSlot& slot = s.relics[i];
@@ -515,7 +566,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         cards_took_player_damage(s);
     }
     if (tgt == kActorPlayer) {
-        try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
+        try_player_revive(s);  // AbstractPlayer.java:1482-1497
     }
     // Monster death edge -> the dying monster's OWN powers' onDeath, then relics
     // onMonsterDeath (AbstractMonster.die:925-937; Spore Cloud and Gremlin Horn).
@@ -580,7 +631,7 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         cards_took_player_damage(s);
     }
     if (tgt == kActorPlayer) {
-        try_lizard_tail(s);  // AbstractPlayer.java:1487-1493
+        try_player_revive(s);  // AbstractPlayer.java:1482-1497
     }
     // A direct HP loss can also kill a monster -> the same die() power-then-relic
     // dispatch (AbstractMonster.die:925-937), before the override seam as above.

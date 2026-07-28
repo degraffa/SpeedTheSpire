@@ -157,6 +157,64 @@ inline constexpr uint32_t kCombatFlagCentennialPuzzleUsed = 1u << 4;
 inline constexpr uint32_t kCombatFlagCombustHpLossShift = 8u;
 inline constexpr uint32_t kCombatFlagCombustHpLossMask = 0xFFu << kCombatFlagCombustHpLossShift;
 
+// CombatState.flags: how many Fairy in a Bottle potions the belt still holds.
+//
+// FairyPotion is never USED (canUse() is `return false`, FairyPotion.java:47-50).
+// It fires from AbstractPlayer.damage (AbstractPlayer.java:1482-1497), the
+// ORDINARY damage path, on ANY lethal HP write:
+//
+//     if (this.currentHealth < 1) {
+//         if (!this.hasRelic("Mark of the Bloom")) {
+//             if (this.hasPotion("FairyPotion")) {
+//                 for (AbstractPotion p : this.potions) {
+//                     if (!p.ID.equals("FairyPotion")) continue;
+//                     p.flash(); this.currentHealth = 0; p.use(this);
+//                     topPanel.destroyPotion(p.slot);
+//                     return;                              // <-- no death
+//                 }
+//             } else if (hasRelic("Lizard Tail") && counter == -1) { ... }
+//         }
+//         this.isDead = true; ...
+//     }
+//
+// WHY A COMBAT-STATE MIRROR AND NOT A RUN-LAYER CHECK. potions.hpp records a
+// deliberate layer boundary: the potion BELT lives in RunState and CombatState
+// has none. But the fix cannot live at the run layer either, because
+// AbstractPlayer.damage RETURNS -- the player is alive for the REST OF THE SAME
+// ACTION, while the engine's pump ends the combat on its next step's
+// combat-over check and finish_combat_after_action would already have routed to
+// RUN_OVER. A post-hoc run-layer revive would be observably wrong. So only the
+// FACT of an armed Fairy is mirrored in, exactly as the relic mirror does, and
+// the run layer burns the real slots at fold-back.
+//
+// A COUNT rather than a bit, because multiple Fairies are legal (kPotionCap is
+// 5; at A20 potion_slot_count is 2) and the Java loop `return`s on the FIRST
+// match -- exactly ONE is consumed per lethal event and a second held Fairy
+// survives for a later one. Three bits cover the whole belt with margin. Bit 19
+// of this stage's 16-19 allocation is RELEASED unspent.
+//
+// Storage rationale is Centennial Puzzle's and the elite-room bit's below: bits
+// 16-18 were previously zero, so no offset, no sizeof and no SCHEMA_VERSION
+// move, and enter_combat's fresh `CombatState s{}` is the per-combat reset. A
+// standalone combat built by combat_begin (advance.cpp) has no belt at all, so
+// the count stays 0 there -- the right answer rather than a gap, since a bare
+// CombatState caller genuinely holds no potions.
+inline constexpr uint32_t kCombatFlagFairyArmedShift = 16u;
+inline constexpr uint32_t kCombatFlagFairyArmedMask =
+    0x7u << kCombatFlagFairyArmedShift;
+
+[[nodiscard]] inline constexpr uint8_t combat_fairy_armed(
+    uint32_t flags) noexcept {
+    return static_cast<uint8_t>((flags & kCombatFlagFairyArmedMask) >>
+                                kCombatFlagFairyArmedShift);
+}
+[[nodiscard]] inline constexpr uint32_t with_combat_fairy_armed(
+    uint32_t flags, uint8_t n) noexcept {
+    return (flags & ~kCombatFlagFairyArmedMask) |
+           ((static_cast<uint32_t>(n) << kCombatFlagFairyArmedShift) &
+            kCombatFlagFairyArmedMask);
+}
+
 // CombatState.flags bit for the ROOM's `eliteTrigger` (AbstractRoom.java:99,
 // default false). It is per-ROOM state in the game and per-COMBAT here, which
 // is exact: a room hosts one combat and the flag is set before that combat is

@@ -122,6 +122,57 @@ TEST(EventDamage, LizardTailRevivesOutsideCombatWithoutMagicFlowerBonus) {
     EXPECT_EQ(static_cast<RunPhase>(rc.phase), RunPhase::EVENT_DIALOG);
 }
 
+// AbstractPlayer.damage is ONE site for combat and out-of-combat HP loss alike,
+// and its revive block prefers a held Fairy over a Lizard Tail -- the tail arm
+// is an `else if` on hasPotion, so the tail is not even consulted, let alone
+// spent. Out here Magic Flower amplifies neither heal: its onPlayerHeal is
+// phase==COMBAT-gated (MagicFlower.java:31-38).
+//
+// This is also the answer to "which out-of-combat lethal sites exist in S1?":
+// apply_event_damage is the only one. Every other run-layer HP write is a heal
+// or a max-HP change -- Neow's drawback is `hp - hp/10*3`, strictly less than
+// hp for any hp >= 1 and so never lethal, and decreaseMaxHealth clamps against
+// a max_hp floored at 1.
+TEST(EventDamage, FairyInABottleRevivesOutsideCombatAndBeatsLizardTail) {
+    RunController rc = event_controller(EventId::WORLD_OF_GOOP);
+    rc.run.hp = 5;
+    rc.run.max_hp = 75;
+    rc.run.potion_slots = 2;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    give_relic(rc.run, RelicId::LIZARD_TAIL);
+    give_relic(rc.run, RelicId::MAGIC_FLOWER);
+
+    EXPECT_TRUE(apply_event_damage(rc, 11, EventDamageOwner::PLAYER));
+
+    EXPECT_EQ(rc.run.hp, 22) << "(int)(75 * 0.30f) -- and NOT Magic-Flowered";
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE))
+        << "destroyPotion(slot)";
+    EXPECT_EQ(relic_counter(rc.run, RelicId::LIZARD_TAIL), -1)
+        << "the tail arm is an else-if on hasPotion: never consulted";
+    EXPECT_EQ(static_cast<RunPhase>(rc.phase), RunPhase::EVENT_DIALOG);
+}
+
+// The loop returns on the FIRST FairyPotion in slot order, so the LEFTMOST is
+// destroyed and a second survives for a later lethal event.
+TEST(EventDamage, FairyInABottleConsumesTheLeftmostSlotOnly) {
+    RunController rc = event_controller(EventId::WORLD_OF_GOOP);
+    rc.run.hp = 5;
+    rc.run.max_hp = 75;
+    rc.run.potion_slots = 2;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
+
+    EXPECT_TRUE(apply_event_damage(rc, 11, EventDamageOwner::PLAYER));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.potions[1],
+              static_cast<uint16_t>(PotionId::FAIRY_POTION))
+        << "exactly one is consumed per lethal event";
+
+    EXPECT_TRUE(apply_event_damage(rc, 999, EventDamageOwner::PLAYER));
+    EXPECT_EQ(rc.run.hp, 22) << "the second takes the next lethal hit";
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
+}
+
 TEST(BigFish, AllThreeOptionsApplyTheirExactImmediateMutations) {
     {
         RunController rc = event_controller(EventId::BIG_FISH);

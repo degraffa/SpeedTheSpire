@@ -100,9 +100,14 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::ENTROPIC_BREW:          // run layer: use_entropic_brew
             return true;
         default:
-            // DEFERRED: no body anywhere. FAIRY_POTION lands here too, which is
-            // correct -- it is never USED (AbstractPotion.isThrown false, it
-            // triggers on death), and combat_potion_legal rejects it by name.
+            // DEFERRED: no body anywhere -- which, as of the potions stage, is
+            // DISTILLED_CHAOS and DUPLICATION_POTION only, both blocked on the
+            // recursive-play opcode.
+            // FAIRY_POTION lands here too and that is still correct, but for a
+            // different reason: it is IMPLEMENTED and it is never USED. canUse()
+            // is `return false` (FairyPotion.java:47-50); the body fires from
+            // the lethal-HP-write path (try_player_revive / apply_event_damage),
+            // not from a USE action, and combat_potion_legal rejects it by name.
             return false;
     }
 }
@@ -377,11 +382,19 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // are all implemented above.
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
-        // opcode, NOT a missing power row).
+        // opcode, NOT a missing power row). THAT IS THE WHOLE REMAINING LIST.
         // SNECKO_OIL is NO LONGER among them: RANDOMIZE_HAND_COST (opcode 60)
         // landed and its row is now a two-step DATA program, so it never reaches
         // this switch at all.
-        // Out-of-combat revive: FAIRY_POTION (never USED at all).
+        // FAIRY_POTION is a case apart and is NOT deferred any more: it is
+        // IMPLEMENTED, but it has no USE body to put here because it is never
+        // USED (canUse() is `return false`, FairyPotion.java:47-50). It fires
+        // from the lethal-HP-write path instead -- try_player_revive
+        // (interp/interp_damage.cpp) in combat, apply_event_damage
+        // (event_framework.cpp) out of it -- so potion_use_implemented
+        // correctly still answers FALSE for it and combat_potion_legal still
+        // rejects it by name. (Its registry row's "out-of-combat" note was
+        // wrong: AbstractPlayer.damage serves both.)
         // IMPLEMENTED, but at the RUN layer, so they never arrive here:
         // FRUIT_JUICE and ENTROPIC_BREW (max-HP / slot mutation) --
         // run_advance's step_potion intercepts both ahead of use_potion.

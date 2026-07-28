@@ -99,7 +99,47 @@ void reseed_floor_streams(CombatState& s, int64_t seed, int32_t floor) noexcept 
 // GreedAction sees the kill, GreedAction.java:38), so settling at the fold is
 // the same total; a combat-only replay, which never folds, simply carries the
 // accumulator and leaves RunState alone.
+// How many Fairy in a Bottle potions the belt holds, in slot order over the
+// OCCUPIED slots (`potion_slots`, the A11-reduced count). `hasPotion` walks the
+// same list (AbstractPlayer.java:1484), and the consuming loop returns on the
+// FIRST match (:1486-1493), so leftmost-first is the observable order.
+[[nodiscard]] uint8_t count_belt_fairies(const RunState& rs) noexcept {
+    uint8_t n = 0;
+    const uint8_t slots =
+        rs.potion_slots < kPotionCap ? rs.potion_slots : kPotionCap;
+    for (uint8_t i = 0; i < slots; ++i) {
+        if (static_cast<PotionId>(rs.potions[i]) == PotionId::FAIRY_POTION) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+// Burn the fairies the combat consumed. The combat mirror is a COUNT, not a slot
+// map, so the number spent is (what the belt still holds) - (what the mirror has
+// left); the slots are cleared LEFTMOST FIRST, which is the order
+// AbstractPlayer.damage's loop consumes them in. Exactly-once by construction:
+// this runs inside fold_back_combat, and the mirror is re-derived from the belt
+// at the next enter_combat rather than carried across.
+void burn_consumed_fairies(RunController& rc) noexcept {
+    const uint8_t held = count_belt_fairies(rc.run);
+    const uint8_t left = combat_fairy_armed(rc.combat.flags);
+    uint8_t to_burn = held > left ? static_cast<uint8_t>(held - left) : 0u;
+    const uint8_t slots =
+        rc.run.potion_slots < kPotionCap ? rc.run.potion_slots : kPotionCap;
+    for (uint8_t i = 0; i < slots && to_burn > 0; ++i) {
+        if (static_cast<PotionId>(rc.run.potions[i]) == PotionId::FAIRY_POTION) {
+            // topPanel.destroyPotion(slot) (AbstractPlayer.java:1491, and again
+            // inside FairyPotion.use:44 -- destroyPotion is idempotent
+            // (TopPanel.java:529-531), so this is ONE event, not two).
+            rc.run.potions[i] = static_cast<uint16_t>(PotionId::NONE);
+            --to_burn;
+        }
+    }
+}
+
 void fold_back_combat(RunController& rc) noexcept {
+    burn_consumed_fairies(rc);
     rc.run.hp = rc.combat.player_hp;
     rc.run.max_hp = rc.combat.player_max_hp;
     if (rc.combat.combat_gold > 0) {
@@ -501,6 +541,14 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     if (room == RoomType::Elite || elite_trigger) {
         s.flags |= kCombatFlagEliteRoom;
     }
+    // Mirror the BELT's Fairy in a Bottle count into the combat. FairyPotion
+    // fires from AbstractPlayer.damage on ANY lethal HP write and the combat
+    // layer has no belt to consult -- see kCombatFlagFairyArmedShift
+    // (combat_state.hpp) for the full rationale, including why a post-hoc
+    // run-layer revive would be observably wrong. This is the ONLY producer: a
+    // bare combat_begin (advance.cpp) has no RunState and correctly leaves the
+    // count at 0, the same answer the game gives a player holding no potions.
+    s.flags = with_combat_fairy_armed(s.flags, count_belt_fairies(rc.run));
     if (preserve_floor_streams) {
         s.monster_hp_rng = rc.combat.monster_hp_rng;
         s.ai_rng = rc.combat.ai_rng;
@@ -1552,7 +1600,27 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
     legal_actions(rc, mask);
     const uint8_t slot = action_arg0(a);
     if (slot < kPotionCap && mask.can_discard_potion[slot]) {
+        const bool was_fairy = static_cast<PotionId>(rc.run.potions[slot]) ==
+                               PotionId::FAIRY_POTION;
         clear_potion_slot(rc.run, slot);
+        // Keep the combat's armed-Fairy mirror in step with the belt. A Fairy
+        // is discardable IN COMBAT (canDiscard has no combat gate,
+        // AbstractPotion.java:398-400), and it is the only mid-combat belt
+        // mutation there is -- a Fairy can never be USED (canUse is false) and
+        // Entropic Brew, the only other slot writer, is out-of-combat-only. If
+        // the mirror were left alone, a thrown-away Fairy would still revive.
+        // DECREMENT, do not recompute from the belt: the mirror is
+        // (held - already consumed), and a discard lowers `held` by one without
+        // changing what was consumed. Recomputing would resurrect a fairy that
+        // had already fired this combat. Floored at 0 for the case where the
+        // discarded slot is one the revive had logically already spent (the
+        // slots are only cleared at fold-back).
+        if (was_fairy && rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            const uint8_t armed = combat_fairy_armed(rc.combat.flags);
+            rc.combat.flags = with_combat_fairy_armed(
+                rc.combat.flags,
+                armed > 0 ? static_cast<uint8_t>(armed - 1) : 0u);
+        }
     }
     // An illegal discard is a non-corrupting no-op, the same contract every
     // other run-layer verb keeps.

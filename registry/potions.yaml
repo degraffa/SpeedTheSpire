@@ -470,10 +470,26 @@
   game_id: "FairyPotion"
   rarity: RARE
   potency: 30
-  # Out-of-combat auto-trigger on lethal: revive to potency% max HP. Not a USE
-  # action (triggers on death) -> native, flagged (design/ledger). Deferred body.
+  # NOT out-of-combat -- IN COMBAT AND OUT, on ANY lethal HP write. The row said
+  # "out-of-combat auto-trigger" and that was wrong: the trigger site is
+  # AbstractPlayer.damage (AbstractPlayer.java:1482-1497), the ORDINARY damage
+  # path, which serves combat damage, self-inflicted HP loss and event damage
+  # alike. IMPLEMENTED (wave-C potions stage).
+  # It is still never USED -- canUse() is `return false` (FairyPotion.java:47-50)
+  # -- so it stays `native`, potion_use_implemented correctly still answers false
+  # for it, and combat_potion_legal keeps rejecting it by name. Discarding one is
+  # legal, in combat and out.
+  # Revive to potency% of MAX HP with the current HP first PINNED TO 0, so the
+  # result is exactly the heal, never hp + heal; the min-1 clamp is on the HEAL.
+  # In combat Magic Flower's x1.5 applies (its onPlayerHeal is phase==COMBAT
+  # gated); out of combat it does not.
+  # ORDER: Mark of the Bloom (no S1 row) blocks the whole branch; a held Fairy
+  # BEATS a Lizard Tail, and because the tail arm is an `else if` on hasPotion
+  # the tail is not even consulted. Exactly ONE fairy per lethal event, LEFTMOST
+  # slot first -- the Java loop returns on the first match.
+  # Sacred Bark doubles potency 30 -> 60, i.e. a revive at 60% of max HP.
   native: true
-  provenance: "FairyPotion (FairyPotion.java:37 canUse=false; getPotency :53) -- on-fatal revive to potency% maxHP, out-of-combat trigger"
+  provenance: "FairyPotion (FairyPotion.java:36-45 use, :47-50 canUse=false, :52-55 getPotency 30) -- on-lethal revive to (int)(maxHealth * potency/100f), floored up to 1, onto a currentHealth pinned at 0; trigger site AbstractPlayer.damage (AbstractPlayer.java:1482-1497), which is BOTH the in-combat and out-of-combat HP-loss path"
 
 - id: 32
   name: SMOKE_BOMB
