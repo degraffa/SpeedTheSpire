@@ -285,6 +285,63 @@ TEST(RelicBossSpecial, ConfusionSpendsADrawEvenWhenTheCostIsUnchanged) {
     EXPECT_EQ(s.card_random_rng.counter, 1) << "but the draw still happened";
 }
 
+// The OTHER half of that equality branch, and the one the engine used to get
+// wrong. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is
+//
+//     if (card.cost >= 0) {
+//         int newCost = cardRandomRng.random(3);
+//         if (card.cost != newCost) { card.costForTurn = card.cost = newCost;
+//                                     card.isCostModified = true; }
+//         card.freeToPlayOnce = false;
+//     }
+//
+// so on equality it writes NOTHING to cost / costForTurn / isCostModified --
+// only freeToPlayOnce is cleared, because that line sits OUTSIDE the inner
+// `if`. A card carrying a live THIS-TURN cost modification (costForTurn != cost,
+// isCostModified true) therefore KEEPS it when the roll lands on its own base
+// cost.
+//
+// Reachable in S1: any card whose cost was set for the turn and which then left
+// and re-entered the hand within that turn under Snecko Eye's Confusion --
+// Forethought's free play, Discovery's cost-0 copy, and Gambler's Brew's
+// discard-then-draw-back round trip all produce it.
+TEST(RelicBossSpecial, ConfusionOnEqualityKeepsALiveThisTurnCostModifier) {
+    int64_t seed = 0;
+    for (int64_t candidate = 1; candidate < 200; ++candidate) {
+        RngStream probe = from_seed(candidate);
+        if (random(probe, 3) == 1) {  // == Strike's base cost
+            seed = candidate;
+            break;
+        }
+    }
+    ASSERT_NE(seed, 0) << "no seed in range rolls a 1 first";
+
+    CombatState s = MakeState();
+    add_player_power(s, PowerId::CONFUSION, 1);
+    const CardPoolIndex strike = put_in_draw(s, CardId::STRIKE);
+    ASSERT_EQ(s.card_pool[strike].cost_now, 1);
+    // Java: costForTurn 0 while cost stays 1, isCostModified true -- plus a free
+    // play granted this turn, which the Java DOES clear unconditionally.
+    s.card_pool[strike].cost_now = 0;
+    s.card_pool[strike].flags = static_cast<uint16_t>(
+        s.card_pool[strike].flags |
+        card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) |
+        card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+    s.card_random_rng = from_seed(seed);
+
+    op_draw(s, 1);
+
+    EXPECT_EQ(s.card_random_rng.counter, 1) << "the draw is unconditional";
+    EXPECT_EQ(s.card_pool[strike].cost_now, 0)
+        << "newCost == card.cost, so neither cost nor costForTurn is written";
+    EXPECT_TRUE(has_card_flag(s.card_pool[strike].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN))
+        << "isCostModified is inside the same skipped branch";
+    EXPECT_FALSE(has_card_flag(s.card_pool[strike].flags,
+                               CardFlag::FREE_TO_PLAY_ONCE))
+        << "freeToPlayOnce = false is OUTSIDE the inner if (:46)";
+}
+
 // Confusion writes card.cost, not just costForTurn, so the new cost must survive
 // the end-of-turn reset. COST_MODIFIED_FOR_TURN is therefore cleared, not set.
 TEST(RelicBossSpecial, ConfusionCostSurvivesTheEndOfTurnCostReset) {

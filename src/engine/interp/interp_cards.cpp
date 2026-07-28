@@ -1430,6 +1430,76 @@ void op_draw_pile_fetch(CombatState& s, int amount, uint8_t type) noexcept {
     }
 }
 
+// The shared per-card cost roll behind ConfusionPower.onCardDraw and
+// RandomizeHandCostAction. The two Java bodies are near-twins that differ in
+// EXACTLY one line, so they are one helper with one boolean rather than two
+// hand copies that drift:
+//
+//   ConfusionPower.onCardDraw (ConfusionPower.java:38-48)
+//     if (card.cost >= 0) {
+//         int newCost = cardRandomRng.random(3);
+//         if (card.cost != newCost) { card.costForTurn = card.cost = newCost;
+//                                     card.isCostModified = true; }
+//         card.freeToPlayOnce = false;              <-- OUTSIDE the inner if
+//     }
+//
+//   RandomizeHandCostAction.update (RandomizeHandCostAction.java:26-38)
+//     for (AbstractCard card : p.hand.group) {
+//         int newCost;
+//         if (card.cost < 0 || card.cost == (newCost = cardRandomRng.random(3)))
+//             continue;                             <-- no freeToPlayOnce line
+//         card.costForTurn = card.cost = newCost;
+//         card.isCostModified = true;
+//     }
+//
+// Four things are load-bearing and shared:
+//
+// (1) THE DRAW IS UNCONDITIONAL once cost >= 0. It happens BEFORE the equality
+//     test (`||` is short-circuit and the assignment sits in its RIGHT operand),
+//     so a card that rolls its own current cost still consumes exactly one
+//     card_random_rng draw.
+// (2) `card.cost < 0` cards consume NO draw. In the Java those are the X-cost
+//     rows (cost -1) and the unplayable status/curse rows (cost < -1); here that
+//     is exactly the XCOST / UNPLAYABLE instance flags, which the generator sets
+//     from those same negative sentinels (stsgen/emit/cards.py parse_card_flags)
+//     and which nothing ever clears.
+// (3) THE COMPARISON IS AGAINST card.cost -- the BASE cost, not costForTurn --
+//     so it is instance_base_cost, not cost_now. On equality the Java writes
+//     NOTHING, so a live this-turn cost modification survives intact.
+// (4) The write is `costForTurn = cost = newCost`, i.e. PERMANENT for the
+//     instance. cost_now is therefore written WITHOUT setting
+//     COST_MODIFIED_FOR_TURN, and any such bit already on the instance is
+//     cleared -- after the assignment the Java's cost and costForTurn are equal,
+//     so leaving it set would make the end-of-turn sweep (reset_cost_for_turn)
+//     restore the REGISTRY cost and silently undo the randomization.
+//
+// `clear_free_to_play_once` is the one difference: true for Confusion (:46),
+// false for RandomizeHandCostAction, which never touches the field. Note that
+// Confusion clears it on the EQUALITY path too -- that line is outside the
+// inner `if`, and only the whole `cost >= 0` branch gates it.
+void randomize_card_cost(CombatState& s, CardPoolIndex pi,
+                         bool clear_free_to_play_once) noexcept {
+    if (pi >= kCardPoolCap) {
+        return;
+    }
+    CardInstance& c = s.card_pool[pi];
+    if (has_card_flag(c.flags, CardFlag::XCOST) ||
+        has_card_flag(c.flags, CardFlag::UNPLAYABLE)) {
+        return;  // (2) card.cost < 0: no draw, no change
+    }
+    const int32_t new_cost = random(s.card_random_rng, 3);  // (1) random(3) == 0..3
+    if (new_cost != instance_base_cost(s, pi)) {            // (3)
+        c.cost_now = static_cast<uint8_t>(new_cost);        // (4)
+        c.flags = static_cast<uint16_t>(
+            c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+            ~card_flag_bit(CardFlag::SAVED_BASE_COST) & ~kSavedBaseCostMask);
+    }
+    if (clear_free_to_play_once) {
+        c.flags = static_cast<uint16_t>(
+            c.flags & ~card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+    }
+}
+
 void prepare_discovery_choice(CombatState& s,
                               ActionQueueItem& item) noexcept {
     if (discovery_choice_prepared(item)) {
