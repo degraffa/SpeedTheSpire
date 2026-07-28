@@ -188,6 +188,22 @@ PotionId hand_limited_potion_roll(RngStream& rng) {
     return candidate;
 }
 
+PotionId hand_unlimited_potion_roll(RngStream& rng) {
+    // AbstractDungeon.returnRandomPotion() -- the NO-ARG overload -- is
+    // returnRandomPotion(false) (AbstractDungeon.java:825-827): d100 tier roll,
+    // then reject-sample by rarity alone. No spam check, no first-candidate
+    // discard, and Fruit Juice is a legal result. limited therefore changes the
+    // DRAW COUNT, not just the identity: the limited loop always redraws at
+    // least once.
+    const PotionRarity tier = potion_tier_for_roll(random(rng, 0, 99));
+    PotionId candidate =
+        static_cast<PotionId>(random(rng, kPotionPoolSize - 1) + 1);
+    while (potion_def(candidate)->rarity != tier) {
+        candidate = static_cast<PotionId>(random(rng, kPotionPoolSize - 1) + 1);
+    }
+    return candidate;
+}
+
 RunController enter_jaw_worm_combat() {
     RunController rc = run_begin(find_jaw_worm_seed(), kA20);
     leave_neow(rc);
@@ -819,20 +835,119 @@ TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     EXPECT_EQ(rc.run.hp, 60);  // Fruit Juice +5, then Toy Ornithopter +5.
 }
 
-TEST(RunPotion, EntropicBrewUsesLimitedDrawsThenFillsOpenedSlots) {
-    RunController rc = run_begin(kSeed, kA20);
+TEST(RunPotion, EntropicBrewOutOfCombatDrawsAreUnlimited) {
+    // EntropicBrew.use (EntropicBrew.java:46-48): OUT of combat the non-Sozu
+    // branch rolls potionSlots x returnRandomPotion() -- the no-arg overload,
+    // limited=false (AbstractDungeon.java:825-827). Only the IN-combat branch
+    // (:40-42) passes limited=true.
+    //
+    // The two flags OFTEN coincide: when a candidate mismatches the rolled
+    // tier anyway, the limited discard overlaps the rarity rejection. So a
+    // fixed seed can silently pin nothing -- hunt for a seed whose sequence
+    // DISTINGUISHES the flag (first candidate already matching the tier, or a
+    // Fruit Juice result) and assert the engine takes the unlimited branch
+    // there.
+    int64_t seed = 0;
+    RngStream expected_rng{};
+    PotionId first = PotionId::NONE;
+    PotionId second = PotionId::NONE;
+    for (int64_t cand = 1; cand <= 500 && seed == 0; ++cand) {
+        RunController probe = run_begin(cand, kA20);
+        leave_neow(probe);
+        RngStream unlimited = probe.run.potion_rng;
+        RngStream limited = probe.run.potion_rng;
+        const PotionId u0 = hand_unlimited_potion_roll(unlimited);
+        const PotionId u1 = hand_unlimited_potion_roll(unlimited);
+        (void)hand_limited_potion_roll(limited);
+        (void)hand_limited_potion_roll(limited);
+        if (!streams_equal(unlimited, limited)) {
+            seed = cand;
+            expected_rng = unlimited;
+            first = u0;
+            second = u1;
+        }
+    }
+    ASSERT_NE(seed, 0) << "no seed in 1..500 distinguishes the limited flag";
+
+    RunController rc = run_begin(seed, kA20);
     leave_neow(rc);
     rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
     rc.run.potions[1] = static_cast<uint16_t>(PotionId::BLOOD_POTION);
 
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng))
+        << "out-of-combat draws must be limited=false (seed " << seed << ")";
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(first));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
+    // The second unlimited roll happened even though no slot was open for it
+    // (the Java constructs every effect before any obtain resolves); its
+    // identity is pinned by the stream compare above.
+    (void)second;
+}
+
+TEST(RunPotion, EntropicBrewWithSozuOutOfCombatRollsNothing) {
+    // EntropicBrew.use:43-45: out of combat the Sozu check comes BEFORE any
+    // roll -- potionRng does not move at all and nothing is obtained; the Brew
+    // itself is still consumed (PotionPopUp destroys the used potion
+    // regardless of which use() branch ran).
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SOZU), -1};
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+    rc.run.potions[1] = static_cast<uint16_t>(PotionId::BLOOD_POTION);
+    const RngStream rng_before = rc.run.potion_rng;
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, rng_before))
+        << "the Sozu branch precedes every potionRng draw";
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
+}
+
+TEST(RunPotion, EntropicBrewInCombatUnderSozuRollsButObtainsNothing) {
+    // In combat the rolls are NOT gated on Sozu: EntropicBrew.use:39-42 rolls
+    // returnRandomPotion(true) potionSlots times unconditionally; each queued
+    // ObtainPotionAction is then suppressed at resolve while Sozu is owned
+    // (ObtainPotionAction.java:29-38 -- flash, no obtainPotion). Net: the
+    // stream moves by the full limited sequence, the belt gains nothing.
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SOZU), -1};
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+
+    RngStream expected_rng = rc.run.potion_rng;
+    (void)hand_limited_potion_roll(expected_rng);
+    (void)hand_limited_potion_roll(expected_rng);  // A20: two slots.
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]);
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::NONE));
+}
+
+TEST(RunPotion, EntropicBrewInCombatDrawsLimitedAndFills) {
+    // The in-combat branch keeps limited=true (EntropicBrew.java:40-42) and,
+    // without Sozu, every obtain lands in the belt front-first.
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ENTROPIC_BREW);
+
     RngStream expected_rng = rc.run.potion_rng;
     const PotionId first = hand_limited_potion_roll(expected_rng);
-    (void)hand_limited_potion_roll(expected_rng);  // A20 has two slots -> two rolls.
+    const PotionId second = hand_limited_potion_roll(expected_rng);
 
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]);
     step(rc, make_action(ActionVerb::USE_POTION, 0));
     EXPECT_TRUE(streams_equal(rc.run.potion_rng, expected_rng));
     EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(first));
-    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(PotionId::BLOOD_POTION));
+    EXPECT_EQ(rc.run.potions[1], static_cast<uint16_t>(second));
 }
 
 TEST(RunPotion, TargetPotionDelegatesToCombatPumpAndConsumesSlot) {

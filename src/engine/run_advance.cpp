@@ -225,17 +225,43 @@ void use_fruit_juice(RunController& rc, uint8_t slot) noexcept {
 }
 
 void use_entropic_brew(RunController& rc, uint8_t slot) noexcept {
-    // EntropicBrew.use constructs potionSlots random-potion actions/effects
-    // before PotionPopUp destroys the Brew. All draws therefore happen even if
-    // only one resulting potion fits after the consumed slot opens.
+    // EntropicBrew.use (EntropicBrew.java:38-50), three branches:
+    //
+    //  IN COMBAT (:39-42): potionSlots x ObtainPotionAction(
+    //  returnRandomPotion(true)) -- limited=true, and the rolls are NOT gated
+    //  on Sozu; while Sozu is owned each obtain is then suppressed at resolve
+    //  (ObtainPotionAction.java:29-38 -- flash, no obtainPotion), so the
+    //  stream moves by the full limited sequence and the belt gains nothing.
+    //
+    //  OUT OF COMBAT with Sozu (:43-45): the check comes BEFORE any roll --
+    //  potionRng does not move at all and nothing is obtained.
+    //
+    //  OUT OF COMBAT otherwise (:46-48): potionSlots x ObtainPotionEffect(
+    //  returnRandomPotion()) -- the NO-ARG overload, i.e. limited=false
+    //  (AbstractDungeon.java:825-827). `limited` is RNG-visible, not
+    //  cosmetic: the limited spam-check loop always redraws at least once
+    //  and rejects Fruit Juice, so the two flags spend different draw counts.
+    //
+    // Every use() branch runs before PotionPopUp destroys the Brew, so the
+    // draws all happen even if only one resulting potion fits after the
+    // consumed slot opens.
+    const bool in_combat = rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+    const bool sozu = run_has_relic(rc.run, RelicId::SOZU);
+    if (!in_combat && sozu) {
+        clear_potion_slot(rc.run, slot);
+        return;
+    }
     PotionId rolls[kPotionCap]{};
     const uint8_t count = rc.run.potion_slots < kPotionCap
                               ? rc.run.potion_slots
                               : static_cast<uint8_t>(kPotionCap);
     for (uint8_t i = 0; i < count; ++i) {
-        rolls[i] = return_random_potion(rc.run.potion_rng, true);
+        rolls[i] = return_random_potion(rc.run.potion_rng, /*limited=*/in_combat);
     }
     clear_potion_slot(rc.run, slot);
+    if (sozu) {
+        return;  // in combat: every ObtainPotionAction resolves as a flash only
+    }
     for (uint8_t i = 0; i < count; ++i) {
         for (uint8_t dst = 0; dst < count; ++dst) {
             if (rc.run.potions[dst] == static_cast<uint16_t>(PotionId::NONE)) {
