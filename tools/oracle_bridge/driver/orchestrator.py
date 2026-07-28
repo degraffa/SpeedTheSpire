@@ -50,6 +50,17 @@ EXIT_FATAL_ENVIRONMENT = 3
 EXIT_CAMPAIGN_INVALID = 4
 SCHEMA_VERSION = 1
 
+# g6_campaign_spotdiff.md §9: a single unreadable/missing heartbeat sample
+# must never look identical to "stale since launch" -- that confusion killed
+# two healthy games mid-combat in the G6 campaign. An unreadable sample only
+# counts toward a kill once it has recurred this many consecutive polls (each
+# poll is STALL_POLL_INTERVAL_S apart); any readable sample resets the streak
+# to 0 immediately. A heartbeat that IS readable but genuinely old is a real
+# stall and is judged the instant it is seen, at the same stall_timeout
+# threshold as before -- that path is unchanged.
+STALL_UNREADABLE_STREAK = 3
+STALL_POLL_INTERVAL_S = 3.0
+
 
 def utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -421,10 +432,11 @@ def main(argv=None) -> int:
         proc = launch_game(args, launch_idx)
         timeline.append({"event": "launch", "idx": launch_idx, "utc": utc()})
         launch_started = time.time()
+        hb_unreadable_streak = 0
 
         # monitor this launch
         while True:
-            time.sleep(3.0)
+            time.sleep(STALL_POLL_INTERVAL_S)
             now = time.time()
             if now - start > args.campaign_timeout:
                 log("CAMPAIGN TIMEOUT during launch -- killing game")
@@ -498,12 +510,39 @@ def main(argv=None) -> int:
             # A missing heartbeat file (the driver died at startup before writing
             # one) is treated the same once the launch has had stall_timeout to
             # produce one, so a driver-startup death can't hang the campaign.
+            #
+            # An unreadable/missing SAMPLE is not proof of that: read_json
+            # (below) swallows OSError/JSONDecodeError and returns None for
+            # any transient hiccup (e.g. a read racing the heartbeat's own
+            # write), and treating one such sample as "stale since launch"
+            # is exactly what g6_campaign_spotdiff.md §9 found killing a
+            # healthy mid-combat game -- `hb_age` fell back to
+            # `now - launch_started`, which trivially exceeds stall_timeout
+            # on every poll after the first, so ONE bad read was sufficient.
+            # A readable sample immediately resets the streak; only
+            # STALL_UNREADABLE_STREAK consecutive unreadable samples count.
+            # A heartbeat that reads back fine but carries a genuinely old
+            # `t` is a real stall and still fires on the spot, same threshold
+            # as before -- that path has no streak requirement.
             hb = read_json(heartbeat_path(args))
-            hb_age = (now - hb.get("t", now)) if hb else (now - launch_started)
-            if hb_age > args.stall_timeout \
-                    and (now - launch_started) > args.stall_timeout:
-                log(f"heartbeat stale/absent {hb_age:.0f}s "
-                    f"(> {args.stall_timeout:.0f}); game still up -- "
+            if isinstance(hb, dict) and "t" in hb:
+                hb_unreadable_streak = 0
+                hb_age = now - hb["t"]
+                stalled = (hb_age > args.stall_timeout
+                           and (now - launch_started) > args.stall_timeout)
+                reason = f"heartbeat stale {hb_age:.0f}s"
+            else:
+                hb_unreadable_streak += 1
+                hb_age = now - launch_started
+                stalled = (
+                    hb_unreadable_streak >= STALL_UNREADABLE_STREAK
+                    and hb_age > args.stall_timeout
+                    and (now - launch_started) > args.stall_timeout)
+                reason = (f"heartbeat unreadable/absent for "
+                          f"{hb_unreadable_streak} consecutive sample(s), "
+                          f"{hb_age:.0f}s since launch")
+            if stalled:
+                log(f"{reason} (> {args.stall_timeout:.0f}); game still up -- "
                     f"killing + relaunching")
                 kill_tree(proc)
                 timeline.append({"event": "stall_relaunch", "utc": utc(),

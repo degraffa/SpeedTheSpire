@@ -64,7 +64,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.4.6"
+DRIVER_VERSION = "b1.4.7"
 SCHEMA_VERSION = 1
 
 # The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
@@ -659,10 +659,13 @@ class Progress:
     the orchestrator can tell a working driver from a wedged one."""
 
     def __init__(self, path: str, hb_path: str,
-                 tmp_path: str | None = None) -> None:
+                 tmp_path: str | None = None,
+                 hb_tmp_path: str | None = None) -> None:
         self.path = path
         self.hb_path = hb_path
         self.tmp_path = tmp_path if tmp_path is not None else path + ".tmp"
+        self.hb_tmp_path = (
+            hb_tmp_path if hb_tmp_path is not None else hb_path + ".tmp")
         self.data = None  # type: dict | None
 
     def load_or_init(self, campaign_id, seed_list, policy, fork_hash,
@@ -733,12 +736,27 @@ class Progress:
                    exact_path_without_redirect(destination))
 
     def heartbeat(self, seed, floor, actions) -> None:
+        """Bump the heartbeat file -- through tmp + fsync + rename, same as
+        `flush()` above, so a reader (the orchestrator's watchdog) never
+        observes a truncated/partial write. Before this fix the write was a
+        plain truncating `open(..., "w")`, which g6_campaign_spotdiff.md §9
+        names as the structural half of "orchestrator kills a healthy game":
+        a reader racing that truncation window would see an unreadable
+        sample, and the watchdog's fallback treated that identically to a
+        stall dating back to launch. Best-effort like the original: a failed
+        heartbeat costs one missed sample, not the run, so both the
+        filesystem (OSError) and the redirect guard (ValueError) are
+        swallowed here -- unlike `flush()`, which must fail loud."""
         try:
-            with open(exact_path_without_redirect(self.hb_path), "w",
-                      encoding="utf-8", newline="\n") as fh:
+            tmp = exact_path_without_redirect(self.hb_tmp_path)
+            destination = exact_path_without_redirect(self.hb_path)
+            with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
                 json.dump({"t": _now(), "utc": _utc(), "seed": seed,
                            "floor": floor, "actions": actions}, fh)
-        except OSError:
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, destination)
+        except (OSError, ValueError):
             pass
 
     def fatal_environment_drift(self, seed: str | None, attempt: int,

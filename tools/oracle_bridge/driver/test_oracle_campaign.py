@@ -699,6 +699,61 @@ class CampaignDriverPreflightTest(unittest.TestCase):
             self.assertEqual([], progress["seeds_failed"])
 
 
+class HeartbeatAtomicWriteTest(unittest.TestCase):
+    """g6_campaign_spotdiff.md §9: Progress.heartbeat() used to be a plain
+    truncating `open(path, "w")`, unlike campaign_progress.json's flush(),
+    which goes through a tmp file + fsync + os.replace. A reader racing the
+    truncating write could observe a torn/unreadable sample, and the
+    orchestrator treated that identically to "stale since launch". These
+    tests prove the heartbeat write now goes through the same tmp+rename
+    door -- the destination file is only ever touched by a completed
+    rename, so a reader can never observe a partial write."""
+
+    def test_heartbeat_write_never_truncates_destination_in_place(self):
+        with tempfile.TemporaryDirectory() as root:
+            hb_path = os.path.join(root, "campaign_heartbeat.json")
+            progress_path = os.path.join(root, "campaign_progress.json")
+            old_content = ('{"t": 1.0, "utc": "old", "seed": "OLD", '
+                          '"floor": 1, "actions": 1}')
+            with open(hb_path, "w", encoding="utf-8") as fh:
+                fh.write(old_content)
+
+            progress = campaign_driver.Progress(progress_path, hb_path)
+
+            # Simulate a crash after the new content is written to the tmp
+            # file but before the rename lands it on the destination -- the
+            # exact window a non-atomic `open(path, "w")` has no equivalent
+            # of, because it truncates the destination immediately.
+            with mock.patch.object(
+                    campaign_driver.os, "replace",
+                    side_effect=OSError("simulated crash before rename")):
+                progress.heartbeat("STS00099", 5, 42)  # best-effort: swallowed
+
+            with open(hb_path, "r", encoding="utf-8") as fh:
+                self.assertEqual(old_content, fh.read())
+            # The new content really did land somewhere -- the tmp path --
+            # proving the write target was never the destination itself.
+            with open(progress.hb_tmp_path, "r", encoding="utf-8") as fh:
+                tmp_content = json.load(fh)
+            self.assertEqual("STS00099", tmp_content["seed"])
+
+    def test_heartbeat_write_succeeds_atomically_via_rename(self):
+        with tempfile.TemporaryDirectory() as root:
+            hb_path = os.path.join(root, "campaign_heartbeat.json")
+            progress_path = os.path.join(root, "campaign_progress.json")
+            progress = campaign_driver.Progress(progress_path, hb_path)
+
+            progress.heartbeat("STS00100", 3, 17)
+
+            with open(hb_path, "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            self.assertEqual("STS00100", data["seed"])
+            self.assertEqual(3, data["floor"])
+            self.assertEqual(17, data["actions"])
+            # The rename consumes the tmp file -- nothing left behind.
+            self.assertFalse(os.path.exists(progress.hb_tmp_path))
+
+
 class OrchestratorPreflightTest(unittest.TestCase):
     def test_existing_fatal_status_stops_before_relaunch(self):
         with tempfile.TemporaryDirectory() as root:
@@ -857,6 +912,139 @@ class OrchestratorPreflightTest(unittest.TestCase):
 
             self.assertEqual(orchestrator.EXIT_CAMPAIGN_INVALID, result)
             launch.assert_not_called()
+
+
+class OrchestratorStallWatchdogTest(unittest.TestCase):
+    """g6_campaign_spotdiff.md §9: orchestrator.py's watchdog fell back to
+    `now - launch_started` whenever a heartbeat sample was unreadable, which
+    made the staleness guard compare that expression to itself -- so ONE
+    unreadable sample, any time after stall_timeout seconds, was sufficient
+    to kill a healthy, mid-combat game. These tests drive `orchestrator.main`
+    with `time.time()` and `read_json` fully mocked (deterministic timestamps
+    and canned heartbeat/progress reads -- no real clock, no real files for
+    the watchdog decision itself) so the exact sample sequence from that
+    incident can be reproduced.
+    """
+
+    def _run(self, root, campaign_id, heartbeats, progress_by_call,
+             times, stall_timeout=10.0):
+        campaign_dir = os.path.join(root, campaign_id)
+        os.makedirs(campaign_dir)
+        heartbeat_iter = iter(heartbeats)
+        call_count = {"n": 0}
+
+        def fake_read_json(path):
+            if "heartbeat" in os.path.basename(path):
+                return next(heartbeat_iter)
+            call_count["n"] += 1
+            return progress_by_call(call_count["n"])
+
+        game_proc = mock.Mock()
+        game_proc.poll.return_value = None
+        local_app_data = os.path.join(root, "local")
+        with mock.patch.dict(
+                os.environ, {"LOCALAPPDATA": local_app_data}), \
+                mock.patch.object(
+                    orchestrator, "sha256_file", return_value="A" * 64), \
+                mock.patch.object(
+                    orchestrator, "launch_game",
+                    return_value=game_proc) as launch, \
+                mock.patch.object(orchestrator, "kill_tree") as kill, \
+                mock.patch.object(
+                    orchestrator, "read_json",
+                    side_effect=fake_read_json), \
+                mock.patch.object(orchestrator.time, "sleep"), \
+                mock.patch.object(
+                    orchestrator.time, "time", side_effect=times):
+            result = orchestrator.main([
+                "--data-root", root,
+                "--campaign-id", campaign_id,
+                "--seeds", SEED,
+                "--stall-timeout", str(stall_timeout),
+            ])
+        with open(os.path.join(
+                campaign_dir, "orchestrator_timeline.json"),
+                "r", encoding="utf-8") as fh:
+            timeline = json.load(fh)["timeline"]
+        return result, timeline, launch, kill
+
+    def test_one_transiently_unreadable_sample_between_good_ones_no_kill(self):
+        """A single unreadable/missing heartbeat sample, sandwiched between
+        two fresh, readable ones, must never be treated as a stall -- the
+        exact shape that killed a healthy game twice in the G6 campaign."""
+        with tempfile.TemporaryDirectory() as root:
+            def progress_by_call(n):
+                if n <= 4:
+                    return _progress(
+                        "stall", status="in_progress", done=[], failed=[])
+                return _progress(
+                    "stall", status="complete", done=[_done()], failed=[])
+
+            result, timeline, launch, kill = self._run(
+                root, "stall",
+                heartbeats=[
+                    {"t": 110.0},  # iter A: fresh (age 1s)
+                    None,          # iter B: ONE unreadable/missing sample
+                    {"t": 132.0},  # iter C: fresh again (age 1s)
+                ],
+                progress_by_call=progress_by_call,
+                times=[
+                    0.0,     # start
+                    0.0,     # outer-loop campaign-timeout check
+                    100.0,   # launch_started
+                    111.0,   # iter A: now
+                    122.0,   # iter B: now (the lone bad sample)
+                    133.0,   # iter C: now
+                    144.0,   # iter D: now (progress reports complete)
+                ])
+
+            self.assertEqual(0, result)
+            self.assertEqual(1, launch.call_count,
+                             "the lone bad sample must not have caused a "
+                             "relaunch")
+            events = [t["event"] for t in timeline]
+            self.assertNotIn("stall_relaunch", events)
+            self.assertEqual(["launch", "complete"], events)
+
+    def test_genuinely_stale_heartbeat_still_triggers_kill_and_relaunch(self):
+        """A heartbeat that IS readable but genuinely old (game hung, or the
+        driver died without updating it) must still be judged a stall at the
+        same threshold as before -- this is the true-stall path and must not
+        regress while the unreadable-sample path is fixed."""
+        with tempfile.TemporaryDirectory() as root:
+            def progress_by_call(n):
+                if n >= 4:
+                    return _progress(
+                        "stall", status="complete", done=[_done()],
+                        failed=[])
+                return _progress(
+                    "stall", status="in_progress", done=[], failed=[])
+
+            result, timeline, launch, kill = self._run(
+                root, "stall",
+                heartbeats=[
+                    {"t": 50.0},  # genuinely old: 61s stale, readable fine
+                ],
+                progress_by_call=progress_by_call,
+                times=[
+                    0.0,     # start
+                    0.0,     # outer-loop check, launch #1
+                    100.0,   # launch_started #1
+                    111.0,   # iter 1: now (stale heartbeat -> kill)
+                    112.0,   # outer-loop check, launch #2
+                    200.0,   # launch_started #2
+                    211.0,   # iter for launch #2: now (progress complete)
+                ])
+
+            self.assertEqual(0, result)
+            self.assertEqual(2, launch.call_count,
+                             "the genuine stall must still relaunch")
+            events = [t["event"] for t in timeline]
+            self.assertEqual(["launch", "stall_relaunch", "launch",
+                              "complete"], events)
+            stall_event = next(
+                t for t in timeline if t["event"] == "stall_relaunch")
+            self.assertEqual(61.0, stall_event["age"])
 
 
 class ArtifactOracleRequirementTest(unittest.TestCase):
