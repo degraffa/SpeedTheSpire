@@ -191,11 +191,14 @@
   game_id: "Centennial Puzzle"
   tier: COMMON
   pool_order: 19
-  initial_counter: 0
+  # NO initial_counter: CentennialPuzzle never writes `this.counter`, so it keeps
+  # AbstractRelic's -1 and CommunicationMod reports -1. The default (-1) is the
+  # correct value; the explicit 0 that used to sit here was the STS00068
+  # `relics[i].counter: -1 -> 0` divergence, on every acquisition path.
   native: true
   hooks:
-    was_hp_lost: []           # first HP loss in combat -> draw 3 (counter flag)
-  provenance: "CentennialPuzzle.wasHPLost (CentennialPuzzle.java:40-49) -- once per combat (this.counter gate) addToTop DrawCardAction(player, 3); atPreBattle resets the flag (:33-37)"
+    was_hp_lost: []           # first HP loss in combat -> draw 3 (static usedThisCombat)
+  provenance: "CentennialPuzzle.wasHPLost (CentennialPuzzle.java:40-49) -- once per combat addToTop DrawCardAction(player, NUM_CARDS=3) (:20,:44). The gate is a `private static boolean usedThisCombat` (:21), read+set at :41/:46 and reset by atPreBattle (:33-37) -- NOT `this.counter`, which the class never touches, so the relic carries AbstractRelic's -1 for the whole run. The engine latch is kCombatFlagCentennialPuzzleUsed (combat_state.hpp), whose per-combat reset is enter_combat's fresh value-initialized CombatState."
 
 - id: 8
   name: LANTERN

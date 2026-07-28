@@ -225,26 +225,80 @@ TEST(RelicHooks, BloodVialHealsTwoAtBattleStart) {
 
 // --- Native conditionals + once-per-combat flags -----------------------------
 
-TEST(RelicHooks, CentennialPuzzleDrawsThreeOnceOnFirstHpLoss) {
-    CombatState s = MakeState();
+// CentennialPuzzle.wasHPLost (CentennialPuzzle.java:40-49): the first HP loss of
+// a combat addToTop(DrawCardAction(player, NUM_CARDS)) with NUM_CARDS == 3
+// (:20, :44). The gate is the class's `private static boolean usedThisCombat`
+// (:21), NOT `this.counter` -- which the class never writes, so the relic keeps
+// AbstractRelic's -1 (pinned in relic_pools_test's
+// CentennialPuzzleKeepsAbstractRelicsMinusOneCounter). Here the counter is
+// seeded at -1, which is what the registry row now hands the live slot, and it
+// must still be -1 after the relic has fired.
+void give_centennial_a_draw_pile(CombatState& s) {
     for (int i = 0; i < 3; ++i) {
         s.card_pool[i].card_id = static_cast<uint16_t>(CardId::STRIKE);
         s.draw[i] = static_cast<uint8_t>(i);
     }
     s.draw_count = 3;
-    Relics r; r.add(RelicId::CENTENNIAL_PUZZLE);
+}
+
+TEST(RelicHooks, CentennialPuzzleDrawsThreeOnFirstHpLoss) {
+    CombatState s = MakeState();
+    give_centennial_a_draw_pile(s);
+    Relics r; r.add(RelicId::CENTENNIAL_PUZZLE, /*counter=*/-1);
+    ASSERT_EQ(s.flags & kCombatFlagCentennialPuzzleUsed, 0u);
 
     dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/5);
     ASSERT_EQ(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::DRAW));
-    EXPECT_EQ(queued(s, 0).amount, 3);
-    EXPECT_EQ(r.slots[0].counter, 1) << "fired flag set";
+    EXPECT_EQ(queued(s, 0).amount, 3);  // NUM_CARDS (CentennialPuzzle.java:20)
+    EXPECT_NE(s.flags & kCombatFlagCentennialPuzzleUsed, 0u)
+        << "usedThisCombat = true (CentennialPuzzle.java:46)";
+    EXPECT_EQ(r.slots[0].counter, -1)
+        << "this.counter is never written (CentennialPuzzle.java:21,33-49)";
     drain(s);
     EXPECT_EQ(s.hand_count, 3);
+}
 
-    // A SECOND HP loss does not draw again.
+TEST(RelicHooks, CentennialPuzzleDoesNotFireTwiceInOneCombat) {
+    CombatState s = MakeState();
+    give_centennial_a_draw_pile(s);
+    Relics r; r.add(RelicId::CENTENNIAL_PUZZLE, /*counter=*/-1);
+
+    dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/5);
+    ASSERT_EQ(s.action_count, 1);
+    drain(s);
+
+    // A SECOND HP loss in the SAME combat does not draw again: usedThisCombat is
+    // still true and only atPreBattle clears it (CentennialPuzzle.java:34).
     dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/4);
     EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(r.slots[0].counter, -1);
+}
+
+// The latch is combat-scoped, not run-scoped: a fresh CombatState IS
+// atPreBattle. This is the unit-level statement of it; the end-to-end statement,
+// walking two real combats of one run through enter_combat, is
+// run_advance_test's RunCombatWasHpLost.CentennialPuzzleReArmsInASecondCombat.
+TEST(RelicHooks, CentennialPuzzleReArmsWhenTheCombatStateIsFresh) {
+    Relics r; r.add(RelicId::CENTENNIAL_PUZZLE, /*counter=*/-1);
+
+    CombatState first = MakeState();
+    give_centennial_a_draw_pile(first);
+    dispatch_relics_was_hp_lost(first, r.slots, r.count, /*amount=*/5);
+    ASSERT_EQ(first.action_count, 1);
+    ASSERT_NE(first.flags & kCombatFlagCentennialPuzzleUsed, 0u);
+
+    // Second combat of the same run: the relic list is carried over untouched,
+    // the CombatState is not.
+    CombatState second = MakeState();
+    give_centennial_a_draw_pile(second);
+    ASSERT_EQ(second.flags & kCombatFlagCentennialPuzzleUsed, 0u)
+        << "a fresh CombatState is atPreBattle's usedThisCombat = false";
+    dispatch_relics_was_hp_lost(second, r.slots, r.count, /*amount=*/5);
+    ASSERT_EQ(second.action_count, 1);
+    EXPECT_EQ(queued(second, 0).opcode, kOp(Opcode::DRAW));
+    EXPECT_EQ(queued(second, 0).amount, 3);
+    EXPECT_EQ(r.slots[0].counter, -1) << "no residue in the persistent slot";
 }
 
 TEST(RelicHooks, OrichalcumGainsBlockOnlyWhenUnblocked) {

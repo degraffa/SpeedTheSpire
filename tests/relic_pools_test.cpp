@@ -491,6 +491,32 @@ TEST(RelicAcquisition, ConstructorAndOnEquipCountersAreExact) {
     EXPECT_EQ(rs.relics[3].counter, 0);
 }
 
+// STS00068 regression (b47_treasure_oracle_20260727T204809Z_claude01): a Neow
+// common-relic blessing handed over Centennial Puzzle and the ONLY field that
+// differed from the capture was `relics[1].counter: -1 -> 0`. The relic's row
+// carried `initial_counter: 0` because the engine was using slot.counter as the
+// once-per-combat flag, but CentennialPuzzle.java never writes `this.counter` at
+// all -- the flag is a `private static boolean usedThisCombat`
+// (CentennialPuzzle.java:21, 33-49) -- so AbstractRelic's -1 default stands and
+// CommunicationMod reports -1. Nothing about the acquisition path is Neow's:
+// every source runs through acquire_relic, so the shape is pinned here at the
+// seam rather than at one caller. The flag now lives in
+// kCombatFlagCentennialPuzzleUsed (combat_state.hpp); see
+// relic_hooks_test's CentennialPuzzle* cases for its per-combat behaviour.
+TEST(RelicAcquisition, CentennialPuzzleKeepsAbstractRelicsMinusOneCounter) {
+    RunState rs{};
+    RngStream misc = from_seed(7);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::BURNING_BLOOD),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CENTENNIAL_PUZZLE),
+              RelicAcquireResult::ACQUIRED);
+    ASSERT_EQ(rs.relic_count, 2);
+    EXPECT_EQ(rs.relics[1].relic_id,
+              static_cast<uint16_t>(RelicId::CENTENNIAL_PUZZLE));
+    EXPECT_EQ(rs.relics[1].counter, -1)
+        << "CentennialPuzzle never touches this.counter; a 0 here is STS00068";
+}
+
 TEST(RelicAcquisition, OrdinaryDuplicatesAppendButCircletStacks) {
     RunState rs{};
     RngStream misc = from_seed(3);

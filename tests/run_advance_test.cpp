@@ -34,10 +34,12 @@
 #include "sts/engine/advance.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"
+#include "sts/engine/interp.hpp"       // Opcode::DRAW (Centennial Puzzle)
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/monster_looter.hpp"  // kLooterGoldAmt / looter_steal_count
 #include "sts/engine/potions.hpp"
+#include "sts/engine/power_hooks.hpp"  // dispatch_was_hp_lost (Centennial Puzzle)
 #include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
 #include "sts/engine/relics.hpp"       // RelicDef / kRelicDefs
 #include "sts/engine/rng_stream.hpp"
@@ -490,6 +492,11 @@ const PowerSlot* player_power(const CombatState& s, PowerId id) {
     return nullptr;
 }
 
+// The action `add_to_top` most recently prepended.
+ActionQueueItem front_action(const CombatState& s) {
+    return s.action_queue[s.action_head % kActionQueueCap];
+}
+
 const PowerSlot* monster_power_slot(const CombatState& s, uint8_t mi, PowerId id) {
     const MonsterState& m = s.monsters[mi];
     for (uint8_t i = 0; i < m.power_count; ++i) {
@@ -685,6 +692,94 @@ TEST(RunCombatBattleStart, NoRegisteredRelicBindsThePreDrawHook) {
     }
     EXPECT_TRUE(any_battle_start)
         << "no relic binds at_battle_start -- the wiring under test would be moot";
+}
+
+// =============================================================================
+// wasHPLost relics across a run: Centennial Puzzle's per-combat re-arm
+// =============================================================================
+//
+// CentennialPuzzle gates on a `private static boolean usedThisCombat`
+// (CentennialPuzzle.java:21) that atPreBattle sets back to false (:34), so the
+// draw is once per COMBAT, not once per run. The engine used to keep that flag
+// in RelicSlot.counter, which is run-persistent and folded back into RunState --
+// so it never re-armed AND it produced the STS00068 `relics[1].counter: -1 -> 0`
+// capture divergence. The flag now lives in kCombatFlagCentennialPuzzleUsed, and
+// its reset is structural: enter_combat value-initializes a fresh CombatState.
+//
+// This walks TWO real combats of one run through enter_combat, which is the only
+// way to observe the reset -- a direct-call test constructs its own
+// CombatStates and so cannot tell "reset by the real entry" from "never set".
+TEST(RunCombatWasHpLost, CentennialPuzzleReArmsInASecondCombat) {
+    const int64_t seed = find_jaw_worm_seed();
+    RunController rc = run_begin(seed, kA20);
+    // Seeded the way acquire_relic seeds it -- AbstractRelic's untouched -1.
+    rc.run.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::CENTENNIAL_PUZZLE), -1};
+    rc.run.relic_count = 1;
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    // -- combat 1 --
+    ASSERT_EQ(rc.combat.flags & kCombatFlagCentennialPuzzleUsed, 0u)
+        << "atPreBattle: usedThisCombat starts false";
+    const uint8_t actions_before = rc.combat.action_count;
+    dispatch_was_hp_lost(rc.combat, kActorPlayer, kActorPlayer, /*amount=*/5);
+    ASSERT_EQ(rc.combat.action_count, actions_before + 1)
+        << "first HP loss of combat 1 must queue the draw";
+    EXPECT_EQ(front_action(rc.combat).opcode, static_cast<uint16_t>(Opcode::DRAW));
+    EXPECT_EQ(front_action(rc.combat).amount, 3);  // NUM_CARDS
+    EXPECT_NE(rc.combat.flags & kCombatFlagCentennialPuzzleUsed, 0u);
+    // A second loss inside the SAME combat adds nothing.
+    const uint8_t after_first = rc.combat.action_count;
+    dispatch_was_hp_lost(rc.combat, kActorPlayer, kActorPlayer, /*amount=*/4);
+    EXPECT_EQ(rc.combat.action_count, after_first);
+    EXPECT_EQ(rc.run.relics[0].counter, -1) << "STS00068: the counter never moves";
+
+    // -- win combat 1, claim nothing, walk to a second monster room --
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD))
+        << "expected a win (player survived the Jaw Worm)";
+    // fold_back_combat has now copied the mirrored counter into RunState. This is
+    // exactly where the old design leaked its flag out to the capture-compared
+    // field.
+    EXPECT_EQ(rc.run.relics[0].counter, -1) << "fold-back must not carry a flag";
+
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    uint8_t next = kMapCols;
+    for (uint8_t x = 0; x < kMapCols; ++x) {
+        if (m.can_choose_node[x]) { next = x; break; }
+    }
+    ASSERT_LT(next, kMapCols);
+    // Force the destination to a monster room, and pin its encounter so the test
+    // does not depend on what the seed's second monster-list entry happens to be
+    // (an unimplemented member would park in ROOM_UNIMPLEMENTED). The subject is
+    // the flag's lifetime, not encounter selection.
+    rc.run.map[run_state_map_index(next, 1)].room_type =
+        static_cast<uint8_t>(RoomType::Monster);
+    ASSERT_LT(rc.monster_cursor, rc.lists.monster_list.size());
+    rc.lists.monster_list[rc.monster_cursor] = "Jaw Worm";
+    step(rc, make_action(ActionVerb::CHOOSE, next));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "second combat did not open";
+    EXPECT_EQ(rc.run.floor, 2);
+
+    // -- combat 2: the relic is armed again --
+    EXPECT_EQ(rc.combat.flags & kCombatFlagCentennialPuzzleUsed, 0u)
+        << "enter_combat's fresh CombatState IS atPreBattle's reset";
+    ASSERT_EQ(rc.combat.relic_count, 1);
+    EXPECT_EQ(rc.combat.relics[0].counter, -1) << "the mirror carries -1 in too";
+    const uint8_t actions_before_2 = rc.combat.action_count;
+    dispatch_was_hp_lost(rc.combat, kActorPlayer, kActorPlayer, /*amount=*/5);
+    ASSERT_EQ(rc.combat.action_count, actions_before_2 + 1)
+        << "Centennial Puzzle must fire again in the second combat";
+    EXPECT_EQ(front_action(rc.combat).opcode, static_cast<uint16_t>(Opcode::DRAW));
+    EXPECT_EQ(front_action(rc.combat).amount, 3);
+    EXPECT_EQ(rc.run.relics[0].counter, -1);
 }
 
 // =============================================================================

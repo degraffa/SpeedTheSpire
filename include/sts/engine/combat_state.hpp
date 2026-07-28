@@ -123,6 +123,33 @@ inline constexpr uint32_t kCombatFlagMugged = 1u << 2;
 // lets a combat end while monsters are still alive.
 inline constexpr uint32_t kCombatFlagPlayerEscaped = 1u << 3;
 
+// CombatState.flags bit for Centennial Puzzle's once-per-combat latch.
+//
+// CentennialPuzzle's flag is a `private static boolean usedThisCombat`
+// (CentennialPuzzle.java:21) -- a COMBAT-GLOBAL, not a per-relic-instance field.
+// wasHPLost reads and sets it (CentennialPuzzle.java:41,46) and atPreBattle
+// resets it to false (CentennialPuzzle.java:33-34). The relic's own
+// `this.counter` is NEVER touched anywhere in the class, so it keeps
+// AbstractRelic's -1 for the life of the run and CommunicationMod reports -1.
+//
+// It therefore may NOT live in RelicSlot.counter: fold_back_combat
+// (run_advance.cpp) copies every mirrored counter into RunState.relics[i].counter,
+// which diff_run_states compares against the translated capture field-for-field
+// (tools/diff_harness/src/differ.cpp). A latch stored there is a guaranteed
+// `relics[i].counter: -1 -> 0` divergence the instant the relic is acquired.
+//
+// A CombatState flags bit is the exact analogue of a static field with an
+// atPreBattle reset, and it needs no reset code: enter_combat value-initializes
+// a fresh `CombatState s{}` for every combat (run_advance.cpp), so the latch is
+// clear at every atPreBattle and set only within one combat. Bit 4 was
+// previously zero, so nothing about the struct's size or schema changes -- the
+// same shape as the Combust hpLoss field below. CombatState.flags is
+// compared only by the replay tool's opt-in COMBAT TRIAGE print, which its own
+// call site documents as "not part of the acceptance ... never a pass/fail
+// signal" -- exactly as for kCombatFlagMugged / kCombatFlagCannotLose /
+// kCombatFlagPlayerEscaped, none of which the translator reconstructs either.
+inline constexpr uint32_t kCombatFlagCentennialPuzzleUsed = 1u << 4;
+
 // CombustPower keeps a private hpLoss counter distinct from its visible damage
 // amount. The player-owned counter lives in otherwise-reserved CombatState
 // flags: the cards are self-only, and this preserves the frozen PowerSlot/POD
