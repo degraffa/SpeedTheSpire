@@ -265,22 +265,9 @@ void step(RunController& rc, Action a) {
             std::span<StepResult>(&res, 1));
 }
 
-[[nodiscard]] const char* phase_name(uint8_t p) {
-    switch (static_cast<RunPhase>(p)) {
-        case RunPhase::NONE: return "NONE";
-        case RunPhase::NEOW: return "NEOW";
-        case RunPhase::MAP_CHOICE: return "MAP_CHOICE";
-        case RunPhase::COMBAT: return "COMBAT";
-        case RunPhase::COMBAT_REWARD: return "COMBAT_REWARD";
-        case RunPhase::ROOM_UNIMPLEMENTED: return "ROOM_UNIMPLEMENTED";
-        case RunPhase::RUN_OVER: return "RUN_OVER";
-        case RunPhase::REST_SITE: return "REST_SITE";
-        case RunPhase::TREASURE_ROOM: return "TREASURE_ROOM";
-        case RunPhase::EVENT_DIALOG: return "EVENT_DIALOG";
-        case RunPhase::SHOP: return "SHOP";
-    }
-    return "?";
-}
+// `phase_name` moved to command_map.hpp when the two UNMAPPED reasons there
+// needed the same spelling (see its comment). It is used unqualified below via
+// `using namespace sts::replay`.
 
 struct Options {
     bool verbose = false;
@@ -293,10 +280,28 @@ struct Options {
 };
 
 // One file's verdict.
+//
+// THE STOP IS NOT THE FRONTIER, AND THE SUMMARY MUST SAY SO. `stop_reason`
+// answers "why did the replay end", which is a different question from "where
+// did the two sides first disagree" -- the replay keeps comparing every record
+// after a divergence, on purpose, because the shape of the drift is the
+// evidence. When the two answers differ the stop is DOWNSTREAM, and reading it
+// as the frontier is a documented, expensive mistake: STS00042 of
+// `b45_rewards_oracle_20260727T204809Z_claude01` diverged at seq 18 (Fusion
+// Hammer's / Philosopher's Stone's deferred `energyMaster` +1, so the sim was a
+// card short every turn and never finished the floor-1 fight) and stopped
+// fourteen records later at seq 32, the first multi-option event page the stuck
+// controller was handed. The obligation row was filed off the stop, and asked
+// whether the ENGINE had an event/combat-boundary defect. It does not. So the
+// first divergence is now carried out of here and printed beside the stop.
 struct Verdict {
     int records_compared = 0;
     int reward_records_compared = 0;
-    int diverged_at = -1;        // first record with a REAL divergence
+    int diverged_at = -1;        // first record INDEX with a REAL divergence
+    int diverged_seq = -1;       // ...and that record's artifact seq / floor /
+    int diverged_floor = -1;     //    screen, which is what a reader quotes
+    std::string diverged_screen;
+    std::size_t diverged_fields = 0;
     int deck_identity_records = 0;  // records whose only diff was library order
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
@@ -362,7 +367,13 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                         rep.size() == 1 ? "" : "s");
             std::printf("%s\n", rep.to_string().c_str());
         } else if (!rep.empty()) {
-            if (v.diverged_at < 0) v.diverged_at = static_cast<int>(k);
+            if (v.diverged_at < 0) {
+                v.diverged_at = static_cast<int>(k);
+                v.diverged_seq = rec.seq;
+                v.diverged_floor = s.floor;
+                v.diverged_screen = s.screen_type;
+                v.diverged_fields = rep.size();
+            }
             std::printf("DIFF seq=%d floor=%d screen=%s sim_phase=%s cmd='%s' (%zu field%s)\n",
                         rec.seq, s.floor, s.screen_type.c_str(), phase_name(rc.phase),
                         rec.action_command.c_str(), rep.size(),
@@ -1450,6 +1461,31 @@ int main(int argc, char** argv) {
                         v.records_compared == 1 ? "" : "s",
                         v.reward_records_compared, v.deck_identity_records,
                         v.stop_reason.c_str());
+            // The frontier, always on its own line and never folded into the
+            // stop -- see `Verdict`. "no divergence" is said out loud too: a
+            // replay that stopped without ever disagreeing is a coverage gap in
+            // the harness, and a replay that disagreed is a question for the
+            // engine, and the summary should not need a second run to tell them
+            // apart.
+            if (v.diverged_seq >= 0) {
+                // A replay that ran out of artifact ended for no reason of its
+                // own, so "downstream" is only worth saying when the harness
+                // stopped EARLY -- that is the case a reader mistakes for the
+                // frontier.
+                const bool stopped_early = v.stop_reason != "run terminal" &&
+                                           v.stop_reason != "artifact exhausted";
+                std::printf("      first divergence: seq=%d floor=%d screen=%s "
+                            "(%zu field%s)%s\n",
+                            v.diverged_seq, v.diverged_floor,
+                            v.diverged_screen.c_str(), v.diverged_fields,
+                            v.diverged_fields == 1 ? "" : "s",
+                            stopped_early
+                                ? " -- the stop above is DOWNSTREAM of this"
+                                : "");
+            } else {
+                std::printf("      first divergence: none -- every compared "
+                            "record was zero-diff\n");
+            }
             if (!v.clean) ++failures;
         } catch (const std::exception& e) {
             std::printf("ERROR %s: %s\n", f.c_str(), e.what());
