@@ -47,9 +47,16 @@
 //     per attack via an anonymous queued action (:97,115 -- the synthetic
 //     accessors :181-192 are its decompiled residue), one queue slot ahead of
 //     the DamageAction whose stealGold (DamageAction.java:98-114) clamps to
-//     the player's gold and deducts it. CombatState carries NO gold field, so
-//     the engine stores the count and the settlement layer computes
-//     min(count * goldAmt, gold) at combat end. That sum-then-clamp equals the
+//     the player's gold and deducts it. The engine stores the count and the
+//     settlement layer computes min(count * goldAmt, gold) at combat end.
+//     (This comment used to justify that with "CombatState carries NO gold
+//     field" -- stale since schema 6: CombatState.combat_gold exists, but it
+//     is the Hand of Greed GAIN accumulator settled once through gain_gold at
+//     fold-back, not a mirror of the purse a steal-time clamp could read; the
+//     end-of-combat settlement is the recorded, orchestrator-adjudicated
+//     deviation -- see settle_stolen_gold and the ledger's stolen-gold row,
+//     whose faithful fix is re-scoped to an owner-approved Act-2-adjacent
+//     task.) That sum-then-clamp equals the
 //     game's per-steal clamping whenever the thief's steals are the only gold
 //     movement in the combat -- true for every Act-1 group, since none fields
 //     two thieves ("Looter" is solo; "Exordium Thugs" emits at most one). An

@@ -409,9 +409,17 @@ bool have_monsters_escaped(const CombatState& s) noexcept {
 // Settle the thieves' stolen gold against the run's purse at combat end.
 // The game deducts at STEAL time (DamageAction.stealGold, DamageAction.java:
 // 98-114 -- a direct target.gold write, clamped per steal to the player's
-// remaining gold, bypassing gainGold and its relic hooks); CombatState carries
-// no gold field, so the engine accrues the UNCLAMPED count on the monster
-// record (looter_stolen_gold) and settles min(total, gold) here instead --
+// remaining gold, bypassing gainGold and its relic hooks); the engine instead
+// accrues the UNCLAMPED count on the monster
+// record (looter_stolen_gold) and settles min(total, gold) here -- a
+// DELIBERATE deviation that preserves exactly-once settlement on every
+// combat-end path (orchestrator decision 2026-07-28: the deviation stands;
+// the faithful steal-time signed purse delta is re-scoped to an owner-approved
+// Act-2-adjacent task alongside the Mugger work flagged below). This header
+// used to say "CombatState carries no gold field"; that has been stale since
+// schema 6 -- CombatState.combat_gold exists, but it is the Hand of Greed
+// GAIN accumulator (settled once through gain_gold at fold-back, next
+// paragraph), not a purse mirror a steal-time clamp could read. The clamp is
 // equal to the game's per-steal clamps whenever the thief's steals are the
 // combat's only gold movement. Every Act-1 group fields at most one thief, and
 // gold moves again only at reward claim, after this. ONE combat effect now also
