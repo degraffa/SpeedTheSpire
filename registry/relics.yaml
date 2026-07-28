@@ -1254,24 +1254,32 @@
 # the already-committed COMMON, UNCOMMON, RARE and SHOP pool_order exactly, which
 # is what validates the method rather than merely fitting it.
 #
-# ENERGY MASTER -- one deferral shared by ten of these rows. Ten boss relics do
-# `++AbstractDungeon.player.energy.energyMaster` in onEquip (Fusion Hammer,
-# Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu,
+# ENERGY MASTER -- one mechanism shared by ten of these rows, now LIVE. Ten boss
+# relics do `++AbstractDungeon.player.energy.energyMaster` in onEquip (Fusion
+# Hammer, Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu,
 # Philosopher's Stone, Coffee Dripper, Mark of Pain), and Slaver's Collar does it
-# conditionally in beforeEnergyPrep. The engine has NO energyMaster field: the
-# per-turn recharge reads the kIroncladBaseEnergy constant
-# (EnergyManager.recharge, EnergyManager.java:25-40 -> action_queue.cpp
-# start_of_turn). Deriving the master from the owned relic list needs no storage,
-# but its single consumer is that one line inside start_of_turn, which this batch
-# does not own. Each affected row's pool slot, canSpawn gate and relicRng draw are
-# LIVE; only the +1 is inert.
+# conditionally in beforeEnergyPrep. The engine still has no energyMaster FIELD:
+# `energy_master(const CombatState&)` (action_queue.hpp / .cpp) DERIVES it by
+# scanning the combat relic mirror, and the recharge line inside start_of_turn is
+# its one consumer (EnergyManager.recharge, EnergyManager.java:25-41; the turn-1
+# route is the different one at AbstractRoom.java:240). Deriving is faithful, not
+# a shortcut: the game reads energyMaster exactly once per combat, at prep()
+# (EnergyManager.java:20-23), and the relic mirror is likewise written once at
+# combat construction -- so a per-turn scan of it IS that snapshot. Snecko Eye's
+# `masterHandSize += 2` is the same shape at the draw line (`game_hand_size`), a
+# DIFFERENT field written by a different relic.
+#
+# Slaver's Collar is the one row this does NOT cover: its increment is
+# conditional per combat and undone only by onVictory, so it needs the elite/boss
+# room marker CombatState still lacks. `energy_master` is the single site it
+# attaches to when that marker lands.
 
 - id: 112
   name: FUSION_HAMMER
   game_id: "Fusion Hammer"
   tier: BOSS
   pool_order: 0
-  provenance: "FusionHammer (FusionHammer.java:18-68) -- onEquip ++energyMaster (:46-49), canUseCampfireOption disables SmithOption (:56-63). A marker row: the energy half is the shared energyMaster deferral above; the smith lock is a rest-room concern owned by the campfire layer. Row, pool slot and relicRng draw are live."
+  provenance: "FusionHammer (FusionHammer.java:18-68) -- onEquip ++energyMaster (:46-49), canUseCampfireOption disables SmithOption (:56-63). A marker row in the registry sense only -- both halves are read at their consumers, not through a hook: the +1 at energy_master (action_queue.cpp) and the smith lock in build_rest_menu (rest_sites.cpp). Row, pool slot and relicRng draw are live."
 
 - id: 113
   name: VELVET_CHOKER
@@ -1284,14 +1292,14 @@
     at_turn_start: []         # counter = 0
     on_play_card: []          # counter++ while < 6
     on_victory: []            # counter = -1
-  provenance: "VelvetChoker (VelvetChoker.java:18-94): atBattleStart/atTurnStart counter = 0 (:57-65); onPlayCard -- if counter < 6 then ++counter (:67-75); canPlay -- false once counter >= 6 (:77-84); onVictory counter = -1 (:86-89). The canPlay veto is AbstractCard.hasEnoughEnergy's relic fan-out (AbstractCard.java:876-879), modeled in legal_actions (advance.cpp) beside Blue Candle's and Medical Kit's gates. onEquip ++energyMaster (:47-50) is the shared deferral above."
+  provenance: "VelvetChoker (VelvetChoker.java:18-94): atBattleStart/atTurnStart counter = 0 (:57-65); onPlayCard -- if counter < 6 then ++counter (:67-75); canPlay -- false once counter >= 6 (:77-84); onVictory counter = -1 (:86-89). The canPlay veto is AbstractCard.hasEnoughEnergy's relic fan-out (AbstractCard.java:876-879), modeled in legal_actions (advance.cpp) beside Blue Candle's and Medical Kit's gates. onEquip ++energyMaster (:47-50) is the shared energy_master derivation above, and it is LIVE."
 
 - id: 114
   name: RUNIC_DOME
   game_id: "Runic Dome"
   tier: BOSS
   pool_order: 2
-  provenance: "RunicDome (RunicDome.java:16-57) -- onEquip ++energyMaster (:44-47) and NOTHING else; the 'you can no longer see enemy intents' half is purely an OBSERVATION concern, read at AbstractMonster.updateIntent/renderIntent (AbstractMonster.java:258, :749) as a negated player.hasRelic test. The engine's observation encoder is what would hide the intent; no simulated outcome depends on it. Deliberate no-op: the row, its pool slot and its relicRng draw are live."
+  provenance: "RunicDome (RunicDome.java:16-57) -- onEquip ++energyMaster (:44-47) and NOTHING else; the 'you can no longer see enemy intents' half is purely an OBSERVATION concern, read at AbstractMonster.updateIntent/renderIntent (AbstractMonster.java:258, :749) as a negated player.hasRelic test. The energy half is LIVE through the shared energy_master derivation above. The intent half is an OBSERVATION-encoder concern only; no simulated outcome depends on it."
 
 - id: 115
   name: SLAVERS_COLLAR
@@ -1308,7 +1316,7 @@
   native: true
   hooks:
     at_pre_battle: []         # apply Confusion to the player before the opening draw
-  provenance: "SneckoEye.atPreBattle (SneckoEye.java:39-43) -- addToBot ApplyPowerAction(player, player, ConfusionPower(player)). Fired from AbstractPlayer.applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of preBattlePrep (:1607) and therefore BEFORE the opening DrawCardAction -- which is what makes the very first hand cost-randomised. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is the RNG-visible half: exactly one cardRandomRng.random(3) per drawn card whose cost >= 0, in draw order (powers.yaml CONFUSION). onEquip masterHandSize += 2 (:29-32) is DEFERRED with the energyMaster group -- gameHandSize is read at the same start-of-turn line (kStartOfTurnDrawCount, action_queue.cpp)."
+  provenance: "SneckoEye.atPreBattle (SneckoEye.java:39-43) -- addToBot ApplyPowerAction(player, player, ConfusionPower(player)). Fired from AbstractPlayer.applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of preBattlePrep (:1607) and therefore BEFORE the opening DrawCardAction -- which is what makes the very first hand cost-randomised. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is the RNG-visible half: exactly one cardRandomRng.random(3) per drawn card whose cost >= 0, in draw order (powers.yaml CONFUSION). onEquip masterHandSize += 2 (:29-32) is a DIFFERENT field from the energyMaster group and is live at the start-of-turn draw line (game_hand_size, action_queue.cpp), which both the opening hand and every later turn read."
 
 - id: 117
   name: PANDORAS_BOX
@@ -1324,14 +1332,14 @@
   game_id: "Cursed Key"
   tier: BOSS
   pool_order: 6
-  provenance: "CursedKey (CursedKey.java:16-79) -- onEquip ++energyMaster (:66-69); onChestOpen, for a NON-boss chest, obtains AbstractDungeon.returnRandomCurse() (:50-56). The chest half is a treasure-room concern (B4.7's onChestOpen surface, which Matryoshka and N'loth's Mask also wait on); the energy half is the shared energyMaster deferral. Row, pool slot and relicRng draw are live."
+  provenance: "CursedKey (CursedKey.java:16-79) -- onEquip ++energyMaster (:66-69); onChestOpen, for a NON-boss chest, obtains AbstractDungeon.returnRandomCurse() (:50-56). Both halves are LIVE: the chest half through B4.7's onChestOpen surface (treasure_rooms.cpp, Omamori-aware, with the boss-chest no-op coming from the relic's own !bossChest guard rather than an exclusion list), the energy half through the shared energy_master derivation. Row, pool slot and relicRng draw are live."
 
 - id: 119
   name: BUSTED_CROWN
   game_id: "Busted Crown"
   tier: BOSS
   pool_order: 7
-  provenance: "BustedCrown (BustedCrown.java:16-60) -- onEquip ++energyMaster (:40-43); changeNumberOfCardsInReward returns numberOfCards - 2 (:45-48), read by RewardItem (RewardItem.java:308-310). The reward-count half is B4.5's (combat rewards do not exist yet); the energy half is the shared deferral. Row, pool slot and relicRng draw are live."
+  provenance: "BustedCrown (BustedCrown.java:16-60) -- onEquip ++energyMaster (:40-43); changeNumberOfCardsInReward returns numberOfCards - 2 (:45-48), read by RewardItem (RewardItem.java:308-310). Both halves are LIVE: the reward-count half landed with B4.5's combat rewards (combat_rewards.cpp, alongside Question Card's +1), the energy half through the shared energy_master derivation. The game applies the same hook at a SECOND site, getColorlessRewardCards (AbstractDungeon.java:1381-1386), reached only by a COLORLESS card reward -- no S1 producer of one is known, so it is unmodelled and named here rather than re-derived by the next reader. Row, pool slot and relicRng draw are live."
 
 - id: 120
   name: ECTOPLASM
@@ -1356,7 +1364,7 @@
   game_id: "Sozu"
   tier: BOSS
   pool_order: 10
-  provenance: "Sozu (Sozu.java:16-58) -- onEquip ++energyMaster (:44-47) and nothing else; the 'can no longer obtain potions' half is a marker read at the potion-obtain sites (ObtainPotionAction.update, ObtainPotionAction.java:29-36 -- with Sozu owned the potion is simply not obtained; also RewardItem.java:276 and EntropicBrew.java:43). Every one of those sites is run-layer (rewards / shop / events), none of which exists yet. Row, pool slot and relicRng draw are live."
+  provenance: "Sozu (Sozu.java:16-58) -- onEquip ++energyMaster (:44-47) and nothing else; the 'can no longer obtain potions' half is a marker read at the potion-obtain sites (ObtainPotionAction.update, ObtainPotionAction.java:29-36 -- with Sozu owned the potion is simply not obtained; also RewardItem.java:276 and EntropicBrew.java:43). Every one of those sites is run-layer and they all now exist: the reward claim and shop purchase doors (combat_rewards.cpp, shop.cpp) and Entropic Brew's out-of-combat pre-roll gate (run_advance.cpp). The energy half is the shared energy_master derivation. Row, pool slot and relicRng draw are live."
 
 - id: 123
   name: PHILOSOPHERS_STONE
@@ -1366,7 +1374,7 @@
   native: true
   hooks:
     at_battle_start: []       # +1 Strength to every monster (direct addPower, not queued)
-  provenance: "PhilosopherStone.atBattleStart (PhilosopherStone.java:41-48) -- for each monster addToTop RelicAboveCreatureAction (cosmetic) and m.addPower(new StrengthPower(m, 1)) DIRECTLY, then AbstractDungeon.onModifyPower(). The power add is SYNCHRONOUS (AbstractCreature.addPower), not an ApplyPowerAction, so it lands before anything else queued at battle start. onSpawnMonster (:50-53) gives a spawned monster the same +1; the SPAWN_MONSTER opcode has no relic fan-out, so that half is deferred to the split/spawn owner. onEquip ++energyMaster (:55-58) is the shared deferral."
+  provenance: "PhilosopherStone.atBattleStart (PhilosopherStone.java:41-48) -- for each monster addToTop RelicAboveCreatureAction (cosmetic) and m.addPower(new StrengthPower(m, 1)) DIRECTLY, then AbstractDungeon.onModifyPower(). The power add is SYNCHRONOUS (AbstractCreature.addPower), not an ApplyPowerAction, so it lands before anything else queued at battle start. onSpawnMonster (:50-53) gives a spawned monster the same +1; the SPAWN_MONSTER opcode has no relic fan-out, so that half is deferred to the split/spawn owner. onEquip ++energyMaster (:55-58) is the shared energy_master derivation, and it is LIVE."
 
 - id: 124
   name: ASTROLABE
@@ -1421,7 +1429,7 @@
   game_id: "Coffee Dripper"
   tier: BOSS
   pool_order: 18
-  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). The rest lock is a campfire-layer concern (the rest room's heal option, design 5.6); the energy half is the shared energyMaster deferral. Row, pool slot and relicRng draw are live."
+  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). The rest lock is a campfire-layer concern (the rest room's heal option, design 5.6); the energy half is the shared energy_master derivation, and it is LIVE. Row, pool slot and relicRng draw are live."
 
 - id: 131
   name: BLACK_BLOOD
@@ -1443,7 +1451,7 @@
   native: true
   hooks:
     at_battle_start: []       # 2 Wounds shuffled into the draw pile
-  provenance: "MarkOfPain.atBattleStart (MarkOfPain.java:26-31) -- addToBot RelicAboveCreatureAction then addToBot MakeTempCardInDrawPileAction(new Wound(), 2, true, true): amount 2, randomSpot true, so each copy is inserted at CardGroup.addToRandomSpot's cardRandomRng.random(size-1) position. Native rather than DATA only because a relic step carries no card field; the body queues one MAKE_CARD(WOUND, DRAW_RANDOM, 2) item, whose per-copy random-spot draws are exactly the Java's. onEquip ++energyMaster (:33-36) is the shared deferral."
+  provenance: "MarkOfPain.atBattleStart (MarkOfPain.java:26-31) -- addToBot RelicAboveCreatureAction then addToBot MakeTempCardInDrawPileAction(new Wound(), 2, true, true): amount 2, randomSpot true, so each copy is inserted at CardGroup.addToRandomSpot's cardRandomRng.random(size-1) position. Native rather than DATA only because a relic step carries no card field; the body queues one MAKE_CARD(WOUND, DRAW_RANDOM, 2) item, whose per-copy random-spot draws are exactly the Java's. onEquip ++energyMaster (:33-36) is the shared energy_master derivation, and it is LIVE."
 
 - id: 133
   name: RUNIC_CUBE

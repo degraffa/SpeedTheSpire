@@ -652,6 +652,117 @@ TEST(RelicBossSpecial, GremlinMaskWeakensThePlayerAtBattleStart) {
 }
 
 // ============================================================================
+// energyMaster / masterHandSize -- the two derived per-combat player numbers.
+// ============================================================================
+
+// The COMPLETE list of relics whose onEquip does
+// `++AbstractDungeon.player.energy.energyMaster`, from `grep -rn energyMaster
+// com/`. Ten of them, each +1, each with a matching onUnequip `--`.
+TEST(RelicBossSpecial, TenBossRelicsEachAddOneToTheEnergyMaster) {
+    const RelicId plus_one[] = {
+        RelicId::FUSION_HAMMER,      RelicId::VELVET_CHOKER,
+        RelicId::RUNIC_DOME,         RelicId::CURSED_KEY,
+        RelicId::BUSTED_CROWN,       RelicId::ECTOPLASM,
+        RelicId::SOZU,               RelicId::PHILOSOPHERS_STONE,
+        RelicId::COFFEE_DRIPPER,     RelicId::MARK_OF_PAIN,
+    };
+    for (RelicId id : plus_one) {
+        CombatState s = MakeState();
+        give(s, id);
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 1)
+            << "relic " << static_cast<int>(id);
+        // ...and none of them touches the hand size. Snecko Eye writes the OTHER
+        // field (SneckoEye.java:29-32), and no relic writes both.
+        EXPECT_EQ(game_hand_size(s), kStartOfTurnDrawCount)
+            << "relic " << static_cast<int>(id);
+    }
+
+    CombatState none = MakeState();
+    EXPECT_EQ(energy_master(none), kIroncladBaseEnergy);
+
+    // Snecko Eye is the ledger's shorthand's odd one out: +2 hand, +0 energy.
+    CombatState snecko = MakeState();
+    give(snecko, RelicId::SNECKO_EYE);
+    EXPECT_EQ(energy_master(snecko), kIroncladBaseEnergy);
+    EXPECT_EQ(game_hand_size(snecko), kStartOfTurnDrawCount + 2);
+
+    // The Java increments per relic INSTANCE, and the increments compose.
+    CombatState both = MakeState();
+    Relics r;
+    r.add(RelicId::FUSION_HAMMER);
+    r.add(RelicId::SOZU);
+    r.add(RelicId::SNECKO_EYE);
+    install(both, r);
+    EXPECT_EQ(energy_master(both), kIroncladBaseEnergy + 2);
+    EXPECT_EQ(game_hand_size(both), kStartOfTurnDrawCount + 2);
+}
+
+// The master is what the recharge line SETS, on turn 1 and on every later turn
+// (AbstractRoom.java:240 / EnergyManager.java:20-23, :25-41).
+TEST(RelicBossSpecial, EnergyMasterIsWhatTheRechargeLineSets) {
+    CombatState s = MakeState();
+    give(s, RelicId::FUSION_HAMMER);
+    begin_first_turn(s, default_monster_turn);
+    EXPECT_EQ(s.player_energy, kIroncladBaseEnergy + 1) << "turn 1";
+
+    // A later turn goes through EnergyManager.recharge instead, and lands on the
+    // same number. Unspent energy is still LOST -- this is a SET.
+    s.player_energy = 0;
+    s.action_count = 0;
+    s.action_head = 0;
+    s.action_tail = 0;
+    s.turn_has_ended = 1;
+    s.monster_attacks_queued = 1;
+    (void)pump_step(s, default_monster_turn);
+    EXPECT_EQ(s.player_energy, kIroncladBaseEnergy + 1) << "turn N";
+}
+
+// TRAP: Ice Cream's branch is `EnergyPanel.addEnergy(this.energy)`
+// (EnergyManager.java:31) and `this.energy` is prep()'s copy of energyMaster --
+// so the carry is +4 per turn with Fusion Hammer, not +3.
+TEST(RelicBossSpecial, IceCreamCarriesTheMasterNotTheBaseEnergy) {
+    CombatState s = MakeState();
+    Relics r;
+    r.add(RelicId::FUSION_HAMMER);
+    r.add(RelicId::ICE_CREAM);
+    install(s, r);
+    s.player_energy = 0;
+    for (int turn = 0; turn < 3; ++turn) {
+        s.action_count = 0;
+        s.action_head = 0;
+        s.action_tail = 0;
+        s.turn_has_ended = 1;
+        s.monster_attacks_queued = 1;
+        (void)pump_step(s, default_monster_turn);
+    }
+    EXPECT_EQ(s.player_energy, 3 * (kIroncladBaseEnergy + 1));
+}
+
+// Snecko Eye's other half: gameHandSize is masterHandSize + 2, and BOTH draw
+// sites read it -- the opening hand (AbstractRoom.java:242) and every later turn
+// (GameActionManager.java:361).
+TEST(RelicBossSpecial, SneckoEyeDrawsTwoExtraCardsOnEveryTurnIncludingTheFirst) {
+    CombatState s = MakeState();
+    give(s, RelicId::SNECKO_EYE);
+    for (int i = 0; i < 12; ++i) {
+        put_in_draw(s, CardId::DEFEND);
+    }
+    begin_first_turn(s, default_monster_turn);
+    EXPECT_EQ(s.hand_count, kStartOfTurnDrawCount + 2) << "opening hand";
+
+    s.hand_count = 0;
+    s.action_count = 0;
+    s.action_head = 0;
+    s.action_tail = 0;
+    s.turn_has_ended = 1;
+    s.monster_attacks_queued = 1;
+    (void)pump_step(s, default_monster_turn);
+    ASSERT_GE(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::DRAW));
+    EXPECT_EQ(queued(s, 0).amount, kStartOfTurnDrawCount + 2) << "turn N";
+}
+
+// ============================================================================
 // Deliberate no-ops -- every one is pinned so implementing it fails HERE first.
 // ============================================================================
 
@@ -709,8 +820,18 @@ TEST(RelicBossSpecial, DeferredOnEquipBodiesChangeNothing) {
 }
 
 // The marker rows: no hook bindings at all, and no combat effect through ANY
-// hook. Their correctness is entirely their tier, their pool slot and (for the
-// boss tier) their relicRng draw.
+// hook.
+//
+// "Marker" does NOT mean "inert" for all of them, and the distinction is the
+// point of this test rather than a caveat on it. Ten of the boss rows here now
+// carry +1 energy, and Fusion Hammer / Coffee Dripper lock a campfire option --
+// but every one of those effects is a MARKER READ at its consumer (energy_master
+// in action_queue.cpp, build_rest_menu in rest_sites.cpp, gainGold for
+// Ectoplasm, the claim/purchase doors for Sozu), never a bound relic hook. What
+// this asserts is exactly that shape: a marker row's `hook_count` is 0 and
+// dispatching every hook at it moves nothing. Binding one of them to a hook
+// instead would fail here, and should -- the reader at the consumer is what
+// keeps acquisition free of side effects.
 TEST(RelicBossSpecial, MarkerRowsCarryNoCombatHooks) {
     const RelicId markers[] = {
         // Boss: energyMaster-only, run-layer, or observation-layer.
@@ -741,11 +862,12 @@ TEST(RelicBossSpecial, MarkerRowsCarryNoCombatHooks) {
     }
 }
 
-// Runic Dome is the batch's purest deliberate no-op: its entire non-energy
-// effect (hiding enemy intents) is an OBSERVATION concern that changes no
-// simulated outcome. Its row must still be exact, because it holds a boss pool
-// slot and therefore a relicRng position.
-TEST(RelicBossSpecial, RunicDomeOccupiesItsPoolSlotAndDoesNothingElse) {
+// Runic Dome's two effects live at opposite ends of the engine: +1 energy at the
+// recharge line (asserted above with the other nine) and hiding enemy intents in
+// the OBSERVATION encoder, which changes no simulated outcome. What is left to
+// assert here is the third thing -- that ACQUIRING it moves no RunState and no
+// miscRng, because it holds a boss pool slot and therefore a relicRng position.
+TEST(RelicBossSpecial, RunicDomeOccupiesItsPoolSlotAndChangesNoRunState) {
     const sts::registry::RelicDef* d = relic_def(RelicId::RUNIC_DOME);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(d->tier, sts::registry::RelicTier::BOSS);

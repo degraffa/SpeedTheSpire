@@ -118,8 +118,10 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     // -- Player (placeholder A20 stats -- see advance.hpp's PLACEHOLDER STATS
     //    note; exact Ironclad starting HP is deferred to Stage B per design doc
     //    §11). player_energy is intentionally left 0 here: the start-of-turn
-    //    sequence below SETS it to kIroncladBaseEnergy when the first pump()
-    //    drains through turn 1 (energy-recharge, action_queue.cpp). --
+    //    sequence below SETS it to energy_master(state) when the first pump()
+    //    drains through turn 1 (energy-recharge, action_queue.cpp). This entry
+    //    point never fills the relic mirror, so that is kIroncladBaseEnergy
+    //    here and the 20 fixtures are unmoved. --
     state.player_hp = 80;
     state.player_max_hp = 80;
     state.player_block = 0;
@@ -166,8 +168,9 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    end-of-round pass, which the game cannot reach on turn 1. See the
     //    declaration in action_queue.hpp for the full derivation. --
     begin_first_turn(state, dispatch_monster_turn);
-    // Post: phase == WAITING_ON_USER, turn == 1, energy == kIroncladBaseEnergy,
-    // hand_count == kStartOfTurnDrawCount (5), draw_count == n - 5.
+    // Post: phase == WAITING_ON_USER, turn == 1, energy == energy_master(state),
+    // hand_count == game_hand_size(state), draw_count == n - that. This entry
+    // point has an empty relic mirror, so both are their base constants.
 
     return state;
 }

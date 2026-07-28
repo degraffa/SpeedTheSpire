@@ -74,19 +74,63 @@ inline constexpr uint8_t kActorPlayer = 0xFF;
 inline constexpr uint8_t kActorAllEnemies = 0xFD;
 inline constexpr uint8_t kActorRandomEnemy = 0xFE;
 
-// Player draw count at start of turn (the game's DrawCardAction(gameHandSize);
-// gameHandSize is 5 for the Ironclad skeleton, design doc §9). Carried as the
-// queued DrawCard item's `amount`; interpreted by the DRAW opcode, not here.
+// Ironclad's BASE hand size -- CharacterStrings/AbstractPlayer.masterHandSize
+// seeded from info.cardDraw (AbstractPlayer.java:133-134, :346). The game draws
+// `gameHandSize`, which preBattlePrep snapshots from masterHandSize
+// (AbstractPlayer.java:1579) and turn-N reads at GameActionManager.java:361.
+// This constant is the base only: game_hand_size() below is what the draw line
+// actually queues, because Snecko Eye's onEquip adds 2 to masterHandSize
+// (SneckoEye.java:29-32).
 inline constexpr int32_t kStartOfTurnDrawCount = 5;
 
-// Ironclad's base energy per turn (EnergyManager.java: energyMaster, prep()).
-// Energy is SET to this value every turn via EnergyManager.recharge() -- not
-// additive. The game wires recharge() through a presentation-layer
+// Ironclad's BASE energy per turn -- the value EnergyManager's ctor is
+// constructed with (EnergyManager.java:16-18). It is NOT the whole per-turn
+// number: ten BOSS relics do `++AbstractDungeon.player.energy.energyMaster` in
+// onEquip, so energy_master() below is what the recharge line reads. Energy is
+// SET to that value every turn via EnergyManager.recharge() -- not additive,
+// except under Ice Cream. The game wires recharge() through a presentation-layer
 // PlayerTurnEffect queued alongside the start-of-turn DrawCardAction; it is
-// presentation-adjacent but outcome-affecting, so it stays in scope. No
-// relic/power in the skeleton changes this (Ice Cream / Conserve branches in
-// EnergyManager.recharge() are unreachable).
+// presentation-adjacent but outcome-affecting, so it stays in scope.
 inline constexpr int16_t kIroncladBaseEnergy = 3;
+
+// --- The two derived per-combat player numbers ------------------------------
+//
+// `EnergyManager.energyMaster` (EnergyManager.java:14) and
+// `AbstractPlayer.masterHandSize` (AbstractPlayer.java:133) are STORED fields in
+// the game and DERIVED here, from the CombatState relic mirror. The derivation
+// is faithful rather than merely convenient, and the reason is a timing one
+// worth stating once:
+//
+//   * The game reads each field exactly ONCE per combat. `prep()` copies
+//     energyMaster into `EnergyManager.energy` (EnergyManager.java:20-23) and
+//     preBattlePrep copies masterHandSize into gameHandSize
+//     (AbstractPlayer.java:1579); every later read that turn -- recharge()'s
+//     `this.energy` (:25-41), the turn-N `DrawCardAction(gameHandSize)`
+//     (GameActionManager.java:361) -- reads the SNAPSHOT, not the master.
+//   * The relic mirror `s.relics` is that snapshot. It is written once, at
+//     combat construction (advance.cpp combat_begin / run_advance.cpp
+//     enter_combat), and no S1 path adds or removes a relic mid-combat -- relic
+//     acquisition is a run-layer event between combats. So a per-turn scan of
+//     the mirror returns the same number every turn of one combat, which is
+//     exactly what a `prep()` snapshot returns.
+//
+// The one Java writer that would break the equivalence is Slaver's Collar
+// (SlaversCollar.beforeEnergyPrep, SlaversCollar.java:46-57): a CONDITIONAL,
+// per-combat `++energyMaster` keyed on the room being elite/boss, undone by
+// onVictory only. That relic's row is deferred on a missing elite/boss room
+// marker in CombatState; when it lands, `energy_master` below is the single
+// place it attaches, and its owner must decide whether the "fled/lost combat
+// keeps the increment" quirk (onVictory does not fire) needs real storage. See
+// the Deferred obligations row in docs/stage-b-tasks.md.
+
+// The player's energyMaster for this combat: kIroncladBaseEnergy plus one per
+// owned copy of each of the ten BOSS relics whose onEquip increments it.
+[[nodiscard]] int16_t energy_master(const CombatState& state) noexcept;
+
+// The player's gameHandSize for this combat: kStartOfTurnDrawCount plus 2 per
+// owned Snecko Eye (SneckoEye.java:29-32 writes masterHandSize, NOT
+// energyMaster -- two different fields, two different relics' worth of effect).
+[[nodiscard]] int32_t game_hand_size(const CombatState& state) noexcept;
 
 // --- Monster-turn extension point -------------------------------------------
 
