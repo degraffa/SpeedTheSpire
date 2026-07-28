@@ -197,7 +197,8 @@ struct Pass {
 };
 
 void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
-             const std::vector<Action>* scripted, const Inject* inject) {
+             const std::vector<Action>* scripted, const Inject* inject,
+             const StepObserver* observer = nullptr) {
     RunController rc = engine::run_begin(id.run_seed, id.ascension);
     PolicyRng rng(id.policy_seed);
 
@@ -223,6 +224,13 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
 
     for (uint32_t step = 0;; ++step) {
         const auto phase = static_cast<RunPhase>(rc.phase);
+
+        // Pass-A observation of the PRE-step controller (fuzz_run.hpp
+        // StepObserver). Only ever non-null for pass A; see the header for why
+        // passes B/C must not call it.
+        if (observer != nullptr && observer->fn != nullptr) {
+            observer->fn(rc, observer->ctx);
+        }
 
         // --- phase-transition accounting -------------------------------------
         if (cov != nullptr && rc.phase != prev_phase) {
@@ -465,6 +473,15 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
         }
     }
 
+    // The terminal controller. The loop's own observation happens BEFORE each
+    // step, so the states reached by the NO_PROGRESS / LIVELOCK exits (which
+    // break after advance()) would otherwise never be seen. This deliberately
+    // re-observes the terminal state on the phase-terminal exits, which is why
+    // the header requires every observer-derived property to be idempotent.
+    if (observer != nullptr && observer->fn != nullptr) {
+        observer->fn(rc, observer->ctx);
+    }
+
     p.final_hash = hash_controller(rc);
 
     if (cov != nullptr) {
@@ -509,12 +526,12 @@ bool replay_actions(const CaseId& id, const std::vector<Action>& actions,
 }
 
 bool run_case(const CaseId& id, const RunLimits& limits, Coverage* cov, CaseResult& out,
-              bool verify_repro, const Inject& inject) {
+              bool verify_repro, const Inject& inject, const StepObserver& observer) {
     out = CaseResult{};
 
     // --- pass A: the trajectory of record --------------------------------------
     Pass a;
-    execute(id, limits, cov, a, nullptr, nullptr);
+    execute(id, limits, cov, a, nullptr, nullptr, &observer);
     out.end_reason = a.end;
     out.actions = static_cast<uint32_t>(a.actions.size());
     out.final_hash = a.final_hash;
