@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstring>
 
 #include "sts/engine/cards.hpp"
 #include "sts/engine/potions.hpp"
@@ -687,6 +688,288 @@ TEST(ShopPurchase, EggsPreviewUpgradeTheStockedCardsTheyMatch) {
     rs.gold = 999;
     ASSERT_TRUE(shop_buy_card(rs, b, 0, false));
     EXPECT_EQ(rs.master_deck[rs.master_deck_count - 1].upgrade, 1);
+}
+
+// =============================================================================
+// The Courier's restock (the deferred row's restock half)
+// =============================================================================
+//
+// Provenance: ShopScreen.purchaseCard :598-643 (cards, incl. the unseeded
+// useRng=false colored identity at :615-617 and setPrice :660-673),
+// StoreRelic.purchaseRelic :105-112, StorePotion.purchasePotion :86-89,
+// ShopScreen.getNewPrice :386-411. Stream expectations are replayed beside the
+// engine draw for draw, exactly like the draw-order pin above. The live-game
+// stream measurement backing these numbers is the wave2cap_courier_* capture
+// (tools/oracle_bridge/driver/wave2cap_capture_runbook.md).
+
+TEST(CourierRestock, ColoredPurchaseSpendsOneCardRngOneMerchantRngAndRefusesTheSlot) {
+    RunState rs = bare_run(4242);
+    give_relic(rs, RelicId::THE_COURIER);
+    rs.gold = 9999;
+    ShopState shop = generate_shop(rs);
+
+    // Replay streams beside the purchase: the restock is ONE cardRng draw
+    // (rollRarity through the ShopRoom 9/37 table, blizz READ not written)
+    // and ONE merchantRng draw (setPrice's 0.9-1.1 jitter). The identity draw
+    // is MathUtils.random and costs the seeded streams NOTHING.
+    RngStream card_replay = rs.card_rng;
+    RngStream merchant_replay = rs.merchant_rng;
+    const RngStream potion_before = rs.potion_rng;
+    const auto blizz_before = rs.card_blizz_randomizer;
+
+    ASSERT_TRUE(shop_buy_card(rs, shop, 0, /*colorless=*/false));
+
+    const int roll = static_cast<int>(random(card_replay, 99)) +
+                     static_cast<int>(blizz_before);
+    const RewardCardRarity rolled = shop_card_rarity_for_roll(roll);
+    // Slot 0 is an ATTACK slot and every RED ATTACK view is non-empty, so the
+    // drawn pool is the rolled pool.
+    const float jitter = random(merchant_replay, 0.9f, 1.1f);
+    const auto expected_price = static_cast<int16_t>(static_cast<int>(
+        static_cast<float>(card_base_price(rolled)) * jitter * 0.8f));
+
+    EXPECT_TRUE(streams_equal(rs.card_rng, card_replay))
+        << "the colored restock is exactly ONE cardRng draw";
+    EXPECT_TRUE(streams_equal(rs.merchant_rng, merchant_replay))
+        << "the colored restock is exactly ONE merchantRng draw";
+    EXPECT_TRUE(streams_equal(rs.potion_rng, potion_before));
+    EXPECT_EQ(rs.card_blizz_randomizer, blizz_before)
+        << "rollRarity in a ShopRoom READS the blizz counter, never writes it";
+
+    EXPECT_EQ(shop.colored[0].id, kShopRestockedUnknownCard);
+    EXPECT_EQ(shop.colored[0].sold, 0) << "the slot exists; it is not sold";
+    EXPECT_EQ(shop.colored[0].price, expected_price)
+        << "setPrice: one float product (base x jitter x 0.8 Courier), one "
+           "truncation -- NO A16 x1.1 and no sale halving";
+
+    // The named deviation's guard: off the mask, and a byte-stable refusal.
+    EXPECT_FALSE(shop_buy_card_legal(rs, shop, 0, false));
+    const RunState rs_before = rs;
+    const ShopState shop_before = shop;
+    EXPECT_FALSE(shop_buy_card(rs, shop, 0, false));
+    EXPECT_EQ(std::memcmp(&rs, &rs_before, sizeof rs), 0);
+    EXPECT_EQ(std::memcmp(&shop, &shop_before, sizeof shop), 0);
+}
+
+TEST(CourierRestock, ColorlessRestockIsFullySeededAndPurchasable) {
+    RunState rs = bare_run(4343);
+    give_relic(rs, RelicId::THE_COURIER);
+    rs.gold = 9999;
+    ShopState shop = generate_shop(rs);
+
+    RngStream card_replay = rs.card_rng;
+    RngStream merchant_replay = rs.merchant_rng;
+
+    ASSERT_TRUE(shop_buy_card(rs, shop, 0, /*colorless=*/true));
+
+    // purchaseCard's colorless branch (:600-613): merchantRng.random() against
+    // colorlessRareChance, ONE cardRng draw on the rarity view, then setPrice
+    // (a SECOND merchantRng draw) with the 1.2f colourless bump inside the
+    // truncation.
+    const RewardCardRarity rarity =
+        random(merchant_replay) < kColorlessRareChance
+            ? RewardCardRarity::RARE
+            : RewardCardRarity::UNCOMMON;
+    const CardId expected_id =
+        draw_colorless_card_from_pool(card_replay, rarity);
+    const float jitter = random(merchant_replay, 0.9f, 1.1f);
+    const auto expected_price = static_cast<int16_t>(
+        static_cast<int>(static_cast<float>(card_base_price(rarity)) * jitter *
+                         1.2f * 0.8f));
+
+    EXPECT_TRUE(streams_equal(rs.card_rng, card_replay));
+    EXPECT_TRUE(streams_equal(rs.merchant_rng, merchant_replay));
+    EXPECT_EQ(shop.colorless[0].id, static_cast<uint16_t>(expected_id))
+        << "the colourless replacement is SEEDED (cardRng), unlike the "
+           "colored one";
+    EXPECT_EQ(shop.colorless[0].sold, 0);
+    EXPECT_EQ(shop.colorless[0].price, expected_price);
+
+    // A seeded restock is purchasable -- and buying it restocks AGAIN.
+    ASSERT_TRUE(shop_buy_card_legal(rs, shop, 0, true));
+    const uint16_t deck_before = rs.master_deck_count;
+    ASSERT_TRUE(shop_buy_card(rs, shop, 0, true));
+    EXPECT_EQ(rs.master_deck_count, deck_before + 1);
+    EXPECT_EQ(rs.master_deck[deck_before].card_id,
+              static_cast<uint16_t>(expected_id));
+    EXPECT_EQ(shop.colorless[0].sold, 0) << "restocked a second time";
+}
+
+TEST(CourierRestock, RelicRestockRollsOneTierThenEndPopsAndReprices) {
+    RunState rs = bare_run(4444);
+    give_relic(rs, RelicId::THE_COURIER);
+    rs.gold = 9999;
+    ShopState shop = generate_shop(rs);
+
+    // Snapshot the pools AFTER generation so the restock's end-pop is
+    // unambiguous against them.
+    uint16_t pool_ends[4];
+    uint8_t pool_counts[4];
+    for (int t = 0; t < 4; ++t) {
+        pool_counts[t] = rs.relic_pool_count[t];
+        pool_ends[t] = pool_counts[t] > 0
+                           ? rs.relic_pools[t][pool_counts[t] - 1]
+                           : 0;
+    }
+
+    RngStream merchant_replay = rs.merchant_rng;
+    const RngStream card_before = rs.card_rng;
+    const RngStream potion_before = rs.potion_rng;
+    const uint16_t old_id = shop.relics[0].id;
+
+    RngStream misc = from_seed(4444);
+    ASSERT_TRUE(shop_buy_relic(rs, misc, shop, 0));
+
+    // StoreRelic.purchaseRelic :105-112: ONE rollRelicTier
+    // (merchantRng.random(99)) -> END-pop of that tier (no further draw; the
+    // instanceof loop is dead in a ShopRoom, see shop.hpp) -> getNewPrice
+    // (a SECOND merchantRng draw, then a separate Courier round).
+    const RelicTier tier =
+        shop_relic_tier_for_roll(random(merchant_replay, 99));
+    const auto tier_idx = static_cast<int>(
+        tier == RelicTier::COMMON
+            ? RelicPool::COMMON
+            : (tier == RelicTier::UNCOMMON ? RelicPool::UNCOMMON
+                                           : RelicPool::RARE));
+    const uint16_t expected_id = pool_ends[tier_idx];
+    const RelicDef* def = relic_def(static_cast<RelicId>(expected_id));
+    ASSERT_NE(def, nullptr);
+    int expected_price = mround(static_cast<float>(relic_base_price(def->tier)) *
+                                random(merchant_replay, 0.95f, 1.05f));
+    expected_price = mround(static_cast<float>(expected_price) * 0.8f);
+
+    EXPECT_TRUE(streams_equal(rs.merchant_rng, merchant_replay))
+        << "relic restock = tier roll + price jitter, TWO merchantRng draws";
+    EXPECT_TRUE(streams_equal(rs.card_rng, card_before));
+    EXPECT_TRUE(streams_equal(rs.potion_rng, potion_before));
+
+    EXPECT_NE(shop.relics[0].id, old_id);
+    EXPECT_EQ(shop.relics[0].id, expected_id)
+        << "returnRandomRelicEnd is an END-pop of the rolled tier";
+    EXPECT_EQ(shop.relics[0].sold, 0) << "the shelf never empties";
+    EXPECT_EQ(shop.relics[0].price, expected_price)
+        << "getNewPrice: round(base x 0.95-1.05), then a separate Courier "
+           "round -- no A16 pass";
+    EXPECT_EQ(rs.relic_pool_count[tier_idx], pool_counts[tier_idx] - 1)
+        << "the restock consumed the pool end";
+}
+
+TEST(CourierRestock, PotionRestockDrawsSeededTiersAndRestocksPurchasable) {
+    RunState rs = bare_run(4545);
+    give_relic(rs, RelicId::THE_COURIER);
+    rs.gold = 9999;
+    rs.potion_slots = 3;
+    ShopState shop = generate_shop(rs);
+
+    RngStream potion_replay = rs.potion_rng;
+    RngStream merchant_replay = rs.merchant_rng;
+    const RngStream card_before = rs.card_rng;
+
+    ASSERT_TRUE(shop_buy_potion(rs, shop, 0));
+
+    // StorePotion.purchasePotion :86-89: returnRandomPotion() on potionRng
+    // (one tier roll + trap-14 rejection sampling -- a VARIABLE draw count the
+    // replay reproduces exactly), then getNewPrice's ONE merchantRng draw.
+    const PotionId expected_id = return_random_potion(potion_replay);
+    const PotionDef* def = potion_def(expected_id);
+    ASSERT_NE(def, nullptr);
+    int expected_price =
+        mround(static_cast<float>(potion_base_price(def->rarity)) *
+               random(merchant_replay, 0.95f, 1.05f));
+    expected_price = mround(static_cast<float>(expected_price) * 0.8f);
+
+    EXPECT_TRUE(streams_equal(rs.potion_rng, potion_replay));
+    EXPECT_TRUE(streams_equal(rs.merchant_rng, merchant_replay));
+    EXPECT_TRUE(streams_equal(rs.card_rng, card_before));
+    EXPECT_EQ(shop.potions[0].id, static_cast<uint16_t>(expected_id));
+    EXPECT_EQ(shop.potions[0].sold, 0);
+    EXPECT_EQ(shop.potions[0].price, expected_price);
+    EXPECT_TRUE(shop_buy_potion_legal(rs, shop, 0))
+        << "a seeded restock is purchasable";
+}
+
+TEST(CourierRestock, WithoutTheCourierEverySlotRetiresExactlyAsBefore) {
+    // The regression guard for every purchase above: no Courier, no restock,
+    // and -- the stream half -- no post-purchase draw on ANY stream.
+    RunState rs = bare_run(4646);
+    rs.gold = 9999;
+    rs.potion_slots = 3;
+    ShopState shop = generate_shop(rs);
+    const RngStream card_before = rs.card_rng;
+    const RngStream merchant_before = rs.merchant_rng;
+    const RngStream potion_before = rs.potion_rng;
+    RngStream misc = from_seed(4646);
+
+    ASSERT_TRUE(shop_buy_card(rs, shop, 0, false));
+    ASSERT_TRUE(shop_buy_card(rs, shop, 0, true));
+    ASSERT_TRUE(shop_buy_relic(rs, misc, shop, 0));
+    ASSERT_TRUE(shop_buy_potion(rs, shop, 0));
+
+    EXPECT_TRUE(streams_equal(rs.card_rng, card_before));
+    EXPECT_TRUE(streams_equal(rs.merchant_rng, merchant_before));
+    EXPECT_TRUE(streams_equal(rs.potion_rng, potion_before));
+    EXPECT_EQ(shop.colored[0].sold, 1);
+    EXPECT_EQ(shop.colorless[0].sold, 1);
+    EXPECT_EQ(shop.relics[0].sold, 1);
+    EXPECT_EQ(shop.potions[0].sold, 1);
+}
+
+TEST(CourierRestock, MembershipBoughtUnderTheCourierRestocksItsOwnSlotAtBothDiscounts) {
+    // Order inside purchaseRelic: obtain -> Membership applyDiscount(0.5f)
+    // over the SHELF -> the Courier restock, whose getNewPrice then sees BOTH
+    // discount relics owned (0.8f round, then 0.5f round).
+    RunState rs = bare_run(4747);
+    give_relic(rs, RelicId::THE_COURIER);
+    rs.gold = 9999;
+    fill_pool(rs, RelicPool::SHOP,
+              {RelicId::TOOLBOX, RelicId::LEES_WAFFLE,
+               RelicId::MEMBERSHIP_CARD});
+    ShopState shop = generate_shop(rs);
+    ASSERT_EQ(shop.relics[2].id,
+              static_cast<uint16_t>(RelicId::MEMBERSHIP_CARD));
+    const int16_t card0 = shop.colored[0].price;
+
+    RngStream merchant_replay = rs.merchant_rng;
+    RngStream misc = from_seed(4747);
+    ASSERT_TRUE(shop_buy_relic(rs, misc, shop, 2));
+
+    // The shelf pass ran first (0.5 on the already-Courier-discounted shelf)...
+    EXPECT_EQ(shop.colored[0].price, mround(static_cast<float>(card0) * 0.5f));
+    // ...then the restock: tier roll, end-pop, and getNewPrice with both
+    // rounds applied separately.
+    const RelicTier tier =
+        shop_relic_tier_for_roll(random(merchant_replay, 99));
+    (void)tier;  // the end-pop identity is asserted through the actual slot
+    const RelicDef* def = relic_def(static_cast<RelicId>(shop.relics[2].id));
+    ASSERT_NE(def, nullptr);
+    int expected_price = mround(static_cast<float>(relic_base_price(def->tier)) *
+                                random(merchant_replay, 0.95f, 1.05f));
+    expected_price = mround(static_cast<float>(expected_price) * 0.8f);
+    expected_price = mround(static_cast<float>(expected_price) * 0.5f);
+    EXPECT_EQ(shop.relics[2].sold, 0) << "restocked, not retired";
+    EXPECT_NE(shop.relics[2].id,
+              static_cast<uint16_t>(RelicId::MEMBERSHIP_CARD));
+    EXPECT_EQ(shop.relics[2].price, expected_price);
+}
+
+TEST(CourierRestock, AnEggBoughtMidShopPreviewsTheRemainingShelf) {
+    // StoreRelic.purchaseRelic :98-103: the JUST-BOUGHT relic previews every
+    // stocked card. Placed on a slot by hand exactly like the Smiling Mask
+    // test above: what is under test is the purchase hook, not the spawn.
+    RunState rs = bare_run(4848);
+    rs.gold = 9999;
+    ShopState shop = generate_shop(rs);
+    shop.relics[0].id = static_cast<uint16_t>(RelicId::MOLTEN_EGG);
+    shop.relics[0].price = 100;
+    RngStream misc = from_seed(4848);
+    ASSERT_TRUE(shop_buy_relic(rs, misc, shop, 0));
+    for (int i = 0; i < kShopColoredCount; ++i) {
+        const CardDef* def = card_def(static_cast<CardId>(shop.colored[i].id));
+        ASSERT_NE(def, nullptr) << i;
+        EXPECT_EQ(shop.colored[i].upgrade,
+                  def->type == CardType::ATTACK ? 1 : 0)
+            << i;
+    }
 }
 
 // =============================================================================

@@ -123,6 +123,67 @@ struct ShopSlot {
 static_assert(std::is_trivially_copyable_v<ShopSlot>);
 static_assert(sizeof(ShopSlot) == 8);
 
+// --- The Courier's restock -----------------------------------------------------
+//
+// With The Courier owned, a purchase does not retire its slot: the merchant
+// RESTOCKS it (ShopScreen.purchaseCard :598-643, StoreRelic.purchaseRelic
+// :105-112, StorePotion.purchasePotion :86-89). Every restock half that the
+// game seeds is modelled faithfully; the ONE unseeded value gets a named,
+// permanent refusal:
+//
+//   colored card   rollRarity() is ONE cardRng.random(99) through the
+//                  ShopRoom's 9/37 table (the purchase still happens inside
+//                  the ShopRoom), then getCardFromPool(rolled, type, false)
+//                  -- useRng=FALSE, so the IDENTITY is drawn from libGDX's
+//                  unseeded MathUtils.random (ShopScreen.java:615-617) and
+//                  has no reproducible answer. The slot therefore restocks
+//                  as kShopRestockedUnknownCard: its RARITY (and so its
+//                  price) is still seeded -- the pool the draw indexes is a
+//                  pure function of (rolled rarity, slot type) -- but the
+//                  slot is kept OFF the legal-action mask and
+//                  shop_buy_card refuses it whole (the
+//                  potion_use_implemented precedent: fail-loud refusal of
+//                  the one thing the sim cannot answer, everything around
+//                  it exact). The `while (c.color == COLORLESS)` re-roll
+//                  guard is dead for the same reason it is dead at shop
+//                  init: the three RED rarity pools hold no colourless row.
+//   colorless card fully seeded: ONE merchantRng.random() float against
+//                  colorlessRareChance (0.3f, Exordium.java:106) picks
+//                  UNCOMMON/RARE, getColorlessCardFromPool spends ONE
+//                  cardRng draw on the sorted rarity view, and the slot
+//                  restocks purchasable.
+//   relic          fully seeded: rollRelicTier (ONE merchantRng.random(99))
+//                  then returnRandomRelicEnd's END-pop with its in-shop
+//                  canSpawn reroute. StoreRelic's own instanceof rejection
+//                  loop (Old Coin / Smiling Mask / Maw Bank / The Courier,
+//                  StoreRelic.java:106-108) is DEAD code here: all four AND
+//                  their canSpawn with `!(getCurrRoom() instanceof
+//                  ShopRoom)`, so returnEndRandomRelicKey's own canSpawn
+//                  recursion (AbstractDungeon.java:751-753) has already
+//                  rerouted past them and the loop condition can never hold.
+//   potion         fully seeded: returnRandomPotion() on potionRng (tier
+//                  roll + trap-14 rejection sampling), restocked
+//                  purchasable.
+//
+// RESTOCK PRICES ARE NOT INIT PRICES. A restocked card goes through setPrice
+// (ShopScreen.java:660-673): one float product of base x merchantRng.random
+// (0.9f, 1.1f) x [1.2f colourless] x [0.8f Courier] x [0.5f Membership],
+// truncated ONCE -- no sale halving and NO A16 x1.1 (applyDiscount never
+// re-runs), so an A20 restock is systematically cheaper than the shelf it
+// replaces. A restocked relic/potion goes through getNewPrice (:386-411):
+// MathUtils.round(base x merchantRng.random(0.95f, 1.05f)), then a SEPARATE
+// round per owned discount relic (0.8f then 0.5f) -- again no A16 pass.
+//
+// The restocked-slot refusal is this simulator's one permanent, named
+// deviation for the merchant: the slot EXISTS (the game's shelf never
+// empties while The Courier is owned) but purchasing the unknowable colored
+// replacement is refused fail-loud rather than answered with an invented
+// card. The capture campaign wave2cap_courier_* measured the seeded stream
+// motion this file models (see the Courier rows in
+// tools/oracle_bridge/driver/wave2cap_capture_runbook.md).
+inline constexpr uint16_t kShopRestockedUnknownCard = 0xFFFF;
+inline constexpr float kColorlessRareChance = 0.3f;  // Exordium.java:106
+
 enum class ShopScreenKind : uint8_t {
     NONE = 0,
     MENU = 1,        // the shop floor: buy anything, or open the purge grid.

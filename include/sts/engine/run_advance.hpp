@@ -68,10 +68,15 @@
 //     bookkeeping. Implemented bodies open EVENT_DIALOG; a selected event with
 //     no body parks at ROOM_UNIMPLEMENTED with the selection committed and the
 //     EventId recorded.
-//   * The Courier's RESTOCK half (shop.hpp): its price discount is live, but
-//     the replacement item a purchase pulls in is not, because the card branch
-//     draws with `useRng=false` -- the unseeded libGDX MathUtils global, not
-//     cardRng (ShopScreen.java:615-617) -- and so has no reproducible answer.
+//   * The Courier's restocked COLORED-CARD identity (shop.hpp): the restock
+//     itself is live -- every seeded half (rarity/tier/identity rolls for
+//     colorless cards, relics and potions, and every restock price) is
+//     modelled -- but the colored replacement's identity draws with
+//     `useRng=false`, the unseeded libGDX MathUtils global, not cardRng
+//     (ShopScreen.java:615-617), so that ONE slot restocks as
+//     kShopRestockedUnknownCard: present on the shelf, priced off its seeded
+//     rarity, refused fail-loud by the legal mask (the permanent named
+//     deviation; shop.hpp's Courier block).
 //   * monsters outside the implemented roster (see monster_dispatch.hpp): an
 //     encounter whose members are not all implemented resolves its composition
 //     (miscRng, as the game does) and then parks at ROOM_UNIMPLEMENTED, rather
