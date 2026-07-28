@@ -145,17 +145,49 @@ expansion and only changes which candidate is taken:
 
 - **combat** — mirrors the sim's fuzz scoring (`tools/fuzz/src/policy.cpp`
   `move_score`): lethal first, then `damage*4 + block` when nothing is swinging
-  and `block*4 + damage` while a monster's intent is an attack, focus fire on the
-  lowest-HP live monster, `end` strictly last. Per-card numbers come from
-  `cards_sidetable.json`; a card outside the S1 registry scores as cheap utility.
+  and `block*W + damage` while a monster's intent is an attack, focus fire on the
+  lowest-HP live monster, `end` strictly last. `W` is 4 for a lone attacker and
+  climbs by 2 per extra banner to a cap of 8 (**R3** below). Per-card numbers
+  come from `cards_sidetable.json`; a card outside the S1 registry scores as
+  cheap utility.
 - **map** — non-combat > monster > elite, and the boss node when it is offered.
   This is deliberately **inverted** relative to the sim's elite-first fuzz
   weights: the fuzzer wants long varied fights, this wants floors survived.
 - **screens** — claim relics/gold/potions, **never** a `SAPPHIRE_KEY` row (it
   retires the linked relic ungranted — `RewardItem.claimReward`,
-  RewardItem.java:255-330 case 6), leave card rewards unopened (skipping is
-  always safe), open treasure chests, rest when hurt / smith when healthy, and
-  leave shops without buying.
+  RewardItem.java:255-330 case 6), take card rewards while the deck is short of
+  attacks (**R1** below), open treasure chests, rest when hurt / smith when
+  healthy, and leave shops without buying.
+- **potions** — held below `end` unless the room is a boss or elite, HP has
+  fallen to 40 %, or the belt is already full (**R2** below).
+
+**The three Act-1 boss rules (b1.5.0).** 69 captured runs produced 12 Act-1 boss
+fights and zero boss-reward claims. Reading the six STS01221 fights record by
+record corrected the diagnosis the g6 runbook recorded: **greedy never killed the
+Slime Boss.** `SlimeBoss.damage` (SlimeBoss.java:173-182) queues SPLIT at
+`currentHealth <= maxHealth / 2`, and `takeTurn` case 3 (:148-159) suicides the
+boss and spawns `SpikeSlime_L` + `AcidSlime_L` **each at the boss's remaining
+HP**. So a `Slime Boss 0/150 GONE` row in a dump is that SuicideAction, not a
+kill, and the fight's effective HP is ~220, not 150. The captures show the
+threshold crossings directly (ps7 `70/150` → two slimes at `70/70`; ps42 75 →
+75/75; ps777 72 → 72/72). Greedy was ~35 % through the fight, with a 12-14 card
+starter deck, having never opened a card row in sixteen floors.
+
+| | Rule | Evidence it comes from |
+|---|---|---|
+| **R1** | open the card row and **take** while the deck holds `< 10` attacks and `< 20` cards; rank ATTACK first, then damage, `+6` for an ALL_ENEMY card | the never-take-cards default capped output at ~15 damage a turn against ~220 effective HP |
+| **R2** | hold potions unless boss/elite room, HP ≤ 40 %, or the belt is full | two of six captures spent the last potion on floor 8 or 12 and met the boss with an empty two-slot belt |
+| **R3** | under-attack block weight `min(4 + 2*(attackers-1), 8)` | the split puts two large slimes on the board at once, and that board is where every STS01221 run died |
+
+R1's take-or-skip decision reads the **deck only**, never the cards on offer.
+That is load-bearing: `skip` on a `CARD_REWARD` screen does **not** retire the
+row it came from (b13_off20 `run_STS00004` seq 30-33 — skip, and `COMBAT_REWARD`
+still lists `card`), so a policy whose two decisions could disagree would
+alternate between the screens forever with a signature the driver's stuck
+detector cannot see. Both decisions read the same `deck`, which cannot change
+between the two screens, so they agree by construction and the row is always
+retired by a take. `test_the_two_screens_can_never_disagree` sweeps the whole
+census matrix for exactly that property.
 
 Ties are broken with the run's own policy RNG (`Random(f"{policy_seed}:{seed}")`,
 one draw per decision), so a greedy campaign is reproducible from

@@ -31,6 +31,59 @@ of `move_score` (`tools/fuzz/src/policy.cpp`): `base + damage*4 + block`,
 `end` strictly below every playable card, +2 for focusing the weakest live
 monster. The *map* scoring is deliberately INVERTED relative to it -- see
 `_score_map`.
+
+--------------------------------------------------------------------------
+b1.5.0 -- THE ACT-1 BOSS RULES, AND THE EVIDENCE THEY COME FROM
+--------------------------------------------------------------------------
+
+69 captured runs produced 12 Act-1 boss fights and zero boss-reward claims
+(g6_campaign2_spotdiff.md 10). Reading the four STS01221 fights record by record
+(`g6_boss_ps{7,42,777}` + the main campaign) corrects the diagnosis that runbook
+records, and the correction is what these rules are built on:
+
+  * **The Slime Boss was never killed.** `SlimeBoss.damage` (SlimeBoss.java:173-
+    182) queues SPLIT when `currentHealth <= maxHealth / 2` -- 75 of 150 at A9+
+    -- and `takeTurn` case 3 (:148-159) then suicides the boss and spawns
+    `SpikeSlime_L` and `AcidSlime_L` EACH at the boss's `currentHealth` (:155,
+    :156). Every capture shows exactly that: ps7 seq 206 `Slime Boss 70/150` ->
+    seq 207 `Spike Slime (L) 70/70 + Acid Slime (L) 70/70`, ps42 75 -> 75/75,
+    ps777 72 -> 72/72. A `Slime Boss 0/150 GONE` row in the dump is the
+    SuicideAction, not a kill. Greedy was ~35 % through the fight's effective
+    HP (75 to the split, then ~144 more), not 100 %.
+  * **Post-split play was not the defect.** Greedy blocked under attack, focused
+    the lower-HP half and spent its last potion there. It simply had nothing
+    left to play: the ps7 deck at floor 16 was 13 cards -- 5 Strikes, 4 Defends,
+    Bash, Impervious, Reckless Charge, Ascender's Bane. ~15 damage a turn
+    against ~220 effective HP is not a targeting problem.
+  * **What it never did was take a card.** `REWARD_CARD` sat below
+    `REWARD_PROCEED`, so across 16 floors and eight reward screens the card row
+    was never opened once. Two of six runs also spent their last potion on
+    floor 8 or 12 and walked into the boss with an empty two-slot belt.
+
+Hence three rules, and only three:
+
+  R1 `wants_card_reward` -- open the card row and TAKE while the deck is short
+     of attacks. The take/skip decision is a function of the DECK ALONE, never
+     of the cards on offer, because skipping a card reward does NOT retire the
+     row (verified in b13_off20 run_STS00004 seq 30-33: skip -> COMBAT_REWARD
+     still lists `card`). A policy that opened the row and then judged the cards
+     would re-open it forever -- the exact 2-cycle the old `REWARD_CARD`
+     comment refused to risk. Deck-only gating makes the two screens agree by
+     construction, so the row is always consumed by a take.
+  R2 `_potion_worth_spending` -- hold potions below `end` unless the room is a
+     boss or elite, HP has fallen to `POTION_LOW_HP_FRACTION`, or the belt is
+     already full (the belt is 2 slots at A11+, and a held potion that blocks a
+     pickup is worth less than a spent one).
+  R3 `attacker_count` -- scale the under-attack block weight with the number of
+     monsters actually swinging. One boss is one attacker; the split is two, and
+     two is where every STS01221 run died.
+
+Everything else is untouched, including the four properties the campaigns
+depend on: legal-by-construction (`pick` only ever returns a candidate handed to
+it), determinism from (policy_seed, seed) (every rule here is a pure function of
+the parsed dump plus the side table, and the tie-break still draws exactly once),
+never-claim-SAPPHIRE_KEY (`_score_reward`), and never-swap-the-boss-relic at
+Neow (`_score_event` has no opinion that reaches it).
 """
 
 from __future__ import annotations
@@ -62,13 +115,27 @@ DAMAGE_WEIGHT = 4
 BLOCK_WEIGHT = 1
 DAMAGE_WEIGHT_UNDER_ATTACK = 1
 BLOCK_WEIGHT_UNDER_ATTACK = 4
+# R3 (b1.5.0). Each attacker past the first adds to the block weight. One boss
+# swinging is the case the 4/1 split was tuned for; the Slime Boss split puts
+# two large slimes on the board at once (SlimeBoss.java:155-156) and every
+# STS01221 capture died there, so a second banner buys block harder. Capped so
+# the weight can never outrun LETHAL_BONUS on a realistic block roll.
+BLOCK_WEIGHT_PER_EXTRA_ATTACKER = 2
+BLOCK_WEIGHT_UNDER_ATTACK_MAX = 8
 LETHAL_BONUS = 400          # kill something this turn -> one fewer enemy turn
 FOCUS_FIRE_BONUS = 2        # policy.cpp's +2: breaks target ties only
 CHEAP_UTILITY_MAX = 3       # 0-cost utility edges out 3-cost utility, by <= 3
 POTION_USE_COMBAT = 500     # below any card play, above ending the turn
 POTION_USE_OUT_OF_COMBAT = 20
+POTION_HOLD = 0             # R3: strictly below END_TURN -- keep it for the boss
 POTION_DISCARD = 0
 END_TURN = 1
+
+# R2 (b1.5.0). Rooms whose fight is worth a potion, and the HP floor at which
+# any fight is.
+HIGH_STAKES_ROOMS = ("MonsterRoomBoss", "MonsterRoomElite")
+POTION_LOW_HP_FRACTION = 0.40
+EMPTY_POTION_IDS = (None, "", "Potion Slot", "PotionSlot")
 
 # Map.
 MAP_BOSS = 700
@@ -83,12 +150,32 @@ REWARD_RELIC = 900
 REWARD_GOLD = 850
 REWARD_POTION = 800
 REWARD_PROCEED = 100        # anything below this is left unclaimed
-REWARD_CARD = 60            # < REWARD_PROCEED: the card row is never opened
+REWARD_CARD = 60            # < REWARD_PROCEED: the card row is left unopened
+# R1 (b1.5.0). The card row when the deck gate is OPEN: above `proceed` so the
+# row is opened, but below relic/gold/potion so the claim ORDER is unchanged --
+# in particular the relic still outranks the sapphire key on a treasure screen.
+REWARD_CARD_TAKE = 780
 REWARD_SAPPHIRE_KEY = 0     # < REWARD_PROCEED: NEVER claim -- see _score_reward
 
 # Card-reward screen.
 CARD_REWARD_SKIP = 900
-CARD_REWARD_TAKE = 10
+CARD_REWARD_TAKE = 10           # gate closed: every card loses to `skip`
+CARD_REWARD_TAKE_OPEN = 1000    # gate open: every card beats `skip`
+CARD_RANK_DAMAGE_WEIGHT = 2
+CARD_RANK_BLOCK_WEIGHT = 1
+CARD_RANK_ATTACK_BONUS = 40     # a deck short of attacks wants an ATTACK
+CARD_RANK_AOE_BONUS = 6         # the split is two targets (SlimeBoss.java:155-6)
+CARD_RANK_MAX = 200             # keeps the take band bounded and comparable
+
+# R1's gate. Ironclad starts with 6 attacks in 10 cards; the Act-1 boss needs
+# ~220 effective HP of damage (75 to the split at SlimeBoss.java:175, then two
+# spawns at the boss's remaining HP), which ~15 damage a turn cannot pay. Ten
+# attacks is three or four takes over sixteen floors -- conservative on purpose,
+# and the size cap stops a run of SKILL/POWER offers from diluting the deck.
+DECK_ATTACK_TARGET = 10
+DECK_SIZE_CAP = 20
+CARD_TYPE_ATTACK = "ATTACK"
+CARD_TYPE_CURSE = "CURSE"
 
 # Chest / rest / shop / event / select screens.
 CHEST_OPEN = 900
@@ -201,21 +288,82 @@ def weakest_monster_index(state):
     return best
 
 
-def facing_attack(state):
-    """True if any live monster's banner shows an incoming attack.
+def attacker_count(state):
+    """How many live monsters' banners show an incoming attack (R3).
 
     `intent` is display-derived (PROTOCOL.md 3.12) and reads DEBUG until the
     banner refreshes, so this is advisory -- it can only ever make the policy
     block one turn later than ideal, never make it emit an illegal command.
     `move_adjusted_damage > 0` is the second witness for the same fact.
     """
+    n = 0
     for _i, m in live_monsters(state):
         intent = (m.get("intent") or "").upper()
-        if "ATTACK" in intent:
-            return True
-        if (m.get("move_adjusted_damage") or 0) > 0:
-            return True
-    return False
+        if "ATTACK" in intent or (m.get("move_adjusted_damage") or 0) > 0:
+            n += 1
+    return n
+
+
+def facing_attack(state):
+    """True if anything at all is swinging. `attacker_count(state) > 0`."""
+    return attacker_count(state) > 0
+
+
+def block_weight_under_attack(state):
+    """R3: 4 for a lone attacker, +2 per extra banner, capped.
+
+    Pure and monotone in the number of attackers, so it cannot reorder anything
+    on a single-monster board -- every pre-b1.5.0 combat preference is
+    unchanged there.
+    """
+    extra = max(0, attacker_count(state) - 1)
+    return min(BLOCK_WEIGHT_UNDER_ATTACK
+               + extra * BLOCK_WEIGHT_PER_EXTRA_ATTACKER,
+               BLOCK_WEIGHT_UNDER_ATTACK_MAX)
+
+
+def card_type(card, table=None):
+    """The card's type, side table first, then the dump's own `type` field.
+
+    Both carry it (`cards_sidetable.json` rows and every hand/deck/reward card
+    in the protocol dump), so this is belt-and-braces: an id outside the S1
+    registry still classifies from the live dump instead of vanishing from the
+    deck census.
+    """
+    row = (table or {}).get((card or {}).get("id")) or {}
+    return (row.get("type") or (card or {}).get("type") or "").upper()
+
+
+def deck_attack_count(state, table=None):
+    """Number of ATTACK cards in the run deck, or None when there is no deck."""
+    deck = _gs(state).get("deck")
+    if not isinstance(deck, list):
+        return None
+    return sum(1 for c in deck if card_type(c, table) == CARD_TYPE_ATTACK)
+
+
+def wants_card_reward(state, table=None):
+    """R1's gate: is this deck short enough of attacks to want another card?
+
+    A FUNCTION OF THE DECK ONLY -- deliberately. `skip` on a CARD_REWARD screen
+    does not retire the row it came from (b13_off20 run_STS00004: seq 30 skip ->
+    COMBAT_REWARD still offering `card`, seq 33 the same again), so a policy
+    whose open-the-row decision and whose take-the-card decision could disagree
+    would loop between the two screens forever, alternating signatures where the
+    driver's stuck detector cannot see it. Because both decisions read the same
+    `deck` -- which cannot change between the two screens -- they agree by
+    construction, and the row is always retired by a take.
+
+    A dump without a `deck` list answers False: the pre-b1.5.0 behaviour (leave
+    the row alone) is the safe default, and it cannot start a cycle.
+    """
+    deck = _gs(state).get("deck")
+    if not isinstance(deck, list) or not deck:
+        return False
+    if len(deck) >= DECK_SIZE_CAP:
+        return False
+    attacks = deck_attack_count(state, table)
+    return attacks is not None and attacks < DECK_ATTACK_TARGET
 
 
 def hand_slot_to_index(slot):
@@ -270,7 +418,7 @@ def _score_play(args, state, table):
 
     if facing_attack(state):
         score = (PLAY_BASE + damage * DAMAGE_WEIGHT_UNDER_ATTACK
-                 + block * BLOCK_WEIGHT_UNDER_ATTACK)
+                 + block * block_weight_under_attack(state))
     else:
         score = PLAY_BASE + damage * DAMAGE_WEIGHT + block * BLOCK_WEIGHT
 
@@ -333,7 +481,7 @@ def _score_map(index, state):
     return MAP_UNKNOWN_SYMBOL
 
 
-def _score_reward(index, state):
+def _score_reward(index, state, table=None):
     """Combat/treasure reward rows.
 
     THE CLAIM-ORDER TRAP (this is why the key is scored below `proceed`):
@@ -362,13 +510,50 @@ def _score_reward(index, state):
     if kind == "POTION":
         return REWARD_POTION
     if kind == "CARD":
-        # Below REWARD_PROCEED on purpose. Opening the row opens the
-        # CARD_REWARD screen, and skipping is always safe, so the cheapest
-        # survival default is never to open it: fewer actions, no deck
-        # dilution, and no way to reach the claim/skip 2-cycle that the sim's
-        # HOARD_GOLD policy fell into (policy.cpp REWARD_CLAIM comment).
-        return REWARD_CARD
+        # R1 (b1.5.0). Pre-b1.5.0 this was unconditionally below
+        # REWARD_PROCEED: never open the row, because opening it and then
+        # judging the cards is how the sim's HOARD_GOLD policy reached a
+        # claim/skip 2-cycle (policy.cpp REWARD_CLAIM comment) -- and skipping
+        # a card reward really does leave the row on the screen (see
+        # `wants_card_reward`). The gate removes the hazard rather than
+        # accepting it: the row is only opened when the SAME deck-only
+        # predicate that the CARD_REWARD screen will consult says take, so the
+        # open is always followed by a take and the row is always retired.
+        # A deck at or past its attack target keeps the old behaviour exactly.
+        return REWARD_CARD_TAKE if wants_card_reward(state, table) \
+            else REWARD_CARD
     return REWARD_CARD
+
+
+def _card_reward_rank(index, state, table=None):
+    """R1: WHICH of the offered cards to take. Never take-vs-skip.
+
+    `choice_list` and `screen_state.cards` are built in one pass over the same
+    `rewardGroup` (ChoiceScreenUtils.getCardRewardScreenChoices), so they are
+    index-parallel; an index past the card list is the singing-bowl row
+    (`bowl_available`) and ranks bottom. Bounded by CARD_RANK_MAX so the whole
+    take band stays inside [CARD_REWARD_TAKE_OPEN, +CARD_RANK_MAX].
+    """
+    cards = _screen_state(state).get("cards") or []
+    if index >= len(cards):
+        return 0
+    card = cards[index] or {}
+    ctype = card_type(card, table)
+    if ctype == CARD_TYPE_CURSE:
+        return 0
+    damage, block = score_card(card, state, table)
+    rank = damage * CARD_RANK_DAMAGE_WEIGHT + block * CARD_RANK_BLOCK_WEIGHT
+    if ((table or {}).get(card.get("id")) or {}).get("aoe"):
+        rank += CARD_RANK_AOE_BONUS
+    if ctype == CARD_TYPE_ATTACK:
+        rank += CARD_RANK_ATTACK_BONUS
+    return max(0, min(rank, CARD_RANK_MAX))
+
+
+def _score_card_reward(index, state, table=None):
+    if not wants_card_reward(state, table):
+        return CARD_REWARD_TAKE     # < CARD_REWARD_SKIP: skip, as before
+    return CARD_REWARD_TAKE_OPEN + _card_reward_rank(index, state, table)
 
 
 def _score_rest(index, state):
@@ -395,14 +580,14 @@ def _score_event(index, state):
     return EVENT_NEUTRAL
 
 
-def _score_choose(index, state):
+def _score_choose(index, state, table=None):
     screen = _gs(state).get("screen_type")
     if screen == "MAP":
         return _score_map(index, state)
     if screen == "COMBAT_REWARD":
-        return _score_reward(index, state)
+        return _score_reward(index, state, table)
     if screen == "CARD_REWARD":
-        return CARD_REWARD_TAKE
+        return _score_card_reward(index, state, table)
     if screen == "CHEST":
         return CHEST_OPEN
     if screen == "REST":
@@ -418,7 +603,7 @@ def _score_choose(index, state):
     return DEFAULT_CHOOSE
 
 
-def _score_alias(verb, state):
+def _score_alias(verb, state, table=None):
     """`proceed` / `confirm` / `skip` / `cancel` / `return` / `leave`.
 
     `confirm` and `proceed` are the same button whenever both can appear
@@ -463,6 +648,8 @@ def _score_alias(verb, state):
         return DEFAULT_PROCEED
     # skip / cancel / return / leave
     if screen == "CARD_REWARD":
+        # Unchanged constant; R1 moves the CARDS above it, not this below them,
+        # so a closed gate still skips and an absent side table still skips.
         return CARD_REWARD_SKIP
     if screen == "SHOP_SCREEN":
         return SHOP_SCREEN_LEAVE
@@ -471,11 +658,46 @@ def _score_alias(verb, state):
     return DEFAULT_CANCEL
 
 
+def belt_is_full(state):
+    """Every potion slot occupied: a held potion is now blocking a pickup."""
+    potions = _gs(state).get("potions") or []
+    if not potions:
+        return False
+    return all((p or {}).get("id") not in EMPTY_POTION_IDS for p in potions)
+
+
+def potion_worth_spending(state):
+    """R2: is this the fight to spend a potion in?
+
+    Boss and elite rooms yes; any room once HP has fallen to the floor; and any
+    room where the belt is already full, because a potion that cannot be
+    replaced by a pickup has stopped being a saved resource. Everything else
+    holds -- six STS01221 captures walked into floor 16 with a two-slot belt
+    holding at most one potion, two of them having spent the last one on floor
+    8 or 12.
+    """
+    gs = _gs(state)
+    if gs.get("room_type") in HIGH_STAKES_ROOMS:
+        return True
+    max_hp = gs.get("max_hp") or 0
+    current = gs.get("current_hp") or 0
+    if max_hp > 0 and \
+            (float(current) / float(max_hp)) <= POTION_LOW_HP_FRACTION:
+        return True
+    return belt_is_full(state)
+
+
 def _score_potion(args, state):
     if args and args[0] == "discard":
         return POTION_DISCARD
     in_combat = bool(_combat(state).get("monsters"))
-    return POTION_USE_COMBAT if in_combat else POTION_USE_OUT_OF_COMBAT
+    if not in_combat:
+        # Out of combat the belt-overflow unstick path is the only user of
+        # this, and it is unchanged.
+        return POTION_USE_OUT_OF_COMBAT
+    if potion_worth_spending(state):
+        return POTION_USE_COMBAT
+    return POTION_HOLD
 
 
 # --- the scorer ------------------------------------------------------------
@@ -502,9 +724,9 @@ def score_action(cmd, state, table=None):
             index = int(args[0])
         except (IndexError, ValueError):
             return DEFAULT_CHOOSE
-        return _score_choose(index, state)
+        return _score_choose(index, state, table)
     if verb in _ALIAS_VERBS:
-        return _score_alias(verb, state)
+        return _score_alias(verb, state, table)
     return 0
 
 

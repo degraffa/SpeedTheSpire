@@ -64,7 +64,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.4.7"
+DRIVER_VERSION = "b1.5.0"
 SCHEMA_VERSION = 1
 
 # The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
