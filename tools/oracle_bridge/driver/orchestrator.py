@@ -112,6 +112,8 @@ def build_driver_command(args) -> str:
             parts += ["--script-dir", args.script_dir.replace("\\", "/")]
         else:
             parts += ["--script", args.script.replace("\\", "/")]
+    if args.policy == "greedy" and args.card_table:
+        parts += ["--card-table", args.card_table.replace("\\", "/")]
     return " ".join(parts)
 
 
@@ -292,8 +294,14 @@ def main(argv=None) -> int:
     ap.add_argument("--campaign-id", required=True)
     ap.add_argument("--seeds", required=True,
                     help="comma-separated seeds or a path to a seed-list file")
-    ap.add_argument("--policy", choices=["random-legal", "script"],
-                    default="random-legal")
+    ap.add_argument("--policy", choices=["random-legal", "greedy", "script"],
+                    default="random-legal",
+                    help="passed straight through to campaign_driver.py; "
+                         "`greedy` is the depth-seeking live policy "
+                         "(greedy_policy.py)")
+    ap.add_argument("--card-table", default=None,
+                    help="override the greedy policy's card side table "
+                         "(default: cards_sidetable.json beside the driver)")
     ap.add_argument("--script", help="single command script for --policy script "
                     "(applied to every seed)")
     ap.add_argument("--script-dir", help="directory of per-seed scripts "

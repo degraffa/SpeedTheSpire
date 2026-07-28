@@ -9,9 +9,11 @@ stdout (\\n-delimited). See ../PROTOCOL.md.
 
 What it does (B1.4 deliverables):
   * seeded A20 Ironclad starts (`start ironclad 20 <SEED>`; PROTOCOL.md 2.1);
-  * two action generators -- `random-legal` (uniform over the game's own
-    accepted-command set, expanded to concrete legal actions) and `script`
-    (a fixed command list) -- both paced through one strict lock-step gate;
+  * three action generators -- `random-legal` (uniform over the game's own
+    accepted-command set, expanded to concrete legal actions), `greedy` (the
+    same expansion, ranked by greedy_policy.score_action -- a depth-seeking
+    heuristic) and `script` (a fixed command list) -- all paced through one
+    strict lock-step gate;
   * JSONL artifacts per design 2.7: one file per run, a version-stamped header
     (fork-jar sha256, seed in BOTH encodings, versions), then one record per
     injected action `{action_command, sim_action_bits?, state_json}`, then a
@@ -52,6 +54,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
+import greedy_policy
 from campaign_paths import (
     ORACLE_LAUNCH_TOKEN_ENV,
     campaign_dir_under_root,
@@ -61,7 +64,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.4.4"
+DRIVER_VERSION = "b1.4.5"
 SCHEMA_VERSION = 1
 
 # The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
@@ -477,6 +480,86 @@ def cmd_verb_ready(state: dict, cmd: str) -> bool:
     return verb in avail
 
 
+def cmd_args_ready(state: dict, cmd: str):
+    """Argument-level sibling of `cmd_verb_ready`: (ok, reason).
+
+    `cmd_verb_ready` validates the VERB only, which leaves a hole that only
+    script mode can fall into. A mis-indexed `choose 3` against a 2-option
+    screen has a legal verb, so the settle gate passes it, the command fires,
+    the game answers with an InvalidCommand error object -- and the run loop
+    tolerates eight of those (`error_wedge`) before giving up. In between, the
+    script is silently one command out of step with the run it is supposed to
+    be replaying, which is the exact failure mode a replay exists to detect.
+
+    What is checked, and only when the state actually carries the collection:
+
+      * `choose <i>`      -- 0 <= i < len(game_state.choice_list)
+      * `play <i> [t]`    -- i names a real hand slot (1-based, 0 == slot 10;
+                             PROTOCOL.md 2) and, when given, t indexes a real
+                             monster in combat_state.monsters
+
+    Deliberately NOT checked:
+
+      * `choose <name>`   -- the protocol matches the exact choice string first
+                             and only then parses an integer index
+                             (CommandExecutor.java:557-570, PROTOCOL.md 2
+                             notes). A name form is passed through untouched.
+      * anything whose collection is absent from the dump -- absence is not
+                             evidence of an out-of-range argument, and inventing
+                             a divergence out of a missing field would be worse
+                             than the hole this closes.
+
+    `random-legal` and `greedy` both draw from `expand_legal_actions`, so their
+    commands are in range by construction and this check is a no-op for them.
+    """
+    parts = (cmd or "").split()
+    if len(parts) < 2:
+        return True, ""
+    verb, args = parts[0], parts[1:]
+    gs = state.get("game_state") or {}
+
+    if verb == "choose":
+        try:
+            index = int(args[0])
+        except ValueError:
+            return True, ""          # `choose <name>`: not ours to judge
+        choices = gs.get("choice_list")
+        if not isinstance(choices, list):
+            return True, ""
+        if index < 0 or index >= len(choices):
+            return False, (f"choose {index} but choice_list has "
+                           f"{len(choices)} option(s): {choices!r}")
+        return True, ""
+
+    if verb == "play":
+        cs = gs.get("combat_state") or {}
+        try:
+            slot = int(args[0])
+        except ValueError:
+            return False, f"play argument {args[0]!r} is not an index"
+        hand = cs.get("hand")
+        if isinstance(hand, list):
+            if slot < 0 or slot > 10:
+                return False, f"play {slot} is outside the 0-10 slot range"
+            index = 9 if slot == 0 else slot - 1
+            if index >= len(hand):
+                return False, (f"play {slot} but the hand holds "
+                               f"{len(hand)} card(s)")
+        if len(args) >= 2:
+            try:
+                target = int(args[1])
+            except ValueError:
+                return False, f"play target {args[1]!r} is not an index"
+            monsters = cs.get("monsters")
+            if isinstance(monsters, list) and (
+                    target < 0 or target >= len(monsters)):
+                return False, (f"play target {target} but the room holds "
+                               f"{len(monsters)} monster(s)")
+        return True, ""
+
+    return True, ""
+
+
 def is_boss_combat_reward(gs: dict) -> bool:
     """Act-1 boss combat rewards up: the S1 terminal (design 1.1 -- stop BEFORE
     the boss chest / boss-relic pick)."""
@@ -689,6 +772,11 @@ class Progress:
 # ---------------------------------------------------------------------------
 
 class CampaignDriver:
+    # Class-level default so a driver built with __new__ (the unit tests, which
+    # bypass __init__ to reach one method) never trips over a missing attribute.
+    # `--policy greedy` replaces it with the real table in __init__.
+    card_table: dict = {}
+
     def __init__(self, args) -> None:
         self.args = args
         validate_campaign_id(args.campaign_id)
@@ -707,6 +795,11 @@ class CampaignDriver:
         )
         # Script(s) are loaded per-seed in run_seed (a --script-dir campaign has a
         # distinct command list per seed). A single --script applies to all seeds.
+        if args.policy == "greedy":
+            self.card_table = greedy_policy.load_side_table(
+                getattr(args, "card_table", None))
+            _log(f"greedy policy: card side table has "
+                 f"{len(self.card_table)} entries")
         self.single_script = None
         if args.policy == "script" and not args.script_dir:
             with open(args.script, "r", encoding="utf-8") as fh:
@@ -998,6 +1091,17 @@ class CampaignDriver:
                     if game_over_outcome(gs) is not None \
                             or is_boss_combat_reward(gs):
                         continue
+                    # The verb is legal; now prove the ARGUMENTS are too, on
+                    # the very state the command is about to be sent into. A
+                    # named divergence beats a silent InvalidCommand that the
+                    # error budget absorbs (see cmd_args_ready).
+                    args_ok, why = cmd_args_ready(state, cmd)
+                    if not args_ok:
+                        rl.terminal("cmd_arg_invalid", gs, actions)
+                        _log(f"seed {seed}: script cmd {cmd!r} has invalid "
+                             f"arguments at floor {floor} screen "
+                             f"{gs.get('screen_type')}: {why} -- divergence")
+                        return "cmd_arg_invalid", floor, actions, False
                     script_i += 1
                 else:
                     cmd = self._policy_command(state)
@@ -1066,9 +1170,14 @@ class CampaignDriver:
             timing.close()
 
     def _policy_command(self, state):
+        # Both live policies draw from the SAME expansion of the game's own
+        # available_commands, so both are legal by construction; they differ
+        # only in how they choose among the candidates.
         acts = expand_legal_actions(state, self.rng)
         if not acts:
             return None
+        if self.args.policy == "greedy":
+            return greedy_policy.pick(acts, state, self.card_table, self.rng)
         return self.rng.choice(acts)
 
     def _claim_boss_reward(self, rl, timing, state, seed, actions):
@@ -1248,8 +1357,15 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--seeds", required=True,
                     help="comma-separated base-35 seeds, or a path to a file "
                          "with one seed per line")
-    ap.add_argument("--policy", choices=["random-legal", "script"],
-                    default="random-legal")
+    ap.add_argument("--policy", choices=["random-legal", "greedy", "script"],
+                    default="random-legal",
+                    help="random-legal: uniform over the expanded legal "
+                         "actions. greedy: the same expansion ranked by "
+                         "greedy_policy.score_action (depth-seeking; use this "
+                         "to reach deep floors). script: a fixed command list.")
+    ap.add_argument("--card-table", default=None,
+                    help="override the greedy policy's card side table "
+                         "(default: cards_sidetable.json beside the driver)")
     ap.add_argument("--script", help="command script (one per line) for "
                     "--policy script; applied to every seed")
     ap.add_argument("--script-dir", help="directory of per-seed scripts "

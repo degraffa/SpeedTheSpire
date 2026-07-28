@@ -1,0 +1,1797 @@
+{
+  "_provenance": {
+    "block_opcodes": [
+      "BLOCK"
+    ],
+    "checked_by": "test_oracle_campaign.py::CardSideTableTest",
+    "damage_opcodes": [
+      "DAMAGE",
+      "DAMAGE_STR_MULT",
+      "DAMAGE_PER_STRIKE",
+      "DAMAGE_UPGRADE_SCALE",
+      "DAMAGE_RAMPAGE"
+    ],
+    "dynamic": {
+      "DAMAGE_BLOCK": "damage == the player's live block; the driver adds combat_state.player.block at scoring time"
+    },
+    "generated_by": "tools/oracle_bridge/driver/gen_cards_sidetable.py",
+    "known_undercounts": [
+      "DAMAGE_GREED",
+      "DAMAGE_FEED",
+      "DAMAGE_DRAW_PILE",
+      "VAMPIRE_DAMAGE_ALL"
+    ],
+    "mirrors": "tools/fuzz/src/policy.cpp score_card (opcode buckets)",
+    "regenerate": "python tools/oracle_bridge/driver/gen_cards_sidetable.py --registry registry/cards.yaml --out tools/oracle_bridge/driver/cards_sidetable.json",
+    "scope": "registry/cards.yaml is S1 only (Ironclad + colorless + curses/statuses). A card the live game offers that is absent here scores as zero-damage cheap utility; the driver never raises on an unknown id.",
+    "source": "registry/cards.yaml",
+    "source_rows": 126,
+    "source_sha256": "8CC04808AA5F72659B98AD3D01C299EBB19FDC26CC6D5D74ABCA4A958BFC87D3"
+  },
+  "cards": {
+    "Anger": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        6,
+        8
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Apotheosis": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Armaments": {
+      "aoe": false,
+      "block": [
+        5,
+        5
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "AscendersBane": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Bandage Up": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Barricade": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 3,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Bash": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        8,
+        8
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Battle Trance": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Berserk": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Blind": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Blood for Blood": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 4,
+      "damage": [
+        18,
+        22
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Bloodletting": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Bludgeon": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 3,
+      "damage": [
+        32,
+        42
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Body Slam": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": true,
+      "type": "ATTACK"
+    },
+    "Brutality": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Burn": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        2,
+        4
+      ],
+      "damage_from_block": false,
+      "type": "STATUS"
+    },
+    "Burning Pact": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Carnage": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        20,
+        28
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Chrysalis": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Clash": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        14,
+        18
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Cleave": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        8,
+        11
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Clothesline": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        12,
+        14
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Clumsy": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Combust": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Corruption": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 3,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Dark Embrace": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Dark Shackles": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Dazed": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "STATUS"
+    },
+    "Decay": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        2,
+        2
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Deep Breath": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Defend_R": {
+      "aoe": false,
+      "block": [
+        5,
+        5
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Demon Form": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 3,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Disarm": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Discovery": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Double Tap": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Doubt": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Dramatic Entrance": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        8,
+        12
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Dropkick": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Dual Wield": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Enlightenment": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Entrench": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Evolve": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Exhume": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Feed": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Feel No Pain": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Fiend Fire": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Finesse": {
+      "aoe": false,
+      "block": [
+        2,
+        4
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Fire Breathing": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Flame Barrier": {
+      "aoe": false,
+      "block": [
+        12,
+        16
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Flash of Steel": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        3,
+        6
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Flex": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Forethought": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Ghostly Armor": {
+      "aoe": false,
+      "block": [
+        10,
+        13
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Good Instincts": {
+      "aoe": false,
+      "block": [
+        6,
+        9
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "HandOfGreed": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Havoc": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Headbutt": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        9,
+        12
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Heavy Blade": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        14,
+        14
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Hemokinesis": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        15,
+        20
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Immolate": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        21,
+        28
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Impatience": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Impervious": {
+      "aoe": false,
+      "block": [
+        30,
+        40
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Infernal Blade": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Inflame": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Injury": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Intimidate": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Iron Wave": {
+      "aoe": false,
+      "block": [
+        5,
+        7
+      ],
+      "cost": 1,
+      "damage": [
+        5,
+        7
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Jack Of All Trades": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Juggernaut": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Limit Break": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Madness": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Magnetism": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Master of Strategy": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Mayhem": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Metallicize": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Metamorphosis": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Mind Blast": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Normality": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Offering": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Pain": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Panacea": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Panache": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "PanicButton": {
+      "aoe": false,
+      "block": [
+        30,
+        40
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Parasite": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Perfected Strike": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        6,
+        6
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Pommel Strike": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        9,
+        9
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Power Through": {
+      "aoe": false,
+      "block": [
+        15,
+        20
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Pummel": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        8,
+        10
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Purity": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Rage": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Rampage": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        8,
+        8
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Reaper": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Reckless Charge": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        7,
+        10
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Regret": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Rupture": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Sadistic Nature": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "POWER"
+    },
+    "Searing Blow": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        12,
+        12
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Second Wind": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Secret Technique": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Secret Weapon": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Seeing Red": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Sentinel": {
+      "aoe": false,
+      "block": [
+        5,
+        8
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Sever Soul": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        16,
+        22
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Shame": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
+    "Shockwave": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Shrug It Off": {
+      "aoe": false,
+      "block": [
+        8,
+        8
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Slimed": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "STATUS"
+    },
+    "Spot Weakness": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Strike_R": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        6,
+        6
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Swift Strike": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        7,
+        10
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Sword Boomerang": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        9,
+        12
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "The Bomb": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Thinking Ahead": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Thunderclap": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        4,
+        7
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Transmutation": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Trip": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "True Grit": {
+      "aoe": false,
+      "block": [
+        7,
+        9
+      ],
+      "cost": 1,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Twin Strike": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        10,
+        14
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Uppercut": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 2,
+      "damage": [
+        13,
+        13
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Violence": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Void": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "STATUS"
+    },
+    "Warcry": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 0,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "SKILL"
+    },
+    "Whirlwind": {
+      "aoe": true,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -1,
+      "damage": [
+        5,
+        8
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Wild Strike": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": 1,
+      "damage": [
+        12,
+        17
+      ],
+      "damage_from_block": false,
+      "type": "ATTACK"
+    },
+    "Wound": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "STATUS"
+    },
+    "Writhe": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    }
+  }
+}
