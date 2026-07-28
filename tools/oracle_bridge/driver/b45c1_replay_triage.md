@@ -2,6 +2,18 @@
 
 Discharges the ledger's **"STS00042 replay stop at seq 32 — untriaged"** row.
 
+> **SUPERSEDED IN PART — 2026-07-28.** Everything below is the read-out of a
+> real `--replay` pass and is kept as written; it is history, not a live claim.
+> But the cause it names for **STS00042 and STS00043** — the deferred
+> `energyMaster` `+1` — **has since landed** (`energy_master`, derived at the
+> recharge line in `action_queue.cpp`; the obligation row quoted in §2 is
+> discharged, and the registry text quoted there was rewritten in the same
+> change, so do not quote it from here). Those two runs must be **re-run**
+> before anything is concluded from their rows: the class-(c) stops should
+> reclassify, and whatever a re-run shows is a new finding rather than a
+> confirmation of this one. The class-(c) boss-`onEquip` stops for STS00045/46
+> (Empty Cage) are unaffected and still open.
+
 The six-run frontier table in the ledger covers only the SECOND b45 campaign
 (`b45_rewards_oracle2_…`, STS00047-52). This is the same read-out for the
 FIRST, `b45_rewards_oracle_20260727T204809Z_claude01` (STS00042-46), which had
