@@ -68,7 +68,6 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
-| STS00048 stalls in `EVENT_DIALOG` on floor 2 while the capture fights on floor 3 | the STS00048 end-of-turn-curse fix (see [Landed non-task work](#landed-non-task-work)) | UNASSIGNED — next run-layer / event-exit owner | Newly **exposed**, not newly caused: with floor 1 zero-diff, `--replay` of STS00048 now reaches seq 29 and reports `floor: 3 -> 2` with `sim_phase=EVENT_DIALOG` for every record from there on. The capture leaves the floor-2 event through `EVENT choose 0` (seq 27) then `MAP choose 0` (seq 28); the sim's `EVENT_DIALOG` never ends, so it never advances the floor. Nothing before seq 29 differs, so the state feeding it is sound and the gap is the event exit / map-advance mapping alone. Reproducer: `tools/oracle_bridge/replay --replay --verbose` on run STS00048 of the b45_rewards_oracle2 campaign. STS00051's identically-shaped seq 28 `floor: 3 -> 2` predates this and is very likely the same defect |
 | Stolen-gold clamp vs in-combat gold ordering | B3.11 | UNASSIGNED — B5.2 verification, or whoever models mid-combat gold timing | `fold_back_combat` settles the Hand of Greed accumulator through `gain_gold` before `settle_stolen_gold` runs, so a Looter's min(total, purse) clamp reads a purse that already contains greed gold. Diverges from the game only when the steal preceded the greed kill AND the purse was below the accrued steal (a Looter and a Hand of Greed kill in one combat, purse ≤ the steal amount); documented at the `settle_stolen_gold` site. Deliberately chosen to preserve exactly-once settlement on every combat-end path |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | **UNBLOCKED — UNASSIGNED**; the shared surface is live, only the relic body is open | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. The explicit-confirm `ActionMask`/translator/fuzz machinery it was waiting on **landed with B3.10c** (`ActionVerb::CONFIRM`, `kChoiceOptionalBit`, the hand-suffix selection model), and B3.10c deliberately did not expand into this relic. What remains is this body alone: a new discard-kind optional `CHOOSE_CARD` queued from the relic's turn-start hook, plus the draw-back of exactly the number discarded (the count is the relic's, not the choice's, so it must be read at confirm). Whoever re-owns it should re-read `GamblingChip.java` in full rather than infer from this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
@@ -85,9 +84,9 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
-| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed by B4.5, still open | **PARTLY COVERED, not discharged.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does two thirds of it: its default mode genuinely seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. What is missing is the general case — resuming from an ARBITRARY mid-run translated state without re-driving the prefix (the run layer has no "restore a `RunController` from a `RunState`" door: map cursors, encounter lists and their cursors are transient and would have to be re-derived), and coverage of the rooms `--replay` still stops at. **Narrowed again by the B4.14 + B4.8 read-outs:** the shop screen and the grid `cancel` now have working command mappings — `--shop` drives a whole merchant visit including the purge grid, and `--neow` buffers a grid's picks until the capture confirms them, which is what `cancel` needed — but both live in the dedicated spot-diff modes, not in `--replay`, so folding them back in is part of the general case. The **out-of-combat potion discard** is the one command with no run-layer analogue at all, and it is now the sole reason two shop visits and one Neow seed stop early |
+| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed by B4.5, still open | **PARTLY COVERED, not discharged.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does two thirds of it: its default mode genuinely seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. What is missing is the general case — resuming from an ARBITRARY mid-run translated state without re-driving the prefix (the run layer has no "restore a `RunController` from a `RunState`" door: map cursors, encounter lists and their cursors are transient and would have to be re-derived), and coverage of the rooms `--replay` still stops at. **Narrowed again by the B4.14 + B4.8 read-outs:** the shop screen and the grid `cancel` now have working command mappings — `--shop` drives a whole merchant visit including the purge grid, and `--neow` buffers a grid's picks until the capture confirms them, which is what `cancel` needed — but both live in the dedicated spot-diff modes, not in `--replay`, so folding them back in is part of the general case. The **out-of-combat potion discard** is the one command with no run-layer analogue at all, and it is now the sole reason two shop visits and one Neow seed stop early. **Narrowed again by the event-exit mapping fix** (see [Landed non-task work](#landed-non-task-work)), which closed a WRONG entry rather than adding a mode: an event's terminal one-button `[Leave]` page was read as Neow framing and no-op'd whenever the phase was not `NEOW`, so `--replay` never pressed an ordinary event's own exit and parked in `EVENT_DIALOG` for the rest of the run. The entry is now keyed off the simulator's phase; the mapping table moved to `tools/oracle_bridge/replay/src/command_map.hpp` and has its own gtest (`replay_command_map_test`), so the next wrong entry does not need a campaign artifact to see; and an EVENT command with real choices on it that arrives while the sim is in no event now STOPS instead of being handed to whatever phase is live. What is still missing in `--replay` is unchanged: the general mid-run resume, the grid buffering `--neow`/`--shop` already have, and the potion discard |
 | Centennial Puzzle carries a persistent `counter` the game does not | B4.14's oracle read-out | UNASSIGNED — relic-layer owner | `relics.yaml` gives the row `initial_counter: 0` and `relic_native_centennial_puzzle` uses `slot.counter` as its once-per-combat flag. The game uses a **static `boolean usedThisCombat`** and never touches `this.counter` (`CentennialPuzzle.java:21, 33-49`), so `AbstractRelic`'s −1 default stands and CommunicationMod reports −1. Caught on STS00068 of `b47_treasure_oracle_20260727T204809Z_claude01`, whose Neow common-relic blessing handed one over: `relics[1].counter: -1 -> 0`, the only field that differs, and it is not Neow's — any acquisition from any source shows it. Two things to fix together, because the first alone breaks the second: `initial_counter` must be −1 so `RunState` matches a capture, and the once-per-combat flag then needs somewhere else to live. Note the flag is `atPreBattle`-reset in the game and the sim has no reset at all, so a second combat is a second question |
-| `kEventTransformRedPool` is emitted in registry-iteration order | B4.14's oracle read-out | B4.10 / B4.11 (event grids) | Same root cause as the `transform_card` fix B4.14 landed: `event_grid_transform_card` reaches the same `returnTrulyRandomCardFromAvailable` list (`AbstractDungeon.java:1016-1045`), which is `commonCardPool` in plain library order followed by `srcUncommonCardPool` and `srcRareCardPool` REVERSED. The generated pool is neither — `emit/events.py` builds it by walking `cards.yaml` rows ("Registry iteration order is stable"), which is the same kind of order B4.5 replaced everywhere else. No capture in hand exercises a Living Wall transform, so this is stated from the Java, not measured; the fix belongs with whoever can produce or find that capture |
+| `kEventTransformRedPool` is emitted in registry-iteration order | B4.14's oracle read-out | B4.10 / B4.11 (event grids) | Same root cause as the `transform_card` fix B4.14 landed: `event_grid_transform_card` reaches the same `returnTrulyRandomCardFromAvailable` list (`AbstractDungeon.java:1016-1045`), which is `commonCardPool` in plain library order followed by `srcUncommonCardPool` and `srcRareCardPool` REVERSED. The generated pool is neither — `emit/events.py` builds it by walking `cards.yaml` rows ("Registry iteration order is stable"), which is the same kind of order B4.5 replaced everywhere else. **NO LONGER "stated from the Java, not measured" — the capture the row asked for was already in hand.** The event-exit mapping fix (see [Landed non-task work](#landed-non-task-work)) let `--replay` run past floor 2 of **STS00051** (`b45_rewards_oracle2_20260727T204809Z_claude01`), whose floor-2 Living Wall takes the **Change** option and transforms the grid's index 5. Every stream and both pity counters match at that record and stay matched to the run's terminal, so the `miscRng` draw and its `count` are right and the POOL ORDER alone is wrong: the game produced **Havoc**, `kEventTransformRedPool` produced **Iron Wave** (`master_deck[11].card_id: Havoc(8) -> Iron Wave(18)`, the single differing field for 20 consecutive records). It is the whole remaining divergence of that run — the floor-4 `hp` gap from seq 41 is one downstream play of the wrong card, worth exactly Iron Wave's 5 Block. Whoever fixes the emitted order has a ready-made end-to-end check: STS00051 replays CLEAN to its terminal iff the pool order is right |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
@@ -329,6 +328,91 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
 
+- **Replay harness: an event's own `[Leave]` is not Neow framing** `[x]` —
+  discharges the **STS00048 stalls in `EVENT_DIALOG` on floor 2** obligation row
+  the end-of-turn-curse fix opened, and closes STS00051's identically-shaped
+  stall with it. **The engine was innocent; the harness was wrong.** Both event
+  bodies exit correctly on their own terms — `fountain_choose` /
+  `living_wall_choose` return `FINISHED` from their result screen and
+  `run_advance.cpp`'s `EVENT_DIALOG` case clears `rc.event` and hands back to
+  `MAP_CHOICE` — and the sim never got the chance to run either, because
+  `--replay` never delivered the press.
+  - **What the capture actually shows.** STS00048's floor-2 event is **The
+    Divine Fountain** (`Fountain of Cleansing`): `EVENT choose 1` (Leave) at seq
+    24, then a one-button `[Leave]` page — `EVENT choose 0` (25), `MAP return`
+    (26), `EVENT choose 0` (27), `MAP choose 0` (28). STS00051's floor-2 event is
+    **Living Wall**: `choose 1` (Change), the transform grid, then the same
+    one-button page pressed **three** times with a `MAP return` between each.
+    Every field of the captured `RunState` is identical across those repeats.
+  - **Why the repeats are free, from the Java.** `AbstractEvent.openMap`
+    (`AbstractEvent.java:120-123`) does two things and no more: it sets the
+    CURRENT ROOM's phase to `COMPLETE` and calls `dungeonMapScreen.open(false)`.
+    The `false` is load-bearing — `doScrollingAnimation == false` sets
+    `dismissable = true` (`DungeonMapScreen.java:287`), and
+    `DungeonMapScreen.close()` (`:316-320`) hides the map and touches nothing
+    else. The event object, its room and its dialog panel all stay mounted, so a
+    map `return` drops straight back onto the same page and the driver's
+    random-legal policy presses `[Leave]` again. Each repeat re-enters
+    `buttonEffect` at the unchanged `screenNum` and calls `openMap` again
+    (`FountainOfCurseRemoval.java:73-79`, `LivingWall.java:116-119`), so every
+    press after the first is state-free. It is the **same** bounce the harness
+    already documents for a reward screen's `proceed`.
+  - **The defect.** The `EVENT` mapping recognised a single-option `[Leave]`
+    page by its LABEL and treated it as Neow's closing screen: `CHOOSE(proceed)`
+    when the phase was `NEOW`, and **a plain no-op otherwise**. For every
+    ordinary event that no-op swallowed the real exit, so the simulator sat in
+    `EVENT_DIALOG` from floor 2 to the end of the artifact while the capture
+    walked on — `floor: 3 -> 2` on every later record, which reads exactly like
+    an engine divergence and is not one.
+  - **The fix.** The discriminator is the **simulator's phase**, not the button's
+    label: while the run layer is still in `EVENT_DIALOG` the press is the
+    event's own proceed and is applied; once it has left for `MAP_CHOICE`, every
+    later press is the UI bounce and is elided, exactly as the reward screen's
+    `proceed` is. Neow keeps its two framing screens (`[Talk]`, and `[Leave]`
+    → `CHOOSE(kChooseProceed)` while in `NEOW`) because the run layer models its
+    blessing menu as its own phase and neither framing page as anything. The
+    elision is deliberately narrow — a **one-button** page — and an EVENT
+    command with real choices on it arriving while the sim is in no event now
+    STOPS with a reason instead of being handed to whatever phase is live; in
+    `MAP_CHOICE` that `CHOOSE` would have picked a map node and moved the run.
+  - **The table is now testable.** A wrong entry in a screen-relative command
+    mapping is indistinguishable from an engine divergence when a whole artifact
+    is replayed, and until now the only way to see one was to re-drive a
+    campaign by hand. `map_command` and its `ScreenInfo` moved out of the tool's
+    `main.cpp` into `tools/oracle_bridge/replay/src/command_map.hpp`, published
+    by the replay directory as the `replay_command_map` INTERFACE target. It
+    carries no JSON dependency by design — the JSON pass that FILLS a
+    `ScreenInfo` stayed behind — so the new `replay_command_map_test` needs no
+    artifact and no data root and runs in every preset.
+  - **Oracle proof**, `replay_run_diff --replay` over all six b45 reward runs,
+    before and after. **STS00048: `PART` at seq 29 → `CLEAN`**, 47 records
+    compared, zero diffs, replay reaches the run's terminal — the run is now
+    end-to-end clean. **STS00051: `PART` at seq 28 → the run's terminal**, 69
+    records compared, with the whole remaining divergence a **single** field
+    (`master_deck[11].card_id: Havoc -> Iron Wave`) plus its one downstream `hp`
+    consequence at floor 4. That is the already-filed
+    `kEventTransformRedPool`-order obligation and nothing else: every stream and
+    both pity counters match at the transform and stay matched to the terminal,
+    so the `miscRng` draw is right and only the pool's ORDER is wrong. **No new
+    real divergence appeared in any run**, and the row has been narrowed from
+    "stated from the Java, not measured" to measured, with STS00051 as its
+    end-to-end check. The other four are **unmoved, byte for byte**, and all
+    four stops are the known B1.6 harness gaps: STS00047 at seq 3 (grid
+    `cancel`), STS00049 clean to its seq 46 out-of-combat `potion discard`,
+    STS00050 `CLEAN` end to end, STS00052 at seq 2 (a Neow grid index with no
+    legal master-deck slot, because `--replay` does not open that grid).
+  - Named regressions, in the new `replay_command_map_test`:
+    `ReplayCommandMap.AnEventsFinalLeavePageIsTheRealExitWhileTheDialogIsLive`
+    and `ReplayCommandMap.AMultiOptionEventPageOutsideAnEventStopsInsteadOfGuessing`
+    were both RED before the fix. Seven more pin what must not move with it:
+    `ALeavePressedAfterTheSimAlreadyLeftTheEventIsAUiBounce`,
+    `NeowsOpeningTalkPageHasNoRunLayerEffect`,
+    `NeowsClosingLeaveIsTheRunLayersProceed`,
+    `NeowsBlessingMenuChoiceIsIndexedStraightThrough`,
+    `NeowsLeaveRepeatedAfterItsMapIsUpIsAUiBounce`,
+    `AMapReturnIsAPureUiDismissal` and
+    `ARewardScreenProceedIsDeferredToTheMapChoiceThatMoves`.
+
 - **Combat: end-of-turn curses play themselves out of the hand** `[x]` —
   discharges the **Two-slime floor-1 card-flow divergence (STS00048)**
   obligation row. One defect, one capture: run **STS00048** of
@@ -400,7 +484,9 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
     STS00051's frontier stays at seq 28 floor 3, STS00052 stops at seq 2 on a
     grid index. STS00048's **new** frontier is a different gap and is filed as
     its own obligation row: the sim is still parked in `EVENT_DIALOG` on floor 2
-    when the capture is fighting on floor 3.
+    when the capture is fighting on floor 3. **That row is now discharged** by
+    the event-exit mapping fix directly above, which found the cause on the
+    harness side, not in the run layer.
   - Named regressions, in `status_curse_test`:
     `StatusCurses.EndOfTurnCurseIsDiscardedBeforeTheGetTopCardHandSweep` (the
     captured `[Shame, AscendersBane, Strike]` hand, RED before the fix),

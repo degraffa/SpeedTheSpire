@@ -408,6 +408,15 @@ add_test(
 set_tests_properties(oracle_campaign_python_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
 
+# The replay harness's screen-relative command mapping
+# (tools/oracle_bridge/replay/src/command_map.hpp). A wrong entry in that table
+# is indistinguishable from an engine divergence when a whole artifact is
+# replayed -- the sim quietly does the wrong thing and every later record
+# disagrees -- so the table gets unit tests of its own. `replay_command_map` is
+# the INTERFACE target the replay directory publishes for exactly this; it
+# carries no JSON dependency, so no artifact and no data root is involved.
+sts_add_test(replay_command_map_test LIBS sts_engine replay_command_map)
+
 # B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
 # corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign
 # b13_on20b). Header-only engine code, so it links sts_engine like the other
