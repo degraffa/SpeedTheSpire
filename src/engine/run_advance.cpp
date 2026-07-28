@@ -569,6 +569,25 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     }
     s.relic_count = rc.run.relic_count;
 
+    // (8b) applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of
+    //      preBattlePrep (:1607) -- the same call combat_begin (advance.cpp)
+    //      makes, at the same point in the sequence. The slot is forced from
+    //      both sides: player_relics reads the mirror, so it must follow (8);
+    //      atPreBattle must precede the opening DrawCardAction, so it must
+    //      precede (9). Nothing is drained here -- what this queues sits at the
+    //      front of the queue begin_first_turn's own pump() drains.
+    //
+    //      This is the call that gives a RUN-layer combat its Snecko Eye
+    //      Confusion, and it is RNG-VISIBLE going forward: ConfusionPower
+    //      .onCardDraw (ConfusionPower.java:38-48) spends one cardRandomRng
+    //      random(3) per drawn card with cost >= 0, from the opening hand on.
+    //      That is the point of the hook -- the first hand is exactly what
+    //      atPreBattle exists to catch -- not a side effect to be avoided.
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_at_pre_battle(s, rv.relics, rv.count);
+    }
+
     // (9) The game's turn-1 block, into WAITING_ON_USER. Literally the same
     //     function combat_begin (advance.cpp) calls, so the two combat-construction
     //     paths cannot disagree about how a combat starts; the derivation of why

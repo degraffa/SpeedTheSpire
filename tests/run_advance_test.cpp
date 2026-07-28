@@ -711,6 +711,90 @@ TEST(RunCombatBattleStart, NoRegisteredRelicBindsThePreDrawHook) {
 }
 
 // =============================================================================
+// atPreBattle relics, through the REAL combat-entry path
+// =============================================================================
+//
+// applyPreCombatLogic (AbstractPlayer.java:1885-1890) is the LAST line of
+// preBattlePrep (:1607) and therefore fires BEFORE AbstractRoom's turn-1 block
+// queues the opening DrawCardAction (:242). enter_combat carries the call at its
+// step (8b), between the relic-mirror copy and begin_first_turn.
+//
+// Same argument as the atBattleStart section above: the dispatcher had direct
+// call coverage in relic_boss_special_test and passed all of it while the RUN
+// entry point never called it, so only entry through enter_combat can tell
+// "wired" from "unreachable".
+
+// Snecko Eye is the only registered relic that binds the hook. Its Confusion
+// must be on the player before the opening hand is drawn -- that is the entire
+// difference between atPreBattle and atBattleStart -- so the opening hand is
+// cost-rolled, and each rolled card costs one cardRandomRng draw.
+TEST(RunCombatPreBattle, SneckoEyeConfusesTheRunLayerOpeningHand) {
+    RunController base = enter_jaw_worm_holding({});
+    ASSERT_EQ(base.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(base.combat.hand_count, 5);
+    EXPECT_EQ(base.combat.card_random_rng.counter, 0)
+        << "no relic -- nothing should touch cardRandomRng at combat start";
+
+    RunController rc = enter_jaw_worm_holding({RelicId::SNECKO_EYE});
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+
+    // The power itself reached the live combat.
+    const PowerSlot* conf = player_power(rc.combat, PowerId::CONFUSION);
+    ASSERT_NE(conf, nullptr) << "Confusion never reached the run-layer combat";
+
+    // masterHandSize += 2 lands on the opening hand as well.
+    ASSERT_EQ(rc.combat.hand_count, 7);
+
+    // Exactly one cardRandomRng draw per drawn card with cost >= 0 -- i.e. every
+    // drawn card that is neither X-cost nor unplayable (Ascender's Bane at A20 is
+    // the one that can qualify out). The count is derived from the hand that
+    // actually landed, not assumed.
+    int32_t expect_rolls = 0;
+    for (uint8_t i = 0; i < rc.combat.hand_count; ++i) {
+        const CardInstance& c = rc.combat.card_pool[rc.combat.hand[i]];
+        if (!has_card_flag(c.flags, CardFlag::XCOST) &&
+            !has_card_flag(c.flags, CardFlag::UNPLAYABLE)) {
+            ++expect_rolls;
+            EXPECT_LE(c.cost_now, 3) << "hand slot " << static_cast<int>(i)
+                                     << " escaped the random(3) roll";
+        }
+    }
+    EXPECT_GT(expect_rolls, 0) << "an all-unplayable opening hand proves nothing";
+    EXPECT_EQ(rc.combat.card_random_rng.counter, expect_rolls);
+}
+
+// The ORDER pin, and the reason the call site is where it is. atPreBattle sits
+// between the relic-mirror copy (it reads the mirror) and begin_first_turn (the
+// opening draw must see the power). Moving it after begin_first_turn would leave
+// the opening hand un-rolled and spend zero cardRandomRng draws before the
+// player's first action, so the first hand would escape -- exactly the bug
+// atPreBattle exists to prevent.
+TEST(RunCombatPreBattle, TheOpeningHandIsRolledNotJustLaterDraws) {
+    RunController base = enter_jaw_worm_holding({});
+    RunController rc = enter_jaw_worm_holding({RelicId::SNECKO_EYE});
+    ASSERT_EQ(base.combat.hand_count, 5);
+    ASSERT_EQ(rc.combat.hand_count, 7);
+
+    // Same shuffle, same draw order: Snecko Eye consumes no shuffleRng and the
+    // first five slots hold the same card instances as the base run.
+    for (uint8_t i = 0; i < 5; ++i) {
+        ASSERT_EQ(rc.combat.hand[i], base.combat.hand[i])
+            << "draw order moved -- the comparison below would be meaningless";
+    }
+    // At least one of them has a cost the base run does not have. With a 4-way
+    // roll over >= 5 playable cards this is not a coin flip, and the exact
+    // per-card values are pinned by the unit tests over ConfusionPower.
+    bool any_changed = false;
+    for (uint8_t i = 0; i < 5; ++i) {
+        any_changed = any_changed ||
+                      rc.combat.card_pool[rc.combat.hand[i]].cost_now !=
+                          base.combat.card_pool[base.combat.hand[i]].cost_now;
+    }
+    EXPECT_TRUE(any_changed) << "the opening hand escaped Confusion";
+}
+
+// =============================================================================
 // wasHPLost relics across a run: Centennial Puzzle's per-combat re-arm
 // =============================================================================
 //

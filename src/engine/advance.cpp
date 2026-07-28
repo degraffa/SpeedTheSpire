@@ -153,8 +153,9 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //
     //    A no-op (and byte-identical) without a responding relic: the combat
     //    relic mirror is empty for this entry point, so the 20 fixtures are
-    //    unchanged. The RUN entry point (run_advance.cpp enter_combat) does not
-    //    yet carry this call -- see the deferral recorded with the batch. --
+    //    unchanged. The RUN entry point (run_advance.cpp enter_combat) carries
+    //    the identical call at its step (8b), between the mirror copy and
+    //    begin_first_turn, so the two combat-construction paths cannot drift. --
     {
         const RelicView rv = player_relics(state);
         dispatch_relics_at_pre_battle(state, rv.relics, rv.count);
