@@ -65,6 +65,23 @@ bool HandContains(const CombatState& s, CardId id) {
     return false;
 }
 
+// Drain the end-of-turn sentinel and everything it queues, then STOP -- before
+// the pump reaches the monster turn and the next turn's draw, which would
+// reshuffle the very discard pile these tests are reading.
+void PumpEndOfTurnStageOnly(CombatState& s) {
+    for (int guard = 0; guard < 256; ++guard) {
+        if (s.action_count == 0 && s.pre_turn_count == 0 &&
+            s.card_queue_count == 0) {
+            return;
+        }
+        if (pump_step(s, default_monster_turn).outcome ==
+            PumpOutcome::WAITING_ON_USER) {
+            return;
+        }
+    }
+    ADD_FAILURE() << "end-of-turn stage did not quiesce";
+}
+
 TEST(StatusCurseRegistry, EveryInScopeEntryHasItsExactIdentityAndMetadata) {
     struct Expected {
         CardId id;
@@ -147,24 +164,34 @@ TEST(StatusCurses, VoidLosesOneEnergyWhenDrawn) {
 }
 
 TEST(StatusCurses, EndTurnEffectsPrecedeEtherealAndHandDiscard) {
-    // Directed script: Regret snapshots all three cards; Burn uses block; only
-    // then does Dazed exhaust and the two remaining cards discard.
+    // Directed script. Each end-of-turn card plays ITSELF (the Java re-queues it
+    // into the cardQueue with dontTriggerOnUseCard), so the resolution order is
+    // [Regret's HP loss, Regret filed, Burn's damage, Burn filed] and only then
+    // the DiscardAtEndOfTurnAction sweep, which exhausts Dazed.
     CombatState s = MakeState({CardId::REGRET, CardId::BURN, CardId::DAZED});
     s.player_block = 1;
     add_card_to_queue_bottom(s, make_end_turn_sentinel());
 
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::END_TURN_SENTINEL);
+    // The sentinel's dispatch already pulled Regret and Burn out of the hand
+    // (AbstractPlayer.useCard:1373); Dazed is all that is left for the sweep.
+    EXPECT_EQ(s.hand_count, 1);
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
-    EXPECT_EQ(s.player_hp, 97);  // Regret: hand size == 3 before discard.
-    EXPECT_EQ(s.hand_count, 3);
+    EXPECT_EQ(s.player_hp, 97);  // Regret: hand size 3, LOCKED at trigger time.
+    EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
+    ASSERT_EQ(s.discard_count, 1);  // Regret's own UseCardAction files it first.
+    EXPECT_EQ(s.card_pool[s.discard[0]].card_id, static_cast<uint16_t>(CardId::REGRET));
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
     EXPECT_EQ(s.player_hp, 96);  // Burn 2 THORNS through one block.
-    EXPECT_EQ(s.hand_count, 3);
+    EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
+    ASSERT_EQ(s.discard_count, 2);
+    EXPECT_EQ(s.card_pool[s.discard[1]].card_id, static_cast<uint16_t>(CardId::BURN));
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
     EXPECT_EQ(s.hand_count, 0);
     ASSERT_EQ(s.exhaust_count, 1);
     EXPECT_EQ(s.card_pool[s.exhaust[0]].card_id, static_cast<uint16_t>(CardId::DAZED));
     EXPECT_EQ(s.discard_count, 2);
+    EXPECT_EQ(s.limbo_count, 0);
 }
 
 TEST(StatusCurses, DecayDoubtAndShameRunAtEndOfTurn) {
@@ -174,14 +201,71 @@ TEST(StatusCurses, DecayDoubtAndShameRunAtEndOfTurn) {
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::END_TURN_SENTINEL);
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
     EXPECT_EQ(s.player_hp, 99);  // Decay 2 THORNS through one block.
+    EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);  // file Decay
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
     const PowerSlot* weak = FindPlayerPower(s, PowerId::WEAK);
     ASSERT_NE(weak, nullptr);
     EXPECT_EQ(weak->amount, 1);
+    EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);  // file Doubt
     EXPECT_EQ(pump_step(s, default_monster_turn).outcome, PumpOutcome::RAN_ACTION);
     const PowerSlot* frail = FindPlayerPower(s, PowerId::FRAIL);
     ASSERT_NE(frail, nullptr);
     EXPECT_EQ(frail->amount, 1);
+}
+
+// REGRESSION (oracle STS00048, floor 1: Spike Slime S + Acid Slime M). The
+// end-of-turn curse is PLAYED out of the hand, so it reaches the discard pile
+// BEFORE DiscardAtEndOfTurnAction files the rest of the hand from the top down.
+// The sim used to leave it in the hand, which put it LAST instead of first; the
+// resulting discard order is the input to the next reshuffle, so one
+// transposition there re-deals the whole rest of the fight.
+TEST(StatusCurses, EndOfTurnCurseIsDiscardedBeforeTheGetTopCardHandSweep) {
+    // Hand order matches the capture at seq 9: Shame, an Ethereal curse, Strike.
+    CombatState s = MakeState({CardId::SHAME, CardId::ASCENDERS_BANE, CardId::STRIKE});
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    PumpEndOfTurnStageOnly(s);
+
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.limbo_count, 0);
+    // Shame first (its own UseCardAction), then the sweep's getTopCard order --
+    // Ascender's Bane exhausted, so Strike is the only card left to file.
+    ASSERT_EQ(s.discard_count, 2);
+    EXPECT_EQ(s.card_pool[s.discard[0]].card_id, static_cast<uint16_t>(CardId::SHAME));
+    EXPECT_EQ(s.card_pool[s.discard[1]].card_id, static_cast<uint16_t>(CardId::STRIKE));
+    ASSERT_EQ(s.exhaust_count, 1);
+    EXPECT_EQ(s.card_pool[s.exhaust[0]].card_id,
+              static_cast<uint16_t>(CardId::ASCENDERS_BANE));
+    // The play is a dontTriggerOnUseCard autoplay: it does NOT count as a card
+    // played this turn (GameActionManager.java:220-249 skips the increment).
+    EXPECT_EQ(s.cards_played_this_turn, 0);
+    const PowerSlot* frail = FindPlayerPower(s, PowerId::FRAIL);
+    ASSERT_NE(frail, nullptr);
+    EXPECT_EQ(frail->amount, 1);
+}
+
+// Two triggering cards resolve strictly serially -- card k is filed before card
+// k+1's own effect runs -- because the game only services the cardQueue with an
+// empty action queue (GameActionManager.getNextAction:185-194).
+TEST(StatusCurses, TwoEndOfTurnCursesFileInHandOrderAheadOfTheSweptHand) {
+    CombatState s = MakeState({CardId::DEFEND, CardId::SHAME, CardId::DOUBT});
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    PumpEndOfTurnStageOnly(s);
+
+    ASSERT_EQ(s.discard_count, 3);
+    EXPECT_EQ(s.card_pool[s.discard[0]].card_id, static_cast<uint16_t>(CardId::SHAME));
+    EXPECT_EQ(s.card_pool[s.discard[1]].card_id, static_cast<uint16_t>(CardId::DOUBT));
+    EXPECT_EQ(s.card_pool[s.discard[2]].card_id, static_cast<uint16_t>(CardId::DEFEND));
+}
+
+// Regret's magicNumber is locked at trigger time with the hand still whole
+// (Regret.java:35-39), NOT re-read when its LoseHPAction resolves -- by then the
+// autoplay has removed Regret and every other triggering curse from the hand.
+TEST(StatusCurses, RegretLocksTheHandSizeBeforeTheEndOfTurnCursesLeaveTheHand) {
+    CombatState s = MakeState({CardId::REGRET, CardId::SHAME, CardId::DEFEND,
+                               CardId::STRIKE});
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    PumpEndOfTurnStageOnly(s);
+    EXPECT_EQ(s.player_hp, 96);  // 4 cards in hand at the lock, not 2.
 }
 
 TEST(StatusCurses, FrailModifiesOnlyCardBlockAndExpiresAfterSkipFirst) {

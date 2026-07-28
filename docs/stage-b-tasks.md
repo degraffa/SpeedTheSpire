@@ -68,7 +68,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
-| Two-slime floor-1 card-flow divergence (STS00048) | oracle replay, combat pre-turn fix wave | UNASSIGNED — next combat-fidelity owner | `--replay` of run STS00048 (b45_rewards_oracle2 campaign) diverges at seq 14, floor 1 (Spike Slime S + Acid Slime M): the sim's Spike Slime (S) survives on 11 HP where the game's died, and `hand_count` reads 3 vs 4 — the Slimed-card flow of a two-slime fight diverges. Present identically before and after the pre-turn/duration fixes, so it is a third, distinct gap. Reproducer: the campaign artifact + `tools/oracle_bridge/replay --replay --combat` triage |
+| STS00048 stalls in `EVENT_DIALOG` on floor 2 while the capture fights on floor 3 | the STS00048 end-of-turn-curse fix (see [Landed non-task work](#landed-non-task-work)) | UNASSIGNED — next run-layer / event-exit owner | Newly **exposed**, not newly caused: with floor 1 zero-diff, `--replay` of STS00048 now reaches seq 29 and reports `floor: 3 -> 2` with `sim_phase=EVENT_DIALOG` for every record from there on. The capture leaves the floor-2 event through `EVENT choose 0` (seq 27) then `MAP choose 0` (seq 28); the sim's `EVENT_DIALOG` never ends, so it never advances the floor. Nothing before seq 29 differs, so the state feeding it is sound and the gap is the event exit / map-advance mapping alone. Reproducer: `tools/oracle_bridge/replay --replay --verbose` on run STS00048 of the b45_rewards_oracle2 campaign. STS00051's identically-shaped seq 28 `floor: 3 -> 2` predates this and is very likely the same defect |
 | Stolen-gold clamp vs in-combat gold ordering | B3.11 | UNASSIGNED — B5.2 verification, or whoever models mid-combat gold timing | `fold_back_combat` settles the Hand of Greed accumulator through `gain_gold` before `settle_stolen_gold` runs, so a Looter's min(total, purse) clamp reads a purse that already contains greed gold. Diverges from the game only when the steal preceded the greed kill AND the purse was below the accrued steal (a Looter and a Hand of Greed kill in one combat, purse ≤ the steal amount); documented at the `settle_stolen_gold` site. Deliberately chosen to preserve exactly-once settlement on every combat-end path |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | **UNBLOCKED — UNASSIGNED**; the shared surface is live, only the relic body is open | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. The explicit-confirm `ActionMask`/translator/fuzz machinery it was waiting on **landed with B3.10c** (`ActionVerb::CONFIRM`, `kChoiceOptionalBit`, the hand-suffix selection model), and B3.10c deliberately did not expand into this relic. What remains is this body alone: a new discard-kind optional `CHOOSE_CARD` queued from the relic's turn-start hook, plus the draw-back of exactly the number discarded (the count is the relic's, not the choice's, so it must be read at confirm). Whoever re-owns it should re-read `GamblingChip.java` in full rather than infer from this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
@@ -328,6 +328,89 @@ rows change Bottled Tornado's gate — so it is answered, not bumped. (For B3.10
 twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
+
+- **Combat: end-of-turn curses play themselves out of the hand** `[x]` —
+  discharges the **Two-slime floor-1 card-flow divergence (STS00048)**
+  obligation row. One defect, one capture: run **STS00048** of
+  `b45_rewards_oracle2_20260727T204809Z_claude01`, floor 1, Spike Slime (S) +
+  Acid Slime (M). `--replay` diverged at seq 14 with the sim's Spike Slime alive
+  on 11 HP where the game's had died. The slimes were innocent: **the Slimed
+  cards, the two-monster damage order, Acid Slime M's move table and its A18+
+  history rerolls all reproduce exactly.** What differed was a **Shame**.
+  - **`trigger: end_of_turn` was modelled as "queue this program", but the game
+    PLAYS the card.** `Shame.triggerOnEndOfTurnForPlayingCard`
+    (`Shame.java:37-42`) sets `dontTriggerOnUseCard` and appends the card to
+    `AbstractDungeon.actionManager.cardQueue`; the self-effect is not queued
+    there at all, it is the body of `Shame.use()` (`:29-33`), guarded by that
+    same flag. `GameActionManager.getNextAction` (`:194-300`) then dequeues and
+    plays it: `canUse` is bypassed by the `dontTriggerOnUseCard` clause (`:214`),
+    every `onPlayCard` / `onUseCard` / `triggerOnCardPlayed` fan-out and the
+    `cardsPlayedThisTurn` increment are skipped (`:220-249`,
+    `UseCardAction.java:41-64`), and `AbstractPlayer.useCard` (`:1358-1384`)
+    runs `use()`, queues `UseCardAction`, and **removes the card from the hand**
+    (`:1373`). So the curse reaches the **discard pile at the trigger stage** —
+    ahead of `DiscardAtEndOfTurnAction`, which is only queued later, by
+    `AbstractRoom.endTurn` (`:393-396`), once the card queue has drained. Burn,
+    Decay, Doubt and Regret are the same shape (`Burn.java:45-56`,
+    `Decay.java:41-52`, `Doubt.java:41-52`, `Regret.java:28-39`).
+  - **Why that is worth a whole fight.** The sim left the curse in the hand for
+    the end-of-turn sweep, which files from `getTopCard` down
+    (`DiscardAction.java:52-62`), so Shame landed **last** instead of **first**.
+    Capture evidence, turn 2 of the floor-1 fight: hand `[Shame, AscendersBane,
+    Strike]`, pre-existing discard 8 cards. The game's pre-reshuffle discard was
+    `[…8…, Shame, Strike, Slimed]`; the sim built `[…8…, Strike, Shame,
+    Slimed]`. `Collections.shuffle` is content-independent, so **one
+    transposition in equals one transposition out**: with the identical
+    `shuffleRng` seed (`9032670848953727813`, hand-checked against a Python
+    model of `java.util.Random` — `jdk_shuffle` is byte-exact) the game's turn-3
+    draw pile read `[…, Shame@2, …, Strike@6, …]` and the sim's the reverse. On
+    turn 4 the game's `play 3 0` hit a Strike and killed the 5-HP Spike Slime;
+    the sim's index 3 was the unplayable Shame, the action was a no-op, and
+    every later record drifted.
+  - **The fix, at the true root cause.** `dispatch_card_end_of_turn`
+    (`src/engine/card_play.cpp`) is now the game's two stages: pass 1 walks
+    `hand.group` and records which cards trigger (with the hand still whole),
+    pass 2 is the card-queue drain — per card, in hand order, queue its program,
+    move it hand → LIMBO, queue its `USE_CARD`. `op_use_card` then files it, so
+    the destination comes from the instance flags rather than an assumption
+    (none of the five is `exhaust`, so all five discard). Bottom-queueing both
+    halves per card reproduces the game's serialization exactly, because the
+    game only services its `cardQueue` with an **empty** action queue, which is
+    also why the four `addToTop` bodies are indistinguishable from `addToBot`
+    there.
+  - **Regret's hand-size read had to move with it.** `Regret.java:35-39` locks
+    `magicNumber = baseMagicNumber = player.hand.size()` **inside the trigger**,
+    before any card leaves the hand; the sim read `hand_count` when
+    `LOSE_HP_PER_HAND` executed, which was only equal by accident and is now
+    short by the number of curses that triggered. The opcode keeps its number
+    and its registry authoring; `dispatch_card_end_of_turn` stamps its `amount`
+    with the pass-1 hand size. Corrected at `interp.hpp`, `interp.cpp` and the
+    `registry/cards.yaml` Regret row, all three of which asserted the
+    execute-time read was equivalent.
+  - **No fixture impact.** All twenty committed combat fixtures replay
+    byte-identical: none holds a `trigger: end_of_turn` card in hand at a turn
+    boundary, so the generator was not re-run and no schema field moved.
+  - **Oracle proof.** `replay_run_diff --replay` over all six b45 reward runs,
+    before and after. **STS00048**: first divergence **seq 14, floor 1 → seq 29,
+    floor 3**; the whole floor-1 combat, its reward screens and its post-combat
+    `RunState` are now **zero-diff** (seq 5-28 all `ok`, 47 records compared,
+    replay reaches the run's terminal). The other five are **unmoved**, byte for
+    byte: STS00047 stops at seq 3 on the grid `cancel`, STS00049 is clean to its
+    seq 46 out-of-combat `potion discard`, STS00050 is CLEAN end to end,
+    STS00051's frontier stays at seq 28 floor 3, STS00052 stops at seq 2 on a
+    grid index. STS00048's **new** frontier is a different gap and is filed as
+    its own obligation row: the sim is still parked in `EVENT_DIALOG` on floor 2
+    when the capture is fighting on floor 3.
+  - Named regressions, in `status_curse_test`:
+    `StatusCurses.EndOfTurnCurseIsDiscardedBeforeTheGetTopCardHandSweep` (the
+    captured `[Shame, AscendersBane, Strike]` hand, RED before the fix),
+    `StatusCurses.TwoEndOfTurnCursesFileInHandOrderAheadOfTheSweptHand`, and
+    `StatusCurses.RegretLocksTheHandSizeBeforeTheEndOfTurnCursesLeaveTheHand`.
+    The two pre-existing directed scripts,
+    `StatusCurses.EndTurnEffectsPrecedeEtherealAndHandDiscard` and
+    `StatusCurses.DecayDoubtAndShameRunAtEndOfTurn`, were both RED on the old
+    behaviour and now pin the interleaved
+    `[effects of card k, card k filed, …, sweep]` order.
 
 - **Combat: pre-turn monster block clear + debuff duration ticks** `[x]` —
   discharges both combat-layer obligation rows B4.5's oracle replay left behind.

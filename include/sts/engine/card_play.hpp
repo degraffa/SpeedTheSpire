@@ -131,11 +131,15 @@ void normalize_terminal_card_queue(CombatState& state) noexcept;
 // fan-out (interp.cpp).
 void dispatch_card_on_draw(CombatState& state, uint8_t pool_index) noexcept;
 
-// The §5.4 hand-card end-of-turn stage: each hand card with trigger END_OF_TURN
-// (Burn/Decay/Doubt/Regret/Shame) queues its self-effect via
-// triggerOnEndOfTurnForPlayingCard. The DiscardAtEndOfTurnAction pile sweep is
-// queued separately after at-end-of-turn powers, so every trigger sees the full
-// hand before ethereal cards exhaust and normal cards discard.
+// The §5.4 hand-card end-of-turn stage. Each hand card with trigger END_OF_TURN
+// (Burn/Decay/Doubt/Regret/Shame) does what triggerOnEndOfTurnForPlayingCard
+// does in the game: it appends ITSELF to the cardQueue and is then PLAYED with
+// dontTriggerOnUseCard set. So the card runs its self-effect AND LEAVES THE
+// HAND, reaching the discard pile through its own UseCardAction -- before the
+// DiscardAtEndOfTurnAction sweep files the rest of the hand. Both stages still
+// precede the ethereal exhaust, and Regret's hand-size read is locked here,
+// with the hand still whole. See the body for the citations and for the
+// oracle divergence (STS00048 floor 1) that the pile ORDER produced.
 void dispatch_card_end_of_turn(CombatState& state) noexcept;
 
 }  // namespace sts::engine

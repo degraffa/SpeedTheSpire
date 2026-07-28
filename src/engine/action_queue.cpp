@@ -201,8 +201,11 @@ void call_end_of_turn_actions(CombatState& s) noexcept {
     }
     dispatch_at_end_of_turn_pre_card(s);   // Metallicize
     // Hand-card end-of-turn triggers (Burn/Decay/Doubt/Regret/Shame) queue here,
-    // before at-end-of-turn powers. The later DiscardAtEndOfTurnAction sweep is a
-    // separate bottom-queued action, so trigger effects see the full hand first.
+    // before at-end-of-turn powers. Each one PLAYS ITSELF out of the hand (the
+    // Java re-queues it into the cardQueue with dontTriggerOnUseCard), so it
+    // reaches the discard pile through its own USE_CARD -- ahead of the
+    // DiscardAtEndOfTurnAction sweep queued below, which is exactly the pile
+    // order the game produces. See dispatch_card_end_of_turn.
     dispatch_card_end_of_turn(s);
     // stance.onEndOfTurn -- stanceless stub.
     dispatch_at_end_of_turn(s);            // Combust
