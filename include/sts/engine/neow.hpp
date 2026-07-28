@@ -83,7 +83,11 @@ namespace sts::engine {
 // --- Option content -----------------------------------------------------------
 
 inline constexpr int kNeowOptionCount = 4;   // categories 0..3, one each
-inline constexpr int kNeowGridPickCap = 2;   // REMOVE_TWO / TRANSFORM_TWO_CARDS
+// The widest grid any NEOW-phase screen opens: Neow's own payouts need 2
+// (REMOVE_TWO / TRANSFORM_TWO_CARDS); Astrolabe's boss-swap onEquip grid needs
+// 3 (Astrolabe.java:48-54). NeowState is transient (re-derived, never saved),
+// so the widening costs no schema bump.
+inline constexpr int kNeowGridPickCap = 3;
 
 // GOLD_BONUS / LARGE_GOLD_BONUS (NeowReward.java:54-55).
 inline constexpr int kNeowGoldBonus = 100;
@@ -150,9 +154,17 @@ enum class NeowScreen : uint8_t {
 // over and what update() does with the selection.
 enum class NeowGridMode : uint8_t {
     NONE = 0,
-    REMOVE = 1,     // getPurgeableCards, masterDeck.removeCard
-    TRANSFORM = 2,  // getPurgeableCards, removeCard + transformCard
+    REMOVE = 1,     // getPurgeableCards, masterDeck.removeCard. Also Empty
+                    // Cage's onEquip grid at 2 picks (EmptyCage.java:55) --
+                    // same list, same removal, no RNG either way.
+    TRANSFORM = 2,  // getPurgeableCards, removeCard + transformCard(NeowEvent.rng)
     UPGRADE = 3,    // getUpgradableCards, card.upgrade()
+    TRANSFORM_UPGRADE = 4,  // Astrolabe's onEquip grid (Astrolabe.java:48-54):
+                    // getPurgeableCards, 3 picks, each removeCard +
+                    // transformCard(pick, autoUpgrade=true, MISC rng) applied
+                    // in click order when the set completes (giveCards,
+                    // :65-79). The only grid mode drawing miscRng, which is
+                    // why neow_grid_pick takes the stream.
 };
 
 inline constexpr uint8_t kNeowNoChoice = 0xFF;
@@ -168,7 +180,7 @@ struct NeowState {
     uint8_t screen;        // NeowScreen
     uint8_t chosen;        // activated option index, or kNeowNoChoice
     uint8_t grid_mode;     // NeowGridMode
-    uint8_t grid_needed;   // picks the open grid wants (1 or 2)
+    uint8_t grid_needed;   // picks the open grid wants (1..kNeowGridPickCap)
     uint8_t grid_done;     // picks made so far
     uint8_t pad;
 };
@@ -207,12 +219,17 @@ void neow_category_options(int cat, NeowDrawback drawback,
 // colorless payout shares the stream with a CURSE drawback.
 //
 // `misc_rng` is the floor-scoped miscRng that relic onEquip bodies draw (War
-// Paint / Whetstone are COMMON, so a common-relic blessing can reach them).
-// Payouts that need a screen leave `st.screen` at CARD_REWARD / GRID /
-// ITEM_REWARD and, for the card screens, write the offer into `rewards` as a
-// single already-open CARDS item; every other payout finishes at DONE.
+// Paint / Whetstone are COMMON, so a common-relic blessing can reach them);
+// `card_random_rng` is the floor-scoped cardRandomRng the BOSS swap's
+// on_equip_screen bodies can draw (Pandora's Box, PandorasBox.java:67 -- see
+// RelicEquipContext, relic_pools.hpp). Payouts that need a screen leave
+// `st.screen` at CARD_REWARD / GRID / ITEM_REWARD and, for the card screens,
+// write the offer into `rewards` as a single already-open CARDS item; every
+// other payout finishes at DONE. A boss-swap relic's onEquip may itself leave
+// GRID (Astrolabe / Empty Cage) or ITEM_REWARD (Tiny House / Calling Bell).
 void neow_activate(RunState& rs, NeowState& st, RewardScreen& rewards,
-                   RngStream& misc_rng, uint8_t index) noexcept;
+                   RngStream& misc_rng, RngStream& card_random_rng,
+                   uint8_t index) noexcept;
 
 // --- Sub-screens --------------------------------------------------------------
 
@@ -226,8 +243,11 @@ void neow_activate(RunState& rs, NeowState& st, RewardScreen& rewards,
 // Pick `deck_index`. The effect is applied only once the grid has all the picks
 // it asked for -- NeowReward.update reads `selectedCards` as a completed set --
 // after which the state moves to DONE. Returns false (no mutation) on an
-// illegal pick.
+// illegal pick. `misc_rng` feeds only the TRANSFORM_UPGRADE mode's transform
+// draws (Astrolabe passes AbstractDungeon.miscRng, Astrolabe.java:72); every
+// Neow-payout mode draws rs.neow_rng and ignores it.
 [[nodiscard]] bool neow_grid_pick(RunState& rs, NeowState& st,
+                                  RngStream& misc_rng,
                                   uint16_t deck_index) noexcept;
 
 // The card screen's Skip. Neow opens CardRewardScreen with a null RewardItem

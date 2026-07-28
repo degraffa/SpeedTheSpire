@@ -66,6 +66,18 @@ using RelicOnEquipSig = void(RunState& rs, RngStream& misc_rng,
                              RelicSlot& slot) noexcept;
 using RelicOnEquipFn = RelicOnEquipSig*;
 
+// The screen-opening sibling (`pickup: on_equip_screen`): an onEquip body that
+// needs more than (RunState, miscRng, slot). The extension shape -- why a
+// second surface rather than a widened RelicOnEquipSig, and how the fail-loud
+// refusal in the plain acquire_relic works -- is documented at RelicEquipContext
+// (include/sts/engine/relic_pools.hpp), which is the definition site of the
+// contract. A relic row lists on_equip OR on_equip_screen, never both (the
+// emitter rejects the pair).
+using RelicOnEquipScreenSig = void(RunState& rs, RngStream& misc_rng,
+                                   RelicSlot& slot,
+                                   RelicEquipContext& ctx) noexcept;
+using RelicOnEquipScreenFn = RelicOnEquipScreenSig*;
+
 // One relic's onObtainCard body. `card` is the master-deck row just appended
 // (mutable: the eggs upgrade it in place); `def` is its registry row, already
 // resolved by the caller so each handler does not repeat the lookup. Handlers run
@@ -81,7 +93,18 @@ using RelicOnObtainCardFn = RelicOnObtainCardSig*;
 // body, not to nullptr.
 [[nodiscard]] RelicCanSpawnFn relic_can_spawn_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept;
+[[nodiscard]] RelicOnEquipScreenFn relic_on_equip_screen_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnObtainCardFn relic_on_obtain_card_fn(RelicId id) noexcept;
+
+// Astrolabe's transform application, shared between the screenless <=3 branch
+// of its on_equip_screen body and the NeowGridMode::TRANSFORM_UPGRADE grid arm
+// (neow.cpp applies it when the 3-pick set completes). `deck_indices` are
+// master-deck rows in PICK order (Astrolabe.update feeds giveCards the grid's
+// selectedCards in click order; the screenless branch feeds master-deck order).
+// Defined in relic_pickup_boss.cpp with the full Java accounting.
+void relic_astrolabe_transform_cards(RunState& rs, RngStream& misc_rng,
+                                     const uint16_t* deck_indices,
+                                     int count) noexcept;
 
 // AbstractPlayer.gainGold (AbstractPlayer.java:719-737), the ONE door every
 // run-layer gold gain goes through:

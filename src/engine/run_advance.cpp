@@ -1457,8 +1457,11 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 switch (static_cast<NeowScreen>(n.screen)) {
                     case NeowScreen::BLESSING:
                         if (a0 < kNeowOptionCount) {
+                            // card_random_rng rides along for the boss swap's
+                            // on_equip_screen bodies (Pandora's Box draws it).
                             neow_activate(rc.run, n, rc.rewards,
-                                          rc.combat.misc_rng, a0);
+                                          rc.combat.misc_rng,
+                                          rc.combat.card_random_rng, a0);
                         }
                         break;
                     case NeowScreen::CARD_REWARD:
@@ -1473,7 +1476,9 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         }
                         break;
                     case NeowScreen::GRID:
-                        (void)neow_grid_pick(rc.run, n, a0);
+                        // misc_rng feeds only the TRANSFORM_UPGRADE (Astrolabe)
+                        // mode; Neow's own grid modes draw rs.neow_rng.
+                        (void)neow_grid_pick(rc.run, n, rc.combat.misc_rng, a0);
                         break;
                     case NeowScreen::ITEM_REWARD:
                         if (a0 == kChooseProceed) {

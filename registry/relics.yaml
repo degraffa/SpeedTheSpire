@@ -1315,8 +1315,8 @@
   tier: BOSS
   pool_order: 5
   pickup:
-    on_equip: true
-  provenance: "PandorasBox.onEquip (PandorasBox.java:47-70) -- remove every STARTER_STRIKE / STARTER_DEFEND card from the master deck, then draw that many AbstractDungeon.returnTrulyRandomCard() replacements. DEFERRED: returnTrulyRandomCard draws over the WHOLE colour pool (commons, uncommons AND rares) and needs the same generated all-red combat pool Dead Branch is waiting on (relics_rare.cpp), plus the CardTags.STARTER_* membership the registry does not carry. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+    on_equip_screen: true
+  provenance: "PandorasBox.onEquip (PandorasBox.java:54-77) -- iterator-remove every master-deck card tagged STARTER_STRIKE / STARTER_DEFEND (synchronous), then draw that many returnTrulyRandomCard().makeCopy() replacements (ONE cardRandomRng draw each) and present them on a choice-free confirmation grid (openConfirmationGrid, GridCardSelectScreen.java:467-480); update (:79-86) only closes it. returnTrulyRandomCard (AbstractDungeon.java:936-942) is the UNFILTERED src-pool concatenation -- no HEALING exclusion -- i.e. the 72-row kIroncladTrulyRandomPool, NOT the 70-row HEALING-filtered kIroncladCombatPool that returnTrulyRandomCardInCombat (:944-962) reads. The STARTER tags are set in the Strike_Red/Defend_Red CONSTRUCTORS (Strike_Red.java:36, Defend_Red.java:30) -- every instance of those two ids carries them, however obtained and at any upgrade -- and no other RED card sets either tag, so id-level membership is Java-exact. Deck order is REVERSE draw order: addToBottom PREPENDS into the display group (CardGroup.java:459-461) and the confirm iterates forward with each obtain appending. Native on_equip_screen body (relics/relic_pickup_boss.cpp); the run layer skips the zero-choice confirmation grid."
 
 - id: 118
   name: CURSED_KEY
@@ -1347,8 +1347,8 @@
   tier: BOSS
   pool_order: 9
   pickup:
-    on_equip: true
-  provenance: "TinyHouse.onEquip (TinyHouse.java:24-60) -- Collections.shuffle(upgradableCards, new Random(miscRng.randomLong())) then upgrade the first, increaseMaxHp(5, true), addGoldToRewards(50), addPotionToRewards(PotionHelper.getRandomPotion(miscRng)), and open the combat-reward screen. DEFERRED WHOLE, not in part: the body consumes miscRng TWICE (the shuffle seed and the potion identity roll, itself a rejection-sampling loop -- potions.cpp / trap 14), and both draws sit inside a reward-screen flow that does not exist until B4.5. A partial that took the upgrade and the max HP but skipped either draw would desync miscRng, which is worse than an inert relic. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+    on_equip_screen: true
+  provenance: "TinyHouse.onEquip (TinyHouse.java:36-63) -- in this order: Collections.shuffle(upgradableCards, new Random(miscRng.randomLong())), taken UNCONDITIONALLY even when nothing is upgradable (:43, the War Paint / Whetstone shape); upgrade the shuffled list's FIRST card only (:45-56 -- the get(1) in the else arm is only bottledCardUpgradeCheck, a description refresh); increaseMaxHp(5, true) which also heals 5 (AbstractCreature.java:199-209); addGoldToRewards(50); addPotionToRewards(PotionHelper.getRandomPotion(miscRng)) -- the FLAT one-draw getRandomPotion(rng) (PotionHelper.java:164-167), NOT returnRandomPotion's d100 tier gate + rejection loop; then combatRewardScreen.open(String) (CombatRewardScreen.java:241-262) whose setupItemReward (:72-99) appends one unconditional getRewardCards() row -- NeowRoom has an event with noCardsInRewards false (NeowRoom.java:16-20, AbstractEvent.java:63), so at Neow the cardRng + pity draws happen and the row is KEPT: that is the relic's '1 card'. miscRng twice, then a full cardRng card-reward assembly. Native on_equip_screen body (relics/relic_pickup_boss.cpp), presenting through the caller's reward screen."
 
 - id: 122
   name: SOZU
@@ -1373,8 +1373,8 @@
   tier: BOSS
   pool_order: 12
   pickup:
-    on_equip: true
-  provenance: "Astrolabe.onEquip (Astrolabe.java:29-51) -- open a 3-card grid select over the purgeable master deck, then transform + upgrade each pick (giveCards :57-71, AbstractDungeon.transformCard(card, true, miscRng)). DEFERRED: needs the run-layer grid-select screen and transformCard, neither of which exists; transformCard is miscRng-consuming, so a partial would desync. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+    on_equip_screen: true
+  provenance: "Astrolabe.onEquip (Astrolabe.java:35-55) -- build the purgeable master-deck copy (getPurgeableCards, CardGroup.java:978-985); empty -> nothing, no RNG (:42-45); <= 3 purgeable -> giveCards on ALL of them screenless, in master-deck order (:46-47); else open a 3-pick grid with no confirm and no cancel (open(...,3,...,false,false,false,false) -> the !anyNumber arm closes on the third click, GridCardSelectScreen.java:215-234). update (:57-63) then giveCards (:65-79): per pick, in click order, masterDeck.removeCard THEN AbstractDungeon.transformCard(card, /*autoUpgrade=*/true, miscRng) -- ONE miscRng draw each through the shared transform_card list (card_pools.hpp, the single authority) -- then transformedCard.canUpgrade() && upgrade() (AbstractDungeon.java:873-876, no RNG), with the obtain queued as a ShowCardAndObtainEffect whose deck append lands only when the ANIMATION completes (the b14_accept2 RACE shape; the sim appends synchronously in pick order). Native on_equip_screen body (relics/relic_pickup_boss.cpp) + the NeowGridMode::TRANSFORM_UPGRADE grid arm."
 
 - id: 125
   name: BLACK_STAR
@@ -1396,8 +1396,8 @@
   tier: BOSS
   pool_order: 15
   pickup:
-    on_equip: true
-  provenance: "EmptyCage.onEquip (EmptyCage.java:28-52) -- open a 2-card grid select over the purgeable master deck and remove both (deleteCards :62-75). DEFERRED: needs the run-layer grid-select screen. No RNG is consumed either way. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+    on_equip_screen: true
+  provenance: "EmptyCage.onEquip (EmptyCage.java:35-57) -- build the purgeable copy; empty -> nothing (:48-51); <= 2 purgeable -> deleteCards on all of them screenless (:52-53); else a 2-pick grid over getPurgeableCards with forPurge=true, which at numCards != 1 closes on the second click with NO confirmation popup (GridCardSelectScreen.java:189-209). deleteCards (:67-79) removes each pick from the master deck SYNCHRONOUSLY (unlike Astrolabe's animation-deferred obtains) and brackets the room phase INCOMPLETE -> COMPLETE (:43, :77 -- presentation-layer, not modelled). No RNG on any path. Native on_equip_screen body (relics/relic_pickup_boss.cpp) + the existing NeowGridMode::REMOVE grid arm at 2 picks."
 
 - id: 128
   name: RUNIC_PYRAMID
@@ -1412,8 +1412,8 @@
   tier: BOSS
   pool_order: 17
   pickup:
-    on_equip: true
-  provenance: "CallingBell.onEquip (CallingBell.java:27-36) -- add a Curse of the Bell to the master deck, then (update :38-54) offer one COMMON + one UNCOMMON + one RARE relic through returnRandomScreenlessRelic. DEFERRED: the three pool draws are relicRng-consuming and land on a combat-reward screen that does not exist (B4.5); Curse of the Bell has no cards.yaml row. Explicit empty on_equip body (relics/relic_pickup_boss.cpp)."
+    on_equip_screen: true
+  provenance: "CallingBell.onEquip (CallingBell.java:36-45) -- present a Curse of the Bell on a choice-free confirmation grid; it reaches the deck through FastCardObtainEffect (masterDeck.addToTop == APPEND, CardGroup.java:455-457) whose constructor's Omamori branch can consume it instead (FastCardObtainEffect.java:24-28). update (:47-65), the frame after the grid closes: combatRewardScreen.open() (CombatRewardScreen.java:292-312) rolls the unconditional setupItemReward card row -- a FULL cardRng + cardBlizzRandomizer assembly -- then rewards.clear() (:52) THROWS THAT ROW AWAY with the draws already spent (skipping them would desync cardRng and the pity counter for the rest of the run; contrast Tiny House, which rolls the same row and KEEPS it), then adds one COMMON + one UNCOMMON + one RARE row via returnRandomScreenlessRelic (AbstractDungeon.java:681-689): each is a FRONT POP off the tier pool shuffled once at initializeRelicList -- pool-consuming, relicRng-COUNTER-NEUTRAL, not a relicRng draw -- re-popped while the key is Bottled Flame/Lightning/Tornado or Whetstone, with canSpawn failures end-popped inside returnRandomRelicKey (:757-805). The three relics are REWARD ROWS claimed through the ordinary screen, each firing its own onEquip at claim. Native on_equip_screen body (relics/relic_pickup_boss.cpp); the run layer skips the zero-choice confirmation grid."
 
 - id: 130
   name: COFFEE_DRIPPER

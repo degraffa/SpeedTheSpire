@@ -430,11 +430,24 @@ bool relic_acquire_legal(const RunState& rs, RelicId id) noexcept {
     return rs.relic_count < kRelicCap;
 }
 
-RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
-                                 RelicId id) noexcept {
+namespace {
+
+// Shared body of the two acquire_relic overloads. `ctx == nullptr` is the
+// plain 3-argument door, which REFUSES an on_equip_screen id up front (see
+// RelicEquipContext in relic_pools.hpp for the design): the refusal happens
+// before any mutation, so a caller that cannot present screens fails loudly
+// and non-corruptingly -- claim_reward already treats a non-ACQUIRED result as
+// a refused claim.
+RelicAcquireResult acquire_relic_impl(RunState& rs, RngStream& misc_rng,
+                                      RelicId id,
+                                      RelicEquipContext* ctx) noexcept {
     const RelicDef* def = relic_def(id);
     if (def == nullptr) {
         return RelicAcquireResult::INVALID_ID;
+    }
+    const RelicOnEquipScreenFn screen_fn = relic_on_equip_screen_fn(id);
+    if (screen_fn != nullptr && ctx == nullptr) {
+        return RelicAcquireResult::NEEDS_EQUIP_CONTEXT;
     }
 
     if (id == RelicId::CIRCLET) {
@@ -461,12 +474,26 @@ RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
 
     // AbstractRelic.instantObtain/obtain (AbstractRelic.java:219-291) append in
     // acquisition order and THEN call onEquip, so the handler sees its own slot
-    // already present and counter-seeded.
-    const RelicOnEquipFn fn = relic_on_equip_fn(id);
-    if (fn != nullptr) {
+    // already present and counter-seeded. The two surfaces are mutually
+    // exclusive (the emitter rejects a row listing both).
+    if (screen_fn != nullptr) {
+        screen_fn(rs, misc_rng, slot, *ctx);
+    } else if (const RelicOnEquipFn fn = relic_on_equip_fn(id)) {
         fn(rs, misc_rng, slot);
     }
     return RelicAcquireResult::ACQUIRED;
+}
+
+}  // namespace
+
+RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng,
+                                 RelicId id) noexcept {
+    return acquire_relic_impl(rs, misc_rng, id, nullptr);
+}
+
+RelicAcquireResult acquire_relic(RunState& rs, RngStream& misc_rng, RelicId id,
+                                 RelicEquipContext& ctx) noexcept {
+    return acquire_relic_impl(rs, misc_rng, id, &ctx);
 }
 
 bool lose_relic(RunState& rs, RelicId id) noexcept {
@@ -514,6 +541,41 @@ RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept {
         default:
             return nullptr;  // no onEquip override on this row
     }
+}
+
+// The screen-opening sibling surface (`pickup: on_equip_screen`) -- same
+// generated fail-loud property: a listed row with no body is an undefined
+// reference at link time. See RelicEquipContext (relic_pools.hpp) for why this
+// is a second surface rather than a widened RelicOnEquipSig.
+
+#define STS_RELIC_ON_EQUIP_SCREEN_DECL(ID, FN) extern RelicOnEquipScreenSig FN;
+STS_REGISTRY_RELIC_ON_EQUIP_SCREEN(STS_RELIC_ON_EQUIP_SCREEN_DECL)
+#undef STS_RELIC_ON_EQUIP_SCREEN_DECL
+
+RelicOnEquipScreenFn relic_on_equip_screen_fn(RelicId id) noexcept {
+    switch (id) {
+#define STS_RELIC_ON_EQUIP_SCREEN_CASE(ID, FN) \
+    case RelicId::ID:                          \
+        return &FN;
+        STS_REGISTRY_RELIC_ON_EQUIP_SCREEN(STS_RELIC_ON_EQUIP_SCREEN_CASE)
+#undef STS_RELIC_ON_EQUIP_SCREEN_CASE
+        default:
+            return nullptr;  // no screen-opening onEquip override on this row
+    }
+}
+
+RelicId return_random_screenless_relic(RunState& rs, RelicTier tier,
+                                       RelicSpawnContext ctx) noexcept {
+    // AbstractDungeon.returnRandomScreenlessRelic (AbstractDungeon.java:
+    // 681-689): re-pop -- never put back -- while the key is one of the four
+    // relics whose obtain opens a screen the caller cannot show. Each rejected
+    // id stays consumed from its pool, exactly like a canSpawn rejection.
+    RelicId id = return_random_relic_key(rs, tier, ctx);
+    while (id == RelicId::BOTTLED_FLAME || id == RelicId::BOTTLED_LIGHTNING ||
+           id == RelicId::BOTTLED_TORNADO || id == RelicId::WHETSTONE) {
+        id = return_random_relic_key(rs, tier, ctx);
+    }
+    return id;
 }
 
 }  // namespace sts::engine

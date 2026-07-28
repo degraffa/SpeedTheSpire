@@ -15,11 +15,16 @@
 
 #include <cstdint>
 
+#include "sts/engine/map_rooms.hpp"   // RoomType (RelicEquipContext.reward_room)
 #include "sts/engine/relics.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_state.hpp"
 
 namespace sts::engine {
+
+struct RewardScreen;  // combat_rewards.hpp; RelicEquipContext holds a reference
+                      // so this header does not drag the reward layer into
+                      // every pool consumer.
 
 enum class RelicPool : uint8_t {
     COMMON = 0,
@@ -91,6 +96,73 @@ enum class RelicAcquireResult : uint8_t {
     INVALID_ID = 2,
     RELIC_CAP_REACHED = 3,
     COUNTER_CAP_REACHED = 4,
+    // The id's onEquip is an `on_equip_screen` body and the caller used the
+    // plain 3-argument acquire_relic: REFUSED before any mutation. See
+    // RelicEquipContext below -- this is the fail-loud half of that design.
+    NEEDS_EQUIP_CONTEXT = 5,
+};
+
+// --- Screen-opening onEquip bodies (Wave-C track 2 architecture decision) ----
+//
+// THE PROBLEM. `RelicOnEquipSig` is (RunState&, miscRng, RelicSlot&), and three
+// of the five BOSS onEquip bodies need more: Pandora's Box draws cardRandomRng
+// (a CombatState-owned floor stream), Tiny House and Calling Bell assemble a
+// REWARD SCREEN (cardRng draws included), and Astrolabe / Empty Cage must open
+// a master-deck GRID -- i.e. transient screen state no RunState-level callee
+// can own. The two candidate shapes were (a) widening RelicOnEquipSig to take
+// the RunController, which drags the controller header into every relic pickup
+// TU and couples pure bodies to the run loop, or (b) a second, parallel
+// dispatch surface whose bodies receive exactly the extra pieces they need and
+// REQUEST a screen from the call site instead of opening one themselves.
+//
+// THE DECISION IS (b), as a generated `pickup: on_equip_screen` surface:
+//   * The body gets a RelicEquipContext -- the two missing inputs
+//     (cardRandomRng, a RewardScreen to assemble into, plus the room identity
+//     the discarded/kept setupItemReward card row rolls under) and two OUT
+//     fields that name the screen the call site must now present. The bodies
+//     therefore stay ignorant of WHO owns the screen: at Neow (the only S1
+//     producer -- the boss swap) the caller translates the request onto
+//     NeowState's existing GRID / ITEM_REWARD sub-screens, and a future Act-2
+//     boss-chest site translates the same request onto whatever screen state
+//     it owns. Re-homing is a call-site change, never a body change.
+//   * FAIL-LOUD BY CONSTRUCTION: the plain 3-argument acquire_relic REFUSES
+//     (NEEDS_EQUIP_CONTEXT, nothing mutated) any id whose row lists this
+//     surface, so an acquisition path that cannot present screens -- claim,
+//     shop, chest, event, a bare test -- can never run such a body half-way or
+//     silently skip it. claim_reward already treats a non-ACQUIRED result as a
+//     refused claim, keeping the item on the screen.
+//   * Namespace cost: zero. The grid reuses NeowState (kNeowGridPickCap 2->3
+//     and one new NeowGridMode), so the Wave-C RunPhase 11-12 and MoveCat
+//     27-29 allocations stay unspent, and the fuzzer's mask-driven NEOW arm
+//     covers the new screens with no new MoveCat.
+enum class RelicEquipScreen : uint8_t {
+    NONE = 0,                    // body completed synchronously; no screen
+    GRID_REMOVE = 1,             // Empty Cage: `grid_picks`-pick purge grid
+                                 // over the purgeable master deck
+    GRID_TRANSFORM_UPGRADE = 2,  // Astrolabe: `grid_picks`-pick grid; each pick
+                                 // is transformCard(pick, autoUpgrade=true,
+                                 // miscRng) applied when the set completes
+    ITEM_REWARD = 3,             // Tiny House / Calling Bell: ctx.rewards now
+                                 // holds an assembled claimable screen
+};
+
+struct RelicEquipContext {
+    RngStream& card_random_rng;  // the floor-scoped cardRandomRng
+                                 // (CombatState-owned; rc.combat at the run
+                                 // layer). Pandora's Box's draws.
+    RewardScreen& rewards;       // screen storage the CALLER owns (rc.rewards
+                                 // at the run layer). Tiny House / Calling
+                                 // Bell assemble into it; untouched otherwise.
+    // The room identity CombatRewardScreen.open's setupItemReward card row
+    // rolls under (its gate reads the CURRENT room: no row in a TreasureRoom /
+    // RestRoom or under an event with noCardsInRewards). At Neow this is
+    // kNeowRewardScreenRoom (RoomType::Event -- NeowRoom has an event with the
+    // flag at its false default, NeowRoom.java:16-20, AbstractEvent.java:63).
+    RoomType reward_room = RoomType::Event;
+    // OUT: what the acquisition site must present next. NONE when the body
+    // finished synchronously.
+    RelicEquipScreen screen = RelicEquipScreen::NONE;
+    uint8_t grid_picks = 0;      // GRID_*: how many picks the grid wants
 };
 
 void initialize_relic_pools(RunState& rs) noexcept;
@@ -106,6 +178,18 @@ void initialize_relic_pools(RunState& rs) noexcept;
 [[nodiscard]] RelicId return_end_random_relic_key(
     RunState& rs, RelicTier tier, RelicSpawnContext ctx = {}) noexcept;
 
+// AbstractDungeon.returnRandomScreenlessRelic(tier) (AbstractDungeon.java:
+// 681-689): returnRandomRelicKey, RE-POPPED (never put back) while the key is
+// one of the four relics with no screenless presentation -- Bottled Flame /
+// Bottled Lightning / Bottled Tornado / Whetstone. Each rejected pop is
+// CONSUMED from its pool; canSpawn failures are handled inside
+// return_random_relic_key itself (:800-803 end-pop reroute). Two S1 callers:
+// event bodies (draw_event_relic rolls its own tier first) and Calling Bell's
+// three FIXED-tier rows, which is why the tier is a parameter here rather
+// than rolled inside.
+[[nodiscard]] RelicId return_random_screenless_relic(
+    RunState& rs, RelicTier tier, RelicSpawnContext ctx = {}) noexcept;
+
 [[nodiscard]] bool relic_can_spawn(RelicId id,
                                    RelicSpawnContext ctx) noexcept;
 
@@ -117,6 +201,14 @@ void initialize_relic_pools(RunState& rs) noexcept;
 
 [[nodiscard]] RelicAcquireResult acquire_relic(
     RunState& rs, RngStream& misc_rng, RelicId id) noexcept;
+
+// The screen-capable overload (see RelicEquipContext above): identical to the
+// plain form for every relic WITHOUT an on_equip_screen body, and the ONLY
+// door through which one WITH such a body can be acquired. On return, read
+// ctx.screen for the screen the body asked the call site to present.
+[[nodiscard]] RelicAcquireResult acquire_relic(
+    RunState& rs, RngStream& misc_rng, RelicId id,
+    RelicEquipContext& ctx) noexcept;
 
 // AbstractPlayer.loseRelic (AbstractPlayer.java:2014-2031): run onUnequip on
 // EVERY owned copy of `id`, then remove the LAST one (the loop overwrites

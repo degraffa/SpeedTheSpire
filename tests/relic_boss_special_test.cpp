@@ -15,19 +15,26 @@
 
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/advance.hpp"      // legal_actions (Velvet Choker's veto)
+#include "sts/engine/card_pools.hpp"   // transform_card (Astrolabe expectations)
 #include "sts/engine/cards.hpp"
+#include "sts/engine/combat_rewards.hpp"  // RewardScreen (on_equip_screen bodies)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/piles.hpp"        // discard_hand_at_end_of_turn (Runic Pyramid)
+#include "sts/engine/potions.hpp"      // get_random_potion (Tiny House)
 #include "sts/engine/power_hooks.hpp"
 #include "sts/engine/powers.hpp"
 #include "sts/engine/relic_hooks.hpp"
 #include "sts/engine/relic_pools.hpp"
 #include "sts/engine/relics.hpp"
+#include "sts/engine/rng_jdk.hpp"      // JdkRandom / jdk_shuffle (Tiny House)
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"  // relic_from_game_id (the translator join)
+
+#include <span>
+#include <vector>
 
 namespace sts::engine {
 namespace {
@@ -677,35 +684,362 @@ TEST(RelicBossSpecial, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
     }
 }
 
-// The five boss relics that DECLARE an onEquip override and whose body is
-// deferred: acquiring one must move nothing at all -- not RunState, not miscRng.
-TEST(RelicBossSpecial, DeferredOnEquipBodiesChangeNothing) {
+// ============================================================================
+// The five `on_equip_screen` bodies (Wave-C track 2) -- positive coverage.
+// Every expectation below is hand-derived from the cited Java by replaying the
+// stream draws on an independent clone, never read back from the engine.
+// ============================================================================
+
+RunState MakeRun() {
+    RunState rs{};
+    rs.hp = 50;
+    rs.max_hp = 80;
+    rs.gold = 10;
+    rs.card_rng = from_seed(11);
+    rs.card_blizz_randomizer = 5;
+    return rs;
+}
+
+void push_card(RunState& rs, CardId id, uint8_t upgrade = 0) {
+    CardInstance& c = rs.master_deck[rs.master_deck_count++];
+    c = CardInstance{};
+    c.card_id = static_cast<uint16_t>(id);
+    c.upgrade = upgrade;
+}
+
+// The plain 3-argument acquire_relic REFUSES every on_equip_screen row before
+// mutating anything -- the fail-loud half of the RelicEquipContext design
+// (relic_pools.hpp): an acquisition site that cannot present screens can never
+// run one of these bodies half-way or silently skip it. claim_reward already
+// treats the non-ACQUIRED result as a refused claim.
+TEST(RelicBossSpecial, PlainAcquireRefusesEveryScreenEquipBodyUntouched) {
     const RelicId ids[] = {
         RelicId::PANDORAS_BOX, RelicId::TINY_HOUSE, RelicId::ASTROLABE,
         RelicId::EMPTY_CAGE,   RelicId::CALLING_BELL,
     };
     for (RelicId id : ids) {
-        RunState rs{};
-        rs.hp = 50;
-        rs.max_hp = 80;
-        rs.gold = 10;
-        rs.master_deck_count = 1;
-        rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::STRIKE);
+        RunState rs = MakeRun();
+        push_card(rs, CardId::STRIKE);
         RngStream misc = from_seed(1);
-        // That each of these DECLARES the override is pinned by the build, not
-        // by an assertion: the generated STS_REGISTRY_RELIC_ON_EQUIP table
-        // odr-uses a handler per `pickup: on_equip` row, so dropping the body
-        // would be a link error. What is asserted here is that the declared body
-        // is EXACTLY empty.
-        ASSERT_EQ(acquire_relic(rs, misc, id), RelicAcquireResult::ACQUIRED)
+        ASSERT_EQ(acquire_relic(rs, misc, id),
+                  RelicAcquireResult::NEEDS_EQUIP_CONTEXT)
             << static_cast<int>(id);
+        EXPECT_EQ(rs.relic_count, 0) << static_cast<int>(id);
         EXPECT_EQ(rs.hp, 50) << static_cast<int>(id);
-        EXPECT_EQ(rs.max_hp, 80) << static_cast<int>(id);
-        EXPECT_EQ(rs.gold, 10) << static_cast<int>(id);
         EXPECT_EQ(rs.master_deck_count, 1) << static_cast<int>(id);
-        EXPECT_EQ(rs.master_deck[0].upgrade, 0) << static_cast<int>(id);
         EXPECT_EQ(misc.counter, 0) << static_cast<int>(id);
     }
+}
+
+// PandorasBox.onEquip (PandorasBox.java:54-77): every STARTER_STRIKE /
+// STARTER_DEFEND instance is removed -- upgraded copies included, the tags are
+// constructor-set (Strike_Red.java:36, Defend_Red.java:30) -- and replaced by
+// exactly that many returnTrulyRandomCard() draws (one cardRandomRng draw
+// each over the UNFILTERED 72-row pool), landing in REVERSE draw order
+// (addToBottom prepends the display group, the confirm appends forward).
+TEST(RelicBossSpecial, PandorasBoxReplacesEveryStarterInReverseDrawOrder) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    push_card(rs, CardId::STRIKE, 1);  // upgraded: the tag survives upgrade
+    push_card(rs, CardId::BASH);
+    push_card(rs, CardId::DEFEND);
+    push_card(rs, CardId::ASCENDERS_BANE);
+
+    RngStream misc = from_seed(1);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+
+    // Independent replay of the three draws.
+    RngStream probe = from_seed(7);
+    CardId expect[3];
+    for (auto& e : expect) {
+        e = sts::registry::kIroncladTrulyRandomPool[static_cast<std::size_t>(
+            random(probe, sts::registry::kIroncladTrulyRandomPoolCount - 1))];
+    }
+
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::PANDORAS_BOX, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE)
+        << "the confirmation grid carries no choice; the run layer skips it";
+    EXPECT_EQ(misc.counter, 0) << "no miscRng on any Pandora path";
+    EXPECT_EQ(card_random.counter, 3);
+    ASSERT_EQ(rs.master_deck_count, 5);
+    EXPECT_EQ(rs.master_deck[0].card_id, static_cast<uint16_t>(CardId::BASH));
+    EXPECT_EQ(rs.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::ASCENDERS_BANE));
+    // d2, d1, d0 -- reverse draw order (trap 8 of the dossier; the STS00051
+    // bug class is exactly "right multiset, wrong master_deck[i]").
+    EXPECT_EQ(rs.master_deck[2].card_id, static_cast<uint16_t>(expect[2]));
+    EXPECT_EQ(rs.master_deck[3].card_id, static_cast<uint16_t>(expect[1]));
+    EXPECT_EQ(rs.master_deck[4].card_id, static_cast<uint16_t>(expect[0]));
+    EXPECT_EQ(rs.master_deck[2].upgrade, 0) << "replacements arrive unupgraded";
+}
+
+TEST(RelicBossSpecial, PandorasBoxWithNoStartersDrawsNothing) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::BASH);
+    RngStream misc = from_seed(1);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::PANDORAS_BOX, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(card_random.counter, 0);
+    EXPECT_EQ(rs.master_deck_count, 1);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE);
+}
+
+// TinyHouse.onEquip (TinyHouse.java:36-63), the full draw order: ONE
+// unconditional miscRng.randomLong() shuffle seed, upgrade the shuffled
+// list's first card, +5 max HP with heal, then the reward screen -- GOLD(50),
+// POTION(getRandomPotion(miscRng), the FLAT draw), and the setupItemReward
+// CARDS row that at Neow's room is rolled on cardRng and KEPT.
+TEST(RelicBossSpecial, TinyHouseDrawsShuffleSeedPotionAndKeepsTheCardRow) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    push_card(rs, CardId::DEFEND);
+    push_card(rs, CardId::BASH);
+    push_card(rs, CardId::ASCENDERS_BANE);  // curse: never upgradable
+
+    RngStream misc = from_seed(21);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+
+    // Replay the two misc draws independently: the Collections.shuffle over
+    // the upgradable list (master-deck order: indices 0,1,2), then the flat
+    // potion index.
+    RngStream probe = from_seed(21);
+    uint16_t order[3] = {0, 1, 2};
+    JdkRandom jdk(random_long(probe));
+    jdk_shuffle(std::span<uint16_t>(order, 3), jdk);
+    const PotionId expect_potion = get_random_potion(probe);
+    // And the kept card row on a cloned run (same card_rng, same pity).
+    RunState clone = rs;
+    RewardScreen clone_screen{};
+    clone_screen.open_card_item = kNoOpenCardReward;
+    roll_setup_item_card_reward(clone, RoomType::Event, clone_screen);
+
+    const int16_t hp0 = rs.hp;
+    const int16_t max0 = rs.max_hp;
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::TINY_HOUSE, ctx),
+              RelicAcquireResult::ACQUIRED);
+
+    EXPECT_EQ(misc.counter, probe.counter)
+        << "exactly the shuffle seed + the flat potion draw";
+    EXPECT_EQ(rs.hp, hp0 + 5);
+    EXPECT_EQ(rs.max_hp, max0 + 5);
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(rs.master_deck[i].upgrade, i == order[0] ? 1 : 0)
+            << "only the shuffled list's FIRST card upgrades (deck row " << i
+            << ")";
+    }
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::ITEM_REWARD);
+    ASSERT_EQ(rewards.count, 3);
+    EXPECT_EQ(rewards.items[0].kind, static_cast<uint8_t>(RewardItemKind::GOLD));
+    EXPECT_EQ(rewards.items[0].gold, 50);
+    EXPECT_EQ(rewards.items[0].bonus_gold, 0);
+    EXPECT_EQ(rewards.items[1].kind,
+              static_cast<uint8_t>(RewardItemKind::POTION));
+    EXPECT_EQ(rewards.items[1].id, static_cast<uint16_t>(expect_potion));
+    EXPECT_EQ(rewards.items[2].kind,
+              static_cast<uint8_t>(RewardItemKind::CARDS));
+    ASSERT_EQ(clone_screen.count, 1);
+    ASSERT_EQ(rewards.items[2].card_count, clone_screen.items[0].card_count);
+    ASSERT_GT(rewards.items[2].card_count, 0);
+    for (int j = 0; j < rewards.items[2].card_count; ++j) {
+        EXPECT_EQ(rewards.items[2].card_ids[j], clone_screen.items[0].card_ids[j]);
+    }
+    EXPECT_EQ(rs.card_rng.counter, clone.card_rng.counter);
+    EXPECT_EQ(rs.card_blizz_randomizer, clone.card_blizz_randomizer);
+    EXPECT_EQ(card_random.counter, 0) << "Tiny House never draws cardRandomRng";
+}
+
+// The shuffle seed is spent even when NOTHING is upgradable -- the draw sits
+// ahead of the isEmpty() guard (TinyHouse.java:43-44), the War Paint shape.
+TEST(RelicBossSpecial, TinyHouseSpendsTheShuffleSeedEvenWithNothingUpgradable) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::ASCENDERS_BANE);
+    RngStream misc = from_seed(3);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+    RngStream probe = from_seed(3);
+    (void)random_long(probe);            // the unconditional shuffle seed
+    (void)get_random_potion(probe);      // the potion identity
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::TINY_HOUSE, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(misc.counter, probe.counter);
+    EXPECT_EQ(rs.master_deck[0].upgrade, 0);
+}
+
+// Astrolabe.onEquip (Astrolabe.java:35-55): with the whole purgeable deck
+// fitting in three cards, giveCards runs screenless over ALL of them in
+// master-deck order -- one miscRng transform draw each through the shared
+// transform_card list, auto-upgraded, appended in that same order.
+TEST(RelicBossSpecial, AstrolabeScreenlessTransformsAWholeSmallDeck) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    push_card(rs, CardId::ASCENDERS_BANE);  // not purgeable: survives
+    push_card(rs, CardId::DEFEND);
+
+    RngStream misc = from_seed(5);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+
+    RngStream probe = from_seed(5);
+    const CardId t0 = transform_card(probe, CardId::STRIKE);
+    const CardId t1 = transform_card(probe, CardId::DEFEND);
+
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::ASTROLABE, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE);
+    EXPECT_EQ(misc.counter, probe.counter) << "one draw per transformed card";
+    ASSERT_EQ(rs.master_deck_count, 3);
+    EXPECT_EQ(rs.master_deck[0].card_id,
+              static_cast<uint16_t>(CardId::ASCENDERS_BANE));
+    EXPECT_EQ(rs.master_deck[1].card_id, static_cast<uint16_t>(t0));
+    EXPECT_EQ(rs.master_deck[2].card_id, static_cast<uint16_t>(t1));
+    // autoUpgrade=true (Astrolabe.java:72; AbstractDungeon.java:873-876): a
+    // RED-branch transform result always canUpgrade()s at upgrade 0.
+    EXPECT_EQ(rs.master_deck[1].upgrade, 1);
+    EXPECT_EQ(rs.master_deck[2].upgrade, 1);
+}
+
+TEST(RelicBossSpecial, AstrolabeRequestsAThreePickGridOverALargerDeck) {
+    RunState rs = MakeRun();
+    for (int i = 0; i < 5; ++i) push_card(rs, CardId::STRIKE);
+    RngStream misc = from_seed(5);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::ASTROLABE, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::GRID_TRANSFORM_UPGRADE);
+    EXPECT_EQ(ctx.grid_picks, 3);
+    EXPECT_EQ(misc.counter, 0) << "the draws happen at pick-apply, not open";
+    EXPECT_EQ(rs.master_deck_count, 5) << "nothing applied before the picks";
+}
+
+// EmptyCage.onEquip (EmptyCage.java:35-57): <= 2 purgeable -> synchronous
+// screenless removal; more -> a 2-pick purge grid request. No RNG anywhere.
+TEST(RelicBossSpecial, EmptyCageScreenlessRemovesASmallDeckAndGridsALarger) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    push_card(rs, CardId::ASCENDERS_BANE);
+    push_card(rs, CardId::DEFEND);
+    RngStream misc = from_seed(1);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::EMPTY_CAGE, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE);
+    ASSERT_EQ(rs.master_deck_count, 1);
+    EXPECT_EQ(rs.master_deck[0].card_id,
+              static_cast<uint16_t>(CardId::ASCENDERS_BANE));
+    EXPECT_EQ(misc.counter, 0);
+    EXPECT_EQ(card_random.counter, 0);
+
+    RunState big = MakeRun();
+    for (int i = 0; i < 4; ++i) push_card(big, CardId::STRIKE);
+    RewardScreen rewards2{};
+    RelicEquipContext ctx2{card_random, rewards2, RoomType::Event};
+    ASSERT_EQ(acquire_relic(big, misc, RelicId::EMPTY_CAGE, ctx2),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(ctx2.screen, RelicEquipScreen::GRID_REMOVE);
+    EXPECT_EQ(ctx2.grid_picks, 2);
+    EXPECT_EQ(big.master_deck_count, 4);
+}
+
+// CallingBell.onEquip + update (CallingBell.java:36-65): the Bell Curse lands
+// (append, Omamori-aware door), a FULL card-reward assembly is rolled on
+// cardRng and thrown away (the draws still happened -- skipping them desyncs
+// cardRng and the pity counter), then one COMMON + one UNCOMMON + one RARE
+// reward row via counter-neutral screenless front-pops.
+TEST(RelicBossSpecial, CallingBellRollsTheDiscardedRewardAndFrontPopsThreeTiers) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    rs.relic_rng = from_seed(33);
+    initialize_relic_pools(rs);
+    const int32_t relic_counter_after_init = rs.relic_rng.counter;
+
+    // Expected relic rows: the same three screenless pops on a full clone.
+    RunState clone = rs;
+    RelicSpawnContext sctx{};
+    sctx.floor = clone.floor;
+    sctx.act = clone.act;
+    fill_deck_spawn_gates(clone, sctx);
+    fill_campfire_relic_count(clone, sctx);
+    fill_boss_spawn_gates(clone, sctx);
+    const RelicId expect_common =
+        return_random_screenless_relic(clone, RelicTier::COMMON, sctx);
+    const RelicId expect_uncommon =
+        return_random_screenless_relic(clone, RelicTier::UNCOMMON, sctx);
+    const RelicId expect_rare =
+        return_random_screenless_relic(clone, RelicTier::RARE, sctx);
+    // And the discarded card roll's stream movement on the same clone.
+    RewardScreen clone_screen{};
+    clone_screen.open_card_item = kNoOpenCardReward;
+    roll_setup_item_card_reward(clone, RoomType::Event, clone_screen);
+
+    RngStream misc = from_seed(1);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CALLING_BELL, ctx),
+              RelicAcquireResult::ACQUIRED);
+
+    ASSERT_EQ(rs.master_deck_count, 2);
+    EXPECT_EQ(rs.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL))
+        << "appended (masterDeck.addToTop == append)";
+    EXPECT_EQ(rs.card_rng.counter, clone.card_rng.counter)
+        << "the discarded assembly's draws are still spent";
+    EXPECT_EQ(rs.card_blizz_randomizer, clone.card_blizz_randomizer);
+    EXPECT_EQ(rs.relic_rng.counter, relic_counter_after_init)
+        << "front-pops move no relicRng counter";
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::ITEM_REWARD);
+    ASSERT_EQ(rewards.count, 3) << "the card row was rolled AND removed";
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(rewards.items[i].kind,
+                  static_cast<uint8_t>(RewardItemKind::RELIC));
+    }
+    EXPECT_EQ(rewards.items[0].id, static_cast<uint16_t>(expect_common));
+    EXPECT_EQ(rewards.items[1].id, static_cast<uint16_t>(expect_uncommon));
+    EXPECT_EQ(rewards.items[2].id, static_cast<uint16_t>(expect_rare));
+    for (int p = 0; p < 5; ++p) {
+        EXPECT_EQ(rs.relic_pool_count[p], clone.relic_pool_count[p])
+            << "pool " << p << " must be popped exactly as the Java pops it";
+    }
+    EXPECT_EQ(misc.counter, 0);
+    EXPECT_EQ(card_random.counter, 0);
+}
+
+// FastCardObtainEffect's constructor Omamori branch (FastCardObtainEffect
+// .java:24-28): a held charge consumes the Bell Curse instead of the deck.
+// Unreachable in S1 (the boss swap is Calling Bell's only path and nothing
+// precedes it), but the body routes through the one Omamori-aware door.
+TEST(RelicBossSpecial, CallingBellCurseIsEatenByAHeldOmamoriCharge) {
+    RunState rs = MakeRun();
+    push_card(rs, CardId::STRIKE);
+    rs.relic_rng = from_seed(33);
+    initialize_relic_pools(rs);
+    rs.relics[0].relic_id = static_cast<uint16_t>(RelicId::OMAMORI);
+    rs.relics[0].counter = 1;
+    rs.relic_count = 1;
+
+    RngStream misc = from_seed(1);
+    RngStream card_random = from_seed(7);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards, RoomType::Event};
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::CALLING_BELL, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.master_deck_count, 1) << "the curse was consumed, not added";
+    EXPECT_EQ(rs.relics[0].counter, 0) << "and the charge was spent";
+    EXPECT_EQ(rewards.count, 3) << "the reward flow is unaffected";
 }
 
 // The marker rows: no hook bindings at all, and no combat effect through ANY
