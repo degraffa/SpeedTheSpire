@@ -101,6 +101,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Preserved Insect (elite-room HP scaling) | B3.24 | UNASSIGNED | elite rooms exist since B4.4; no discharge recorded |
 | Fire Potion `applyEnemyPowersOnly` / THORNS typing | B3.23, B3.2 | UNASSIGNED | B3.2's DAMAGE damage-TYPE item was discharged by the potion-support-powers follow-up; B3.23 records this piece as "its own item" |
 | Snecko Oil cost-randomization potion body | B3.23 | UNASSIGNED | the "cost randomization" verb has no owner |
+| Distilled Chaos potion body | registry deferral, surfaced by the G6 campaign audit | UNASSIGNED | deferred native in `registry/potions.yaml` (id 26): "play the top `potency` cards of the draw pile → recursive play (a later opcode, cf. B3.2 Double Tap deferral)". It was on NO obligation row until 2026-07-28 — invisible during execution per conventions §5, which is exactly what this table exists to prevent. `potion_use_implemented` keeps it off the legal-action mask (fail-loud), so it cannot silently burn a slot |
 | Fairy in a Bottle out-of-combat revive | B3.23 | UNASSIGNED | flagged native at B3.23, no owner named |
 | Translator: power `misc` fields other than player-owned Combust | B3.7 | UNASSIGNED | the fix-forward mapped only Combust `hpLoss`; every other power `misc` stays deferred |
 | Translator: `monster_move_history` beyond 3 entries | B1.5, B4.3 | UNASSIGNED | "stays deferred to its owning task" — none named |
