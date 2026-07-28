@@ -336,6 +336,19 @@ it is on no ledger row, and the mechanism by which the rolled buff fails to reac
 the monsters was **not** root-caused here — do not treat "no buff observed" as
 proof the effect can never matter.
 
+> **CORRECTION (2026-07-28, `fix-battlestart-order` a03f257, per conventions
+> §4):** the mechanism claim above is wrong — **the buff DID land in every
+> observation.** "The sim's match exactly" was structurally unverifiable
+> because `--replay` diffs `RunState` only and never compares monster HP or
+> powers. The captures prove it directly: STS02009's Sentries read 49/49/56
+> — impossible unbuffed (A20 range 39–45, `Sentry.java:63`), exactly
+> 39/39/45 + round(25 %) = roll 1 — and STS00451's GremlinNob carries
+> Strength 2 at entry, STS01068's Lagavulin Metallicize 8 + Strength 2 =
+> roll 0 each (rolls independently recovered by inverting the post-roll
+> `mapRng` state one XorShift128+ step). The honest caveat in this section
+> was exactly right; the fix models the roll AND the buff (arms 0/1/2; arm
+> 3 parked pending its `PowerId`, since registered as 91).
+
 ### 8.2 — CLASS (d), known-benign: Wheel of Change resolves its prize one page early
 
 Unchanged from the predecessor's §8.1 and reproduced exactly. The sim commits the

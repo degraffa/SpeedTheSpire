@@ -74,11 +74,15 @@ trio, POD `CombatState`/`RunState` with memcpy snapshots, the action-queue pump
 + effect interpreter, JDK-exact pile ops, the batch `advance()` API, and 20
 independently-generated combat fixtures replaying with zero diffs.
 
-**Stage B in progress, past M2.** Tags: `g1-rng-green`, `m1-walking-skeleton`,
+**Stage B in progress, past M3.** Tags: `g1-rng-green`, `m1-walking-skeleton`,
 `g4-bridge-live` (= M2, oracle bridge live end-to-end), `g5-registry-live`
-(the registry is the single source of truth for content ids/tables). Open
-gates: **G6** (S1 rules complete = M3) and **G7** (S1 verified = M4). Current
-work is Phase B3 (combat content) and Phase B4 (run layer).
+(the registry is the single source of truth for content ids/tables),
+**`g6-s1-content` (= M3, S1 rules complete)** — every B3/B4 task `[x]`, 100 %
+tier-2 registry coverage by scripted check, 1,000-seed random-policy soak
+clean in debug + asan, and a 75-run oracle spot campaign spanning Neow
+through a claimed Act-1 boss reward with zero un-triaged diffs through the
+run-level differ. Open gate: **G7** (S1 verified = M4). Current work is
+Phase B5 (verification campaigns).
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md); **do not restate it here.**
