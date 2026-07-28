@@ -66,6 +66,18 @@ using RelicOnEquipSig = void(RunState& rs, RngStream& misc_rng,
                              RelicSlot& slot) noexcept;
 using RelicOnEquipFn = RelicOnEquipSig*;
 
+// The screen-opening sibling (`pickup: on_equip_screen`): an onEquip body that
+// needs more than (RunState, miscRng, slot). The extension shape -- why a
+// second surface rather than a widened RelicOnEquipSig, and how the fail-loud
+// refusal in the plain acquire_relic works -- is documented at RelicEquipContext
+// (include/sts/engine/relic_pools.hpp), which is the definition site of the
+// contract. A relic row lists on_equip OR on_equip_screen, never both (the
+// emitter rejects the pair).
+using RelicOnEquipScreenSig = void(RunState& rs, RngStream& misc_rng,
+                                   RelicSlot& slot,
+                                   RelicEquipContext& ctx) noexcept;
+using RelicOnEquipScreenFn = RelicOnEquipScreenSig*;
+
 // One relic's onObtainCard body. `card` is the master-deck row just appended
 // (mutable: the eggs upgrade it in place); `def` is its registry row, already
 // resolved by the caller so each handler does not repeat the lookup. Handlers run
@@ -81,7 +93,18 @@ using RelicOnObtainCardFn = RelicOnObtainCardSig*;
 // body, not to nullptr.
 [[nodiscard]] RelicCanSpawnFn relic_can_spawn_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnEquipFn relic_on_equip_fn(RelicId id) noexcept;
+[[nodiscard]] RelicOnEquipScreenFn relic_on_equip_screen_fn(RelicId id) noexcept;
 [[nodiscard]] RelicOnObtainCardFn relic_on_obtain_card_fn(RelicId id) noexcept;
+
+// Astrolabe's transform application, shared between the screenless <=3 branch
+// of its on_equip_screen body and the NeowGridMode::TRANSFORM_UPGRADE grid arm
+// (neow.cpp applies it when the 3-pick set completes). `deck_indices` are
+// master-deck rows in PICK order (Astrolabe.update feeds giveCards the grid's
+// selectedCards in click order; the screenless branch feeds master-deck order).
+// Defined in relic_pickup_boss.cpp with the full Java accounting.
+void relic_astrolabe_transform_cards(RunState& rs, RngStream& misc_rng,
+                                     const uint16_t* deck_indices,
+                                     int count) noexcept;
 
 // AbstractPlayer.gainGold (AbstractPlayer.java:719-737), the ONE door every
 // run-layer gold gain goes through:
@@ -109,6 +132,42 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
     if (amount > 0) {
         rs.gold += amount;
     }
+}
+
+// AbstractCreature.heal (AbstractCreature.java:385-415) reached through
+// AbstractPlayer.heal (AbstractPlayer.java:1544-1552) -- the gold door's HP
+// twin, for every run-layer heal that happens OUTSIDE a combat:
+//
+//     for (AbstractRelic r : player.relics) amount = r.onPlayerHeal(amount);
+//     for (AbstractPower p : powers)        amount = p.onHeal(amount);
+//     currentHealth += amount; if (currentHealth > maxHealth) currentHealth = maxHealth;
+//
+// TWO fan-outs are NAMED rather than written, and both are identity out here:
+//
+//   * onPlayerHeal -- Magic Flower is the only S1 override and its whole body
+//     is gated on `getCurrRoom().phase == RoomPhase.COMBAT`
+//     (MagicFlower.java:30-37), so out of combat it returns the amount
+//     unchanged. A room-ENTRY heal is by construction not in a combat: the
+//     onEnterRoom fan-out runs at AbstractDungeon.java:1755-1757, before
+//     setCurrMapNode and before any room's onPlayerEntry. The in-combat seam is
+//     the separate one relic_hooks.hpp documents; nothing routes through both.
+//   * powers' onHeal -- no power survives a room boundary (powers.clear() runs
+//     in resetPlayer, AbstractDungeon.java:1671), so the list is empty.
+//
+// AbstractCreature.heal also carries the NOT-BLOODIED cross at :403-408 (the
+// relics' onNotBloodied when the heal lifts the player back over half max HP).
+// Red Skull is its only S1 override and that body is a DEFERRED row
+// (docs/stage-b-tasks.md, "Red Skull onNotBloodied"); out of combat its -3
+// Strength half is phase-gated off anyway. Written here as the note the row's
+// owner needs, not as a silent omission.
+//
+// Non-positive amounts still clamp, exactly as the Java's unguarded += does.
+inline void heal_out_of_combat(RunState& rs, int32_t amount) noexcept {
+    int32_t hp = static_cast<int32_t>(rs.hp) + amount;
+    if (hp > rs.max_hp) {
+        hp = rs.max_hp;
+    }
+    rs.hp = static_cast<int16_t>(hp);
 }
 
 // AbstractPlayer.loseGold (AbstractPlayer.java:697-717), the gain_gold twin for

@@ -9,6 +9,7 @@
 #include "gtest/gtest.h"
 
 #include "sts/engine/cards.hpp"
+#include "sts/engine/combat_rewards.hpp"  // RewardScreen (RelicEquipContext)
 #include "sts/engine/relic_pools.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_deck.hpp"
@@ -820,16 +821,16 @@ TEST(RelicPickupDispatch, ShopGatedRelicsStayGatedInEndless) {
 }
 
 TEST(RelicPickupDispatch, DeferredOnEquipHandlersAreNoOpsAndDrawNoRng) {
-    // The Bottled trio's bottling screen (BottledFlame.java:42-52 and siblings)
-    // and the eggs' reward-screen preview pass (FrozenEgg2.java:31-38 and
-    // siblings) are registered `pickup: on_equip` with EXPLICIT empty bodies --
+    // The eggs' reward-screen preview pass (FrozenEgg2.java:31-38 and
+    // siblings) is registered `pickup: on_equip` with EXPLICIT empty bodies --
     // under the generated dispatch a deferral cannot be expressed by omission,
     // because a listed surface with no definition fails to link. Pin that those
     // bodies really are inert: acquisition appends the slot and changes nothing
-    // else, and in particular consumes no miscRng draw.
-    for (const RelicId id : {RelicId::BOTTLED_FLAME, RelicId::BOTTLED_LIGHTNING,
-                             RelicId::BOTTLED_TORNADO, RelicId::FROZEN_EGG,
-                             RelicId::MOLTEN_EGG, RelicId::TOXIC_EGG}) {
+    // else, and in particular consumes no miscRng draw. (The Bottled trio used
+    // to sit in this loop; its bodies are now live `pickup: on_equip_screen`
+    // requests -- the BottleEquip suite below.)
+    for (const RelicId id : {RelicId::FROZEN_EGG, RelicId::MOLTEN_EGG,
+                             RelicId::TOXIC_EGG}) {
         RunState rs{};
         rs.hp = 60;
         rs.max_hp = 80;
@@ -852,6 +853,100 @@ TEST(RelicPickupDispatch, DeferredOnEquipHandlersAreNoOpsAndDrawNoRng) {
         EXPECT_EQ(misc.s0, before.s0);
         EXPECT_EQ(misc.s1, before.s1);
     }
+}
+
+// =============================================================================
+// The Bottled trio's on_equip_screen bodies (BottledFlame.java:41-53 + sibs)
+// =============================================================================
+
+TEST(BottleEquip, PlainAcquireRefusesABottleWithoutMutation) {
+    // The 3-argument door cannot present the bottle grid, so it must refuse
+    // BEFORE any mutation (NEEDS_EQUIP_CONTEXT) rather than granting the
+    // relic silently unbottled.
+    RunState rs{};
+    rs.master_deck_count = 1;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    RngStream misc = from_seed(11);
+    const RngStream before = misc;
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::BOTTLED_FLAME),
+              RelicAcquireResult::NEEDS_EQUIP_CONTEXT);
+    EXPECT_EQ(rs.relic_count, 0);
+    EXPECT_EQ(misc.counter, before.counter);
+}
+
+TEST(BottleEquip, EquipContextDoorRequestsTheMandatoryOneCardGrid) {
+    RunState rs{};
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);   // ATTACK
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);  // SKILL
+    RngStream misc = from_seed(11);
+    const RngStream before = misc;
+    RngStream card_random = from_seed(3);
+    const RngStream card_random_before = card_random;
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards};
+
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::BOTTLED_FLAME, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.relic_count, 1);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::GRID_BOTTLE);
+    EXPECT_EQ(ctx.grid_picks, 1);
+    EXPECT_EQ(ctx.bottle, MasterBottleKind::FLAME);
+    // Zero RNG on every path (the Java body draws nothing).
+    EXPECT_EQ(misc.counter, before.counter);
+    EXPECT_EQ(card_random.counter, card_random_before.counter);
+    // The relic's counter stays at AbstractRelic's -1 (never written).
+    EXPECT_EQ(rs.relics[0].counter, -1);
+    // Nothing is bottled yet -- the pick is the overlay's job.
+    EXPECT_EQ(rs.master_deck[0].flags, 0);
+    EXPECT_EQ(rs.master_deck[1].flags, 0);
+}
+
+TEST(BottleEquip, EmptyEligibleListMeansNoScreenAndAPermanentlyUnbottledRelic) {
+    // BottledFlame.java:41: `if (...getAttacks().size() > 0)` -- an all-skill
+    // deck opens NO screen; cardSelected stays true and the relic is kept,
+    // permanently unbottled.
+    RunState rs{};
+    rs.master_deck_count = 1;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);  // SKILL
+    RngStream misc = from_seed(11);
+    RngStream card_random = from_seed(3);
+    RewardScreen rewards{};
+    RelicEquipContext ctx{card_random, rewards};
+
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::BOTTLED_FLAME, ctx),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.relic_count, 1);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE);
+    EXPECT_EQ(ctx.bottle, MasterBottleKind::NONE);
+    EXPECT_EQ(rs.master_deck[0].flags, 0);
+}
+
+TEST(BottleEquip, PickEligibilityIsPurgeableAndTypeMatched) {
+    // getPurgeableCards().getCardsOfType(type): the three excluded curse ids
+    // and the type filter, NOTHING else -- an already-bottled card of another
+    // kind stays formally eligible (getPurgeableCards has no bottled clause),
+    // and a Strike (BASIC) is eligible (no rarity clause on the grid).
+    RunState rs{};
+    rs.master_deck_count = 5;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::ASCENDERS_BANE);
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    rs.master_deck[2].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[3].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);
+    rs.master_deck[4].card_id = static_cast<uint16_t>(CardId::INFLAME);  // POWER
+
+    EXPECT_FALSE(bottle_pick_legal(rs, MasterBottleKind::FLAME, 0))
+        << "Ascender's Bane is not purgeable";
+    EXPECT_TRUE(bottle_pick_legal(rs, MasterBottleKind::FLAME, 1))
+        << "a BASIC Strike is on the grid (no rarity clause)";
+    EXPECT_TRUE(bottle_pick_legal(rs, MasterBottleKind::FLAME, 2));
+    EXPECT_FALSE(bottle_pick_legal(rs, MasterBottleKind::FLAME, 3))
+        << "type-filtered: a SKILL is not on Flame's grid";
+    EXPECT_FALSE(bottle_pick_legal(rs, MasterBottleKind::FLAME, 5))
+        << "out of range";
+    EXPECT_TRUE(bottle_pick_legal(rs, MasterBottleKind::LIGHTNING, 3));
+    EXPECT_TRUE(bottle_pick_legal(rs, MasterBottleKind::TORNADO, 4));
+    EXPECT_FALSE(bottle_pick_legal(rs, MasterBottleKind::NONE, 1));
 }
 
 TEST(RelicPickupDispatch, CounterOnlyOnEquipIsCarriedByInitialCounterNotAHandler) {

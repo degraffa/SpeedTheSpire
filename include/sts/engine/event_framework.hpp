@@ -55,6 +55,11 @@
 //   * TinyChest                           TinyChest.java:19-42
 //   * SsserpentHead.onEnterRoom           SsserpentHead.java:29-35
 //   * MawBank.onEnterRoom                 MawBank.java:31-36
+//   * MawBank.setCounter (the -2 usedUp)  MawBank.java:47-53
+//   * EternalFeather.onEnterRoom          EternalFeather.java:29-35
+//   * RestRoom.onPlayerEntry              RestRoom.java:33-43
+//   * MagicFlower.onPlayerHeal            MagicFlower.java:30-37
+//   * DungeonMap boss-node transition     DungeonMap.java:77-87
 //   * AbstractPlayer.isCursed             AbstractPlayer.java:741-748
 //
 // Transient screen state (EventDialogState) lives in RunController, not
@@ -67,6 +72,7 @@
 #include <cstdint>
 #include <type_traits>
 
+#include "sts/engine/map_rooms.hpp"  // RoomType (the onEnterRoom fan-out's gate)
 #include "sts/engine/run_state.hpp"
 
 namespace sts::engine {
@@ -143,14 +149,41 @@ void build_event_roll_table(int monster_size, int shop_size, int treasure_size,
 [[nodiscard]] EventRoomResult event_room_roll(RunState& rs,
                                               bool leaving_shop) noexcept;
 
-// The AbstractRelic.onEnterRoom fan-out for the ORIGINAL map room runs before
-// EventHelper.roll replaces an EventRoom with its resolved room
-// (AbstractDungeon.nextRoomTransition, AbstractDungeon.java:1754-1779).
-// Therefore Ssserpent Head gains 50 gold and an unused Maw Bank gains 12 on
-// every ? entry even when the roll becomes MONSTER / SHOP / TREASURE. One
-// call per held copy, in relic order; gain_gold carries Ectoplasm's
-// suppression. Other room types remain owned by their room-entry tasks.
-void dispatch_event_room_entry_relics(RunState& rs) noexcept;
+// THE AbstractRelic.onEnterRoom FAN-OUT -- for EVERY room kind, not just `?`.
+//
+// AbstractDungeon.nextRoomTransition runs `for (r : player.relics)
+// r.onEnterRoom(nextRoom.room)` at AbstractDungeon.java:1755-1757. Three facts
+// about that line decide this function's whole shape:
+//
+//  1. IT IS UNCONDITIONAL ON THE ROOM KIND. Its only guard is `nextRoom != null
+//     && !isLoadingPostCombatSave` (:1754). Monster, Elite, Rest, Shop,
+//     Treasure, Event -- and the BOSS, which DungeonMap.java:77-87 reaches by
+//     assigning `nextRoom` a fresh MonsterRoomBoss and calling
+//     nextRoomTransitionStart(). RoomType::None IS the `nextRoom == null` case
+//     and fires nothing.
+//  2. IT SEES THE PRE-ROLL ROOM. The `?` replacement (:1766-1781) and
+//     setCurrMapNode (:1783) both run AFTER it, so a `?` is still an EventRoom
+//     here however it later resolves. That is why Ssserpent Head
+//     (SsserpentHead.java:29-35, `room instanceof EventRoom`) pays on a `?`
+//     that becomes a shop, and why `room` must be the ARRIVING map node's kind,
+//     never the resolved one.
+//  3. IT FIRES EXACTLY ONCE PER TRANSITION. This is a DIFFERENT hook from
+//     justEnteredRoom (:1785-1789, dispatch_just_entered_room_relics in
+//     shop.hpp), which runs post-roll, post-setCurrMapNode -- and which
+//     on_player_entry's `?` recursion therefore runs a second time on purpose.
+//     This fan-out must NOT be reached by that recursion: Maw Bank has no room
+//     gate, so a second call would pay 12 gold twice on a ?->Shop.
+//
+// The three S1 bodies, in one acquisition-order loop (a fan-out, not a
+// getRelic: a duplicate imported copy fires once per copy, as the Java's relic
+// iteration does):
+//   * Ssserpent Head  Event only, +50 gold.
+//   * Maw Bank        every kind, +12 gold while counter != -2 (MawBank.java:
+//                     31-36 has no room condition at all).
+//   * Eternal Feather Rest only, heals (masterDeck.size() / 5) * 3.
+// Gold goes through gain_gold and HP through heal_out_of_combat, so Ectoplasm's
+// suppression and the named onPlayerHeal / onNotBloodied fan-outs apply.
+void dispatch_on_enter_room_relics(RunState& rs, RoomType room) noexcept;
 
 // --- Pool membership ---------------------------------------------------------
 

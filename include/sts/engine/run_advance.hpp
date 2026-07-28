@@ -293,6 +293,20 @@ struct RunController {
     // NeowEvent rebuilds the whole blessing from `new Random(Settings.seed)`
     // (NeowEvent.java:363), so it is derived state, never saved.
     NeowState neow;
+
+    // The PENDING-BOTTLE OVERLAY: MasterBottleKind (run_deck.hpp), non-NONE
+    // while a just-acquired bottle relic's mandatory 1-pick card grid is up.
+    // A Bottled relic's onEquip opens the grid AT THE CLAIM SITE -- combat /
+    // chest / event reward claim, shop purchase -- over whatever screen is
+    // showing, and parks the room INCOMPLETE until the pick
+    // (BottledFlame.java:41-53). That is a MODAL overlay orthogonal to
+    // RunPhase, so it lives here rather than inside any one phase's screen
+    // struct: while non-NONE, legal_actions offers ONLY the eligible
+    // can_choose_master_deck[] rows (bottle_pick_legal) and step_one applies
+    // the pick before any phase dispatch. Transient like every screen field
+    // above; the phase itself never changes while the overlay is up.
+    uint8_t pending_bottle;
+    uint8_t pad2[3];  // explicit padding (value-init zeroed, hash-stable).
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,

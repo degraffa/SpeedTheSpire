@@ -295,8 +295,18 @@ inline constexpr int kShopUncommonCardChance = 37;
 [[nodiscard]] bool shop_buy_relic_legal(const RunState& rs,
                                         const ShopState& shop,
                                         uint8_t index) noexcept;
+// The plain overload REFUSES (false, nothing mutated -- no gold spent, slot
+// unsold) a relic id with an `on_equip_screen` body: the shop CAN stock a
+// Bottled trio relic (uncommon-tier stock draws see them), and its onEquip
+// opens the bottle grid at the purchase site (StoreRelic.purchaseRelic ->
+// instantObtain -> onEquip). The run-layer purchase dispatch uses the
+// RelicEquipContext overload and reads the grid request back from
+// equip_ctx.screen (the pending-bottle overlay, run_advance.hpp).
 [[nodiscard]] bool shop_buy_relic(RunState& rs, RngStream& misc_rng,
                                   ShopState& shop, uint8_t index) noexcept;
+[[nodiscard]] bool shop_buy_relic(RunState& rs, RngStream& misc_rng,
+                                  ShopState& shop, uint8_t index,
+                                  RelicEquipContext& equip_ctx) noexcept;
 
 [[nodiscard]] bool shop_buy_potion_legal(const RunState& rs,
                                          const ShopState& shop,

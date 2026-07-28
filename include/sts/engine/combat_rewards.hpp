@@ -369,11 +369,29 @@ void roll_setup_item_card_reward(RunState& rs, RoomType room,
                                       const RewardScreen& s,
                                       uint8_t index) noexcept;
 
+struct RelicEquipContext;  // relic_pools.hpp (which fwd-declares RewardScreen
+                           // from THIS header; the reference param below keeps
+                           // the two headers acyclic).
+
 // Claim item `index`. GOLD/POTION/RELIC apply immediately and remove the item;
 // CARDS opens the pick sub-screen (s.open_card_item = index) and removes
 // nothing. Returns false (no mutation) on an illegal claim.
+//
+// A RELIC row whose id carries an `on_equip_screen` body goes through the
+// plain 3-argument acquire_relic in the first overload and is therefore
+// REFUSED (NEEDS_EQUIP_CONTEXT: the item stays on the screen, nothing
+// mutated). Every run-layer claim dispatch uses the second overload, which
+// passes the RelicEquipContext through acquire_relic so such a relic CAN be
+// claimed -- the game's obtain runs onEquip at the claim site whatever the
+// room (AbstractRelic.instantObtain/obtain) -- and the body's screen request
+// (in S1 only the Bottled trio's GRID_BOTTLE; the five boss on_equip_screen
+// relics are BOSS-tier and never sit on an S1 claim screen) is read back by
+// the caller from equip_ctx.screen.
 [[nodiscard]] bool claim_reward(RunState& rs, RngStream& misc_rng,
                                 RewardScreen& s, uint8_t index) noexcept;
+[[nodiscard]] bool claim_reward(RunState& rs, RngStream& misc_rng,
+                                RewardScreen& s, uint8_t index,
+                                RelicEquipContext& equip_ctx) noexcept;
 
 // Whether open_card_item names an in-bounds CARDS item on a structurally valid
 // reward screen. This is the shared authority for card-pick masks and

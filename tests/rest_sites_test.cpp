@@ -447,6 +447,34 @@ TEST(RestSites, SmithGridWritesExistingUpgradeCountByMasterDeckIndex) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
+TEST(RestSites, SmithingABottledCardKeepsTheBottleBit) {
+    // The Smith grid is getUpgradableCards() with NO bottled exclusion
+    // (CampfireSmithEffect.java:62), so a bottled card CAN be upgraded -- and
+    // upgrading keeps the bottle: the flags live on the instance and
+    // AbstractPlayer.bottledCardUpgradeCheck (AbstractPlayer.java:2106) only
+    // re-points the relic's display reference, never clears the card's flag.
+    RunController rc = enter_floor_one_rest();
+    rc.run.master_deck_count = 2;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0,
+                     kMasterCardInBottleFlame, 0};
+    rc.run.master_deck[1] =
+        CardInstance{static_cast<uint16_t>(CardId::DEFEND), 0, 0, 0, 0};
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         option_index(rc.run, RestOptionKind::SMITH)));
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::SMITH));
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_choose_master_deck[0])
+        << "a bottled card stays smithable (no exclusion on the Smith grid)";
+
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.master_deck[0].upgrade, 1);
+    EXPECT_EQ(rc.run.master_deck[0].flags, kMasterCardInBottleFlame)
+        << "upgrading a bottled card keeps the bottle";
+}
+
 TEST(RestSites, PeacePipeTokeUsesPurgeableGridAndMasterDeckRemovalDoor) {
     RunController rc = enter_floor_one_rest(20);
     set_relics(rc.run,
@@ -475,6 +503,60 @@ TEST(RestSites, PeacePipeTokeUsesPurgeableGridAndMasterDeckRemovalDoor) {
     EXPECT_EQ(rc.run.hp, 72);
     EXPECT_EQ(rc.run.relics[1].counter, 1);  // Du-Vu Doll recomputed
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+TEST(RestSites, TokeGridAndOptionGateExcludeBottledCards) {
+    // The Toke grid is getGroupWithoutBottledCards(getPurgeableCards())
+    // (CampfireTokeEffect.java:57) and the OPTION's usable flag reads the
+    // same excluded group (PeacePipe.java:48, TokeOption ctor) -- one
+    // exclusion stronger than the Smith side, which keeps bottled cards.
+    RunController rc = enter_floor_one_rest(20);
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::PEACE_PIPE), -1}});
+    rc.run.master_deck_count = 2;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::CLEAVE), 0, 0,
+                     kMasterCardInBottleFlame, 0};
+    rc.run.master_deck[1] =
+        CardInstance{static_cast<uint16_t>(CardId::ARMAMENTS), 0, 0, 0, 0};
+
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         option_index(rc.run, RestOptionKind::TOKE)));
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::TOKE));
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_choose_master_deck[0])
+        << "the bottled card is not on the Toke grid";
+    EXPECT_TRUE(mask.can_choose_master_deck[1]);
+
+    // A CHOOSE on the bottled row is a non-corrupting no-op.
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(rc.run.master_deck_count, 2);
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::TOKE));
+    // The eligible pick still works.
+    step(rc, make_action(ActionVerb::CHOOSE, 1));
+    EXPECT_EQ(rc.run.master_deck_count, 1);
+}
+
+TEST(RestSites, TokeOptionIsUnusableWhenEveryPurgeableCardIsBottled) {
+    RunController rc = enter_floor_one_rest(20);
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::PEACE_PIPE), -1}});
+    rc.run.master_deck_count = 2;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::CLEAVE), 0, 0,
+                     kMasterCardInBottleFlame, 0};
+    rc.run.master_deck[1] =
+        CardInstance{static_cast<uint16_t>(CardId::ASCENDERS_BANE), 0, 0, 0, 0};
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    const uint8_t toke = option_index(rc.run, RestOptionKind::TOKE);
+    EXPECT_FALSE(mask.can_choose_rest[toke])
+        << "PeacePipe.java:48: no un-bottled purgeable card -> Toke disabled";
+    // And the disabled option cannot be forced through the dispatcher.
+    step(rc, make_action(ActionVerb::CHOOSE, toke));
+    EXPECT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::MENU));
 }
 
 TEST(RestSites, GiryaLiftStopsAtThreeAndPersistsInRelicSlot) {

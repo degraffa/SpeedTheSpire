@@ -15,6 +15,7 @@
 #include "sts/engine/event_framework.hpp"
 #include "sts/engine/interp.hpp"  // CHOOSE_CARD encoding for the HAND_SELECT screen
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/run_deck.hpp"  // the master-deck bottle flag bits
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
 
@@ -295,10 +296,35 @@ private:
 
 // ---- card / power parsers (PROTOCOL §3.13 / §3.14) -----------------------
 
+// `master_deck` is true only on the RunState `deck` walk: the fork's
+// in_bottle_* booleans (PROTOCOL §3.13, absent == false so pre-addition
+// captures translate unchanged) become the engine's MASTER-DECK bottle flag
+// bits there. On every other walk (combat piles, reward offers, grids) the
+// keys are consumed and DROPPED: combat `flags` are registry-derived
+// `CardFlag`s -- a different namespace, where bit 0 means EXHAUST -- and the
+// bottled instance's combat rendering is the INNATE bit the combat builder
+// derives itself (run_deck.hpp's encoding note).
 [[nodiscard]] eng::CardInstance parse_card(const json& j, const std::string& path,
-                                           Ctx& ctx) {
+                                           Ctx& ctx, bool master_deck = false) {
     FieldReader fr(j, path, ctx);
     eng::CardInstance ci{};
+    struct BottleKey {
+        const char* key;
+        uint16_t bit;
+    };
+    static constexpr BottleKey kBottleKeys[] = {
+        {"in_bottle_flame", eng::kMasterCardInBottleFlame},
+        {"in_bottle_lightning", eng::kMasterCardInBottleLightning},
+        {"in_bottle_tornado", eng::kMasterCardInBottleTornado},
+    };
+    for (const BottleKey& bk : kBottleKeys) {
+        if (const json* b = fr.take(bk.key)) {
+            if (as_bool(*b, ctx, path + "." + bk.key) && master_deck) {
+                ci.flags = static_cast<uint16_t>(ci.flags | bk.bit);
+            }
+            fr.mapped();
+        }
+    }
     // id -> card_id (the translator join key, §2.6). Mapped.
     ci.card_id = static_cast<uint16_t>(join_card(as_str(fr.require("id"), ctx, path + ".id"),
                                                  ctx, path + ".id"));
@@ -1242,7 +1268,8 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
         rs.master_deck_count = 0;
         for (std::size_t i = 0; i < deck->size(); ++i) {
             rs.master_deck[rs.master_deck_count++] =
-                parse_card((*deck)[i], path + ".deck[" + std::to_string(i) + "]", ctx);
+                parse_card((*deck)[i], path + ".deck[" + std::to_string(i) + "]", ctx,
+                           /*master_deck=*/true);
         }
         fr.mapped();
     }

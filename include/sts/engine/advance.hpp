@@ -69,6 +69,25 @@ namespace sts::engine {
 [[nodiscard]] CombatState combat_begin(int64_t run_seed, int32_t floor,
                                        std::span<const CardId> deck) noexcept;
 
+// The initializeDeck overflow draw (CardGroup.java:951-954): when the
+// placeOnTop collection -- Innate cards plus bottled instances, ONE list
+// (CardGroup.java:933-941) -- exceeds masterHandSize, initializeDeck queues
+// `addToTurnStart(new DrawCardAction(placeOnTop.size() - masterHandSize))`.
+// addToTurnStart prepends to GameActionManager.preTurnActions
+// (GameActionManager.java:145-148), which getNextAction drains only once
+// `actions` is EMPTY (GameActionManager.java:190-191) -- i.e. after the whole
+// turn-1 block [GainEnergy, Draw(5), EnableEndTurn] AND every atBattleStart
+// relic body queued behind it have resolved. Both combat builders therefore
+// call this LAST, after their turn-1 pump (and, on the run path, after the
+// atBattleStart drain): it queues DRAW(innate_count - kStartOfTurnDrawCount)
+// and pumps it, so the player opens with every innate/bottled card in hand.
+// A no-op when innate_count <= kStartOfTurnDrawCount (5 -- the game's
+// masterHandSize; Snecko Eye's masterHandSize += 2 is the deferred
+// energyMaster row's concern and would move BOTH the threshold and the
+// start-of-turn draw together). Defined in advance.cpp.
+void queue_innate_overflow_draw(CombatState& state,
+                                uint8_t innate_count) noexcept;
+
 // --- ActionMask -------------------------------------------------------------
 
 // Which actions are legal in the current state (design doc §7:

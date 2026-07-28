@@ -372,10 +372,13 @@ EventDialogStatus fountain_choose(RunController& rc, EventDialogState& es,
     if (option == 0) {
         // The Java walks the master deck BACKWARDS (:54-59) so each removal
         // leaves the not-yet-visited prefix in place. The exclusion list is
-        // AscendersBane / CurseOfTheBell / Necronomicurse plus the two bottle
-        // flags; of those only Ascender's Bane has a registry row, and
-        // bottling at acquisition is a separately recorded deferral, so
-        // rest_card_purgeable is exactly this predicate today.
+        // AscendersBane / CurseOfTheBell / Necronomicurse plus inBottleFlame
+        // and inBottleLightning (:55 -- and NOT inBottleTornado, a game
+        // oddity). Bottling is live now (run_deck.hpp), but the two bottle
+        // clauses stay unwritten because they are structurally dead: this
+        // walk only visits CURSE-type cards, and no bottle can hold one (the
+        // grids are ATTACK/SKILL/POWER type-filtered). rest_card_purgeable
+        // therefore remains exactly this predicate.
         for (int i = static_cast<int>(rc.run.master_deck_count) - 1; i >= 0;
              --i) {
             const auto index = static_cast<uint16_t>(i);

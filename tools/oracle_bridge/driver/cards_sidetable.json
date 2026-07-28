@@ -25,8 +25,8 @@
     "regenerate": "python tools/oracle_bridge/driver/gen_cards_sidetable.py --registry registry/cards.yaml --out tools/oracle_bridge/driver/cards_sidetable.json",
     "scope": "registry/cards.yaml is S1 only (Ironclad + colorless + curses/statuses). A card the live game offers that is absent here scores as zero-damage cheap utility; the driver never raises on an unknown id.",
     "source": "registry/cards.yaml",
-    "source_rows": 126,
-    "source_sha256": "D8893534C2E322B5AF5B136395437415048A89EDC01BB5F31701F159D2F8F9E3"
+    "source_rows": 127,
+    "source_sha256": "AFF1F3B5A0E16F53BC8D50AB175B58FF9E3613A7D81E752DEAB6AA82F9E1060F"
   },
   "cards": {
     "Anger": {
@@ -122,7 +122,7 @@
       "cost": 2,
       "damage": [
         8,
-        10
+        8
       ],
       "damage_from_block": false,
       "type": "ATTACK"
@@ -379,6 +379,20 @@
       "damage_from_block": false,
       "type": "POWER"
     },
+    "CurseOfTheBell": {
+      "aoe": false,
+      "block": [
+        0,
+        0
+      ],
+      "cost": -2,
+      "damage": [
+        0,
+        0
+      ],
+      "damage_from_block": false,
+      "type": "CURSE"
+    },
     "Dark Embrace": {
       "aoe": false,
       "block": [
@@ -453,7 +467,7 @@
       "aoe": false,
       "block": [
         5,
-        8
+        5
       ],
       "cost": 1,
       "damage": [
@@ -1228,7 +1242,7 @@
       "cost": 1,
       "damage": [
         9,
-        10
+        9
       ],
       "damage_from_block": false,
       "type": "ATTACK"
@@ -1503,7 +1517,7 @@
       "aoe": false,
       "block": [
         8,
-        11
+        8
       ],
       "cost": 1,
       "damage": [
@@ -1550,7 +1564,7 @@
       "cost": 1,
       "damage": [
         6,
-        9
+        6
       ],
       "damage_from_block": false,
       "type": "ATTACK"

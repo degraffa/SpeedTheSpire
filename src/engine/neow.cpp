@@ -60,11 +60,52 @@ RelicSpawnContext neow_spawn_context(const RunState& rs) noexcept {
     return ctx;
 }
 
-void spawn_relic_and_obtain(RunState& rs, RngStream& misc_rng,
+void open_grid(NeowState& st, NeowGridMode mode, uint8_t picks) noexcept;
+
+void spawn_relic_and_obtain(RunState& rs, NeowState& st, RewardScreen& rewards,
+                            RngStream& misc_rng, RngStream& card_random_rng,
                             RelicId id) noexcept {
     // AbstractRoom.spawnRelicAndObtain (AbstractRoom.java:501-510): the Circlet
     // duplicate branch and obtain() are both what acquire_relic already models.
-    (void)acquire_relic(rs, misc_rng, id);
+    // Every Neow relic payout goes through the screen-capable overload so that
+    // a BOSS-swap relic with an on_equip_screen body (the five: Pandora's Box,
+    // Tiny House, Astrolabe, Empty Cage, Calling Bell) runs it here rather
+    // than being refused by the plain door -- and so no Neow path can ever be
+    // the silent-inert one. The body's screen request is then translated onto
+    // NeowState's own sub-screens; that translation living HERE (not in the
+    // bodies) is what keeps the bodies re-homable to an Act-2 boss-chest call
+    // site later (see RelicEquipContext, relic_pools.hpp).
+    //
+    // TIMING: the Java fires onEquip from the relic's fly-in animation, not
+    // from obtain() (AbstractRelic.java:277-292 vs :339-348); nothing else in
+    // any Neow payout runs in between, so this inline dispatch is observably
+    // identical -- recorded at the bodies' header (relic_pickup_boss.cpp).
+    RelicEquipContext ctx{card_random_rng, rewards, kNeowRewardScreenRoom};
+    (void)acquire_relic(rs, misc_rng, id, ctx);
+    switch (ctx.screen) {
+        case RelicEquipScreen::NONE:
+            break;  // synchronous body (or none): st.screen stays as set.
+        case RelicEquipScreen::GRID_REMOVE:
+            open_grid(st, NeowGridMode::REMOVE, ctx.grid_picks);
+            break;
+        case RelicEquipScreen::GRID_TRANSFORM_UPGRADE:
+            open_grid(st, NeowGridMode::TRANSFORM_UPGRADE, ctx.grid_picks);
+            break;
+        case RelicEquipScreen::ITEM_REWARD:
+            // The body assembled `rewards`; the claim/proceed flow is the same
+            // NeowScreen::ITEM_REWARD branch the three-potion blessing uses.
+            st.screen = static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
+            break;
+        case RelicEquipScreen::GRID_BOTTLE:
+            // Structurally unreachable at this site: the boss swap draws from
+            // the BOSS pool and the Bottled trio is UNCOMMON. The bottle grid
+            // belongs to the claim/purchase sites' pending-bottle overlay
+            // (apply_claim_equip_request, run_advance.cpp); this function has
+            // no RunController to park it on, which is fine because no Neow
+            // payout can produce the request.
+            assert(false && "a bottle grid request from the Neow boss swap");
+            break;
+    }
 }
 
 // --- Card offers ---------------------------------------------------------------
@@ -156,8 +197,16 @@ void open_neow_card_screen(RewardScreen& rewards, const RunRewardItem& item) noe
 
 // --- Grid application ---------------------------------------------------------
 
-void apply_grid(RunState& rs, NeowState& st) noexcept {
+void apply_grid(RunState& rs, NeowState& st, RngStream& misc_rng) noexcept {
     const auto mode = static_cast<NeowGridMode>(st.grid_mode);
+    if (mode == NeowGridMode::TRANSFORM_UPGRADE) {
+        // Astrolabe's grid (the only mode on MISC rng): the completed pick set
+        // routes back through the relic's own transform application, in click
+        // order (Astrolabe.update -> giveCards, Astrolabe.java:57-63, :65-79).
+        relic_astrolabe_transform_cards(rs, misc_rng, st.grid_picked,
+                                        st.grid_done);
+        return;
+    }
     if (mode == NeowGridMode::UPGRADE) {
         // NeowReward.update case UPGRADE_CARD (NeowReward.java:134-140).
         rs.master_deck[st.grid_picked[0]].upgrade = 1;
@@ -219,14 +268,16 @@ void open_grid(NeowState& st, NeowGridMode mode, uint8_t picks) noexcept {
     st.grid_mode = static_cast<uint8_t>(mode);
     st.grid_needed = picks;
     st.grid_done = 0;
-    st.grid_picked[0] = 0;
-    st.grid_picked[1] = 0;
+    for (int i = 0; i < kNeowGridPickCap; ++i) {
+        st.grid_picked[i] = 0;
+    }
 }
 
 // --- Payout dispatch ----------------------------------------------------------
 
 void apply_payout(RunState& rs, NeowState& st, RewardScreen& rewards,
-                  RngStream& misc_rng, NeowRewardType type) noexcept {
+                  RngStream& misc_rng, RngStream& card_random_rng,
+                  NeowRewardType type) noexcept {
     st.screen = static_cast<uint8_t>(NeowScreen::DONE);
     switch (type) {
         case NeowRewardType::THREE_CARDS:
@@ -294,31 +345,36 @@ void apply_payout(RunState& rs, NeowState& st, RewardScreen& rewards,
 
         case NeowRewardType::RANDOM_COMMON_RELIC:
             spawn_relic_and_obtain(
-                rs, misc_rng,
+                rs, st, rewards, misc_rng, card_random_rng,
                 return_random_relic_key(rs, RelicTier::COMMON,
                                         neow_spawn_context(rs)));
             break;
         case NeowRewardType::ONE_RARE_RELIC:
             spawn_relic_and_obtain(
-                rs, misc_rng,
+                rs, st, rewards, misc_rng, card_random_rng,
                 return_random_relic_key(rs, RelicTier::RARE,
                                         neow_spawn_context(rs)));
             break;
         case NeowRewardType::THREE_ENEMY_KILL:
             // Neow's Lament, a hand-built relic rather than a pool draw
             // (NeowReward.java:248-250).
-            spawn_relic_and_obtain(rs, misc_rng, RelicId::NEOWS_LAMENT);
+            spawn_relic_and_obtain(rs, st, rewards, misc_rng, card_random_rng,
+                                   RelicId::NEOWS_LAMENT);
             break;
         case NeowRewardType::BOSS_RELIC:
             // loseRelic(relics.get(0)) FIRST, then the BOSS-pool draw
             // (NeowReward.java:243-247). The order is observable: the removed
             // relic is the Ironclad's Burning Blood, and Black Blood's canSpawn
-            // requires it, so the draw can never return Black Blood.
+            // requires it, so the draw can never return Black Blood. The drawn
+            // relic's onEquip -- including the five on_equip_screen bodies --
+            // runs inside spawn_relic_and_obtain, which translates any screen
+            // request onto st.screen (overriding the DONE set at the top of
+            // this function).
             if (rs.relic_count > 0) {
                 (void)lose_relic(rs, static_cast<RelicId>(rs.relics[0].relic_id));
             }
             spawn_relic_and_obtain(
-                rs, misc_rng,
+                rs, st, rewards, misc_rng, card_random_rng,
                 return_random_relic_key(rs, RelicTier::BOSS,
                                         neow_spawn_context(rs)));
             break;
@@ -464,7 +520,8 @@ void neow_roll_blessing(RunState& rs, NeowState& out) noexcept {
 // --- Activation ---------------------------------------------------------------
 
 void neow_activate(RunState& rs, NeowState& st, RewardScreen& rewards,
-                   RngStream& misc_rng, uint8_t index) noexcept {
+                   RngStream& misc_rng, RngStream& card_random_rng,
+                   uint8_t index) noexcept {
     if (index >= kNeowOptionCount ||
         st.screen != static_cast<uint8_t>(NeowScreen::BLESSING)) {
         return;
@@ -476,7 +533,7 @@ void neow_activate(RunState& rs, NeowState& st, RewardScreen& rewards,
     // NeowReward.activate: the drawback switch (:192-212) runs first, then the
     // payout switch (:213-305).
     apply_drawback(rs, st, drawback);
-    apply_payout(rs, st, rewards, misc_rng, type);
+    apply_payout(rs, st, rewards, misc_rng, card_random_rng, type);
 
     // The CURSE drawback's card is NOT part of activate(): it is obtained in the
     // next NeowReward.update tick (:183-186), which is after activate() returned
@@ -512,13 +569,20 @@ bool neow_grid_card_legal(const RunState& rs, const NeowState& st,
     const CardInstance& card = rs.master_deck[deck_index];
     // The list the grid was opened over: getUpgradableCards for UPGRADE_CARD
     // (NeowReward.java:303), getPurgeableCards for every other grid payout
-    // (:253, :257, :286, :290).
+    // (:253, :257, :286, :290). Deliberately the PLAIN filters, with NO
+    // getGroupWithoutBottledCards pass: neither Neow's grids nor the two
+    // relic grids sharing this legality (Astrolabe.java:39/:55 via
+    // getPurgeableCards, EmptyCage.java:45/:55) exclude bottled cards in the
+    // Java -- do not "fix" this to match the event/shop/Toke grids, which DO
+    // exclude (master_card_purgeable_unbottled and its site map,
+    // relic_pools.hpp).
     return static_cast<NeowGridMode>(st.grid_mode) == NeowGridMode::UPGRADE
                ? rest_card_upgradeable(card)
                : rest_card_purgeable(card);
 }
 
-bool neow_grid_pick(RunState& rs, NeowState& st, uint16_t deck_index) noexcept {
+bool neow_grid_pick(RunState& rs, NeowState& st, RngStream& misc_rng,
+                    uint16_t deck_index) noexcept {
     if (!neow_grid_card_legal(rs, st, deck_index)) {
         return false;
     }
@@ -526,7 +590,7 @@ bool neow_grid_pick(RunState& rs, NeowState& st, uint16_t deck_index) noexcept {
     if (st.grid_done < st.grid_needed) {
         return true;  // the screen stays up until the set is complete
     }
-    apply_grid(rs, st);
+    apply_grid(rs, st, misc_rng);
     st.grid_mode = static_cast<uint8_t>(NeowGridMode::NONE);
     st.screen = static_cast<uint8_t>(NeowScreen::DONE);
     return true;

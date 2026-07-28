@@ -508,6 +508,30 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 
+    # Wave-C track 2, Pandora's Box: AbstractDungeon.returnTrulyRandomCard()
+    # (:936-942) -- srcCommonCardPool ++ srcUncommonCardPool ++ srcRareCardPool
+    # with NO filter at all, one cardRandomRng random(size - 1) per draw. This is
+    # a GENUINELY DIFFERENT Java list from returnTrulyRandomCardInCombat()
+    # (:944-962, the kIroncladCombatPool above): the in-combat method excludes
+    # CardTags.HEALING (Feed and Reaper, both RED RARE), this one does not, so
+    # the two differ by exactly those two rows (72 vs 70 for the Ironclad).
+    # Emitting it does not violate the one-authority rule card_pools.hpp:73-84
+    # states for transformCard's list -- that rule forbids a SECOND SPELLING OF
+    # THE SAME list, and this is a different method reading a different set.
+    # CardPoolLibraryOrder.CombatPoolIsTheHealingFilteredTrulyRandomSubsequence
+    # pins the containment so the two cannot drift apart.
+    truly_random_pool = src_combat_order(
+        [r for r in rows
+         if r["color"] == "RED"
+         and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")])
+    out.append(f"inline constexpr int kIroncladTrulyRandomPoolCount = "
+               f"{len(truly_random_pool)};")
+    out.append("inline constexpr std::array<CardId, "
+               "kIroncladTrulyRandomPoolCount> kIroncladTrulyRandomPool{{")
+    for r in truly_random_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
     # B3.10b Jack of All Trades: returnTrulyRandomColorlessCardInCombat
     # (:981-995) draws from every poolable COLORLESS UNCOMMON/RARE except a
     # HEALING-tagged card (Bandage Up). This reaches the final 34 members

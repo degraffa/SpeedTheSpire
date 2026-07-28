@@ -385,6 +385,9 @@ site in `GameStateConverter.java` maps to exactly one row below (see §4).
 | `exhausts` | bool | S | :639 | |
 | `ethereal` | bool | S | :640 | |
 | `price` | int | S | :346 | present only on shop cards (§3.9) |
+| `in_bottle_flame` | bool | S | fork addition (Wave-C track 2) | only emitted when true (`AbstractCard.inBottleFlame`); absent == false, so captures made by earlier fork builds translate unchanged. Mapped to the master-deck bottle flag bits (engine `run_deck.hpp`) on the `deck` walk only — combat-pile occurrences are consumed and dropped, because combat `flags` are registry-derived and use the `CardFlag` namespace |
+| `in_bottle_lightning` | bool | S | fork addition | same shape (`inBottleLightning`) |
+| `in_bottle_tornado` | bool | S | fork addition | same shape (`inBottleTornado`) |
 
 ### 3.14 Power — `convertCreaturePowersToJson` (:770-819)
 

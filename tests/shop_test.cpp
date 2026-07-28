@@ -836,6 +836,95 @@ TEST(ShopFlow, PurgeOpensAModalGridAndConfirmingRemovesExactlyOneCard) {
     (void)removed;
 }
 
+TEST(ShopPurge, TheGridAndTheServiceGateExcludeBottledCards) {
+    // ShopScreen.java:973: the purge grid opens
+    // getGroupWithoutBottledCards(getPurgeableCards()), so a bottled card is
+    // not a purge row -- and a deck whose ONLY purgeable cards are bottled
+    // has no live purge service at all (shop_purge_legal's card scan).
+    RunState rs = bare_run(707);
+    rs.gold = 999;
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);
+    ShopState shop = generate_shop(rs);
+
+    ASSERT_TRUE(shop_purge_legal(rs, shop));
+    EXPECT_FALSE(shop_purge_card_legal(rs, shop, 0))
+        << "the bottled card is not on the purge grid";
+    EXPECT_TRUE(shop_purge_card_legal(rs, shop, 1));
+
+    // Bottle the other card too: every purgeable card is now bottled and the
+    // service itself goes dark.
+    rs.master_deck[1].flags = kMasterCardInBottleLightning;
+    EXPECT_FALSE(shop_purge_legal(rs, shop));
+}
+
+TEST(ShopPurchase, PlainBuyOfABottleIsRefusedWholeWithNoGoldSpent) {
+    // The context-less shop_buy_relic overload cannot present the bottle grid,
+    // so it must refuse BEFORE the gold leaves and the slot is marked sold --
+    // never a paid-for relic silently not granted (contract in shop.hpp).
+    RunState rs = bare_run(606);
+    rs.gold = 999;
+    rs.master_deck_count = 1;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    ShopState shop = generate_shop(rs);
+    shop.relics[0].id = static_cast<uint16_t>(RelicId::BOTTLED_FLAME);
+    shop.relics[0].price = 100;
+    EXPECT_FALSE(shop_buy_relic(rs, rs.merchant_rng, shop, 0));
+    EXPECT_EQ(rs.gold, 999);
+    EXPECT_EQ(shop.relics[0].sold, 0);
+    EXPECT_EQ(rs.relic_count, 0);
+}
+
+TEST(ShopFlow, BuyingABottleOpensTheOverlayOverTheShopFloor) {
+    // StoreRelic.purchaseRelic -> instantObtain -> onEquip: the bottle grid
+    // opens over the merchant (room INCOMPLETE) and the pick returns to the
+    // shop menu. The tier-rolled stock CAN roll a bottle for real; the slot is
+    // placed by hand here so the test does not depend on a stock-roll seed.
+    RunController rc = enter_shop(0xB48'5407LL);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
+    rc.run.gold = 5000;
+    rc.shop.relics[1].id = static_cast<uint16_t>(RelicId::BOTTLED_LIGHTNING);
+    rc.shop.relics[1].price = 200;
+    const uint8_t relics_before = rc.run.relic_count;
+    const int32_t gold_before = rc.run.gold;
+
+    // The A20 deck holds Defends (SKILLs), so Lightning's grid is non-empty.
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         static_cast<uint8_t>(kChooseShopRelicBase + 1)));
+    ASSERT_EQ(rc.run.relic_count, relics_before + 1);
+    EXPECT_EQ(rc.run.relics[relics_before].relic_id,
+              static_cast<uint16_t>(RelicId::BOTTLED_LIGHTNING));
+    EXPECT_EQ(rc.run.gold, gold_before - 200);
+    EXPECT_EQ(rc.shop.relics[1].sold, 1);
+    ASSERT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::LIGHTNING));
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    EXPECT_FALSE(m.can_proceed) << "the bottle grid is modal over the shop";
+    EXPECT_FALSE(m.can_purge);
+    for (int i = 0; i < kShopItemCount; ++i) {
+        EXPECT_FALSE(m.can_buy_shop_item[i]) << i;
+    }
+    uint16_t pick = kMasterDeckCap;
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        if (m.can_choose_master_deck[i]) {
+            pick = i;
+            break;
+        }
+    }
+    ASSERT_LT(pick, kMasterDeckCap);
+    step(rc, make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(pick)));
+    EXPECT_EQ(rc.run.master_deck[pick].flags, kMasterCardInBottleLightning);
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::NONE));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::SHOP));
+    legal_actions(rc, m);
+    EXPECT_TRUE(m.can_proceed) << "back on the shop menu after the pick";
+}
+
 TEST(ShopFlow, MealTicketHealsOnAStaticShopRoomEntry) {
     RunController rc = run_begin(0xB48'5407LL, kA20);
     for (int x = 0; x < kMapCols; ++x) {

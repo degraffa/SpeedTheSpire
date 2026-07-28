@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 
-#include "relics/relic_pickup.hpp"    // gain_gold (Ectoplasm door)
+#include "relics/relic_pickup.hpp"    // gain_gold / heal_out_of_combat doors
 #include "sts/engine/card_pools.hpp"  // transform_card (the ONE transformCard list)
 #include "sts/engine/cards.hpp"       // card_def / CardType (isCursed)
 #include "sts/engine/relics.hpp"      // RelicId (Tiny Chest / Juzu Bracelet)
@@ -64,23 +64,68 @@ void build_event_roll_table(int monster_size, int shop_size, int treasure_size,
          EventRoomResult::TREASURE);
 }
 
-// --- The roll ----------------------------------------------------------------
+// --- The room-entry relic fan-out ---------------------------------------------
 
-void dispatch_event_room_entry_relics(RunState& rs) noexcept {
+void dispatch_on_enter_room_relics(RunState& rs, RoomType room) noexcept {
     // AbstractDungeon.nextRoomTransition iterates every relic's onEnterRoom
-    // against nextRoom.room BEFORE an EventRoom is rolled/replaced
-    // (AbstractDungeon.java:1754-1779). SsserpentHead.onEnterRoom
-    // (SsserpentHead.java:29-35) therefore fires for every ? entry, including
-    // one that later resolves to combat, shop or treasure. MawBank.onEnterRoom
-    // (MawBank.java:31-36) has no room-type condition and likewise fires here
-    // while unused. This is a fan-out, not getRelic: a malformed duplicate
-    // import fires once per copy as the Java relic iteration does.
+    // against nextRoom.room (AbstractDungeon.java:1755-1757) -- unconditional on
+    // the room kind, BEFORE the ? roll replaces an EventRoom (:1766-1781) and
+    // before setCurrMapNode (:1783). The full contract, and why this must NOT
+    // be reached by on_player_entry's ? recursion, is in event_framework.hpp.
+    //
+    // `nextRoom != null` is the Java's only guard (:1754); RoomType::None is
+    // that null room.
+    if (room == RoomType::None) {
+        return;
+    }
+    // A fan-out, not getRelic: a malformed duplicate import fires once per copy
+    // as the Java relic iteration does.
     for (uint8_t i = 0; i < rs.relic_count; ++i) {
-        const RelicId id = static_cast<RelicId>(rs.relics[i].relic_id);
-        if (id == RelicId::SSSERPENT_HEAD) {
-            gain_gold(rs, 50);
-        } else if (id == RelicId::MAW_BANK && rs.relics[i].counter != -2) {
-            gain_gold(rs, 12);
+        switch (static_cast<RelicId>(rs.relics[i].relic_id)) {
+            case RelicId::SSSERPENT_HEAD:
+                // `if (room instanceof EventRoom)` (SsserpentHead.java:29-35).
+                // The PRE-roll room is what is tested, so a ? that later
+                // becomes a monster, shop or chest still pays.
+                if (room == RoomType::Event) {
+                    gain_gold(rs, 50);
+                }
+                break;
+            case RelicId::MAW_BANK:
+                // `if (!this.usedUp) { flash(); player.gainGold(12); }`
+                // (MawBank.java:31-36) -- NO room condition whatsoever, so
+                // every kind pays, boss node included. usedUp is encoded as
+                // counter == -2 (setCounter, MawBank.java:47-53), the same
+                // encoding dispatch_relics_on_spend_gold writes.
+                if (rs.relics[i].counter != -2) {
+                    gain_gold(rs, 12);
+                }
+                break;
+            case RelicId::ETERNAL_FEATHER:
+                // `if (room instanceof RestRoom) { flash();
+                //    int amountToGain = player.masterDeck.size() / 5 * 3;
+                //    player.heal(amountToGain); }`
+                // (EternalFeather.java:29-35). INTEGER DIVISION FIRST, then x3:
+                // a 14-card deck heals 6, not 8.
+                //
+                // This is the room ENTRY, not the campfire. RestRoom's own
+                // onPlayerEntry -- which builds the CampfireUI and fires
+                // onEnterRestRoom (RestRoom.java:33-43) -- runs later, at
+                // AbstractDungeon.java:1800. So the heal lands before the menu
+                // exists and whether or not the player then rests, and it is
+                // NOT rest_apply_heal (which is the REST option's body).
+                //
+                // Magic Flower cannot scale it: MagicFlower.onPlayerHeal
+                // (MagicFlower.java:30-37) is gated on
+                // `getCurrRoom().phase == RoomPhase.COMBAT`, and this fan-out
+                // precedes even setCurrMapNode. heal_out_of_combat names that
+                // fan-out and the not-bloodied cross in full.
+                if (room == RoomType::Rest) {
+                    heal_out_of_combat(
+                        rs, static_cast<int32_t>(rs.master_deck_count) / 5 * 3);
+                }
+                break;
+            default:
+                break;
         }
     }
 }
@@ -408,13 +453,23 @@ bool event_grid_card_legal(const RunState& rs, const EventDialogState& es,
     }
     switch (static_cast<EventGridKind>(es.grid_kind)) {
         case EventGridKind::PURGE:
-            return rest_card_purgeable(rs.master_deck[deck_index]);
+            // Every S1 event purge grid passes getGroupWithoutBottledCards
+            // over getPurgeableCards -- Cleric.java:76-78,
+            // LivingWall.java:96-97 (Forget), Bonfire.java:101-102,
+            // PurificationShrine.java:62, GremlinWheelGame.java:286-287,
+            // NoteForYourself.java:65, GoldenWing.java:110 -- so a bottled
+            // card is not on any of them. (An Act-2 event that does NOT
+            // exclude, e.g. DrugDealer.java:128, would need its own kind.)
+            return master_card_purgeable_unbottled(rs.master_deck[deck_index]);
         case EventGridKind::UPGRADE:
+            // Upgrade grids keep bottled cards: LivingWall.java:109 (Grow)
+            // opens getUpgradableCards(), which has NO bottled clause -- do
+            // not over-exclude here.
             return rest_card_upgradeable(rs.master_deck[deck_index]);
         case EventGridKind::TRANSFORMABLE:
-            // Living Wall uses getPurgeableCards for this screen too
-            // (LivingWall.java:68-72).
-            return rest_card_purgeable(rs.master_deck[deck_index]);
+            // Living Wall's Change (:102-103) and Transmogrifier (:65) both
+            // open getGroupWithoutBottledCards(getPurgeableCards()).
+            return master_card_purgeable_unbottled(rs.master_deck[deck_index]);
         case EventGridKind::NONE:
         default:
             return false;

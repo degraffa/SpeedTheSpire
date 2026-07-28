@@ -469,8 +469,14 @@ bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
     }
 }
 
-bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
-                  uint8_t index) noexcept {
+namespace {
+
+// Shared body of the two claim_reward overloads. `equip_ctx == nullptr` is the
+// plain door: an on_equip_screen relic row (in S1, a Bottled trio id) is then
+// refused by acquire_relic's NEEDS_EQUIP_CONTEXT guard and the item stays on
+// the screen -- fail-loud, never a silent unbottled grant.
+bool claim_reward_impl(RunState& rs, RngStream& misc_rng, RewardScreen& s,
+                       uint8_t index, RelicEquipContext* equip_ctx) noexcept {
     if (!reward_claim_legal(rs, s, index)) {
         return false;
     }
@@ -502,10 +508,16 @@ bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
         case RewardItemKind::RELIC:
             // instantObtain: append in acquisition order + onEquip (which may
             // consume miscRng -- War Paint / Whetstone). The pool pop already
-            // happened at assembly.
+            // happened at assembly. With an equip context the screen-capable
+            // acquire_relic overload runs, so a Bottled trio row opens its
+            // grid request instead of being refused (the overload contract on
+            // the declaration).
             {
+                const RelicId rid = static_cast<RelicId>(item.id);
                 const RelicAcquireResult acquired =
-                    acquire_relic(rs, misc_rng, static_cast<RelicId>(item.id));
+                    equip_ctx != nullptr
+                        ? acquire_relic(rs, misc_rng, rid, *equip_ctx)
+                        : acquire_relic(rs, misc_rng, rid);
                 if (acquired != RelicAcquireResult::ACQUIRED &&
                     acquired != RelicAcquireResult::CIRCLET_STACKED) {
                     return false;
@@ -523,6 +535,18 @@ bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
         default:
             return false;
     }
+}
+
+}  // namespace
+
+bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
+                  uint8_t index) noexcept {
+    return claim_reward_impl(rs, misc_rng, s, index, nullptr);
+}
+
+bool claim_reward(RunState& rs, RngStream& misc_rng, RewardScreen& s,
+                  uint8_t index, RelicEquipContext& equip_ctx) noexcept {
+    return claim_reward_impl(rs, misc_rng, s, index, &equip_ctx);
 }
 
 bool reward_card_item_open_legal(const RewardScreen& s) noexcept {
