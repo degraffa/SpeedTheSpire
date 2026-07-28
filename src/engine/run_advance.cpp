@@ -736,6 +736,26 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
             rc.rest = RestSiteState{};
             rc.rest.screen = static_cast<uint8_t>(RestScreen::MENU);
             rc.phase = static_cast<uint8_t>(RunPhase::REST_SITE);
+            // CampfireUI.initializeButtons ends by asking whether ANY button is
+            // usable, and when none is it sets waitTimer = 0 and the room's
+            // phase = COMPLETE (CampfireUI.java:97-104) -- the campfire resolves
+            // with no player decision at all. An empty menu is a ROOM here, not
+            // an error: Coffee Dripper with a fully-upgraded, unpurgeable deck
+            // reaches it (Rest vetoed, Smith unusable on its own terms), and so
+            // does Coffee Dripper together with Fusion Hammer. Without this the
+            // run would offer no legal action and a soak would report the floor
+            // as a no_legal_moves dead end.
+            //
+            // It is the LAST thing rest-room entry does, which is also where it
+            // belongs relative to entry hooks: the game builds CampfireUI from
+            // RestRoom.onPlayerEntry, after the relic onEnterRoom fan-out -- so
+            // a future Eternal Feather heal (its own deferred row) attaches
+            // ABOVE this line and still fires in a skipped campfire, exactly as
+            // it does in the game.
+            if (!rest_menu_has_usable_option(build_rest_menu(rc.run))) {
+                rc.rest = RestSiteState{};
+                rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+            }
             break;
         case RoomType::Treasure:
             rc.combat = CombatState{};

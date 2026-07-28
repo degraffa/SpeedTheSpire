@@ -396,6 +396,123 @@ TEST(RestSites, MenuOrderAndAvailabilityMatrixMatchCampfireUi) {
     EXPECT_TRUE(menu.entries[4].usable);
 }
 
+// FusionHammer.canUseCampfireOption (FusionHammer.java:56-63) refuses
+// SmithOption and CoffeeDripper.canUseCampfireOption (CoffeeDripper.java:56-63)
+// refuses RestOption. The disable itself is CampfireUI.java:90's
+// `co.usable = false` -- the relics' own updateUsability calls only swap
+// description and image (SmithOption.java:24-27, RestOption.java:43-48) -- so
+// what is asserted is the built menu, not anything on the relic.
+TEST(RestSites, FusionHammerLocksSmithAndCoffeeDripperLocksRest) {
+    RunController rc = enter_floor_one_rest();
+    rc.run.master_deck_count = 1;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
+
+    // Baseline: an upgradeable deck and no boss relic -- both base buttons live.
+    RestMenu menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 2);
+    EXPECT_TRUE(menu.entries[0].usable);
+    EXPECT_TRUE(menu.entries[1].usable);
+
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::FUSION_HAMMER), -1}});
+    menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 2);
+    EXPECT_TRUE(menu.entries[0].usable) << "Fusion Hammer does not touch Rest";
+    EXPECT_FALSE(menu.entries[1].usable) << "Smith is locked";
+    // The button is still THERE -- CampfireUI keeps it in the list and only
+    // clears usable -- so the option indices the mask uses do not shift.
+    EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[1].kind),
+              RestOptionKind::SMITH);
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_choose_rest[0]);
+    EXPECT_FALSE(mask.can_choose_rest[1]);
+    const RunController before = rc;
+    step(rc, make_action(ActionVerb::CHOOSE, 1));
+    EXPECT_EQ(std::memcmp(&rc, &before, sizeof(rc)), 0)
+        << "choosing the locked Smith button is a non-corrupting no-op";
+
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
+    menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 2);
+    EXPECT_FALSE(menu.entries[0].usable) << "Rest is locked";
+    EXPECT_TRUE(menu.entries[1].usable) << "Coffee Dripper does not touch Smith";
+
+    // Neither relic touches an option added by another relic: the sweep runs
+    // over every button, but only these two kinds are refused.
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::FUSION_HAMMER), -1},
+                RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1},
+                RelicSlot{static_cast<uint16_t>(RelicId::SHOVEL), -1}});
+    menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 3);
+    EXPECT_FALSE(menu.entries[0].usable);
+    EXPECT_FALSE(menu.entries[1].usable);
+    EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[2].kind),
+              RestOptionKind::DIG);
+    EXPECT_TRUE(menu.entries[2].usable) << "Dig survives both vetoes";
+    EXPECT_TRUE(rest_menu_has_usable_option(menu));
+}
+
+// CampfireUI.java:97-104: when NO button is usable the room is completed on the
+// spot -- waitTimer 0, phase COMPLETE -- with no player decision. Reachable in
+// S1 with a single relic: Coffee Dripper vetoes Rest, and Smith is unusable on
+// its own terms whenever nothing in the deck can be upgraded.
+TEST(RestSites, ACampfireWithNoUsableOptionCompletesTheRoomOnEntry) {
+    RunController rc = run_begin(kSeed, 0);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
+    step(rc, make_action(ActionVerb::CHOOSE));
+    const uint8_t x = first_start_column(rc);
+    ASSERT_NE(x, 0xFF);
+    rc.run.map[run_state_map_index(x, 0)].room_type =
+        static_cast<uint8_t>(RoomType::Rest);
+
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
+    // Nothing upgradeable: one already-upgraded Strike.
+    rc.run.master_deck_count = 1;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::STRIKE), 1, 0, 0, 0};
+
+    const RestMenu menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 2);
+    EXPECT_FALSE(rest_menu_has_usable_option(menu));
+
+    step(rc, make_action(ActionVerb::CHOOSE, x));
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Rest))
+        << "the room was still ENTERED -- entry hooks belong above the skip";
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE))
+        << "an all-unusable campfire completes without a decision";
+    EXPECT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::NONE));
+    EXPECT_EQ(rc.run.floor, 1);
+
+    // ...and the run is not stuck: the map is offering nodes again.
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    bool any_node = false;
+    for (uint8_t c = 0; c < kMapCols; ++c) {
+        any_node = any_node || mask.can_choose_node[c];
+    }
+    EXPECT_TRUE(any_node) << "no legal move -- a soak would call this a dead end";
+
+    // One upgradeable card is enough to keep the campfire open, which is what
+    // makes the assertion above about the LOCK rather than about rest rooms.
+    RunController open = run_begin(kSeed, 0);
+    open.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
+    step(open, make_action(ActionVerb::CHOOSE));
+    open.run.map[run_state_map_index(x, 0)].room_type =
+        static_cast<uint8_t>(RoomType::Rest);
+    set_relics(open.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
+    open.run.master_deck_count = 1;
+    open.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
+    step(open, make_action(ActionVerb::CHOOSE, x));
+    EXPECT_EQ(open.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+}
+
 TEST(RestSites, NoUpgradableCardsMeansNoLegalSmith) {
     RunController rc = enter_floor_one_rest();
     rc.run.master_deck_count = 3;

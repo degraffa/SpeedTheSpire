@@ -1429,7 +1429,7 @@
   game_id: "Coffee Dripper"
   tier: BOSS
   pool_order: 18
-  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). The rest lock is a campfire-layer concern (the rest room's heal option, design 5.6); the energy half is the shared energy_master derivation, and it is LIVE. Row, pool slot and relicRng draw are live."
+  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). A marker row in the registry sense only -- both halves are read at their consumers, not through a hook: the rest lock in build_rest_menu's veto sweep (rest_sites.cpp) and the +1 at energy_master (action_queue.cpp). Row, pool slot and relicRng draw are live."
 
 - id: 131
   name: BLACK_BLOOD
