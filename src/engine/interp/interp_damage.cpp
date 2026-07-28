@@ -90,7 +90,11 @@ namespace {
     // PenNibPower (:51-57) doubles. Neither overrides atDamageReceive,
     // atDamageFinalReceive, modifyBlock or modifyBlockLast -- both classes were
     // read in full -- so those three switches take the count move and no case.
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Checked for Regenerate Monster (PowerId::REGENERATE_MONSTER, id 91): its
+    // only override is atEndOfTurn (RegenerateMonsterPower.java:37-43), read in
+    // full -- no atDamage* or block hook at all, so this file's three
+    // count-guard sites plus interp_block.cpp's one take the move together.
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -161,7 +165,9 @@ namespace {
     // Checked for Panache and The Bomb: same answer as the pass above -- both
     // QUEUE damage and neither overrides any atDamage* hook
     // (PanachePower.java:40-67 / TheBombPower.java:40-53).
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Checked for Regenerate Monster: same answer as the pass above -- its only
+    // override is atEndOfTurn (RegenerateMonsterPower.java:37-43), read in full.
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -224,7 +230,10 @@ namespace {
     // Checked for Panache and The Bomb: neither overrides atDamageFinalReceive
     // (PanachePower.java:40-67 / TheBombPower.java:40-53). All three of this
     // file's counts moved together again.
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Checked for Regenerate Monster: neither overrides atDamageFinalReceive
+    // (RegenerateMonsterPower.java:37-43, read in full). All three of this
+    // file's counts moved together with interp_block.cpp's, again.
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
@@ -749,7 +758,14 @@ void op_vampire_damage_all(CombatState& s, int base) noexcept {
 // HEAL (HealAction.update, HealAction.java:30-34 -> AbstractCreature.heal): the
 // player's heal, routed through heal_player_with_relics so the onPlayerHeal relic
 // pass (Magic Flower) applies and the result is clamped to max HP. A monster
-// target is a no-op: no S1 effect heals one, and the relic pass is player-only.
+// target is a no-op HERE -- the ONE S1 effect that heals a monster,
+// RegenerateMonsterPower (PowerId::REGENERATE_MONSTER, id 91), does not come
+// through this opcode at all: it is native and writes the monster's HP
+// directly at end of turn (power_regenerate_monster.cpp), the same escape
+// hatch the player's own REGEN (id 18) uses. So this op_heal no-op is not a
+// dead branch to "fix" if a monster-heal need ever shows up here -- it means
+// that need is data-program-shaped and REGENERATE_MONSTER's native precedent
+// is not it.
 void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
     if (tgt != kActorPlayer || amount <= 0) {
         return;

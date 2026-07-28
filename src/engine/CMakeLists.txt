@@ -58,6 +58,7 @@ add_library(sts_engine
     powers/power_plated_armor.cpp
     powers/power_rage.cpp
     powers/power_regen.cpp
+    powers/power_regenerate_monster.cpp
     powers/power_ritual.cpp
     powers/power_rupture.cpp
     powers/power_sadistic.cpp

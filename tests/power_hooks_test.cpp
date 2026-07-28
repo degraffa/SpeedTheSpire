@@ -465,6 +465,17 @@ int player_power_stack(const CombatState& s, PowerId id) {
     return -1;
 }
 
+// Monster `m`'s power stack amount, or -1 if absent (a removed slot reads as
+// absent) -- the monster-owned twin of player_power_stack above.
+int monster_power_stack(const CombatState& s, uint8_t m, PowerId id) {
+    for (uint8_t i = 0; i < s.monsters[m].power_count; ++i) {
+        if (s.monsters[m].powers[i].power_id == static_cast<uint16_t>(id)) {
+            return s.monsters[m].powers[i].amount;
+        }
+    }
+    return -1;
+}
+
 // DEXTERITY: modifyBlock adds to CARD block only; power/relic/potion block (the
 // kBlockNoPowers items) is a direct GainBlockAction and does NOT get Dexterity.
 TEST(PowerHooks, DexterityBoostsCardBlockNotDirectBlock) {
@@ -700,6 +711,50 @@ TEST(PowerHooks, RegenClampsToMaxHpAndRemovesAtZero) {
     dispatch_at_end_of_turn(s);
     EXPECT_EQ(s.player_hp, 50) << "heal clamped to max HP";
     EXPECT_EQ(player_power_stack(s, PowerId::REGEN), -1) << "Regen removed at 0";
+}
+
+// REGENERATE_MONSTER: heals `amount` at end of turn, clamped to max HP, and
+// NEVER decrements (the whole distinction from REGEN above -- see
+// power_regenerate_monster.cpp / RegenerateMonsterPower.java:37-43). A
+// monster's own AT_END_OF_TURN is dispatched from dispatch_at_end_of_round's
+// per-monster walk (power_hooks.cpp:258-259), NOT from dispatch_at_end_of_turn
+// (player-only, :234-236) -- that walk is exactly MonsterGroup
+// .applyEndOfTurnPowers's step (1) (MonsterGroup.java:290-304).
+TEST(PowerHooks, RegenerateMonsterHealsAndNeverDecrements) {
+    CombatState s{};
+    s.monster_count = 1;
+    s.monsters[0].hp = 20;
+    s.monsters[0].max_hp = 30;
+    give_monster_power(s, 0, PowerId::REGENERATE_MONSTER, 3);
+    dispatch_at_end_of_round(s);
+    EXPECT_EQ(s.monsters[0].hp, 23) << "healed 3";
+    EXPECT_EQ(monster_power_stack(s, 0, PowerId::REGENERATE_MONSTER), 3)
+        << "amount is untouched -- no decrement, unlike REGEN";
+}
+
+TEST(PowerHooks, RegenerateMonsterClampsToMaxHp) {
+    CombatState s{};
+    s.monster_count = 1;
+    s.monsters[0].hp = 29;
+    s.monsters[0].max_hp = 30;
+    give_monster_power(s, 0, PowerId::REGENERATE_MONSTER, 3);
+    dispatch_at_end_of_round(s);
+    EXPECT_EQ(s.monsters[0].hp, 30) << "heal clamped to max HP";
+    EXPECT_EQ(monster_power_stack(s, 0, PowerId::REGENERATE_MONSTER), 3);
+}
+
+// A dead monster's AT_END_OF_TURN never fires at all -- the dispatch walk
+// (power_hooks.cpp:254-256) skips monster_dead_or_escaped before reaching any
+// power's hook, which is what stands in for RegenerateMonsterPower's own
+// isDying/isDead guard (RegenerateMonsterPower.java:39).
+TEST(PowerHooks, RegenerateMonsterSkipsADeadMonster) {
+    CombatState s{};
+    s.monster_count = 1;
+    s.monsters[0].hp = 0;
+    s.monsters[0].max_hp = 30;
+    give_monster_power(s, 0, PowerId::REGENERATE_MONSTER, 3);
+    dispatch_at_end_of_round(s);
+    EXPECT_EQ(s.monsters[0].hp, 0) << "dead monster is skipped, not healed back up";
 }
 
 // RITUAL (data): applies its amount of Strength to the player at end of turn.

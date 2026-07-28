@@ -68,7 +68,10 @@ namespace {
     // scalers and neither overrides modifyBlock or modifyBlockLast
     // (VigorPower and PenNibPower read in full), so this guard moves and no
     // case is added in either block pass.
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Checked for Regenerate Monster (PowerId::REGENERATE_MONSTER, id 91):
+    // its only override is atEndOfTurn (RegenerateMonsterPower.java:37-43),
+    // read in full -- it touches no block path at all.
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

@@ -3089,7 +3089,10 @@ TEST(RunEmeraldElite, MetallicizeRollStacksOnPreBattleArmour) {
     FAIL() << "no seed under 400 rolls Metallicize on its burning elite";
 }
 
-TEST(RunEmeraldElite, RegenerateRollParksTheRoomWithTheDrawConsumed) {
+// Roll 3 -> RegenerateMonsterPower(1 + actNum*2) == 3 at act 1, applied to
+// EVERY group member (MonsterRoomElite.java:60-64; PowerId::REGENERATE_MONSTER,
+// registry/powers.yaml id 91).
+TEST(RunEmeraldElite, RegenerateRollAppliesRegenerateMonsterToEveryMember) {
     for (int64_t seed = 1; seed < 400; ++seed) {
         RunController rc = run_begin(seed, kA20);
         if (rc.emerald_x == kNoEmeraldNode) continue;
@@ -3098,13 +3101,17 @@ TEST(RunEmeraldElite, RegenerateRollParksTheRoomWithTheDrawConsumed) {
         leave_neow(rc);
         const RngStream before = rc.run.map_rng;
         enter_burning_elite(rc);
-        EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED))
-            << "RegenerateMonsterPower (\"Regenerate\", RegenerateMonster"
-               "Power.java:17) has no registry row; faking the fight without "
-               "it would be a silent class (a) divergence";
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
         EXPECT_EQ(rc.run.map_rng.counter, before.counter + 1)
-            << "the game rolled before anything could park; the draw is spent";
-        return;
+            << "the draw must still be spent exactly once";
+        ASSERT_GT(rc.combat.monster_count, 0);
+        for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+            const PowerSlot* regen = monster_power_slot(
+                rc.combat, m, PowerId::REGENERATE_MONSTER);
+            ASSERT_NE(regen, nullptr) << "member " << static_cast<int>(m);
+            EXPECT_EQ(regen->amount, 3) << "member " << static_cast<int>(m);
+        }
+        return;  // one witness seed is the test
     }
     FAIL() << "no seed under 400 rolls Regenerate on its burning elite";
 }

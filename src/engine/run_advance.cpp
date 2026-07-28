@@ -743,19 +743,17 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
                                    act * 2 + 2);
                 }
                 break;
-            default:  // 3: RegenerateMonsterPower(1 + actNum*2)  (:60-64)
-                // "Regenerate" (RegenerateMonsterPower.java:17) has NO registry
-                // row -- it is a distinct power from the player's "Regeneration"
-                // (REGEN, which decrements; the monster one never does) and a
-                // new PowerId is an append-only registry decision this change
-                // does not get to make unilaterally. The draw is spent (the
-                // game rolled before anything could park), then the room parks
-                // at the explicit never-fake seam rather than fighting a combat
-                // whose monsters silently miss their per-turn heal.
-                rc.combat = s;
-                rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
-                rc.room_type = static_cast<uint8_t>(room);
-                return false;
+            case 3:  // RegenerateMonsterPower(1 + actNum*2)  (:60-64)
+                // "Regenerate" (RegenerateMonsterPower.java:17) is a distinct
+                // power from the player's "Regeneration" (REGEN, id 18, which
+                // decrements; the monster one never does) -- registered as
+                // PowerId::REGENERATE_MONSTER, id 91 (registry/powers.yaml).
+                // NOTE the arithmetic: 1 + actNum*2, NOT arm 2's actNum*2+2.
+                for (uint8_t i = 0; i < s.monster_count; ++i) {
+                    op_apply_power(s, i, i, PowerId::REGENERATE_MONSTER,
+                                   act * 2 + 1);
+                }
+                break;
         }
     }
 
