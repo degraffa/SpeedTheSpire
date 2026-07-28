@@ -1306,7 +1306,7 @@
   game_id: "SlaversCollar"
   tier: BOSS
   pool_order: 3
-  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called by name from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1591): if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, ++energyMaster and begin the pulse; onVictory undoes it while pulsing (:59-65). DEFERRED for the same reason as Sling of Courage: eliteTrigger is per-ROOM state and CombatState carries no elite/boss marker. Row, pool slot and relicRng draw are live."
+  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called by name from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1591): if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, ++energyMaster and begin the pulse; onVictory undoes it while pulsing (:59-65). DEFERRED for the same reason as Sling of Courage: eliteTrigger is per-ROOM state and CombatState carries no elite/boss marker. The attach point is energy_master (action_queue.cpp), where the other ten energyMaster relics are read; note that onVictory fires only on VICTORY, so in the game a fled or lost combat carries the increment forward -- a pure derivation cannot express that and a combat-scoped store can. Row, pool slot and relicRng draw are live."
 
 - id: 116
   name: SNECKO_EYE
