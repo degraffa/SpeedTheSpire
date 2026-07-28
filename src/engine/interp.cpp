@@ -19,6 +19,7 @@
 #include "interp/interp_damage.hpp"         // op_damage / op_lose_hp / op_dropkick
 #include "interp/interp_ops.hpp"            // actor_powers (the DRAW No-Draw gate)
 #include "interp/interp_powers.hpp"         // op_apply_power / op_remove_power / op_reduce_power / op_spot_weakness
+#include "relics/relic_native.hpp"          // op_red_skull_entry (RED_SKULL_ENTRY)
 #include "sts/engine/action_queue.hpp"
 #include "sts/engine/card_play.hpp"     // roll_random_target (dequeue-time random enemy)
 #include "sts/engine/combat_state.hpp"
@@ -404,6 +405,13 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // per hand card whose BASE cost is non-negative, in hand order, and
             // the resulting cost is PERMANENT for the instance.
             op_randomize_hand_cost(s);
+            return;
+        case Opcode::RED_SKULL_ENTRY:
+            // Red Skull's battle-start decider (RedSkull$1): re-test
+            // `!isActive && player.isBloodied` HERE, at resolve time -- after
+            // the addToTop battle-start heals have settled -- and grant +3 via
+            // the game's direct addPower. No operands.
+            op_red_skull_entry(s);
             return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))

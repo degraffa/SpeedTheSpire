@@ -91,6 +91,11 @@ GENERAL_OPS = frozenset({
     # played card's instance, so potions.cpp's queue_use_step carries it
     # identically to card_play.cpp's.
     "RANDOMIZE_HAND_COST",
+    # final-integrate fix-forward (Red Skull). Queued from a RELIC hook with no
+    # operand at all -- the slot and the player's HP are execute-time reads --
+    # so it carries identically from any domain's queue helper. GENERAL_OPS,
+    # not CARD_CONTEXT_OPS: nothing about the item depends on a played card.
+    "RED_SKULL_ENTRY",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance

@@ -467,6 +467,39 @@ TEST(CombatStart, GamblingChipScreenOpensOnTheBagOfPreparationExtendedHand) {
     EXPECT_NE(s.relics[1].counter, -1) << "activated = true, once per combat";
 }
 
+// THE SECOND UNION PIN (final-integrate fix-forward): Red Skull's entry
+// decider composes with the reordered shared block. RedSkull$1 (the addToBot
+// at RedSkull.java:38, recovered from desktop-1.0.jar --
+// tools/oracle_bridge/driver/redskull_capture_runbook.md) re-tests
+// player.isBloodied when it RESOLVES, at the bottom of the battle-start
+// drain, AFTER Blood Vial's heal has settled (BloodVial.java:33 addToTop in
+// the Java; synchronous-at-dispatch here -- earlier still). Entering at
+// exactly half HP therefore grants nothing, spends no Artifact charge, and
+// leaves the latch armed -- through the REAL turn-1 block, with the decider
+// item riding behind the opening draw exactly where :38's addToBot puts it.
+TEST(CombatStart, RedSkullEntryDeciderResolvesAfterHealsInTheSharedBlock) {
+    CombatState s = make_constructed_combat();
+    s.player_hp = 40;
+    s.player_max_hp = 80;           // 80 <= 80 -> bloodied at the hook...
+    give_player_power(s, PowerId::ARTIFACT, 1);
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL),
+                            int16_t{0}};
+    s.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::BLOOD_VIAL),
+                            int16_t{0}};
+    s.relic_count = 2;
+
+    begin_first_turn(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.player_hp, 42) << "Blood Vial settled during the drain";
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
+        << "42/80 > half when RedSkull$1 decides -> no grant, no -3/+3 pair";
+    ASSERT_NE(player_power(s, PowerId::ARTIFACT), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 1)
+        << "no -3 was ever queued, so no Artifact charge is spent";
+    EXPECT_EQ(s.relics[0].counter, 0) << "latch stays armed";
+}
+
 TEST(CombatStart, NeitherConstructionPathHandRollsTurnOnePriming) {
     // The exact assignments the old hand-rolled priming used. Their return is the
     // regression: setting turn_has_ended before a pump routes combat start

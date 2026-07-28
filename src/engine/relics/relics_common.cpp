@@ -187,9 +187,12 @@ void relic_native_lantern(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 namespace {
 
-// The one action all three Red Skull sites queue, differing only in sign and in
-// which end of the queue it goes on: ApplyPowerAction(player, player,
-// StrengthPower(player, N), N) with STR_AMT == 3 (RedSkull.java:23).
+// The one action BOTH Red Skull crossing sites queue, differing only in sign:
+// addToTop ApplyPowerAction(player, player, StrengthPower(player, N), N) with
+// STR_AMT == 3 (RedSkull.java:23) -- the +3 of the damage-side cross (:47) and
+// the -3 of the heal-side cross (:58). The ENTRY grant does NOT come through
+// here: RedSkull$1 uses the direct AbstractCreature.addPower, not an
+// ApplyPowerAction (op_red_skull_entry below).
 //
 // It goes through the ORDINARY APPLY_POWER door, which is the whole of the
 // Artifact interaction: StrengthPower's ctor types an instance built with a
@@ -231,30 +234,46 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
     //    (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
     //    never fires the damage-side onBloodied cross (:1476-1481 fires only on
     //    the false->true flip);
-    //  * RedSkull.atBattleStart resets isActive = false (:37) every combat;
+    //  * RedSkull.atBattleStart resets isActive = false (:37) every combat --
+    //    SYNCHRONOUSLY, during the relic fan-out;
     //  * ...and then addToBot's an action (:38) whose body decides what an
-    //    already-bloodied entry is worth.
+    //    already-bloodied entry is worth WHEN IT RESOLVES, at the bottom of
+    //    the battle-start drain.
     //
-    // THAT ACTION'S BODY IS NOT DECOMPILABLE HERE: `new /* Unavailable
-    // Anonymous Inner Class!! */` (:38), one of the 145 files with that CFR
-    // hole; all the class file tells us is that it reads and writes isActive
-    // (the synthetic access$000/002, :76-83). Its behaviour is therefore
-    // OWNER-SPECIFIED (project owner, 2026-07-28): becoming bloodied grants +3
-    // Strength, and entering combat already bloodied is becoming bloodied.
-    // PENDING ORACLE-CAPTURE VALIDATION -- a Red Skull run capture is what
-    // turns this from a specification into evidence. What the Java DOES pin is
-    // the queue end: the call at :38 is `addToBot`, not addToTop.
+    // That action's body is RedSkull$1 -- stripped from this decompiled tree
+    // (`new /* Unavailable Anonymous Inner Class!! */`, :38) but recovered
+    // byte-exact from the shipped desktop-1.0.jar, the same build
+    // (RedSkull.class byte-identical across both jars; the full provenance
+    // chain is tools/oracle_bridge/driver/redskull_capture_runbook.md):
     //
-    // The entry grant is also what makes `counter == isActive` exact rather
-    // than approximate: with it, the latch is set on exactly the crossings that
+    //     if (!RedSkull.this.isActive && AbstractDungeon.player.isBloodied) {
+    //         AbstractDungeon.player.addPower(new StrengthPower(player, 3));
+    //         RedSkull.this.isActive = true;
+    //     }
+    //     this.isDone = true;
+    //
+    // BOTH conjuncts are RESOLVE-time reads, and that is load-bearing: the
+    // battle-start healers (BloodVial.java:33, Pantograph.java:36) queue their
+    // HealAction addToTop, so they settle before this bottom-queued decision
+    // regardless of relic acquisition order, and an entry at exactly half HP
+    // that a heal lifts above half grants NOTHING. Deciding here at queue time
+    // instead committed a +3 the heal-side cross then "undid" with a -3 the
+    // game never fires -- net 0 without Artifact, but Strength 3 plus a
+    // spuriously burned Artifact charge with it (the runbook's SS5 worked
+    // case). So the hook does exactly what the Java does: clear the latch,
+    // queue the decider (op_red_skull_entry, Opcode::RED_SKULL_ENTRY).
+    //
+    // The resolve-time decision is also what makes `counter == isActive` exact
+    // rather than approximate: the latch is set on exactly the crossings that
     // set isActive, which is what lets the heal-side cross below use the
     // counter as its guard.
     if (hook == RelicHook::AT_BATTLE_START) {
-        const bool bloodied = player_is_bloodied(s);
-        slot.counter = bloodied ? 1 : 0;  // isActive = false (:37), then the
-        if (bloodied) {                   // :38 action's owner-specified body
-            queue_red_skull_strength(s, 3, /*to_top=*/false);
-        }
+        slot.counter = 0;  // isActive = false (:37)
+        ActionQueueItem decider{};
+        decider.opcode = static_cast<uint16_t>(Opcode::RED_SKULL_ENTRY);
+        decider.src = kActorPlayer;
+        decider.tgt = kActorPlayer;
+        add_to_bottom(s, decider);  // addToBot (:38)
         return;
     }
     // RedSkull.onBloodied (RedSkull.java:41-52, routed through wasHPLost):
@@ -265,6 +284,67 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
         player_is_bloodied(s)) {
         slot.counter = 1;                          // isActive = true (:49)
         queue_red_skull_strength(s, 3, /*to_top=*/true);  // addToTop (:47)
+    }
+}
+
+void op_red_skull_entry(CombatState& s) noexcept {
+    // RedSkull$1.update -- the deciding action RedSkull.atBattleStart addToBots
+    // (RedSkull.java:38; recovered from the shipped jar, see the block comment
+    // on relic_native_red_skull above). Executed when the item is POPPED, i.e.
+    // at the bottom of the battle-start drain, after every addToTop heal has
+    // settled -- which is the whole point of it being an action.
+    //
+    // PER SLOT, matching the Java: each RedSkull instance queues its own
+    // action testing its own isActive, so two copies would EACH grant +3.
+    // One decider item looping every slot is equivalent to N queued deciders
+    // in sequence, because nothing between two of them can change isBloodied
+    // (a Strength grant moves no HP). The slots are found by id in s.relics --
+    // the queue item carries no operand, so a malformed or stale item over a
+    // relic-less state is a safe no-op.
+    //
+    // The grant is the game's DIRECT AbstractCreature.addPower (:506-527):
+    // stack-or-append with NO priority sort and NO ApplyPowerAction
+    // interception (no source onApplyPower, no Champion Belt, no Artifact
+    // door) -- +3 is a buff, so Artifact could not eat it anyway, but the
+    // power-LIST ORDER is observable and addPower appends without the
+    // Collections.sort ApplyPowerAction runs (interp_powers.cpp
+    // sort_powers_like_the_game). StrengthPower.stackPower's land-on-zero
+    // removal (:48-53) is carried for exactness; a battle start cannot reach
+    // it in S1 (no negative Strength can precede this action).
+    for (uint8_t i = 0; i < s.relic_count; ++i) {
+        RelicSlot& slot = s.relics[i];
+        if (slot.relic_id != static_cast<uint16_t>(RelicId::RED_SKULL) ||
+            slot.counter != 0) {  // !isActive
+            continue;
+        }
+        if (!player_is_bloodied(s)) {  // player.isBloodied, at resolve time
+            continue;
+        }
+        slot.counter = 1;  // isActive = true (inside RedSkull$1's if)
+        bool stacked = false;
+        for (uint8_t p = 0; p < s.player_power_count; ++p) {
+            PowerSlot& ps = s.player_powers[p];
+            if (ps.power_id == static_cast<uint16_t>(PowerId::STRENGTH)) {
+                ps.amount = static_cast<int16_t>(ps.amount + 3);
+                if (ps.amount == 0) {  // stackPower's removal queue (:48-53)
+                    ActionQueueItem rem{};
+                    rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+                    rem.src = kActorPlayer;
+                    rem.tgt = kActorPlayer;
+                    rem.flags = make_apply_power_flags(PowerId::STRENGTH);
+                    add_to_top(s, rem);
+                }
+                stacked = true;
+                break;
+            }
+        }
+        if (!stacked && s.player_power_count < kPowerCap) {
+            PowerSlot fresh{};
+            fresh.power_id = static_cast<uint16_t>(PowerId::STRENGTH);
+            fresh.amount = 3;
+            s.player_powers[s.player_power_count] = fresh;
+            ++s.player_power_count;
+        }
     }
 }
 

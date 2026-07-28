@@ -72,6 +72,16 @@ using RelicNativeFn = RelicNativeSig*;
 void dispatch_relics_on_not_bloodied(CombatState& s, RelicSlot* relics,
                                      uint8_t count) noexcept;
 
+// The execute body of Opcode::RED_SKULL_ENTRY -- RedSkull$1, the deciding
+// action RedSkull.atBattleStart addToBots (RedSkull.java:38; recovered from
+// the shipped jar -- tools/oracle_bridge/driver/redskull_capture_runbook.md).
+// Re-tests `!isActive && player.isBloodied` at RESOLVE time, then grants +3
+// Strength via the game's direct AbstractCreature.addPower (:506-527 -- no
+// sort, no interception) and latches the slot. Defined in relics_common.cpp
+// beside relic_native_red_skull, which queues it; called from interp.cpp's
+// execute switch.
+void op_red_skull_entry(CombatState& s) noexcept;
+
 // Heal the player by `n`, clamped to max HP (HealAction semantics). No HEAL opcode
 // exists; a pure heal has no queue-ordering interplay
 // with other S1 relic effects, so it is applied directly at dispatch time.

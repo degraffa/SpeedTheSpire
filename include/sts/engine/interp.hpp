@@ -568,6 +568,36 @@ enum class Opcode : uint16_t {
                               // the equality and freeToPlayOnce differences,
                               // which are exactly where two hand-written copies
                               // diverged before.
+    // final-integrate fix-forward (claimed in the ledger's namespace table;
+    // 65 was released unspent by Wave-C's relic-tail block).
+    RED_SKULL_ENTRY = 65,     // Red Skull's battle-start DECIDING action --
+                              // RedSkull$1 (recovered from desktop-1.0.jar;
+                              // tools/oracle_bridge/driver/
+                              // redskull_capture_runbook.md SS3), the addToBot
+                              // at RedSkull.java:38:
+                              //
+                              //   if (!isActive && player.isBloodied) {
+                              //       player.addPower(StrengthPower(p, 3));
+                              //       isActive = true;
+                              //   }
+                              //
+                              // Both conjuncts are RESOLVE-time reads -- the
+                              // action sits at the BOTTOM of the battle-start
+                              // drain while Blood Vial's / Pantograph's heals
+                              // resolve first (addToTop in the Java,
+                              // synchronous-at-dispatch here), so an entry at
+                              // exactly half HP that a battle-start heal lifts
+                              // above half grants NOTHING. Deciding at queue
+                              // time instead produced a spurious -3/+3 pair
+                              // (net 0 without Artifact; +3 and a burned
+                              // charge with it). The grant is the game's
+                              // DIRECT AbstractCreature.addPower(:506-527) --
+                              // stack-or-append, NO priority sort, NO
+                              // ApplyPowerAction interception -- not an
+                              // APPLY_POWER item. No operands; the responding
+                              // slot is found by id in s.relics at resolve
+                              // (per-slot latch, matching the per-instance
+                              // isActive of N queued Java actions).
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------

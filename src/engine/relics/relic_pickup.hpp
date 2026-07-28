@@ -172,11 +172,11 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
 //
 // That latch write is OBSERVATIONALLY INERT in this engine and is written
 // anyway, because inert-by-accident and inert-by-derivation are different
-// things: relic_native_red_skull's AT_BATTLE_START rewrites the counter
-// unconditionally from starting HP (preBattlePrep's isBloodied pre-seed,
-// AbstractPlayer.java:1575, plus atBattleStart's isActive = false,
-// RedSkull.java:37), so the NEXT combat's entry grant is re-derived and cannot
-// read a stale latch. The game reaches the same place by a second road --
+// things: relic_native_red_skull's AT_BATTLE_START clears the counter
+// synchronously (atBattleStart's isActive = false, RedSkull.java:37) and its
+// queued decider (RedSkull$1, op_red_skull_entry) re-derives the entry grant
+// from live HP when it resolves, so the NEXT combat's entry grant cannot read
+// a stale latch. The game reaches the same place by a second road --
 // RedSkull.onVictory (:66-69) also clears isActive, which is why that hook is
 // NOT bound on the row: binding it would change nothing the re-seed does not
 // already guarantee. Keeping the write here is what makes "counter == isActive"

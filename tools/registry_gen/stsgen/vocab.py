@@ -280,6 +280,21 @@ OPCODES = {
     # current cost, because the `||` short-circuits and the assignment sits in
     # its RIGHT operand. X-cost / unplayable cards (card.cost < 0) cost nothing.
     "RANDOMIZE_HAND_COST": 60,
+    # final-integrate fix-forward (ledger: "final-integrate allocation"). 65 was
+    # released unspent by Wave-C's relic-tail block.
+    #
+    # RED_SKULL_ENTRY is RedSkull$1 -- the deciding action RedSkull.atBattleStart
+    # addToBots (RedSkull.java:38), stripped by the tree's extraction but
+    # recovered byte-exact from the shipped desktop-1.0.jar
+    # (tools/oracle_bridge/driver/redskull_capture_runbook.md). Its body:
+    # `if (!isActive && player.isBloodied) { player.addPower(Strength+3);
+    # isActive = true; }` -- BOTH conjuncts read at RESOLVE time, at the bottom
+    # of the battle-start drain, after the addToTop heals (Blood Vial,
+    # Pantograph) settle. No operand: the responding slot is found by id in the
+    # relic mirror at execute time. The grant is the direct
+    # AbstractCreature.addPower (:506-527) -- no sort, no ApplyPowerAction
+    # interception -- so it is its own opcode, not an APPLY_POWER item.
+    "RED_SKULL_ENTRY": 65,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
