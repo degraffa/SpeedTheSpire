@@ -638,17 +638,13 @@ void dispatch_just_entered_room_relics(RunState& rs, bool in_shop) noexcept {
         if (rs.relics[i].relic_id != static_cast<uint16_t>(RelicId::MEAL_TICKET)) {
             continue;
         }
-        // AbstractCreature.heal (AbstractCreature.java:386-418): the
-        // onPlayerHeal fan-out then a clamp to max HP. Magic Flower is the only
-        // S1 override and its body is gated on RoomPhase.COMBAT
-        // (MagicFlower.java:31-37), so out here it returns the amount
-        // unchanged; the fan-out is therefore identity and is named rather than
-        // written, exactly as rest_apply_heal names it.
-        int hp = static_cast<int>(rs.hp) + kMealTicketHeal;
-        if (hp > rs.max_hp) {
-            hp = rs.max_hp;
-        }
-        rs.hp = static_cast<int16_t>(hp);
+        // AbstractCreature.heal (AbstractCreature.java:386-418) through the
+        // shared out-of-combat door, which owns the derivation of why both
+        // fan-outs (onPlayerHeal, powers' onHeal) are identity out here --
+        // Wave-C integration consolidated the three hand-spelled copies of
+        // this clamp (this one, rest_apply_heal, heal_out_of_combat) into the
+        // one door.
+        heal_out_of_combat(rs, kMealTicketHeal);
     }
 }
 

@@ -4,6 +4,8 @@
 #include <limits>
 
 #include "sts/engine/cards.hpp"
+#include "relics/relic_pickup.hpp"  // heal_out_of_combat
+#include "sts/engine/relic_pools.hpp"  // master_card_purgeable_unbottled
 #include "sts/engine/run_deck.hpp"  // remove_master_deck_card
 
 namespace sts::engine {
@@ -24,6 +26,21 @@ bool has_upgradeable_card(const RunState& rs) noexcept {
 bool has_purgeable_card(const RunState& rs) noexcept {
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         if (rest_card_purgeable(rs.master_deck[i])) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// PeacePipe.java:48: the Toke OPTION's gate is
+// `!getGroupWithoutBottledCards(getPurgeableCards()).isEmpty()` -- one
+// exclusion stronger than has_purgeable_card above. Folded into
+// build_rest_menu at the Wave-C integration (it lived at the run-layer
+// consumers as build_rest_menu_with_bottle_gates only while this file was
+// the other track's during the wave).
+bool has_purgeable_unbottled_card(const RunState& rs) noexcept {
+    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
+        if (master_card_purgeable_unbottled(rs.master_deck[i])) {
             return true;
         }
     }
@@ -113,8 +130,12 @@ bool rest_card_purgeable(const CardInstance& card) noexcept {
     // CardGroup.getPurgeableCards (CardGroup.java:978-985) excludes exactly
     // three ids by name: Necronomicurse, CurseOfTheBell, AscendersBane. Two of
     // them are registry rows; Necronomicurse is not an S1 row (Act-2 event
-    // relic content). Bottled-card flags are likewise not represented: bottling
-    // at acquisition remains explicitly deferred.
+    // relic content). Bottled instances are NOT excluded here on purpose:
+    // this is the plain getPurgeableCards mirror, and the surfaces the Java
+    // routes through getGroupWithoutBottledCards apply the stronger
+    // master_card_purgeable_unbottled (relic_pools.hpp) one level up -- the
+    // Toke option gate above, the Toke grid's dispatch guard
+    // (run_advance.cpp), the event and shop purge grids.
     if (card.card_id == static_cast<uint16_t>(CardId::ASCENDERS_BANE) ||
         card.card_id == static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL)) {
         return false;
@@ -139,8 +160,11 @@ RestMenu build_rest_menu(const RunState& rs) noexcept {
                             rs.relics[i].counter < 3, i);
                 break;
             case RelicId::PEACE_PIPE:
+                // The bottled exclusion is the OPTION's own gate
+                // (PeacePipe.java:48), not a veto -- see
+                // has_purgeable_unbottled_card above.
                 push_option(menu, RestOptionKind::TOKE,
-                            has_purgeable_card(rs), i);
+                            has_purgeable_unbottled_card(rs), i);
                 break;
             case RelicId::SHOVEL:
                 push_option(menu, RestOptionKind::DIG, true, i);
@@ -182,12 +206,12 @@ bool rest_menu_has_usable_option(const RestMenu& menu) noexcept {
 }
 
 bool rest_apply_heal(RunState& rs) noexcept {
-    const int amount = rest_heal_amount(rs);
-    int hp = static_cast<int>(rs.hp) + amount;
-    if (hp > rs.max_hp) {
-        hp = rs.max_hp;
-    }
-    rs.hp = static_cast<int16_t>(hp);
+    // The REST option's heal is out of combat by construction, so it goes
+    // through the shared heal_out_of_combat door (relics/relic_pickup.hpp),
+    // which owns the fan-out derivation (Magic Flower COMBAT-gated, powers
+    // cleared at the room boundary) -- Wave-C integration consolidated the
+    // three hand-spelled copies of this clamp into that one door.
+    heal_out_of_combat(rs, rest_heal_amount(rs));
     return true;
 }
 
