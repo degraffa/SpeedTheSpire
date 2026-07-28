@@ -55,7 +55,13 @@ Forward-looking obligations that completed tasks recorded in their Logs and
 handed to a future task. **This table is the live carrier** — the archived
 Logs are not read during normal execution, so an obligation that is not here
 is invisible. When you land a task, discharge every row that names it (or
-re-own the row explicitly) and delete the row in the same commit.
+re-own the row explicitly) **by marking it DISCHARGED in place, in the same
+commit** — discharged rows stay in the table as its historical record. (This
+sentence used to say "delete the row"; observed practice across every
+discharge since B4.x has been to mark in place, which is strictly better —
+a deleted row erases the evidence that an obligation was ever tracked — so
+the header now blesses the practice rather than contradicting it. Settled at
+the Wave-C integration, which the stage-2 report asked to reconcile the two.)
 
 Owners marked `[x]` are tasks that have **already landed without recording a
 discharge** — they need re-owning by the orchestrator, not silent closure.
@@ -188,8 +194,8 @@ keys stored soak-coverage identities.
 
 | Namespace (defined in) | Taken | Reserved / free |
 |---|---|---|
-| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–10** (`NONE`..`SHOP`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10, 10 `SHOP` B4.8 — all landed, each claiming its reservation) | **11–12 allocated to Wave-C track 2** (see Wave-C table below); 13+ free — claim here first |
-| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–26** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c, 26 `SHOP` B4.8 — **spent**; `COUNT = 27`) | **27–29 allocated to Wave-C track 2** (see Wave-C table below); 30+ free — claim here first and bump `COUNT` past every enumerator |
+| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–10** (`NONE`..`SHOP`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10, 10 `SHOP` B4.8 — all landed, each claiming its reservation) | 11+ free — claim here first (Wave-C track 2's 11–12 allocation was RELEASED unspent; see the Wave-C table) |
+| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–26** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c, 26 `SHOP` B4.8 — **spent**; `COUNT = 27`) | 27+ free — claim here first and bump `COUNT` past every enumerator (Wave-C track 2's 27–29 allocation was RELEASED unspent; see the Wave-C table) |
 
 ### Wave-C allocations — 2026-07-28, two concurrent tracks (deferred-bodies wave)
 
@@ -206,13 +212,22 @@ as usual.
 
 | Namespace | Track 1 potions stage | Track 1 relic-tail stage | Track 1 energyMaster stage | Track 2 |
 |---|---|---|---|---|
-| Opcode | **60–62** — SPENT **60** `RANDOMIZE_HAND_COST` (Snecko Oil); **61–62 released unspent** | **63–66** — SPENT **63** `REMOVE_DEBUFFS`, **64** `UPGRADE_RANDOM_CARD`; **65–66 released unspent** | **67** (contingency) | **68** (reserve) |
+| Opcode | **60–62** — SPENT **60** `RANDOMIZE_HAND_COST` (Snecko Oil); **61–62 released unspent** | **63–66** — SPENT **63** `REMOVE_DEBUFFS`, **64** `UPGRADE_RANDOM_CARD`; **65–66 released unspent** | **67** (contingency) — **RELEASED unspent** (the derivation needed no opcode) | **68** (reserve) — **RELEASED unspent** |
 | `PowerId` | — | **87–90** — SPENT **87** `VIGOR`, **88** `PEN_NIB`; **89–90 released unspent** | — | — |
 | `ChoiceKind` | **11–13** — SPENT **11** `DISCARD_TO_HAND_FREE` (Liquid Memories), **12** `HAND_TO_DISCARD_THEN_DRAW` (Gambler's Brew AND Gambling Chip, one shared body); **13 RELEASED unspent**. Elixir and the four discovery potions needed NO new kind — Elixir is the already-live optional `EXHAUST`, and the discovery four ride opcode 50 with a pool selector and a copy count in the queue item's unused `src`/`tgt` bytes | **14–15** — **BOTH RELEASED UNSPENT.** The relic tail needed no new choice kind: Gambling Chip is the only item in it that wanted one and belongs to the potions stage | — | — |
 | `CombatState.flags` bits | **16–19** — SPENT **16–18** as the armed Fairy-in-a-Bottle COUNT (a count, not a bit: multiple fairies are legal and exactly one is consumed per lethal event); **19 RELEASED unspent** | **20–25** — SPENT **20** elite room, **21–23** Orange Pellets ATTACK/SKILL/POWER latches, **24** Art of War "attack played this turn"; **25 released unspent**. Slaver's Collar cost ZERO bits (see row 78) | — | — |
-| `CardId` | — | — | — | **127–128** (Curse of the Bell + reserve) |
-| `RunPhase` | — | — | — | **11–12** |
-| fuzz `MoveCat` | — | — | — | **27–29** (bump `COUNT` past every spent enumerator) |
+| `CardId` | — | — | — | **127–128** — SPENT **127** `CURSE_OF_THE_BELL`; **128 left a permanent gap** |
+| `RunPhase` | — | — | — | **11–12** — **BOTH RELEASED UNSPENT**: the grids reuse `NeowState` (`kNeowGridPickCap` 2→3 + `NeowGridMode::TRANSFORM_UPGRADE`) and the bottle overlay is phase-independent (`pending_bottle`), so no phase was needed |
+| fuzz `MoveCat` | — | — | — | **27–29** — **ALL RELEASED UNSPENT** (`COUNT` stays 27): the new grids ride the existing mask-driven NEOW/SHOP/REWARD_CLAIM buckets |
+
+**Integration audit (2026-07-28, `wave-integrate`):** every spend/release above
+was RE-DERIVED from the union tree, not from branch claims — `vocab.py` OPCODES
+(60/63/64 present; 61–62, 65–68 absent), `interp.hpp` `ChoiceKind` (11/12
+present; 13–15 absent), `combat_state.hpp` flag constants (16–18 Fairy count,
+20 elite, 21–23 Orange Pellets, 24 Art of War; 19 and 25 untouched-zero),
+`powers.yaml` (87/88; 89–90 absent), `cards.yaml` (127; 128 absent),
+`run_advance.hpp` `RunPhase` (max 10), `policy.hpp` `MoveCat` (`COUNT == 27`).
+Zero discrepancies against the tracks' stage reports.
 
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
@@ -354,6 +369,52 @@ rows change Bottled Tornado's gate — so it is answered, not bumped. (For B3.10
 twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
+
+- **Wave-C integration: the two-track union proven on `wave-integrate`** `[x]`
+  — merges `03c681d` (`wave-runlayer`, 10 commits) and `0f6708a`
+  (`wave-combat`, 20 commits) onto master `7df27ab`, plus the consolidation
+  commit `5f87ac6` and the `<sstream>` portability fix `8d6cbae`. NOT yet on
+  `master` — the G6 gate agent owns it; landing is the orchestrator's.
+  **The two couplings a conflict-free merge would have got wrong**, both
+  RED-first on the union: (1) `queue_innate_overflow_draw` now thresholds on
+  `game_hand_size` — `CardGroup.initializeDeck:951-953` reads
+  `player.masterHandSize`, the field Snecko Eye enlarges (`SneckoEye.java:31`)
+  and `preBattlePrep` snapshots (`AbstractPlayer.java:1579`) — pinned by
+  `RunCombatBottle.SneckoEyeRaisesTheInnateOverflowThresholdWithTheDraw` (+ the
+  8-top-placed overflow-by-one twin); (2) rest-room entry composes Feather
+  (onEnterRoom fan-out, `AbstractDungeon.java:1755-1757`) → Tea Set arming
+  (`RestRoom.java:39-41` at `:1800`) → empty-campfire auto-complete last
+  (`CampfireUI.java:97-104`), pinned by
+  `RestSites.FeatherHealsAndTeaSetArmsEvenWhenTheCampfireAutoCompletes` — both
+  hooks fire even on a campfire the player never sees. Three-way surfaces
+  reconciled: `emit/cards.py` (master's `upgraded:` guard + both new pools),
+  `command_map.hpp` (master's G6 grid-stop classifier kept, its deferred-whole
+  `onEquip` set RE-DERIVED for the union as ORRERY / DOLLYS_MIRROR / CAULDRON —
+  the five boss bodies are live, so master's five-boss list would have been the
+  misattribution its own fix removed), `kTotalCount` re-derived as 450 (neither
+  branch's number was authoritative). Landed the two file-contention
+  consolidations the stages deferred (heal-clamp trio → `heal_out_of_combat`;
+  Toke bottled gate folded into `build_rest_menu`). **Verification**: WSL
+  `debug` / `asan` / `release` all PASS, 0 failed (clean per-preset builds in a
+  fresh worktree); `fuzz_soak --seeds 300` failures: 0; the full 12-artifact
+  offline replay corpus reproduces the better of its per-track verdicts with
+  zero divergence everywhere — STS00042/43's track-2-era `energyMaster`
+  divergences are GONE on the union, and the three remaining stops are the
+  documented `SHOP_ROOM` mapping frontier (verdict table:
+  [`wavec_track2_replay_triage.md`](../tools/oracle_bridge/driver/wavec_track2_replay_triage.md)).
+  `win-debug` builds clean after `8d6cbae`; its six remaining test failures
+  reproduce byte-for-byte at the fork commit `09f8847` (pre-existing win-preset
+  rot, reported, not chased). **PARKED, honestly** — nothing below is silently
+  dropped: Red Skull `atBattleStart`'s anonymous-inner-class action (needs an
+  oracle capture; row open), the Courier restock (decision memo + capture-first,
+  B4.8 runbook §4; row open), the Discovery tick-regen question (row filed by
+  track 1 stage 4, owned by the next capture-campaign owner), the fork-redeploy
+  + bottle-taking capture (row filed by track 2 stage 3d, same owner), the
+  `SHOP_ROOM` `--replay` mapping arm (ledger row "replay generalized" owns it;
+  master's `badc58f` did not add it), and the six pre-existing `win-debug` test
+  failures plus four pre-fork stale "does not exist yet" comments
+  (`shrines.cpp:97`, `monster_looter.hpp:68`, `run_state.hpp:177`, Frozen Egg's
+  provenance) left for a repo-hygiene pass — all four predate `09f8847`.
 
 - **Wave-C track 1, stage 1: three live divergence fixes** `[x]` — branch
   `wave-combat` (commits `239885c`, `b4faf1c`, `f9fab90`), each RED-first with

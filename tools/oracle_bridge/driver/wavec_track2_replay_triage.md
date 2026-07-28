@@ -90,3 +90,29 @@ these runs' actual draws), so this proves non-regression only; the positive
 end-to-end proof needs the fork redeploy + a bottle-taking capture — the new
 Deferred-obligations row (`docs/stage-b-tasks.md`) names the next
 capture-campaign owner.
+
+## Wave-C integration re-run (`wave-integrate` union of both tracks + master)
+
+Same command set (offline, no game, no capture pipeline), re-run on the
+`wave-integrate` union — `wave-runlayer` + `wave-combat` merged onto master
+`7df27ab`, with the two cross-track coupling fixes (Snecko-Eye-derived innate
+overflow threshold; composed rest-room entry order) applied. The acceptance
+bar was: no artifact regresses vs the BETTER of its two per-track results,
+and STS00042/43 may improve because track 1's `energyMaster` derivation and
+track 2's stream fixes are on one tree for the first time.
+
+| Run | Union verdict | vs better per-track result |
+|---|---|---|
+| STS00042 | zero divergence over 38 records; stop seq 37 `SHOP_ROOM` mapping frontier | equals track 1's post-`energyMaster` re-run (`b45c1_replay_triage.md` supersession note); the track-2 baseline's seq-18 divergence is GONE |
+| STS00043 | **CLEAN to terminal**, 67 records, zero divergence | equals track 1's re-run; track-2 baseline's seq-15 divergence GONE |
+| STS00044 / 47 / 48 / 49 / 50 / 51 | **CLEAN to terminal**, zero divergence | unchanged |
+| STS00045 / 46 | **CLEAN to terminal** (24 / 25 records), zero divergence | equals track 2's result |
+| STS00052 | zero divergence over 43 records; stop seq 42 `SHOP_ROOM` frontier | equals track 2's result |
+| STS00054 | zero divergence over 33 records; stop seq 32 (`proceed`), same frontier | equals track 2's result |
+
+12 files, 3 not clean — all three stops are the documented `SHOP_ROOM`
+`--replay` mapping frontier (ledger row "replay generalized", which already
+owns it; master's `badc58f` harness fixes did NOT add that arm, checked
+against its read-out and the union source). **No new divergence appeared on
+the union that neither track saw**, and no record anywhere compared
+different. First divergence: none, on every file.
