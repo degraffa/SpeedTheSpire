@@ -1128,7 +1128,7 @@
   game_id: "DollysMirror"
   tier: SHOP
   pool_order: 6
-  provenance: "DollysMirror.onEquip/update (DollysMirror.java:1160-1195) -- gridSelect one master-deck card, then obtain a makeStatEquivalentCopy with the three bottle flags cleared. DEFERRED: acquisition-time grid-select machinery (the same gap the Bottled trio's onEquip carries) is a run-layer concern; the row and its pool slot are live."
+  provenance: "DollysMirror.onEquip (DollysMirror.java:33-43) / update (:45-59) -- gridSelect ONE card from the RAW master deck (:41 passes masterDeck whole: no getPurgeableCards, no bottled exclusion), then obtain a makeStatEquivalentCopy with the three bottle flags explicitly cleared on the COPY (:50-52 -- the original keeps its bottle). The file is 65 lines; the row's former :1160-1195 citation was the +1000-offset drift class. STILL DEFERRED, but the named gap has narrowed: the acquisition-choice machinery now exists (the Bottled trio's `pickup: on_equip_screen` + GRID_BOTTLE overlay, relic_pools.hpp), so what remains is this relic's own body -- a raw-deck grid variant (every existing overlay/grid filters) plus the copy-obtain with the :50-52 flag clear. The row and its pool slot are live."
 
 - id: 101
   name: ORANGE_PELLETS

@@ -279,11 +279,17 @@ void initialize_relic_pools(RunState& rs) noexcept;
 // hence trigger order (trap 8), is preserved with one entry deleted. Returns
 // false and changes nothing when the run does not own `id`.
 //
-// NO S1 RELIC HAS AN onUnequip BODY, so the per-copy pass is named rather than
-// written: the only S1 caller is Neow's boss-relic swap, which removes
-// relics[0] -- the Ironclad's Burning Blood, whose only override is onVictory
-// (BurningBlood.java:30). A relic row that later needs onUnequip adds its
-// dispatch here, beside acquire_relic's onEquip fan-out.
+// NO S1-REACHABLE RELIC LOSS RUNS AN onUnequip BODY, so the per-copy pass is
+// named rather than written: the only S1 caller is Neow's boss-relic swap,
+// which removes relics[0] -- the Ironclad's Burning Blood, whose only
+// override is onVictory (BurningBlood.java:30). The Bottled trio DOES
+// override onUnequip in the Java (BottledFlame.java:55-61 clears the chosen
+// instance's flag), but that body is INERT in S1 by reachability: bottles
+// cannot be owned at floor 0, and no later S1 path loses a relic -- so the
+// master-deck bottle bit (run_deck.hpp) has no un-set path and needs none.
+// If an Act-2+ relic-loss door ever lands (Ectoparasite-style events, the
+// boss-swap chest), its owner adds the onUnequip fan-out here, with the
+// bottles' flag-clear as its first S1-relic body.
 [[nodiscard]] bool lose_relic(RunState& rs, RelicId id) noexcept;
 
 }  // namespace sts::engine
