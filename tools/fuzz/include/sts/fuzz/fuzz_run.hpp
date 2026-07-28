@@ -118,11 +118,37 @@ struct CaseResult {
     std::vector<engine::Action> trajectory;  // pass A, complete
 };
 
+// Optional per-step observation of PASS A ONLY.
+//
+// It exists because `CaseResult` is a summary: it answers "did this case end
+// cleanly, and in how many actions", but not "what did the run pass THROUGH".
+// A consumer that needs a trajectory-derived property -- a seed pre-scanner
+// asking whether a treasure room or the boss was ever entered -- would
+// otherwise have to re-derive the whole loop, i.e. fork it, and a forked copy
+// of the policy loop is a copy that drifts.
+//
+// PASS A ONLY is the load-bearing half of the contract. Passes B and C exist to
+// prove the engine and the policy are functions of the case id alone; calling
+// an arbitrary consumer's callback inside them would let an observer with state
+// influence what the comparator sees. The observer is also given a CONST
+// controller and cannot feed anything back into the run.
+//
+// `fn` is called with the controller BEFORE each step, and once more with the
+// terminal controller after the loop ends (so the last state is always seen,
+// including on the NO_PROGRESS / LIVELOCK exits where the loop breaks after
+// advance()). The terminal state can therefore be observed twice; every
+// property built on this must be idempotent (a max, an OR, a set-insert).
+struct StepObserver {
+    void (*fn)(const engine::RunController& rc, void* ctx) noexcept = nullptr;
+    void* ctx = nullptr;
+};
+
 // Execute one case: pass A (recorded, coverage-counted), pass B (re-derived),
 // and -- when `verify_repro` -- pass C over pass A's literal action log.
 // Returns true when the case is clean. `cov` may be null.
 bool run_case(const CaseId& id, const RunLimits& limits, Coverage* cov, CaseResult& out,
-              bool verify_repro, const Inject& inject = Inject{});
+              bool verify_repro, const Inject& inject = Inject{},
+              const StepObserver& observer = StepObserver{});
 
 // Replay a LITERAL action list against a fresh run_begin(seed, ascension) --
 // the standalone reproducer path, with no policy involved. Every action is

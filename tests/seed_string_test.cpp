@@ -244,3 +244,51 @@ TEST(SeedStringTrap, EncodeUnsignedDecodeSignedWrapping) {
     // this test would be vacuous.
     EXPECT_NE(static_cast<std::uint64_t>(wrapped), 0u);
 }
+
+// THE BRIDGE'S SEED CONTRACT, pinned across the two implementations of it.
+//
+// `sim_seed_int64 == seed_to_long(game_seed_string)` is the join key between a
+// capture artifact (named by its STS-format seed string) and a simulator run
+// (driven by an int64). There are two ports of SeedHelper.getLong in this repo:
+// this C++ one, and the driver's Python
+// (tools/oracle_bridge/driver/campaign_driver.py:199-206, `seed_to_long`). The
+// golden vectors above prove the C++ against the JVM; this case pins the ONE
+// vector both ports are quoted against in the bridge documentation, so a change
+// to either side that silently breaks the join fails here.
+//
+// Alphabet: stage-a design §3.5 -- "0123456789ABCDEFGHIJKLMNPQRSTUVWXYZ", 35
+// characters, 'O' omitted and folded to '0'. Both ports use exactly this string
+// (kSeedAlphabet here; `_SEED_CHARS` at campaign_driver.py:176).
+//
+// The expected value is also re-derived digit by digit below rather than only
+// asserted, so the test documents the base-35 accumulation instead of parroting
+// a constant nobody can check.
+TEST(SeedString, CampaignDriverVectorSTS12345) {
+    constexpr std::int64_t kExpected = 1790052133945;
+    EXPECT_EQ(sts::engine::seed_from_string("STS12345"), kExpected);
+
+    // Re-derivation. 'S'=27, 'T'=28 in the §3.5 alphabet; the digits are their
+    // own values. total = total*35 + index, exactly as both ports accumulate.
+    std::uint64_t total = 0;
+    for (char c : std::string("STS12345")) {
+        const std::size_t idx = sts::engine::kSeedAlphabet.find(c);
+        ASSERT_NE(idx, std::string_view::npos) << "char " << c;
+        total = total * 35u + static_cast<std::uint64_t>(idx);
+    }
+    EXPECT_EQ(static_cast<std::int64_t>(total), kExpected);
+
+    // The driver's Python folds an UNKNOWN character to index 0
+    // (`idx if idx >= 0 else 0`); the Java -- and therefore this C++ -- lets
+    // the -1 from String.indexOf participate in the sum (SeedHelper.java:76-89,
+    // and seed_string.hpp's note on it). The two ports therefore DISAGREE on
+    // input containing a character outside the alphabet. That disagreement is
+    // unreachable for real seed strings, and the Java is the spec, so this
+    // pins the C++ behaviour rather than the Python's.
+    EXPECT_EQ(sts::engine::seed_from_string("!"), -1);
+
+    // Sterilization is part of the contract on both sides: the Python does
+    // `.upper().replace("O", "0")`, the C++ does it inline per character.
+    EXPECT_EQ(sts::engine::seed_from_string("sts12345"), kExpected);
+    EXPECT_EQ(sts::engine::seed_from_string("STSO"),
+              sts::engine::seed_from_string("STS0"));
+}

@@ -216,6 +216,12 @@ if(STS_BUILD_TESTS)
     # directory -- it links both oracle_translator and the nlohmann_json
     # INTERFACE target that directory defines.
     add_subdirectory(tools/oracle_bridge/replay)
+
+    # The capture PLANNER: `seed_scan` pre-scans seeds so a campaign can be
+    # pointed at seeds already known to contain a rare target, instead of
+    # walking STS%05d and hoping. Must come AFTER tools/fuzz -- it links
+    # fuzz_core for the run loop rather than forking it.
+    add_subdirectory(tools/oracle_bridge/planner)
 endif()
 
 if(STS_BUILD_TESTS)

@@ -574,3 +574,12 @@ sts_add_test(fuzz_test
         STS_FUZZ_SOAK_BIN="$<TARGET_FILE:fuzz_soak>"
         STS_FUZZ_REPRO_BIN="$<TARGET_FILE:fuzz_repro>"
         STS_FUZZ_SOAK_SCRIPT="${CMAKE_SOURCE_DIR}/tools/fuzz/soak.sh")
+
+# The capture planner (tools/oracle_bridge/planner). Tests the TOOL: that the
+# EventId <-> name table covers every generated event row, that the event_flags
+# bit layout is read as (id-1), that a ScanRow is a byte-identical function of
+# its ScanCase, and that the min-hit-count rule excludes the single-hit seeds it
+# exists to exclude. Every one of those, wrong, produces a plausible-looking but
+# WRONG capture seed list rather than an error -- which is why they are pinned
+# here rather than noticed during a capture.
+sts_add_test(seed_scan_test LIBS seed_scan_core)
