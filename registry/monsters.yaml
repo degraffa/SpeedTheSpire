@@ -627,7 +627,7 @@
 - id: 18
   name: GREMLIN_FAT
   game_id: "GremlinFat"
-  provenance: "GremlinFat ctor setHp/damage branches (GremlinFat.java:48-64), takeTurn incl. the trailing RollMoveAction (:66-91), getMove (:129-132), escapeNext/deathReact (:121-141), move id BLUNT=2 (:46); WeakPower ctor (WeakPower.java:27-43); FrailPower ctor (FrailPower.java:25-41); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
+  provenance: "GremlinFat ctor setHp/damage branches (GremlinFat.java:48-64), takeTurn incl. the trailing RollMoveAction (:66-91), getMove (:129-132), escapeNext/deathReact (:121-141), move id BLUNT=2 (:46); WeakPower ctor (WeakPower.java:27-43); FrailPower ctor (FrailPower.java:24-37); AbstractMonster.init/rollMove/setHp (AbstractMonster.java:705-715,765-775)"
   enemy_type: NORMAL   # AbstractMonster.java:99
   hp:
     base: {min: 13, max: 17}   # GremlinFat.java:54 (ascension < 7)
@@ -1071,7 +1071,13 @@
 # The gold steal: usePreBattleAction applies ThieveryPower(this, goldAmt) (:85;
 # powers.yaml id 75), goldAmt = 15 / A17 20 (:63). Each Mug/Lunge queues an
 # anonymous accrual action (stolenGold += min(goldAmt, player.gold); the
-# synthetic accessors :181-192 are its residue) and then the 3-arg
+# synthetic accessors :181-192 are its residue -- CONFIRMED 2026-07-28, no
+# longer inferred from the accessors: Looter$1 (:97) and Looter$2 (:115) were
+# recovered from the shipped desktop-1.0.jar and both read exactly
+# `stolenGold += Math.min(goldAmt, AbstractDungeon.player.gold); isDone = true`,
+# queued AHEAD of the DamageAction as stated below. Mugger$1/$2 (Mugger.java:95,
+# :113) are byte-for-byte the same shape. See RECOVERED-INNER-CLASSES.md at the
+# decompiled tree root) and then the 3-arg
 # DamageAction(player, damage.get(i), goldAmt) whose stealGold (DamageAction.
 # java:98-114) clamps to the player's gold and deducts it. CombatState carries
 # no gold, so the engine records the STEAL COUNT (MonsterState.pad0) and the

@@ -73,7 +73,21 @@
   level: 4
   scope: monster
   mechanic: "boss damage and move parameters"
-  provenance: "Per-boss constructor branches on ascensionLevel >= 4, e.g. TheGuardian.<init> (TheGuardian.java:107-109): fierceBashDamage = 36, rollDamage = 10; SlimeBoss.<init> (SlimeBoss.java:94-96): tackleDmg = 10, slamDmg = 38."
+  # DELIBERATE, AND NOT A DOCUMENT CONFLICT -- do not "fix" the asymmetry with
+  # registry/monsters.yaml (recorded resolution, integration-11; row discharged
+  # 2026-07-28). The `tackleDmg = 10` below is LITERALLY ACCURATE at the cited
+  # line: the A4 branch of SlimeBoss's constructor really does assign it. But
+  # `tackleDmg` feeds `damage.get(0)`, and SlimeBoss NEVER READS `damage.get(0)`
+  # -- both takeTurn arms read `damage.get(1)` (SlimeBoss.java:137 and :144),
+  # the slamDmg slot. So `tackleDmg` is a DEAD DamageInfo: an A4 scaling the
+  # game computes and never applies.
+  # This row is the A20 LEDGER, whose job is to record what the ascension branch
+  # does in the Java -- so it names both assignments, the dead one included.
+  # `registry/monsters.yaml` is the BEHAVIOUR table, whose job is to record what
+  # the monster does -- so it omits `tackleDmg`, and is right to. The two files
+  # differ because they answer different questions; that is why this is a
+  # comment and not an edit on either side.
+  provenance: "Per-boss constructor branches on ascensionLevel >= 4, e.g. TheGuardian.<init> (TheGuardian.java:107-109): fierceBashDamage = 36, rollDamage = 10; SlimeBoss.<init> (SlimeBoss.java:94-96): tackleDmg = 10, slamDmg = 38 -- tackleDmg is damage.get(0), which SlimeBoss never reads (both takeTurn arms use damage.get(1), :137/:144), so that half of the A4 branch is dead in the game and is deliberately absent from monsters.yaml; see the comment above."
   notes: "IMPLEMENTED (per-monster columns in registry/monsters.yaml) for the Act-1 bosses that exist."
 
 - id: 5

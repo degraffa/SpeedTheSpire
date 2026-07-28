@@ -271,7 +271,7 @@
   target: ENEMY
   flags: []
   requires_all_attacks: true
-  provenance: "Clash.use (Clash.java:176-181) -> DamageAction(14). canUse (Clash.java:184-194): playable only if EVERY card in p.hand is CardType.ATTACK. baseDamage 14 (Clash.java:172); upgradeDamage(4) -> 18 (Clash.java:198-203)."
+  provenance: "Clash.use (Clash.java:36-41) -> DamageAction(14). canUse (Clash.java:44-55): playable only if EVERY card in p.hand is CardType.ATTACK. baseDamage 14 (Clash.java:32); upgradeDamage(4) -> 18 (Clash.java:58-63)."
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 14}
   upgraded:
@@ -335,7 +335,7 @@
   cost: 2
   target: ENEMY
   flags: []
-  provenance: "HeavyBlade.use (HeavyBlade.java:418-423) -> DamageAction(14). applyPowers/calculateCardDamage (HeavyBlade.java:426-447): Strength.amount *= magicNumber before applyPowers, /= after -> Strength counts x magic. baseDamage 14 / magic 3 (HeavyBlade.java:413-414); upgradeMagicNumber(2) -> 5 (HeavyBlade.java:450-457)."
+  provenance: "HeavyBlade.use (HeavyBlade.java:39-44) -> DamageAction(14). applyPowers/calculateCardDamage (HeavyBlade.java:47-68): Strength.amount *= magicNumber before applyPowers, /= after -> Strength counts x magic. baseDamage 14 / magic 3 (HeavyBlade.java:34-35); upgradeMagicNumber(2) -> 5 (HeavyBlade.java:71-78)."
   effects:
     - {op: DAMAGE_STR_MULT, target: CARD_TARGET, amount: 14, mult: 3}
   upgraded:

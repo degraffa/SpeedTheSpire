@@ -831,7 +831,7 @@
   native: true
   hooks:
     on_use_card: []           # POWER played -> heal 2 (addToTop; Magic Flower-aware)
-  provenance: "BirdFacedUrn.onUseCard (BirdFacedUrn.java:33-40) -- if card.type == POWER: addToTop HealAction(player, player, 2). Native: the type guard plus a direct heal, routed through the shared player-heal seam so Magic Flower's x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:728-735)."
+  provenance: "BirdFacedUrn.onUseCard (BirdFacedUrn.java:33-40) -- if card.type == POWER: addToTop HealAction(player, player, 2). Native: the type guard plus a direct heal, routed through the shared player-heal seam so Magic Flower's x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:30-37)."
 
 - id: 69
   name: UNCEASING_TOP
@@ -845,7 +845,7 @@
   game_id: "Torii"
   tier: RARE
   pool_order: 4
-  provenance: "Torii.onAttacked (Torii.java:1197-1205) -- if info.owner != null && type != HP_LOSS && type != THORNS && 1 < damageAmount <= 5: return 1. A player-damage-pipeline modifier: AbstractPlayer.damage runs the relics' onAttacked loop (AbstractPlayer.java:1430-1432) AFTER the victim powers' onAttacked (Thorns/Flame Barrier) and BEFORE onLoseHpLast (Tungsten Rod). Implemented at that point of op_damage (interp/interp_damage.cpp), keyed by player_has_relic."
+  provenance: "Torii.onAttacked (Torii.java:31-38) -- if info.owner != null && type != HP_LOSS && type != THORNS && 1 < damageAmount <= 5: return 1. A player-damage-pipeline modifier: AbstractPlayer.damage runs the relics' onAttacked loop (AbstractPlayer.java:1430-1432) AFTER the victim powers' onAttacked (Thorns/Flame Barrier) and BEFORE onLoseHpLast (Tungsten Rod). Implemented at that point of op_damage (interp/interp_damage.cpp), keyed by player_has_relic."
 
 - id: 71
   name: STONE_CALENDAR
@@ -915,7 +915,7 @@
   game_id: "Lizard Tail"
   tier: RARE
   pool_order: 12
-  provenance: "LizardTail.onTrigger (LizardTail.java:680-690) -- heal maxHealth/2 (minimum 1, integer division), then setCounter(-2) which marks it used up (:672-678). Fired from AbstractPlayer.damage (AbstractPlayer.java:1487-1493) when currentHealth < 1, the player has no Mark of the Bloom and no Fairy Potion, and the owned Lizard Tail's counter is still -1: currentHealth is set to 0 first and the method RETURNS, so the death branch never runs. The constructor leaves counter at AbstractRelic's -1 (armed), so no initial_counter override is needed. Implemented at the player-death edge of op_damage / op_lose_hp; the heal routes through the shared seam so Magic Flower applies."
+  provenance: "LizardTail.onTrigger (LizardTail.java:36-45) -- heal maxHealth/2 (minimum 1, integer division), then setCounter(-2) which marks it used up (:28-33; that setter is GUARDED -- any argument other than -2 is a silent no-op, so the relic can never be re-armed through it). Fired from AbstractPlayer.damage (AbstractPlayer.java:1487-1493) when currentHealth < 1, the player has no Mark of the Bloom and no Fairy Potion, and the owned Lizard Tail's counter is still -1: currentHealth is set to 0 first and the method RETURNS, so the death branch never runs. The constructor leaves counter at AbstractRelic's -1 (armed), so no initial_counter override is needed. Implemented at the player-death edge of op_damage / op_lose_hp; the heal routes through the shared seam so Magic Flower applies."
 
 - id: 79
   name: PRAYER_WHEEL
@@ -1041,14 +1041,14 @@
   game_id: "TungstenRod"
   tier: RARE
   pool_order: 24
-  provenance: "TungstenRod.onLoseHpLast (TungstenRod.java:1238-1245) -- if damageAmount > 0 return damageAmount - 1. AbstractPlayer.damage runs the relics' onLoseHpLast loop (AbstractPlayer.java:1433-1435) LAST -- after Buffer (onAttackedToChangeDamage) and after Torii (relics onAttacked) -- and BEFORE the `if (damageAmount > 0)` block, so a 1-damage hit becomes 0 and no wasHPLost fires at all. Implemented at that point of op_damage AND of op_lose_hp: LoseHPAction routes through creature.damage() with DamageType.HP_LOSS (LoseHPAction.java:41), which runs this same method body."
+  provenance: "TungstenRod.onLoseHpLast (TungstenRod.java:26-32) -- if damageAmount > 0 return damageAmount - 1. AbstractPlayer.damage runs the relics' onLoseHpLast loop (AbstractPlayer.java:1433-1435) LAST -- after Buffer (onAttackedToChangeDamage) and after Torii (relics onAttacked) -- and BEFORE the `if (damageAmount > 0)` block, so a 1-damage hit becomes 0 and no wasHPLost fires at all. Implemented at that point of op_damage AND of op_lose_hp: LoseHPAction routes through creature.damage() with DamageType.HP_LOSS (LoseHPAction.java:41), which runs this same method body."
 
 - id: 91
   name: MAGIC_FLOWER
   game_id: "Magic Flower"
   tier: RARE
   pool_order: 25
-  provenance: "MagicFlower.onPlayerHeal (MagicFlower.java:728-735) -- while the current room's phase is COMBAT, MathUtils.round(healAmount * 1.5f); outside combat the heal is unchanged. AbstractPlayer.heal runs every relic's onPlayerHeal before applying. Implemented as one shared in-combat heal seam (heal_player_with_relics, relic_hooks.cpp) that every combat heal routes through -- Burning Blood, Blood Vial, Meat on the Bone, Bird Faced Urn, Lizard Tail."
+  provenance: "MagicFlower.onPlayerHeal (MagicFlower.java:30-37) -- while the current room's phase is COMBAT, MathUtils.round(healAmount * 1.5f); outside combat the heal is unchanged. AbstractPlayer.heal runs every relic's onPlayerHeal before applying. Implemented as one shared in-combat heal seam (heal_player_with_relics, relic_hooks.cpp) that every combat heal routes through -- Burning Blood, Blood Vial, Meat on the Bone, Bird Faced Urn, Lizard Tail."
 
 - id: 92
   name: CHARONS_ASHES
