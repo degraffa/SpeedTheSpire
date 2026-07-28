@@ -90,7 +90,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
 | Translator `screen_state` content (shop / grid / map screens and future event variants) | B1.5, B4.3 | B4.8 | **EVENT slice content-validation DISCHARGED by B4.11:** `event_id` joins through the generated registry and option `disabled` / `choice_index` fields are type-checked; the content intentionally remains storage-less because translation outputs `RunState`/`CombatState`, not transient `RunController::event`. **The reward slice was discharged by B4.5.** **The NEOW slice was discharged by B4.14:** Neow arrives as an `EVENT` screen with the hard-coded id `"Neow Event"` (GameStateConverter.getEventState :343-355), which is recognised as a sentinel rather than joined — it is deliberately not an `events.yaml` row, because Neow is in no act's event/shrine/special pool and an `EventId` for it would place a non-pool entry into the three membership bitsets that pool ids index; the option list still gets the ordinary EVENT validation, and a near-miss id (`"Neow"`) is still refused. **The SHOP slice was discharged by B4.8** on the same terms: potion ids join through the registry (an unknown one fails loud / tallies under id-tolerance, as the reward potion already did), every `price` on a card / relic / potion row is type-checked, `purge_cost` must be an integer and `purge_available` a boolean — and it stays storage-less deliberately, because a merchant is derived state the game rebuilds from `(seed, merchantRng.counter)` and the one piece it DOES persist (the ramping purge cost) already has a `RunState` field fed from the oracle block. GRID and MAP content and any new event-variant fields remain with their owning tasks. |
-| `b14_accept2` obtain-race capture-fidelity triage | B1.3 | B5.2 | flagged explicitly by B1.3; B1.4's acceptance is unaffected |
+| `b14_accept2` obtain-race capture-fidelity triage | B1.3 | B5.2 | flagged explicitly by B1.3; B1.4's acceptance is unaffected. **Now has a named reproducer and a machine classification** (2026-07-28): `b14_accept` STS00009 floor 4 Living Wall — the transform removes a Defend_R immediately (miscRng 0→1) but `ShowCardAndObtainEffect` grants Dark Embrace only when its animation completes, so seq 40-47 show deck 11 and seq 48 (next floor) shows 12. `replay_run_diff --event` recognises the shape NARROWLY (every differing field must be `master_deck_count` or a `master_deck[i]` at/past the seeded deck's end) and reports `RACE` instead of a divergence, so no stream/pool/`event_flags` diff can hide behind it |
 | Infernal-Blade-generated Blood for Blood cost model (`cost_now` only; end-of-turn reset restores 4, not the game's reduced base) | B3.6 | G7 | judged unreachable — "revisit if G7 ever hits it" |
 | Bottled trio bottling at acquisition (run-layer acquisition-choice machinery + a per-master-deck-instance innate flag) | B3.25 | UNASSIGNED — named "B4-owner" | rows + deck-content gates live so pools and B4.7 chests are complete |
 | Akabeko (Vigor power row) | B3.24 | UNASSIGNED — "card-batch consumers" | no S1 Ironclad card grants Vigor, so no card batch will pick the power row up |
@@ -1133,49 +1133,20 @@ committing rather than take unallocated ids or land a fragment. That was correct
 - **B4.5** `[x]` Combat rewards — assembly (gold / elite relic / potion / 3-card pick with pity, the no-dupe re-roll and the Act-1 upgrade draws) plus the transient `RewardScreen` claim flow, **no schema bump**; **oracle spot-diff PASSED** on campaigns `b45_rewards_oracle_20260727T204809Z_claude01` (STS00042/43) and `b45_rewards_oracle2_20260727T204809Z_claude01` (STS00048/49/51/52): **13 combat reward screens over 6 runs, all 13 zero-diff** on gold / potions[] / master_deck[] / both pity counters / cardRng+treasureRng+potionRng+relicRng; the CardLibrary HashMap **library order is now computed** in `emit/cards.py` and reproduces **27/27** captured offer identities (registry-id order: 0/27), discharging the B3.6/B3.10b/B3.11 pool-order obligation; 1322/1322 ×3 · [log](stage-b-log.md#b45)
 - **B4.6** `[x]` Relic pools + acquisition — `relic_pools.hpp/.cpp`: 5 unconditional relicRng shuffles (JDK-LCG route), front/end pop, 50/33/17 tier roll, canSpawn re-check + Circlet fallback, acquisition in trap-8 order with pickup effects; 3-seed live-oracle pool + `(s0,s1,counter)` match; 428/428 ×3 · [log](stage-b-log.md#b46)
 
-### B4.7 `[ ]` Treasure rooms
-**Deps:** B4.6 · **Spec:** design §5.6; §10 trap 16 · **Provenance:**
-AbstractDungeon.java:499-508; AbstractChest.java:54-102; Small/Medium/
-LargeChest.java:18-22
-**Deliverables:** chest size roll, single-roll gold+tier (trap 16), gold
-amount ×(0.9,1.1), relic grant via B4.6, the fixed treasure row (map row 8).
-**Acceptance:** tier-2: chest tables vs. hand-derivation across the roll
-range; trap-16 named test; oracle spot-diff ≥ 2 treasure floors.
-**Pending oracle spot-diff — expected shape (design §11 v0.1.6):** the capture
-**will** carry one extra trailing `SAPPHIRE_KEY` reward row after the base
-relic on every Act-1 chest open (`isFinalActAvailable && !hasSapphireKey`
-holds, AbstractChest.java:95-96; `AbstractRoom.addSapphireKey`,
-AbstractRoom.java:545-547). It is **expected, not a divergence**: it consumes
-no RNG, the sim models no key row, and the translator already classifies the
-type as known and ignores `rewards[].link`. The spot-diff must therefore
-(a) compare reward rows ignoring that trailing key row, and (b) **claim the
-base RELIC, never the key** — claiming the relic marks the linked key row
-`isDone`/`ignoreReward` (RewardItem.java:298-300), whereas claiming the key
-does the reverse (RewardItem.java:317-322) and would cost the run its relic,
-diverging every downstream floor. The one legitimate absence is an N'loth's
-Mask open with no Matryoshka bonus: `removeOneRelicFromRewards` deletes the
-first RELIC row **and** the row immediately after it when that row is its
-`relicLink` (AbstractRoom.java:549-557), taking the key with the base relic.
-Any other missing key row, or a key row on a *non*-treasure reward screen, IS
-a divergence.
-**Inherited — DISCHARGED in code:** Matryoshka (chest relic; floor≤40
-canSpawn gate was already live), plus the **Cursed Key** and **N'loth's Mask**
-chest hooks deferred by B3.27. All three now have exact non-boss bodies,
-boss gates, counter/RNG/acquisition-order tests, and source-order coverage.
-**Defensive fix-forward:** one strict descriptor/capacity authority now gates
-mask, open, and step; fallible copy-commit reward/hook transactions make
-malformed or over-cap forced opens byte-stable in Debug and Release, including
-duplicate imported Matryoshkas and near-full public hook calls. The authority
-additionally preflights master-deck slots for acquisition-ordered Cursed Keys
-under first-Omamori charge depletion (a full-deck curse aborts the whole open
-byte-stably instead of being silently dropped), and its descriptor domain is
-derived at compile time from `treasure_chest_for_rolls`, so non-constructible
-size/tier pairs (SMALL+RARE, LARGE+COMMON) are rejected and the table cannot
-drift from the generator. `open_treasure_chest`'s vestigial `misc_rng`
-parameter is gone — the open path reads `treasureRng` only
-(AbstractChest.java:72), and `miscRng` is first touched at claim time.
-**Log:** [implementation and remaining oracle blocker](stage-b-log.md#b47)
-(the task stays unchecked until its required live-game spot-diff can run)
+- **B4.7** `[x]` Treasure rooms — chest size roll, single-roll gold+tier
+  (trap 16), gold ×(0.9,1.1), relic grant via B4.6, fixed treasure row; strict
+  descriptor/capacity authority with fallible copy-commit transactions;
+  Matryoshka + Cursed Key + N'loth's Mask chest hooks discharged in code;
+  oracle spot-diff `[x]` 2026-07-28: **both captured treasure floors
+  zero-diff** via the new `replay_run_diff --treasure` mode (STS00052 floor 5,
+  a ?-node that rolled TREASURE, Medium/RARE, skipped; STS00054 floor 9, a `T`
+  node, Small/COMMON, opened — a corpus sweep proves these are the only two;
+  together they cover both entry routes, two sizes, two tiers, the open and
+  the skip). The sapphire-key expected shape held, and the capture claimed the
+  KEY — the read-out reproduces the abandoned base relic exactly
+  (`RewardItem.java:317-322`). The gold roll is unexercised by any live
+  capture and stays on tier-2 · [log](stage-b-log.md#b47) ·
+  [read-out](stage-b-log.md#b47-readout)
 
 ### B4.8 `[x]` Shop
 **Deps:** B4.5, B4.6, B3.23 · **Spec:** design §5.6 · **Provenance:**
@@ -1359,6 +1330,28 @@ A20 in both game and sim; see [Landed non-task work](#landed-non-task-work).
 This task's capture leg is Match and Keep's deal alone.
 **Inherited — DISCHARGED in code:** the B3.27 event-screen shares for every
 site this batch actually creates; see the obligations row.
+**ARRIVAL half discharged — 88 of 88 captured ?-room sightings zero-diff
+(2026-07-28).** `replay_run_diff --event` (the `replay-readout-modes` branch)
+over all 161 oracle-carrying runs of the ten campaigns reads out, per
+sighting, the onEnterRoom fan-out, the one committed `eventRng` draw,
+`generate_event`'s byte-identical stream, the capture-id → `EventId` join
+(the join is `event_id`, NOT the display `event_name` — they differ for six
+of the eighteen ids, and the game's misspelling `Transmorgrifier` is the id),
+and the WHOLE arrival `RunState` (three pity floats, three membership
+bitsets, `event_flags`, gold, every relic counter): **88 sightings, 87
+zero-diff plus 1 clean but for the known B1.3 obtain race (recognised
+narrowly), 0 diverged**, across 18 distinct events — eventList 10/11,
+shrineList 4/6 (Transmorgrifier, Purifier, Upgrade Shrine, Wheel of Change)
+and 4 Act-1 specials, with Fountain of Cleansing's `isCursed` and The
+Cleric's `gold >= 35` gates observed live on filtered pools. **This does NOT
+close the task**: Match and Keep is in no capture, so its card-dealing
+spot-check — now the task's ONLY remaining leg — is untouched
+(NoteForYourself's profile pin was separately discharged by direct profile
+inspection; see [Landed non-task work](#landed-non-task-work)). Option FLOW
+is deliberately out of scope for the arrival mode and stays `--replay`'s.
+Tables and traps:
+[b47_treasure_spotdiff.md](../tools/oracle_bridge/driver/b47_treasure_spotdiff.md)
+§8b.
 **Log:** [implementation and remaining oracle blocker](stage-b-log.md#b413)
 (the task stays unchecked until its required live-game spot-check can run)
 

@@ -5314,3 +5314,72 @@ Java provenance: `ShopScreen.java:130-244, 246-292, 340-428, 592-672, 969-978`,
 `Merchant.java:57-97`, `ShopRoom.java:43-77`, `StoreRelic.java:36-120`,
 `StorePotion.java:33-101`, `AbstractDungeon.java:1538-1620, 1785-1789`,
 `CardGroup.java:498-552`.
+
+---
+
+<a id="b47-readout"></a>
+## B4.7 oracle spot-diff read-out — both captured treasure floors zero-diff (2026-07-28)
+
+Read out with the new `replay_run_diff --treasure` mode (branch
+`replay-readout-modes`), which mirrors `--shop`: seed a `RunState` from ONE
+captured record, drive the module, diff — no prefix replay, so combat fidelity
+is irrelevant. Per room: CONSTRUCTION off the pre-entry record (`++rs.floor`
+first, trap 7; for a `?` node, `dispatch_event_room_entry_relics` +
+`event_room_roll` which must yield TREASURE; then `roll_treasure_chest`;
+`treasureRng` +2 exactly — the size roll and `randomizeReward`'s shared
+contents roll — every other stream and all five relic pools unmoved, size vs
+`screen_state.chest_type`); OPEN off the CHEST record (`open_treasure_chest`,
+whole-`RunState` diff against the post-open record, so the optional gold draw
+and the pool front-pop are proved, plus reward rows vs the first in-room
+COMBAT_REWARD screen with the key row accounted for); CLAIM (a `RunController`
+parked in COMBAT_REWARD driven through the capture's own claim commands,
+whole-`RunState` diffed against every later in-room record).
+
+Verbatim verdicts:
+
+```
+CHEST    OK   STS00052 floor=5 MediumChest tier=RARE gold=no treasureRng 2->4 entered via a ? node (eventRng +1 first)
+WALK     OK   STS00052 floor=5 5 in-room records compared, chest skipped
+CHEST    OK   STS00054 floor=9 SmallChest tier=COMMON gold=no treasureRng 3->5 entered via a 'T' node
+OPEN     OK   STS00054 floor=9 seq=116 rows=[RELIC] treasureRng 5->5; capture carries the expected trailing SAPPHIRE_KEY row
+CLAIM    KEY  STS00054 floor=9 seq=119: the capture claimed the SAPPHIRE_KEY row, abandoning the linked base relic (RewardItem.java:317-322)
+WALK     OK   STS00054 floor=9 5 in-room records compared, chest opened
+--- 2 file(s): 2 treasure room(s), construction clean 2, 1 opened (1 clean) / 1 skipped, in-room walks clean 2 (+0 partial), 0 divergence(s) ---
+```
+
+A sweep of all 161 oracle-carrying runs confirms these are the ONLY two
+treasure rooms in the corpus. Between them: both entry routes (a `?` that
+rolled TREASURE and a static `T` node — the mode's own first pass conflated
+these and misreported a missing eventRng draw as an engine divergence, now a
+named trap in the runbook), Small+Medium, COMMON+RARE, the open and the skip.
+
+**The expected shape held, and the claim went the other way (design §11
+v0.1.6).** STS00054's open carries the predicted extra trailing `SAPPHIRE_KEY`
+row after the base relic (`isFinalActAvailable && !hasSapphireKey`,
+`AbstractChest.java:95-96`; `AbstractRoom.addSapphireKey` `:545-547`), linked
+in both directions (`RewardItem.java:86-93`). It is elided, but narrowly — a
+key row on a non-treasure screen, one that is not trailing or not linked, two
+of them, or a MISSING one is a divergence, except the two legitimate absences
+(the run already holds a key; N'loth's Mask's `removeOneRelicFromRewards` took
+relic and key together, `AbstractRoom.java:549-559`). What the ledger did NOT
+predict is that the capture's `random-legal` policy claimed the **key**, not
+the relic: `RewardItem.java:317-322` then marks the linked base relic
+`isDone`/`ignoreReward`, so the run ABANDONED a Bag of Preparation it had
+already popped — common pool 32 → 31 at `relicRng` unmoved, `relics` still
+`[Astrolabe]` on the next floor — and the read-out reproduces exactly that.
+Both directions frozen in
+`RewardClaimMapping.ClaimingTheBaseRelicMapsThroughTheElidedIndexSpace` /
+`.ClaimingTheKeyAbandonsTheLinkedRelic`. **One honest gap:** neither chest
+rolled gold, so `Math.round(treasureRng.random(GOLD_AMT*0.9f, GOLD_AMT*1.1f))`
+is unexercised by a live capture and stays on tier-2.
+
+The same branch's `--event` mode read out **88 of 88 captured ?-room
+sightings** (87 zero-diff + 1 clean but for the known B1.3 obtain race,
+recognised narrowly; 0 diverged) across 18 distinct events in all three pools
+— recorded under B4.13's block in the ledger, since that task stays open on
+Match and Keep. Full tables and traps:
+[`b47_treasure_spotdiff.md`](../tools/oracle_bridge/driver/b47_treasure_spotdiff.md)
+§8a/§8b. Suite on the branch: debug/asan/release PASS, 0 failed of 1411
+(`ctest -N`). The capture-id join is `event_id`, NOT `event_name` — for six of
+the eighteen ids they differ (the game's misspelling `Transmorgrifier` is the
+*id*); `EventJoin.UnknownNameFailsLoud` pins that a name is refused.
