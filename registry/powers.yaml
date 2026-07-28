@@ -678,3 +678,42 @@
   hooks:
     at_end_of_turn: []       # native: monsters-in-fight gate, then an instance-targeted ReducePowerAction and, at fuse 1, the detonation
   provenance: "TheBombPower (TheBombPower.java:20-54), read in full. POWER_ID is NOT a constant: the ctor builds `POWER_ID + bombIdOffset` and increments that static offset (:22,27,31-32), so AbstractCreature.getPower NEVER finds an existing bomb and ApplyPowerAction adds a brand-new AbstractPower on every play -- two bombs are two independent fuses, never a stack of 2. That is what `instanced: true` encodes (op_apply_power APPENDS instead of merging); the game_id above is the PREFIX, since the oracle reports the per-instance \"TheBomb0\", \"TheBomb1\", ... (the translator's join normalizes that suffix). The ctor (:29-38) sets no type -> the AbstractPower default BUFF (AbstractPower.java:67); `amount` = the ctor's `turns` (3, TheBomb.java:32) and the private `damage` = the ctor's third argument (40, or 50 upgraded -- TheBomb.java:27,44). Slot mapping: amount = the fuse in turns (the oracle-visible number), counter = the damage. atEndOfTurn(isPlayer) (:40-48): `if (!AbstractDungeon.getMonsters().areMonstersBasicallyDead()) { addToBot(new ReducePowerAction(this.owner, this.owner, this, 1)); if (this.amount == 1) addToBot(new DamageAllEnemiesAction(null, DamageInfo.createDamageMatrix(this.damage, true), DamageType.THORNS, FIRE)); }`. THREE things that pins. (1) The areMonstersBasicallyDead gate (MonsterGroup.java:90-95 -- every monster dying or escaped) is checked ONCE and covers BOTH queued actions, so with nobody left in the fight the fuse is FROZEN, not merely silent. (2) The explosion test reads `amount` AT HOOK TIME, before its own queued reduce resolves, so a bomb standing at 1 queues [reduce, damage] and the reduce -- 1 from 1 -- drives ReducePowerAction's else branch into RemoveSpecificPowerAction on THAT EXACT INSTANCE (ReducePowerAction.java:28-33,45-51): the bomb is gone in the same end-of-turn it detonates. Counting from the play turn that is 3 -> 2, 2 -> 1, then the hook sees 1: the end of the THIRD turn. (3) The player sweep it fires from is applyEndOfTurnTriggers, at the TOP of endTurn and BEFORE the hand discard (AbstractCreature.java:547-553 via AbstractRoom.java:393-396) -- where the engine's AT_END_OF_TURN dispatch already sits. The instance-exact reduce is why interp.hpp gained a REDUCE_POWER/REMOVE_POWER instance key: a slot INDEX cannot be the handle, because an earlier bomb's removal compacts the list before a later queued item resolves. isPureDamage TRUE (DamageInfo.java:126-136) plus the THORNS type means neither Strength nor Vulnerable/Weak moves the 40/50. Applied only by The Bomb card, stack amount 3 at both levels (TheBomb.java:32)."
+
+# --- Wave-C track 1 relic-tail stage: the two relic-granted damage powers ----
+# Ids 87-88 come out of the 87-90 block this stage owns; 89-90 are RELEASED
+# unspent (a PowerId gap costs nothing -- the generator enforces uniqueness, not
+# monotonicity). 85-86 stay B3.11's unissued reserve, as do 79-80.
+#
+# Both rows are ATTACKER-SIDE atDamageGive scalers, so both needed a case in
+# interp_damage.cpp's at_damage_give and both moved its kPowersCount guard --
+# checked against ALL FIVE count-guarded switches (at_damage_give,
+# at_damage_receive, at_damage_final_receive, modify_block, modify_block_last) by
+# reading each class in full, not by pattern-matching the name.
+#
+# ORDER IS LOAD-BEARING HERE and is what makes these two one batch: Vigor takes
+# AbstractPower's default priority 5 while PenNibPower's ctor sets 6
+# (PenNibPower.java:36), so the game's ApplyPowerAction.java:167 sort puts every
+# priority-5 addend (Strength, Vigor) BEFORE the doubling and both before
+# Frail(10)/Intangible(75)/Weak(99). The engine reproduces that sort
+# (sort_powers_like_the_game, interp_powers.cpp), which is why
+# ((base + Str + Vigor) * 2) * 0.75 comes out right rather than by luck.
+
+- id: 87
+  name: VIGOR
+  game_id: "Vigor"
+  type: BUFF
+  native: true
+  hooks:
+    on_use_card: []          # native: an ATTACK consumes it -- addToBot RemoveSpecificPowerAction(self)
+  provenance: "VigorPower (com.megacrit.cardcrawl.powers.watcher.VigorPower, 58 lines, read in full). POWER_ID \"Vigor\" (:22) -- the oracle join key. The ctor (:30-38) sets type = BUFF and isTurnBased = false and does NOT set priority, so it takes AbstractPower's default 5 (AbstractPower.java:66); it does not override stackPower either, so a re-application is the additive default -- hence no `stack:` column. atDamageGive (:41-47): `if (type == NORMAL) return damage += (float)this.amount; return damage;` -- a float ADD on the attacker side, NORMAL only, so THORNS and HP_LOSS are untouched. onUseCard (:49-55): `if (card.type == ATTACK) { flash(); addToBot(new RemoveSpecificPowerAction(owner, owner, POWER_ID)); }` -- addToBot, so the removal resolves AFTER the played attack's own actions and every hit of a multi-hit attack is boosted, and a SKILL or POWER play leaves it standing. NO S1 CARD grants Vigor; the sole S1 granter is the COMMON relic Akabeko (Akabeko.java:30-35, VIGOR = 8 at :19, pool_order 5), which is why ledger row 96's 'card-batch consumers' framing was wrong and is corrected: this is a live relic obligation reachable from the first combat reward."
+
+- id: 88
+  name: PEN_NIB
+  game_id: "Pen Nib"
+  type: BUFF
+  priority: 6
+  stack: none
+  native: true
+  hooks:
+    on_use_card: []          # native: an ATTACK consumes it -- addToBot RemoveSpecificPowerAction(self)
+  provenance: "PenNibPower (PenNibPower.java, 58 lines, read in full). POWER_ID \"Pen Nib\" (:22) -- note the SPACE; it is the relic's id string too, and the oracle join key. The ctor (:27-37) sets type = BUFF, isTurnBased = true and priority = 6 (:36). isTurnBased is RENDER-ONLY -- its single reader in the whole game is AbstractPower.renderAmount's colour choice (AbstractPower.java:193-197) -- so it needs no registry column. Priority 6 makes this the only registered power between the priority-5 default class and Frail's 10, which is exactly the slot the doubling has to occupy. atDamageGive (:51-57): `if (type == NORMAL) return damage * 2.0f; return damage;` -- so THORNS and HP_LOSS are NOT doubled. onUseCard (:39-44): `if (card.type == ATTACK) addToBot(new RemoveSpecificPowerAction(owner, owner, POWER_ID));` -- addToBot, so the removal resolves after the attack's own actions and EVERY hit of a multi-hit attack (Twin Strike, Pummel) is doubled. `stack: none`: the granter always applies amount 1 (PenNib.java:35,46) and nothing reads the amount -- the multiply is a flat x2 -- so a second application would be a marker re-set, not an intensity. Granted only by the PenNib relic: onUseCard's counter == 9 branch (PenNib.java:30-36) and atBattleStart's re-grant at counter == 9 (:41-48), which is reachable because the relic's counter is RUN-persistent."

@@ -159,6 +159,41 @@ TEST(PowerHooks, RageAttackGuardSkipsNonAttacks) {
     EXPECT_EQ(s.action_count, 0);
 }
 
+// --- Vigor / Pen Nib: the two attack-consumed damage powers -------------------
+
+// Both are spent by an ATTACK and by nothing else, and both queue their removal
+// addToBot (VigorPower.java:49-55; PenNibPower.java:39-44) -- so the removal
+// resolves BEHIND the played attack's own actions and every hit of a multi-hit
+// attack is boosted before the power leaves.
+TEST(PowerHooks, VigorAndPenNibAreConsumedByAnAttackAndNothingElse) {
+    const struct { PowerId id; int16_t amount; } powers[] = {
+        {PowerId::VIGOR, 8},
+        {PowerId::PEN_NIB, 1},
+    };
+    for (const auto& p : powers) {
+        {
+            CombatState s{};
+            give_player_power(s, p.id, p.amount);
+            dispatch_on_use_card(s, /*played_pool_index=*/0,
+                                 static_cast<uint16_t>(CardId::STRIKE));
+            ASSERT_EQ(s.action_count, 1)
+                << "power " << static_cast<int>(p.id);
+            EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::REMOVE_POWER));
+            EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
+            EXPECT_EQ(queued(s, 0).flags, make_apply_power_flags(p.id));
+        }
+        {
+            // A SKILL leaves it standing.
+            CombatState s{};
+            give_player_power(s, p.id, p.amount);
+            dispatch_on_use_card(s, /*played_pool_index=*/0,
+                                 static_cast<uint16_t>(CardId::DEFEND));
+            EXPECT_EQ(s.action_count, 0)
+                << "power " << static_cast<int>(p.id);
+        }
+    }
+}
+
 // --- STRESS 1: onExhaust list order (Feel No Pain + Dark Embrace) ------------
 
 TEST(PowerHooks, OnExhaustFollowsPlayerPowerListOrder) {

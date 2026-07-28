@@ -423,6 +423,88 @@ TEST(RelicHooks, PenNibCountsAttacksAndCyclesAtTen) {
     EXPECT_EQ(r.slots[0].counter, 0) << "cycles back to 0 at the 10th attack";
 }
 
+// The grant is on the NINTH attack, not the tenth: PenNib.java:44-47 resets at
+// ten WITHOUT granting, and :48-51 grants at nine -- so the TENTH attack is the
+// empowered one.
+TEST(RelicHooks, PenNibGrantsTheDoublingAfterTheNinthAttackNotTheTenth) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::PEN_NIB);
+    const uint16_t strike = static_cast<uint16_t>(CardId::STRIKE);
+    for (int i = 1; i <= 8; ++i) {
+        dispatch_relics_on_use_card(s, r.slots, r.count, strike, 0);
+        EXPECT_EQ(s.action_count, 0) << "granted early at attack " << i;
+    }
+    dispatch_relics_on_use_card(s, r.slots, r.count, strike, 0);  // 9th
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(it.tgt, kActorPlayer);
+    EXPECT_EQ(it.amount, 1);
+    EXPECT_EQ(it.flags, make_apply_power_flags(PowerId::PEN_NIB));
+    drain(s);
+    ASSERT_NE(player_power(s, PowerId::PEN_NIB), nullptr);
+
+    // The tenth attack resets the counter and grants nothing more (the power it
+    // already holds is what makes that attack the empowered one).
+    dispatch_relics_on_use_card(s, r.slots, r.count, strike, 0);  // 10th
+    EXPECT_EQ(r.slots[0].counter, 0);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// A SKILL never moves the counter and never grants (the ATTACK gate,
+// PenNib.java:38).
+TEST(RelicHooks, PenNibIgnoresNonAttacksEntirely) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::PEN_NIB, 8);
+    dispatch_relics_on_use_card(s, r.slots, r.count,
+                                static_cast<uint16_t>(CardId::SHRUG_IT_OFF), 0);
+    EXPECT_EQ(r.slots[0].counter, 8);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// atBattleStart re-grants when the RUN-persistent counter is already 9, and
+// leaves the counter alone (PenNib.java:54-62). This is the case that makes the
+// power visible on turn 1 of a fresh combat.
+TEST(RelicHooks, PenNibReGrantsAtBattleStartWhenTheCounterIsNine) {
+    {
+        CombatState s = MakeState();
+        Relics r; r.add(RelicId::PEN_NIB, 9);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        ASSERT_EQ(s.action_count, 1);
+        EXPECT_EQ(queued(s, 0).flags, make_apply_power_flags(PowerId::PEN_NIB));
+        EXPECT_EQ(r.slots[0].counter, 9) << "atBattleStart never writes counter";
+        drain(s);
+        EXPECT_NE(player_power(s, PowerId::PEN_NIB), nullptr);
+    }
+    for (const int16_t counter : {int16_t{0}, int16_t{8}, int16_t{10}}) {
+        CombatState s = MakeState();
+        Relics r; r.add(RelicId::PEN_NIB, counter);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        EXPECT_EQ(s.action_count, 0) << "counter " << counter;
+    }
+}
+
+// --- Akabeko / Vigor ---------------------------------------------------------
+
+// Akabeko.atBattleStart (Akabeko.java:30-35): unconditional Vigor 8.
+TEST(RelicHooks, AkabekoGrantsEightVigorAtBattleStart) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::AKABEKO, -1);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(it.src, kActorPlayer);
+    EXPECT_EQ(it.tgt, kActorPlayer);
+    EXPECT_EQ(it.amount, 8);
+    EXPECT_EQ(it.flags, make_apply_power_flags(PowerId::VIGOR));
+    drain(s);
+    const PowerSlot* vigor = player_power(s, PowerId::VIGOR);
+    ASSERT_NE(vigor, nullptr);
+    EXPECT_EQ(vigor->amount, 8);
+    EXPECT_EQ(r.slots[0].counter, -1) << "Akabeko never writes its counter";
+}
+
 // --- Turn-start counters -----------------------------------------------------
 
 TEST(RelicHooks, HappyFlowerGrantsEnergyEveryThirdTurn) {
@@ -506,7 +588,6 @@ TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {
     CombatState s = MakeState();
     Relics r;
     r.add(RelicId::WHETSTONE);        // equip-time, no combat hook
-    r.add(RelicId::AKABEKO);          // Vigor apply DEFERRED (Vigor power row is later)
     r.add(RelicId::BOOT);             // damage-pipeline DEFERRED
     r.add(RelicId::PRESERVED_INSECT); // live, but only in an elite room (flag clear here)
     dispatch_relics_at_battle_start(s, r.slots, r.count);

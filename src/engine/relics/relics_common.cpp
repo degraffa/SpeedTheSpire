@@ -93,17 +93,60 @@ void relic_native_nunchaku(CombatState& s, RelicHook hook, RelicSlot& slot,
     }
 }
 
-void relic_native_pen_nib(CombatState& /*s*/, RelicHook hook, RelicSlot& slot,
+namespace {
+
+// The one action both PenNib call sites queue: addToBot ApplyPowerAction(player,
+// player, PenNibPower(player, 1), 1, true) (PenNib.java:51 and :60). Spelled
+// once so the two sites cannot drift.
+void queue_pen_nib_power(CombatState& s) noexcept {
+    ActionQueueItem gain{};
+    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    gain.src = kActorPlayer;
+    gain.tgt = kActorPlayer;
+    gain.amount = 1;
+    gain.flags = make_apply_power_flags(PowerId::PEN_NIB);
+    add_to_bottom(s, gain);
+}
+
+}  // namespace
+
+void relic_native_pen_nib(CombatState& s, RelicHook hook, RelicSlot& slot,
                           const RelicHookContext& ctx) noexcept {
-    // PenNib.onUseCard: counts ATTACKs; the 10th is empowered (double
-    // damage) then the counter resets. The double-damage PenNibPower has no
-    // registry/powers.yaml row, so the empowerment is DEFERRED; the COUNTER is
-    // live here so the accounting is already correct when the power lands.
-    // counter persists in the RelicSlot (design §4.3).
+    // PenNib (PenNib.java:36-62; the ledger and this row previously cited
+    // :40-56 / :44-47, both wrong). `counter` starts at 0 (the ctor, :28) and is
+    // RUN-persistent -- fold_back_combat copies it into RunState.relics.
+    //
+    // onUseCard (:36-52):
+    //     if (card.type == ATTACK) {
+    //         ++counter;
+    //         if (counter == 10) { counter = 0; flash(); pulse = false; }
+    //         else if (counter == 9) { beginPulse(); pulse = true;
+    //             hand.refreshHandLayout();
+    //             addToBot(RelicAboveCreatureAction);            -- cosmetic
+    //             addToBot(ApplyPowerAction(p, p, PenNibPower(p, 1), 1, true)); }
+    //     }
+    //
+    // The 9-vs-10 asymmetry is the whole mechanic and is easy to get backwards:
+    // the power is granted AFTER the NINTH attack, so the TENTH attack is the
+    // empowered one, and reaching ten RESETS the counter without granting. The
+    // 5-arg ApplyPowerAction's trailing boolean is a speed flag, not a semantic
+    // one. `pulse` and refreshHandLayout are presentation.
+    //
+    // atBattleStart (:54-62): `if (counter == 9)` re-grant, WITHOUT touching the
+    // counter. Reachable precisely because the counter survives the combat that
+    // set it to 9 -- a fresh combat can therefore open with the power already up.
+    if (hook == RelicHook::AT_BATTLE_START) {
+        if (slot.counter == 9) {
+            queue_pen_nib_power(s);  // addToBot (PenNib.java:60)
+        }
+        return;
+    }
     if (hook == RelicHook::ON_USE_CARD && ctx.card_is_attack) {
         ++slot.counter;
-        if (slot.counter >= 10) {
-            slot.counter = 0;  // PenNib.java:44-47 (empowerment: DEFERRED)
+        if (slot.counter == 10) {
+            slot.counter = 0;  // (:40-43) -- reset, no grant
+        } else if (slot.counter == 9) {
+            queue_pen_nib_power(s);  // addToBot (PenNib.java:51)
         }
     }
 }
@@ -211,12 +254,27 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
 // powers follow-up: Thorns/Dexterity are registered, so both became DATA
 // at_battle_start APPLY_POWER relics and never route here at all.)
 
-// Akabeko.atBattleStart (Akabeko.java:31-35) -- addToTop ApplyPowerAction(
-// VigorPower 8). DEFERRED: registry/powers.yaml has no VIGOR row, so the power
-// this relic applies cannot be named -- the effect is unrepresentable.
-void relic_native_akabeko(CombatState& /*s*/, RelicHook /*hook*/,
-                          RelicSlot& /*slot*/,
-                          const RelicHookContext& /*ctx*/) noexcept {}
+void relic_native_akabeko(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
+                          const RelicHookContext& /*ctx*/) noexcept {
+    // Akabeko.atBattleStart (Akabeko.java:30-35):
+    //     flash();
+    //     addToTop(ApplyPowerAction(player, player, VigorPower(player, 8), 8));
+    //     addToTop(RelicAboveCreatureAction(player, this));   -- cosmetic
+    //
+    // Unconditional -- no room, HP or deck gate of any kind. VIGOR = 8 (:19).
+    // The two addToTop pushes reverse; with the cosmetic dropped, one add_to_top
+    // is the whole body.
+    if (hook != RelicHook::AT_BATTLE_START) {
+        return;
+    }
+    ActionQueueItem gain{};
+    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    gain.src = kActorPlayer;
+    gain.tgt = kActorPlayer;
+    gain.amount = 8;
+    gain.flags = make_apply_power_flags(PowerId::VIGOR);
+    add_to_top(s, gain);  // addToTop (Akabeko.java:33)
+}
 
 // AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter == -2, gain
 // 2 energy on the first turn; onEnterRestRoom (:77-80) arms it. DEFERRED

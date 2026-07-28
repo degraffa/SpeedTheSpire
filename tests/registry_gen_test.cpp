@@ -480,7 +480,7 @@ TEST(RegistryGen, ManifestCounts) {
                                       // and holds no gap at all.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 49u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 51u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -520,6 +520,11 @@ TEST(RegistryGen, ManifestCounts) {
                                       // Bomb) the registry's first `instanced`
                                       // row; 85-86 are that batch's published
                                       // RESERVE and stay unissued
+                                      // + the Wave-C relic-tail stage's Vigor
+                                      // (87, Akabeko) and Pen Nib (88), the two
+                                      // relic-granted atDamageGive scalers; 89-90
+                                      // were that stage's block and are RELEASED
+                                      // unspent
     EXPECT_EQ(m::kMonstersCount, 25u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
@@ -551,7 +556,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 447u);  // 126 + 49 + 25 + 142 + 33 + 31 + 21 + 20
+    EXPECT_EQ(m::kTotalCount, 449u);  // 126 + 51 + 25 + 142 + 33 + 31 + 21 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1327,17 +1332,25 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
     // The complete override set for registered powers, from a full grep of
     // `this.priority` across the decompiled powers directory: Weak 99
     // (WeakPower.java:40), Frail 10 (FrailPower.java:29), IntangiblePlayer 75
-    // (IntangiblePlayerPower.java:31), Confusion 0 (ConfusionPower.java:30).
+    // (IntangiblePlayerPower.java:31), Confusion 0 (ConfusionPower.java:30),
+    // PenNib 6 (PenNibPower.java:36).
     namespace r = sts::registry;
     EXPECT_EQ(r::power_def(r::PowerId::WEAK)->priority, 99);
     EXPECT_EQ(r::power_def(r::PowerId::FRAIL)->priority, 10);
     EXPECT_EQ(r::power_def(r::PowerId::INTANGIBLE)->priority, 75);
     EXPECT_EQ(r::power_def(r::PowerId::CONFUSION)->priority, 0);
+    EXPECT_EQ(r::power_def(r::PowerId::PEN_NIB)->priority, 6);
+    // Vigor's ctor sets NO priority (VigorPower.java:30-38), so it takes the
+    // default and belongs in the sweep below rather than in the list above --
+    // which is exactly why ((base + Str + Vigor) * 2) is the game's grouping.
+    EXPECT_EQ(r::power_def(r::PowerId::VIGOR)->priority,
+              r::kDefaultPowerPriority);
     // Every other row carries the default.
     for (int i = 0; i < kIdProbeLimit; ++i) {
         const auto id = static_cast<r::PowerId>(i);
         if (id == r::PowerId::WEAK || id == r::PowerId::FRAIL ||
-            id == r::PowerId::INTANGIBLE || id == r::PowerId::CONFUSION) {
+            id == r::PowerId::INTANGIBLE || id == r::PowerId::CONFUSION ||
+            id == r::PowerId::PEN_NIB) {
             continue;
         }
         const r::PowerDef* d = r::power_def(id);

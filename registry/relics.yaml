@@ -250,8 +250,9 @@
   initial_counter: 0
   native: true
   hooks:
-    on_use_card: []           # ATTACK played -> counter++; 10th attack empowered (double-dmg power DEFERRED)
-  provenance: "PenNib.onUseCard (PenNib.java:40-56) -- if card.type==ATTACK ++counter; at 10 -> counter=0 (grants PenNibPower/double-damage, DEFERRED: PenNib power row not yet in powers.yaml). counter persists in RunState RelicSlot.counter (stage-a §4.3)."
+    on_use_card: []           # native: ATTACK played -> ++counter; at 9 grant PenNibPower, at 10 reset
+    at_battle_start: []       # native: re-grant PenNibPower if the RUN-persistent counter is already 9
+  provenance: "PenNib (PenNib.java:36-62; this row and ledger row 97 previously cited :40-56 / :44-47, both wrong -- onUseCard is :36-52, its counter == 10 branch :40-43, atBattleStart :54-62). onUseCard: if card.type == ATTACK then ++counter; `if (counter == 10) counter = 0;` else `if (counter == 9)` addToBot ApplyPowerAction(player, player, PenNibPower(player, 1), 1, true) behind a cosmetic RelicAboveCreatureAction. The 9-vs-10 asymmetry IS the mechanic: the power is granted after the NINTH attack so the TENTH is the empowered one, and reaching ten resets without granting. atBattleStart re-grants when counter == 9 and does NOT touch the counter -- reachable because counter is RUN-persistent (fold_back_combat), so a fresh combat can open with the doubling already up. The 5-arg ApplyPowerAction's trailing boolean is a speed flag, not a semantic one; pulse and refreshHandLayout are presentation. counter starts at 0 from the ctor (:28), which is what initial_counter mirrors."
 
 - id: 13
   name: RED_SKULL
@@ -296,8 +297,8 @@
   pool_order: 5
   native: true
   hooks:
-    at_battle_start: []       # apply Vigor 8 -- DEFERRED (Vigor power row is B3.4+/later)
-  provenance: "Akabeko.atBattleStart (Akabeko.java:31-35) -- addToTop ApplyPowerAction(VigorPower 8). Vigor not yet in powers.yaml (B3.4 owns it); native body deferred until the Vigor row lands."
+    at_battle_start: []       # native: addToTop ApplyPowerAction(player, player, VigorPower 8)
+  provenance: "Akabeko.atBattleStart (Akabeko.java:30-35) -- flash(), addToTop ApplyPowerAction(player, player, VigorPower(player, 8), 8), addToTop a cosmetic RelicAboveCreatureAction. VIGOR = 8 (:19). Unconditional: no room, HP or deck gate. LIVE since the VIGOR power row (powers.yaml id 87) landed. NOTE for anyone re-reading ledger row 96: this is a COMMON relic at pool_order 5, i.e. reachable from the very first combat reward, so the Vigor row was never a 'card-batch' leftover -- no S1 Ironclad CARD grants Vigor and this relic is its only S1 source."
 
 - id: 17
   name: ANCIENT_TEA_SET

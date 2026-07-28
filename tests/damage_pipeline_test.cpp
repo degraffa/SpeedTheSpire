@@ -431,6 +431,82 @@ TEST(ApplyPowerSort, WeakThenStrengthComputesTheGameAnswer) {
     EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 6);
 }
 
+// Vigor is a flat attacker-side ADD on NORMAL damage only
+// (VigorPower.java:41-47) -- the Akabeko payload.
+TEST(DamagePipeline, VigorAddsItsAmountToNormalDamageOnly) {
+    CombatState s = make_combat();
+    add_power(s.player_powers, s.player_power_count, PowerId::VIGOR, 8);
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 14);
+
+    // THORNS / HP_LOSS never reach the NORMAL-only pipeline at all, so op_damage
+    // lands the base number unscaled (the `type == NORMAL` gate in op_damage).
+    CombatState t = make_combat();
+    add_power(t.player_powers, t.player_power_count, PowerId::VIGOR, 8);
+    const int16_t before = t.monsters[0].hp;
+    execute_opcode(t, op(Opcode::DAMAGE, kActorPlayer, 0, 6,
+                         make_damage_flags(DamageType::THORNS)));
+    EXPECT_EQ(before - t.monsters[0].hp, 6);
+}
+
+// Pen Nib is a FLAT x2 on NORMAL damage that never reads its slot amount
+// (PenNibPower.java:51-57).
+TEST(DamagePipeline, PenNibDoublesNormalDamageAndIgnoresItsAmount) {
+    for (const int16_t amount : {int16_t{1}, int16_t{4}}) {
+        CombatState s = make_combat();
+        add_power(s.player_powers, s.player_power_count, PowerId::PEN_NIB,
+                  amount);
+        EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 12)
+            << "amount " << amount;
+    }
+}
+
+// THE ORDERING CASE, and the reason Vigor and Pen Nib had to land together.
+// PenNibPower's priority is 6 (PenNibPower.java:36); Strength and Vigor take
+// the default 5. ApplyPowerAction.java:167's sort therefore always yields
+// [priority-5 addends ..., Pen Nib(6), ..., Weak(99)], so the game computes
+// ((base + Str + Vigor) * 2) * 0.75 no matter what order the powers arrived in.
+// Applying Pen Nib FIRST and Strength LAST is the case that would break under
+// plain append order: base 6 + Str 2 = 8, doubled = 16, vs the appended answer
+// 6 * 2 + 2 = 14.
+TEST(ApplyPowerSort, PenNibDoublesAfterEveryAddendWhicheverArrivesFirst) {
+    {
+        CombatState s = make_combat();
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::PEN_NIB, 1);
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+        ASSERT_EQ(s.player_power_count, 2);
+        EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::STRENGTH));
+        EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::PEN_NIB));
+        EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 16);
+    }
+    {
+        // The reverse arrival order sorts identically and computes identically.
+        CombatState s = make_combat();
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::PEN_NIB, 1);
+        EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::STRENGTH));
+        EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::PEN_NIB));
+        EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 16);
+    }
+}
+
+// The full stack, in the game's grouping: ((6 + 2 + 8) * 2) * 0.75 = 24.0 -> 24.
+// Weak is priority 99 so it multiplies last; Vigor and Strength are both
+// priority 5 and both precede the doubling.
+TEST(ApplyPowerSort, StrengthVigorPenNibAndWeakComposeInPriorityOrder) {
+    CombatState s = make_combat();
+    apply_via_action(s, /*src=*/0, kActorPlayer, PowerId::WEAK, 1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::PEN_NIB, 1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::VIGOR, 8);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+
+    ASSERT_EQ(s.player_power_count, 4);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::VIGOR));
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::STRENGTH));
+    EXPECT_EQ(s.player_powers[2].power_id, pid(PowerId::PEN_NIB));
+    EXPECT_EQ(s.player_powers[3].power_id, pid(PowerId::WEAK));
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 24);
+}
+
 TEST(ApplyPowerSort, EqualPriorityKeepsInsertionOrderAcrossResorts) {
     // Strength / Dexterity / Thorns all default to priority 5; every new
     // application re-runs the (stable) sort and must leave their relative

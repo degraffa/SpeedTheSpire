@@ -83,7 +83,13 @@ namespace {
     // SCALES anyone else's, which is the only question these switches ask. Their
     // own damage is moreover PURE (createDamageMatrix(..., true), DamageInfo.
     // java:126-136) and typed THORNS, so it does not reach this pipeline at all.
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    // Checked for Vigor and Pen Nib, the two relic-granted powers: BOTH override
+    // atDamageGive and BOTH have a case below. Vigor
+    // (com.megacrit.cardcrawl.powers.watcher.VigorPower:41-47) adds its amount;
+    // PenNibPower (:51-57) doubles. Neither overrides atDamageReceive,
+    // atDamageFinalReceive, modifyBlock or modifyBlockLast -- both classes were
+    // read in full -- so those three switches take the count move and no case.
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -92,6 +98,23 @@ namespace {
         case PowerId::STRENGTH:                        // StrengthPower.java:96
             return dmg + static_cast<float>(p.amount) *
                              static_cast<float>(strength_mult);
+        case PowerId::VIGOR:
+            // VigorPower.atDamageGive (VigorPower.java:41-47): `damage +=
+            // (float)this.amount`. Priority 5 (the AbstractPower default -- the
+            // ctor sets none), so the sort puts it in the same class as
+            // Strength: both are additive, so their relative order is
+            // exact-arithmetic-safe, but both must land BEFORE Pen Nib's
+            // doubling, and the sort is what guarantees that.
+            return dmg + static_cast<float>(p.amount);
+        case PowerId::PEN_NIB:
+            // PenNibPower.atDamageGive (PenNibPower.java:51-57): `damage * 2.0f`,
+            // a FLAT double that never reads the slot's amount. Priority 6
+            // (PenNibPower.java:36) puts it after every priority-5 addend and
+            // before Frail(10)/Intangible(75)/Weak(99), so the game computes
+            // ((base + Str + Vigor) * 2) * 0.75 under a Weak -- reproduced here
+            // by slot ORDER (sort_powers_like_the_game, interp_powers.cpp),
+            // not by a special case in this walk.
+            return dmg * 2.0f;
         case PowerId::WEAK:
             return dmg * 0.75f;                         // WeakPower.java:67
         default:
@@ -137,7 +160,7 @@ namespace {
     // Checked for Panache and The Bomb: same answer as the pass above -- both
     // QUEUE damage and neither overrides any atDamage* hook
     // (PanachePower.java:40-67 / TheBombPower.java:40-53).
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -200,7 +223,7 @@ namespace {
     // Checked for Panache and The Bomb: neither overrides atDamageFinalReceive
     // (PanachePower.java:40-67 / TheBombPower.java:40-53). All three of this
     // file's counts moved together again.
-    static_assert(sts::registry::manifest::kPowersCount == 49,
+    static_assert(sts::registry::manifest::kPowersCount == 51,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
