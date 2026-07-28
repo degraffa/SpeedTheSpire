@@ -23,6 +23,8 @@
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
 
+#include "readout_shapes.hpp"
+
 namespace sts::replay {
 
 using sts::engine::Action;
@@ -69,11 +71,27 @@ struct ScreenInfo {
     int floor = 0;
     std::string room_type;
     std::vector<int> map_next_x;
+    // The MAP screen's outgoing edges by ROOM SYMBOL (`M`/`?`/`R`/`T`/`$`/`E`).
+    // Parallel to `map_next_x`. A room's node symbol is the only capture-side
+    // evidence of how it was ENTERED, and that changes what the sim has to do
+    // before the room content runs: a `?` node fires the onEnterRoom fan-out and
+    // the one committed eventRng draw before it becomes a chest / shop / fight
+    // (AbstractDungeon.nextRoomTransition :1763-1779), while a `T` node does
+    // not. Both arrive as `room_type: TreasureRoom`.
+    std::vector<std::string> map_next_symbol;
     bool boss_available = false;
     std::vector<std::string> card_offer;     // CARD_REWARD: offered game ids
     std::vector<std::string> reward_types;   // COMBAT_REWARD: rewards[].reward_type
+    // The same reward rows with the fields a chest read-out compares (gold
+    // amount, relic identity, and a SAPPHIRE_KEY row's link). `reward_types`
+    // stays because the B4.5 reward mode compares kinds only; both are filled
+    // from one pass.
+    std::vector<CaptureRewardRow> reward_rows;
     std::vector<std::string> option_labels;  // EVENT: the dialog buttons
-    std::string event_id;
+    std::string event_id;                    // EVENT: the class's static ID
+    std::string event_name;                  // EVENT: the localized display name
+    std::string chest_type;                  // CHEST: Small/Medium/LargeChest
+    bool chest_open = false;                 // CHEST: screen_state.chest_open
     std::vector<std::string> choice_list;    // the command's own index space
     // SHOP_SCREEN only:
     bool shop_screen = false;

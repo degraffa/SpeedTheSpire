@@ -2,20 +2,25 @@
 //
 // Usage:
 //   replay_run_diff <run.jsonl> [<run2.jsonl> ...]
-//                   [--replay | --neow | --shop]
+//                   [--replay | --neow | --shop | --treasure | --event]
 //                   [--verbose] [--pool-evidence] [--stop-on-diff]
 //
-// FOUR MODES, one per acceptance read-out, all over the same artifacts:
+// SIX MODES, one per acceptance read-out, all over the same artifacts:
 //
-//   (default) the combat-reward spot-diff  -- B4.5, see spot_diff_one below
-//   --replay  the whole-run replay          -- diagnosis, see replay_one below
-//   --neow    the floor-0 blessing spot-diff -- B4.14, see neow_spot_diff_one
-//   --shop    the merchant spot-diff         -- B4.8,  see shop_spot_diff_one
+//   (default)  the combat-reward spot-diff   -- B4.5,  see spot_diff_one below
+//   --replay   the whole-run replay          -- diagnosis, see replay_one below
+//   --neow     the floor-0 blessing spot-diff -- B4.14, see neow_spot_diff_one
+//   --shop     the merchant spot-diff        -- B4.8,  see shop_spot_diff_one
+//   --treasure the chest spot-diff           -- B4.7,  see treasure_spot_diff_one
+//   --event    the ?-room selection spot-diff -- B4.10/B4.13, see
+//              event_spot_diff_one
 //
-// The three spot-diff modes all SEED the simulator from a translated RunState
+// The five spot-diff modes all SEED the simulator from a translated RunState
 // rather than re-driving the run from `run_begin`, which is what makes them
 // independent of combat fidelity; only --replay re-drives, and only it needs
-// every intervening room to be modelled.
+// every intervening room to be modelled. That independence is the whole point
+// for the two newest: B4.7's chests and B4.13's shrines sit deep in Act 1,
+// where a full replay has to survive every intervening fight first.
 //
 // WHAT IT DOES. A campaign artifact is a sequence of (game state, command)
 // records: record k holds the live game's state BEFORE its `action_command` was
@@ -97,10 +102,12 @@
 
 #include "sts/diff/differ.hpp"
 #include "sts/engine/combat_rewards.hpp"
+#include "sts/engine/event_framework.hpp"
 #include "sts/engine/neow.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/shop.hpp"
+#include "sts/engine/treasure_rooms.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
 #include "sts/translate/translate.hpp"
@@ -160,17 +167,37 @@ void read_stock(const json& screen_state, const char* key,
         const auto ss = gs.find("screen_state");
         if (ss != gs.end() && ss->is_object()) {
             if (const auto n = ss->find("next_nodes"); n != ss->end() && n->is_array()) {
-                for (const json& node : *n) s.map_next_x.push_back(node.value("x", -1));
+                for (const json& node : *n) {
+                    s.map_next_x.push_back(node.value("x", -1));
+                    s.map_next_symbol.push_back(node.value("symbol", std::string{}));
+                }
             }
             s.boss_available = ss->value("boss_available", false);
             if (const auto c = ss->find("cards"); c != ss->end() && c->is_array()) {
                 for (const json& card : *c) s.card_offer.push_back(card.value("id", std::string{}));
             }
             if (const auto r = ss->find("rewards"); r != ss->end() && r->is_array()) {
-                for (const json& item : *r)
-                    s.reward_types.push_back(item.value("reward_type", std::string{}));
+                for (const json& item : *r) {
+                    CaptureRewardRow row;
+                    row.type = item.value("reward_type", std::string{});
+                    row.gold = item.value("gold", 0);
+                    if (const auto rl = item.find("relic");
+                        rl != item.end() && rl->is_object())
+                        row.relic_id = rl->value("id", std::string{});
+                    // A SAPPHIRE_KEY row carries its linked base relic under
+                    // `link`, which is what proves the pairing rather than
+                    // inferring it from adjacency (RewardItem.java:86-93).
+                    if (const auto lk = item.find("link");
+                        lk != item.end() && lk->is_object())
+                        row.link_id = lk->value("id", std::string{});
+                    s.reward_types.push_back(row.type);
+                    s.reward_rows.push_back(std::move(row));
+                }
             }
             s.event_id = ss->value("event_id", std::string{});
+            s.event_name = ss->value("event_name", std::string{});
+            s.chest_type = ss->value("chest_type", std::string{});
+            s.chest_open = ss->value("chest_open", false);
             if (const auto o = ss->find("options"); o != ss->end() && o->is_array()) {
                 for (const json& opt : *o)
                     s.option_labels.push_back(opt.value("label", std::string{}));
@@ -277,6 +304,8 @@ struct Options {
     bool full_replay = false;  // whole-run replay instead of the reward spot-diff
     bool neow = false;         // the floor-0 blessing spot-diff
     bool shop = false;         // the merchant spot-diff
+    bool treasure = false;     // the chest spot-diff
+    bool event = false;        // the ?-room selection spot-diff
 };
 
 // One file's verdict.
@@ -1330,6 +1359,757 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
     return v;
 }
 
+// --- the chest spot-diff (--treasure) ----------------------------------------
+//
+// A chest is a pure function of the state the room entry sees, exactly like a
+// merchant, so this mode seeds instead of replaying. Per treasure ROOM:
+//
+//   CONSTRUCTION  seed a RunState from the last record BEFORE the map choice
+//                 that entered the room and call `roll_treasure_chest`. That is
+//                 TreasureRoom.onPlayerEntry -> getRandomChest -> the chest
+//                 constructor, whose only cost is TWO treasureRng wrapper calls
+//                 (the size roll, then randomizeReward's one shared contents
+//                 roll -- AbstractDungeon.java:499-508, AbstractChest.java:
+//                 54-60). Compared against the first in-room record: treasureRng
+//                 exactly, every OTHER run stream unmoved, the relic pools
+//                 untouched, and the resulting size against the capture's own
+//                 `screen_state.chest_type`.
+//   OPEN          from the CHEST record's RunState, `open_treasure_chest`. The
+//                 whole RunState is diffed against the post-open record -- which
+//                 is where the optional gold draw (+1 treasureRng iff the chest
+//                 rolled gold, AbstractChest.java:72) and the relic pool's
+//                 front-pop are proved -- and the assembled reward rows are
+//                 compared against the captured screen.
+//   CLAIM         a RunController parked in COMBAT_REWARD with the captured
+//                 post-open RunState and the assembled screen, driven through
+//                 the capture's own claim commands and diffed whole against
+//                 every later in-room record.
+//
+// THE KEY ROW. Every Act-1 chest open in a capture carries one extra trailing
+// SAPPHIRE_KEY row the engine deliberately does not model; the rule for when
+// that is expected, and the rule for what claiming it MEANS, both live in
+// `readout_shapes.hpp` where they have their own gtest. This file only applies
+// them.
+
+// The map symbol of the node a pre-entry record's command stepped ONTO, or ""
+// when that record is not a map `choose`. Both `--treasure` and `--event` need
+// it, because `room_type` alone cannot tell a room reached from a `T`/`$`/`M`
+// node apart from the same room reached through a `?`: the ? path fires
+// AbstractRelic.onEnterRoom against the ORIGINAL EventRoom and spends the one
+// committed eventRng float before the room content runs at all
+// (AbstractDungeon.nextRoomTransition, AbstractDungeon.java:1754-1779), and the
+// direct path does neither. STS00052's floor-5 chest is exactly this case --
+// `next_nodes[0].symbol == "?"` -- and a read-out that assumed a treasure NODE
+// reported the missing eventRng draw as an engine divergence.
+[[nodiscard]] std::string entered_node_symbol(const ScreenInfo& s,
+                                              const std::string& cmd) {
+    if (s.screen_type != "MAP") return {};
+    const std::vector<std::string> p = split_ws(cmd);
+    if (p.size() < 2 || p[0] != "choose") return {};
+    const int i = std::stoi(p[1]);
+    if (i < 0 || i >= static_cast<int>(s.map_next_symbol.size())) return {};
+    return s.map_next_symbol[static_cast<std::size_t>(i)];
+}
+
+[[nodiscard]] const char* event_roll_name(EventRoomResult r) noexcept {
+    switch (r) {
+        case EventRoomResult::EVENT: return "EVENT";
+        case EventRoomResult::MONSTER: return "MONSTER";
+        case EventRoomResult::SHOP: return "SHOP";
+        case EventRoomResult::TREASURE: return "TREASURE";
+        case EventRoomResult::ELITE: return "ELITE";
+    }
+    return "?";
+}
+
+[[nodiscard]] const char* chest_size_name(uint8_t s) noexcept {
+    switch (static_cast<ChestSize>(s)) {
+        case ChestSize::NONE: return "NONE";
+        case ChestSize::SMALL: return "SmallChest";
+        case ChestSize::MEDIUM: return "MediumChest";
+        case ChestSize::LARGE: return "LargeChest";
+    }
+    return "?";
+}
+
+// Every member named and NO `default:`, so a tier added to the registry is a
+// -Wswitch error here rather than a silent "?" (conventions §8). A chest's tier
+// is only ever COMMON/UNCOMMON/RARE (`treasure_chest_for_rolls`); the rest exist
+// so an out-of-domain descriptor prints as itself instead of as an integer.
+[[nodiscard]] const char* relic_tier_name(uint8_t t) noexcept {
+    switch (static_cast<RelicTier>(t)) {
+        case RelicTier::STARTER: return "STARTER";
+        case RelicTier::COMMON: return "COMMON";
+        case RelicTier::UNCOMMON: return "UNCOMMON";
+        case RelicTier::RARE: return "RARE";
+        case RelicTier::BOSS: return "BOSS";
+        case RelicTier::SHOP: return "SHOP";
+        case RelicTier::SPECIAL: return "SPECIAL";
+        case RelicTier::EVENT: return "EVENT";
+    }
+    return "?";
+}
+
+// The engine models no key row, so when a capture claims the KEY the linked
+// base relic is abandoned (RewardItem.java:317-322) and BOTH rows leave the
+// captured screen. The simulator's screen has only the relic row, and the run
+// layer has no verb for "abandon this one item" -- proceed abandons the whole
+// screen. Dropping the row here keeps the two index spaces aligned for any
+// later claim on the same screen, and it is the tool's job rather than the
+// engine's precisely because the key is what caused it.
+void drop_reward_row(RewardScreen& s, uint8_t index) noexcept {
+    if (index >= s.count) return;
+    for (uint8_t i = index; i + 1 < s.count; ++i) s.items[i] = s.items[i + 1];
+    s.items[s.count - 1] = RunRewardItem{};
+    --s.count;
+    s.open_card_item = kNoOpenCardReward;
+}
+
+// Does the run hold a N'loth's Mask with a live charge? That is the one thing
+// that legitimately deletes the base relic row and its linked key row
+// (NlothsMask.java:23-32 -> AbstractRoom.java:549-559). `counter > 0` is the
+// relic's own gate.
+[[nodiscard]] bool nloths_mask_armed(const RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id ==
+                static_cast<uint16_t>(RelicId::NLOTHS_MASK) &&
+            rs.relics[i].counter > 0)
+            return true;
+    }
+    return false;
+}
+
+struct TreasureVerdict {
+    int rooms = 0;
+    int construction_clean = 0;
+    int opens = 0;
+    int open_clean = 0;
+    int skips = 0;
+    int walk_clean = 0;
+    int walk_partial = 0;
+    int failures = 0;
+};
+
+[[nodiscard]] TreasureVerdict treasure_spot_diff_one(const std::string& path,
+                                                     const Options& opts) {
+    TreasureVerdict v;
+    const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
+    const std::vector<ScreenInfo> screens = read_screens(path);
+    if (screens.size() != run.records.size())
+        throw std::runtime_error("screen/record count mismatch in " + path);
+
+    // `Settings.hasSapphireKey` is run-scoped and starts false
+    // (CardCrawlGame.java:473). The only way a capture sets it is claiming a
+    // SAPPHIRE_KEY reward row, so track that as the walk goes.
+    bool has_key = false;
+
+    for (std::size_t k = 0; k < screens.size(); ++k) {
+        if (screens[k].room_type != "TreasureRoom") continue;
+        if (k > 0 && screens[k - 1].room_type == "TreasureRoom" &&
+            screens[k - 1].floor == screens[k].floor)
+            continue;
+        if (k == 0) continue;  // no pre-entry record to seed from
+        ++v.rooms;
+        const int floor = screens[k].floor;
+
+        // 1. CONSTRUCTION, off the pre-entry state.
+        RunState rs = run.records[k - 1].run;
+        // ++floorNum happens on the transition, BEFORE onPlayerEntry and before
+        // the ?-roll (AbstractDungeon.java:1741; trap 7 -- floor++ precedes the
+        // floor-stream reseed). The pre-entry record is still on the old floor.
+        ++rs.floor;
+        const RngStream before = rs.treasure_rng;
+        std::vector<std::string> fail;
+
+        // A chest reached through a `?` node runs the ?-room entry FIRST: the
+        // onEnterRoom fan-out against the original EventRoom, then the one
+        // committed eventRng draw, and only then the recursion into a real
+        // TreasureRoom (run_advance.cpp's EventRoomResult::TREASURE arm --
+        // "byte-identical to a map treasure node" from that point on).
+        const std::string symbol =
+            entered_node_symbol(screens[k - 1], run.records[k - 1].action_command);
+        const bool via_question = symbol == "?";
+        if (via_question) {
+            dispatch_event_room_entry_relics(rs);
+            const EventRoomResult roll =
+                event_room_roll(rs, screens[k - 1].room_type == "ShopRoom");
+            if (roll != EventRoomResult::TREASURE)
+                fail.push_back("the ? node's roll resolved to " +
+                               std::string(event_roll_name(roll)) +
+                               " but the capture entered a TreasureRoom");
+        }
+        const TreasureChest chest = roll_treasure_chest(rs);
+        const RunState& entered = run.records[k].run;
+        auto stream = [&](const char* name, const RngStream& e, const RngStream& a) {
+            if (e.s0 == a.s0 && e.s1 == a.s1 && e.counter == a.counter) return;
+            fail.push_back(std::string(name) + ": counter " +
+                           std::to_string(e.counter) + " -> " +
+                           std::to_string(a.counter) +
+                           (e.s0 == a.s0 && e.s1 == a.s1 ? "" : " (raw state too)"));
+        };
+        stream("treasure_rng", entered.treasure_rng, rs.treasure_rng);
+        // The construction is treasureRng-only: nothing else may move
+        // (treasure_rooms.hpp -- the relic identity is a POOL front-pop at open
+        // time, so even relicRng stays put).
+        stream("monster_rng", entered.monster_rng, rs.monster_rng);
+        stream("event_rng", entered.event_rng, rs.event_rng);
+        stream("merchant_rng", entered.merchant_rng, rs.merchant_rng);
+        stream("card_rng", entered.card_rng, rs.card_rng);
+        stream("relic_rng", entered.relic_rng, rs.relic_rng);
+        stream("potion_rng", entered.potion_rng, rs.potion_rng);
+        for (std::size_t t = 0; t < kRelicTierCount; ++t) {
+            if (entered.relic_pool_count[t] != rs.relic_pool_count[t]) {
+                fail.push_back("relic_pool[" + std::to_string(t) + "].count: " +
+                               std::to_string(entered.relic_pool_count[t]) + " -> " +
+                               std::to_string(rs.relic_pool_count[t]));
+                continue;
+            }
+            for (uint8_t i = 0; i < rs.relic_pool_count[t]; ++i) {
+                if (entered.relic_pools[t][i] == rs.relic_pools[t][i]) continue;
+                fail.push_back("relic_pool[" + std::to_string(t) + "][" +
+                               std::to_string(i) + "] differs");
+                break;
+            }
+        }
+        // The chest the capture actually shows.
+        std::string capture_size;
+        for (std::size_t j = k; j < screens.size(); ++j) {
+            if (screens[j].floor != floor || screens[j].room_type != "TreasureRoom")
+                break;
+            if (screens[j].chest_type.empty()) continue;
+            capture_size = screens[j].chest_type;
+            break;
+        }
+        if (capture_size.empty()) {
+            fail.push_back("the capture never shows a CHEST screen in this room");
+        } else if (capture_size != chest_size_name(chest.size)) {
+            fail.push_back("chest size: " + capture_size + " -> " +
+                           std::string(chest_size_name(chest.size)));
+        }
+
+        if (fail.empty()) {
+            ++v.construction_clean;
+            const std::string route =
+                via_question ? std::string("a ? node (eventRng +1 first)")
+                             : "a '" + (symbol.empty() ? std::string("unknown")
+                                                       : symbol) + "' node";
+            std::printf("CHEST    OK   %s floor=%d %s tier=%s gold=%s treasureRng "
+                        "%u->%u entered via %s\n",
+                        run.seed_string.c_str(), floor, chest_size_name(chest.size),
+                        relic_tier_name(chest.relic_tier),
+                        chest.has_gold ? "yes" : "no", before.counter,
+                        rs.treasure_rng.counter, route.c_str());
+        } else {
+            ++v.failures;
+            std::printf("CHEST    DIFF %s floor=%d\n", run.seed_string.c_str(), floor);
+            for (const auto& f : fail) std::printf("    %s\n", f.c_str());
+        }
+
+        // 2 + 3. The in-room walk: the open, then the claims.
+        RunState cur = run.records[k].run;
+        TreasureChest live = chest;
+        RewardScreen screen{};
+        screen.open_card_item = kNoOpenCardReward;
+        bool opened = false;
+        int key_index = -1;  // in the CURRENT captured screen's index space
+        std::string stop;
+        int compared = 0;
+
+        for (std::size_t j = k; j < screens.size(); ++j) {
+            if (screens[j].floor != floor || screens[j].room_type != "TreasureRoom")
+                break;
+            const std::vector<std::string> c = split_ws(run.records[j].action_command);
+            if (c.empty()) break;
+            if (screens[j].screen_type == "MAP" && c[0] == "choose") break;
+
+            // Compare the whole RunState at every in-room record.
+            RunState e = run.records[j].run;
+            RunState a = cur;
+            neutralize_presentation_only(e);
+            neutralize_presentation_only(a);
+            e.neow_rng = RngStream{};  // floor-0 only; not carried here
+            a.neow_rng = RngStream{};
+            const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
+            ++compared;
+            if (!rep.empty()) {
+                ++v.failures;
+                std::printf("WALK     DIFF %s floor=%d seq=%d (%zu field%s)\n%s\n",
+                            run.seed_string.c_str(), floor, run.records[j].seq,
+                            rep.size(), rep.size() == 1 ? "" : "s",
+                            rep.to_string().c_str());
+                stop = "divergence";
+                break;
+            }
+
+            // The belt is drawn over a treasure room too (same rationale as the
+            // merchant walk's).
+            if (c[0] == "potion" && c.size() >= 3 && c[1] == "discard") {
+                const int slot = std::stoi(c[2]);
+                if (slot < 0 || slot >= kPotionCap ||
+                    cur.potions[static_cast<std::size_t>(slot)] ==
+                        static_cast<uint16_t>(PotionId::NONE)) {
+                    stop = "seq " + std::to_string(run.records[j].seq) +
+                           " discards an empty potion slot";
+                    break;
+                }
+                cur.potions[static_cast<std::size_t>(slot)] =
+                    static_cast<uint16_t>(PotionId::NONE);
+                continue;
+            }
+
+            if (screens[j].screen_type == "CHEST") {
+                // `proceed` at a chest is the SKIP, and it bounces exactly like
+                // a reward screen's (AbstractEvent.openMap leaves the room
+                // mounted behind a dismissable map -- the header note). Skipping
+                // consumes no RNG and touches no RunState field
+                // (run_advance.cpp's TREASURE_ROOM proceed arm), so eliding the
+                // bounce is sound and every intervening record is still
+                // compared above.
+                if (c[0] != "choose") continue;
+                if (opened) {
+                    stop = "seq " + std::to_string(run.records[j].seq) +
+                           ": the capture opens the chest twice";
+                    break;
+                }
+                ++v.opens;
+                std::vector<std::string> ofail;
+                RunState post = cur;
+                if (!treasure_chest_open_legal(post, live)) {
+                    ofail.push_back("treasure_chest_open_legal refused the "
+                                    "captured chest descriptor");
+                } else if (!open_treasure_chest(post, live, screen)) {
+                    ofail.push_back("open_treasure_chest refused (capacity "
+                                    "preflight)");
+                }
+                opened = true;
+
+                // The post-open record, and the reward screen it shows.
+                std::size_t oj = j + 1;
+                if (oj >= screens.size()) {
+                    stop = "the artifact ends at the chest open";
+                    cur = post;
+                    break;
+                }
+                RunState oe = run.records[oj].run;
+                RunState oa = post;
+                neutralize_presentation_only(oe);
+                neutralize_presentation_only(oa);
+                oe.neow_rng = RngStream{};
+                oa.neow_rng = RngStream{};
+                const sts::diff::DiffReport orep = sts::diff::diff_run_states(oe, oa);
+                if (!orep.empty())
+                    ofail.push_back("post-open RunState (" +
+                                    std::to_string(orep.size()) + " field(s)):\n" +
+                                    orep.to_string());
+
+                // The reward rows, with the chest-linked key row accounted for.
+                // Taken from the first in-room COMBAT_REWARD screen rather than
+                // assumed to be the very next record: `AbstractChest.open` ends
+                // with `combatRewardScreen.open()`, but the capture's next dump
+                // is whatever screen the policy was looking at.
+                std::size_t rj = oj;
+                for (; rj < screens.size(); ++rj) {
+                    if (screens[rj].floor != floor ||
+                        screens[rj].room_type != "TreasureRoom") {
+                        rj = screens.size();
+                        break;
+                    }
+                    if (screens[rj].screen_type == "COMBAT_REWARD") break;
+                }
+                KeyRowContext ctx;
+                ctx.chest_open = true;
+                ctx.already_has_key = has_key;
+                ctx.nloths_mask_fired = nloths_mask_armed(cur);
+                KeyRowVerdict kv;
+                if (rj >= screens.size()) {
+                    ofail.push_back("the capture never shows the reward screen "
+                                    "AbstractChest.open opened");
+                } else {
+                    kv = strip_sapphire_key_row(screens[rj].reward_rows, ctx);
+                }
+                if (rj >= screens.size()) {
+                    // nothing to compare rows against; the ofail above says so
+                } else if (!kv.ok) {
+                    ofail.push_back("SAPPHIRE_KEY shape: " + kv.problem);
+                } else {
+                    key_index = kv.key_index;
+                    std::vector<std::string> sim_kinds;
+                    for (uint8_t i = 0; i < screen.count; ++i)
+                        sim_kinds.emplace_back(reward_kind_name(screen.items[i].kind));
+                    std::vector<std::string> game_kinds;
+                    for (const auto& r : kv.rows) game_kinds.push_back(r.type);
+                    if (sim_kinds != game_kinds) {
+                        std::string ge, se;
+                        for (const auto& x : game_kinds) ge += (ge.empty() ? "" : ",") + x;
+                        for (const auto& x : sim_kinds) se += (se.empty() ? "" : ",") + x;
+                        ofail.push_back("reward rows: [" + ge + "] -> [" + se + "]");
+                    } else {
+                        for (std::size_t i = 0; i < kv.rows.size(); ++i) {
+                            const RunRewardItem& it = screen.items[i];
+                            if (kv.rows[i].type == "GOLD" &&
+                                kv.rows[i].gold != it.gold + it.bonus_gold) {
+                                ofail.push_back("chest gold: " +
+                                                std::to_string(kv.rows[i].gold) + " -> " +
+                                                std::to_string(it.gold + it.bonus_gold));
+                            }
+                            if (kv.rows[i].type == "RELIC") {
+                                const std::string sim_id(sts::registry::relic_game_id(
+                                    static_cast<RelicId>(it.id)));
+                                if (kv.rows[i].relic_id != sim_id)
+                                    ofail.push_back("chest relic: " +
+                                                    kv.rows[i].relic_id + " -> " + sim_id);
+                            }
+                        }
+                    }
+                }
+
+                if (ofail.empty()) {
+                    ++v.open_clean;
+                    std::printf("OPEN     OK   %s floor=%d seq=%d rows=[",
+                                run.seed_string.c_str(), floor, run.records[j].seq);
+                    for (uint8_t i = 0; i < screen.count; ++i)
+                        std::printf("%s%s", i ? "," : "",
+                                    reward_kind_name(screen.items[i].kind));
+                    std::printf("] treasureRng %u->%u%s\n", cur.treasure_rng.counter,
+                                post.treasure_rng.counter,
+                                key_index >= 0
+                                    ? "; capture carries the expected trailing "
+                                      "SAPPHIRE_KEY row"
+                                    : "");
+                } else {
+                    ++v.failures;
+                    std::printf("OPEN     DIFF %s floor=%d seq=%d\n",
+                                run.seed_string.c_str(), floor, run.records[j].seq);
+                    for (const auto& f : ofail) std::printf("    %s\n", f.c_str());
+                }
+                cur = post;
+                continue;
+            }
+
+            if (screens[j].screen_type == "COMBAT_REWARD") {
+                if (c[0] != "choose") continue;  // proceed bounces; see above
+                // Re-derive the key row from THIS record's own screen: the
+                // capture's list shrinks as rows are claimed, so the index space
+                // the command uses is the live one.
+                KeyRowContext ctx;
+                ctx.chest_open = true;
+                ctx.already_has_key = has_key;
+                ctx.nloths_mask_fired = nloths_mask_armed(cur);
+                const KeyRowVerdict kv =
+                    strip_sapphire_key_row(screens[j].reward_rows, ctx);
+                const int live_key = kv.ok ? kv.key_index : -1;
+                const ClaimMapping cm = map_reward_claim(
+                    screens[j].reward_rows, live_key,
+                    c.size() >= 2 ? std::stoi(c[1]) : -1);
+                if (cm.what == ClaimTarget::OUT_OF_RANGE) {
+                    stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
+                           run.records[j].action_command +
+                           "' names no captured reward row";
+                    break;
+                }
+                if (cm.what == ClaimTarget::ABANDONS_RELIC) {
+                    // The capture took the KEY. RewardItem.java:317-322 marks
+                    // the linked base relic isDone/ignoreReward, so the run
+                    // never obtains it and neither does the sim; the relic
+                    // stays popped from its pool, which the RunState comparison
+                    // on the next record proves.
+                    has_key = true;
+                    for (uint8_t i = 0; i < screen.count; ++i) {
+                        if (screen.items[i].kind !=
+                            static_cast<uint8_t>(RewardItemKind::RELIC))
+                            continue;
+                        drop_reward_row(screen, i);
+                        break;
+                    }
+                    std::printf("CLAIM    KEY  %s floor=%d seq=%d: the capture "
+                                "claimed the SAPPHIRE_KEY row, abandoning the "
+                                "linked base relic (RewardItem.java:317-322)\n",
+                                run.seed_string.c_str(), floor, run.records[j].seq);
+                    continue;
+                }
+                RunController rc{};
+                rc.run = cur;
+                rc.combat = run.records[j].combat;
+                rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+                rc.room_type = static_cast<uint8_t>(RoomType::Treasure);
+                rc.rewards = screen;
+                rc.cur_x = 0;
+                step(rc, make_action(ActionVerb::CHOOSE,
+                                     static_cast<uint8_t>(cm.sim_index)));
+                cur = rc.run;
+                screen = rc.rewards;
+                continue;
+            }
+
+            if (screens[j].screen_type == "MAP") continue;  // `return` dismissal
+            if (c[0] == "proceed" || c[0] == "return" || c[0] == "leave") continue;
+            stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
+                   run.records[j].action_command + "' at screen " +
+                   screens[j].screen_type + " has no run-layer analogue here";
+            break;
+        }
+        if (!opened) ++v.skips;
+        if (stop.empty()) {
+            ++v.walk_clean;
+            std::printf("WALK     OK   %s floor=%d %d in-room record%s compared, "
+                        "chest %s\n", run.seed_string.c_str(), floor, compared,
+                        compared == 1 ? "" : "s", opened ? "opened" : "skipped");
+        } else {
+            ++v.walk_partial;
+            std::printf("WALK     PART %s floor=%d %d in-room record%s compared; "
+                        "stop: %s\n", run.seed_string.c_str(), floor, compared,
+                        compared == 1 ? "" : "s", stop.c_str());
+        }
+        (void)opts;
+    }
+    return v;
+}
+
+// --- the ?-room selection spot-diff (--event) --------------------------------
+//
+// A ?-room's resolution is a pure function of the state the room ENTRY sees, so
+// this mode seeds like the merchant and the chest do. Per captured ? that
+// stayed an event:
+//
+//   ROLL       `dispatch_event_room_entry_relics` (the onEnterRoom fan-out the
+//              game runs against the ORIGINAL EventRoom, AbstractDungeon.java:
+//              1754-1779 -- Ssserpent Head's 50 gold and Maw Bank's 12 fire even
+//              on a ? that becomes something else) followed by
+//              `event_room_roll`, which draws THE one committed eventRng float
+//              (EventHelper.java:100-187).
+//   SELECTION  `generate_event`, whose two selection draws are made on a
+//              THROWAWAY copy and discarded, leaving eventRng byte-identical --
+//              while the pool-membership removals and the event_flags bit DO
+//              commit (event_framework.hpp's RNG contract).
+//   ARRIVAL    the whole translated RunState of the first in-room record, and
+//              the selected id joined to the capture's own `event_id`.
+//
+// The comparison is a WHOLE-RunState diff, not a field list, because everything
+// the entry moves lives there: eventRng, the three pity floats, the three
+// membership bitsets, event_flags, gold, and any relic counter the fan-out
+// ticked. What it deliberately does NOT do is drive the dialog -- option flow
+// and event grids belong to --replay. The one screen-level check is the ENTRY
+// page's option count, and it is advisory: it is reported and counted, never
+// folded into the zero-diff verdict, because a body's first page is content the
+// selection layer does not own.
+
+// THE OBTAIN RACE, recognized narrowly. `ShowCardAndObtainEffect` adds a
+// transformed / obtained card to the master deck only when its ANIMATION
+// completes (ShowCardAndObtainEffect.java:30-45 -- the constructor stores the
+// card, `update` obtains it), while the removal is immediate. Every capture
+// dump taken in between therefore shows a deck one card SHORT of the state the
+// rules describe, and the card appears in the first dump after the effect
+// finishes -- in b14_accept's STS00009 that is the first record of the NEXT
+// floor, so a mode seeded from the pre-entry record starts a card behind. That
+// is the capture-fidelity gap B1.3 deferred and B5.2 carries as an obligation
+// row, not an engine defect.
+//
+// The recognition is deliberately narrow, because a wide one would hide a real
+// deck divergence: EVERY differing field must be `master_deck_count` or a
+// `master_deck[i]` whose index is at or past the seeded deck's END -- i.e. the
+// capture has strictly more cards and the shared prefix is identical. An
+// event-selection defect cannot produce that shape: it would move eventRng, a
+// pool bit or event_flags, and any of those makes this return false.
+[[nodiscard]] bool is_obtain_race(const sts::diff::DiffReport& rep,
+                                  const RunState& expected,
+                                  const RunState& actual) {
+    if (rep.empty()) return false;
+    if (expected.master_deck_count <= actual.master_deck_count) return false;
+    for (const auto& d : rep.diffs) {
+        if (d.field_name == "master_deck_count") continue;
+        if (d.field_name.rfind("master_deck[", 0) != 0) return false;
+        const std::size_t lb = d.field_name.find('[');
+        const std::size_t rb = d.field_name.find(']');
+        if (lb == std::string::npos || rb == std::string::npos || rb <= lb + 1)
+            return false;
+        const int idx = std::atoi(d.field_name.substr(lb + 1, rb - lb - 1).c_str());
+        if (idx < static_cast<int>(actual.master_deck_count)) return false;
+    }
+    return true;
+}
+
+struct EventSighting {
+    std::string seed;
+    int floor = 0;
+    std::string capture_id;
+    std::string capture_name;
+    uint16_t sim_id = 0;
+    bool clean = false;
+    bool obtain_race = false;
+    std::string problem;
+};
+
+struct EventVerdict {
+    int sightings = 0;
+    int clean = 0;
+    int races = 0;
+    int failures = 0;
+    int options_checked = 0;
+    int options_matched = 0;
+    std::vector<EventSighting> rows;
+};
+
+[[nodiscard]] EventVerdict event_spot_diff_one(const std::string& path,
+                                               const Options& opts) {
+    EventVerdict v;
+    const sts::translate::TranslatedRun run = sts::translate::translate_file(path);
+    const std::vector<ScreenInfo> screens = read_screens(path);
+    if (screens.size() != run.records.size())
+        throw std::runtime_error("screen/record count mismatch in " + path);
+
+    for (std::size_t k = 0; k < screens.size(); ++k) {
+        if (screens[k].room_type != "EventRoom") continue;
+        if (screens[k].floor == 0) continue;  // Neow -- the --neow mode's subject
+        if (k > 0 && screens[k - 1].room_type == "EventRoom" &&
+            screens[k - 1].floor == screens[k].floor)
+            continue;
+        if (k == 0) continue;
+        ++v.sightings;
+
+        EventSighting row;
+        row.seed = run.seed_string;
+        row.floor = screens[k].floor;
+
+        // The capture's own identity for this room, from the first record that
+        // actually shows the dialog.
+        for (std::size_t j = k; j < screens.size(); ++j) {
+            if (screens[j].floor != row.floor || screens[j].room_type != "EventRoom")
+                break;
+            if (screens[j].event_id.empty()) continue;
+            row.capture_id = screens[j].event_id;
+            row.capture_name = screens[j].event_name;
+            break;
+        }
+
+        std::vector<std::string> fail;
+
+        // 0. The node really was a `?`. An EventRoom has no other producer in
+        //    Act 1, and checking it keeps the roll below honest about which
+        //    branch of nextRoomTransition it is standing in.
+        const std::string symbol =
+            entered_node_symbol(screens[k - 1], run.records[k - 1].action_command);
+        if (!symbol.empty() && symbol != "?")
+            fail.push_back("the capture entered this EventRoom from a '" + symbol +
+                           "' node, not a '?'");
+
+        // 1. The ?-roll, off the pre-entry state.
+        RunState rs = run.records[k - 1].run;
+        // ++floorNum first (AbstractDungeon.java:1741; trap 7). This is not
+        // cosmetic: `floorNum` is read by EventHelper.roll's eliteSize gate
+        // (:123-125) and, more importantly, by getEvent's Dead Adventurer and
+        // Mushrooms filter (`floorNum > 6`, AbstractDungeon.java:1949-1982), so
+        // an off-by-one floor silently changes the DRAW LIST the pool index
+        // addresses.
+        ++rs.floor;
+        dispatch_event_room_entry_relics(rs);
+        const bool leaving_shop = screens[k - 1].room_type == "ShopRoom";
+        const RngStream before = rs.event_rng;
+        const EventRoomResult roll = event_room_roll(rs, leaving_shop);
+        if (roll != EventRoomResult::EVENT) {
+            fail.push_back("the sim's ?-roll resolved to " +
+                           std::string(event_roll_name(roll)) +
+                           " but the capture stayed an EventRoom");
+        }
+
+        // 2. Selection, on the throwaway stream.
+        const RngStream after_roll = rs.event_rng;
+        const uint16_t sim_id = generate_event(rs);
+        row.sim_id = sim_id;
+        if (rs.event_rng.s0 != after_roll.s0 || rs.event_rng.s1 != after_roll.s1 ||
+            rs.event_rng.counter != after_roll.counter) {
+            fail.push_back("generate_event moved eventRng; the selection draws "
+                           "are made on a discarded duplicate "
+                           "(AbstractDungeon.java:1865)");
+        }
+
+        // 3. The identity join.
+        const EventJoin join = join_capture_event(row.capture_id);
+        if (!join.problem.empty()) {
+            fail.push_back("event join: " + join.problem);
+        } else if (join.id != sim_id) {
+            fail.push_back(
+                "event identity: capture " + row.capture_id + " (EventId " +
+                std::to_string(join.id) + ") -> sim " +
+                std::string(sim_id == 0
+                                ? "NONE"
+                                : sts::registry::event_game_id(
+                                      static_cast<sts::registry::EventId>(sim_id))) +
+                " (EventId " + std::to_string(sim_id) + ")");
+        }
+
+        // 4. The whole arrival state -- eventRng, pity, the three membership
+        //    bitsets, event_flags, gold, relic counters.
+        RunState e = run.records[k].run;
+        RunState a = rs;
+        neutralize_presentation_only(e);
+        neutralize_presentation_only(a);
+        e.neow_rng = RngStream{};
+        a.neow_rng = RngStream{};
+        const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
+        if (is_obtain_race(rep, e, a)) {
+            row.obtain_race = true;
+            std::printf("  RACE     %s floor=%d: the capture's deck holds %u card(s) "
+                        "the pre-entry record did not -- ShowCardAndObtainEffect "
+                        "landed across the transition (the B1.3/B5.2 obtain-race "
+                        "capture gap); selection state is otherwise identical\n",
+                        run.seed_string.c_str(), row.floor,
+                        static_cast<unsigned>(e.master_deck_count -
+                                              a.master_deck_count));
+        } else if (!rep.empty()) {
+            fail.push_back("arrival RunState (" + std::to_string(rep.size()) +
+                           " field(s)):\n" + rep.to_string());
+        }
+
+        // 5. ADVISORY: the entry page's option count, when the sim has a body.
+        if (fail.empty() && sim_id != 0) {
+            if (const EventDialogImpl* impl = event_dialog_impl(sim_id)) {
+                RunController rc{};
+                rc.run = rs;
+                rc.combat = run.records[k].combat;
+                rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+                rc.room_type = static_cast<uint8_t>(RoomType::Event);
+                rc.event = EventDialogState{};
+                rc.event.event_id = sim_id;
+                impl->on_enter(rc, rc.event);
+                EventDialogMenu menu{};
+                impl->build_menu(rc, rc.event, menu);
+                ++v.options_checked;
+                const std::size_t game = screens[k].option_labels.size();
+                if (menu.count == game) {
+                    ++v.options_matched;
+                } else {
+                    std::printf("  OPTIONS  ADV  %s floor=%d %s: capture shows %zu "
+                                "button(s), sim's entry menu has %u\n",
+                                run.seed_string.c_str(), row.floor,
+                                row.capture_id.c_str(), game, menu.count);
+                }
+            }
+        }
+
+        row.clean = fail.empty();
+        if (row.clean) {
+            if (row.obtain_race) ++v.races;
+            else ++v.clean;
+            std::printf("EVENT    %s %s floor=%d %-22s (%s) EventId=%u "
+                        "eventRng %u->%u\n",
+                        row.obtain_race ? "RACE" : "OK  ",
+                        run.seed_string.c_str(), row.floor, row.capture_id.c_str(),
+                        row.capture_name.c_str(), sim_id, before.counter,
+                        rs.event_rng.counter);
+        } else {
+            ++v.failures;
+            row.problem = fail.front();
+            std::printf("EVENT    DIFF %s floor=%d %s (%s)\n",
+                        run.seed_string.c_str(), row.floor, row.capture_id.c_str(),
+                        row.capture_name.c_str());
+            for (const auto& f : fail) std::printf("    %s\n", f.c_str());
+        }
+        v.rows.push_back(std::move(row));
+        (void)opts;
+    }
+    return v;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -1344,22 +2124,98 @@ int main(int argc, char** argv) {
         else if (a == "--replay") opts.full_replay = true;
         else if (a == "--neow") opts.neow = true;
         else if (a == "--shop") opts.shop = true;
+        else if (a == "--treasure") opts.treasure = true;
+        else if (a == "--event") opts.event = true;
         else files.push_back(a);
     }
     if (files.empty() ||
         static_cast<int>(opts.full_replay) + static_cast<int>(opts.neow) +
-                static_cast<int>(opts.shop) > 1) {
+                static_cast<int>(opts.shop) + static_cast<int>(opts.treasure) +
+                static_cast<int>(opts.event) > 1) {
         std::fprintf(stderr,
                      "usage: replay_run_diff <run.jsonl> [...] "
-                     "[--replay | --neow | --shop]\n"
+                     "[--replay | --neow | --shop | --treasure | --event]\n"
                      "         [--verbose] [--pool-evidence] [--stop-on-diff] [--combat]\n"
-                     "  default: per-reward-screen spot-diff seeded from the capture\n"
-                     "  --replay: whole-run replay from run_begin, diffed per record\n"
-                     "  --neow:   floor-0 blessing spot-diff (options / activation / "
+                     "  default:    per-reward-screen spot-diff seeded from the capture\n"
+                     "  --replay:   whole-run replay from run_begin, diffed per record\n"
+                     "  --neow:     floor-0 blessing spot-diff (options / activation / "
                      "post-choice)\n"
-                     "  --shop:   merchant spot-diff (stock, prices, sale slot, purchases)\n"
+                     "  --shop:     merchant spot-diff (stock, prices, sale slot, purchases)\n"
+                     "  --treasure: chest spot-diff (size, rewards, streams, the claim walk)\n"
+                     "  --event:    ?-room spot-diff (roll, selection, pools, arrival state)\n"
                      "  the mode flags are mutually exclusive\n");
         return 2;
+    }
+
+    if (opts.treasure) {
+        int failures = 0;
+        TreasureVerdict total{};
+        for (const std::string& f : files) {
+            std::printf("=== %s\n", f.c_str());
+            try {
+                const TreasureVerdict v = treasure_spot_diff_one(f, opts);
+                total.rooms += v.rooms;
+                total.construction_clean += v.construction_clean;
+                total.opens += v.opens;
+                total.open_clean += v.open_clean;
+                total.skips += v.skips;
+                total.walk_clean += v.walk_clean;
+                total.walk_partial += v.walk_partial;
+                total.failures += v.failures;
+                if (v.failures != 0) ++failures;
+            } catch (const std::exception& e) {
+                std::printf("ERROR %s: %s\n", f.c_str(), e.what());
+                ++failures;
+            }
+        }
+        std::printf("--- %zu file(s): %d treasure room(s), construction clean %d, "
+                    "%d opened (%d clean) / %d skipped, in-room walks clean %d "
+                    "(+%d partial), %d divergence(s) ---\n",
+                    files.size(), total.rooms, total.construction_clean, total.opens,
+                    total.open_clean, total.skips, total.walk_clean,
+                    total.walk_partial, total.failures);
+        return failures;
+    }
+
+    if (opts.event) {
+        int failures = 0;
+        EventVerdict total{};
+        for (const std::string& f : files) {
+            try {
+                std::printf("=== %s\n", f.c_str());
+                const EventVerdict v = event_spot_diff_one(f, opts);
+                total.sightings += v.sightings;
+                total.clean += v.clean;
+                total.races += v.races;
+                total.failures += v.failures;
+                total.options_checked += v.options_checked;
+                total.options_matched += v.options_matched;
+                for (const EventSighting& r : v.rows) total.rows.push_back(r);
+                if (v.failures != 0) ++failures;
+            } catch (const std::exception& e) {
+                std::printf("=== %s\nERROR %s\n", f.c_str(), e.what());
+                ++failures;
+            }
+        }
+        // The per-sighting table, in one block, so a runbook can quote it.
+        std::printf("\n--- per-sighting verdict table ---\n");
+        std::printf("%-10s %5s  %-24s %-22s %-8s %s\n", "seed", "floor", "event_id",
+                    "event_name", "EventId", "verdict");
+        for (const EventSighting& r : total.rows) {
+            const char* verdict = r.clean ? (r.obtain_race ? "zero-diff (obtain race)"
+                                                           : "zero-diff")
+                                          : "DIFF";
+            std::printf("%-10s %5d  %-24s %-22s %-8u %s%s%s\n", r.seed.c_str(), r.floor,
+                        r.capture_id.c_str(), r.capture_name.c_str(), r.sim_id,
+                        verdict, r.clean ? "" : ": ",
+                        r.clean ? "" : r.problem.c_str());
+        }
+        std::printf("--- %zu file(s): %d sighting(s), %d zero-diff (+%d clean but for "
+                    "the known obtain race), %d diverged; entry-page option count "
+                    "matched %d of %d advisory check(s) ---\n",
+                    files.size(), total.sightings, total.clean, total.races,
+                    total.failures, total.options_matched, total.options_checked);
+        return failures;
     }
 
     if (opts.neow) {
