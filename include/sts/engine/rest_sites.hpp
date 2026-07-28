@@ -89,8 +89,18 @@ static_assert(sizeof(RestSiteState) == 4);
 [[nodiscard]] bool rest_card_upgradeable(const CardInstance& card) noexcept;
 [[nodiscard]] bool rest_card_purgeable(const CardInstance& card) noexcept;
 
-// Rebuild CampfireUI's button list in exact insertion order.
+// Rebuild CampfireUI's button list in exact insertion order, then apply the
+// canUseCampfireOption veto sweep over the whole list (CampfireUI
+// .initializeButtons, CampfireUI.java:81-93). Fusion Hammer clears Smith and
+// Coffee Dripper clears Rest; the relics' own updateUsability calls are
+// cosmetic and are NOT the disable (see the derivation at the definition).
 [[nodiscard]] RestMenu build_rest_menu(const RunState& rs) noexcept;
+
+// Is any button usable? CampfireUI.java:97-104 asks exactly this after building
+// the list, and when the answer is no it sets the room's phase to COMPLETE with
+// waitTimer 0 -- the campfire is skipped with no player decision at all. The run
+// layer applies that at rest-room entry; this is the predicate it applies.
+[[nodiscard]] bool rest_menu_has_usable_option(const RestMenu& menu) noexcept;
 
 // Effects return false without mutation when the chosen row is illegal.
 [[nodiscard]] bool rest_apply_heal(RunState& rs) noexcept;

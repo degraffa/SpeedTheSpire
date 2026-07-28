@@ -118,8 +118,10 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     // -- Player (placeholder A20 stats -- see advance.hpp's PLACEHOLDER STATS
     //    note; exact Ironclad starting HP is deferred to Stage B per design doc
     //    §11). player_energy is intentionally left 0 here: the start-of-turn
-    //    sequence below SETS it to kIroncladBaseEnergy when the first pump()
-    //    drains through turn 1 (energy-recharge, action_queue.cpp). --
+    //    sequence below SETS it to energy_master(state) when the first pump()
+    //    drains through turn 1 (energy-recharge, action_queue.cpp). This entry
+    //    point never fills the relic mirror, so that is kIroncladBaseEnergy
+    //    here and the 20 fixtures are unmoved. --
     state.player_hp = 80;
     state.player_max_hp = 80;
     state.player_block = 0;
@@ -151,8 +153,9 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //
     //    A no-op (and byte-identical) without a responding relic: the combat
     //    relic mirror is empty for this entry point, so the 20 fixtures are
-    //    unchanged. The RUN entry point (run_advance.cpp enter_combat) does not
-    //    yet carry this call -- see the deferral recorded with the batch. --
+    //    unchanged. The RUN entry point (run_advance.cpp enter_combat) carries
+    //    the identical call at its step (8b), between the mirror copy and
+    //    begin_first_turn, so the two combat-construction paths cannot drift. --
     {
         const RelicView rv = player_relics(state);
         dispatch_relics_at_pre_battle(state, rv.relics, rv.count);
@@ -166,8 +169,9 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    end-of-round pass, which the game cannot reach on turn 1. See the
     //    declaration in action_queue.hpp for the full derivation. --
     begin_first_turn(state, dispatch_monster_turn);
-    // Post: phase == WAITING_ON_USER, turn == 1, energy == kIroncladBaseEnergy,
-    // hand_count == kStartOfTurnDrawCount (5), draw_count == n - 5.
+    // Post: phase == WAITING_ON_USER, turn == 1, energy == energy_master(state),
+    // hand_count == game_hand_size(state), draw_count == n - that. This entry
+    // point has an empty relic mirror, so both are their base constants.
 
     // initializeDeck's overflow draw for a >5-card placeOnTop collection --
     // see the declaration (advance.hpp) for the preTurnActions derivation of
@@ -180,19 +184,28 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
 
 void queue_innate_overflow_draw(CombatState& state,
                                 uint8_t innate_count) noexcept {
-    // CardGroup.initializeDeck:951-954. The threshold and the queued amount
-    // both read masterHandSize (5); the ordering contract is on the
-    // declaration in advance.hpp. A no-op leaves the state byte-untouched, so
-    // every existing <=5-innate combat (all 20 fixtures included) is
-    // unchanged.
-    if (innate_count <= static_cast<uint8_t>(kStartOfTurnDrawCount)) {
+    // CardGroup.initializeDeck:951-953. The threshold and the queued amount
+    // both read AbstractDungeon.player.masterHandSize -- the SAME field Snecko
+    // Eye's onEquip enlarges (SneckoEye.java:31, masterHandSize += 2) and that
+    // preBattlePrep snapshots into gameHandSize (AbstractPlayer.java:1579) --
+    // NOT the constant 5. game_hand_size(state) is this engine's derivation of
+    // that field (Snecko Eye is its only S1 registry writer), so the overflow
+    // threshold moves together with the start-of-turn draw: Snecko Eye + 6
+    // top-placed cards is NO overflow in the game (6 <= 7), pinned by
+    // RunCombatBottle.SneckoEyeRaisesTheInnateOverflowThresholdWithTheDraw.
+    // The ordering contract is on the declaration in advance.hpp. A no-op
+    // leaves the state byte-untouched, so every existing combat whose
+    // top-placed collection fits the hand (all 20 fixtures included -- empty
+    // relic mirror, hand size 5) is unchanged.
+    const int32_t hand = game_hand_size(state);
+    if (static_cast<int32_t>(innate_count) <= hand) {
         return;
     }
     ActionQueueItem draw{};
     draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
     draw.src = kActorPlayer;
     draw.tgt = kActorPlayer;
-    draw.amount = static_cast<int32_t>(innate_count) - kStartOfTurnDrawCount;
+    draw.amount = static_cast<int32_t>(innate_count) - hand;
     add_to_bottom(state, draw);
     pump(state, dispatch_monster_turn);
 }
@@ -576,10 +589,18 @@ void step_one(CombatState& s, Action a, const ActionMask& mask,
             if (!mask.choice_pending || !mask.can_confirm_choice) {
                 break;
             }
-            ActionQueueItem& front = s.action_queue[s.action_head];
-            resolve_optional_choice(s, front);
+            // POP FIRST, then resolve off the popped copy. The Java action is
+            // already off the queue while its update() runs -- and one kind,
+            // HAND_TO_DISCARD_THEN_DRAW (Gambler's Brew / Gambling Chip),
+            // add_to_TOPs a DrawCardAction from inside its resolution
+            // (GamblingChipAction.java:53). Resolving before the pop would put
+            // that draw at the head, and the pop would then throw the DRAW away
+            // instead of the finished CHOOSE_CARD. The order is invisible to
+            // every other kind: resolve_optional_choice reads only the item's
+            // flags and the hand suffix, and the pop touches neither.
             ActionQueueItem consumed{};
             (void)pop_action_front(s, consumed);
+            resolve_optional_choice(s, consumed);
             pump(s, dispatch_monster_turn);
             break;
         }

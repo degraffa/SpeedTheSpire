@@ -54,6 +54,7 @@ add_library(sts_engine
     powers/power_mayhem.cpp
     powers/power_next_turn_block.cpp
     powers/power_panache.cpp
+    powers/power_pen_nib.cpp
     powers/power_plated_armor.cpp
     powers/power_rage.cpp
     powers/power_regen.cpp
@@ -64,6 +65,7 @@ add_library(sts_engine
     powers/power_spore_cloud.cpp
     powers/power_the_bomb.cpp
     powers/power_thorns.cpp
+    powers/power_vigor.cpp
     powers/power_vulnerable.cpp
     powers/power_weak.cpp
     relic_hooks.cpp

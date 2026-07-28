@@ -340,6 +340,47 @@ TEST(RelicHooks, RedSkullGainsStrengthWhenBloodied) {
     EXPECT_EQ(s2.action_count, 0);
 }
 
+TEST(RelicHooks, RedSkullDoesNotFireWhenCombatBeganBloodied) {
+    // preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
+    // (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
+    // never fires the damage-side onBloodied cross (:1476-1481 fires only on
+    // the false->true flip). The battle-start hook seeds the slot latch from
+    // starting HP; an HP loss while already bloodied then grants nothing.
+    CombatState s = MakeState();
+    s.player_hp = 38;               // 76 <= 80 -> entered combat bloodied
+    Relics r; r.add(RelicId::RED_SKULL);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "the seed itself queues nothing";
+    EXPECT_EQ(r.slots[0].counter, 1) << "entered bloodied -> latch suppressed";
+
+    s.player_hp = 30;
+    dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/8);
+    EXPECT_EQ(s.action_count, 0)
+        << "no onBloodied cross for a combat that began bloodied";
+}
+
+TEST(RelicHooks, RedSkullReArmsAtEveryBattleStart) {
+    // fold_back_combat persists the mirrored counter into the run's RelicSlot,
+    // so a combat where Red Skull fired leaves counter == 1 behind. The game
+    // resets isActive at every atBattleStart (RedSkull.java:37) and re-derives
+    // isBloodied from starting HP (AbstractPlayer.java:1575): entering the
+    // next combat above half HP must re-arm the grant.
+    CombatState s = MakeState();
+    s.player_hp = 60;               // 120 > 80 -> not bloodied at entry
+    Relics r; r.add(RelicId::RED_SKULL);
+    r.slots[0].counter = 1;         // stale isActive from the previous combat
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(r.slots[0].counter, 0) << "atBattleStart resets isActive";
+
+    s.player_hp = 35;               // 70 <= 80 -> the cross happens in-combat
+    dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/25);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
+    EXPECT_EQ(queued(s, 0).amount, 3);
+    EXPECT_EQ(r.slots[0].counter, 1);
+}
+
 // --- Counter relics (persist counter in the RelicSlot) -----------------------
 
 TEST(RelicHooks, NunchakuGrantsEnergyEveryTenthAttack) {
@@ -382,6 +423,88 @@ TEST(RelicHooks, PenNibCountsAttacksAndCyclesAtTen) {
     EXPECT_EQ(r.slots[0].counter, 0) << "cycles back to 0 at the 10th attack";
 }
 
+// The grant is on the NINTH attack, not the tenth: PenNib.java:44-47 resets at
+// ten WITHOUT granting, and :48-51 grants at nine -- so the TENTH attack is the
+// empowered one.
+TEST(RelicHooks, PenNibGrantsTheDoublingAfterTheNinthAttackNotTheTenth) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::PEN_NIB);
+    const uint16_t strike = static_cast<uint16_t>(CardId::STRIKE);
+    for (int i = 1; i <= 8; ++i) {
+        dispatch_relics_on_use_card(s, r.slots, r.count, strike, 0);
+        EXPECT_EQ(s.action_count, 0) << "granted early at attack " << i;
+    }
+    dispatch_relics_on_use_card(s, r.slots, r.count, strike, 0);  // 9th
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(it.tgt, kActorPlayer);
+    EXPECT_EQ(it.amount, 1);
+    EXPECT_EQ(it.flags, make_apply_power_flags(PowerId::PEN_NIB));
+    drain(s);
+    ASSERT_NE(player_power(s, PowerId::PEN_NIB), nullptr);
+
+    // The tenth attack resets the counter and grants nothing more (the power it
+    // already holds is what makes that attack the empowered one).
+    dispatch_relics_on_use_card(s, r.slots, r.count, strike, 0);  // 10th
+    EXPECT_EQ(r.slots[0].counter, 0);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// A SKILL never moves the counter and never grants (the ATTACK gate,
+// PenNib.java:38).
+TEST(RelicHooks, PenNibIgnoresNonAttacksEntirely) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::PEN_NIB, 8);
+    dispatch_relics_on_use_card(s, r.slots, r.count,
+                                static_cast<uint16_t>(CardId::SHRUG_IT_OFF), 0);
+    EXPECT_EQ(r.slots[0].counter, 8);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// atBattleStart re-grants when the RUN-persistent counter is already 9, and
+// leaves the counter alone (PenNib.java:54-62). This is the case that makes the
+// power visible on turn 1 of a fresh combat.
+TEST(RelicHooks, PenNibReGrantsAtBattleStartWhenTheCounterIsNine) {
+    {
+        CombatState s = MakeState();
+        Relics r; r.add(RelicId::PEN_NIB, 9);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        ASSERT_EQ(s.action_count, 1);
+        EXPECT_EQ(queued(s, 0).flags, make_apply_power_flags(PowerId::PEN_NIB));
+        EXPECT_EQ(r.slots[0].counter, 9) << "atBattleStart never writes counter";
+        drain(s);
+        EXPECT_NE(player_power(s, PowerId::PEN_NIB), nullptr);
+    }
+    for (const int16_t counter : {int16_t{0}, int16_t{8}, int16_t{10}}) {
+        CombatState s = MakeState();
+        Relics r; r.add(RelicId::PEN_NIB, counter);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        EXPECT_EQ(s.action_count, 0) << "counter " << counter;
+    }
+}
+
+// --- Akabeko / Vigor ---------------------------------------------------------
+
+// Akabeko.atBattleStart (Akabeko.java:30-35): unconditional Vigor 8.
+TEST(RelicHooks, AkabekoGrantsEightVigorAtBattleStart) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::AKABEKO, -1);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(it.src, kActorPlayer);
+    EXPECT_EQ(it.tgt, kActorPlayer);
+    EXPECT_EQ(it.amount, 8);
+    EXPECT_EQ(it.flags, make_apply_power_flags(PowerId::VIGOR));
+    drain(s);
+    const PowerSlot* vigor = player_power(s, PowerId::VIGOR);
+    ASSERT_NE(vigor, nullptr);
+    EXPECT_EQ(vigor->amount, 8);
+    EXPECT_EQ(r.slots[0].counter, -1) << "Akabeko never writes its counter";
+}
+
 // --- Turn-start counters -----------------------------------------------------
 
 TEST(RelicHooks, HappyFlowerGrantsEnergyEveryThirdTurn) {
@@ -410,14 +533,155 @@ TEST(RelicHooks, LanternGrantsEnergyOnFirstTurnOnly) {
     EXPECT_EQ(s.action_count, 0);
 }
 
+// --- Preserved Insect -------------------------------------------------------
+
+// PreservedInsect.atBattleStart (PreservedInsect.java:30-41): in an ELITE room
+// only, clamp each monster's CURRENT health down to (int)((float)maxHealth *
+// 0.75f). maxHealth is untouched, and the clamp never raises health.
+TEST(RelicHooks, PreservedInsectClampsEliteMonsterHealthToThreeQuarters) {
+    CombatState s = MakeState(/*monster_count=*/2, /*monster_hp=*/50);
+    s.flags |= kCombatFlagEliteRoom;
+    // A monster already BELOW the threshold is left exactly where it is: the
+    // Java `continue` makes the clamp one-directional.
+    s.monsters[1].hp = 10;
+    Relics r; r.add(RelicId::PRESERVED_INSECT, -1);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "the clamp is synchronous, not queued";
+    EXPECT_EQ(s.monsters[0].hp, 37) << "(int)(50.0f * 0.75f) == 37";
+    EXPECT_EQ(s.monsters[0].max_hp, 50) << "maxHealth is never scaled";
+    EXPECT_EQ(s.monsters[1].hp, 10);
+    EXPECT_EQ(s.monsters[1].max_hp, 50);
+}
+
+// The float product is a C-style truncation of `(float)maxHealth * 0.75f`, not
+// MathUtils.floor and not the integer maxHealth * 3 / 4. 90 -> 67.5f -> 67 is
+// the worked case (an A20 Gremlin Nob); the two formulations happen to agree
+// there, so the odd-multiple cases are pinned alongside it.
+TEST(RelicHooks, PreservedInsectUsesTheGamesFloatTruncation) {
+    const struct { int16_t max_hp; int16_t want; } cases[] = {
+        {90, 67}, {85, 63}, {1, 0}, {3, 2}, {7, 5},
+    };
+    for (const auto& c : cases) {
+        CombatState s = MakeState(/*monster_count=*/1, c.max_hp);
+        s.flags |= kCombatFlagEliteRoom;
+        Relics r; r.add(RelicId::PRESERVED_INSECT, -1);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        EXPECT_EQ(s.monsters[0].hp, c.want) << "max_hp " << c.max_hp;
+    }
+}
+
+// A BOSS room does not set eliteTrigger (MonsterRoomBoss.java:22-24), so the
+// flag is clear and this relic does nothing -- the same answer an ordinary
+// monster room gives.
+TEST(RelicHooks, PreservedInsectLeavesNonEliteMonstersAlone) {
+    CombatState s = MakeState(/*monster_count=*/2, /*monster_hp=*/50);
+    Relics r; r.add(RelicId::PRESERVED_INSECT, -1);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.monsters[0].hp, 50);
+    EXPECT_EQ(s.monsters[1].hp, 50);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// --- Art of War --------------------------------------------------------------
+
+// ArtOfWar (ArtOfWar.java:52-82): +1 energy at the start of turn N (N >= 2) iff
+// no ATTACK was played during turn N-1. `firstTurn` suppresses turn 1 only.
+TEST(RelicHooks, ArtOfWarGrantsEnergyOnlyAfterAnAttacklessTurn) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::ART_OF_WAR, -1);
+
+    // Turn 1's atTurnStart: firstTurn suppresses the grant even though
+    // gainEnergyNext is true.
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "turn 1 never grants";
+    ++s.turn;
+
+    // Turn 1 passed with no attack -> turn 2 grants.
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::GAIN_ENERGY));
+    EXPECT_EQ(queued(s, 0).amount, 1);
+    EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
+    drain(s);
+    ++s.turn;
+
+    // An ATTACK during turn 2 cancels turn 3's grant.
+    dispatch_relics_on_use_card(s, r.slots, r.count,
+                                static_cast<uint16_t>(CardId::STRIKE), 0);
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "an attack last turn cancels the grant";
+    ++s.turn;
+
+    // ...and the latch is re-armed by that same atTurnStart, so turn 4 grants
+    // again. Getting the Java's line order wrong (clearing before the test)
+    // would have granted on turn 3 too.
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 1);
+    EXPECT_EQ(r.slots[0].counter, -1) << "the counter is never touched";
+}
+
+// A SKILL or POWER play does not cancel the grant -- only ATTACK does
+// (ArtOfWar.java:78).
+TEST(RelicHooks, ArtOfWarIgnoresNonAttackPlays) {
+    CombatState s = MakeState();
+    s.turn = 1;
+    Relics r; r.add(RelicId::ART_OF_WAR, -1);
+    dispatch_relics_on_use_card(s, r.slots, r.count,
+                                static_cast<uint16_t>(CardId::SHRUG_IT_OFF), 0);
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 1);
+}
+
+// --- Ancient Tea Set ---------------------------------------------------------
+
+// AncientTeaSet.atTurnStart (AncientTeaSet.java:49-61): if the RUN-persistent
+// counter is -2 (armed by onEnterRestRoom), the FIRST turn of the combat gains 2
+// energy and the counter is spent to -1.
+TEST(RelicHooks, AncientTeaSetSpendsTheArmedCounterOnTurnOne) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::ANCIENT_TEA_SET, -2);
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::GAIN_ENERGY));
+    EXPECT_EQ(queued(s, 0).amount, 2);
+    EXPECT_EQ(r.slots[0].counter, -1) << "-2 armed becomes -1 spent";
+    drain(s);
+    EXPECT_EQ(s.player_energy, 5);
+
+    // Later turns of the SAME combat do nothing -- firstTurn is one-shot.
+    ++s.turn;
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// An UNARMED tea set (counter -1, the spent value) grants nothing, and a turn
+// that is not the first grants nothing even while armed.
+TEST(RelicHooks, AncientTeaSetGrantsNothingUnarmedOrOffTurnOne) {
+    {
+        CombatState s = MakeState();
+        Relics r; r.add(RelicId::ANCIENT_TEA_SET, -1);
+        dispatch_relics_at_turn_start(s, r.slots, r.count);
+        EXPECT_EQ(s.action_count, 0);
+        EXPECT_EQ(r.slots[0].counter, -1);
+    }
+    {
+        CombatState s = MakeState();
+        s.turn = 3;
+        Relics r; r.add(RelicId::ANCIENT_TEA_SET, -2);
+        dispatch_relics_at_turn_start(s, r.slots, r.count);
+        EXPECT_EQ(s.action_count, 0);
+        EXPECT_EQ(r.slots[0].counter, -2) << "still armed for the NEXT combat";
+    }
+}
+
 // --- Non-combat / deferred relics dispatch nothing ---------------------------
 
 TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {
     CombatState s = MakeState();
     Relics r;
     r.add(RelicId::WHETSTONE);        // equip-time, no combat hook
-    r.add(RelicId::AKABEKO);          // Vigor apply DEFERRED (Vigor power row is later)
-    r.add(RelicId::BOOT);             // damage-pipeline DEFERRED
+    r.add(RelicId::BOOT);             // live, but at a damage-pipeline site, not a hook
+    r.add(RelicId::PRESERVED_INSECT); // live, but only in an elite room (flag clear here)
     dispatch_relics_at_battle_start(s, r.slots, r.count);
     dispatch_relics_on_victory(s, r.slots, r.count);
     EXPECT_EQ(s.action_count, 0);

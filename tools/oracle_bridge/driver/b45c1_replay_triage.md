@@ -2,6 +2,54 @@
 
 Discharges the ledger's **"STS00042 replay stop at seq 32 — untriaged"** row.
 
+> **SUPERSEDED IN PART — 2026-07-28.** Everything below is the read-out of a
+> real `--replay` pass and is kept as written; it is history, not a live claim.
+> But the cause it names for **STS00042 and STS00043** — the deferred
+> `energyMaster` `+1` — **has since landed** (`energy_master`, derived at the
+> recharge line in `action_queue.cpp`; the obligation row quoted in §2 is
+> discharged, and the registry text quoted there was rewritten in the same
+> change, so do not quote it from here). Those two runs must be **re-run**
+> before anything is concluded from their rows: the class-(c) stops should
+> reclassify, and whatever a re-run shows is a new finding rather than a
+> confirmation of this one. The class-(c) boss-`onEquip` stops for STS00045/46
+> (Empty Cage) are unaffected and still open.
+>
+> **RE-RUN DONE — 2026-07-28, `wave-combat` Track 1 stage 3.** See §0 below.
+> Both runs reclassify, and the STS00042 read-out in §2 is now history in its
+> entirety: the sim no longer stops on floor 1 at all.
+
+## §0 — the 2026-07-28 re-run
+
+Same command as below, at `wave-combat` after the relic-tail stage:
+
+| Run | Records compared | First divergence | Stop | Class |
+|---|---|---|---|---|
+| STS00042 | **38** (was 33) | **none** — every compared record zero-diff | seq 37 `choose 0`: `screen 'SHOP_ROOM' is not modelled by the run layer` | **(b)** harness mapping gap |
+| STS00043 | **67, to terminal** | **none** — every compared record zero-diff | run terminal | **CLEAN** |
+| STS00044 | 21, to terminal | none | run terminal | **CLEAN** (unchanged control) |
+
+**Both energyMaster stops are gone, and neither left a divergence behind.**
+STS00043 was the harder of the two — it had run to its terminal *while*
+diverging from seq 15 — and it is now zero-diff over all 67 records. STS00042's
+first divergence was seq 18 (`hp: 66 -> 61`, the knock-on of a 2-cost Bash the
+sim could not afford); it now matches through seq 36 and gets **five records
+further** than it did before.
+
+**The new STS00042 stop is a HARNESS gap, not a deferral and not a divergence.**
+`--replay`'s command map (`replay/src/command_map.hpp`) has arms for
+`EVENT`/`CARD_REWARD`/`COMBAT_REWARD`/`GRID`/`CHEST`/`MAP` and falls through for
+anything else; `SHOP_ROOM` has no arm. The run layer itself **does** model shops
+(`RunPhase::SHOP`, B4.8) — B4.8 drove them through `replay_run_diff`'s separate
+`--shop` spot-diff mode, which seeds `ShopState` directly rather than parking a
+controller, so the `--replay` mapping table was never extended. That is
+replay-tooling work and is **stated, not fixed here**: this stage's scope is
+combat-layer bodies, and touching the mapping table would be a different task's
+change. It is the first class-(b) stop either b45 campaign has produced, so it
+is worth a row of its own rather than a footnote.
+
+**Class-(c) stops still open in this campaign:** STS00045 and STS00046, both on
+Empty Cage's deferred boss `onEquip` grid. Unchanged.
+
 The six-run frontier table in the ledger covers only the SECOND b45 campaign
 (`b45_rewards_oracle2_…`, STS00047-52). This is the same read-out for the
 FIRST, `b45_rewards_oracle_20260727T204809Z_claude01` (STS00042-46), which had

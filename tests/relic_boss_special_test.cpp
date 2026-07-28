@@ -292,6 +292,63 @@ TEST(RelicBossSpecial, ConfusionSpendsADrawEvenWhenTheCostIsUnchanged) {
     EXPECT_EQ(s.card_random_rng.counter, 1) << "but the draw still happened";
 }
 
+// The OTHER half of that equality branch, and the one the engine used to get
+// wrong. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is
+//
+//     if (card.cost >= 0) {
+//         int newCost = cardRandomRng.random(3);
+//         if (card.cost != newCost) { card.costForTurn = card.cost = newCost;
+//                                     card.isCostModified = true; }
+//         card.freeToPlayOnce = false;
+//     }
+//
+// so on equality it writes NOTHING to cost / costForTurn / isCostModified --
+// only freeToPlayOnce is cleared, because that line sits OUTSIDE the inner
+// `if`. A card carrying a live THIS-TURN cost modification (costForTurn != cost,
+// isCostModified true) therefore KEEPS it when the roll lands on its own base
+// cost.
+//
+// Reachable in S1: any card whose cost was set for the turn and which then left
+// and re-entered the hand within that turn under Snecko Eye's Confusion --
+// Forethought's free play, Discovery's cost-0 copy, and Gambler's Brew's
+// discard-then-draw-back round trip all produce it.
+TEST(RelicBossSpecial, ConfusionOnEqualityKeepsALiveThisTurnCostModifier) {
+    int64_t seed = 0;
+    for (int64_t candidate = 1; candidate < 200; ++candidate) {
+        RngStream probe = from_seed(candidate);
+        if (random(probe, 3) == 1) {  // == Strike's base cost
+            seed = candidate;
+            break;
+        }
+    }
+    ASSERT_NE(seed, 0) << "no seed in range rolls a 1 first";
+
+    CombatState s = MakeState();
+    add_player_power(s, PowerId::CONFUSION, 1);
+    const CardPoolIndex strike = put_in_draw(s, CardId::STRIKE);
+    ASSERT_EQ(s.card_pool[strike].cost_now, 1);
+    // Java: costForTurn 0 while cost stays 1, isCostModified true -- plus a free
+    // play granted this turn, which the Java DOES clear unconditionally.
+    s.card_pool[strike].cost_now = 0;
+    s.card_pool[strike].flags = static_cast<uint16_t>(
+        s.card_pool[strike].flags |
+        card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) |
+        card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+    s.card_random_rng = from_seed(seed);
+
+    op_draw(s, 1);
+
+    EXPECT_EQ(s.card_random_rng.counter, 1) << "the draw is unconditional";
+    EXPECT_EQ(s.card_pool[strike].cost_now, 0)
+        << "newCost == card.cost, so neither cost nor costForTurn is written";
+    EXPECT_TRUE(has_card_flag(s.card_pool[strike].flags,
+                              CardFlag::COST_MODIFIED_FOR_TURN))
+        << "isCostModified is inside the same skipped branch";
+    EXPECT_FALSE(has_card_flag(s.card_pool[strike].flags,
+                               CardFlag::FREE_TO_PLAY_ONCE))
+        << "freeToPlayOnce = false is OUTSIDE the inner if (:46)";
+}
+
 // Confusion writes card.cost, not just costForTurn, so the new cost must survive
 // the end-of-turn reset. COST_MODIFIED_FOR_TURN is therefore cleared, not set.
 TEST(RelicBossSpecial, ConfusionCostSurvivesTheEndOfTurnCostReset) {
@@ -382,6 +439,65 @@ TEST(RelicBossSpecial, PhilosophersStoneGivesEveryMonsterOneStrengthDirectly) {
         ASSERT_NE(p, nullptr) << "monster " << static_cast<int>(m);
         EXPECT_EQ(p->amount, 1);
     }
+}
+
+// PhilosopherStone.onSpawnMonster (PhilosopherStone.java:50-54) gives the SAME
+// +1 Strength to a monster spawned mid-combat, fanned out from
+// SpawnMonsterAction.update (SpawnMonsterAction.java:44-50). Act 1 reaches it
+// through the three Exordium splits (SlimeBoss, AcidSlime_L, SpikeSlime_L), each
+// of which queues SPAWN_MONSTER items -- the opcode driven directly here.
+TEST(RelicBossSpecial, PhilosophersStoneStrengthensEveryMidCombatSpawn) {
+    auto spawn = [](CombatState& s, uint8_t slot, MonsterId id, int16_t hp) {
+        ActionQueueItem it{};
+        it.opcode = kOp(Opcode::SPAWN_MONSTER);
+        it.src = 0;
+        it.tgt = slot;
+        it.amount = hp;
+        it.flags = static_cast<uint32_t>(id);
+        execute_opcode(s, it);
+    };
+
+    CombatState base = MakeState();
+    base.ai_rng = from_seed(11);
+    spawn(base, 1, MonsterId::SPIKE_SLIME_MEDIUM, 12);
+    ASSERT_EQ(base.monster_count, 2);
+    EXPECT_EQ(monster_power(base, 1, PowerId::STRENGTH), nullptr);
+
+    CombatState s = MakeState();
+    give(s, RelicId::PHILOSOPHERS_STONE);
+    s.ai_rng = from_seed(11);
+    spawn(s, 1, MonsterId::SPIKE_SLIME_MEDIUM, 12);
+    ASSERT_EQ(s.monster_count, 2);
+    const PowerSlot* p = monster_power(s, 1, PowerId::STRENGTH);
+    ASSERT_NE(p, nullptr) << "the spawned monster never got its Strength";
+    EXPECT_EQ(p->amount, 1);
+    // addPower is SYNCHRONOUS in the Java too -- nothing is queued.
+    EXPECT_EQ(s.action_count, 0);
+    // The monster already on the field is untouched: onSpawnMonster takes the
+    // ONE new monster, not the group.
+    EXPECT_EQ(monster_power(s, 0, PowerId::STRENGTH), nullptr);
+
+    // RNG-neutral. init()'s rollMove does not read Strength, so the child's
+    // aiRng draw and the move it lands on are identical with and without the
+    // relic -- which is what makes the Java's before-init ordering and this
+    // engine's after-init ordering equivalent rather than merely close.
+    EXPECT_EQ(s.ai_rng.counter, base.ai_rng.counter);
+    EXPECT_EQ(s.ai_rng.s0, base.ai_rng.s0);
+    EXPECT_EQ(s.monsters[1].move_history[0], base.monsters[1].move_history[0]);
+    EXPECT_EQ(s.monsters[1].intent, base.monsters[1].intent);
+    EXPECT_EQ(s.monsters[1].hp, 12);
+
+    // The fan-out is per relic SLOT, matching `for (AbstractRelic r : relics)`.
+    CombatState twice = MakeState();
+    Relics r;
+    r.add(RelicId::PHILOSOPHERS_STONE);
+    r.add(RelicId::PHILOSOPHERS_STONE);
+    install(twice, r);
+    twice.ai_rng = from_seed(11);
+    spawn(twice, 1, MonsterId::SPIKE_SLIME_MEDIUM, 12);
+    const PowerSlot* q = monster_power(twice, 1, PowerId::STRENGTH);
+    ASSERT_NE(q, nullptr);
+    EXPECT_EQ(q->amount, 2);
 }
 
 TEST(RelicBossSpecial, MarkOfPainShufflesTwoWoundsIntoTheDrawPile) {
@@ -659,15 +775,185 @@ TEST(RelicBossSpecial, GremlinMaskWeakensThePlayerAtBattleStart) {
 }
 
 // ============================================================================
+// energyMaster / masterHandSize -- the two derived per-combat player numbers.
+// ============================================================================
+
+// Slaver's Collar -- the ELEVENTH energyMaster writer, and the only conditional
+// one. SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57): +1 when the
+// room's eliteTrigger is set OR any monster is EnemyType.BOSS.
+TEST(RelicBossSpecial, SlaversCollarAddsOneOnlyInAnEliteOrBossEncounter) {
+    // Ordinary monster room, no boss member: nothing.
+    {
+        CombatState s = MakeState();
+        give(s, RelicId::SLAVERS_COLLAR);
+        EXPECT_FALSE(combat_is_elite_or_boss(s));
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy);
+    }
+    // Elite room (kCombatFlagEliteRoom -- MonsterRoomElite.java:33, and the
+    // Dead Adventurer event, DeadAdventurer.java:116).
+    {
+        CombatState s = MakeState();
+        s.flags |= kCombatFlagEliteRoom;
+        give(s, RelicId::SLAVERS_COLLAR);
+        EXPECT_TRUE(combat_is_elite_or_boss(s));
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 1);
+    }
+    // A BOSS encounter does NOT set eliteTrigger (MonsterRoomBoss.java:22-24);
+    // the collar's own EnemyType.BOSS scan is what catches it, read off the live
+    // `enemy_type` registry column rather than a hard-coded id list.
+    {
+        CombatState s = MakeState();
+        s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::HEXAGHOST);
+        EXPECT_FALSE(combat_is_elite_room(s.flags));
+        give(s, RelicId::SLAVERS_COLLAR);
+        EXPECT_TRUE(combat_is_elite_or_boss(s));
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 1);
+    }
+    // Without the relic the same encounters are the base number -- the
+    // condition is the relic's, not the room's.
+    {
+        CombatState s = MakeState();
+        s.flags |= kCombatFlagEliteRoom;
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy);
+    }
+}
+
+// It stacks with the unconditional ten rather than replacing them, and it is
+// per SLOT like every other term in the derivation.
+TEST(RelicBossSpecial, SlaversCollarStacksWithAnUnconditionalEnergyRelic) {
+    CombatState s = MakeState();
+    s.flags |= kCombatFlagEliteRoom;
+    Relics r;
+    r.add(RelicId::SLAVERS_COLLAR);
+    r.add(RelicId::SOZU);
+    install(s, r);
+    EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 2);
+}
+
+// The COMPLETE list of relics whose onEquip does
+// `++AbstractDungeon.player.energy.energyMaster`, from `grep -rn energyMaster
+// com/`. Ten of them, each +1, each with a matching onUnequip `--`.
+TEST(RelicBossSpecial, TenBossRelicsEachAddOneToTheEnergyMaster) {
+    const RelicId plus_one[] = {
+        RelicId::FUSION_HAMMER,      RelicId::VELVET_CHOKER,
+        RelicId::RUNIC_DOME,         RelicId::CURSED_KEY,
+        RelicId::BUSTED_CROWN,       RelicId::ECTOPLASM,
+        RelicId::SOZU,               RelicId::PHILOSOPHERS_STONE,
+        RelicId::COFFEE_DRIPPER,     RelicId::MARK_OF_PAIN,
+    };
+    for (RelicId id : plus_one) {
+        CombatState s = MakeState();
+        give(s, id);
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 1)
+            << "relic " << static_cast<int>(id);
+        // ...and none of them touches the hand size. Snecko Eye writes the OTHER
+        // field (SneckoEye.java:29-32), and no relic writes both.
+        EXPECT_EQ(game_hand_size(s), kStartOfTurnDrawCount)
+            << "relic " << static_cast<int>(id);
+    }
+
+    CombatState none = MakeState();
+    EXPECT_EQ(energy_master(none), kIroncladBaseEnergy);
+
+    // Snecko Eye is the ledger's shorthand's odd one out: +2 hand, +0 energy.
+    CombatState snecko = MakeState();
+    give(snecko, RelicId::SNECKO_EYE);
+    EXPECT_EQ(energy_master(snecko), kIroncladBaseEnergy);
+    EXPECT_EQ(game_hand_size(snecko), kStartOfTurnDrawCount + 2);
+
+    // The Java increments per relic INSTANCE, and the increments compose.
+    CombatState both = MakeState();
+    Relics r;
+    r.add(RelicId::FUSION_HAMMER);
+    r.add(RelicId::SOZU);
+    r.add(RelicId::SNECKO_EYE);
+    install(both, r);
+    EXPECT_EQ(energy_master(both), kIroncladBaseEnergy + 2);
+    EXPECT_EQ(game_hand_size(both), kStartOfTurnDrawCount + 2);
+}
+
+// The master is what the recharge line SETS, on turn 1 and on every later turn
+// (AbstractRoom.java:240 / EnergyManager.java:20-23, :25-41).
+TEST(RelicBossSpecial, EnergyMasterIsWhatTheRechargeLineSets) {
+    CombatState s = MakeState();
+    give(s, RelicId::FUSION_HAMMER);
+    begin_first_turn(s, default_monster_turn);
+    EXPECT_EQ(s.player_energy, kIroncladBaseEnergy + 1) << "turn 1";
+
+    // A later turn goes through EnergyManager.recharge instead, and lands on the
+    // same number. Unspent energy is still LOST -- this is a SET.
+    s.player_energy = 0;
+    s.action_count = 0;
+    s.action_head = 0;
+    s.action_tail = 0;
+    s.turn_has_ended = 1;
+    s.monster_attacks_queued = 1;
+    (void)pump_step(s, default_monster_turn);
+    EXPECT_EQ(s.player_energy, kIroncladBaseEnergy + 1) << "turn N";
+}
+
+// TRAP: Ice Cream's branch is `EnergyPanel.addEnergy(this.energy)`
+// (EnergyManager.java:31) and `this.energy` is prep()'s copy of energyMaster --
+// so the carry is +4 per turn with Fusion Hammer, not +3.
+TEST(RelicBossSpecial, IceCreamCarriesTheMasterNotTheBaseEnergy) {
+    CombatState s = MakeState();
+    Relics r;
+    r.add(RelicId::FUSION_HAMMER);
+    r.add(RelicId::ICE_CREAM);
+    install(s, r);
+    s.player_energy = 0;
+    for (int turn = 0; turn < 3; ++turn) {
+        s.action_count = 0;
+        s.action_head = 0;
+        s.action_tail = 0;
+        s.turn_has_ended = 1;
+        s.monster_attacks_queued = 1;
+        (void)pump_step(s, default_monster_turn);
+    }
+    EXPECT_EQ(s.player_energy, 3 * (kIroncladBaseEnergy + 1));
+}
+
+// Snecko Eye's other half: gameHandSize is masterHandSize + 2, and BOTH draw
+// sites read it -- the opening hand (AbstractRoom.java:242) and every later turn
+// (GameActionManager.java:361).
+TEST(RelicBossSpecial, SneckoEyeDrawsTwoExtraCardsOnEveryTurnIncludingTheFirst) {
+    CombatState s = MakeState();
+    give(s, RelicId::SNECKO_EYE);
+    for (int i = 0; i < 12; ++i) {
+        put_in_draw(s, CardId::DEFEND);
+    }
+    begin_first_turn(s, default_monster_turn);
+    EXPECT_EQ(s.hand_count, kStartOfTurnDrawCount + 2) << "opening hand";
+
+    s.hand_count = 0;
+    s.action_count = 0;
+    s.action_head = 0;
+    s.action_tail = 0;
+    s.turn_has_ended = 1;
+    s.monster_attacks_queued = 1;
+    (void)pump_step(s, default_monster_turn);
+    ASSERT_GE(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::DRAW));
+    EXPECT_EQ(queued(s, 0).amount, kStartOfTurnDrawCount + 2) << "turn N";
+}
+
+// ============================================================================
 // Deliberate no-ops -- every one is pinned so implementing it fails HERE first.
 // ============================================================================
 
+// Warped Tongs LEFT this list when Opcode::UPGRADE_RANDOM_CARD landed; its
+// behaviour tests are below. Nothing in this tier is inert today, and the empty
+// case list is deliberate rather than a deletion: the next deferred SPECIAL or
+// BOSS body has a place to be pinned.
 TEST(RelicBossSpecial, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
     struct Case { RelicId id; RelicHook hook; };
     const Case cases[] = {
-        {RelicId::WARPED_TONGS, RelicHook::AT_TURN_START_POST_DRAW},
+        {RelicId::NONE, RelicHook::AT_TURN_START_POST_DRAW},
     };
     for (const Case& c : cases) {
+        if (c.id == RelicId::NONE) {
+            continue;  // placeholder row -- see the note above
+        }
         CombatState s = MakeState();
         put_in_hand(s, CardId::STRIKE);
         const RelicView rv = give(s, c.id);
@@ -682,6 +968,109 @@ TEST(RelicBossSpecial, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
         EXPECT_EQ(s.card_pool[s.hand[0]].upgrade, 0) << "and upgrades nothing";
         EXPECT_EQ(rv.relics[0].counter, -1) << "and mutates no counter";
     }
+}
+
+// UPGRADE_RANDOM_CARD through the public interpreter entry point --
+// op_upgrade_random_card itself lives in an internal header (interp_cards.hpp).
+void run_upgrade_random_card(CombatState& s) {
+    ActionQueueItem it{};
+    it.opcode = kOp(Opcode::UPGRADE_RANDOM_CARD);
+    it.src = kActorPlayer;
+    it.tgt = kActorPlayer;
+    execute_opcode(s, it);
+}
+
+// The stream contract, both branches. The shuffle sits INSIDE
+// `if (upgradeable.size() > 0)` (UpgradeRandomCardAction.java:40-45) and an empty
+// hand returns even earlier (:31-34), so a hand with nothing upgradeable costs
+// ZERO shuffleRng. Getting this wrong desynchronises every later shuffle.
+TEST(RelicBossSpecial, UpgradeRandomCardDrawsNothingWhenNothingIsEligible) {
+    // Empty hand.
+    {
+        CombatState s = MakeState();
+        s.shuffle_rng = from_seed(3);
+        const RngStream before = s.shuffle_rng;
+        run_upgrade_random_card(s);
+        EXPECT_EQ(s.shuffle_rng.counter, before.counter);
+    }
+    // A hand of already-upgraded cards: canUpgrade() is false for every one.
+    {
+        CombatState s = MakeState();
+        const CardPoolIndex pi = put_in_hand(s, CardId::STRIKE);
+        s.card_pool[pi].upgrade = 1;
+        s.shuffle_rng = from_seed(3);
+        const RngStream before = s.shuffle_rng;
+        run_upgrade_random_card(s);
+        EXPECT_EQ(s.shuffle_rng.counter, before.counter);
+        EXPECT_EQ(s.card_pool[pi].upgrade, 1) << "and upgrades nothing further";
+    }
+    // A hand of nothing but a STATUS card -- canUpgrade() rejects STATUS and
+    // CURSE outright (AbstractCard.java:672-680).
+    {
+        CombatState s = MakeState();
+        const CardPoolIndex pi = put_in_hand(s, CardId::SLIMED);
+        s.shuffle_rng = from_seed(3);
+        const RngStream before = s.shuffle_rng;
+        run_upgrade_random_card(s);
+        EXPECT_EQ(s.shuffle_rng.counter, before.counter);
+        EXPECT_EQ(s.card_pool[pi].upgrade, 0);
+    }
+}
+
+// The filter is canUpgrade(), not `upgrade == 0`: SearingBlow.canUpgrade
+// (SearingBlow.java:58-60) returns true unconditionally, so an ALREADY upgraded
+// Searing Blow is still eligible and still costs the shuffleRng draw.
+TEST(RelicBossSpecial, UpgradeRandomCardKeepsAnUpgradedSearingBlowEligible) {
+    CombatState s = MakeState();
+    const CardPoolIndex pi = put_in_hand(s, CardId::SEARING_BLOW);
+    s.card_pool[pi].upgrade = 3;
+    s.shuffle_rng = from_seed(3);
+    const RngStream before = s.shuffle_rng;
+    run_upgrade_random_card(s);
+    EXPECT_EQ(s.shuffle_rng.counter, before.counter + 1);
+    EXPECT_EQ(s.card_pool[pi].upgrade, 4);
+}
+
+// The eligible subset is built in HAND ORDER (CardGroup.addToTop is an append,
+// CardGroup.java:455-457) and only that subset is shuffled -- an ineligible card
+// sitting in the hand never occupies a slot in the draw. With exactly one
+// eligible card the shuffle is a no-op permutation but the draw is still spent.
+TEST(RelicBossSpecial, UpgradeRandomCardShufflesOnlyTheEligibleSubset) {
+    CombatState s = MakeState();
+    const CardPoolIndex status = put_in_hand(s, CardId::SLIMED);
+    const CardPoolIndex strike = put_in_hand(s, CardId::STRIKE);
+    const CardPoolIndex done = put_in_hand(s, CardId::DEFEND);
+    s.card_pool[done].upgrade = 1;
+    s.shuffle_rng = from_seed(7);
+    run_upgrade_random_card(s);
+    EXPECT_EQ(s.card_pool[strike].upgrade, 1) << "the only eligible card";
+    EXPECT_EQ(s.card_pool[status].upgrade, 0);
+    EXPECT_EQ(s.card_pool[done].upgrade, 1);
+    EXPECT_EQ(s.shuffle_rng.counter, 1);
+}
+
+// --- Warped Tongs ------------------------------------------------------------
+
+// WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:28-33) queues exactly one
+// UPGRADE_RANDOM_CARD and draws nothing itself -- the stream cost is the
+// OPCODE's, at resolve time.
+TEST(RelicBossSpecial, WarpedTongsQueuesTheUpgradeAndDrawsNothingAtHookTime) {
+    CombatState s = MakeState();
+    put_in_hand(s, CardId::STRIKE);
+    const RelicView rv = give(s, RelicId::WARPED_TONGS);
+    s.shuffle_rng = from_seed(3);
+    const RngStream before = s.shuffle_rng;
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, RelicHookContext{});
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::UPGRADE_RANDOM_CARD));
+    EXPECT_EQ(s.shuffle_rng.counter, before.counter)
+        << "the hook itself must not draw -- the action does, when it resolves";
+    EXPECT_EQ(rv.relics[0].counter, -1);
+    drain(s);
+    EXPECT_EQ(s.card_pool[s.hand[0]].upgrade, 1);
+    EXPECT_EQ(s.shuffle_rng.counter, before.counter + 1)
+        << "exactly one shuffleRng draw, spent at resolve";
 }
 
 // ============================================================================
@@ -1043,8 +1432,18 @@ TEST(RelicBossSpecial, CallingBellCurseIsEatenByAHeldOmamoriCharge) {
 }
 
 // The marker rows: no hook bindings at all, and no combat effect through ANY
-// hook. Their correctness is entirely their tier, their pool slot and (for the
-// boss tier) their relicRng draw.
+// hook.
+//
+// "Marker" does NOT mean "inert" for all of them, and the distinction is the
+// point of this test rather than a caveat on it. Ten of the boss rows here now
+// carry +1 energy, and Fusion Hammer / Coffee Dripper lock a campfire option --
+// but every one of those effects is a MARKER READ at its consumer (energy_master
+// in action_queue.cpp, build_rest_menu in rest_sites.cpp, gainGold for
+// Ectoplasm, the claim/purchase doors for Sozu), never a bound relic hook. What
+// this asserts is exactly that shape: a marker row's `hook_count` is 0 and
+// dispatching every hook at it moves nothing. Binding one of them to a hook
+// instead would fail here, and should -- the reader at the consumer is what
+// keeps acquisition free of side effects.
 TEST(RelicBossSpecial, MarkerRowsCarryNoCombatHooks) {
     const RelicId markers[] = {
         // Boss: energyMaster-only, run-layer, or observation-layer.
@@ -1075,11 +1474,12 @@ TEST(RelicBossSpecial, MarkerRowsCarryNoCombatHooks) {
     }
 }
 
-// Runic Dome is the batch's purest deliberate no-op: its entire non-energy
-// effect (hiding enemy intents) is an OBSERVATION concern that changes no
-// simulated outcome. Its row must still be exact, because it holds a boss pool
-// slot and therefore a relicRng position.
-TEST(RelicBossSpecial, RunicDomeOccupiesItsPoolSlotAndDoesNothingElse) {
+// Runic Dome's two effects live at opposite ends of the engine: +1 energy at the
+// recharge line (asserted above with the other nine) and hiding enemy intents in
+// the OBSERVATION encoder, which changes no simulated outcome. What is left to
+// assert here is the third thing -- that ACQUIRING it moves no RunState and no
+// miscRng, because it holds a boss pool slot and therefore a relicRng position.
+TEST(RelicBossSpecial, RunicDomeOccupiesItsPoolSlotAndChangesNoRunState) {
     const sts::registry::RelicDef* d = relic_def(RelicId::RUNIC_DOME);
     ASSERT_NE(d, nullptr);
     EXPECT_EQ(d->tier, sts::registry::RelicTier::BOSS);

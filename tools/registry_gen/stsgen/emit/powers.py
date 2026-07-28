@@ -35,6 +35,15 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
         # marked here must also have per-instance removal that names ONE slot
         # (interp.hpp's REDUCE_POWER/REMOVE_POWER instance key).
         instanced = bool(p.get("instanced", False))
+        # `priority:` -- AbstractPower.priority, defaulting to 5
+        # (AbstractPower.java:66). ApplyPowerAction.java:167 keeps the live
+        # power list sorted by it (AbstractPower.compareTo, :366-368), which
+        # op_apply_power reproduces, so every ctor override must be mirrored.
+        priority = p.get("priority", 5)
+        if isinstance(priority, bool) or not isinstance(priority, int) \
+                or not (0 <= priority <= 255):
+            raise fail(f"powers.yaml: power {p['name']} priority must be an "
+                       f"integer in 0..255, got {priority!r}")
 
         raw_hooks = p.get("hooks") or {}
         if not isinstance(raw_hooks, dict):
@@ -66,7 +75,8 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
         max_hooks = max(max_hooks, len(bindings))
         rows.append({"name": p["name"], "type": POWER_TYPES[ptype],
                      "stack": POWER_STACK[stack], "native": native,
-                     "instanced": instanced, "bindings": bindings})
+                     "instanced": instanced, "priority": priority,
+                     "bindings": bindings})
 
     out: list[str] = [BANNER, "#pragma once\n",
                       "#include <array>", "#include <cstdint>\n",
@@ -117,10 +127,21 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
     out.append("    uint8_t step_count;")
     out.append("    std::array<CardEffectStep, kMaxPowerHookSteps> steps;")
     out.append("};\n")
+    out.append("// AbstractPower.priority's default (AbstractPower.java:66); "
+               "the fallback for a")
+    out.append("// PowerId with no registry row.")
+    out.append("inline constexpr uint8_t kDefaultPowerPriority = 5;\n")
     out.append("struct PowerDef {")
     out.append("    PowerId id;")
     out.append("    PowerType type;")
     out.append("    PowerStack stack;")
+    out.append("    // AbstractPower.priority (AbstractPower.java:66, default 5). "
+               "The sort key of")
+    out.append("    // ApplyPowerAction.java:167's Collections.sort over the "
+               "target's power list")
+    out.append("    // (AbstractPower.compareTo, :366-368); consumed by "
+               "op_apply_power's re-sort.")
+    out.append("    uint8_t priority;")
     out.append("    bool native;")
     out.append("    // op_apply_power APPENDS a fresh slot for this power instead "
                "of merging")
@@ -159,6 +180,7 @@ def emit_power_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    PowerId::{r['name']}, PowerType::"
                    f"{next(k for k, v in POWER_TYPES.items() if v == r['type'])}, "
                    f"PowerStack::{stack_name.upper()}, "
+                   f"{r['priority']}, "
                    f"{'true' if r['native'] else 'false'}, "
                    f"{'true' if r['instanced'] else 'false'}, "
                    f"{len(r['bindings'])},")

@@ -42,6 +42,47 @@ void push_option(RestMenu& menu, RestOptionKind kind, bool usable,
     out.pad = 0;
 }
 
+// The canUseCampfireOption veto sweep (CampfireUI.initializeButtons,
+// CampfireUI.java:87-93): after the whole button list is built, every button is
+// offered to every relic in acquisition order, and the FIRST relic that refuses
+// clears that button's `usable`.
+//
+// Two things about the Java are easy to model wrongly, so they are named here:
+//
+//   * The relics' own `updateUsability(false)` calls (SmithOption.java:24-27,
+//     RestOption.java:43-48) are COSMETIC -- they swap the option's description
+//     and image and never touch `usable`. The disable is the `co.usable = false`
+//     at the call site, which is why this is a sweep over the built list rather
+//     than something the relic does to the option.
+//   * The tests are exact-class, not instanceof-plus-subclass: both relics write
+//     `option instanceof XOption && option.getClass().getName().equals(
+//     XOption.class.getName())` (FusionHammer.java:57-63, CoffeeDripper.java:
+//     57-63). With no subclasses in S1 that is the same set, but it is why a
+//     kind-equality test is the faithful translation rather than a category one.
+//
+// Fusion Hammer refuses SmithOption; Coffee Dripper refuses RestOption. Those
+// are the complete S1 set: `grep -rn canUseCampfireOption com/` finds overrides
+// only in these two relics and in AbstractRelic's `return true` base.
+bool campfire_option_vetoed(const RunState& rs, RestOptionKind kind) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        switch (static_cast<RelicId>(rs.relics[i].relic_id)) {
+            case RelicId::FUSION_HAMMER:
+                if (kind == RestOptionKind::SMITH) {
+                    return true;
+                }
+                break;
+            case RelicId::COFFEE_DRIPPER:
+                if (kind == RestOptionKind::REST) {
+                    return true;
+                }
+                break;
+            default:
+                break;
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 int rest_heal_amount(const RunState& rs) noexcept {
@@ -85,8 +126,6 @@ RestMenu build_rest_menu(const RunState& rs) noexcept {
     RestMenu menu{};
 
     // CampfireUI.initializeButtons starts with these two even when unusable.
-    // Fusion Hammer / Coffee Dripper option locks are intentionally not read
-    // here: their registered rows remain whole-effect deferrals.
     push_option(menu, RestOptionKind::REST, true);
     push_option(menu, RestOptionKind::SMITH, has_upgradeable_card(rs));
 
@@ -110,7 +149,36 @@ RestMenu build_rest_menu(const RunState& rs) noexcept {
                 break;
         }
     }
+
+    // The veto sweep runs LAST, over EVERY button including the relic-added
+    // ones (CampfireUI.java:87-93). No S1 relic refuses a LIFT/TOKE/DIG option,
+    // but sweeping the whole list rather than only the base two is the shape the
+    // Java has, and it is what keeps a future refusing relic correct.
+    //
+    // A veto only ever CLEARS `usable` -- it never sets it -- so an option that
+    // was already unusable for its own reason (no upgradeable card, Girya at 3)
+    // stays unusable and is not double-counted.
+    for (uint8_t i = 0; i < menu.count; ++i) {
+        if (menu.entries[i].usable &&
+            campfire_option_vetoed(
+                rs, static_cast<RestOptionKind>(menu.entries[i].kind))) {
+            menu.entries[i].usable = false;
+        }
+    }
+    // RecallOption (CampfireUI.java:94-96) is appended AFTER the sweep and is
+    // therefore never vetoed -- but it needs Settings.isFinalActAvailable and a
+    // missing Ruby Key, both Act-4 concerns with no S1 representation, so it is
+    // deliberately absent rather than modelled as always-off.
     return menu;
+}
+
+bool rest_menu_has_usable_option(const RestMenu& menu) noexcept {
+    for (uint8_t i = 0; i < menu.count; ++i) {
+        if (menu.entries[i].usable) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool rest_apply_heal(RunState& rs) noexcept {

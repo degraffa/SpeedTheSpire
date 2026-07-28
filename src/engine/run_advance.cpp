@@ -42,6 +42,7 @@
 #include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
 #include "sts/engine/shop.hpp"             // merchant stock / purchases / purge
 #include "relics/relic_pickup.hpp"         // gain_gold (the one run-layer gold door)
+#include "sts/registry/monster_table.hpp"  // monster_def / MonsterDef::is_boss (Smoke Bomb)
 #include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
 
@@ -98,7 +99,47 @@ void reseed_floor_streams(CombatState& s, int64_t seed, int32_t floor) noexcept 
 // GreedAction sees the kill, GreedAction.java:38), so settling at the fold is
 // the same total; a combat-only replay, which never folds, simply carries the
 // accumulator and leaves RunState alone.
+// How many Fairy in a Bottle potions the belt holds, in slot order over the
+// OCCUPIED slots (`potion_slots`, the A11-reduced count). `hasPotion` walks the
+// same list (AbstractPlayer.java:1484), and the consuming loop returns on the
+// FIRST match (:1486-1493), so leftmost-first is the observable order.
+[[nodiscard]] uint8_t count_belt_fairies(const RunState& rs) noexcept {
+    uint8_t n = 0;
+    const uint8_t slots =
+        rs.potion_slots < kPotionCap ? rs.potion_slots : kPotionCap;
+    for (uint8_t i = 0; i < slots; ++i) {
+        if (static_cast<PotionId>(rs.potions[i]) == PotionId::FAIRY_POTION) {
+            ++n;
+        }
+    }
+    return n;
+}
+
+// Burn the fairies the combat consumed. The combat mirror is a COUNT, not a slot
+// map, so the number spent is (what the belt still holds) - (what the mirror has
+// left); the slots are cleared LEFTMOST FIRST, which is the order
+// AbstractPlayer.damage's loop consumes them in. Exactly-once by construction:
+// this runs inside fold_back_combat, and the mirror is re-derived from the belt
+// at the next enter_combat rather than carried across.
+void burn_consumed_fairies(RunController& rc) noexcept {
+    const uint8_t held = count_belt_fairies(rc.run);
+    const uint8_t left = combat_fairy_armed(rc.combat.flags);
+    uint8_t to_burn = held > left ? static_cast<uint8_t>(held - left) : 0u;
+    const uint8_t slots =
+        rc.run.potion_slots < kPotionCap ? rc.run.potion_slots : kPotionCap;
+    for (uint8_t i = 0; i < slots && to_burn > 0; ++i) {
+        if (static_cast<PotionId>(rc.run.potions[i]) == PotionId::FAIRY_POTION) {
+            // topPanel.destroyPotion(slot) (AbstractPlayer.java:1491, and again
+            // inside FairyPotion.use:44 -- destroyPotion is idempotent
+            // (TopPanel.java:529-531), so this is ONE event, not two).
+            rc.run.potions[i] = static_cast<uint16_t>(PotionId::NONE);
+            --to_burn;
+        }
+    }
+}
+
 void fold_back_combat(RunController& rc) noexcept {
+    burn_consumed_fairies(rc);
     rc.run.hp = rc.combat.player_hp;
     rc.run.max_hp = rc.combat.player_max_hp;
     if (rc.combat.combat_gold > 0) {
@@ -154,9 +195,43 @@ bool combat_potion_legal(const RunController& rc, uint8_t slot,
     if (!potion_use_implemented(id)) {
         return false;
     }
-    if (id == PotionId::SMOKE_BOMB &&
-        rc.room_type == static_cast<uint8_t>(RoomType::Boss)) {
-        return false;  // SmokeBomb.canUse rejects bosses.
+    // SmokeBomb.canUse (SmokeBomb.java:50-63) asks the MONSTERS, never the room:
+    //
+    //     for (AbstractMonster m : getCurrRoom().monsters.monsters) {
+    //         if (m.hasPower("BackAttack")) return false;
+    //         if (m.type != AbstractMonster.EnemyType.BOSS) continue;
+    //         return false;
+    //     }
+    //
+    // This used to test `rc.room_type == RoomType::Boss` instead. The two agree
+    // in every state the S1 run layer can currently PRODUCE -- all three
+    // BOSS-typed rows (SLIME_BOSS, THE_GUARDIAN, HEXAGHOST) are Act-1 bosses and
+    // only ever appear in a Boss room, and a Boss room in S1 always holds one --
+    // so this changes no reachable outcome today. It is still the wrong test:
+    // RunState/CombatState are populated from real captures by the oracle
+    // translator, so an imported state can pair either half with the other, and
+    // the moment a BOSS-typed monster appears outside a boss room (an Act-2+
+    // encounter, or an event spawn) the room test silently offers an escape the
+    // game refuses. The exact test is available -- `enemy_type` is a live
+    // registry column with a MonsterDef::is_boss() accessor -- so it is used.
+    //
+    // NO LIVENESS GATE, deliberately: the Java walks `monsters.monsters`, the
+    // whole group, and a dead or escaped monster is still a member of it. That
+    // matters for the Slime Boss, which stays in the group after it splits.
+    // (The general "anything left to fight" test below is AbstractPotion.canUse's
+    // areMonstersBasicallyDead, a different clause.)
+    //
+    // BackAttack is an Act-3 power (Snecko / Spiker ambush) with no S1 registry
+    // row, so that first clause is constant-false here. Named rather than
+    // invented as state; whoever registers BackAttack owns adding it.
+    if (id == PotionId::SMOKE_BOMB) {
+        for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+            const auto* mdef = sts::registry::monster_def(
+                static_cast<MonsterId>(rc.combat.monsters[m].monster_id));
+            if (mdef != nullptr && mdef->is_boss()) {
+                return false;
+            }
+        }
     }
     // "Any monster left to use it on" is the in-the-fight predicate, matching
     // every other liveness read. (The WAITING_ON_USER gate above already makes
@@ -225,17 +300,43 @@ void use_fruit_juice(RunController& rc, uint8_t slot) noexcept {
 }
 
 void use_entropic_brew(RunController& rc, uint8_t slot) noexcept {
-    // EntropicBrew.use constructs potionSlots random-potion actions/effects
-    // before PotionPopUp destroys the Brew. All draws therefore happen even if
-    // only one resulting potion fits after the consumed slot opens.
+    // EntropicBrew.use (EntropicBrew.java:38-50), three branches:
+    //
+    //  IN COMBAT (:39-42): potionSlots x ObtainPotionAction(
+    //  returnRandomPotion(true)) -- limited=true, and the rolls are NOT gated
+    //  on Sozu; while Sozu is owned each obtain is then suppressed at resolve
+    //  (ObtainPotionAction.java:29-38 -- flash, no obtainPotion), so the
+    //  stream moves by the full limited sequence and the belt gains nothing.
+    //
+    //  OUT OF COMBAT with Sozu (:43-45): the check comes BEFORE any roll --
+    //  potionRng does not move at all and nothing is obtained.
+    //
+    //  OUT OF COMBAT otherwise (:46-48): potionSlots x ObtainPotionEffect(
+    //  returnRandomPotion()) -- the NO-ARG overload, i.e. limited=false
+    //  (AbstractDungeon.java:825-827). `limited` is RNG-visible, not
+    //  cosmetic: the limited spam-check loop always redraws at least once
+    //  and rejects Fruit Juice, so the two flags spend different draw counts.
+    //
+    // Every use() branch runs before PotionPopUp destroys the Brew, so the
+    // draws all happen even if only one resulting potion fits after the
+    // consumed slot opens.
+    const bool in_combat = rc.phase == static_cast<uint8_t>(RunPhase::COMBAT);
+    const bool sozu = run_has_relic(rc.run, RelicId::SOZU);
+    if (!in_combat && sozu) {
+        clear_potion_slot(rc.run, slot);
+        return;
+    }
     PotionId rolls[kPotionCap]{};
     const uint8_t count = rc.run.potion_slots < kPotionCap
                               ? rc.run.potion_slots
                               : static_cast<uint8_t>(kPotionCap);
     for (uint8_t i = 0; i < count; ++i) {
-        rolls[i] = return_random_potion(rc.run.potion_rng, true);
+        rolls[i] = return_random_potion(rc.run.potion_rng, /*limited=*/in_combat);
     }
     clear_potion_slot(rc.run, slot);
+    if (sozu) {
+        return;  // in combat: every ObtainPotionAction resolves as a flash only
+    }
     for (uint8_t i = 0; i < count; ++i) {
         for (uint8_t dst = 0; dst < count; ++dst) {
             if (rc.run.potions[dst] == static_cast<uint16_t>(PotionId::NONE)) {
@@ -420,13 +521,34 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
 // ROOM_UNIMPLEMENTED (unknown encounter / a member monster not yet implemented).
 // The five floor streams are re-derived here (identical to the caller's reseed) so
 // the build is a pure function of (run, floor, encounter).
+//
+// `elite_trigger` is AbstractRoom.eliteTrigger for an encounter whose ROOM KIND
+// does not imply it: the Act-1 Dead Adventurer sets it on an EventRoom
+// (DeadAdventurer.java:116). RoomType::Elite implies it on its own
+// (MonsterRoomElite.java:33); RoomType::Boss deliberately does NOT
+// (MonsterRoomBoss.java:22-24 never touches the field).
 bool enter_combat(RunController& rc, std::string_view enc_key,
                   RoomType room, bool preserve_floor_streams = false,
-                  EventCombatVariant variant = EventCombatVariant::NONE) noexcept {
+                  EventCombatVariant variant = EventCombatVariant::NONE,
+                  bool elite_trigger = false) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
 
     CombatState s{};                              // value-init: byte-clean scratch
+    // The room's eliteTrigger, set before ANY consumer runs: energy_master
+    // (Slaver's Collar) is read by begin_first_turn's recharge line at step (9),
+    // and Sling / Preserved Insect read the bit from atBattleStart at step (10).
+    if (room == RoomType::Elite || elite_trigger) {
+        s.flags |= kCombatFlagEliteRoom;
+    }
+    // Mirror the BELT's Fairy in a Bottle count into the combat. FairyPotion
+    // fires from AbstractPlayer.damage on ANY lethal HP write and the combat
+    // layer has no belt to consult -- see kCombatFlagFairyArmedShift
+    // (combat_state.hpp) for the full rationale, including why a post-hoc
+    // run-layer revive would be observably wrong. This is the ONLY producer: a
+    // bare combat_begin (advance.cpp) has no RunState and correctly leaves the
+    // count at 0, the same answer the game gives a player holding no potions.
+    s.flags = with_combat_fairy_armed(s.flags, count_belt_fairies(rc.run));
     if (preserve_floor_streams) {
         s.monster_hp_rng = rc.combat.monster_hp_rng;
         s.ai_rng = rc.combat.ai_rng;
@@ -556,6 +678,25 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     }
     s.relic_count = rc.run.relic_count;
 
+    // (8b) applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of
+    //      preBattlePrep (:1607) -- the same call combat_begin (advance.cpp)
+    //      makes, at the same point in the sequence. The slot is forced from
+    //      both sides: player_relics reads the mirror, so it must follow (8);
+    //      atPreBattle must precede the opening DrawCardAction, so it must
+    //      precede (9). Nothing is drained here -- what this queues sits at the
+    //      front of the queue begin_first_turn's own pump() drains.
+    //
+    //      This is the call that gives a RUN-layer combat its Snecko Eye
+    //      Confusion, and it is RNG-VISIBLE going forward: ConfusionPower
+    //      .onCardDraw (ConfusionPower.java:38-48) spends one cardRandomRng
+    //      random(3) per drawn card with cost >= 0, from the opening hand on.
+    //      That is the point of the hook -- the first hand is exactly what
+    //      atPreBattle exists to catch -- not a side effect to be avoided.
+    {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_at_pre_battle(s, rv.relics, rv.count);
+    }
+
     // (9) The game's turn-1 block, into WAITING_ON_USER. Literally the same
     //     function combat_begin (advance.cpp) calls, so the two combat-construction
     //     paths cannot disagree about how a combat starts; the derivation of why
@@ -616,9 +757,15 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     //      (AbstractPlayer.java:1903-1908) at AbstractRoom.java:241, genuinely
     //      before the draw. No dispatch is wired for it because no row in
     //      registry/relics.yaml binds it -- in the Java its only holders are
-    //      GamblingChip, HolyWater, NinjaScroll, PureWater and Toolbox, none of
-    //      which is registered. When one lands it needs its own call, ahead of the
-    //      pump's draw rather than here.
+    //      GamblingChip, HolyWater, NinjaScroll, PureWater and Toolbox.
+    //      GamblingChip IS a registered, live row, but it deliberately does not
+    //      bind this hook: its atBattleStartPreDraw only clears a private
+    //      `activated` latch (GamblingChip.java:30-32), and the engine carries
+    //      that latch in RelicSlot.counter, whose -1 unset default IS the
+    //      cleared state at every fresh CombatState -- binding a hook with no
+    //      dispatch site would be inert code (see the row's provenance). The
+    //      other four are unregistered. When a row genuinely needs the hook it
+    //      needs its own call, ahead of the pump's draw rather than here.
     {
         const RelicView rv = player_relics(s);
         dispatch_relics_at_battle_start(s, rv.relics, rv.count);
@@ -629,7 +776,9 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     pump(s, dispatch_monster_turn);
 
     // (11) initializeDeck's overflow draw when the innate/bottled placeOnTop
-    //      collection exceeds masterHandSize (CardGroup.java:951-954). It rides
+    //      collection exceeds masterHandSize (CardGroup.java:951-953) -- the
+    //      Snecko-enlarged field, derived here as game_hand_size(s), NOT the
+    //      constant 5 (see queue_innate_overflow_draw). It rides
     //      preTurnActions, which drain only after `actions` empties
     //      (GameActionManager.java:190-191) -- i.e. after the turn-1 block AND
     //      the atBattleStart bodies above, which is exactly this position. See
@@ -724,6 +873,24 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             }
             break;
         case RoomType::Rest:
+            // RestRoom.onPlayerEntry (RestRoom.java:33-42) fires every relic's
+            // onEnterRestRoom at :39-41 -- Ancient Tea Set's arming, and the
+            // only implementor in the game. It runs from getCurrRoom()
+            // .onPlayerEntry() at AbstractDungeon.java:1800, AFTER the
+            // onEnterRoom / justEnteredRoom fan-outs -- which is why Eternal
+            // Feather's heal (LIVE, riding dispatch_on_enter_room_relics at
+            // the top of this function) has already landed by this line, and
+            // lands whether or not the campfire below auto-completes.
+            //
+            // ONE recorded, unobservable order swap: the Java constructs
+            // CampfireUI (whose initializeButtons makes the no-usable-button
+            // auto-complete decision, :97-104) at RestRoom.java:38, BEFORE the
+            // onEnterRestRoom loop; here the arming runs before the menu
+            // check. Equivalent because the only onEnterRestRoom implementor
+            // writes a relic counter and no relic's arming reads or edits the
+            // button list -- pinned by
+            // RestSites.FeatherHealsAndTeaSetArmsEvenWhenTheCampfireAutoCompletes.
+            dispatch_relics_on_enter_rest_room(rc.run);
             rc.combat = CombatState{};
             reseed_floor_streams(rc.combat, seed, floor);
             rc.rewards = RewardScreen{};
@@ -731,6 +898,27 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             rc.rest = RestSiteState{};
             rc.rest.screen = static_cast<uint8_t>(RestScreen::MENU);
             rc.phase = static_cast<uint8_t>(RunPhase::REST_SITE);
+            // CampfireUI.initializeButtons ends by asking whether ANY button is
+            // usable, and when none is it sets waitTimer = 0 and the room's
+            // phase = COMPLETE (CampfireUI.java:97-104) -- the campfire resolves
+            // with no player decision at all. An empty menu is a ROOM here, not
+            // an error: Coffee Dripper with a fully-upgraded, unpurgeable deck
+            // reaches it (Rest vetoed, Smith unusable on its own terms), and so
+            // does Coffee Dripper together with Fusion Hammer. Without this the
+            // run would offer no legal action and a soak would report the floor
+            // as a no_legal_moves dead end.
+            //
+            // It is the LAST thing rest-room entry does, which is also where
+            // it belongs relative to entry hooks: the game builds CampfireUI
+            // from RestRoom.onPlayerEntry, after the relic onEnterRoom fan-out
+            // -- so Eternal Feather's heal (live, fired at the top of this
+            // function) and Ancient Tea Set's arming (fired above) have both
+            // landed before a skipped campfire resolves, exactly as in the
+            // game.
+            if (!rest_menu_has_usable_option(build_rest_menu(rc.run))) {
+                rc.rest = RestSiteState{};
+                rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+            }
             break;
         case RoomType::Treasure:
             rc.combat = CombatState{};
@@ -855,12 +1043,12 @@ void fill_run_result(const RunController& rc, StepResult& r) noexcept {
 }  // namespace
 
 bool enter_event_combat(RunController& rc, std::string_view encounter_key,
-                        EventCombatVariant variant) noexcept {
+                        EventCombatVariant variant, bool elite_trigger) noexcept {
     // AbstractEvent.enterCombat keeps the EventRoom object alive. Preserve the
     // constructor/buttonEffect draws already consumed from the five floor
     // streams, and retain RoomType::Event so leaving never pops monsterList.
     return enter_combat(rc, encounter_key, RoomType::Event,
-                        /*preserve_floor_streams=*/true, variant);
+                        /*preserve_floor_streams=*/true, variant, elite_trigger);
 }
 
 // --- next_room_transition ----------------------------------------------------
@@ -1544,7 +1732,27 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
     legal_actions(rc, mask);
     const uint8_t slot = action_arg0(a);
     if (slot < kPotionCap && mask.can_discard_potion[slot]) {
+        const bool was_fairy = static_cast<PotionId>(rc.run.potions[slot]) ==
+                               PotionId::FAIRY_POTION;
         clear_potion_slot(rc.run, slot);
+        // Keep the combat's armed-Fairy mirror in step with the belt. A Fairy
+        // is discardable IN COMBAT (canDiscard has no combat gate,
+        // AbstractPotion.java:398-400), and it is the only mid-combat belt
+        // mutation there is -- a Fairy can never be USED (canUse is false) and
+        // Entropic Brew, the only other slot writer, is out-of-combat-only. If
+        // the mirror were left alone, a thrown-away Fairy would still revive.
+        // DECREMENT, do not recompute from the belt: the mirror is
+        // (held - already consumed), and a discard lowers `held` by one without
+        // changing what was consumed. Recomputing would resurrect a fairy that
+        // had already fired this combat. Floored at 0 for the case where the
+        // discarded slot is one the revive had logically already spent (the
+        // slots are only cleared at fold-back).
+        if (was_fairy && rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            const uint8_t armed = combat_fairy_armed(rc.combat.flags);
+            rc.combat.flags = with_combat_fairy_armed(
+                rc.combat.flags,
+                armed > 0 ? static_cast<uint8_t>(armed - 1) : 0u);
+        }
     }
     // An illegal discard is a non-corrupting no-op, the same contract every
     // other run-layer verb keeps.

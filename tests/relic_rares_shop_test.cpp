@@ -10,6 +10,7 @@
 // captures is covered by relic_pools_test. What is here is the mechanics.
 
 #include <cstdint>
+#include <vector>
 
 #include "gtest/gtest.h"
 
@@ -20,6 +21,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/piles.hpp"         // shuffle_discard_into_draw (Abacus)
+#include "sts/engine/potions.hpp"       // use_potion (the Gambling Chip / Gambler's Brew twin)
 #include "sts/engine/power_hooks.hpp"
 #include "sts/engine/powers.hpp"
 #include "sts/engine/relic_hooks.hpp"
@@ -567,6 +569,107 @@ TEST(RelicRaresShop, ToriiThenTungstenRodStackInJavaOrder) {
     EXPECT_EQ(s.player_hp, 70);
 }
 
+// --- The Boot ---------------------------------------------------------------
+
+// Boot.onAttackToChangeDamage (Boot.java:30-38): a PLAYER-sourced hit whose
+// value is 1..4 becomes 5. 5 and above are untouched, and 0 is not raised.
+TEST(RelicRaresShop, BootRaisesSmallPlayerHitsToFive) {
+    const struct { int base; int expect_loss; } cases[] = {
+        {1, 5}, {2, 5}, {4, 5}, {5, 5}, {6, 6}, {30, 30},
+    };
+    for (const auto& c : cases) {
+        CombatState s = MakeState();
+        give(s, RelicId::BOOT);
+        op_damage(s, kActorPlayer, 0, c.base);
+        EXPECT_EQ(s.monsters[0].hp, 50 - c.expect_loss) << "base=" << c.base;
+    }
+}
+
+// THE PLACEMENT TEST. onAttackToChangeDamage runs AFTER decrementBlock at BOTH
+// call sites (AbstractMonster.java:639-643, AbstractPlayer.java:1399-1403), so
+// Boot reads the UNBLOCKED residue. A 7-damage hit into 5 block leaves 2, which
+// Boot raises to 5 -- 50 - 5 = 45. A pre-block site would have seen 7, which is
+// outside the 1..4 window, raised nothing, and dealt the bare 2 for 48. The two
+// answers differ, which is what makes the site observable rather than a matter
+// of taste.
+TEST(RelicRaresShop, BootReadsThePostBlockRemainder) {
+    CombatState s = MakeState();
+    give(s, RelicId::BOOT);
+    s.monsters[0].block = 5;
+    op_damage(s, kActorPlayer, 0, 7);
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[0].hp, 45) << "7 - 5 = 2, raised to 5";
+}
+
+// `damageAmount > 0` (Boot.java:32): a hit fully soaked by block is NOT raised.
+// This is the case option (b) of the pre-block reading would have broken.
+TEST(RelicRaresShop, BootDoesNotResurrectAFullyBlockedHit) {
+    CombatState s = MakeState();
+    give(s, RelicId::BOOT);
+    s.monsters[0].block = 3;
+    op_damage(s, kActorPlayer, 0, 3);
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[0].hp, 50) << "0 unblocked damage stays 0";
+}
+
+// The type guard (Boot.java:32) and the attacker gate (the enclosing
+// `if (info.owner == AbstractDungeon.player)`).
+TEST(RelicRaresShop, BootSkipsThornsHpLossAndMonsterSourcedHits) {
+    CombatState thorns = MakeState();
+    give(thorns, RelicId::BOOT);
+    op_damage(thorns, kActorPlayer, 0, 3, 1, DamageType::THORNS);
+    EXPECT_EQ(thorns.monsters[0].hp, 47);
+
+    CombatState loss = MakeState();
+    give(loss, RelicId::BOOT);
+    op_lose_hp(loss, kActorPlayer, 3);
+    EXPECT_EQ(loss.player_hp, 67);
+
+    // A MONSTER-sourced hit on the player is not the player attacking, so the
+    // relic never sees it.
+    CombatState incoming = MakeState();
+    give(incoming, RelicId::BOOT);
+    op_damage(incoming, 0, kActorPlayer, 3);
+    EXPECT_EQ(incoming.player_hp, 67);
+}
+
+// Boot composed with the victim's Buffer, and the case that discriminates the
+// insertion point a SECOND way. Block 3 against base 3 leaves 0 unblocked, so
+// Boot's `damageAmount > 0` fails and Buffer is handed a 0 -- which spends no
+// stack (apply_buffer only queues the ReducePowerAction for a positive amount).
+// Had Boot been placed BEFORE decrementBlock it would have raised the 3 to 5,
+// block would have soaked 3, and Buffer would have been handed 2 and spent a
+// stack. So the absence of the REDUCE_POWER is the observable.
+//
+// Stated honestly: Boot's order relative to Buffer ITSELF is NOT observable in
+// S1 -- Buffer zeroes the number either way and its stack is spent for any
+// positive input, so `Boot then Buffer` and `Buffer then Boot` agree on every
+// reachable input. The Java order (AbstractMonster.java:643 before :646) is
+// reproduced anyway because it is free; this test does not claim to prove it.
+TEST(RelicRaresShop, BootAndBufferComposeAndAFullyBlockedHitSpendsNoStack) {
+    CombatState s = MakeState();
+    give(s, RelicId::BOOT);
+    s.monsters[0].block = 3;
+    s.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::BUFFER);
+    s.monsters[0].powers[0].amount = 1;
+    s.monsters[0].power_count = 1;
+    op_damage(s, kActorPlayer, 0, 3);
+    EXPECT_EQ(s.monsters[0].hp, 50);
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.action_count, 0) << "Buffer was handed a 0, so no stack is spent";
+
+    // With no block the same hit IS raised, and the Buffer then eats the 5.
+    CombatState open = MakeState();
+    give(open, RelicId::BOOT);
+    open.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::BUFFER);
+    open.monsters[0].powers[0].amount = 1;
+    open.monsters[0].power_count = 1;
+    op_damage(open, kActorPlayer, 0, 3);
+    EXPECT_EQ(open.monsters[0].hp, 50);
+    ASSERT_EQ(open.action_count, 1);
+    EXPECT_EQ(queued(open, 0).opcode, kOp(Opcode::REDUCE_POWER));
+}
+
 // LizardTail (LizardTail.java:672-690 via AbstractPlayer.java:1487-1493): a
 // lethal hit leaves the player at maxHealth/2 instead of dead, once.
 TEST(RelicRaresShop, LizardTailRevivesOnceAtHalfMaxHp) {
@@ -578,6 +681,90 @@ TEST(RelicRaresShop, LizardTailRevivesOnceAtHalfMaxHp) {
 
     op_damage(s, 0, kActorPlayer, 999);
     EXPECT_EQ(s.player_hp, 0) << "a used-up Lizard Tail does not fire again";
+}
+
+// ============================================================================
+// Fairy in a Bottle -- the OTHER revive source at the same site
+// ============================================================================
+//
+// AbstractPlayer.damage (:1482-1497):
+//     if (!hasRelic("Mark of the Bloom")) {
+//         if (hasPotion("FairyPotion")) { ...consume ONE...; return; }
+//         else if (hasRelic("Lizard Tail") && counter == -1) { ...; return; }
+//     }
+// The combat layer has no belt, so the ARMED COUNT is mirrored into
+// CombatState.flags at combat entry (kCombatFlagFairyArmedShift).
+//
+// FairyPotion.use (FairyPotion.java:36-45) heals
+// (int)((float)maxHealth * potency/100f), floored UP to 1, onto an HP already
+// pinned at 0 -- so the result IS the heal, never hp + heal. potency is 30.
+
+TEST(RelicRaresShop, FairyInABottleRevivesAtThirtyPercentOfMaxHp) {
+    CombatState s = MakeState();
+    ASSERT_EQ(s.player_max_hp, 80);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 24) << "(int)(80 * 0.30f), not hp + 24";
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0) << "exactly one consumed";
+}
+
+// The Java loop `return`s on the first match, so ONE fairy is spent per lethal
+// event and a second survives for a later one.
+TEST(RelicRaresShop, FairyInABottleSpendsExactlyOnePerLethalEvent) {
+    CombatState s = MakeState();
+    s.flags = with_combat_fairy_armed(s.flags, 2);
+
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 24);
+    EXPECT_EQ(combat_fairy_armed(s.flags), 1) << "one left";
+
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 24) << "the second fairy fires too";
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0);
+
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 0) << "and then the player dies";
+}
+
+// The Lizard Tail arm is an `else if` on `hasPotion`, so while a Fairy is held
+// the relic is not even CONSULTED -- its counter must be untouched.
+TEST(RelicRaresShop, FairyInABottleBeatsLizardTailAndLeavesItArmed) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::LIZARD_TAIL, /*counter=*/-1);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+
+    op_damage(s, 0, kActorPlayer, 999);
+
+    EXPECT_EQ(s.player_hp, 24) << "the FAIRY's 30%, not the tail's 50%";
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the Lizard Tail is still armed";
+
+    // With the fairy gone, the tail takes the next lethal hit.
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 40) << "maxHealth/2";
+    EXPECT_EQ(rv.relics[0].counter, -2);
+}
+
+// The revive is a player heal on a COMBAT site, so Magic Flower's phase-gated
+// x1.5 applies exactly as it does to the Lizard Tail's: round(24 * 1.5) = 36.
+TEST(RelicRaresShop, MagicFlowerMultipliesTheFairyRevive) {
+    CombatState s = MakeState();
+    give(s, RelicId::MAGIC_FLOWER);
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+    op_damage(s, 0, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 36);
+}
+
+// It fires from the HP-LOSS path too, not only from an attack: the Java hook is
+// on AbstractPlayer.damage, which LoseHPAction also routes through
+// (LoseHPAction.java:41).
+TEST(RelicRaresShop, FairyInABottleAlsoFiresOnASelfInflictedHpLoss) {
+    CombatState s = MakeState();
+    s.flags = with_combat_fairy_armed(s.flags, 1);
+    op_lose_hp(s, kActorPlayer, 999);
+    EXPECT_EQ(s.player_hp, 24);
+    EXPECT_EQ(combat_fairy_armed(s.flags), 0);
 }
 
 // The revive is a player HEAL, so Magic Flower multiplies it
@@ -1227,19 +1414,14 @@ TEST(RelicRaresShop, NoShopRelicGatesItsOwnSpawn) {
 // first rather than changing behaviour nobody was watching.
 // ============================================================================
 
-// Dead Branch and Gambling Chip carry explicit EMPTY native bodies (the
-// all-red combat card pool and an optional multi-select screen respectively).
-// Sling of Courage is empty for want of an elite-room marker on CombatState;
-// Orange Pellets for want of a remove-all-debuffs action.
+// THIS LIST IS NOW EMPTY. Dead Branch, Sling of Courage and Orange Pellets left
+// it in the relic-tail stage; Gambling Chip left it here, when the optional
+// multi-select screen its deferral named as the blocker turned out to have
+// already landed. The scaffold is kept rather than deleted so the next deferred
+// native body has a home to go into.
 TEST(RelicRaresShop, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
     struct Case { RelicId id; RelicHook hook; };
-    const Case cases[] = {
-        {RelicId::DEAD_BRANCH, RelicHook::ON_EXHAUST},
-        {RelicId::GAMBLING_CHIP, RelicHook::AT_TURN_START_POST_DRAW},
-        {RelicId::SLING_OF_COURAGE, RelicHook::AT_BATTLE_START},
-        {RelicId::ORANGE_PELLETS, RelicHook::AT_TURN_START},
-        {RelicId::ORANGE_PELLETS, RelicHook::ON_USE_CARD},
-    };
+    const std::vector<Case> cases{};
     for (const Case& c : cases) {
         CombatState s = MakeState();
         const RelicView rv = give(s, c.id);
@@ -1254,6 +1436,344 @@ TEST(RelicRaresShop, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
         EXPECT_EQ(s.card_random_rng.counter, before.counter);
         EXPECT_EQ(rv.relics[0].counter, -1) << "and mutates no counter";
     }
+    EXPECT_TRUE(cases.empty()) << "no relic native body is deferred any more";
+}
+
+// ============================================================================
+// Gambling Chip -- ONCE per combat, and the same action Gambler's Brew queues
+// ============================================================================
+//
+// GamblingChip.java in full (48 lines): a private `activated` field (:18)
+// cleared by atBattleStartPreDraw (:30-32), and
+//
+//   public void atTurnStartPostDraw() {                              (:34-42)
+//       if (!this.activated) {
+//           this.activated = true;
+//           this.flash();
+//           this.addToBot(new RelicAboveCreatureAction(player, this));
+//           this.addToBot(new GamblingChipAction(AbstractDungeon.player));
+//       }
+//   }
+
+TEST(RelicRaresShop, GamblingChipQueuesTheOptionalDiscardScreenOnceOnly) {
+    CombatState s = MakeState();
+    put_in_hand(s, CardId::STRIKE);
+    put_in_hand(s, CardId::DEFEND);
+    const RelicView rv = give(s, RelicId::GAMBLING_CHIP);
+    ASSERT_EQ(rv.relics[0].counter, -1) << "-1 unset == not activated";
+    s.card_random_rng = from_seed(3);
+    const RngStream before = s.card_random_rng;
+    RelicHookContext ctx{};
+
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(it.flags),
+              ChoiceKind::HAND_TO_DISCARD_THEN_DRAW);
+    EXPECT_TRUE(choose_is_optional(it.flags));
+    EXPECT_EQ(it.amount, 99);
+    EXPECT_EQ(s.card_random_rng.counter, before.counter)
+        << "the relic itself spends no rng";
+    EXPECT_NE(rv.relics[0].counter, -1) << "activated = true";
+
+    // Every LATER turn start finds the latch set and does nothing. That is the
+    // fact the relic is entirely made of, and the one a per-turn reading loses.
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    EXPECT_EQ(s.action_count, 1) << "once per combat, not once per turn";
+}
+
+// The relic has NO empty-hand guard -- that guard is Gambler's Brew's, on the
+// potion (GamblersBrew.java:38). GamblingChipAction opens its screen regardless,
+// and an empty hand is simply "nothing to show", so the pump does not block.
+TEST(RelicRaresShop, GamblingChipQueuesEvenOnAnEmptyHandAndThenBlocksOnNothing) {
+    CombatState s = MakeState();
+    ASSERT_EQ(s.hand_count, 0);
+    const RelicView rv = give(s, RelicId::GAMBLING_CHIP);
+    RelicHookContext ctx{};
+
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+
+    ASSERT_EQ(s.action_count, 1) << "no guard on the relic side";
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_FALSE(choice_requires_user(s, it)) << "an empty hand shows nothing";
+    drain(s);
+    EXPECT_EQ(s.hand_count, 0);
+    EXPECT_EQ(s.discard_count, 0);
+}
+
+// The relic and the potion queue the IDENTICAL item: GamblingChipAction is ONE
+// action and `notChip` selects only a prompt string
+// (GamblingChipAction.java:42-46). If these two ever diverge, the shared builder
+// has been forked -- which is exactly how the same discard-then-draw-back logic
+// would end up written twice.
+TEST(RelicRaresShop, GamblingChipAndGamblersBrewQueueTheSameItem) {
+    CombatState relic_state = MakeState();
+    put_in_hand(relic_state, CardId::STRIKE);
+    const RelicView rv = give(relic_state, RelicId::GAMBLING_CHIP);
+    RelicHookContext ctx{};
+    dispatch_relic_hook(relic_state, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    ASSERT_EQ(relic_state.action_count, 1);
+    const ActionQueueItem from_relic = queued(relic_state, 0);
+
+    CombatState potion_state = MakeState();
+    put_in_hand(potion_state, CardId::STRIKE);
+    ASSERT_TRUE(use_potion(potion_state, PotionId::GAMBLERS_BREW, 0));
+    ASSERT_EQ(potion_state.action_count, 1);
+    const ActionQueueItem from_potion =
+        potion_state.action_queue[potion_state.action_head];
+
+    EXPECT_EQ(from_relic.opcode, from_potion.opcode);
+    EXPECT_EQ(from_relic.src, from_potion.src);
+    EXPECT_EQ(from_relic.tgt, from_potion.tgt);
+    EXPECT_EQ(from_relic.amount, from_potion.amount);
+    EXPECT_EQ(from_relic.flags, from_potion.flags);
+}
+
+// Sling of Courage: Strength 2 at battle start, ELITE ROOMS ONLY
+// (Sling.java:30-37). The marker is kCombatFlagEliteRoom; a boss room does NOT
+// set it (MonsterRoomBoss.java:22-24), which is the whole reason this relic and
+// Slaver's Collar are not twins.
+TEST(RelicRaresShop, SlingOfCourageGrantsStrengthOnlyInAnEliteRoom) {
+    {
+        CombatState s = MakeState();
+        s.flags |= kCombatFlagEliteRoom;
+        const RelicView rv = give(s, RelicId::SLING_OF_COURAGE);
+        RelicHookContext ctx{};
+        dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::AT_BATTLE_START,
+                            ctx);
+        ASSERT_EQ(s.action_count, 1);
+        const ActionQueueItem it = queued(s, 0);
+        EXPECT_EQ(it.opcode, kOp(Opcode::APPLY_POWER));
+        EXPECT_EQ(it.src, kActorPlayer);
+        EXPECT_EQ(it.tgt, kActorPlayer);
+        EXPECT_EQ(it.amount, 2);
+        EXPECT_EQ(it.flags, make_apply_power_flags(PowerId::STRENGTH));
+        drain(s);
+        ASSERT_EQ(s.player_power_count, 1);
+        EXPECT_EQ(s.player_powers[0].power_id,
+                  static_cast<uint16_t>(PowerId::STRENGTH));
+        EXPECT_EQ(s.player_powers[0].amount, 2);
+        // The counter is never touched (Sling.counter stays AbstractRelic's -1).
+        EXPECT_EQ(rv.relics[0].counter, -1);
+    }
+    {
+        // A non-elite combat -- which is also what a BOSS room looks like to the
+        // flag -- queues nothing at all.
+        CombatState s = MakeState();
+        const RelicView rv = give(s, RelicId::SLING_OF_COURAGE);
+        RelicHookContext ctx{};
+        dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::AT_BATTLE_START,
+                            ctx);
+        EXPECT_EQ(s.action_count, 0);
+        EXPECT_EQ(s.player_power_count, 0);
+    }
+}
+
+// --- Dead Branch -------------------------------------------------------------
+
+// DeadBranch.onExhaust (DeadBranch.java:24-31): while any monster is still in
+// the fight, put a copy of a truly-random combat-pool card into hand. The
+// cardRandomRng pick is spent AT QUEUE TIME -- returnTrulyRandomCardInCombat()
+// is an argument of the MakeTempCardInHandAction constructor.
+TEST(RelicRaresShop, DeadBranchDrawsAtQueueTimeAndMakesACardInHand) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::DEAD_BRANCH);
+    s.card_random_rng = from_seed(11);
+    const RngStream before = s.card_random_rng;
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::STRIKE);
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_EXHAUST, ctx);
+
+    EXPECT_EQ(s.card_random_rng.counter, before.counter + 1)
+        << "exactly one cardRandomRng draw, spent while the HOOK runs";
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::MAKE_CARD));
+    EXPECT_EQ(it.src, static_cast<uint8_t>(CardPile::HAND));
+    EXPECT_EQ(it.amount, 1);
+    EXPECT_FALSE(make_card_upgraded_from_flags(it.flags))
+        << "MakeTempCardInHandAction(..., false) -- a base library copy";
+
+    // The chosen id is a member of the HEALING-filtered combat pool -- the same
+    // 70-row list Discovery draws from, not the ATTACK-only pool.
+    const CardId chosen = static_cast<CardId>(make_card_id_from_flags(it.flags));
+    bool in_pool = false;
+    for (unsigned i = 0; i < static_cast<unsigned>(kIroncladCombatPoolCount); ++i) {
+        in_pool = in_pool || kIroncladCombatPool[i] == chosen;
+    }
+    EXPECT_TRUE(in_pool);
+
+    drain(s);
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+              static_cast<uint16_t>(chosen));
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the counter is never touched";
+}
+
+// areMonstersBasicallyDead (MonsterGroup.java:90-95) gates it: an exhaust after
+// the fight is over draws NOTHING, which is the point of testing the stream
+// rather than just the queue.
+TEST(RelicRaresShop, DeadBranchDrawsNothingWhenTheFightIsOver) {
+    CombatState s = MakeState(/*monster_count=*/2);
+    s.monsters[0].hp = 0;
+    s.monsters[1].hp = 0;
+    const RelicView rv = give(s, RelicId::DEAD_BRANCH);
+    s.card_random_rng = from_seed(11);
+    const RngStream before = s.card_random_rng;
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::STRIKE);
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_EXHAUST, ctx);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_random_rng.counter, before.counter);
+
+    // An ESCAPED monster counts as out of the fight too (isEscaping), so a lone
+    // escapee is the same answer.
+    CombatState e = MakeState();
+    e.monsters[0].flags |= kMonsterFlagEscaped;
+    const RelicView erv = give(e, RelicId::DEAD_BRANCH);
+    e.card_random_rng = from_seed(11);
+    dispatch_relic_hook(e, erv.relics, erv.count, RelicHook::ON_EXHAUST, ctx);
+    EXPECT_EQ(e.action_count, 0);
+    EXPECT_EQ(e.card_random_rng.counter, 0);
+}
+
+// --- Orange Pellets ----------------------------------------------------------
+
+namespace {
+
+void add_player_power(CombatState& s, PowerId id, int16_t amount) {
+    s.player_powers[s.player_power_count].power_id = static_cast<uint16_t>(id);
+    s.player_powers[s.player_power_count].amount = amount;
+    ++s.player_power_count;
+}
+
+void play(CombatState& s, const RelicView& rv, CardId id) {
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(id);
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+}
+
+}  // namespace
+
+// OrangePellets.onUseCard (OrangePellets.java:41-58): the three type latches
+// arm independently and the removal fires only once all three are set. Bash is
+// an ATTACK, Defend a SKILL, Inflame a POWER.
+TEST(RelicRaresShop, OrangePelletsFiresOnlyOnceAllThreeTypesArePlayed) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    play(s, rv, CardId::BASH);
+    EXPECT_EQ(s.action_count, 0);
+    play(s, rv, CardId::DEFEND);
+    EXPECT_EQ(s.action_count, 0);
+    play(s, rv, CardId::BASH) ;  // a repeat of an armed type changes nothing
+    EXPECT_EQ(s.action_count, 0);
+    play(s, rv, CardId::INFLAME);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::REMOVE_DEBUFFS));
+    EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the counter is never touched";
+    // Cleared ON FIRE, so it is re-armable inside the same turn.
+    EXPECT_EQ(s.flags & kCombatFlagOrangePelletsMask, 0u);
+}
+
+// It can fire MORE THAN ONCE PER TURN -- the latches are cleared when it fires,
+// not at turn end (OrangePellets.java:56-58).
+TEST(RelicRaresShop, OrangePelletsReArmsWithinTheSameTurn) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    for (int round = 0; round < 2; ++round) {
+        play(s, rv, CardId::BASH);
+        play(s, rv, CardId::DEFEND);
+        play(s, rv, CardId::INFLAME);
+    }
+    EXPECT_EQ(s.action_count, 2) << "fired twice in one turn";
+}
+
+// atTurnStart (OrangePellets.java:34-39) is the ONLY clear. atPreBattle does not
+// touch the latches; a value-initialised CombatState stands in for that only
+// because turn 1's atTurnStart precedes any card play.
+TEST(RelicRaresShop, OrangePelletsLatchesAreClearedAtTurnStart) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    ASSERT_NE(s.flags & kCombatFlagOrangePelletsMask, 0u);
+    dispatch_relics_at_turn_start(s, rv.relics, rv.count);
+    EXPECT_EQ(s.flags & kCombatFlagOrangePelletsMask, 0u);
+    EXPECT_EQ(s.action_count, 0);
+    // The POWER alone no longer completes the set.
+    play(s, rv, CardId::INFLAME);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// REMOVE_DEBUFFS enumerates at RESOLVE time and removes every DEBUFF-typed
+// power, leaving the buffs. The predicate is the LIVE-INSTANCE type, so a
+// NEGATIVE Strength stack is a debuff and IS removed while a positive one is not
+// (StrengthPower.java:81-89).
+TEST(RelicRaresShop, RemoveDebuffsStripsDebuffsIncludingNegativeStrength) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    add_player_power(s, PowerId::VULNERABLE, 2);
+    add_player_power(s, PowerId::STRENGTH, -3);
+    add_player_power(s, PowerId::THORNS, 3);
+    add_player_power(s, PowerId::WEAK, 1);
+    add_player_power(s, PowerId::FRAIL, 2);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    play(s, rv, CardId::INFLAME);
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::WEAK), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::FRAIL), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
+        << "a negative Strength stack is DEBUFF-typed and goes";
+    const PowerSlot* thorns = player_power(s, PowerId::THORNS);
+    ASSERT_NE(thorns, nullptr) << "buffs stay";
+    EXPECT_EQ(thorns->amount, 3);
+}
+
+// ...and a POSITIVE Strength is a BUFF and survives -- the other half of the
+// same two-term predicate.
+TEST(RelicRaresShop, RemoveDebuffsKeepsAPositiveStrengthStack) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    add_player_power(s, PowerId::STRENGTH, 3);
+    add_player_power(s, PowerId::VULNERABLE, 2);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    play(s, rv, CardId::INFLAME);
+    drain(s);
+    const PowerSlot* str = player_power(s, PowerId::STRENGTH);
+    ASSERT_NE(str, nullptr);
+    EXPECT_EQ(str->amount, 3);
+    EXPECT_EQ(player_power(s, PowerId::VULNERABLE), nullptr);
+}
+
+// The enumeration happens when the ACTION resolves, not when it is queued --
+// which is exactly why this needed its own opcode. A debuff applied AFTER the
+// queue but BEFORE the resolve is still removed.
+TEST(RelicRaresShop, RemoveDebuffsEnumeratesAtResolveTimeNotQueueTime) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    add_player_power(s, PowerId::VULNERABLE, 2);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    play(s, rv, CardId::INFLAME);
+    ASSERT_EQ(s.action_count, 1);
+    // ... a Weak lands between the queue and the drain.
+    add_player_power(s, PowerId::WEAK, 1);
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::WEAK), nullptr)
+        << "a queue-time expansion would have missed this one";
 }
 
 // Prismatic Shard, Frozen Eye, Toolbox, Unceasing Top and the four shop

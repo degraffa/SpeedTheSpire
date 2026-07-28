@@ -9,7 +9,8 @@
 #include <cstdint>
 
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
-#include "sts/engine/cards.hpp"         // card_def, CardType (POWER guard)
+#include "sts/engine/cards.hpp"         // card_def, CardType (POWER guard) + kIroncladCombatPool
+#include "sts/engine/rng_stream.hpp"    // random (Dead Branch's cardRandomRng pick)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags, make_damage_flags
 #include "sts/engine/run_state.hpp"     // RelicSlot
@@ -243,35 +244,108 @@ void relic_native_stone_calendar(CombatState& s, RelicHook hook, RelicSlot& slot
 // the function out. It is an explicit empty body carrying the reason and the
 // citation, right where the implementation goes.
 
-void relic_native_dead_branch(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_dead_branch(CombatState& s, RelicHook hook,
                               RelicSlot& /*slot*/,
                               const RelicHookContext& /*ctx*/) noexcept {
-    // DeadBranch.onExhaust (DeadBranch.java:259-266): while any monster is still
-    // alive, addToBot MakeTempCardInHandAction(returnTrulyRandomCardInCombat()
-    // .makeCopy(), false).
+    // DeadBranch.onExhaust (DeadBranch.java:24-31 -- the file is 43 lines; the
+    // row and ledger row 72 cited :259-266):
+    //     if (!getMonsters().areMonstersBasicallyDead()) {
+    //         flash();
+    //         addToBot(RelicAboveCreatureAction);                  -- cosmetic
+    //         addToBot(new MakeTempCardInHandAction(
+    //             AbstractDungeon.returnTrulyRandomCardInCombat().makeCopy(), false));
+    //     }
     //
-    // DEFERRED, and RNG-VISIBLE when it lands: the UNFILTERED
-    // AbstractDungeon.returnTrulyRandomCardInCombat() (AbstractDungeon.java:
-    // 964-979) draws one cardRandomRng pick over the whole colour pool --
-    // commons, uncommons AND rares -- not the ATTACK-only pool the
-    // RANDOM_ATTACK_TO_HAND opcode already carries. Implementing it needs a
-    // second generated combat pool over registry/cards.yaml, and getting the
-    // pool membership wrong moves every later cardRandomRng draw.
+    // THE DRAW HAPPENS AT QUEUE TIME, and that is the point rather than an
+    // implementation detail: returnTrulyRandomCardInCombat() is an ARGUMENT of
+    // the MakeTempCardInHandAction constructor, so the cardRandomRng pick is
+    // spent WHILE THIS HOOK RUNS -- inside the exhaust fan-out -- and only the
+    // card creation is deferred to the queue. Rolling it at resolve time instead
+    // would move the stream the moment anything else queued between the two
+    // consumes cardRandomRng. Magnetism's atStartOfTurn is the same shape and the
+    // same argument (power_magnetism.cpp).
+    //
+    // THE POOL ALREADY EXISTED. returnTrulyRandomCardInCombat()
+    // (AbstractDungeon.java:938-962) concatenates srcCommon + srcUncommon +
+    // srcRare EXCLUDING CardTags.HEALING and takes
+    // `list.get(cardRandomRng.random(list.size() - 1))` -- one draw. That is
+    // exactly kIroncladCombatPool (70 rows, generated), the pool Discovery
+    // already consumes. The deferral note claimed the draw was UNFILTERED and so
+    // needed a second generated pool; it is HEALING-filtered, and it does not.
+    // (The genuinely-new pool is Pandora's Box's returnTrulyRandomCard(), which
+    // does NOT exclude HEALING -- 72 rows, still unbuilt.)
+    //
+    // areMonstersBasicallyDead (MonsterGroup.java:90-95) is `isDying ||
+    // isEscaping` per monster, which is monster_dead_or_escaped here -- the same
+    // gate Dark Embrace and Magnetism use, spelled inline for the same reason.
+    if (hook != RelicHook::ON_EXHAUST) {
+        return;
+    }
+    bool any_live = false;
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        any_live = any_live || !monster_dead_or_escaped(s.monsters[i]);
+    }
+    if (!any_live) {
+        return;
+    }
+    const int32_t pick =
+        random(s.card_random_rng,
+               static_cast<int32_t>(kIroncladCombatPoolCount) - 1);
+    const CardId id = kIroncladCombatPool[static_cast<unsigned>(pick)];
+    ActionQueueItem make{};
+    make.opcode = static_cast<uint16_t>(Opcode::MAKE_CARD);
+    make.src = static_cast<uint8_t>(CardPile::HAND);
+    make.tgt = kActorPlayer;
+    make.amount = 1;
+    make.flags = make_make_card_flags(static_cast<uint16_t>(id));
+    add_to_bottom(s, make);  // addToBot (DeadBranch.java:29)
 }
 
-void relic_native_gambling_chip(CombatState& /*s*/, RelicHook /*hook*/,
-                                RelicSlot& /*slot*/,
+void relic_native_gambling_chip(CombatState& s, RelicHook hook,
+                                RelicSlot& slot,
                                 const RelicHookContext& /*ctx*/) noexcept {
-    // GamblingChip.atTurnStartPostDraw (GamblingChip.java:445-453): the first
-    // turn-start of a combat queues GamblingChipAction(player), which opens a
-    // hand-select screen, discards ZERO-to-all chosen cards, and then draws
-    // exactly as many as were discarded.
+    // GamblingChip.java, read in full -- the file is 48 lines, not the 426-453
+    // range the deferral note cited:
     //
-    // DEFERRED: every existing ChoiceKind selects a MANDATORY fixed count, so the
-    // engine has no optional multi-select with an explicit confirm. Adding one
-    // changes the public ActionMask surface in advance.hpp -- the shape the
-    // observation and translator layers join on -- which is a bigger, shared
-    // change than a relic body.
+    //   private boolean activated = false;                             (:18)
+    //   public void atBattleStartPreDraw() { this.activated = false; } (:30-32)
+    //   public void atTurnStartPostDraw() {                            (:34-42)
+    //       if (!this.activated) {
+    //           this.activated = true;
+    //           this.flash();
+    //           this.addToBot(new RelicAboveCreatureAction(player, this));
+    //           this.addToBot(new GamblingChipAction(AbstractDungeon.player));
+    //       }
+    //   }
+    //
+    // ONCE PER COMBAT, NOT EVERY TURN. atTurnStartPostDraw fires every turn but
+    // the `activated` latch lets the body run only on the first. `slot.counter`
+    // carries the latch: the registry row leaves it at the -1 unset default,
+    // which IS "not yet activated", and a fresh CombatState starts there -- so
+    // no combat-scoped reset is needed at this hook, and binding
+    // atBattleStartPreDraw (the Java's reset) would be inert code, since the
+    // engine has no dispatch site for it.
+    //
+    // The queued action is the SAME GamblingChipAction Gambler's Brew queues,
+    // one presentation-only boolean apart (notChip false here, true there,
+    // selecting only the prompt string, GamblingChipAction.java:42-46), so this
+    // calls the shared builder rather than hand-writing a second item. The draw
+    // count is `selectedCards.size()` read AT CONFIRM -- there is no
+    // relic-side count.
+    //
+    // RelicAboveCreatureAction (:39) is pure presentation and is not modeled.
+    //
+    // This body was deferred on the grounds that "every existing ChoiceKind
+    // selects a MANDATORY fixed count, so the engine has no optional
+    // multi-select with an explicit confirm". That prerequisite ARRIVED --
+    // kChoiceOptionalBit, ActionVerb::CONFIRM and the runtime selected-count
+    // nibble are live -- which is exactly the conventions §8 signal that a
+    // comment justifying inert code by a missing prerequisite has gone stale.
+    if (hook != RelicHook::AT_TURN_START_POST_DRAW || slot.counter != -1) {
+        return;
+    }
+    slot.counter = 1;               // this.activated = true (:36)
+    queue_gambling_chip_choice(s);  // addToBot (:40)
 }
 
 }  // namespace sts::engine

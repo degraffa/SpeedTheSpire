@@ -9,9 +9,13 @@
 // per-opcode direct checks plus a pump() wiring regression proving the pop step
 // applies effects.
 //
-// Power-list order convention used throughout: on an attacker carrying both,
-// Strength is stored at index 0 and Weak at index 1, so atDamageGive applies
-// Strength (+amount) THEN Weak (*0.75) -- order matters and is fixed here.
+// Power-list order used throughout: on an attacker carrying both, Strength is
+// stored at index 0 and Weak at index 1, so atDamageGive applies Strength
+// (+amount) THEN Weak (*0.75). That is not a local convention: it is the order
+// the game maintains -- ApplyPowerAction.java:167 re-sorts the power list by
+// AbstractPower.priority on every new application (Strength 5, Weak 99), and
+// op_apply_power reproduces it. The ApplyPowerSort tests below pin the sort
+// itself; the hand-built tables here seed slots directly in that game order.
 
 #include <cstdint>
 #include <cstring>
@@ -387,6 +391,197 @@ TEST(PaperPhrog, VulnerablePlayerStillTakes150) {
     add_power(s.player_powers, s.player_power_count, PowerId::VULNERABLE, 1);
     give_paper_phrog(s);
     EXPECT_EQ(compute_damage(s, /*src=*/0, kActorPlayer, 6), 9);
+}
+
+// --- ApplyPowerAction's power-list sort (ApplyPowerAction.java:167) ----------
+// Every NEW power landed through ApplyPowerAction re-sorts the WHOLE list:
+// `Collections.sort(this.target.powers)` in the !hasBuffAlready branch
+// (ApplyPowerAction.java:165-167). The comparator is AbstractPower.compareTo
+// (AbstractPower.java:366-368), `this.priority - other.priority`, with the
+// field defaulting to 5 (AbstractPower.java:66); Collections.sort is a stable
+// merge sort (TimSort), so the live list is priority-major with insertion
+// order preserved inside a priority class. The stacking branch (:140-161)
+// never re-sorts, and the synchronous AbstractCreature.addPower (:506-527)
+// never sorts at all. compute_damage walks slot order, so the sort decides
+// Strength-vs-Weak arithmetic: Weak is priority 99 (WeakPower.java:40) and
+// therefore ALWAYS multiplies after every default-priority add.
+
+void apply_via_action(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
+                      int32_t amount, uint16_t counter = 0) {
+    uint32_t flags = make_apply_power_flags(id);
+    flags |= static_cast<uint32_t>(counter) << kApplyPowerCounterShift;
+    execute_opcode(s, op(Opcode::APPLY_POWER, src, tgt, amount, flags));
+}
+
+uint16_t pid(PowerId id) { return static_cast<uint16_t>(id); }
+
+TEST(ApplyPowerSort, WeakThenStrengthComputesTheGameAnswer) {
+    // The Blue Slaver opener: Rake's Weak lands turn 1, the player then plays
+    // Flex/Inflame. The game's list is [Strength(5), Weak(99)] regardless of
+    // application order, so atDamageGive computes (base + S) * 0.75, never
+    // (base * 0.75) + S. Base 6, Str 3: (6 + 3) * 0.75 = 6.75 -> floor 6.
+    // The unsorted answer would be 6 * 0.75 + 3 = 7.5 -> floor 7.
+    CombatState s = make_combat();
+    apply_via_action(s, /*src=*/0, kActorPlayer, PowerId::WEAK, 1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 3);
+
+    ASSERT_EQ(s.player_power_count, 2);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::STRENGTH));
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::WEAK));
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 6);
+}
+
+// Vigor is a flat attacker-side ADD on NORMAL damage only
+// (VigorPower.java:41-47) -- the Akabeko payload.
+TEST(DamagePipeline, VigorAddsItsAmountToNormalDamageOnly) {
+    CombatState s = make_combat();
+    add_power(s.player_powers, s.player_power_count, PowerId::VIGOR, 8);
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 14);
+
+    // THORNS / HP_LOSS never reach the NORMAL-only pipeline at all, so op_damage
+    // lands the base number unscaled (the `type == NORMAL` gate in op_damage).
+    CombatState t = make_combat();
+    add_power(t.player_powers, t.player_power_count, PowerId::VIGOR, 8);
+    const int16_t before = t.monsters[0].hp;
+    execute_opcode(t, op(Opcode::DAMAGE, kActorPlayer, 0, 6,
+                         make_damage_flags(DamageType::THORNS)));
+    EXPECT_EQ(before - t.monsters[0].hp, 6);
+}
+
+// Pen Nib is a FLAT x2 on NORMAL damage that never reads its slot amount
+// (PenNibPower.java:51-57).
+TEST(DamagePipeline, PenNibDoublesNormalDamageAndIgnoresItsAmount) {
+    for (const int16_t amount : {int16_t{1}, int16_t{4}}) {
+        CombatState s = make_combat();
+        add_power(s.player_powers, s.player_power_count, PowerId::PEN_NIB,
+                  amount);
+        EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 12)
+            << "amount " << amount;
+    }
+}
+
+// THE ORDERING CASE, and the reason Vigor and Pen Nib had to land together.
+// PenNibPower's priority is 6 (PenNibPower.java:36); Strength and Vigor take
+// the default 5. ApplyPowerAction.java:167's sort therefore always yields
+// [priority-5 addends ..., Pen Nib(6), ..., Weak(99)], so the game computes
+// ((base + Str + Vigor) * 2) * 0.75 no matter what order the powers arrived in.
+// Applying Pen Nib FIRST and Strength LAST is the case that would break under
+// plain append order: base 6 + Str 2 = 8, doubled = 16, vs the appended answer
+// 6 * 2 + 2 = 14.
+TEST(ApplyPowerSort, PenNibDoublesAfterEveryAddendWhicheverArrivesFirst) {
+    {
+        CombatState s = make_combat();
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::PEN_NIB, 1);
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+        ASSERT_EQ(s.player_power_count, 2);
+        EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::STRENGTH));
+        EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::PEN_NIB));
+        EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 16);
+    }
+    {
+        // The reverse arrival order sorts identically and computes identically.
+        CombatState s = make_combat();
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+        apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::PEN_NIB, 1);
+        EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::STRENGTH));
+        EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::PEN_NIB));
+        EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 16);
+    }
+}
+
+// The full stack, in the game's grouping: ((6 + 2 + 8) * 2) * 0.75 = 24.0 -> 24.
+// Weak is priority 99 so it multiplies last; Vigor and Strength are both
+// priority 5 and both precede the doubling.
+TEST(ApplyPowerSort, StrengthVigorPenNibAndWeakComposeInPriorityOrder) {
+    CombatState s = make_combat();
+    apply_via_action(s, /*src=*/0, kActorPlayer, PowerId::WEAK, 1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::PEN_NIB, 1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::VIGOR, 8);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+
+    ASSERT_EQ(s.player_power_count, 4);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::VIGOR));
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::STRENGTH));
+    EXPECT_EQ(s.player_powers[2].power_id, pid(PowerId::PEN_NIB));
+    EXPECT_EQ(s.player_powers[3].power_id, pid(PowerId::WEAK));
+    EXPECT_EQ(compute_damage(s, kActorPlayer, 0, 6), 24);
+}
+
+TEST(ApplyPowerSort, EqualPriorityKeepsInsertionOrderAcrossResorts) {
+    // Strength / Dexterity / Thorns all default to priority 5; every new
+    // application re-runs the (stable) sort and must leave their relative
+    // order untouched. Frail (10, FrailPower.java:29) sorts behind them and
+    // Confusion (0, ConfusionPower.java:30) ahead of them no matter when
+    // each arrives.
+    CombatState s = make_combat();
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::FRAIL, 1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::STRENGTH, 2);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::DEXTERITY, 2);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::CONFUSION, -1);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::THORNS, 3);
+
+    ASSERT_EQ(s.player_power_count, 5);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::CONFUSION));
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::STRENGTH));
+    EXPECT_EQ(s.player_powers[2].power_id, pid(PowerId::DEXTERITY));
+    EXPECT_EQ(s.player_powers[3].power_id, pid(PowerId::THORNS));
+    EXPECT_EQ(s.player_powers[4].power_id, pid(PowerId::FRAIL));
+}
+
+TEST(ApplyPowerSort, MonsterListSortsTheSameWay) {
+    // Player applies Weak then Vulnerable to a monster: Vulnerable defaults to
+    // 5, so the game's list is [Vulnerable, Weak].
+    CombatState s = make_combat();
+    apply_via_action(s, kActorPlayer, 0, PowerId::WEAK, 2);
+    apply_via_action(s, kActorPlayer, 0, PowerId::VULNERABLE, 2);
+
+    ASSERT_EQ(s.monsters[0].power_count, 2);
+    EXPECT_EQ(s.monsters[0].powers[0].power_id, pid(PowerId::VULNERABLE));
+    EXPECT_EQ(s.monsters[0].powers[1].power_id, pid(PowerId::WEAK));
+}
+
+TEST(ApplyPowerSort, StackingRefreshDoesNotResort) {
+    // Only the NEW-power branch sorts (ApplyPowerAction.java:165-167); the
+    // stacking branch (:140-161) touches amounts and returns. Hand-seed an
+    // out-of-order list (the shape a direct AbstractCreature.addPower port
+    // leaves behind) and stack the Weak: the order must survive.
+    CombatState s = make_combat();
+    add_power(s.player_powers, s.player_power_count, PowerId::WEAK, 1);
+    add_power(s.player_powers, s.player_power_count, PowerId::STRENGTH, 2);
+
+    apply_via_action(s, /*src=*/0, kActorPlayer, PowerId::WEAK, 1);
+    ASSERT_EQ(s.player_power_count, 2);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::WEAK));
+    EXPECT_EQ(s.player_powers[0].amount, 2);
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::STRENGTH));
+
+    // A NEW power then sorts the WHOLE list, not just the newcomer:
+    // Collections.sort sees [Weak(99), Strength(5), Dexterity(5)] and yields
+    // [Strength, Dexterity, Weak] (stable: Strength stays ahead of Dexterity).
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::DEXTERITY, 1);
+    ASSERT_EQ(s.player_power_count, 3);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::STRENGTH));
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::DEXTERITY));
+    EXPECT_EQ(s.player_powers[2].power_id, pid(PowerId::WEAK));
+}
+
+TEST(ApplyPowerSort, InstancedSlotsTravelWholeAndKeepRelativeOrder) {
+    // Two Bombs (instanced, default priority) then a Weak: the sort moves
+    // whole PowerSlot rows, so each fuse keeps its own counter, and the
+    // stable sort keeps the older Bomb ahead of the newer one.
+    CombatState s = make_combat();
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::THE_BOMB, 40,
+                     /*counter=*/3);
+    apply_via_action(s, kActorPlayer, kActorPlayer, PowerId::THE_BOMB, 40,
+                     /*counter=*/2);
+    apply_via_action(s, /*src=*/0, kActorPlayer, PowerId::WEAK, 1);
+
+    ASSERT_EQ(s.player_power_count, 3);
+    EXPECT_EQ(s.player_powers[0].power_id, pid(PowerId::THE_BOMB));
+    EXPECT_EQ(s.player_powers[0].counter, 3);
+    EXPECT_EQ(s.player_powers[1].power_id, pid(PowerId::THE_BOMB));
+    EXPECT_EQ(s.player_powers[1].counter, 2);
+    EXPECT_EQ(s.player_powers[2].power_id, pid(PowerId::WEAK));
 }
 
 }  // namespace

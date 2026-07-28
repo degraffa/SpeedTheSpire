@@ -8,7 +8,9 @@
 
 #include <cstdint>
 
+#include "sts/engine/action_queue.hpp"  // add_to_bottom / kActor*
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/interp.hpp"        // Opcode
 #include "sts/engine/run_state.hpp"  // RelicSlot
 #include "sts/engine/types.hpp"
 
@@ -79,11 +81,12 @@ void relic_native_face_of_cleric(CombatState& s, RelicHook hook,
 
 // --- DEFERRED combat bodies --------------------------------------------------
 
-void relic_native_warped_tongs(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_warped_tongs(CombatState& s, RelicHook hook,
                                RelicSlot& /*slot*/,
                                const RelicHookContext& /*ctx*/) noexcept {
-    // WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:24-29): addToBot
-    // RelicAboveCreatureAction, then addToBot UpgradeRandomCardAction.
+    // WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:28-33 -- the row and
+    // ledger cited :24-29; the file is 40 lines): flash(), addToBot a cosmetic
+    // RelicAboveCreatureAction, addToBot a new UpgradeRandomCardAction().
     //
     // DEFERRED, and RNG-VISIBLE when it lands. UpgradeRandomCardAction.update
     // (UpgradeRandomCardAction.java:28-50):
@@ -99,10 +102,27 @@ void relic_native_warped_tongs(CombatState& /*s*/, RelicHook /*hook*/,
     //
     // CHOOSE_CARD's RANDOM + UPGRADE path is NOT this action: it draws a
     // different stream and applies a different eligibility filter, so reusing it
-    // would silently move shuffleRng. Implementing this needs its own opcode.
-    // The registry row still BINDS at_turn_start_post_draw so the queue position
-    // (behind the start-of-turn DrawCardAction, GameActionManager.java:361-362) is
-    // already correct the day the opcode lands.
+    // would silently move shuffleRng. Hence Opcode::UPGRADE_RANDOM_CARD, whose
+    // body (op_upgrade_random_card, interp/interp_cards.cpp) carries the whole
+    // derivation including the zero-draw paths.
+    //
+    // The queue position is the row's, not this body's: at_turn_start_post_draw
+    // fires behind the start-of-turn DrawCardAction
+    // (GameActionManager.java:361-362 on turn >= 2, AbstractRoom.java:242 on turn
+    // 1), which is what makes "upgrade a card in hand" see the hand it should.
+    //
+    // The upgrade is per-COMBAT: it writes the card_pool INSTANCE, which is built
+    // from the master deck at combat construction and discarded at combat end, so
+    // nothing folds back to RunState. That matches the Java, where the action
+    // upgrades the in-combat AbstractCard copy.
+    if (hook != RelicHook::AT_TURN_START_POST_DRAW) {
+        return;
+    }
+    ActionQueueItem up{};
+    up.opcode = static_cast<uint16_t>(Opcode::UPGRADE_RANDOM_CARD);
+    up.src = kActorPlayer;
+    up.tgt = kActorPlayer;
+    add_to_bottom(s, up);  // addToBot (WarpedTongs.java:32)
 }
 
 }  // namespace sts::engine

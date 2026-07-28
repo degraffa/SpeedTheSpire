@@ -135,6 +135,39 @@ void remove_slot_at(CombatState& s, uint8_t tgt, PowerSlot* slots,
     }
 }
 
+// The sort key of ApplyPowerAction.java:167's Collections.sort:
+// AbstractPower.compareTo (AbstractPower.java:366-368) is
+// `this.priority - other.priority`, the field defaulting to 5
+// (AbstractPower.java:66). The registry mirrors every ctor override
+// (powers.yaml `priority:`); an id with no row takes the default.
+[[nodiscard]] uint8_t power_sort_priority(uint16_t pid) noexcept {
+    const PowerDef* def = power_def(static_cast<PowerId>(pid));
+    return def != nullptr ? def->priority : sts::registry::kDefaultPowerPriority;
+}
+
+// ApplyPowerAction.java:167: `Collections.sort(this.target.powers)` runs after
+// every NEW power is appended (the !hasBuffAlready branch ONLY -- the stacking
+// branch :140-161 never re-sorts, and the synchronous AbstractCreature.addPower
+// :506-527 never sorts at all). Collections.sort is a stable merge sort, so the
+// live list is priority-major with insertion order preserved inside a priority
+// class. Reproduced as an in-place insertion sort (stable; the list is at most
+// kPowerCap = 24 slots) over WHOLE PowerSlot rows, so an instanced power's
+// per-slot amount/counter travel with their slot. Safe against queued
+// REMOVE/REDUCE items: instance keys match {amount, counter} values, never a
+// slot index (interp.hpp power_instance_key_present).
+void sort_powers_like_the_game(PowerSlot* slots, uint8_t count) noexcept {
+    for (uint8_t i = 1; i < count; ++i) {
+        const PowerSlot key = slots[i];
+        const uint8_t kp = power_sort_priority(key.power_id);
+        int j = static_cast<int>(i) - 1;
+        while (j >= 0 && power_sort_priority(slots[j].power_id) > kp) {
+            slots[j + 1] = slots[j];
+            --j;
+        }
+        slots[j + 1] = key;
+    }
+}
+
 }  // namespace
 
 // APPLY_POWER: stack PowerId(flags) x amount onto tgt. Stacks onto an existing
@@ -324,6 +357,12 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     }
     slots[*count] = fresh;
     ++*count;
+    // The new-power branch ends with the whole-list re-sort
+    // (ApplyPowerAction.java:165-167). Slot order is load-bearing: it is the
+    // iteration order of compute_damage's atDamage* walks and of every
+    // per-power hook fan-out, so Weak (99) lands behind Strength (5) no matter
+    // which was applied first -- (base + Str) * 0.75, never (base * 0.75) + Str.
+    sort_powers_like_the_game(slots, *count);
 }
 
 // REMOVE_POWER (RemoveSpecificPowerAction): drop PowerId(flags low16) from tgt's
@@ -344,6 +383,61 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id,
         return;
     }
     remove_slot_at(s, tgt, slots, count, i);
+}
+
+// REMOVE_DEBUFFS (RemoveDebuffsAction.update, RemoveDebuffsAction.java:23-30):
+//
+//     for (AbstractPower p : this.c.powers) {
+//         if (p.type != PowerType.DEBUFF) continue;
+//         this.addToTop(new RemoveSpecificPowerAction(this.c, this.c, p.ID));
+//     }
+//     this.isDone = true;
+//
+// THE ENUMERATION IS THE OPCODE. It happens when this action RESOLVES, over the
+// power list as it then stands -- which is exactly what a queue-time expansion
+// into N REMOVE_POWER items could not express, because Orange Pellets queues
+// addToBot, behind the played card's own actions, so a debuff can land in
+// between.
+//
+// The DEBUFF test reads the LIVE INSTANCE's type. StrengthPower.updateDescription
+// (StrengthPower.java:81-89) and DexterityPower's (:74-82) recompute
+// `this.type = amount > 0 ? BUFF : DEBUFF`, so a negative Strength stack IS a
+// debuff and is removed, while a positive one is not. That is the same two-term
+// predicate op_apply_power builds at apply time (negative_stat_flip above), and
+// it is spelled once here rather than re-derived.
+//
+// Two consequences worth stating because they look like bugs and are not:
+//   * Shackled (GainStrengthPower) is DEBUFF-typed in the Java
+//     (GainStrengthPower.java:29), so this removes it -- and with it the pending
+//     Strength restoration. Reproduced, not corrected.
+//   * addToTop per power means the removals resolve in REVERSE list order. No
+//     removal's side effects are read by another today, so it is unobservable;
+//     it is done anyway because it is free and stays right if that changes.
+void op_remove_debuffs(CombatState& s, uint8_t tgt) noexcept {
+    PowerSlot* slots = nullptr;
+    uint8_t* count = nullptr;
+    if (!power_list_for(s, tgt, slots, count)) {
+        return;
+    }
+    for (uint8_t i = 0; i < *count; ++i) {
+        const PowerId id = static_cast<PowerId>(slots[i].power_id);
+        const PowerDef* def = power_def(id);
+        const bool negative_stat_flip =
+            (id == PowerId::STRENGTH || id == PowerId::DEXTERITY) &&
+            slots[i].amount <= 0;
+        const bool is_debuff =
+            (def != nullptr && def->type == PowerType::DEBUFF) ||
+            negative_stat_flip;
+        if (!is_debuff) {
+            continue;  // `if (p.type != DEBUFF) continue;` (:25)
+        }
+        ActionQueueItem rem{};
+        rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+        rem.src = tgt;
+        rem.tgt = tgt;
+        rem.flags = make_apply_power_flags(id);
+        add_to_top(s, rem);  // addToTop (:26)
+    }
 }
 
 // REDUCE_POWER (ReducePowerAction): subtract `amount` from one power and remove

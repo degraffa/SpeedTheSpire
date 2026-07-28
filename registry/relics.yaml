@@ -250,8 +250,9 @@
   initial_counter: 0
   native: true
   hooks:
-    on_use_card: []           # ATTACK played -> counter++; 10th attack empowered (double-dmg power DEFERRED)
-  provenance: "PenNib.onUseCard (PenNib.java:40-56) -- if card.type==ATTACK ++counter; at 10 -> counter=0 (grants PenNibPower/double-damage, DEFERRED: PenNib power row not yet in powers.yaml). counter persists in RunState RelicSlot.counter (stage-a §4.3)."
+    on_use_card: []           # native: ATTACK played -> ++counter; at 9 grant PenNibPower, at 10 reset
+    at_battle_start: []       # native: re-grant PenNibPower if the RUN-persistent counter is already 9
+  provenance: "PenNib (PenNib.java:36-62; this row and ledger row 97 previously cited :40-56 / :44-47, both wrong -- onUseCard is :36-52, its counter == 10 branch :40-43, atBattleStart :54-62). onUseCard: if card.type == ATTACK then ++counter; `if (counter == 10) counter = 0;` else `if (counter == 9)` addToBot ApplyPowerAction(player, player, PenNibPower(player, 1), 1, true) behind a cosmetic RelicAboveCreatureAction. The 9-vs-10 asymmetry IS the mechanic: the power is granted after the NINTH attack so the TENTH is the empowered one, and reaching ten resets without granting. atBattleStart re-grants when counter == 9 and does NOT touch the counter -- reachable because counter is RUN-persistent (fold_back_combat), so a fresh combat can open with the doubling already up. The 5-arg ApplyPowerAction's trailing boolean is a speed flag, not a semantic one; pulse and refreshHandLayout are presentation. counter starts at 0 from the ctor (:28), which is what initial_counter mirrors."
 
 - id: 13
   name: RED_SKULL
@@ -261,8 +262,9 @@
   initial_counter: 0
   native: true
   hooks:
-    was_hp_lost: []           # onBloodied: cross to <=50% HP -> +3 Strength (once, while active)
-  provenance: "RedSkull.onBloodied (RedSkull.java:48-58) -- if !isActive && in combat addToTop ApplyPowerAction(StrengthPower 3), isActive=true. onNotBloodied -3 on heal-cross (RedSkull.java:60-67) DEFERRED (needs a heal-cross hook). atBattleStart sets active per starting HP (:41-45)."
+    at_battle_start: []       # native: seed the isActive/entered-bloodied latch from starting HP
+    was_hp_lost: []           # onBloodied: cross to <=50% HP -> +3 Strength (once, while armed)
+  provenance: "RedSkull, read in full. onBloodied (RedSkull.java:41-52) -- if !isActive && COMBAT phase (:45), addToTop ApplyPowerAction(StrengthPower 3) (:47), isActive = true (:49); routed through wasHPLost because AbstractPlayer.damage's bloodied cross (AbstractPlayer.java:1476-1481) fires it only when isBloodied flips false->true. ENTRY SEMANTICS: preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2 (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP never fires onBloodied; and atBattleStart (RedSkull.java:35-39) resets isActive = false (:37) every combat -- both reproduced by the at_battle_start latch seed (int-division seed and float damage-cross agree for integer HP: cur <= max/2 == cur*2 <= max). atBattleStart's QUEUED anonymous action (:38, reads/writes isActive per the synthetic access$000/002 :76-83) is NOT decompilable in this tree (CFR inner-class hole) and stays a recorded deferral -- not invented here. onNotBloodied (:54-63) -3 on the heal-cross (AbstractPlayer.heal:1544-1552) DEFERRED (needs a heal-cross hook)."
 
 - id: 14
   name: VAJRA
@@ -295,8 +297,8 @@
   pool_order: 5
   native: true
   hooks:
-    at_battle_start: []       # apply Vigor 8 -- DEFERRED (Vigor power row is B3.4+/later)
-  provenance: "Akabeko.atBattleStart (Akabeko.java:31-35) -- addToTop ApplyPowerAction(VigorPower 8). Vigor not yet in powers.yaml (B3.4 owns it); native body deferred until the Vigor row lands."
+    at_battle_start: []       # native: addToTop ApplyPowerAction(player, player, VigorPower 8)
+  provenance: "Akabeko.atBattleStart (Akabeko.java:30-35) -- flash(), addToTop ApplyPowerAction(player, player, VigorPower(player, 8), 8), addToTop a cosmetic RelicAboveCreatureAction. VIGOR = 8 (:19). Unconditional: no room, HP or deck gate. LIVE since the VIGOR power row (powers.yaml id 87) landed. NOTE for anyone re-reading ledger row 96: this is a COMMON relic at pool_order 5, i.e. reachable from the very first combat reward, so the Vigor row was never a 'card-batch' leftover -- no S1 Ironclad CARD grants Vigor and this relic is its only S1 source."
 
 - id: 17
   name: ANCIENT_TEA_SET
@@ -305,10 +307,10 @@
   pool_order: 9
   native: true
   hooks:
-    at_turn_start: []         # +2 energy on turn 1 IF entered combat from a campfire (DEFERRED: cross-room flag)
+    at_turn_start: []         # +2 energy on turn 1 while counter == -2 (armed by onEnterRestRoom)
   pickup:
     can_spawn: true
-  provenance: "AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter==-2 gain 2 energy on first turn; onEnterRestRoom arms it (:77-80). Needs a cross-room armed flag (run layer); native body deferred."
+  provenance: "AncientTeaSet.atTurnStart (AncientTeaSet.java:49-61) -- on the FIRST turn of a combat, if counter == -2: counter = -1 and addToTop GainEnergyAction(2) (ENERGY_AMT = 2, :22). atPreBattle (:63-66) sets firstTurn = true; onEnterRestRoom (:76-81) sets counter = -2, which is the ARMING half and lives at the run layer (dispatch_relics_on_enter_rest_room, relics/relic_pickup.hpp, called once from the rest-room entry in run_advance.cpp -- RestRoom.onPlayerEntry, RestRoom.java:38-42, which runs at AbstractDungeon.java:1800, AFTER the onEnterRoom and justEnteredRoom fan-outs). LIVE. RelicSlot.counter IS the cross-room state, exactly: -2 armed, -1 spent -- the GAME'S OWN encoding, written directly by the relic and reported by CommunicationMod, so unlike Centennial Puzzle nothing has to move out of the counter. `firstTurn` needs no storage: the hook runs from start_of_turn BEFORE ++s.turn and combat construction leaves s.turn == 0, so the first atTurnStart is exactly s.turn == 0. The +2 is addToTop while turn 1's own energy is an ADD onto a just-zeroed panel (AbstractRoom.java:241 -> EnergyPanel.addEnergy, EnergyPanel.java:59-66), so both are additive and the ordering is harmless."
 
 - id: 18
   name: ART_OF_WAR
@@ -317,9 +319,9 @@
   pool_order: 15
   native: true
   hooks:
-    on_use_card: []           # ATTACK played this turn cancels next turn's +1 energy (DEFERRED: cross-turn flags)
+    on_use_card: []           # an ATTACK this turn cancels NEXT turn's +1 energy
     at_turn_start: []
-  provenance: "ArtOfWar.onUseCard/atTurnStart (ArtOfWar.java:76-83,64-74) -- +1 energy at turn start if no ATTACK was played last turn (firstTurn + gainEnergyNext flags). Needs multi-bit relic state beyond RelicSlot.counter; native body deferred."
+  provenance: "ArtOfWar (ArtOfWar.java:52-82) -- atPreBattle (:52-61) firstTurn = true, gainEnergyNext = true; atTurnStart (:63-74) `if (gainEnergyNext && !firstTurn) addToBot GainEnergyAction(1);` then firstTurn = false and gainEnergyNext = true; onUseCard (:76-82) `if (card.type == ATTACK) gainEnergyNext = false`. Net: +1 energy at the start of turn N (N >= 2) iff no ATTACK was played during turn N-1. LIVE, on ONE bit of storage rather than two: firstTurn is s.turn == 0 (the hook runs before start_of_turn's ++s.turn), and gainEnergyNext is stored INVERTED as kCombatFlagArtOfWarAttackPlayed (CombatState.flags bit 24) so the value-initialised default is already atPreBattle's gainEnergyNext = true. A flags bit and not RelicSlot.counter because ArtOfWar's counter is never written in the game and stays at -1 -- the Centennial Puzzle divergence class. THE LINE ORDER IS LOAD-BEARING: gainEnergyNext = true is the LAST statement of atTurnStart, after the check; clearing the latch before the test would grant every turn."
 
 - id: 19
   name: BOOT
@@ -328,8 +330,8 @@
   pool_order: 1
   native: true
   hooks:
-    on_attack: []             # unblocked attack damage 1..4 raised to 5 (DEFERRED: damage-pipeline hook)
-  provenance: "Boot.onAttackToChangeDamage (Boot.java:30-38) -- if owner!=null && type not HP_LOSS/THORNS && 0<dmg<5 return 5. A DAMAGE-pipeline modifier (interp.cpp op_damage, float-exact/hot); native body deferred to keep the frozen pipeline untouched."
+    on_attack: []             # documentation of the Java hook; the body is apply_boot in interp_damage.cpp
+  provenance: "Boot.onAttackToChangeDamage (Boot.java:30-38) -- `if (info.owner != null && info.type != HP_LOSS && info.type != THORNS && damageAmount > 0 && damageAmount < 5) return 5;` (THRESHOLD = 5 at :19; the description's 4 at :27 is display text). LIVE, as apply_boot in interp/interp_damage.cpp, inside op_damage's INTEGER tail -- the float pipeline (compute_damage) is untouched. PLACEMENT: both call sites (AbstractMonster.damage:639-643, AbstractPlayer.damage:1399-1403) run decrementBlock FIRST and only then walk the player's relics, so the number Boot sees is the UNBLOCKED RESIDUE: a 4-damage hit into 2 block deals 5, and a 3-damage hit fully soaked by 3 block deals 0 because `damageAmount > 0` fails. That matches the relic's own 'unblocked attack damage' text. It is the FIRST of op_damage's four integer-tail modifiers -- before Buffer (onAttackedToChangeDamage), Thorns/Torii (onAttacked) and Tungsten Rod (onLoseHpLast) -- and it is attacker-side while those are victim-side. The enclosing `if (info.owner == AbstractDungeon.player)` is the real gate and becomes `src == kActorPlayer`. RelicHook::ON_ATTACK (12) stays allocated and UNFIRED -- it has no dispatcher and RelicHookContext carries no damage in/out channel -- so this `on_attack: []` binding is documentation of which Java hook the bespoke site reproduces, the Magic Flower / Torii / Tungsten Rod precedent. The empty native body in relics/relics_common.cpp is kept because the generated dispatch odr-uses a handler for every native row."
 
 - id: 20
   name: CERAMIC_FISH
@@ -404,10 +406,10 @@
   pool_order: 12
   native: true
   hooks:
-    at_battle_start: []       # elite HP -25% (DEFERRED: needs elite-room context + monster HP scaling)
+    at_battle_start: []       # elite rooms only: clamp each monster's CURRENT hp to (int)(max * 0.75f)
   pickup:
     can_spawn: true
-  provenance: "PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an elite room set each monster HP to 75%. Needs room-type context + a monster-HP scale op; native body deferred."
+  provenance: "PreservedInsect.atBattleStart (PreservedInsect.java:30-41) -- if getCurrRoom().eliteTrigger, then for every monster in the group: `if (m.currentHealth <= (int)((float)m.maxHealth * (1.0f - 0.25f))) continue; m.currentHealth = (int)((float)m.maxHealth * (1.0f - 0.25f));` (MODIFIER_AMT = 0.25f, :19). LIVE, via kCombatFlagEliteRoom (combat_state.hpp). It is a CURRENT-health clamp, not an HP-init change: maxHealth is untouched, so split thresholds and every max-HP-relative gate still read the unscaled max, and monsters spawned later are never scaled. The float product is written as the Java writes it -- a C-style truncation of `(float)maxHealth * 0.75f`, not maxHealth * 3 / 4. Native body in relics/relics_common.cpp."
 
 - id: 28
   name: REGAL_PILLOW
@@ -944,8 +946,8 @@
   pool_order: 15
   native: true
   hooks:
-    on_exhaust: []            # DEFERRED body: needs the all-red combat card pool
-  provenance: "DeadBranch.onExhaust (DeadBranch.java:259-266) -- if !areMonstersBasicallyDead(): addToBot MakeTempCardInHandAction(AbstractDungeon.returnTrulyRandomCardInCombat().makeCopy(), false). DEFERRED: returnTrulyRandomCardInCombat() with NO type filter (AbstractDungeon.java:964-979) draws one cardRandomRng pick over the whole colour pool -- commons + uncommons + rares, not the ATTACK-only pool RANDOM_ATTACK_TO_HAND uses -- so it needs a second generated combat pool and is RNG-visible. Explicit empty native body (relics/relics_rare.cpp) rather than an omitted one, so the deferral sits where the implementation goes."
+    on_exhaust: []            # one cardRandomRng pick at HOOK time -> MAKE_CARD into HAND
+  provenance: "DeadBranch.onExhaust (DeadBranch.java:24-31 -- the file is 43 lines; this row and ledger row 72 cited :259-266) -- `if (!getMonsters().areMonstersBasicallyDead()) { flash(); addToBot(RelicAboveCreatureAction); addToBot(new MakeTempCardInHandAction(AbstractDungeon.returnTrulyRandomCardInCombat().makeCopy(), false)); }`. LIVE, and cardRandomRng-VISIBLE. THE DRAW HAPPENS AT QUEUE TIME: returnTrulyRandomCardInCombat() is an ARGUMENT of the MakeTempCardInHandAction constructor, so the pick is spent while the exhaust fan-out runs and only the card creation is deferred -- the same shape and the same argument as MagnetismPower.atStartOfTurn. THE POOL ALREADY EXISTED: returnTrulyRandomCardInCombat (AbstractDungeon.java:938-962) concatenates srcCommon + srcUncommon + srcRare EXCLUDING CardTags.HEALING and takes one `cardRandomRng.random(list.size() - 1)`, which is exactly the generated 70-row kIroncladCombatPool that Discovery already consumes. The deferral note claiming the draw is UNFILTERED and needs a second generated pool was wrong; the genuinely-new pool is Pandora's Box's returnTrulyRandomCard(), which does not exclude HEALING. areMonstersBasicallyDead (MonsterGroup.java:90-95) is `isDying || isEscaping` per monster, i.e. monster_dead_or_escaped. The copy is a BASE library copy (MakeTempCardInHandAction(..., false)), landing through Opcode::MAKE_CARD into CardPile::HAND with its hand-cap spill to the discard pile."
 
 - id: 82
   name: DU_VU_DOLL
@@ -1000,8 +1002,8 @@
   pool_order: 20
   native: true
   hooks:
-    at_turn_start_post_draw: []  # DEFERRED body: needs an optional multi-select screen
-  provenance: "GamblingChip (GamblingChip.java:426-453): atBattleStartPreDraw clears a PRIVATE `activated` flag; atTurnStartPostDraw -- if !activated, set it and addToBot GamblingChipAction(player), which opens a hand-select screen discarding ZERO-to-all chosen cards and then draws exactly as many as were discarded. DEFERRED: the engine's CHOOSE_CARD screen has no OPTIONAL multi-select with an explicit confirm (every existing ChoiceKind selects a mandatory fixed count), and adding one changes the public ActionMask surface the observation and translator layers join on. Explicit empty native body (relics/relics_rare.cpp). Only atTurnStartPostDraw is bound: atBattleStartPreDraw has no dispatch site, and an unfired hook would be inert code."
+    at_turn_start_post_draw: []  # native body: relics/relics_rare.cpp
+  provenance: "GamblingChip (GamblingChip.java, read in full -- the file is 48 lines, NOT the 426-453 range this row used to cite): a private `activated` field (:18) cleared by atBattleStartPreDraw (:30-32); atTurnStartPostDraw (:34-42) is `if (!activated) { activated = true; flash(); addToBot(RelicAboveCreatureAction); addToBot(new GamblingChipAction(player)); }`. ONCE PER COMBAT, not every turn -- the latch IS the relic. IMPLEMENTED: the deferral's stated blocker (no OPTIONAL multi-select with an explicit confirm) arrived with the optional-choice machinery, and the body is now ChoiceKind::HAND_TO_DISCARD_THEN_DRAW queued through the shared queue_gambling_chip_choice builder that Gambler's Brew also calls -- GamblingChipAction is ONE action and its notChip boolean selects only a prompt string (GamblingChipAction.java:42-46). The draw count is selectedCards.size() read AT CONFIRM; there is no relic-side count. RelicSlot.counter carries `activated` (the -1 unset default IS 'not activated'). Only atTurnStartPostDraw is bound: atBattleStartPreDraw has no dispatch site and a fresh CombatState already starts at -1, so binding it would be inert code."
 
 - id: 87
   name: PEACE_PIPE
@@ -1080,8 +1082,8 @@
   pool_order: 0
   native: true
   hooks:
-    at_battle_start: []       # DEFERRED body: needs the room's eliteTrigger flag
-  provenance: "Sling.atBattleStart (Sling.java:1030-1038) -- if getCurrRoom().eliteTrigger: addToTop ApplyPowerAction(player, player, StrengthPower 2). DEFERRED: eliteTrigger is per-ROOM state the run layer sets when an elite encounter begins, and CombatState carries no elite marker; producing one is a run-layer change. Explicit empty native body (relics/relics_shop.cpp) so the deferral sits where the implementation will go."
+    at_battle_start: []       # elite rooms only: Strength 2
+  provenance: "Sling.atBattleStart (Sling.java:30-37 -- the file is 44 lines; this row and ledger row 74 previously cited :1030-1038, off by exactly 1000): if getCurrRoom().eliteTrigger, addToTop ApplyPowerAction(player, player, StrengthPower(player, 2), 2) plus a cosmetic RelicAboveCreatureAction. LIVE: the room's eliteTrigger reaches the combat as kCombatFlagEliteRoom (combat_state.hpp), set by enter_combat for RoomType::Elite and by the Dead Adventurer event (DeadAdventurer.java:116). BOSS-EXCLUDING -- MonsterRoomBoss never sets eliteTrigger (MonsterRoomBoss.java:22-24) -- so this relic is NOT a twin of Slaver's Collar, which ORs an EnemyType.BOSS scan on top of the same flag. Native body in relics/relics_shop.cpp."
 
 - id: 95
   name: HAND_DRILL
@@ -1137,9 +1139,9 @@
   pool_order: 7
   native: true
   hooks:
-    at_turn_start: []         # clear the attack/skill/power latches
-    on_use_card: []           # DEFERRED body: needs a remove-all-debuffs action
-  provenance: "OrangePellets (OrangePellets.java:1218-1250): atTurnStart clears three PRIVATE booleans (ATTACK/SKILL/POWER); onUseCard sets the one matching the played card's type and, once all three are set, addToBot RemoveDebuffsAction(player) and clears them again. The public counter stays -1 throughout. DEFERRED: RemoveDebuffsAction removes EVERY DEBUFF-type power from the player, enumerated when the ACTION resolves, and no opcode expresses that (REMOVE_POWER names one PowerId chosen at queue time). Explicit empty native body (relics/relics_shop.cpp)."
+    at_turn_start: []         # clear the three type latches
+    on_use_card: []           # set the played type's latch; on all three, queue REMOVE_DEBUFFS and re-arm
+  provenance: "OrangePellets (OrangePellets.java, 65 lines; this row and ledger row 75 previously cited :1218-1250, which does not exist). atTurnStart (:34-39) clears three PRIVATE STATIC booleans ATTACK/SKILL/POWER; onUseCard (:41-58) sets the one matching the played card's type via an if/else-if chain (so a CURSE or STATUS play sets nothing) and, once all three are set, flashes, addToBot a cosmetic RelicAboveCreatureAction, addToBot a RemoveDebuffsAction(player), and CLEARS all three again -- so it can fire MORE THAN ONCE PER TURN. The relic's counter is never touched and stays -1. LIVE. The latches are CombatState.flags bits 21-23, not RelicSlot.counter: they are `static` in the Java (combat-global, the Centennial Puzzle shape) and the counter is oracle-visible. Note the game does NOT clear them at atPreBattle -- only atTurnStart does -- and a value-initialised CombatState is equivalent purely because turn 1's atTurnStart precedes any card play (AbstractRoom.java:253). The removal itself is Opcode::REMOVE_DEBUFFS (63), which enumerates the player's DEBUFF-typed powers AT RESOLVE TIME (RemoveDebuffsAction.java:23-30) -- it cannot be a queue-time list of REMOVE_POWER items, and its DEBUFF predicate is the live-instance type, so a negative Strength stack IS removed. Shackled (GainStrengthPower) is DEBUFF-typed (GainStrengthPower.java:29) and is therefore removed along with its pending Strength restoration -- reproduced, not corrected."
 
 - id: 102
   name: PRISMATIC_SHARD
@@ -1253,24 +1255,32 @@
 # the already-committed COMMON, UNCOMMON, RARE and SHOP pool_order exactly, which
 # is what validates the method rather than merely fitting it.
 #
-# ENERGY MASTER -- one deferral shared by ten of these rows. Ten boss relics do
-# `++AbstractDungeon.player.energy.energyMaster` in onEquip (Fusion Hammer,
-# Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu,
+# ENERGY MASTER -- one mechanism shared by ten of these rows, now LIVE. Ten boss
+# relics do `++AbstractDungeon.player.energy.energyMaster` in onEquip (Fusion
+# Hammer, Velvet Choker, Runic Dome, Cursed Key, Busted Crown, Ectoplasm, Sozu,
 # Philosopher's Stone, Coffee Dripper, Mark of Pain), and Slaver's Collar does it
-# conditionally in beforeEnergyPrep. The engine has NO energyMaster field: the
-# per-turn recharge reads the kIroncladBaseEnergy constant
-# (EnergyManager.recharge, EnergyManager.java:25-40 -> action_queue.cpp
-# start_of_turn). Deriving the master from the owned relic list needs no storage,
-# but its single consumer is that one line inside start_of_turn, which this batch
-# does not own. Each affected row's pool slot, canSpawn gate and relicRng draw are
-# LIVE; only the +1 is inert.
+# conditionally in beforeEnergyPrep. The engine still has no energyMaster FIELD:
+# `energy_master(const CombatState&)` (action_queue.hpp / .cpp) DERIVES it by
+# scanning the combat relic mirror, and the recharge line inside start_of_turn is
+# its one consumer (EnergyManager.recharge, EnergyManager.java:25-41; the turn-1
+# route is the different one at AbstractRoom.java:240). Deriving is faithful, not
+# a shortcut: the game reads energyMaster exactly once per combat, at prep()
+# (EnergyManager.java:20-23), and the relic mirror is likewise written once at
+# combat construction -- so a per-turn scan of it IS that snapshot. Snecko Eye's
+# `masterHandSize += 2` is the same shape at the draw line (`game_hand_size`), a
+# DIFFERENT field written by a different relic.
+#
+# Slaver's Collar is the one row this does NOT cover: its increment is
+# conditional per combat and undone only by onVictory, so it needs the elite/boss
+# room marker CombatState still lacks. `energy_master` is the single site it
+# attaches to when that marker lands.
 
 - id: 112
   name: FUSION_HAMMER
   game_id: "Fusion Hammer"
   tier: BOSS
   pool_order: 0
-  provenance: "FusionHammer (FusionHammer.java:18-68) -- onEquip ++energyMaster (:46-49), canUseCampfireOption disables SmithOption (:56-63). A marker row: the energy half is the shared energyMaster deferral above; the smith lock is a rest-room concern owned by the campfire layer. Row, pool slot and relicRng draw are live."
+  provenance: "FusionHammer (FusionHammer.java:18-68) -- onEquip ++energyMaster (:46-49), canUseCampfireOption disables SmithOption (:56-63). A marker row in the registry sense only -- both halves are read at their consumers, not through a hook: the +1 at energy_master (action_queue.cpp) and the smith lock in build_rest_menu (rest_sites.cpp). Row, pool slot and relicRng draw are live."
 
 - id: 113
   name: VELVET_CHOKER
@@ -1283,21 +1293,21 @@
     at_turn_start: []         # counter = 0
     on_play_card: []          # counter++ while < 6
     on_victory: []            # counter = -1
-  provenance: "VelvetChoker (VelvetChoker.java:18-94): atBattleStart/atTurnStart counter = 0 (:57-65); onPlayCard -- if counter < 6 then ++counter (:67-75); canPlay -- false once counter >= 6 (:77-84); onVictory counter = -1 (:86-89). The canPlay veto is AbstractCard.hasEnoughEnergy's relic fan-out (AbstractCard.java:876-879), modeled in legal_actions (advance.cpp) beside Blue Candle's and Medical Kit's gates. onEquip ++energyMaster (:47-50) is the shared deferral above."
+  provenance: "VelvetChoker (VelvetChoker.java:18-94): atBattleStart/atTurnStart counter = 0 (:57-65); onPlayCard -- if counter < 6 then ++counter (:67-75); canPlay -- false once counter >= 6 (:77-84); onVictory counter = -1 (:86-89). The canPlay veto is AbstractCard.hasEnoughEnergy's relic fan-out (AbstractCard.java:876-879), modeled in legal_actions (advance.cpp) beside Blue Candle's and Medical Kit's gates. onEquip ++energyMaster (:47-50) is the shared energy_master derivation above, and it is LIVE."
 
 - id: 114
   name: RUNIC_DOME
   game_id: "Runic Dome"
   tier: BOSS
   pool_order: 2
-  provenance: "RunicDome (RunicDome.java:16-57) -- onEquip ++energyMaster (:44-47) and NOTHING else; the 'you can no longer see enemy intents' half is purely an OBSERVATION concern, read at AbstractMonster.updateIntent/renderIntent (AbstractMonster.java:258, :749) as a negated player.hasRelic test. The engine's observation encoder is what would hide the intent; no simulated outcome depends on it. Deliberate no-op: the row, its pool slot and its relicRng draw are live."
+  provenance: "RunicDome (RunicDome.java:16-57) -- onEquip ++energyMaster (:44-47) and NOTHING else; the 'you can no longer see enemy intents' half is purely an OBSERVATION concern, read at AbstractMonster.updateIntent/renderIntent (AbstractMonster.java:258, :749) as a negated player.hasRelic test. Both halves are LIVE: the energy through the shared energy_master derivation above, the intent hiding in encode_observation (observation.hpp), which zeroes ObsMonster::intent -- a free sentinel, since move_id is never 0. It stays out of MonsterState deliberately: MonsterState::intent IS the move_id the capture-diff pipeline anchors on (the oracle fork blanks only the display string and the translator ignores it), so hiding it there would corrupt every diff. No simulated outcome depends on the suppression; it makes ObsBuffer a strictly lossier view than CombatState."
 
 - id: 115
   name: SLAVERS_COLLAR
   game_id: "SlaversCollar"
   tier: BOSS
   pool_order: 3
-  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called by name from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1591): if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, ++energyMaster and begin the pulse; onVictory undoes it while pulsing (:59-65). DEFERRED for the same reason as Sling of Courage: eliteTrigger is per-ROOM state and CombatState carries no elite/boss marker. Row, pool slot and relicRng draw are live."
+  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called BY NAME from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1590), between drawPile.initializeDeck (:1583) and energy.prep() (:1591), so it is not an atPreBattle hook and is not modelled as one: if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, beginLongPulse + ++energyMaster; onVictory undoes it while pulsing (:59-65). LIVE and DERIVED, inside energy_master (action_queue.cpp) beside the other ten energyMaster relics, from kCombatFlagEliteRoom plus a MonsterDef::is_boss() scan of the group. NO stored state, and the derivation is exact rather than approximate: beginLongPulse sets pulse = true (AbstractRelic.java:849-852) and AbstractRoom.endBattle calls player.onVictory() unconditionally (AbstractRoom.java:413-421) -- including on a Smoke Bomb escape, whose only exit is updateEscapeAnimation -> endBattle (AbstractPlayer.java:2281-2292) -- so the ++/-- pair balances on every combat end except player death, which ends the run. This stays a pure MARKER row: no native body and no hook bindings, exactly as MarkerRowsCarryNoCombatHooks asserts."
 
 - id: 116
   name: SNECKO_EYE
@@ -1307,7 +1317,7 @@
   native: true
   hooks:
     at_pre_battle: []         # apply Confusion to the player before the opening draw
-  provenance: "SneckoEye.atPreBattle (SneckoEye.java:39-43) -- addToBot ApplyPowerAction(player, player, ConfusionPower(player)). Fired from AbstractPlayer.applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of preBattlePrep (:1607) and therefore BEFORE the opening DrawCardAction -- which is what makes the very first hand cost-randomised. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is the RNG-visible half: exactly one cardRandomRng.random(3) per drawn card whose cost >= 0, in draw order (powers.yaml CONFUSION). onEquip masterHandSize += 2 (:29-32) is DEFERRED with the energyMaster group -- gameHandSize is read at the same start-of-turn line (kStartOfTurnDrawCount, action_queue.cpp)."
+  provenance: "SneckoEye.atPreBattle (SneckoEye.java:39-43) -- addToBot ApplyPowerAction(player, player, ConfusionPower(player)). Fired from AbstractPlayer.applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of preBattlePrep (:1607) and therefore BEFORE the opening DrawCardAction -- which is what makes the very first hand cost-randomised. ConfusionPower.onCardDraw (ConfusionPower.java:38-48) is the RNG-visible half: exactly one cardRandomRng.random(3) per drawn card whose cost >= 0, in draw order (powers.yaml CONFUSION). onEquip masterHandSize += 2 (:29-32) is a DIFFERENT field from the energyMaster group and is live at the start-of-turn draw line (game_hand_size, action_queue.cpp), which both the opening hand and every later turn read."
 
 - id: 117
   name: PANDORAS_BOX
@@ -1323,14 +1333,14 @@
   game_id: "Cursed Key"
   tier: BOSS
   pool_order: 6
-  provenance: "CursedKey (CursedKey.java:16-79) -- onEquip ++energyMaster (:66-69); onChestOpen, for a NON-boss chest, obtains AbstractDungeon.returnRandomCurse() (:50-56). The chest half is a treasure-room concern (B4.7's onChestOpen surface, which Matryoshka and N'loth's Mask also wait on); the energy half is the shared energyMaster deferral. Row, pool slot and relicRng draw are live."
+  provenance: "CursedKey (CursedKey.java:16-79) -- onEquip ++energyMaster (:66-69); onChestOpen, for a NON-boss chest, obtains AbstractDungeon.returnRandomCurse() (:50-56). Both halves are LIVE: the chest half through B4.7's onChestOpen surface (treasure_rooms.cpp, Omamori-aware, with the boss-chest no-op coming from the relic's own !bossChest guard rather than an exclusion list), the energy half through the shared energy_master derivation. Row, pool slot and relicRng draw are live."
 
 - id: 119
   name: BUSTED_CROWN
   game_id: "Busted Crown"
   tier: BOSS
   pool_order: 7
-  provenance: "BustedCrown (BustedCrown.java:16-60) -- onEquip ++energyMaster (:40-43); changeNumberOfCardsInReward returns numberOfCards - 2 (:45-48), read by RewardItem (RewardItem.java:308-310). The reward-count half is B4.5's (combat rewards do not exist yet); the energy half is the shared deferral. Row, pool slot and relicRng draw are live."
+  provenance: "BustedCrown (BustedCrown.java:16-60) -- onEquip ++energyMaster (:40-43); changeNumberOfCardsInReward returns numberOfCards - 2 (:45-48), read by RewardItem (RewardItem.java:308-310). Both halves are LIVE: the reward-count half landed with B4.5's combat rewards (combat_rewards.cpp, alongside Question Card's +1), the energy half through the shared energy_master derivation. The game applies the same hook at a SECOND site, getColorlessRewardCards (AbstractDungeon.java:1381-1386), reached only by a COLORLESS card reward -- no S1 producer of one is known, so it is unmodelled and named here rather than re-derived by the next reader. Row, pool slot and relicRng draw are live."
 
 - id: 120
   name: ECTOPLASM
@@ -1355,7 +1365,7 @@
   game_id: "Sozu"
   tier: BOSS
   pool_order: 10
-  provenance: "Sozu (Sozu.java:16-58) -- onEquip ++energyMaster (:44-47) and nothing else; the 'can no longer obtain potions' half is a marker read at the potion-obtain sites (ObtainPotionAction.update, ObtainPotionAction.java:29-36 -- with Sozu owned the potion is simply not obtained; also RewardItem.java:276 and EntropicBrew.java:43). Every one of those sites is run-layer (rewards / shop / events), none of which exists yet. Row, pool slot and relicRng draw are live."
+  provenance: "Sozu (Sozu.java:16-58) -- onEquip ++energyMaster (:44-47) and nothing else; the 'can no longer obtain potions' half is a marker read at the potion-obtain sites (ObtainPotionAction.update, ObtainPotionAction.java:29-36 -- with Sozu owned the potion is simply not obtained; also RewardItem.java:276 and EntropicBrew.java:43). Every one of those sites is run-layer and they all now exist: the reward claim and shop purchase doors (combat_rewards.cpp, shop.cpp) and Entropic Brew's out-of-combat pre-roll gate (run_advance.cpp). The energy half is the shared energy_master derivation. Row, pool slot and relicRng draw are live."
 
 - id: 123
   name: PHILOSOPHERS_STONE
@@ -1365,7 +1375,7 @@
   native: true
   hooks:
     at_battle_start: []       # +1 Strength to every monster (direct addPower, not queued)
-  provenance: "PhilosopherStone.atBattleStart (PhilosopherStone.java:41-48) -- for each monster addToTop RelicAboveCreatureAction (cosmetic) and m.addPower(new StrengthPower(m, 1)) DIRECTLY, then AbstractDungeon.onModifyPower(). The power add is SYNCHRONOUS (AbstractCreature.addPower), not an ApplyPowerAction, so it lands before anything else queued at battle start. onSpawnMonster (:50-53) gives a spawned monster the same +1; the SPAWN_MONSTER opcode has no relic fan-out, so that half is deferred to the split/spawn owner. onEquip ++energyMaster (:55-58) is the shared deferral."
+  provenance: "PhilosopherStone.atBattleStart (PhilosopherStone.java:41-48) -- for each monster addToTop RelicAboveCreatureAction (cosmetic) and m.addPower(new StrengthPower(m, 1)) DIRECTLY, then AbstractDungeon.onModifyPower(). The power add is SYNCHRONOUS (AbstractCreature.addPower), not an ApplyPowerAction, so it lands before anything else queued at battle start. onSpawnMonster (:50-53) gives a mid-combat spawn the same +1, and it is LIVE: a hand-written fan-out inside spawn_monster_at_slot (monster_dispatch.cpp), not a registry hook -- this relic is the game's ONLY onSpawnMonster implementor, so a RelicHook id for it would move kRelicHookCount for one row. It runs after the child's init rather than before it as SpawnMonsterAction.java:44-50 does, which is forced (the record does not exist earlier, and spawn-at-hp init zeroes power_count) and equivalent (rollMove does not read Strength, and this engine bakes no telegraphed damage -- monster damage is computed when the move's effects are queued). onEquip ++energyMaster (:55-58) is the shared energy_master derivation, and it is LIVE."
 
 - id: 124
   name: ASTROLABE
@@ -1420,7 +1430,7 @@
   game_id: "Coffee Dripper"
   tier: BOSS
   pool_order: 18
-  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). The rest lock is a campfire-layer concern (the rest room's heal option, design 5.6); the energy half is the shared energyMaster deferral. Row, pool slot and relicRng draw are live."
+  provenance: "CoffeeDripper (CoffeeDripper.java:16-60) -- onEquip ++energyMaster (:44-47); canUseCampfireOption disables RestOption (:53-59). A marker row in the registry sense only -- both halves are read at their consumers, not through a hook: the rest lock in build_rest_menu's veto sweep (rest_sites.cpp) and the +1 at energy_master (action_queue.cpp). Row, pool slot and relicRng draw are live."
 
 - id: 131
   name: BLACK_BLOOD
@@ -1442,7 +1452,7 @@
   native: true
   hooks:
     at_battle_start: []       # 2 Wounds shuffled into the draw pile
-  provenance: "MarkOfPain.atBattleStart (MarkOfPain.java:26-31) -- addToBot RelicAboveCreatureAction then addToBot MakeTempCardInDrawPileAction(new Wound(), 2, true, true): amount 2, randomSpot true, so each copy is inserted at CardGroup.addToRandomSpot's cardRandomRng.random(size-1) position. Native rather than DATA only because a relic step carries no card field; the body queues one MAKE_CARD(WOUND, DRAW_RANDOM, 2) item, whose per-copy random-spot draws are exactly the Java's. onEquip ++energyMaster (:33-36) is the shared deferral."
+  provenance: "MarkOfPain.atBattleStart (MarkOfPain.java:26-31) -- addToBot RelicAboveCreatureAction then addToBot MakeTempCardInDrawPileAction(new Wound(), 2, true, true): amount 2, randomSpot true, so each copy is inserted at CardGroup.addToRandomSpot's cardRandomRng.random(size-1) position. Native rather than DATA only because a relic step carries no card field; the body queues one MAKE_CARD(WOUND, DRAW_RANDOM, 2) item, whose per-copy random-spot draws are exactly the Java's. onEquip ++energyMaster (:33-36) is the shared energy_master derivation, and it is LIVE."
 
 - id: 133
   name: RUNIC_CUBE
@@ -1529,8 +1539,8 @@
   tier: SPECIAL
   native: true
   hooks:
-    at_turn_start_post_draw: []   # DEFERRED body: upgrade a random hand card
-  provenance: "WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:24-29) -- addToBot RelicAboveCreatureAction then addToBot UpgradeRandomCardAction. DEFERRED: UpgradeRandomCardAction.update (UpgradeRandomCardAction.java:28-50) is RNG-VISIBLE and has no opcode -- it filters the hand to canUpgrade() and type != STATUS and, ONLY when that subset is non-empty, calls CardGroup.shuffle() with NO argument, i.e. one shuffleRng.randomLong() (CardGroup.java:561-563), then upgrades group[0]. CHOOSE_CARD's RANDOM+UPGRADE path is NOT the same thing: it draws a different stream and applies a different eligibility filter, so reusing it would silently move shuffleRng. The hook binding is registered so the queue position (behind the start-of-turn draw) is already correct when the opcode lands; explicit empty native body (relics/relics_special.cpp)."
+    at_turn_start_post_draw: []   # queue UPGRADE_RANDOM_CARD (one shuffleRng draw, and only when eligible)
+  provenance: "WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:28-33 -- the file is 40 lines; this row and ledger row 79 cited :24-29) -- flash(), addToBot a cosmetic RelicAboveCreatureAction, addToBot a new UpgradeRandomCardAction(). LIVE, as Opcode::UPGRADE_RANDOM_CARD (64). UpgradeRandomCardAction.update (UpgradeRandomCardAction.java:28-50): an EMPTY hand returns at :31-34 with no draw; otherwise the hand is filtered to `canUpgrade() && type != STATUS` into a group built with addToTop, which is an APPEND (CardGroup.java:455-457) so the group is in HAND ORDER; and IF that group is non-empty it is shuffled and element 0 upgraded. THE STREAM FACT: the no-arg CardGroup.shuffle seeds java.util.Random from ONE shuffleRng.randomLong() (CardGroup.java:561-563) and sits INSIDE the non-empty test, so a hand with nothing upgradeable costs ZERO shuffleRng. That is why CHOOSE_CARD RANDOM+UPGRADE could not be reused -- it draws cardRandomRng once over the WHOLE hand. The filter is canUpgrade(), not `upgrade == 0`: SearingBlow.canUpgrade returns true unconditionally (SearingBlow.java:58-60). Tier SPECIAL, so it is in no pool; its only source is the Accursed Blacksmith shrine (AccursedBlacksmith.java:42,86-87), which is live, so this is reachable in S1 today. The upgrade is per-COMBAT -- it writes the card_pool instance, which is discarded at combat end."
 
 - id: 138
   name: CULTIST_MASK

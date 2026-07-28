@@ -490,6 +490,33 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    CardId::{r['name']},")
     out.append("}};\n")
 
+    # Wave-C potions stage: the POWER sibling of the two pools above, needed by
+    # Power Potion. PowerPotion.use (PowerPotion.java:40-42) is
+    # `addToBot(new DiscoveryAction(CardType.POWER, this.potency))`, and
+    # DiscoveryAction.generateCardChoices (DiscoveryAction.java:105-120) calls
+    # the SAME returnTrulyRandomCardInCombat(type) (AbstractDungeon.java:964-979)
+    # that Infernal Blade passes ATTACK to and Chrysalis passes SKILL to. One
+    # emission shape, one filter changed -- and, as there, emitting the
+    # type-filtered pool rather than filtering kIroncladCombatPool at runtime is
+    # what keeps the pick a single indexed read over [0, size-1].
+    # ORDER: src_combat_order, for the same subsequence argument the SKILL block
+    # above spells out.
+    # The rejection sampler needs THREE DISTINCT ids to terminate, so the count
+    # is asserted rather than assumed; the Ironclad POWER pool has far more.
+    power_pool = src_combat_order(
+        [r for r in rows
+         if r["color"] == "RED"
+         and r["rarity"] in ("COMMON", "UNCOMMON", "RARE")
+         and r["ctype"] == CARD_TYPES["POWER"]
+         and not r["healing"]])
+    out.append(f"inline constexpr int kIroncladPowerPoolCount = "
+               f"{len(power_pool)};")
+    out.append("inline constexpr std::array<CardId, kIroncladPowerPoolCount> "
+               "kIroncladPowerPool{{")
+    for r in power_pool:
+        out.append(f"    CardId::{r['name']},")
+    out.append("}};\n")
+
     # B3.10b Discovery: AbstractDungeon.returnTrulyRandomCardInCombat()
     # (:944-962) concatenates the player's src COMMON, UNCOMMON and RARE pools,
     # excluding HEALING-tagged cards, and spends one cardRandomRng draw per

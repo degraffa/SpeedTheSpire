@@ -29,6 +29,7 @@
 #include <type_traits>
 
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/relic_hooks.hpp"  // player_has_relic (Runic Dome)
 #include "sts/engine/schema.hpp"
 #include "sts/engine/types.hpp"
 
@@ -168,6 +169,31 @@ inline void encode_observation(const CombatState& state, ObsBuffer& out) noexcep
 
     // Monsters: fixed-width; occupied slots carry hp/intent/powers, empty slots
     // are fully zeroed with occupied == 0.
+    //
+    // RUNIC DOME. "You can no longer see enemy Intents" is TWO rendering guards
+    // in the game and nothing else -- AbstractMonster.java:258 (the intent-alpha
+    // update) and :749 (the intent render), both a negated
+    // `player.hasRelic("Runic Dome")`, and `grep -rn "Runic Dome" com/` finds
+    // only those two plus the relic's own ID constant. Neither touches game
+    // state, so this is the ONE place it belongs: the observation is this
+    // engine's view-of-the-board, and hiding it here makes ObsBuffer a strictly
+    // lossier projection of CombatState rather than changing CombatState.
+    //
+    // WHERE IT MUST NOT REACH -- and this is the whole reason the suppression is
+    // a single expression at one write site. MonsterState::intent holds the
+    // game's move_id byte, not the display banner, and the diff pipeline is
+    // built on that: the oracle fork already forces the DISPLAY intent string to
+    // NONE under Runic Dome, and the translator deliberately ignores that string
+    // and anchors on move_id (translate.cpp `fr.ignore("intent")`), so
+    // differ.cpp's MonsterState .intent comparison stays correct on both sides.
+    // Hiding the move in MonsterState -- or "fixing" the translator to match the
+    // fork's string -- would corrupt every capture diff.
+    //
+    // The sentinel is free: registry/monsters.yaml documents move_id as unique
+    // per monster and NEVER 0 (0 is the move_history empty-slot marker), and no
+    // row uses it -- so 0 reads unambiguously as "hidden", the same value an
+    // unoccupied slot carries.
+    const bool hide_intents = player_has_relic(state, RelicId::RUNIC_DOME);
     const int mon_n =
         state.monster_count < kObsMonsterCap ? state.monster_count : kObsMonsterCap;
     out.monster_count = static_cast<uint16_t>(state.monster_count);
@@ -178,7 +204,7 @@ inline void encode_observation(const CombatState& state, ObsBuffer& out) noexcep
             om.monster_id = ms.monster_id;
             om.hp = ms.hp;
             om.max_hp = ms.max_hp;
-            om.intent = ms.intent;
+            om.intent = hide_intents ? 0 : ms.intent;
             om.occupied = 1;
             om.power_count = ms.power_count;
             om.pad0 = 0;

@@ -9,6 +9,7 @@
 #include "relics/relic_pickup.hpp"    // gain_gold / heal_out_of_combat doors
 #include "sts/engine/card_pools.hpp"  // transform_card (the ONE transformCard list)
 #include "sts/engine/cards.hpp"       // card_def / CardType (isCursed)
+#include "sts/engine/potions.hpp"     // potion_def / PotionId (Fairy in a Bottle)
 #include "sts/engine/relics.hpp"      // RelicId (Tiny Chest / Juzu Bracelet)
 #include "sts/engine/rng_stream.hpp"  // random() wrappers
 #include "sts/engine/rest_sites.hpp"  // shared purge/upgrade legality
@@ -565,11 +566,60 @@ bool apply_event_damage(RunController& rc, int32_t amount,
     }
     rc.run.hp = static_cast<int16_t>(hp);
     if (hp == 0) {
-        // AbstractPlayer.damage (:1494-1497) consumes an armed Lizard Tail
-        // before declaring death. LizardTail.onTrigger (LizardTail.java:36-45)
-        // heals maxHealth/2 (minimum 1) and marks the relic used. Magic Flower
-        // does not amplify this heal in an EventRoom: its onPlayerHeal body is
-        // explicitly phase==COMBAT-gated (MagicFlower.java:31-38).
+        // AbstractPlayer.damage (:1482-1497) is ONE site for combat and
+        // out-of-combat HP loss alike, and it offers TWO revive sources in a
+        // fixed structure:
+        //
+        //     if (!hasRelic("Mark of the Bloom")) {
+        //         if (hasPotion("FairyPotion")) { ...; return; }
+        //         else if (hasRelic("Lizard Tail") && counter == -1) { ...; return; }
+        //     }
+        //
+        // A HELD FAIRY THEREFORE BEATS A LIZARD TAIL -- and because the Lizard
+        // Tail arm is an `else if` on `hasPotion`, the Lizard Tail is not even
+        // CONSULTED, let alone spent, while a Fairy is held. This is the
+        // out-of-combat twin of try_player_revive (interp_damage.cpp); here the
+        // BELT is directly readable, so no CombatState mirror is involved.
+        //
+        // FairyPotion.use (FairyPotion.java:36-45): healAmt =
+        // (int)((float)maxHealth * potency/100f), clamped UP to 1, applied to a
+        // currentHealth already pinned at 0 -- so the result IS healAmt. The
+        // slot is destroyed (:44, and again at AbstractPlayer.java:1491; the two
+        // are one event, destroyPotion being idempotent). LEFTMOST FAIRY FIRST:
+        // the Java loop returns on the first match in slot order, and exactly
+        // ONE is consumed.
+        //
+        // Magic Flower amplifies NEITHER heal here: its onPlayerHeal is
+        // explicitly phase==COMBAT-gated (MagicFlower.java:31-38) and an
+        // EventRoom is not COMBAT.
+        {
+            const uint8_t slots =
+                rc.run.potion_slots < static_cast<uint8_t>(kPotionCap)
+                    ? rc.run.potion_slots
+                    : static_cast<uint8_t>(kPotionCap);
+            for (uint8_t i = 0; i < slots; ++i) {
+                if (static_cast<PotionId>(rc.run.potions[i]) !=
+                    PotionId::FAIRY_POTION) {
+                    continue;
+                }
+                const PotionDef* def = potion_def(PotionId::FAIRY_POTION);
+                const int potency = def == nullptr ? 0 : def->potency;
+                const float percent = static_cast<float>(potency) / 100.0f;
+                int heal = static_cast<int>(
+                    static_cast<float>(rc.run.max_hp) * percent);
+                if (heal < 1) {
+                    heal = 1;
+                }
+                if (heal > static_cast<int>(rc.run.max_hp)) {
+                    heal = static_cast<int>(rc.run.max_hp);  // heal() clamps
+                }
+                rc.run.hp = static_cast<int16_t>(heal);
+                rc.run.potions[i] = static_cast<uint16_t>(PotionId::NONE);
+                return true;
+            }
+        }
+        // LizardTail.onTrigger (LizardTail.java:36-45) heals maxHealth/2
+        // (minimum 1) and marks the relic used.
         for (uint8_t i = 0; i < rc.run.relic_count; ++i) {
             RelicSlot& slot = rc.run.relics[i];
             if (slot.relic_id ==

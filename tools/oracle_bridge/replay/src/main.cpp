@@ -327,8 +327,10 @@ struct Options {
 // evidence. When the two answers differ the stop is DOWNSTREAM, and reading it
 // as the frontier is a documented, expensive mistake: STS00042 of
 // `b45_rewards_oracle_20260727T204809Z_claude01` diverged at seq 18 (Fusion
-// Hammer's / Philosopher's Stone's deferred `energyMaster` +1, so the sim was a
-// card short every turn and never finished the floor-1 fight) and stopped
+// Hammer's / Philosopher's Stone's then-deferred `energyMaster` +1 -- SINCE
+// LANDED, so that run wants re-running; the lesson here does not depend on it --
+// so the sim was an energy short every turn and never finished the fight) and
+// stopped
 // fourteen records later at seq 32, the first multi-option event page the stuck
 // controller was handed. The obligation row was filed off the stop, and asked
 // whether the ENGINE had an event/combat-boundary defect. It does not. So the
