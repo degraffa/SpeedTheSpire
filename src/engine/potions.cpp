@@ -86,6 +86,7 @@ bool potion_use_implemented(PotionId id) noexcept {
     switch (id) {
         case PotionId::BLOOD_POTION:           // dispatch_native_potion, below
         case PotionId::BLESSING_OF_THE_FORGE:  // dispatch_native_potion, below
+        case PotionId::ELIXIR:                 // dispatch_native_potion, below
         case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
                                                // (run_advance's step_potion
                                                // still intercepts it first)
@@ -184,6 +185,60 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             add_to_bottom(s, item);   // addToBot (BlessingOfTheForge.java:45)
             break;
         }
+        case PotionId::ELIXIR: {
+            // Elixir.use (Elixir.java:44-49): in RoomPhase.COMBAT, a single
+            // addToBot(new ExhaustAction(false, true, true)). getPotency (:51-54)
+            // is 0 -- the potion has no number of its own.
+            //
+            // The 3-arg ctor is (isRandom, anyNumber, canPickZero) and forwards
+            // amount 99 (ExhaustAction.java:56-58). Walk ExhaustAction.update
+            // (:73-110) in branch order with those values:
+            //   :76-79  empty hand      -> isDone, nothing happens.
+            //   :80-89  `!anyNumber && hand.size() <= amount` -- UNREACHABLE,
+            //           anyNumber is true. This is the branch that would exhaust
+            //           the whole hand with no screen.
+            //   :90-94  isRandom -- UNREACHABLE, isRandom is false. So ELIXIR
+            //           SPENDS NO card_random_rng AT ALL, on any path.
+            //   :96-99  open(TEXT[0], 99, true, true) -- the OPTIONAL zero-to-99
+            //           screen, ended only by the confirm button.
+            //   :102-108 on retrieval, walk selectedCards.group IN PICK ORDER
+            //           calling moveToExhaustPile, so the exhaust-pile order is
+            //           the pick order and each card's onExhaust fires in it.
+            //
+            // That is EXACTLY Purity's authored program with the amount raised
+            // (registry/cards.yaml:1856,
+            //  {op: CHOOSE_CARD, choose: exhaust, amount: 3, optional: true}),
+            // whose provenance block reasons through the same branch table --
+            // Purity is ExhaustAction(magicNumber, false, true, true). So there
+            // is no new machinery here: kChoiceOptionalBit, ActionVerb::CONFIRM
+            // and optional_choice_slot_legal / toggle_optional_choice_slot /
+            // resolve_optional_choice all already carry it.
+            //
+            // amount 99 IS THE CORRECT AUTHORED VALUE and must not be "tidied"
+            // down to kHandCap: optional_choice_slot_legal compares the pick
+            // count against item.amount, and 99 is what the Java compares
+            // against. The 4-bit runtime selected-count nibble
+            // (kChoiceSelectedShift) is safe regardless, because the SELECTION
+            // is capped by hand size, which is <= kHandCap == 10.
+            //
+            // Like Blessing of the Forge this cannot be a data program:
+            // CHOOSE_CARD is a CARD_CONTEXT op and the potion domain admits only
+            // GENERAL ops (tools/registry_gen/stsgen/steps.py). Hence the
+            // hand-built item. And like Blessing's, the RoomPhase.COMBAT guard
+            // at Elixir.java:46 is the run layer's -- a potion USE is offered
+            // only in RunPhase::COMBAT, and Elixir is not on the two-potion
+            // out-of-combat whitelist (noncombat_potion_legal).
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::CHOOSE_CARD);
+            item.src = kActorPlayer;
+            item.tgt = kActorPlayer;  // hand-source choice: no exclusion index
+            item.amount = 99;         // ExhaustAction.java:56-58
+            item.flags = make_choose_flags(ChoiceKind::EXHAUST, /*random=*/false,
+                                           /*copies=*/1, kChoiceNoTypeFilter,
+                                           /*optional=*/true);
+            add_to_bottom(s, item);   // addToBot (Elixir.java:47)
+            break;
+        }
         // --- Deferred native bodies (each lands with its dependency) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
@@ -191,10 +246,11 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // (powers.yaml ids 14-19; Steroid reuses LoseStrength id 13) -- so they no
         // longer route here (use_potion sends them through queue_use_step).
         // Still native + DEFERRED, each on a verb owned elsewhere:
-        // In-combat card CHOOSE: ELIXIR, ATTACK/SKILL/POWER/COLORLESS_
-        // POTION, GAMBLERS_BREW, LIQUID_MEMORIES. (BLESSING_OF_THE_FORGE is no
-        // longer among them -- it needed only the already-live CHOOSE_CARD
-        // UPGRADE kind and is implemented above.)
+        // In-combat card CHOOSE: ATTACK/SKILL/POWER/COLORLESS_POTION,
+        // GAMBLERS_BREW, LIQUID_MEMORIES. (BLESSING_OF_THE_FORGE and ELIXIR are
+        // no longer among them -- Blessing needed only the already-live
+        // CHOOSE_CARD UPGRADE kind, and Elixir only the already-live OPTIONAL
+        // EXHAUST one; both are implemented above.)
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
         // opcode, NOT a missing power row).

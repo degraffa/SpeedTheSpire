@@ -61,9 +61,21 @@
   game_id: "ElixirPotion"
   rarity: UNCOMMON
   potency: 0
-  # Exhaust any number of chosen hand cards -> in-combat card CHOOSE (B3.4). Deferred native.
+  # Exhaust ANY NUMBER of chosen hand cards, including none. IMPLEMENTED
+  # (native, potions.cpp): queues exactly Purity's authored program with the
+  # amount raised -- CHOOSE_CARD{exhaust, optional: true, amount: 99} -- because
+  # Elixir.use is `addToBot(new ExhaustAction(false, true, true))`, the
+  # (isRandom, anyNumber, canPickZero) ctor that forwards amount 99
+  # (ExhaustAction.java:56-58), and Purity is the same action with a magicNumber
+  # amount. isRandom false makes the getRandomCard branch (:90-94) unreachable,
+  # so ELIXIR SPENDS NO RNG ON ANY PATH; anyNumber true makes the
+  # exhaust-the-whole-hand branch (:80-89) unreachable too, so even a 1-card
+  # hand opens the optional screen and may legally take nothing.
+  # It stays `native` rather than becoming a data program for the same reason
+  # Blessing of the Forge does: CHOOSE_CARD is a CARD_CONTEXT op and the potion
+  # domain admits only GENERAL ops (gen steps.py).
   native: true
-  provenance: "Elixir.use (Elixir.java:45), getPotency (:52) -- ExhaustSpecificCardsAction over a hand grid choice"
+  provenance: "Elixir.use (Elixir.java:44-49), getPotency (:51-54) -- COMBAT-gated addToBot ExhaustAction(isRandom=false, anyNumber=true, canPickZero=true), i.e. amount 99 (ExhaustAction.java:56-58); ExhaustAction.update (:73-110) opens the optional zero-to-99 hand select and on retrieval moveToExhaustPile's the selection IN PICK ORDER (:102-108)"
 
 - id: 3
   name: HEART_OF_IRON

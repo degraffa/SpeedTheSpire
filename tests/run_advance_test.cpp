@@ -1311,7 +1311,7 @@ TEST(RunEscape, SmokeBombAfterAMugKeepsTheMuggedScreenAndItsRewards) {
 
 TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
     RunController rc = enter_jaw_worm_combat();
-    for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
+    for (PotionId id : {PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
                         PotionId::LIQUID_MEMORIES,
@@ -1347,13 +1347,13 @@ TEST(RunPotion, ForcingADeferredPotionKeepsTheSlot) {
     // Belt and braces: even if a caller submits the action the mask refused,
     // the slot is not consumed and combat state is untouched.
     RunController rc = enter_jaw_worm_combat();
-    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ELIXIR);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::DUPLICATION_POTION);
     const int hp_before = rc.combat.monsters[0].hp;
     const int16_t player_hp_before = rc.combat.player_hp;
 
     step(rc, make_action(ActionVerb::USE_POTION, 0));
 
-    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::ELIXIR))
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::DUPLICATION_POTION))
         << "the slot must survive an illegal use";
     EXPECT_EQ(rc.combat.monsters[0].hp, hp_before);
     EXPECT_EQ(rc.combat.player_hp, player_hp_before);

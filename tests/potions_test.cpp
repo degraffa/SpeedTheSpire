@@ -356,6 +356,112 @@ TEST(Potions, BlessingOfTheForgeWithOnlyCursesAndStatusesIsInert) {
     EXPECT_EQ(s.hand_count, 3);
 }
 
+// --- NATIVE with body: Elixir (Purity in a bottle) ---------------------------
+//
+// Elixir.use (Elixir.java:44-49) addToBot's ExhaustAction(false, true, true) --
+// the (isRandom, anyNumber, canPickZero) ctor, which forwards amount 99
+// (ExhaustAction.java:56-58). With anyNumber true the whole-hand branch
+// (:80-89) is unreachable and with isRandom false the getRandomCard branch
+// (:90-94) is too, so what is left is the OPTIONAL zero-to-99 screen at :96-99
+// and the pick-order moveToExhaustPile at :102-108. That is Purity's authored
+// program with a bigger amount (registry/cards.yaml:1856).
+
+TEST(Potions, ElixirQueuesTheOptionalExhaustScreen) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+
+    ASSERT_TRUE(use_potion(s, PotionId::ELIXIR, 0));
+    ASSERT_EQ(s.action_count, 1) << "one queued ExhaustAction-equivalent";
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
+    EXPECT_EQ(choose_kind_from_flags(item.flags), ChoiceKind::EXHAUST);
+    EXPECT_TRUE(choose_is_optional(item.flags));
+    EXPECT_FALSE(choose_is_random(item.flags))
+        << "isRandom false -- Elixir spends no rng on any path";
+    EXPECT_EQ(item.amount, 99)
+        << "ExhaustAction's 3-arg ctor forwards 99, and the pick cap is "
+           "compared against it -- it must not be tidied down to the hand cap";
+    EXPECT_TRUE(choice_requires_user(s, item))
+        << "canPickZero: the screen is ended by the confirm button only";
+    EXPECT_EQ(s.card_random_rng.counter, 0);
+}
+
+// anyNumber makes the "hand.size() <= amount -> exhaust everything, no screen"
+// branch unreachable, so even a single-card hand still prompts and may
+// legitimately take nothing.
+TEST(Potions, ElixirStillPromptsWithASingleCardInHand) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    ASSERT_TRUE(use_potion(s, PotionId::ELIXIR, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_TRUE(choice_requires_user(s, item));
+    EXPECT_EQ(s.hand_count, 1) << "nothing is exhausted before the confirm";
+    EXPECT_EQ(s.exhaust_count, 0);
+}
+
+// ExhaustAction.java:76-79: an EMPTY hand ends the action immediately. That is
+// the action's only short-circuit, so it is also the only way the pump does not
+// block on this item.
+TEST(Potions, ElixirWithAnEmptyHandBlocksOnNothing) {
+    CombatState s = MakeCombat();
+    ASSERT_EQ(s.hand_count, 0);
+    ASSERT_TRUE(use_potion(s, PotionId::ELIXIR, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    EXPECT_FALSE(choice_requires_user(s, item));
+    drain_actions(s);
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.card_random_rng.counter, 0);
+}
+
+// The confirm applies the selection IN PICK ORDER (:102-105), so the exhaust
+// pile records the order the player picked, NOT hand order. Picking slot 2 then
+// slot 0 must put CLEAVE into the exhaust pile ahead of STRIKE.
+TEST(Potions, ElixirExhaustsThePicksInPickOrderAndLeavesTheRest) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+    seed_hand_card(s, 2, CardId::CLEAVE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::ELIXIR, 0));
+    ActionQueueItem& item = s.action_queue[s.action_head];
+    ASSERT_TRUE(optional_choice_slot_legal(s, item, 2));
+    toggle_optional_choice_slot(s, item, 2);   // pick CLEAVE first
+    // Selecting lifts the card out of the hand and appends it to the suffix, so
+    // STRIKE is now slot 0 still and DEFEND slot 1.
+    ASSERT_TRUE(optional_choice_slot_legal(s, item, 0));
+    toggle_optional_choice_slot(s, item, 0);   // then STRIKE
+    EXPECT_EQ(choose_selected_count(item.flags), 2);
+
+    resolve_optional_choice(s, item);
+
+    ASSERT_EQ(s.exhaust_count, 2);
+    EXPECT_EQ(s.card_pool[s.exhaust[0]].card_id,
+              static_cast<uint16_t>(CardId::CLEAVE)) << "picked first";
+    EXPECT_EQ(s.card_pool[s.exhaust[1]].card_id,
+              static_cast<uint16_t>(CardId::STRIKE)) << "picked second";
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+              static_cast<uint16_t>(CardId::DEFEND)) << "unpicked, still held";
+    EXPECT_EQ(s.card_random_rng.counter, 0);
+}
+
+// canPickZero: confirming with nothing selected exhausts nothing at all. The
+// Java walks an empty selectedCards.group and the potion is simply spent.
+TEST(Potions, ElixirConfirmedWithNoPicksExhaustsNothing) {
+    CombatState s = MakeCombat();
+    seed_hand_card(s, 0, CardId::STRIKE);
+    seed_hand_card(s, 1, CardId::DEFEND);
+
+    ASSERT_TRUE(use_potion(s, PotionId::ELIXIR, 0));
+    const ActionQueueItem& item = s.action_queue[s.action_head];
+    resolve_optional_choice(s, item);
+
+    EXPECT_EQ(s.exhaust_count, 0);
+    EXPECT_EQ(s.hand_count, 2);
+    EXPECT_EQ(potion_def(PotionId::ELIXIR)->potency, 0);
+}
+
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
 // Powers registered by the potion-support-powers follow-up (Dexterity, Lose
 // Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
@@ -622,8 +728,8 @@ TEST(Potions, ImplementedNessIsRegistryDrivenForDataPotions) {
 TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // The `native` rows are the hand-written ones, so they are named explicitly.
     for (PotionId id : {PotionId::BLOOD_POTION, PotionId::BLESSING_OF_THE_FORGE,
-                        PotionId::FRUIT_JUICE, PotionId::ENTROPIC_BREW,
-                        PotionId::SMOKE_BOMB}) {
+                        PotionId::ELIXIR, PotionId::FRUIT_JUICE,
+                        PotionId::ENTROPIC_BREW, PotionId::SMOKE_BOMB}) {
         EXPECT_TRUE(potion_use_implemented(id))
             << "native id " << static_cast<int>(id) << " has a body";
     }
@@ -632,7 +738,7 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::ELIXIR, PotionId::ATTACK_POTION,
+    for (PotionId id : {PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
                         PotionId::LIQUID_MEMORIES, PotionId::DISTILLED_CHAOS,
