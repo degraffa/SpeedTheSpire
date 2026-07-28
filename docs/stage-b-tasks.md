@@ -350,6 +350,53 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
 
+- **Wave-C track 1, stage 1: three live divergence fixes** `[x]` — branch
+  `wave-combat` (commits `239885c`, `b4faf1c`, `f9fab90`), each RED-first with
+  the failing tests named in its commit body. Orchestrator-sanctioned
+  stop-the-line fixes; no design section asserted any of the old behaviours
+  (checked stage-a §5.2/§5.5 and stage-b), so no design change-log entry.
+  - **Power-list ordering** (`239885c`): `ApplyPowerAction.java:167` runs
+    `Collections.sort(target.powers)` after every NEW power lands — stable,
+    priority-major (`AbstractPower.compareTo` :366-368, default 5 :66) — and
+    the engine appended without sorting, so a player Weakened before gaining
+    Strength computed `(base×0.75)+S` where the game computes `(base+S)×0.75`.
+    `PowerDef` now carries `priority` (mirrored ctor overrides: WEAK 99,
+    FRAIL 10, INTANGIBLE 75, CONFUSION 0 — the complete override set for
+    registered powers) and `op_apply_power`'s new-slot path ends with the
+    stable re-sort. The stacking branch does not re-sort and
+    `AbstractCreature.addPower` ports (Philosopher's Stone) are unaffected,
+    matching the Java. **Fixture impact: none** — the 20 frozen fixture
+    traces replay unchanged (no captured trace holds an out-of-order pair).
+    This is the ordering prerequisite the Pen Nib obligations row needs
+    (`PenNibPower.priority = 6` sits between the default-5 powers and
+    Frail/Intangible/Weak).
+  - **Red Skull entry semantics** (`b4faf1c`): the game pre-seeds
+    `isBloodied = currentHealth <= maxHealth / 2` in `preBattlePrep`
+    (`AbstractPlayer.java:1575`), so a combat ENTERED at/below half HP never
+    fires the damage-side onBloodied cross; and `RedSkull.atBattleStart`
+    resets `isActive = false` every combat (`RedSkull.java:37`). The engine
+    granted +3 Strength on the first HP loss of an entered-bloodied combat,
+    and its suppression latch persisted across combats. RED_SKULL's row now
+    binds `at_battle_start: []` and the native body seeds the latch from
+    starting HP. **NOT taken:** the anonymous action `atBattleStart` queues
+    (`RedSkull.java:38`) stays the recorded undecompilable deferral, and the
+    `onNotBloodied` heal-cross obligations row stays open. The row's stale
+    citations (`:48-58`/`:60-67`/`:41-45`) were corrected in the same commit.
+  - **Entropic Brew** (`f9fab90`): `EntropicBrew.use` checks Sozu BEFORE any
+    roll out of combat (`EntropicBrew.java:43-45`), rolls `limited=false`
+    out of combat (`:46-48`, the no-arg `returnRandomPotion`,
+    `AbstractDungeon.java:825-827`), and in combat rolls `limited=true`
+    un-gated with each obtain Sozu-suppressed at resolve
+    (`ObtainPotionAction.java:29-38`). The engine had no Sozu check and
+    hard-coded `limited=true` in both phases — RNG-visible, since the
+    limited loop spends a different draw count. Surgical to
+    `use_entropic_brew`; the rest of `run_advance.cpp` untouched (Track 2's
+    surface). Caution recorded for future potion tests: the two `limited`
+    flags OFTEN coincide on a given seed (a tier-mismatched candidate makes
+    the limited discard overlap the rarity rejection) — the replacement test
+    hunts a distinguishing seed before asserting, because the old test's
+    fixed seed pinned the wrong flag without noticing.
+
 - **`--replay` triage of b45 campaign 1 (STS00042-46)** `[x]` — branch
   `triage-sts00042`. Discharges the **"STS00042 replay stop at seq 32 —
   untriaged"** obligation row; full read-out in
