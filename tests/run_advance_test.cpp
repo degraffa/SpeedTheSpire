@@ -221,7 +221,15 @@ TEST(RunBegin, NeowHasGenerateSeedsFloorStreamsAtFloorZero) {
     EXPECT_TRUE(streams_equal(rc.combat.ai_rng, floor0));
     EXPECT_TRUE(streams_equal(rc.combat.shuffle_rng, floor0));
     EXPECT_TRUE(streams_equal(rc.combat.card_random_rng, floor0));
-    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, floor0));
+    // miscRng alone starts ONE draw in: Exordium's constructor ends with
+    // changeBGM, whose MainMusic.getSong Exordium arm draws miscRng.random(1)
+    // to pick the act's track (Exordium.java:58; MainMusic.java:56-66). Found
+    // empirically via STS00052's Astrolabe transforms -- every identity one
+    // draw behind the capture with all counters equal -- and floor-0-only,
+    // because nextRoomTransition's per-floor reseed discards the offset.
+    RngStream misc = floor0;
+    (void)random(misc, 1);
+    EXPECT_TRUE(streams_equal(rc.combat.misc_rng, misc));
 }
 
 TEST(RunBegin, RelicRngConsumesFivePoolShuffleDraws) {

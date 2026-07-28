@@ -885,6 +885,24 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     // transition replaces them only after incrementing floor.
     reseed_floor_streams(rc.combat, seed, 0);
 
+    // THE ACT-MUSIC DRAW -- the first and only run-start miscRng consumer.
+    // Exordium.<init> ends with CardCrawlGame.music.changeBGM(id)
+    // (Exordium.java:58) -> new MainMusic("Exordium") -> getSong, whose
+    // Exordium arm draws AbstractDungeon.miscRng.random(1) to pick between the
+    // act's two tracks (MainMusic.java:56-66). That is a real draw off the
+    // FLOOR-0 misc stream (miscRng = new Random(Settings.seed),
+    // AbstractDungeon.java:411; the per-floor reseed at nextRoomTransition
+    // :1751 then discards the offset, which is why floors >= 1 never see it).
+    // It was invisible until the boss-swap onEquip bodies landed, because no
+    // other floor-0 miscRng consumer existed; STS00052's Astrolabe transforms
+    // are what exposed it -- the game's three identities matched draws 2..4 of
+    // the sim's stream, one behind on every draw, with every counter equal.
+    // (The value is deliberately discarded: which TRACK plays is not run
+    // state.) The save-reload path re-draws it off the reloaded floor stream
+    // (Exordium.java:83 after the :81 reseed) -- a mid-run-resume concern for
+    // that row's owner, not modelled here.
+    (void)random(rc.combat.misc_rng, 1);
+
     // dungeonTransitionSetup: EventHelper.resetProbabilities (act-scoped pity
     // floats) + blizzardPotionMod = 0; cardBlizzRandomizer starts at +5.
     // (ELITE_CHANCE's reset has no field here -- event_framework.hpp.)
