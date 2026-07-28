@@ -201,10 +201,10 @@ as usual.
 
 | Namespace | Track 1 potions stage | Track 1 relic-tail stage | Track 1 energyMaster stage | Track 2 |
 |---|---|---|---|---|
-| Opcode | **60–62** | **63–66** | **67** (contingency) | **68** (reserve) |
-| `PowerId` | — | **87–90** | — | — |
-| `ChoiceKind` | **11–13** (release unspent) | **14–15** (release unspent) | — | — |
-| `CombatState.flags` bits | **16–19** (release unspent) | **20–25** (release unspent) | — | — |
+| Opcode | **60–62** | **63–66** — SPENT **63** `REMOVE_DEBUFFS`, **64** `UPGRADE_RANDOM_CARD`; **65–66 released unspent** | **67** (contingency) | **68** (reserve) |
+| `PowerId` | — | **87–90** — SPENT **87** `VIGOR`, **88** `PEN_NIB`; **89–90 released unspent** | — | — |
+| `ChoiceKind` | **11–13** (release unspent) | **14–15** — **BOTH RELEASED UNSPENT.** The relic tail needed no new choice kind: Gambling Chip is the only item in it that wanted one and belongs to the potions stage | — | — |
+| `CombatState.flags` bits | **16–19** (release unspent) | **20–25** — SPENT **20** elite room, **21–23** Orange Pellets ATTACK/SKILL/POWER latches, **24** Art of War "attack played this turn"; **25 released unspent**. Slaver's Collar cost ZERO bits (see row 78) | — | — |
 | `CardId` | — | — | — | **127–128** (Curse of the Bell + reserve) |
 | `RunPhase` | — | — | — | **11–12** |
 | fuzz `MoveCat` | — | — | — | **27–29** (bump `COUNT` past every spent enumerator) |
