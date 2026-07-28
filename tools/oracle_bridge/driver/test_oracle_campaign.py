@@ -1867,6 +1867,25 @@ def _pick(state, table=None, rng=None):
     return greedy_policy.pick(actions, state, table, rng)
 
 
+def _deck(attacks=6, others=4, attack_id="Strike_R", other_id="Defend_R"):
+    """A run deck with a known ATTACK census -- b1.5.0 R1's gate reads this.
+
+    The Ironclad opener is exactly (6, 4): 5 Strikes + Bash against 4 Defends.
+    """
+    return ([{"id": attack_id, "type": "ATTACK", "upgrades": 0}] * attacks
+            + [{"id": other_id, "type": "SKILL", "upgrades": 0}] * others)
+
+
+def _potion(pid="FirePotion", can_use=True, requires_target=False):
+    return {"id": pid, "name": pid, "can_use": can_use,
+            "can_discard": True, "requires_target": requires_target}
+
+
+_EMPTY_SLOT = {"id": "Potion Slot", "name": "Potion Slot",
+               "can_use": False, "can_discard": False,
+               "requires_target": False}
+
+
 class GreedyCombatScoringTest(unittest.TestCase):
     def setUp(self):
         self.table = greedy_policy.load_side_table(_SIDE_TABLE)
@@ -2439,6 +2458,469 @@ class GreedyReplayLegalityTest(unittest.TestCase):
         self.assertLess(agreements, decisions,
                         "greedy that never diverges from random-legal is not "
                         "a policy")
+
+
+# --- b1.5.0: the three Act-1 boss rules ------------------------------------
+#
+# Evidence they were derived from (greedy_policy module docstring has the
+# citations): six STS01221 captures under six policy seeds, every one of which
+# drove the Slime Boss to its 50 % split threshold (SlimeBoss.java:175) with a
+# 12-14 card starter deck and an empty or one-potion belt, and died to the two
+# large slimes the split leaves behind (SlimeBoss.java:155-156).
+
+class GreedyCardRewardGateTest(unittest.TestCase):
+    """R1 -- the deck-only gate on card rewards."""
+
+    def setUp(self):
+        self.table = greedy_policy.load_side_table(_SIDE_TABLE)
+        self.assertTrue(self.table, "the committed side table must load")
+
+    @staticmethod
+    def _combat_reward(deck):
+        return _screen("COMBAT_REWARD", ["gold", "card"],
+                       {"rewards": [{"reward_type": "GOLD", "gold": 18},
+                                    {"reward_type": "CARD"}]},
+                       available=("choose", "proceed"), deck=deck)
+
+    @staticmethod
+    def _card_screen(cards, deck, choices=None):
+        return _screen("CARD_REWARD",
+                       choices or [c.get("id", "?") for c in cards],
+                       {"skip_available": True, "bowl_available": False,
+                        "cards": cards},
+                       available=("choose", "skip"), deck=deck)
+
+    # -- the gate itself ---------------------------------------------------
+
+    def test_starter_deck_wants_a_card_and_a_stocked_deck_does_not(self):
+        opener = _screen("COMBAT_REWARD", [], {}, deck=_deck(6, 4))
+        self.assertTrue(greedy_policy.wants_card_reward(opener, self.table))
+        stocked = _screen("COMBAT_REWARD", [], {}, deck=_deck(10, 4))
+        self.assertFalse(greedy_policy.wants_card_reward(stocked, self.table))
+
+    def test_deck_size_cap_closes_the_gate_even_while_attacks_are_short(self):
+        big = _screen("COMBAT_REWARD", [], {}, deck=_deck(6, 14))
+        self.assertEqual(6, greedy_policy.deck_attack_count(big, self.table))
+        self.assertEqual(20, len(big["game_state"]["deck"]))
+        self.assertFalse(greedy_policy.wants_card_reward(big, self.table),
+                         "a 20-card deck stops taking regardless of census")
+
+    def test_absent_deck_keeps_the_pre_b150_behaviour(self):
+        blind = _screen("COMBAT_REWARD", [], {})
+        self.assertIsNone(greedy_policy.deck_attack_count(blind, self.table))
+        self.assertFalse(greedy_policy.wants_card_reward(blind, self.table))
+
+    def test_census_reads_the_dumps_own_type_for_an_unregistered_card(self):
+        deck = _deck(3, 4) + [{"id": "ModdedSlash", "type": "ATTACK"}] * 7
+        state = _screen("COMBAT_REWARD", [], {}, deck=deck)
+        self.assertEqual(10, greedy_policy.deck_attack_count(state, self.table))
+        self.assertFalse(greedy_policy.wants_card_reward(state, self.table))
+
+    # -- COMBAT_REWARD: open the row, and only then -----------------------
+
+    def test_open_gate_lifts_the_card_row_above_proceed(self):
+        state = self._combat_reward(_deck(6, 4))
+        self.assertGreater(
+            greedy_policy.score_action("choose 1", state, self.table),
+            greedy_policy.score_action("proceed", state, self.table),
+            "a starter deck must open the card row")
+
+    def test_closed_gate_leaves_the_card_row_exactly_as_before(self):
+        state = self._combat_reward(_deck(10, 4))
+        self.assertEqual(
+            greedy_policy.REWARD_CARD,
+            greedy_policy.score_action("choose 1", state, self.table))
+        self.assertLess(
+            greedy_policy.score_action("choose 1", state, self.table),
+            greedy_policy.score_action("proceed", state, self.table))
+
+    def test_gold_is_still_claimed_before_the_card_row(self):
+        state = self._combat_reward(_deck(6, 4))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_open_gate_does_not_disturb_the_sapphire_key_order(self):
+        """The never-claim-key property is orthogonal and must stay orthogonal."""
+        rewards = [{"reward_type": "RELIC",
+                    "relic": {"id": "Bag of Preparation"}},
+                   {"reward_type": "SAPPHIRE_KEY",
+                    "link": {"id": "Bag of Preparation"}},
+                   {"reward_type": "CARD"}]
+        state = _screen("COMBAT_REWARD", ["relic", "sapphire_key", "card"],
+                        {"rewards": rewards},
+                        available=("choose", "proceed"), deck=_deck(6, 4))
+        self.assertTrue(greedy_policy.wants_card_reward(state, self.table))
+        self.assertEqual("choose 0", _pick(state, self.table))
+        self.assertLess(
+            greedy_policy.score_action("choose 1", state, self.table),
+            greedy_policy.score_action("proceed", state, self.table),
+            "the key must still rank below proceed with the gate open")
+        self.assertGreater(
+            greedy_policy.score_action("choose 0", state, self.table),
+            greedy_policy.score_action("choose 2", state, self.table),
+            "the relic must still be claimed before the card row")
+
+    # -- CARD_REWARD: which card ------------------------------------------
+
+    def test_open_gate_takes_the_biggest_attack_over_a_big_block_skill(self):
+        cards = [{"id": "Impervious", "type": "SKILL", "upgrades": 0},
+                 {"id": "Heavy Blade", "type": "ATTACK", "upgrades": 0},
+                 {"id": "Anger", "type": "ATTACK", "upgrades": 0}]
+        state = self._card_screen(cards, _deck(6, 4))
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_aoe_breaks_a_tie_between_two_equal_attacks(self):
+        """The split leaves two targets, so an ALL_ENEMY attack is worth more."""
+        cards = [{"id": "Pommel Strike", "type": "ATTACK", "upgrades": 0},
+                 {"id": "Sword Boomerang", "type": "ATTACK", "upgrades": 0}]
+        state = self._card_screen(cards, _deck(6, 4))
+        plain = self.table["Pommel Strike"]["damage"][0]
+        aoe = self.table["Sword Boomerang"]["damage"][0]
+        self.assertEqual(plain, aoe, "this test needs equal base damage")
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_upgraded_offer_is_ranked_on_its_upgraded_column(self):
+        cards = [{"id": "Anger", "type": "ATTACK", "upgrades": 1},
+                 {"id": "Anger", "type": "ATTACK", "upgrades": 0}]
+        state = self._card_screen(cards, _deck(6, 4))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_a_curse_ranks_below_every_real_offer(self):
+        cards = [{"id": "Clumsy", "type": "CURSE", "upgrades": 0},
+                 {"id": "Anger", "type": "ATTACK", "upgrades": 0}]
+        state = self._card_screen(cards, _deck(6, 4))
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_the_singing_bowl_row_ranks_below_a_real_card(self):
+        cards = [{"id": "Anger", "type": "ATTACK", "upgrades": 0}]
+        state = _screen("CARD_REWARD", ["anger", "bowl"],
+                        {"skip_available": True, "bowl_available": True,
+                         "cards": cards},
+                        available=("choose", "skip"), deck=_deck(6, 4))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_closed_gate_still_skips_the_card_screen(self):
+        cards = [{"id": "Heavy Blade", "type": "ATTACK", "upgrades": 0}]
+        state = self._card_screen(cards, _deck(10, 4))
+        self.assertEqual("skip", _pick(state, self.table))
+
+    def test_missing_side_table_still_takes_when_the_gate_is_open(self):
+        """Degraded mode ranks everything 0 but must not open-then-skip."""
+        cards = [{"id": "Heavy Blade", "type": "ATTACK", "upgrades": 0}]
+        state = self._card_screen(cards, _deck(6, 4))
+        self.assertEqual("choose 0", _pick(state, {}))
+
+    # -- the anti-cycle invariant -----------------------------------------
+
+    def test_the_two_screens_can_never_disagree(self):
+        """THE load-bearing property of R1.
+
+        `skip` does not retire a card row (b13_off20 run_STS00004 seq 30-33:
+        skip -> COMBAT_REWARD still offering `card`). If the open-the-row
+        decision could ever be `open` while the take-the-card decision was
+        `skip`, greedy would alternate between the two screens forever with a
+        signature the driver's stuck detector cannot see. Both read the same
+        deck, so over every census the two answers must be the same answer.
+        """
+        cards = [{"id": "Anger", "type": "ATTACK", "upgrades": 0},
+                 {"id": "Impervious", "type": "SKILL", "upgrades": 0}]
+        seen = set()
+        for attacks in range(0, 14):
+            for others in range(0, 14):
+                deck = _deck(attacks, others) if attacks or others else None
+                reward = self._combat_reward(deck)
+                screen = self._card_screen(cards, deck)
+                opens = (greedy_policy.score_action("choose 1", reward,
+                                                    self.table)
+                         > greedy_policy.score_action("proceed", reward,
+                                                      self.table))
+                takes = (greedy_policy.score_action("choose 0", screen,
+                                                    self.table)
+                         > greedy_policy.score_action("skip", screen,
+                                                      self.table))
+                self.assertEqual(
+                    opens, takes,
+                    f"deck ({attacks} attack / {others} other): opened="
+                    f"{opens} but took={takes} -- that is the 2-cycle")
+                seen.add(opens)
+        self.assertEqual({True, False}, seen,
+                         "the sweep must cover both sides of the gate")
+
+
+class GreedyPotionHoldingTest(unittest.TestCase):
+    """R2 -- potions are held for the fight that matters."""
+
+    def setUp(self):
+        self.table = greedy_policy.load_side_table(_SIDE_TABLE)
+
+    @staticmethod
+    def _fight(room_type="MonsterRoom", hp=70, potions=None, hand=None):
+        state = _combat(hand if hand is not None else [],
+                        [_monster(40)],
+                        available=("play", "end", "potion"))
+        gs = state["game_state"]
+        gs["room_type"] = room_type
+        gs["current_hp"] = hp
+        gs["potions"] = potions if potions is not None \
+            else [_potion(), dict(_EMPTY_SLOT)]
+        return state
+
+    def test_an_ordinary_fight_holds_the_potion_and_ends_the_turn(self):
+        state = self._fight()
+        self.assertIn("potion use 0",
+                      campaign_driver.expand_legal_actions(
+                          state, random.Random(0)))
+        self.assertEqual("end", _pick(state, self.table))
+
+    def test_the_act1_boss_room_spends_it(self):
+        state = self._fight(room_type="MonsterRoomBoss")
+        self.assertEqual("potion use 0", _pick(state, self.table))
+
+    def test_an_elite_room_spends_it(self):
+        state = self._fight(room_type="MonsterRoomElite")
+        self.assertEqual("potion use 0", _pick(state, self.table))
+
+    def test_a_low_hp_fight_spends_it_anywhere(self):
+        self.assertEqual("end", _pick(self._fight(hp=33), self.table))
+        self.assertEqual("potion use 0", _pick(self._fight(hp=32), self.table))
+
+    def test_a_full_belt_spends_it_rather_than_blocking_a_pickup(self):
+        state = self._fight(potions=[_potion("FirePotion"),
+                                     _potion("BlockPotion")])
+        self.assertTrue(greedy_policy.belt_is_full(state))
+        self.assertEqual("potion use 0", _pick(state, self.table))
+
+    def test_a_belt_with_a_free_slot_is_not_full(self):
+        self.assertFalse(greedy_policy.belt_is_full(self._fight()))
+
+    def test_a_held_potion_still_outranks_nothing_but_ending_the_turn(self):
+        state = self._fight()
+        self.assertLess(
+            greedy_policy.score_action("potion use 0", state, self.table),
+            greedy_policy.score_action("end", state, self.table))
+
+    def test_a_spent_potion_still_ranks_below_every_playable_card(self):
+        state = self._fight(room_type="MonsterRoomBoss",
+                            hand=[_card("Strike_R")])
+        self.assertLess(
+            greedy_policy.score_action("potion use 0", state, self.table),
+            greedy_policy.score_action("play 1 0", state, self.table))
+        self.assertEqual("play 1 0", _pick(state, self.table))
+
+    def test_out_of_combat_potion_handling_is_unchanged(self):
+        state = _screen("COMBAT_REWARD", ["gold"],
+                        {"rewards": [{"reward_type": "GOLD", "gold": 9}]},
+                        available=("choose", "proceed", "potion"),
+                        potions=[_potion(), dict(_EMPTY_SLOT)])
+        self.assertEqual(
+            greedy_policy.POTION_USE_OUT_OF_COMBAT,
+            greedy_policy.score_action("potion use 0", state, self.table))
+        self.assertEqual(
+            greedy_policy.POTION_DISCARD,
+            greedy_policy.score_action("potion discard 0", state, self.table))
+
+
+class GreedyMultiAttackerBlockTest(unittest.TestCase):
+    """R3 -- the block weight scales with the number of banners swinging."""
+
+    # damage 25 beats block 5 at weight 4 (25 > 20) and loses at weight 6
+    # (25 < 30): the smallest state that shows the rule doing anything.
+    TABLE = {
+        "BigHit": {"damage": [25, 25], "block": [0, 0], "cost": 2,
+                   "type": "ATTACK", "aoe": False, "damage_from_block": False},
+        "SmallGuard": {"damage": [0, 0], "block": [5, 5], "cost": 1,
+                       "type": "SKILL", "aoe": False,
+                       "damage_from_block": False},
+    }
+
+    @staticmethod
+    def _board(attackers, idle=0, hp=200):
+        monsters = [_monster(hp, intent="ATTACK", adjusted=18)
+                    for _ in range(attackers)]
+        monsters += [_monster(hp, intent="DEBUFF", adjusted=0)
+                     for _ in range(idle)]
+        return _combat([_card("BigHit", cost=2),
+                        _card("SmallGuard", cost=1, has_target=False)],
+                       monsters)
+
+    def test_weight_is_four_for_one_attacker_and_climbs_by_two(self):
+        for attackers, expected in ((1, 4), (2, 6), (3, 8), (4, 8), (9, 8)):
+            state = self._board(attackers)
+            self.assertEqual(attackers,
+                             greedy_policy.attacker_count(state))
+            self.assertEqual(
+                expected, greedy_policy.block_weight_under_attack(state),
+                f"{attackers} attacker(s)")
+
+    def test_one_attacker_still_prefers_the_bigger_hit(self):
+        state = self._board(1)
+        self.assertEqual("play 1 0", _pick(state, self.TABLE))
+
+    def test_two_attackers_buy_the_turn_instead(self):
+        """The Slime Boss split board: two large slimes, both swinging."""
+        state = self._board(2)
+        self.assertEqual("play 2", _pick(state, self.TABLE))
+
+    def test_an_idle_second_monster_does_not_raise_the_weight(self):
+        state = self._board(1, idle=1)
+        self.assertEqual(1, greedy_policy.attacker_count(state))
+        self.assertEqual(4, greedy_policy.block_weight_under_attack(state))
+        self.assertEqual("play 1 0", _pick(state, self.TABLE))
+
+    def test_dead_and_gone_monsters_are_not_counted(self):
+        monsters = [_monster(0, intent="ATTACK", adjusted=18),
+                    _monster(30, intent="ATTACK", adjusted=18, gone=True),
+                    _monster(30, intent="ATTACK", adjusted=18)]
+        state = _combat([_card("BigHit", cost=2)], monsters)
+        self.assertEqual(1, greedy_policy.attacker_count(state))
+
+    def test_lethal_still_outranks_block_with_two_attackers(self):
+        monsters = [_monster(10, intent="ATTACK", adjusted=18),
+                    _monster(200, intent="ATTACK", adjusted=18)]
+        state = _combat([_card("BigHit", cost=2),
+                         _card("SmallGuard", cost=1, has_target=False)],
+                        monsters)
+        self.assertEqual(2, greedy_policy.attacker_count(state))
+        self.assertEqual("play 1 0", _pick(state, self.TABLE))
+
+    def test_facing_attack_is_still_the_boolean_it_always_was(self):
+        self.assertFalse(greedy_policy.facing_attack(self._board(0, idle=2)))
+        self.assertTrue(greedy_policy.facing_attack(self._board(1)))
+
+
+# --- replay harness over the recorded Act-1 boss fights ---------------------
+
+_BOSS_CAPTURE_GLOB = os.environ.get(
+    "STS_ORACLE_BOSS_CAPTURE_GLOB",
+    r"D:\STS_BG_Mod\_oracle_data\campaigns"
+    r"\g6_boss_ps*_20260728T153342Z_claude01")
+
+
+class GreedyBossFightReplayLegalityTest(unittest.TestCase):
+    """Every b1.5.0 command, on every recorded Act-1 boss-fight state.
+
+    Same contract as GreedyReplayLegalityTest and for the same reason -- the
+    policy ranks, `expand_legal_actions` decides legality -- but scoped to the
+    room the new rules exist for. These captures are the twelve boss fights the
+    g6 runbook counted; they live outside the repo (design 7.3), so their
+    absence skips.
+    """
+
+    MIN_RUNS = 3
+    MIN_BOSS_STATES = 200
+
+    def _runs(self):
+        paths = []
+        for directory in sorted(glob.glob(_BOSS_CAPTURE_GLOB)):
+            paths.extend(sorted(glob.glob(os.path.join(
+                directory, "run_*_a20_ironclad.jsonl"))))
+        if len(paths) < self.MIN_RUNS:
+            self.skipTest(
+                f"need >= {self.MIN_RUNS} recorded runs under "
+                f"{_BOSS_CAPTURE_GLOB} (campaign artifacts live outside the "
+                "repo, design 7.3)")
+        return paths
+
+    @staticmethod
+    def _boss_states(path):
+        with open(path, encoding="utf-8") as fh:
+            for line in fh:
+                record = json.loads(line)
+                if record.get("record_kind") != "action":
+                    continue
+                state = record.get("state_json") or {}
+                if not state.get("in_game"):
+                    continue
+                gs = state.get("game_state") or {}
+                if gs.get("room_type") != "MonsterRoomBoss":
+                    continue
+                yield record, state, gs
+
+    def test_every_greedy_command_is_legal_on_every_boss_fight_state(self):
+        table = greedy_policy.load_side_table(_SIDE_TABLE)
+        self.assertTrue(table)
+        checked = emitted = 0
+        runs_with_a_boss_fight = 0
+        for path in self._runs():
+            rng = random.Random(f"1234:{os.path.basename(path)}")
+            here = 0
+            for _record, state, _gs in self._boss_states(path):
+                checked += 1
+                here += 1
+                actions = campaign_driver.expand_legal_actions(state, rng)
+                command = greedy_policy.pick(actions, state, table, rng)
+                if command is None:
+                    self.assertEqual([], actions)
+                    continue
+                emitted += 1
+                self.assertIn(command, actions, f"{path}: {command!r}")
+                self.assertTrue(
+                    campaign_driver.cmd_verb_ready(state, command),
+                    f"{path}: verb of {command!r} is not advertised "
+                    f"({state.get('available_commands')})")
+                ok, why = campaign_driver.cmd_args_ready(state, command)
+                self.assertTrue(ok, f"{path}: {command!r} -- {why}")
+            if here:
+                runs_with_a_boss_fight += 1
+        self.assertGreaterEqual(checked, self.MIN_BOSS_STATES)
+        self.assertGreaterEqual(emitted, self.MIN_BOSS_STATES // 2)
+        self.assertGreaterEqual(runs_with_a_boss_fight, 3)
+
+    def test_the_recorded_boss_fights_actually_exercise_the_new_rules(self):
+        """A legality sweep over states no new rule touches proves nothing."""
+        table = greedy_policy.load_side_table(_SIDE_TABLE)
+        spendable = 0
+        multi_attacker = 0
+        split_boards = 0
+        for path in self._runs():
+            for _record, state, gs in self._boss_states(path):
+                if (gs.get("combat_state") or {}).get("monsters"):
+                    if greedy_policy.potion_worth_spending(state):
+                        spendable += 1
+                    if greedy_policy.block_weight_under_attack(state) > \
+                            greedy_policy.BLOCK_WEIGHT_UNDER_ATTACK:
+                        multi_attacker += 1
+                names = {(m or {}).get("name") for m in
+                         (gs.get("combat_state") or {}).get("monsters") or []}
+                if {"Spike Slime (L)", "Acid Slime (L)"} <= names:
+                    split_boards += 1
+        self.assertGreater(spendable, 0,
+                           "R2 must read True in a MonsterRoomBoss")
+        self.assertGreater(multi_attacker, 0,
+                           "R3 must fire on the post-split board")
+        self.assertGreater(split_boards, 0,
+                           "the captures must contain a real Slime Boss split")
+
+    def test_replay_is_reproducible_from_policy_seed_and_seed(self):
+        """Design 7.5: the whole action sequence follows from the two seeds."""
+        table = greedy_policy.load_side_table(_SIDE_TABLE)
+        paths = self._runs()
+
+        def sequence(policy_seed, path):
+            rng = random.Random(f"{policy_seed}:{os.path.basename(path)}")
+            out = []
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    record = json.loads(line)
+                    if record.get("record_kind") != "action":
+                        continue
+                    state = record.get("state_json") or {}
+                    if not state.get("in_game"):
+                        continue
+                    actions = campaign_driver.expand_legal_actions(state, rng)
+                    out.append(greedy_policy.pick(actions, state, table, rng))
+            return out
+
+        differed = 0
+        for path in paths[:6]:
+            first = sequence(1234, path)
+            self.assertGreater(len(first), 0)
+            self.assertEqual(first, sequence(1234, path),
+                             f"{path}: not reproducible from (1234, seed)")
+            if sequence(4321, path) != first:
+                differed += 1
+        self.assertGreater(differed, 0,
+                           "a policy seed that can never change a decision is "
+                           "not a tie-break")
 
 
 if __name__ == "__main__":
