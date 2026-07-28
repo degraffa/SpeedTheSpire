@@ -391,8 +391,9 @@ namespace sts {
 // combat skeleton signature; run-level advance lands with S1
 struct Action { uint32_t bits; };  // verb:8 | arg0:8 | arg1:8 | arg2:8
 // verbs: PLAY_CARD(hand_idx, target), END_TURN, USE_POTION(slot, target),
-//        CHOOSE(option_idx), CONFIRM  — one enum, all phases
-//        (CONFIRM appended in Stage B — see §12)
+//        CHOOSE(option_idx), CONFIRM, DISCARD_POTION(slot)
+//                                             — one enum, all phases
+//        (CONFIRM and DISCARD_POTION appended in Stage B — see §12)
 void advance(std::span<CombatState> states,
              std::span<const Action> actions,
              std::span<StepResult> results);   // heterogeneous batch, no sync
@@ -509,6 +510,28 @@ decompiled Java > this design doc > the task ledger).
   every pre-existing choice keeps its exact semantics and every pre-existing
   verb keeps its value. Append-only API growth, not a frozen-mechanic change; no
   `SCHEMA_VERSION` bump and no fixture touched.
+
+- **Stage B — `ActionVerb::DISCARD_POTION` appended to §7's verb set.** Same
+  shape as `CONFIRM` above, and for the same reason: a real button the four
+  original verbs had no spelling for. The potion belt on the top panel offers
+  USE **and** THROW AWAY, and the two are different actions, not two modes of
+  one. `CommandExecutor.executePotionCommand` runs `potion.use` and the whole
+  relic `onUsePotion` fan-out on the USE branch only; both branches then end at
+  `topPanel.destroyPotion(slot)`, which is
+  `potions.set(slot, new PotionSlot(slot))` and nothing else
+  (`TopPanel.java:529-531`). So a discard consumes no RNG, moves no stream and
+  fires no hook — it is not a weakened `USE_POTION`, and it is legal in strictly
+  MORE situations: `AbstractPotion.canDiscard` (`AbstractPotion.java:398-400`)
+  allows any occupied slot in or out of combat and refuses only inside a We Meet
+  Again dialog, where `USE_POTION` additionally needs an implemented body and,
+  in combat, a live target. Encoding it as `USE_POTION` with a sentinel arg
+  would therefore have to carry a second legality rule inside one verb. Value 5,
+  `arg0` = potion slot, no other args; `RunActionMask` gains
+  `can_discard_potion[]` beside `can_use_potion[]`. Found because a captured run
+  issues `potion discard 0` and the replay harness had nothing to map it to
+  (stage-b ledger, **Landed non-task work**). Append-only API growth: every
+  pre-existing verb keeps its value, `Action`'s packing is unchanged, and no
+  `SCHEMA_VERSION` bump and no fixture is touched.
 
 - **Stage B — cardQueue `canUse` gate and dead/escaped split (§5.3 paraphrase
   correction).** The old §5.3 began at the hook fan-out and misattributed

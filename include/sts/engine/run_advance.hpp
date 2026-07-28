@@ -366,6 +366,15 @@ struct RunActionMask {
     // required potions; non-target potions use can_use_potion[slot] directly.
     bool can_use_potion[kPotionCap];
     bool can_use_potion_target[kPotionCap][kMonsterCap];
+    // DISCARD_POTION (the belt's throw-away button) is far wider than USE: it
+    // needs no target, no implemented body and no combat, because
+    // TopPanel.destroyPotion just empties the slot. Its only gate is
+    // AbstractPotion.canDiscard (AbstractPotion.java:398-400) -- refused inside
+    // a We Meet Again dialog, allowed everywhere else -- so this is a separate
+    // flag rather than a mode of can_use_potion, none of whose gates (an
+    // implemented body, a live target, the FRUIT_JUICE/ENTROPIC_BREW
+    // out-of-combat pair) apply here.
+    bool can_discard_potion[kPotionCap];
     ActionMask combat;                 // COMBAT: delegated combat legal actions.
 };
 

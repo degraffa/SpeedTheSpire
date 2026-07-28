@@ -21,11 +21,13 @@
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
+#include "sts/registry/game_ids.hpp"
 
 namespace sts::replay {
 
 using sts::engine::Action;
 using sts::engine::ActionVerb;
+using sts::engine::EventGridKind;
 using sts::engine::kChooseBoss;
 using sts::engine::kChooseOpenChest;
 using sts::engine::kChooseProceed;
@@ -34,9 +36,13 @@ using sts::engine::kChooseSkipCard;
 using sts::engine::kMasterDeckCap;
 using sts::engine::legal_actions;
 using sts::engine::make_action;
+using sts::engine::NeowScreen;
+using sts::engine::RelicId;
+using sts::engine::RestScreen;
 using sts::engine::RunActionMask;
 using sts::engine::RunController;
 using sts::engine::RunPhase;
+using sts::engine::ShopScreenKind;
 
 // --- the screen context the translator does not carry -----------------------
 
@@ -90,35 +96,107 @@ struct ScreenInfo {
 
 // What one artifact command becomes on the sim side.
 enum class MapKind : uint8_t {
-    ACTIONS,    // apply `actions` in order
-    NOOP,       // a pure UI command with no run-layer effect
-    LEAVE_ROOM, // proceed out of the reward screen first, then apply `actions`
-    TERMINAL,   // the run ended here; stop cleanly
-    UNMAPPED,   // no run-layer analogue -- stop and say so
+    ACTIONS,      // apply `actions` in order
+    NOOP,         // a pure UI command with no run-layer effect
+    LEAVE_ROOM,   // proceed out of the reward screen first, then apply `actions`
+    TERMINAL,     // the run ended here; stop cleanly
+    UNMAPPED,     // no run-layer analogue -- stop and say so
+    // The three grid verbs. A grid is the one screen whose commands cannot be
+    // translated one-for-one, because the game's selection is BUFFERED and the
+    // run layer's is not -- see GridSession below. The caller owns the buffer;
+    // the table only says which of the three a command is.
+    GRID_PICK,    // select grid row `grid_index` (not yet committed)
+    GRID_CANCEL,  // clear the whole pending selection
+    GRID_COMMIT,  // the confirm button: apply everything pending
 };
 
 struct MappedCommand {
     MapKind kind = MapKind::UNMAPPED;
     std::vector<Action> actions;
-    std::string reason;  // set when UNMAPPED
+    int grid_index = -1;  // GRID_PICK only
+    std::string reason;   // set when UNMAPPED
 };
 
-// The game's grid screens list a FILTERED master deck (getPurgeableCards drops
-// curses, getUpgradableCards additionally drops already-upgraded cards) and its
-// `choose i` indexes that filtered list. The run layer instead addresses the
-// stable master-deck index and publishes which of those are legal, so the
-// translation from one to the other is "the i-th legal master-deck index".
-[[nodiscard]] inline int grid_index_to_master_deck(const RunController& rc, int filtered) {
-    if (filtered < 0) return -1;
+// --- grid screens ------------------------------------------------------------
+//
+// WHY A SESSION AND NOT A MAPPING. `GridCardSelectScreen` selects on click and
+// commits on a button, and the two are separated by an arbitrary number of
+// further commands: a one-pick grid shows the confirm button (`choose` selects,
+// `proceed` commits, `cancel` clears the selection again -- STS00047's Neow
+// removal uses `choose`, `cancel`, `choose`, `proceed`, and STS00057's shop
+// purge cancels twice), while a two-pick grid commits on its second `choose`
+// with no button at all. The run layer has no selection stage: its CHOOSE
+// removes/upgrades/transforms the card there and then, and nothing can undo it.
+// So the harness buffers what the capture selected and flushes at the moment
+// the capture confirms; a `cancel` simply drops the buffer, and because nothing
+// was applied, nothing has to be undone. That is the whole of the `cancel` gap.
+//
+// The session ALSO freezes the index space at open, which is a second, separate
+// correctness point: CommunicationMod's `choice_list` is the UNSHRUNK filtered
+// deck, so selecting the 5th row does not renumber the 8th, whereas the sim's
+// legal mask drops a picked row immediately.
+struct GridSession {
+    bool open = false;
+    std::vector<int> filtered;  // master-deck indices, in grid order
+    std::vector<int> pending;   // grid indices selected, not yet committed
+};
+
+// The grid's index space, snapshotted from the sim's legal mask at open. The
+// game's grid lists a FILTERED master deck (getPurgeableCards drops curses,
+// getUpgradableCards additionally drops the already-upgraded) and indexes that
+// list; the run layer addresses the stable master-deck index and publishes
+// which of those are legal, so row i is "the i-th legal master-deck index".
+inline void open_grid_session(const RunController& rc, GridSession& g) {
+    g.open = true;
+    g.filtered.clear();
+    g.pending.clear();
     RunActionMask m{};
     legal_actions(rc, m);
-    int seen = 0;
-    for (int i = 0; i < kMasterDeckCap; ++i) {
-        if (!m.can_choose_master_deck[i]) continue;
-        if (seen == filtered) return i;
-        ++seen;
+    for (int i = 0; i < kMasterDeckCap; ++i)
+        if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
+}
+
+// Is the sim showing a master-deck grid right now? Every phase that has one
+// gates it behind its own sub-screen field, so this is the disjunction of those
+// -- the run-layer analogue of "GridCardSelectScreen is up".
+[[nodiscard]] inline bool sim_grid_open(const RunController& rc) noexcept {
+    switch (static_cast<RunPhase>(rc.phase)) {
+        case RunPhase::NEOW:
+            return rc.neow.screen == static_cast<uint8_t>(NeowScreen::GRID);
+        case RunPhase::REST_SITE:
+            // Smith and Toke are the campfire's two master-deck grids; Dream
+            // Catcher's screen is a card-reward pick, not a grid.
+            return rc.rest.screen == static_cast<uint8_t>(RestScreen::SMITH) ||
+                   rc.rest.screen == static_cast<uint8_t>(RestScreen::TOKE);
+        case RunPhase::EVENT_DIALOG:
+            return rc.event.grid_kind != static_cast<uint8_t>(EventGridKind::NONE);
+        case RunPhase::SHOP:
+            return rc.shop.screen == static_cast<uint8_t>(ShopScreenKind::PURGE_GRID);
+        default:
+            return false;
     }
-    return -1;
+}
+
+// A capture that opens a grid the sim never opened is NOT a mapping bug to be
+// papered over with an index guess -- it is a body the engine defers, and the
+// honest outcome is a stop that names it. The five BOSS `onEquip` bodies
+// (Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) are the
+// producers that actually occur in the b45 captures: a Neow boss-relic blessing
+// hands one over, the relic's onEquip opens a transform / removal grid, and the
+// sim -- which took the relic, popped its pool and moved every stream correctly
+// -- has no grid to drive. Name the relic that was just acquired, because that
+// is the deferred body, and reporting "grid index has no legal master-deck
+// slot" instead is what made this look like an index-mapping defect.
+[[nodiscard]] inline std::string unsimulated_grid_reason(const RunController& rc) {
+    std::string who = "?";
+    if (rc.run.relic_count > 0) {
+        who = std::string(sts::registry::relic_game_id(
+            static_cast<RelicId>(rc.run.relics[rc.run.relic_count - 1].relic_id)));
+    }
+    return "the capture opens a master-deck grid the sim never opened (sim phase " +
+           std::to_string(static_cast<int>(rc.phase)) +
+           "): the most recently acquired relic is " + who +
+           ", whose onEquip body is deferred";
 }
 
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
@@ -136,6 +214,23 @@ struct MappedCommand {
 
     if (verb == "__terminal_observed__") {
         m.kind = MapKind::TERMINAL;
+        return m;
+    }
+
+    // `potion discard i` is SCREEN-INDEPENDENT, so it is resolved ahead of the
+    // screen dispatch rather than inside one branch. The potion belt lives on
+    // the top panel, which is drawn over whatever screen is up: the captures
+    // issue this at a MAP (STS00049 seq 46, STS00052 seq 49) exactly as they
+    // could at a shop or mid-fight, and CommandExecutor.executePotionCommand
+    // never consults the screen -- it checks the slot and canDiscard, then
+    // destroys the slot. The run layer mirrors that with a phase-independent
+    // DISCARD_POTION dispatched ahead of its own phase switch, so one entry
+    // here covers every screen. `potion use` stays in the combat branch below:
+    // it is the one that needs a live target.
+    if (verb == "potion" && p.size() >= 3 && p[1] == "discard") {
+        m.kind = MapKind::ACTIONS;
+        m.actions.push_back(make_action(ActionVerb::DISCARD_POTION,
+                                        static_cast<uint8_t>(arg(2) < 0 ? 0 : arg(2))));
         return m;
     }
 
@@ -257,24 +352,33 @@ struct MappedCommand {
     }
 
     if (s.screen_type == "GRID") {
+        // FIRST, the classification that used to be missing. If the sim has no
+        // grid up, the capture is driving a screen the engine never opened, and
+        // the old code found that out one step later as "grid choose index has
+        // no legal master-deck slot" -- a mapping-shaped message for a
+        // deferred-body condition. Ask the phase instead, and name the body.
+        if (!sim_grid_open(rc)) {
+            m.reason = unsimulated_grid_reason(rc);
+            return m;
+        }
+        // Otherwise the three grid verbs, all buffered by the caller's
+        // GridSession (see its comment): the run layer's CHOOSE is immediate
+        // and irreversible, so nothing may be applied until the capture
+        // confirms, and `cancel` then costs nothing to honour.
         if (verb == "choose") {
-            const int deck_index = grid_index_to_master_deck(rc, arg(1));
-            if (deck_index < 0) {
-                m.reason = "grid choose index has no legal master-deck slot";
-                return m;
-            }
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(deck_index)));
+            m.kind = MapKind::GRID_PICK;
+            m.grid_index = arg(1);
+            return m;
+        }
+        if (verb == "cancel") {
+            m.kind = MapKind::GRID_CANCEL;
             return m;
         }
         if (verb == "proceed") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+            m.kind = MapKind::GRID_COMMIT;
             return m;
         }
-        m.reason = "grid command '" + verb +
-                   "' has no run-layer analogue (a grid pick cannot be undone)";
+        m.reason = "grid command '" + verb + "' is not modelled";
         return m;
     }
 
@@ -352,8 +456,7 @@ struct MappedCommand {
             m.actions.push_back(make_action(ActionVerb::CHOOSE, dst));
             return m;
         }
-        m.reason = "map command '" + verb + "' is not modelled "
-                   "(the run layer has no out-of-combat potion discard)";
+        m.reason = "map command '" + verb + "' is not modelled";
         return m;
     }
 

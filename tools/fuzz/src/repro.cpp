@@ -52,6 +52,9 @@ std::string decode_action(Action a) {
             // printed above it, so the log reads as toggle, toggle, confirm.
             os << "CONFIRM";
             break;
+        case ActionVerb::DISCARD_POTION:
+            os << "DISCARD_POTION slot=" << static_cast<int>(a0);
+            break;
     }
     return os.str();
 }

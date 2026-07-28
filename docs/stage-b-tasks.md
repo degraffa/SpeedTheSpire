@@ -68,7 +68,6 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot |
 | Mummified Hand onUseCard POWER → cardRandomRng 0-cost | B3.25 | B3.7 `[x]` | no POWER CardType at B3.25 time; B3.7 landed the POWER cards but recorded no discharge. **DISCHARGED** on `discharge`, commit `add41ed` — implemented with the cardQueue exclusion and the just-played-card exclusion, no draw on the empty-candidate path |
 | Frozen Egg's POWER-card upgrade-on-obtain branch (documented inert) | B3.25 | B3.7 `[x]` | same cause, same gap. **DISCHARGED** on `discharge`, commit `dc6f626` |
-| STS00052 shop screen `potions[0] FearPotion` diff — uncompared, untriaged | event-exit mapping fix (observed in passing, reproduces at base) | UNASSIGNED — B4.8 follow-up / next shop-fidelity owner | The B4.14/B4.8 read-out compared only the three b47-campaign shop runs (STS00054/57/74, five merchants, all zero-diff); STS00052 (b45_rewards_oracle2) also visited a shop that was never compared, and `replay --shop` shows its first potion slot diverging (FearPotion). Pre-existing at `a7dd375`. Needs triage: real stock divergence vs a seeding/mapping artifact — B4.8's `[x]` rests on 5/5, so this must be classified, not ignored |
 | Stolen-gold clamp vs in-combat gold ordering | B3.11 | UNASSIGNED — B5.2 verification, or whoever models mid-combat gold timing | `fold_back_combat` settles the Hand of Greed accumulator through `gain_gold` before `settle_stolen_gold` runs, so a Looter's min(total, purse) clamp reads a purse that already contains greed gold. Diverges from the game only when the steal preceded the greed kill AND the purse was below the accrued steal (a Looter and a Hand of Greed kill in one combat, purse ≤ the steal amount); documented at the `settle_stolen_gold` site. Deliberately chosen to preserve exactly-once settlement on every combat-end path |
 | **Dead Branch** `onExhaust` | B3.26 | UNASSIGNED — needs the unfiltered all-red combat card pool | `DeadBranch.onExhaust` (`DeadBranch.java:259-266`) queues a `returnTrulyRandomCardInCombat()` copy into hand. That draw is **unfiltered** over the whole colour pool — commons + uncommons + rares (`AbstractDungeon.java:964-979`), not the ATTACK-only pool `RANDOM_ATTACK_TO_HAND` uses — so it needs a **second generated combat pool** and is **`cardRandomRng`-visible**: implementing it moves the stream. Pandora's Box (B3.27) waits on the same pool. Inertness is asserted today by `relic_rares_shop_test`, so implementing it fails a test rather than silently changing behaviour |
 | **Gambling Chip** `atTurnStartPostDraw` | B3.26 | **UNBLOCKED — UNASSIGNED**; the shared surface is live, only the relic body is open | `GamblingChip.java:426-453` opens a hand-select screen discarding **zero-to-all** chosen cards, then draws exactly as many as were discarded. The explicit-confirm `ActionMask`/translator/fuzz machinery it was waiting on **landed with B3.10c** (`ActionVerb::CONFIRM`, `kChoiceOptionalBit`, the hand-suffix selection model), and B3.10c deliberately did not expand into this relic. What remains is this body alone: a new discard-kind optional `CHOOSE_CARD` queued from the relic's turn-start hook, plus the draw-back of exactly the number discarded (the count is the relic's, not the choice's, so it must be read at confirm). Whoever re-owns it should re-read `GamblingChip.java` in full rather than infer from this row. Only `atTurnStartPostDraw` is bound (`atBattleStartPreDraw` has no dispatch site). Inertness asserted by `relic_rares_shop_test` |
@@ -85,9 +84,9 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Philosopher's Stone `onSpawnMonster` | B3.27 | UNASSIGNED — split/spawn owner | |
 | Purged replay copies leak a card-pool row | B3.8 | UNASSIGNED | same as the existing POWER-card path; bounded (~40 of 160 rows worst case). Freeing the row would race a queued `DAMAGE_RAMPAGE` stamping that index |
 | Windows CI job | build effort | UNASSIGNED | a proposed workflow exists but is **unverified** (Actions cannot run locally). **Pin the LLVM version**: the googletest `/WX-` workaround exists because clang 22 added a warning gtest trips over, and a newer runner clang could add another |
-| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed by B4.5, still open | **PARTLY COVERED, not discharged.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does two thirds of it: its default mode genuinely seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. What is missing is the general case — resuming from an ARBITRARY mid-run translated state without re-driving the prefix (the run layer has no "restore a `RunController` from a `RunState`" door: map cursors, encounter lists and their cursors are transient and would have to be re-derived), and coverage of the rooms `--replay` still stops at. **Narrowed again by the B4.14 + B4.8 read-outs:** the shop screen and the grid `cancel` now have working command mappings — `--shop` drives a whole merchant visit including the purge grid, and `--neow` buffers a grid's picks until the capture confirms them, which is what `cancel` needed — but both live in the dedicated spot-diff modes, not in `--replay`, so folding them back in is part of the general case. The **out-of-combat potion discard** is the one command with no run-layer analogue at all, and it is now the sole reason two shop visits and one Neow seed stop early. **Narrowed again by the event-exit mapping fix** (see [Landed non-task work](#landed-non-task-work)), which closed a WRONG entry rather than adding a mode: an event's terminal one-button `[Leave]` page was read as Neow framing and no-op'd whenever the phase was not `NEOW`, so `--replay` never pressed an ordinary event's own exit and parked in `EVENT_DIALOG` for the rest of the run. The entry is now keyed off the simulator's phase; the mapping table moved to `tools/oracle_bridge/replay/src/command_map.hpp` and has its own gtest (`replay_command_map_test`), so the next wrong entry does not need a campaign artifact to see; and an EVENT command with real choices on it that arrives while the sim is in no event now STOPS instead of being handed to whatever phase is live. What is still missing in `--replay` is unchanged: the general mid-run resume, the grid buffering `--neow`/`--shop` already have, and the potion discard |
+| `replay` generalized to seed a sim replay from any translated `RunState` | B1.6 | UNASSIGNED — narrowed to ONE thing by the potion-belt/grid-buffer fix | **NARROWED TO THE MID-RUN RESUME, AND NOTHING ELSE.** `tools/oracle_bridge/replay/replay_run_diff` (B4.5) does the rest: its default mode seeds the engine from a translated `RunState` and re-drives one reward screen from there, and its `--replay` mode re-drives a whole captured run from `run_begin` with a screen-driven `action_command` mapping, diffing every record. The **room-coverage half of this row is closed** — see [Landed non-task work](#landed-non-task-work). The grid buffering `--neow` and `--shop` had is now shared code in `command_map.hpp` and `--replay` uses it, so `cancel` is a mapped command; the out-of-combat `potion discard` gained a real run-layer door (`ActionVerb::DISCARD_POTION` + `can_discard_potion[]`), so it is no longer the command with no analogue; and a capture that drives a grid the sim never opened now stops with the DEFERRED BODY named instead of an index complaint. Across the six b45 reward runs `--replay` now leaves **no stop attributable to the harness**: four reach their terminal (STS00047/48/49/50 `CLEAN`), STS00051 reaches its terminal with only the `kEventTransformRedPool` order row below, and STS00052 stops on Astrolabe's deferred `onEquip`. **What remains of this row is the general mid-run resume alone**: restoring a `RunController` from an ARBITRARY translated `RunState` without re-driving the prefix. The run layer still has no door for it — map cursors, encounter lists and their cursors are transient and would have to be re-derived — which is also why `--shop` drives `ShopState` directly rather than parking a controller in `RunPhase::SHOP`. Folding the three spot-diff modes into `--replay` is no longer part of the gap: they now share the mapping table and its grid session, and differ only in what they seed from |
 | Centennial Puzzle carries a persistent `counter` the game does not | B4.14's oracle read-out | UNASSIGNED — relic-layer owner | `relics.yaml` gives the row `initial_counter: 0` and `relic_native_centennial_puzzle` uses `slot.counter` as its once-per-combat flag. The game uses a **static `boolean usedThisCombat`** and never touches `this.counter` (`CentennialPuzzle.java:21, 33-49`), so `AbstractRelic`'s −1 default stands and CommunicationMod reports −1. Caught on STS00068 of `b47_treasure_oracle_20260727T204809Z_claude01`, whose Neow common-relic blessing handed one over: `relics[1].counter: -1 -> 0`, the only field that differs, and it is not Neow's — any acquisition from any source shows it. Two things to fix together, because the first alone breaks the second: `initial_counter` must be −1 so `RunState` matches a capture, and the once-per-combat flag then needs somewhere else to live. Note the flag is `atPreBattle`-reset in the game and the sim has no reset at all, so a second combat is a second question |
-| `kEventTransformRedPool` is emitted in registry-iteration order | B4.14's oracle read-out | B4.10 / B4.11 (event grids) | Same root cause as the `transform_card` fix B4.14 landed: `event_grid_transform_card` reaches the same `returnTrulyRandomCardFromAvailable` list (`AbstractDungeon.java:1016-1045`), which is `commonCardPool` in plain library order followed by `srcUncommonCardPool` and `srcRareCardPool` REVERSED. The generated pool is neither — `emit/events.py` builds it by walking `cards.yaml` rows ("Registry iteration order is stable"), which is the same kind of order B4.5 replaced everywhere else. **NO LONGER "stated from the Java, not measured" — the capture the row asked for was already in hand.** The event-exit mapping fix (see [Landed non-task work](#landed-non-task-work)) let `--replay` run past floor 2 of **STS00051** (`b45_rewards_oracle2_20260727T204809Z_claude01`), whose floor-2 Living Wall takes the **Change** option and transforms the grid's index 5. Every stream and both pity counters match at that record and stay matched to the run's terminal, so the `miscRng` draw and its `count` are right and the POOL ORDER alone is wrong: the game produced **Havoc**, `kEventTransformRedPool` produced **Iron Wave** (`master_deck[11].card_id: Havoc(8) -> Iron Wave(18)`, the single differing field for 20 consecutive records). It is the whole remaining divergence of that run — the floor-4 `hp` gap from seq 41 is one downstream play of the wrong card, worth exactly Iron Wave's 5 Block. Whoever fixes the emitted order has a ready-made end-to-end check: STS00051 replays CLEAN to its terminal iff the pool order is right |
+| `kEventTransformRedPool` is emitted in registry-iteration order | B4.14's oracle read-out | B4.10 / B4.11 (event grids) | Same root cause as the `transform_card` fix B4.14 landed: `event_grid_transform_card` reaches the same `returnTrulyRandomCardFromAvailable` list (`AbstractDungeon.java:1016-1045`), which is `commonCardPool` in plain library order followed by `srcUncommonCardPool` and `srcRareCardPool` REVERSED. The generated pool is neither — `emit/events.py` builds it by walking `cards.yaml` rows ("Registry iteration order is stable"), which is the same kind of order B4.5 replaced everywhere else. **NO LONGER "stated from the Java, not measured" — the capture the row asked for was already in hand.** The event-exit mapping fix (see [Landed non-task work](#landed-non-task-work)) let `--replay` run past floor 2 of **STS00051** (`b45_rewards_oracle2_20260727T204809Z_claude01`), whose floor-2 Living Wall takes the **Change** option and transforms the grid's index 5. Every stream and both pity counters match at that record and stay matched to the run's terminal, so the `miscRng` draw and its `count` are right and the POOL ORDER alone is wrong: the game produced **Havoc**, `kEventTransformRedPool` produced **Iron Wave** (`master_deck[11].card_id: Havoc(8) -> Iron Wave(18)`, the single differing field for 19 consecutive records — it read 20 until the grid-buffer fix stopped `--replay` committing a grid pick one record early, see [Landed non-task work](#landed-non-task-work)). It is the whole remaining divergence of that run — the floor-4 `hp` gap from seq 41 is one downstream play of the wrong card, worth exactly Iron Wave's 5 Block. Whoever fixes the emitted order has a ready-made end-to-end check: STS00051 replays CLEAN to its terminal iff the pool order is right |
 | Matryoshka (chest relic) | B3.25 | B4.7 `[x]` | **DISCHARGED:** two-use non-boss hook, 75/25 relicRng branch, reward insertion, counter `2→1→-2`, and boss no-op are live and tested |
 | The Courier (shop relic) | B3.25 | B4.8 → **UNASSIGNED for the restock half**; see the blocker | **PRICE HALF DISCHARGED by B4.8:** the `x0.8` discount is applied at shop init in the Java's order (and is therefore overwritten, not compounded, by a Membership Card at that call site — reproduced, not corrected), and its purge-cost branch is live in both `shop_purge_cost_at_init` and `shop_purge_cost_after_purge`, the latter with the `0.8f * 0.5f` product the Java spells there. **The RESTOCK half stays deferred, and it is BLOCKED, not merely unscheduled:** `ShopScreen.purchaseCard`'s replacement draws `getCardFromPool(rollRarity(), type, false)` — `useRng=false` means `MathUtils.random`, libGDX's **unseeded global**, not `cardRng` (`ShopScreen.java:615-617`), so the replacement card's identity is not reproducible from a seed at all. The rarity roll before it, and the relic/potion restocks (`StoreRelic.java:105-112`, `StorePotion.java:86-89`), ARE seeded; whoever re-owns this should decide what a deterministic simulator does about an unseeded identity before writing any of it. B4.8's runbook §4 asks the operator to capture a Courier shop specifically to measure what the restock costs the seeded streams |
 | Eternal Feather (rest-room heal) | B3.25, B4.9 | UNASSIGNED — next rest-room entry-hook follow-up | row and pool slot are live; B4.9 explicitly preserved this inherited deferral. `EternalFeather.onEnterRoom` (`EternalFeather.java:29-35`) fires on entering a RestRoom, before the player chooses a campfire option, and heals `(masterDeck.size() / 5) * 3`; it is not part of the Rest option body. |
@@ -328,6 +327,139 @@ rows change Bottled Tornado's gate — so it is answered, not bumped. (For B3.10
 twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
+
+- **Replay harness: the potion belt, the grid buffer, and a grid the sim never
+  opened** `[x]` — discharges the **STS00052 shop screen `potions[0]
+  FearPotion` diff** obligation row (it was never a stock divergence) and closes
+  the last three `--replay` gaps the B1.6 row named. All six b45 reward runs now
+  either reach their terminal or stop with a **named deferred body**; none stops
+  on a missing mapping any more.
+  - **The STS00052 verdict: a harness artifact, and not on the screen the row
+    named.** `replay_run_diff --shop` on STS00052 reports **`STOCK OK`** — the
+    whole floor-2 merchant reproduces: all seven card ids, prices and upgrades,
+    three relics, **all three potions in order (Gambler's Brew, Explosive
+    Potion, Fear Potion)**, the purge cost, `purge_available`, the
+    independently-inferred sale slot, and `merchantRng 0→16` / `cardRng 9→21` /
+    `potionRng 3→10` with the relic pools and `cardBlizzRandomizer` alongside.
+    Seven `potionRng` draws for three potions is the RARITY-GATED
+    `AbstractDungeon.returnRandomPotion` (`:824-850`) that
+    `ShopScreen.initPotions` calls — three d100 tier rolls plus four
+    `PotionHelper.getRandomPotion` picks, one of them a trap-14 rejection — and
+    not the flat `getRandomPotion` an event site uses, which would have taken
+    three. Both the gate and the draw count reproduce exactly, so the merchant's
+    potion machinery is not implicated at all.
+    The `potions[0]` the row quotes is not a shelf slot at all — it is the
+    PLAYER's belt, and the diff surfaced in the **purchase walk**, at seq 50:
+    `potions[0]: NONE(0) -> FearPotion(12)`. The run bought that Fear Potion at
+    seq 43 (`choose 9`, 56 gold) and **threw it away at seq 49** with `potion
+    discard 0`, on the map screen over the shop room. The walk's MAP branch
+    treated every non-`choose` map command as an ignorable UI bounce, so the
+    discard was skipped and the belt disagreed for the rest of the visit.
+    **Verdict: category (b), a harness gap — and specifically the
+    out-of-combat potion discard the B1.6 row already carried. B4.8's `[x]` is
+    untouched; nothing about stock generation is implicated.** It is now fixed
+    rather than merely classified, and the b47 read-out B4.8's `[x]` rests on
+    gets *stronger* with it: all five merchants of STS00054 / STS00057 /
+    STS00074 now walk **end to end** clean (5/5 stock, **5/5** purchase walks,
+    previously 3 walks clean and 2 stopped at this same discard).
+  - **The run layer gained a discard door, because it genuinely had none.**
+    `ActionVerb::DISCARD_POTION` (appended, value 5) plus
+    `RunActionMask.can_discard_potion[]`, dispatched beside `USE_POTION` ahead
+    of the phase switch — the belt is RunState-owned inventory the top panel
+    exposes on every screen, so it belongs to no single phase. The body is one
+    line, and that is the whole of the Java:
+    `CommandExecutor.executePotionCommand` runs `potion.use` and the relic
+    `onUsePotion` fan-out on the USE branch **only**, and both branches end at
+    `topPanel.destroyPotion(slot)` = `potions.set(slot, new PotionSlot(slot))`
+    (`TopPanel.java:529-531`). No RNG, no stream, no hook — pinned by
+    `RunPotionDiscard.ToyOrnithopterDoesNotHealForAPotionThrownAway`. Legality
+    is `AbstractPotion.canDiscard` (`AbstractPotion.java:398-400`) in full: any
+    occupied slot, in combat or out, refused only inside a We Meet Again dialog.
+    Two consequences worth naming: it is **wider than USE** (a still-deferred
+    potion body is discardable, because a discard never runs the body) and it is
+    **not restricted to the non-combat phases** `can_use_potion` is.
+  - **Grid `cancel` cost nothing to honour once the picks were buffered.**
+    `GridCardSelectScreen` selects on click and commits on a button; the run
+    layer's `CHOOSE` does both at once and can undo neither, which is why
+    `cancel` was mapped as "no run-layer analogue (a grid pick cannot be
+    undone)" and ended STS00047 four records in. But nothing needs undoing if
+    nothing was applied. The `GridSession` `--neow` and `--shop` already used —
+    accumulate picks, flush when the capture confirms, snapshot the index space
+    at open because CommunicationMod's `choice_list` is the **unshrunk** filtered
+    deck — moved into `command_map.hpp` beside the table, and `--replay` now uses
+    it too. STS00047's Neow removal grid is exactly the shape that needed it:
+    `choose 2`, `cancel`, `choose 0`, `proceed`.
+  - **A grid the sim never opened is a deferred BODY, and now says so.**
+    STS00052 and STS00045/46 all stopped at seq 2 with `grid choose index has no
+    legal master-deck slot` — a mapping-shaped message for a condition that is
+    not a mapping defect. Each took Neow's boss-relic blessing; the relic's
+    `onEquip` opens a grid, and Astrolabe's (STS00052) and Empty Cage's
+    (STS00045/46) `onEquip` bodies are two of the five deferred BOSS bodies in
+    the obligations table. The **acquisition** is right — relic in the list, pool
+    popped, every stream matched — so the honest outcome is a stop that names the
+    body, which is what `sim_grid_open` + `unsimulated_grid_reason` now produce:
+    *"the capture opens a master-deck grid the sim never opened (sim phase 1):
+    the most recently acquired relic is Astrolabe, whose onEquip body is
+    deferred"*. `sim_grid_open` knows all four phases that own a master-deck grid
+    (Neow, campfire Smith/Toke, event grids, the shop purge grid), because a
+    phase it did not know would misreport a live grid as a deferred body.
+  - **Oracle proof**, `replay_run_diff --replay` over all six b45 reward runs.
+    **STS00047: `PART` at seq 3 → `CLEAN`** to its terminal, 26 records.
+    **STS00049: `PART` at seq 46 → `CLEAN`** to its terminal, 58 records (was
+    47). **STS00048 and STS00050 unmoved and still `CLEAN`.** **STS00052:** still
+    stops at seq 2, now **classified** — Astrolabe's deferred `onEquip`, not an
+    index-mapping failure. **STS00051** reaches its terminal as before, and its
+    library-order-only record count moves **20 → 19**: the seq-21 record was
+    being compared against a sim that had ALREADY applied the Living Wall
+    transform, because the old mapping committed a grid pick on the `choose`
+    rather than on the `proceed` the capture had not issued yet. Buffering
+    removes that off-by-one-record and the comparison is now clean; the 19 that
+    remain, the 28 `hp`-plus-`card_id` records after them and the whole
+    `kEventTransformRedPool` verdict are unchanged. **No new real divergence
+    appeared anywhere.** `--neow` over all eleven runs is **byte-identical**.
+    `--shop` differs only where it should: STS00052's walk goes `PURCHASE DIFF`
+    → `PURCHASE OK`, 10 in-room records compared. The default reward spot-diff
+    moves one line — STS00049's claim walk ends at seq 47 instead of 46, because
+    the discard at seq 46 is now applied instead of ending the walk, a strictly
+    later and strictly stricter checkpoint, still `CLAIM OK`.
+  - Named regressions. In `replay_command_map_test`, five that could not even
+    COMPILE before the fix, because the kinds and the verb they name did not
+    exist: `APotionDiscardIsTheSameMappingOnEveryScreen`,
+    `AGridChooseIsBufferedRatherThanAppliedImmediately`,
+    `AGridCancelDropsThePendingSelectionInsteadOfStopping`,
+    `AGridProceedIsTheCommitAndNotAScreenExit` and
+    `EveryPhaseWithAMasterDeckGridIsRecognised`; plus
+    `AGridTheSimNeverOpenedNamesTheDeferredRelicBody`, RED on the old reason
+    string, and `APotionUseIsStillTheCombatScreensTargetedVerb`, which pins that
+    the new screen-independent entry did not swallow the targeted one. In
+    `run_advance_test`, five on the new door:
+    `RunPotionDiscard.DiscardingOutOfCombatEmptiesTheSlotAndMovesNothingElse`
+    (a whole-`RunState` memcmp against the pre-discard state with only that slot
+    changed), `ADeferredPotionBodyIsStillDiscardable`,
+    `ToyOrnithopterDoesNotHealForAPotionThrownAway`,
+    `AnEmptySlotAndAnOutOfRangeSlotAreBothRefused` and
+    `WeMeetAgainConfiscatesTheBelt`.
+  - **A frozen document had to move with it, and it did.** stage-a design §7
+    enumerates the `ActionVerb` set, so appending one makes that list wrong —
+    exactly the condition conventions §4 calls stop-the-line. It is fixed in
+    this change, in the shape `ActionVerb::CONFIRM` already set: §7's comment
+    now lists `DISCARD_POTION(slot)` and stage-a §12 carries its change-log
+    entry, including why it is a verb of its own rather than a mode of
+    `USE_POTION` (it is legal in strictly MORE situations, so a sentinel arg
+    would put two legality rules inside one verb).
+  - No schema, fixture, golden, registry id, opcode, Steam/game deployment or
+    oracle artifact changed; both campaign directories were read only. `Action`'s
+    encoding is untouched — `DISCARD_POTION` is an appended enumerator, so no
+    existing verb number moved.
+  - Java provenance: `TopPanel.destroyPotion` (`TopPanel.java:529-531`),
+    `AbstractPotion.canDiscard` / `.canUse` (`AbstractPotion.java:398-410`),
+    `AbstractDungeon.returnRandomPotion` (`AbstractDungeon.java:824-850`),
+    `PotionHelper.getRandomPotion` (`PotionHelper.java:164-172`),
+    `ShopScreen.initPotions` (`ShopScreen.java:373-384`),
+    `AbstractEvent.openMap` (`AbstractEvent.java:120-123`). The `potion discard`
+    command itself is CommunicationMod's, not the game's:
+    `CommandExecutor.executePotionCommand`
+    (`tools/oracle_bridge/communicationmod-oracle/src/main/java/communicationmod/CommandExecutor.java:255-313`).
 
 - **Replay harness: an event's own `[Leave]` is not Neow framing** `[x]` —
   discharges the **STS00048 stalls in `EVENT_DIALOG` on floor 2** obligation row
