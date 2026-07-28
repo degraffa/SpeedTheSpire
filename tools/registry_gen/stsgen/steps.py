@@ -78,6 +78,12 @@ GENERAL_OPS = frozenset({
     # literals and the kill test is an execute-time read of the target's HP, so
     # the item carries identically from any domain's queue helper.
     "DAMAGE_GREED",
+    # Wave-C relic-tail stage. Both are queued from RELIC hooks and neither has
+    # any operand at all: REMOVE_DEBUFFS enumerates the target's power list at
+    # execute time and UPGRADE_RANDOM_CARD reads the hand at execute time, so
+    # each carries identically from any domain's queue helper. GENERAL_OPS, not
+    # CARD_CONTEXT_OPS -- neither needs the played card's instance.
+    "REMOVE_DEBUFFS", "UPGRADE_RANDOM_CARD",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance

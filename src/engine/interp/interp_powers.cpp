@@ -385,6 +385,61 @@ void op_remove_power(CombatState& s, uint8_t tgt, PowerId id,
     remove_slot_at(s, tgt, slots, count, i);
 }
 
+// REMOVE_DEBUFFS (RemoveDebuffsAction.update, RemoveDebuffsAction.java:23-30):
+//
+//     for (AbstractPower p : this.c.powers) {
+//         if (p.type != PowerType.DEBUFF) continue;
+//         this.addToTop(new RemoveSpecificPowerAction(this.c, this.c, p.ID));
+//     }
+//     this.isDone = true;
+//
+// THE ENUMERATION IS THE OPCODE. It happens when this action RESOLVES, over the
+// power list as it then stands -- which is exactly what a queue-time expansion
+// into N REMOVE_POWER items could not express, because Orange Pellets queues
+// addToBot, behind the played card's own actions, so a debuff can land in
+// between.
+//
+// The DEBUFF test reads the LIVE INSTANCE's type. StrengthPower.updateDescription
+// (StrengthPower.java:81-89) and DexterityPower's (:74-82) recompute
+// `this.type = amount > 0 ? BUFF : DEBUFF`, so a negative Strength stack IS a
+// debuff and is removed, while a positive one is not. That is the same two-term
+// predicate op_apply_power builds at apply time (negative_stat_flip above), and
+// it is spelled once here rather than re-derived.
+//
+// Two consequences worth stating because they look like bugs and are not:
+//   * Shackled (GainStrengthPower) is DEBUFF-typed in the Java
+//     (GainStrengthPower.java:29), so this removes it -- and with it the pending
+//     Strength restoration. Reproduced, not corrected.
+//   * addToTop per power means the removals resolve in REVERSE list order. No
+//     removal's side effects are read by another today, so it is unobservable;
+//     it is done anyway because it is free and stays right if that changes.
+void op_remove_debuffs(CombatState& s, uint8_t tgt) noexcept {
+    PowerSlot* slots = nullptr;
+    uint8_t* count = nullptr;
+    if (!power_list_for(s, tgt, slots, count)) {
+        return;
+    }
+    for (uint8_t i = 0; i < *count; ++i) {
+        const PowerId id = static_cast<PowerId>(slots[i].power_id);
+        const PowerDef* def = power_def(id);
+        const bool negative_stat_flip =
+            (id == PowerId::STRENGTH || id == PowerId::DEXTERITY) &&
+            slots[i].amount <= 0;
+        const bool is_debuff =
+            (def != nullptr && def->type == PowerType::DEBUFF) ||
+            negative_stat_flip;
+        if (!is_debuff) {
+            continue;  // `if (p.type != DEBUFF) continue;` (:25)
+        }
+        ActionQueueItem rem{};
+        rem.opcode = static_cast<uint16_t>(Opcode::REMOVE_POWER);
+        rem.src = tgt;
+        rem.tgt = tgt;
+        rem.flags = make_apply_power_flags(id);
+        add_to_top(s, rem);  // addToTop (:26)
+    }
+}
+
 // REDUCE_POWER (ReducePowerAction): subtract `amount` from one power and remove
 // the slot when it reaches zero. Kept as a queued opcode so an atEndOfRound power
 // cannot mutate/compact the list while the dispatcher is still iterating it.

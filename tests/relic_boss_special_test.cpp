@@ -714,9 +714,6 @@ TEST(RelicBossSpecial, GremlinMaskWeakensThePlayerAtBattleStart) {
 // energyMaster / masterHandSize -- the two derived per-combat player numbers.
 // ============================================================================
 
-// The COMPLETE list of relics whose onEquip does
-// `++AbstractDungeon.player.energy.energyMaster`, from `grep -rn energyMaster
-// com/`. Ten of them, each +1, each with a matching onUnequip `--`.
 // Slaver's Collar -- the ELEVENTH energyMaster writer, and the only conditional
 // one. SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57): +1 when the
 // room's eliteTrigger is set OR any monster is EnemyType.BOSS.
@@ -769,6 +766,9 @@ TEST(RelicBossSpecial, SlaversCollarStacksWithAnUnconditionalEnergyRelic) {
     EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 2);
 }
 
+// The COMPLETE list of relics whose onEquip does
+// `++AbstractDungeon.player.energy.energyMaster`, from `grep -rn energyMaster
+// com/`. Ten of them, each +1, each with a matching onUnequip `--`.
 TEST(RelicBossSpecial, TenBossRelicsEachAddOneToTheEnergyMaster) {
     const RelicId plus_one[] = {
         RelicId::FUSION_HAMMER,      RelicId::VELVET_CHOKER,
@@ -877,12 +877,19 @@ TEST(RelicBossSpecial, SneckoEyeDrawsTwoExtraCardsOnEveryTurnIncludingTheFirst) 
 // Deliberate no-ops -- every one is pinned so implementing it fails HERE first.
 // ============================================================================
 
+// Warped Tongs LEFT this list when Opcode::UPGRADE_RANDOM_CARD landed; its
+// behaviour tests are below. Nothing in this tier is inert today, and the empty
+// case list is deliberate rather than a deletion: the next deferred SPECIAL or
+// BOSS body has a place to be pinned.
 TEST(RelicBossSpecial, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
     struct Case { RelicId id; RelicHook hook; };
     const Case cases[] = {
-        {RelicId::WARPED_TONGS, RelicHook::AT_TURN_START_POST_DRAW},
+        {RelicId::NONE, RelicHook::AT_TURN_START_POST_DRAW},
     };
     for (const Case& c : cases) {
+        if (c.id == RelicId::NONE) {
+            continue;  // placeholder row -- see the note above
+        }
         CombatState s = MakeState();
         put_in_hand(s, CardId::STRIKE);
         const RelicView rv = give(s, c.id);
@@ -897,6 +904,109 @@ TEST(RelicBossSpecial, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
         EXPECT_EQ(s.card_pool[s.hand[0]].upgrade, 0) << "and upgrades nothing";
         EXPECT_EQ(rv.relics[0].counter, -1) << "and mutates no counter";
     }
+}
+
+// UPGRADE_RANDOM_CARD through the public interpreter entry point --
+// op_upgrade_random_card itself lives in an internal header (interp_cards.hpp).
+void run_upgrade_random_card(CombatState& s) {
+    ActionQueueItem it{};
+    it.opcode = kOp(Opcode::UPGRADE_RANDOM_CARD);
+    it.src = kActorPlayer;
+    it.tgt = kActorPlayer;
+    execute_opcode(s, it);
+}
+
+// The stream contract, both branches. The shuffle sits INSIDE
+// `if (upgradeable.size() > 0)` (UpgradeRandomCardAction.java:40-45) and an empty
+// hand returns even earlier (:31-34), so a hand with nothing upgradeable costs
+// ZERO shuffleRng. Getting this wrong desynchronises every later shuffle.
+TEST(RelicBossSpecial, UpgradeRandomCardDrawsNothingWhenNothingIsEligible) {
+    // Empty hand.
+    {
+        CombatState s = MakeState();
+        s.shuffle_rng = from_seed(3);
+        const RngStream before = s.shuffle_rng;
+        run_upgrade_random_card(s);
+        EXPECT_EQ(s.shuffle_rng.counter, before.counter);
+    }
+    // A hand of already-upgraded cards: canUpgrade() is false for every one.
+    {
+        CombatState s = MakeState();
+        const CardPoolIndex pi = put_in_hand(s, CardId::STRIKE);
+        s.card_pool[pi].upgrade = 1;
+        s.shuffle_rng = from_seed(3);
+        const RngStream before = s.shuffle_rng;
+        run_upgrade_random_card(s);
+        EXPECT_EQ(s.shuffle_rng.counter, before.counter);
+        EXPECT_EQ(s.card_pool[pi].upgrade, 1) << "and upgrades nothing further";
+    }
+    // A hand of nothing but a STATUS card -- canUpgrade() rejects STATUS and
+    // CURSE outright (AbstractCard.java:672-680).
+    {
+        CombatState s = MakeState();
+        const CardPoolIndex pi = put_in_hand(s, CardId::SLIMED);
+        s.shuffle_rng = from_seed(3);
+        const RngStream before = s.shuffle_rng;
+        run_upgrade_random_card(s);
+        EXPECT_EQ(s.shuffle_rng.counter, before.counter);
+        EXPECT_EQ(s.card_pool[pi].upgrade, 0);
+    }
+}
+
+// The filter is canUpgrade(), not `upgrade == 0`: SearingBlow.canUpgrade
+// (SearingBlow.java:58-60) returns true unconditionally, so an ALREADY upgraded
+// Searing Blow is still eligible and still costs the shuffleRng draw.
+TEST(RelicBossSpecial, UpgradeRandomCardKeepsAnUpgradedSearingBlowEligible) {
+    CombatState s = MakeState();
+    const CardPoolIndex pi = put_in_hand(s, CardId::SEARING_BLOW);
+    s.card_pool[pi].upgrade = 3;
+    s.shuffle_rng = from_seed(3);
+    const RngStream before = s.shuffle_rng;
+    run_upgrade_random_card(s);
+    EXPECT_EQ(s.shuffle_rng.counter, before.counter + 1);
+    EXPECT_EQ(s.card_pool[pi].upgrade, 4);
+}
+
+// The eligible subset is built in HAND ORDER (CardGroup.addToTop is an append,
+// CardGroup.java:455-457) and only that subset is shuffled -- an ineligible card
+// sitting in the hand never occupies a slot in the draw. With exactly one
+// eligible card the shuffle is a no-op permutation but the draw is still spent.
+TEST(RelicBossSpecial, UpgradeRandomCardShufflesOnlyTheEligibleSubset) {
+    CombatState s = MakeState();
+    const CardPoolIndex status = put_in_hand(s, CardId::SLIMED);
+    const CardPoolIndex strike = put_in_hand(s, CardId::STRIKE);
+    const CardPoolIndex done = put_in_hand(s, CardId::DEFEND);
+    s.card_pool[done].upgrade = 1;
+    s.shuffle_rng = from_seed(7);
+    run_upgrade_random_card(s);
+    EXPECT_EQ(s.card_pool[strike].upgrade, 1) << "the only eligible card";
+    EXPECT_EQ(s.card_pool[status].upgrade, 0);
+    EXPECT_EQ(s.card_pool[done].upgrade, 1);
+    EXPECT_EQ(s.shuffle_rng.counter, 1);
+}
+
+// --- Warped Tongs ------------------------------------------------------------
+
+// WarpedTongs.atTurnStartPostDraw (WarpedTongs.java:28-33) queues exactly one
+// UPGRADE_RANDOM_CARD and draws nothing itself -- the stream cost is the
+// OPCODE's, at resolve time.
+TEST(RelicBossSpecial, WarpedTongsQueuesTheUpgradeAndDrawsNothingAtHookTime) {
+    CombatState s = MakeState();
+    put_in_hand(s, CardId::STRIKE);
+    const RelicView rv = give(s, RelicId::WARPED_TONGS);
+    s.shuffle_rng = from_seed(3);
+    const RngStream before = s.shuffle_rng;
+    dispatch_relic_hook(s, rv.relics, rv.count,
+                        RelicHook::AT_TURN_START_POST_DRAW, RelicHookContext{});
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::UPGRADE_RANDOM_CARD));
+    EXPECT_EQ(s.shuffle_rng.counter, before.counter)
+        << "the hook itself must not draw -- the action does, when it resolves";
+    EXPECT_EQ(rv.relics[0].counter, -1);
+    drain(s);
+    EXPECT_EQ(s.card_pool[s.hand[0]].upgrade, 1);
+    EXPECT_EQ(s.shuffle_rng.counter, before.counter + 1)
+        << "exactly one shuffleRng draw, spent at resolve";
 }
 
 // The five boss relics that DECLARE an onEquip override and whose body is

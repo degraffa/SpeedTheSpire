@@ -1392,6 +1392,137 @@ TEST(RelicRaresShop, SlingOfCourageGrantsStrengthOnlyInAnEliteRoom) {
     }
 }
 
+// --- Orange Pellets ----------------------------------------------------------
+
+namespace {
+
+void add_player_power(CombatState& s, PowerId id, int16_t amount) {
+    s.player_powers[s.player_power_count].power_id = static_cast<uint16_t>(id);
+    s.player_powers[s.player_power_count].amount = amount;
+    ++s.player_power_count;
+}
+
+void play(CombatState& s, const RelicView& rv, CardId id) {
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(id);
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_USE_CARD, ctx);
+}
+
+}  // namespace
+
+// OrangePellets.onUseCard (OrangePellets.java:41-58): the three type latches
+// arm independently and the removal fires only once all three are set. Bash is
+// an ATTACK, Defend a SKILL, Inflame a POWER.
+TEST(RelicRaresShop, OrangePelletsFiresOnlyOnceAllThreeTypesArePlayed) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    play(s, rv, CardId::BASH);
+    EXPECT_EQ(s.action_count, 0);
+    play(s, rv, CardId::DEFEND);
+    EXPECT_EQ(s.action_count, 0);
+    play(s, rv, CardId::BASH) ;  // a repeat of an armed type changes nothing
+    EXPECT_EQ(s.action_count, 0);
+    play(s, rv, CardId::INFLAME);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::REMOVE_DEBUFFS));
+    EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the counter is never touched";
+    // Cleared ON FIRE, so it is re-armable inside the same turn.
+    EXPECT_EQ(s.flags & kCombatFlagOrangePelletsMask, 0u);
+}
+
+// It can fire MORE THAN ONCE PER TURN -- the latches are cleared when it fires,
+// not at turn end (OrangePellets.java:56-58).
+TEST(RelicRaresShop, OrangePelletsReArmsWithinTheSameTurn) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    for (int round = 0; round < 2; ++round) {
+        play(s, rv, CardId::BASH);
+        play(s, rv, CardId::DEFEND);
+        play(s, rv, CardId::INFLAME);
+    }
+    EXPECT_EQ(s.action_count, 2) << "fired twice in one turn";
+}
+
+// atTurnStart (OrangePellets.java:34-39) is the ONLY clear. atPreBattle does not
+// touch the latches; a value-initialised CombatState stands in for that only
+// because turn 1's atTurnStart precedes any card play.
+TEST(RelicRaresShop, OrangePelletsLatchesAreClearedAtTurnStart) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    ASSERT_NE(s.flags & kCombatFlagOrangePelletsMask, 0u);
+    dispatch_relics_at_turn_start(s, rv.relics, rv.count);
+    EXPECT_EQ(s.flags & kCombatFlagOrangePelletsMask, 0u);
+    EXPECT_EQ(s.action_count, 0);
+    // The POWER alone no longer completes the set.
+    play(s, rv, CardId::INFLAME);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// REMOVE_DEBUFFS enumerates at RESOLVE time and removes every DEBUFF-typed
+// power, leaving the buffs. The predicate is the LIVE-INSTANCE type, so a
+// NEGATIVE Strength stack is a debuff and IS removed while a positive one is not
+// (StrengthPower.java:81-89).
+TEST(RelicRaresShop, RemoveDebuffsStripsDebuffsIncludingNegativeStrength) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    add_player_power(s, PowerId::VULNERABLE, 2);
+    add_player_power(s, PowerId::STRENGTH, -3);
+    add_player_power(s, PowerId::THORNS, 3);
+    add_player_power(s, PowerId::WEAK, 1);
+    add_player_power(s, PowerId::FRAIL, 2);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    play(s, rv, CardId::INFLAME);
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::WEAK), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::FRAIL), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
+        << "a negative Strength stack is DEBUFF-typed and goes";
+    const PowerSlot* thorns = player_power(s, PowerId::THORNS);
+    ASSERT_NE(thorns, nullptr) << "buffs stay";
+    EXPECT_EQ(thorns->amount, 3);
+}
+
+// ...and a POSITIVE Strength is a BUFF and survives -- the other half of the
+// same two-term predicate.
+TEST(RelicRaresShop, RemoveDebuffsKeepsAPositiveStrengthStack) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    add_player_power(s, PowerId::STRENGTH, 3);
+    add_player_power(s, PowerId::VULNERABLE, 2);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    play(s, rv, CardId::INFLAME);
+    drain(s);
+    const PowerSlot* str = player_power(s, PowerId::STRENGTH);
+    ASSERT_NE(str, nullptr);
+    EXPECT_EQ(str->amount, 3);
+    EXPECT_EQ(player_power(s, PowerId::VULNERABLE), nullptr);
+}
+
+// The enumeration happens when the ACTION resolves, not when it is queued --
+// which is exactly why this needed its own opcode. A debuff applied AFTER the
+// queue but BEFORE the resolve is still removed.
+TEST(RelicRaresShop, RemoveDebuffsEnumeratesAtResolveTimeNotQueueTime) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::ORANGE_PELLETS);
+    add_player_power(s, PowerId::VULNERABLE, 2);
+    play(s, rv, CardId::BASH);
+    play(s, rv, CardId::DEFEND);
+    play(s, rv, CardId::INFLAME);
+    ASSERT_EQ(s.action_count, 1);
+    // ... a Weak lands between the queue and the drain.
+    add_player_power(s, PowerId::WEAK, 1);
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::VULNERABLE), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::WEAK), nullptr)
+        << "a queue-time expansion would have missed this one";
+}
+
 // Prismatic Shard, Frozen Eye, Toolbox, Unceasing Top and the four shop
 // run-layer relics carry NO hook bindings at all: their rows exist for the pool
 // slot and the relicRng draws, and a stray binding would be inert code.

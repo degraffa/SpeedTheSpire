@@ -228,6 +228,36 @@ OPCODES = {
     # combat-only replay never touches a run purse. `extra` carries the gold, the
     # same second-operand shape DAMAGE_FEED (35) uses for its max-HP number.
     "DAMAGE_GREED": 57,
+    # Wave-C track 1, relic-tail stage: 63-64 out of the 63-66 block that stage
+    # owns. 58-59 remain B3.11's published reserve, 60-62 the potions stage's,
+    # 65-66 are RELEASED unspent (an opcode gap costs nothing -- the numbering is
+    # append-only, never dense).
+    #
+    # REMOVE_DEBUFFS is RemoveDebuffsAction.update (RemoveDebuffsAction.java:
+    # 23-30): `for (p : c.powers) if (p.type == DEBUFF) addToTop(new
+    # RemoveSpecificPowerAction(c, c, p.ID));`. It needs its OWN opcode rather
+    # than a queued list of REMOVE_POWER items because the enumeration happens
+    # when the ACTION RESOLVES, not when it is queued -- REMOVE_POWER names one
+    # PowerId chosen at queue time, so a debuff applied between the queue and the
+    # resolve would survive the game's version and not this one. The addToTop per
+    # power means the removals resolve in REVERSE power-list order. The DEBUFF
+    # predicate is the LIVE-INSTANCE type, not the static table alone:
+    # StrengthPower/DexterityPower recompute this.type from the sign of amount
+    # (StrengthPower.java:81-89, DexterityPower.java:74-82), so a negative
+    # Strength stack IS removed and a positive one is not -- the same two-term
+    # test op_apply_power already builds at apply time.
+    "REMOVE_DEBUFFS": 63,
+    # UPGRADE_RANDOM_CARD is UpgradeRandomCardAction.update
+    # (UpgradeRandomCardAction.java:28-50): filter the hand to
+    # `canUpgrade() && type != STATUS`, and IF that subset is non-empty shuffle it
+    # and upgrade element 0. It needs its own opcode because CHOOSE_CARD's
+    # RANDOM + UPGRADE path is a DIFFERENT STREAM over a DIFFERENT SET -- one
+    # cardRandomRng draw over the whole hand, versus one shuffleRng.randomLong()
+    # seeding a JDK Fisher-Yates over the PRE-FILTERED group (the no-arg
+    # CardGroup.shuffle, CardGroup.java:561-563). The shuffle sits INSIDE the
+    # non-empty test, so an empty hand or a hand with nothing upgradeable costs
+    # ZERO shuffleRng -- that is the single most load-bearing stream fact here.
+    "UPGRADE_RANDOM_CARD": 64,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

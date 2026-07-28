@@ -471,6 +471,60 @@ enum class Opcode : uint16_t {
                               // STRUCTURALLY constant-false in S1 and are
                               // documented at the site rather than invented as
                               // state -- see op_damage_greed.
+    // Wave-C track 1, relic-tail stage. 63-64 out of the 63-66 block that stage
+    // owns; 65-66 are RELEASED unspent, and 60-62 stay the potions stage's.
+    REMOVE_DEBUFFS = 63,      // Orange Pellets / RemoveDebuffsAction.update
+                              // (RemoveDebuffsAction.java:23-30): `for (p :
+                              // c.powers) if (p.type == DEBUFF) addToTop(new
+                              // RemoveSpecificPowerAction(c, c, p.ID));`.
+                              // `tgt` is the creature; no other operand.
+                              //
+                              // WHY IT CANNOT BE A LIST OF REMOVE_POWER ITEMS:
+                              // the enumeration happens when the ACTION
+                              // RESOLVES. REMOVE_POWER names one PowerId chosen
+                              // at QUEUE time, so a debuff that lands between
+                              // the queue and the resolve survives the game's
+                              // version and would survive a queue-time
+                              // expansion too -- reachable, since Orange
+                              // Pellets queues addToBot behind the played
+                              // card's own actions.
+                              //
+                              // The addToTop per power means the removals
+                              // resolve in REVERSE power-list order. Only
+                              // observable if a removal's onRemove is read by a
+                              // later one -- none is today -- but it is free,
+                              // so it is reproduced rather than approximated.
+                              //
+                              // The DEBUFF predicate is the LIVE-INSTANCE type,
+                              // not PowerDef::type alone: StrengthPower and
+                              // DexterityPower recompute this.type from the
+                              // sign of amount (StrengthPower.java:81-89,
+                              // DexterityPower.java:74-82), so a NEGATIVE
+                              // Strength stack IS removed and a positive one is
+                              // not. That is the same two-term test
+                              // op_apply_power builds at apply time
+                              // (interp_powers.cpp negative_stat_flip).
+    UPGRADE_RANDOM_CARD = 64, // Warped Tongs / UpgradeRandomCardAction.update
+                              // (UpgradeRandomCardAction.java:28-50): filter the
+                              // hand to `canUpgrade() && type != STATUS`, and IF
+                              // that subset is non-empty shuffle it and upgrade
+                              // element 0. No operand at all.
+                              //
+                              // WHY IT IS NOT CHOOSE_CARD{RANDOM, UPGRADE}: a
+                              // DIFFERENT STREAM over a DIFFERENT SET. That path
+                              // draws card_random_rng once over the WHOLE hand;
+                              // this spends one shuffle_rng.random_long()
+                              // seeding a JDK Fisher-Yates over the PRE-FILTERED
+                              // group (the no-arg CardGroup.shuffle,
+                              // CardGroup.java:561-563) and takes index 0.
+                              // Reusing the other path would silently move
+                              // shuffleRng.
+                              //
+                              // THE STREAM FACT THAT MATTERS: the shuffle sits
+                              // INSIDE `if (upgradeable.size() > 0)` (:40-45),
+                              // and an empty hand returns even earlier (:31-34),
+                              // so a hand with nothing upgradeable costs ZERO
+                              // shuffle_rng draws.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------

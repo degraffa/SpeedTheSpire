@@ -389,6 +389,16 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_draw_pile_fetch(s, item.amount,
                                draw_pile_fetch_type_from_flags(item.flags));
             return;
+        case Opcode::REMOVE_DEBUFFS:
+            // Orange Pellets / RemoveDebuffsAction: enumerate tgt's DEBUFFs HERE,
+            // at resolve time, and queue one addToTop REMOVE_POWER per hit.
+            op_remove_debuffs(s, item.tgt);
+            return;
+        case Opcode::UPGRADE_RANDOM_CARD:
+            // Warped Tongs / UpgradeRandomCardAction: one shuffle_rng draw over
+            // the pre-filtered hand, and none at all when nothing is eligible.
+            op_upgrade_random_card(s);
+            return;
         default:
             return;  // any unrecognized opcode is a safe no-op (decision (3))
     }

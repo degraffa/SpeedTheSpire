@@ -1330,6 +1330,58 @@ void op_upgrade_all(CombatState& s) noexcept {
     upgrade_pile(s.exhaust, s.exhaust_count);
 }
 
+// UPGRADE_RANDOM_CARD (Warped Tongs / UpgradeRandomCardAction.update,
+// UpgradeRandomCardAction.java:28-50), read in full and reproduced in ORDER,
+// because every early-out sits at a different point in the shuffleRng stream:
+//
+//   :31-34  an EMPTY hand ends the action -- ZERO draws.
+//   :35-39  build `upgradeable` from the hand, skipping `!c.canUpgrade() ||
+//           c.type == STATUS`. CardGroup.addToTop is `group.add(c)` -- an APPEND
+//           (CardGroup.java:455-457) -- so the temp group is in HAND ORDER.
+//   :40-45  IF the subset is non-empty: `upgradeable.shuffle()` then
+//           `group.get(0).upgrade()`. Otherwise the action ends having drawn
+//           NOTHING.
+//
+// THE STREAM FACT: the no-arg CardGroup.shuffle() is `Collections.shuffle(group,
+// new java.util.Random(AbstractDungeon.shuffleRng.randomLong()))`
+// (CardGroup.java:561-563) -- ONE shuffle_rng draw seeding a JDK Fisher-Yates
+// over the PRE-FILTERED group, and only when that group is non-empty. A hand
+// with nothing upgradeable therefore costs zero. This is why the action needed
+// its own opcode instead of CHOOSE_CARD{RANDOM, UPGRADE}, which draws
+// card_random_rng once over the WHOLE hand: different stream, different set.
+//
+// The filter is canUpgrade(), NOT `upgrade == 0`: SearingBlow.canUpgrade
+// (SearingBlow.java:58-60) overrides the base with `return true`, so an already
+// upgraded Searing Blow stays eligible. can_upgrade_instance is that predicate,
+// shared with Armaments and Apotheosis so the three cannot drift.
+// The explicit `type == STATUS` test at :37 is redundant -- canUpgrade already
+// rejects CURSE and STATUS (AbstractCard.java:672-680) -- and is kept in this
+// note so the filter is visibly derived rather than invented.
+//
+// `superFlash()` and `applyPowers()` (:43-44) are presentation: this engine has
+// no preview layer, and upgrade_instance already re-seeds cost_now/flags from the
+// upgraded registry row, which is the only state applyPowers would touch.
+void op_upgrade_random_card(CombatState& s) noexcept {
+    if (s.hand_count == 0) {
+        return;  // (:31-34) -- no draw
+    }
+    CardPoolIndex eligible[kHandCap]{};
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        const CardPoolIndex pi = s.hand[i];
+        if (can_upgrade_instance(s, pi)) {
+            eligible[n++] = pi;  // addToTop == append, so HAND ORDER (:38)
+        }
+    }
+    if (n == 0) {
+        return;  // (:40) -- the shuffle is INSIDE the non-empty test: no draw
+    }
+    JdkRandom jr(random_long(s.shuffle_rng));
+    jdk_shuffle(std::span<CardPoolIndex>(eligible, static_cast<std::size_t>(n)),
+                jr);
+    upgrade_instance(s, eligible[0]);  // group.get(0).upgrade() (:42-43)
+}
+
 // DRAW_PILE_FETCH (Violence / DrawPileToHandAction.update, :31-71). Read in
 // order, because each early-out sits at a different point in the rng stream:
 //

@@ -191,6 +191,28 @@ inline constexpr uint32_t kCombatFlagEliteRoom = 1u << 20;
     return (flags & kCombatFlagEliteRoom) != 0u;
 }
 
+// CombatState.flags bits for Orange Pellets' three type latches.
+//
+// OrangePellets declares them as `private static boolean SKILL / POWER / ATTACK`
+// (OrangePellets.java:21-23) -- STATICS, i.e. combat-global rather than per-relic
+// -instance, which is the same shape as Centennial Puzzle's usedThisCombat and
+// the same reason they may not live in RelicSlot.counter: the game never writes
+// OrangePellets.counter, so it stays at AbstractRelic's -1 and any write here
+// would fold out to RunState and diverge from the capture.
+//
+// Their only clear is atTurnStart (:34-39); atPreBattle does NOT touch them. A
+// fresh value-initialised CombatState is equivalent because turn 1's atTurnStart
+// runs before any card can be played (AbstractRoom.java:253) -- said explicitly
+// rather than implying the game resets them at combat start, because it does not.
+//
+// Bits 21-23 were previously zero, so no offset, no sizeof, no SCHEMA_VERSION.
+inline constexpr uint32_t kCombatFlagOrangePelletsAttack = 1u << 21;
+inline constexpr uint32_t kCombatFlagOrangePelletsSkill = 1u << 22;
+inline constexpr uint32_t kCombatFlagOrangePelletsPower = 1u << 23;
+inline constexpr uint32_t kCombatFlagOrangePelletsMask =
+    kCombatFlagOrangePelletsAttack | kCombatFlagOrangePelletsSkill |
+    kCombatFlagOrangePelletsPower;
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;

@@ -85,6 +85,11 @@ void op_random_card_to_draw(CombatState& s, int count, uint8_t type) noexcept;
 // discardPile, exhaustPile, in that order.
 void op_upgrade_all(CombatState& s) noexcept;
 
+// UPGRADE_RANDOM_CARD (Warped Tongs / UpgradeRandomCardAction) -- upgrade ONE
+// random upgradeable hand card, in place, for the combat. Spends exactly ONE
+// shuffle_rng.random_long() and ONLY when the eligible subset is non-empty.
+void op_upgrade_random_card(CombatState& s) noexcept;
+
 // DRAW_PILE_FETCH (Violence) -- pull up to `amount` cards of CardType `type`
 // (the raw CardType byte, interp.hpp draw_pile_fetch_type_from_flags) out of the
 // draw pile into the hand. Dual-stream: k-1 card_random_rng draws for the temp

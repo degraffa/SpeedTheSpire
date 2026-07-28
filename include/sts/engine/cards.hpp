@@ -322,7 +322,11 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::DRAW_PILE_FETCH) ==
             static_cast<uint16_t>(Opcode::DRAW_PILE_FETCH) &&
         static_cast<uint16_t>(sts::registry::Opcode::DAMAGE_GREED) ==
-            static_cast<uint16_t>(Opcode::DAMAGE_GREED),
+            static_cast<uint16_t>(Opcode::DAMAGE_GREED) &&
+        static_cast<uint16_t>(sts::registry::Opcode::REMOVE_DEBUFFS) ==
+            static_cast<uint16_t>(Opcode::REMOVE_DEBUFFS) &&
+        static_cast<uint16_t>(sts::registry::Opcode::UPGRADE_RANDOM_CARD) ==
+            static_cast<uint16_t>(Opcode::UPGRADE_RANDOM_CARD),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 
