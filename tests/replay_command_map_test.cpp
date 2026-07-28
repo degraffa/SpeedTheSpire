@@ -670,4 +670,165 @@ TEST(ReplayCommandMap, TheDeferredOnEquipSetMatchesTheUnionTree) {
         EXPECT_FALSE(relic_on_equip_deferred(id)) << static_cast<int>(id);
 }
 
+// --- the merchant (SHOP_ROOM / SHOP_SCREEN) ---------------------------------
+//
+// The arm this suite gained with the `SHOP_ROOM` mapping frontier. Three
+// distinct claims: the two screens' pure-UI presses move nothing, a purchase
+// resolves through IDENTITY rather than through the capture's array position,
+// and the room's `proceed` bounces like an event's exit page.
+
+[[nodiscard]] RunController at_shop_menu() {
+    RunController rc = at_phase(RunPhase::SHOP);
+    rc.shop.screen = static_cast<uint8_t>(sts::engine::ShopScreenKind::MENU);
+    return rc;
+}
+
+[[nodiscard]] sts::replay::StockRow stock(std::string id, std::string name, int price) {
+    sts::replay::StockRow r;
+    r.id = std::move(id);
+    r.name = std::move(name);
+    r.price = price;
+    return r;
+}
+
+TEST(ReplayCommandMap, WalkingUpToTheMerchantMovesNothing) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_ROOM";
+    s.choice_list = {"shop"};
+    const MappedCommand m = map_command(at_shop_menu(), s, "choose 0");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+}
+
+TEST(ReplayCommandMap, AShopRoomChooseThatIsNotTheMerchantStopsInsteadOfNoOpping) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_ROOM";
+    s.choice_list = {"something else"};
+    const MappedCommand m = map_command(at_shop_menu(), s, "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("not the merchant"), std::string::npos) << m.reason;
+}
+
+TEST(ReplayCommandMap, LeavingTheStockScreenIsNotTheExitFromTheShop) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    const MappedCommand m = map_command(at_shop_menu(), s, "leave");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+}
+
+TEST(ReplayCommandMap, TheShopRoomsProceedIsTheRunLayersOnlyDoorOutOfAShop) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_ROOM";
+    s.choice_list = {"shop"};
+    const MappedCommand m = map_command(at_shop_menu(), s, "proceed");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
+    EXPECT_EQ(action_arg0(m.actions[0]), kChooseProceed);
+}
+
+// The bounce, and the reason the phase (not the record) decides. STS00052
+// presses proceed at seq 48, dismisses the map at 50 and presses it again at
+// 51; STS00054 does the same at 102/104/105. A second CHOOSE(kChooseProceed) is
+// harmless in MAP_CHOICE today, but "harmless" is not a mapping.
+TEST(ReplayCommandMap, AShopRoomProceedAfterTheSimLeftIsAUiBounce) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_ROOM";
+    s.choice_list = {"shop"};
+    const MappedCommand m = map_command(at_phase(RunPhase::MAP_CHOICE), s, "proceed");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+}
+
+TEST(ReplayCommandMap, APurchaseArrivingOutsideAShopStopsInsteadOfSpendingTheRun) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"whirlwind"};
+    s.shop_cards = {stock("Whirlwind", "Whirlwind", 39)};
+    const MappedCommand m = map_command(at_phase(RunPhase::MAP_CHOICE), s, "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("MAP_CHOICE"), std::string::npos) << m.reason;
+}
+
+// THE POINT OF THE IDENTITY JOIN. The game DELETES a bought row from its shop
+// screen; the run layer keeps every slot at a fixed index and marks it sold. So
+// after one purchase the capture's array position and the sim's ordinal have
+// drifted apart, and a positional mapping buys the wrong item -- legally, and
+// therefore silently. Here the sim's colored slot 0 is already sold and the
+// capture no longer lists it, so "twin strike" must still resolve to the sim's
+// slot 1 and not to the capture's position 0.
+TEST(ReplayCommandMap, APurchaseResolvesThroughIdentityNotThroughTheCapturesPosition) {
+    RunController rc = at_shop_menu();
+    rc.shop.colored[0].id = static_cast<uint16_t>(sts::engine::CardId::WHIRLWIND);
+    rc.shop.colored[0].sold = 1;
+    rc.shop.colored[1].id = static_cast<uint16_t>(sts::engine::CardId::TWIN_STRIKE);
+    rc.shop.colored[1].sold = 0;
+
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"twin strike"};
+    s.shop_cards = {stock("Twin Strike", "Twin Strike", 51)};  // position 0 now
+
+    const MappedCommand m = map_command(rc, s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]),
+              sts::engine::kChooseShopColoredBase + 1);
+}
+
+TEST(ReplayCommandMap, TheShopsPurgeServiceIsItsOwnOrdinalAndOpensTheGrid) {
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"purge", "whirlwind"};
+    s.shop_cards = {stock("Whirlwind", "Whirlwind", 39)};
+    const MappedCommand m = map_command(at_shop_menu(), s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), sts::engine::kChooseShopPurge);
+}
+
+TEST(ReplayCommandMap, AShopRowTheSimHasNoUnsoldSlotForStopsWithBothIds) {
+    RunController rc = at_shop_menu();  // every slot is CardId 0 / unsold
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"whirlwind"};
+    s.shop_cards = {stock("Whirlwind", "Whirlwind", 39)};
+    const MappedCommand m = map_command(rc, s, "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("Whirlwind"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("no UNSOLD slot"), std::string::npos) << m.reason;
+}
+
+// --- the campfire ------------------------------------------------------------
+
+// `build_rest_menu` (rest_sites.cpp) deliberately omits RecallOption -- the Ruby
+// Key button, appended after CampfireUI's veto sweep, with no S1 Act-4 content
+// behind it. Every capture from this profile lists it third, and pressing it
+// used to be an ILLEGAL CHOOSE, which the run layer defines as a non-corrupting
+// NO-OP: the sim stayed parked on the campfire while the capture walked on, and
+// the first evidence was a `floor` field a dozen records later. STS00052 (seq
+// 78) and STS00054 (seq 122) both did exactly that.
+TEST(ReplayCommandMap, ARestOptionTheSimDoesNotOfferStopsAndNamesRecall) {
+    RunController rc = at_phase(RunPhase::REST_SITE);
+    ScreenInfo s;
+    s.screen_type = "REST";
+    const MappedCommand m = map_command(rc, s, "choose 2");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("RecallOption"), std::string::npos) << m.reason;
+}
+
+TEST(ReplayCommandMap, ARestProceedAfterTheSimLeftTheCampfireIsAUiBounce) {
+    ScreenInfo s;
+    s.screen_type = "REST";
+    const MappedCommand m = map_command(at_phase(RunPhase::MAP_CHOICE), s, "proceed");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+}
+
+TEST(ReplayCommandMap, ARestProceedWhileTheCampfireIsLiveIsStillTheExit) {
+    ScreenInfo s;
+    s.screen_type = "REST";
+    const MappedCommand m = map_command(at_phase(RunPhase::REST_SITE), s, "proceed");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), kChooseProceed);
+}
+
 }  // namespace

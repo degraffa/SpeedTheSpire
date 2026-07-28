@@ -335,6 +335,56 @@ struct Options {
 // controller was handed. The obligation row was filed off the stop, and asked
 // whether the ENGINE had an event/combat-boundary defect. It does not. So the
 // first divergence is now carried out of here and printed beside the stop.
+
+// THE OBTAIN RACE, recognized narrowly. `ShowCardAndObtainEffect` adds a
+// transformed / obtained card to the master deck only when its ANIMATION
+// completes (ShowCardAndObtainEffect.java:30-45 -- the constructor stores the
+// card, `update` obtains it), while the removal is immediate. Every capture
+// dump taken in between therefore shows a deck one card SHORT of the state the
+// rules describe, and the card appears in the first dump after the effect
+// finishes -- in b14_accept's STS00009 that is the first record of the NEXT
+// floor, so a mode seeded from the pre-entry record starts a card behind. That
+// is the capture-fidelity gap B1.3 deferred and B5.2 carries as an obligation
+// row, not an engine defect.
+//
+// The recognition is deliberately narrow, because a wide one would hide a real
+// deck divergence: EVERY differing field must be `master_deck_count` or a
+// `master_deck[i]` whose index is at or past the SHORTER deck's END -- i.e. one
+// side has strictly more cards and the shared prefix is identical. An
+// event-selection defect cannot produce that shape: it would move eventRng, a
+// pool bit or event_flags, and any of those makes this return false.
+//
+// WHICH SIDE IS AHEAD DEPENDS ON THE MODE, so the parameters name the ROLE
+// rather than the source, and each caller says which is which.
+//
+//   --event  seeds the sim from the PRE-ENTRY record, so the sim starts a card
+//            behind a capture whose animation has since finished: ahead = the
+//            capture.
+//   --replay steps the sim command by command and diffs BEFORE applying record
+//            k, so the sim has already obtained the card that record k's
+//            mid-animation dump does not yet show: ahead = the SIM. Same effect,
+//            same narrowness, mirrored -- and it is why the whole-run differ
+//            could not simply reuse the --event call and had to be told the
+//            direction. (Deferred-obligations row "`--replay` lacks `--event`'s
+//            obtain-race recognition".)
+[[nodiscard]] bool is_obtain_race(const sts::diff::DiffReport& rep,
+                                  const RunState& ahead,
+                                  const RunState& behind) {
+    if (rep.empty()) return false;
+    if (ahead.master_deck_count <= behind.master_deck_count) return false;
+    for (const auto& d : rep.diffs) {
+        if (d.field_name == "master_deck_count") continue;
+        if (d.field_name.rfind("master_deck[", 0) != 0) return false;
+        const std::size_t lb = d.field_name.find('[');
+        const std::size_t rb = d.field_name.find(']');
+        if (lb == std::string::npos || rb == std::string::npos || rb <= lb + 1)
+            return false;
+        const int idx = std::atoi(d.field_name.substr(lb + 1, rb - lb - 1).c_str());
+        if (idx < static_cast<int>(behind.master_deck_count)) return false;
+    }
+    return true;
+}
+
 struct Verdict {
     int records_compared = 0;
     int reward_records_compared = 0;
@@ -344,6 +394,7 @@ struct Verdict {
     std::string diverged_screen;
     std::size_t diverged_fields = 0;
     int deck_identity_records = 0;  // records whose only diff was library order
+    int obtain_race_records = 0;    // ...whose only diff was the obtain race
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
 };
@@ -407,6 +458,21 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                         rec.action_command.c_str(), rep.size(),
                         rep.size() == 1 ? "" : "s");
             std::printf("%s\n", rep.to_string().c_str());
+        } else if (is_obtain_race(rep, /*ahead=*/actual, /*behind=*/expected)) {
+            // A ShowCardAndObtainEffect that has not finished animating on the
+            // capture side. Reported and counted, never a divergence -- the
+            // same call `--event` makes, mirrored (see is_obtain_race).
+            ++v.obtain_race_records;
+            std::printf("RACE  seq=%d floor=%d screen=%s cmd='%s': the sim's deck holds "
+                        "%u card%s this dump does not -- ShowCardAndObtainEffect is "
+                        "still animating capture-side (the B1.3/B5.2 obtain-race "
+                        "capture gap); the shared prefix is identical\n",
+                        rec.seq, s.floor, s.screen_type.c_str(),
+                        rec.action_command.c_str(),
+                        static_cast<unsigned>(actual.master_deck_count -
+                                              expected.master_deck_count),
+                        actual.master_deck_count - expected.master_deck_count == 1
+                            ? "" : "s");
         } else if (!rep.empty()) {
             if (v.diverged_at < 0) {
                 v.diverged_at = static_cast<int>(k);
@@ -501,8 +567,18 @@ void print_pool_evidence(const std::string& seed_string, int floor,
             grid = GridSession{};
             continue;
         }
+        // The map can be up OVER a room the capture has not formally left --
+        // that is the whole of the "leaving is deferred to the map choice"
+        // convention. Two phases park that way: COMBAT_REWARD (whose `proceed`
+        // is NOOPped in the table) and SHOP (whose room `proceed` is normally
+        // the exit, but a capture can dismiss the map with `return` and then
+        // `choose` a node without ever issuing one -- `--shop`'s own in-room
+        // walk already handles a MAP screen appearing mid-visit for the same
+        // reason). Without this the node CHOOSE would land on the shop menu and
+        // buy row `dst` instead of moving the run.
         if (m.kind == MapKind::LEAVE_ROOM &&
-            rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD)) {
+            (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD) ||
+             rc.phase == static_cast<uint8_t>(RunPhase::SHOP))) {
             step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
         }
         for (const Action a : m.actions) step(rc, a);
@@ -1078,50 +1154,12 @@ struct NeowVerdict {
 // ascension, all of which the translated RunState carries. Driving the module
 // keeps the read-out about the merchant.
 
-[[nodiscard]] std::string lower(std::string s) {
-    std::transform(s.begin(), s.end(), s.begin(),
-                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
-    return s;
-}
-
-// Which shop row a `choose i` names, resolved through the capture's own
-// choice_list: the game lists the AFFORDABLE unsold rows by display name, so
-// the index means nothing without it.
-enum class ShopPick : uint8_t { NONE, COLORED, COLORLESS, RELIC, POTION, PURGE };
-
-struct ShopTarget {
-    ShopPick what = ShopPick::NONE;
-    uint8_t index = 0;
-};
-
-[[nodiscard]] ShopTarget resolve_shop_choice(const ScreenInfo& s, int choice) {
-    ShopTarget t;
-    if (choice < 0 || choice >= static_cast<int>(s.choice_list.size())) return t;
-    const std::string want = lower(s.choice_list[static_cast<std::size_t>(choice)]);
-    if (want == "purge") {
-        t.what = ShopPick::PURGE;
-        return t;
-    }
-    for (std::size_t i = 0; i < s.shop_cards.size(); ++i) {
-        if (lower(s.shop_cards[i].name) != want) continue;
-        t.what = i < kShopColoredCount ? ShopPick::COLORED : ShopPick::COLORLESS;
-        t.index = static_cast<uint8_t>(i < kShopColoredCount ? i : i - kShopColoredCount);
-        return t;
-    }
-    for (std::size_t i = 0; i < s.shop_relics.size(); ++i) {
-        if (lower(s.shop_relics[i].name) != want) continue;
-        t.what = ShopPick::RELIC;
-        t.index = static_cast<uint8_t>(i);
-        return t;
-    }
-    for (std::size_t i = 0; i < s.shop_potions.size(); ++i) {
-        if (lower(s.shop_potions[i].name) != want) continue;
-        t.what = ShopPick::POTION;
-        t.index = static_cast<uint8_t>(i);
-        return t;
-    }
-    return t;
-}
+// `lower`, `ShopPick`/`ShopTarget` and `resolve_shop_choice` MOVED to
+// command_map.hpp when `--replay` grew its own SHOP_ROOM / SHOP_SCREEN arm:
+// both modes resolve a `choose i` on a merchant's shelf the same way (the
+// game lists the AFFORDABLE unsold rows by display name, so the index means
+// nothing without the choice_list), and two copies of that rule is exactly the
+// shape the mapping table was split out to prevent.
 
 struct ShopVerdict {
     int visits = 0;         // merchants built
@@ -1958,41 +1996,6 @@ struct TreasureVerdict {
 // folded into the zero-diff verdict, because a body's first page is content the
 // selection layer does not own.
 
-// THE OBTAIN RACE, recognized narrowly. `ShowCardAndObtainEffect` adds a
-// transformed / obtained card to the master deck only when its ANIMATION
-// completes (ShowCardAndObtainEffect.java:30-45 -- the constructor stores the
-// card, `update` obtains it), while the removal is immediate. Every capture
-// dump taken in between therefore shows a deck one card SHORT of the state the
-// rules describe, and the card appears in the first dump after the effect
-// finishes -- in b14_accept's STS00009 that is the first record of the NEXT
-// floor, so a mode seeded from the pre-entry record starts a card behind. That
-// is the capture-fidelity gap B1.3 deferred and B5.2 carries as an obligation
-// row, not an engine defect.
-//
-// The recognition is deliberately narrow, because a wide one would hide a real
-// deck divergence: EVERY differing field must be `master_deck_count` or a
-// `master_deck[i]` whose index is at or past the seeded deck's END -- i.e. the
-// capture has strictly more cards and the shared prefix is identical. An
-// event-selection defect cannot produce that shape: it would move eventRng, a
-// pool bit or event_flags, and any of those makes this return false.
-[[nodiscard]] bool is_obtain_race(const sts::diff::DiffReport& rep,
-                                  const RunState& expected,
-                                  const RunState& actual) {
-    if (rep.empty()) return false;
-    if (expected.master_deck_count <= actual.master_deck_count) return false;
-    for (const auto& d : rep.diffs) {
-        if (d.field_name == "master_deck_count") continue;
-        if (d.field_name.rfind("master_deck[", 0) != 0) return false;
-        const std::size_t lb = d.field_name.find('[');
-        const std::size_t rb = d.field_name.find(']');
-        if (lb == std::string::npos || rb == std::string::npos || rb <= lb + 1)
-            return false;
-        const int idx = std::atoi(d.field_name.substr(lb + 1, rb - lb - 1).c_str());
-        if (idx < static_cast<int>(actual.master_deck_count)) return false;
-    }
-    return true;
-}
-
 // --- the constructor deal (Match and Keep!) ----------------------------------
 //
 // MOST event bodies spend nothing until the player presses a button, so the
@@ -2442,7 +2445,7 @@ struct EventVerdict {
         e.neow_rng = RngStream{};
         a.neow_rng = RngStream{};
         const sts::diff::DiffReport rep = sts::diff::diff_run_states(e, a);
-        if (is_obtain_race(rep, e, a)) {
+        if (is_obtain_race(rep, /*ahead=*/e, /*behind=*/a)) {
             row.obtain_race = true;
             std::printf("  RACE     %s floor=%d: the capture's deck holds %u card(s) "
                         "the pre-entry record did not -- ShowCardAndObtainEffect "
@@ -2771,11 +2774,11 @@ int main(int argc, char** argv) {
         try {
             const Verdict v = replay_one(f, opts);
             std::printf("%s %s: %d record%s compared (%d on reward screens), "
-                        "%d library-order-only; stop: %s\n",
+                        "%d library-order-only, %d obtain-race; stop: %s\n",
                         v.clean ? "CLEAN" : "PART ", f.c_str(), v.records_compared,
                         v.records_compared == 1 ? "" : "s",
                         v.reward_records_compared, v.deck_identity_records,
-                        v.stop_reason.c_str());
+                        v.obtain_race_records, v.stop_reason.c_str());
             // The frontier, always on its own line and never folded into the
             // stop -- see `Verdict`. "no divergence" is said out loud too: a
             // replay that stopped without ever disagreeing is a coverage gap in

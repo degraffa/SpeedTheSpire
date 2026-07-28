@@ -14,6 +14,7 @@
 // JSON pass that FILLS a `ScreenInfo` stays in `main.cpp`.
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -40,6 +41,7 @@ using sts::engine::kChooseSing;
 using sts::engine::kChooseSkipCard;
 using sts::engine::kEventOptionCap;
 using sts::engine::kMasterDeckCap;
+using sts::engine::kRestOptionCap;
 using sts::engine::legal_actions;
 using sts::engine::make_action;
 using sts::engine::MasterBottleKind;
@@ -49,7 +51,19 @@ using sts::engine::RestScreen;
 using sts::engine::RunActionMask;
 using sts::engine::RunController;
 using sts::engine::RunPhase;
+using sts::engine::kChooseShopColoredBase;
+using sts::engine::kChooseShopColorlessBase;
+using sts::engine::kChooseShopPotionBase;
+using sts::engine::kChooseShopPurge;
+using sts::engine::kChooseShopRelicBase;
+using sts::engine::kShopColoredCount;
+using sts::engine::kShopColorlessCount;
+using sts::engine::kShopPotionCount;
+using sts::engine::kShopRelicCount;
+using sts::engine::CardId;
+using sts::engine::PotionId;
 using sts::engine::ShopScreenKind;
+using sts::engine::ShopSlot;
 
 // --- the screen context the translator does not carry -----------------------
 
@@ -453,6 +467,162 @@ struct MatchPlayScreen {
     return p;
 }
 
+// --- the merchant ------------------------------------------------------------
+//
+// A shop visit arrives as TWO screen types, and the split is the game's, not
+// the fork's. `SHOP_ROOM` is the room with the merchant standing in it: its
+// whole `choice_list` is `["shop"]`, `choose 0` walks up to him and `proceed`
+// opens the map. `SHOP_SCREEN` is the stock itself, where `choose i` buys and
+// `leave` steps back into the room. (Verified over the 260 shop records in the
+// artifact corpus: SHOP_ROOM carries only those two verbs and only that
+// choice_list; SHOP_SCREEN carries `choose`, `leave`, and the belt's
+// screen-independent `potion discard`.)
+//
+// THE RUN LAYER HAS ONE STATE FOR BOTH. Entering a ShopRoom puts the controller
+// straight into `RunPhase::SHOP` / `ShopScreenKind::MENU` -- there is no
+// walk-up-to-the-merchant step to model, because nothing about the game's is
+// stateful. So the room's `choose` is a NOOP and the screen's `leave` is a
+// NOOP; the only two commands that move the run layer are the room's `proceed`
+// (which is the menu's `kChooseProceed`) and the screen's `choose` (a purchase
+// or the purge service). The purge grid that a purge opens is an ordinary
+// `GRID` screen and is handled by the GRID branch, whose `sim_grid_open`
+// already knows about `ShopScreenKind::PURGE_GRID`.
+
+[[nodiscard]] inline std::string lower(std::string s) {
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+    return s;
+}
+
+enum class ShopPick : uint8_t { NONE, COLORED, COLORLESS, RELIC, POTION, PURGE };
+
+struct ShopTarget {
+    ShopPick what = ShopPick::NONE;
+    uint8_t index = 0;   // position in the CAPTURE's stock array
+    std::string id;      // the capture row's game id; empty for PURGE / NONE
+};
+
+// Which shop row a `choose i` names, resolved through the capture's own
+// choice_list: the game lists the AFFORDABLE unsold rows by DISPLAY name, so
+// the index means nothing without it.
+[[nodiscard]] inline ShopTarget resolve_shop_choice(const ScreenInfo& s, int choice) {
+    ShopTarget t;
+    if (choice < 0 || choice >= static_cast<int>(s.choice_list.size())) return t;
+    const std::string want = lower(s.choice_list[static_cast<std::size_t>(choice)]);
+    if (want == "purge") {
+        t.what = ShopPick::PURGE;
+        return t;
+    }
+    for (std::size_t i = 0; i < s.shop_cards.size(); ++i) {
+        if (lower(s.shop_cards[i].name) != want) continue;
+        t.what = i < static_cast<std::size_t>(kShopColoredCount) ? ShopPick::COLORED
+                                                                 : ShopPick::COLORLESS;
+        t.index = static_cast<uint8_t>(
+            i < static_cast<std::size_t>(kShopColoredCount)
+                ? i
+                : i - static_cast<std::size_t>(kShopColoredCount));
+        t.id = s.shop_cards[i].id;
+        return t;
+    }
+    for (std::size_t i = 0; i < s.shop_relics.size(); ++i) {
+        if (lower(s.shop_relics[i].name) != want) continue;
+        t.what = ShopPick::RELIC;
+        t.index = static_cast<uint8_t>(i);
+        t.id = s.shop_relics[i].id;
+        return t;
+    }
+    for (std::size_t i = 0; i < s.shop_potions.size(); ++i) {
+        if (lower(s.shop_potions[i].name) != want) continue;
+        t.what = ShopPick::POTION;
+        t.index = static_cast<uint8_t>(i);
+        t.id = s.shop_potions[i].id;
+        return t;
+    }
+    return t;
+}
+
+// The run layer's dense CHOOSE ordinal for a resolved shop row, or -1 with a
+// reason.
+//
+// WHY THE CAPTURE'S POSITION IS NOT THE ANSWER. The game DELETES a bought row
+// from its shop screen (`ShopScreen` removes the purchased item), so the second
+// purchase in a visit is at a different array position than the same item had
+// before the first; the run layer, by contrast, keeps every slot at a FIXED
+// index for the whole visit and just marks it sold (`ShopSlot::sold`; see the
+// `kChooseShop*Base` note in run_advance.hpp on why slots are not compacted).
+// Handing the capture's position straight to the engine therefore buys the
+// WRONG ITEM after the first purchase -- silently, since the ordinal is legal.
+//
+// So the join goes through IDENTITY: the display name picks a row out of the
+// capture's stock, that row's game id is matched against the sim's unsold slots
+// in the same group, and the slot's fixed index is the ordinal. The `sold`
+// filter is what makes a duplicated identity (two of the same potion on the
+// shelf) resolve to the one still for sale.
+[[nodiscard]] inline int shop_choose_ordinal(const RunController& rc, const ScreenInfo& s,
+                                             int choice, std::string& why) {
+    const ShopTarget t = resolve_shop_choice(s, choice);
+    const std::string named =
+        (choice >= 0 && choice < static_cast<int>(s.choice_list.size()))
+            ? s.choice_list[static_cast<std::size_t>(choice)]
+            : std::string("<index " + std::to_string(choice) + " off the list>");
+
+    if (t.what == ShopPick::PURGE) return kChooseShopPurge;
+    if (t.what == ShopPick::NONE) {
+        why = "shop `choose " + std::to_string(choice) + "` names \"" + named +
+              "\", which is on none of the merchant's three shelves in this "
+              "record (" + std::to_string(s.shop_cards.size()) + " card, " +
+              std::to_string(s.shop_relics.size()) + " relic, " +
+              std::to_string(s.shop_potions.size()) + " potion rows)";
+        return -1;
+    }
+
+    const ShopSlot* group = nullptr;
+    int count = 0;
+    int base = 0;
+    switch (t.what) {
+        case ShopPick::COLORED:
+            group = rc.shop.colored; count = kShopColoredCount;
+            base = kChooseShopColoredBase; break;
+        case ShopPick::COLORLESS:
+            group = rc.shop.colorless; count = kShopColorlessCount;
+            base = kChooseShopColorlessBase; break;
+        case ShopPick::RELIC:
+            group = rc.shop.relics; count = kShopRelicCount;
+            base = kChooseShopRelicBase; break;
+        case ShopPick::POTION:
+            group = rc.shop.potions; count = kShopPotionCount;
+            base = kChooseShopPotionBase; break;
+        default:
+            break;
+    }
+
+    for (int i = 0; i < count; ++i) {
+        if (group[i].sold) continue;
+        std::string sim_id;
+        switch (t.what) {
+            case ShopPick::COLORED:
+            case ShopPick::COLORLESS:
+                sim_id = sts::registry::card_game_id(static_cast<CardId>(group[i].id));
+                break;
+            case ShopPick::RELIC:
+                sim_id = sts::registry::relic_game_id(static_cast<RelicId>(group[i].id));
+                break;
+            case ShopPick::POTION:
+                sim_id = sts::registry::potion_game_id(static_cast<PotionId>(group[i].id));
+                break;
+            default:
+                break;
+        }
+        if (sim_id == t.id) return base + i;
+    }
+
+    why = "shop `choose " + std::to_string(choice) + "` names \"" + named +
+          "\" (game id \"" + t.id +
+          "\"), which the sim's merchant has no UNSOLD slot for -- the two "
+          "stocks disagree, or the row was already bought sim-side";
+    return -1;
+}
+
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
                                         const std::string& cmd) {
     const std::vector<std::string> p = split_ws(cmd);
@@ -632,7 +802,65 @@ struct MatchPlayScreen {
         return m;
     }
 
-    if (s.screen_type == "REST" || s.screen_type == "HAND_SELECT") {
+    if (s.screen_type == "REST") {
+        const bool in_rest = rc.phase == static_cast<uint8_t>(RunPhase::REST_SITE);
+        if (verb == "choose") {
+            const int i = arg(1);
+            // THE CAMPFIRE'S MENU CAN BE LONGER THAN THE SIM'S. `build_rest_menu`
+            // (rest_sites.cpp) deliberately omits `RecallOption`
+            // (CampfireUI.java:94-96) -- it is the Ruby Key button, appended
+            // after the veto sweep, and the run layer has no Act-4 key content.
+            // The capture profile HAS the final act available, so every captured
+            // rest site lists `["rest", "smith", "recall"]` and a capture that
+            // presses index 2 is naming a button the sim does not have.
+            //
+            // Left unchecked, `CHOOSE 2` is simply illegal at the run layer and
+            // therefore a NO-OP -- the sim silently stays parked on the campfire
+            // while the capture walks on, and the first evidence is a `floor`
+            // field a dozen records later with no hint of what caused it. That
+            // is exactly what STS00052 (seq 78) and STS00054 (seq 122) did.
+            // Ask the mask instead and name the button.
+            if (in_rest) {
+                RunActionMask mask{};
+                legal_actions(rc, mask);
+                if (i < 0 || i >= kRestOptionCap || !mask.can_choose_rest[i]) {
+                    m.reason = "rest `choose " + std::to_string(i) +
+                               "` is not a campfire option the sim offers; the "
+                               "run layer models Rest/Smith plus the Girya, "
+                               "Peace Pipe and Shovel buttons, and DEFERS "
+                               "RecallOption (the Ruby Key button, "
+                               "rest_sites.cpp `build_rest_menu`), which every "
+                               "capture from this profile lists third";
+                    return m;
+                }
+            }
+            m.kind = MapKind::ACTIONS;
+            m.actions.push_back(make_action(ActionVerb::CHOOSE,
+                                            static_cast<uint8_t>(i)));
+            return m;
+        }
+        if (verb == "proceed") {
+            // The campfire's proceed opens the map -- and repeats, exactly like
+            // an event's [Leave] page and a shop room's proceed. The map opens
+            // over the still-mounted rest room, a map `return` dismisses it, and
+            // the capture's policy presses proceed again (STS00052 seq 79/81/83,
+            // STS00054 seq 110/112/114). One door out, no way back: the FIRST
+            // press is the exit and the rest are UI bounces, discriminated on
+            // the SIM's phase.
+            if (!in_rest &&
+                rc.phase == static_cast<uint8_t>(RunPhase::MAP_CHOICE)) {
+                m.kind = MapKind::NOOP;
+                return m;
+            }
+            m.kind = MapKind::ACTIONS;
+            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+            return m;
+        }
+        m.reason = "REST command '" + verb + "' is not modelled";
+        return m;
+    }
+
+    if (s.screen_type == "HAND_SELECT") {
         if (verb == "choose") {
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
@@ -644,7 +872,7 @@ struct MatchPlayScreen {
             m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
             return m;
         }
-        m.reason = s.screen_type + " command '" + verb + "' is not modelled";
+        m.reason = "HAND_SELECT command '" + verb + "' is not modelled";
         return m;
     }
 
@@ -762,6 +990,93 @@ struct MatchPlayScreen {
             return m;
         }
         m.reason = "chest command '" + verb + "' is not modelled";
+        return m;
+    }
+
+    if (s.screen_type == "SHOP_ROOM") {
+        const bool in_shop = rc.phase == static_cast<uint8_t>(RunPhase::SHOP);
+        if (verb == "choose") {
+            // Walking up to the merchant. `choice_list` is `["shop"]`, and the
+            // run layer put the controller on the shop MENU when it entered the
+            // room, so this press moves nothing -- at any phase, including
+            // after the visit is over (see `proceed` below for how a capture
+            // gets back here). The label IS checked rather than assumed: a
+            // SHOP_ROOM offering something other than the merchant would be a
+            // screen this mapping has never seen, and silently no-opping it
+            // would hide that.
+            const int i = arg(1);
+            if (i >= 0 && i < static_cast<int>(s.choice_list.size()) &&
+                lower(s.choice_list[static_cast<std::size_t>(i)]) != "shop") {
+                m.reason = "shop-room `choose " + std::to_string(i) + "` names \"" +
+                           s.choice_list[static_cast<std::size_t>(i)] +
+                           "\", not the merchant";
+                return m;
+            }
+            m.kind = MapKind::NOOP;
+            return m;
+        }
+        if (verb == "proceed") {
+            // ShopRoom's proceed opens the map, which is exactly what
+            // kChooseProceed on the shop menu does (`can_proceed` on
+            // RunPhase::SHOP, run_advance.hpp).
+            //
+            // AND IT REPEATS, for the same reason an event's [Leave] page does.
+            // The map opens over the still-mounted room; a map `return`
+            // dismisses it and drops the capture back onto the SHOP_ROOM, whose
+            // proceed then re-opens the same map. STS00052 does exactly that at
+            // seq 48/50/51 and STS00054 at 102/104/105. The run layer has one
+            // door out of a shop and no way back, so the FIRST press is the
+            // exit and every later one is a UI bounce -- discriminated on the
+            // SIM's phase, never on the record, precisely as the EVENT branch
+            // separates a real exit from its bounce.
+            if (in_shop) {
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+                return m;
+            }
+            if (rc.phase == static_cast<uint8_t>(RunPhase::MAP_CHOICE)) {
+                m.kind = MapKind::NOOP;
+                return m;
+            }
+            m.reason = "shop-room `proceed` arrived while the sim is in " +
+                       std::string(phase_name(rc.phase)) +
+                       ", neither a shop nor the map it opens";
+            return m;
+        }
+        m.reason = "shop-room command '" + verb + "' is not modelled";
+        return m;
+    }
+
+    if (s.screen_type == "SHOP_SCREEN") {
+        if (verb == "leave") {
+            // Back out to the room. The run layer never left the menu, and the
+            // press that ends the visit is the room's `proceed`. Phase-free for
+            // the same reason the room's `choose` is: it moves nothing.
+            m.kind = MapKind::NOOP;
+            return m;
+        }
+        if (verb == "choose") {
+            // A purchase, and the one merchant command that MOVES the run. It
+            // must not reach any other phase: `CHOOSE i` means a shop row here,
+            // a map node in MAP_CHOICE and a reward row in COMBAT_REWARD, so a
+            // desync would spend the run rather than stop it.
+            if (rc.phase != static_cast<uint8_t>(RunPhase::SHOP)) {
+                m.reason = "shop `choose` arrived while the sim is in " +
+                           std::string(phase_name(rc.phase)) + ", not a shop";
+                return m;
+            }
+            std::string why;
+            const int ordinal = shop_choose_ordinal(rc, s, arg(1), why);
+            if (ordinal < 0) {
+                m.reason = why;
+                return m;
+            }
+            m.kind = MapKind::ACTIONS;
+            m.actions.push_back(make_action(ActionVerb::CHOOSE,
+                                            static_cast<uint8_t>(ordinal)));
+            return m;
+        }
+        m.reason = "shop command '" + verb + "' is not modelled";
         return m;
     }
 

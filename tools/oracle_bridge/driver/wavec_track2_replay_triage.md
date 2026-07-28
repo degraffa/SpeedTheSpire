@@ -116,3 +116,100 @@ owns it; master's `badc58f` harness fixes did NOT add that arm, checked
 against its read-out and the union source). **No new divergence appeared on
 the union that neither track saw**, and no record anywhere compared
 different. First divergence: none, on every file.
+
+## `wave2-harness` stage 2 — the `SHOP_ROOM` frontier is gone
+
+The mapping arm the "replay generalized" ledger row owned is landed:
+`command_map.hpp` now has a `SHOP_ROOM` branch (the merchant click is a NOOP,
+`proceed` is the menu's `kChooseProceed`, and a repeat after the sim has left is
+a UI bounce) and a `SHOP_SCREEN` branch (`leave` is a NOOP, `choose i` resolves
+through the capture's `choice_list` and then through IDENTITY to the sim's
+unsold slot). Same offline command as above, `debug` build, no game and no
+capture pipeline.
+
+| Run | Before (union re-run) | After | Delta |
+|---|---|---|---|
+| STS00042 | zero-diff over 38, stop seq 37 `SHOP_ROOM` | **CLEAN to terminal**, 85 records | +47, frontier gone |
+| STS00043 | CLEAN to terminal, 67 records | **CLEAN to terminal**, 67 records | unchanged |
+| STS00044 / 45 / 46 / 47 / 48 / 49 / 50 / 51 | CLEAN to terminal | **CLEAN to terminal** | unchanged |
+| STS00052 | zero-diff over 43, stop seq 42 `SHOP_ROOM` | zero-diff over 79, stop seq 78 **rest `Recall`** | +36, new frontier |
+| STS00054 | zero-diff over 33, stop seq 32 `SHOP_ROOM` | zero-diff over 123, stop seq 122 **rest `Recall`** | +90, new frontier |
+
+`--- 12 file(s), 2 not clean ---`, **first divergence: none, on every file** —
+the two stops are class (c), with zero divergence up to them.
+
+### What the new arm exposed, and how each was triaged
+
+**The shop arm itself produced no divergence anywhere.** Everything below was
+reached only because the replays now walk past a merchant.
+
+1. **A second UI bounce, in the SAME shape as the shop's** — and this one was
+   already broken. A rest room's `proceed` opens the map over the still-mounted
+   campfire; a map `return` dismisses it and the capture presses `proceed` again
+   (STS00052 seq 79/81/83, STS00054 seq 110/112/114). The REST branch mapped
+   every one of them to `CHOOSE(kChooseProceed)`. Fixed the way the EVENT and
+   SHOP branches discriminate: on the SIM's phase, never on the record.
+2. **`RecallOption` is the new frontier, and it is class (c).**
+   `build_rest_menu` (`rest_sites.cpp`) deliberately omits the Ruby Key button
+   (`CampfireUI.java:94-96`) as "Act-4 concerns with no S1 representation". But
+   the capture profile HAS the final act available, so **every captured rest
+   site lists `["rest", "smith", "recall"]`** — which contradicts that comment's
+   premise that the button is unreachable here. Pressing it was an illegal
+   `CHOOSE` at the run layer, which is defined as a non-corrupting NO-OP: the
+   sim stayed parked on the campfire while the capture walked on, and the first
+   evidence was a `floor` field a dozen records later. The mapping now asks the
+   legal mask and stops with the body NAMED. Whether to model the option is a
+   run-layer question (`RunState.keys` exists) and is not this track's to
+   answer — reported, not patched.
+
+## `wave2-harness` stage 2 — the G6 main campaign, 30 runs
+
+The `SHOP_ROOM` stop was 16 of the 30 stops in
+[`g6_campaign2_spotdiff.md`](g6_campaign2_spotdiff.md) §6. Re-run whole with the
+new arm (and with this wave's already-discharged potion / Duplication rows on
+the tree, which is why two former translation aborts now replay):
+
+```bash
+build/debug/tools/oracle_bridge/replay/replay_run_diff --replay \
+    /mnt/d/STS_BG_Mod/_oracle_data/campaigns/g6_campaign2_20260728T153342Z_claude01/run_*[!g].jsonl
+```
+
+`--- 30 file(s), 12 not clean ---`, up from 4 clean. **No `SHOP_ROOM` stop
+remains anywhere**, and no run regressed: every seed compares at least as many
+records as its old row records, and none acquired an earlier first divergence.
+
+Newly clean to terminal, having previously stopped at a merchant: STS00220,
+STS00365, STS00425, STS00451, STS00577, STS00610, STS01857, STS01861, STS01906,
+STS02041, STS02048, STS02110. **STS01221 — the boss-reward terminal seed the
+gate cites — replays 200 records to its terminal**, where it previously aborted
+in translation on `DuplicationPower`.
+
+The twelve remaining, each attributed:
+
+| First divergence | Runs | Class |
+|---|---|---|
+| `EVENT` page offset (seq 22 / 25 / 61) | STS01314, STS00221, STS02009 | **(d)** the §8.2 Wheel-of-Change capture artifact, unchanged |
+| `gold` +20 in combat | STS00462, STS00683, **STS01372**, **STS01221** | **(c)** the "stolen-gold clamp vs in-combat gold ordering" ledger row (UNASSIGNED). The last two are newly reached and are the SAME shape, not new findings |
+| `potions[i] NONE -> FairyPotion` | **STS00283** seq 85, **STS00856** seq 80 | **(c)** the capture's Fairy in a Bottle fired its auto-revive and the sim's did not. Newly reached; sim-side, so reported, not patched |
+| `hp 14 -> 6`, then the sim dies while the capture fights on | **STS01789** seq 130 f10 | **(a)-candidate, NEW.** A combat damage divergence beyond every previous frontier. Sim-side — reported, not patched |
+| 11 fields at a `COMBAT_REWARD`: `hp 50 -> 44` plus card / treasure / potion stream counters and `blizzard_potion_mod` | **STS00353** seq 97 f8 | **(a)-candidate, NEW.** The capture heals 6 leaving the fight (Burning Blood) and assembles a different reward set; the sim does neither. Sim-side — reported, not patched |
+| none — zero-diff to the stop | STS01068 (unsimulated grid, seq 39) | unchanged |
+
+The two (a)-candidates are this stage's honest headline. They are not
+regressions and they are not the shop arm's doing — every record before them
+compared zero-diff, including their merchants. They are simply the first
+divergences that were ever *reachable*, and they belong to whoever owns
+`src/engine`.
+
+## `--replay` also learned `--event`'s obtain-race classification
+
+`is_obtain_race` moved above the whole-run driver, and its parameters now name
+the ROLE (`ahead` / `behind`) rather than the source, because the two modes see
+the race from opposite sides: `--event` seeds from the pre-entry record, so the
+CAPTURE is ahead; `--replay` diffs before applying record *k*, so the SIM is.
+The narrowness is unchanged — every differing field must be `master_deck_count`
+or a `master_deck[i]` at or past the shorter deck's end — and the verdict line
+carries an `obtain-race` count beside the library-order one. The current corpus
+produces none (0 across all 42 artifacts run here), which is exactly the state
+the ledger row records; what changes is that such a record can no longer read as
+a deck divergence.
