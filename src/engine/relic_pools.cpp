@@ -266,7 +266,14 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // either -- both pass CardType.SKILL at the same lines -- so Bottled
     // Tornado's rarity-agnostic type scan sees no new input at all and the count
     // of POWER-type rows stays at 12. Neither gate moved.
-    static_assert(sts::registry::manifest::kCardsCount == 126,
+    // Checked again for CURSE_OF_THE_BELL (Wave-C track 2, CardId 127). BASIC:
+    // NO -- the ctor passes CardRarity.SPECIAL (CurseOfTheBell.java:24), so the
+    // hard-coded BASIC set stays exactly {STRIKE, DEFEND, BASH}. POWER: NO --
+    // the same ctor passes CardType.CURSE, so Bottled Tornado's type scan sees
+    // no new input and the POWER-row count stays at 12. Neither gate moved. (A
+    // curse also cannot satisfy the ATTACK/SKILL bottle gates below, which
+    // branch on those two types only.)
+    static_assert(sts::registry::manifest::kCardsCount == 127,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

@@ -450,7 +450,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 126u);  // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 127u);  // B3.7: prior 67 + 8 red uncommon POWER cards
                                       // + the 16 red RARE cards (ids 76-91)
                                       // + the 20 colorless UNCOMMONs at ids
                                       // 92-111: 18 landed first, and B3.10c's
@@ -478,6 +478,10 @@ TEST(RegistryGen, ManifestCounts) {
                                       // Panache, 123 The Bomb). With them the
                                       // colorless RARE block 112-126 is complete
                                       // and holds no gap at all.
+                                      // + Wave-C track 2's Curse of the Bell
+                                      // (127), Calling Bell's SPECIAL curse;
+                                      // 128 is that track's published reserve
+                                      // and stays unissued.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
     EXPECT_EQ(m::kPowersCount, 49u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
@@ -551,7 +555,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 447u);  // 126 + 49 + 25 + 142 + 33 + 31 + 21 + 20
+    EXPECT_EQ(m::kTotalCount, 448u);  // 127 + 49 + 25 + 142 + 33 + 31 + 21 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

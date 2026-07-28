@@ -55,6 +55,8 @@ using sts::registry::kIroncladRarePool;
 using sts::registry::kIroncladRarePoolCount;
 using sts::registry::kIroncladSkillPool;
 using sts::registry::kIroncladSkillPoolCount;
+using sts::registry::kIroncladTrulyRandomPool;
+using sts::registry::kIroncladTrulyRandomPoolCount;
 using sts::registry::kIroncladUncommonPool;
 using sts::registry::kIroncladUncommonPoolCount;
 using sts::registry::kPoolableCurses;
@@ -164,6 +166,46 @@ TEST(CardPoolLibraryOrder, CombatPoolIsTheReversedRarityMajorConcatenation) {
                   want[static_cast<std::size_t>(i)])
             << "combat-pool position " << i;
     }
+}
+
+// Pandora's Box's list -- AbstractDungeon.returnTrulyRandomCard() (:936-942) --
+// is the UNFILTERED src-pool concatenation: the same reversed rarity-major
+// order as the combat pool, with NOTHING dropped. Asserted two ways so the two
+// emitted lists cannot drift apart: (1) structurally against the three reward
+// pools, exactly like the combat pool's own pin above; (2) as a containment --
+// the combat pool must be precisely this list minus the two HEALING rows (Feed
+// and Reaper, both RED RARE), in order.
+TEST(CardPoolLibraryOrder, CombatPoolIsTheHealingFilteredTrulyRandomSubsequence) {
+    std::vector<CardId> want;
+    const std::array<std::pair<const CardId*, int>, 3> tiers{{
+        {kIroncladCommonPool.data(), kIroncladCommonPoolCount},
+        {kIroncladUncommonPool.data(), kIroncladUncommonPoolCount},
+        {kIroncladRarePool.data(), kIroncladRarePoolCount},
+    }};
+    for (const auto& [data, count] : tiers) {
+        for (int i = count - 1; i >= 0; --i) {
+            want.push_back(data[static_cast<unsigned>(i)]);
+        }
+    }
+    ASSERT_EQ(static_cast<int>(want.size()), kIroncladTrulyRandomPoolCount);
+    for (int i = 0; i < kIroncladTrulyRandomPoolCount; ++i) {
+        EXPECT_EQ(kIroncladTrulyRandomPool[static_cast<unsigned>(i)],
+                  want[static_cast<std::size_t>(i)])
+            << "truly-random-pool position " << i;
+    }
+
+    // 20 + 36 + 16 = 72; minus Feed and Reaper = 70 (dossier arithmetic pin).
+    ASSERT_EQ(kIroncladTrulyRandomPoolCount, kIroncladCombatPoolCount + 2);
+    int j = 0;
+    for (int i = 0; i < kIroncladTrulyRandomPoolCount; ++i) {
+        const CardId id = kIroncladTrulyRandomPool[static_cast<unsigned>(i)];
+        if (id == CardId::FEED || id == CardId::REAPER) continue;
+        ASSERT_LT(j, kIroncladCombatPoolCount);
+        EXPECT_EQ(kIroncladCombatPool[static_cast<unsigned>(j)], id)
+            << "combat-pool position " << j;
+        ++j;
+    }
+    EXPECT_EQ(j, kIroncladCombatPoolCount);
 }
 
 // transformCard's list is a THIRD shape, and it is the one that mixes the two

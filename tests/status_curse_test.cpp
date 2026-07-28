@@ -15,6 +15,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/power_hooks.hpp"
+#include "sts/engine/rest_sites.hpp"
 #include "sts/engine/run_deck.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/types.hpp"
@@ -109,6 +110,9 @@ TEST(StatusCurseRegistry, EveryInScopeEntryHasItsExactIdentityAndMetadata) {
         {CardId::SHAME, CardType::CURSE, CardTrigger::END_OF_TURN, false, false, false, true},
         {CardId::WRITHE, CardType::CURSE, CardTrigger::ON_PLAY, false, false, true, true},
         {CardId::ASCENDERS_BANE, CardType::CURSE, CardTrigger::ON_PLAY, true, false, false, false},
+        // Calling Bell's curse (CurseOfTheBell.java:24): SPECIAL, NOT ethereal
+        // (it stays in hand, unlike Ascender's Bane), not poolable.
+        {CardId::CURSE_OF_THE_BELL, CardType::CURSE, CardTrigger::ON_PLAY, false, false, false, false},
     };
 
     for (const Expected& e : kExpected) {
@@ -358,6 +362,27 @@ TEST(StatusCurses, PoolExcludesAscendersBaneAndParasiteRemovalReducesMaxHp) {
     EXPECT_EQ(run.master_deck[0].card_id, static_cast<uint16_t>(CardId::STRIKE));
     EXPECT_EQ(run.max_hp, 77);
     EXPECT_EQ(run.hp, 77);
+}
+
+// Curse of the Bell joins Ascender's Bane in every exclusion the Java spells:
+// out of the returnRandomCurse pool (CardLibrary.getCurse walks the poolable
+// curses; AbstractDungeon.addCurseCards skips SPECIAL, AbstractDungeon.java:
+// 1213-1219), out of getPurgeableCards (CardGroup.java:981 excludes it BY NAME,
+// which is what makes it unremovable at every grid), and never upgradeable
+// (canUpgrade is false for every CURSE, AbstractCard.java:672-679).
+TEST(StatusCurses, CurseOfTheBellIsUnpoolableUnremovableAndUnupgradeable) {
+    for (const CardId id : kPoolableCurses) {
+        EXPECT_NE(id, CardId::CURSE_OF_THE_BELL);
+    }
+    CardInstance bell{};
+    bell.card_id = static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL);
+    EXPECT_FALSE(rest_card_purgeable(bell));
+    EXPECT_FALSE(rest_card_upgradeable(bell));
+    // ...while an ORDINARY curse stays purgeable (the exclusion is by id, not
+    // by type -- Neow's CURSE drawback card can be toked away).
+    CardInstance shame{};
+    shame.card_id = static_cast<uint16_t>(CardId::SHAME);
+    EXPECT_TRUE(rest_card_purgeable(shame));
 }
 
 TEST(StatusCurses, WritheIsGuaranteedInTheOpeningHand) {

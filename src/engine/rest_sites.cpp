@@ -69,12 +69,15 @@ bool rest_card_upgradeable(const CardInstance& card) noexcept {
 }
 
 bool rest_card_purgeable(const CardInstance& card) noexcept {
-    if (card.card_id == static_cast<uint16_t>(CardId::ASCENDERS_BANE)) {
+    // CardGroup.getPurgeableCards (CardGroup.java:978-985) excludes exactly
+    // three ids by name: Necronomicurse, CurseOfTheBell, AscendersBane. Two of
+    // them are registry rows; Necronomicurse is not an S1 row (Act-2 event
+    // relic content). Bottled-card flags are likewise not represented: bottling
+    // at acquisition remains explicitly deferred.
+    if (card.card_id == static_cast<uint16_t>(CardId::ASCENDERS_BANE) ||
+        card.card_id == static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL)) {
         return false;
     }
-    // The other two unpurgeable game cards (Necronomicurse and Curse of the
-    // Bell) are not S1 registry rows.  Bottled-card flags are likewise not
-    // represented: bottling at acquisition remains explicitly deferred.
     return card_def(static_cast<CardId>(card.card_id)) != nullptr;
 }
 
