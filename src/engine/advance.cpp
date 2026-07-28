@@ -164,7 +164,14 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    REUSES the exact turn-N start-of-turn machinery (design intent: reuse,
     //    don't duplicate); what it does not reuse is getNextAction's step-6
     //    end-of-round pass, which the game cannot reach on turn 1. See the
-    //    declaration in action_queue.hpp for the full derivation. --
+    //    declaration in action_queue.hpp for the full derivation.
+    //
+    //    The relic AT_BATTLE_START dispatch (applyStartOfCombatLogic,
+    //    AbstractRoom.java:245) also lives inside that shared block, so this
+    //    entry point carries it structurally -- it used to carry it not at all
+    //    (G6 campaign 2 spot-diff §8.0). A no-op here today because this entry
+    //    point's relic mirror is always empty, which is why the 20 fixtures do
+    //    not move. --
     begin_first_turn(state, dispatch_monster_turn);
     // Post: phase == WAITING_ON_USER, turn == 1, energy == kIroncladBaseEnergy,
     // hand_count == kStartOfTurnDrawCount (5), draw_count == n - 5.

@@ -228,6 +228,19 @@ enum class TurnStart : uint8_t {
     kSubsequentTurn,   // getNextAction step 6 (GameActionManager.java:329-366)
 };
 
+// The start-of-turn DrawCardAction(gameHandSize), queued addToBot. One helper
+// because the two call sites queue it at DIFFERENT points of the sequence (see
+// the block comment inside start_of_turn) and the item must stay identical.
+void queue_start_of_turn_draw(CombatState& s) noexcept {
+    ActionQueueItem draw{};
+    draw.opcode = kOpcodeDrawCard;
+    draw.src = kActorPlayer;
+    draw.tgt = kActorPlayer;
+    draw.amount = kStartOfTurnDrawCount;
+    draw.flags = 0;
+    add_to_bottom(s, draw);
+}
+
 // Start-of-turn sequence (design doc §5.2 step 6; GameActionManager.java:
 // 329-366). Stubs are named where a future subsystem would attach.
 void start_of_turn(CombatState& s, TurnStart when) noexcept {
@@ -245,14 +258,56 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     }
     s.cards_played_this_turn = 0;               // player.cardsPlayedThisTurn = 0
     // orbsChanneledThisTurn.clear() -- no orbs.
-    // applyStartOfTurnRelics -> relics atTurnStart (acq order; Happy Flower, Lantern,
-    // relics). PreDrawCards -- card-level hooks not in scope.
-    {
+
+    // THE TWO CALL SITES QUEUE THEIR DRAW ON OPPOSITE SIDES OF THE RELIC HOOKS,
+    // and the difference is load-bearing for where a relic's addToBot lands:
+    //
+    //   * The combat-start block queues DrawCardAction FIRST
+    //     (AbstractRoom.java:242), then fires applyStartOfCombatLogic -- every
+    //     relic's atBattleStart (:245, AbstractPlayer.java:1892-1901) -- and
+    //     then applyStartOfTurnRelics (:253). So on turn 1 an atBattleStart /
+    //     atTurnStart body's IMMEDIATE writes happen before the draw resolves,
+    //     while its addToBot items land BEHIND the queued draw (an addToTop
+    //     lands ahead of it). Stone Calendar is the arithmetic witness for the
+    //     immediate half: atBattleStart's counter = 0 precedes turn 1's
+    //     atTurnStart ++, so the capture reads 1 on turn 1 (STS00683 seq 141,
+    //     both G6 campaigns) -- an engine that dispatched AT_BATTLE_START after
+    //     the whole start-of-turn sequence read 0 all fight and missed the
+    //     turn-7 THORNS.
+    //
+    //   * Step 6 (GameActionManager.java:342-361) runs applyStartOfTurnRelics
+    //     BEFORE it queues its DrawCardAction (:361), so on later turns an
+    //     atTurnStart addToBot lands AHEAD of the draw.
+    //
+    // AT_BATTLE_START is dispatched HERE, inside the shared turn-1 block,
+    // because this function is the one both construction paths reach through
+    // begin_first_turn -- bolting the dispatch onto one caller is exactly how
+    // the run layer inverted the counter relics while combat_begin dispatched
+    // the hook not at all (G6 campaign 2 spot-diff §8.0).
+    //
+    // Known deviation, unobservable: in the Java the combat-start block's
+    // GainEnergyAndEnableControlsAction is queued at :240, ahead of the draw,
+    // so an addToTop atBattleStart body (Girya.java:532, DuVuDoll.java:31)
+    // resolves before the energy gain too; here energy is an inline SET (below)
+    // that no queued item ever reads, so only the order against the DRAW is
+    // observable -- and that order is faithful on both halves.
+    if (when == TurnStart::kCombatStart) {
+        queue_start_of_turn_draw(s);            // AbstractRoom.java:242
+        const RelicView rv = player_relics(s);
+        dispatch_relics_at_battle_start(s, rv.relics, rv.count);  // :245
+        dispatch_relics_at_turn_start(s, rv.relics, rv.count);    // :253
+    } else {
+        // applyStartOfTurnRelics -> relics atTurnStart (acq order; Happy
+        // Flower, Lantern). PreDrawCards -- card-level hooks not in scope.
         const RelicView rv = player_relics(s);
         dispatch_relics_at_turn_start(s, rv.relics, rv.count);
     }
     // applyStartOfTurnPowers (§5.2 step 6, pre-draw): Berserk/Mayhem/Magnetism
     // energy/play; applyStartOfTurnOrbs -- no orbs. No-op without such a power.
+    // (The combat-start block calls it at AbstractRoom.java:256, after the
+    // post-draw relic line; no registered power binds it at combat start -- both
+    // shapes that could, Brutality and Demon Form, arrive only by card play --
+    // so the shared position is step 6's.)
     dispatch_at_start_of_turn(s);
 
     // Energy recharge (EnergyManager.recharge(), EnergyManager.java:25-40; see
@@ -352,15 +407,14 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
         }
     }
 
-    // Queue DrawCardAction(gameHandSize) (line 361). The pump only enqueues a
-    // well-formed item here; the DRAW opcode does the drawing when it is popped.
-    ActionQueueItem draw{};
-    draw.opcode = kOpcodeDrawCard;
-    draw.src = kActorPlayer;
-    draw.tgt = kActorPlayer;
-    draw.amount = kStartOfTurnDrawCount;
-    draw.flags = 0;
-    add_to_bottom(s, draw);
+    // Queue DrawCardAction(gameHandSize) (GameActionManager.java:361). The pump
+    // only enqueues a well-formed item here; the DRAW opcode does the drawing
+    // when it is popped. kSubsequentTurn ONLY: the combat-start block queued its
+    // draw at the TOP of this function (AbstractRoom.java:242 -- before the
+    // relic hooks), so queueing here again would draw twice.
+    if (when == TurnStart::kSubsequentTurn) {
+        queue_start_of_turn_draw(s);
+    }
     // applyStartOfTurnPostDrawRelics then applyStartOfTurnPostDrawPowers
     // (GameActionManager.java:361-363), both queued AFTER the DrawCardAction so
     // their effects resolve after the draw. Relics first, in acquisition order

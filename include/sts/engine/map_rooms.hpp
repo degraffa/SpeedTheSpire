@@ -206,6 +206,17 @@ struct RoomAssignment {
     int elite_node_count = 0;      // # Elite rooms placed (setEmeraldElite bound)
     RoomQuota quota;               // pre-padding quota breakdown
 
+    // The node setEmeraldElite's draw CHOSE (AbstractDungeon.java:551-552):
+    // eliteNodes is collected row-major (i = row, j = col, :545-550, the same
+    // orientation this header iterates), so the drawn index k names the k-th
+    // Elite in row-major order. Recorded because the ENTRY roll
+    // (MonsterRoomElite.applyEmeraldEliteBuff, MonsterRoomElite.java:39-68)
+    // fires only on this one node -- the placement draw itself was already
+    // modelled; the coordinates were simply discarded. -1/-1 when no Elite was
+    // placed (then no draw fired either).
+    int8_t emerald_x = -1;         // burning-elite column, or -1
+    int8_t emerald_y = -1;         // burning-elite row (floor - 1), or -1
+
     [[nodiscard]] constexpr RoomType at(int x, int y) const noexcept {
         return rooms[y][x];
     }
@@ -378,14 +389,30 @@ namespace detail {
     // (5) setEmeraldElite (AbstractDungeon.java:539,542-556). On the fully-
     //     unlocked A20 profile the guard passes -> one mapRng.random(0,
     //     eliteNodes.size()-1) draw fires (:551), advancing counter + state. The
-    //     chosen elite's key flag is out of S1 scope; only the DRAW matters here.
+    //     CHOSEN node is recorded (row-major k-th Elite, matching the game's
+    //     row-major eliteNodes collection, :545-550): the emerald-key ENTRY
+    //     roll (MonsterRoomElite.java:39-68) is gated on exactly this node's
+    //     hasEmeraldKey flag, so the coordinates are load-bearing for the run
+    //     layer, not just the draw.
     int elite_nodes = 0;
     for (int y = 0; y < kGameMapFloors; ++y)
         for (int x = 0; x < kGameMapCols; ++x)
             if (ra.rooms[y][x] == RoomType::Elite) ++elite_nodes;
     ra.elite_node_count = elite_nodes;
     if (elite_nodes >= 1) {
-        (void)random(ra.rng, 0, elite_nodes - 1);  // wrapper draw: counter += 1
+        const int32_t chosen = random(ra.rng, 0, elite_nodes - 1);  // counter += 1
+        int seen = 0;
+        for (int y = 0; y < kGameMapFloors && ra.emerald_x < 0; ++y) {
+            for (int x = 0; x < kGameMapCols; ++x) {
+                if (ra.rooms[y][x] != RoomType::Elite) continue;
+                if (seen == chosen) {
+                    ra.emerald_x = static_cast<int8_t>(x);
+                    ra.emerald_y = static_cast<int8_t>(y);
+                    break;
+                }
+                ++seen;
+            }
+        }
     }
     return ra;
 }

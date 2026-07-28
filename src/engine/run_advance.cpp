@@ -35,13 +35,14 @@
 #include "sts/engine/neow.hpp"             // the floor-0 blessing + its screens
 #include "sts/engine/observation.hpp"      // encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
-#include "sts/engine/relic_hooks.hpp"      // dispatch_relics_at_battle_start / _on_victory
+#include "sts/engine/relic_hooks.hpp"      // dispatch_relics_on_victory / room-entry hooks
 #include "sts/engine/relic_pools.hpp"      // pool init + acquisition/on-pickup
 #include "sts/engine/rng_jdk.hpp"          // JdkRandom / jdk_shuffle
 #include "sts/engine/rng_stream.hpp"       // floor_stream / random_long / from_seed
 #include "sts/engine/run_deck.hpp"         // add_card_to_master_deck (the obtain door)
 #include "sts/engine/shop.hpp"             // merchant stock / purchases / purge
 #include "relics/relic_pickup.hpp"         // gain_gold (the one run-layer gold door)
+#include "interp/interp_powers.hpp"        // op_apply_power (emerald elite buff)
 #include "sts/engine/treasure_rooms.hpp"   // fixed-row chest lifecycle
 #include "sts/registry/game_ids.hpp"       // monster_from_game_id
 
@@ -543,77 +544,107 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     }
     s.relic_count = rc.run.relic_count;
 
-    // (9) The game's turn-1 block, into WAITING_ON_USER. Literally the same
-    //     function combat_begin (advance.cpp) calls, so the two combat-construction
-    //     paths cannot disagree about how a combat starts; the derivation of why
-    //     turn 1 is not getNextAction step 6 is on the declaration in
-    //     action_queue.hpp.
-    begin_first_turn(s, dispatch_monster_turn);
+    // (9) The emerald-key elite entry roll (G6 campaign 2 spot-diff §8.1).
+    //     AbstractPlayer.preBattlePrep (AbstractPlayer.java:1602-1605), right
+    //     after monsters.usePreBattleAction() -- i.e. between step (7) above and
+    //     the turn-1 block below:
+    //
+    //       if (Settings.isFinalActAvailable && getCurrMapNode().hasEmeraldKey)
+    //           getCurrRoom().applyEmeraldEliteBuff();
+    //
+    //     The base AbstractRoom body is empty (AbstractRoom.java:129-131); only
+    //     MonsterRoomElite overrides it (MonsterRoomElite.java:39-68), re-tests
+    //     the same gate, rolls AbstractDungeon.mapRng.random(0, 3) -- the only
+    //     mid-run mapRng consumer; the other three consumers all run at act
+    //     start -- and addToBottom's ONE buff onto every member of the group.
+    //     Those queued actions resolve during the pre-turn-1 drain
+    //     (AbstractRoom.java:229-235), before the player ever acts, so applying
+    //     them synchronously here is faithful; the ApplyPowerAction interception
+    //     chain is inert for a monster buffing itself (the Philosopher's Stone
+    //     derivation, relics_boss.cpp) and Sentry's Artifact only eats DEBUFFS.
+    //
+    //     hasEmeraldKey is true on exactly the node the setEmeraldElite draw
+    //     chose (AbstractDungeon.java:542-556; recorded at run_begin as
+    //     rc.emerald_x/emerald_y), and isFinalActAvailable passes on the frozen
+    //     fully-unlocked profile (the map_rooms.hpp step-5 live-oracle finding).
+    //     Settings.hasEmeraldKey does NOT gate the entry roll -- only the
+    //     placement -- and an event-combat cannot reach here with room == Elite
+    //     (a ? node carries no key flag and resolves with RoomType::Event).
+    //     Deviation, unreachable in S1: an elite whose encounter PARKED above
+    //     (unimplemented member) returns before this roll, while the game rolls
+    //     regardless; every Act-1 elite encounter is implemented.
+    if (room == RoomType::Elite && rc.emerald_x != kNoEmeraldNode &&
+        rc.cur_x == rc.emerald_x &&
+        run_cur_row(rc) == static_cast<int>(rc.emerald_y)) {
+        const int32_t act = static_cast<int32_t>(rc.run.act);
+        switch (random(rc.run.map_rng, 0, 3)) {
+            case 0:  // StrengthPower(actNum + 1)     (MonsterRoomElite.java:42-46)
+                for (uint8_t i = 0; i < s.monster_count; ++i) {
+                    op_apply_power(s, i, i, PowerId::STRENGTH,
+                                   act + 1);
+                }
+                break;
+            case 1:  // IncreaseMaxHpAction(0.25f)    (MonsterRoomElite.java:48-52)
+                // this.target.increaseMaxHp(MathUtils.round((float)maxHealth *
+                // 0.25f), true) (IncreaseMaxHpAction.java:27-31);
+                // AbstractCreature.increaseMaxHp (:199-208) raises maxHealth and
+                // heals the same amount -- at this point every member is at full
+                // HP (nothing has damaged it), so hp lands on the new max.
+                for (uint8_t i = 0; i < s.monster_count; ++i) {
+                    MonsterState& m = s.monsters[i];
+                    const int32_t amt = mathutils_round(
+                        static_cast<float>(m.max_hp) * 0.25f);
+                    m.max_hp = static_cast<int16_t>(m.max_hp + amt);
+                    const int32_t healed =
+                        static_cast<int32_t>(m.hp) + amt;
+                    m.hp = static_cast<int16_t>(
+                        healed > m.max_hp ? m.max_hp : healed);
+                }
+                break;
+            case 2:  // MetallicizePower(actNum*2+2)  (MonsterRoomElite.java:54-58)
+                for (uint8_t i = 0; i < s.monster_count; ++i) {
+                    op_apply_power(s, i, i, PowerId::METALLICIZE,
+                                   act * 2 + 2);
+                }
+                break;
+            default:  // 3: RegenerateMonsterPower(1 + actNum*2)  (:60-64)
+                // "Regenerate" (RegenerateMonsterPower.java:17) has NO registry
+                // row -- it is a distinct power from the player's "Regeneration"
+                // (REGEN, which decrements; the monster one never does) and a
+                // new PowerId is an append-only registry decision this change
+                // does not get to make unilaterally. The draw is spent (the
+                // game rolled before anything could park), then the room parks
+                // at the explicit never-fake seam rather than fighting a combat
+                // whose monsters silently miss their per-turn heal.
+                rc.combat = s;
+                rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
+                rc.room_type = static_cast<uint8_t>(room);
+                return false;
+        }
+    }
 
-    // (10) applyStartOfCombatLogic -> every relic's atBattleStart, in acquisition
-    //      order (AbstractPlayer.applyStartOfCombatLogic,
-    //      AbstractPlayer.java:1892-1901). Its one call site is the turn-1
-    //      combat-start block of AbstractRoom.update (AbstractRoom.java:236-258),
-    //      a fixed line sequence:
+    // (10) The game's turn-1 block, into WAITING_ON_USER. Literally the same
+    //      function combat_begin (advance.cpp) calls, so the two
+    //      combat-construction paths cannot disagree about how a combat starts
+    //      -- INCLUDING the relic battle-start hooks: the turn-1 block itself
+    //      (start_of_turn, action_queue.cpp) queues the opening DrawCardAction
+    //      (AbstractRoom.java:242) and then dispatches AT_BATTLE_START (:245)
+    //      and AT_TURN_START (:253) in the Java's order, so an immediate body
+    //      (Stone Calendar's counter = 0) lands before turn 1's ++ while an
+    //      addToBot body still resolves behind the opening draw. The full
+    //      derivation, including why the energy SET makes the ordering benign
+    //      for queued ENERGY grants, sits on the dispatch site itself.
     //
-    //        addToBottom(GainEnergyAndEnableControlsAction)  (AbstractRoom.java:239)
-    //        applyStartOfCombatPreDrawLogic()                (AbstractRoom.java:241)
-    //        addToBottom(DrawCardAction(gameHandSize))       (AbstractRoom.java:242)
-    //        addToBottom(EnableEndTurnButtonAction())        (AbstractRoom.java:243)
-    //        applyStartOfCombatLogic()                       (AbstractRoom.java:245)
-    //        applyStartOfTurnRelics()                        (AbstractRoom.java:253)
-    //
-    //      so atBattleStart is invoked with the opening DrawCardAction ALREADY
-    //      queued, and an addToBot relic body lands behind it. queue_relic_step
-    //      (relic_hooks.cpp) is addToBot-only, so the faithful placement is after
-    //      the opening draw has resolved -- which is exactly where the pump above
-    //      leaves the combat.
-    //
-    //      Placing it BEFORE the pump would not merely reorder, it would silently
-    //      cancel effects. This engine folds Java's turn-1 block into
-    //      start_of_turn (action_queue.cpp), which SETS player_energy before it
-    //      queues the draw. Anything queued ahead of the pump executes ahead of
-    //      start_of_turn, so an atBattleStart relic that grants ENERGY would be
-    //      paid out and then overwritten by that SET -- a relic that fires and does
-    //      nothing, the same class of dead effect as never firing at all.
-    //
-    //      This paragraph used to make the same argument about player_block and
-    //      Anchor's 10 (Anchor.atBattleStart, Anchor.java:32-36), citing the
-    //      loseBlock of GameActionManager.java:352-359 "which the turn-1 block does
-    //      not actually run". That reading was right, and the code has now caught
-    //      up with it: the block decay is gated to TurnStart::kSubsequentTurn, so it
-    //      no longer runs at combat start and no longer threatens Anchor. The energy
-    //      SET above is genuinely every-turn (AbstractRoom.java:241's
-    //      GainEnergyAndEnableControlsAction), so the ordering requirement stands on
-    //      that half alone -- and on plain faithfulness to AbstractRoom.java:245,
-    //      where applyStartOfCombatLogic follows the queued draw.
-    //
-    //      Known deviation, currently unobservable: the addToTop bodies
-    //      (BloodVial.java:33, Vajra.java:33, BronzeScales.java:32,
-    //      OddlySmoothStone.java:33, Pantograph.java:36) resolve BEFORE the opening
-    //      draw in Java. They are heals and player powers; the draw reads neither,
-    //      and no card is played between the draw and the return of control, so the
-    //      state handed to the player is identical either way. The distinction only
-    //      becomes visible if a relic whose atBattleStart body is addToTop ever
-    //      touches the draw pile or energy.
-    //
-    //      atBattleStartPreDraw is a SEPARATE hook, not a conflation of this one:
-    //      AT_BATTLE_START_PRE_DRAW already exists in the hook inventory
+    //      atBattleStartPreDraw is a SEPARATE hook, not a conflation of this
+    //      one: AT_BATTLE_START_PRE_DRAW already exists in the hook inventory
     //      (relic_hooks.hpp) and is fired from applyStartOfCombatPreDrawLogic
     //      (AbstractPlayer.java:1903-1908) at AbstractRoom.java:241, genuinely
     //      before the draw. No dispatch is wired for it because no row in
     //      registry/relics.yaml binds it -- in the Java its only holders are
     //      GamblingChip, HolyWater, NinjaScroll, PureWater and Toolbox, none of
-    //      which is registered. When one lands it needs its own call, ahead of the
-    //      pump's draw rather than here.
-    {
-        const RelicView rv = player_relics(s);
-        dispatch_relics_at_battle_start(s, rv.relics, rv.count);
-    }
-    // Drain what the hook queued. A no-op (and byte-identical) when no relic
-    // responds: the queue is empty, so the pump falls straight through to
-    // WAITING_ON_USER, which is already the phase.
-    pump(s, dispatch_monster_turn);
+    //      which is registered. When one lands it needs its own call, ahead of
+    //      the draw item, inside the shared block.
+    begin_first_turn(s, dispatch_monster_turn);
 
     rc.combat = s;
     rc.room_type = static_cast<uint8_t>(room);
@@ -922,6 +953,12 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     const RoomAssignment ra = assign_room_types(g, static_cast<int>(ascension));
     encode_paths_into_run_state(g, rs);   // edges (+ post-path mapRng)
     encode_rooms_into_run_state(ra, rs);  // room types (+ end-of-generateMap mapRng)
+    // The burning-elite node the setEmeraldElite draw chose (map_rooms.hpp step
+    // 5): the emerald-key ENTRY roll fires on exactly this node (enter_combat).
+    rc.emerald_x = ra.emerald_x < 0 ? kNoEmeraldNode
+                                    : static_cast<uint8_t>(ra.emerald_x);
+    rc.emerald_y = ra.emerald_y < 0 ? kNoEmeraldNode
+                                    : static_cast<uint8_t>(ra.emerald_y);
 
     // The character sheet + the run-setup ascension modifiers, in the game's
     //     own application order (derived in full in run_advance.hpp, above

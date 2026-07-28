@@ -399,6 +399,37 @@ TEST(CombatStart, BothConstructionPathsDelegateToTheSharedTurnOneBlock) {
     }
 }
 
+// THE HOOK-ORDER PIN AT THE SHARED BLOCK ITSELF (G6 campaign 2 spot-diff §8.0).
+// AbstractRoom's turn-1 block fires applyStartOfCombatLogic -- every relic's
+// atBattleStart -- at :245, BEFORE applyStartOfTurnRelics at :253, and with the
+// opening DrawCardAction already queued (:242). Because begin_first_turn is the
+// one function both construction paths call (the test above), the
+// AT_BATTLE_START dispatch must live inside its turn-1 block -- NOT be bolted
+// on afterwards by one caller, which is exactly how the run layer inverted
+// Stone Calendar's counter by one turn for a whole fight (STS00683, both
+// campaigns) while combat_begin dispatched the hook not at all. This constructs
+// the state directly (combat_begin's own entry never carries relics, so the
+// shared block is the only place its half of the defect can be observed) and
+// pins the visible consequence of the Java order: counter == 1 when control
+// first reaches the player.
+TEST(CombatStart, SharedTurnOneBlockRunsAtBattleStartBeforeAtTurnStart) {
+    CombatState s = make_constructed_combat();
+    // StoneCalendar at its out-of-combat counter (StoneCalendar.java:1112-1116
+    // onVictory latches -1; a fresh pickup carries AbstractRelic's -1 too).
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::STONE_CALENDAR),
+                            int16_t{-1}};
+    s.relic_count = 1;
+
+    begin_first_turn(s);
+
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(s.hand_count, static_cast<uint8_t>(kStartOfTurnDrawCount));
+    EXPECT_EQ(s.relics[0].counter, 1)
+        << "atBattleStart's counter = 0 (AbstractRoom.java:245) must precede "
+           "turn 1's atTurnStart ++ (:253): the wrong order reads 0, the Java "
+           "reads 1 (the capture's value at STS00683 seq 141)";
+}
+
 TEST(CombatStart, NeitherConstructionPathHandRollsTurnOnePriming) {
     // The exact assignments the old hand-rolled priming used. Their return is the
     // regression: setting turn_has_ended before a pump routes combat start
