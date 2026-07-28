@@ -448,6 +448,15 @@
 # on_draw / on_other_card_played), NOT on play (they are unplayable). color/rarity
 # are documentation-only (gen.py does not read them): CURSE cards are
 # CardColor.CURSE / CardRarity.CURSE, statuses COLORLESS/COMMON per the Java ctor.
+#
+# CORRECTION (oracle STS00048, floor 1): `trigger: end_of_turn` is not merely
+# "run this program at end of turn". triggerOnEndOfTurnForPlayingCard re-queues
+# the card into the cardQueue with dontTriggerOnUseCard set, so the card PLAYS
+# ITSELF -- the program below is its `use()` body, and the card LEAVES THE HAND
+# for the discard pile at that moment, ahead of the DiscardAtEndOfTurnAction
+# sweep that files the rest of the hand. See dispatch_card_end_of_turn
+# (src/engine/card_play.cpp) for the citations and for the reshuffle-order
+# divergence that pinned it.
 
 # STATUS: Burn -- end-of-turn self THORNS damage (2, upg 4).
 - id: 25
@@ -624,7 +633,7 @@
   target: NONE
   flags: []
   trigger: end_of_turn
-  provenance: "Regret (Regret.java:24-26): cost -2 CURSE CURSE NONE. triggerOnEndOfTurnForPlayingCard (Regret.java:35-38) sets magicNumber = baseMagicNumber = player.hand.size() (locked at trigger time) then re-queues; use() with dontTriggerOnUseCard -> addToTop LoseHPAction(player, player, magicNumber) (Regret.java:28-32). Loses HP == the current hand size (bypasses block). upgrade() no-op. Maps to trigger=end_of_turn + LOSE_HP_PER_HAND (reads hand_count at execute; queued before the ethereal sweep so ethereals still count)."
+  provenance: "Regret (Regret.java:24-26): cost -2 CURSE CURSE NONE. triggerOnEndOfTurnForPlayingCard (Regret.java:35-38) sets magicNumber = baseMagicNumber = player.hand.size() (locked at trigger time) then re-queues; use() with dontTriggerOnUseCard -> addToTop LoseHPAction(player, player, magicNumber) (Regret.java:28-32). Loses HP == the hand size at trigger time (bypasses block). upgrade() no-op. Maps to trigger=end_of_turn + LOSE_HP_PER_HAND, whose `amount` dispatch_card_end_of_turn STAMPS with the pre-autoplay hand size -- the lock is on the card in the Java, and by the time the action resolves the hand has already lost every curse that triggered (Regret included). Ethereals are still in hand at the lock, so they count."
   effects:
     - {op: LOSE_HP_PER_HAND, target: SELF}
 

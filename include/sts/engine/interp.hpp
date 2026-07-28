@@ -161,14 +161,17 @@ enum class Opcode : uint16_t {
                              // never reaches execute_opcode (a safe no-op if it
                              // somehow does); it exists only as table encoding.
     // --- End-of-turn hand/power sweeps (append-only from 18) ---
-    LOSE_HP_PER_HAND = 18,  // `tgt` loses HP == the current hand size, bypassing
-                             // block (HP_LOSS type). Regret's end-of-turn self-loss
-                             // (Regret.java:35-38: magicNumber = player.hand.size()
-                             // locked at triggerOnEndOfTurnForPlayingCard). The hand
-                             // count is read at EXECUTE; the end-of-turn card triggers
-                             // are queued BEFORE the ethereal-exhaust sweep so the
-                             // ethereals are still in hand when this resolves --
-                             // matching the game's trigger-time value lock.
+    LOSE_HP_PER_HAND = 18,  // `tgt` loses HP == a hand size LOCKED AT TRIGGER
+                             // TIME, bypassing block (HP_LOSS type). Regret's
+                             // end-of-turn self-loss (Regret.java:35-39:
+                             // magicNumber = baseMagicNumber = player.hand.size()
+                             // inside triggerOnEndOfTurnForPlayingCard, read back by
+                             // the LoseHPAction the ensuing play queues). The registry
+                             // authors no amount; dispatch_card_end_of_turn STAMPS
+                             // `amount` with the hand size it saw before any curse
+                             // left the hand. An execute-time read would be short:
+                             // the end-of-turn autoplay pulls every triggering card
+                             // (Regret included) out of the hand first.
     DISCARD_HAND = 19,       // end-of-turn DiscardAtEndOfTurnAction collapse:
                              // exhaust ETHEREAL hand cards, then move the remaining
                              // non-RETAIN hand cards to discard. This is queued after

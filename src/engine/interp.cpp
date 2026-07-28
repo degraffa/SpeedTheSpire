@@ -157,11 +157,16 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_lose_hp(s, item.tgt, item.amount);
             return;
         case Opcode::LOSE_HP_PER_HAND:
-            // Regret: lose HP == the current hand size (read at execute time; the
-            // end-of-turn card triggers resolve before the ethereal-exhaust sweep,
-            // so the hand still holds every card it held when Regret triggered --
-            // matching the game locking magicNumber = hand.size() at trigger).
-            op_lose_hp(s, item.tgt, static_cast<int>(s.hand_count));
+            // Regret: lose HP == the hand size LOCKED AT TRIGGER TIME. The game
+            // stores it on the card -- `magicNumber = baseMagicNumber =
+            // player.hand.size()` inside triggerOnEndOfTurnForPlayingCard
+            // (Regret.java:35-39) -- and only then queues the play whose
+            // LoseHPAction reads it back (Regret.java:28-33). The count is
+            // therefore taken while the hand is still whole; it CANNOT be read
+            // here, because the end-of-turn autoplay has already pulled every
+            // triggering curse (Regret included) out of the hand by the time
+            // this action resolves. dispatch_card_end_of_turn stamps `amount`.
+            op_lose_hp(s, item.tgt, item.amount);
             return;
         case Opcode::DISCARD_HAND:
             discard_hand_at_end_of_turn(s);

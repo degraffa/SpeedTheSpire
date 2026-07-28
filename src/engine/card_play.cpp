@@ -335,8 +335,16 @@ void queue_cancelled_autoplay_filing(CombatState& s,
 // these cards are UNPLAYABLE, reusing their effect program for the trigger is
 // unambiguous (it is never run on play). add_top mirrors the Java's
 // addToTop/addToBot for the specific hook (Pain's LoseHP is addToTop).
+//
+// `hand_size_lock` stamps LOSE_HP_PER_HAND's amount. Regret is the only author
+// of that opcode, and the game LOCKS its magicNumber at TRIGGER time
+// (Regret.java:36 `magicNumber = baseMagicNumber = player.hand.size()`, inside
+// triggerOnEndOfTurnForPlayingCard), not when the LoseHPAction resolves. The
+// distinction is load-bearing: the end-of-turn autoplay below takes every
+// triggering card OUT of the hand before its own action runs, so an
+// execute-time read would be short by the number of curses that triggered.
 void queue_card_trigger_program(CombatState& s, CardEffectView eff,
-                                bool add_top) noexcept {
+                                bool add_top, uint8_t hand_size_lock) noexcept {
     for (uint8_t k = 0; k < eff.count; ++k) {
         const CardEffectStep& step = eff.steps[k];
         ActionQueueItem item{};
@@ -344,6 +352,9 @@ void queue_card_trigger_program(CombatState& s, CardEffectView eff,
         item.src = kActorPlayer;
         item.tgt = kActorPlayer;   // all trigger steps are SELF (player-owned)
         item.amount = step.amount;
+        if (step.op == static_cast<decltype(step.op)>(Opcode::LOSE_HP_PER_HAND)) {
+            item.amount = static_cast<int16_t>(hand_size_lock);
+        }
         item.flags = step.extra;   // DAMAGE: DamageType; APPLY_POWER: PowerId
         if (add_top) {
             add_to_top(s, item);
@@ -606,7 +617,8 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
             continue;
         }
         queue_card_trigger_program(
-            s, card_effect_steps(*od, s.card_pool[pi].upgrade), /*add_top=*/true);
+            s, card_effect_steps(*od, s.card_pool[pi].upgrade), /*add_top=*/true,
+            s.hand_count);
     }
     // hand.removeCard(c); cardInUse = c (:1373-1375): into limbo. The Strange
     // Spoon roll and the exhaust/discard/poof/empower decision all belong to
@@ -669,16 +681,47 @@ void dispatch_card_on_draw(CombatState& s, uint8_t pool_index) noexcept {
     }
     queue_card_trigger_program(
         s, card_effect_steps(*def, s.card_pool[pool_index].upgrade),
-        /*add_top=*/false);
+        /*add_top=*/false, s.hand_count);
 }
 
 void dispatch_card_end_of_turn(CombatState& s) noexcept {
-    // §5.4 hand-card triggerOnEndOfTurnForPlayingCard (GameActionManager:373-375):
-    // Burn/Decay/Doubt/Regret/Shame each queue their self-effect (self DAMAGE /
-    // debuff / HP loss). The game routes these through the cardQueue (the card
-    // plays itself); the observable result is the self-effect queued at the §5.4
-    // hand-trigger stage, which is what we queue here. add_to_bottom preserves
-    // hand order; all resolve on later pump iterations.
+    // §5.4 hand-card triggerOnEndOfTurnForPlayingCard (GameActionManager.java:
+    // 373-375). Burn/Decay/Doubt/Regret/Shame do NOT merely queue a self-effect:
+    // each one sets `dontTriggerOnUseCard` and APPENDS ITSELF TO THE cardQueue
+    // (Burn.java:53-56, Decay.java:49-52, Doubt.java:49-52, Regret.java:35-39,
+    // Shame.java:39-42). GameActionManager then dequeues each and PLAYS it --
+    // canUse is bypassed by the dontTriggerOnUseCard clause (:214), every
+    // onPlayCard / onUseCard / triggerOnCardPlayed fan-out and the
+    // cardsPlayedThisTurn increment are skipped (:220-249,
+    // UseCardAction.java:41-64), AbstractPlayer.useCard runs `c.use()` (which is
+    // where the self-effect actually comes from -- each body is guarded by
+    // `if (this.dontTriggerOnUseCard)`), queues UseCardAction, and REMOVES THE
+    // CARD FROM THE HAND (:1373-1375). So the card lands in the DISCARD PILE
+    // here, at the trigger stage, and the later DiscardAtEndOfTurnAction sweep
+    // never sees it.
+    //
+    // That ordering is observable and was the STS00048 floor-1 divergence: a
+    // Shame in hand alongside a Strike went into the discard BEFORE the
+    // getTopCard sweep filed the rest of the hand, so the pre-reshuffle discard
+    // read [.., Shame, Strike] and not [.., Strike, Shame]. One transposition in
+    // the shuffle input is one transposition in the shuffled draw pile, which
+    // dealt the player a different card on the following turn and desynced the
+    // whole fight. Queueing only the self-effect (what this function used to do)
+    // left the card in the hand for the sweep and produced the wrong order.
+    //
+    // The Java serializes this through the cardQueue -- card k is fully resolved
+    // before card k+1 is dequeued -- and the cardQueue is only serviced with an
+    // EMPTY action queue, so per card the resolution order is
+    // [its own effects, its UseCardAction]. Appending both to the action queue
+    // bottom, per card, in hand order, reproduces exactly that sequence; it is
+    // also why every step goes to the BOTTOM even though four of the five bodies
+    // spell addToTop (with an empty queue the two are the same insertion).
+    //
+    // Pass 1 mirrors callEndOfTurnActions' walk of hand.group with the hand still
+    // whole: that is where Regret locks magicNumber = hand.size().
+    CardPoolIndex triggered[kHandCap]{};
+    uint8_t triggered_count = 0;
+    const uint8_t hand_size_lock = s.hand_count;
     for (uint8_t i = 0; i < s.hand_count; ++i) {
         const CardPoolIndex pi = s.hand[i];
         const CardDef* def =
@@ -686,8 +729,34 @@ void dispatch_card_end_of_turn(CombatState& s) noexcept {
         if (def == nullptr || def->trigger != CardTrigger::END_OF_TURN) {
             continue;
         }
+        triggered[triggered_count] = pi;
+        ++triggered_count;
+    }
+
+    // Pass 2 is the cardQueue drain: play each card, in queue (== hand) order.
+    for (uint8_t k = 0; k < triggered_count; ++k) {
+        const CardPoolIndex pi = triggered[k];
+        const CardDef* def =
+            card_def(static_cast<CardId>(s.card_pool[pi].card_id));
+        if (def == nullptr) {
+            continue;
+        }
         queue_card_trigger_program(
-            s, card_effect_steps(*def, s.card_pool[pi].upgrade), /*add_top=*/false);
+            s, card_effect_steps(*def, s.card_pool[pi].upgrade),
+            /*add_top=*/false, hand_size_lock);
+        // AbstractPlayer.useCard:1373-1375 -- hand.removeCard(c); cardInUse = c.
+        // The queued USE_CARD below is UseCardAction.update: it files the card
+        // out of limbo AFTER its own effects have resolved, so the discard order
+        // is [effects of card k, card k, effects of card k+1, card k+1, ...].
+        // None of the five is `exhaust`, so all five file to the discard pile;
+        // op_use_card derives that from the instance flags rather than assuming.
+        move_played_card_to_limbo(s, pi);
+        ActionQueueItem use{};
+        use.opcode = static_cast<uint16_t>(Opcode::USE_CARD);
+        use.src = kActorPlayer;
+        use.tgt = kActorPlayer;
+        use.amount = pi;
+        add_to_bottom(s, use);
     }
 }
 
