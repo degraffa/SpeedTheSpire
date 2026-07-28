@@ -13,6 +13,7 @@
 // engine's public run-layer headers, so the table is directly testable; the
 // JSON pass that FILLS a `ScreenInfo` stays in `main.cpp`.
 
+#include <algorithm>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -23,6 +24,7 @@
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
 
+#include "mk_board.hpp"
 #include "readout_shapes.hpp"
 
 namespace sts::replay {
@@ -35,6 +37,7 @@ using sts::engine::kChooseOpenChest;
 using sts::engine::kChooseProceed;
 using sts::engine::kChooseSing;
 using sts::engine::kChooseSkipCard;
+using sts::engine::kEventOptionCap;
 using sts::engine::kMasterDeckCap;
 using sts::engine::legal_actions;
 using sts::engine::make_action;
@@ -88,6 +91,28 @@ struct ScreenInfo {
     // from one pass.
     std::vector<CaptureRewardRow> reward_rows;
     std::vector<std::string> option_labels;  // EVENT: the dialog buttons
+    // EVENT: each button's `choice_index`, parallel to `option_labels`, and -1
+    // for a button that carries none.
+    //
+    // WHY THE TWO INDEX SPACES ARE NOT THE SAME. `screen_state.options[]` lists
+    // EVERY dialog button including the DISABLED ones (a `[Locked]` row whose
+    // requirement the run does not meet), and the run layer's option ordinal is
+    // that same full-list position -- an event body publishes `count` buttons
+    // with an `enabled[]` mask beside them, so a disabled button still occupies
+    // its slot. But a `choose N` command indexes `choice_list`, which
+    // CommunicationMod builds from the ENABLED buttons only, and that is
+    // exactly what `choice_index` records: the position a button has in the
+    // command's index space, absent when the button has none.
+    //
+    // Passing the capture's N straight to the engine therefore addresses the
+    // wrong button on any page with a disabled row. STS00856's Golden Wing is
+    // the live case: options are [Pray, Locked(disabled), Leave] with
+    // choice_index [0, -, 1], the capture pressed `choose 1` = Leave, and the
+    // untranslated 1 named the locked gold branch instead -- which the sim's
+    // own `enabled[]` mask then refused, leaving it parked on the intro page so
+    // the NEXT press (the exit page's `choose 0`) was applied to the intro
+    // page's option 0 and cost the sim 7 HP the run never lost.
+    std::vector<int> option_choice_index;
     std::string event_id;                    // EVENT: the class's static ID
     std::string event_name;                  // EVENT: the localized display name
     std::string chest_type;                  // CHEST: Small/Medium/LargeChest
@@ -225,26 +250,177 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
     }
 }
 
-// A capture that opens a grid the sim never opened is NOT a mapping bug to be
-// papered over with an index guess -- it is a body the engine defers, and the
-// honest outcome is a stop that names it. The five BOSS `onEquip` bodies
-// (Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell) are the
-// producers that actually occur in the b45 captures: a Neow boss-relic blessing
-// hands one over, the relic's onEquip opens a transform / removal grid, and the
-// sim -- which took the relic, popped its pool and moved every stream correctly
-// -- has no grid to drive. Name the relic that was just acquired, because that
-// is the deferred body, and reporting "grid index has no legal master-deck
-// slot" instead is what made this look like an index-mapping defect.
-[[nodiscard]] inline std::string unsimulated_grid_reason(const RunController& rc) {
-    std::string who = "?";
-    if (rc.run.relic_count > 0) {
-        who = std::string(sts::registry::relic_game_id(
-            static_cast<RelicId>(rc.run.relics[rc.run.relic_count - 1].relic_id)));
+// The five relics whose `onEquip` the engine defers WHOLE
+// (src/engine/relics/relic_pickup_boss.cpp, "the DEFERRED run-layer bodies").
+// Each is an explicit empty body carrying its citation, so a deferred override
+// cannot be told from an implemented one through `relic_on_equip_fn` -- it maps
+// to a real function pointer either way, by design. Naming them here is
+// therefore a list and not a lookup; it is short, it is pinned by
+// `replay_command_map_test`, and the alternative is the misattribution below.
+[[nodiscard]] inline bool relic_on_equip_deferred(RelicId id) noexcept {
+    switch (id) {
+        case RelicId::PANDORAS_BOX:
+        case RelicId::TINY_HOUSE:
+        case RelicId::ASTROLABE:
+        case RelicId::EMPTY_CAGE:
+        case RelicId::CALLING_BELL:
+            return true;
+        default:
+            return false;
     }
-    return "the capture opens a master-deck grid the sim never opened (sim phase " +
-           std::string(phase_name(rc.phase)) +
-           "): the most recently acquired relic is " + who +
-           ", whose onEquip body is deferred";
+}
+
+// A relic's `onEquip` runs at ACQUISITION, and the run layer acquires relics on
+// exactly these phases. Inside a live combat -- or after the run is over --
+// nothing can be pending an onEquip, so a grid the capture opened there is not
+// a deferred body at all.
+[[nodiscard]] inline bool phase_can_follow_relic_pickup(uint8_t p) noexcept {
+    switch (static_cast<RunPhase>(p)) {
+        case RunPhase::NEOW:
+        case RunPhase::MAP_CHOICE:
+        case RunPhase::COMBAT_REWARD:
+        case RunPhase::TREASURE_ROOM:
+        case RunPhase::EVENT_DIALOG:
+        case RunPhase::SHOP:
+        case RunPhase::REST_SITE:
+            return true;
+        case RunPhase::NONE:
+        case RunPhase::COMBAT:
+        case RunPhase::ROOM_UNIMPLEMENTED:
+        case RunPhase::RUN_OVER:
+            return false;
+    }
+    return false;
+}
+
+// A capture that opens a grid the sim never opened is NOT a mapping bug to be
+// papered over with an index guess. It has TWO causes, and this reason must say
+// which, because the two want opposite responses from the reader.
+//
+//   1. A DEFERRED BODY. A Neow boss-relic blessing hands over one of the five
+//      relics above, its onEquip opens a transform / removal grid, and the sim
+//      -- which took the relic, popped its pool and moved every stream
+//      correctly -- has no grid to drive. Naming the relic is the whole point,
+//      and reporting "grid index has no legal master-deck slot" instead is what
+//      made this look like an index-mapping defect.
+//
+//   2. A DESYNC. The two sides are simply on different screens, and the sim's
+//      relic list has nothing to do with it.
+//
+// The old text asserted (1) unconditionally, reading the last entry of
+// `rc.run.relics` whether or not a relic had just been acquired and whether or
+// not its onEquip was deferred at all. On a fresh Ironclad that entry is
+// BURNING BLOOD -- the STARTING relic, whose onEquip is modelled -- and
+// STS02009 of the G6 campaign duly stopped with "the most recently acquired
+// relic is Burning Blood, whose onEquip body is deferred", of which every
+// clause after the comma is false: the sim had been desynced into COMBAT since
+// seq 61 and the capture opened a master-deck grid it could not follow. Same
+// class of defect as the bare phase ordinal this file already fixed above: a
+// stop reason is read by a human, and a confidently wrong one costs more than
+// no reason at all.
+[[nodiscard]] inline std::string unsimulated_grid_reason(const RunController& rc) {
+    const std::string where =
+        "the capture opens a master-deck grid the sim never opened (sim phase " +
+        std::string(phase_name(rc.phase)) + ")";
+
+    const bool acquirable = phase_can_follow_relic_pickup(rc.phase);
+    if (acquirable && rc.run.relic_count > 0) {
+        const RelicId last = static_cast<RelicId>(
+            rc.run.relics[rc.run.relic_count - 1].relic_id);
+        const std::string who = std::string(sts::registry::relic_game_id(last));
+        if (relic_on_equip_deferred(last)) {
+            return where + ": the most recently acquired relic is " + who +
+                   ", whose onEquip body is deferred";
+        }
+        return where + ": no deferred relic onEquip explains it -- the sim's "
+                       "most recent relic is " +
+               who +
+               ", whose onEquip is modelled, so the two sides are on different "
+               "screens (read the `first divergence:` line, not this stop)";
+    }
+    return where +
+           ": no relic onEquip can be pending in that phase, so the two sides "
+           "are on different screens (read the `first divergence:` line, not "
+           "this stop)";
+}
+
+// The capture's `choose N` -> the run layer's event-option ordinal, i.e. the
+// position of the button whose `choice_index` is N (see
+// `ScreenInfo::option_choice_index` for why the two spaces differ). Returns -1
+// when no enabled button carries that index, which is a real desync and not
+// something to guess through.
+//
+// A screen whose options carry NO `choice_index` at all -- an artifact written
+// before the fork emitted the field -- falls back to the identity, which is the
+// old behaviour and is exactly right on any page with no disabled button.
+[[nodiscard]] inline int event_option_ordinal(const ScreenInfo& s, int choice) noexcept {
+    if (s.option_choice_index.size() != s.option_labels.size()) return choice;
+    bool any = false;
+    for (const int ci : s.option_choice_index)
+        if (ci >= 0) any = true;
+    if (!any) return choice;
+    for (std::size_t i = 0; i < s.option_choice_index.size(); ++i)
+        if (s.option_choice_index[i] == choice) return static_cast<int>(i);
+    return -1;
+}
+
+// --- Match and Keep!'s play screen -------------------------------------------
+//
+// The one EVENT page whose `choose N` is not an option ordinal at all.
+//
+// `GremlinMatchGame` puts its twelve cards on a 4-wide grid, and the fork's
+// `getOrderedCards()` offers the cards that are still ON THE BOARD and still
+// FACE DOWN, sorted by SCREEN POSITION -- so a `choose N` names the N-th
+// smallest still-offered position, in a list that shrinks as the walk goes on.
+// The run layer's option index is the BOARD SLOT (`cards.group` index): its
+// `match_menu` publishes twelve options and enables `board[i].taken == 0 &&
+// scratch1 != i`, which is exactly the same SET of cards in a different index
+// space, related by `mk_board.hpp`'s `match_screen_position` permutation.
+//
+// Passing N straight through therefore picks an unrelated card -- and worse, it
+// silently DOES something rather than stopping: the wrong flip either resolves
+// a pair the capture never attempted or is refused outright, which does not
+// decrement `attemptCount`, so the sim's walk desynchronises from the capture's
+// and the event never ends. STS00683 loses the Double Tap it matched
+// (`master_deck_count: 11 -> 10` from seq 32 to the run terminal), and STS00856
+// -- which only reaches its floor-3 Match and Keep once the Golden Wing
+// `choice_index` fix above lets it get there -- loses a Shame and is still
+// parked in `EVENT_DIALOG` when the capture is two screens further on.
+//
+// The translation needs no cross-record state: the sim's own enabled set IS the
+// offered set, so sorting it by screen position reproduces `getOrderedCards()`
+// exactly. Every entry the capture labels `card<position>` then re-states the
+// answer, which is checked rather than assumed -- the same discipline
+// `decode_match_grid` applies to the whole walk.
+struct MatchPlayScreen {
+    bool live = false;
+    std::vector<int> offered;  // board slots, ordered by screen position
+};
+
+[[nodiscard]] inline MatchPlayScreen match_play_screen(const RunController& rc,
+                                                       const ScreenInfo& s) {
+    MatchPlayScreen p;
+    if (rc.phase != static_cast<uint8_t>(RunPhase::EVENT_DIALOG)) return p;
+    if (sts::registry::event_from_game_id(s.event_id) !=
+        sts::registry::EventId::MATCH_AND_KEEP)
+        return p;
+    // The intro / rules / done pages are one-button pages and take the ordinary
+    // path; only the board itself offers more than one card.
+    if (s.option_labels.size() < 2) return p;
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    std::vector<int> slots;
+    for (int i = 0; i < kEventOptionCap && i < kMatchBoardSlots; ++i)
+        if (m.can_choose_event_option[i]) slots.push_back(i);
+    if (slots.size() != s.option_labels.size()) return p;
+
+    std::sort(slots.begin(), slots.end(), [](int a, int b) {
+        return match_screen_position(a) < match_screen_position(b);
+    });
+    p.live = true;
+    p.offered = std::move(slots);
+    return p;
 }
 
 [[nodiscard]] inline MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
@@ -373,9 +549,53 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
             return m;
         }
         if (verb == "choose") {
+            // Match and Keep's board is the one page whose index space is
+            // SCREEN POSITIONS rather than option ordinals -- see
+            // `match_play_screen`.
+            if (const MatchPlayScreen play = match_play_screen(rc, s); play.live) {
+                const int n = arg(1);
+                if (n < 0 || n >= static_cast<int>(play.offered.size())) {
+                    m.reason = "Match and Keep `choose " + std::to_string(n) +
+                               "` is off the " +
+                               std::to_string(play.offered.size()) +
+                               "-card list the sim still has face down";
+                    return m;
+                }
+                const int slot = play.offered[static_cast<std::size_t>(n)];
+                const int pos = match_screen_position(slot);
+                // A face-down card labels itself `card<screen position>`, so the
+                // reconstruction is checked at every pick rather than assumed.
+                const std::string& label = s.option_labels[static_cast<std::size_t>(n)];
+                if (label == "card" + std::to_string(pos) ||
+                    label.rfind("card", 0) != 0) {
+                    m.kind = MapKind::ACTIONS;
+                    m.actions.push_back(
+                        make_action(ActionVerb::CHOOSE, static_cast<uint8_t>(slot)));
+                    return m;
+                }
+                m.reason = "Match and Keep entry " + std::to_string(n) +
+                           " is labelled \"" + label +
+                           "\" but the sim's still-face-down cards, sorted by "
+                           "screen position, put position " + std::to_string(pos) +
+                           " (board slot " + std::to_string(slot) +
+                           ") there; the two boards disagree";
+                return m;
+            }
+            // `choice_list` -> the sim's option ordinal. The two differ exactly
+            // when the page carries a disabled button; see
+            // `ScreenInfo::option_choice_index`.
+            const int ordinal = event_option_ordinal(s, arg(1));
+            if (ordinal < 0) {
+                m.reason = "event `choose " + std::to_string(arg(1)) +
+                           "` names no enabled option on a page of " +
+                           std::to_string(s.option_labels.size()) +
+                           " button(s); `choice_index` is the command's index "
+                           "space and no button carries that value";
+                return m;
+            }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
+                                            static_cast<uint8_t>(ordinal)));
             return m;
         }
         m.reason = "event command '" + verb + "' is not modelled";
@@ -437,6 +657,40 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
             return m;
         }
         if (verb == "proceed") {
+            // NEOW'S THREE-POTION PAYOUT IS NOT A COMBAT-REWARD ROOM, and the
+            // lazy-leave convention below is wrong for it. Discriminate on the
+            // SIM's phase, the same way the EVENT branch above separates an
+            // event's real exit from its UI bounce -- the screen LABEL is
+            // `COMBAT_REWARD` in both cases and says nothing.
+            //
+            // `NeowRewardType::THREE_SMALL_POTIONS` delivers through
+            // `combatRewardScreen.open()` inside the NeowRoom (NeowReward.java:
+            // 268-283; the engine's neow.cpp mirror sets
+            // `NeowScreen::ITEM_REWARD`). One press of that screen's Proceed
+            // takes the game all the way to the map: closing the screen leaves
+            // NeowEvent already at screenNum 99 with `NeowRoom.update` having
+            // set the room COMPLETE, so the [Leave] page every OTHER blessing
+            // shows is never rendered. Both affected captures record exactly
+            // that -- STS00283 and STS00700 go COMBAT_REWARD `proceed` (seq 5)
+            // straight to a `MAP` (seq 6), with no EVENT page between.
+            //
+            // The run layer spends that one press over TWO CHOOSEs, because it
+            // models the two states the game passed through in one frame:
+            // `ITEM_REWARD` + kChooseProceed closes the payout screen
+            // (run_advance.cpp:1478-1489 -> neow_finish_payout -> `DONE`), and
+            // the `DONE` press is what sets `RunPhase::MAP_CHOICE` (:1490-1494).
+            // Neither consumes RNG, so the pair is state-equivalent to what the
+            // game did. Mapping it to NOOP instead left the sim in `NEOW`
+            // forever: the following map `choose` became LEAVE_ROOM, and its
+            // CHOOSE(dst) fell into `ITEM_REWARD`'s `else` branch as
+            // `claim_reward(dst)`.
+            if (rc.phase == static_cast<uint8_t>(RunPhase::NEOW) &&
+                rc.neow.screen == static_cast<uint8_t>(NeowScreen::ITEM_REWARD)) {
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+                return m;
+            }
             // See the header note: leaving is deferred to the map choice.
             m.kind = MapKind::NOOP;
             return m;

@@ -301,6 +301,17 @@ edit.
 Affects STS00283, STS00700 — i.e. exactly the two runs whose Neow blessing was
 "Obtain 3 random Potions", and no others.
 
+> **RESOLVED on branch `replay-neow-exit`.** The screen-label reading was the
+> defect, and the phase discriminator was the right shape but the wrong site:
+> `command_map.hpp:351` is the EVENT branch, while the NOOP is in the
+> `COMBAT_REWARD` branch, which now asks for `RunPhase::NEOW` +
+> `NeowScreen::ITEM_REWARD` before it elides. The single captured `proceed`
+> maps to **two** `kChooseProceed` CHOOSEs, because one game frame crossed both
+> run-layer states (`ITEM_REWARD` → `DONE` → `MAP_CHOICE`) and neither consumes
+> RNG; the capture confirms it, going COMBAT_REWARD `proceed` straight to a
+> `MAP` with no [Leave] page between. STS00700 now reads **CLEAN** to its run
+> terminal and STS00283 zero-diff to its `SHOP_ROOM` stop.
+
 ### 8.3 — CLASS (b): the Match and Keep board invariant is unsound
 
 `--event` reports one DIFF in the whole corpus:
@@ -321,10 +332,21 @@ The read-out's own numbers say the sim's board is right: **5 screen positions
 named by the capture compared, 5 attempt outcomes reproduced, 10 grid rounds
 walked** — a wrong board could not reproduce five match/miss outcomes. The
 invariant fires before the comparison is credited, so a correct board is scored
-as a divergence. This is also the cause of STS00683's `--replay` frontier
-(`master_deck_count: 11 → 10`, the Double Tap the run kept).
+as a divergence. ~~This is also the cause of STS00683's `--replay` frontier
+(`master_deck_count: 11 → 10`, the Double Tap the run kept).~~ **That last
+sentence is wrong** — see the correction in §8.4 below; the board invariant
+lives only in the `--event` deal read-out and `--replay` never consults it.
 
 The other **eleven** constructor deals in this campaign are zero-diff.
+
+> **RESOLVED on branch `replay-neow-exit`.** The invariant is now the multiset
+> shape the Java actually guarantees: every position filled, every count EVEN
+> (that is all `retVal.addAll(retVal2)` proves), each count 2 or 4, and at most
+> ONE identity at 4 — because only the two adjacent `returnRandomCurse()` draws
+> can collide, the other four slots coming from disjoint pools. Three copies,
+> two quadruples and a board of one identity all still fail loud.
+> STS00683's deal reads `DEAL OK` and `--event` on this campaign is
+> **47 / 47 zero-diff, 12 / 12 deals zero-diff**.
 
 ### 8.4 — CLASS (b): one event-exit residual
 
@@ -333,6 +355,43 @@ by seq 26 the sim is a floor behind (`floor: 3 → 2`, `event_flags: 2064 → 16
 The event is Golden Wing, whose exit page the sim did not consume. This is the
 same family as the event-exit mapping fix already recorded in the ledger; one
 residual case survives it.
+
+> **RESOLVED on branch `replay-neow-exit`, and it was TWO mapping gaps, neither
+> of them the event-exit door itself.**
+>
+> **(i) An event's two index spaces.** `screen_state.options[]` lists every
+> dialog button, DISABLED ones included, and the run layer's option ordinal is
+> that same full-list position (a body publishes `count` buttons plus an
+> `enabled[]` mask). A `choose N` command instead indexes `choice_list`, the
+> ENABLED buttons only — which is exactly what each option's `choice_index`
+> records. Golden Wing offers `[Pray, Locked(disabled), Leave]` with
+> `choice_index [0, -, 1]`; greedy pressed `choose 1` = **Leave**, the
+> untranslated 1 named the **locked** gold branch, the sim's own `enabled[]`
+> mask refused it, and the sim stayed on the intro page — so the NEXT record's
+> exit press was applied to the intro page's option 0, **Pray**, which is the
+> `hp: 60 → 53` at seq 25. `ScreenInfo` now carries `option_choice_index` and
+> the EVENT branch translates between the two spaces, failing loud when no
+> enabled button carries the index.
+>
+> **(ii) Match and Keep's board is indexed by SCREEN POSITION.** The fork's
+> `getOrderedCards()` offers the cards still on the board and still face down,
+> sorted by screen position, so a `choose N` names the N-th smallest offered
+> position; the run layer's option index is the BOARD SLOT. Same cards, two
+> index spaces, related by `mk_board.hpp`'s `match_screen_position`. Passing N
+> through picks an unrelated card and, worse, still DOES something: a refused
+> flip does not decrement `attemptCount`, so the walk desynchronises and the
+> event never ends. `map_command` now sorts the sim's own still-face-down slots
+> by screen position and checks the answer against each `card<position>` label.
+>
+> This — not §8.3's board invariant — is what produced STS00683's `--replay`
+> frontier: the sim lost the Double Tap it matched. STS00856 only reaches its
+> floor-3 Match and Keep at all once (i) lands, which is why (ii) surfaced here.
+>
+> After both: **STS00856 is zero-diff to its `SHOP_ROOM` stop**, and STS00683
+> walks to its **run terminal** (186 records, up from a stop at seq 138) with
+> its first divergence moved to seq 79 floor 5 — one field, in-combat
+> `gold: 128 → 148`, i.e. the §8.8 class (c) *"Stolen-gold clamp vs in-combat
+> gold ordering"* row, +20 for one steal.
 
 ### 8.5 — CLASS (c): two runs abort translation on a power with no registry row
 
@@ -377,6 +436,19 @@ seq-61 offset) and the capture opened a grid. The reason text is misleading in
 exactly the way `b45c1_replay_triage.md` fixed the phase-ordinal text; it needs
 the same treatment.
 
+> **RESOLVED on branch `replay-neow-exit`.** The reason now separates the two
+> causes it used to conflate. A relic's `onEquip` runs at ACQUISITION, so it
+> can only be pending on a phase the run layer acquires relics on — never in
+> `COMBAT` or `RUN_OVER` — and the deferral claim is made only for the five
+> relics whose `onEquip` really is deferred whole (`relic_pickup_boss.cpp`:
+> Pandora's Box, Tiny House, Astrolabe, Empty Cage, Calling Bell). That list is
+> a list and not a lookup on purpose: a deferred override is an explicit empty
+> body, so `relic_on_equip_fn` returns a real function pointer either way and
+> cannot tell them apart. STS02009's stop now reads *"…(sim phase COMBAT): no
+> relic onEquip can be pending in that phase, so the two sides are on different
+> screens (read the `first divergence:` line, not this stop)"*, and a modelled
+> relic on an acquisition phase is named and ruled out rather than blamed.
+
 ### 8.8 — CLASS (b): the reward mode cannot see a Looter's theft, and CLASS (c) for the in-combat half
 
 Four reward-mode failures, two distinct shapes.
@@ -393,6 +465,26 @@ mode structurally cannot reconstruct the row. Not an engine gap; a limit of what
 that mode seeds. (B4.5 §3's *"treat a divergence on a Looter floor as a real
 divergence"* still stands for `--replay`; it is the reward mode's seeding that is
 at issue.)
+
+> **RESOLVED on branch `replay-neow-exit`, as a NAMED SEEDED INPUT rather than a
+> reconstruction.** The Looter's steal count lives in `MonsterState.pad0` and
+> CommunicationMod publishes no such field, so the translated combat state is 0
+> whatever the thief did — nothing in the artifact can rebuild the accumulator.
+> But the capture's own reward row carries the amount, and this mode already
+> takes its `RunState`, its `miscRng` and its room type from the capture, so the
+> amount is now read from `screen_state.rewards[].gold` and passed as
+> `assemble_combat_rewards`' `stolen_gold_return`. It is already deducted from
+> the seeded purse, which is what that parameter's contract requires: the game
+> deducts at steal time. **One number is seeded; the row's POSITION in the list,
+> its effect on the ≥ 4 potion-suppression threshold, the rest of the assembly's
+> stream draws and the whole claim stay proved** — and the claim is where the
+> sim's gold has to land on the capture's to the unit. Every such screen is
+> counted and printed separately (`ASSEMBLY OK … (STOLEN_GOLD n seeded from the
+> capture …)`, and `assembly clean N (M with a capture-seeded STOLEN_GOLD row)`)
+> so no read-out line implies the theft itself was reproduced. Default mode on
+> this campaign now reports **assembly clean 98 (3 seeded), claim clean 99, 3
+> failing files** — §8.5's two translation aborts and STS01372's unattributed
+> floor-7 gold row, which is unchanged and still unattributed.
 
 **STS00462's in-combat `gold: 110 → 130` — class (c).** The sim is 20 gold
 *higher* mid-fight because it deliberately does not deduct at steal time:
@@ -576,3 +668,16 @@ the replay tool and the driver are not this task's to edit. The class (c) items
 need no action beyond §8.9's request that **Distilled Chaos** be given a
 Deferred-obligations row, since a registry comment alone is invisible during
 execution.
+
+> **Follow-up landed on branch `replay-neow-exit`.** The five replay-tool class
+> (b) items — §8.2, §8.3, §8.4 (which turned out to be two distinct index-space
+> gaps), §8.7 and §8.8's `STOLEN_GOLD` half — are fixed, each with its own
+> RED-first unit test. **§9 is the driver's and is untouched.** §6 and §7 above
+> are the read-out of that capture at `master` `09f8847` and are left as the
+> record of it; the post-fix read-out of the same artifacts is: `--replay` 30
+> files, **27** not clean (STS00700 joins STS00463/STS00572 as CLEAN, and
+> STS00283/STS00856 are zero-diff to their `SHOP_ROOM` stops); `--event`
+> **47/47** sightings and **12/12** deals zero-diff; default reward mode 3
+> failing files instead of 6. `--neow`, `--treasure` and `--shop` are
+> byte-identical, as are the 161-run `--event` / `--treasure` regression sweeps
+> and the six-deal pilot sweep. **§8.0 is untouched and still blocks the leg.**
