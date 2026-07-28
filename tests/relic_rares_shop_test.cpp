@@ -567,6 +567,107 @@ TEST(RelicRaresShop, ToriiThenTungstenRodStackInJavaOrder) {
     EXPECT_EQ(s.player_hp, 70);
 }
 
+// --- The Boot ---------------------------------------------------------------
+
+// Boot.onAttackToChangeDamage (Boot.java:30-38): a PLAYER-sourced hit whose
+// value is 1..4 becomes 5. 5 and above are untouched, and 0 is not raised.
+TEST(RelicRaresShop, BootRaisesSmallPlayerHitsToFive) {
+    const struct { int base; int expect_loss; } cases[] = {
+        {1, 5}, {2, 5}, {4, 5}, {5, 5}, {6, 6}, {30, 30},
+    };
+    for (const auto& c : cases) {
+        CombatState s = MakeState();
+        give(s, RelicId::BOOT);
+        op_damage(s, kActorPlayer, 0, c.base);
+        EXPECT_EQ(s.monsters[0].hp, 50 - c.expect_loss) << "base=" << c.base;
+    }
+}
+
+// THE PLACEMENT TEST. onAttackToChangeDamage runs AFTER decrementBlock at BOTH
+// call sites (AbstractMonster.java:639-643, AbstractPlayer.java:1399-1403), so
+// Boot reads the UNBLOCKED residue. A 7-damage hit into 5 block leaves 2, which
+// Boot raises to 5 -- 50 - 5 = 45. A pre-block site would have seen 7, which is
+// outside the 1..4 window, raised nothing, and dealt the bare 2 for 48. The two
+// answers differ, which is what makes the site observable rather than a matter
+// of taste.
+TEST(RelicRaresShop, BootReadsThePostBlockRemainder) {
+    CombatState s = MakeState();
+    give(s, RelicId::BOOT);
+    s.monsters[0].block = 5;
+    op_damage(s, kActorPlayer, 0, 7);
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[0].hp, 45) << "7 - 5 = 2, raised to 5";
+}
+
+// `damageAmount > 0` (Boot.java:32): a hit fully soaked by block is NOT raised.
+// This is the case option (b) of the pre-block reading would have broken.
+TEST(RelicRaresShop, BootDoesNotResurrectAFullyBlockedHit) {
+    CombatState s = MakeState();
+    give(s, RelicId::BOOT);
+    s.monsters[0].block = 3;
+    op_damage(s, kActorPlayer, 0, 3);
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.monsters[0].hp, 50) << "0 unblocked damage stays 0";
+}
+
+// The type guard (Boot.java:32) and the attacker gate (the enclosing
+// `if (info.owner == AbstractDungeon.player)`).
+TEST(RelicRaresShop, BootSkipsThornsHpLossAndMonsterSourcedHits) {
+    CombatState thorns = MakeState();
+    give(thorns, RelicId::BOOT);
+    op_damage(thorns, kActorPlayer, 0, 3, 1, DamageType::THORNS);
+    EXPECT_EQ(thorns.monsters[0].hp, 47);
+
+    CombatState loss = MakeState();
+    give(loss, RelicId::BOOT);
+    op_lose_hp(loss, kActorPlayer, 3);
+    EXPECT_EQ(loss.player_hp, 67);
+
+    // A MONSTER-sourced hit on the player is not the player attacking, so the
+    // relic never sees it.
+    CombatState incoming = MakeState();
+    give(incoming, RelicId::BOOT);
+    op_damage(incoming, 0, kActorPlayer, 3);
+    EXPECT_EQ(incoming.player_hp, 67);
+}
+
+// Boot composed with the victim's Buffer, and the case that discriminates the
+// insertion point a SECOND way. Block 3 against base 3 leaves 0 unblocked, so
+// Boot's `damageAmount > 0` fails and Buffer is handed a 0 -- which spends no
+// stack (apply_buffer only queues the ReducePowerAction for a positive amount).
+// Had Boot been placed BEFORE decrementBlock it would have raised the 3 to 5,
+// block would have soaked 3, and Buffer would have been handed 2 and spent a
+// stack. So the absence of the REDUCE_POWER is the observable.
+//
+// Stated honestly: Boot's order relative to Buffer ITSELF is NOT observable in
+// S1 -- Buffer zeroes the number either way and its stack is spent for any
+// positive input, so `Boot then Buffer` and `Buffer then Boot` agree on every
+// reachable input. The Java order (AbstractMonster.java:643 before :646) is
+// reproduced anyway because it is free; this test does not claim to prove it.
+TEST(RelicRaresShop, BootAndBufferComposeAndAFullyBlockedHitSpendsNoStack) {
+    CombatState s = MakeState();
+    give(s, RelicId::BOOT);
+    s.monsters[0].block = 3;
+    s.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::BUFFER);
+    s.monsters[0].powers[0].amount = 1;
+    s.monsters[0].power_count = 1;
+    op_damage(s, kActorPlayer, 0, 3);
+    EXPECT_EQ(s.monsters[0].hp, 50);
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(s.action_count, 0) << "Buffer was handed a 0, so no stack is spent";
+
+    // With no block the same hit IS raised, and the Buffer then eats the 5.
+    CombatState open = MakeState();
+    give(open, RelicId::BOOT);
+    open.monsters[0].powers[0].power_id = static_cast<uint16_t>(PowerId::BUFFER);
+    open.monsters[0].powers[0].amount = 1;
+    open.monsters[0].power_count = 1;
+    op_damage(open, kActorPlayer, 0, 3);
+    EXPECT_EQ(open.monsters[0].hp, 50);
+    ASSERT_EQ(open.action_count, 1);
+    EXPECT_EQ(queued(open, 0).opcode, kOp(Opcode::REDUCE_POWER));
+}
+
 // LizardTail (LizardTail.java:672-690 via AbstractPlayer.java:1487-1493): a
 // lethal hit leaves the player at maxHealth/2 instead of dead, once.
 TEST(RelicRaresShop, LizardTailRevivesOnceAtHalfMaxHp) {

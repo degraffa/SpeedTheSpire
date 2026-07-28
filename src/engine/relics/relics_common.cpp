@@ -296,10 +296,25 @@ void relic_native_art_of_war(CombatState& /*s*/, RelicHook /*hook*/,
                              RelicSlot& /*slot*/,
                              const RelicHookContext& /*ctx*/) noexcept {}
 
-// Boot.onAttackToChangeDamage (Boot.java:30-38) -- if owner != null and the type
-// is neither HP_LOSS nor THORNS and 0 < dmg < 5, return 5. DEFERRED: this is a
-// DAMAGE-pipeline modifier, and the pipeline (interp/interp_damage.cpp
-// op_damage) is float-exact and frozen; it is not a hook-queue effect.
+// Boot.onAttackToChangeDamage (Boot.java:30-38) -- LIVE, but NOT here.
+//
+// The body lives at `apply_boot` in interp/interp_damage.cpp, inside op_damage's
+// INTEGER TAIL, immediately after the block subtraction and before Buffer /
+// Thorns / Torii / Tungsten Rod -- exactly where AbstractMonster.damage:639-643
+// and AbstractPlayer.damage:1399-1403 run the player's relics'
+// onAttackToChangeDamage. Read that function for the ordering derivation and for
+// why the number Boot sees is the UNBLOCKED residue rather than the pre-block
+// output. The frozen float pipeline (compute_damage) is untouched: this is an
+// integer step, and it sits beside two relic modifiers that were already there.
+//
+// This definition stays EMPTY and stays here on purpose. The generated dispatch
+// odr-uses a handler for every `native: true` row, so deleting it is a link
+// error; and the row's `on_attack: []` binding is documentation of WHICH Java
+// hook the bespoke site reproduces. RelicHook::ON_ATTACK (value 12) remains
+// allocated and unfired -- it has no dispatcher, and RelicHookContext carries no
+// damage in/out channel, so wiring one for a single relic would be a far larger
+// change than the eight-line helper. Magic Flower, Torii and Tungsten Rod are the
+// same shape.
 void relic_native_boot(CombatState& /*s*/, RelicHook /*hook*/,
                        RelicSlot& /*slot*/,
                        const RelicHookContext& /*ctx*/) noexcept {}

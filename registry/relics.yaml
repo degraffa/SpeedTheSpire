@@ -330,8 +330,8 @@
   pool_order: 1
   native: true
   hooks:
-    on_attack: []             # unblocked attack damage 1..4 raised to 5 (DEFERRED: damage-pipeline hook)
-  provenance: "Boot.onAttackToChangeDamage (Boot.java:30-38) -- if owner!=null && type not HP_LOSS/THORNS && 0<dmg<5 return 5. A DAMAGE-pipeline modifier (interp.cpp op_damage, float-exact/hot); native body deferred to keep the frozen pipeline untouched."
+    on_attack: []             # documentation of the Java hook; the body is apply_boot in interp_damage.cpp
+  provenance: "Boot.onAttackToChangeDamage (Boot.java:30-38) -- `if (info.owner != null && info.type != HP_LOSS && info.type != THORNS && damageAmount > 0 && damageAmount < 5) return 5;` (THRESHOLD = 5 at :19; the description's 4 at :27 is display text). LIVE, as apply_boot in interp/interp_damage.cpp, inside op_damage's INTEGER tail -- the float pipeline (compute_damage) is untouched. PLACEMENT: both call sites (AbstractMonster.damage:639-643, AbstractPlayer.damage:1399-1403) run decrementBlock FIRST and only then walk the player's relics, so the number Boot sees is the UNBLOCKED RESIDUE: a 4-damage hit into 2 block deals 5, and a 3-damage hit fully soaked by 3 block deals 0 because `damageAmount > 0` fails. That matches the relic's own 'unblocked attack damage' text. It is the FIRST of op_damage's four integer-tail modifiers -- before Buffer (onAttackedToChangeDamage), Thorns/Torii (onAttacked) and Tungsten Rod (onLoseHpLast) -- and it is attacker-side while those are victim-side. The enclosing `if (info.owner == AbstractDungeon.player)` is the real gate and becomes `src == kActorPlayer`. RelicHook::ON_ATTACK (12) stays allocated and UNFIRED -- it has no dispatcher and RelicHookContext carries no damage in/out channel -- so this `on_attack: []` binding is documentation of which Java hook the bespoke site reproduces, the Magic Flower / Torii / Tungsten Rod precedent. The empty native body in relics/relics_common.cpp is kept because the generated dispatch odr-uses a handler for every native row."
 
 - id: 20
   name: CERAMIC_FISH

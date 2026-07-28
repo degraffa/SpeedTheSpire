@@ -588,7 +588,7 @@ TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {
     CombatState s = MakeState();
     Relics r;
     r.add(RelicId::WHETSTONE);        // equip-time, no combat hook
-    r.add(RelicId::BOOT);             // damage-pipeline DEFERRED
+    r.add(RelicId::BOOT);             // live, but at a damage-pipeline site, not a hook
     r.add(RelicId::PRESERVED_INSECT); // live, but only in an elite room (flag clear here)
     dispatch_relics_at_battle_start(s, r.slots, r.count);
     dispatch_relics_on_victory(s, r.slots, r.count);

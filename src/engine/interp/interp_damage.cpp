@@ -304,6 +304,57 @@ void cards_took_player_damage(CombatState& s) noexcept;
     return 0;
 }
 
+// The PLAYER-AS-ATTACKER relic pass, AbstractMonster.damage:639-643 (and its
+// twin AbstractPlayer.damage:1399-1403 for a player hitting itself). Boot is the
+// only relic in the game that overrides it.
+//
+// PLACEMENT IS THE WHOLE FINDING, and the deferral note this replaces had it
+// backwards. `onAttackToChangeDamage` reads like an attacker-side pre-block
+// modifier, and it is NOT: both call sites run `damageAmount =
+// this.decrementBlock(info, damageAmount);` FIRST and only then walk the
+// player's relics. So the number Boot sees is the UNBLOCKED RESIDUE, and a
+// 4-damage hit into 2 block deals 5, not 4 -- while a 3-damage hit fully soaked
+// by 3 block deals 0, because `damageAmount > 0` fails. That is also what the
+// relic's own text says ("unblocked attack damage"), and it is why the
+// pre-block insertion point would have been wrong in the direction that inflates
+// every partially-blocked hit.
+//
+// Ordering against the other two integer-tail modifiers, straight off the two
+// Java methods: onAttackToChangeDamage (here) precedes the victim's
+// onAttackedToChangeDamage (Buffer, :646/:1405-1407), which precedes onAttacked
+// (Thorns, and Torii on the player side, :1425-1432), which precedes
+// onLoseHpLast (Tungsten Rod, :1433-1435). Boot is therefore the FIRST of the
+// four and Torii/Tungsten Rod stay last -- they are victim-side and Boot is
+// attacker-side, so on the player's own turn they never even see the same hit.
+//
+// Boot.onAttackToChangeDamage (Boot.java:30-38):
+//     if (info.owner != null && info.type != HP_LOSS && info.type != THORNS
+//         && damageAmount > 0 && damageAmount < 5) { flash();
+//         addToBot(RelicAboveCreatureAction); return 5; }
+// THRESHOLD = 5 (:19); the description's "4" (:27) is display text.
+//
+// `info.owner != null` needs no expression: every hit this engine produces has an
+// actor. The gate that DOES matter is the enclosing `if (info.owner ==
+// AbstractDungeon.player)` at the call site -- Boot fires only when the PLAYER is
+// the attacker, which is `src == kActorPlayer` here. The queued
+// RelicAboveCreatureAction is cosmetic and deliberately dropped, but note that
+// the Java hook does touch the action queue from inside a damage computation.
+//
+// RelicHook::ON_ATTACK (value 12) stays allocated and unfired: it has no
+// dispatcher, and RelicHookContext carries no damage in/out channel, so building
+// one for a single relic would be a much larger change than this. The row's
+// `on_attack: []` binding is documentation of WHICH Java hook this bespoke site
+// reproduces -- the Magic Flower / Torii / Tungsten Rod precedent.
+[[nodiscard]] int apply_boot(const CombatState& s, uint8_t src, int dmg,
+                             DamageType type) noexcept {
+    if (src == kActorPlayer && type != DamageType::HP_LOSS &&
+        type != DamageType::THORNS && dmg > 0 && dmg < 5 &&
+        player_has_relic(s, RelicId::BOOT)) {
+        return 5;
+    }
+    return dmg;
+}
+
 // Step 3 (AbstractPlayer.java:1430-1432): the player's relics' onAttacked, run
 // AFTER the victim powers' onAttacked (Thorns / Flame Barrier). Torii.onAttacked
 // (Torii.java:1197-1205) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
@@ -424,6 +475,12 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         const RelicView rv = player_relics(s);
         dispatch_relics_on_block_broken(s, rv.relics, rv.count, tgt);
     }
+    // The PLAYER-AS-ATTACKER relic pass, immediately after decrementBlock and
+    // BEFORE the victim's onAttackedToChangeDamage (AbstractMonster.java:639-643
+    // / AbstractPlayer.java:1399-1403). The Boot -- see apply_boot for why this
+    // is a post-block site, which is the opposite of what the hook's name
+    // suggests.
+    dmg = apply_boot(s, src, dmg, type);
     // The victim's powers' onAttackedToChangeDamage (AbstractPlayer.java:
     // 1412-1415), between decrementBlock and the onAttacked fan-out. Buffer.
     dmg = apply_buffer(s, tgt, dmg);
