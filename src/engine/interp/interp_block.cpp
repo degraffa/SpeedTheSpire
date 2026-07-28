@@ -68,7 +68,10 @@ namespace {
     // scalers and neither overrides modifyBlock or modifyBlockLast
     // (VigorPower and PenNibPower read in full), so this guard moves and no
     // case is added in either block pass.
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Checked for Duplication: it overrides only updateDescription, onUseCard
+    // and atEndOfRound (DuplicationPower.java:19-72, read in full) -- no
+    // modifyBlock or modifyBlockLast -- so the count moves and no case is added.
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

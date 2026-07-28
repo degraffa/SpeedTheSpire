@@ -1888,12 +1888,17 @@ TEST(RunPotion, DeferredPotionsAreNotOfferedInCombat) {
     RunController rc = enter_jaw_worm_combat();
     // DISTILLED_CHAOS left this list: PLAY_CARD + kPlayCardFromDrawTop was
     // PlayTopCardAction all along, so its body landed with no new opcode.
-    for (PotionId id : {PotionId::DUPLICATION_POTION}) {
+    // DUPLICATION_POTION left it when PowerId::DUPLICATION was registered
+    // (its row became a data APPLY_POWER program). The DEFERRED-potion set is
+    // now empty; FAIRY_POTION keeps this trap's coverage alive -- it is
+    // IMPLEMENTED but never USED (canUse() is `return false`,
+    // FairyPotion.java:47-50), so the gate must still refuse it by name.
+    for (PotionId id : {PotionId::FAIRY_POTION}) {
         rc.run.potions[0] = static_cast<uint16_t>(id);
         RunActionMask mask{};
         legal_actions(rc, mask);
         EXPECT_FALSE(mask.can_use_potion[0])
-            << "deferred potion id " << static_cast<int>(id)
+            << "unusable potion id " << static_cast<int>(id)
             << " must not be a legal action";
     }
 }
@@ -1912,6 +1917,7 @@ TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
                         PotionId::LIQUID_MEMORIES,        // combat native (CHOOSE)
                         PotionId::GAMBLERS_BREW,          // combat native (CHOOSE)
                         PotionId::DISTILLED_CHAOS,        // combat native (PLAY_CARD top)
+                        PotionId::DUPLICATION_POTION,     // data program (power 92)
                         PotionId::SNECKO_OIL,             // data program (op 60)
                         PotionId::SMOKE_BOMB}) {          // run-layer native
         rc.run.potions[0] = static_cast<uint16_t>(id);
@@ -1925,15 +1931,17 @@ TEST(RunPotion, ImplementedPotionsAreStillOfferedInCombat) {
 
 TEST(RunPotion, ForcingADeferredPotionKeepsTheSlot) {
     // Belt and braces: even if a caller submits the action the mask refused,
-    // the slot is not consumed and combat state is untouched.
+    // the slot is not consumed and combat state is untouched. (With the
+    // deferred set now empty, FAIRY_POTION -- refused by name, never USED --
+    // is what keeps this trap exercised.)
     RunController rc = enter_jaw_worm_combat();
-    rc.run.potions[0] = static_cast<uint16_t>(PotionId::DUPLICATION_POTION);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
     const int hp_before = rc.combat.monsters[0].hp;
     const int16_t player_hp_before = rc.combat.player_hp;
 
     step(rc, make_action(ActionVerb::USE_POTION, 0));
 
-    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::DUPLICATION_POTION))
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::FAIRY_POTION))
         << "the slot must survive an illegal use";
     EXPECT_EQ(rc.combat.monsters[0].hp, hp_before);
     EXPECT_EQ(rc.combat.player_hp, player_hp_before);
@@ -1981,13 +1989,14 @@ TEST(RunPotionDiscard, DiscardingOutOfCombatEmptiesTheSlotAndMovesNothingElse) {
 }
 
 TEST(RunPotionDiscard, ADeferredPotionBodyIsStillDiscardable) {
-    // The use door is closed on a still-deferred body (potion_use_implemented);
+    // The use door is closed on an unusable body (potion_use_implemented);
     // the discard door is not, because a discard never runs the body.
-    // The example was SNECKO_OIL until RANDOMIZE_HAND_COST (opcode 60) landed
-    // and un-deferred it; DUPLICATION_POTION is blocked on the recursive-play
-    // opcode, which is out of the potions stage's scope.
+    // The example was SNECKO_OIL until RANDOMIZE_HAND_COST (opcode 60) landed,
+    // then DUPLICATION_POTION until PowerId::DUPLICATION registered; with the
+    // deferred set now empty, FAIRY_POTION -- never USABLE, always
+    // discardable outside a We Meet Again dialog -- carries the trap.
     RunController rc = enter_jaw_worm_combat();
-    rc.run.potions[0] = static_cast<uint16_t>(PotionId::DUPLICATION_POTION);
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FAIRY_POTION);
     RunActionMask mask{};
     legal_actions(rc, mask);
     EXPECT_FALSE(mask.can_use_potion[0]);

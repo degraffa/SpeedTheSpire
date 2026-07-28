@@ -90,7 +90,10 @@ namespace {
     // PenNibPower (:51-57) doubles. Neither overrides atDamageReceive,
     // atDamageFinalReceive, modifyBlock or modifyBlockLast -- both classes were
     // read in full -- so those three switches take the count move and no case.
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Checked for Duplication (DuplicationPower.java:19-72, read in full):
+    // only updateDescription, onUseCard and atEndOfRound -- no atDamage* hook
+    // anywhere -- so all three of this file's counts move again, caseless.
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -161,7 +164,8 @@ namespace {
     // Checked for Panache and The Bomb: same answer as the pass above -- both
     // QUEUE damage and neither overrides any atDamage* hook
     // (PanachePower.java:40-67 / TheBombPower.java:40-53).
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // Duplication: no atDamage* override either (see at_damage_give's note).
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -223,8 +227,9 @@ namespace {
     // file's counts moved together, as the note above requires.
     // Checked for Panache and The Bomb: neither overrides atDamageFinalReceive
     // (PanachePower.java:40-67 / TheBombPower.java:40-53). All three of this
-    // file's counts moved together again.
-    static_assert(sts::registry::manifest::kPowersCount == 51,
+    // file's counts moved together again -- and again for Duplication (see
+    // at_damage_give's note).
+    static_assert(sts::registry::manifest::kPowersCount == 52,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {

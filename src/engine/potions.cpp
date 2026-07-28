@@ -102,9 +102,10 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::ENTROPIC_BREW:          // run layer: use_entropic_brew
             return true;
         default:
-            // DEFERRED: no body anywhere -- which, as of the discovery/
-            // duplication stage, is DUPLICATION_POTION only (its blocker was
-            // never an opcode -- see the deferred-list note below).
+            // DEFERRED: no body anywhere -- an EMPTY set as of the discovery/
+            // duplication stage (DUPLICATION_POTION became a data APPLY_POWER
+            // program when PowerId::DUPLICATION registered -- see the note
+            // below).
             // FAIRY_POTION lands here too and that is still correct, but for a
             // different reason: it is IMPLEMENTED and it is never USED. canUse()
             // is `return false` (FairyPotion.java:47-50); the body fires from
@@ -426,14 +427,13 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // Elixir, the four DISCOVERY potions, Liquid Memories and Gambler's Brew
         // are all implemented above.
         // The "recursive play (a later opcode)" group was MISDIAGNOSED and is
-        // down to one row: PLAY_CARD + kPlayCardFromDrawTop was
-        // PlayTopCardAction all along (DISTILLED_CHAOS is implemented above),
-        // and DuplicationPower's replay is Double Tap's synchronous
-        // kPlayCardCopy|kPlayCardPurge|kPlayCardQueueFront call. What
-        // DUPLICATION_POTION actually waits on is its POWER ROW (a PowerId is
-        // an append-only allocation surfaced upward), after which the potion
-        // itself is a plain data APPLY_POWER program. THAT IS THE WHOLE
-        // REMAINING LIST.
+        // now EMPTY: PLAY_CARD + kPlayCardFromDrawTop was PlayTopCardAction
+        // all along (DISTILLED_CHAOS is implemented above), and
+        // DUPLICATION_POTION's replay is Double Tap's synchronous
+        // kPlayCardCopy|kPlayCardPurge|kPlayCardQueueFront call, owned by the
+        // POWER's native body (powers/power_duplication.cpp, PowerId 92) --
+        // the potion itself is a plain data APPLY_POWER program and never
+        // reaches this switch. NOTHING IS DEFERRED ANY MORE.
         // SNECKO_OIL is NO LONGER among them: RANDOMIZE_HAND_COST (opcode 60)
         // landed and its row is now a two-step DATA program, so it never reaches
         // this switch at all.

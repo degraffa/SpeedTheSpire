@@ -391,13 +391,17 @@
   game_id: "DuplicationPotion"
   rarity: UNCOMMON
   potency: 1
-  # Grants DuplicationPower (next N cards played twice). Still DEFERRED, but the
-  # blocker is the RECURSIVE-PLAY opcode (DuplicationPower.onUseCard re-queues a
-  # copy of the played card -- cf. Distilled Chaos / Double Tap), NOT a missing
-  # power row: registering a DuplicationPower row without that opcode would be an
-  # inert power. Un-defers with the recursive-play opcode, not the power follow-up.
-  native: true
-  provenance: "DuplicationPotion.use (DuplicationPotion.java:42), getPotency (:49) -- ApplyPower DuplicationPower(potency)"
+  # Grants DuplicationPower (the next `potency` cards are played twice). The old
+  # deferral note had the blocker backwards: no "recursive-play opcode" was ever
+  # needed -- the replay is Double Tap's synchronous PLAY_CARD verb, owned by
+  # the POWER's native body (powers.yaml id 92). Once that row registered, this
+  # became a plain data APPLY_POWER program, exactly like Dexterity/Steroid/
+  # Essence of Steel before it. The RoomPhase.COMBAT gate (:43) is the run
+  # layer's (combat-only offer; not on the out-of-combat whitelist). Sacred
+  # Bark doubles POTENCY = the charge count.
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: DUPLICATION}
+  provenance: "DuplicationPotion.use (DuplicationPotion.java:42-46), getPotency (:48-51) -- in RoomPhase.COMBAT, one addToBot ApplyPowerAction(player, player, DuplicationPower(player, potency), potency); potency 1"
 
 - id: 26
   name: DISTILLED_CHAOS

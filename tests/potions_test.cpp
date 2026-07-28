@@ -22,7 +22,8 @@
 #include "gtest/gtest.h"
 
 #include "sts/engine/action_queue.hpp"
-#include "sts/engine/advance.hpp"  // legal_actions/advance: the DISCOVERY screen
+#include "sts/engine/advance.hpp"   // legal_actions/advance: the DISCOVERY screen
+#include "sts/engine/card_play.hpp" // queue_card_play (the Duplication replays)
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
@@ -977,6 +978,110 @@ TEST(Potions, DistilledChaosRollsAllTargetsAtUseTimeAndBakesThem) {
     EXPECT_EQ(potion_def(PotionId::DISTILLED_CHAOS)->potency, 3);
 }
 
+// --- Duplication Potion + DuplicationPower (data row 25 -> power 92) ---------
+//
+// DuplicationPotion.use (DuplicationPotion.java:42-46): in RoomPhase.COMBAT,
+// one addToBot ApplyPowerAction(player, player, DuplicationPower(player,
+// potency), potency); getPotency (:48-51) is 1. The potion row is a plain
+// DATA APPLY_POWER program; the behavior lives on the POWER
+// (DuplicationPower.java:19-72 / powers/power_duplication.cpp): onUseCard
+// replays ANY played, non-purge card -- Double Tap's synchronous verb with
+// the ATTACK filter removed -- and atEndOfRound decays an unspent charge by
+// ONE per round (not Double Tap's end-of-turn whole-power removal).
+
+void PlayHandCard(CombatState& s, uint8_t slot, uint8_t tgt = 0) {
+    ASSERT_TRUE(queue_card_play(s, slot, tgt));
+    pump(s);
+}
+
+void EndPlayerTurn(CombatState& s) {
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s);
+}
+
+TEST(Potions, DuplicationPotionIsADataApplyPowerProgram) {
+    CombatState s = MakeCombat();
+    EXPECT_FALSE(potion_def(PotionId::DUPLICATION_POTION)->native)
+        << "the row is a data program once the power exists";
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), 1);
+    EXPECT_EQ(potion_def(PotionId::DUPLICATION_POTION)->potency, 1);
+}
+
+TEST(Potions, DuplicationReplaysAnyCardTypeIncludingSkills) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    drain_actions(s);
+    seed_hand_card(s, 30, CardId::DEFEND);
+
+    PlayHandCard(s, 0);
+
+    EXPECT_EQ(s.player_block, 10)
+        << "a SKILL is replayed too -- the :40 guard has no CardType clause "
+           "(contrast DoubleTapPower.java:44)";
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), -1)
+        << "--amount hit 0 -> addToBot RemoveSpecificPowerAction (:57-60)";
+    EXPECT_EQ(s.discard_count, 1)
+        << "the ORIGINAL files normally; the purge-on-use copy lands nowhere";
+    EXPECT_EQ(s.exhaust_count, 0);
+}
+
+TEST(Potions, DuplicationCopyDoesNotItselfSpendACharge) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    ASSERT_EQ(s.action_count, 1);
+    s.action_queue[s.action_head].amount = 2;  // Sacred Bark: potency 1 -> 2
+    drain_actions(s);
+    ASSERT_EQ(player_power_stack(s, PowerId::DUPLICATION), 2);
+    seed_hand_card(s, 30, CardId::STRIKE);
+
+    PlayHandCard(s, 0, 0);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 12) << "one played Strike lands twice";
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), 1)
+        << "one charge per PLAYED card -- `!card.purgeOnUse` (:40) keeps the "
+           "replay copy from spending the second";
+}
+
+TEST(Potions, DuplicationUnspentChargesDecayOnePerRoundNotWholesale) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    ASSERT_EQ(s.action_count, 1);
+    s.action_queue[s.action_head].amount = 2;
+    drain_actions(s);
+    ASSERT_EQ(player_power_stack(s, PowerId::DUPLICATION), 2);
+
+    EndPlayerTurn(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), 1)
+        << "atEndOfRound is ReducePowerAction(1) (:65-71) -- NOT Double Tap's "
+           "whole-power atEndOfTurn removal";
+
+    EndPlayerTurn(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), -1)
+        << "the reduce of 1-from-1 removes (ReducePowerAction.java:45-51) -- "
+           "the g6b STS01221 shape: drunk, unspent, gone after one round";
+}
+
+TEST(Potions, DuplicationParkedAtZeroLeavesAtEndOfRound) {
+    // The Java's `if (this.amount == 0) addToBot(Remove)` branch (:66-67).
+    // Unreachable through normal play (the onUseCard decrement queues the
+    // removal itself at zero), implemented because the Java writes it: a
+    // power parked at 0 by some other route must leave rather than tick
+    // forever -- the same belt-and-braces power_duration_debuff keeps.
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    drain_actions(s);
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::DUPLICATION)) {
+            s.player_powers[i].amount = 0;
+        }
+    }
+    EndPlayerTurn(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), -1);
+}
+
 TEST(Potions, DistilledChaosPlaysTheTopThreeAndSpendsNothingMoreAtResolve) {
     CombatState s = MakeCombat(2, /*monster_hp=*/60);
     seed_draw_pile(s, 5);  // five STRIKEs
@@ -1455,8 +1560,8 @@ TEST(Potions, RarityAndPotencyTable) {
         {PotionId::LIQUID_BRONZE, PotionRarity::UNCOMMON, 3, false},
         {PotionId::ESSENCE_OF_STEEL, PotionRarity::UNCOMMON, 4, false},
         {PotionId::CULTIST_POTION, PotionRarity::RARE, 1, false},
-        // Still native + deferred (recursive-play opcode, not powers.yaml).
-        {PotionId::DUPLICATION_POTION, PotionRarity::UNCOMMON, 1, true},
+        // A data APPLY_POWER program since PowerId::DUPLICATION registered.
+        {PotionId::DUPLICATION_POTION, PotionRarity::UNCOMMON, 1, false},
         {PotionId::FRUIT_JUICE, PotionRarity::RARE, 5, true},
         {PotionId::FAIRY_POTION, PotionRarity::RARE, 30, true},
         {PotionId::SMOKE_BOMB, PotionRarity::RARE, 0, true},
@@ -1474,14 +1579,16 @@ TEST(Potions, RarityAndPotencyTable) {
 // --- The implemented-ness gate (potion legality trap) ------------------------
 
 TEST(Potions, DeferredNativePotionIsRefusedNotSilentlyNoOped) {
-    // A still-deferred native potion (Duplication -- blocked on the recursive-
-    // play opcode) must FAIL rather than quietly do nothing: run_advance's
-    // step_potion reads the false return as "the use did not happen" and keeps
-    // the slot, so the player can never burn a potion for no effect.
+    // The DEFERRED set is empty now, but the refusal door itself must stay
+    // shut: an unusable potion FAILS rather than quietly doing nothing, so
+    // run_advance's step_potion reads the false return as "the use did not
+    // happen" and keeps the slot. FAIRY_POTION is the standing example -- it
+    // is IMPLEMENTED (the lethal-HP-write revive) but never USED (canUse() is
+    // `return false`, FairyPotion.java:47-50), so the gate refuses it by name.
     CombatState s = MakeCombat();
     const CombatState before = s;
-    EXPECT_FALSE(potion_use_implemented(PotionId::DUPLICATION_POTION));
-    EXPECT_FALSE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    EXPECT_FALSE(potion_use_implemented(PotionId::FAIRY_POTION));
+    EXPECT_FALSE(use_potion(s, PotionId::FAIRY_POTION, 0));
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_power_count, before.player_power_count);
     EXPECT_EQ(s.player_hp, before.player_hp);
@@ -1519,9 +1626,12 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // ever needed -- PLAY_CARD + kPlayCardFromDrawTop IS PlayTopCardAction.
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
+    // DUPLICATION_POTION left the same way when PowerId::DUPLICATION was
+    // registered: its row is a DATA APPLY_POWER program (the Dexterity/
+    // Steroid/Essence-of-Steel shape), so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::DUPLICATION_POTION,
-                        PotionId::FAIRY_POTION}) {
+    EXPECT_TRUE(potion_use_implemented(PotionId::DUPLICATION_POTION));
+    for (PotionId id : {PotionId::FAIRY_POTION}) {
         EXPECT_FALSE(potion_use_implemented(id))
             << "deferred id " << static_cast<int>(id) << " must not be usable";
         CombatState s = MakeCombat();

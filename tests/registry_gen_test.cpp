@@ -484,7 +484,7 @@ TEST(RegistryGen, ManifestCounts) {
                                       // and stays unissued.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 51u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
+    EXPECT_EQ(m::kPowersCount, 52u);  // B3.7 appends Evolve (26) + Fire Breathing (27);
                                       // Anger (33) is the Gremlin Nob's Bellow power.
                                       // Lagavulin adds none -- its Metallicize is the
                                       // pre-existing id 5 row.
@@ -529,6 +529,10 @@ TEST(RegistryGen, ManifestCounts) {
                                       // relic-granted atDamageGive scalers; 89-90
                                       // were that stage's block and are RELEASED
                                       // unspent
+                                      // + the discovery/duplication stage's
+                                      // Duplication (92), the Duplication
+                                      // Potion's any-card-type replay; 91 is a
+                                      // sibling stage's allocation, untouched
     EXPECT_EQ(m::kMonstersCount, 25u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
@@ -560,7 +564,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 450u);  // 127 + 51 + 25 + 142 + 33 + 31 + 21 + 20
+    EXPECT_EQ(m::kTotalCount, 451u);  // 127 + 52 + 25 + 142 + 33 + 31 + 21 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
