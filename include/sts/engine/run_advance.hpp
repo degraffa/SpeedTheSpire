@@ -89,12 +89,15 @@
 //   * MonsterRoom.onPlayerEntry (MonsterRoom.java:53-61): getMonsterForRoomCreation
 //     -> getEncounter(monsterList.get(0)) -> monsters.init().
 //   * AbstractRoom.update turn-1 combat-start block (AbstractRoom.java:236-258):
-//     the opening DrawCardAction is queued (:242) BEFORE
-//     applyStartOfCombatLogic (:245) fires every relic's atBattleStart
-//     (AbstractPlayer.java:1892-1901), which is why enter_combat dispatches that
-//     hook after its turn-1 pump rather than before it. The separate pre-draw
-//     hook (applyStartOfCombatPreDrawLogic, :241) has no registered relic and so
-//     no call site yet. Full reasoning at the dispatch in run_advance.cpp.
+//     the opening DrawCardAction is queued (:242), then applyStartOfCombatLogic
+//     (:245) fires every relic's atBattleStart (AbstractPlayer.java:1892-1901),
+//     then applyStartOfTurnRelics (:253) fires atTurnStart. Both dispatches live
+//     INSIDE the shared turn-1 block (start_of_turn, action_queue.cpp), in that
+//     order, so an immediate atBattleStart body precedes turn 1's atTurnStart
+//     while a queued one lands behind the opening draw -- see the dispatch-site
+//     comment for the derivation and the G6 §8.0 Stone Calendar witness. The
+//     separate pre-draw hook (applyStartOfCombatPreDrawLogic, :241) has no
+//     registered relic and so no call site yet.
 //   * AbstractRoom.update battle-over (:277-357): the lifecycle transition points
 //     (COMPLETE -> reward screen); the reward ASSEMBLY itself lives in
 //     combat_rewards.hpp/.cpp and runs from enter_combat_reward.
@@ -202,6 +205,10 @@ inline constexpr uint8_t kChooseBoss = static_cast<uint8_t>(kMapCols);  // 7
 // cur_x sentinel: the controller is at Neow (floor 0), with no grid column yet.
 inline constexpr uint8_t kNeowColumn = 0xFF;
 
+// emerald_x / emerald_y sentinel: the act placed no burning elite (only
+// possible with zero Elite nodes, which the Act-1 quota never produces).
+inline constexpr uint8_t kNoEmeraldNode = 0xFF;
+
 // CHOOSE arg0 sentinels at a COMBAT_REWARD. Small arg0 values are claim /
 // pick indices, so the named buttons live at the top of the u8 range:
 //   * kChooseProceed -- the Proceed button: leave the screen for the map,
@@ -258,7 +265,17 @@ struct RunController {
     uint8_t monster_cursor;
     uint8_t elite_cursor;
     uint8_t boss_cursor;
-    uint8_t pad1;           // explicit padding.
+    uint8_t pad1;           // explicit padding (hashed by the fuzz soak).
+    // The act's burning (emerald-key) elite node, copied from the placement
+    // draw's RoomAssignment at run_begin (map_rooms.hpp step 5). Transient
+    // derived state exactly like the cursors -- the game re-derives the flag
+    // from (seed, mapRng) at map generation -- so it lives here, never in the
+    // frozen RunState. Entering THIS elite node rolls mapRng.random(0, 3) and
+    // buffs the group (MonsterRoomElite.applyEmeraldEliteBuff,
+    // MonsterRoomElite.java:39-68; gate at AbstractPlayer.java:1603).
+    uint8_t emerald_x;      // column, or kNoEmeraldNode
+    uint8_t emerald_y;      // row (floor - 1), or kNoEmeraldNode
+    uint8_t pad_emerald[2]; // explicit padding
 
     // The live COMBAT_REWARD screen: assembled once when the reward
     // screen opens, mutated by claims. Transient screen-flow state exactly like

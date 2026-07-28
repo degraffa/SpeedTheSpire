@@ -541,13 +541,13 @@ TEST(RunCombatBattleStart, BurningBloodEntersCombatIdenticallyToNoRelic) {
 }
 
 // THE ORDERING TEST. Anchor.atBattleStart (Anchor.java:32-36) is
-// addToBot GainBlockAction(player, 10). start_of_turn (action_queue.cpp) zeroes
-// player_block before it queues the opening draw -- the loseBlock of
-// GameActionManager.java:352-359, which Java's turn-1 block does not actually
-// run. So a dispatch placed BEFORE the turn-1 pump would grant the block and
-// then have it wiped in the same pump: the relic fires and nothing happens,
-// which is the same dead effect as never firing. Dispatching after the pump --
-// where Java's own call site sits, behind the queued DrawCardAction -- keeps it.
+// addToBot GainBlockAction(player, 10). The block decay (the loseBlock of
+// GameActionManager.java:352-359) belongs to step 6 alone -- Java's turn-1
+// block has no loseBlock line -- and start_of_turn gates it to
+// kSubsequentTurn accordingly, so the 10 granted at battle start must reach
+// the player's first decision intact. The dispatch sits inside the shared
+// turn-1 block, behind the queued DrawCardAction (AbstractRoom.java:242 vs
+// :245), which is where the addToBot body resolves in the Java too.
 TEST(RunCombatBattleStart, AnchorBlockSurvivesTheTurnOneBlockReset) {
     RunController rc = enter_jaw_worm_holding({RelicId::ANCHOR});
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
@@ -692,6 +692,107 @@ TEST(RunCombatBattleStart, NoRegisteredRelicBindsThePreDrawHook) {
     }
     EXPECT_TRUE(any_battle_start)
         << "no relic binds at_battle_start -- the wiring under test would be moot";
+}
+
+// THE ORDER-WITHIN-TURN-ONE TESTS (G6 campaign 2 spot-diff §8.0, STS00683).
+// AbstractRoom's turn-1 block is a fixed line sequence: the opening
+// DrawCardAction is queued (:242), then applyStartOfCombatLogic fires every
+// relic's atBattleStart (:245), and only then does applyStartOfTurnRelics fire
+// atTurnStart (:253). A relic whose atBattleStart writes state INLINE therefore
+// sees its write happen BEFORE the turn-1 atTurnStart -- Stone Calendar's
+// counter reads 0-then-++ == 1 at the moment control reaches the player.
+// The engine used to run the whole start-of-turn sequence first and dispatch
+// AT_BATTLE_START afterwards, which inverted every counter relic by one turn
+// for the whole fight (the sim lost STS00683's floor-12 Sentry fight the game
+// wins). These walk the REAL entry path; the relic BODIES are pinned by
+// relic_rares_shop_test's direct-call loops, which cannot see the wiring.
+
+// StoneCalendar (StoneCalendar.java:1083-1116): atBattleStart counter = 0,
+// atTurnStart ++counter, onPlayerEndTurn fires 52 THORNS at counter == 7,
+// onVictory counter = -1. Out of combat the counter is -1 (pickup default and
+// the onVictory latch), which is exactly what makes the wrong order visible:
+// ++(-1) then =0 reads 0; =0 then ++ reads 1. The capture reads 1 on turn 1
+// (STS00683 seq 141, both campaigns).
+TEST(RunCombatBattleStart, StoneCalendarCounterSequenceMatchesTheJavaOrder) {
+    RunController rc = run_begin(kSeed, kA20);
+    // STS00683's floor-12 witness fight: three Sentries, killed outright by the
+    // 52 THORNS in the capture. Sentries never gain block or change their own
+    // HP, so the fight's whole damage ledger on their side is the calendar's.
+    rc.lists.monster_list[0] = "3 Sentries";
+    set_run_relics(rc, {RelicId::STONE_CALENDAR});
+    rc.run.relics[0].counter = -1;  // the out-of-combat value
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+    EXPECT_EQ(rc.combat.relics[0].counter, 1)
+        << "atBattleStart (counter = 0) must run BEFORE turn 1's atTurnStart "
+           "++ -- AbstractRoom.java:245 vs :253";
+
+    // Never act; just survive. A20 Sentries max at 45 HP (Sentry.java:63), so
+    // the end-of-turn-7 52 THORNS (unblocked -- Sentries gain no block) kills
+    // all three, exactly as the capture's fight ends.
+    rc.combat.player_hp = 999;
+    const int16_t hp0 = rc.combat.monsters[0].hp;
+    for (int turn = 1; turn <= 6; ++turn) {
+        ASSERT_EQ(rc.combat.relics[0].counter, turn) << "turn " << turn;
+        step(rc, make_action(ActionVerb::END_TURN));
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+        EXPECT_EQ(rc.combat.monsters[0].hp, hp0)
+            << "no thorns before the end of turn 7 (turn " << turn << ")";
+    }
+    ASSERT_EQ(rc.combat.relics[0].counter, 7)
+        << "the game fires at the END of turn 7; the sim must reach 7 by then";
+    step(rc, make_action(ActionVerb::END_TURN));  // ends turn 7 -> 52 THORNS
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD))
+        << "StoneCalendar.onPlayerEndTurn at counter == 7 kills every Sentry "
+           "(StoneCalendar.java:1101; the STS00683 fight the sim used to LOSE)";
+    EXPECT_EQ(rc.run.relics[0].counter, -1)
+        << "onVictory latches -1 back into the run (StoneCalendar.java:1112-1116)";
+}
+
+// HornCleat (HornCleat.java:36-53): "at the start of your 2nd turn, gain 14
+// Block." atBattleStart arms counter = 0; atTurnStart ++counter and fires at 2.
+// Under the inverted order turn 1's ++ was overwritten by the arm, so the block
+// arrived one turn late (turn 3) -- same shape as the Stone Calendar defect,
+// silently wrong rather than fight-losing.
+TEST(RunCombatBattleStart, HornCleatBlocksOnTurnTwoNotTurnThree) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    set_run_relics(rc, {RelicId::HORN_CLEAT});
+    rc.run.relics[0].counter = -1;  // out-of-combat value
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.player_block, 0) << "nothing on turn 1";
+    step(rc, make_action(ActionVerb::END_TURN));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.turn, 2);
+    EXPECT_EQ(rc.combat.player_block, 14)
+        << "HornCleat.java:43 addToBot GainBlockAction(14) when the turn-start "
+           "++ lands on 2 -- turn 2 under the Java order";
+}
+
+// Pocketwatch (Pocketwatch.java:906-946): counter == -1 is the armed firstTurn
+// flag (atBattleStart sets it), the post-draw check treats a negative counter
+// as "this is turn 1, no bonus", and a non-negative counter <= 3 plays draws 3.
+// Under the inverted order the turn-1 post-draw check ran BEFORE atBattleStart
+// re-armed the flag, so turn 2 read the -1 and the <=3-plays bonus draw was
+// silently suppressed.
+TEST(RunCombatBattleStart, PocketwatchGrantsTheTurnTwoBonusDraw) {
+    RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+    set_run_relics(rc, {RelicId::POCKETWATCH});
+    rc.run.relics[0].counter = -1;  // out-of-combat value
+    leave_neow(rc);
+    step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.combat.hand_count, 5)
+        << "turn 1 is the armed firstTurn: no bonus draw (Pocketwatch.java:923)";
+    step(rc, make_action(ActionVerb::END_TURN));  // 0 cards played <= 3
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    ASSERT_EQ(rc.combat.turn, 2);
+    EXPECT_EQ(rc.combat.hand_count, 8)
+        << "0 plays on turn 1 -> the turn-2 post-draw check draws 3 "
+           "(Pocketwatch.java:926)";
 }
 
 // =============================================================================
@@ -1931,6 +2032,214 @@ TEST(BossVictory, VictoryMaskIsEmptyBecauseRunOver) {
     EXPECT_TRUE(res.terminal);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
     EXPECT_TRUE(run_is_victory(rc));
+}
+
+// =============================================================================
+// The emerald-key elite entry roll (G6 campaign 2 spot-diff §8.1)
+// =============================================================================
+//
+// MonsterRoomElite.applyEmeraldEliteBuff (MonsterRoomElite.java:39-68), reached
+// from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1602-1605) right after
+// monsters.usePreBattleAction(): entering the one elite node setEmeraldElite
+// flagged at map generation (AbstractDungeon.java:542-556) rolls
+// AbstractDungeon.mapRng.random(0, 3) -- the ONLY mid-run mapRng consumer --
+// and queues one buff on every member of the group:
+//   0 -> StrengthPower(actNum + 1)            (MonsterRoomElite.java:42-46)
+//   1 -> IncreaseMaxHpAction(0.25f)           (:48-52)
+//   2 -> MetallicizePower(actNum * 2 + 2)     (:54-58)
+//   3 -> RegenerateMonsterPower(1 + actNum*2) (:60-64)
+// Six observations across both G6 campaigns (STS00451/STS01068/STS02009); the
+// per-seed roll values asserted below are ground truth recovered by inverting
+// the captures' post-roll mapRng (s0, s1) one step (XorShift128+ is invertible)
+// -- STS00451 rolled 0 (its GremlinNob carries Strength 2 at entry, seq 82),
+// STS01068 rolled 0 (Lagavulin: Metallicize 8 + Strength 2, seq 74), STS02009
+// rolled 1 (Sentries 49/49/56 == 39/39/45 + round(25%), seq 96).
+
+// The three campaign seeds (artifact headers, crosscheck_ok on all three).
+constexpr int64_t kSeedSTS00451 = INT64_C(1790050548826);
+constexpr int64_t kSeedSTS01068 = INT64_C(1790050586843);
+constexpr int64_t kSeedSTS02009 = INT64_C(1790050629509);
+
+// Enter the act's burning-elite node directly. next_room_transition does not
+// re-validate edges (the FloorReseed tests use the same door), so the test can
+// walk straight onto the node instead of pathing a whole run to it.
+void enter_burning_elite(RunController& rc) {
+    ASSERT_NE(rc.emerald_x, kNoEmeraldNode) << "run has no burning elite?";
+    rc.run.floor = rc.emerald_y;  // ++floor lands run_cur_row on the node's row
+    rc.cur_x = 0;                 // on the grid (not Neow), a no-cursor room kind
+    rc.room_type = static_cast<uint8_t>(RoomType::None);
+    next_room_transition(rc, rc.emerald_x, /*to_boss=*/false);
+}
+
+// All three capture seeds place the burning elite on row 5 -- the captures roll
+// on floor 6 (seq 82 / 74 / 96, both campaigns). Pins the placement RECORDING
+// (the draw itself was already modelled and oracle-matched, map_rooms.hpp).
+TEST(RunEmeraldElite, PlacementMatchesTheCapturesFloorSixEntries) {
+    for (const int64_t seed :
+         {kSeedSTS00451, kSeedSTS01068, kSeedSTS02009}) {
+        RunController rc = run_begin(seed, kA20);
+        ASSERT_NE(rc.emerald_x, kNoEmeraldNode) << "seed " << seed;
+        EXPECT_EQ(rc.emerald_y, 5) << "seed " << seed;
+        EXPECT_EQ(rc.run.map[run_state_map_index(rc.emerald_x, rc.emerald_y)]
+                      .room_type,
+                  static_cast<uint8_t>(RoomType::Elite))
+            << "seed " << seed << ": the recorded node must be an Elite node";
+    }
+}
+
+// STS00451's roll: 0 -> Strength actNum+1 == 2 on every member. The entry must
+// consume EXACTLY one wrapper draw (counter +1, the (s0, s1) of one
+// random(0,3)), which is the six-observation §8.1 stream divergence.
+TEST(RunEmeraldElite, EntryConsumesOneMapRngDrawAndAppliesStrength) {
+    RunController rc = run_begin(kSeedSTS00451, kA20);
+    leave_neow(rc);
+    RngStream probe = rc.run.map_rng;  // pre-entry (end-of-generateMap) state
+    const int32_t expected_roll = random(probe, 0, 3);
+    ASSERT_EQ(expected_roll, 0)
+        << "capture-derived ground truth for STS00451 (see block comment)";
+
+    enter_burning_elite(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.run.map_rng.counter, probe.counter)
+        << "one wrapper draw: MonsterRoomElite.java:41";
+    EXPECT_EQ(rc.run.map_rng.s0, probe.s0);
+    EXPECT_EQ(rc.run.map_rng.s1, probe.s1);
+    ASSERT_GT(rc.combat.monster_count, 0);
+    for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+        const PowerSlot* str = monster_power_slot(rc.combat, m, PowerId::STRENGTH);
+        ASSERT_NE(str, nullptr) << "member " << static_cast<int>(m)
+                                << " missing the rolled Strength";
+        EXPECT_EQ(str->amount, 2) << "actNum + 1 with actNum == 1";
+    }
+}
+
+// STS02009's roll: 1 -> IncreaseMaxHpAction(0.25f, true) on every member:
+// maxHealth += MathUtils.round(maxHealth * 0.25f) and the heal tops current HP
+// up by the same amount (AbstractCreature.increaseMaxHp, :199-208). The
+// baseline run (burning-elite flag cleared) fights the same HP rolls unbuffed,
+// so the pair isolates exactly the buff.
+TEST(RunEmeraldElite, MaxHpRollRaisesEveryMemberByTwentyFivePercent) {
+    RunController base = run_begin(kSeedSTS02009, kA20);
+    RngStream probe = base.run.map_rng;
+    ASSERT_EQ(random(probe, 0, 3), 1)
+        << "capture-derived ground truth for STS02009 (see block comment)";
+
+    RunController rc = run_begin(kSeedSTS02009, kA20);
+    leave_neow(rc);
+    enter_burning_elite(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    leave_neow(base);
+    const uint8_t ex = base.emerald_x;
+    const uint8_t ey = base.emerald_y;
+    base.emerald_x = kNoEmeraldNode;  // un-flag: same node, no roll
+    base.emerald_y = kNoEmeraldNode;
+    base.run.floor = ey;
+    base.cur_x = 0;
+    base.room_type = static_cast<uint8_t>(RoomType::None);
+    next_room_transition(base, ex, /*to_boss=*/false);
+    ASSERT_EQ(base.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+
+    ASSERT_EQ(rc.combat.monster_count, base.combat.monster_count);
+    for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+        const int16_t unbuffed = base.combat.monsters[m].max_hp;
+        const int16_t expect = static_cast<int16_t>(
+            unbuffed + mathutils_round(static_cast<float>(unbuffed) * 0.25f));
+        EXPECT_EQ(rc.combat.monsters[m].max_hp, expect)
+            << "member " << static_cast<int>(m);
+        EXPECT_EQ(rc.combat.monsters[m].hp, expect)
+            << "increaseMaxHp heals the added amount (hp arrives full)";
+    }
+    // The baseline consumed no mapRng draw; the buffed entry consumed one.
+    EXPECT_EQ(base.run.map_rng.counter + 1, rc.run.map_rng.counter);
+}
+
+// A NON-burning elite node rolls nothing -- the gate is the node flag
+// (AbstractPlayer.java:1603, getCurrMapNode().hasEmeraldKey), not the room
+// kind. Uses whichever other elite node the STS00451 map carries.
+TEST(RunEmeraldElite, OtherEliteNodesConsumeNoDraw) {
+    RunController rc = run_begin(kSeedSTS00451, kA20);
+    leave_neow(rc);
+    uint8_t ox = 0xFF, oy = 0xFF;
+    for (uint8_t y = 0; y < kMapRows && ox == 0xFF; ++y) {
+        for (uint8_t x = 0; x < kMapCols; ++x) {
+            if (rc.run.map[run_state_map_index(x, y)].room_type ==
+                    static_cast<uint8_t>(RoomType::Elite) &&
+                !(x == rc.emerald_x && y == rc.emerald_y)) {
+                ox = x;
+                oy = y;
+                break;
+            }
+        }
+    }
+    ASSERT_NE(ox, 0xFF) << "map carries no second elite; pick another seed";
+    const RngStream before = rc.run.map_rng;
+    rc.run.floor = oy;
+    rc.cur_x = 0;
+    rc.room_type = static_cast<uint8_t>(RoomType::None);
+    next_room_transition(rc, ox, /*to_boss=*/false);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+    EXPECT_EQ(rc.run.map_rng.counter, before.counter);
+    EXPECT_EQ(rc.run.map_rng.s0, before.s0);
+    ASSERT_GT(rc.combat.monster_count, 0);
+    for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+        EXPECT_EQ(monster_power_slot(rc.combat, m, PowerId::STRENGTH), nullptr)
+            << "no roll happened, so STS00451's Strength arm must not land";
+    }
+}
+
+// The remaining two arms, found by scanning seeds for the wanted roll value.
+// Roll 2 -> Metallicize actNum*2+2 == 4 (stacked ON TOP of any pre-battle
+// armour); roll 3 -> RegenerateMonsterPower, whose power id "Regenerate" has NO
+// registry row, so the entry consumes the draw and parks at ROOM_UNIMPLEMENTED
+// (the documented never-fake seam) rather than fighting a silently wrong fight.
+TEST(RunEmeraldElite, MetallicizeRollStacksOnPreBattleArmour) {
+    for (int64_t seed = 1; seed < 400; ++seed) {
+        RunController rc = run_begin(seed, kA20);
+        if (rc.emerald_x == kNoEmeraldNode) continue;
+        RngStream probe = rc.run.map_rng;
+        if (random(probe, 0, 3) != 2) continue;
+        leave_neow(rc);
+        const RngStream before = rc.run.map_rng;
+        enter_burning_elite(rc);
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+        EXPECT_EQ(rc.run.map_rng.counter, before.counter + 1);
+        ASSERT_GT(rc.combat.monster_count, 0);
+        for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+            const PowerSlot* met =
+                monster_power_slot(rc.combat, m, PowerId::METALLICIZE);
+            ASSERT_NE(met, nullptr) << "member " << static_cast<int>(m);
+            // Lagavulin already carries Metallicize 8 from usePreBattleAction;
+            // ApplyPowerAction STACKS (8 + 4), everyone else reads a plain 4.
+            const bool lagavulin =
+                rc.combat.monsters[m].monster_id ==
+                static_cast<uint16_t>(MonsterId::LAGAVULIN);
+            EXPECT_EQ(met->amount, lagavulin ? 12 : 4)
+                << "member " << static_cast<int>(m);
+        }
+        return;  // one witness seed is the test
+    }
+    FAIL() << "no seed under 400 rolls Metallicize on its burning elite";
+}
+
+TEST(RunEmeraldElite, RegenerateRollParksTheRoomWithTheDrawConsumed) {
+    for (int64_t seed = 1; seed < 400; ++seed) {
+        RunController rc = run_begin(seed, kA20);
+        if (rc.emerald_x == kNoEmeraldNode) continue;
+        RngStream probe = rc.run.map_rng;
+        if (random(probe, 0, 3) != 3) continue;
+        leave_neow(rc);
+        const RngStream before = rc.run.map_rng;
+        enter_burning_elite(rc);
+        EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED))
+            << "RegenerateMonsterPower (\"Regenerate\", RegenerateMonster"
+               "Power.java:17) has no registry row; faking the fight without "
+               "it would be a silent class (a) divergence";
+        EXPECT_EQ(rc.run.map_rng.counter, before.counter + 1)
+            << "the game rolled before anything could park; the draw is spent";
+        return;
+    }
+    FAIL() << "no seed under 400 rolls Regenerate on its burning elite";
 }
 
 TEST(BossVictory, ADeathAtTheBossIsNotAVictory) {
