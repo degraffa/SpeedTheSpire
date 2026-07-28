@@ -426,6 +426,18 @@ sts_add_test(replay_command_map_test LIBS sts_engine replay_command_map)
 # run. Same no-artifact, no-JSON contract as the command-map suite above.
 sts_add_test(replay_readout_shapes_test LIBS sts_engine replay_readout_shapes)
 
+# B4.13: the Match and Keep! board decode
+# (tools/oracle_bridge/replay/src/mk_board.hpp). The capture never shows the
+# dealt board. It shows a COMPACTED, screen-position-sorted list of the cards
+# still face down, in an index space that is a PERMUTATION of the simulator's
+# board slots -- and a card that has ever been flipped is labelled by identity
+# with no position at all. Getting the permutation or the compaction wrong does
+# not make the read-out fail loudly; it makes it compare the wrong twelve cards
+# and report a clean deal. Same no-artifact, no-JSON contract as the two suites
+# above, and no engine dependency either: the header is plain data and plain
+# strings.
+sts_add_test(replay_mk_board_test LIBS replay_mk_board)
+
 # B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
 # corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign
 # b13_on20b). Header-only engine code, so it links sts_engine like the other

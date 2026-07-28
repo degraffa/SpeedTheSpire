@@ -8,7 +8,10 @@ gate, every artifact and the same seed-from-one-record shape:
 - **B4.13's** (and B4.10's) *arrival* leg — the ?-roll, the shrine/event split,
   the pool bookkeeping and the selected identity → `replay_run_diff --event`.
   Event **option flow** is deliberately NOT this mode's business; that stays
-  `--replay`'s.
+  `--replay`'s. The one exception is a body that deals in its **constructor**,
+  because that happens at arrival rather than at a button press: Match and
+  Keep's twelve-card board is compared here (§8c), and it is B4.13's remaining
+  card-dealing leg.
 
 This runbook is the sibling of
 [b45_reward_spotdiff.md](b45_reward_spotdiff.md),
@@ -53,6 +56,15 @@ build/debug/tools/oracle_bridge/replay/replay_run_diff --treasure \
     /mnt/d/STS_BG_Mod/_oracle_data/campaigns/<campaign>/run_*_a20_ironclad.jsonl
 build/debug/tools/oracle_bridge/replay/replay_run_diff --event \
     /mnt/d/STS_BG_Mod/_oracle_data/campaigns/<campaign>/run_*_a20_ironclad.jsonl
+```
+
+The `--event` corpus is named once, in
+[b413_event_sweep.sh](b413_event_sweep.sh), so a re-run selects exactly the same
+files in the same order and is byte-comparable against §8b / §8c:
+
+```bash
+tools/wsl_run.sh --script tools/oracle_bridge/driver/b413_event_sweep.sh
+tools/wsl_run.sh --script tools/oracle_bridge/driver/b413_event_sweep.sh --deal
 ```
 
 From the Windows host the binary is an ELF and cannot be exec'd directly
@@ -125,8 +137,10 @@ floor, floor 0 excluded — Neow is `--neow`'s subject):
 | roll | `event_room_roll` | must resolve to `EVENT`; **`eventRng` +1, byte-identical** — the one committed eventRng advance in the game, ever |
 | selection | `generate_event` | `eventRng` must be **unmoved**: both selection draws are made on a throwaway duplicate and discarded (`AbstractDungeon.java:1865`, `EventRoom.java:28`) |
 | identity | the registry join | `screen_state.event_id` → `EventId`, against the sim's selection |
+| deal | the body's own `on_enter`, **only** for a body that spends RNG in its constructor | `miscRng` and `shuffleRng` (which live in `CombatState`, so `diff_run_states` never sees them); `cardRng` folds into the arrival diff below. Today that is Match and Keep alone — §8c |
 | arrival | — | the **whole translated `RunState`**: the three pity floats, the three membership bitsets, `event_flags`, gold, every relic counter (the Tiny Chest one included) |
-| options | `on_enter` + `build_menu` | **advisory**: the entry page's button count. Reported, never folded into the verdict — a body's first page is content the selection layer does not own |
+| options | `build_menu` | **advisory**: the entry page's button count. Reported, never folded into the verdict — a body's first page is content the selection layer does not own |
+| board | `match_menu` / `match_choose`, driven by the capture's own picks | **not advisory** — the twelve dealt identities against every position the capture names, every attempt's match/miss, the cards the run kept, and a per-round walk. §8c states exactly what that does and does not reach |
 
 **The identity join goes through `event_id`, not `event_name`.** The capture
 carries both, and for six of the eighteen ids these campaigns show they differ:
@@ -306,12 +320,137 @@ which is the per-key gates of `getShrine` / `getEvent` observed live.
 **Dead Adventurer** at STS00054 floor **12** is the `floorNum > 6` gate on the
 right side of trap 4.
 
-**Match and Keep is not in the corpus**, so B4.13's card-dealing spot-check is
-still open and this read-out does not close it. Neither does it touch the
-NoteForYourself profile pin, which A20 gates out of the pool entirely — that one
-needs a sub-A15 capture, which no campaign here is.
+**Match and Keep is not in *these ten* campaigns**, which is why B4.13's
+card-dealing spot-check stayed open after this sweep. It is closed by a
+different campaign in §8c below; the coverage table above is deliberately left
+describing *this* corpus, because a table that quietly absorbs a later
+campaign's sightings stops being re-derivable. This sweep still does not touch
+the NoteForYourself profile pin, which A20 gates out of the pool entirely — that
+one needs a sub-A15 capture, which no campaign here is.
 
-### 8c. Frozen in tests
+### 8c. `--event` — the Match and Keep! constructor deal
+
+Campaign **`b4x_greedy_pilot_20260728T041406Z_claude01`** (10 runs, A20
+Ironclad) holds **six complete Match and Keep interactions** — thirteen EVENT
+records each: `Continue`, `Play`, five attempts of two grid picks, `Leave`.
+Four of the six matched at least one pair and two matched nothing, so both
+branches of `updateMatchGameLogic` are exercised.
+
+```
+  DEAL     OK   STS00212 floor=4: 5/12 screen position(s) named by the capture and identical, 5 attempt outcome(s) reproduced, 10 grid round(s) walked, kept {True Grit, Decay}
+  DEAL     OK   STS00465 floor=2: 5/12 screen position(s) named by the capture and identical, 5 attempt outcome(s) reproduced, 10 grid round(s) walked, kept {Havoc, Writhe}
+  DEAL     OK   STS00506 floor=3: 7/12 screen position(s) named by the capture and identical, 5 attempt outcome(s) reproduced, 10 grid round(s) walked, kept {nothing}
+  DEAL     OK   STS00711 floor=2: 6/12 screen position(s) named by the capture and identical, 5 attempt outcome(s) reproduced, 10 grid round(s) walked, kept {Iron Wave}
+  DEAL     OK   STS00783 floor=2: 5/12 screen position(s) named by the capture and identical, 5 attempt outcome(s) reproduced, 10 grid round(s) walked, kept {nothing}
+  DEAL     OK   STS00947 floor=3: 2/12 screen position(s) named by the capture and identical, 5 attempt outcome(s) reproduced, 10 grid round(s) walked, kept {Bash, Pummel, Limit Break}
+--- 10 file(s): 13 sighting(s), 13 zero-diff (+0 clean but for the known obtain race), 0 diverged; entry-page option count matched 13 of 13 advisory check(s) ---
+--- constructor deals: 6 read out, 6 zero-diff; 30 screen position(s) named by a capture and compared, 30 attempt outcome(s) reproduced, 60 grid round(s) walked ---
+```
+
+Reproduce with
+`tools/wsl_run.sh --script tools/oracle_bridge/driver/b413_event_sweep.sh --deal`;
+the same script with no argument re-runs §8b's corpus, which this change leaves
+**byte-identical**. The `--verbose` flag adds the twelve-card board line quoted
+further down.
+
+**Why the deal extended `--event` rather than becoming a mode of its own.**
+Match and Keep is the only Act-1 body that spends RNG in its **constructor**
+(`GremlinMatchGame.java:55-61`, run at `EventRoom.onPlayerEntry`), so three
+streams have already moved by the time CommunicationMod dumps the "Continue"
+page. The arrival step was therefore comparing a post-deal capture against a
+pre-deal sim and reporting all six sightings as `cardRng +5` divergences that
+were nothing of the kind. That is a defect in what the arrival step models, not
+a missing mode: the deal happens *at arrival*, which is the moment this mode
+already owns, and steps 0–3 of §4 are what identify the sighting as Match and
+Keep in the first place. A separate mode would have had to duplicate the
+seeding, the ?-roll, the throwaway selection and the identity join to reach the
+same point.
+
+**The three streams**, each read from the Java:
+
+| Stream | What moves it | Where it is compared |
+|---|---|---|
+| `cardRng` | the three `AbstractDungeon.getCard(rarity)` pool draws (`:67-69`) and **both** `returnRandomCurse` calls (`:70-71`) — **+5** | §4's whole-`RunState` diff, once the sim is post-deal |
+| `miscRng` | the board shuffle's one `randomLong` (`:58`) — **+1** | explicitly: it lives in `CombatState`, which `diff_run_states` does not reach |
+| `shuffleRng` | `returnColorlessCard`'s `randomLong` (`AbstractDungeon.java:1101`) — **+0 here** | explicitly, and it is not a dead check — see below |
+
+`shuffleRng` is untouched because these captures are **A20** and
+`initializeCards` branches on `ascensionLevel >= 15` (`:66-71`), drawing a
+second curse instead of a colorless uncommon. The `< 15` branch — the only one
+that spends `shuffleRng`, and the only one that reaches
+`draw_colorless_uncommon` — is therefore **not oracle-proved** and stays on its
+tier-2 test. What the untouched stream *does* prove is the seeding: the five
+floor streams are derived by the read-out as `floor_stream(seed, floor)` rather
+than copied from the capture, so an unmoved `shuffleRng` that matches the
+capture is that formula checked against the live game.
+
+**What the capture actually exposes, and what it does not.** The artifact never
+dumps `cards.group`. It dumps the fork's event option list, and three things
+happen to it on the way out (`ChoiceScreenUtils.getEventScreenChoices`,
+`patches/GremlinMatchGamePatch.java`):
+
+1. **Cards are keyed by SCREEN POSITION, not by board slot.**
+   `InitializeCardsPatch` stores `(i%4) + 4*(i%3)` per card — `placeCards`' own
+   layout arithmetic (`:280-281`) read as a 4-wide grid index — which for
+   `i = 0..11` is `[0, 5, 10, 3, 4, 9, 2, 7, 8, 1, 6, 11]`. A `card7` label
+   names `cards.group[10]`, not slot 7. Six of the twelve slots move, so a
+   read-out that skipped the hop would agree with the capture on the other six
+   and look half-right.
+2. **The list is compacted.** `getOrderedCards()` sorts by that position and
+   keeps only cards still on the board **and** still face down, so the first
+   pick of an attempt and both cards of a matched pair drop out of it. A
+   `choose N` indexes *that* list, not the board.
+3. **A revealed card carries its identity but no position.** `revealedCards` is
+   permanent, so a mismatched pair keeps showing its `cardID` after flipping
+   back down — and a **matched** pair never shows its name at all, because it
+   leaves `cards.group` in the same frame it is revealed (`:221-222`).
+
+The decode recovers the positions exactly anyway, because the list is sorted:
+entry *j* is the *j*-th smallest still-offered position, and every hidden entry
+re-states its own position in its label — so the reconstruction is **checked at
+every entry of every record** rather than assumed. It fails loud on the first
+disagreement. Note the consequence for reading an artifact by hand: the *first*
+grid record is the least informative one (all twelve face down, no names), and
+identities accumulate as the walk proceeds.
+
+**What is therefore compared, stated precisely.** Not "twelve cards":
+
+- every screen position the capture ever names, **position for position** — 2 to
+  7 per sighting, **30 across the six**;
+- every attempt as a **pair predicate** (`board[a] == board[b]` iff the capture
+  matched) — **30 of 30**, which reaches positions the capture never names: the
+  True Grit pair STS00212's first attempt took is pinned this way plus the deck
+  delta, never by a label;
+- the **multiset of cards the run kept**, which is the only witness for a
+  matched pair's identity and the only thing that can settle the **fifth**
+  attempt's outcome — no grid record follows it, the next screen is `Leave`;
+- a **ten-round walk** per sighting driven through the engine's own
+  `match_menu` / `match_choose`, whose still-face-down set must equal the next
+  captured record's offered set — **60 rounds, all clean**. That re-derives the
+  same facts through the state machine rather than through the board array, so
+  a right board with wrong flip/remove bookkeeping is still caught.
+
+Positions never flipped and never matched are constrained by the pairing
+invariant alone, and the read-out counts them as neither.
+
+Each of the six boards is structurally exactly what `initializeCards` produces —
+six identities, each dealt twice, being one RARE, one UNCOMMON, one COMMON, two
+curses and Bash. STS00212's, by screen position:
+
+```
+0:Decay | 1:Decay | 2:Shame | 3:Bash | 4:Fire Breathing | 5:Fire Breathing
+6:Berserk | 7:Shame | 8:Bash | 9:True Grit | 10:True Grit | 11:Berserk
+```
+
+Berserk RARE, Fire Breathing UNCOMMON, True Grit COMMON, Decay + Shame the two
+curses, Bash from `Ironclad.getStartCardForEvent`. That is corroboration, not a
+compared field — the read-out asserts no rarities.
+
+This campaign also carries the first captured **Mushrooms** (STS00711 floor 8)
+and **The Woman in Blue** (STS00212 floor 10), both listed as unseen in §8b's
+pool table; all thirteen of its sightings are zero-diff.
+
+### 8d. Frozen in tests
 
 The two shape decisions both modes depend on are
 `tests/replay_readout_shapes_test.cpp` (`SapphireKeyRow.*`,
@@ -319,3 +458,18 @@ The two shape decisions both modes depend on are
 on-the-wrong-screen, both legitimate absences, the claim mapping in both
 directions, and the fail-loud join. They run in every preset and need no
 artifact.
+
+The board alignment §8c depends on is `tests/replay_mk_board_test.cpp`
+(`MatchBoardPositions.*`, `MatchBoardDecode.*`, `MatchDealCompare.*`), against
+`tools/oracle_bridge/replay/src/mk_board.hpp`. It exists for the same reason:
+every failure mode there is one that produces a **clean-looking** deal line
+rather than an error. It pins the permutation against the fork patch's own
+table and both directions of its inverse; the decode against the real STS00212
+walk (revealed positions, attempt outcomes, offered sets) and against a
+mislabelled position, a wrong-sized record, an out-of-range `choose`, an
+identity that changes, an unclassifiable attempt and an unexplainable deck
+delta; and the comparison against a swapped pair of named positions, a broken
+pair predicate at positions the capture never named, a board that lost the
+pairing invariant, and — the concrete regression the header exists for — the
+**identity mapping**, i.e. comparing screen positions against board slots with
+no permutation at all.

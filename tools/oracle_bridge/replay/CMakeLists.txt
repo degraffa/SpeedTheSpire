@@ -33,9 +33,20 @@ target_include_directories(replay_readout_shapes INTERFACE
 target_link_libraries(replay_readout_shapes INTERFACE sts_engine)
 target_link_libraries(replay_command_map INTERFACE replay_readout_shapes)
 
+# The Match and Keep! board decode (src/mk_board.hpp): the capture's option
+# labels -> screen positions -> the simulator's board slots, and the comparison
+# over them. Its own INTERFACE target for the same reason as the two above -- it
+# is where a read-out can align the twelve slots WRONG and then report a clean
+# deal that compared nothing. `replay_mk_board_test` exercises the permutation,
+# the decode and the comparison with no artifact, no JSON and (deliberately) no
+# engine dependency: everything in the header is plain data and plain strings.
+add_library(replay_mk_board INTERFACE)
+target_include_directories(replay_mk_board INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+
 add_executable(replay_run_diff src/main.cpp)
 target_link_libraries(replay_run_diff
-    PRIVATE oracle_translator nlohmann_json replay_command_map)
+    PRIVATE oracle_translator nlohmann_json replay_command_map replay_mk_board)
 add_dependencies(replay_run_diff registry_gen_headers)
 sts_set_warnings(replay_run_diff)
 sts_enable_sanitizers(replay_run_diff)

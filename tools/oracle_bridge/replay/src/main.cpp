@@ -106,6 +106,7 @@
 #include "sts/engine/neow.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_state.hpp"
+#include "sts/engine/rng_stream.hpp"
 #include "sts/engine/shop.hpp"
 #include "sts/engine/treasure_rooms.hpp"
 #include "sts/engine/types.hpp"
@@ -113,6 +114,7 @@
 #include "sts/translate/translate.hpp"
 
 #include "command_map.hpp"
+#include "mk_board.hpp"
 
 namespace {
 
@@ -1928,6 +1930,124 @@ struct TreasureVerdict {
     return true;
 }
 
+// --- the constructor deal (Match and Keep!) ----------------------------------
+//
+// MOST event bodies spend nothing until the player presses a button, so the
+// capture's first in-room record and a sim that has only just SELECTED the
+// event agree field for field. Match and Keep does not: its whole twelve-card
+// board is dealt in the CONSTRUCTOR (GremlinMatchGame.java:55-61), which the
+// game runs at `EventRoom.onPlayerEntry`, before any dialog is shown. By the
+// time CommunicationMod dumps the "Continue" page, three streams have already
+// moved, and the arrival diff in step 4 was therefore comparing a POST-deal
+// capture against a PRE-deal sim -- reporting all six captured sightings as
+// `cardRng +5` divergences that were nothing of the kind.
+//
+// This is a defect in what `--event` models, not a missing mode: the deal
+// happens at arrival, which is exactly the moment this mode already owns, and
+// steps 0-3 (the node symbol, the ?-roll, the throwaway selection and the
+// identity join) are what tell us the sighting IS Match and Keep in the first
+// place. So the fix is to run the body's own `on_enter` -- the same entry point
+// the run layer uses -- before the arrival diff, and then to compare what the
+// deal produced.
+//
+// THE THREE STREAMS, each read from the Java rather than assumed:
+//   cardRng    the three `AbstractDungeon.getCard(rarity)` pool draws (:67-69 /
+//              :73-75; one `cardRng.random(size-1)` each via
+//              CardGroup.getRandomCard, CardGroup.java:502-506) and EVERY
+//              `returnRandomCurse` (:70-71 / :77; CardLibrary.getCurse,
+//              CardLibrary.java:1022-1029). Lives in RunState, so step 4's
+//              whole-RunState diff compares it once `rs` is post-deal.
+//   shuffleRng `returnColorlessCard(UNCOMMON)`'s one `randomLong`
+//              (AbstractDungeon.java:1101). ONLY on the `ascensionLevel < 15`
+//              branch (:72-78) -- at A20 the ascension branch (:66-71) draws a
+//              SECOND curse instead and shuffleRng is never touched, which is
+//              why every capture here shows it at counter 0. That untouched
+//              state is not a dead check: it is the floor-stream seed itself,
+//              so comparing it proves `floor_stream(seed, floor)` below.
+//   miscRng    the board shuffle's one `randomLong` (:58).
+// Both floor streams live in CombatState, which `diff_run_states` does not
+// reach, so they are compared explicitly here.
+//
+// SEEDING THE FLOOR STREAMS. The capture's own arrival record carries them, but
+// using it would make the read-out assume the answer. They are derived instead:
+// all five floor-scoped streams are reseeded to `floor_stream(seed, floor)` on
+// entering a floor (design §3.4, AbstractDungeon.java:1747-1751; the engine's
+// own `reseed_floor_streams`), so the sim computes them and the capture checks
+// them.
+[[nodiscard]] bool event_deals_at_construction(uint16_t sim_id) noexcept {
+    // The only Act-1 body that spends a stream in its constructor. Everything
+    // else in the shrine / event / special lists builds its dialog and waits.
+    return sim_id == static_cast<uint16_t>(sts::registry::EventId::MATCH_AND_KEEP);
+}
+
+[[nodiscard]] bool same_stream(const RngStream& a, const RngStream& b) noexcept {
+    return a.s0 == b.s0 && a.s1 == b.s1 && a.counter == b.counter;
+}
+
+[[nodiscard]] std::string stream_text(const RngStream& s) {
+    std::ostringstream o;
+    o << "counter=" << s.counter << " s0=" << static_cast<int64_t>(s.s0)
+      << " s1=" << static_cast<int64_t>(s.s1);
+    return o.str();
+}
+
+// The `N` of a `choose N` command, or -1.
+[[nodiscard]] int choose_index(const std::string& cmd) {
+    const std::vector<std::string> p = split_ws(cmd);
+    if (p.size() < 2 || p[0] != "choose") return -1;
+    try {
+        return std::stoi(p[1]);
+    } catch (const std::exception&) {
+        return -1;
+    }
+}
+
+// The multiset of (card_id, upgrade) `after` holds that `before` does not.
+// A multiset difference rather than a tail slice: nothing in this interaction
+// removes a card, but a read-out that assumed append-only would silently
+// mis-report the day something does.
+[[nodiscard]] std::vector<std::pair<uint16_t, uint8_t>> deck_gain(
+    const RunState& before, const RunState& after) {
+    std::vector<std::pair<uint16_t, uint8_t>> pool;
+    for (uint16_t i = 0; i < before.master_deck_count; ++i)
+        pool.emplace_back(before.master_deck[i].card_id, before.master_deck[i].upgrade);
+    std::vector<std::pair<uint16_t, uint8_t>> gained;
+    for (uint16_t i = 0; i < after.master_deck_count; ++i) {
+        const std::pair<uint16_t, uint8_t> c{after.master_deck[i].card_id,
+                                             after.master_deck[i].upgrade};
+        const auto it = std::find(pool.begin(), pool.end(), c);
+        if (it != pool.end()) pool.erase(it);
+        else gained.push_back(c);
+    }
+    std::sort(gained.begin(), gained.end());
+    return gained;
+}
+
+[[nodiscard]] std::string deck_gain_text(
+    const std::vector<std::pair<uint16_t, uint8_t>>& g) {
+    if (g.empty()) return "nothing";
+    std::string s;
+    for (const auto& c : g) {
+        if (!s.empty()) s += ", ";
+        s += sts::registry::card_game_id(static_cast<sts::registry::CardId>(c.first));
+        if (c.second != 0) s += "+" + std::to_string(c.second);
+    }
+    return s;
+}
+
+// What the deal read-out found, per sighting.
+struct MatchDealReport {
+    bool ran = false;       // the sighting was a Match and Keep with a grid walk
+    bool ok = false;
+    int identity_checks = 0;
+    int pair_checks = 0;
+    int rounds_compared = 0;  // grid records whose offered set matched the sim's
+    int obtained = 0;         // cards the capture's deck gained
+    std::string kept;         // those cards, named
+    std::vector<std::string> problems;
+    std::array<std::string, kMatchBoardSlots> sim_board{};  // by screen position
+};
+
 struct EventSighting {
     std::string seed;
     int floor = 0;
@@ -1936,6 +2056,7 @@ struct EventSighting {
     uint16_t sim_id = 0;
     bool clean = false;
     bool obtain_race = false;
+    bool deal_ok = false;
     std::string problem;
 };
 
@@ -1946,8 +2067,180 @@ struct EventVerdict {
     int failures = 0;
     int options_checked = 0;
     int options_matched = 0;
+    int deals_checked = 0;
+    int deals_clean = 0;
+    int deal_identity_checks = 0;
+    int deal_pair_checks = 0;
+    int deal_rounds = 0;
     std::vector<EventSighting> rows;
 };
+
+// Drive the simulator's Match and Keep from the board it just dealt through the
+// capture's own picks, and compare at every step.
+//
+// WHAT EACH PIECE IS WORTH, so a clean line is not read as more than it is:
+//   - the BOARD comparison (`compare_match_deal`) is the acceptance. It pins
+//     every screen position the capture ever named, position for position, and
+//     every attempt's match/miss as a predicate over two positions -- which
+//     reaches positions the capture never named.
+//   - the ROUND walk is corroboration: after each pick the simulator's own
+//     still-face-down-and-on-board set must be the set the next captured record
+//     offered. It re-derives the same facts through the ENGINE's state machine
+//     (`match_menu` / `match_choose`) instead of through the board array, so a
+//     board that is right while the flip/remove bookkeeping is wrong is caught.
+//   - the OBTAINED multiset closes the loop on the identities the capture never
+//     labelled at all: a matched pair leaves `cards.group` before it can be
+//     named on screen (GremlinMatchGame.java:221-222), and the only witness is
+//     the card `ShowCardAndObtainEffect` put in the master deck (:224).
+//
+// INDEX SPACES. Three of them meet here and none of them is the same:
+//   capture `choose N` -> N indexes the COMPACTED, position-sorted offered list
+//   screen position    -> what a `cardN` label names
+//   board slot         -> `cards.group` index, which is what the sim's
+//                         `EventDialogState.board[]` and `match_choose` take
+// `mk_board.hpp` owns the position<->slot permutation; `MatchBoardObservation`
+// owns the compaction. Nothing here re-derives either.
+[[nodiscard]] MatchDealReport read_out_match_deal(
+    const sts::translate::TranslatedRun& run, const std::vector<ScreenInfo>& screens,
+    std::size_t arrival, int floor, const EventDialogImpl& impl,
+    const RunController& dealt) {
+    MatchDealReport r;
+
+    for (int p = 0; p < kMatchBoardSlots; ++p)
+        r.sim_board[static_cast<std::size_t>(p)] =
+            sts::registry::card_game_id(static_cast<sts::registry::CardId>(
+                dealt.event.board[match_group_index(p)].card_id));
+
+    // The room's records, and the screen sequence the Java guarantees:
+    // INTRO (one button) -> RULE_EXPLANATION (one button) -> PLAY x10 (the
+    // twelve-slot grid, five attempts of two picks) -> COMPLETE (one button)
+    // (GremlinMatchGame.buttonEffect :246-276, updateMatchGameLogic :179-244).
+    //
+    // `room_type` alone OVER-COLLECTS: `AbstractEvent.openMap` leaves the
+    // room's dialog mounted behind a dismissable map -- the same bounce
+    // `map_command` elides for every event -- so the record after the COMPLETE
+    // page is a MAP screen still reported as `EventRoom` on the same floor.
+    // Only the EVENT screens are this event's pages.
+    std::vector<std::size_t> in_room;
+    for (std::size_t j = arrival; j < screens.size(); ++j) {
+        if (screens[j].floor != floor || screens[j].room_type != "EventRoom") break;
+        if (screens[j].screen_type != "EVENT") break;
+        in_room.push_back(j);
+    }
+    if (in_room.size() < 4) {
+        r.problems.push_back("the capture holds only " + std::to_string(in_room.size()) +
+                             " in-room record(s); a played Match and Keep has an "
+                             "INTRO page, a RULE_EXPLANATION page, ten grid picks "
+                             "and a COMPLETE page");
+        return r;
+    }
+    const std::size_t last = in_room.size() - 1;
+    for (std::size_t t : {std::size_t{0}, std::size_t{1}, last}) {
+        if (screens[in_room[t]].option_labels.size() != 1) {
+            r.problems.push_back(
+                "in-room record " + std::to_string(t) + " offers " +
+                std::to_string(screens[in_room[t]].option_labels.size()) +
+                " button(s); the INTRO, RULE_EXPLANATION and COMPLETE pages each "
+                "offer exactly one");
+            return r;
+        }
+    }
+
+    std::vector<MatchGridRecord> grids;
+    for (std::size_t t = 2; t < last; ++t) {
+        const ScreenInfo& s = screens[in_room[t]];
+        if (s.option_labels.size() < 3) {
+            r.problems.push_back("in-room record " + std::to_string(t) + " offers " +
+                                 std::to_string(s.option_labels.size()) +
+                                 " option(s); a PLAY grid always offers at least "
+                                 "three (twelve slots, at most four pairs gone and "
+                                 "one face up)");
+            return r;
+        }
+        MatchGridRecord g;
+        g.labels = s.option_labels;
+        g.choice = choose_index(run.records[in_room[t]].action_command);
+        grids.push_back(std::move(g));
+    }
+    r.ran = true;
+
+    // The deck delta, read one record PAST the room where possible: the last
+    // match's `ShowCardAndObtainEffect` is an animation, so a dump taken while
+    // it is still running is a card short (the same obtain race step 4 already
+    // recognizes). Both readings agree on every capture in the corpus; taking
+    // the later one is what makes that a property rather than luck.
+    const std::size_t after_room =
+        (in_room.back() + 1 < run.records.size()) ? in_room.back() + 1 : in_room.back();
+    const std::vector<std::pair<uint16_t, uint8_t>> capture_gain =
+        deck_gain(run.records[arrival].run, run.records[after_room].run);
+    r.obtained = static_cast<int>(capture_gain.size());
+    r.kept = deck_gain_text(capture_gain);
+
+    const MatchBoardObservation obs = decode_match_grid(grids, r.obtained);
+    const MatchDealDiff diff = compare_match_deal(obs, r.sim_board);
+    r.identity_checks = diff.identity_checks;
+    r.pair_checks = diff.pair_checks;
+    for (const std::string& p : diff.problems) r.problems.push_back(p);
+    if (!obs.ok) return r;
+
+    // The walk. `dealt` is parked on the INTRO page with the board already
+    // dealt, so the two dialog pages come first and then the ten picks.
+    RunController w = dealt;
+    (void)impl.choose(w, w.event, 0);  // INTRO -> RULE_EXPLANATION
+    (void)impl.choose(w, w.event, 0);  // RULE_EXPLANATION -> PLAY (placeCards)
+    for (std::size_t g = 0; g < grids.size(); ++g) {
+        EventDialogMenu menu{};
+        impl.build_menu(w, w.event, menu);
+        std::vector<int> sim_offered;
+        for (int i = 0; i < static_cast<int>(menu.count); ++i)
+            if (menu.enabled[static_cast<std::size_t>(i)])
+                sim_offered.push_back(match_screen_position(i));
+        std::sort(sim_offered.begin(), sim_offered.end());
+        if (sim_offered != obs.offered[g]) {
+            std::string want;
+            for (int p : obs.offered[g]) want += (want.empty() ? "" : ",") + std::to_string(p);
+            std::string got;
+            for (int p : sim_offered) got += (got.empty() ? "" : ",") + std::to_string(p);
+            r.problems.push_back("grid record " + std::to_string(g) +
+                                 ": the capture offers screen positions [" + want +
+                                 "], the sim offers [" + got + "]");
+            break;
+        }
+        ++r.rounds_compared;
+        const int pos = obs.offered[g][static_cast<std::size_t>(grids[g].choice)];
+        (void)impl.choose(w, w.event,
+                             static_cast<uint8_t>(match_group_index(pos)));
+    }
+
+    // The COMPLETE page. The capture reached it after exactly five resolved
+    // attempts (`attemptCount` starts at 5 and drops on every resolved pair,
+    // match or miss, GremlinMatchGame.java:235-239), so the sim must be off the
+    // grid and on a one-button page here -- and pressing it must END the event.
+    if (r.rounds_compared == static_cast<int>(grids.size())) {
+        EventDialogMenu done{};
+        impl.build_menu(w, w.event, done);
+        if (done.count != 1)
+            r.problems.push_back(
+                "after the capture's ten picks the sim still offers " +
+                std::to_string(done.count) +
+                " option(s); five resolved attempts end the game "
+                "(GremlinMatchGame.java:235-239)");
+        else if (impl.choose(w, w.event, 0) != EventDialogStatus::FINISHED)
+            r.problems.push_back(
+                "the sim's COMPLETE page did not finish the event on its one "
+                "button, but the capture left the room here");
+    }
+
+    const std::vector<std::pair<uint16_t, uint8_t>> sim_gain =
+        deck_gain(dealt.run, w.run);
+    if (sim_gain != capture_gain)
+        r.problems.push_back("the run's deck gained {" + deck_gain_text(capture_gain) +
+                             "} in the capture and {" + deck_gain_text(sim_gain) +
+                             "} in the sim");
+
+    r.ok = r.problems.empty();
+    return r;
+}
 
 [[nodiscard]] EventVerdict event_spot_diff_one(const std::string& path,
                                                const Options& opts) {
@@ -2037,6 +2330,46 @@ struct EventVerdict {
                 " (EventId " + std::to_string(sim_id) + ")");
         }
 
+        // 3b. THE CONSTRUCTOR DEAL, before the arrival diff, because the
+        //     capture's arrival record is already POST-deal. See
+        //     `event_deals_at_construction` for the three streams and why the
+        //     floor streams are derived rather than copied from the capture.
+        const EventDialogImpl* impl =
+            (sim_id != 0) ? event_dialog_impl(sim_id) : nullptr;
+        RunController rc{};
+        bool dealt = false;
+        if (fail.empty() && impl != nullptr && event_deals_at_construction(sim_id)) {
+            rc.run = rs;
+            const RngStream fresh =
+                floor_stream(rs.run_seed, static_cast<int32_t>(rs.floor));
+            rc.combat.monster_hp_rng = fresh;
+            rc.combat.ai_rng = fresh;
+            rc.combat.shuffle_rng = fresh;
+            rc.combat.card_random_rng = fresh;
+            rc.combat.misc_rng = fresh;
+            rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
+            rc.room_type = static_cast<uint8_t>(RoomType::Event);
+            rc.event = EventDialogState{};
+            rc.event.event_id = sim_id;
+            impl->on_enter(rc, rc.event);
+            dealt = true;
+            rs = rc.run;  // so the arrival diff below sees a post-deal cardRng
+
+            const CombatState& cap = run.records[k].combat;
+            if (!same_stream(rc.combat.misc_rng, cap.misc_rng))
+                fail.push_back("miscRng after the board shuffle: capture " +
+                               stream_text(cap.misc_rng) + ", sim " +
+                               stream_text(rc.combat.misc_rng) +
+                               " (GremlinMatchGame.java:58)");
+            if (!same_stream(rc.combat.shuffle_rng, cap.shuffle_rng))
+                fail.push_back("shuffleRng after the deal: capture " +
+                               stream_text(cap.shuffle_rng) + ", sim " +
+                               stream_text(rc.combat.shuffle_rng) +
+                               " (returnColorlessCard, AbstractDungeon.java:1101 -- "
+                               "untouched at ascension >= 15, so this is also the "
+                               "floor_stream(seed, floor) seed)");
+        }
+
         // 4. The whole arrival state -- eventRng, pity, the three membership
         //    bitsets, event_flags, gold, relic counters.
         RunState e = run.records[k].run;
@@ -2061,9 +2394,12 @@ struct EventVerdict {
         }
 
         // 5. ADVISORY: the entry page's option count, when the sim has a body.
-        if (fail.empty() && sim_id != 0) {
-            if (const EventDialogImpl* impl = event_dialog_impl(sim_id)) {
-                RunController rc{};
+        //    A body that already dealt at 3b keeps THAT controller -- running
+        //    `on_enter` a second time would deal a second board off an
+        //    already-advanced cardRng.
+        if (fail.empty() && impl != nullptr) {
+            if (!dealt) {
+                rc = RunController{};
                 rc.run = rs;
                 rc.combat = run.records[k].combat;
                 rc.phase = static_cast<uint8_t>(RunPhase::EVENT_DIALOG);
@@ -2071,18 +2407,54 @@ struct EventVerdict {
                 rc.event = EventDialogState{};
                 rc.event.event_id = sim_id;
                 impl->on_enter(rc, rc.event);
-                EventDialogMenu menu{};
-                impl->build_menu(rc, rc.event, menu);
-                ++v.options_checked;
-                const std::size_t game = screens[k].option_labels.size();
-                if (menu.count == game) {
-                    ++v.options_matched;
-                } else {
-                    std::printf("  OPTIONS  ADV  %s floor=%d %s: capture shows %zu "
-                                "button(s), sim's entry menu has %u\n",
-                                run.seed_string.c_str(), row.floor,
-                                row.capture_id.c_str(), game, menu.count);
-                }
+            }
+            EventDialogMenu menu{};
+            impl->build_menu(rc, rc.event, menu);
+            ++v.options_checked;
+            const std::size_t game = screens[k].option_labels.size();
+            if (menu.count == game) {
+                ++v.options_matched;
+            } else {
+                std::printf("  OPTIONS  ADV  %s floor=%d %s: capture shows %zu "
+                            "button(s), sim's entry menu has %u\n",
+                            run.seed_string.c_str(), row.floor,
+                            row.capture_id.c_str(), game, menu.count);
+            }
+        }
+
+        // 6. THE DEAL READ-OUT: the twelve dealt identities against the board
+        //    the capture progressively exposes, the five attempts' outcomes, and
+        //    the cards the run actually kept. Unlike the option count above this
+        //    is NOT advisory -- the deal is what B4.13's spot-check is for.
+        if (fail.empty() && dealt) {
+            const MatchDealReport deal =
+                read_out_match_deal(run, screens, k, row.floor, *impl, rc);
+            if (deal.ran) {
+                ++v.deals_checked;
+                v.deal_identity_checks += deal.identity_checks;
+                v.deal_pair_checks += deal.pair_checks;
+                v.deal_rounds += deal.rounds_compared;
+            }
+            if (deal.ok) {
+                ++v.deals_clean;
+                row.deal_ok = true;
+                std::printf("  DEAL     OK   %s floor=%d: %d/12 screen position(s) "
+                            "named by the capture and identical, %d attempt "
+                            "outcome(s) reproduced, %d grid round(s) walked, kept "
+                            "{%s}\n",
+                            run.seed_string.c_str(), row.floor, deal.identity_checks,
+                            deal.pair_checks, deal.rounds_compared,
+                            deal.kept.c_str());
+            } else {
+                for (const std::string& p : deal.problems)
+                    fail.push_back("Match and Keep deal: " + p);
+            }
+            if (deal.ok && opts.verbose) {
+                std::string b;
+                for (int p = 0; p < kMatchBoardSlots; ++p)
+                    b += (p == 0 ? "" : " | ") + std::to_string(p) + ":" +
+                         deal.sim_board[static_cast<std::size_t>(p)];
+                std::printf("           board by screen position: %s\n", b.c_str());
             }
         }
 
@@ -2142,7 +2514,11 @@ int main(int argc, char** argv) {
                      "post-choice)\n"
                      "  --shop:     merchant spot-diff (stock, prices, sale slot, purchases)\n"
                      "  --treasure: chest spot-diff (size, rewards, streams, the claim walk)\n"
-                     "  --event:    ?-room spot-diff (roll, selection, pools, arrival state)\n"
+                     "  --event:    ?-room spot-diff (roll, selection, pools, arrival "
+                     "state, and\n"
+                     "              a constructor-dealing body's board -- Match and "
+                     "Keep's twelve\n"
+                     "              cards; --verbose prints the dealt board)\n"
                      "  the mode flags are mutually exclusive\n");
         return 2;
     }
@@ -2190,6 +2566,11 @@ int main(int argc, char** argv) {
                 total.failures += v.failures;
                 total.options_checked += v.options_checked;
                 total.options_matched += v.options_matched;
+                total.deals_checked += v.deals_checked;
+                total.deals_clean += v.deals_clean;
+                total.deal_identity_checks += v.deal_identity_checks;
+                total.deal_pair_checks += v.deal_pair_checks;
+                total.deal_rounds += v.deal_rounds;
                 for (const EventSighting& r : v.rows) total.rows.push_back(r);
                 if (v.failures != 0) ++failures;
             } catch (const std::exception& e) {
@@ -2202,9 +2583,11 @@ int main(int argc, char** argv) {
         std::printf("%-10s %5s  %-24s %-22s %-8s %s\n", "seed", "floor", "event_id",
                     "event_name", "EventId", "verdict");
         for (const EventSighting& r : total.rows) {
-            const char* verdict = r.clean ? (r.obtain_race ? "zero-diff (obtain race)"
-                                                           : "zero-diff")
-                                          : "DIFF";
+            const char* verdict =
+                r.clean ? (r.obtain_race ? "zero-diff (obtain race)"
+                                         : (r.deal_ok ? "zero-diff (DEAL OK)"
+                                                      : "zero-diff"))
+                        : "DIFF";
             std::printf("%-10s %5d  %-24s %-22s %-8u %s%s%s\n", r.seed.c_str(), r.floor,
                         r.capture_id.c_str(), r.capture_name.c_str(), r.sim_id,
                         verdict, r.clean ? "" : ": ",
@@ -2215,6 +2598,13 @@ int main(int argc, char** argv) {
                     "matched %d of %d advisory check(s) ---\n",
                     files.size(), total.sightings, total.clean, total.races,
                     total.failures, total.options_matched, total.options_checked);
+        if (total.deals_checked != 0)
+            std::printf("--- constructor deals: %d read out, %d zero-diff; %d screen "
+                        "position(s) named by a capture and compared, %d attempt "
+                        "outcome(s) reproduced, %d grid round(s) walked ---\n",
+                        total.deals_checked, total.deals_clean,
+                        total.deal_identity_checks, total.deal_pair_checks,
+                        total.deal_rounds);
         return failures;
     }
 
