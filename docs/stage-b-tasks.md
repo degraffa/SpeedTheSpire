@@ -101,6 +101,8 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 | Preserved Insect (elite-room HP scaling) | B3.24 | UNASSIGNED | elite rooms exist since B4.4; no discharge recorded |
 | Fire Potion `applyEnemyPowersOnly` / THORNS typing | B3.23, B3.2 | UNASSIGNED | B3.2's DAMAGE damage-TYPE item was discharged by the potion-support-powers follow-up; B3.23 records this piece as "its own item" |
 | Snecko Oil cost-randomization potion body | B3.23 | UNASSIGNED | the "cost randomization" verb has no owner |
+| `--replay` lacks `--event`'s obtain-race recognition | replay-neow-exit's read-out | UNASSIGNED — next replay-fidelity owner | `--event` recognises the `ShowCardAndObtainEffect` mid-animation dump narrowly (`is_obtain_race`, `main.cpp`) and reports `RACE`; the whole-run differ does not, so such a capture record reads as a real deck divergence under `--replay`. Not hit by the current corpus after the Match-and-Keep pick-index fix, but the asymmetry between the two modes is real |
+| STS00509 seq-135 Louse-turn 5-HP residual | fix-starter-upgrades' frontier re-sweep | UNASSIGNED — engine owner | `g6_campaign_20260728T053354Z_claude01/run_STS00509`, floor 11 triple-Louse fight: after the starter-upgrade fix moved the frontier 126→135, the capture's two live Defensive Lice deal 15 through 10 block while the sim's deal ≤10 (`hp: 50→55`, capture lower, persisting to terminal). Previously masked by the class-(a) frontier; matches no documented shape (not a potion/Wheel/Neow/stolen-gold/Match-and-Keep footprint). Suspect area: the Louse bite-damage roll or its A17+ modifier — re-derive from `LouseDefensive.java`/`LouseNormal.java` before touching anything |
 | Distilled Chaos potion body | registry deferral, surfaced by the G6 campaign audit | UNASSIGNED | deferred native in `registry/potions.yaml` (id 26): "play the top `potency` cards of the draw pile → recursive play (a later opcode, cf. B3.2 Double Tap deferral)". It was on NO obligation row until 2026-07-28 — invisible during execution per conventions §5, which is exactly what this table exists to prevent. `potion_use_implemented` keeps it off the legal-action mask (fail-loud), so it cannot silently burn a slot |
 | Fairy in a Bottle out-of-combat revive | B3.23 | UNASSIGNED | flagged native at B3.23, no owner named |
 | Translator: power `misc` fields other than player-owned Combust | B3.7 | UNASSIGNED | the fix-forward mapped only Combust `hpLoss`; every other power `misc` stays deferred |
@@ -447,6 +449,66 @@ twenty: none is BASIC or POWER-type, so the gate is unaffected.)
   the APPENDING `addToTop` (`:1203-1210`), so it is plain library order, and
   the draw now reads `kColorlessPool` (the `src*` twin) BACKWARDS. Membership
   unchanged; Match and Keep is the only consumer.
+
+- **G6 replay-harness class (b) gaps** `[x]` — branch `replay-neow-exit`
+  (badc58f). Closed the five class-(b) findings the G6 campaign filed against
+  `tools/oracle_bridge/replay/` (`g6_campaign_spotdiff.md` §8.2/§8.3/§8.4/
+  §8.7/§8.8-STOLEN_GOLD); §8.4 proved to be TWO distinct index-space gaps
+  (disabled event buttons occupy `options[]` ordinals but not `choice_list`;
+  Match-and-Keep picks index screen positions, not board slots), so six fixes
+  landed, each with a RED-first test. Highlights: Neow's potion-reward
+  `proceed` maps to two `kChooseProceed`s (one game frame crosses
+  ITEM_REWARD→DONE→MAP, RNG-free, both captures confirm); the Match-and-Keep
+  board invariant now admits the LEGAL double-curse quadruple
+  (`GremlinMatchGame.java:70-71` draws `returnRandomCurse()` twice with no
+  dedup) while two quadruples stay impossible; a grid stop can no longer
+  blame the starting Burning Blood (the deferral claim is made only for the
+  five whole-deferred boss bodies); and the reward mode seeds a Looter's
+  stolen-gold amount from the capture's own row — one number seeded, named
+  and counted separately in the output, everything else still proved. The
+  runbook's §8.3 frontier misattribution corrected in the same change
+  (conventions §4). Corpus sweeps byte-identical; g6 `--replay` 28→27 not
+  clean, `--event` 47/47 with 12/12 deals, reward mode 6→3 failing files.
+  STS01372's floor-7 `treasure_rng` residual stays unattributed in the
+  runbook (escaped-thief branch suspected, unconfirmed).
+
+- **The starter cards that never upgraded** `[x]` — branch
+  `fix-starter-upgrades` (fabb9d0). The G6 campaign's one live class-(a)
+  divergence: `cards.yaml` ids 1-5 carried no `upgraded:` block, so
+  `cards.hpp`'s fallback returned the BASE program for an upgraded instance —
+  Strike+ dealt 6 not 9 (`Strike_Red.java:57-62`), Defend+ blocked 5 not 8
+  (`Defend_Red.java:43-48`), Bash+ 8/2 not 10/3 (`Bash.java:54-60`), Shrug It
+  Off+ 8 not 11 (`ShrugItOff.java:43-48`), Pommel Strike+ 9/1 not 10/2
+  (`PommelStrike.java:44-52`). The justifying comment ("until CardDef gains
+  the upgrade dimension (a later task)") predated the dimension 106 of 126
+  rows already used — the conventions §8 stale-comment trap, third instance
+  this stage. Every upgrade taken in all 30 campaign runs landed on one of
+  the five. Fixed from the Java with RED-first `CardTableUpgraded.*` tests
+  (incl. the STS01068 arithmetic reproducer); three tests that PINNED the
+  wrong behavior fixed RED-first; and the class is closed structurally — the
+  generator now fails loud on any non-STATUS/CURSE row without `upgraded:`
+  (exemption set = `AbstractCard.canUpgrade`, `AbstractCard.java:672-680`;
+  STATUS/CURSE may still author one, as Burn does). Live A/B: STS02041
+  zero-diff to its documented stop; STS01068 → the documented Liquid
+  Memories frontier; **STS02002's unexplained 1-HP diff proved to be the
+  same bug via a third route** (Blessing of the Forge's in-combat Defend
+  upgrades — master deck stays base, which is why triage missed it) and is
+  now CLEAN to terminal. Zero class-(a) frontier rows remain; the one new
+  residue (STS00509) is filed above. Campaign re-run under a new id still
+  required before ticking the G6 leg.
+
+- **Capture-driver heartbeat hardening** `[x]` — branch `driver-heartbeat`
+  (32f4d7a, DRIVER_VERSION b1.4.7). The G6 campaign twice lost a seed
+  attempt to the orchestrator killing a HEALTHY game at exactly
+  `stall_timeout`: an unreadable heartbeat sample fell back to
+  `now - launch_started`, making the staleness guard compare the same
+  expression — one bad read looked like a stall since launch. The heartbeat
+  is now written atomically (temp+fsync+rename, mirroring
+  `campaign_progress.json`), and an unreadable sample only counts toward a
+  kill after 3 CONSECUTIVE bad polls (a readable sample resets the streak;
+  the true-stall path fires unchanged). RED-proven: the lone-bad-sample kill
+  reproduced verbatim against the old code. Full defect narrative in
+  `g6_campaign_spotdiff.md` §9/§13.
 
 - **The victory terminal and the shop that was never counted** `[x]` — branch
   `fix-postboss-shop` (6d7efc4 + 690585a). Two defects surfaced by a 300-seed
