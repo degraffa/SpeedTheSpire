@@ -7,6 +7,7 @@
 #include <cstdint>
 
 #include "relics/relic_pickup.hpp"    // gain_gold (Ectoplasm door)
+#include "sts/engine/card_pools.hpp"  // transform_card (the ONE transformCard list)
 #include "sts/engine/cards.hpp"       // card_def / CardType (isCursed)
 #include "sts/engine/relics.hpp"      // RelicId (Tiny Chest / Juzu Bracelet)
 #include "sts/engine/rng_stream.hpp"  // random() wrappers
@@ -452,34 +453,23 @@ bool event_grid_transform_card(RunState& rs, EventDialogState& es,
     }
     const CardId removed =
         static_cast<CardId>(rs.master_deck[deck_index].card_id);
-    const uint8_t color = sts::registry::event_transform_color(removed);
 
-    CardId candidates[kMasterDeckCap]{};
-    int count = 0;
-    auto append_pool = [&](const auto& pool) noexcept {
-        for (CardId id : pool) {
-            if (id != removed) {
-                candidates[count++] = id;
-            }
-        }
-    };
-    if (color == 1) {
-        append_pool(sts::registry::kEventTransformRedPool);
-    } else if (color == 2) {
-        append_pool(sts::registry::kEventTransformColorlessPool);
-    } else if (color == 3) {
-        append_pool(sts::registry::kEventTransformCursePool);
-    }
-    if (count == 0 || !remove_master_deck_card(rs, deck_index)) {
+    // LivingWall.update removes first, then transformCard(..., miscRng)
+    // (LivingWall.java:53-61); Transmorgrifier.buttonEffect is the same pair
+    // (Transmorgrifier.java:56-64). The list transformCard builds is
+    // `transform_card` (card_pools.hpp) -- THE one authority for
+    // AbstractDungeon.transformCard (:860-878) and its
+    // returnTrulyRandomCardFromAvailable list (:1016-1045), shared with Neow's
+    // grid. Only the stream differs: miscRng here, NeowEvent.rng there. This
+    // used to be a second, independent rendering over a separately emitted
+    // `kEventTransformRedPool`, and the two drifted -- that pool walked
+    // registry rows rather than commonCardPool ++ REVERSED srcUncommonCardPool
+    // ++ REVERSED srcRareCardPool, so STS00051's floor-2 Living Wall produced
+    // Iron Wave where the game produced Havoc. Do not re-introduce one.
+    if (!remove_master_deck_card(rs, deck_index)) {
         return false;
     }
-
-    // LivingWall.update removes first, then transformCard(..., miscRng);
-    // CardGroup.getRandomCard(Random) performs one inclusive random(count-1)
-    // draw even for a singleton pool (LivingWall.java:53-61;
-    // AbstractDungeon.java:860-877; CardGroup.java:498-500).
-    const CardId replacement =
-        candidates[random(misc_rng, count - 1)];
+    const CardId replacement = transform_card(misc_rng, removed);
     const bool obtained = add_card_to_master_deck(rs, replacement);
     close_event_grid(es);
     return obtained;

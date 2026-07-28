@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include "sts/engine/card_pools.hpp"
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_rewards.hpp"
 #include "sts/engine/event_framework.hpp"
@@ -164,6 +165,12 @@ TEST(LivingWall, ForgetGrowAndDisabledGrowUseArbitraryDeckGrid) {
     }
 }
 
+// The event grid reaches AbstractDungeon.transformCard just as Neow's grid
+// does, so the expectation is the SAME `transform_card` (card_pools.hpp) driven
+// off the SAME stream the event uses -- miscRng, not neowRng. What this pins is
+// the stream and the one-draw accounting; the LIST's order is pinned without a
+// seed by CardPoolLibraryOrder.TransformCardListIsCommonsThenBothSrcPoolsBackwards
+// and against the live game by LivingWallCapture.STS00051FloorTwoProducesHavoc.
 TEST(LivingWall, ChangeRemovesFirstDrawsOnceAndObtainsFromSameColorPool) {
     RunController rc = event_controller(EventId::LIVING_WALL);
     set_deck(rc.run, {{CardId::ANGER, 0}, {CardId::DEFEND, 0}});
@@ -171,15 +178,7 @@ TEST(LivingWall, ChangeRemovesFirstDrawsOnceAndObtainsFromSameColorPool) {
     const int gold = rc.run.gold;
     rc.combat.misc_rng = from_seed(4321);
     RngStream expected_rng = rc.combat.misc_rng;
-    std::array<CardId, sts::registry::kEventTransformRedPool.size() - 1>
-        filtered{};
-    std::copy_if(sts::registry::kEventTransformRedPool.begin(),
-                 sts::registry::kEventTransformRedPool.end(),
-                 filtered.begin(),
-                 [](CardId id) { return id != CardId::ANGER; });
-    const int pick = random(expected_rng,
-                            static_cast<int32_t>(filtered.size() - 1));
-    const CardId expected = filtered[static_cast<std::size_t>(pick)];
+    const CardId expected = transform_card(expected_rng, CardId::ANGER);
 
     choose(rc, 1);
     choose(rc, 0);
@@ -192,18 +191,70 @@ TEST(LivingWall, ChangeRemovesFirstDrawsOnceAndObtainsFromSameColorPool) {
     EXPECT_EQ(rc.run.gold, gold + 9);  // Ceramic Fish onObtainCard
 }
 
-TEST(LivingWall, GeneratedTransformPoolsExcludeBasicsAndSelfCompleteByColor) {
-    EXPECT_EQ(sts::registry::event_transform_color(CardId::STRIKE), 1);
-    EXPECT_EQ(sts::registry::event_transform_color(CardId::WOUND), 2);
-    EXPECT_EQ(sts::registry::event_transform_color(CardId::DOUBT), 3);
-    EXPECT_EQ(std::find(sts::registry::kEventTransformRedPool.begin(),
-                        sts::registry::kEventTransformRedPool.end(),
-                        CardId::STRIKE),
-              sts::registry::kEventTransformRedPool.end());
-    EXPECT_NE(std::find(sts::registry::kEventTransformColorlessPool.begin(),
-                        sts::registry::kEventTransformColorlessPool.end(),
-                        CardId::BLIND),
-              sts::registry::kEventTransformColorlessPool.end());
+// Which of the three lists a source card reaches is its own COLOUR, and the
+// generated pools still self-complete by it. There is no longer an
+// `event_transform_color` table to ask: transformCard branches on the card
+// itself (CURSE type, then colorless-pool membership, then the `default:` arm),
+// so the branch is observable only through the list it produces.
+TEST(LivingWall, TheTransformListFollowsTheSourceCardsOwnColour) {
+    CardId list[kTransformCardListCap]{};
+
+    // STRIKE is RED and BASIC: it takes the `default:` arm and is in none of
+    // the three reward pools, so nothing is excluded and the list is the whole
+    // RED concatenation.
+    const int red = transform_card_list(CardId::STRIKE, list);
+    EXPECT_EQ(red, kIroncladCommonPoolCount + kIroncladUncommonPoolCount +
+                       kIroncladRarePoolCount);
+    EXPECT_EQ(std::find(list, list + red, CardId::STRIKE), list + red);
+
+    // WOUND is a COLORLESS status: also not in its pool, so also nothing
+    // excluded -- but Blind, an ordinary colorless uncommon, is there.
+    const int colorless = transform_card_list(CardId::BLIND, list);
+    EXPECT_EQ(colorless, kColorlessPoolCount - 1);
+    EXPECT_EQ(std::find(list, list + colorless, CardId::BLIND),
+              list + colorless);
+
+    // A CURSE reaches CardLibrary.getCurse, minus its own id.
+    const int curse = transform_card_list(CardId::DOUBT, list);
+    EXPECT_EQ(curse, kPoolableCurseCount - 1);
+    EXPECT_EQ(std::find(list, list + curse, CardId::DOUBT), list + curse);
+    EXPECT_NE(std::find(list, list + curse, CardId::SHAME), list + curse);
+}
+
+// =============================================================================
+// Captured evidence -- the Living Wall transform the live game answered
+// =============================================================================
+
+// Run STS00051 of campaign `b45_rewards_oracle2_20260727T204809Z_claude01`,
+// floor 2: a Living Wall took the Change option and transformed the grid's
+// index 5, a Defend. The capture's own oracle block gives the whole vector, so
+// nothing here is re-derived from the simulator:
+//
+//   * `miscRng` before the pick (record seq 21):
+//     `{counter: 0, s0: 6415738780070550668, s1: 6791187303769805616}` -- the
+//     fresh `Random(Settings.seed)` state, which is why `from_seed` reproduces
+//     it and the ASSERTs below prove it rather than assuming it.
+//   * `miscRng` after (seq 22): `counter: 1` -- exactly one draw.
+//   * deck before: `... Defend_R, Defend_R, Defend_R, Defend_R, Bash,
+//     Perfected Strike`; deck after: one Defend_R gone and **Havoc** appended.
+//
+// This is the vector that caught the bug: walking `cards.yaml` rows put Iron
+// Wave at that index, and the whole-run `--replay` of STS00051 carried
+// `master_deck[11].card_id: Havoc(8) -> Iron Wave(18)` for 19 consecutive
+// records because of it.
+TEST(LivingWallCapture, STS00051FloorTwoProducesHavoc) {
+    // The capture's raw state, transcribed. It is also DERIVED, which is the
+    // cross-check: miscRng is floor-scoped, reseeded as `Random(seed +
+    // floorNum)` with the floor number AFTER its increment
+    // (AbstractDungeon.java:1747-1751, stage-a trap 7), and floor_stream
+    // reproduces the captured pair exactly on seed 1790050543926, floor 2.
+    RngStream misc = floor_stream(1790050543926LL, 2);
+    ASSERT_EQ(misc.s0, 6415738780070550668ULL);
+    ASSERT_EQ(misc.s1, 6791187303769805616ULL);
+    ASSERT_EQ(misc.counter, 0);
+
+    EXPECT_EQ(transform_card(misc, CardId::DEFEND), CardId::HAVOC);
+    EXPECT_EQ(misc.counter, 1);
 }
 
 TEST(Mushrooms, HealThenParasiteUsesTheNormalCurseObtainDoor) {

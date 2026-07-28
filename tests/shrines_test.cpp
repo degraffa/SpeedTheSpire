@@ -213,13 +213,13 @@ TEST(Transmorgrifier, TransformSpendsExactlyOneMiscRngDrawOnTheSameColorPool) {
     set_deck(rc.run, {{CardId::ANGER, 0}, {CardId::DEFEND, 0}});
     rc.combat.misc_rng = from_seed(31337);
     RngStream expected_rng = rc.combat.misc_rng;
-    std::array<CardId, reg::kEventTransformRedPool.size() - 1> filtered{};
-    std::copy_if(reg::kEventTransformRedPool.begin(),
-                 reg::kEventTransformRedPool.end(), filtered.begin(),
-                 [](CardId id) { return id != CardId::ANGER; });
-    const int pick =
-        random(expected_rng, static_cast<int32_t>(filtered.size() - 1));
-    const CardId expected = filtered[static_cast<std::size_t>(pick)];
+    // Transmorgrifier.buttonEffect (Transmorgrifier.java:56-64) is Living
+    // Wall's pair: removeCard, then transformCard(..., miscRng). The
+    // expectation is therefore the shared `transform_card` (card_pools.hpp) off
+    // the event's own stream; the LIST's order is pinned separately and without
+    // a seed by
+    // CardPoolLibraryOrder.TransformCardListIsCommonsThenBothSrcPoolsBackwards.
+    const CardId expected = transform_card(expected_rng, CardId::ANGER);
     const int before = rc.combat.misc_rng.counter;
 
     choose(rc, 0);
@@ -494,7 +494,19 @@ std::array<CardId, kEventBoardCap> derive_match_board(RngStream& card_rng,
         ids[3] = return_random_curse(card_rng);
         ids[4] = return_random_curse(card_rng);
     } else {
-        auto colorless = reg::kEventTransformColorlessPool;
+        // returnColorlessCard shuffles the LIVE `colorlessCardPool`, which
+        // `addColorlessCards` fills with the APPENDING `addToTop`
+        // (AbstractDungeon.java:1203-1210, CardGroup.java:455-457) and which is
+        // therefore plain library order. `kColorlessPool` is the `src*` twin,
+        // the same membership REVERSED, so this walks it backwards -- spelled
+        // out here rather than shared with shrines.cpp, because an independent
+        // transcription is the whole point of this derivation.
+        std::array<CardId, static_cast<std::size_t>(kColorlessPoolCount)>
+            colorless{};
+        for (int i = 0; i < kColorlessPoolCount; ++i) {
+            colorless[static_cast<std::size_t>(i)] = kColorlessPool[
+                static_cast<std::size_t>(kColorlessPoolCount - 1 - i)];
+        }
         JdkRandom colorless_rng(random_long(shuffle_rng));
         jdk_shuffle(std::span<CardId>(colorless), colorless_rng);
         ids[3] = CardId::SWIFT_STRIKE;
