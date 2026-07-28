@@ -121,6 +121,15 @@ struct Seed {
 //                     (rc.shop.relics). Offers depend on the policy's path
 //                     (pool pops are path-dependent), which is exactly why this
 //                     is scanned rather than computed from the seed alone.
+//   reward_offered    the REWARD-ROW half of `offered` alone. The distinction
+//                     is load-bearing for capture planning: a reward-row
+//                     offer is CLAIMABLE FOR FREE, while a shelf offer must
+//                     be BOUGHT -- and an A20 shop lists only AFFORDABLE rows
+//                     in its choice list, so an uncommon relic (250 base,
+//                     ~265+ at A20) on a floor-3 shelf against ~130 gold is
+//                     an offer no live policy can accept. The first bottle
+//                     scan conflated the two and selected 14 seeds whose
+//                     bottles all sat on unaffordable early shelves.
 //   acquired          the relic is in RunState.relics -- the policy claimed or
 //                     bought it.
 //   shop_while_owned  a merchant floor (RunPhase::SHOP) was live while the
@@ -134,7 +143,8 @@ struct Seed {
 // (sts/registry/game_ids.hpp), the same join key the capture artifacts carry.
 struct RelicObs {
     registry::RelicId id = registry::RelicId::NONE;
-    bool offered = false;
+    bool offered = false;         // reward row OR merchant shelf
+    bool reward_offered = false;  // reward row only (claimable for free)
     bool acquired = false;
     bool shop_while_owned = false;
 };
@@ -207,6 +217,7 @@ struct Filter {
     // is a caller bug the row must not paper over, and the CLI always tracks
     // the union of every filter's relics.
     std::vector<registry::RelicId> need_relic_offered;
+    std::vector<registry::RelicId> need_relic_reward_offered;
     std::vector<registry::RelicId> need_relic_acquired;
     std::vector<registry::RelicId> need_shop_after_relic;
 
@@ -255,6 +266,7 @@ struct ScanSummary {
     struct RelicRows {
         registry::RelicId id;
         uint64_t offered = 0;
+        uint64_t reward_offered = 0;
         uint64_t acquired = 0;
         uint64_t shop_while_owned = 0;
     };

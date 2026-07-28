@@ -314,10 +314,12 @@ TEST(SeedScanFilter, MinHitCountExcludesSingleHitSeeds) {
 
 namespace {
 
-RelicObs MakeObs(RelicId id, bool offered, bool acquired, bool shop) {
+RelicObs MakeObs(RelicId id, bool offered, bool acquired, bool shop,
+                 bool reward_offered = false) {
     RelicObs o;
     o.id = id;
     o.offered = offered;
+    o.reward_offered = reward_offered;
     o.acquired = acquired;
     o.shop_while_owned = shop;
     return o;
@@ -348,6 +350,19 @@ TEST(SeedScanRelicFilter, ClausesAreAnyOfWithinAndAndAcross) {
     EXPECT_FALSE(sts::planner::row_hits(flame_offered, any_bottle_acquired));
     EXPECT_FALSE(any_bottle.empty());
     EXPECT_FALSE(any_bottle_acquired.empty());
+
+    // A shelf-only offer is not a REWARD-ROW offer -- the affordability
+    // distinction the first bottle scan missed (a shelf bottle against ~130
+    // gold is unclaimable; a reward-row bottle is free).
+    Filter reward_only;
+    reward_only.need_relic_reward_offered = any_bottle.need_relic_offered;
+    EXPECT_FALSE(sts::planner::row_hits(flame_offered, reward_only))
+        << "offered=1 with reward_offered=0 is a shelf offer";
+    EXPECT_FALSE(reward_only.empty());
+    ScanRow flame_reward = flame_offered;
+    flame_reward.relic_obs[0] = MakeObs(RelicId::BOTTLED_FLAME, true, false,
+                                        false, /*reward_offered=*/true);
+    EXPECT_TRUE(sts::planner::row_hits(flame_reward, reward_only));
 
     // Clauses AND with each other and with the non-relic clauses.
     ScanRow courier_shop = FakeRow(0, false, false, 8);
@@ -436,7 +451,7 @@ TEST(SeedScanOutput, TsvRowMatchesHeaderWidth) {
     };
     const std::string relic_row = sts::planner::row_to_tsv(with_relics);
     EXPECT_EQ(CountTabs(header), CountTabs(relic_row)) << relic_row;
-    EXPECT_NE(relic_row.find("Bottled Flame=110|The Courier=000"),
+    EXPECT_NE(relic_row.find("Bottled Flame=1010|The Courier=0000"),
               std::string::npos)
         << relic_row;
 }
@@ -456,8 +471,8 @@ TEST(SeedScanOutput, JsonlEscapesAndSelects) {
     EXPECT_NE(j.find("\"boss\":false"), std::string::npos) << j;
     EXPECT_NE(j.find("\"events\":[\"Match and Keep!\"]"), std::string::npos) << j;
     EXPECT_NE(j.find("\"relic_obs\":[{\"relic\":\"The Courier\","
-                     "\"offered\":true,\"acquired\":false,"
-                     "\"shop_while_owned\":false}]"),
+                     "\"offered\":true,\"reward_offered\":false,"
+                     "\"acquired\":false,\"shop_while_owned\":false}]"),
               std::string::npos)
         << j;
     EXPECT_EQ(j.find('\n'), std::string::npos);

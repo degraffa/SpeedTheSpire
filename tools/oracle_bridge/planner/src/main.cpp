@@ -84,6 +84,11 @@ void usage() {
         "                            any-of WITHIN the clause, and AND with\n"
         "                            every other clause. Names are the exact\n"
         "                            registry game ids (\"Bottled Flame\").\n"
+        "  --need-relic-reward-offered <game id>  repeatable; like\n"
+        "                            --need-relic-offered but REWARD ROWS only\n"
+        "                            (claimable for free; a shelf offer must be\n"
+        "                            bought, and the shop lists only rows the\n"
+        "                            run can afford)\n"
         "  --need-relic-acquired <game id>  repeatable; ANY listed relic ended\n"
         "                            up owned (the policy claimed/bought it)\n"
         "  --need-shop-after-relic <game id> repeatable; a merchant floor was\n"
@@ -332,6 +337,9 @@ int main(int argc, char** argv) {
         } else if (a == "--need-relic-offered") {
             filter.need_relic_offered.push_back(
                 parse_relic("--need-relic-offered", need_value(argc, argv, i)));
+        } else if (a == "--need-relic-reward-offered") {
+            filter.need_relic_reward_offered.push_back(parse_relic(
+                "--need-relic-reward-offered", need_value(argc, argv, i)));
         } else if (a == "--need-relic-acquired") {
             filter.need_relic_acquired.push_back(
                 parse_relic("--need-relic-acquired", need_value(argc, argv, i)));
@@ -470,6 +478,10 @@ int main(int argc, char** argv) {
         }
         for (sts::registry::RelicId id : filter.need_relic_offered) {
             header += " relic_offered=\"" +
+                      std::string(sts::registry::relic_game_id(id)) + "\"";
+        }
+        for (sts::registry::RelicId id : filter.need_relic_reward_offered) {
+            header += " relic_reward_offered=\"" +
                       std::string(sts::registry::relic_game_id(id)) + "\"";
         }
         for (sts::registry::RelicId id : filter.need_relic_acquired) {

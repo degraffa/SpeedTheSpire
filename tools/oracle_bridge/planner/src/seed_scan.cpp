@@ -206,6 +206,7 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
                     static_cast<uint8_t>(engine::RewardItemKind::RELIC) &&
                 item.id == raw) {
                 t.offered = true;
+                t.reward_offered = true;
             }
         }
         // ... and the merchant's three shelf slots (a Bottled relic CAN be
@@ -269,7 +270,8 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim,
 bool Filter::empty() const {
     return need_events.empty() && !need_treasure && !need_boss &&
            min_floor == 0 && need_relic_offered.empty() &&
-           need_relic_acquired.empty() && need_shop_after_relic.empty();
+           need_relic_reward_offered.empty() && need_relic_acquired.empty() &&
+           need_shop_after_relic.empty();
 }
 
 namespace {
@@ -300,6 +302,10 @@ bool row_hits(const ScanRow& row, const Filter& f) {
     }
     if (!any_relic_hits(row.relic_obs, f.need_relic_offered,
                         &RelicObs::offered)) {
+        return false;
+    }
+    if (!any_relic_hits(row.relic_obs, f.need_relic_reward_offered,
+                        &RelicObs::reward_offered)) {
         return false;
     }
     if (!any_relic_hits(row.relic_obs, f.need_relic_acquired,
@@ -346,7 +352,8 @@ std::string_view tsv_header() {
 namespace {
 
 std::string relic_obs_text(const std::vector<RelicObs>& obs) {
-    // `<game_id>=<offered><acquired><shop_while_owned>` per target, '|'-joined
+    // `<game_id>=<offered><reward_offered><acquired><shop_while_owned>` per
+    // target, '|'-joined
     // -- the same separator rationale as the events column (no relic game id
     // contains '|' or a tab; `SeparatorNeverOccursInsideAName` pins the event
     // claim and the relic ids share the character set). "" when untracked, so
@@ -357,6 +364,7 @@ std::string relic_obs_text(const std::vector<RelicObs>& obs) {
         s.append(registry::relic_game_id(o.id));
         s += '=';
         s += o.offered ? '1' : '0';
+        s += o.reward_offered ? '1' : '0';
         s += o.acquired ? '1' : '0';
         s += o.shop_while_owned ? '1' : '0';
     }
@@ -457,6 +465,8 @@ std::string row_to_jsonl(const ScanRow& row) {
         s += "{\"relic\":\"" +
              json_escape(registry::relic_game_id(o.id)) + "\",";
         s += std::string("\"offered\":") + (o.offered ? "true" : "false") + ",";
+        s += std::string("\"reward_offered\":") +
+             (o.reward_offered ? "true" : "false") + ",";
         s += std::string("\"acquired\":") + (o.acquired ? "true" : "false") + ",";
         s += std::string("\"shop_while_owned\":") +
              (o.shop_while_owned ? "true" : "false") + "}";
@@ -511,6 +521,7 @@ void ScanSummary::add(const ScanRow& row) {
             rr = &relic_rows.back();
         }
         if (o.offered) ++rr->offered;
+        if (o.reward_offered) ++rr->reward_offered;
         if (o.acquired) ++rr->acquired;
         if (o.shop_while_owned) ++rr->shop_while_owned;
     }
@@ -561,13 +572,15 @@ std::string ScanSummary::text() const {
              " (" + pct(event_rows[v], rows) + ")\n";
     }
     if (!relic_rows.empty()) {
-        s += "relic targets (rows offered / acquired / shop-while-owned):\n";
+        s += "relic targets (rows offered / reward-offered / acquired / "
+             "shop-while-owned):\n";
         for (const RelicRows& rr : relic_rows) {
             s += "  " + std::string(registry::relic_game_id(rr.id)) + ": " +
                  std::to_string(rr.offered) + " (" + pct(rr.offered, rows) +
-                 ") / " + std::to_string(rr.acquired) + " (" +
-                 pct(rr.acquired, rows) + ") / " +
-                 std::to_string(rr.shop_while_owned) + " (" +
+                 ") / " + std::to_string(rr.reward_offered) + " (" +
+                 pct(rr.reward_offered, rows) + ") / " +
+                 std::to_string(rr.acquired) + " (" + pct(rr.acquired, rows) +
+                 ") / " + std::to_string(rr.shop_while_owned) + " (" +
                  pct(rr.shop_while_owned, rows) + ")\n";
         }
     }
