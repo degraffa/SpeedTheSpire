@@ -183,8 +183,31 @@ keys stored soak-coverage identities.
 
 | Namespace (defined in) | Taken | Reserved / free |
 |---|---|---|
-| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–10** (`NONE`..`SHOP`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10, 10 `SHOP` B4.8 — all landed, each claiming its reservation) | 11+ free — claim here first |
-| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–26** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c, 26 `SHOP` B4.8 — **spent**; `COUNT = 27`) | 27+ free — claim here first and bump `COUNT` past every enumerator |
+| `RunPhase` (`include/sts/engine/run_advance.hpp`) | **0–10** (`NONE`..`SHOP`; 7 `REST_SITE` B4.9, 8 `TREASURE_ROOM` B4.7, 9 `EVENT_DIALOG` B4.10, 10 `SHOP` B4.8 — all landed, each claiming its reservation) | **11–12 allocated to Wave-C track 2** (see Wave-C table below); 13+ free — claim here first |
+| fuzz `MoveCat` (`tools/fuzz/include/sts/fuzz/policy.hpp`) | **0–26** (14–20 rest-site B4.9, 21–22 treasure B4.7, 23 `EVENT_OPTION` B4.10, 24 `EVENT_GRID` B4.11, 25 `CHOICE_CONFIRM` B3.10c, 26 `SHOP` B4.8 — **spent**; `COUNT = 27`) | **27–29 allocated to Wave-C track 2** (see Wave-C table below); 30+ free — claim here first and bump `COUNT` past every enumerator |
+
+### Wave-C allocations — 2026-07-28, two concurrent tracks (deferred-bodies wave)
+
+Two track branches off `wave-defer-base` (`master` frozen for the G6 gate):
+`wave-combat` (track 1: combat-layer files — action_queue, interp_*, damage
+pipeline, potions, combat-side registry rows) and `wave-runlayer` (track 2:
+run-layer files — run_advance, rest/room entry, Neow/relic-acquisition grids,
+pool emitters). Same rules as every wave: a block is exclusive to its stage; a
+stage needing MORE stops and asks the orchestrator. **`ChoiceKind` is a scarce
+4-bit namespace with only five values left before this wave — unspent
+`ChoiceKind` values and `CombatState.flags` bits are RELEASED, not gapped**
+(the B3.11 scarce-namespace precedent); unspent opcodes/PowerIds/CardIds gap
+as usual.
+
+| Namespace | Track 1 potions stage | Track 1 relic-tail stage | Track 1 energyMaster stage | Track 2 |
+|---|---|---|---|---|
+| Opcode | **60–62** | **63–66** | **67** (contingency) | **68** (reserve) |
+| `PowerId` | — | **87–90** | — | — |
+| `ChoiceKind` | **11–13** (release unspent) | **14–15** (release unspent) | — | — |
+| `CombatState.flags` bits | **16–19** (release unspent) | **20–25** (release unspent) | — | — |
+| `CardId` | — | — | — | **127–128** (Curse of the Bell + reserve) |
+| `RunPhase` | — | — | — | **11–12** |
+| fuzz `MoveCat` | — | — | — | **27–29** (bump `COUNT` past every spent enumerator) |
 
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
