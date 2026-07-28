@@ -417,6 +417,15 @@ set_tests_properties(oracle_campaign_python_test PROPERTIES
 # carries no JSON dependency, so no artifact and no data root is involved.
 sts_add_test(replay_command_map_test LIBS sts_engine replay_command_map)
 
+# The two SHAPE decisions the --treasure and --event read-outs make
+# (tools/oracle_bridge/replay/src/readout_shapes.hpp): which captured reward
+# rows a chest open may carry that the engine deliberately does not model, and
+# the capture-id -> EventId join. Both are places a read-out can quietly call a
+# real divergence benign -- a rule that elides too much simply reports zero-diff
+# and nobody notices -- so they get unit tests rather than only a green campaign
+# run. Same no-artifact, no-JSON contract as the command-map suite above.
+sts_add_test(replay_readout_shapes_test LIBS sts_engine replay_readout_shapes)
+
 # B4.1: map path generation (MapGenerator re-expression) vs the live-game oracle
 # corpus (tests/golden/map_paths/oracle_maps.txt, derived from campaign
 # b13_on20b). Header-only engine code, so it links sts_engine like the other

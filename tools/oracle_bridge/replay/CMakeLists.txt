@@ -18,6 +18,21 @@ target_include_directories(replay_command_map INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(replay_command_map INTERFACE sts_engine)
 
+# The two SHAPE decisions the --treasure and --event read-outs make before any
+# comparison runs (src/readout_shapes.hpp): which captured reward rows a chest
+# open may carry that the engine deliberately does not model, and the
+# capture-id -> EventId join. Published as its own INTERFACE target for exactly
+# the reason the command table is -- both are places a read-out can quietly call
+# a real divergence benign, so `replay_readout_shapes_test` exercises them with
+# no artifact and no JSON layer. `command_map.hpp` includes the header for
+# ScreenInfo's reward rows, so the command-map target links it too and its own
+# test keeps compiling unchanged.
+add_library(replay_readout_shapes INTERFACE)
+target_include_directories(replay_readout_shapes INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_link_libraries(replay_readout_shapes INTERFACE sts_engine)
+target_link_libraries(replay_command_map INTERFACE replay_readout_shapes)
+
 add_executable(replay_run_diff src/main.cpp)
 target_link_libraries(replay_run_diff
     PRIVATE oracle_translator nlohmann_json replay_command_map)
