@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import glob
 import io
 import json
 import os
+import random
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -14,6 +16,8 @@ from unittest import mock
 
 import campaign_driver
 import campaign_paths
+import gen_cards_sidetable
+import greedy_policy
 import orchestrator
 import validate_artifacts
 
@@ -1549,6 +1553,597 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 self.assertNotEqual(0, validate_artifacts.main([
                     "--require-oracle", "--campaign", campaign_dir]))
+
+
+# --- greedy policy (B4.x live depth policy) --------------------------------
+#
+# What these cover: the scorer is a pure function of a parsed protocol dump, so
+# every case below is a hand-built dump. Legality is NOT asserted here (it is a
+# property of expand_legal_actions, proved against real captures by
+# GreedyReplayLegalityTest); these pin the PREFERENCES.
+
+_DRIVER_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.abspath(os.path.join(_DRIVER_DIR, "..", "..", ".."))
+_REGISTRY_CARDS = os.path.join(_REPO_ROOT, "registry", "cards.yaml")
+_SIDE_TABLE = os.path.join(_DRIVER_DIR, "cards_sidetable.json")
+
+# Recorded random-legal captures, used read-only by the replay harness. They are
+# campaign artifacts and therefore live outside the repo (conventions 2 / design
+# 7.3), so their absence skips rather than fails.
+_CAPTURE_DIR = os.environ.get(
+    "STS_ORACLE_CAPTURE_DIR",
+    r"D:\STS_BG_Mod\_oracle_data\campaigns"
+    r"\b47_treasure_oracle_20260727T204809Z_claude01")
+
+
+def _card(card_id, cost=1, upgrades=0, has_target=True, card_type="ATTACK"):
+    return {"id": card_id, "is_playable": True, "has_target": has_target,
+            "cost": cost, "upgrades": upgrades, "type": card_type}
+
+
+def _monster(hp, intent="ATTACK", adjusted=10, block=0, gone=False):
+    return {"current_hp": hp, "max_hp": 50, "intent": intent,
+            "move_adjusted_damage": adjusted, "block": block,
+            "is_gone": gone, "id": "JawWorm"}
+
+
+def _combat(hand, monsters, player_block=0, available=("play", "end")):
+    return {
+        "available_commands": list(available),
+        "ready_for_command": True,
+        "in_game": True,
+        "game_state": {
+            "screen_type": "NONE",
+            "room_phase": "COMBAT",
+            "current_hp": 60, "max_hp": 80,
+            "combat_state": {
+                "hand": hand,
+                "monsters": monsters,
+                "player": {"block": player_block, "energy": 3,
+                           "current_hp": 60, "max_hp": 80},
+            },
+        },
+    }
+
+
+def _screen(screen_type, choice_list, screen_state=None,
+            available=("choose",), **game_state):
+    gs = {"screen_type": screen_type, "choice_list": list(choice_list),
+          "current_hp": 60, "max_hp": 80}
+    if screen_state is not None:
+        gs["screen_state"] = screen_state
+    gs.update(game_state)
+    return {"available_commands": list(available), "ready_for_command": True,
+            "in_game": True, "game_state": gs}
+
+
+def _pick(state, table=None, rng=None):
+    """expand -> greedy pick, exactly as CampaignDriver._policy_command does."""
+    actions = campaign_driver.expand_legal_actions(state, random.Random(0))
+    return greedy_policy.pick(actions, state, table, rng)
+
+
+class GreedyCombatScoringTest(unittest.TestCase):
+    def setUp(self):
+        self.table = greedy_policy.load_side_table(_SIDE_TABLE)
+        self.assertTrue(self.table, "the committed side table must load")
+
+    def test_lethal_pick_targets_the_monster_it_can_finish(self):
+        """Strike kills the 5-HP monster; the 30-HP one is just damage."""
+        state = _combat([_card("Strike_R")],
+                        [_monster(30, intent="ATTACK"),
+                         _monster(5, intent="ATTACK")])
+        self.assertEqual("play 1 1", _pick(state, self.table))
+
+    def test_block_is_counted_through_a_monsters_block_before_lethal(self):
+        """6 damage does not kill 5 HP behind 4 block -- no lethal bonus."""
+        state = _combat([_card("Strike_R")],
+                        [_monster(30, intent="ATTACK"),
+                         _monster(5, intent="ATTACK", block=4)])
+        # Still targets slot 1 (focus fire on the weakest), but only by the +2
+        # tie-break, not by the +400 lethal bonus.
+        self.assertEqual(
+            greedy_policy.score_action("play 1 1", state, self.table),
+            greedy_policy.score_action("play 1 0", state, self.table) + 2)
+
+    def test_block_wins_while_a_monster_intends_an_attack(self):
+        state = _combat([_card("Defend_R", has_target=False,
+                               card_type="SKILL"),
+                         _card("Strike_R")],
+                        [_monster(50, intent="ATTACK", adjusted=12)])
+        self.assertEqual("play 1", _pick(state, self.table))
+
+    def test_damage_wins_again_once_nothing_is_attacking(self):
+        state = _combat([_card("Defend_R", has_target=False,
+                               card_type="SKILL"),
+                         _card("Strike_R")],
+                        [_monster(50, intent="BUFF", adjusted=-1)])
+        self.assertEqual("play 2 0", _pick(state, self.table))
+
+    def test_lethal_outranks_blocking_even_under_attack(self):
+        state = _combat([_card("Defend_R", has_target=False,
+                               card_type="SKILL"),
+                         _card("Strike_R")],
+                        [_monster(4, intent="ATTACK", adjusted=12)])
+        self.assertEqual("play 2 0", _pick(state, self.table))
+
+    def test_end_turn_is_strictly_below_every_playable_card(self):
+        state = _combat([_card("Flex", has_target=False, cost=0,
+                               card_type="SKILL")],
+                        [_monster(50, intent="ATTACK")])
+        self.assertEqual("play 1", _pick(state, self.table))
+        self.assertLess(greedy_policy.score_action("end", state, self.table),
+                        greedy_policy.score_action("play 1", state,
+                                                   self.table))
+
+    def test_end_turn_is_taken_when_it_is_the_only_action(self):
+        state = _combat([], [_monster(50)], available=("end",))
+        self.assertEqual("end", _pick(state, self.table))
+
+    def test_unknown_card_scores_as_cheap_utility_and_never_raises(self):
+        """A Silent/Defect/modded id is simply not in the S1 registry."""
+        state = _combat([_card("Neutralize", has_target=True, cost=0),
+                         _card("Strike_R")],
+                        [_monster(50, intent="BUFF", adjusted=-1)])
+        self.assertEqual((0, 0), greedy_policy.score_card(
+            {"id": "Neutralize"}, state, self.table))
+        self.assertEqual("play 2 0", _pick(state, self.table))
+
+    def test_missing_side_table_degrades_instead_of_failing(self):
+        state = _combat([_card("Strike_R")], [_monster(50)])
+        self.assertEqual({}, greedy_policy.load_side_table(
+            os.path.join(_DRIVER_DIR, "no_such_side_table.json")))
+        self.assertEqual("play 1 0", _pick(state, {}))
+
+    def test_body_slam_reads_the_players_live_block(self):
+        naked = _combat([_card("Body Slam")], [_monster(50)], player_block=0)
+        armoured = _combat([_card("Body Slam")], [_monster(50)],
+                           player_block=17)
+        self.assertEqual((0, 0), greedy_policy.score_card(
+            {"id": "Body Slam"}, naked, self.table))
+        self.assertEqual((17, 0), greedy_policy.score_card(
+            {"id": "Body Slam"}, armoured, self.table))
+
+    def test_upgraded_cards_use_the_upgraded_column(self):
+        state = _combat([_card("Cleave", has_target=False, upgrades=1)],
+                        [_monster(50)])
+        # Cleave+ is 11 damage, and ALL_ENEMY multiplies by the live count.
+        self.assertEqual((11, 0), greedy_policy.score_card(
+            {"id": "Cleave", "upgrades": 1}, state, self.table))
+
+    def test_tie_break_is_reproducible_from_the_run_seed(self):
+        """Two identical Strikes tie; the same (policy_seed, seed) must repeat."""
+        state = _combat([_card("Strike_R"), _card("Strike_R")],
+                        [_monster(50, intent="ATTACK")])
+        first = [_pick(state, self.table, random.Random("1234:STS00041"))
+                 for _ in range(8)]
+        second = [_pick(state, self.table, random.Random("1234:STS00041"))
+                  for _ in range(8)]
+        self.assertEqual(first, second)
+        self.assertTrue(all(cmd in ("play 1 0", "play 2 0") for cmd in first))
+
+
+class GreedyScreenScoringTest(unittest.TestCase):
+    def setUp(self):
+        self.table = greedy_policy.load_side_table(_SIDE_TABLE)
+
+    def test_map_prefers_non_combat_then_monster_then_elite(self):
+        state = _screen(
+            "MAP", ["x=1", "x=3", "x=5"],
+            {"boss_available": False, "first_node_chosen": True,
+             "next_nodes": [{"symbol": "E", "x": 1, "y": 3},
+                            {"symbol": "M", "x": 3, "y": 3},
+                            {"symbol": "?", "x": 5, "y": 3}]},
+            available=("choose", "return"))
+        self.assertEqual("choose 2", _pick(state, self.table))
+        scores = [greedy_policy.score_action(f"choose {i}", state, self.table)
+                  for i in range(3)]
+        self.assertEqual(sorted(scores, reverse=True),
+                         [scores[2], scores[1], scores[0]])
+
+    def test_map_prefers_monster_over_elite_when_that_is_the_choice(self):
+        state = _screen(
+            "MAP", ["x=1", "x=3"],
+            {"boss_available": False,
+             "next_nodes": [{"symbol": "E"}, {"symbol": "M"}]},
+            available=("choose", "return"))
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_map_takes_the_boss_node_when_offered(self):
+        state = _screen("MAP", ["boss"],
+                        {"boss_available": True, "next_nodes": []},
+                        available=("choose", "return"))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_map_never_backs_out_of_the_screen(self):
+        state = _screen(
+            "MAP", ["x=1"], {"boss_available": False,
+                             "next_nodes": [{"symbol": "E"}]},
+            available=("choose", "return"))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_treasure_reward_claims_the_relic_and_never_the_key(self):
+        """The claim-order trap: the key row forfeits the linked relic.
+
+        RewardItem.claimReward (RewardItem.java:255-330) case 6 sets
+        relicLink.isDone/ignoreReward, retiring the RELIC row ungranted.
+        """
+        rewards = [
+            {"reward_type": "RELIC",
+             "relic": {"id": "Bag of Preparation", "counter": -1}},
+            {"reward_type": "SAPPHIRE_KEY",
+             "link": {"id": "Bag of Preparation", "counter": -1}},
+        ]
+        state = _screen("COMBAT_REWARD", ["relic", "sapphire_key"],
+                        {"rewards": rewards},
+                        available=("choose", "proceed"))
+        self.assertEqual("choose 0", _pick(state, self.table))
+        self.assertLess(
+            greedy_policy.score_action("choose 1", state, self.table),
+            greedy_policy.score_action("proceed", state, self.table),
+            "the sapphire key must rank BELOW proceed so it is never claimed")
+
+    def test_key_is_still_refused_when_it_is_the_only_row_left(self):
+        state = _screen("COMBAT_REWARD", ["sapphire_key"],
+                        {"rewards": [{"reward_type": "SAPPHIRE_KEY",
+                                      "link": {"id": "Bag of Preparation"}}]},
+                        available=("choose", "proceed"))
+        self.assertEqual("proceed", _pick(state, self.table))
+
+    def test_gold_and_potion_are_claimed_and_the_card_row_is_left(self):
+        rewards = [{"reward_type": "CARD"},
+                   {"reward_type": "GOLD", "gold": 18},
+                   {"reward_type": "POTION",
+                    "potion": {"id": "GamblersBrew"}}]
+        state = _screen("COMBAT_REWARD", ["card", "gold", "potion"],
+                        {"rewards": rewards},
+                        available=("choose", "proceed"))
+        self.assertEqual("choose 1", _pick(state, self.table))
+        self.assertLess(
+            greedy_policy.score_action("choose 0", state, self.table),
+            greedy_policy.score_action("proceed", state, self.table),
+            "skipping is always safe: the card row is never opened")
+
+    def test_card_reward_screen_skips_rather_than_taking_an_unknown_card(self):
+        state = _screen("CARD_REWARD", ["reaper", "juggernaut", "impervious"],
+                        {"skip_available": True, "bowl_available": False,
+                         "cards": [{"id": "Reaper"}, {"id": "Juggernaut"},
+                                   {"id": "Impervious"}]},
+                        available=("choose", "skip"))
+        self.assertEqual("skip", _pick(state, self.table))
+
+    def test_card_reward_still_picks_when_skipping_is_not_offered(self):
+        state = _screen("CARD_REWARD", ["reaper", "juggernaut"],
+                        {"skip_available": False,
+                         "cards": [{"id": "Reaper"}, {"id": "Juggernaut"}]},
+                        available=("choose",))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_treasure_chest_is_opened(self):
+        state = _screen("CHEST", ["open"],
+                        {"chest_open": False, "chest_type": "SmallChest"},
+                        available=("choose", "proceed"))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_rest_beats_smith_when_hurt_and_loses_when_healthy(self):
+        hurt = _screen("REST", ["rest", "smith", "recall"],
+                       {"has_rested": False,
+                        "rest_options": ["rest", "smith", "recall"]},
+                       current_hp=30, max_hp=80)
+        healthy = _screen("REST", ["rest", "smith", "recall"],
+                          {"has_rested": False,
+                           "rest_options": ["rest", "smith", "recall"]},
+                          current_hp=78, max_hp=80)
+        self.assertEqual("choose 0", _pick(hurt, self.table))
+        self.assertEqual("choose 1", _pick(healthy, self.table))
+
+    def test_shop_is_left_without_buying_or_even_entering(self):
+        room = _screen("SHOP_ROOM", ["shop"], {},
+                       available=("choose", "proceed"))
+        self.assertEqual("proceed", _pick(room, self.table))
+        screen = _screen("SHOP_SCREEN", ["purge", "pummel", "block potion"],
+                         {"purge_cost": 75, "cards": [], "relics": [],
+                          "potions": []},
+                         available=("choose", "leave"))
+        self.assertEqual("leave", _pick(screen, self.table))
+
+    def test_event_avoids_the_costly_option_when_the_text_says_so(self):
+        state = _screen(
+            "EVENT",
+            ["lose 7 max hp choose a rare card to obtain", "leave"],
+            {"event_id": "Neow Event", "options": [
+                {"choice_index": 0, "disabled": False},
+                {"choice_index": 1, "disabled": False}]})
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_event_falls_back_to_index_zero_when_nothing_is_identifiable(self):
+        state = _screen(
+            "EVENT", ["remove a card from your deck", "obtain 3 random potions"],
+            {"event_id": "Neow Event", "options": [
+                {"choice_index": 0, "disabled": False},
+                {"choice_index": 1, "disabled": False}]})
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_hand_select_picks_one_card_then_confirms(self):
+        empty = _screen("HAND_SELECT", ["strike", "defend"],
+                        {"selected": [], "max_cards": 1,
+                         "can_pick_zero": False,
+                         "hand": [{"id": "Strike_R"}, {"id": "Defend_R"}]},
+                        available=("choose", "confirm"))
+        self.assertEqual("choose 0", _pick(empty, self.table))
+        picked = _screen("HAND_SELECT", ["defend"],
+                         {"selected": [{"id": "Strike_R"}], "max_cards": 1,
+                          "can_pick_zero": False,
+                          "hand": [{"id": "Defend_R"}]},
+                         available=("choose", "confirm"))
+        self.assertEqual("proceed", _pick(picked, self.table))
+
+
+class CardSideTableTest(unittest.TestCase):
+    """The committed JSON must still be what registry/cards.yaml derives.
+
+    This is the sync check a registry_gen emit module would have given for free.
+    """
+
+    def test_committed_table_matches_the_registry(self):
+        try:
+            import yaml
+        except ImportError:  # pragma: no cover - dev machines all have it
+            self.skipTest("PyYAML absent; the side table is dev-time generated")
+        if not os.path.exists(_REGISTRY_CARDS):
+            self.skipTest(f"{_REGISTRY_CARDS} not present")
+        with open(_REGISTRY_CARDS, "r", encoding="utf-8") as fh:
+            cards = yaml.safe_load(fh)
+        expected = gen_cards_sidetable.build_document(_REGISTRY_CARDS, cards)
+        with open(_SIDE_TABLE, "r", encoding="utf-8") as fh:
+            committed = json.load(fh)
+        self.assertEqual(
+            expected, committed,
+            "cards_sidetable.json is stale -- regenerate with "
+            "gen_cards_sidetable.py (see its _provenance.regenerate)")
+
+    def test_provenance_names_its_source_and_the_mirrored_scorer(self):
+        with open(_SIDE_TABLE, "r", encoding="utf-8") as fh:
+            document = json.load(fh)
+        provenance = document["_provenance"]
+        self.assertEqual("registry/cards.yaml", provenance["source"])
+        self.assertIn("policy.cpp", provenance["mirrors"])
+        self.assertRegex(provenance["source_sha256"], r"\A[0-9A-F]{64}\Z")
+        self.assertEqual(len(document["cards"]), provenance["source_rows"])
+
+    def test_starter_card_numbers_are_the_registry_numbers(self):
+        table = greedy_policy.load_side_table(_SIDE_TABLE)
+        self.assertEqual([6, 6], table["Strike_R"]["damage"])
+        self.assertEqual([5, 5], table["Defend_R"]["block"])
+        self.assertEqual([8, 8], table["Bash"]["damage"])
+        self.assertTrue(table["Cleave"]["aoe"])
+        self.assertTrue(table["Body Slam"]["damage_from_block"])
+
+
+# --- argument-level validation (script mode) -------------------------------
+
+class CommandArgumentValidationTest(unittest.TestCase):
+    def test_in_range_choose_and_play_pass(self):
+        state = _screen("MAP", ["x=1", "x=3"], {"next_nodes": []})
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(state, "choose 1"))
+        combat = _combat([_card("Strike_R"), _card("Defend_R")],
+                         [_monster(20), _monster(20)])
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(combat, "play 2 1"))
+
+    def test_out_of_range_choose_is_a_divergence(self):
+        state = _screen("MAP", ["x=1", "x=3"], {"next_nodes": []})
+        ok, why = campaign_driver.cmd_args_ready(state, "choose 3")
+        self.assertFalse(ok)
+        self.assertIn("choice_list has 2 option(s)", why)
+
+    def test_named_choose_passes_through_untouched(self):
+        """PROTOCOL.md 2: `choose` matches the exact choice string first."""
+        state = _screen("REST", ["rest", "smith"], {})
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(state, "choose smith"))
+        self.assertEqual(
+            (True, ""),
+            campaign_driver.cmd_args_ready(state, "choose sapphire_key"))
+
+    def test_play_slot_and_target_are_both_range_checked(self):
+        combat = _combat([_card("Strike_R")], [_monster(20)])
+        bad_slot, why_slot = campaign_driver.cmd_args_ready(combat, "play 4")
+        self.assertFalse(bad_slot)
+        self.assertIn("hand holds 1 card(s)", why_slot)
+        bad_target, why_target = campaign_driver.cmd_args_ready(
+            combat, "play 1 2")
+        self.assertFalse(bad_target)
+        self.assertIn("room holds 1 monster(s)", why_target)
+        self.assertFalse(
+            campaign_driver.cmd_args_ready(combat, "play 11")[0])
+
+    def test_slot_zero_means_the_tenth_card(self):
+        ten = _combat([_card("Strike_R")] * 10, [_monster(20)])
+        nine = _combat([_card("Strike_R")] * 9, [_monster(20)])
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(ten, "play 0 0"))
+        self.assertFalse(campaign_driver.cmd_args_ready(nine, "play 0 0")[0])
+
+    def test_absent_collections_are_never_reported_as_a_divergence(self):
+        bare = {"available_commands": ["choose"], "in_game": True,
+                "game_state": {"screen_type": "EVENT"}}
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(bare, "choose 4"))
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(bare, "play 3 1"))
+        self.assertEqual((True, ""),
+                         campaign_driver.cmd_args_ready(bare, "proceed"))
+
+    def test_verb_gate_alone_would_have_let_the_bad_index_through(self):
+        """The exact hole this closes: the verb is legal, the index is not."""
+        state = _screen("MAP", ["x=1", "x=3"], {"next_nodes": []})
+        self.assertTrue(campaign_driver.cmd_verb_ready(state, "choose 3"))
+        self.assertFalse(campaign_driver.cmd_args_ready(state, "choose 3")[0])
+
+    def test_script_mode_ends_the_run_as_cmd_arg_invalid(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "argcheck"
+            _write_launch_log(os.path.join(root, campaign_id))
+            state = _action(_oracle())["state_json"]
+            state["available_commands"] = ["choose", "proceed"]
+            state["game_state"]["choice_list"] = ["gold"]
+            state["game_state"]["screen_type"] = "COMBAT_REWARD"
+            driver = _stack_driver(root, campaign_id, state=state,
+                                   max_actions=10)
+            driver.args.policy = "script"
+            driver.args.script = None
+            driver.args.script_dir = None
+            driver.args.max_settle = 4
+            driver.args.settle_sleep = 0.0
+            driver.single_script = ["choose 3"]
+
+            with mock.patch.dict(
+                    os.environ,
+                    {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+                     "unit-test-launch-token"}):
+                outcome, _floor, actions, menu_ok = driver.run_seed(SEED, 1)
+
+            self.assertEqual(("cmd_arg_invalid", 0, False),
+                             (outcome, actions, menu_ok))
+            artifact = os.path.join(
+                root, campaign_id, f"run_{SEED}_a20_ironclad.jsonl")
+            with open(artifact, encoding="utf-8") as fh:
+                records = [json.loads(line) for line in fh if line.strip()]
+            self.assertEqual("terminal", records[-1]["record_kind"])
+            self.assertEqual("cmd_arg_invalid", records[-1]["outcome"])
+            # The command must NOT have been sent: only `start` was.
+            self.assertEqual([f"start ironclad 20 {SEED}"],
+                             driver.stepper.commands)
+
+    def test_script_mode_still_runs_an_in_range_command(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "argok"
+            _write_launch_log(os.path.join(root, campaign_id))
+            state = _action(_oracle())["state_json"]
+            state["available_commands"] = ["choose", "proceed"]
+            state["game_state"]["choice_list"] = ["gold"]
+            state["game_state"]["screen_type"] = "COMBAT_REWARD"
+            driver = _stack_driver(root, campaign_id, state=state,
+                                   max_actions=1)
+            driver.args.policy = "script"
+            driver.args.script = None
+            driver.args.script_dir = None
+            driver.args.max_settle = 4
+            driver.args.settle_sleep = 0.0
+            driver.single_script = ["choose 0"]
+            driver.stepper.states.append(state)
+
+            with mock.patch.dict(
+                    os.environ,
+                    {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+                     "unit-test-launch-token"}):
+                outcome, _floor, actions, _menu = driver.run_seed(SEED, 1)
+
+            self.assertEqual(("action_cap", 1), (outcome, actions))
+            self.assertIn("choose 0", driver.stepper.commands)
+
+    def test_terminal_outcome_still_satisfies_the_artifact_validator(self):
+        """validate_artifacts has no outcome whitelist -- prove it, don't assume."""
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, f"run_{SEED}_a20_ironclad.jsonl")
+            _write_artifact(path, [
+                _header(True), _action(_oracle()),
+                _terminal(outcome="cmd_arg_invalid")])
+            errors, _actions = validate_artifacts.validate_file(
+                path, require_oracle=True)
+            self.assertEqual([], errors)
+
+
+# --- replay harness: legality against real recorded states -----------------
+
+class GreedyReplayLegalityTest(unittest.TestCase):
+    """Run recorded captures through the greedy policy and check LEGALITY.
+
+    The policy will disagree with what random-legal actually played -- that is
+    the point of it existing. What must hold on every real state is that the
+    command it would emit is one the game itself advertised, with in-range
+    arguments: exactly the invariant that random-legal satisfied for free and
+    that a hand-written script does not (see cmd_args_ready).
+    """
+
+    MIN_RUNS = 2
+    MIN_STATES = 100
+
+    def _runs(self):
+        paths = sorted(glob.glob(os.path.join(
+            _CAPTURE_DIR, "run_*_a20_ironclad.jsonl")))
+        if len(paths) < self.MIN_RUNS:
+            self.skipTest(
+                f"need >= {self.MIN_RUNS} recorded runs under {_CAPTURE_DIR} "
+                "(campaign artifacts live outside the repo, design 7.3)")
+        return paths
+
+    def test_every_greedy_command_is_legal_on_every_recorded_state(self):
+        table = greedy_policy.load_side_table(_SIDE_TABLE)
+        self.assertTrue(table)
+        paths = self._runs()
+        checked = 0
+        emitted = 0
+        screens = set()
+        for path in paths:
+            rng = random.Random(f"1234:{os.path.basename(path)}")
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    record = json.loads(line)
+                    if record.get("record_kind") != "action":
+                        continue
+                    state = record.get("state_json") or {}
+                    if not state.get("in_game"):
+                        continue
+                    checked += 1
+                    gs = state.get("game_state") or {}
+                    screens.add(gs.get("screen_type"))
+                    actions = campaign_driver.expand_legal_actions(state, rng)
+                    command = greedy_policy.pick(actions, state, table, rng)
+                    if command is None:
+                        self.assertEqual([], actions)
+                        continue
+                    emitted += 1
+                    self.assertIn(command, actions, f"{path}: {command!r}")
+                    self.assertTrue(
+                        campaign_driver.cmd_verb_ready(state, command),
+                        f"{path}: verb of {command!r} is not advertised "
+                        f"({state.get('available_commands')})")
+                    ok, why = campaign_driver.cmd_args_ready(state, command)
+                    self.assertTrue(ok, f"{path}: {command!r} -- {why}")
+        self.assertGreaterEqual(checked, self.MIN_STATES)
+        self.assertGreaterEqual(emitted, self.MIN_STATES // 2)
+        # The states must actually cover the screens the policy has rules for,
+        # or this proves nothing about them.
+        for screen in ("MAP", "COMBAT_REWARD", "CARD_REWARD", "EVENT"):
+            self.assertIn(screen, screens)
+
+    def test_replay_disagrees_with_random_legal_but_stays_inside_it(self):
+        """A sanity check that the policy is doing something at all."""
+        table = greedy_policy.load_side_table(_SIDE_TABLE)
+        agreements = 0
+        decisions = 0
+        for path in self._runs():
+            rng = random.Random(4321)
+            with open(path, encoding="utf-8") as fh:
+                for line in fh:
+                    record = json.loads(line)
+                    if record.get("record_kind") != "action":
+                        continue
+                    state = record.get("state_json") or {}
+                    actions = campaign_driver.expand_legal_actions(state, rng)
+                    if len(actions) < 2:
+                        continue
+                    command = greedy_policy.pick(actions, state, table, rng)
+                    decisions += 1
+                    if command == record.get("action_command"):
+                        agreements += 1
+        self.assertGreater(decisions, 0)
+        self.assertLess(agreements, decisions,
+                        "greedy that never diverges from random-legal is not "
+                        "a policy")
 
 
 if __name__ == "__main__":

@@ -5,7 +5,10 @@ This directory holds the oracle-bridge driver family. Protocol details are in
 
 | File | Task | Role |
 |---|---|---|
-| `campaign_driver.py` | **B1.4** | the real campaign driver — the CommunicationMod-oracle child: seeded A20 Ironclad starts, random-legal + scripted generators, per-run JSONL artifacts (design 2.7), crash detection, seed-level resume, batch over a seed list |
+| `campaign_driver.py` | **B1.4** | the real campaign driver — the CommunicationMod-oracle child: seeded A20 Ironclad starts, random-legal / greedy / scripted generators, per-run JSONL artifacts (design 2.7), crash detection, seed-level resume, batch over a seed list |
+| `greedy_policy.py` | **B4.x** | the `--policy greedy` scorer: a pure, depth-seeking heuristic over the parsed dump (combat, map, rewards, screens) |
+| `cards_sidetable.json` | **B4.x** | committed per-card damage/block numbers the greedy policy scores with |
+| `gen_cards_sidetable.py` | **B4.x** | regenerates `cards_sidetable.json` from `registry/cards.yaml` (dev-time, needs PyYAML; the driver itself never imports it) |
 | `orchestrator.py` | **B1.4** | Windows-host outer loop that owns the game process: writes config.properties, launches ModTheSpire under the bundled JRE 8, relaunches on crash/hang/boss-reward, induces a kill for acceptance |
 | `validate_artifacts.py` | **B1.4** | validates run JSONL against the PROTOCOL.md schema (header + action `state_json` + oracle block + terminal) |
 | `echo_driver.py` | B0.2 | bring-up child: logs every state JSON, forwards side-channel commands, `--verify` re-parse |
@@ -126,10 +129,63 @@ Validate with:
 python validate_artifacts.py --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b14_accept
 ```
 
-### Scripted mode
+### Policies
 
-`--policy script --script <file>` paces a fixed command list (one per line) through
-the same lock-step gate instead of the random-legal generator.
+| `--policy` | Choice rule |
+|---|---|
+| `random-legal` (default) | uniform over `expand_legal_actions` — the game's own `available_commands`, expanded to concrete arguments |
+| `greedy` | the **same** expansion, ranked by `greedy_policy.score_action` |
+| `script` | a fixed command list (one per line), `--script <file>` or `--script-dir <dir>` |
+
+**`--policy greedy` (depth).** `random-legal` is unbiased and therefore shallow:
+across 41 recent runs its median death floor was 3 and its deepest was 12, so the
+states a deep capture needs — the treasure chest at floor 8+, the Act-1 boss at
+16-17 — essentially never appear. `greedy` keeps the same legal-by-construction
+expansion and only changes which candidate is taken:
+
+- **combat** — mirrors the sim's fuzz scoring (`tools/fuzz/src/policy.cpp`
+  `move_score`): lethal first, then `damage*4 + block` when nothing is swinging
+  and `block*4 + damage` while a monster's intent is an attack, focus fire on the
+  lowest-HP live monster, `end` strictly last. Per-card numbers come from
+  `cards_sidetable.json`; a card outside the S1 registry scores as cheap utility.
+- **map** — non-combat > monster > elite, and the boss node when it is offered.
+  This is deliberately **inverted** relative to the sim's elite-first fuzz
+  weights: the fuzzer wants long varied fights, this wants floors survived.
+- **screens** — claim relics/gold/potions, **never** a `SAPPHIRE_KEY` row (it
+  retires the linked relic ungranted — `RewardItem.claimReward`,
+  RewardItem.java:255-330 case 6), leave card rewards unopened (skipping is
+  always safe), open treasure chests, rest when hurt / smith when healthy, and
+  leave shops without buying.
+
+Ties are broken with the run's own policy RNG (`Random(f"{policy_seed}:{seed}")`,
+one draw per decision), so a greedy campaign is reproducible from
+`(--policy-seed, seed)` exactly as the random-legal one is.
+
+Regenerate the side table after any `registry/cards.yaml` change:
+
+```bash
+python tools/oracle_bridge/driver/gen_cards_sidetable.py
+```
+
+`test_oracle_campaign.py::CardSideTableTest` fails if the committed JSON drifts
+from the registry.
+
+### Scripted mode and its two gates
+
+`--policy script` paces a fixed command list through the same lock-step gate.
+Two checks stand between a stale script and a silently mutated run:
+
+- `cmd_verb_ready` waits (bounded by `--max-settle`) for the game to advertise
+  the command's **verb**; a verb that never arrives ends the run as
+  `cmd_never_ready`.
+- `cmd_args_ready` then checks the **arguments** against the very state the
+  command is about to enter: `choose <i>` against `choice_list`, `play <i> [t]`
+  against the hand and the monster list. Out of range ends the run as
+  `cmd_arg_invalid` instead of firing a command the game answers with an
+  InvalidCommand that the eight-error budget quietly absorbs. `choose <name>`
+  (the protocol's string form) and any collection the dump does not carry are
+  passed through untouched. Neither live policy is affected — both draw from
+  `expand_legal_actions` and are in range by construction.
 
 ---
 
