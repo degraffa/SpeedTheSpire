@@ -836,6 +836,30 @@ TEST(ShopFlow, PurgeOpensAModalGridAndConfirmingRemovesExactlyOneCard) {
     (void)removed;
 }
 
+TEST(ShopPurge, TheGridAndTheServiceGateExcludeBottledCards) {
+    // ShopScreen.java:973: the purge grid opens
+    // getGroupWithoutBottledCards(getPurgeableCards()), so a bottled card is
+    // not a purge row -- and a deck whose ONLY purgeable cards are bottled
+    // has no live purge service at all (shop_purge_legal's card scan).
+    RunState rs = bare_run(707);
+    rs.gold = 999;
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);
+    ShopState shop = generate_shop(rs);
+
+    ASSERT_TRUE(shop_purge_legal(rs, shop));
+    EXPECT_FALSE(shop_purge_card_legal(rs, shop, 0))
+        << "the bottled card is not on the purge grid";
+    EXPECT_TRUE(shop_purge_card_legal(rs, shop, 1));
+
+    // Bottle the other card too: every purgeable card is now bottled and the
+    // service itself goes dark.
+    rs.master_deck[1].flags = kMasterCardInBottleLightning;
+    EXPECT_FALSE(shop_purge_legal(rs, shop));
+}
+
 TEST(ShopPurchase, PlainBuyOfABottleIsRefusedWholeWithNoGoldSpent) {
     // The context-less shop_buy_relic overload cannot present the bottle grid,
     // so it must refuse BEFORE the gold leaves and the slot is marked sold --

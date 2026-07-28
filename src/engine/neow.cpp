@@ -569,7 +569,13 @@ bool neow_grid_card_legal(const RunState& rs, const NeowState& st,
     const CardInstance& card = rs.master_deck[deck_index];
     // The list the grid was opened over: getUpgradableCards for UPGRADE_CARD
     // (NeowReward.java:303), getPurgeableCards for every other grid payout
-    // (:253, :257, :286, :290).
+    // (:253, :257, :286, :290). Deliberately the PLAIN filters, with NO
+    // getGroupWithoutBottledCards pass: neither Neow's grids nor the two
+    // relic grids sharing this legality (Astrolabe.java:39/:55 via
+    // getPurgeableCards, EmptyCage.java:45/:55) exclude bottled cards in the
+    // Java -- do not "fix" this to match the event/shop/Toke grids, which DO
+    // exclude (master_card_purgeable_unbottled and its site map,
+    // relic_pools.hpp).
     return static_cast<NeowGridMode>(st.grid_mode) == NeowGridMode::UPGRADE
                ? rest_card_upgradeable(card)
                : rest_card_purgeable(card);

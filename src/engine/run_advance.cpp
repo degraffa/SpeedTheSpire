@@ -1069,6 +1069,34 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
 
 // --- legal_actions (run overload) -------------------------------------------
 
+// PeacePipe.java:48: the Toke OPTION's usable flag is
+// `!getGroupWithoutBottledCards(getPurgeableCards()).isEmpty()` -- one
+// exclusion stronger than the plain has_purgeable_card that build_rest_menu
+// (rest_sites.cpp) computes. rest_sites.cpp belongs to the other track this
+// wave, so the override lives HERE, at the menu's two run-layer consumers
+// (the REST_SITE mask fill and dispatch); folding it into build_rest_menu
+// when the file frees up is recorded as an integration follow-up in the
+// stage report. Every other option is untouched (Smith's gate is
+// hasUpgradableCards, no bottled clause -- CampfireUI/LivingWall precedent).
+RestMenu build_rest_menu_with_bottle_gates(const RunState& rs) noexcept {
+    RestMenu menu = build_rest_menu(rs);
+    for (uint8_t i = 0; i < menu.count; ++i) {
+        if (static_cast<RestOptionKind>(menu.entries[i].kind) !=
+            RestOptionKind::TOKE) {
+            continue;
+        }
+        bool any = false;
+        for (uint16_t j = 0; j < rs.master_deck_count; ++j) {
+            if (master_card_purgeable_unbottled(rs.master_deck[j])) {
+                any = true;
+                break;
+            }
+        }
+        menu.entries[i].usable = menu.entries[i].usable && any;
+    }
+    return menu;
+}
+
 void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
     out = RunActionMask{};
     out.phase = rc.phase;
@@ -1229,19 +1257,25 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
         case RunPhase::REST_SITE: {
             const RestScreen screen = static_cast<RestScreen>(rc.rest.screen);
             if (screen == RestScreen::MENU) {
-                const RestMenu menu = build_rest_menu(rc.run);
+                const RestMenu menu =
+                    build_rest_menu_with_bottle_gates(rc.run);
                 for (uint8_t i = 0; i < menu.count; ++i) {
                     out.can_choose_rest[i] = menu.entries[i].usable;
                 }
             } else if (screen == RestScreen::SMITH) {
+                // getUpgradableCards (CampfireSmithEffect.java:62): NO bottled
+                // exclusion -- a bottled card stays smithable.
                 for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
                     out.can_choose_master_deck[i] =
                         rest_card_upgradeable(rc.run.master_deck[i]);
                 }
             } else if (screen == RestScreen::TOKE) {
+                // CampfireTokeEffect.java:57: the Toke grid is
+                // getGroupWithoutBottledCards(getPurgeableCards()).
                 for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
                     out.can_choose_master_deck[i] =
-                        rest_card_purgeable(rc.run.master_deck[i]);
+                        master_card_purgeable_unbottled(
+                            rc.run.master_deck[i]);
                 }
             } else if (screen == RestScreen::DREAM_CATCHER) {
                 const RewardScreen& s = rc.rewards;
@@ -1758,7 +1792,8 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 const RestScreen screen =
                     static_cast<RestScreen>(rc.rest.screen);
                 if (screen == RestScreen::MENU) {
-                    const RestMenu menu = build_rest_menu(rc.run);
+                    const RestMenu menu =
+                        build_rest_menu_with_bottle_gates(rc.run);
                     if (a0 < menu.count && menu.entries[a0].usable) {
                         const RestOptionEntry& option = menu.entries[a0];
                         switch (static_cast<RestOptionKind>(option.kind)) {
@@ -1789,7 +1824,14 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         finish_rest_site(rc);
                     }
                 } else if (screen == RestScreen::TOKE) {
-                    if (rest_purge_card(rc.run, a0)) {
+                    // The bottled exclusion guards the grid HERE because
+                    // rest_purge_card's own filter is the plain
+                    // getPurgeableCards (rest_sites.cpp -- the other track's
+                    // file this wave; see build_rest_menu_with_bottle_gates).
+                    if (a0 < rc.run.master_deck_count &&
+                        master_card_purgeable_unbottled(
+                            rc.run.master_deck[a0]) &&
+                        rest_purge_card(rc.run, a0)) {
                         finish_rest_site(rc);
                     }
                 } else if (screen == RestScreen::DREAM_CATCHER) {

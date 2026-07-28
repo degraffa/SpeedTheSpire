@@ -195,6 +195,23 @@ struct RelicEquipContext {
 [[nodiscard]] bool bottle_has_eligible_card(const RunState& rs,
                                             MasterBottleKind kind) noexcept;
 
+// CardGroup.getGroupWithoutBottledCards(getPurgeableCards()) membership for
+// one master-deck row (CardGroup.java:1084-1091 over :978-985): purgeable AND
+// not bottled. This is the filter of every S1 purge/transform grid the Java
+// passes through getGroupWithoutBottledCards -- the shop purge
+// (ShopScreen.java:973), Peace Pipe's Toke grid and option gate
+// (CampfireTokeEffect.java:57, PeacePipe.java:48), and the event grids
+// (Cleric.java:76-78, LivingWall.java:96-103, Bonfire.java:101-102,
+// PurificationShrine.java:62, Transmogrifier.java:65,
+// GremlinWheelGame.java:286-287, NoteForYourself.java:65,
+// GoldenWing.java:110). NOT every grid: Neow's remove/transform
+// (NeowReward.java:253-290), Astrolabe/Empty Cage (Astrolabe.java:39,
+// EmptyCage.java:45/:55) and every UPGRADE grid (CampfireSmithEffect.java:62,
+// LivingWall.java:109) read the un-excluded groups and keep bottled cards
+// eligible -- do not widen this predicate onto them.
+[[nodiscard]] bool master_card_purgeable_unbottled(
+    const CardInstance& card) noexcept;
+
 // Which bottle a relic id is, or NONE for every other relic.
 [[nodiscard]] constexpr MasterBottleKind bottle_kind_for_relic(
     RelicId id) noexcept {

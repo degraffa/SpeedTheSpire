@@ -588,9 +588,13 @@ bool shop_purge_legal(const RunState& rs, const ShopState& shop) noexcept {
     }
     // gridSelectScreen.open over getGroupWithoutBottledCards(getPurgeableCards())
     // (:973): an empty grid has nothing to confirm, so the service is dead even
-    // though the game would still open the screen.
+    // though the game would still open the screen. The bottled exclusion is
+    // part of that filter, so a deck whose only purgeable cards are bottled
+    // has no purge service either (the sim's grids have no cancel button; an
+    // openable-but-empty grid would be a dead end, and the state outcome of
+    // open-then-cancel is identical to never opening).
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
-        if (rest_card_purgeable(rs.master_deck[i])) {
+        if (master_card_purgeable_unbottled(rs.master_deck[i])) {
             return true;
         }
     }
@@ -599,8 +603,10 @@ bool shop_purge_legal(const RunState& rs, const ShopState& shop) noexcept {
 
 bool shop_purge_card_legal(const RunState& rs, const ShopState& shop,
                            uint16_t deck_index) noexcept {
+    // The grid row filter is the same getGroupWithoutBottledCards pass the
+    // service gate above cites (ShopScreen.java:973).
     return shop_purge_legal(rs, shop) && deck_index < rs.master_deck_count &&
-           rest_card_purgeable(rs.master_deck[deck_index]);
+           master_card_purgeable_unbottled(rs.master_deck[deck_index]);
 }
 
 bool shop_purge_card(RunState& rs, ShopState& shop,

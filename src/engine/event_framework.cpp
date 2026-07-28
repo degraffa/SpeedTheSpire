@@ -453,13 +453,23 @@ bool event_grid_card_legal(const RunState& rs, const EventDialogState& es,
     }
     switch (static_cast<EventGridKind>(es.grid_kind)) {
         case EventGridKind::PURGE:
-            return rest_card_purgeable(rs.master_deck[deck_index]);
+            // Every S1 event purge grid passes getGroupWithoutBottledCards
+            // over getPurgeableCards -- Cleric.java:76-78,
+            // LivingWall.java:96-97 (Forget), Bonfire.java:101-102,
+            // PurificationShrine.java:62, GremlinWheelGame.java:286-287,
+            // NoteForYourself.java:65, GoldenWing.java:110 -- so a bottled
+            // card is not on any of them. (An Act-2 event that does NOT
+            // exclude, e.g. DrugDealer.java:128, would need its own kind.)
+            return master_card_purgeable_unbottled(rs.master_deck[deck_index]);
         case EventGridKind::UPGRADE:
+            // Upgrade grids keep bottled cards: LivingWall.java:109 (Grow)
+            // opens getUpgradableCards(), which has NO bottled clause -- do
+            // not over-exclude here.
             return rest_card_upgradeable(rs.master_deck[deck_index]);
         case EventGridKind::TRANSFORMABLE:
-            // Living Wall uses getPurgeableCards for this screen too
-            // (LivingWall.java:68-72).
-            return rest_card_purgeable(rs.master_deck[deck_index]);
+            // Living Wall's Change (:102-103) and Transmogrifier (:65) both
+            // open getGroupWithoutBottledCards(getPurgeableCards()).
+            return master_card_purgeable_unbottled(rs.master_deck[deck_index]);
         case EventGridKind::NONE:
         default:
             return false;

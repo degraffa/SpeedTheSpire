@@ -37,6 +37,7 @@
 #include "sts/engine/relics.hpp"
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/run_deck.hpp"  // the master-deck bottle bits
 #include "sts/engine/run_state.hpp"
 #include "sts/registry/event_table.hpp"
 
@@ -907,6 +908,60 @@ TEST(EventDialog, DisabledAndOutOfRangeChoicesAreNonCorruptingNoOps) {
     // Leaving still works.
     dialog_step(rc, 2);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+}
+
+// =============================================================================
+// Bottled-card exclusion on the event grids (getGroupWithoutBottledCards)
+// =============================================================================
+//
+// Every S1 event PURGE/TRANSFORMABLE grid opens
+// getGroupWithoutBottledCards(getPurgeableCards()) (Cleric.java:76-78,
+// LivingWall.java:96-103, Bonfire.java:101-102, PurificationShrine.java:62,
+// Transmogrifier.java:65, GremlinWheelGame.java:286-287,
+// NoteForYourself.java:65, GoldenWing.java:110). The UPGRADE grid does NOT
+// exclude: LivingWall's Grow opens getUpgradableCards() (:109). And because
+// events::has_purgeable_card is grid_has_card(PURGE) over the same legality,
+// every event's purge/transform OPTION gate picks up the exclusion too.
+
+TEST(EventGridBottle, PurgeAndTransformGridsExcludeBottledCardsUpgradeKeepsThem) {
+    RunState rs{};
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ARMAMENTS);
+
+    EventDialogState es{};
+    open_event_grid(es, EventGridKind::PURGE);
+    EXPECT_FALSE(event_grid_card_legal(rs, es, 0))
+        << "a bottled card is not on any S1 event purge grid";
+    EXPECT_TRUE(event_grid_card_legal(rs, es, 1));
+
+    open_event_grid(es, EventGridKind::TRANSFORMABLE);
+    EXPECT_FALSE(event_grid_card_legal(rs, es, 0));
+    EXPECT_TRUE(event_grid_card_legal(rs, es, 1));
+
+    open_event_grid(es, EventGridKind::UPGRADE);
+    EXPECT_TRUE(event_grid_card_legal(rs, es, 0))
+        << "upgrade grids keep bottled cards (LivingWall.java:109)";
+}
+
+TEST(EventGridBottle, AnAllBottledPurgeableDeckClosesTheEventPurgeGates) {
+    // events::has_purgeable_card is grid_has_card(PURGE): when every purgeable
+    // card is bottled, the purge/transform option gates read false and no
+    // event opens an empty grid.
+    RunState rs{};
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::ASCENDERS_BANE);
+
+    EventDialogState probe{};
+    open_event_grid(probe, EventGridKind::PURGE);
+    bool any = false;
+    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
+        any = any || event_grid_card_legal(rs, probe, i);
+    }
+    EXPECT_FALSE(any);
 }
 
 }  // namespace

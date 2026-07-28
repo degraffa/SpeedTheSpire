@@ -1313,3 +1313,28 @@ TEST(NeowFlow, IllegalPressesAreInertAtEveryScreen) {
     step(rc, choose(200));  // out of range
     EXPECT_EQ(rc.run.master_deck_count, copy.run.master_deck_count);
 }
+
+TEST(NeowGrid, BottledCardsStayEligibleOnNeowAndRelicGrids) {
+    // NeowReward's remove/transform grids open the PLAIN getPurgeableCards
+    // (NeowReward.java:253/:257/:286/:290) with NO getGroupWithoutBottledCards
+    // pass -- and the two relic grids sharing this legality (Empty Cage,
+    // EmptyCage.java:55; Astrolabe, Astrolabe.java:39) read the same plain
+    // group. A bottled card therefore STAYS choosable here, unlike on the
+    // event/shop/Toke grids. (Unreachable with a real bottle at floor 0 --
+    // bottles cannot be owned before Neow -- but the predicate must not
+    // over-exclude, per the master_card_purgeable_unbottled site map.)
+    RunState rs{};
+    rs.master_deck_count = 1;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::CLEAVE);
+    rs.master_deck[0].flags = kMasterCardInBottleFlame;
+
+    NeowState st{};
+    st.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    st.grid_mode = static_cast<uint8_t>(NeowGridMode::REMOVE);
+    st.grid_needed = 1;
+    EXPECT_TRUE(neow_grid_card_legal(rs, st, 0));
+    st.grid_mode = static_cast<uint8_t>(NeowGridMode::TRANSFORM_UPGRADE);
+    EXPECT_TRUE(neow_grid_card_legal(rs, st, 0));
+    st.grid_mode = static_cast<uint8_t>(NeowGridMode::UPGRADE);
+    EXPECT_TRUE(neow_grid_card_legal(rs, st, 0));
+}

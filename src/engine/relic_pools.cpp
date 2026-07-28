@@ -443,6 +443,12 @@ bool bottle_has_eligible_card(const RunState& rs,
     return false;
 }
 
+bool master_card_purgeable_unbottled(const CardInstance& card) noexcept {
+    // getGroupWithoutBottledCards over getPurgeableCards -- the site map is on
+    // the declaration (relic_pools.hpp).
+    return rest_card_purgeable(card) && !master_card_bottled(card);
+}
+
 bool relic_acquire_legal(const RunState& rs, RelicId id) noexcept {
     if (relic_def(id) == nullptr) {
         return false;
