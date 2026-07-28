@@ -92,6 +92,11 @@ TEST(Encounters, FixedMonsterCompositionsConsumeNoDraws) {
         {"The Guardian", {"TheGuardian"}},
         {"Hexaghost", {"Hexaghost"}},
         {"Slime Boss", {"SlimeBoss"}},
+        // EVENT pool (lookup-only fixed group, encounters.yaml id 21): the
+        // Hypnotizing Mushrooms fight -- MonsterHelper.getEncounter
+        // "The Mushroom Lair" builds three FungiBeasts; the run layer reaches
+        // it through enter_event_combat (exordium_events_ii.cpp).
+        {"The Mushroom Lair", {kFungi, kFungi, kFungi}},
     };
     for (const auto& c : cases) {
         for (int64_t seed = 0; seed < 8; ++seed) {
