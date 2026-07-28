@@ -71,7 +71,11 @@ namespace {
     // Checked for Regenerate Monster (PowerId::REGENERATE_MONSTER, id 91):
     // its only override is atEndOfTurn (RegenerateMonsterPower.java:37-43),
     // read in full -- it touches no block path at all.
-    static_assert(sts::registry::manifest::kPowersCount == 52,
+    // Checked for Duplication (id 92): it overrides only updateDescription,
+    // onUseCard and atEndOfRound (DuplicationPower.java:19-72, read in full)
+    // -- no modifyBlock or modifyBlockLast -- so the count moves and no case
+    // is added.
+    static_assert(sts::registry::manifest::kPowersCount == 53,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

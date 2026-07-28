@@ -971,6 +971,66 @@ enum class DiscoveryPool : uint8_t {
     return item.tgt == kActorPlayer ? 1 : static_cast<int>(item.tgt);
 }
 
+// Is this DISCOVERY screen skippable? DiscoveryAction.update opens
+// cardRewardScreen.customCombatOpen(cards, TEXT[1], this.cardType != null)
+// (DiscoveryAction.java:49), and customCombatOpen's third parameter IS the
+// screen's `skippable` (CardRewardScreen.java:485-500: stored at :498, drives
+// SkipCardButton show/hide at :499-502). cardType is non-null for exactly the
+// TYPED ctor (DiscoveryAction.java:31-36 -- Attack/Skill/Power Potion); the
+// default ctor (the Discovery card, :25-29) and the colorless ctor (Colorless
+// Potion, :38-43) both leave it null. So skippability is a pure function of
+// the pool selector.
+[[nodiscard]] constexpr bool discovery_skippable(
+    const ActionQueueItem& item) noexcept {
+    const DiscoveryPool p = discovery_pool(item);
+    return p == DiscoveryPool::ATTACK || p == DiscoveryPool::SKILL ||
+           p == DiscoveryPool::POWER;
+}
+
+// How many WASTED offer regenerations one DISCOVERY resolution burns, pick and
+// skip alike -- the RNG model behind the capture-observed cardRandomRng spend.
+//
+// DiscoveryAction.update recomputes `generatedCards` at the top of EVERY update
+// tick (DiscoveryAction.java:47, outside the duration branch); only the first
+// tick's list reaches the screen (:49). The action ticks once to open the
+// screen (duration == ACTION_DUR_FAST -> customCombatOpen + tickDuration,
+// :48-51), is then FROZEN while the screen is up (AbstractRoom.update runs
+// actionManager.update() only under !AbstractDungeon.isScreenUp), and on close
+// ticks until tickDuration drives duration below zero
+// (AbstractGameAction.java:74-79), regenerating -- and discarding -- a full
+// three-distinct-card offer each tick.
+//
+// THE TICK COUNT IS TIMING-DRIVEN AND IS PINNED BY THE ORACLE CONTRACT, not by
+// game source: tickDuration subtracts Gdx.graphics.getDeltaTime(), which the
+// oracle fork's stripAnimationCollapse patch fixes at STEP = 0.043
+// (tools/oracle_bridge/communicationmod-oracle/README-oracle.md, the
+// rendering-strip patch table). From
+// ACTION_DUR_FAST = 0.25 (Settings.java:685): the open tick leaves 0.207, and
+// the post-close ticks run 0.164 / 0.121 / 0.078 / 0.035 / -0.008 -- FIVE
+// regenerations after the pick or skip, then done. (In an unpatched client the
+// count would be frame-rate-dependent; under the frozen §1.2 environment it is
+// a constant of the fork, which is the runtime oracle this engine replays.)
+//
+// Capture table (both G6 campaigns agree record-for-record; counters are the
+// cardRandomRng totals at screen-open / after the close resolved):
+//   STS00220 seq 61 pick  0 -> 3 -> 19   (open 3, close 16 = 5 regens + 1 dupe)
+//   STS00221 seq 53 skip  0 -> 4 -> 19   (open 3+1 dupe, close 15 = 5 regens)
+//   STS00425 seq 38 pick  0 -> 3 -> 19
+//   STS00610 seq 104 skip 0 -> 3 -> 18   (close 15: no dupe in any regen)
+//   STS01372 seq 39 pick  0 -> 3 -> 19
+//   STS01861 seq 31 skip  0 -> 3 -> 18
+//   STS01861 seq 90 skip  0 -> 3 -> 19   (a dupe INSIDE a wasted regen)
+// Pick and skip agree because line :47 runs regardless of what the screen
+// returned; the retrieve half (:53-85) spends no cardRandomRng.
+//
+// The one Java-order nuance: the FIRST wasted regeneration precedes the
+// retrieve (tick 2 regenerates, THEN reads discoveryCard), the other four
+// follow it. advance.cpp's CHOOSE dispatch reproduces that order exactly;
+// nothing observable separates the interleavings today (the retrieve draws
+// nothing), but the order is the Java's, so a future rng-spending hand-entry
+// hook cannot silently reorder the stream.
+inline constexpr int kDiscoveryWastedRegens = 5;
+
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
 inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;   // ChoiceKind bit 2
 inline constexpr uint32_t kChoiceCopiesShift = 4;
@@ -1454,6 +1514,18 @@ void prepare_discovery_choice(CombatState& state,
 void resolve_discovery_choice(CombatState& state,
                               const ActionQueueItem& item,
                               uint8_t slot) noexcept;
+
+// Burn `regens` full offer regenerations WITHOUT storing any of them --
+// DiscoveryAction.update's wasted work. generateCardChoices runs at the TOP of
+// every update tick (DiscoveryAction.java:47, OUTSIDE the duration branch), so
+// every tick after the first re-rolls a complete three-distinct-card offer that
+// nothing reads. Each burned regeneration is the FULL rejection sampler --
+// duplicates re-roll and cost their draw -- against the item's own pool. See
+// kDiscoveryWastedRegens (below the DISCOVERY item helpers, this header) for
+// why the tick count is a fixed 1 + 5 under the oracle contract, and the
+// capture table pinning it.
+void discard_discovery_regens(CombatState& state, const ActionQueueItem& item,
+                              int regens) noexcept;
 
 // --- Dispatch ----------------------------------------------------------------
 // Execute one popped ActionQueueItem against `state`. One case per Opcode;

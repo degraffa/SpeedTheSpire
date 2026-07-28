@@ -94,7 +94,10 @@ namespace {
     // only override is atEndOfTurn (RegenerateMonsterPower.java:37-43), read in
     // full -- no atDamage* or block hook at all, so this file's three
     // count-guard sites plus interp_block.cpp's one take the move together.
-    static_assert(sts::registry::manifest::kPowersCount == 52,
+    // Checked for Duplication (DuplicationPower.java:19-72, read in full):
+    // only updateDescription, onUseCard and atEndOfRound -- no atDamage* hook
+    // anywhere -- so all three of this file's counts move again, caseless.
+    static_assert(sts::registry::manifest::kPowersCount == 53,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -167,7 +170,8 @@ namespace {
     // (PanachePower.java:40-67 / TheBombPower.java:40-53).
     // Checked for Regenerate Monster: same answer as the pass above -- its only
     // override is atEndOfTurn (RegenerateMonsterPower.java:37-43), read in full.
-    static_assert(sts::registry::manifest::kPowersCount == 52,
+    // Duplication: no atDamage* override either (see at_damage_give's note).
+    static_assert(sts::registry::manifest::kPowersCount == 53,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -233,7 +237,9 @@ namespace {
     // Checked for Regenerate Monster: neither overrides atDamageFinalReceive
     // (RegenerateMonsterPower.java:37-43, read in full). All three of this
     // file's counts moved together with interp_block.cpp's, again.
-    static_assert(sts::registry::manifest::kPowersCount == 52,
+    // file's counts moved together again -- and again for Duplication (see
+    // at_damage_give's note).
+    static_assert(sts::registry::manifest::kPowersCount == 53,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible does)? Add a case here if so.");
     switch (static_cast<PowerId>(p.power_id)) {

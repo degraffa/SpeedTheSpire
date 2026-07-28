@@ -17,10 +17,13 @@
 // (potion_use_implemented).
 
 #include <cstdint>
+#include <span>
 
 #include "gtest/gtest.h"
 
 #include "sts/engine/action_queue.hpp"
+#include "sts/engine/advance.hpp"   // legal_actions/advance: the DISCOVERY screen
+#include "sts/engine/card_play.hpp" // queue_card_play (the Duplication replays)
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
@@ -758,6 +761,344 @@ TEST(Potions, AnAuthoredDiscoveryItemDefaultsToTheFullCombatPoolAndOneCopy) {
     EXPECT_EQ(discovery_copies(authored), 1);
 }
 
+// --- The DISCOVERY screen's SKIP and its per-tick regeneration cost ----------
+//
+// DiscoveryAction.update opens customCombatOpen(cards, TEXT[1],
+// this.cardType != null) (DiscoveryAction.java:49): the third parameter is the
+// screen's `skippable` (CardRewardScreen.java:485-500). cardType is non-null
+// for exactly the typed ctor, so Attack/Skill/Power Potion screens carry the
+// Skip button and the colorless ctor's (and the Discovery card's) do not.
+//
+// And the action regenerates its offer at the top of EVERY update tick (:47,
+// outside the duration branch): 1 open tick whose offer is latched, then
+// kDiscoveryWastedRegens full regenerations burned when the pick or skip
+// closes the screen (the fork-STEP derivation and the seven-capture pin table
+// live on the constant, interp.hpp).
+
+// One advance() step against a single state (the public API, so the CHOOSE
+// dispatch's legality gate is exercised, not bypassed).
+StepResult StepCombat(CombatState& s, Action a) {
+    StepResult r{};
+    advance(std::span<CombatState>(&s, 1), std::span<const Action>(&a, 1),
+            std::span<StepResult>(&r, 1));
+    return r;
+}
+
+// Replay one generateCardChoices call on an independent probe stream: draws
+// until it holds three distinct cardIDs, one draw per attempt. Returns the
+// number of draws spent (3 + duplicate retries).
+int ProbeGenerateOffer(RngStream& probe, const CardId* pool, int pool_count) {
+    CardId got[kDiscoveryChoiceCount]{};
+    uint8_t n = 0;
+    int draws = 0;
+    while (n < kDiscoveryChoiceCount) {
+        const int32_t pick =
+            random(probe, static_cast<int32_t>(pool_count) - 1);
+        ++draws;
+        const CardId id = pool[static_cast<unsigned>(pick)];
+        bool dupe = false;
+        for (uint8_t i = 0; i < n; ++i) {
+            dupe = dupe || got[i] == id;
+        }
+        if (!dupe) {
+            got[n++] = id;
+        }
+    }
+    return draws;
+}
+
+TEST(Potions, DiscoverPotionScreensAreSkippableExactlyWhenTyped) {
+    struct Row { PotionId id; bool skippable; };
+    const Row rows[] = {
+        {PotionId::ATTACK_POTION, true},      // DiscoveryAction(CardType, n)
+        {PotionId::SKILL_POTION, true},       //   -> cardType != null
+        {PotionId::POWER_POTION, true},
+        {PotionId::COLORLESS_POTION, false},  // DiscoveryAction(true, n)
+    };                                        //   -> cardType stays null
+    for (const Row& r : rows) {
+        CombatState s = MakeCombat();
+        s.card_random_rng = from_seed(3);  // prepare needs a live stream
+        ASSERT_TRUE(use_potion(s, r.id, 0));
+        pump(s);  // blocks at the prepared DISCOVERY head
+        ASSERT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+        ActionMask m{};
+        legal_actions(s, m);
+        ASSERT_TRUE(m.choice_from_generated) << static_cast<int>(r.id);
+        EXPECT_EQ(m.can_skip_choice, r.skippable) << static_cast<int>(r.id);
+    }
+    // The Discovery CARD's authored item rides the COMBAT pool (the default
+    // ctor, cardType null) -- not skippable either.
+    ActionQueueItem authored{};
+    authored.opcode = static_cast<uint16_t>(Opcode::DISCOVERY);
+    authored.src = kActorPlayer;
+    authored.tgt = kActorPlayer;
+    EXPECT_FALSE(discovery_skippable(authored));
+}
+
+// SKIP: consumes the item, creates nothing, refunds nothing -- the close just
+// lets the action tick out with cardRewardScreen.discoveryCard still null
+// (SkipCardButton.java:64-66 closes without writing it; DiscoveryAction.java:
+// 53-85's retrieve is a no-op on null) -- and STILL burns the five wasted
+// regenerations (:47 runs on every one of those ticks).
+TEST(Potions, DiscoverPotionSkipConsumesTheItemCreatesNothingAndBurnsRegens) {
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(7);
+    ASSERT_TRUE(use_potion(s, PotionId::SKILL_POTION, 0));
+    pump(s);
+    ASSERT_EQ(s.action_count, 1);
+
+    RngStream probe = from_seed(7);
+    ProbeGenerateOffer(probe, kIroncladSkillPool.data(),
+                       kIroncladSkillPoolCount);  // the open tick's offer
+    ASSERT_EQ(s.card_random_rng.counter, probe.counter)
+        << "screen-open cost is the latched offer alone";
+
+    StepCombat(s, make_action(ActionVerb::CHOOSE, kChooseSkipCard));
+
+    for (int r = 0; r < kDiscoveryWastedRegens; ++r) {
+        ProbeGenerateOffer(probe, kIroncladSkillPool.data(),
+                           kIroncladSkillPoolCount);
+    }
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "the close burns exactly kDiscoveryWastedRegens regenerations";
+    EXPECT_EQ(s.action_count, 0) << "the DISCOVERY item is consumed";
+    EXPECT_EQ(s.hand_count, 0) << "skip creates nothing";
+    EXPECT_EQ(s.discard_count, 0);
+    EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::WAITING_ON_USER));
+}
+
+// PICK spends the SAME wasted regenerations as skip -- line :47 runs no matter
+// what the screen returned. The seed battery keeps the counter identity honest
+// across duplicate retries landing INSIDE a wasted regeneration (the capture
+// pin: STS01861 seq 90, a skip whose close cost 16 draws, not 15).
+TEST(Potions, DiscoverPotionPickBurnsTheSameWastedRegens) {
+    int closes_with_duplicate_retry = 0;
+    for (int64_t seed = 1; seed <= 24; ++seed) {
+        CombatState s = MakeCombat();
+        s.card_random_rng = from_seed(seed);
+        ASSERT_TRUE(use_potion(s, PotionId::ATTACK_POTION, 0));
+        pump(s);
+        ASSERT_EQ(s.action_count, 1);
+        const CardId chosen =
+            discovery_choice_card(s.action_queue[s.action_head], 0);
+
+        RngStream probe = from_seed(seed);
+        ProbeGenerateOffer(probe, kIroncladAttackPool.data(),
+                           kIroncladAttackPoolCount);  // open tick
+
+        StepCombat(s, make_action(ActionVerb::CHOOSE, 0));
+
+        int close_draws = 0;
+        for (int r = 0; r < kDiscoveryWastedRegens; ++r) {
+            close_draws += ProbeGenerateOffer(probe, kIroncladAttackPool.data(),
+                                              kIroncladAttackPoolCount);
+        }
+        if (close_draws > kDiscoveryWastedRegens * kDiscoveryChoiceCount) {
+            ++closes_with_duplicate_retry;
+        }
+        EXPECT_EQ(s.card_random_rng.counter, probe.counter) << "seed " << seed;
+        ASSERT_EQ(s.hand_count, 1) << "seed " << seed;
+        EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+                  static_cast<uint16_t>(chosen));
+        EXPECT_EQ(s.card_pool[s.hand[0]].cost_now, 0);
+    }
+    EXPECT_GT(closes_with_duplicate_retry, 0)
+        << "the battery must cover a duplicate retry inside a wasted regen";
+}
+
+// The negative control: on a NON-skippable discovery screen (Colorless
+// Potion), CHOOSE(kChooseSkipCard) is a documented no-op -- the screen stays
+// open, the item stays queued, and no rng is spent.
+TEST(Potions, DiscoverPotionSkipOnAColorlessScreenIsANoOp) {
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(11);
+    ASSERT_TRUE(use_potion(s, PotionId::COLORLESS_POTION, 0));
+    pump(s);
+    ASSERT_EQ(s.action_count, 1);
+    const int32_t counter_before = s.card_random_rng.counter;
+
+    StepCombat(s, make_action(ActionVerb::CHOOSE, kChooseSkipCard));
+
+    EXPECT_EQ(s.action_count, 1) << "the DISCOVERY item is NOT consumed";
+    EXPECT_EQ(s.card_random_rng.counter, counter_before);
+    ActionMask m{};
+    legal_actions(s, m);
+    EXPECT_TRUE(m.choice_pending) << "the screen is still open";
+    EXPECT_FALSE(m.can_skip_choice);
+}
+
+// --- NATIVE with body: Distilled Chaos (USE-time rolls + PLAY_CARD top) ------
+//
+// DistilledChaosPotion.use (DistilledChaosPotion.java:38-43):
+//     for (int i = 0; i < this.potency; ++i)
+//         this.addToBot(new PlayTopCardAction(
+//             AbstractDungeon.getCurrRoom().monsters.getRandomMonster(
+//                 null, true, AbstractDungeon.cardRandomRng), false));
+// getPotency (:46-48) is 3. NO new opcode: PlayTopCardAction is exactly
+// PLAY_CARD + kPlayCardFromDrawTop (op_play_card -- the both-piles-empty
+// no-op, the empty-draw reshuffle, top card to limbo, autoplay queue), the
+// body Mayhem already reuses. THE LOAD-BEARING DIFFERENCE from Mayhem:
+// getRandomMonster is a CONSTRUCTOR ARGUMENT, evaluated synchronously inside
+// use() -- all `potency` cardRandomRng target rolls are spent BEFORE any play
+// resolves -- so the body rolls at USE time and bakes each target into its
+// queued item (the power_magnetism USE-time-roll precedent), where Mayhem's
+// anonymous action defers its roll to queue-drain (kActorRandomEnemy).
+// Capture pin: every witnessed drink spends exactly 3 cardRandomRng draws by
+// the next record (STS01857 seq 20, STS02110 seq 31, STS01314 seq 49 and 69
+// -- identical in both g6 campaigns, counters 0 -> 3).
+
+TEST(Potions, DistilledChaosRollsAllTargetsAtUseTimeAndBakesThem) {
+    CombatState s = MakeCombat(3);
+    seed_draw_pile(s, 5);
+    s.card_random_rng = from_seed(9);
+
+    RngStream probe = from_seed(9);
+    uint8_t expected_tgt[3];
+    for (int i = 0; i < 3; ++i) {
+        // getRandomMonster(null, true, cardRandomRng): one draw over the LIVE
+        // monsters, [0, aliveCount-1] inclusive -- all three are alive here.
+        expected_tgt[i] = static_cast<uint8_t>(random(probe, 2));
+    }
+
+    ASSERT_TRUE(use_potion(s, PotionId::DISTILLED_CHAOS, 0));
+
+    EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+        << "all potency rolls are spent at USE time, before any play resolves";
+    ASSERT_EQ(s.action_count, 3);
+    for (int i = 0; i < 3; ++i) {
+        const ActionQueueItem& it =
+            s.action_queue[(s.action_head + i) % kActionQueueCap];
+        EXPECT_EQ(it.opcode, static_cast<uint16_t>(Opcode::PLAY_CARD)) << i;
+        EXPECT_EQ(it.flags & kPlayCardFromDrawTop, kPlayCardFromDrawTop) << i;
+        EXPECT_EQ(it.flags & kPlayCardExhaust, 0u)
+            << "exhausts = false -- the played card files normally";
+        EXPECT_EQ(it.tgt, expected_tgt[i])
+            << "target " << i << " baked at use, not deferred to execute";
+    }
+    EXPECT_EQ(potion_def(PotionId::DISTILLED_CHAOS)->potency, 3);
+}
+
+// --- Duplication Potion + DuplicationPower (data row 25 -> power 92) ---------
+//
+// DuplicationPotion.use (DuplicationPotion.java:42-46): in RoomPhase.COMBAT,
+// one addToBot ApplyPowerAction(player, player, DuplicationPower(player,
+// potency), potency); getPotency (:48-51) is 1. The potion row is a plain
+// DATA APPLY_POWER program; the behavior lives on the POWER
+// (DuplicationPower.java:19-72 / powers/power_duplication.cpp): onUseCard
+// replays ANY played, non-purge card -- Double Tap's synchronous verb with
+// the ATTACK filter removed -- and atEndOfRound decays an unspent charge by
+// ONE per round (not Double Tap's end-of-turn whole-power removal).
+
+void PlayHandCard(CombatState& s, uint8_t slot, uint8_t tgt = 0) {
+    ASSERT_TRUE(queue_card_play(s, slot, tgt));
+    pump(s);
+}
+
+void EndPlayerTurn(CombatState& s) {
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+    pump(s);
+}
+
+TEST(Potions, DuplicationPotionIsADataApplyPowerProgram) {
+    CombatState s = MakeCombat();
+    EXPECT_FALSE(potion_def(PotionId::DUPLICATION_POTION)->native)
+        << "the row is a data program once the power exists";
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), 1);
+    EXPECT_EQ(potion_def(PotionId::DUPLICATION_POTION)->potency, 1);
+}
+
+TEST(Potions, DuplicationReplaysAnyCardTypeIncludingSkills) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    drain_actions(s);
+    seed_hand_card(s, 30, CardId::DEFEND);
+
+    PlayHandCard(s, 0);
+
+    EXPECT_EQ(s.player_block, 10)
+        << "a SKILL is replayed too -- the :40 guard has no CardType clause "
+           "(contrast DoubleTapPower.java:44)";
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), -1)
+        << "--amount hit 0 -> addToBot RemoveSpecificPowerAction (:57-60)";
+    EXPECT_EQ(s.discard_count, 1)
+        << "the ORIGINAL files normally; the purge-on-use copy lands nowhere";
+    EXPECT_EQ(s.exhaust_count, 0);
+}
+
+TEST(Potions, DuplicationCopyDoesNotItselfSpendACharge) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    ASSERT_EQ(s.action_count, 1);
+    s.action_queue[s.action_head].amount = 2;  // Sacred Bark: potency 1 -> 2
+    drain_actions(s);
+    ASSERT_EQ(player_power_stack(s, PowerId::DUPLICATION), 2);
+    seed_hand_card(s, 30, CardId::STRIKE);
+
+    PlayHandCard(s, 0, 0);
+
+    EXPECT_EQ(s.monsters[0].hp, 50 - 12) << "one played Strike lands twice";
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), 1)
+        << "one charge per PLAYED card -- `!card.purgeOnUse` (:40) keeps the "
+           "replay copy from spending the second";
+}
+
+TEST(Potions, DuplicationUnspentChargesDecayOnePerRoundNotWholesale) {
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    ASSERT_EQ(s.action_count, 1);
+    s.action_queue[s.action_head].amount = 2;
+    drain_actions(s);
+    ASSERT_EQ(player_power_stack(s, PowerId::DUPLICATION), 2);
+
+    EndPlayerTurn(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), 1)
+        << "atEndOfRound is ReducePowerAction(1) (:65-71) -- NOT Double Tap's "
+           "whole-power atEndOfTurn removal";
+
+    EndPlayerTurn(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), -1)
+        << "the reduce of 1-from-1 removes (ReducePowerAction.java:45-51) -- "
+           "the g6b STS01221 shape: drunk, unspent, gone after one round";
+}
+
+TEST(Potions, DuplicationParkedAtZeroLeavesAtEndOfRound) {
+    // The Java's `if (this.amount == 0) addToBot(Remove)` branch (:66-67).
+    // Unreachable through normal play (the onUseCard decrement queues the
+    // removal itself at zero), implemented because the Java writes it: a
+    // power parked at 0 by some other route must leave rather than tick
+    // forever -- the same belt-and-braces power_duration_debuff keeps.
+    CombatState s = MakeCombat();
+    ASSERT_TRUE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    drain_actions(s);
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::DUPLICATION)) {
+            s.player_powers[i].amount = 0;
+        }
+    }
+    EndPlayerTurn(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::DUPLICATION), -1);
+}
+
+TEST(Potions, DistilledChaosPlaysTheTopThreeAndSpendsNothingMoreAtResolve) {
+    CombatState s = MakeCombat(2, /*monster_hp=*/60);
+    seed_draw_pile(s, 5);  // five STRIKEs
+    s.card_random_rng = from_seed(4);
+    ASSERT_TRUE(use_potion(s, PotionId::DISTILLED_CHAOS, 0));
+    const int32_t counter_after_use = s.card_random_rng.counter;
+
+    pump(s);
+
+    EXPECT_EQ(s.card_random_rng.counter, counter_after_use)
+        << "a STRIKE play spends no cardRandomRng -- the rolls were the use()'s";
+    EXPECT_EQ(s.draw_count, 2) << "three cards left the draw-pile top";
+    EXPECT_EQ(s.discard_count, 3) << "exhausts=false: the plays file normally";
+    const int dealt = (60 - s.monsters[0].hp) + (60 - s.monsters[1].hp);
+    EXPECT_EQ(dealt, 18) << "three autoplayed base STRIKEs landed (3 x 6)";
+}
+
 // --- NATIVE with body: Liquid Memories (ChoiceKind::DISCARD_TO_HAND_FREE) ----
 //
 // LiquidMemories.use (LiquidMemories.java:37-40) is one addToBot of
@@ -1219,8 +1560,8 @@ TEST(Potions, RarityAndPotencyTable) {
         {PotionId::LIQUID_BRONZE, PotionRarity::UNCOMMON, 3, false},
         {PotionId::ESSENCE_OF_STEEL, PotionRarity::UNCOMMON, 4, false},
         {PotionId::CULTIST_POTION, PotionRarity::RARE, 1, false},
-        // Still native + deferred (recursive-play opcode, not powers.yaml).
-        {PotionId::DUPLICATION_POTION, PotionRarity::UNCOMMON, 1, true},
+        // A data APPLY_POWER program since PowerId::DUPLICATION registered.
+        {PotionId::DUPLICATION_POTION, PotionRarity::UNCOMMON, 1, false},
         {PotionId::FRUIT_JUICE, PotionRarity::RARE, 5, true},
         {PotionId::FAIRY_POTION, PotionRarity::RARE, 30, true},
         {PotionId::SMOKE_BOMB, PotionRarity::RARE, 0, true},
@@ -1238,14 +1579,16 @@ TEST(Potions, RarityAndPotencyTable) {
 // --- The implemented-ness gate (potion legality trap) ------------------------
 
 TEST(Potions, DeferredNativePotionIsRefusedNotSilentlyNoOped) {
-    // A still-deferred native potion (Duplication -- blocked on the recursive-
-    // play opcode) must FAIL rather than quietly do nothing: run_advance's
-    // step_potion reads the false return as "the use did not happen" and keeps
-    // the slot, so the player can never burn a potion for no effect.
+    // The DEFERRED set is empty now, but the refusal door itself must stay
+    // shut: an unusable potion FAILS rather than quietly doing nothing, so
+    // run_advance's step_potion reads the false return as "the use did not
+    // happen" and keeps the slot. FAIRY_POTION is the standing example -- it
+    // is IMPLEMENTED (the lethal-HP-write revive) but never USED (canUse() is
+    // `return false`, FairyPotion.java:47-50), so the gate refuses it by name.
     CombatState s = MakeCombat();
     const CombatState before = s;
-    EXPECT_FALSE(potion_use_implemented(PotionId::DUPLICATION_POTION));
-    EXPECT_FALSE(use_potion(s, PotionId::DUPLICATION_POTION, 0));
+    EXPECT_FALSE(potion_use_implemented(PotionId::FAIRY_POTION));
+    EXPECT_FALSE(use_potion(s, PotionId::FAIRY_POTION, 0));
     EXPECT_EQ(s.action_count, 0);
     EXPECT_EQ(s.player_power_count, before.player_power_count);
     EXPECT_EQ(s.player_hp, before.player_hp);
@@ -1273,19 +1616,22 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
                         PotionId::ELIXIR, PotionId::ATTACK_POTION,
                         PotionId::SKILL_POTION, PotionId::POWER_POTION,
                         PotionId::COLORLESS_POTION, PotionId::LIQUID_MEMORIES,
-                        PotionId::GAMBLERS_BREW, PotionId::FRUIT_JUICE,
+                        PotionId::GAMBLERS_BREW, PotionId::DISTILLED_CHAOS,
+                        PotionId::FRUIT_JUICE,
                         PotionId::ENTROPIC_BREW, PotionId::SMOKE_BOMB}) {
         EXPECT_TRUE(potion_use_implemented(id))
             << "native id " << static_cast<int>(id) << " has a body";
     }
-    // The card-CHOOSE group, recursive play, cost randomization, and the
-    // out-of-combat revive are all still deferred.
+    // DISTILLED_CHAOS left the deferred list: no "recursive play" opcode was
+    // ever needed -- PLAY_CARD + kPlayCardFromDrawTop IS PlayTopCardAction.
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
+    // DUPLICATION_POTION left the same way when PowerId::DUPLICATION was
+    // registered: its row is a DATA APPLY_POWER program (the Dexterity/
+    // Steroid/Essence-of-Steel shape), so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::DISTILLED_CHAOS,
-                        PotionId::DUPLICATION_POTION,
-                        PotionId::FAIRY_POTION}) {
+    EXPECT_TRUE(potion_use_implemented(PotionId::DUPLICATION_POTION));
+    for (PotionId id : {PotionId::FAIRY_POTION}) {
         EXPECT_FALSE(potion_use_implemented(id))
             << "deferred id " << static_cast<int>(id) << " must not be usable";
         CombatState s = MakeCombat();

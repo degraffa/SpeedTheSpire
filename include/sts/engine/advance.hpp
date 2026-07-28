@@ -92,6 +92,18 @@ void queue_innate_overflow_draw(CombatState& state,
 
 // --- ActionMask -------------------------------------------------------------
 
+// CHOOSE arg0 sentinel for the Skip button on a card-reward-style screen. Small
+// arg0 values are pick indices, so the named buttons live at the top of the u8
+// range (the same layout run_advance.hpp's kChooseProceed/kChooseSing continue).
+// Defined HERE, at the combat layer, because it has a combat-layer consumer: a
+// typed DISCOVERY screen (Attack/Skill/Power Potion) is skippable --
+// DiscoveryAction.update opens cardRewardScreen.customCombatOpen(cards,
+// TEXT[1], this.cardType != null) (DiscoveryAction.java:49), and
+// CardRewardScreen.customCombatOpen's third parameter is `skippable`
+// (CardRewardScreen.java:485-500). The run layer's COMBAT_REWARD / Neow card
+// screens reuse the same sentinel (run_advance.hpp).
+inline constexpr uint8_t kChooseSkipCard = 0xFE;
+
 // Which actions are legal in the current state (design doc §7:
 // legal_actions(const CombatState&, ActionMask&)). The design doc names the
 // call but leaves the type's shape to the implementation; this is that shape.
@@ -160,6 +172,19 @@ struct ActionMask {
     // Discovery's generated three-card reward-style offer. When true, CHOOSE
     // arg0 is an offer slot 0..2, not a pile slot; can_choose[0..2] are true.
     bool choice_from_generated;
+
+    // The Skip button on that generated screen: CHOOSE(kChooseSkipCard) is
+    // legal iff this is true. A TYPED discovery (Attack/Skill/Power Potion) is
+    // skippable and a cardType-null one (the Discovery card, Colorless Potion)
+    // is not: customCombatOpen's third parameter is `this.cardType != null`
+    // (DiscoveryAction.java:49; CardRewardScreen.java:485-500 stores it as
+    // `skippable` and shows/hides the SkipCardButton from it, :498-502).
+    // Skipping consumes the item and creates NOTHING -- on close the action
+    // finds cardRewardScreen.discoveryCard still null and ticks out without
+    // touching a pile (DiscoveryAction.java:53-85) -- but it still spends the
+    // wasted regeneration draws (interp.hpp kDiscoveryWastedRegens). False
+    // whenever choice_from_generated is false.
+    bool can_skip_choice;
 
     // --- Draw-source CHOOSE (Secret Technique / Secret Weapon) ---
     // A DRAW_TO_HAND choice selects from the DRAW PILE, filtered to one CardType

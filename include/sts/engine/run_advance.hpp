@@ -219,8 +219,10 @@ inline constexpr uint8_t kNoEmeraldNode = 0xFF;
 //   * kChooseSing -- the Singing Bowl button: +2 max HP instead of a card.
 // Neow's card screen reuses kChooseSkipCard and kChooseSing (the game opens the
 // same CardRewardScreen), and its finished-payout screen reuses kChooseProceed.
+// kChooseSkipCard itself is DEFINED in advance.hpp (included above): the Skip
+// button also exists on the in-combat typed-DISCOVERY screen, so the sentinel
+// lives at the lowest layer that consumes it.
 inline constexpr uint8_t kChooseProceed = 0xFF;
-inline constexpr uint8_t kChooseSkipCard = 0xFE;
 inline constexpr uint8_t kChooseSing = 0xFD;
 inline constexpr uint8_t kChooseOpenChest = 0;
 

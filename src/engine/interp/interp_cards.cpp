@@ -1603,30 +1603,14 @@ struct DiscoveryPoolView {
     }
 }
 
-// KNOWN AMBIGUITY, deliberately unresolved and carried in the ledger's Deferred
-// obligations table ("DiscoveryAction may regenerate its three-card offer on
-// EVERY update tick", owner: next capture-campaign owner).
-//
-// DiscoveryAction.update computes `generatedCards` at DiscoveryAction.java:47 --
-// OUTSIDE the duration branch -- and only the FIRST tick's list reaches the
-// screen (:49). If update() runs again before retrieveCard, generateCardChoices
-// runs again and its cardRandomRng draws are spent for nothing. Whether that
-// happens, and how often, depends on how many frames the action is updated for,
-// which is animation-driven and CANNOT be settled from the source.
-//
-// This latch is the generate-once reading, which is also what the already-landed
-// Discovery CARD does -- so if the game really double-rolls, the card is wrong
-// too and it is a stop-the-line question, not a potion-only one. It needs an
-// oracle capture (G4 is live). Do not "fix" it from source.
-void prepare_discovery_choice(CombatState& s,
-                              ActionQueueItem& item) noexcept {
-    if (discovery_choice_prepared(item)) {
-        return;
-    }
-    // The rejection sampler loops until it holds three DISTINCT cardIDs
-    // (:107-118 `while (derp.size() != 3)`), so a pool with fewer than three
-    // members would spin forever in the game and here. Every pool is generated,
-    // so this is a compile-time guarantee rather than a runtime hope.
+// One generateCardChoices / generateColorlessCardChoices call
+// (DiscoveryAction.java:105-120 / :89-103): the rejection sampler loops until
+// it holds three DISTINCT cardIDs (`while (derp.size() != 3)`, `continue` on a
+// duplicate cardID), one cardRandomRng draw per attempt. A pool with fewer
+// than three members would spin forever in the game and here; every pool is
+// generated, so that is a compile-time guarantee rather than a runtime hope.
+void generate_discovery_offer(CombatState& s, const DiscoveryPoolView& pv,
+                              CardId (&offered)[kDiscoveryChoiceCount]) noexcept {
     static_assert(kIroncladCombatPoolCount >= kDiscoveryChoiceCount &&
                       kIroncladAttackPoolCount >= kDiscoveryChoiceCount &&
                       kIroncladSkillPoolCount >= kDiscoveryChoiceCount &&
@@ -1634,8 +1618,6 @@ void prepare_discovery_choice(CombatState& s,
                       kColorlessCombatPoolCount >= kDiscoveryChoiceCount,
                   "every Discovery pool needs at least three distinct cards, "
                   "or generateCardChoices' rejection loop cannot terminate");
-    const DiscoveryPoolView pv = discovery_pool_view(discovery_pool(item));
-    CardId offered[kDiscoveryChoiceCount]{};
     uint8_t count = 0;
     while (count < kDiscoveryChoiceCount) {
         const int32_t pick = random(
@@ -1652,11 +1634,46 @@ void prepare_discovery_choice(CombatState& s,
             offered[count++] = id;
         }
     }
+}
+
+// RESOLVED (was the ledger's "DiscoveryAction may regenerate its three-card
+// offer on EVERY update tick" deferred obligation): it DOES, and the capture
+// settled how often. DiscoveryAction.update computes `generatedCards` at
+// DiscoveryAction.java:47 -- OUTSIDE the duration branch -- and only the FIRST
+// tick's list reaches the screen (:49); under the oracle contract the action
+// ticks 1 + kDiscoveryWastedRegens times in total (the full derivation and the
+// seven-capture table live on that constant, interp.hpp). This latch is that
+// first tick; the five wasted regenerations are burned by advance()'s CHOOSE
+// dispatch when the pick or skip closes the screen, which is when the game
+// resumes ticking -- so the counter a mid-screen observation sees is the
+// open-tick cost alone, exactly as the captures record it.
+void prepare_discovery_choice(CombatState& s,
+                              ActionQueueItem& item) noexcept {
+    if (discovery_choice_prepared(item)) {
+        return;
+    }
+    const DiscoveryPoolView pv = discovery_pool_view(discovery_pool(item));
+    CardId offered[kDiscoveryChoiceCount]{};
+    generate_discovery_offer(s, pv, offered);
     item.flags =
         static_cast<uint32_t>(static_cast<uint16_t>(offered[0])) |
         (static_cast<uint32_t>(static_cast<uint16_t>(offered[1])) << 16u);
     item.amount =
         static_cast<int32_t>(static_cast<uint16_t>(offered[2]));
+}
+
+// The wasted-work half of the model above: `regens` complete offer
+// regenerations whose results nothing reads. Each is the FULL rejection
+// sampler -- a duplicate inside a wasted regeneration still costs its draw
+// (STS01861 seq 90: a skip whose close spends 16, not 15). The pool is the
+// item's own: line :47 calls the same generator the open tick called.
+void discard_discovery_regens(CombatState& s, const ActionQueueItem& item,
+                              int regens) noexcept {
+    const DiscoveryPoolView pv = discovery_pool_view(discovery_pool(item));
+    for (int r = 0; r < regens; ++r) {
+        CardId scratch[kDiscoveryChoiceCount]{};
+        generate_discovery_offer(s, pv, scratch);
+    }
 }
 
 // DiscoveryAction.update's selection half (DiscoveryAction.java:53-85). It ALWAYS

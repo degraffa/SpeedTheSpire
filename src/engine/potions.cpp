@@ -11,6 +11,7 @@
 #include <cstdint>
 
 #include "sts/engine/action_queue.hpp"  // add_to_bottom, kActor* sentinels
+#include "sts/engine/card_play.hpp"     // roll_random_target (Distilled Chaos)
 #include "sts/engine/cards.hpp"         // CardEffectStep
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode
@@ -93,6 +94,7 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::COLORLESS_POTION:       //  item's src byte)
         case PotionId::LIQUID_MEMORIES:        // dispatch_native_potion, below
         case PotionId::GAMBLERS_BREW:          // dispatch_native_potion, below
+        case PotionId::DISTILLED_CHAOS:        // dispatch_native_potion, below
         case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
                                                // (run_advance's step_potion
                                                // still intercepts it first)
@@ -100,9 +102,10 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::ENTROPIC_BREW:          // run layer: use_entropic_brew
             return true;
         default:
-            // DEFERRED: no body anywhere -- which, as of the potions stage, is
-            // DISTILLED_CHAOS and DUPLICATION_POTION only, both blocked on the
-            // recursive-play opcode.
+            // DEFERRED: no body anywhere -- an EMPTY set as of the discovery/
+            // duplication stage (DUPLICATION_POTION became a data APPLY_POWER
+            // program when PowerId::DUPLICATION registered -- see the note
+            // below).
             // FAIRY_POTION lands here too and that is still correct, but for a
             // different reason: it is IMPLEMENTED and it is never USED. canUse()
             // is `return false` (FairyPotion.java:47-50); the body fires from
@@ -370,6 +373,49 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             queue_gambling_chip_choice(s);  // addToBot (:39)
             break;
         }
+        case PotionId::DISTILLED_CHAOS: {
+            // DistilledChaosPotion.use (DistilledChaosPotion.java:38-43):
+            //     for (int i = 0; i < this.potency; ++i)
+            //         addToBot(new PlayTopCardAction(
+            //             AbstractDungeon.getCurrRoom().monsters
+            //                 .getRandomMonster(null, true, cardRandomRng),
+            //             false));
+            // getPotency (:46-48) is 3; Sacred Bark doubles POTENCY, i.e. the
+            // play count, which is why the loop bound is `potency`.
+            //
+            // PlayTopCardAction IS the shared PLAY_CARD verb with
+            // kPlayCardFromDrawTop (op_play_card, interp/interp_cards.cpp):
+            // the both-piles-empty no-op (PlayTopCardAction.java:34-37), the
+            // empty-draw reshuffle-then-retry (:38-43), top card into limbo
+            // and an autoplay queue entry (:44-62). `exhausts` is FALSE here
+            // -- the played card files normally -- so no kPlayCardExhaust
+            // (contrast Havoc, exhausts = true).
+            //
+            // THE LOAD-BEARING SHAPE, and why this is not Mayhem's item:
+            // getRandomMonster is a CONSTRUCTOR ARGUMENT, evaluated inside
+            // use() itself -- all `potency` cardRandomRng target rolls are
+            // spent synchronously at USE time, BEFORE any play resolves
+            // (capture pin: every witnessed drink is exactly +3 draws by the
+            // next record -- STS01857 seq 20, STS02110 seq 31, STS01314 seq
+            // 49/69, identical in both g6 campaigns). Mayhem's anonymous
+            // action evaluates the same call at queue-drain time, which is
+            // why power_mayhem queues kActorRandomEnemy and lets
+            // execute_opcode roll; HERE the roll happens now and the target
+            // is BAKED into the item (the power_magnetism USE-time-roll
+            // precedent). A monster that dies before a later play resolves
+            // keeps its baked target, exactly as the Java's constructed
+            // action keeps its AbstractCreature.
+            for (int i = 0; i < potency; ++i) {
+                ActionQueueItem play{};
+                play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+                play.src = kActorPlayer;
+                play.tgt = roll_random_target(s);  // one draw, NOW (:41)
+                play.amount = 0;  // unused: the source is the draw-pile top
+                play.flags = kPlayCardFromDrawTop;
+                add_to_bottom(s, play);  // addToBot per iteration
+            }
+            break;
+        }
         // --- Deferred native bodies (each lands with its dependency) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
@@ -380,9 +426,14 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // The in-combat card-CHOOSE group is now EMPTY: Blessing of the Forge,
         // Elixir, the four DISCOVERY potions, Liquid Memories and Gambler's Brew
         // are all implemented above.
-        // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
-        // (its DuplicationPower re-queues the played card -- the blocker is the
-        // opcode, NOT a missing power row). THAT IS THE WHOLE REMAINING LIST.
+        // The "recursive play (a later opcode)" group was MISDIAGNOSED and is
+        // now EMPTY: PLAY_CARD + kPlayCardFromDrawTop was PlayTopCardAction
+        // all along (DISTILLED_CHAOS is implemented above), and
+        // DUPLICATION_POTION's replay is Double Tap's synchronous
+        // kPlayCardCopy|kPlayCardPurge|kPlayCardQueueFront call, owned by the
+        // POWER's native body (powers/power_duplication.cpp, PowerId 92) --
+        // the potion itself is a plain data APPLY_POWER program and never
+        // reaches this switch. NOTHING IS DEFERRED ANY MORE.
         // SNECKO_OIL is NO LONGER among them: RANDOMIZE_HAND_COST (opcode 60)
         // landed and its row is now a two-step DATA program, so it never reaches
         // this switch at all.
