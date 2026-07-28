@@ -575,6 +575,88 @@ TEST(RunCombatBottle, SixTopPlacedCardsAllOpenInHandViaTheOverflowDraw) {
     EXPECT_EQ(rc.combat.player_energy, 3);
 }
 
+// =============================================================================
+// The pending-bottle overlay (claim -> modal grid -> pick), run_advance.hpp
+// =============================================================================
+
+TEST(BottleOverlay, ClaimingABottleOpensTheModalGridAndThePickBottlesTheCard) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Park the controller on a reward screen holding a Bottled Flame row --
+    // the shape elite rewards, chests (open_treasure_chest routes here) and
+    // event reward screens all produce.
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.rewards.count = 1;
+    rc.rewards.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    rc.rewards.items[0].id = static_cast<uint16_t>(RelicId::BOTTLED_FLAME);
+    const uint8_t relics_before = rc.run.relic_count;
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_claim_reward[0]);
+
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    // Relic granted (append order), the item consumed, the overlay up.
+    ASSERT_EQ(rc.run.relic_count, relics_before + 1);
+    EXPECT_EQ(rc.run.relics[relics_before].relic_id,
+              static_cast<uint16_t>(RelicId::BOTTLED_FLAME));
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::FLAME));
+    EXPECT_EQ(rc.rewards.count, 0);
+
+    legal_actions(rc, mask);
+    EXPECT_FALSE(mask.can_proceed)
+        << "the grid is modal (RoomPhase.INCOMPLETE, BottledFlame.java:49)";
+    // Eligible rows = purgeable ATTACKs. A20 deck: Ascender's Bane 0 (not
+    // purgeable), Strikes 1-5 and Bash 10 (attacks), Defends 6-9 (skills).
+    EXPECT_FALSE(mask.can_choose_master_deck[0]);
+    EXPECT_TRUE(mask.can_choose_master_deck[1]);
+    EXPECT_FALSE(mask.can_choose_master_deck[6]);
+    EXPECT_TRUE(mask.can_choose_master_deck[10]);
+
+    // An ineligible pick is a non-corrupting no-op; the overlay stays.
+    step(rc, make_action(ActionVerb::CHOOSE, 6));
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::FLAME));
+    EXPECT_EQ(rc.run.master_deck[6].flags, 0);
+
+    // The pick bottles the INSTANCE and closes the overlay; the phase and the
+    // relic's counter (-1, never written) are untouched.
+    step(rc, make_action(ActionVerb::CHOOSE, 10));
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::NONE));
+    EXPECT_EQ(rc.run.master_deck[10].flags, kMasterCardInBottleFlame);
+    EXPECT_EQ(rc.run.relics[relics_before].counter, -1);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed) << "the reward screen is back";
+}
+
+TEST(BottleOverlay, ABottleWithNoEligibleCardIsClaimedScreenlessAndUnbottled) {
+    RunController rc = run_begin(kSeed, kA20);
+    // Bottled Tornado with no POWER card in the deck: the :41 guard opens no
+    // screen; the relic is granted, permanently unbottled.
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+    rc.rewards.count = 1;
+    rc.rewards.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    rc.rewards.items[0].id = static_cast<uint16_t>(RelicId::BOTTLED_TORNADO);
+    const uint8_t relics_before = rc.run.relic_count;
+
+    step(rc, make_action(ActionVerb::CHOOSE, 0));
+    ASSERT_EQ(rc.run.relic_count, relics_before + 1);
+    EXPECT_EQ(rc.pending_bottle,
+              static_cast<uint8_t>(MasterBottleKind::NONE));
+    for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
+        EXPECT_EQ(rc.run.master_deck[i].flags, 0);
+    }
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed);
+}
+
 TEST(RunCombatBottle, StandaloneCombatBeginRunsTheSameOverflowDraw) {
     // combat_begin has no master-deck instances, so a bottle cannot be
     // expressed here -- but six registry-innate Writhes reach the same

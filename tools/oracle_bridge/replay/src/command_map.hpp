@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "sts/engine/run_advance.hpp"
+#include "sts/engine/run_deck.hpp"  // MasterBottleKind (the bottle overlay)
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/types.hpp"
 #include "sts/registry/game_ids.hpp"
@@ -38,6 +39,7 @@ using sts::engine::kChooseSkipCard;
 using sts::engine::kMasterDeckCap;
 using sts::engine::legal_actions;
 using sts::engine::make_action;
+using sts::engine::MasterBottleKind;
 using sts::engine::NeowScreen;
 using sts::engine::RelicId;
 using sts::engine::RestScreen;
@@ -194,12 +196,26 @@ struct GridSession {
 // getUpgradableCards additionally drops the already-upgraded) and indexes that
 // list; the run layer addresses the stable master-deck index and publishes
 // which of those are legal, so row i is "the i-th legal master-deck index".
+//
+// ONE ordering exception: a Bottled trio grid (the pending-bottle overlay,
+// RunController.pending_bottle) is built by getCardsOfType, whose addToBottom
+// is a PREPEND (CardGroup.java:1052-1058 -> :459-461), so the game's grid rows
+// run in REVERSE master-deck order -- unlike getPurgeableCards, whose plain
+// `group.add(c)` (CardGroup.java:978-985) keeps deck order. The session
+// snapshots the legal indices DESCENDING for that grid so "the game's row i"
+// still maps positionally.
 inline void open_grid_session(const RunController& rc, GridSession& g) {
     g.open = true;
     g.filtered.clear();
     g.pending.clear();
     RunActionMask m{};
     legal_actions(rc, m);
+    if (rc.pending_bottle !=
+        static_cast<uint8_t>(MasterBottleKind::NONE)) {
+        for (int i = kMasterDeckCap - 1; i >= 0; --i)
+            if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
+        return;
+    }
     for (int i = 0; i < kMasterDeckCap; ++i)
         if (m.can_choose_master_deck[i]) g.filtered.push_back(i);
 }
@@ -208,6 +224,12 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 // gates it behind its own sub-screen field, so this is the disjunction of those
 // -- the run-layer analogue of "GridCardSelectScreen is up".
 [[nodiscard]] inline bool sim_grid_open(const RunController& rc) noexcept {
+    // The pending-bottle overlay is a master-deck grid over ANY phase (the
+    // bottle was claimed on a reward screen or bought in a shop; the game
+    // parks the room INCOMPLETE under the gridSelectScreen).
+    if (rc.pending_bottle != static_cast<uint8_t>(MasterBottleKind::NONE)) {
+        return true;
+    }
     switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW:
             return rc.neow.screen == static_cast<uint8_t>(NeowScreen::GRID);

@@ -18,6 +18,7 @@
 #include "sts/engine/map_rooms.hpp"   // RoomType (RelicEquipContext.reward_room)
 #include "sts/engine/relics.hpp"
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/run_deck.hpp"    // MasterBottleKind + the bottle bits
 #include "sts/engine/run_state.hpp"
 
 namespace sts::engine {
@@ -144,6 +145,19 @@ enum class RelicEquipScreen : uint8_t {
                                  // miscRng) applied when the set completes
     ITEM_REWARD = 3,             // Tiny House / Calling Bell: ctx.rewards now
                                  // holds an assembled claimable screen
+    GRID_BOTTLE = 4,             // Bottled Flame/Lightning/Tornado: ONE
+                                 // mandatory pick over the purgeable
+                                 // type-matched master deck (ctx.bottle names
+                                 // which bottle); the pick sets the instance's
+                                 // bottle bit (run_deck.hpp). Unlike the boss
+                                 // grids this request arises at CLAIM sites
+                                 // (reward claim incl. chests, shop purchase),
+                                 // so the run layer presents it as the
+                                 // phase-independent pending-bottle overlay
+                                 // (RunController.pending_bottle), the sim's
+                                 // rendering of the game's modal
+                                 // gridSelectScreen + RoomPhase.INCOMPLETE
+                                 // (BottledFlame.java:49-51).
 };
 
 struct RelicEquipContext {
@@ -163,7 +177,38 @@ struct RelicEquipContext {
     // finished synchronously.
     RelicEquipScreen screen = RelicEquipScreen::NONE;
     uint8_t grid_picks = 0;      // GRID_*: how many picks the grid wants
+    // OUT (GRID_BOTTLE only): which bottle wants the pick. NONE otherwise.
+    MasterBottleKind bottle = MasterBottleKind::NONE;
 };
+
+// One master-deck row's eligibility on a bottle's grid:
+// getPurgeableCards().getCardsOfType(type) (BottledFlame.java:43/:51 and
+// siblings) == rest_card_purgeable AND the kind's card type. NO already-bottled
+// exclusion (getPurgeableCards has none; the three grids are type-disjoint
+// anyway). Defined in relic_pools.cpp; shared by the bottle onEquip bodies'
+// emptiness guard, the overlay's action mask, and the pick dispatch.
+[[nodiscard]] bool bottle_pick_legal(const RunState& rs, MasterBottleKind kind,
+                                     uint16_t deck_index) noexcept;
+
+// `getPurgeableCards().getX().size() > 0` -- the :41 guard. When false the
+// body requests NO screen and the relic stays permanently unbottled.
+[[nodiscard]] bool bottle_has_eligible_card(const RunState& rs,
+                                            MasterBottleKind kind) noexcept;
+
+// Which bottle a relic id is, or NONE for every other relic.
+[[nodiscard]] constexpr MasterBottleKind bottle_kind_for_relic(
+    RelicId id) noexcept {
+    switch (id) {
+        case RelicId::BOTTLED_FLAME:
+            return MasterBottleKind::FLAME;
+        case RelicId::BOTTLED_LIGHTNING:
+            return MasterBottleKind::LIGHTNING;
+        case RelicId::BOTTLED_TORNADO:
+            return MasterBottleKind::TORNADO;
+        default:
+            return MasterBottleKind::NONE;
+    }
+}
 
 void initialize_relic_pools(RunState& rs) noexcept;
 

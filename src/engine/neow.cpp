@@ -96,6 +96,15 @@ void spawn_relic_and_obtain(RunState& rs, NeowState& st, RewardScreen& rewards,
             // NeowScreen::ITEM_REWARD branch the three-potion blessing uses.
             st.screen = static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
             break;
+        case RelicEquipScreen::GRID_BOTTLE:
+            // Structurally unreachable at this site: the boss swap draws from
+            // the BOSS pool and the Bottled trio is UNCOMMON. The bottle grid
+            // belongs to the claim/purchase sites' pending-bottle overlay
+            // (apply_claim_equip_request, run_advance.cpp); this function has
+            // no RunController to park it on, which is fine because no Neow
+            // payout can produce the request.
+            assert(false && "a bottle grid request from the Neow boss swap");
+            break;
     }
 }
 

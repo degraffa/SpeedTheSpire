@@ -38,6 +38,8 @@
 
 #include "relics/relic_pickup.hpp"  // RelicCanSpawnSig/Fn, RelicOnEquipSig/Fn
 #include "sts/engine/cards.hpp"
+#include "sts/engine/rest_sites.hpp"  // rest_card_purgeable (the bottle grids'
+                                      // getPurgeableCards filter)
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/registry/manifest.hpp"  // generated kRelicsCount / kCardsCount
 
@@ -412,6 +414,33 @@ RelicId return_end_random_relic_key(RunState& rs, RelicTier tier,
     return relic_can_spawn(id, ctx)
                ? id
                : return_end_random_relic_key(rs, tier, ctx);
+}
+
+bool bottle_pick_legal(const RunState& rs, MasterBottleKind kind,
+                       uint16_t deck_index) noexcept {
+    // masterDeck.getPurgeableCards().getCardsOfType(type)
+    // (BottledFlame.java:43/:51 and siblings): the purgeable filter
+    // (CardGroup.java:978-985 -- rest_card_purgeable is that predicate) then a
+    // plain type match (CardGroup.java:1052-1058). Deliberately NO
+    // already-bottled exclusion: getPurgeableCards has none, and the three
+    // grids are type-disjoint so a double-bottle cannot arise anyway.
+    if (kind == MasterBottleKind::NONE || deck_index >= rs.master_deck_count ||
+        !rest_card_purgeable(rs.master_deck[deck_index])) {
+        return false;
+    }
+    const CardDef* def =
+        card_def(static_cast<CardId>(rs.master_deck[deck_index].card_id));
+    return def != nullptr && def->type == master_bottle_card_type(kind);
+}
+
+bool bottle_has_eligible_card(const RunState& rs,
+                              MasterBottleKind kind) noexcept {
+    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
+        if (bottle_pick_legal(rs, kind, i)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool relic_acquire_legal(const RunState& rs, RelicId id) noexcept {

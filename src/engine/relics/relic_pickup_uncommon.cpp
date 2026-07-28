@@ -106,27 +106,56 @@ void relic_on_equip_pear(RunState& rs, RngStream& /*misc_rng*/,
     rs.hp = static_cast<int16_t>(rs.hp + 10);
 }
 
-// --- onEquip: DEFERRED bodies (explicit no-ops, reason at the definition) -----
+// --- onEquip: the Bottled trio (`pickup: on_equip_screen`) --------------------
+//
+// BottledFlame.onEquip (BottledFlame.java:41-53), read in full; Lightning and
+// Tornado are textually identical except for the type filter and the flag.
+// When masterDeck.getPurgeableCards().getX() is non-empty the game opens a
+// MANDATORY 1-pick grid over it (`gridSelectScreen.open(group, 1, msg, false,
+// false, false, false)` -- no confirm, no cancel) and parks the room at
+// RoomPhase.INCOMPLETE (:49-51); the async update (:63-77) then sets the
+// chosen instance's inBottle* flag. When the filtered list is EMPTY, no
+// screen opens and `cardSelected` stays true: the relic is kept, permanently
+// unbottled (:41 guard).
+//
+// The bodies therefore only ask the call site for the screen: the run layer's
+// pending-bottle overlay (run_advance.cpp) is the modal grid, and the pick
+// lands as the master-deck instance's bottle bit (run_deck.hpp -- the
+// encoding decision is documented there). Zero RNG on every path.
 
-// BottledFlame.onEquip (BottledFlame.java:42-52) opens gridSelectScreen over the
-// purgeable ATTACKs so the player bottles one, and sets the room phase to
-// INCOMPLETE until the choice is made. That needs run-layer acquisition-CHOICE
-// machinery plus a per-master-deck-instance "bottled" flag; neither exists yet.
-// The relic row, its pool_order and its deck-content canSpawn gate above are all
-// live, so pools and chest draws are already correct -- only the bottling itself
-// is missing.
-void relic_on_equip_bottled_flame(RunState& /*rs*/, RngStream& /*misc_rng*/,
-                                  RelicSlot& /*slot*/) noexcept {}
+namespace {
+void bottle_on_equip(const RunState& rs, MasterBottleKind kind,
+                     RelicEquipContext& ctx) noexcept {
+    if (!bottle_has_eligible_card(rs, kind)) {
+        return;  // no screen; the relic stays, permanently unbottled (:41)
+    }
+    ctx.screen = RelicEquipScreen::GRID_BOTTLE;
+    ctx.grid_picks = 1;
+    ctx.bottle = kind;
+}
+}  // namespace
 
-// BottledLightning.onEquip (BottledLightning.java:42-53) -- the same body over
-// purgeable SKILLs. Deferred for the same reason.
-void relic_on_equip_bottled_lightning(RunState& /*rs*/, RngStream& /*misc_rng*/,
-                                      RelicSlot& /*slot*/) noexcept {}
+void relic_on_equip_screen_bottled_flame(RunState& rs, RngStream& /*misc_rng*/,
+                                         RelicSlot& /*slot*/,
+                                         RelicEquipContext& ctx) noexcept {
+    // BottledFlame.java:41-53 -- purgeable ATTACKs (any rarity; a Strike is
+    // offerable -- only canSpawn reads rarity).
+    bottle_on_equip(rs, MasterBottleKind::FLAME, ctx);
+}
 
-// BottledTornado.onEquip (BottledTornado.java:42-53) -- the same body over
-// purgeable POWERs. Deferred for the same reason.
-void relic_on_equip_bottled_tornado(RunState& /*rs*/, RngStream& /*misc_rng*/,
-                                    RelicSlot& /*slot*/) noexcept {}
+void relic_on_equip_screen_bottled_lightning(
+    RunState& rs, RngStream& /*misc_rng*/, RelicSlot& /*slot*/,
+    RelicEquipContext& ctx) noexcept {
+    // BottledLightning.java:41-53 -- purgeable SKILLs.
+    bottle_on_equip(rs, MasterBottleKind::LIGHTNING, ctx);
+}
+
+void relic_on_equip_screen_bottled_tornado(
+    RunState& rs, RngStream& /*misc_rng*/, RelicSlot& /*slot*/,
+    RelicEquipContext& ctx) noexcept {
+    // BottledTornado.java:41-53 -- purgeable POWERs.
+    bottle_on_equip(rs, MasterBottleKind::TORNADO, ctx);
+}
 
 // FrozenEgg2.onEquip (FrozenEgg2.java:31-38) walks the cards ALREADY OFFERED on
 // the combat-reward screen and re-runs onPreviewObtainCard over them, so a card

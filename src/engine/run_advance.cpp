@@ -1073,7 +1073,21 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
     out = RunActionMask{};
     out.phase = rc.phase;
 
-    switch (static_cast<RunPhase>(rc.phase)) {
+    // The pending-bottle overlay (run_advance.hpp) is MODAL over the phase
+    // underneath: while a just-claimed bottle's mandatory 1-pick grid is up,
+    // only the eligible master-deck rows are legal -- no proceed, no claims,
+    // no purchases (the game's RoomPhase.INCOMPLETE + cancel-less grid,
+    // BottledFlame.java:41-53). The potion belt below stays live, matching
+    // the Smith/Toke and shop-purge grid masks.
+    const auto pending_bottle =
+        static_cast<MasterBottleKind>(rc.pending_bottle);
+    if (pending_bottle != MasterBottleKind::NONE) {
+        for (uint16_t i = 0;
+             i < rc.run.master_deck_count && i < kMasterDeckCap; ++i) {
+            out.can_choose_master_deck[i] =
+                bottle_pick_legal(rc.run, pending_bottle, i);
+        }
+    } else switch (static_cast<RunPhase>(rc.phase)) {
         case RunPhase::NEOW: {
             // Which of NeowEvent's screens is up. The dialog itself has no
             // Proceed button while options are on it (screenNum 3 clears the
@@ -1508,11 +1522,69 @@ bool step_discard_potion(RunController& rc, Action a, StepResult& res) noexcept 
     return true;
 }
 
+// Translate an on_equip_screen body's request made at a CLAIM/purchase site
+// onto the controller. Only GRID_BOTTLE can arise on these paths in S1: the
+// five boss on_equip_screen relics are BOSS-tier, so no claim screen or shop
+// slot ever holds one (Neow's boss swap owns them, spawn_relic_and_obtain in
+// neow.cpp, which translates onto NeowState's own sub-screens instead).
+void apply_claim_equip_request(RunController& rc,
+                               const RelicEquipContext& ctx) noexcept {
+    switch (ctx.screen) {
+        case RelicEquipScreen::NONE:
+            break;  // synchronous body, or no on_equip_screen body at all
+        case RelicEquipScreen::GRID_BOTTLE:
+            // The modal pending-bottle overlay (run_advance.hpp): the game's
+            // gridSelectScreen over the reward/shop screen, room INCOMPLETE
+            // (BottledFlame.java:49-51).
+            rc.pending_bottle = static_cast<uint8_t>(ctx.bottle);
+            break;
+        case RelicEquipScreen::GRID_REMOVE:
+        case RelicEquipScreen::GRID_TRANSFORM_UPGRADE:
+        case RelicEquipScreen::ITEM_REWARD:
+        default:
+            assert(false &&
+                   "a BOSS on_equip_screen request reached a claim site");
+            break;
+    }
+}
+
+// The pending-bottle overlay's pick (run_advance.hpp). While the overlay is
+// up it is MODAL over the phase underneath -- the game parks the room at
+// RoomPhase.INCOMPLETE with no cancel and no confirm on the 1-pick grid
+// (BottledFlame.java:41-53) -- so this consumes EVERY action while active:
+// a legal CHOOSE applies the bottle bit and closes the overlay; anything
+// else is the non-corrupting no-op every run verb promises. Dispatched after
+// the potion steps (the belt stays on top of every screen, matching the
+// Smith/Toke/purge grids, whose masks also keep the belt live).
+bool step_bottle_pick(RunController& rc, Action a, StepResult& res) noexcept {
+    const auto kind = static_cast<MasterBottleKind>(rc.pending_bottle);
+    if (kind == MasterBottleKind::NONE) {
+        return false;
+    }
+    if (action_verb(a) == ActionVerb::CHOOSE) {
+        const uint8_t a0 = action_arg0(a);
+        if (bottle_pick_legal(rc.run, kind, a0)) {
+            // BottledFlame.update (:63-77): the chosen INSTANCE carries the
+            // flag. The relic's own counter stays untouched (AbstractRelic's
+            // -1 -- the game never writes it, and neither do we).
+            rc.run.master_deck[a0].flags = static_cast<uint16_t>(
+                rc.run.master_deck[a0].flags | master_bottle_bit(kind));
+            rc.pending_bottle =
+                static_cast<uint8_t>(MasterBottleKind::NONE);
+        }
+    }
+    fill_run_result(rc, res);
+    return true;
+}
+
 void step_one(RunController& rc, Action a, StepResult& res) noexcept {
     if (step_potion(rc, a, res)) {
         return;
     }
     if (step_discard_potion(rc, a, res)) {
+        return;
+    }
+    if (step_bottle_pick(rc, a, res)) {
         return;
     }
     switch (static_cast<RunPhase>(rc.phase)) {
@@ -1557,8 +1629,18 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                             rc.rewards.open_card_item = kNoOpenCardReward;
                             neow_finish_payout(n);
                         } else {
+                            // Neow's reward rows are screenless draws
+                            // (return_random_screenless_relic excludes the
+                            // Bottled trio), so no GRID_BOTTLE can arise here
+                            // today -- but the claim goes through the same
+                            // equip-context door as every other claim site so
+                            // the refusal path can never be the silent one.
+                            RelicEquipContext ectx{rc.combat.card_random_rng,
+                                                   rc.rewards,
+                                                   kNeowRewardScreenRoom};
                             (void)claim_reward(rc.run, rc.combat.misc_rng,
-                                               rc.rewards, a0);
+                                               rc.rewards, a0, ectx);
+                            apply_claim_equip_request(rc, ectx);
                         }
                         break;
                     case NeowScreen::DONE:
@@ -1651,8 +1733,19 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
                 } else {
                     // Claim item a0 (CARDS opens the pick screen). Relic
-                    // onEquip bodies draw the floor-scoped miscRng.
-                    (void)claim_reward(rc.run, rc.combat.misc_rng, s, a0);
+                    // onEquip bodies draw the floor-scoped miscRng; a Bottled
+                    // trio row's on_equip_screen body instead requests its
+                    // grid through the equip context, translated onto the
+                    // pending-bottle overlay below. This is the ONE claim
+                    // surface -- combat rewards, chests (the treasure open
+                    // routes here) and event reward screens all dispatch
+                    // through it.
+                    RelicEquipContext ectx{
+                        rc.combat.card_random_rng, rc.rewards,
+                        static_cast<RoomType>(rc.room_type)};
+                    (void)claim_reward(rc.run, rc.combat.misc_rng, s, a0,
+                                       ectx);
+                    apply_claim_equip_request(rc, ectx);
                 }
             }
             fill_run_result(rc, res);
@@ -1801,9 +1894,17 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         rc.run, shop,
                         static_cast<uint8_t>(a0 - kChooseShopPotionBase));
                 } else if (a0 >= kChooseShopRelicBase) {
+                    // The tier-rolled stock can hold a Bottled trio relic;
+                    // its purchase opens the bottle grid over the shop
+                    // (StoreRelic.purchaseRelic -> instantObtain -> onEquip),
+                    // carried by the same pending-bottle overlay the claim
+                    // sites use.
+                    RelicEquipContext ectx{rc.combat.card_random_rng,
+                                           rc.rewards, RoomType::Shop};
                     (void)shop_buy_relic(
                         rc.run, rc.combat.misc_rng, shop,
-                        static_cast<uint8_t>(a0 - kChooseShopRelicBase));
+                        static_cast<uint8_t>(a0 - kChooseShopRelicBase), ectx);
+                    apply_claim_equip_request(rc, ectx);
                 } else if (a0 >= kChooseShopColorlessBase) {
                     (void)shop_buy_card(
                         rc.run, shop,

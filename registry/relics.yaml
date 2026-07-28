@@ -666,8 +666,8 @@
   pool_order: 19
   pickup:
     can_spawn: true
-    on_equip: true
-  provenance: "BottledFlame.onEquip (BottledFlame.java:42-53) -- gridSelect ONE non-basic ATTACK from the master deck; the chosen instance becomes innate (inBottleFlame -> CardGroup.initializeDeck innate collection). DEFERRED at acquisition: needs run-layer acquisition-choice machinery + a per-master-deck-instance bottled/innate flag (RunState schema, B4-owner). canSpawn (BottledFlame.java:93-99): any non-BASIC-rarity ATTACK in the master deck -- RelicSpawnContext.deck_has_nonbasic_attack (relic_pools.cpp)."
+    on_equip_screen: true
+  provenance: "BottledFlame.onEquip (BottledFlame.java:41-53) -- when masterDeck.getPurgeableCards().getAttacks() is non-empty, open a MANDATORY 1-pick grid over it (gridSelectScreen.open(..., 1, msg, false, false, false, false): no confirm, no cancel; room phase INCOMPLETE until the pick); the async update (:63-77) sets the chosen instance's inBottleFlame, which initializeDeck's placeOnTop collection reads (CardGroup.java:933-941 -- ONE list with isInnate, so bottled == innate placement). When the filtered list is EMPTY, NO screen opens and cardSelected stays true: the relic is kept, permanently unbottled (:41 guard). IMPLEMENTED as a `pickup: on_equip_screen` body (relic_pickup_uncommon.cpp) requesting RelicEquipScreen::GRID_BOTTLE; every claim site that can grant a bottle (reward claim incl. chests, shop purchase) presents it through the run layer's pending-bottle overlay (run_advance.cpp), which applies the pick onto the master-deck instance's kMasterCardInBottleFlame bit (run_deck.hpp carries the encoding decision). The grid offers purgeable ATTACKS of ANY rarity (no rarity clause at :43 -- a Strike is offerable); only canSpawn (:93-99, any non-BASIC ATTACK -- RelicSpawnContext.deck_has_nonbasic_attack) reads rarity. getPurgeableCards (CardGroup.java:978-985) excludes only the three curse ids and does NOT exclude already-bottled cards -- moot in practice, the three grids are type-disjoint."
 
 - id: 53
   name: BOTTLED_LIGHTNING
@@ -676,8 +676,8 @@
   pool_order: 13
   pickup:
     can_spawn: true
-    on_equip: true
-  provenance: "BottledLightning.onEquip (BottledLightning.java:42-53) -- gridSelect ONE non-basic SKILL; chosen instance becomes innate (inBottleLightning). DEFERRED at acquisition (same machinery gap as Bottled Flame). canSpawn (BottledLightning.java:93-99): any non-BASIC SKILL in the master deck -- RelicSpawnContext.deck_has_nonbasic_skill."
+    on_equip_screen: true
+  provenance: "BottledLightning.onEquip (BottledLightning.java:41-53) -- textually identical to Bottled Flame's body over masterDeck.getPurgeableCards().getSkills(); the update (:63-77) sets inBottleLightning. IMPLEMENTED as a `pickup: on_equip_screen` body requesting RelicEquipScreen::GRID_BOTTLE (see the Bottled Flame row for the full shape -- one mandatory pick, no screen on an empty filtered list, applied by the run layer's pending-bottle overlay onto kMasterCardInBottleLightning). canSpawn (BottledLightning.java:93-99): any non-BASIC SKILL in the master deck -- RelicSpawnContext.deck_has_nonbasic_skill."
 
 - id: 54
   name: BOTTLED_TORNADO
@@ -686,8 +686,8 @@
   pool_order: 0
   pickup:
     can_spawn: true
-    on_equip: true
-  provenance: "BottledTornado.onEquip (BottledTornado.java:42-53) -- gridSelect ONE POWER card; chosen instance becomes innate (inBottleTornado). DEFERRED at acquisition (same machinery gap). canSpawn (BottledTornado.java:93-95): CardHelper.hasCardType(POWER) -- RelicSpawnContext.deck_has_power (always false until B3.7 lands POWER cards)."
+    on_equip_screen: true
+  provenance: "BottledTornado.onEquip (BottledTornado.java:41-53) -- textually identical to Bottled Flame's body over masterDeck.getPurgeableCards().getPowers(); the update (:63-77) sets inBottleTornado. IMPLEMENTED as a `pickup: on_equip_screen` body requesting RelicEquipScreen::GRID_BOTTLE (see the Bottled Flame row -- one mandatory pick, no screen on an empty filtered list, applied by the run layer's pending-bottle overlay onto kMasterCardInBottleTornado). canSpawn (BottledTornado.java:93-95) delegates to CardHelper.hasCardType(POWER) (CardHelper.java:80-86) -- a plain type scan with NO rarity clause, unlike its two siblings -- RelicSpawnContext.deck_has_power."
 
 - id: 55
   name: DARKSTONE_PERIAPT
