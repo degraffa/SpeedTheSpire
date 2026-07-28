@@ -1392,6 +1392,74 @@ TEST(RelicRaresShop, SlingOfCourageGrantsStrengthOnlyInAnEliteRoom) {
     }
 }
 
+// --- Dead Branch -------------------------------------------------------------
+
+// DeadBranch.onExhaust (DeadBranch.java:24-31): while any monster is still in
+// the fight, put a copy of a truly-random combat-pool card into hand. The
+// cardRandomRng pick is spent AT QUEUE TIME -- returnTrulyRandomCardInCombat()
+// is an argument of the MakeTempCardInHandAction constructor.
+TEST(RelicRaresShop, DeadBranchDrawsAtQueueTimeAndMakesACardInHand) {
+    CombatState s = MakeState();
+    const RelicView rv = give(s, RelicId::DEAD_BRANCH);
+    s.card_random_rng = from_seed(11);
+    const RngStream before = s.card_random_rng;
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::STRIKE);
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_EXHAUST, ctx);
+
+    EXPECT_EQ(s.card_random_rng.counter, before.counter + 1)
+        << "exactly one cardRandomRng draw, spent while the HOOK runs";
+    ASSERT_EQ(s.action_count, 1);
+    const ActionQueueItem it = queued(s, 0);
+    EXPECT_EQ(it.opcode, kOp(Opcode::MAKE_CARD));
+    EXPECT_EQ(it.src, static_cast<uint8_t>(CardPile::HAND));
+    EXPECT_EQ(it.amount, 1);
+    EXPECT_FALSE(make_card_upgraded_from_flags(it.flags))
+        << "MakeTempCardInHandAction(..., false) -- a base library copy";
+
+    // The chosen id is a member of the HEALING-filtered combat pool -- the same
+    // 70-row list Discovery draws from, not the ATTACK-only pool.
+    const CardId chosen = static_cast<CardId>(make_card_id_from_flags(it.flags));
+    bool in_pool = false;
+    for (unsigned i = 0; i < static_cast<unsigned>(kIroncladCombatPoolCount); ++i) {
+        in_pool = in_pool || kIroncladCombatPool[i] == chosen;
+    }
+    EXPECT_TRUE(in_pool);
+
+    drain(s);
+    ASSERT_EQ(s.hand_count, 1);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id,
+              static_cast<uint16_t>(chosen));
+    EXPECT_EQ(rv.relics[0].counter, -1) << "the counter is never touched";
+}
+
+// areMonstersBasicallyDead (MonsterGroup.java:90-95) gates it: an exhaust after
+// the fight is over draws NOTHING, which is the point of testing the stream
+// rather than just the queue.
+TEST(RelicRaresShop, DeadBranchDrawsNothingWhenTheFightIsOver) {
+    CombatState s = MakeState(/*monster_count=*/2);
+    s.monsters[0].hp = 0;
+    s.monsters[1].hp = 0;
+    const RelicView rv = give(s, RelicId::DEAD_BRANCH);
+    s.card_random_rng = from_seed(11);
+    const RngStream before = s.card_random_rng;
+    RelicHookContext ctx{};
+    ctx.card_id = static_cast<uint16_t>(CardId::STRIKE);
+    dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::ON_EXHAUST, ctx);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.card_random_rng.counter, before.counter);
+
+    // An ESCAPED monster counts as out of the fight too (isEscaping), so a lone
+    // escapee is the same answer.
+    CombatState e = MakeState();
+    e.monsters[0].flags |= kMonsterFlagEscaped;
+    const RelicView erv = give(e, RelicId::DEAD_BRANCH);
+    e.card_random_rng = from_seed(11);
+    dispatch_relic_hook(e, erv.relics, erv.count, RelicHook::ON_EXHAUST, ctx);
+    EXPECT_EQ(e.action_count, 0);
+    EXPECT_EQ(e.card_random_rng.counter, 0);
+}
+
 // --- Orange Pellets ----------------------------------------------------------
 
 namespace {

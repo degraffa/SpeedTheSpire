@@ -62,6 +62,26 @@ RunController enter_floor_one_rest(uint8_t ascension = 0) {
     return rc;
 }
 
+// AbstractRelic.onEnterRestRoom, fired from RestRoom.onPlayerEntry
+// (RestRoom.java:38-42). Ancient Tea Set is the only implementor in the game
+// (AncientTeaSet.java:76-81): counter = -2, the ARMED encoding, which the next
+// combat consumes to -1 on its first turn.
+TEST(RestSites, EnteringARestRoomArmsTheAncientTeaSet) {
+    RunController rc = run_begin(kSeed, 0);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
+    step(rc, make_action(ActionVerb::CHOOSE));
+    rc.run.relic_count = 0;
+    rc.run.relics[rc.run.relic_count++] =
+        RelicSlot{static_cast<uint16_t>(RelicId::ANCIENT_TEA_SET), -1};
+    const uint8_t x = first_start_column(rc);
+    ASSERT_NE(x, 0xFF);
+    rc.run.map[run_state_map_index(x, 0)].room_type =
+        static_cast<uint8_t>(RoomType::Rest);
+    step(rc, make_action(ActionVerb::CHOOSE, x));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+    EXPECT_EQ(rc.run.relics[0].counter, -2) << "armed on rest-room ENTRY, before any campfire choice";
+}
+
 void set_relics(RunState& rs, std::initializer_list<RelicSlot> relics) {
     rs.relic_count = 0;
     for (const RelicSlot relic : relics) {

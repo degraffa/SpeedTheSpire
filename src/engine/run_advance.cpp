@@ -742,6 +742,18 @@ void on_player_entry(RunController& rc, RoomType room, RoomType left_room) noexc
             }
             break;
         case RoomType::Rest:
+            // RestRoom.onPlayerEntry (RestRoom.java:33-43) fires every relic's
+            // onEnterRestRoom at :38-42 -- Ancient Tea Set's arming, and the only
+            // implementor in the game. It runs at AbstractDungeon.java:1800,
+            // AFTER the onEnterRoom / justEnteredRoom fan-outs, so a future
+            // Eternal Feather heal (its own deferred row) belongs ABOVE this
+            // line, not below it.
+            //
+            // TRACK-2 COLLISION, FLAGGED: this is the rest-room entry region the
+            // concurrent run-layer track is editing. Kept to a single call whose
+            // body lives in relics/relic_pickup.hpp precisely so the two changes
+            // meet on one line rather than across a block.
+            dispatch_relics_on_enter_rest_room(rc.run);
             rc.combat = CombatState{};
             reseed_floor_streams(rc.combat, seed, floor);
             rc.rewards = RewardScreen{};

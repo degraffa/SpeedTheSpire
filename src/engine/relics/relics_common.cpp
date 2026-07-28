@@ -276,25 +276,95 @@ void relic_native_akabeko(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
     add_to_top(s, gain);  // addToTop (Akabeko.java:33)
 }
 
-// AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter == -2, gain
-// 2 energy on the first turn; onEnterRestRoom (:77-80) arms it. DEFERRED
-// because there is nowhere to ARM it from: rest rooms are not implemented
-// (entering one parks at ROOM_UNIMPLEMENTED, run_advance.cpp), so
-// onEnterRestRoom never fires. NOTE: the armed flag itself is no longer the
-// obstacle -- RelicSlot.counter survives across rooms, because fold_back_combat
-// copies each combat counter back into RunState.relics at combat end.
-void relic_native_ancient_tea_set(CombatState& /*s*/, RelicHook /*hook*/,
-                                  RelicSlot& /*slot*/,
-                                  const RelicHookContext& /*ctx*/) noexcept {}
+void relic_native_ancient_tea_set(CombatState& s, RelicHook hook,
+                                  RelicSlot& slot,
+                                  const RelicHookContext& /*ctx*/) noexcept {
+    // AncientTeaSet.atTurnStart (AncientTeaSet.java:49-61):
+    //     if (this.firstTurn) {
+    //         if (this.counter == -2) {
+    //             pulse = false; this.counter = -1; flash();
+    //             addToTop(new GainEnergyAction(2));
+    //             addToTop(RelicAboveCreatureAction);   -- cosmetic
+    //         }
+    //         this.firstTurn = false;
+    //     }
+    // atPreBattle (:63-66) sets firstTurn = true; onEnterRestRoom (:76-81) sets
+    // counter = -2, which is the ARMING half and lives at the run layer.
+    //
+    // RelicSlot.counter IS the cross-room state, exactly: -2 armed, -1 spent,
+    // and fold_back_combat already carries it between rooms. That is the GAME'S
+    // OWN encoding -- AncientTeaSet writes this.counter directly and
+    // CommunicationMod reports it -- so unlike Centennial Puzzle / Orange Pellets
+    // / Art of War there is nothing to move out of the counter here. The earlier
+    // note claiming this relic needed "state beyond RelicSlot.counter" was wrong;
+    // so was its successor claiming rest rooms do not exist, which they have
+    // since.
+    //
+    // `firstTurn` needs no storage. This hook runs from start_of_turn BEFORE
+    // `++s.turn` (action_queue.cpp) and combat construction leaves s.turn == 0,
+    // so the first atTurnStart of a combat is exactly `s.turn == 0`. A skipped
+    // turn cannot re-arm it mid-combat, which is the property the Java's one-shot
+    // boolean has.
+    //
+    // The +2 is addToTop while turn 1's own energy comes from an ADD onto a
+    // just-zeroed panel (GainEnergyAndEnableControlsAction, AbstractRoom.java:241
+    // -> EnergyPanel.addEnergy, EnergyPanel.java:59-66), so both are additive and
+    // the ordering between them is harmless.
+    if (hook != RelicHook::AT_TURN_START || s.turn != 0 || slot.counter != -2) {
+        return;
+    }
+    slot.counter = -1;  // (:54)
+    ActionQueueItem e{};
+    e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+    e.src = kActorPlayer;
+    e.tgt = kActorPlayer;
+    e.amount = 2;  // ENERGY_AMT (AncientTeaSet.java:22)
+    add_to_top(s, e);  // addToTop (:56)
+}
 
-// ArtOfWar.onUseCard / atTurnStart (ArtOfWar.java:76-83, 64-74) -- +1 energy at
-// turn start if no ATTACK was played last turn. DEFERRED: it needs two
-// independent per-relic flags (firstTurn + gainEnergyNext). RelicSlot.counter
-// is a signed 16-bit field and could carry both as bits, so this is a missing
-// DECISION about how a relic encodes multi-flag state, not missing storage.
-void relic_native_art_of_war(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_art_of_war(CombatState& s, RelicHook hook,
                              RelicSlot& /*slot*/,
-                             const RelicHookContext& /*ctx*/) noexcept {}
+                             const RelicHookContext& ctx) noexcept {
+    // ArtOfWar (ArtOfWar.java:52-82):
+    //     atPreBattle (:52-61) : firstTurn = true; gainEnergyNext = true;
+    //     atTurnStart (:63-74) : if (gainEnergyNext && !firstTurn) {
+    //                                addToBot(RelicAboveCreatureAction);  -- cosmetic
+    //                                addToBot(new GainEnergyAction(1)); }
+    //                            firstTurn = false;
+    //                            gainEnergyNext = true;
+    //     onUseCard   (:76-82) : if (card.type == ATTACK) gainEnergyNext = false;
+    //
+    // Net: +1 energy at the start of turn N (N >= 2) iff no ATTACK was played
+    // during turn N-1.
+    //
+    // ONE bit of storage, not two. `firstTurn` is `s.turn == 0` (this hook runs
+    // before start_of_turn's ++s.turn), and `gainEnergyNext` is stored INVERTED
+    // as kCombatFlagArtOfWarAttackPlayed so the value-initialised default is
+    // already atPreBattle's `gainEnergyNext = true`. See that constant for why a
+    // flags bit rather than RelicSlot.counter.
+    //
+    // THE LINE ORDER IS LOAD-BEARING: `gainEnergyNext = true` is the LAST
+    // statement of atTurnStart, AFTER the check. Clearing the latch before the
+    // test would grant every turn.
+    if (hook == RelicHook::ON_USE_CARD) {
+        if (ctx.card_is_attack) {
+            s.flags |= kCombatFlagArtOfWarAttackPlayed;  // gainEnergyNext = false
+        }
+        return;
+    }
+    if (hook != RelicHook::AT_TURN_START) {
+        return;
+    }
+    if (s.turn != 0 && (s.flags & kCombatFlagArtOfWarAttackPlayed) == 0u) {
+        ActionQueueItem e{};
+        e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
+        e.src = kActorPlayer;
+        e.tgt = kActorPlayer;
+        e.amount = 1;
+        add_to_bottom(s, e);  // addToBot (ArtOfWar.java:71)
+    }
+    s.flags &= ~kCombatFlagArtOfWarAttackPlayed;  // gainEnergyNext = true (:73)
+}
 
 // Boot.onAttackToChangeDamage (Boot.java:30-38) -- LIVE, but NOT here.
 //

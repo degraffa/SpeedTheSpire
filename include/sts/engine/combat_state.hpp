@@ -209,6 +209,31 @@ inline constexpr uint32_t kCombatFlagEliteRoom = 1u << 20;
 inline constexpr uint32_t kCombatFlagOrangePelletsAttack = 1u << 21;
 inline constexpr uint32_t kCombatFlagOrangePelletsSkill = 1u << 22;
 inline constexpr uint32_t kCombatFlagOrangePelletsPower = 1u << 23;
+// CombatState.flags bit for Art of War's `gainEnergyNext`, stored INVERTED as
+// "an ATTACK has been played this turn".
+//
+// ArtOfWar (ArtOfWar.java:23-24, :52-82) keeps two per-combat booleans:
+//     atPreBattle : firstTurn = true; gainEnergyNext = true;
+//     atTurnStart : if (gainEnergyNext && !firstTurn) addToBot GainEnergyAction(1);
+//                   firstTurn = false; gainEnergyNext = true;
+//     onUseCard   : if (card.type == ATTACK) gainEnergyNext = false;
+// i.e. +1 energy at the start of turn N (N >= 2) iff no ATTACK was played during
+// turn N-1.
+//
+// Only ONE of the two needs storage. `firstTurn` is derivable: the relic hook
+// runs from start_of_turn BEFORE `++s.turn` (action_queue.cpp), and combat
+// construction leaves s.turn == 0, so the first atTurnStart of a combat is
+// exactly `s.turn == 0`. Storing `gainEnergyNext` INVERTED keeps the
+// value-initialised default correct with no atPreBattle write: a fresh
+// CombatState means "no attack played yet", which is what atPreBattle's
+// `gainEnergyNext = true` says.
+//
+// A flags bit and not RelicSlot.counter for the usual reason: ArtOfWar's counter
+// is never written in the game, stays at AbstractRelic's -1, and
+// fold_back_combat would carry any write into RunState where the differ compares
+// it (the Centennial Puzzle divergence class).
+inline constexpr uint32_t kCombatFlagArtOfWarAttackPlayed = 1u << 24;
+
 inline constexpr uint32_t kCombatFlagOrangePelletsMask =
     kCombatFlagOrangePelletsAttack | kCombatFlagOrangePelletsSkill |
     kCombatFlagOrangePelletsPower;

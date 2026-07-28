@@ -307,10 +307,10 @@
   pool_order: 9
   native: true
   hooks:
-    at_turn_start: []         # +2 energy on turn 1 IF entered combat from a campfire (DEFERRED: cross-room flag)
+    at_turn_start: []         # +2 energy on turn 1 while counter == -2 (armed by onEnterRestRoom)
   pickup:
     can_spawn: true
-  provenance: "AncientTeaSet.atTurnStart (AncientTeaSet.java:50-61) -- if counter==-2 gain 2 energy on first turn; onEnterRestRoom arms it (:77-80). Needs a cross-room armed flag (run layer); native body deferred."
+  provenance: "AncientTeaSet.atTurnStart (AncientTeaSet.java:49-61) -- on the FIRST turn of a combat, if counter == -2: counter = -1 and addToTop GainEnergyAction(2) (ENERGY_AMT = 2, :22). atPreBattle (:63-66) sets firstTurn = true; onEnterRestRoom (:76-81) sets counter = -2, which is the ARMING half and lives at the run layer (dispatch_relics_on_enter_rest_room, relics/relic_pickup.hpp, called once from the rest-room entry in run_advance.cpp -- RestRoom.onPlayerEntry, RestRoom.java:38-42, which runs at AbstractDungeon.java:1800, AFTER the onEnterRoom and justEnteredRoom fan-outs). LIVE. RelicSlot.counter IS the cross-room state, exactly: -2 armed, -1 spent -- the GAME'S OWN encoding, written directly by the relic and reported by CommunicationMod, so unlike Centennial Puzzle nothing has to move out of the counter. `firstTurn` needs no storage: the hook runs from start_of_turn BEFORE ++s.turn and combat construction leaves s.turn == 0, so the first atTurnStart is exactly s.turn == 0. The +2 is addToTop while turn 1's own energy is an ADD onto a just-zeroed panel (AbstractRoom.java:241 -> EnergyPanel.addEnergy, EnergyPanel.java:59-66), so both are additive and the ordering is harmless."
 
 - id: 18
   name: ART_OF_WAR
@@ -319,9 +319,9 @@
   pool_order: 15
   native: true
   hooks:
-    on_use_card: []           # ATTACK played this turn cancels next turn's +1 energy (DEFERRED: cross-turn flags)
+    on_use_card: []           # an ATTACK this turn cancels NEXT turn's +1 energy
     at_turn_start: []
-  provenance: "ArtOfWar.onUseCard/atTurnStart (ArtOfWar.java:76-83,64-74) -- +1 energy at turn start if no ATTACK was played last turn (firstTurn + gainEnergyNext flags). Needs multi-bit relic state beyond RelicSlot.counter; native body deferred."
+  provenance: "ArtOfWar (ArtOfWar.java:52-82) -- atPreBattle (:52-61) firstTurn = true, gainEnergyNext = true; atTurnStart (:63-74) `if (gainEnergyNext && !firstTurn) addToBot GainEnergyAction(1);` then firstTurn = false and gainEnergyNext = true; onUseCard (:76-82) `if (card.type == ATTACK) gainEnergyNext = false`. Net: +1 energy at the start of turn N (N >= 2) iff no ATTACK was played during turn N-1. LIVE, on ONE bit of storage rather than two: firstTurn is s.turn == 0 (the hook runs before start_of_turn's ++s.turn), and gainEnergyNext is stored INVERTED as kCombatFlagArtOfWarAttackPlayed (CombatState.flags bit 24) so the value-initialised default is already atPreBattle's gainEnergyNext = true. A flags bit and not RelicSlot.counter because ArtOfWar's counter is never written in the game and stays at -1 -- the Centennial Puzzle divergence class. THE LINE ORDER IS LOAD-BEARING: gainEnergyNext = true is the LAST statement of atTurnStart, after the check; clearing the latch before the test would grant every turn."
 
 - id: 19
   name: BOOT
@@ -946,8 +946,8 @@
   pool_order: 15
   native: true
   hooks:
-    on_exhaust: []            # DEFERRED body: needs the all-red combat card pool
-  provenance: "DeadBranch.onExhaust (DeadBranch.java:259-266) -- if !areMonstersBasicallyDead(): addToBot MakeTempCardInHandAction(AbstractDungeon.returnTrulyRandomCardInCombat().makeCopy(), false). DEFERRED: returnTrulyRandomCardInCombat() with NO type filter (AbstractDungeon.java:964-979) draws one cardRandomRng pick over the whole colour pool -- commons + uncommons + rares, not the ATTACK-only pool RANDOM_ATTACK_TO_HAND uses -- so it needs a second generated combat pool and is RNG-visible. Explicit empty native body (relics/relics_rare.cpp) rather than an omitted one, so the deferral sits where the implementation goes."
+    on_exhaust: []            # one cardRandomRng pick at HOOK time -> MAKE_CARD into HAND
+  provenance: "DeadBranch.onExhaust (DeadBranch.java:24-31 -- the file is 43 lines; this row and ledger row 72 cited :259-266) -- `if (!getMonsters().areMonstersBasicallyDead()) { flash(); addToBot(RelicAboveCreatureAction); addToBot(new MakeTempCardInHandAction(AbstractDungeon.returnTrulyRandomCardInCombat().makeCopy(), false)); }`. LIVE, and cardRandomRng-VISIBLE. THE DRAW HAPPENS AT QUEUE TIME: returnTrulyRandomCardInCombat() is an ARGUMENT of the MakeTempCardInHandAction constructor, so the pick is spent while the exhaust fan-out runs and only the card creation is deferred -- the same shape and the same argument as MagnetismPower.atStartOfTurn. THE POOL ALREADY EXISTED: returnTrulyRandomCardInCombat (AbstractDungeon.java:938-962) concatenates srcCommon + srcUncommon + srcRare EXCLUDING CardTags.HEALING and takes one `cardRandomRng.random(list.size() - 1)`, which is exactly the generated 70-row kIroncladCombatPool that Discovery already consumes. The deferral note claiming the draw is UNFILTERED and needs a second generated pool was wrong; the genuinely-new pool is Pandora's Box's returnTrulyRandomCard(), which does not exclude HEALING. areMonstersBasicallyDead (MonsterGroup.java:90-95) is `isDying || isEscaping` per monster, i.e. monster_dead_or_escaped. The copy is a BASE library copy (MakeTempCardInHandAction(..., false)), landing through Opcode::MAKE_CARD into CardPile::HAND with its hand-cap spill to the discard pile."
 
 - id: 82
   name: DU_VU_DOLL

@@ -582,6 +582,98 @@ TEST(RelicHooks, PreservedInsectLeavesNonEliteMonstersAlone) {
     EXPECT_EQ(s.action_count, 0);
 }
 
+// --- Art of War --------------------------------------------------------------
+
+// ArtOfWar (ArtOfWar.java:52-82): +1 energy at the start of turn N (N >= 2) iff
+// no ATTACK was played during turn N-1. `firstTurn` suppresses turn 1 only.
+TEST(RelicHooks, ArtOfWarGrantsEnergyOnlyAfterAnAttacklessTurn) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::ART_OF_WAR, -1);
+
+    // Turn 1's atTurnStart: firstTurn suppresses the grant even though
+    // gainEnergyNext is true.
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "turn 1 never grants";
+    ++s.turn;
+
+    // Turn 1 passed with no attack -> turn 2 grants.
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::GAIN_ENERGY));
+    EXPECT_EQ(queued(s, 0).amount, 1);
+    EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
+    drain(s);
+    ++s.turn;
+
+    // An ATTACK during turn 2 cancels turn 3's grant.
+    dispatch_relics_on_use_card(s, r.slots, r.count,
+                                static_cast<uint16_t>(CardId::STRIKE), 0);
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "an attack last turn cancels the grant";
+    ++s.turn;
+
+    // ...and the latch is re-armed by that same atTurnStart, so turn 4 grants
+    // again. Getting the Java's line order wrong (clearing before the test)
+    // would have granted on turn 3 too.
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 1);
+    EXPECT_EQ(r.slots[0].counter, -1) << "the counter is never touched";
+}
+
+// A SKILL or POWER play does not cancel the grant -- only ATTACK does
+// (ArtOfWar.java:78).
+TEST(RelicHooks, ArtOfWarIgnoresNonAttackPlays) {
+    CombatState s = MakeState();
+    s.turn = 1;
+    Relics r; r.add(RelicId::ART_OF_WAR, -1);
+    dispatch_relics_on_use_card(s, r.slots, r.count,
+                                static_cast<uint16_t>(CardId::SHRUG_IT_OFF), 0);
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 1);
+}
+
+// --- Ancient Tea Set ---------------------------------------------------------
+
+// AncientTeaSet.atTurnStart (AncientTeaSet.java:49-61): if the RUN-persistent
+// counter is -2 (armed by onEnterRestRoom), the FIRST turn of the combat gains 2
+// energy and the counter is spent to -1.
+TEST(RelicHooks, AncientTeaSetSpendsTheArmedCounterOnTurnOne) {
+    CombatState s = MakeState();
+    Relics r; r.add(RelicId::ANCIENT_TEA_SET, -2);
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::GAIN_ENERGY));
+    EXPECT_EQ(queued(s, 0).amount, 2);
+    EXPECT_EQ(r.slots[0].counter, -1) << "-2 armed becomes -1 spent";
+    drain(s);
+    EXPECT_EQ(s.player_energy, 5);
+
+    // Later turns of the SAME combat do nothing -- firstTurn is one-shot.
+    ++s.turn;
+    dispatch_relics_at_turn_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0);
+}
+
+// An UNARMED tea set (counter -1, the spent value) grants nothing, and a turn
+// that is not the first grants nothing even while armed.
+TEST(RelicHooks, AncientTeaSetGrantsNothingUnarmedOrOffTurnOne) {
+    {
+        CombatState s = MakeState();
+        Relics r; r.add(RelicId::ANCIENT_TEA_SET, -1);
+        dispatch_relics_at_turn_start(s, r.slots, r.count);
+        EXPECT_EQ(s.action_count, 0);
+        EXPECT_EQ(r.slots[0].counter, -1);
+    }
+    {
+        CombatState s = MakeState();
+        s.turn = 3;
+        Relics r; r.add(RelicId::ANCIENT_TEA_SET, -2);
+        dispatch_relics_at_turn_start(s, r.slots, r.count);
+        EXPECT_EQ(s.action_count, 0);
+        EXPECT_EQ(r.slots[0].counter, -2) << "still armed for the NEXT combat";
+    }
+}
+
 // --- Non-combat / deferred relics dispatch nothing ---------------------------
 
 TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {

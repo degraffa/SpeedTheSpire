@@ -579,6 +579,29 @@ TEST(RelicAcquisition, WarPaintAndWhetstoneUseMiscRngJdkShuffle) {
     EXPECT_EQ(misc.counter, 2);
 }
 
+// The eligibility filter is canUpgrade(), not `upgrade == 0`. Both Java bodies
+// spell `if (!c.canUpgrade() || c.type != <TYPE>) continue;` (WarPaint.java:37-40
+// / Whetstone.java:37-40), and SearingBlow.canUpgrade (SearingBlow.java:58-60)
+// returns true unconditionally -- so an ALREADY upgraded Searing Blow is still a
+// candidate. The old `upgrade == 0` test dropped it from the list, and because
+// the JDK shuffle runs over the FILTERED list that changed WHICH cards were
+// picked, not merely how many.
+TEST(RelicAcquisition, WarPaintKeepsAnUpgradedSearingBlowEligible) {
+    RunState rs{};
+    rs.master_deck_count = 2;
+    rs.master_deck[0].card_id = static_cast<uint16_t>(CardId::SEARING_BLOW);
+    rs.master_deck[0].upgrade = 2;
+    rs.master_deck[1].card_id = static_cast<uint16_t>(CardId::STRIKE);
+    rs.master_deck[1].upgrade = 1;   // an ordinary upgraded ATTACK stays OUT
+    RngStream misc = from_seed(99);
+    ASSERT_EQ(acquire_relic(rs, misc, RelicId::WHETSTONE),
+              RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(rs.master_deck[0].upgrade, 3)
+        << "Searing Blow re-upgrades; canUpgrade() overrides the base method";
+    EXPECT_EQ(rs.master_deck[1].upgrade, 1) << "and an upgraded Strike does not";
+    EXPECT_EQ(misc.counter, 1) << "the shuffle draw is unconditional";
+}
+
 TEST(RelicAcquisition, CircletCounterCapacityIsExplicit) {
     RunState rs{};
     RngStream misc = from_seed(5);

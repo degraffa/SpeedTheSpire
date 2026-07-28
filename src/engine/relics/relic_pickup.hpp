@@ -145,6 +145,29 @@ inline void dispatch_relics_on_spend_gold(RunState& rs) noexcept {
     }
 }
 
+// AbstractRelic.onEnterRestRoom, fired from RestRoom.onPlayerEntry
+// (RestRoom.java:33-43, specifically :38-42) at AbstractDungeon.java:1800 --
+// i.e. AFTER the onEnterRoom and justEnteredRoom fan-outs, not instead of them.
+//
+// Ancient Tea Set is the only implementor in the whole game
+// (AncientTeaSet.onEnterRestRoom, AncientTeaSet.java:76-81): `flash();
+// this.counter = -2; this.pulse = true;`. counter == -2 is the ARMED encoding
+// the game itself uses, so this is a plain RunState.relics write that
+// fold_back_combat/enter_combat already carry into the next combat, where
+// relic_native_ancient_tea_set consumes it to -1 on turn 1.
+//
+// A fan-out over every held copy rather than a getRelic, matching the Java's
+// relic iteration, and inline here beside the other run-layer relic fan-outs so
+// the rest-room entry site needs exactly one call.
+inline void dispatch_relics_on_enter_rest_room(RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        RelicSlot& slot = rs.relics[i];
+        if (slot.relic_id == static_cast<uint16_t>(RelicId::ANCIENT_TEA_SET)) {
+            slot.counter = -2;  // setCounter(-2) == armed (AncientTeaSet.java:78)
+        }
+    }
+}
+
 inline void lose_gold(RunState& rs, int32_t amount,
                       bool in_shop = false) noexcept {
     if (in_shop) {
@@ -169,6 +192,37 @@ inline void lose_gold(RunState& rs, int32_t amount,
 // even when the filtered list has fewer than two cards, so the draw happens
 // unconditionally -- that consumption is part of the RNG contract, not an
 // optimization to skip.
+//
+// The eligibility test is canUpgrade(), NOT `upgrade == 0`. Both Java bodies
+// spell `if (!c.canUpgrade() || c.type != <TYPE>) continue;`
+// (WarPaint.java:37-40 / Whetstone.java:37-40), and SearingBlow.canUpgrade
+// (SearingBlow.java:58-60) OVERRIDES the base with `return true`, so an already
+// upgraded Searing Blow stays eligible and can be upgraded again. `upgrade == 0`
+// silently excluded it -- and, because the shuffle is over the FILTERED list, a
+// wrongly-sized candidate list changes which cards are picked, not merely how
+// many. The CURSE/STATUS half of canUpgrade is already implied by the
+// `type == wanted` test above (wanted is ATTACK or SKILL), so Searing Blow is
+// the whole of the difference.
+// AbstractCard.canUpgrade (AbstractCard.java:672-680) for a master-deck
+// instance: CURSE and STATUS are never upgradeable, everything else is
+// upgradeable while `!upgraded`. SearingBlow.canUpgrade (SearingBlow.java:58-60)
+// replaces the whole body with `return true`, so it is tested FIRST -- an
+// override runs INSTEAD OF, not after, the base. The in-combat twin is
+// can_upgrade_instance (interp_cards.cpp) and the rest-site twin is
+// rest_card_upgradeable (rest_sites.cpp); all three answer the same Java method
+// over a different carrier.
+[[nodiscard]] inline bool can_upgrade(const CardInstance& card) noexcept {
+    if (card.card_id == static_cast<uint16_t>(CardId::SEARING_BLOW)) {
+        return card.upgrade != UINT8_MAX;
+    }
+    const CardDef* def = card_def(static_cast<CardId>(card.card_id));
+    if (def == nullptr || def->type == CardType::CURSE ||
+        def->type == CardType::STATUS) {
+        return false;
+    }
+    return card.upgrade == 0;
+}
+
 inline void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
                                  CardType wanted) noexcept {
     uint16_t candidates[kMasterDeckCap]{};
@@ -176,7 +230,7 @@ inline void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         const CardInstance& card = rs.master_deck[i];
         const CardDef* def = card_def(static_cast<CardId>(card.card_id));
-        if (def != nullptr && def->type == wanted && card.upgrade == 0) {
+        if (def != nullptr && def->type == wanted && can_upgrade(card)) {
             candidates[count++] = i;
         }
     }
@@ -185,7 +239,14 @@ inline void upgrade_random_cards(RunState& rs, RngStream& misc_rng,
     jdk_shuffle(std::span<uint16_t>(candidates, count), jdk);
     const uint16_t take = count < 2 ? count : 2;
     for (uint16_t i = 0; i < take; ++i) {
-        rs.master_deck[candidates[i]].upgrade = 1;
+        // AbstractCard.upgrade() INCREMENTS timesUpgraded; SearingBlow.upgrade
+        // (SearingBlow.java:48-54) does the same and is the only card for which
+        // the distinction is visible, since every other card is filtered out by
+        // canUpgrade() once its count reaches 1. A blind `= 1` silently reset a
+        // Searing Blow+2 back to +1 -- the other half of the same defect the
+        // canUpgrade() filter above fixes. can_upgrade already refuses UINT8_MAX,
+        // so the increment cannot wrap.
+        ++rs.master_deck[candidates[i]].upgrade;
     }
 }
 
