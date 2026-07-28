@@ -1619,8 +1619,9 @@
   type: SKILL
   cost: 0
   target: ENEMY
+  upgraded_target: ALL_ENEMY
   flags: []
-  provenance: "Blind (Blind.java:23-58): ctor (:28-31) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.ENEMY, magicNumber = baseMagicNumber = 2. use (:33-42) branches on `upgraded`: base addToBot ONE ApplyPowerAction(m, p, WeakPower(m, 2, false), 2); upgraded loops over getCurrRoom().monsters.monsters applying the same WeakPower to each. upgrade (:44-52) changes NOTHING but the target -- there is no upgradeMagicNumber -- so both rows apply 2. The upgraded loop is expressed as an ALL_ENEMY step target, whose execute-time fan-out is over the LIVE monsters; the Java loop is over the whole group, but ApplyPowerAction.update skips a dead target (isDeadOrEscaped), so the observable result is the same. CARD-LEVEL TARGETING IS A KNOWN DEVIATION: upgrade() also sets this.target = CardTarget.ALL_ENEMY (:48), and CardDef has no upgraded-target column, so an upgraded Blind still offers a target choice in the ActionMask that the game would not. State is unaffected; the row is in the ledger's deferred obligations."
+  provenance: "Blind (Blind.java:23-58): ctor (:28-31) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.ENEMY, magicNumber = baseMagicNumber = 2. use (:33-42) branches on `upgraded`: base addToBot ONE ApplyPowerAction(m, p, WeakPower(m, 2, false), 2); upgraded loops over getCurrRoom().monsters.monsters applying the same WeakPower to each. upgrade (:44-52) changes NOTHING but the target -- there is no upgradeMagicNumber -- so both rows apply 2. The upgraded loop is expressed as an ALL_ENEMY step target, whose execute-time fan-out is over the LIVE monsters; the Java loop is over the whole group, but ApplyPowerAction.update skips a dead target (isDeadOrEscaped), so the observable result is the same. upgraded_target mirrors upgrade()'s this.target = CardTarget.ALL_ENEMY (:48): the upgraded card takes no target in the ActionMask, no dead-target canUse rejection applies, and GameActionManager's ENEMY-only dead-target suppression (:264-283) passes it -- the old 'ActionMask deviation, state unaffected' note was WRONG (a dead baked target under Distilled Chaos cancelled the play; tier-2 UpgradedPlaysThroughItsDeadBakedTarget reproduces it)."
   effects:
     - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: WEAK}
   upgraded:
@@ -1903,8 +1904,9 @@
   type: SKILL
   cost: 0
   target: ENEMY
+  upgraded_target: ALL_ENEMY
   flags: []
-  provenance: "Trip (Trip.java:23-58): ctor (:28-31) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.ENEMY, magicNumber = baseMagicNumber = 2. use (:33-42) is Blind's structure with VulnerablePower in place of WeakPower: base applies ONE Vulnerable 2 to the played-on monster, upgraded loops the whole monster group. upgrade (:49-57) changes only the target -- there is no upgradeMagicNumber -- so both rows apply 2. Same two notes as Blind: the ALL_ENEMY step fans out over LIVE monsters (ApplyPowerAction skips a dead target, so the Java's whole-group loop is equivalent), and the card-level target stays ENEMY because CardDef has no upgraded-target column -- an ActionMask deviation on the upgraded row, recorded in the ledger's deferred obligations, with no state effect."
+  provenance: "Trip (Trip.java:23-58): ctor (:28-31) cost 0, SKILL, COLORLESS, UNCOMMON, CardTarget.ENEMY, magicNumber = baseMagicNumber = 2. use (:33-42) is Blind's structure with VulnerablePower in place of WeakPower: base applies ONE Vulnerable 2 to the played-on monster, upgraded loops the whole monster group. upgrade (:49-57) changes only the target -- there is no upgradeMagicNumber -- so both rows apply 2. Same two notes as Blind: the ALL_ENEMY step fans out over LIVE monsters (ApplyPowerAction skips a dead target, so the Java's whole-group loop is equivalent), and upgraded_target mirrors upgrade()'s this.target = CardTarget.ALL_ENEMY (:53 -- the :43 this row cited for years was a blank line): no target in the mask, no dead-target rejection, no :264-283 suppression on the upgraded row (see Blind for the state-divergence note)."
   effects:
     - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: VULNERABLE}
   upgraded:

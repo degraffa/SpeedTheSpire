@@ -333,8 +333,11 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept {
             // escaped Looter is not a legal target even though its hp is
             // positive. Self/all/none/random cards ignore the declared target,
             // so their grid row stays all-false and can_play[i] alone carries
-            // their legality.
-            if (out.can_play[i] && def != nullptr && def->needs_target) {
+            // their legality. UPGRADE-AWARE: Blind+/Trip+ reassign the card
+            // target to ALL_ENEMY in upgrade() (Blind.java:48 / Trip.java:53),
+            // so their upgraded instances take no target row.
+            if (out.can_play[i] && def != nullptr &&
+                card_needs_target(*def, state.card_pool[pi].upgrade)) {
                 for (int t = 0; t < kMonsterCap; ++t) {
                     out.can_play_target[i][t] =
                         t < static_cast<int>(state.monster_count) &&

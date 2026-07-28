@@ -25,6 +25,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/piles.hpp"
+#include "sts/engine/potions.hpp"
 #include "sts/engine/powers.hpp"
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
@@ -374,6 +375,96 @@ TEST(CardColorlessUncommonsTrip, VulnerableOneTargetBaseAllLiveUpgraded) {
             ASSERT_NE(FindPower(s, m, PowerId::VULNERABLE), nullptr) << "slot " << m;
             EXPECT_EQ(FindPower(s, m, PowerId::VULNERABLE)->amount, 2)
                 << "Trip.upgrade (:49-57) changes only the target";
+        }
+    }
+}
+
+// The upgraded-target STATE divergence, reproduced end-to-end. Blind.upgrade
+// sets this.target = CardTarget.ALL_ENEMY (Blind.java:48; Trip.java:53), and
+// GameActionManager's dequeue-time dead-target suppression applies ONLY to
+// exact CardTarget.ENEMY (GameActionManager.java:264-283) -- so in the game an
+// upgraded Blind whose QUEUED play outlives its selected monster still
+// resolves and Weakens the survivors. The reachable route is Distilled Chaos:
+// all three targets are rolled and BAKED at use time (DistilledChaosPotion.
+// java:38-43, the ctor-argument getRandomMonster), so a Strike played first
+// can kill the monster a queued Blind+ was aimed at. Before CardDef grew the
+// upgraded-target column, the engine kept Blind+ at card-level ENEMY and both
+// STATE-path reads of target_kind -- card_can_use's dead-target rejection and
+// resolve_card_play's :264-283 suppression -- cancelled the play: no Weak
+// anywhere, a real state divergence (the old ledger claim "ActionMask
+// deviation, not a state one" was wrong).
+TEST(CardColorlessUncommonsBlind, UpgradedPlaysThroughItsDeadBakedTarget) {
+    // Find a card_random_rng seed whose first two live-monster rolls (over two
+    // live monsters, random(rng, 1)) agree -- so the Strike and the Blind+ are
+    // baked onto the SAME monster. Derived, not hardcoded, so the test cannot
+    // rot if the rng implementation changes.
+    int chosen = -1;
+    uint8_t t01 = 0;
+    for (int c = 1; c <= 64 && chosen < 0; ++c) {
+        RngStream probe = from_seed(c);
+        const uint8_t a = static_cast<uint8_t>(random(probe, 1));
+        const uint8_t b = static_cast<uint8_t>(random(probe, 1));
+        if (a == b) {
+            chosen = c;
+            t01 = a;
+        }
+    }
+    ASSERT_GE(chosen, 1) << "no seed in 1..64 rolls a repeated target?";
+
+    CombatState s = MakeCombat(/*energy=*/3, /*monster_hp=*/50);
+    s.monster_count = 2;
+    s.monsters[1].monster_id = static_cast<uint16_t>(MonsterId::JAW_WORM);
+    s.monsters[1].hp = 50;
+    s.monsters[1].max_hp = 50;
+    s.monsters[t01].hp = 5;  // the doomed monster: one Strike (6) kills it
+    s.card_random_rng = from_seed(chosen);
+
+    // Draw pile bottom-to-top: [Defend, Blind+, Strike] -- PLAY_CARD FromDrawTop
+    // pops the top, so the plays are Strike, then Blind+, then Defend.
+    AddDrawTop(s, CardId::DEFEND);
+    AddDrawTop(s, CardId::BLIND, /*upgrade=*/1);
+    AddDrawTop(s, CardId::STRIKE);
+
+    ASSERT_TRUE(use_potion(s, PotionId::DISTILLED_CHAOS, 0));
+    pump(s);
+
+    const uint8_t survivor = static_cast<uint8_t>(1 - t01);
+    EXPECT_EQ(s.monsters[t01].hp, 0) << "the Strike killed its baked target";
+    ASSERT_NE(FindPower(s, survivor, PowerId::WEAK), nullptr)
+        << "Blind+ is CardTarget.ALL_ENEMY (Blind.java:48): the dead baked "
+           "target must not cancel the play (GameActionManager.java:264-283 "
+           "suppresses exact ENEMY only)";
+    EXPECT_EQ(FindPower(s, survivor, PowerId::WEAK)->amount, 2);
+    EXPECT_EQ(FindPower(s, t01, PowerId::WEAK), nullptr)
+        << "ApplyPowerAction skips a dead target";
+}
+
+// The mask half of the same column: an upgraded Blind/Trip takes NO target in
+// the game (CardTarget.ALL_ENEMY), so its ActionMask row must be all-false
+// with can_play[i] carrying legality -- while the BASE card keeps its
+// per-target row. (advance.cpp reads the upgrade-aware needs_target.)
+TEST(CardColorlessUncommonsBlind, UpgradedTakesNoTargetInTheActionMask) {
+    CombatState s = MakeThree();
+    AddHand(s, CardId::BLIND);                 // slot 0: base -- targeted
+    AddHand(s, CardId::BLIND, /*upgrade=*/1);  // slot 1: upgraded -- ALL_ENEMY
+    AddHand(s, CardId::TRIP);                  // slot 2: base -- targeted
+    AddHand(s, CardId::TRIP, /*upgrade=*/1);   // slot 3: upgraded -- ALL_ENEMY
+    ActionMask m{};
+    legal_actions(s, m);
+    for (int slot : {0, 2}) {
+        EXPECT_TRUE(m.can_play[slot]) << slot;
+        bool any_target = false;
+        for (int t = 0; t < kMonsterCap; ++t) {
+            any_target = any_target || m.can_play_target[slot][t];
+        }
+        EXPECT_TRUE(any_target) << "base Blind/Trip is CardTarget.ENEMY";
+    }
+    for (int slot : {1, 3}) {
+        EXPECT_TRUE(m.can_play[slot]) << slot;
+        for (int t = 0; t < kMonsterCap; ++t) {
+            EXPECT_FALSE(m.can_play_target[slot][t])
+                << "upgraded Blind/Trip is CardTarget.ALL_ENEMY (Blind.java:48"
+                   " / Trip.java:53): no target row";
         }
     }
 }
