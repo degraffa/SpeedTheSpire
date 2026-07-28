@@ -1153,6 +1153,53 @@ TEST(FuzzCoverage, CheckedMergeRejectsCounterOverflow) {
     EXPECT_EQ(total.actions, UINT64_MAX);
 }
 
+// REGRESSION (probe_shop, 2026-07-27): B4.8 moved shop rooms from
+// ROOM_UNIMPLEMENTED parking to RunPhase::SHOP, and the soak's room-entry
+// accounting was never taught the new phase -- so a 300-seed probe printed
+// "shop entered 0" while its own move table showed 506 SHOP moves taken.
+// Reachability was never the problem; the COUNTER was. This test distinguishes
+// the two explicitly: the first assert proves a shop floor was really reached
+// (SHOP moves only ever enumerate inside RunPhase::SHOP), the second that the
+// rooms table counted it.
+TEST(FuzzCoverage, ShopEntryCountsInTheRoomsTable) {
+    Coverage cov;
+    for (int64_t seed = 1; seed <= 40; ++seed) {
+        CaseId id;
+        id.run_seed = seed;
+        id.ascension = 20;
+        id.policy = PolicyKind::ALWAYS_EVENT;  // scores non-combat rooms at 100
+        id.policy_seed = 0xC0FFEEull;
+        CaseResult r;
+        (void)run_case(id, limits(), &cov, r, false);
+    }
+    ASSERT_GT(cov.move_legal[static_cast<int>(MoveCat::SHOP)], 0u)
+        << "no shop floor was ever reached in the 40-seed sweep -- widen it";
+    EXPECT_GT(cov.room_entered[static_cast<int>(engine::RoomType::Shop)], 0u)
+        << "shops were shopped in (SHOP moves were legal) but the rooms table "
+           "never counted an entry";
+}
+
+// The seed-116 always_event probe reproducer, as a named in-tree case: beat
+// the Act-1 boss, claim its rewards, press proceed -- and the case must END,
+// in the victory terminal, rather than fail no_legal_moves on an empty mask
+// the run layer advertised while claiming not to be terminal.
+TEST(FuzzGuard, Seed116AlwaysEventReachesTheVictoryTerminal) {
+    CaseId id;
+    id.run_seed = 116;
+    id.ascension = 20;
+    id.policy = PolicyKind::ALWAYS_EVENT;
+    id.policy_seed = 12948172379672766026ull;
+    Coverage cov;
+    CaseResult r;
+    EXPECT_TRUE(run_case(id, limits(), &cov, r, /*verify_repro=*/true))
+        << triage_text(id, r);
+    EXPECT_EQ(r.end_reason, EndReason::RUN_OVER);
+    EXPECT_EQ(cov.victories, 1u)
+        << "this trajectory beats the boss; a RUN_OVER here that is not a "
+           "victory means the terminal lost its outcome";
+    EXPECT_EQ(cov.deaths, 0u) << "a win must not be filed as a death";
+}
+
 TEST(FuzzDriver, RejectsZeroWorkMalformedAndPartialCaseCli) {
     EXPECT_NE(std::system((shell_quote(STS_FUZZ_SOAK_BIN) +
                            " --seeds garbage --quiet >/dev/null 2>&1").c_str()),

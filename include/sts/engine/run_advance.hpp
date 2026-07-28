@@ -53,6 +53,10 @@
 //     discount chain, and then bought through CHOOSE; the card-removal service
 //     runs off the run-persistent RunState.purge_cost and ramps it. A ? room
 //     that rolls SHOP enters the same phase as a map shop node.
+//   * the S1 VICTORY terminal: the Act-1 boss's reward-screen proceed ends the
+//     run (RunPhase::RUN_OVER, run_is_victory() true) in place of the game's
+//     boss chest / act transition, which are S2 content (stage-b-design §1.1:
+//     "the run terminates when the act-1 boss's combat rewards are claimed").
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
@@ -131,17 +135,28 @@ enum class RunPhase : uint8_t {
     COMBAT = 3,            // inside a combat; delegates to the embedded CombatState.
     COMBAT_REWARD = 4,     // post-combat reward screen (claim / pick / proceed).
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
-    RUN_OVER = 6,          // player dead (loss) -- terminal.
+    RUN_OVER = 6,          // terminal: the player died (combat DEFEAT, or an
+                           // event kill with outcome NONE), or the S1 VICTORY
+                           // -- the Act-1 boss's reward-screen proceed
+                           // (stage-b-design §1.1: "the run terminates when
+                           // the act-1 boss's combat rewards are claimed"; the
+                           // game instead goes to the boss chest,
+                           // ProceedButton.java:111-113 -> goToTreasureRoom
+                           // :179-187, which is S2 content). run_is_victory()
+                           // (below) tells the two apart; no separate phase
+                           // value is spent on the win.
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
     TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
     EVENT_DIALOG = 9,      // a ?-room resolved to an event with a live dialog
-                           // body (event_framework.hpp). Today only the
-                           // synthetic proof body reaches it; every native
-                           // event parks at ROOM_UNIMPLEMENTED until its
-                           // content-task body lands. Value 9 is the ledger's
-                           // reserved allocation (stage-b-tasks.md shared-
-                           // namespace table); gaps are legal, values are
-                           // append-only and never renumbered.
+                           // body (event_framework.hpp). Most native events
+                           // have one (the events.yaml rows marked
+                           // `implemented: true`); a selected event with NO
+                           // registered body parks at ROOM_UNIMPLEMENTED
+                           // instead, with the selection bookkeeping committed
+                           // and the EventId retained in rc.event. Value 9 is
+                           // the ledger's reserved allocation (stage-b-tasks.md
+                           // shared-namespace table); gaps are legal, values
+                           // are append-only and never renumbered.
     SHOP = 10,             // the merchant's floor, or its card-removal grid
                            // (shop.hpp). Reached from a static ShopRoom map
                            // node AND from a ? room whose eventRng roll came up
@@ -498,6 +513,20 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
 // The current grid row (floor-1) for a controller on the map, or -1 at Neow.
 [[nodiscard]] constexpr int run_cur_row(const RunController& rc) noexcept {
     return rc.run.floor == 0 ? -1 : static_cast<int>(rc.run.floor) - 1;
+}
+
+// Whether a terminal controller is the S1 VICTORY: the run ended at the Act-1
+// boss with its combat won. The victory terminal is produced by the boss
+// reward screen's proceed (see RUN_OVER above); a death shares the phase but
+// never this read -- a combat loss records combat_outcome DEFEAT, an event
+// kill leaves the room-entry NONE, and neither SMOKE_BOMB (SmokeBomb.canUse
+// rejects bosses) nor MUGGED (no Act-1 boss fields a thief) can produce a
+// boss KILLED it did not earn. One spelling for tests and tools; the mask for
+// this state is empty BECAUSE the run is over, exactly as for a loss.
+[[nodiscard]] constexpr bool run_is_victory(const RunController& rc) noexcept {
+    return rc.phase == static_cast<uint8_t>(RunPhase::RUN_OVER) &&
+           rc.room_type == static_cast<uint8_t>(RoomType::Boss) &&
+           rc.combat_outcome == static_cast<uint8_t>(RunCombatOutcome::KILLED);
 }
 
 }  // namespace sts::engine
