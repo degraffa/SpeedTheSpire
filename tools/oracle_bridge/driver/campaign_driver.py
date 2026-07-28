@@ -64,7 +64,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.4.5"
+DRIVER_VERSION = "b1.4.6"
 SCHEMA_VERSION = 1
 
 # The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
@@ -665,7 +665,8 @@ class Progress:
         self.tmp_path = tmp_path if tmp_path is not None else path + ".tmp"
         self.data = None  # type: dict | None
 
-    def load_or_init(self, campaign_id, seed_list, policy, fork_hash) -> dict:
+    def load_or_init(self, campaign_id, seed_list, policy, fork_hash,
+                      policy_seed=None) -> dict:
         if os.path.exists(self.path):
             with open(exact_path_without_redirect(self.path), "r",
                       encoding="utf-8") as fh:
@@ -678,6 +679,12 @@ class Progress:
                 "schema_version": SCHEMA_VERSION,
                 "driver_version": DRIVER_VERSION,
             }
+            # policy_seed is checked separately (not folded into `expected`)
+            # so a caller that omits it (policy_seed=None -- every test that
+            # is not exercising this field) does not spuriously demand a
+            # `None` stored value; the real driver always passes it.
+            if policy_seed is not None:
+                expected["policy_seed"] = policy_seed
             mismatches = [
                 f"{key}={self.data.get(key)!r} (expected {value!r})"
                 for key, value in expected.items()
@@ -697,6 +704,10 @@ class Progress:
                 "driver_version": DRIVER_VERSION,
                 "fork_jar_sha256": fork_hash,
                 "policy": policy,
+                # Additive (design 7.5 reproducibility gap): NOT in
+                # validate_artifacts.STRICT_PROGRESS_KEYS, so an old
+                # campaign_progress.json without this field still validates.
+                "policy_seed": policy_seed,
                 "seed_list": seed_list,
                 "status": "in_progress",
                 "seeds_done": [],
@@ -1005,6 +1016,13 @@ class CampaignDriver:
             "ascension": 20,
             "character": "IRONCLAD",
             "policy": self.args.policy,
+            # Reproducibility (design 7.5): the greedy tie-break RNG is
+            # seeded Random(f"{policy_seed}:{seed}") and every real choice a
+            # tied decision makes flows from that draw, so without the seed
+            # in the artifact a campaign cannot be reconstructed from its own
+            # output. Additive: NOT in validate_artifacts.HEADER_KEYS, so an
+            # old artifact written before this field existed still validates.
+            "policy_seed": self.args.policy_seed,
             "attempt": attempt,
             "campaign_id": self.args.campaign_id,
         }
@@ -1240,7 +1258,8 @@ class CampaignDriver:
         try:
             self.progress.load_or_init(
                 self.args.campaign_id, seed_list,
-                self.args.policy, self.fork_hash)
+                self.args.policy, self.fork_hash,
+                policy_seed=self.args.policy_seed)
         except CampaignIdentityError as exc:
             message = str(exc)
             _log(f"FATAL CAMPAIGN IDENTITY: {message}")
@@ -1337,6 +1356,10 @@ class CampaignDriver:
             "driver_version": DRIVER_VERSION,
             "fork_jar_sha256": d["fork_jar_sha256"],
             "policy": d["policy"],
+            # Additive (design 7.5), same key `Progress.load_or_init` writes
+            # to campaign_progress.json; absent on a manifest from before
+            # this field existed, so `.get` rather than `[...]`.
+            "policy_seed": d.get("policy_seed"),
             "seed_list": d["seed_list"],
             "status": d["status"],
             "launches": d["launches"],

@@ -134,7 +134,7 @@ EVENT_SAFE_WORDS = (
     "talk", "proceed",
 )
 
-_ALIAS_VERBS = ("skip", "cancel", "return", "leave", "proceed")
+_ALIAS_VERBS = ("skip", "cancel", "return", "leave", "proceed", "confirm")
 
 
 # --- side table ------------------------------------------------------------
@@ -419,9 +419,15 @@ def _score_choose(index, state):
 
 
 def _score_alias(verb, state):
-    """`proceed` / `skip` / `cancel` / `return` / `leave`."""
+    """`proceed` / `confirm` / `skip` / `cancel` / `return` / `leave`.
+
+    `confirm` and `proceed` are the same button whenever both can appear
+    (campaign_driver.expand_legal_actions and cmd_verb_ready already treat
+    them as interchangeable -- `any(a in avail for a in ("confirm",
+    "proceed"))` -- so scoring unifies them too.
+    """
     screen = _gs(state).get("screen_type")
-    if verb == "proceed":
+    if verb in ("proceed", "confirm"):
         if screen == "COMBAT_REWARD":
             return REWARD_PROCEED
         if screen == "SHOP_ROOM":
@@ -432,12 +438,28 @@ def _score_alias(verb, state):
             # alternates between the two screens).
             return SHOP_ROOM_LEAVE
         if screen in ("GRID", "HAND_SELECT"):
-            selected = _screen_state(state)
-            picked = selected.get("selected") or selected.get(
-                "selected_cards") or []
-            # Confirm only once something is selected -- an empty confirm is
-            # either refused or a no-op on most select screens.
-            return SELECT_CONFIRM if picked else DEFAULT_CANCEL
+            screen_state = _screen_state(state)
+            confirm_up = screen_state.get("confirm_up")
+            if confirm_up is None:
+                # HAND_SELECT carries no confirm_up field (PROTOCOL.md
+                # 3.19); fall back to the selection count.
+                selected = screen_state.get("selected") or \
+                    screen_state.get("selected_cards") or []
+                confirmable = bool(selected)
+            else:
+                # GRID is authoritative here -- confirm_up is the game's own
+                # signal that a selection is committable. `selected_cards`
+                # is NOT a safe substitute: the live dump has been observed
+                # reporting it EMPTY (`[]`) on a GRID screen that also
+                # reports confirm_up: true, i.e. after a real selection was
+                # made (pilot campaign
+                # b4x_greedy_pilot_20260728T041406Z_claude01: 8/6
+                # proceed/cancel ties over 14 decisions, one run lost to
+                # noop_wedge at STS00275 seq 54-59, because the old
+                # selected_cards-only gate scored proceed level with cancel
+                # and the tie-break RNG re-opened the grid).
+                confirmable = bool(confirm_up)
+            return SELECT_CONFIRM if confirmable else DEFAULT_CANCEL
         return DEFAULT_PROCEED
     # skip / cancel / return / leave
     if screen == "CARD_REWARD":

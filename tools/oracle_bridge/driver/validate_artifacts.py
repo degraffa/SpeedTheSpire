@@ -615,6 +615,14 @@ def validate_campaign(campaign_dir: str, require_oracle: bool = False):
         if key in progress and key in manifest and manifest[key] != progress[key]:
             errs.append(f"campaign_manifest.json: {key} does not match "
                         "campaign_progress.json")
+    # policy_seed (design 7.5 reproducibility) is additive, NOT in
+    # STRICT_MANIFEST_KEYS/STRICT_PROGRESS_KEYS, so an old campaign missing it
+    # entirely from both files is unaffected -- this only fires once both
+    # sides carry the key and disagree.
+    if "policy_seed" in progress and "policy_seed" in manifest and \
+            manifest["policy_seed"] != progress["policy_seed"]:
+        errs.append("campaign_manifest.json: policy_seed does not match "
+                    "campaign_progress.json")
 
     expected_runs = set()
     expected_timings = set()
@@ -685,6 +693,11 @@ def validate_campaign(campaign_dir: str, require_oracle: bool = False):
             "driver_version": progress.get("driver_version"),
             "attempt": row.get("attempts"),
         }
+        # Additive: only asserted when the progress ledger actually carries
+        # policy_seed, so a campaign captured before this field existed
+        # (progress lacks the key entirely) is not newly failed.
+        if "policy_seed" in progress:
+            expected_header["policy_seed"] = progress.get("policy_seed")
         for key, expected in expected_header.items():
             if header.get(key) != expected:
                 errs.append(f"{name}: header {key} {header.get(key)!r} "

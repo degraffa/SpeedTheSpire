@@ -512,6 +512,28 @@ class RuntimeStackEnforcementTest(unittest.TestCase):
             self.assertEqual(set(), validate_artifacts.HEADER_KEYS
                              - header.keys())
 
+    def test_policy_seed_is_recorded_in_the_run_header(self):
+        """Design 7.5 gap: the greedy tie-break RNG is seeded from
+        (policy_seed, seed), so without policy_seed in the artifact a
+        campaign's real choices cannot be reconstructed from its own output.
+        `_stack_driver` defaults `policy_seed=1234`; use a distinctive value
+        so this cannot pass by coincidence against that default."""
+        with tempfile.TemporaryDirectory() as root:
+            _write_launch_log(os.path.join(root, "seedprov"))
+            driver = _stack_driver(root, "seedprov")
+            driver.args.policy_seed = 918273
+
+            driver.run_seed(SEED, 1)
+
+            artifact = os.path.join(
+                root, "seedprov", f"run_{SEED}_a20_ironclad.jsonl")
+            with open(artifact, encoding="utf-8") as fh:
+                header = json.loads(fh.readline())
+            self.assertEqual(918273, header["policy_seed"])
+            # additive: the required header-key contract is unchanged
+            self.assertEqual(set(), validate_artifacts.HEADER_KEYS
+                             - header.keys())
+
     def test_no_constant_can_reach_a_header(self):
         """Guard the shape of the defect, not just one instance of it.
 
@@ -649,6 +671,7 @@ class CampaignDriverPreflightTest(unittest.TestCase):
                 seeds=[SEED],
                 campaign_id="preflight",
                 policy="random-legal",
+                policy_seed=1234,
             )
             driver.reader = _Reader()
             driver.stepper = _HandshakeStepper()
@@ -1351,6 +1374,37 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 progress.load_or_init(
                     "strict", [SEED], "random-legal", "A" * 64)
 
+    def test_policy_seed_is_recorded_in_campaign_progress(self):
+        """Design 7.5 gap, ledger half: a fresh campaign_progress.json must
+        carry policy_seed so a greedy campaign is reproducible from its own
+        artifacts (the tie-break RNG decides real choices)."""
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "campaign_progress.json")
+            heartbeat = os.path.join(root, "campaign_heartbeat.json")
+            progress = campaign_driver.Progress(path, heartbeat)
+            data = progress.load_or_init(
+                "greedyseed", [SEED], "greedy", "A" * 64, policy_seed=918273)
+            self.assertEqual(918273, data["policy_seed"])
+            with open(path, encoding="utf-8") as fh:
+                on_disk = json.load(fh)
+            self.assertEqual(918273, on_disk["policy_seed"])
+
+    def test_policy_seed_mismatch_on_resume_is_a_caught_identity_error(self):
+        """A resumed campaign whose stored policy_seed disagrees with the
+        one it's being resumed with must refuse, same as policy/seed_list."""
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "campaign_progress.json")
+            heartbeat = os.path.join(root, "campaign_heartbeat.json")
+            stored = _progress("strict")
+            stored["policy_seed"] = 111
+            _write_campaign_json(path, stored)
+            progress = campaign_driver.Progress(path, heartbeat)
+            with self.assertRaisesRegex(
+                    campaign_driver.CampaignIdentityError, "policy_seed"):
+                progress.load_or_init(
+                    "strict", [SEED], "random-legal", "A" * 64,
+                    policy_seed=222)
+
     def test_campaign_id_escape_is_rejected_before_cleanup_or_write(self):
         invalid_ids = [
             ".", "..", "../outside", r"..\outside",
@@ -1459,6 +1513,7 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 seeds=[SEED],
                 campaign_id=campaign_id,
                 policy="random-legal",
+                policy_seed=1234,
             )
             driver.reader = _Reader()
             driver.stepper = _HandshakeStepper()
@@ -1515,6 +1570,7 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 seeds=[SEED],
                 campaign_id=campaign_id,
                 policy="random-legal",
+                policy_seed=1234,
                 data_root=root,
                 max_attempts=1,
             )
@@ -1877,6 +1933,54 @@ class GreedyScreenScoringTest(unittest.TestCase):
                           "hand": [{"id": "Defend_R"}]},
                          available=("choose", "confirm"))
         self.assertEqual("proceed", _pick(picked, self.table))
+
+    def test_grid_prefers_choose_while_confirm_is_not_up_yet(self):
+        """State (a) of the GRID 2-cycle: confirm_up false, `choose` legal."""
+        state = _screen("GRID", ["strike", "defend"],
+                        {"cards": [{"id": "Strike_R"}, {"id": "Defend_R"}],
+                         "selected_cards": [], "num_cards": 1,
+                         "confirm_up": False},
+                        available=("choose",))
+        self.assertEqual("choose 0", _pick(state, self.table))
+
+    def test_grid_confirm_up_wins_even_when_selected_cards_reports_empty(self):
+        """The live-pilot bug: on GRID the game alternates confirm_up=false
+        (with `choose` legal) and confirm_up=true (with `confirm`/`cancel`
+        legal, `selected_cards` reported EMPTY even though a selection was
+        made -- PROTOCOL.md 3.19 lists it as a distinct field from `choose`
+        never re-arms it). Gating on confirm_up rather than the selection
+        count is what makes `proceed` (the alias expand_legal_actions emits
+        for `confirm`) win outright in state (b); the old selected_cards-only
+        gate tied `proceed` with `cancel` at DEFAULT_CANCEL and let the
+        tie-break RNG coin-flip re-open the grid. Observed live: pilot
+        campaign b4x_greedy_pilot_20260728T041406Z_claude01, 8/6
+        proceed/cancel over 14 decisions, 90s stalls, and one run lost to
+        noop_wedge at STS00275 seq 54-59.
+        """
+        state = _screen("GRID", ["strike", "defend"],
+                        {"cards": [], "selected_cards": [], "num_cards": 1,
+                         "confirm_up": True},
+                        available=("confirm", "cancel"))
+        self.assertEqual("proceed", _pick(state, self.table))
+        self.assertGreater(
+            greedy_policy.score_action("proceed", state, self.table),
+            greedy_policy.score_action("cancel", state, self.table))
+
+    def test_raw_confirm_verb_is_scored_like_proceed(self):
+        """expand_legal_actions always emits the literal text `proceed` for
+        an advertised `confirm`, but score_action must not silently drop a
+        raw `confirm` command to its unknown-verb default of 0 -- callers
+        outside the expansion (replay/triage tooling, direct scoring) can
+        hand it a `confirm` string verbatim."""
+        state = _screen("GRID", ["strike"],
+                        {"cards": [], "selected_cards": [], "num_cards": 1,
+                         "confirm_up": True},
+                        available=("confirm", "cancel"))
+        self.assertEqual(
+            greedy_policy.score_action("proceed", state, self.table),
+            greedy_policy.score_action("confirm", state, self.table))
+        self.assertGreater(
+            greedy_policy.score_action("confirm", state, self.table), 0)
 
 
 class CardSideTableTest(unittest.TestCase):
