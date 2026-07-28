@@ -35,9 +35,11 @@
 //
 // SCREEN-DRIVEN COMMAND MAPPING. CommunicationMod commands are screen-relative,
 // so the artifact's `screen_type` (parsed here, alongside the translator's
-// typed output) selects the interpretation:
+// typed output) selects the interpretation. The table lives in
+// `command_map.hpp`, which has its own gtest (`replay_command_map_test`):
 //
 //   EVENT   choose i        -> CHOOSE(i)          Neow blessing / event dialog
+//   EVENT   choose (1 page) -> DEFERRED, see below, once the event has exited
 //   MAP     choose i        -> CHOOSE(next_nodes[i].x) or CHOOSE(kChooseBoss)
 //   MAP     return          -> no-op (a pure UI dismissal)
 //   COMBAT_REWARD choose i  -> CHOOSE(i)          claim item i / open the cards
@@ -62,6 +64,11 @@
 // immediately before the map `choose` that actually moves. Neither side's
 // RunState changes across a bounce, so every intervening record is still
 // compared, and the comparison is what proves the elision was sound.
+//
+// An event's terminal one-button page bounces IDENTICALLY, for the same reason
+// -- AbstractEvent.openMap leaves the room's dialog mounted behind a dismissable
+// map -- and is elided the same way, keyed off the simulator's phase rather
+// than the button's label. The full citation trail is on `map_command`.
 //
 // The exit code is the number of files that ended with a divergence or an
 // unmapped command (0 == every file replayed clean to its terminal).
@@ -91,50 +98,23 @@
 #include "sts/registry/game_ids.hpp"
 #include "sts/translate/translate.hpp"
 
+#include "command_map.hpp"
+
 namespace {
 
 using nlohmann::json;
 using namespace sts::engine;
+using namespace sts::replay;
 
 // --- the screen context the translator does not carry -----------------------
 
-// The translator's output is RunState/CombatState; the transient screen the
-// command was typed at is deliberately not part of either. This tool needs it
-// to interpret the command, so it does one extra light JSON pass over the same
-// file and keeps only the few presentation fields the mapping table above
-// consults (plus the CARD_REWARD offer, which is the pool-order evidence).
-
-// One SHOP_SCREEN row exactly as the merchant presented it. `name` is the
-// DISPLAY name, which is what the stock command indexes through: the game's
-// `choice_list` is a lowercased list of display names, not of slot indices, so
-// the join from `choose i` back to a slot goes through this field.
-struct StockRow {
-    std::string id;
-    std::string name;
-    std::string rarity;  // cards only; the sale-slot inference reads it
-    int price = 0;
-    int upgrades = 0;
-};
-
-struct ScreenInfo {
-    std::string screen_type;
-    int floor = 0;
-    std::string room_type;
-    std::vector<int> map_next_x;
-    bool boss_available = false;
-    std::vector<std::string> card_offer;     // CARD_REWARD: offered game ids
-    std::vector<std::string> reward_types;   // COMBAT_REWARD: rewards[].reward_type
-    std::vector<std::string> option_labels;  // EVENT: the dialog buttons
-    std::string event_id;
-    std::vector<std::string> choice_list;    // the command's own index space
-    // SHOP_SCREEN only:
-    bool shop_screen = false;
-    std::vector<StockRow> shop_cards;    // 5 colored, then the 2 colorless
-    std::vector<StockRow> shop_relics;
-    std::vector<StockRow> shop_potions;
-    int purge_cost = 0;
-    bool purge_available = false;
-};
+// `ScreenInfo` and the whole command mapping live in `command_map.hpp`, which
+// depends on nothing but the engine's run-layer headers so the table can be
+// tested directly (`replay_command_map_test`). What stays here is the JSON pass
+// that FILLS one: the translator's output is RunState/CombatState, so the
+// transient screen the command was typed at has to be read from the artifact a
+// second time. Only the presentation fields the mapping consults are kept, plus
+// the CARD_REWARD offer, which is the pool-order evidence.
 
 void read_stock(const json& screen_state, const char* key,
                 std::vector<StockRow>& out) {
@@ -200,250 +180,6 @@ void read_stock(const json& screen_state, const char* key,
         out.push_back(std::move(s));
     }
     return out;
-}
-
-// --- command parsing ---------------------------------------------------------
-
-[[nodiscard]] std::vector<std::string> split_ws(const std::string& s) {
-    std::vector<std::string> parts;
-    std::istringstream is(s);
-    std::string tok;
-    while (is >> tok) parts.push_back(tok);
-    return parts;
-}
-
-// What one artifact command becomes on the sim side.
-enum class MapKind : uint8_t {
-    ACTIONS,    // apply `actions` in order
-    NOOP,       // a pure UI command with no run-layer effect
-    LEAVE_ROOM, // proceed out of the reward screen first, then apply `actions`
-    TERMINAL,   // the run ended here; stop cleanly
-    UNMAPPED,   // no run-layer analogue -- stop and say so
-};
-
-struct MappedCommand {
-    MapKind kind = MapKind::UNMAPPED;
-    std::vector<Action> actions;
-    std::string reason;  // set when UNMAPPED
-};
-
-// The game's grid screens list a FILTERED master deck (getPurgeableCards drops
-// curses, getUpgradableCards additionally drops already-upgraded cards) and its
-// `choose i` indexes that filtered list. The run layer instead addresses the
-// stable master-deck index and publishes which of those are legal, so the
-// translation from one to the other is "the i-th legal master-deck index".
-[[nodiscard]] int grid_index_to_master_deck(const RunController& rc, int filtered) {
-    if (filtered < 0) return -1;
-    RunActionMask m{};
-    legal_actions(rc, m);
-    int seen = 0;
-    for (int i = 0; i < kMasterDeckCap; ++i) {
-        if (!m.can_choose_master_deck[i]) continue;
-        if (seen == filtered) return i;
-        ++seen;
-    }
-    return -1;
-}
-
-[[nodiscard]] MappedCommand map_command(const RunController& rc, const ScreenInfo& s,
-                                        const std::string& cmd) {
-    const std::vector<std::string> p = split_ws(cmd);
-    MappedCommand m;
-    if (p.empty()) {
-        m.reason = "empty command";
-        return m;
-    }
-    const std::string& verb = p[0];
-    auto arg = [&](std::size_t i) -> int {
-        return i < p.size() ? std::stoi(p[i]) : -1;
-    };
-
-    if (verb == "__terminal_observed__") {
-        m.kind = MapKind::TERMINAL;
-        return m;
-    }
-
-    if (s.screen_type == "NONE") {  // in combat
-        if (verb == "play") {
-            const int hand_1based = arg(1);
-            const int target = p.size() >= 3 ? arg(2) : 0;
-            if (hand_1based < 1) {
-                m.reason = "play with no card index";
-                return m;
-            }
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::PLAY_CARD,
-                                            static_cast<uint8_t>(hand_1based - 1),
-                                            static_cast<uint8_t>(target < 0 ? 0 : target)));
-            return m;
-        }
-        if (verb == "end") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::END_TURN));
-            return m;
-        }
-        if (verb == "potion" && p.size() >= 3 && p[1] == "use") {
-            const int slot = arg(2);
-            const int target = p.size() >= 4 ? arg(3) : 0;
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::USE_POTION,
-                                            static_cast<uint8_t>(slot),
-                                            static_cast<uint8_t>(target < 0 ? 0 : target)));
-            return m;
-        }
-        m.reason = "combat command '" + verb + "' has no run-layer analogue";
-        return m;
-    }
-
-    if (s.screen_type == "EVENT") {
-        // Neow's dialog has two framing screens the run layer does not model:
-        // the opening [Talk] (NeowEvent screenNum 0->3, no state change) and the
-        // closing [Leave] (screenNum 99), which is the one that opens the map.
-        // A [Leave] pressed again after the map is already up is another of the
-        // policy's UI bounces -- see the header note on `proceed`.
-        const bool single = s.option_labels.size() == 1;
-        if (single && s.option_labels[0] == "Talk") {
-            m.kind = MapKind::NOOP;
-            return m;
-        }
-        if (single && s.option_labels[0] == "Leave") {
-            if (rc.phase == static_cast<uint8_t>(RunPhase::NEOW)) {
-                m.kind = MapKind::ACTIONS;
-                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-            } else {
-                m.kind = MapKind::NOOP;
-            }
-            return m;
-        }
-        if (verb == "choose") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
-            return m;
-        }
-        m.reason = "event command '" + verb + "' is not modelled";
-        return m;
-    }
-
-    if (s.screen_type == "REST" || s.screen_type == "HAND_SELECT") {
-        if (verb == "choose") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
-            return m;
-        }
-        if (verb == "proceed") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-            return m;
-        }
-        m.reason = s.screen_type + " command '" + verb + "' is not modelled";
-        return m;
-    }
-
-    if (s.screen_type == "GRID") {
-        if (verb == "choose") {
-            const int deck_index = grid_index_to_master_deck(rc, arg(1));
-            if (deck_index < 0) {
-                m.reason = "grid choose index has no legal master-deck slot";
-                return m;
-            }
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(deck_index)));
-            return m;
-        }
-        if (verb == "proceed") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-            return m;
-        }
-        m.reason = "grid command '" + verb +
-                   "' has no run-layer analogue (a grid pick cannot be undone)";
-        return m;
-    }
-
-    if (s.screen_type == "COMBAT_REWARD") {
-        if (verb == "choose") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
-            return m;
-        }
-        if (verb == "proceed") {
-            // See the header note: leaving is deferred to the map choice.
-            m.kind = MapKind::NOOP;
-            return m;
-        }
-        m.reason = "reward-screen command '" + verb + "' is not modelled";
-        return m;
-    }
-
-    if (s.screen_type == "CARD_REWARD") {
-        if (verb == "choose") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
-            return m;
-        }
-        if (verb == "skip") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseSkipCard));
-            return m;
-        }
-        if (verb == "sing" || verb == "bowl") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseSing));
-            return m;
-        }
-        m.reason = "card-screen command '" + verb + "' is not modelled";
-        return m;
-    }
-
-    if (s.screen_type == "CHEST") {
-        if (verb == "choose") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseOpenChest));
-            return m;
-        }
-        if (verb == "proceed") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-            return m;
-        }
-        m.reason = "chest command '" + verb + "' is not modelled";
-        return m;
-    }
-
-    if (s.screen_type == "MAP") {
-        if (verb == "return") {
-            m.kind = MapKind::NOOP;
-            return m;
-        }
-        if (verb == "choose") {
-            const int idx = arg(1);
-            // choice_list at a map screen is next_nodes in order, with the boss
-            // edge appended when it is offered.
-            uint8_t dst = 0;
-            if (idx >= 0 && idx < static_cast<int>(s.map_next_x.size())) {
-                dst = static_cast<uint8_t>(s.map_next_x[static_cast<std::size_t>(idx)]);
-            } else if (s.boss_available) {
-                dst = kChooseBoss;
-            } else {
-                m.reason = "map choose index out of range";
-                return m;
-            }
-            m.kind = MapKind::LEAVE_ROOM;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, dst));
-            return m;
-        }
-        m.reason = "map command '" + verb + "' is not modelled "
-                   "(the run layer has no out-of-combat potion discard)";
-        return m;
-    }
-
-    m.reason = "screen '" + s.screen_type + "' is not modelled by the run layer";
-    return m;
 }
 
 // --- what is comparable ------------------------------------------------------
