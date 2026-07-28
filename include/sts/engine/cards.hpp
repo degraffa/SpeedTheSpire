@@ -69,17 +69,27 @@ using sts::registry::kPoolableCurseCount;
 using sts::registry::kPoolableCurses;
 // The Ironclad in-combat ATTACK transform pool (Infernal Blade /
 // returnTrulyRandomCardInCombat(ATTACK), AbstractDungeon.java:964-979). Derived
-// by the generator from the rows' color/rarity/type/healing columns; see the
-// pool-order note in gen.py (registry-id order; the game's CardLibrary HashMap
-// order is a known, documented deviation until an oracle capture pins it).
+// by the generator from the rows' color/rarity/type/healing columns.
+// ORDER is `src_combat_order` (tools/registry_gen/stsgen/emit/cards.py:94-118):
+// the rarity-major concatenation of the REVERSED per-rarity library order the
+// three src*CardPools hold, i.e. JAVA-EXACT. (These three comments used to
+// assert a registry-id-order deviation and point at a "pool-order note in
+// gen.py"; the deviation was fixed when src_combat_order landed and gen.py has
+// no such note -- a conventions §8 "comment asserting X" running stale.)
 using sts::registry::kIroncladAttackPoolCount;
 using sts::registry::kIroncladAttackPool;
 // The SKILL sibling of the pool above: returnTrulyRandomCardInCombat(SKILL) is
 // the SAME method with one CardType changed (Chrysalis.java:34 vs Infernal
-// Blade's / Metamorphosis.java:34's ATTACK). Same generator derivation and the
-// SAME documented pool-ORDER deviation -- opcode 55's filtered view inherits it.
+// Blade's / Metamorphosis.java:34's ATTACK). Same generator derivation, same
+// src_combat_order ordering -- opcode 55's filtered view inherits both.
 using sts::registry::kIroncladSkillPoolCount;
 using sts::registry::kIroncladSkillPool;
+// The POWER sibling, added for Power Potion: DiscoveryAction.generateCardChoices
+// (DiscoveryAction.java:105-120) calls that same
+// returnTrulyRandomCardInCombat(type) with CardType.POWER
+// (PowerPotion.java:40-42). Same derivation, same ordering.
+using sts::registry::kIroncladPowerPoolCount;
+using sts::registry::kIroncladPowerPool;
 // Full non-healing RED combat pool (Discovery / returnTrulyRandomCardInCombat).
 using sts::registry::kIroncladCombatPoolCount;
 using sts::registry::kIroncladCombatPool;
@@ -90,8 +100,12 @@ using sts::registry::kColorlessCombatPool;
 // card split by rarity (AbstractDungeon.initializeCardPools ->
 // CardLibrary.addRedCards, CardLibrary.java:1152-1161). No type filter and no
 // healing exclusion -- those are the ATTACK transform pool's, not these.
-// Same documented pool-ORDER deviation as kIroncladAttackPool (registry-id
-// order until an oracle capture pins CardLibrary HashMap order).
+// ORDER is plain CardLibrary iteration order (addToTop appends, CardGroup.java:
+// 455-457, so no reversal), and it is PINNED against a live oracle capture that
+// reproduces all 27 captured card-reward offer identities -- see the emission
+// block in tools/registry_gen/stsgen/emit/cards.py. (This comment used to claim
+// the same registry-id-order deviation as kIroncladAttackPool; that claim was
+// stale in both places.)
 using sts::registry::kIroncladCommonPoolCount;
 using sts::registry::kIroncladCommonPool;
 using sts::registry::kIroncladUncommonPoolCount;

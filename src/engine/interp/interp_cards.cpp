@@ -1520,21 +1520,72 @@ void op_randomize_hand_cost(CombatState& s) noexcept {
     }
 }
 
+// The pool a DISCOVERY item draws its three offers from. All five are the same
+// rejection sampler over a different list -- DiscoveryAction.generateCardChoices
+// (DiscoveryAction.java:105-120) calls returnTrulyRandomCardInCombat(type)
+// (AbstractDungeon.java:964-979) and generateColorlessCardChoices (:89-103)
+// calls returnTrulyRandomColorlessCardInCombat (:981-995), and each of those is
+// exactly ONE cardRandomRng.random(size - 1) over its concatenated,
+// HEALING-filtered list.
+struct DiscoveryPoolView {
+    const CardId* cards;
+    int count;
+};
+
+[[nodiscard]] DiscoveryPoolView discovery_pool_view(DiscoveryPool pool) noexcept {
+    switch (pool) {
+        case DiscoveryPool::ATTACK:
+            return {kIroncladAttackPool.data(), kIroncladAttackPoolCount};
+        case DiscoveryPool::SKILL:
+            return {kIroncladSkillPool.data(), kIroncladSkillPoolCount};
+        case DiscoveryPool::POWER:
+            return {kIroncladPowerPool.data(), kIroncladPowerPoolCount};
+        case DiscoveryPool::COLORLESS:
+            return {kColorlessCombatPool.data(), kColorlessCombatPoolCount};
+        case DiscoveryPool::COMBAT:
+        default:
+            return {kIroncladCombatPool.data(), kIroncladCombatPoolCount};
+    }
+}
+
+// KNOWN AMBIGUITY, deliberately unresolved and carried in the ledger's Deferred
+// obligations table ("DiscoveryAction may regenerate its three-card offer on
+// EVERY update tick", owner: next capture-campaign owner).
+//
+// DiscoveryAction.update computes `generatedCards` at DiscoveryAction.java:47 --
+// OUTSIDE the duration branch -- and only the FIRST tick's list reaches the
+// screen (:49). If update() runs again before retrieveCard, generateCardChoices
+// runs again and its cardRandomRng draws are spent for nothing. Whether that
+// happens, and how often, depends on how many frames the action is updated for,
+// which is animation-driven and CANNOT be settled from the source.
+//
+// This latch is the generate-once reading, which is also what the already-landed
+// Discovery CARD does -- so if the game really double-rolls, the card is wrong
+// too and it is a stop-the-line question, not a potion-only one. It needs an
+// oracle capture (G4 is live). Do not "fix" it from source.
 void prepare_discovery_choice(CombatState& s,
                               ActionQueueItem& item) noexcept {
     if (discovery_choice_prepared(item)) {
         return;
     }
-    static_assert(kIroncladCombatPoolCount >= kDiscoveryChoiceCount,
-                  "Discovery needs at least three combat-pool cards");
+    // The rejection sampler loops until it holds three DISTINCT cardIDs
+    // (:107-118 `while (derp.size() != 3)`), so a pool with fewer than three
+    // members would spin forever in the game and here. Every pool is generated,
+    // so this is a compile-time guarantee rather than a runtime hope.
+    static_assert(kIroncladCombatPoolCount >= kDiscoveryChoiceCount &&
+                      kIroncladAttackPoolCount >= kDiscoveryChoiceCount &&
+                      kIroncladSkillPoolCount >= kDiscoveryChoiceCount &&
+                      kIroncladPowerPoolCount >= kDiscoveryChoiceCount &&
+                      kColorlessCombatPoolCount >= kDiscoveryChoiceCount,
+                  "every Discovery pool needs at least three distinct cards, "
+                  "or generateCardChoices' rejection loop cannot terminate");
+    const DiscoveryPoolView pv = discovery_pool_view(discovery_pool(item));
     CardId offered[kDiscoveryChoiceCount]{};
     uint8_t count = 0;
     while (count < kDiscoveryChoiceCount) {
         const int32_t pick = random(
-            s.card_random_rng,
-            static_cast<int32_t>(kIroncladCombatPoolCount) - 1);
-        const CardId id =
-            kIroncladCombatPool[static_cast<unsigned>(pick)];
+            s.card_random_rng, static_cast<int32_t>(pv.count) - 1);
+        const CardId id = pv.cards[static_cast<unsigned>(pick)];
         bool duplicate = false;
         for (uint8_t i = 0; i < count; ++i) {
             if (offered[i] == id) {
@@ -1553,6 +1604,26 @@ void prepare_discovery_choice(CombatState& s,
         static_cast<int32_t>(static_cast<uint16_t>(offered[2]));
 }
 
+// DiscoveryAction.update's selection half (DiscoveryAction.java:53-85). It ALWAYS
+// makes TWO makeStatEquivalentCopy()s of the chosen card (:55-56) and
+// setCostForTurn(0)s both (:61-62), then fans them out by `amount`:
+//
+//   amount == 1 (:65-71)  one copy to hand, or to DISCARD if the hand is full;
+//                         the second copy is dropped on the floor (disCard2 =
+//                         null) and never reaches a pile.
+//   amount == 2           hand + 2 <= 10 -> both to hand (:72-74);
+//                         hand == 9      -> first to hand, second to discard
+//                                           (:75-77);
+//                         otherwise      -> both to discard (:78-80).
+//
+// Those four cases ARE sequential add-with-spill: at hand 8 both fit, at hand 9
+// the first fills the hand and the second spills, at hand 10 both spill. So the
+// fan-out is reproduced exactly by calling add_library_copy_to_hand once per
+// copy -- its per-card spill (interp_cards.cpp add_library_copy_to_hand) is the
+// same rule -- rather than by transcribing the branch table. Both copies are of
+// the SAME card.
+//
+// MasterRealityPower's upgrade (:57-60) is Watcher-only and out of S1 scope.
 void resolve_discovery_choice(CombatState& s,
                               const ActionQueueItem& item,
                               uint8_t slot) noexcept {
@@ -1560,7 +1631,11 @@ void resolve_discovery_choice(CombatState& s,
         return;
     }
     const CardId id = discovery_choice_card(item, slot);
-    if (id != CardId::NONE) {
+    if (id == CardId::NONE) {
+        return;
+    }
+    const int copies = discovery_copies(item);
+    for (int i = 0; i < copies; ++i) {
         add_library_copy_to_hand(s, id, /*free_this_turn=*/true);
     }
 }

@@ -462,6 +462,240 @@ TEST(Potions, ElixirConfirmedWithNoPicksExhaustsNothing) {
     EXPECT_EQ(potion_def(PotionId::ELIXIR)->potency, 0);
 }
 
+// --- NATIVE with body: the four "discover" potions ---------------------------
+//
+// One shape, one argument changed. Each use() is a single addToBot:
+//   AttackPotion.java:40-42     DiscoveryAction(CardType.ATTACK, potency)
+//   SkillPotion.java:40-42      DiscoveryAction(CardType.SKILL, potency)
+//   PowerPotion.java:40-42      DiscoveryAction(CardType.POWER, potency)
+//   ColorlessPotion.java:38-40  DiscoveryAction(true, potency)
+// All four getPotency return 1. They ride the already-live DISCOVERY opcode,
+// extended here with a POOL SELECTOR (item.src) and a COPY COUNT (item.tgt).
+
+const CardId* discovery_pool_cards(DiscoveryPool p, int& count) {
+    switch (p) {
+        case DiscoveryPool::ATTACK:
+            count = kIroncladAttackPoolCount;
+            return kIroncladAttackPool.data();
+        case DiscoveryPool::SKILL:
+            count = kIroncladSkillPoolCount;
+            return kIroncladSkillPool.data();
+        case DiscoveryPool::POWER:
+            count = kIroncladPowerPoolCount;
+            return kIroncladPowerPool.data();
+        case DiscoveryPool::COLORLESS:
+            count = kColorlessCombatPoolCount;
+            return kColorlessCombatPool.data();
+        default:
+            count = kIroncladCombatPoolCount;
+            return kIroncladCombatPool.data();
+    }
+}
+
+TEST(Potions, DiscoverPotionsSelectTheirOwnPoolAndCarryPotencyAsTheCopyCount) {
+    struct Row { PotionId id; DiscoveryPool pool; };
+    const Row rows[] = {
+        {PotionId::ATTACK_POTION, DiscoveryPool::ATTACK},
+        {PotionId::SKILL_POTION, DiscoveryPool::SKILL},
+        {PotionId::POWER_POTION, DiscoveryPool::POWER},
+        {PotionId::COLORLESS_POTION, DiscoveryPool::COLORLESS},
+    };
+    for (const Row& r : rows) {
+        CombatState s = MakeCombat();
+        ASSERT_TRUE(use_potion(s, r.id, 0)) << static_cast<int>(r.id);
+        ASSERT_EQ(s.action_count, 1);
+        const ActionQueueItem& item = s.action_queue[s.action_head];
+        EXPECT_EQ(item.opcode, static_cast<uint16_t>(Opcode::DISCOVERY));
+        EXPECT_EQ(discovery_pool(item), r.pool)
+            << "potion " << static_cast<int>(r.id);
+        EXPECT_EQ(discovery_copies(item), 1)
+            << "getPotency is 1 -- DiscoveryAction's amount is the COPY count";
+        EXPECT_FALSE(discovery_choice_prepared(item))
+            << "the offer is generated when the item reaches the pump";
+        EXPECT_EQ(potion_def(r.id)->potency, 1);
+    }
+}
+
+// The offer is three DISTINCT cardIDs drawn from THAT potion's pool, one
+// card_random_rng draw per attempt (DiscoveryAction.java:105-120 / :89-103 --
+// `while (derp.size() != 3)` with a `continue` on a duplicate cardID). The
+// expected values are re-derived from an independent stream, and every offered
+// card is asserted to be a member of the right pool -- which is the assertion
+// that would catch a mis-wired selector.
+TEST(Potions, DiscoverPotionOffersComeFromTheRightPoolWithExactRngAccounting) {
+    struct Row { PotionId id; DiscoveryPool pool; };
+    const Row rows[] = {
+        {PotionId::ATTACK_POTION, DiscoveryPool::ATTACK},
+        {PotionId::SKILL_POTION, DiscoveryPool::SKILL},
+        {PotionId::POWER_POTION, DiscoveryPool::POWER},
+        {PotionId::COLORLESS_POTION, DiscoveryPool::COLORLESS},
+    };
+    int seeds_with_duplicate_retry = 0;
+    for (const Row& r : rows) {
+        int pool_count = 0;
+        const CardId* pool = discovery_pool_cards(r.pool, pool_count);
+        ASSERT_GE(pool_count, kDiscoveryChoiceCount);
+
+        for (int64_t seed = 1; seed <= 24; ++seed) {
+            CombatState s = MakeCombat();
+            s.card_random_rng = from_seed(seed);
+            ASSERT_TRUE(use_potion(s, r.id, 0));
+            ActionQueueItem& item = s.action_queue[s.action_head];
+
+            RngStream probe = from_seed(seed);
+            CardId expected[kDiscoveryChoiceCount]{};
+            uint8_t n = 0;
+            int draws = 0;
+            while (n < kDiscoveryChoiceCount) {
+                const int32_t pick =
+                    random(probe, static_cast<int32_t>(pool_count) - 1);
+                ++draws;
+                const CardId cid = pool[static_cast<unsigned>(pick)];
+                bool dupe = false;
+                for (uint8_t i = 0; i < n; ++i) {
+                    dupe = dupe || expected[i] == cid;
+                }
+                if (!dupe) {
+                    expected[n++] = cid;
+                }
+            }
+            if (draws > kDiscoveryChoiceCount) {
+                ++seeds_with_duplicate_retry;
+            }
+
+            prepare_discovery_choice(s, item);
+
+            EXPECT_EQ(s.card_random_rng.counter, probe.counter)
+                << "potion " << static_cast<int>(r.id) << " seed " << seed
+                << ": a rejected duplicate still costs its draw";
+            for (uint8_t i = 0; i < kDiscoveryChoiceCount; ++i) {
+                const CardId got = discovery_choice_card(item, i);
+                EXPECT_EQ(got, expected[i])
+                    << "potion " << static_cast<int>(r.id) << " slot " << int{i};
+                bool in_pool = false;
+                for (int k = 0; k < pool_count; ++k) {
+                    in_pool = in_pool || pool[k] == got;
+                }
+                EXPECT_TRUE(in_pool)
+                    << "offer slot " << int{i} << " left its pool";
+            }
+        }
+    }
+    EXPECT_GT(seeds_with_duplicate_retry, 0)
+        << "the seed battery must cover at least one rejected duplicate";
+}
+
+// Power Potion is the one that needed a NEW generated pool. Membership is what
+// makes the pool right, so it is asserted from the card table rather than
+// trusted: every member must be a RED, non-BASIC, non-HEALING POWER.
+TEST(Potions, PowerPotionPoolIsExactlyTheRedNonHealingPowers) {
+    ASSERT_GE(kIroncladPowerPoolCount, kDiscoveryChoiceCount)
+        << "the rejection sampler cannot terminate on a pool of fewer than 3";
+    for (int i = 0; i < kIroncladPowerPoolCount; ++i) {
+        const CardDef* d = card_def(kIroncladPowerPool[static_cast<unsigned>(i)]);
+        ASSERT_NE(d, nullptr);
+        EXPECT_EQ(d->type, CardType::POWER)
+            << "pool index " << i << " is not a POWER";
+    }
+    // And it is a strict subset of the full combat pool it filters.
+    for (int i = 0; i < kIroncladPowerPoolCount; ++i) {
+        const CardId id = kIroncladPowerPool[static_cast<unsigned>(i)];
+        bool found = false;
+        for (int k = 0; k < kIroncladCombatPoolCount; ++k) {
+            found = found || kIroncladCombatPool[static_cast<unsigned>(k)] == id;
+        }
+        EXPECT_TRUE(found) << "pool index " << i << " is not in the combat pool";
+    }
+}
+
+// The chosen card arrives as `amount` stat-equivalent copies, each at cost 0 for
+// the turn (DiscoveryAction.java:55-62, :65-81). Potency 1 is one copy.
+TEST(Potions, DiscoverPotionCreatesOneCostZeroCopyOfTheChosenCard) {
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(5);
+    ASSERT_TRUE(use_potion(s, PotionId::SKILL_POTION, 0));
+    ActionQueueItem& item = s.action_queue[s.action_head];
+    prepare_discovery_choice(s, item);
+    const CardId chosen = discovery_choice_card(item, 1);
+
+    resolve_discovery_choice(s, item, 1);
+
+    ASSERT_EQ(s.hand_count, 1);
+    const CardInstance& made = s.card_pool[s.hand[0]];
+    EXPECT_EQ(made.card_id, static_cast<uint16_t>(chosen));
+    EXPECT_EQ(made.upgrade, 0) << "makeStatEquivalentCopy of the BASE offer";
+    EXPECT_EQ(made.cost_now, 0);
+    const CardDef* d = card_def(chosen);
+    ASSERT_NE(d, nullptr);
+    EXPECT_EQ(has_card_flag(made.flags, CardFlag::COST_MODIFIED_FOR_TURN),
+              d->base_cost != 0)
+        << "setCostForTurn is a no-op on an already-0 cost";
+}
+
+// SACRED BARK'S SHAPE. AbstractPotion.getPotency doubles potency, and for these
+// four potency IS DiscoveryAction's `amount`, i.e. the number of copies -- not
+// the offer size and not the pool. The relic has no engine hook yet (there is no
+// potency site at all), so the doubled value is stamped directly to pin the
+// encoding the hook will drive. `amount == 2` with hand + 2 <= 10 puts BOTH
+// copies in hand (:72-74).
+TEST(Potions, DiscoverPotionWithTwoCopiesMakesTwoOfTheSameCard) {
+    CombatState s = MakeCombat();
+    s.card_random_rng = from_seed(5);
+    ASSERT_TRUE(use_potion(s, PotionId::SKILL_POTION, 0));
+    ActionQueueItem& item = s.action_queue[s.action_head];
+    item.tgt = 2;  // Sacred Bark: potency 1 -> 2
+    ASSERT_EQ(discovery_copies(item), 2);
+    prepare_discovery_choice(s, item);
+    const CardId chosen = discovery_choice_card(item, 0);
+
+    resolve_discovery_choice(s, item, 0);
+
+    ASSERT_EQ(s.hand_count, 2);
+    EXPECT_EQ(s.card_pool[s.hand[0]].card_id, static_cast<uint16_t>(chosen));
+    EXPECT_EQ(s.card_pool[s.hand[1]].card_id, static_cast<uint16_t>(chosen))
+        << "both copies are of the SAME card";
+    EXPECT_NE(s.hand[0], s.hand[1]) << "two distinct instances";
+    EXPECT_EQ(s.card_pool[s.hand[0]].cost_now, 0);
+    EXPECT_EQ(s.card_pool[s.hand[1]].cost_now, 0);
+}
+
+// The amount == 2 fan-out's middle case (:75-77): at hand size 9 the first copy
+// fills the hand and the SECOND goes to the discard pile. That is exactly
+// sequential add-with-spill, which is why the branch table is not transcribed.
+TEST(Potions, DiscoverPotionSecondCopySpillsToDiscardAtAFullHand) {
+    CombatState s = MakeCombat();
+    for (uint8_t i = 0; i < 9; ++i) {
+        seed_hand_card(s, static_cast<uint8_t>(30 + i), CardId::STRIKE);
+    }
+    ASSERT_EQ(s.hand_count, 9);
+    s.card_random_rng = from_seed(5);
+    ASSERT_TRUE(use_potion(s, PotionId::SKILL_POTION, 0));
+    ActionQueueItem& item = s.action_queue[s.action_head];
+    item.tgt = 2;
+    prepare_discovery_choice(s, item);
+    const CardId chosen = discovery_choice_card(item, 0);
+
+    resolve_discovery_choice(s, item, 0);
+
+    EXPECT_EQ(s.hand_count, 10) << "the first copy fills the hand";
+    EXPECT_EQ(s.card_pool[s.hand[9]].card_id, static_cast<uint16_t>(chosen));
+    ASSERT_EQ(s.discard_count, 1) << "the second copy spills";
+    EXPECT_EQ(s.card_pool[s.discard[0]].card_id, static_cast<uint16_t>(chosen));
+}
+
+// The Discovery CARD must be untouched by the new operands. An AUTHORED
+// DISCOVERY step carries the actor sentinels in src/tgt (queue_effect_step
+// writes them for every step), and those are exactly the defaults -- full RED
+// combat pool, one copy -- so no previously-authored item changed meaning.
+TEST(Potions, AnAuthoredDiscoveryItemDefaultsToTheFullCombatPoolAndOneCopy) {
+    ActionQueueItem authored{};
+    authored.opcode = static_cast<uint16_t>(Opcode::DISCOVERY);
+    authored.src = kActorPlayer;
+    authored.tgt = kActorPlayer;
+    EXPECT_EQ(discovery_pool(authored), DiscoveryPool::COMBAT);
+    EXPECT_EQ(discovery_copies(authored), 1);
+}
+
 // --- Un-deferred power-granting potions (now DATA APPLY_POWER programs) -------
 // Powers registered by the potion-support-powers follow-up (Dexterity, Lose
 // Dexterity, Thorns, Plated Armor, Regen, Ritual; Steroid reuses LoseStrength).
@@ -728,7 +962,9 @@ TEST(Potions, ImplementedNessIsRegistryDrivenForDataPotions) {
 TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // The `native` rows are the hand-written ones, so they are named explicitly.
     for (PotionId id : {PotionId::BLOOD_POTION, PotionId::BLESSING_OF_THE_FORGE,
-                        PotionId::ELIXIR, PotionId::FRUIT_JUICE,
+                        PotionId::ELIXIR, PotionId::ATTACK_POTION,
+                        PotionId::SKILL_POTION, PotionId::POWER_POTION,
+                        PotionId::COLORLESS_POTION, PotionId::FRUIT_JUICE,
                         PotionId::ENTROPIC_BREW, PotionId::SMOKE_BOMB}) {
         EXPECT_TRUE(potion_use_implemented(id))
             << "native id " << static_cast<int>(id) << " has a body";
@@ -738,9 +974,7 @@ TEST(Potions, ImplementedAndDeferredNativeRosters) {
     // SNECKO_OIL LEFT this list when RANDOMIZE_HAND_COST (opcode 60) landed: its
     // row is now a DATA program, so the gate answers from the registry.
     EXPECT_TRUE(potion_use_implemented(PotionId::SNECKO_OIL));
-    for (PotionId id : {PotionId::ATTACK_POTION,
-                        PotionId::SKILL_POTION, PotionId::POWER_POTION,
-                        PotionId::COLORLESS_POTION, PotionId::GAMBLERS_BREW,
+    for (PotionId id : {PotionId::GAMBLERS_BREW,
                         PotionId::LIQUID_MEMORIES, PotionId::DISTILLED_CHAOS,
                         PotionId::DUPLICATION_POTION,
                         PotionId::FAIRY_POTION}) {

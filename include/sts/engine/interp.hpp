@@ -810,6 +810,57 @@ inline constexpr uint8_t kDiscoveryChoiceCount = 3;
     return CardId::NONE;
 }
 
+// --- DISCOVERY's pool selector and copy count --------------------------------
+//
+// DiscoveryAction has three ctors (DiscoveryAction.java:25-43) and its consumers
+// differ in exactly two ways: WHICH POOL the three offers are drawn from, and
+// HOW MANY copies of the chosen card are created.
+//
+//   Discovery (the card)  -- DiscoveryAction(), the full RED combat pool,
+//                            amount 1 (:25-29).
+//   Attack / Skill / Power Potion -- DiscoveryAction(CardType, potency), the
+//                            type-filtered RED pool, amount = potency
+//                            (AttackPotion.java:40-42 and siblings).
+//   Colorless Potion      -- DiscoveryAction(true, potency), the colorless pool
+//                            (ColorlessPotion.java:38-40).
+//
+// `flags` and `amount` are already fully consumed by the persisted offer, but a
+// DISCOVERY item uses NEITHER of ActionQueueItem's two actor bytes -- there is
+// no source or target creature anywhere in DiscoveryAction. So the selector
+// rides in `src` and the copy count in `tgt`. ActionQueueItem stays 12 bytes, so
+// there is no SCHEMA_VERSION bump and no fixture regeneration; this is the same
+// trick the offer itself already plays with flags/amount.
+//
+// THE DEFAULTS ARE THE ACTOR SENTINELS, deliberately. Every queue helper writes
+// src = kActorPlayer and, for a SELF-targeted step, tgt = kActorPlayer, so an
+// AUTHORED DISCOVERY step (registry/cards.yaml's Discovery) arrives carrying
+// 0xFF in both. Reading 0xFF as "full combat pool" and "one copy" therefore
+// leaves every previously-authored item byte-identical AND correct, with no
+// generator packer needed. A native writer that wants anything else stamps a
+// real value.
+enum class DiscoveryPool : uint8_t {
+    COMBAT = 0,     // kIroncladCombatPool  -- returnTrulyRandomCardInCombat()
+    ATTACK = 1,     // kIroncladAttackPool  -- ...InCombat(CardType.ATTACK)
+    SKILL = 2,      // kIroncladSkillPool   -- ...InCombat(CardType.SKILL)
+    POWER = 3,      // kIroncladPowerPool   -- ...InCombat(CardType.POWER)
+    COLORLESS = 4,  // kColorlessCombatPool -- returnTrulyRandomColorlessCardInCombat()
+};
+
+[[nodiscard]] constexpr DiscoveryPool discovery_pool(
+    const ActionQueueItem& item) noexcept {
+    return item.src == kActorPlayer ? DiscoveryPool::COMBAT
+                                    : static_cast<DiscoveryPool>(item.src);
+}
+
+// How many stat-equivalent copies of the chosen card are created. This is
+// DiscoveryAction's `amount` field, which is the potion's POTENCY -- 1 base, 2
+// with Sacred Bark (AbstractPotion.getPotency doubles it). The Discovery CARD
+// passes no amount and gets the ctor default of 1 (:28).
+[[nodiscard]] constexpr int discovery_copies(
+    const ActionQueueItem& item) noexcept {
+    return item.tgt == kActorPlayer ? 1 : static_cast<int>(item.tgt);
+}
+
 inline constexpr uint32_t kChoiceRandomBit = 1u << 2;
 inline constexpr uint32_t kChoiceKindHighBit = 1u << 3;   // ChoiceKind bit 2
 inline constexpr uint32_t kChoiceCopiesShift = 4;

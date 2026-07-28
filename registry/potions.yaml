@@ -34,14 +34,16 @@
 # already-registered LoseStrength/Flex], Regen, Liquid Bronze, Essence of Steel,
 # Cultist) are now DATA APPLY_POWER programs, un-deferred here with their effect
 # tests. Potions still `native: true` and DEFERRED need a verb owned elsewhere:
-# in-combat card CHOOSE = B3.4 (Elixir, Attack/Skill/Power/Colorless, Gamblers Brew,
-# Liquid Memories -- Blessing of the Forge is NO LONGER among them: it needs only
-# the already-live CHOOSE_CARD UPGRADE kind); RECURSIVE PLAY = a later opcode
-# (Distilled Chaos, Duplication); run-layer max-HP
-# / potion-slot mutation = B4.x (Fruit Juice, Entropic Brew); combat escape = B3.15
-# (Smoke Bomb); out-of-combat revive (Fairy). Snecko Oil is NO LONGER among them
-# either: the wave-C potions stage added RANDOMIZE_HAND_COST (opcode 60), so its
-# row is a two-step DATA program. Every row still carries its real
+# in-combat card CHOOSE (Gamblers Brew, Liquid Memories); RECURSIVE PLAY = a later
+# opcode (Distilled Chaos, Duplication); run-layer max-HP / potion-slot mutation
+# = B4.x (Fruit Juice, Entropic Brew); combat escape = B3.15 (Smoke Bomb);
+# out-of-combat revive (Fairy).
+# NO LONGER deferred, each with the reason it turned out to need less than the
+# row once claimed: Blessing of the Forge (the already-live CHOOSE_CARD UPGRADE
+# kind), Elixir (the already-live OPTIONAL EXHAUST kind), Attack/Skill/Power/
+# Colorless (a pool selector + copy count on the already-live DISCOVERY opcode),
+# Snecko Oil (RANDOMIZE_HAND_COST, opcode 60, so a DATA program).
+# Every row still carries its real
 # potency/rarity/game_id so the registry, translator join, and identity roll are complete.
 
 # --- Ironclad-specific (PotionHelper.java:92-96) ----------------------------
@@ -198,33 +200,70 @@
   game_id: "AttackPotion"
   rarity: COMMON
   potency: 1
-  # Choose 1 of 3 random attack cards into hand (costs 0 this turn) -> card CHOOSE + MAKE_CARD (B3.4). Deferred native.
+  # IMPLEMENTED (native, potions.cpp). The four "discover" potions are ONE body
+  # with one argument changed -- each use() is a single addToBot of a
+  # DiscoveryAction differing only in which pool it draws from:
+  #   Attack/Skill/Power -> DiscoveryAction(CardType.X, potency)  (the
+  #     type-filtered RED combat pool, returnTrulyRandomCardInCombat(type),
+  #     AbstractDungeon.java:964-979)
+  #   Colorless          -> DiscoveryAction(true, potency)        (the colorless
+  #     pool, returnTrulyRandomColorlessCardInCombat, :981-995)
+  # They ride the already-live DISCOVERY opcode (50), which the potions stage
+  # extended with a POOL SELECTOR and a COPY COUNT in the queue item's otherwise
+  # unused src/tgt bytes -- no struct change, no SCHEMA_VERSION bump.
+  # POTENCY IS THE COPY COUNT, not the offer size: DiscoveryAction's `amount`
+  # (:65-81) decides how many stat-equivalent copies of the CHOSEN card are
+  # created, so Sacred Bark (potency 1 -> 2) gives TWO copies of one card, and
+  # never changes the three-card offer or the pool. Each copy costs 0 for the
+  # turn (setCostForTurn(0), :61-62) and spills to the discard pile at a full
+  # hand. The offer is three DISTINCT cardIDs, rejection-sampled with ONE
+  # cardRandomRng draw per attempt (:105-120).
+  # They stay `native` rather than becoming data programs even though DISCOVERY
+  # is a GENERAL op: a data step's `extra` becomes item.flags, and for a
+  # DISCOVERY item flags IS the persisted offer, so a naive authoring would
+  # mispack the item -- and the generator's domain check cannot catch that.
+  # KNOWN OPEN QUESTION, carried in the ledger's Deferred obligations: whether
+  # DiscoveryAction's per-update-tick regeneration of the offer (:47, outside the
+  # duration branch) spends a SECOND round of cardRandomRng draws in the real
+  # game. It is frame-driven and cannot be settled from source. Modeled here as
+  # generate-once-and-latch, which is what the already-landed Discovery CARD does.
   native: true
-  provenance: "AttackPotion.use (AttackPotion.java:40), getPotency (:45) -- 3-attack reward choice, temp cost 0"
+  provenance: "AttackPotion.use (AttackPotion.java:40-42), getPotency (:44-46) -- addToBot DiscoveryAction(CardType.ATTACK, potency); DiscoveryAction.generateCardChoices (DiscoveryAction.java:105-120) rejection-samples 3 distinct ids at one cardRandomRng draw each, selection (:53-85) makes `amount` cost-0-this-turn copies of the chosen card"
 
 - id: 14
   name: SKILL_POTION
   game_id: "SkillPotion"
   rarity: COMMON
   potency: 1
+  # IMPLEMENTED (native, potions.cpp) -- see the ATTACK_POTION row above for the
+  # shared derivation; this differs only in CardType.SKILL.
   native: true
-  provenance: "SkillPotion.use (SkillPotion.java:40), getPotency (:45) -- 3-skill reward choice, temp cost 0"
+  provenance: "SkillPotion.use (SkillPotion.java:40-42), getPotency (:44-46) -- addToBot DiscoveryAction(CardType.SKILL, potency)"
 
 - id: 15
   name: POWER_POTION
   game_id: "PowerPotion"
   rarity: COMMON
   potency: 1
+  # IMPLEMENTED (native, potions.cpp) -- see the ATTACK_POTION row above for the
+  # shared derivation; this differs only in CardType.POWER, whose generated pool
+  # (kIroncladPowerPool) the potions stage had to add -- the ATTACK and SKILL
+  # siblings already existed.
   native: true
-  provenance: "PowerPotion.use (PowerPotion.java:40), getPotency (:45) -- 3-power reward choice, temp cost 0"
+  provenance: "PowerPotion.use (PowerPotion.java:40-42), getPotency (:44-46) -- addToBot DiscoveryAction(CardType.POWER, potency)"
 
 - id: 16
   name: COLORLESS_POTION
   game_id: "ColorlessPotion"
   rarity: COMMON
   potency: 1
+  # IMPLEMENTED (native, potions.cpp) -- see the ATTACK_POTION row above. This is
+  # the ONE of the four that takes DiscoveryAction's colorless ctor
+  # (DiscoveryAction.java:38-43) rather than the typed one, so its offers come
+  # from srcColorlessCardPool minus HEALING (kColorlessCombatPool), not from the
+  # RED pools.
   native: true
-  provenance: "ColorlessPotion.use (ColorlessPotion.java:38), getPotency (:43) -- 3-colorless reward choice, temp cost 0"
+  provenance: "ColorlessPotion.use (ColorlessPotion.java:38-40), getPotency (:42-44) -- addToBot DiscoveryAction(colorless=true, potency); generateColorlessCardChoices (DiscoveryAction.java:89-103) over returnTrulyRandomColorlessCardInCombat (AbstractDungeon.java:981-995)"
 
 - id: 17
   name: STEROID_POTION

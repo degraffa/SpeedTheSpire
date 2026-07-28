@@ -87,6 +87,10 @@ bool potion_use_implemented(PotionId id) noexcept {
         case PotionId::BLOOD_POTION:           // dispatch_native_potion, below
         case PotionId::BLESSING_OF_THE_FORGE:  // dispatch_native_potion, below
         case PotionId::ELIXIR:                 // dispatch_native_potion, below
+        case PotionId::ATTACK_POTION:          // dispatch_native_potion, below
+        case PotionId::SKILL_POTION:           // (the four DISCOVERY potions --
+        case PotionId::POWER_POTION:           //  one body, pool selector in the
+        case PotionId::COLORLESS_POTION:       //  item's src byte)
         case PotionId::SMOKE_BOMB:             // dispatch_native_potion, below
                                                // (run_advance's step_potion
                                                // still intercepts it first)
@@ -239,6 +243,53 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             add_to_bottom(s, item);   // addToBot (Elixir.java:47)
             break;
         }
+        case PotionId::ATTACK_POTION:
+        case PotionId::SKILL_POTION:
+        case PotionId::POWER_POTION:
+        case PotionId::COLORLESS_POTION: {
+            // The four "discover" potions are ONE shape with one argument
+            // changed. Each use() is a single addToBot:
+            //   AttackPotion.java:40-42     DiscoveryAction(CardType.ATTACK, potency)
+            //   SkillPotion.java:40-42      DiscoveryAction(CardType.SKILL, potency)
+            //   PowerPotion.java:40-42      DiscoveryAction(CardType.POWER, potency)
+            //   ColorlessPotion.java:38-40  DiscoveryAction(true, potency)
+            // All four getPotency return 1, all four isThrown false, none takes
+            // a target. Their initializeData reads hasRelic("SacredBark") only
+            // to pick a description string -- the actual doubling is
+            // AbstractPotion.getPotency's, and it doubles POTENCY, which for
+            // these is DiscoveryAction's `amount`, i.e. THE NUMBER OF COPIES
+            // CREATED (1 -> 2). It does NOT change the three-card offer or the
+            // pool. That is why the copy count is the second operand here.
+            //
+            // Opcode DISCOVERY (50) already does the whole lifecycle -- the
+            // rejection-sampled three-card offer persisted in the item, the pump
+            // intercept, the can_choose[0..2] mask, and the cost-0-this-turn
+            // creation. What this adds is the POOL SELECTOR and the COPY COUNT,
+            // in the item's otherwise-unused src/tgt bytes (interp.hpp
+            // discovery_pool / discovery_copies). No struct change, so no
+            // SCHEMA_VERSION bump.
+            //
+            // NATIVE rather than a data program even though DISCOVERY is in
+            // GENERAL_OPS: a data step's `extra` becomes item.flags
+            // (queue_use_step above), and for a DISCOVERY item flags IS the
+            // offer slot -- a naively authored row would mispack the item and
+            // make discovery_choice_prepared read garbage. Authoring these as
+            // data needs a generator packer for DISCOVERY's pool/copies first;
+            // until then the domain check cannot catch the mistake, so the
+            // hand-built item is the safe form.
+            ActionQueueItem item{};
+            item.opcode = static_cast<uint16_t>(Opcode::DISCOVERY);
+            item.src = static_cast<uint8_t>(
+                id == PotionId::ATTACK_POTION    ? DiscoveryPool::ATTACK
+                : id == PotionId::SKILL_POTION   ? DiscoveryPool::SKILL
+                : id == PotionId::POWER_POTION   ? DiscoveryPool::POWER
+                                                 : DiscoveryPool::COLORLESS);
+            item.tgt = static_cast<uint8_t>(potency);  // DiscoveryAction.amount
+            item.amount = 0;  // the "offer not yet generated" sentinel
+            item.flags = 0;
+            add_to_bottom(s, item);
+            break;
+        }
         // --- Deferred native bodies (each lands with its dependency) ---
         // The power-granting potions (Dexterity, Steroid, Speed, Regen, Liquid
         // Bronze, Essence of Steel, Cultist) are now DATA APPLY_POWER programs --
@@ -246,11 +297,12 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
         // (powers.yaml ids 14-19; Steroid reuses LoseStrength id 13) -- so they no
         // longer route here (use_potion sends them through queue_use_step).
         // Still native + DEFERRED, each on a verb owned elsewhere:
-        // In-combat card CHOOSE: ATTACK/SKILL/POWER/COLORLESS_POTION,
-        // GAMBLERS_BREW, LIQUID_MEMORIES. (BLESSING_OF_THE_FORGE and ELIXIR are
-        // no longer among them -- Blessing needed only the already-live
-        // CHOOSE_CARD UPGRADE kind, and Elixir only the already-live OPTIONAL
-        // EXHAUST one; both are implemented above.)
+        // In-combat card CHOOSE: GAMBLERS_BREW, LIQUID_MEMORIES.
+        // (BLESSING_OF_THE_FORGE, ELIXIR and the four DISCOVERY potions are no
+        // longer among them -- Blessing needed only the already-live CHOOSE_CARD
+        // UPGRADE kind, Elixir only the already-live OPTIONAL EXHAUST one, and
+        // the discover four only a pool selector and a copy count on the
+        // already-live DISCOVERY opcode; all six are implemented above.)
         // Recursive play (a later opcode): DISTILLED_CHAOS, DUPLICATION_POTION
         // (its DuplicationPower re-queues the played card -- the blocker is the
         // opcode, NOT a missing power row).
