@@ -185,47 +185,128 @@ void relic_native_lantern(CombatState& s, RelicHook hook, RelicSlot& slot,
     }
 }
 
+namespace {
+
+// The one action all three Red Skull sites queue, differing only in sign and in
+// which end of the queue it goes on: ApplyPowerAction(player, player,
+// StrengthPower(player, N), N) with STR_AMT == 3 (RedSkull.java:23).
+//
+// It goes through the ORDINARY APPLY_POWER door, which is the whole of the
+// Artifact interaction: StrengthPower's ctor types an instance built with a
+// non-positive amount as a DEBUFF (StrengthPower.java:37 -> updateDescription
+// :81-89), and ApplyPowerAction.java:131-138 spends one Artifact stack
+// (ArtifactPower.onSpecificTrigger, ArtifactPower.java:33-40) and returns
+// WITHOUT applying. op_apply_power already reproduces both halves
+// (interp_powers.cpp's negative_stat_flip -> apply_power_blocked_by_artifact),
+// so an Artifact charge eats the -3 and the Strength stays, with no
+// Red-Skull-shaped special case anywhere.
+void queue_red_skull_strength(CombatState& s, int32_t amount,
+                              bool to_top) noexcept {
+    ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    item.src = kActorPlayer;
+    item.tgt = kActorPlayer;
+    item.amount = amount;
+    item.flags = make_apply_power_flags(PowerId::STRENGTH);
+    if (to_top) {
+        add_to_top(s, item);
+    } else {
+        add_to_bottom(s, item);
+    }
+}
+
+}  // namespace
+
 void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
                             const RelicHookContext& /*ctx*/) noexcept {
-    // slot.counter is the suppression latch: 1 while the grant must not fire
-    // (isActive, OR the combat was entered already bloodied), 0 while armed.
+    // slot.counter IS RedSkull's `isActive` (RedSkull.java:24): 1 while the +3
+    // is standing, 0 while armed. It is the run-persistent RelicSlot counter
+    // (fold_back_combat mirrors it into RunState), and AT_BATTLE_START rewrites
+    // it unconditionally, so nothing a previous combat or a run-layer crossing
+    // left behind can leak into this one.
     //
-    // AT_BATTLE_START seeds it from starting HP, reproducing two Java facts at
-    // once: preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
-    // (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP never
-    // fires the damage-side onBloodied cross (AbstractPlayer.java:1476-1481 --
-    // it fires only when isBloodied flips false->true); and RedSkull.
-    // atBattleStart resets isActive = false (RedSkull.java:37), so a latch a
-    // previous combat left behind (fold_back_combat persists the counter into
-    // the run slot) re-arms here. The int-division seed and the float damage
-    // cross agree for integer HP: cur <= max/2  ==  cur*2 <= max.
+    // AT_BATTLE_START reproduces three Java facts:
     //
-    // NOT MODELLED, deliberately: the action atBattleStart QUEUES at
-    // RedSkull.java:38 is an unavailable anonymous inner class in this
-    // decompiled tree (it reads/writes isActive per the synthetic
-    // access$000/002, :76-83) -- its body is not evidence-derivable and stays
-    // a recorded deferral rather than an invention.
+    //  * preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
+    //    (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
+    //    never fires the damage-side onBloodied cross (:1476-1481 fires only on
+    //    the false->true flip);
+    //  * RedSkull.atBattleStart resets isActive = false (:37) every combat;
+    //  * ...and then addToBot's an action (:38) whose body decides what an
+    //    already-bloodied entry is worth.
+    //
+    // THAT ACTION'S BODY IS NOT DECOMPILABLE HERE: `new /* Unavailable
+    // Anonymous Inner Class!! */` (:38), one of the 145 files with that CFR
+    // hole; all the class file tells us is that it reads and writes isActive
+    // (the synthetic access$000/002, :76-83). Its behaviour is therefore
+    // OWNER-SPECIFIED (project owner, 2026-07-28): becoming bloodied grants +3
+    // Strength, and entering combat already bloodied is becoming bloodied.
+    // PENDING ORACLE-CAPTURE VALIDATION -- a Red Skull run capture is what
+    // turns this from a specification into evidence. What the Java DOES pin is
+    // the queue end: the call at :38 is `addToBot`, not addToTop.
+    //
+    // The entry grant is also what makes `counter == isActive` exact rather
+    // than approximate: with it, the latch is set on exactly the crossings that
+    // set isActive, which is what lets the heal-side cross below use the
+    // counter as its guard.
     if (hook == RelicHook::AT_BATTLE_START) {
-        slot.counter =
-            (static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) ? 1 : 0;
+        const bool bloodied = player_is_bloodied(s);
+        slot.counter = bloodied ? 1 : 0;  // isActive = false (:37), then the
+        if (bloodied) {                   // :38 action's owner-specified body
+            queue_red_skull_strength(s, 3, /*to_top=*/false);
+        }
         return;
     }
     // RedSkull.onBloodied (RedSkull.java:41-52, routed through wasHPLost):
     // when the HP loss drops the player to <=50% max HP while the latch is
     // clear, gain 3 Strength (addToTop ApplyPowerAction(StrengthPower 3),
-    // :47) and latch (isActive = true, :49). The onNotBloodied -3 on healing
-    // back over 50% (:54-63) is DEFERRED (needs a heal-cross hook). Strength
-    // IS registered (id 1).
+    // :47) and latch (isActive = true, :49). Strength IS registered (id 1).
     if (hook == RelicHook::WAS_HP_LOST && slot.counter == 0 &&
-        static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
-        slot.counter = 1;
-        ActionQueueItem gain{};
-        gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
-        gain.src = kActorPlayer;
-        gain.tgt = kActorPlayer;
-        gain.amount = 3;
-        gain.flags = make_apply_power_flags(PowerId::STRENGTH);
-        add_to_top(s, gain);  // addToTop (RedSkull.java:47)
+        player_is_bloodied(s)) {
+        slot.counter = 1;                          // isActive = true (:49)
+        queue_red_skull_strength(s, 3, /*to_top=*/true);  // addToTop (:47)
+    }
+}
+
+void dispatch_relics_on_not_bloodied(CombatState& s, RelicSlot* relics,
+                                     uint8_t count) noexcept {
+    // RedSkull.onNotBloodied (RedSkull.java:54-63) -- decompilable in full,
+    // unlike the atBattleStart action above:
+    //
+    //     if (this.isActive && getCurrRoom().phase == RoomPhase.COMBAT) {
+    //         addToTop(new ApplyPowerAction(p, p, new StrengthPower(p, -3), -3));
+    //     }
+    //     this.stopPulse();            // presentation
+    //     this.isActive = false;       // :61 -- OUTSIDE the guarded block
+    //     player.hand.applyPowers();   // presentation (this engine has no bake)
+    //
+    // The phase clause is structurally true here: this fan-out is reached only
+    // from heal_player_with_relics, which takes a CombatState. The run-layer
+    // twin, where the clause is false and only the :61 latch write survives, is
+    // heal_out_of_combat (relics/relic_pickup.hpp).
+    //
+    // isActive == 0 makes the :61 write a no-op, so the guarded and unguarded
+    // halves collapse into one branch -- and that is also why the caller does
+    // NOT need to carry AbstractCreature.heal:404's `&& isBloodied` conjunct as
+    // a separate latch: the only body this fan-out reaches re-tests isActive
+    // itself, at :56.
+    //
+    // Repeated crossings are CUMULATIVE DELTAS, not an invariant: nothing here
+    // remembers whether the +3 it is undoing actually landed, so an Artifact
+    // that eats the -3 leaves the Strength standing and the next cross-down
+    // adds another +3 on top of it.
+    //
+    // Per SLOT, matching the Java's `for (AbstractRelic r : relics)` -- two
+    // copies of one relic would each fire (Red Skull is not duplicable in S1;
+    // the loop shape is the point).
+    for (uint8_t i = 0; i < count; ++i) {
+        RelicSlot& slot = relics[i];
+        if (slot.relic_id != static_cast<uint16_t>(RelicId::RED_SKULL) ||
+            slot.counter == 0) {
+            continue;
+        }
+        slot.counter = 0;                                  // isActive = false (:61)
+        queue_red_skull_strength(s, -3, /*to_top=*/true);  // addToTop (:58)
     }
 }
 

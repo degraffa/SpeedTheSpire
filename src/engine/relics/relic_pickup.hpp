@@ -154,20 +154,56 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
 //   * powers' onHeal -- no power survives a room boundary (powers.clear() runs
 //     in resetPlayer, AbstractDungeon.java:1671), so the list is empty.
 //
-// AbstractCreature.heal also carries the NOT-BLOODIED cross at :403-408 (the
+// AbstractCreature.heal also carries the NOT-BLOODIED cross at :404-408 (the
 // relics' onNotBloodied when the heal lifts the player back over half max HP).
-// Red Skull is its only S1 override and that body is a DEFERRED row
-// (docs/stage-b-tasks.md, "Red Skull onNotBloodied"); out of combat its -3
-// Strength half is phase-gated off anyway. Written here as the note the row's
-// owner needs, not as a silent omission.
+// Red Skull is its only mechanical override in the whole game, and OUT HERE
+// exactly half of its body survives -- see the fan-out below, which this door
+// calls.
 //
 // Non-positive amounts still clamp, exactly as the Java's unguarded += does.
+//
+// RedSkull.onNotBloodied out of combat (RedSkull.java:54-63). The -3 Strength
+// is inside `if (this.isActive && getCurrRoom().phase == RoomPhase.COMBAT)`
+// (:56) and is therefore phase-gated OFF here -- which is the only answer that
+// could work anyway, since no power list survives a room boundary
+// (powers.clear() in resetPlayer, AbstractDungeon.java:1671). But
+// `this.isActive = false` (:61) sits OUTSIDE that block and runs regardless, so
+// a run-layer cross-up still disarms the relic.
+//
+// That latch write is OBSERVATIONALLY INERT in this engine and is written
+// anyway, because inert-by-accident and inert-by-derivation are different
+// things: relic_native_red_skull's AT_BATTLE_START rewrites the counter
+// unconditionally from starting HP (preBattlePrep's isBloodied pre-seed,
+// AbstractPlayer.java:1575, plus atBattleStart's isActive = false,
+// RedSkull.java:37), so the NEXT combat's entry grant is re-derived and cannot
+// read a stale latch. The game reaches the same place by a second road --
+// RedSkull.onVictory (:66-69) also clears isActive, which is why that hook is
+// NOT bound on the row: binding it would change nothing the re-seed does not
+// already guarantee. Keeping the write here is what makes "counter == isActive"
+// true at every point in a run rather than only inside a combat.
+//
+// A fan-out over every held copy rather than a getRelic, matching the Java's
+// relic iteration.
+inline void dispatch_relics_on_not_bloodied_out_of_combat(RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        RelicSlot& slot = rs.relics[i];
+        if (slot.relic_id == static_cast<uint16_t>(RelicId::RED_SKULL)) {
+            slot.counter = 0;  // isActive = false (RedSkull.java:61)
+        }
+    }
+}
+
 inline void heal_out_of_combat(RunState& rs, int32_t amount) noexcept {
     int32_t hp = static_cast<int32_t>(rs.hp) + amount;
     if (hp > rs.max_hp) {
         hp = rs.max_hp;
     }
     rs.hp = static_cast<int16_t>(hp);
+    // The cross, on the CLAMPED value: `currentHealth > maxHealth / 2.0f`
+    // (AbstractCreature.java:404), whose exact integer form is hp * 2 > max.
+    if (hp * 2 > rs.max_hp) {
+        dispatch_relics_on_not_bloodied_out_of_combat(rs);
+    }
 }
 
 // AbstractPlayer.loseGold (AbstractPlayer.java:697-717), the gain_gold twin for

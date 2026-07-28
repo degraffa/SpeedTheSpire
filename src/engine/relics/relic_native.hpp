@@ -44,6 +44,34 @@ using RelicNativeFn = RelicNativeSig*;
 // STS_REGISTRY_NATIVE_RELICS expansion in relic_hooks.cpp.
 [[nodiscard]] RelicNativeFn relic_native_fn(RelicId id) noexcept;
 
+// "Bloodied": at or below HALF max HP, half rounded DOWN. The game spells the
+// test three times and all three agree for integer HP -- preBattlePrep's int
+// division `currentHealth <= maxHealth / 2` (AbstractPlayer.java:1575), the
+// damage-side cross's float `currentHealth <= maxHealth / 2.0f` (:1476), and
+// the heal-side cross's `currentHealth > maxHealth / 2.0f`
+// (AbstractCreature.java:404, which is this negated). `hp * 2 <= max` is the
+// exact integer form of each: for max 7, all three answer hp <= 3. Spelled once
+// here so the sites that key off it (Red Skull's two crosses, Meat on the
+// Bone's pre-victory heal) cannot drift apart.
+[[nodiscard]] inline bool player_is_bloodied(const CombatState& s) noexcept {
+    return static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp;
+}
+
+// The relics' onNotBloodied fan-out (AbstractCreature.heal:404-408, reached
+// through AbstractPlayer.heal:1544-1552), fired by heal_player_with_relics when
+// a heal leaves the player above half max HP.
+//
+// A HAND-WRITTEN fan-out rather than a registry RelicHook: Red Skull is the
+// game's only MECHANICAL implementor -- `grep -rn onNotBloodied com/` finds
+// AbstractRelic's empty base, the two call sites, MeatOnTheBone's
+// presentation-only `stopPulse()` (MeatOnTheBone.java:47-50) and RedSkull -- so
+// a new hook id would move kRelicHookCount for one row. Philosopher's Stone's
+// onSpawnMonster (monster_dispatch.cpp) and Velvet Choker's canPlay veto are
+// the precedents. Defined in relics_common.cpp beside relic_native_red_skull,
+// so the -3 and the +3 it undoes stay in one file.
+void dispatch_relics_on_not_bloodied(CombatState& s, RelicSlot* relics,
+                                     uint8_t count) noexcept;
+
 // Heal the player by `n`, clamped to max HP (HealAction semantics). No HEAL opcode
 // exists; a pure heal has no queue-ordering interplay
 // with other S1 relic effects, so it is applied directly at dispatch time.

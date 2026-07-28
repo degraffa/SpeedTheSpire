@@ -247,6 +247,29 @@ void heal_player_with_relics(CombatState& s, int32_t amount) noexcept {
         healed = mathutils_round(static_cast<float>(healed) * 1.5f);
     }
     heal_player(s, healed);
+    // ...and, once the heal has landed and clamped, the NOT-BLOODIED CROSS:
+    //
+    //     if ((float)currentHealth > (float)maxHealth / 2.0f && this.isBloodied) {
+    //         this.isBloodied = false;
+    //         for (AbstractRelic r : player.relics) r.onNotBloodied();
+    //     }
+    //
+    // AbstractCreature.heal:404-408 (AbstractPlayer.heal:1547-1552 re-checks the
+    // same condition after super.heal has already cleared isBloodied, so the
+    // fan-out runs exactly once). Ordering matters and is the Java's: after the
+    // += and after the max-HP clamp, so a heal that overshoots is judged on the
+    // clamped value.
+    //
+    // `isBloodied` itself is NOT modelled as a field. The only body the fan-out
+    // reaches carries its own isActive re-test (RedSkull.java:56), and this
+    // engine's Red Skull latch IS isActive, so the conjunct would be a second
+    // copy of a gate that is already checked one call deeper. See
+    // dispatch_relics_on_not_bloodied (relics/relic_native.hpp) for why this is
+    // a hand-written fan-out rather than a RelicHook id.
+    if (!player_is_bloodied(s)) {
+        const RelicView rv = player_relics(s);
+        dispatch_relics_on_not_bloodied(s, rv.relics, rv.count);
+    }
 }
 
 void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
@@ -258,8 +281,7 @@ void apply_meat_on_the_bone_pre_victory(CombatState& s) noexcept {
     if (!player_has_relic(s, RelicId::MEAT_ON_THE_BONE)) {
         return;
     }
-    if (s.player_hp > 0 &&
-        static_cast<int32_t>(s.player_hp) * 2 <= s.player_max_hp) {
+    if (s.player_hp > 0 && player_is_bloodied(s)) {
         heal_player_with_relics(s, 12);
     }
 }

@@ -26,6 +26,7 @@
 #include "sts/engine/powers.hpp"
 #include "sts/engine/relic_hooks.hpp"
 #include "sts/engine/relics.hpp"
+#include "sts/engine/rest_sites.hpp"  // rest_apply_heal (the out-of-combat heal door)
 #include "sts/engine/rng_stream.hpp"  // from_seed / random (Mummified Hand's draw)
 #include "sts/engine/run_deck.hpp"    // add_card_to_master_deck (egg onObtainCard)
 #include "sts/engine/run_state.hpp"
@@ -340,23 +341,254 @@ TEST(RelicHooks, RedSkullGainsStrengthWhenBloodied) {
     EXPECT_EQ(s2.action_count, 0);
 }
 
-TEST(RelicHooks, RedSkullDoesNotFireWhenCombatBeganBloodied) {
+TEST(RelicHooks, RedSkullDoesNotFireTwiceWhenCombatBeganBloodied) {
     // preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
     // (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
     // never fires the damage-side onBloodied cross (:1476-1481 fires only on
     // the false->true flip). The battle-start hook seeds the slot latch from
     // starting HP; an HP loss while already bloodied then grants nothing.
+    //
+    // b4faf1c's fix, unchanged. What DID change is the first half: entering
+    // bloodied now grants the +3 once, at battle start (the owner-specified
+    // body of the action RedSkull.java:38 queues), instead of granting
+    // nothing at all -- so the property under test is "exactly one grant",
+    // which is what the damage-side suppression exists to protect.
     CombatState s = MakeState();
     s.player_hp = 38;               // 76 <= 80 -> entered combat bloodied
     Relics r; r.add(RelicId::RED_SKULL);
     dispatch_relics_at_battle_start(s, r.slots, r.count);
-    EXPECT_EQ(s.action_count, 0) << "the seed itself queues nothing";
-    EXPECT_EQ(r.slots[0].counter, 1) << "entered bloodied -> latch suppressed";
+    EXPECT_EQ(r.slots[0].counter, 1) << "entered bloodied -> isActive";
+    drain(s);
+    ASSERT_NE(player_power(s, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
 
     s.player_hp = 30;
     dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/8);
     EXPECT_EQ(s.action_count, 0)
         << "no onBloodied cross for a combat that began bloodied";
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3)
+        << "still the single entry grant";
+}
+
+// --- Red Skull: entry grant, heal-cross removal, cumulative crossings --------
+//
+// The spec for the +3 on an already-bloodied ENTRY is OWNER-PROVIDED (project
+// owner, 2026-07-28): RedSkull.atBattleStart's queued action
+// (RedSkull.java:38) is an unavailable anonymous inner class in this decompiled
+// tree, so its body cannot be derived. Everything else below IS Java-derived
+// and cites it.
+
+TEST(RelicHooks, RedSkullGrantsStrengthOnAnAlreadyBloodiedEntry) {
+    // Owner-specified 2026-07-28: becoming bloodied grants +3, and that
+    // includes ENTERING combat already bloodied. addToBot, because the call
+    // itself is visible at RedSkull.java:38 even though the action's body is
+    // not.
+    CombatState s = MakeState();
+    s.player_hp = 40;               // 80 <= 80 -> entered combat bloodied
+    Relics r; r.add(RelicId::RED_SKULL);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
+    EXPECT_EQ(queued(s, 0).amount, 3);
+    EXPECT_EQ(r.slots[0].counter, 1) << "isActive set by the entry grant";
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
+
+    // Negative control: entering ABOVE half grants nothing and arms the latch.
+    CombatState s2 = MakeState();
+    s2.player_hp = 41;              // 82 > 80 -> not bloodied
+    Relics r2; r2.add(RelicId::RED_SKULL);
+    dispatch_relics_at_battle_start(s2, r2.slots, r2.count);
+    EXPECT_EQ(s2.action_count, 0);
+    EXPECT_EQ(r2.slots[0].counter, 0);
+}
+
+TEST(RelicHooks, RedSkullBloodiedBoundaryRoundsHalfDown) {
+    // "At or below half, half rounded DOWN": max 7 -> bloodied at hp <= 3.
+    // preBattlePrep's seed is the int division `currentHealth <= maxHealth / 2`
+    // (AbstractPlayer.java:1575) and the damage-side cross is the float
+    // `currentHealth <= maxHealth / 2.0f` (:1476); for max 7 both answer
+    // hp <= 3, and hp*2 <= max is the integer form of each.
+    for (int hp = 0; hp <= 7; ++hp) {
+        CombatState s = MakeState();
+        s.player_max_hp = 7;
+        s.player_hp = static_cast<int16_t>(hp);
+        Relics r; r.add(RelicId::RED_SKULL);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        const bool bloodied = hp <= 3;
+        EXPECT_EQ(s.action_count, bloodied ? 1 : 0) << "hp " << hp << "/7";
+        EXPECT_EQ(r.slots[0].counter, bloodied ? 1 : 0) << "hp " << hp << "/7";
+    }
+}
+
+TEST(RelicHooks, RedSkullRemovesStrengthWhenAHealLiftsAboveHalf) {
+    // RedSkull.onNotBloodied (RedSkull.java:54-63) -- DECOMPILABLE, unlike the
+    // atBattleStart action: while isActive and in a COMBAT-phase room, addToTop
+    // ApplyPowerAction(p, p, StrengthPower(p, -3), -3); then isActive = false.
+    // The cross itself is AbstractCreature.heal:404-408 (isBloodied && the heal
+    // leaves currentHealth above maxHealth / 2.0f), reached from
+    // AbstractPlayer.heal (:1544-1552).
+    CombatState s = MakeState();
+    s.player_hp = 40;               // bloodied at entry -> the entry grant
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relic_count = 1;
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    drain(s);
+    ASSERT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
+
+    heal_player_with_relics(s, 5);  // 45 -> 90 > 80 -> the not-bloodied cross
+    EXPECT_EQ(s.player_hp, 45);
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
+    EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
+    EXPECT_EQ(queued(s, 0).amount, -3);
+    EXPECT_EQ(s.relics[0].counter, 0) << "isActive cleared (RedSkull.java:61)";
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
+        << "3 + (-3) == 0 -> StrengthPower.stackPower queues its own removal";
+
+    // Negative control: a heal that leaves the player AT or below half is no
+    // cross at all -- the Java's condition is strictly greater than half.
+    CombatState s2 = MakeState();
+    s2.player_hp = 30;
+    s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s2.relic_count = 1;
+    dispatch_relics_at_battle_start(s2, s2.relics, s2.relic_count);
+    drain(s2);
+    ASSERT_EQ(player_power(s2, PowerId::STRENGTH)->amount, 3);
+    heal_player_with_relics(s2, 10);  // 40 -> 80 == 80, still bloodied
+    EXPECT_EQ(s2.action_count, 0);
+    EXPECT_EQ(s2.relics[0].counter, 1) << "still isActive";
+}
+
+TEST(RelicHooks, RedSkullHealCrossDoesNothingWhileArmed) {
+    // Negative control for the fan-out gate: a player who was never bloodied
+    // has isActive == false, so a heal past half must queue nothing at all.
+    // (This is the guard at RedSkull.java:56, not an outer isBloodied test.)
+    CombatState s = MakeState();
+    s.player_hp = 60;
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relic_count = 1;
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    ASSERT_EQ(s.relics[0].counter, 0);
+    heal_player_with_relics(s, 10);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.relics[0].counter, 0);
+}
+
+TEST(RelicHooks, RedSkullRemovalIsBlockedByArtifact) {
+    // The -3 is a NEGATIVE Strength application through the ordinary
+    // APPLY_POWER door, so Artifact eats it with no special case anywhere:
+    // StrengthPower's ctor types an instance built with a non-positive amount
+    // as a DEBUFF (StrengthPower.java:37 -> updateDescription :81-89), and
+    // ApplyPowerAction.java:131-138 spends one Artifact stack
+    // (ArtifactPower.onSpecificTrigger, ArtifactPower.java:33-40) and RETURNS
+    // without applying. Charge consumed, Strength stays.
+    CombatState s = MakeState();
+    s.player_hp = 40;
+    s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::ARTIFACT), 1,
+                                   0, 0};
+    s.player_power_count = 1;
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relic_count = 1;
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    drain(s);
+    ASSERT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
+    EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 1) << "+3 is a BUFF";
+
+    heal_player_with_relics(s, 5);  // 45 -> above half -> the -3 is queued
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 0)
+        << "one Artifact charge consumed";
+    ASSERT_NE(player_power(s, PowerId::STRENGTH), nullptr);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3)
+        << "the Strength survives the nullified removal";
+    EXPECT_EQ(s.relics[0].counter, 0)
+        << "isActive is cleared regardless -- RedSkull.java:61 sits OUTSIDE "
+           "the guarded block, and the relic never learns the -3 was eaten";
+}
+
+TEST(RelicHooks, RedSkullCrossingsAreCumulativeDeltasNotAnInvariant) {
+    // Each cross-down applies +3 and each cross-up attempts -3; nothing
+    // reconciles the two. With the -3 eaten by Artifact, a second cross-down
+    // therefore leaves +6.
+    CombatState s = MakeState();
+    s.player_hp = 60;               // above half at entry -> armed
+    s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::ARTIFACT), 1,
+                                   0, 0};
+    s.player_power_count = 1;
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relic_count = 1;
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    ASSERT_EQ(s.action_count, 0);
+
+    s.player_hp = 35;               // 70 <= 80 -> first cross DOWN
+    dispatch_relics_was_hp_lost(s, s.relics, s.relic_count, /*amount=*/25);
+    drain(s);
+    ASSERT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
+
+    heal_player_with_relics(s, 10);  // 45 -> cross UP, -3 eaten by Artifact
+    drain(s);
+    ASSERT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 0);
+    ASSERT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
+    ASSERT_EQ(s.relics[0].counter, 0) << "re-armed by the cross-up";
+
+    s.player_hp = 39;               // 78 <= 80 -> second cross DOWN
+    dispatch_relics_was_hp_lost(s, s.relics, s.relic_count, /*amount=*/6);
+    drain(s);
+    EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 6)
+        << "+3, blocked -3, +3 -- deltas, not an invariant";
+}
+
+TEST(RelicHooks, RedSkullOutOfCombatCrossOnlyMovesTheLatch) {
+    // Out of combat there are no powers to move (resetPlayer clears the list,
+    // AbstractDungeon.java:1671) and RedSkull.onNotBloodied's -3 is gated on
+    // RoomPhase.COMBAT (RedSkull.java:56) -- but `isActive = false` (:61) sits
+    // outside that guard, so a run-layer cross-up still clears the latch. The
+    // bridge to the next combat is the at_battle_start re-seed either way.
+    RunState rs{};
+    rs.max_hp = 80;
+    rs.hp = 38;                     // 76 <= 80 -> bloodied out of combat
+    rs.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};
+    rs.relic_count = 1;
+
+    EXPECT_TRUE(rest_apply_heal(rs));  // (int)(80 * 0.3f) == 24 -> 62
+    EXPECT_EQ(rs.hp, 62);
+    EXPECT_EQ(rs.relics[0].counter, 0) << "the run-layer cross clears isActive";
+
+    // ... and the NEXT combat opens armed, so nothing is granted at entry.
+    CombatState s = MakeState();
+    s.player_hp = rs.hp;
+    s.player_max_hp = rs.max_hp;
+    s.relics[0] = rs.relics[0];
+    s.relic_count = 1;
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    EXPECT_EQ(s.action_count, 0);
+    EXPECT_EQ(s.relics[0].counter, 0);
+
+    // Negative control: a run-layer heal that does NOT lift the player above
+    // half is no cross -- and the next combat is still entered bloodied, so it
+    // opens with the entry grant.
+    RunState rs2{};
+    rs2.max_hp = 80;
+    rs2.hp = 10;
+    rs2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};
+    rs2.relic_count = 1;
+    EXPECT_TRUE(rest_apply_heal(rs2));  // 10 + 24 == 34, still <= 40
+    EXPECT_EQ(rs2.hp, 34);
+    EXPECT_EQ(rs2.relics[0].counter, 1) << "no cross -> latch untouched";
+
+    CombatState s2 = MakeState();
+    s2.player_hp = rs2.hp;
+    s2.player_max_hp = rs2.max_hp;
+    s2.relics[0] = rs2.relics[0];
+    s2.relic_count = 1;
+    dispatch_relics_at_battle_start(s2, s2.relics, s2.relic_count);
+    ASSERT_EQ(s2.action_count, 1);
+    EXPECT_EQ(queued(s2, 0).amount, 3);
+    EXPECT_EQ(s2.relics[0].counter, 1);
 }
 
 TEST(RelicHooks, RedSkullReArmsAtEveryBattleStart) {
