@@ -8,9 +8,12 @@
 #include <cstdio>
 #include <string>
 
+#include "sts/engine/combat_rewards.hpp"  // run_has_relic, RewardItemKind
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/run_state.hpp"
+#include "sts/engine/shop.hpp"  // kShopRelicCount (the merchant shelf)
 #include "sts/registry/event_table.hpp"
+#include "sts/registry/game_ids.hpp"  // relic_game_id (the join key)
 
 namespace sts::planner {
 
@@ -155,6 +158,7 @@ struct Watch {
     uint32_t event_flags = 0;
     bool treasure = false;
     bool boss = false;
+    std::vector<RelicObs> relics;  // one per target, latched (OR) per step
 };
 
 void observe(const engine::RunController& rc, void* ctx) noexcept {
@@ -177,11 +181,48 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
     if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss)) {
         w->boss = true;
     }
+
+    // Relic targets. Every latch is idempotent, per the StepObserver contract.
+    const bool in_shop =
+        rc.phase == static_cast<uint8_t>(engine::RunPhase::SHOP);
+    for (RelicObs& t : w->relics) {
+        const auto raw = static_cast<uint16_t>(t.id);
+        // Ownership -- and The Courier's compound question: a live merchant
+        // while owned. (`acquired` is latched, but shop_while_owned reads the
+        // CURRENT ownership on purpose: run_has_relic can only ever grow in
+        // S1 -- purges remove cards, never relics -- so the two agree, and
+        // reading the live state keeps the observation honest if that ever
+        // changes.)
+        if (engine::run_has_relic(rc.run, t.id)) {
+            t.acquired = true;
+            if (in_shop) t.shop_while_owned = true;
+        }
+        // Offers: RELIC rows on the live reward screen (elite / chest / event
+        // combat rewards all assemble into rc.rewards)...
+        for (uint8_t i = 0; i < rc.rewards.count && i < engine::kRewardItemCap;
+             ++i) {
+            const engine::RunRewardItem& item = rc.rewards.items[i];
+            if (item.kind ==
+                    static_cast<uint8_t>(engine::RewardItemKind::RELIC) &&
+                item.id == raw) {
+                t.offered = true;
+            }
+        }
+        // ... and the merchant's three shelf slots (a Bottled relic CAN be
+        // stocked -- shop.hpp's on_equip_screen note; The Courier cannot, per
+        // its canSpawn, and this observation is how that stays checkable).
+        if (in_shop) {
+            for (int i = 0; i < engine::kShopRelicCount; ++i) {
+                if (rc.shop.relics[i].id == raw) t.offered = true;
+            }
+        }
+    }
 }
 
 }  // namespace
 
-ScanRow scan_case(const ScanCase& c, const ScanLimits& lim) {
+ScanRow scan_case(const ScanCase& c, const ScanLimits& lim,
+                  const std::vector<registry::RelicId>& relic_targets) {
     ScanRow row;
     row.seed = c.seed;
     row.ascension = c.ascension;
@@ -193,6 +234,12 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim) {
     limits.revisit_limit = lim.revisit_limit;
 
     Watch w;
+    w.relics.reserve(relic_targets.size());
+    for (registry::RelicId id : relic_targets) {
+        RelicObs t;
+        t.id = id;
+        w.relics.push_back(t);
+    }
     fuzz::StepObserver obs;
     obs.fn = &observe;
     obs.ctx = &w;
@@ -212,6 +259,7 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim) {
     row.event_flags = w.event_flags;
     row.treasure_entered = w.treasure;
     row.boss_reached = w.boss;
+    row.relic_obs = std::move(w.relics);
     row.fail_kind = fuzz::fail_kind_name(result.failure.kind);
     return row;
 }
@@ -219,8 +267,29 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim) {
 // --- Filtering ---------------------------------------------------------------
 
 bool Filter::empty() const {
-    return need_events.empty() && !need_treasure && !need_boss && min_floor == 0;
+    return need_events.empty() && !need_treasure && !need_boss &&
+           min_floor == 0 && need_relic_offered.empty() &&
+           need_relic_acquired.empty() && need_shop_after_relic.empty();
 }
+
+namespace {
+
+// ANY-OF over one relic clause (see the Filter declaration for why relic
+// clauses are any-of where need_events is all-of). An untracked relic never
+// satisfies -- the row cannot testify about a relic it did not watch.
+bool any_relic_hits(const std::vector<RelicObs>& obs,
+                    const std::vector<registry::RelicId>& wanted,
+                    bool RelicObs::* field) {
+    if (wanted.empty()) return true;
+    for (registry::RelicId id : wanted) {
+        for (const RelicObs& o : obs) {
+            if (o.id == id && o.*field) return true;
+        }
+    }
+    return false;
+}
+
+}  // namespace
 
 bool row_hits(const ScanRow& row, const Filter& f) {
     if (f.need_treasure && !row.treasure_entered) return false;
@@ -228,6 +297,18 @@ bool row_hits(const ScanRow& row, const Filter& f) {
     if (row.max_floor < f.min_floor) return false;
     for (EventId id : f.need_events) {
         if (!event_flag_set(row.event_flags, id)) return false;
+    }
+    if (!any_relic_hits(row.relic_obs, f.need_relic_offered,
+                        &RelicObs::offered)) {
+        return false;
+    }
+    if (!any_relic_hits(row.relic_obs, f.need_relic_acquired,
+                        &RelicObs::acquired)) {
+        return false;
+    }
+    if (!any_relic_hits(row.relic_obs, f.need_shop_after_relic,
+                        &RelicObs::shop_while_owned)) {
+        return false;
     }
     return true;
 }
@@ -258,8 +339,31 @@ bool format_from_name(std::string_view name, Format& out) {
 
 std::string_view tsv_header() {
     return "seed\tseed_int\tpolicy\tpolicy_seed\tascension\tend_reason\tactions\t"
-           "max_floor\ttreasure\tboss\tevent_flags\tevents\tfinal_hash\tfail_kind";
+           "max_floor\ttreasure\tboss\tevent_flags\tevents\trelic_obs\t"
+           "final_hash\tfail_kind";
 }
+
+namespace {
+
+std::string relic_obs_text(const std::vector<RelicObs>& obs) {
+    // `<game_id>=<offered><acquired><shop_while_owned>` per target, '|'-joined
+    // -- the same separator rationale as the events column (no relic game id
+    // contains '|' or a tab; `SeparatorNeverOccursInsideAName` pins the event
+    // claim and the relic ids share the character set). "" when untracked, so
+    // an untracked scan's rows are unchanged but for the empty column.
+    std::string s;
+    for (const RelicObs& o : obs) {
+        if (!s.empty()) s += '|';
+        s.append(registry::relic_game_id(o.id));
+        s += '=';
+        s += o.offered ? '1' : '0';
+        s += o.acquired ? '1' : '0';
+        s += o.shop_while_owned ? '1' : '0';
+    }
+    return s;
+}
+
+}  // namespace
 
 std::string json_escape(std::string_view s) {
     std::string out;
@@ -306,6 +410,7 @@ std::string row_to_tsv(const ScanRow& row) {
         row.boss_reached ? "1" : "0",
         std::to_string(row.event_flags),
         event_flags_text(row.event_flags),
+        relic_obs_text(row.relic_obs),
         hash_buf,
         row.fail_kind,
     };
@@ -337,7 +442,24 @@ std::string row_to_jsonl(const ScanRow& row) {
     for (EventId id : decode_event_flags(row.event_flags)) {
         if (!first) s += ',';
         first = false;
-        s += "\"" + json_escape(event_game_id(id)) + "\"";
+        // Qualified: sts::registry::event_game_id (game_ids.hpp) is also
+        // visible here via ADL since this file gained the registry include,
+        // and the two would otherwise be ambiguous. The planner's own table
+        // is the one this column documents.
+        s += "\"" + json_escape(sts::planner::event_game_id(id)) + "\"";
+    }
+    s += "],";
+    s += "\"relic_obs\":[";
+    first = true;
+    for (const RelicObs& o : row.relic_obs) {
+        if (!first) s += ',';
+        first = false;
+        s += "{\"relic\":\"" +
+             json_escape(registry::relic_game_id(o.id)) + "\",";
+        s += std::string("\"offered\":") + (o.offered ? "true" : "false") + ",";
+        s += std::string("\"acquired\":") + (o.acquired ? "true" : "false") + ",";
+        s += std::string("\"shop_while_owned\":") +
+             (o.shop_while_owned ? "true" : "false") + "}";
     }
     s += "],";
     s += "\"final_hash\":\"" + [&] {
@@ -373,6 +495,24 @@ void ScanSummary::add(const ScanRow& row) {
     for (EventId id : decode_event_flags(row.event_flags)) {
         const auto v = static_cast<std::size_t>(id);
         if (v < 32) ++event_rows[v];
+    }
+    for (const RelicObs& o : row.relic_obs) {
+        RelicRows* rr = nullptr;
+        for (RelicRows& cand : relic_rows) {
+            if (cand.id == o.id) {
+                rr = &cand;
+                break;
+            }
+        }
+        if (rr == nullptr) {
+            RelicRows fresh;
+            fresh.id = o.id;
+            relic_rows.push_back(fresh);
+            rr = &relic_rows.back();
+        }
+        if (o.offered) ++rr->offered;
+        if (o.acquired) ++rr->acquired;
+        if (o.shop_while_owned) ++rr->shop_while_owned;
     }
 }
 
@@ -419,6 +559,17 @@ std::string ScanSummary::text() const {
         if (v >= 32 || event_rows[v] == 0) continue;
         s += "  " + std::string(e.game_id) + ": " + std::to_string(event_rows[v]) +
              " (" + pct(event_rows[v], rows) + ")\n";
+    }
+    if (!relic_rows.empty()) {
+        s += "relic targets (rows offered / acquired / shop-while-owned):\n";
+        for (const RelicRows& rr : relic_rows) {
+            s += "  " + std::string(registry::relic_game_id(rr.id)) + ": " +
+                 std::to_string(rr.offered) + " (" + pct(rr.offered, rows) +
+                 ") / " + std::to_string(rr.acquired) + " (" +
+                 pct(rr.acquired, rows) + ") / " +
+                 std::to_string(rr.shop_while_owned) + " (" +
+                 pct(rr.shop_while_owned, rows) + ")\n";
+        }
     }
     return s;
 }
