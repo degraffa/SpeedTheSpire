@@ -308,9 +308,15 @@ enum class EventCombatVariant : uint8_t {
     LAGAVULIN_AWAKE = 1,
 };
 
+// `elite_trigger` carries AbstractRoom.eliteTrigger for the ONE Act-1 event that
+// sets it on its own EventRoom before fighting: DeadAdventurer.java:116. It
+// reaches CombatState as kCombatFlagEliteRoom (combat_state.hpp), which is what
+// makes Sling of Courage / Preserved Insect / Slaver's Collar fire on that
+// event combat exactly as they do in a MonsterRoomElite.
 [[nodiscard]] bool enter_event_combat(
     RunController& rc, std::string_view encounter_key,
-    EventCombatVariant variant = EventCombatVariant::NONE) noexcept;
+    EventCombatVariant variant = EventCombatVariant::NONE,
+    bool elite_trigger = false) noexcept;
 
 // --- RunActionMask -----------------------------------------------------------
 

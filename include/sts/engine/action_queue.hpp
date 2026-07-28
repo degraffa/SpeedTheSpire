@@ -114,18 +114,40 @@ inline constexpr int16_t kIroncladBaseEnergy = 3;
 //     the mirror returns the same number every turn of one combat, which is
 //     exactly what a `prep()` snapshot returns.
 //
-// The one Java writer that would break the equivalence is Slaver's Collar
-// (SlaversCollar.beforeEnergyPrep, SlaversCollar.java:46-57): a CONDITIONAL,
-// per-combat `++energyMaster` keyed on the room being elite/boss, undone by
-// onVictory only. That relic's row is deferred on a missing elite/boss room
-// marker in CombatState; when it lands, `energy_master` below is the single
-// place it attaches, and its owner must decide whether the "fled/lost combat
-// keeps the increment" quirk (onVictory does not fire) needs real storage. See
-// the Deferred obligations row in docs/stage-b-tasks.md.
+// SLAVER'S COLLAR, the eleventh writer, is DERIVED here too -- and the
+// derivation is EXACT, which took reading the escape path to establish.
+// SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) is a CONDITIONAL,
+// per-combat `++energyMaster` keyed on `eliteTrigger || any monster is
+// EnemyType.BOSS`, paired with an `onVictory` `--` guarded by the relic's
+// `pulse` (:59-65). `beginLongPulse` sets `pulse = true`
+// (AbstractRelic.java:849-852), so the pair is balanced on every combat whose
+// end runs AbstractRoom.endBattle -- and endBattle calls `player.onVictory()`
+// UNCONDITIONALLY (AbstractRoom.java:413-421), including on a Smoke Bomb
+// escape, whose only route out is updateEscapeAnimation ->
+// getCurrRoom().endBattle() (AbstractPlayer.java:2281-2292). The single path
+// that skips the `--` is AbstractPlayer.onVictory's `if (!this.isDying)` guard
+// (AbstractPlayer.java:1951-1964), i.e. player DEATH -- which ends the run, so
+// no later combat can observe the leak.
+//
+// The Deferred-obligations row (and the stage-2 seam note it carries) claimed
+// the increment leaks across a fled combat and that a derivation therefore
+// could not be faithful. That reading is WRONG at the Java, and correcting it
+// is what makes this row cost zero storage: no CombatState field, no
+// RunState/RunController carry, no SCHEMA_VERSION question. The delta between
+// combats is provably 0.
 
-// The player's energyMaster for this combat: kIroncladBaseEnergy plus one per
-// owned copy of each of the ten BOSS relics whose onEquip increments it.
+// The player's energyMaster for this combat: kIroncladBaseEnergy, plus one per
+// owned copy of each of the ten BOSS relics whose onEquip increments it, plus
+// one for a Slaver's Collar in an elite-or-boss encounter.
 [[nodiscard]] int16_t energy_master(const CombatState& state) noexcept;
+
+// SlaversCollar.beforeEnergyPrep's own condition, without the relic test:
+// `getCurrRoom().eliteTrigger` OR any monster with `type == EnemyType.BOSS`
+// (SlaversCollar.java:47-51). The elite half is kCombatFlagEliteRoom
+// (combat_state.hpp); the boss half reads the live `enemy_type` registry column
+// through MonsterDef::is_boss(), so no monster id is hard-coded. Exposed
+// because it is a two-source predicate worth testing directly.
+[[nodiscard]] bool combat_is_elite_or_boss(const CombatState& state) noexcept;
 
 // The player's gameHandSize for this combat: kStartOfTurnDrawCount plus 2 per
 // owned Snecko Eye (SneckoEye.java:29-32 writes masterHandSize, NOT

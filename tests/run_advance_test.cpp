@@ -523,6 +523,50 @@ const PowerSlot* monster_power_slot(const CombatState& s, uint8_t mi, PowerId id
     return nullptr;
 }
 
+// --- The elite-room marker's PRODUCER ---------------------------------------
+//
+// kCombatFlagEliteRoom (combat_state.hpp) is AbstractRoom.eliteTrigger. Only
+// MonsterRoomElite's ctor sets it among ROOM kinds (MonsterRoomElite.java:33);
+// MonsterRoomBoss does not (MonsterRoomBoss.java:22-24), and an ordinary
+// MonsterRoom never did. The consumers are Sling of Courage, Preserved Insect
+// and Slaver's Collar.
+TEST(RunCombatBattleStart, OnlyEliteRoomsMarkTheCombat) {
+    for (const RoomType kind : {RoomType::Monster, RoomType::Elite}) {
+        RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+        leave_neow(rc);
+        const uint8_t x = first_start_column(rc);
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(kind);
+        step(rc, make_action(ActionVerb::CHOOSE, x));
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+            << "room kind " << static_cast<int>(kind);
+        EXPECT_EQ(combat_is_elite_room(rc.combat.flags),
+                  kind == RoomType::Elite);
+    }
+}
+
+// End-to-end through the real run path: Sling of Courage's Strength 2 reaches
+// the live combat in an elite room and nowhere else (Sling.java:30-37).
+TEST(RunCombatBattleStart, SlingOfCourageReachesTheLiveEliteCombat) {
+    for (const RoomType kind : {RoomType::Monster, RoomType::Elite}) {
+        RunController rc = run_begin(find_jaw_worm_seed(), kA20);
+        set_run_relics(rc, {RelicId::SLING_OF_COURAGE});
+        leave_neow(rc);
+        const uint8_t x = first_start_column(rc);
+        rc.run.map[run_state_map_index(x, 0)].room_type =
+            static_cast<uint8_t>(kind);
+        step(rc, make_action(ActionVerb::CHOOSE, x));
+        ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
+        const PowerSlot* str = player_power(rc.combat, PowerId::STRENGTH);
+        if (kind == RoomType::Elite) {
+            ASSERT_NE(str, nullptr) << "no Strength in an elite room";
+            EXPECT_EQ(str->amount, 2);
+        } else {
+            EXPECT_EQ(str, nullptr) << "Strength granted outside an elite room";
+        }
+    }
+}
+
 // Control: with no battle-start relic the combat is untouched. Establishes the
 // baseline the ordering tests below are read against.
 TEST(RunCombatBattleStart, NoBattleStartRelicLeavesTheOpeningStateUntouched) {

@@ -717,6 +717,58 @@ TEST(RelicBossSpecial, GremlinMaskWeakensThePlayerAtBattleStart) {
 // The COMPLETE list of relics whose onEquip does
 // `++AbstractDungeon.player.energy.energyMaster`, from `grep -rn energyMaster
 // com/`. Ten of them, each +1, each with a matching onUnequip `--`.
+// Slaver's Collar -- the ELEVENTH energyMaster writer, and the only conditional
+// one. SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57): +1 when the
+// room's eliteTrigger is set OR any monster is EnemyType.BOSS.
+TEST(RelicBossSpecial, SlaversCollarAddsOneOnlyInAnEliteOrBossEncounter) {
+    // Ordinary monster room, no boss member: nothing.
+    {
+        CombatState s = MakeState();
+        give(s, RelicId::SLAVERS_COLLAR);
+        EXPECT_FALSE(combat_is_elite_or_boss(s));
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy);
+    }
+    // Elite room (kCombatFlagEliteRoom -- MonsterRoomElite.java:33, and the
+    // Dead Adventurer event, DeadAdventurer.java:116).
+    {
+        CombatState s = MakeState();
+        s.flags |= kCombatFlagEliteRoom;
+        give(s, RelicId::SLAVERS_COLLAR);
+        EXPECT_TRUE(combat_is_elite_or_boss(s));
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 1);
+    }
+    // A BOSS encounter does NOT set eliteTrigger (MonsterRoomBoss.java:22-24);
+    // the collar's own EnemyType.BOSS scan is what catches it, read off the live
+    // `enemy_type` registry column rather than a hard-coded id list.
+    {
+        CombatState s = MakeState();
+        s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::HEXAGHOST);
+        EXPECT_FALSE(combat_is_elite_room(s.flags));
+        give(s, RelicId::SLAVERS_COLLAR);
+        EXPECT_TRUE(combat_is_elite_or_boss(s));
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 1);
+    }
+    // Without the relic the same encounters are the base number -- the
+    // condition is the relic's, not the room's.
+    {
+        CombatState s = MakeState();
+        s.flags |= kCombatFlagEliteRoom;
+        EXPECT_EQ(energy_master(s), kIroncladBaseEnergy);
+    }
+}
+
+// It stacks with the unconditional ten rather than replacing them, and it is
+// per SLOT like every other term in the derivation.
+TEST(RelicBossSpecial, SlaversCollarStacksWithAnUnconditionalEnergyRelic) {
+    CombatState s = MakeState();
+    s.flags |= kCombatFlagEliteRoom;
+    Relics r;
+    r.add(RelicId::SLAVERS_COLLAR);
+    r.add(RelicId::SOZU);
+    install(s, r);
+    EXPECT_EQ(energy_master(s), kIroncladBaseEnergy + 2);
+}
+
 TEST(RelicBossSpecial, TenBossRelicsEachAddOneToTheEnergyMaster) {
     const RelicId plus_one[] = {
         RelicId::FUSION_HAMMER,      RelicId::VELVET_CHOKER,

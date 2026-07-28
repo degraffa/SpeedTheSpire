@@ -157,6 +157,40 @@ inline constexpr uint32_t kCombatFlagCentennialPuzzleUsed = 1u << 4;
 inline constexpr uint32_t kCombatFlagCombustHpLossShift = 8u;
 inline constexpr uint32_t kCombatFlagCombustHpLossMask = 0xFFu << kCombatFlagCombustHpLossShift;
 
+// CombatState.flags bit for the ROOM's `eliteTrigger` (AbstractRoom.java:99,
+// default false). It is per-ROOM state in the game and per-COMBAT here, which
+// is exact: a room hosts one combat and the flag is set before that combat is
+// constructed, never during it.
+//
+// The COMPLETE producer list, from `grep -rn eliteTrigger com/`:
+//   * MonsterRoomElite ctor          (MonsterRoomElite.java:33)
+//   * DeadAdventurer, an ACT-1 EVENT (DeadAdventurer.java:116) -- set on an
+//     EventRoom just before its combat, which is why the marker cannot be
+//     derived from RoomType alone and enter_combat takes it as an argument
+//   * Colosseum                      (Colosseum.java:75) -- Act 2, no S1 row
+// MonsterRoomBoss does NOT set it (MonsterRoomBoss.java:22-24 sets only
+// mapSymbol). A BOSS room is therefore NOT an elite room, and Sling of Courage
+// / Preserved Insect do NOT fire there -- see energy_master (action_queue.cpp)
+// for the one consumer that wants "elite OR boss" and builds it from this bit
+// plus the monsters' own EnemyType.
+//
+// The COMPLETE consumer list: Sling.atBattleStart (Sling.java:30-37),
+// PreservedInsect.atBattleStart (PreservedInsect.java:30-41),
+// SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57), and
+// AbstractCreature.java:371 -- a render-scale tweak with no state effect.
+//
+// Storage rationale is the Centennial Puzzle one directly above: bit 20 was
+// previously zero, so no offset, no sizeof and no SCHEMA_VERSION move, and
+// enter_combat's fresh `CombatState s{}` is the per-combat reset. A
+// standalone combat built by combat_begin (advance.cpp) has no room, so the
+// bit stays clear there -- the same answer the game gives for an
+// AbstractRoom whose ctor never set it.
+inline constexpr uint32_t kCombatFlagEliteRoom = 1u << 20;
+
+[[nodiscard]] inline bool combat_is_elite_room(uint32_t flags) noexcept {
+    return (flags & kCombatFlagEliteRoom) != 0u;
+}
+
 // kCardPoolCap == 160 fits in a uint8_t index (0..159 <= 255), so every pile
 // stores its members as uint8_t indices into card_pool.
 using CardPoolIndex = uint8_t;

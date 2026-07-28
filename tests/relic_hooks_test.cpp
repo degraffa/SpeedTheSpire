@@ -451,6 +451,55 @@ TEST(RelicHooks, LanternGrantsEnergyOnFirstTurnOnly) {
     EXPECT_EQ(s.action_count, 0);
 }
 
+// --- Preserved Insect -------------------------------------------------------
+
+// PreservedInsect.atBattleStart (PreservedInsect.java:30-41): in an ELITE room
+// only, clamp each monster's CURRENT health down to (int)((float)maxHealth *
+// 0.75f). maxHealth is untouched, and the clamp never raises health.
+TEST(RelicHooks, PreservedInsectClampsEliteMonsterHealthToThreeQuarters) {
+    CombatState s = MakeState(/*monster_count=*/2, /*monster_hp=*/50);
+    s.flags |= kCombatFlagEliteRoom;
+    // A monster already BELOW the threshold is left exactly where it is: the
+    // Java `continue` makes the clamp one-directional.
+    s.monsters[1].hp = 10;
+    Relics r; r.add(RelicId::PRESERVED_INSECT, -1);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.action_count, 0) << "the clamp is synchronous, not queued";
+    EXPECT_EQ(s.monsters[0].hp, 37) << "(int)(50.0f * 0.75f) == 37";
+    EXPECT_EQ(s.monsters[0].max_hp, 50) << "maxHealth is never scaled";
+    EXPECT_EQ(s.monsters[1].hp, 10);
+    EXPECT_EQ(s.monsters[1].max_hp, 50);
+}
+
+// The float product is a C-style truncation of `(float)maxHealth * 0.75f`, not
+// MathUtils.floor and not the integer maxHealth * 3 / 4. 90 -> 67.5f -> 67 is
+// the worked case (an A20 Gremlin Nob); the two formulations happen to agree
+// there, so the odd-multiple cases are pinned alongside it.
+TEST(RelicHooks, PreservedInsectUsesTheGamesFloatTruncation) {
+    const struct { int16_t max_hp; int16_t want; } cases[] = {
+        {90, 67}, {85, 63}, {1, 0}, {3, 2}, {7, 5},
+    };
+    for (const auto& c : cases) {
+        CombatState s = MakeState(/*monster_count=*/1, c.max_hp);
+        s.flags |= kCombatFlagEliteRoom;
+        Relics r; r.add(RelicId::PRESERVED_INSECT, -1);
+        dispatch_relics_at_battle_start(s, r.slots, r.count);
+        EXPECT_EQ(s.monsters[0].hp, c.want) << "max_hp " << c.max_hp;
+    }
+}
+
+// A BOSS room does not set eliteTrigger (MonsterRoomBoss.java:22-24), so the
+// flag is clear and this relic does nothing -- the same answer an ordinary
+// monster room gives.
+TEST(RelicHooks, PreservedInsectLeavesNonEliteMonstersAlone) {
+    CombatState s = MakeState(/*monster_count=*/2, /*monster_hp=*/50);
+    Relics r; r.add(RelicId::PRESERVED_INSECT, -1);
+    dispatch_relics_at_battle_start(s, r.slots, r.count);
+    EXPECT_EQ(s.monsters[0].hp, 50);
+    EXPECT_EQ(s.monsters[1].hp, 50);
+    EXPECT_EQ(s.action_count, 0);
+}
+
 // --- Non-combat / deferred relics dispatch nothing ---------------------------
 
 TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {
@@ -459,6 +508,7 @@ TEST(RelicHooks, NonCombatAndDeferredRelicsAreNoOps) {
     r.add(RelicId::WHETSTONE);        // equip-time, no combat hook
     r.add(RelicId::AKABEKO);          // Vigor apply DEFERRED (Vigor power row is later)
     r.add(RelicId::BOOT);             // damage-pipeline DEFERRED
+    r.add(RelicId::PRESERVED_INSECT); // live, but only in an elite room (flag clear here)
     dispatch_relics_at_battle_start(s, r.slots, r.count);
     dispatch_relics_on_victory(s, r.slots, r.count);
     EXPECT_EQ(s.action_count, 0);

@@ -188,12 +188,14 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 // --- DEFERRED combat bodies --------------------------------------------------
 //
-// These six commons are registered `native: true` with their hook
-// inventory (so the row, the pool accounting and the acquisition-order wiring
-// are all in place) but have NO combat body. Five are genuinely DEFERRED, each
-// needing something the engine does not model; the sixth (Toy Ornithopter) is
-// live on the run-level potion route instead. They are DELIBERATELY EMPTY
-// definitions, not omissions.
+// The commons below are registered `native: true` with their hook inventory (so
+// the row, the pool accounting and the acquisition-order wiring are all in
+// place) but have NO combat body. Toy Ornithopter is live on the run-level
+// potion route instead; anything else still here is genuinely DEFERRED and says
+// why. They are DELIBERATELY EMPTY definitions, not omissions.
+//
+// Bodies that have LEFT this block keep their implementation where the empty
+// definition stood, so the citation and the code stay together.
 //
 // Why a definition at all: the dispatch table is generated from
 // registry/relics.yaml (STS_REGISTRY_NATIVE_RELICS, expanded in relic_hooks.cpp)
@@ -244,16 +246,48 @@ void relic_native_boot(CombatState& /*s*/, RelicHook /*hook*/,
                        RelicSlot& /*slot*/,
                        const RelicHookContext& /*ctx*/) noexcept {}
 
-// PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an ELITE
-// room, set every monster's HP to 75%. DEFERRED: a relic hook is handed only a
-// CombatState, and CombatState carries no room kind -- so the body cannot tell
-// an elite fight from an ordinary one. (Elite ROOMS do exist: RunController
-// tracks room_type, and run_advance.cpp enters elite combats. Discharging this
-// needs that fact plumbed into the combat hook, plus a monster-HP scaling
-// opcode.)
-void relic_native_preserved_insect(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_preserved_insect(CombatState& s, RelicHook hook,
                                    RelicSlot& /*slot*/,
-                                   const RelicHookContext& /*ctx*/) noexcept {}
+                                   const RelicHookContext& /*ctx*/) noexcept {
+    // PreservedInsect.atBattleStart (PreservedInsect.java:30-41):
+    //     if (getCurrRoom().eliteTrigger) {
+    //         flash();
+    //         for (m : getCurrRoom().monsters.monsters) {
+    //             if (m.currentHealth <= (int)((float)m.maxHealth * (1.0f - 0.25f))) continue;
+    //             m.currentHealth = (int)((float)m.maxHealth * (1.0f - 0.25f));
+    //             m.healthBarUpdatedEvent();
+    //         }
+    //         addToTop(RelicAboveCreatureAction(player, this));  -- cosmetic
+    //     }
+    //
+    // This is a CURRENT-health CLAMP, not an HP-init change: maxHealth is
+    // untouched, so every max-HP-relative gate downstream (the large slimes'
+    // split at maxHealth/2, Lagavulin's wake, health-bar denominators) still
+    // reads the UNSCALED max. It also never RAISES health -- the `continue`
+    // makes it one-directional.
+    //
+    // FLOAT EXACTNESS: the Java is a C-style truncation of a float product,
+    // `(int)((float)maxHealth * 0.75f)`, not MathUtils.floor and not the integer
+    // `maxHealth * 3 / 4`. Written the same way here so the two agree bit for
+    // bit at every maxHealth (MODIFIER_AMT = 0.25f, PreservedInsect.java:19;
+    // 1.0f - 0.25f is exact in binary, so the constant folds to 0.75f).
+    //
+    // Applied ONCE, at battle start: monsters spawned later (slime splits) are
+    // not scaled, which is the Java's shape -- the loop runs in atBattleStart
+    // and nowhere else.
+    if (hook != RelicHook::AT_BATTLE_START || !combat_is_elite_room(s.flags)) {
+        return;
+    }
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        MonsterState& m = s.monsters[i];
+        const int32_t capped = static_cast<int32_t>(
+            static_cast<float>(m.max_hp) * (1.0f - 0.25f));
+        if (m.hp <= capped) {
+            continue;
+        }
+        m.hp = static_cast<int16_t>(capped);
+    }
+}
 
 // Toy Ornithopter -- heal 5 on potion use. NOT deferred and NOT missing: it is
 // LIVE, dispatched on the RunState-owned potion route

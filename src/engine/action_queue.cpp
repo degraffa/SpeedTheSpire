@@ -18,6 +18,7 @@
 #include "sts/engine/power_hooks.hpp"  // start/end-of-turn power dispatch
 #include "sts/engine/relic_hooks.hpp"  // start/end-of-turn relic dispatch
 #include "sts/registry/manifest.hpp"   // generated kRelicsCount
+#include "sts/registry/monster_table.hpp"  // monster_def, MonsterDef::is_boss
 
 namespace sts::engine {
 
@@ -29,11 +30,31 @@ static_assert(kOpcodeDrawCard == static_cast<uint16_t>(Opcode::DRAW),
 
 // --- energyMaster / masterHandSize (see the derivation note in the header) ---
 
+bool combat_is_elite_or_boss(const CombatState& s) noexcept {
+    // SlaversCollar.beforeEnergyPrep (SlaversCollar.java:47-51):
+    //     boolean isEliteOrBoss = getCurrRoom().eliteTrigger;
+    //     for (m : getMonsters().monsters) if (m.type == EnemyType.BOSS) isEliteOrBoss = true;
+    // The loop has no liveness gate -- it walks the whole monster GROUP, and it
+    // runs in preBattlePrep, before anything can have died anyway.
+    if (combat_is_elite_room(s.flags)) {
+        return true;
+    }
+    for (uint8_t i = 0; i < s.monster_count; ++i) {
+        const auto* def = sts::registry::monster_def(
+            static_cast<MonsterId>(s.monsters[i].monster_id));
+        if (def != nullptr && def->is_boss()) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int16_t energy_master(const CombatState& s) noexcept {
     // The COMPLETE set of energyMaster writers in the game, from
     // `grep -rn energyMaster com/`: these ten relics' onEquip (one `++` each,
-    // one matching `--` in onUnequip), SlaversCollar.beforeEnergyPrep (deferred
-    // -- see the header note), and VoidEssence, an Act-4 blight with no S1 row.
+    // one matching `--` in onUnequip), SlaversCollar.beforeEnergyPrep (the
+    // conditional per-combat `++` handled below), and VoidEssence, an Act-4
+    // blight with no S1 row.
     //
     // This is a deliberate SUBSET switch over the relic table, so it carries a
     // row-count pin rather than the link-error property the generated dispatch
@@ -41,8 +62,8 @@ int16_t energy_master(const CombatState& s) noexcept {
     static_assert(sts::registry::manifest::kRelicsCount == 142,
                   "new relic: does its onEquip touch "
                   "AbstractDungeon.player.energy.energyMaster? Only the ten "
-                  "listed below do today (plus Slaver's Collar, conditionally, "
-                  "whose row is deferred). If the new one does, it belongs in "
+                  "listed below do today, plus Slaver's Collar's conditional "
+                  "per-combat increment. If the new one does, it belongs in "
                   "this switch.");
     int32_t master = kIroncladBaseEnergy;
     // Per SLOT, not per distinct id: the Java increment is per relic instance,
@@ -60,6 +81,22 @@ int16_t energy_master(const CombatState& s) noexcept {
             case RelicId::COFFEE_DRIPPER:       // CoffeeDripper.java:47-49
             case RelicId::MARK_OF_PAIN:         // MarkOfPain.java:38-40
                 ++master;
+                break;
+            case RelicId::SLAVERS_COLLAR:
+                // SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57),
+                // called BY NAME from AbstractPlayer.preBattlePrep
+                // (AbstractPlayer.java:1589-1590) -- between
+                // drawPile.initializeDeck (:1583) and energy.prep() (:1591), so
+                // the increment is in force for the whole combat including its
+                // first recharge. Not an atPreBattle hook, and deliberately not
+                // modelled as one.
+                //
+                // Balanced against onVictory by construction rather than by
+                // stored state -- the derivation note in action_queue.hpp spells
+                // out why the delta between combats is provably 0.
+                if (combat_is_elite_or_boss(s)) {
+                    ++master;
+                }
                 break;
             default:
                 break;

@@ -246,6 +246,12 @@ TEST(DeadAdventurer, FailedSearchSeedsRewardsThenEntersEventCombat) {
     EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Event));
     EXPECT_EQ(rc.combat.monsters[0].monster_id,
               static_cast<uint16_t>(MonsterId::GREMLIN_NOB));
+    // DeadAdventurer.java:116 sets getCurrRoom().eliteTrigger in the same branch
+    // that installs the encounter -- the only Act-1 producer of the flag outside
+    // MonsterRoomElite. The room stays an EventRoom; the ELITE marker rides
+    // alongside it, which is what makes Sling of Courage / Preserved Insect /
+    // Slaver's Collar fire on this fight.
+    EXPECT_TRUE(combat_is_elite_room(rc.combat.flags));
     ASSERT_EQ(rc.rewards.count, 2);
     EXPECT_EQ(rc.rewards.items[0].kind,
               static_cast<uint8_t>(RewardItemKind::GOLD));

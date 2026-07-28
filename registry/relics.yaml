@@ -405,10 +405,10 @@
   pool_order: 12
   native: true
   hooks:
-    at_battle_start: []       # elite HP -25% (DEFERRED: needs elite-room context + monster HP scaling)
+    at_battle_start: []       # elite rooms only: clamp each monster's CURRENT hp to (int)(max * 0.75f)
   pickup:
     can_spawn: true
-  provenance: "PreservedInsect.atBattleStart (PreservedInsect.java:31-39) -- in an elite room set each monster HP to 75%. Needs room-type context + a monster-HP scale op; native body deferred."
+  provenance: "PreservedInsect.atBattleStart (PreservedInsect.java:30-41) -- if getCurrRoom().eliteTrigger, then for every monster in the group: `if (m.currentHealth <= (int)((float)m.maxHealth * (1.0f - 0.25f))) continue; m.currentHealth = (int)((float)m.maxHealth * (1.0f - 0.25f));` (MODIFIER_AMT = 0.25f, :19). LIVE, via kCombatFlagEliteRoom (combat_state.hpp). It is a CURRENT-health clamp, not an HP-init change: maxHealth is untouched, so split thresholds and every max-HP-relative gate still read the unscaled max, and monsters spawned later are never scaled. The float product is written as the Java writes it -- a C-style truncation of `(float)maxHealth * 0.75f`, not maxHealth * 3 / 4. Native body in relics/relics_common.cpp."
 
 - id: 28
   name: REGAL_PILLOW
@@ -1081,8 +1081,8 @@
   pool_order: 0
   native: true
   hooks:
-    at_battle_start: []       # DEFERRED body: needs the room's eliteTrigger flag
-  provenance: "Sling.atBattleStart (Sling.java:1030-1038) -- if getCurrRoom().eliteTrigger: addToTop ApplyPowerAction(player, player, StrengthPower 2). DEFERRED: eliteTrigger is per-ROOM state the run layer sets when an elite encounter begins, and CombatState carries no elite marker; producing one is a run-layer change. Explicit empty native body (relics/relics_shop.cpp) so the deferral sits where the implementation will go."
+    at_battle_start: []       # elite rooms only: Strength 2
+  provenance: "Sling.atBattleStart (Sling.java:30-37 -- the file is 44 lines; this row and ledger row 74 previously cited :1030-1038, off by exactly 1000): if getCurrRoom().eliteTrigger, addToTop ApplyPowerAction(player, player, StrengthPower(player, 2), 2) plus a cosmetic RelicAboveCreatureAction. LIVE: the room's eliteTrigger reaches the combat as kCombatFlagEliteRoom (combat_state.hpp), set by enter_combat for RoomType::Elite and by the Dead Adventurer event (DeadAdventurer.java:116). BOSS-EXCLUDING -- MonsterRoomBoss never sets eliteTrigger (MonsterRoomBoss.java:22-24) -- so this relic is NOT a twin of Slaver's Collar, which ORs an EnemyType.BOSS scan on top of the same flag. Native body in relics/relics_shop.cpp."
 
 - id: 95
   name: HAND_DRILL
@@ -1306,7 +1306,7 @@
   game_id: "SlaversCollar"
   tier: BOSS
   pool_order: 3
-  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called by name from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1591): if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, ++energyMaster and begin the pulse; onVictory undoes it while pulsing (:59-65). DEFERRED for the same reason as Sling of Courage: eliteTrigger is per-ROOM state and CombatState carries no elite/boss marker. The attach point is energy_master (action_queue.cpp), where the other ten energyMaster relics are read; note that onVictory fires only on VICTORY, so in the game a fled or lost combat carries the increment forward -- a pure derivation cannot express that and a combat-scoped store can. Row, pool slot and relicRng draw are live."
+  provenance: "SlaversCollar.beforeEnergyPrep (SlaversCollar.java:46-57) -- called BY NAME from AbstractPlayer.preBattlePrep (AbstractPlayer.java:1589-1590), between drawPile.initializeDeck (:1583) and energy.prep() (:1591), so it is not an atPreBattle hook and is not modelled as one: if the room's eliteTrigger is set OR any monster is EnemyType.BOSS, beginLongPulse + ++energyMaster; onVictory undoes it while pulsing (:59-65). LIVE and DERIVED, inside energy_master (action_queue.cpp) beside the other ten energyMaster relics, from kCombatFlagEliteRoom plus a MonsterDef::is_boss() scan of the group. NO stored state, and the derivation is exact rather than approximate: beginLongPulse sets pulse = true (AbstractRelic.java:849-852) and AbstractRoom.endBattle calls player.onVictory() unconditionally (AbstractRoom.java:413-421) -- including on a Smoke Bomb escape, whose only exit is updateEscapeAnimation -> endBattle (AbstractPlayer.java:2281-2292) -- so the ++/-- pair balances on every combat end except player death, which ends the run. This stays a pure MARKER row: no native body and no hook bindings, exactly as MarkerRowsCarryNoCombatHooks asserts."
 
 - id: 116
   name: SNECKO_EYE

@@ -1227,18 +1227,13 @@ TEST(RelicRaresShop, NoShopRelicGatesItsOwnSpawn) {
 // first rather than changing behaviour nobody was watching.
 // ============================================================================
 
-// Dead Branch and Gambling Chip carry explicit EMPTY native bodies (the
-// all-red combat card pool and an optional multi-select screen respectively).
-// Sling of Courage is empty for want of an elite-room marker on CombatState;
-// Orange Pellets for want of a remove-all-debuffs action.
+// Gambling Chip carries an explicit EMPTY native body (an optional
+// multi-select screen). Dead Branch, Sling of Courage and Orange Pellets have
+// LEFT this list -- see their own tests below.
 TEST(RelicRaresShop, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
     struct Case { RelicId id; RelicHook hook; };
     const Case cases[] = {
-        {RelicId::DEAD_BRANCH, RelicHook::ON_EXHAUST},
         {RelicId::GAMBLING_CHIP, RelicHook::AT_TURN_START_POST_DRAW},
-        {RelicId::SLING_OF_COURAGE, RelicHook::AT_BATTLE_START},
-        {RelicId::ORANGE_PELLETS, RelicHook::AT_TURN_START},
-        {RelicId::ORANGE_PELLETS, RelicHook::ON_USE_CARD},
     };
     for (const Case& c : cases) {
         CombatState s = MakeState();
@@ -1253,6 +1248,46 @@ TEST(RelicRaresShop, DeferredNativeBodiesQueueNothingAndTouchNoRng) {
         EXPECT_EQ(s.player_hp, 70);
         EXPECT_EQ(s.card_random_rng.counter, before.counter);
         EXPECT_EQ(rv.relics[0].counter, -1) << "and mutates no counter";
+    }
+}
+
+// Sling of Courage: Strength 2 at battle start, ELITE ROOMS ONLY
+// (Sling.java:30-37). The marker is kCombatFlagEliteRoom; a boss room does NOT
+// set it (MonsterRoomBoss.java:22-24), which is the whole reason this relic and
+// Slaver's Collar are not twins.
+TEST(RelicRaresShop, SlingOfCourageGrantsStrengthOnlyInAnEliteRoom) {
+    {
+        CombatState s = MakeState();
+        s.flags |= kCombatFlagEliteRoom;
+        const RelicView rv = give(s, RelicId::SLING_OF_COURAGE);
+        RelicHookContext ctx{};
+        dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::AT_BATTLE_START,
+                            ctx);
+        ASSERT_EQ(s.action_count, 1);
+        const ActionQueueItem it = queued(s, 0);
+        EXPECT_EQ(it.opcode, kOp(Opcode::APPLY_POWER));
+        EXPECT_EQ(it.src, kActorPlayer);
+        EXPECT_EQ(it.tgt, kActorPlayer);
+        EXPECT_EQ(it.amount, 2);
+        EXPECT_EQ(it.flags, make_apply_power_flags(PowerId::STRENGTH));
+        drain(s);
+        ASSERT_EQ(s.player_power_count, 1);
+        EXPECT_EQ(s.player_powers[0].power_id,
+                  static_cast<uint16_t>(PowerId::STRENGTH));
+        EXPECT_EQ(s.player_powers[0].amount, 2);
+        // The counter is never touched (Sling.counter stays AbstractRelic's -1).
+        EXPECT_EQ(rv.relics[0].counter, -1);
+    }
+    {
+        // A non-elite combat -- which is also what a BOSS room looks like to the
+        // flag -- queues nothing at all.
+        CombatState s = MakeState();
+        const RelicView rv = give(s, RelicId::SLING_OF_COURAGE);
+        RelicHookContext ctx{};
+        dispatch_relic_hook(s, rv.relics, rv.count, RelicHook::AT_BATTLE_START,
+                            ctx);
+        EXPECT_EQ(s.action_count, 0);
+        EXPECT_EQ(s.player_power_count, 0);
     }
 }
 

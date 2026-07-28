@@ -109,17 +109,38 @@ void relic_native_orange_pellets(CombatState& /*s*/, RelicHook /*hook*/,
     // honest no-op.
 }
 
-void relic_native_sling_of_courage(CombatState& /*s*/, RelicHook /*hook*/,
+void relic_native_sling_of_courage(CombatState& s, RelicHook hook,
                                    RelicSlot& /*slot*/,
                                    const RelicHookContext& /*ctx*/) noexcept {
-    // Sling.atBattleStart (Sling.java:1030-1038): if getCurrRoom().eliteTrigger,
-    // addToTop ApplyPowerAction(player, player, StrengthPower 2).
+    // Sling.atBattleStart (Sling.java:30-37 -- the ledger's :1030-1038 was off by
+    // exactly 1000; the file is 44 lines):
+    //     if (AbstractDungeon.getCurrRoom().eliteTrigger) {
+    //         flash();
+    //         addToTop(ApplyPowerAction(player, player, StrengthPower(player, 2), 2));
+    //         addToTop(RelicAboveCreatureAction(player, this));   -- cosmetic
+    //     }
     //
-    // DEFERRED: eliteTrigger is per-ROOM state the run layer sets when an elite
-    // encounter begins, and CombatState carries no elite marker at all. The gap
-    // is a producer, not a consumer: the body below is one queue_self_power_top
-    // call the moment a combat can answer "did this encounter come from an elite
-    // room?".
+    // eliteTrigger is a BOSS-EXCLUDING test: MonsterRoomBoss never sets the field
+    // (MonsterRoomBoss.java:22-24), so this relic does NOT fire on the Act-1 boss.
+    // Sling and Slaver's Collar are therefore NOT twins -- the collar ORs an
+    // EnemyType.BOSS scan on top (SlaversCollar.java:47-51) and this does not.
+    //
+    // The two addToTop pushes reverse, leaving the cosmetic
+    // RelicAboveCreatureAction in front of the ApplyPowerAction; with the cosmetic
+    // dropped, one add_to_top is the whole body. atBattleStart is dispatched after
+    // this engine's turn-1 pump (run_advance.cpp step 10), so the Strength lands
+    // before control returns to the player -- state-equivalent, because nothing
+    // reads Strength between the opening draw and the first card play.
+    if (hook != RelicHook::AT_BATTLE_START || !combat_is_elite_room(s.flags)) {
+        return;
+    }
+    ActionQueueItem gain{};
+    gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    gain.src = kActorPlayer;
+    gain.tgt = kActorPlayer;
+    gain.amount = 2;
+    gain.flags = make_apply_power_flags(PowerId::STRENGTH);
+    add_to_top(s, gain);  // addToTop (Sling.java:34)
 }
 
 }  // namespace sts::engine

@@ -446,13 +446,26 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
 // ROOM_UNIMPLEMENTED (unknown encounter / a member monster not yet implemented).
 // The five floor streams are re-derived here (identical to the caller's reseed) so
 // the build is a pure function of (run, floor, encounter).
+//
+// `elite_trigger` is AbstractRoom.eliteTrigger for an encounter whose ROOM KIND
+// does not imply it: the Act-1 Dead Adventurer sets it on an EventRoom
+// (DeadAdventurer.java:116). RoomType::Elite implies it on its own
+// (MonsterRoomElite.java:33); RoomType::Boss deliberately does NOT
+// (MonsterRoomBoss.java:22-24 never touches the field).
 bool enter_combat(RunController& rc, std::string_view enc_key,
                   RoomType room, bool preserve_floor_streams = false,
-                  EventCombatVariant variant = EventCombatVariant::NONE) noexcept {
+                  EventCombatVariant variant = EventCombatVariant::NONE,
+                  bool elite_trigger = false) noexcept {
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
 
     CombatState s{};                              // value-init: byte-clean scratch
+    // The room's eliteTrigger, set before ANY consumer runs: energy_master
+    // (Slaver's Collar) is read by begin_first_turn's recharge line at step (9),
+    // and Sling / Preserved Insect read the bit from atBattleStart at step (10).
+    if (room == RoomType::Elite || elite_trigger) {
+        s.flags |= kCombatFlagEliteRoom;
+    }
     if (preserve_floor_streams) {
         s.monster_hp_rng = rc.combat.monster_hp_rng;
         s.ai_rng = rc.combat.ai_rng;
@@ -869,12 +882,12 @@ void fill_run_result(const RunController& rc, StepResult& r) noexcept {
 }  // namespace
 
 bool enter_event_combat(RunController& rc, std::string_view encounter_key,
-                        EventCombatVariant variant) noexcept {
+                        EventCombatVariant variant, bool elite_trigger) noexcept {
     // AbstractEvent.enterCombat keeps the EventRoom object alive. Preserve the
     // constructor/buttonEffect draws already consumed from the five floor
     // streams, and retain RoomType::Event so leaving never pops monsterList.
     return enter_combat(rc, encounter_key, RoomType::Event,
-                        /*preserve_floor_streams=*/true, variant);
+                        /*preserve_floor_streams=*/true, variant, elite_trigger);
 }
 
 // --- next_room_transition ----------------------------------------------------
