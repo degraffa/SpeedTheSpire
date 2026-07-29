@@ -26,7 +26,7 @@
     "scope": "registry/cards.yaml is S1 only (Ironclad + colorless + curses/statuses). A card the live game offers that is absent here scores as zero-damage cheap utility; the driver never raises on an unknown id.",
     "source": "registry/cards.yaml",
     "source_rows": 127,
-    "source_sha256": "56F55F9429497415AE0CFB1C3319B98F3167E9275486C1E133D36B779FDE7AD0"
+    "source_sha256": "12A6686F88B8BC26CF62602A55E5CE5DBBECE9CD9B2C290548E7E010652DD10E"
   },
   "cards": {
     "Anger": {
