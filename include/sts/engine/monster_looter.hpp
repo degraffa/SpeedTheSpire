@@ -72,8 +72,11 @@
 //     (addStolenGoldToRewards, :170-172, BEFORE super.die()'s power/relic
 //     walks); ESCAPED -- hp > 0 + kMonsterFlagEscaped + kCombatFlagMugged, the
 //     gold is gone. Both are reads on the surviving record (looter_stolen_gold
-//     below); the reward screen that consumes them does not exist yet and
-//     belongs to the combat-rewards layer.
+//     below), and the consumer EXISTS (this line used to say it did not):
+//     run_advance.cpp settle_stolen_gold computes the dead thieves' clamped
+//     return and seed_combat_rewards presents it as the STOLEN_GOLD reward
+//     item (combat_rewards.cpp), with no Golden Idol bonus on the theft
+//     branch.
 //
 // (4) NO damage() OVERRIDE, NO ROLL-MOVE FN, NO SPAWN PATH. Looter.java
 //     declares usePreBattleAction, takeTurn, playSfx, playDeathSfx, die and

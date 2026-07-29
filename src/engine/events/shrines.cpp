@@ -93,9 +93,14 @@ using sts::registry::event_card_rarity;
 // IN PLACE, so the new order persists into the next reader of that same list.
 // This port shuffles a local copy. Nothing in Act 1 observes the persisted
 // order -- transformCard's COLORLESS branch reads the untouched
-// srcColorlessCardPool (AbstractDungeon.java:998-1014), and the only other
-// consumer is the shop's two colorless slots, which do not exist yet; the
-// ledger's Deferred obligations table carries it for whoever builds them.
+// srcColorlessCardPool (AbstractDungeon.java:998-1014), and the shop's two
+// colorless slots (which EXIST now, shop.cpp -- this comment used to say
+// they did not) are NOT an observer either:
+// getColorlessCardFromPool reaches CardGroup.getRandomCard(true, rarity)
+// (CardGroup.java:509-524), which filters into a local tmp and
+// Collections.sort()s it before indexing, discarding the source order on
+// every read. The ledger's Deferred obligations row stays open only against
+// a future reader of the UNSORTED whole-pool view.
 //
 // THE INPUT ORDER IS LOAD-BEARING and it is the LIVE pool's, not the `src*`
 // twin's. `addColorlessCards` fills `colorlessCardPool` with `addToTop`, which

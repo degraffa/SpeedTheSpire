@@ -173,9 +173,10 @@ struct RunState {
 
     // Remaining event/shrine/special POOL-membership bitsets (§2.5 #7): bit set
     // == that entry is still in the draw pool (cleared on use). Bit index =
-    // position in the act's canonical init list; that list is defined by the
-    // event registry, which does not exist yet and which will also populate
-    // these. Widths cover the
+    // position in the act's canonical init list, defined by the event registry
+    // (registry/events.yaml -- it EXISTS; this comment used to predate it):
+    // event_framework.cpp populates these at init and clears bits as entries
+    // are drawn/used. Widths cover the
     // Act-1 lists (11 events / 6 shrines / 14 specials). These are the "remaining
     // pool" view; event_flags above stays the one-shot "already fired" view.
     uint16_t event_membership;
