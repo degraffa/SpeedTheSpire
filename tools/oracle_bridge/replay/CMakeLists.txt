@@ -56,3 +56,11 @@ target_link_libraries(replay_run_diff
 add_dependencies(replay_run_diff registry_gen_headers)
 sts_set_warnings(replay_run_diff)
 sts_enable_sanitizers(replay_run_diff)
+
+# B5.2: compare the fork's raw encounter-list oracle against the identical
+# run_begin(seed, A20) construction, including the final monsterRng state.
+add_executable(encounter_list_oracle src/encounter_list_oracle.cpp)
+target_link_libraries(encounter_list_oracle PRIVATE sts_engine nlohmann_json)
+add_dependencies(encounter_list_oracle registry_gen_headers)
+sts_set_warnings(encounter_list_oracle)
+sts_enable_sanitizers(encounter_list_oracle)

@@ -221,6 +221,16 @@ public class GameStateConverter {
         oracle.put("shrineList", new ArrayList<Object>(AbstractDungeon.shrineList));
         oracle.put("specialOneTimeEventList", new ArrayList<Object>(AbstractDungeon.specialOneTimeEventList));
 
+        // B5.2 -- the raw encounter walk orders generated at run start. These
+        // are public AbstractDungeon lists (AbstractDungeon.java:178-180);
+        // normal/elite entries are removed from the front as rooms settle
+        // (:1694-1707), while bossList is the shuffled act-boss order.
+        HashMap<String, Object> encounterLists = new HashMap<>();
+        encounterLists.put("monster", new ArrayList<Object>(AbstractDungeon.monsterList));
+        encounterLists.put("elite", new ArrayList<Object>(AbstractDungeon.eliteMonsterList));
+        encounterLists.put("boss", new ArrayList<Object>(AbstractDungeon.bossList));
+        oracle.put("encounterLists", encounterLists);
+
         // Row 8 -- the 5 relic pool orders (shuffled once at init via 5
         // relicRng.randomLong() draws, then popped front-for-rewards /
         // end-for-shop; AbstractDungeon.java:1221-1256).

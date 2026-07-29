@@ -441,6 +441,11 @@ add_test(
     COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_oracle_campaign.py)
 set_tests_properties(oracle_campaign_python_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+add_test(
+    NAME oracle_campaign_pipeline_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_campaign_pipeline.py)
+set_tests_properties(oracle_campaign_pipeline_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
 
 # The replay harness's screen-relative command mapping
 # (tools/oracle_bridge/replay/src/command_map.hpp). A wrong entry in that table

@@ -447,6 +447,18 @@ def expand_legal_actions(state: dict, rng: random.Random) -> list:
         actions.append("proceed")
     for alias in ("skip", "cancel", "return", "leave"):
         if alias in avail:
+            # B5.2 live campaign trap: after a GRID selection, the game
+            # advertises confirm + cancel, but cancel only clears the selected
+            # card and never re-arms ready_for_command. Stepper must then wait
+            # its full watchdog, probe, and select again. This made a
+            # random-legal run alternate forever until max_noops. Once the
+            # GRID's own confirm_up says the pick is committable, proceeding is
+            # the only progress action. Keep cancel everywhere else, including
+            # HAND_SELECT and an unconfirmed GRID.
+            if alias == "cancel" and gs.get("screen_type") == "GRID" and \
+                    (gs.get("screen_state") or {}).get("confirm_up") and \
+                    any(a in avail for a in ("confirm", "proceed")):
+                continue
             actions.append(alias)
             break
 

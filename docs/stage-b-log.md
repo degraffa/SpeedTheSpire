@@ -5442,3 +5442,85 @@ NoteForYourself's NOTE_CARD/NOTE_UPGRADE profile pin was discharged
 separately by direct reference-profile inspection (no `NOTE_*` key in any
 preferences file; the event is unreachable at A20 in both game and sim) —
 recorded in the ledger's Landed non-task work.
+
+---
+
+<a id="b52"></a>
+### B5.2 `[x]` ∥ Oracle campaign automation
+**Deps:** B1.4, B4.4 · **Spec:** design §7.1-7.3
+**Deliverables:** campaign orchestration (seed sharding, nightly schedule,
+resume, artifact root fixed per §7.3, translation + diffing pipeline run as
+one command); triage queue (divergence → reproducer → this ledger/change-log
+workflow); promoted-reproducer corpus layout.
+**Acceptance:** one unattended overnight campaign (≥ 50 seeds) runs
+end-to-end (game → JSONL → traces → diff reports) without intervention;
+throughput and diff counts land in a generated report.
+**Inherited:** triage the `b14_accept2` obtain-race capture-fidelity gap —
+deferred by B1.3 (B1.4's acceptance is unaffected).
+**Log:** `campaign_pipeline.py` is the one-command Windows entry point over
+the fixed `D:\STS_BG_Mod\_oracle_data\campaigns` root. It generates or reads
+deterministic seed lists, shards by stable seed position, resumes only after
+checking campaign/policy/script identity, owns the game through an OS-backed
+nonblocking singleton lock, drives `campaign_driver.py`, crosses into WSL only
+through `tools/wsl_run.cmd`, then strict-validates, translates, replays,
+compares raw encounter lists and writes JSON + Markdown reports. Separate
+`nightly`/`schedule` commands create short stable Task Scheduler actions under
+the fixed external schedule root; the long seed/config payload stays in a
+JSON file rather than exceeding Task Scheduler's action limit. Script policies
+bind both path and SHA-256 into resume identity. Exit 11 names the current
+campaign/PID when the singleton is busy; the OS releases the lock after a
+crash.
+
+- **Independent acceptance:** from Windows,
+  `C:\Python39\python.exe
+  tools\oracle_bridge\driver\campaign_pipeline.py run --campaign-id
+  b52_accept_locked_20260729_71000_71049 --seeds
+  D:\STS_BG_Mod\_oracle_data\b52_50_seeds_clean.txt --policy random-legal
+  --campaign-timeout 57600` ran unattended end-to-end. Exactly **50/50 seeds**
+  (`STS71000`–`STS71049`) completed, **0 failed**, in **one game launch**;
+  **2,740 captured actions**, 163.734 active seconds, **16.734 actions/s**.
+  Strict validation and translation passed 50/50. Whole-run replay classified
+  **40 clean / 5 replay-harness stops / 5 state divergences**, with **2,124
+  replay-clean and strict-zero-diff actions**. The generated report preserves
+  `Pending triage: 10` rather than laundering findings into acceptance.
+- **All ten acceptance findings are dispositioned, not accepted.** The five
+  harness stops follow zero-diff prefixes: two unmappable `play` commands, one
+  reward-screen potion use, and two shop commands after `MAP_CHOICE`. The five
+  state results are Lantern's observable counter defect; Tiny House/Neow
+  payout; the already-declared in-combat stolen-gold model boundary; Gambling
+  Chip's private latch leaking through `RelicSlot.counter`; and Calling Bell's
+  Neow onEquip grid/pool timing. The live obligations table owns every new
+  product/harness family. The preliminary, deliberately non-acceptance
+  exercise campaign added the Spike Slime block/HP and Wheel result-page
+  candidates. Exact first diffs and classifications:
+  [`b52_exercise_triage.md`](../tools/oracle_bridge/driver/b52_exercise_triage.md).
+- **Raw encounter-list obligation discharged:** the oracle fork now emits
+  `encounterLists` for monster/elite/boss. Strict validation and the translator
+  type-check the nested lists. New standalone `encounter_list_oracle`
+  independently rebuilds `run_begin(seed, ascension)` and compares all three
+  raw lists plus post-construction `monsterRng`. Acceptance passed **50/50,
+  zero list or stream diff**.
+- **Provenance:** every run reports driver `b1.5.0`, pipeline `b5.2.0`, source
+  artifact SHA-256 and fork jar SHA-256
+  `9D390597F37D1CDF4811609800E399C1B6750337DBF62D80D4C1E14C640D6BDE`.
+  The jar was built twice byte-identically and redeployed before capture.
+- **Two exercise defects became permanent traps.** A collided first exercise
+  proved that the live game/config is one machine resource; the OS-backed
+  singleton and a two-process collision/crash-release test eliminate it. A
+  live GRID advertised `cancel` even where it only re-presented the same
+  progress-blocking screen; random-legal now suppresses GRID cancel only when
+  confirm/proceed is simultaneously advertised, with HAND_SELECT cancel left
+  legal. The exact policy boundary is unit-tested and recorded in conventions.
+- **Promoted reproducer:** `tests/golden/oracle_reproducers/` carries a
+  manifest layout plus the B1.3 Living Wall obtain-animation race from
+  `b14_accept` STS00009. It preserves the exact commands, minimal source
+  excerpt and artifact SHA. `b14_accept2` did not take the same branch and is
+  explicitly not claimed as a second witness. Replay classification is narrow:
+  only the delayed appended master-deck row may be `RACE`; any shared-prefix,
+  stream, pool or event-field difference remains a divergence. Java citation
+  corrected to `ShowCardAndObtainEffect.java:30-45,94-108`.
+- **Verification:** Python driver/campaign suites passed (**140** and **6**
+  tests respectively). Final WSL ASan/UBSan was clean, **1748/1748**. Debug
+  had passed 1748/1748 before the final narrow GRID policy fix; the final-tree
+  Debug rerun, doc link/stale-number checks and `git diff --check` are recorded
+  in the landing commit's verification handoff.

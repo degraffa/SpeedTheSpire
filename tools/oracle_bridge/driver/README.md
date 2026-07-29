@@ -10,8 +10,126 @@ This directory holds the oracle-bridge driver family. Protocol details are in
 | `cards_sidetable.json` | **B4.x** | committed per-card damage/block numbers the greedy policy scores with |
 | `gen_cards_sidetable.py` | **B4.x** | regenerates `cards_sidetable.json` from `registry/cards.yaml` (dev-time, needs PyYAML; the driver itself never imports it) |
 | `orchestrator.py` | **B1.4** | Windows-host outer loop that owns the game process: writes config.properties, launches ModTheSpire under the bundled JRE 8, relaunches on crash/hang/boss-reward, induces a kill for acceptance |
+| `campaign_pipeline.py` | **B5.2** | one-command capture → strict validation → translation/traces → replay + encounter-list diffs → generated report/triage; deterministic seed shards and Windows nightly scheduling |
+| `postprocess_campaign.sh` | **B5.2** | WSL half of the pipeline, reached only through `tools/wsl_run.cmd --script`; builds the release tools and writes per-seed derived artifacts |
 | `validate_artifacts.py` | **B1.4** | validates run JSONL against the PROTOCOL.md schema (header + action `state_json` + oracle block + terminal) |
 | `echo_driver.py` | B0.2 | bring-up child: logs every state JSON, forwards side-channel commands, `--verify` re-parse |
+
+## B5.2 one-command campaigns
+
+The campaign artifact root is now fixed at
+`D:\STS_BG_Mod\_oracle_data\campaigns`. It is outside the repository and is the
+same root the B1.4 orchestrator already used; B5.2 removes the pipeline-level
+root override so a nightly task cannot accidentally write raw captures into a
+worktree.
+
+On the Windows host, one command owns the whole path:
+
+```bat
+C:\Python39\python.exe campaign_pipeline.py run ^
+  --campaign-id b52_nightly_20260729 ^
+  --seeds D:/STS_BG_Mod/_oracle_data/b52_50_seeds.txt ^
+  --policy random-legal
+```
+
+Resume is the default. Re-running the identical command resumes the seed-level
+progress ledger and then regenerates derived outputs. `--fresh` is explicit and
+has the orchestrator's narrow cleanup semantics; a changed seed list, policy,
+policy seed, or shard identity is refused under an existing campaign id.
+An interrupted current seed is retried first; its incomplete JSONL and timing
+sidecar are replaced before the new attempt writes its header, while completed
+seeds are retained.
+
+The game and CommunicationMod config are a machine-wide singleton. `run` and
+`nightly` take a nonblocking OS-backed lock at
+`D:\STS_BG_Mod\_oracle_data\oracle_game.lock` before launching the
+orchestrator. A concurrent campaign fails immediately with exit `11` and names
+the owning campaign id and PID. The OS releases the lock if the pipeline exits
+or crashes, so the next invocation can reacquire it without manual cleanup.
+
+Arbitrary campaign sizes use the same format. This is the 200-run harvest shape
+for the distributional suite:
+
+```bat
+C:\Python39\python.exe campaign_pipeline.py generate-seeds ^
+  --start 50000 --count 200 ^
+  --out D:/STS_BG_Mod/_oracle_data/b53_200_seeds.txt
+C:\Python39\python.exe campaign_pipeline.py run ^
+  --campaign-id b53_oracle_spot_20260729 ^
+  --seeds D:/STS_BG_Mod/_oracle_data/b53_200_seeds.txt ^
+  --policy greedy
+```
+
+A promoted triage prefix can be captured through the same singleton pipeline:
+
+```bat
+C:\Python39\python.exe campaign_pipeline.py run ^
+  --campaign-id b52_obtain_race_repro ^
+  --seeds STS00009 --policy script ^
+  --script ../../../tests/golden/oracle_reproducers/b14-living-wall-obtain-race/commands.txt
+```
+
+The script path and SHA-256 are part of the resumable campaign identity.
+
+For multiple hosts, pass the same source list and `--shard-count N
+--shard-index I` (zero-based). Selection is `seeds[I::N]`; the artifact
+directory is named
+`<campaign-id>.shard-<I+1>-of-<N>`, so shards never share progress files and
+their union is exactly the input list.
+
+Install a resumable daily Windows Task Scheduler entry (local time):
+
+```bat
+C:\Python39\python.exe campaign_pipeline.py schedule ^
+  --campaign-prefix oracle_nightly ^
+  --seeds D:/STS_BG_Mod/_oracle_data/nightly_seeds.txt ^
+  --policy greedy --at 01:00
+```
+
+The scheduled action runs the `nightly` subcommand, whose campaign id includes
+the UTC date. Running it again on the same date resumes; the next date gets a
+new immutable evidence directory. The full nightly argv is stored under
+`D:\STS_BG_Mod\_oracle_data\schedules`; Task Scheduler receives only a short
+`scheduled --config ...` action, staying below `schtasks.exe`'s `/TR` length
+limit. Add `--print-only` to audit the command without changing Task Scheduler
+(it still refreshes that external config).
+
+After capture, the pipeline calls the sanctioned WSL boundary helper to build
+the release post-process tools. Each campaign directory then contains:
+
+```text
+run_<SEED>_a20_ironclad.jsonl        raw self-describing capture
+run_<SEED>_a20_ironclad.timing.jsonl action timing
+traces/<SEED>.trace                  translated CombatState trace
+translation/<SEED>.{log,status}      fail-loud translator result
+diffs/<SEED>.{log,status}            whole-run replay/diff report
+encounter_lists/<SEED>.{log,status}  raw monster/elite/boss list oracle
+triage/pending/index.json            authoritative open queue
+triage/pending/<SEED>.reproducer.json
+triage/pending/<SEED>.commands.txt   prefix through first divergence
+report.json                          machine-readable counts/throughput
+report.md                            generated operator summary
+```
+
+`report.json` is aggregation-ready: it binds schema/driver/fork provenance,
+hashes every source artifact, keeps the per-seed outcome/floor/action/attempt
+rows, emits outcome and floor histograms, and distinguishes captured,
+replay-clean, and strict-zero-diff action totals. Known capture-race records
+remain an explicit separate count; a later gate report must join their reviewed
+dispositions rather than silently treating every pending or known item alike.
+
+Exit `0` means the full pipeline completed with no untriaged item. Exit `10`
+means every artifact/report was produced but one or more translation, raw-list,
+or replay divergences were queued; this is intentionally non-green and must be
+triaged, not tuned away. Infrastructure/validation failures retain their own
+nonzero exit; exit `11` specifically means another campaign owns the live
+game/config resource.
+
+Promoted, minimized cases live under
+`tests/golden/oracle_reproducers/`; its README defines the review and promotion
+bar. A pending item names that destination and the binding workflow: reproduce
+twice, audit the fork's strip patches, then update the ledger and the owning
+change log with the fix or sanctioned frozen-spec decision.
 
 ## B1.4 campaign driver
 

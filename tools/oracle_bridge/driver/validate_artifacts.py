@@ -52,6 +52,7 @@ RUN_STREAMS = {"monsterRng", "eventRng", "merchantRng", "cardRng", "treasureRng"
                "cardRandomRng", "miscRng", "mapRng"}
 REWARD_ORACLE_FIELDS = {"cardBlizzRandomizer", "blizzardPotionMod"}
 REWARD_STREAMS = {"cardRng", "treasureRng", "potionRng", "relicRng", "miscRng"}
+ENCOUNTER_LIST_KEYS = {"monster", "elite", "boss"}
 STRICT_PROGRESS_KEYS = {
     "campaign_id", "schema_version", "driver_version", "fork_jar_sha256",
     "policy", "seed_list", "status", "seeds_done", "seeds_failed",
@@ -119,7 +120,8 @@ def _check_stream_triples(errs, path, lineno, streams, names):
                   f"stream {name} lacks counter/s0/s1")
 
 
-def validate_file(path: str, require_oracle: bool = False):
+def validate_file(path: str, require_oracle: bool = False,
+                  require_encounter_lists: bool = False):
     errs = []
     records = []
     if require_oracle:
@@ -377,6 +379,30 @@ def validate_file(path: str, require_oracle: bool = False):
                                 streams[name].keys()
                                 for name in REWARD_STREAMS):
                         in_game_oracle_actions += 1
+                if require_encounter_lists:
+                    lists = oc.get("encounterLists")
+                    if not isinstance(lists, dict):
+                        _fail(errs, path, lineno,
+                              "--require-encounter-lists but oracle."
+                              "encounterLists is missing/not an object")
+                    else:
+                        missing_lists = ENCOUNTER_LIST_KEYS - lists.keys()
+                        extra_lists = lists.keys() - ENCOUNTER_LIST_KEYS
+                        if missing_lists or extra_lists:
+                            _fail(errs, path, lineno,
+                                  "oracle.encounterLists keys differ: "
+                                  f"missing={sorted(missing_lists)}, "
+                                  f"extra={sorted(extra_lists)}")
+                        for name in sorted(
+                                ENCOUNTER_LIST_KEYS & lists.keys()):
+                            value = lists[name]
+                            if not isinstance(value, list) or not all(
+                                    isinstance(item, str) and item
+                                    for item in value):
+                                _fail(errs, path, lineno,
+                                      "oracle.encounterLists."
+                                      f"{name} must be a list of non-empty "
+                                      "strings")
 
     if not saw_terminal:
         _fail(errs, path, records[-1][0], "no terminal record")
@@ -530,7 +556,8 @@ def _timing_records(path, errs):
     return header, marks
 
 
-def validate_campaign(campaign_dir: str, require_oracle: bool = False):
+def validate_campaign(campaign_dir: str, require_oracle: bool = False,
+                      require_encounter_lists: bool = False):
     """Validate one campaign directory.
 
     The historical/default mode remains the original glob-and-validate
@@ -679,7 +706,8 @@ def validate_campaign(campaign_dir: str, require_oracle: bool = False):
         seed = name[len("run_"):-len("_a20_ironclad.jsonl")]
         row = rows_by_seed.get(seed, {})
         file_errs, _action_count = validate_file(
-            path, require_oracle=True)
+            path, require_oracle=True,
+            require_encounter_lists=require_encounter_lists)
         errs.extend(file_errs)
         header, terminal, actions = _artifact_identity(path, errs)
         artifact_actions[seed] = actions
@@ -770,16 +798,21 @@ def main(argv=None) -> int:
     ap.add_argument("--require-oracle", action="store_true",
                     help="reject artifacts without an enabled oracle block and "
                          "require B4.5 pity fields plus reward RNG triples")
+    ap.add_argument("--require-encounter-lists", action="store_true",
+                    help="also require B5.2 oracle.encounterLists on every "
+                         "in-game action (implies --require-oracle)")
     args = ap.parse_args(argv)
+    require_oracle = args.require_oracle or args.require_encounter_lists
 
     files = list(args.paths)
     campaign_errs = []
     strict_campaign_files = set()
     if args.campaign:
         campaign_files, campaign_errs = validate_campaign(
-            args.campaign, require_oracle=args.require_oracle)
+            args.campaign, require_oracle=require_oracle,
+            require_encounter_lists=args.require_encounter_lists)
         files += campaign_files
-        if args.require_oracle:
+        if require_oracle:
             strict_campaign_files = {
                 os.path.abspath(path) for path in campaign_files
             }
@@ -793,7 +826,9 @@ def main(argv=None) -> int:
     for error in campaign_errs:
         print(f"    {error}")
     for path in files:
-        errs, actions = validate_file(path, require_oracle=args.require_oracle)
+        errs, actions = validate_file(
+            path, require_oracle=require_oracle,
+            require_encounter_lists=args.require_encounter_lists)
         status = "OK" if not errs else f"{len(errs)} ERROR(S)"
         print(f"{os.path.basename(path)}: {actions} actions -- {status}")
         for e in errs[:25]:
