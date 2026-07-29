@@ -447,6 +447,29 @@ add_test(
 set_tests_properties(oracle_campaign_pipeline_python_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
 
+# B5.4 deterministic dashboard aggregation + compressed-corpus integrity.
+add_test(
+    NAME verify_report_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_verify_report.py)
+set_tests_properties(verify_report_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/verify_report")
+
+# B5.4 pure sim-side CI replay over the committed compressed 50-seed corpus.
+# The Python wrapper uses only stdlib gzip/tar support to verify hashes and
+# extract safe members; the real replay_run_diff binary performs every state
+# comparison. The second case mutates one extracted state and proves the same
+# path fails loud without committing the mutation.
+sts_add_test(oracle_corpus_replay_test
+    DEPENDS replay_run_diff
+    MAKE_DIRS oracle_corpus_scratch
+    DEFS
+        STS_PYTHON_EXECUTABLE="${STS_PYTHON_EXECUTABLE}"
+        STS_CORPUS_SMOKE_PY="${CMAKE_SOURCE_DIR}/tools/verify_report/ci_corpus_smoke.py"
+        STS_CORPUS_ARCHIVE="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus/act1_a20_50.tar.gz"
+        STS_CORPUS_MANIFEST="${CMAKE_CURRENT_SOURCE_DIR}/golden/oracle_corpus/act1_a20_50.manifest.json"
+        STS_REPLAY_BIN="$<TARGET_FILE:replay_run_diff>"
+        STS_CORPUS_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/oracle_corpus_scratch")
+
 # The replay harness's screen-relative command mapping
 # (tools/oracle_bridge/replay/src/command_map.hpp). A wrong entry in that table
 # is indistinguishable from an engine divergence when a whole artifact is
