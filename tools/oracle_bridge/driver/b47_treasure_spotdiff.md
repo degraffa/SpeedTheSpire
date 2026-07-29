@@ -212,7 +212,7 @@ that a *name* passed to the join is refused rather than silently becoming
   and is still flagged.
 - **The obtain race.** `ShowCardAndObtainEffect` adds a transformed/obtained
   card to the master deck only when its animation completes
-  (`ShowCardAndObtainEffect.java:30-45`) while the removal is immediate, so
+  (`ShowCardAndObtainEffect.java:30-45,94-108`) while the removal is immediate, so
   every capture dump in between is one card short and the card appears in the
   first dump after the effect finishes. `--event` recognises this **narrowly** —
   every differing field must be `master_deck_count` or a `master_deck[i]` at or

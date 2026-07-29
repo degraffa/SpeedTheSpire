@@ -740,6 +740,28 @@ struct OracleAnchors {
             << (eng::kSpecialListFirstId - 1u);
         fr.mapped();
     }
+    // B5.2 encounter-list oracle. These arrays live in RunController rather
+    // than RunState, so encounter_list_oracle compares them directly against
+    // run_begin. They are nevertheless a consumed ORACLE field here, and the
+    // complete nested shape is validated so a new key cannot bypass the
+    // translator's fail-loud unknown-field policy.
+    if (const json* lists = fr.take("encounterLists")) {
+        FieldReader lr(*lists, path + ".encounterLists", ctx);
+        for (const char* key : {"monster", "elite", "boss"}) {
+            const json& arr = lr.require(key);
+            if (!arr.is_array()) {
+                throw TranslateError(loc(ctx) + " expected array at " +
+                                     path + ".encounterLists." + key);
+            }
+            for (std::size_t i = 0; i < arr.size(); ++i) {
+                (void)as_str(arr[i], ctx, path + ".encounterLists." + key +
+                                          "[" + std::to_string(i) + "]");
+            }
+            lr.oracle(key);
+        }
+        lr.finish();
+        fr.oracle("encounterLists");
+    }
     // monster_move_history (§2.5 #9 / PROTOCOL §5): the fork emits the FULL
     // `AbstractMonster.moveHistory` per monster, in room order -- up to 14
     // entries in the current corpus, where stock's own JSON gives 2. The schema

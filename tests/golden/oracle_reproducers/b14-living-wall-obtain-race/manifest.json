@@ -1,0 +1,27 @@
+{
+  "format": "STS-ORACLE-PROMOTED v1",
+  "case_id": "b14-living-wall-obtain-race",
+  "seed": "STS00009",
+  "seed_long": 1790050543759,
+  "ascension": 20,
+  "character": "IRONCLAD",
+  "classification": "capture_obtain_race",
+  "source": {
+    "campaign_id": "b14_accept",
+    "artifact": "run_STS00009_a20_ironclad.jsonl",
+    "artifact_sha256": "f8272444af5d6f54ffd6e3b58db942d27f23c5b9a0ac4c16c63ebc2fd29eda86",
+    "first_short_seq": 40,
+    "last_short_seq": 47,
+    "resolved_seq": 48
+  },
+  "first_divergence": {
+    "floor": 4,
+    "event": "Living Wall",
+    "fields": [
+      "master_deck_count",
+      "master_deck[11]"
+    ]
+  },
+  "expected": "known capture race; no RNG, pool, or event_flags difference",
+  "owner": "docs/stage-b-tasks.md deferred obligation: b14_accept2 obtain-race capture-fidelity triage"
+}

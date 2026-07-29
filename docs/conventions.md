@@ -665,6 +665,36 @@ behaviour beats instruction count here — measure before "optimising".
 
 ---
 
+**Two oracle campaigns cannot share the live game/config resource.** Two
+campaign agents launched within seconds of each other, creating two game
+instances after each had rewritten CommunicationMod's singleton
+`config.properties`. Separate artifact directories prevented path aliasing, but
+neither the resumable ledgers nor per-campaign launch bindings serialized that
+machine-wide resource.
+
+> **ELIMINATED 2026-07-29: `campaign_pipeline.py run` and `nightly` now take a
+> nonblocking OS-backed singleton lock before the orchestrator can touch the
+> config or launch the game.** A contender exits loudly with the owning
+> campaign id and PID; process exit or crash releases the lock. The focused
+> pipeline test holds the lock in a child process, proves concurrent rejection,
+> kills the owner, and proves immediate reacquisition. Use the one-command
+> entry point documented in
+> [`tools/oracle_bridge/driver/README.md`](../tools/oracle_bridge/driver/README.md#b52-one-command-campaigns);
+> never launch two lower-level orchestrators independently.
+
+**An advertised CommunicationMod command can still be a progress no-op.**
+Random-legal campaigns selected `cancel` after a mandatory GRID card pick
+because the dump advertised both `confirm` and `cancel`. That cancel clears the
+pick but does not re-arm `ready_for_command`; the driver paid its full watchdog,
+probed the live game, selected again, and repeated until the bounded noop guard
+ended the run.
+
+> **ELIMINATED 2026-07-29: the shared live-action expansion excludes `cancel`
+> only when `screen_type == GRID`, the GRID's own `confirm_up` is true, and a
+> confirm/proceed command is advertised.** `proceed` is then the sole progress
+> action for both random-legal and greedy policies. A focused test freezes the
+> live STS70021/STS70022 shape and proves HAND_SELECT still retains cancel.
+
 ### Bridge-side components
 
 The fork jar (JDK 8, `tools/oracle_bridge/build_fork.ps1`) and the Python

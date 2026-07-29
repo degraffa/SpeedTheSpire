@@ -519,6 +519,7 @@ bit-exact differential testing needs — the frozen inventory of design §2.5.
 | `eventList` | list<str> | 7 | `AbstractDungeon.eventList` | remaining Exordium events (removed on use) |
 | `shrineList` | list<str> | 7 | `AbstractDungeon.shrineList` | remaining shrines |
 | `specialOneTimeEventList` | list<str> | 7 | `AbstractDungeon.specialOneTimeEventList` | remaining shared one-time events |
+| `encounterLists` | object | B5.2 | `AbstractDungeon.{monsterList,eliteMonsterList,bossList}` | `{monster,elite,boss}`: the live remaining encounter-key order. Monster and elite entries are removed from the front when a room settles; the boss list retains the shuffled act order |
 | `relicPools` | object | 8 | `AbstractDungeon.{common,uncommon,rare,shop,boss}RelicPool` | `{common,uncommon,rare,shop,boss}`: each the live shuffled pool **order** (front popped for rewards, end for shop) |
 | `monster_move_history` | list | 9 | `AbstractMonster.moveHistory` | present only in COMBAT: `[{id, move_history:[byte,…]}]`, one per monster in room order (full history, not stock's 2-back) |
 

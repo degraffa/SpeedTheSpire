@@ -351,8 +351,8 @@ struct Options {
 
 // THE OBTAIN RACE, recognized narrowly. `ShowCardAndObtainEffect` adds a
 // transformed / obtained card to the master deck only when its ANIMATION
-// completes (ShowCardAndObtainEffect.java:30-45 -- the constructor stores the
-// card, `update` obtains it), while the removal is immediate. Every capture
+// completes (ShowCardAndObtainEffect.java:30-45,94-108 -- the constructor
+// stores the card, `update` obtains it), while the removal is immediate. Every capture
 // dump taken in between therefore shows a deck one card SHORT of the state the
 // rules describe, and the card appears in the first dump after the effect
 // finishes -- in b14_accept's STS00009 that is the first record of the NEXT

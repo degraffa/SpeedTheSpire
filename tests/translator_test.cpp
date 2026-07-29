@@ -291,6 +291,30 @@ TEST(Translator, UnknownRelicInAPoolIsRefused) {
                  tr::TranslateError);
 }
 
+// B5.2: encounterLists is live controller-oracle data, not a RunState field.
+// The translator must accept it under the ORACLE disposition while still
+// validating all three arrays and refusing nested shape drift.
+TEST(Translator, EncounterListsAreValidatedOracleControllerState) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string field =
+        R"("encounterLists":{"monster":["Jaw Worm"],"elite":["Gremlin Nob"],"boss":["The Guardian"]},)";
+    const auto pos = lines[1].find("\"relicPools\":");
+    ASSERT_NE(pos, std::string::npos);
+    lines[1].insert(pos, field);
+    EXPECT_NO_THROW(
+        (void)tr::translate_lines({lines[0], lines[1]}, "encounter-lists"));
+
+    std::string drifted = lines[1];
+    const auto lists_end = drifted.find("},\"relicPools\":");
+    ASSERT_NE(lists_end, std::string::npos);
+    drifted.insert(lists_end, R"(,"unexpected":[])");
+    EXPECT_THROW(
+        (void)tr::translate_lines({lines[0], drifted},
+                                  "encounter-lists-drift"),
+        tr::TranslateError);
+}
+
 // B4.10: the three oracle remaining-list arrays map by generated EventId to
 // the B4.3 membership bitsets. Runtime indices shift after removals, but bit
 // meanings do not: each bit is the event's canonical init-list position.

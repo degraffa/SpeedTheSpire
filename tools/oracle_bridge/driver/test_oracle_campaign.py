@@ -1048,12 +1048,14 @@ class OrchestratorStallWatchdogTest(unittest.TestCase):
 
 
 class ArtifactOracleRequirementTest(unittest.TestCase):
-    def _validate(self, records, require_oracle=False):
+    def _validate(self, records, require_oracle=False,
+                  require_encounter_lists=False):
         with tempfile.TemporaryDirectory() as root:
             path = os.path.join(root, f"run_{SEED}_a20_ironclad.jsonl")
             _write_artifact(path, records)
             return validate_artifacts.validate_file(
-                path, require_oracle=require_oracle)[0]
+                path, require_oracle=require_oracle,
+                require_encounter_lists=require_encounter_lists)[0]
 
     def test_default_keeps_non_oracle_artifacts_backward_compatible(self):
         errors = self._validate([
@@ -1079,6 +1081,30 @@ class ArtifactOracleRequirementTest(unittest.TestCase):
             [_header(True), _action(_oracle()), _terminal()],
             require_oracle=True)
         self.assertEqual([], errors)
+
+    def test_b52_encounter_list_requirement_is_explicit_and_structural(self):
+        old_oracle = _oracle()
+        errors = self._validate(
+            [_header(True), _action(old_oracle), _terminal()],
+            require_oracle=True, require_encounter_lists=True)
+        self.assertIn("encounterLists is missing",
+                      "\n".join(errors))
+
+        new_oracle = _oracle()
+        new_oracle["encounterLists"] = {
+            "monster": ["Jaw Worm"], "elite": ["Gremlin Nob"],
+            "boss": ["The Guardian"],
+        }
+        errors = self._validate(
+            [_header(True), _action(new_oracle), _terminal()],
+            require_oracle=True, require_encounter_lists=True)
+        self.assertEqual([], errors)
+
+        new_oracle["encounterLists"]["unknown"] = []
+        errors = self._validate(
+            [_header(True), _action(new_oracle), _terminal()],
+            require_oracle=True, require_encounter_lists=True)
+        self.assertIn("extra=['unknown']", "\n".join(errors))
 
     def test_require_oracle_rejects_missing_pity_and_malformed_reward_stream(self):
         oracle = _oracle()
@@ -2172,6 +2198,28 @@ class GreedyScreenScoringTest(unittest.TestCase):
         self.assertGreater(
             greedy_policy.score_action("proceed", state, self.table),
             greedy_policy.score_action("cancel", state, self.table))
+
+    def test_random_legal_suppresses_the_confirmable_grid_cancel_noop(self):
+        """B5.2 live repro STS70021/22: confirmable GRID cancel clears the
+        selection but never restores readiness, costing a watchdog cycle and
+        reopening the same mandatory grid. It is not a progress action."""
+        grid = _screen(
+            "GRID", [],
+            {"cards": [], "selected_cards": [], "num_cards": 1,
+             "confirm_up": True},
+            available=("confirm", "cancel"))
+        self.assertEqual(
+            ["proceed"],
+            campaign_driver.expand_legal_actions(grid, random.Random(0)))
+
+        # The exclusion is narrow: other cancel-capable screens retain cancel.
+        hand = _screen(
+            "HAND_SELECT", [],
+            {"selected": [{"id": "Strike_R"}], "max_cards": 1},
+            available=("confirm", "cancel"))
+        self.assertEqual(
+            ["proceed", "cancel"],
+            campaign_driver.expand_legal_actions(hand, random.Random(0)))
 
     def test_raw_confirm_verb_is_scored_like_proceed(self):
         """expand_legal_actions always emits the literal text `proceed` for
