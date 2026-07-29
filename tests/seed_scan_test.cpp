@@ -24,16 +24,19 @@
 
 #include "sts/engine/seed_string.hpp"
 #include "sts/registry/event_table.hpp"
+#include "sts/registry/game_ids.hpp"
 
 namespace {
 
 using sts::fuzz::PolicyKind;
 using sts::planner::Filter;
 using sts::planner::Format;
+using sts::planner::RelicObs;
 using sts::planner::ScanCase;
 using sts::planner::ScanLimits;
 using sts::planner::ScanRow;
 using sts::registry::EventId;
+using sts::registry::RelicId;
 
 sts::planner::Seed MakeSeed(const std::string& text) {
     sts::planner::Seed s;
@@ -307,6 +310,120 @@ TEST(SeedScanFilter, MinHitCountExcludesSingleHitSeeds) {
     EXPECT_FALSE(sts::planner::seed_qualifies({}, f));
 }
 
+// --- relic targeting ---------------------------------------------------------
+
+namespace {
+
+RelicObs MakeObs(RelicId id, bool offered, bool acquired, bool shop,
+                 bool reward_offered = false) {
+    RelicObs o;
+    o.id = id;
+    o.offered = offered;
+    o.reward_offered = reward_offered;
+    o.acquired = acquired;
+    o.shop_while_owned = shop;
+    return o;
+}
+
+}  // namespace
+
+TEST(SeedScanRelicFilter, ClausesAreAnyOfWithinAndAndAcross) {
+    // The motivating query: "ANY of the three Bottled relics was offered".
+    // need_events is all-of; the relic clauses must NOT be, or the bottle
+    // query could never be satisfied by a real run.
+    ScanRow flame_offered = FakeRow(0, false, false, 6);
+    flame_offered.relic_obs = {
+        MakeObs(RelicId::BOTTLED_FLAME, true, false, false),
+        MakeObs(RelicId::BOTTLED_LIGHTNING, false, false, false),
+        MakeObs(RelicId::BOTTLED_TORNADO, false, false, false),
+    };
+
+    Filter any_bottle;
+    any_bottle.need_relic_offered = {RelicId::BOTTLED_FLAME,
+                                     RelicId::BOTTLED_LIGHTNING,
+                                     RelicId::BOTTLED_TORNADO};
+    EXPECT_TRUE(sts::planner::row_hits(flame_offered, any_bottle));
+
+    // Offered is not acquired: the same row must fail an acquired clause.
+    Filter any_bottle_acquired;
+    any_bottle_acquired.need_relic_acquired = any_bottle.need_relic_offered;
+    EXPECT_FALSE(sts::planner::row_hits(flame_offered, any_bottle_acquired));
+    EXPECT_FALSE(any_bottle.empty());
+    EXPECT_FALSE(any_bottle_acquired.empty());
+
+    // A shelf-only offer is not a REWARD-ROW offer -- the affordability
+    // distinction the first bottle scan missed (a shelf bottle against ~130
+    // gold is unclaimable; a reward-row bottle is free).
+    Filter reward_only;
+    reward_only.need_relic_reward_offered = any_bottle.need_relic_offered;
+    EXPECT_FALSE(sts::planner::row_hits(flame_offered, reward_only))
+        << "offered=1 with reward_offered=0 is a shelf offer";
+    EXPECT_FALSE(reward_only.empty());
+    ScanRow flame_reward = flame_offered;
+    flame_reward.relic_obs[0] = MakeObs(RelicId::BOTTLED_FLAME, true, false,
+                                        false, /*reward_offered=*/true);
+    EXPECT_TRUE(sts::planner::row_hits(flame_reward, reward_only));
+
+    // Clauses AND with each other and with the non-relic clauses.
+    ScanRow courier_shop = FakeRow(0, false, false, 8);
+    courier_shop.relic_obs = {MakeObs(RelicId::THE_COURIER, true, true, true)};
+    Filter courier;
+    courier.need_relic_acquired = {RelicId::THE_COURIER};
+    courier.need_shop_after_relic = {RelicId::THE_COURIER};
+    EXPECT_TRUE(sts::planner::row_hits(courier_shop, courier));
+    courier.min_floor = 9;
+    EXPECT_FALSE(sts::planner::row_hits(courier_shop, courier));
+    courier.min_floor = 0;
+    ScanRow courier_no_shop = courier_shop;
+    courier_no_shop.relic_obs = {
+        MakeObs(RelicId::THE_COURIER, true, true, false)};
+    EXPECT_FALSE(sts::planner::row_hits(courier_no_shop, courier));
+}
+
+TEST(SeedScanRelicFilter, UntrackedRelicNeverHits) {
+    // A row cannot testify about a relic it did not watch. Silently passing
+    // here would qualify every seed of a scan whose --track/--need lists
+    // disagreed -- the planner's canonical silent-wrong-list hazard.
+    ScanRow row = FakeRow(0, false, false, 6);
+    row.relic_obs = {MakeObs(RelicId::BOTTLED_FLAME, true, true, true)};
+    Filter f;
+    f.need_relic_offered = {RelicId::THE_COURIER};
+    EXPECT_FALSE(sts::planner::row_hits(row, f));
+    // Empty relic clauses constrain nothing.
+    Filter none;
+    EXPECT_TRUE(none.empty());
+    EXPECT_TRUE(sts::planner::row_hits(row, none));
+}
+
+TEST(SeedScanRelicObs, StarterRelicIsAcquiredFromFloorZeroAndNeverOffered) {
+    // A live-path pin that needs no lottery: Burning Blood is the Ironclad's
+    // starter, so it is OWNED from run_begin and can never sit on a reward
+    // row or a merchant shelf. The Courier, conversely, is essentially never
+    // acquired by a 600-action random run -- both directions guard against
+    // the observer latching the wrong field.
+    const std::vector<RelicId> targets = {RelicId::BURNING_BLOOD,
+                                          RelicId::THE_COURIER};
+    const ScanRow r = sts::planner::scan_case(
+        MakeCase("STS00100", PolicyKind::RANDOM, 0), SmallLimits(), targets);
+    ASSERT_EQ(r.relic_obs.size(), 2u);
+    EXPECT_EQ(r.relic_obs[0].id, RelicId::BURNING_BLOOD);
+    EXPECT_TRUE(r.relic_obs[0].acquired);
+    EXPECT_FALSE(r.relic_obs[0].offered);
+    EXPECT_EQ(r.relic_obs[1].id, RelicId::THE_COURIER);
+
+    // Determinism must hold with targets attached (the serialized comparison,
+    // same claim as the CLI's --verify-determinism).
+    const ScanRow again = sts::planner::scan_case(
+        MakeCase("STS00100", PolicyKind::RANDOM, 0), SmallLimits(), targets);
+    EXPECT_EQ(sts::planner::row_to_tsv(r), sts::planner::row_to_tsv(again));
+    EXPECT_EQ(sts::planner::row_to_jsonl(r), sts::planner::row_to_jsonl(again));
+
+    // And the untracked row must serialize exactly as before targets existed.
+    const ScanRow untracked = sts::planner::scan_case(
+        MakeCase("STS00100", PolicyKind::RANDOM, 0), SmallLimits());
+    EXPECT_TRUE(untracked.relic_obs.empty());
+}
+
 // --- output ------------------------------------------------------------------
 
 TEST(SeedScanOutput, TsvRowMatchesHeaderWidth) {
@@ -325,6 +442,18 @@ TEST(SeedScanOutput, TsvRowMatchesHeaderWidth) {
     const std::string wide = sts::planner::row_to_tsv(with_events);
     EXPECT_EQ(CountTabs(header), CountTabs(wide)) << wide;
     EXPECT_NE(wide.find("Match and Keep!|Golden Shrine"), std::string::npos);
+
+    // The relic_obs column joins on '|' too, and must not change the width.
+    ScanRow with_relics = r;
+    with_relics.relic_obs = {
+        MakeObs(RelicId::BOTTLED_FLAME, true, true, false),
+        MakeObs(RelicId::THE_COURIER, false, false, false),
+    };
+    const std::string relic_row = sts::planner::row_to_tsv(with_relics);
+    EXPECT_EQ(CountTabs(header), CountTabs(relic_row)) << relic_row;
+    EXPECT_NE(relic_row.find("Bottled Flame=1010|The Courier=0000"),
+              std::string::npos)
+        << relic_row;
 }
 
 TEST(SeedScanOutput, JsonlEscapesAndSelects) {
@@ -333,6 +462,7 @@ TEST(SeedScanOutput, JsonlEscapesAndSelects) {
     EXPECT_EQ(sts::planner::json_escape("N'loth"), "N'loth");
 
     ScanRow r = FakeRow(kMatchAndKeepBit, true, false, 6);
+    r.relic_obs = {MakeObs(RelicId::THE_COURIER, true, false, false)};
     const std::string j = sts::planner::row_to_jsonl(r);
     EXPECT_EQ(j.front(), '{');
     EXPECT_EQ(j.back(), '}');
@@ -340,6 +470,11 @@ TEST(SeedScanOutput, JsonlEscapesAndSelects) {
     EXPECT_NE(j.find("\"treasure\":true"), std::string::npos) << j;
     EXPECT_NE(j.find("\"boss\":false"), std::string::npos) << j;
     EXPECT_NE(j.find("\"events\":[\"Match and Keep!\"]"), std::string::npos) << j;
+    EXPECT_NE(j.find("\"relic_obs\":[{\"relic\":\"The Courier\","
+                     "\"offered\":true,\"reward_offered\":false,"
+                     "\"acquired\":false,\"shop_while_owned\":false}]"),
+              std::string::npos)
+        << j;
     EXPECT_EQ(j.find('\n'), std::string::npos);
 
     Format f{};

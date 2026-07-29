@@ -303,6 +303,14 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 
     EXPECT_EQ(r::power_game_id(r::PowerId::WEAK), "Weakened");
     EXPECT_EQ(r::power_from_game_id("Vulnerable"), r::PowerId::VULNERABLE);
+    // No Block's join key is the POWER_ID literal, not the display name
+    // (NoBlockPower.java:19). The row first landed with "No Block" and the
+    // first capture whose player carried the power (a Neow Panic Button,
+    // wave2cap_bottle_* STS03364) failed translation on it -- this pin is
+    // that reproducer, promoted.
+    EXPECT_EQ(r::power_game_id(r::PowerId::NO_BLOCK), "NoBlockPower");
+    EXPECT_EQ(r::power_from_game_id("NoBlockPower"), r::PowerId::NO_BLOCK);
+    EXPECT_EQ(r::power_from_game_id("No Block"), r::PowerId::NONE);
     EXPECT_EQ(r::monster_game_id(r::MonsterId::JAW_WORM), "JawWorm");
     EXPECT_EQ(r::monster_from_game_id("JawWorm"), r::MonsterId::JAW_WORM);
 

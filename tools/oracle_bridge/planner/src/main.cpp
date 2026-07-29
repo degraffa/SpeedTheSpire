@@ -25,6 +25,7 @@
 
 #include "sts/engine/seed_string.hpp"
 #include "sts/planner/seed_scan.hpp"
+#include "sts/registry/game_ids.hpp"
 
 namespace {
 
@@ -77,6 +78,24 @@ void usage() {
         "  --need-treasure           a treasure room was entered\n"
         "  --need-boss               the boss room was entered\n"
         "  --min-floor <n>           max floor reached >= n\n"
+        "  --need-relic-offered <game id>   repeatable; hits when ANY listed\n"
+        "                            relic was OFFERED (a RELIC reward row or a\n"
+        "                            merchant shelf slot). Relic clauses are\n"
+        "                            any-of WITHIN the clause, and AND with\n"
+        "                            every other clause. Names are the exact\n"
+        "                            registry game ids (\"Bottled Flame\").\n"
+        "  --need-relic-reward-offered <game id>  repeatable; like\n"
+        "                            --need-relic-offered but REWARD ROWS only\n"
+        "                            (claimable for free; a shelf offer must be\n"
+        "                            bought, and the shop lists only rows the\n"
+        "                            run can afford)\n"
+        "  --need-relic-acquired <game id>  repeatable; ANY listed relic ended\n"
+        "                            up owned (the policy claimed/bought it)\n"
+        "  --need-shop-after-relic <game id> repeatable; a merchant floor was\n"
+        "                            live while ANY listed relic was owned\n"
+        "                            (The Courier's restock precondition)\n"
+        "  --track-relic <game id>   repeatable; observe a relic (adds the\n"
+        "                            relic_obs column) without filtering on it\n"
         "  --min-hit-count <k>       a SEED qualifies when >= k of its scanned\n"
         "                            combinations hit; default 1. Use >= 2: the\n"
         "                            capture runs a different policy, so a target\n"
@@ -237,6 +256,22 @@ int main(int argc, char** argv) {
     bool progress = false;
     bool verify_determinism = false;
 
+    std::vector<sts::registry::RelicId> track_relics;
+    auto parse_relic = [&](const char* flag, const char* name) {
+        const sts::registry::RelicId id = sts::registry::relic_from_game_id(name);
+        if (id == sts::registry::RelicId::NONE) {
+            die(std::string(flag) + ": unknown relic game id '" + name +
+                "' (names are the exact registry game ids, e.g. "
+                "\"Bottled Flame\", \"The Courier\")");
+        }
+        bool tracked = false;
+        for (sts::registry::RelicId t : track_relics) {
+            if (t == id) tracked = true;
+        }
+        if (!tracked) track_relics.push_back(id);
+        return id;
+    };
+
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "-h" || a == "--help") {
@@ -299,6 +334,20 @@ int main(int argc, char** argv) {
                 die("unknown event '" + name + "' (try --list-events)");
             }
             filter.need_events.push_back(id);
+        } else if (a == "--need-relic-offered") {
+            filter.need_relic_offered.push_back(
+                parse_relic("--need-relic-offered", need_value(argc, argv, i)));
+        } else if (a == "--need-relic-reward-offered") {
+            filter.need_relic_reward_offered.push_back(parse_relic(
+                "--need-relic-reward-offered", need_value(argc, argv, i)));
+        } else if (a == "--need-relic-acquired") {
+            filter.need_relic_acquired.push_back(
+                parse_relic("--need-relic-acquired", need_value(argc, argv, i)));
+        } else if (a == "--need-shop-after-relic") {
+            filter.need_shop_after_relic.push_back(parse_relic(
+                "--need-shop-after-relic", need_value(argc, argv, i)));
+        } else if (a == "--track-relic") {
+            (void)parse_relic("--track-relic", need_value(argc, argv, i));
         } else if (a == "--need-treasure") {
             filter.need_treasure = true;
         } else if (a == "--need-boss") {
@@ -367,10 +416,12 @@ int main(int argc, char** argv) {
                 c.policy = policy;
                 c.policy_seed = pseed;
 
-                const ScanRow row = sts::planner::scan_case(c, limits);
+                const ScanRow row = sts::planner::scan_case(c, limits,
+                                                            track_relics);
                 const std::string text = sts::planner::row_to_text(row, format);
                 if (verify_determinism) {
-                    const ScanRow again = sts::planner::scan_case(c, limits);
+                    const ScanRow again =
+                        sts::planner::scan_case(c, limits, track_relics);
                     if (sts::planner::row_to_text(again, format) != text) {
                         ++determinism_mismatches;
                         std::fprintf(stderr,
@@ -424,6 +475,22 @@ int main(int argc, char** argv) {
         header += "# filter:";
         for (sts::registry::EventId id : filter.need_events) {
             header += " event=\"" + std::string(sts::planner::event_game_id(id)) + "\"";
+        }
+        for (sts::registry::RelicId id : filter.need_relic_offered) {
+            header += " relic_offered=\"" +
+                      std::string(sts::registry::relic_game_id(id)) + "\"";
+        }
+        for (sts::registry::RelicId id : filter.need_relic_reward_offered) {
+            header += " relic_reward_offered=\"" +
+                      std::string(sts::registry::relic_game_id(id)) + "\"";
+        }
+        for (sts::registry::RelicId id : filter.need_relic_acquired) {
+            header += " relic_acquired=\"" +
+                      std::string(sts::registry::relic_game_id(id)) + "\"";
+        }
+        for (sts::registry::RelicId id : filter.need_shop_after_relic) {
+            header += " shop_after_relic=\"" +
+                      std::string(sts::registry::relic_game_id(id)) + "\"";
         }
         if (filter.need_treasure) header += " treasure";
         if (filter.need_boss) header += " boss";

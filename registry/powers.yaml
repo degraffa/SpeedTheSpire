@@ -579,7 +579,15 @@
 
 - id: 77
   name: NO_BLOCK
-  game_id: "No Block"
+  # game_id is the POWER_ID literal "NoBlockPower" (NoBlockPower.java:19), NOT
+  # the display name "No Block" -- exactly as this row's own provenance says.
+  # The row landed with "No Block" anyway, and the first live capture whose
+  # player carried the power (wave2cap_bottle_* STS03364: a Neow-granted Panic
+  # Button played in the floor-1 fight) failed translation with `unknown power
+  # id "NoBlockPower"` -- the fail-loud join doing its job. Fixed 2026-07-28
+  # (Track C, wave2-capture); the join is pinned in
+  # RegistryGen.GameIdTablesRoundTrip.
+  game_id: "NoBlockPower"
   type: DEBUFF
   hooks:
     at_end_of_round:

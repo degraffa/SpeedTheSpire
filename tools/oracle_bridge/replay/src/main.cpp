@@ -1165,8 +1165,9 @@ struct NeowVerdict {
 // ascension, all of which the translated RunState carries. Driving the module
 // keeps the read-out about the merchant.
 
-// `lower`, `ShopPick`/`ShopTarget` and `resolve_shop_choice` MOVED to
-// command_map.hpp when `--replay` grew its own SHOP_ROOM / SHOP_SCREEN arm:
+// `lower`, `ShopPick`/`ShopTarget`, `resolve_shop_choice` and
+// `shop_choice_arg_to_index` MOVED to command_map.hpp when `--replay` grew its
+// own SHOP_ROOM / SHOP_SCREEN arm:
 // both modes resolve a `choose i` on a merchant's shelf the same way (the
 // game lists the AFFORDABLE unsold rows by display name, so the index means
 // nothing without the choice_list), and two copies of that rule is exactly the
@@ -1422,14 +1423,19 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
             }
             if (c[0] == "leave" || c[0] == "proceed" || c[0] == "return") continue;
             if (screens[j].screen_type == "SHOP_ROOM" && c[0] == "choose") continue;
+            // `state` is the protocol's pure no-op (a forced dump; changes
+            // nothing). Scripted captures append them so every post-purchase
+            // state lands in an ordinary action record -- the record was
+            // already compared above, so the command itself is elided.
+            if (c[0] == "state") continue;
             if (screens[j].screen_type != "SHOP_SCREEN" || c[0] != "choose") {
                 stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
                        run.records[j].action_command +
                        "' is not a merchant action and has no run-layer analogue";
                 break;
             }
-            const ShopTarget t =
-                resolve_shop_choice(screens[j], c.size() >= 2 ? std::stoi(c[1]) : -1);
+            const ShopTarget t = resolve_shop_choice(
+                screens[j], shop_choice_arg_to_index(screens[j], c));
             bool applied = false;
             switch (t.what) {
                 case ShopPick::COLORED:

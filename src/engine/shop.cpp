@@ -249,8 +249,86 @@ void apply_price_discount(ShopState& shop, float multiplier) noexcept {
 }
 
 [[nodiscard]] bool slot_buyable(const RunState& rs, const ShopSlot& slot) noexcept {
+    // kShopRestockedUnknownCard is the Courier deviation's guard (shop.hpp):
+    // the restocked colored slot exists but its identity is MathUtils.random
+    // (unseeded, ShopScreen.java:615-617), so buying it is refused fail-loud
+    // here -- which keeps it off the legal mask AND makes a stale-mask CHOOSE
+    // a non-corrupting no-op through the same door every purchase re-derives.
     return slot.sold == 0 && slot.id != 0 &&
+           slot.id != kShopRestockedUnknownCard &&
            rs.gold >= static_cast<int32_t>(slot.price);
+}
+
+// --- The Courier's restock (see the shop.hpp block for the full derivation) ----
+
+// ShopScreen.setPrice (:660-673): ONE float product, ONE truncation, no sale
+// halving, no A16 pass. Distinct from roll_card_price (init), which truncates
+// BEFORE the discount passes round in place.
+[[nodiscard]] int16_t restock_card_price(const RunState& rs,
+                                         RngStream& merchant_rng, int base,
+                                         bool colorless) noexcept {
+    float price = static_cast<float>(base) * random(merchant_rng, 0.9f, 1.1f);
+    if (colorless) {
+        price *= 1.2f;
+    }
+    if (run_has_relic(rs, RelicId::THE_COURIER)) {
+        price *= 0.8f;
+    }
+    if (run_has_relic(rs, RelicId::MEMBERSHIP_CARD)) {
+        price *= 0.5f;
+    }
+    return static_cast<int16_t>(static_cast<int>(price));
+}
+
+// ShopScreen.getNewPrice (:386-411): a MathUtils.round of the jitter, then a
+// SEPARATE round per owned discount relic (applyDiscountToRelic) -- rounds of
+// rounds, exactly as spelled.
+[[nodiscard]] int16_t restock_item_price(const RunState& rs,
+                                         RngStream& merchant_rng,
+                                         int base) noexcept {
+    int p = mathutils_round(static_cast<float>(base) *
+                            random(merchant_rng, 0.95f, 1.05f));
+    if (run_has_relic(rs, RelicId::THE_COURIER)) {
+        p = mathutils_round(static_cast<float>(p) * 0.8f);
+    }
+    if (run_has_relic(rs, RelicId::MEMBERSHIP_CARD)) {
+        p = mathutils_round(static_cast<float>(p) * 0.5f);
+    }
+    return static_cast<int16_t>(p);
+}
+
+// The pool a useRng=false getCardFromPool draw indexes, WITHOUT the index draw
+// itself (that index is the unseeded MathUtils call): the same empty-view
+// walk shop_card_from_pool spends a cardRng draw on, made pure. This is what
+// keeps the restocked colored slot's RARITY -- and therefore its price --
+// seeded even though its identity is not.
+[[nodiscard]] RewardCardRarity restock_drawn_rarity(RewardCardRarity rolled,
+                                                    CardType type) noexcept {
+    if (type == CardType::POWER) {
+        for (int r = static_cast<int>(rolled);
+             r <= static_cast<int>(RewardCardRarity::RARE); ++r) {
+            if (typed_pool(static_cast<RewardCardRarity>(r), type).count > 0) {
+                return static_cast<RewardCardRarity>(r);
+            }
+        }
+        return RewardCardRarity::RARE;
+    }
+    for (int r = static_cast<int>(rolled);
+         r >= static_cast<int>(RewardCardRarity::COMMON); --r) {
+        if (typed_pool(static_cast<RewardCardRarity>(r), type).count > 0) {
+            return static_cast<RewardCardRarity>(r);
+        }
+    }
+    return RewardCardRarity::COMMON;
+}
+
+// Merchant.cards1's slot layout: ATTACK, ATTACK, SKILL, SKILL, POWER. A
+// restock replaces in place with `hoveredCard.type`, so the layout is stable
+// across restocks (and a restocked slot cannot itself be bought, so at most
+// one restock per colored slot).
+[[nodiscard]] CardType shop_colored_slot_type(uint8_t index) noexcept {
+    return index < 2 ? CardType::ATTACK
+                     : (index < 4 ? CardType::SKILL : CardType::POWER);
 }
 
 }  // namespace
@@ -466,7 +544,47 @@ bool shop_buy_card(RunState& rs, ShopState& shop, uint8_t index,
     // because no curse is ever stocked (the shop draws only RED non-basics and
     // poolable colourless cards).
     (void)add_card_to_master_deck(rs, static_cast<CardId>(slot.id), slot.upgrade);
-    slot.sold = 1;
+    // ShopScreen.purchaseCard's tail (:598-643): with The Courier the slot is
+    // REPLACED in place, not removed. The seeded halves run here in the Java's
+    // order (rarity/identity draw, then setPrice); the sold flag stays 0. The
+    // stream-order note: the Java's obtain is a queued FastCardObtainEffect
+    // that resolves after this tail, but no S1 onObtainCard body draws RNG, so
+    // running the obtain first (above) moves nothing observable.
+    if (run_has_relic(rs, RelicId::THE_COURIER)) {
+        if (colorless) {
+            // merchantRng.random() < colorlessRareChance (:600-603), then ONE
+            // seeded cardRng draw on the rarity view -- fully reproducible.
+            const RewardCardRarity rarity =
+                random(rs.merchant_rng) < kColorlessRareChance
+                    ? RewardCardRarity::RARE
+                    : RewardCardRarity::UNCOMMON;
+            const CardId id =
+                draw_colorless_card_from_pool(rs.card_rng, rarity);
+            slot.id = static_cast<uint16_t>(id);
+            // Every owned relic previews the replacement (:604-607); the eggs
+            // are the only S1 bodies.
+            slot.upgrade = preview_upgrade(rs, id);
+            slot.price = restock_card_price(rs, rs.merchant_rng,
+                                            card_base_price(rarity),
+                                            /*colorless=*/true);
+        } else {
+            // rollRarity() is seeded (ONE cardRng.random(99) through the
+            // ShopRoom table, :615); the pool INDEX is MathUtils.random
+            // (useRng=false, :615-617) and is the permanent named deviation:
+            // the slot restocks as unknown-identity, priced off the seeded
+            // rarity, and slot_buyable refuses it (shop.hpp).
+            const RewardCardRarity rolled = shop_roll_rarity(rs);
+            const RewardCardRarity drawn =
+                restock_drawn_rarity(rolled, shop_colored_slot_type(index));
+            slot.id = kShopRestockedUnknownCard;
+            slot.upgrade = 0;
+            slot.price = restock_card_price(rs, rs.merchant_rng,
+                                            card_base_price(drawn),
+                                            /*colorless=*/false);
+        }
+    } else {
+        slot.sold = 1;
+    }
     return true;
 }
 
@@ -519,6 +637,57 @@ bool shop_buy_relic_impl(RunState& rs, RngStream& misc_rng, ShopState& shop,
                 : mathutils_round(static_cast<float>(rs.purge_cost) * 0.5f));
     } else if (id == RelicId::SMILING_MASK) {
         shop.actual_purge_cost = kSmilingMaskPurgeCost;
+    }
+    // StoreRelic.purchaseRelic :98-103: the JUST-BOUGHT relic previews every
+    // stocked card. The eggs are the only S1 onPreviewObtainCard bodies, so a
+    // Molten/Toxic/Frozen Egg bought mid-shop upgrades its matching shelf
+    // cards (the instance later bought is the upgraded one). Skips sold slots
+    // (the game removed them from its lists) and the restocked-unknown
+    // sentinel (no identity to upgrade, and it is refused anyway).
+    {
+        CardType egg_type;
+        bool is_egg = true;
+        switch (id) {
+            case RelicId::MOLTEN_EGG: egg_type = CardType::ATTACK; break;
+            case RelicId::TOXIC_EGG: egg_type = CardType::SKILL; break;
+            case RelicId::FROZEN_EGG: egg_type = CardType::POWER; break;
+            default: is_egg = false; egg_type = CardType::CURSE; break;
+        }
+        if (is_egg) {
+            auto preview = [&](ShopSlot* slots, int n) noexcept {
+                for (int i = 0; i < n; ++i) {
+                    if (slots[i].sold != 0 || slots[i].id == 0 ||
+                        slots[i].id == kShopRestockedUnknownCard) {
+                        continue;
+                    }
+                    const CardDef* def =
+                        card_def(static_cast<CardId>(slots[i].id));
+                    if (def != nullptr && def->type == egg_type) {
+                        slots[i].upgrade = 1;
+                    }
+                }
+            };
+            preview(shop.colored, kShopColoredCount);
+            preview(shop.colorless, kShopColorlessCount);
+        }
+    }
+    // StoreRelic.purchaseRelic :105-112: with The Courier owned the slot
+    // restocks -- ONE rollRelicTier (merchantRng.random(99)), an END-pop with
+    // the in-shop canSpawn reroute (the instanceof loop at :106-108 is dead,
+    // see shop.hpp), then getNewPrice. The `relicId.equals("The Courier")`
+    // half of the guard is equally dead: The Courier cannot be stocked in a
+    // shop, so ownership always predates the purchase.
+    if (run_has_relic(rs, RelicId::THE_COURIER)) {
+        const RelicTier tier =
+            shop_relic_tier_for_roll(random(rs.merchant_rng, 99));
+        const RelicSpawnContext restock_ctx = shop_spawn_context(rs);
+        const RelicId restock_id =
+            return_end_random_relic_key(rs, tier, restock_ctx);
+        slot.id = static_cast<uint16_t>(restock_id);
+        slot.sold = 0;
+        slot.upgrade = 0;
+        slot.price = restock_item_price(rs, rs.merchant_rng,
+                                        drawn_relic_base_price(restock_id));
     }
     return true;
 }
@@ -573,7 +742,17 @@ bool shop_buy_potion(RunState& rs, ShopState& shop, uint8_t index) noexcept {
         break;
     }
     lose_gold(rs, static_cast<int32_t>(slot.price), /*in_shop=*/true);
-    slot.sold = 1;
+    // StorePotion.purchasePotion :86-89: with The Courier the slot restocks --
+    // returnRandomPotion() on potionRng (tier roll + trap-14 rejection
+    // sampling, fully seeded), then getNewPrice's merchantRng jitter.
+    if (run_has_relic(rs, RelicId::THE_COURIER)) {
+        const PotionId restock_id = return_random_potion(rs.potion_rng);
+        slot.id = static_cast<uint16_t>(restock_id);
+        slot.price = restock_item_price(rs, rs.merchant_rng,
+                                        drawn_potion_base_price(restock_id));
+    } else {
+        slot.sold = 1;
+    }
     return true;
 }
 

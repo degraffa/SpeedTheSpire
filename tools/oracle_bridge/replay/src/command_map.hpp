@@ -502,6 +502,28 @@ struct ShopTarget {
     std::string id;      // the capture row's game id; empty for PURGE / NONE
 };
 
+// A capture's `choose` argument is an INDEX from the live policies, but the
+// protocol equally accepts the exact choice string ("`choose` matches the
+// exact choice string first, else parses an integer index" -- PROTOCOL.md §2),
+// and the wave2cap Courier scripts buy by name precisely because a restock
+// renumbers the list under a script written in advance. Resolve the way the
+// game does: the exact (case-folded) choice string first, the integer second.
+[[nodiscard]] inline int shop_choice_arg_to_index(const ScreenInfo& s,
+                                                  const std::vector<std::string>& c) {
+    if (c.size() < 2) return -1;
+    std::string arg = c[1];
+    for (std::size_t i = 2; i < c.size(); ++i) arg += " " + c[i];
+    const std::string want = lower(arg);
+    for (std::size_t i = 0; i < s.choice_list.size(); ++i) {
+        if (lower(s.choice_list[i]) == want) return static_cast<int>(i);
+    }
+    try {
+        return std::stoi(arg);
+    } catch (...) {
+        return -1;  // reported by the caller as an unresolvable merchant action
+    }
+}
+
 // Which shop row a `choose i` names, resolved through the capture's own
 // choice_list: the game lists the AFFORDABLE unsold rows by DISPLAY name, so
 // the index means nothing without it.
