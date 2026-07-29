@@ -471,6 +471,66 @@ bool reward_claim_legal(const RunState& rs, const RewardScreen& s,
 
 namespace {
 
+// The Egg trio's onEquip preview pass (FrozenEgg2.onEquip, FrozenEgg2.java:
+// 31-38; MoltenEgg2/ToxicEgg2 identical but for the CardType): at equip time
+// the relic walks the OPEN combat-reward screen's card offers and runs
+// onPreviewObtainCard -> onObtainCard on each, upgrading matching-type
+// not-yet-upgraded OFFERS in place. The claim site is where the open screen
+// and the equip meet, so the pass lives here; an egg acquired with no reward
+// screen open (an event grant, the ctx-less shop fallback) walks the game's
+// stale/empty screen object -- observably inert, and the sim faithfully does
+// nothing there.
+//
+// EGG-SPECIFIC, not generic over onObtainCard bodies: Ceramic Fish and
+// Darkstone Periapt have onObtainCard overrides but the AbstractRelic no-op
+// onEquip -- a generic pass would pay the fish +9 gold for cards the player
+// never took. The three ids below are the complete S1 set whose Java onEquip
+// carries the walk (the only relics overriding onPreviewObtainCard are the
+// three egg files).
+[[nodiscard]] bool relic_equip_previews_open_offers(RelicId id) noexcept {
+    switch (id) {
+        case RelicId::FROZEN_EGG:
+        case RelicId::MOLTEN_EGG:
+        case RelicId::TOXIC_EGG:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void apply_egg_preview_to_open_offers(RunState& rs, RewardScreen& s,
+                                      RelicId id) noexcept {
+    const RelicOnObtainCardFn fn = relic_on_obtain_card_fn(id);
+    if (fn == nullptr) {
+        return;
+    }
+    // `for (RewardItem reward : rewards) { if (reward.cards == null) continue;
+    // for (AbstractCard c : reward.cards) onPreviewObtainCard(c); }` -- every
+    // CARDS item still on the screen, offers in display order. The guarded
+    // onObtainCard body itself is REUSED over a scratch CardInstance so the
+    // preview and the obtain-time upgrade can never drift apart; the eggs'
+    // bodies read only (type, upgrade), so the scratch row is the whole of
+    // what they can see.
+    for (uint8_t i = 0; i < s.count && i < kRewardItemCap; ++i) {
+        RunRewardItem& item = s.items[i];
+        if (static_cast<RewardItemKind>(item.kind) != RewardItemKind::CARDS) {
+            continue;
+        }
+        for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap; ++j) {
+            const CardDef* def =
+                card_def(static_cast<CardId>(item.card_ids[j]));
+            if (def == nullptr) {
+                continue;
+            }
+            CardInstance scratch{};
+            scratch.card_id = item.card_ids[j];
+            scratch.upgrade = item.card_upgrades[j];
+            fn(rs, scratch, *def);
+            item.card_upgrades[j] = scratch.upgrade;
+        }
+    }
+}
+
 // Shared body of the two claim_reward overloads. `equip_ctx == nullptr` is the
 // plain door: an on_equip_screen relic row (in S1, a Bottled trio id) is then
 // refused by acquire_relic's NEEDS_EQUIP_CONTEXT guard and the item stays on
@@ -521,6 +581,15 @@ bool claim_reward_impl(RunState& rs, RngStream& misc_rng, RewardScreen& s,
                 if (acquired != RelicAcquireResult::ACQUIRED &&
                     acquired != RelicAcquireResult::CIRCLET_STACKED) {
                     return false;
+                }
+                // The Egg trio's onEquip walks THIS screen's still-open card
+                // offers at equip time (the helpers above). Runs after the
+                // acquire -- the relic is owned when its onEquip fires -- and
+                // before the item removal, which cannot matter: the pass never
+                // touches RELIC items.
+                if (acquired == RelicAcquireResult::ACQUIRED &&
+                    relic_equip_previews_open_offers(rid)) {
+                    apply_egg_preview_to_open_offers(rs, s, rid);
                 }
             }
             remove_item(s, index);

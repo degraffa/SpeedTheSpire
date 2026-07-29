@@ -1338,5 +1338,100 @@ TEST(RewardFlow, MalformedOpenCardStatesAreInertAndAdvertiseNothing) {
     expect_inert(oversized_offer);
 }
 
+// =============================================================================
+// The Egg trio's onEquip reward-screen preview pass
+// =============================================================================
+//
+// FrozenEgg2.onEquip (FrozenEgg2.java:31-38; Molten/Toxic identical but for
+// the CardType) walks the OPEN combat-reward screen's card offers and runs
+// onPreviewObtainCard -> onObtainCard on each: a matching-type, not-yet-
+// upgraded OFFER is upgraded in place at equip time. An elite reward screen
+// holds a RELIC and a CARDS item at once, so claiming an egg with an offer
+// still open is the game's live case. The pass runs at the CLAIM site
+// (claim_reward's RELIC arm), which is where the open screen and the equip
+// meet; an egg granted with no reward screen open (an event) walks the game's
+// stale/empty screen -- observably inert, and the sim faithfully does
+// nothing.
+//
+// The narrow observable is the still-open offer's upgrade bits; the MASTER
+// DECK converges regardless (the Java's !upgraded gate makes preview-then-
+// obtain and obtain-only identical), which the double-upgrade pin below
+// checks rather than assumes.
+
+// A screen holding [RELIC(rid), CARDS{Strike, Defend, Inflame}], all offers
+// at upgrade 0.
+RewardScreen egg_preview_screen(RelicId rid) {
+    RewardScreen s{};
+    s.open_card_item = kNoOpenCardReward;
+    s.count = 2;
+    s.items[0].kind = static_cast<uint8_t>(RewardItemKind::RELIC);
+    s.items[0].id = static_cast<uint16_t>(rid);
+    s.items[1].kind = static_cast<uint8_t>(RewardItemKind::CARDS);
+    s.items[1].card_count = 3;
+    s.items[1].card_ids[0] = static_cast<uint16_t>(CardId::STRIKE);   // ATTACK
+    s.items[1].card_ids[1] = static_cast<uint16_t>(CardId::DEFEND);   // SKILL
+    s.items[1].card_ids[2] = static_cast<uint16_t>(CardId::INFLAME);  // POWER
+    return s;
+}
+
+TEST(RewardEggPreview, ClaimingAnEggUpgradesTheMatchingStillOpenOffers) {
+    struct Case {
+        RelicId egg;
+        int upgraded_offer;  // index into the 3-card offer above
+    };
+    const Case cases[] = {{RelicId::MOLTEN_EGG, 0},
+                          {RelicId::TOXIC_EGG, 1},
+                          {RelicId::FROZEN_EGG, 2}};
+    for (const Case& c : cases) {
+        RunState rs = make_run(910);
+        RngStream misc = from_seed(3);
+        RewardScreen s = egg_preview_screen(c.egg);
+        ASSERT_TRUE(claim_reward(rs, misc, s, 0))
+            << "egg id " << static_cast<int>(c.egg);
+        ASSERT_EQ(s.count, 1) << "the relic item was consumed";
+        const RunRewardItem& offer = s.items[0];
+        for (int j = 0; j < 3; ++j) {
+            EXPECT_EQ(offer.card_upgrades[j], j == c.upgraded_offer ? 1 : 0)
+                << "egg id " << static_cast<int>(c.egg) << " offer " << j;
+        }
+    }
+}
+
+TEST(RewardEggPreview, PreviewThenObtainDoesNotDoubleUpgrade) {
+    RunState rs = make_run(911);
+    RngStream misc = from_seed(3);
+    RewardScreen s = egg_preview_screen(RelicId::FROZEN_EGG);
+    ASSERT_TRUE(claim_reward(rs, misc, s, 0));
+    ASSERT_EQ(s.items[0].card_upgrades[2], 1) << "Inflame previewed to +1";
+
+    // Take the previewed Inflame: the deck row lands at upgrade 1 EXACTLY --
+    // the onObtainCard body's !upgraded gate skips a second upgrade.
+    ASSERT_TRUE(claim_reward(rs, misc, s, 0));  // open the CARDS item
+    const uint16_t before = rs.master_deck_count;
+    ASSERT_TRUE(reward_take_card(rs, s, 2));
+    ASSERT_EQ(rs.master_deck_count, before + 1);
+    EXPECT_EQ(rs.master_deck[before].card_id,
+              static_cast<uint16_t>(CardId::INFLAME));
+    EXPECT_EQ(rs.master_deck[before].upgrade, 1)
+        << "preview-then-obtain and obtain-only end identical";
+}
+
+// Negative control: an onObtainCard relic whose Java onEquip has NO preview
+// walk must leave the offers alone -- Ceramic Fish's onObtainCard is +9 gold
+// on obtain (CeramicFish.java), and its onEquip is the AbstractRelic no-op.
+// A pass keyed generically on "has an onObtainCard body" would pay the fish
+// for cards the player never took.
+TEST(RewardEggPreview, ANonPreviewingOnObtainRelicLeavesTheOffersAlone) {
+    RunState rs = make_run(912);
+    RngStream misc = from_seed(3);
+    RewardScreen s = egg_preview_screen(RelicId::CERAMIC_FISH);
+    const int32_t gold_before = rs.gold;
+    ASSERT_TRUE(claim_reward(rs, misc, s, 0));
+    EXPECT_EQ(rs.gold, gold_before) << "no gold for cards never obtained";
+    for (int j = 0; j < 3; ++j) {
+        EXPECT_EQ(s.items[0].card_upgrades[j], 0);
+    }
+}
+
 }  // namespace
 }  // namespace sts::engine
