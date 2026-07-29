@@ -70,9 +70,16 @@ jobs:
         with:
           arch: x64
 
+      # msvc-dev-cmd prepends Visual Studio's own paths, and VS bundles its own
+      # clang-cl -- a bare `clang-cl` resolves to the VS copy, not the pinned
+      # choco install (the first run of this job failed exactly there). So the
+      # pinned toolchain is named by ABSOLUTE path here, and the preset's bare
+      # `clang-cl` is overridden at configure time for the same reason.
       - name: Assert the pinned toolchain
         run: |
-          $v = (& clang-cl --version | Select-Object -First 1)
+          $clang = 'C:\Program Files\LLVM\bin\clang-cl.exe'
+          if (-not (Test-Path $clang)) { throw "pinned LLVM not found at $clang" }
+          $v = (& $clang --version | Select-Object -First 1)
           Write-Host $v
           if ($v -notmatch '22\.1\.8') { throw "clang-cl is not the pinned 22.1.8: $v" }
 
@@ -88,7 +95,7 @@ jobs:
             sts-deps-${{ runner.os }}-win-debug-
 
       - name: Configure
-        run: cmake --preset win-debug -DSTS_BUILD_BENCHMARKS=ON
+        run: cmake --preset win-debug -DSTS_BUILD_BENCHMARKS=ON "-DCMAKE_C_COMPILER=C:/Program Files/LLVM/bin/clang-cl.exe" "-DCMAKE_CXX_COMPILER=C:/Program Files/LLVM/bin/clang-cl.exe"
 
       - name: Build
         run: cmake --build --preset win-debug
