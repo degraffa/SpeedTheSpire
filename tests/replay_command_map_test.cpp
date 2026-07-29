@@ -13,6 +13,7 @@
 // these are stdlib-only unit tests over hand-built `ScreenInfo`s -- no
 // artifact, no JSON, no campaign data root.
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -360,6 +361,76 @@ TEST(ReplayCommandMap, EveryPhaseWithAMasterDeckGridIsRecognised) {
     EXPECT_TRUE(sim_grid_open(rc));
     rc.event.grid_kind = static_cast<uint8_t>(EventGridKind::NONE);
     EXPECT_FALSE(sim_grid_open(rc));
+}
+
+// --- the bottle grid's REVERSE row order, proven live -------------------------
+//
+// getCardsOfType builds the bottle grid with addToBottom, which is a PREPEND
+// (CardGroup.java:1052-1058 -> :459-461), so the game's grid rows run in
+// REVERSE master-deck order -- unlike every other master-deck grid, whose
+// getPurgeableCards keeps deck order. open_grid_session therefore snapshots
+// the legal indices DESCENDING for a pending-bottle grid, and this was the one
+// mapping claim only a live capture could prove.
+//
+// It was proven 2026-07-28: campaign wave2cap_roundA2_20260728T224858Z_claude01
+// run STS04925, seq 58-59 -- a floor-5 chest offers Bottled Flame, the claim
+// opens the game's grid reading [Blood for Blood, Sword Boomerang, Bash,
+// Strike, Strike+, Strike, Strike, Strike] over a deck whose attacks sit in
+// exactly the opposite order, and the capture's `choose 1` bottles SWORD
+// BOOMERANG (the deck's second-from-last attack). replay_run_diff --replay
+// re-drove the run through this session and diffed zero on every record
+// through and past the bottling -- master-deck `flags` included, which is the
+// bit the fork's in_bottle_flame key populates on the capture side. A forward
+// (ascending) snapshot would have bottled an opening Strike instead and
+// diverged on every record from seq 59 on. This test is that capture's shape,
+// promoted; the campaign artifact is the evidence, this is the guard.
+TEST(ReplayCommandMap, ABottleGridSessionSnapshotsTheLegalIndicesDescending) {
+    namespace eng = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT_REWARD);
+    rc.pending_bottle = static_cast<uint8_t>(eng::MasterBottleKind::FLAME);
+    auto add = [&rc](eng::CardId id, uint8_t up = 0) {
+        eng::CardInstance c{};
+        c.card_id = static_cast<uint16_t>(id);
+        c.upgrade = up;
+        rc.run.master_deck[rc.run.master_deck_count++] = c;
+    };
+    // STS04925's deck shape at the claim: starter Strikes (one smithed),
+    // Defends, Bash, then the two acquired attacks in acquisition order.
+    add(eng::CardId::STRIKE);        // 0
+    add(eng::CardId::STRIKE);        // 1
+    add(eng::CardId::STRIKE, 1);     // 2
+    add(eng::CardId::STRIKE);       // 3
+    add(eng::CardId::STRIKE);       // 4
+    add(eng::CardId::DEFEND);       // 5 -- a SKILL: not on the flame grid
+    add(eng::CardId::DEFEND);       // 6
+    add(eng::CardId::BASH);         // 7
+    add(eng::CardId::SWORD_BOOMERANG);  // 8
+    add(eng::CardId::BLOOD_FOR_BLOOD);  // 9
+
+    ASSERT_TRUE(sim_grid_open(rc)) << "pending_bottle overlays any phase";
+
+    sts::replay::GridSession g;
+    sts::replay::open_grid_session(rc, g);
+    // The legal rows are the eight attacks; the session must hold their
+    // master-deck indices DESCENDING, so the game's top row (the LAST
+    // acquired attack) maps positionally.
+    const std::vector<int> expected = {9, 8, 7, 4, 3, 2, 1, 0};
+    EXPECT_EQ(g.filtered, expected);
+    // The capture's `choose 1` names the game's second row == Sword Boomerang
+    // (deck index 8), which is where the live run's in_bottle_flame landed.
+    ASSERT_GT(g.filtered.size(), 1u);
+    EXPECT_EQ(g.filtered[1], 8);
+
+    // And the non-bottle contrast: the same deck's PURGE-style grid (no
+    // pending bottle) snapshots ASCENDING -- the ordering exception is the
+    // bottle grid alone.
+    rc.pending_bottle = static_cast<uint8_t>(eng::MasterBottleKind::NONE);
+    rc.phase = static_cast<uint8_t>(RunPhase::REST_SITE);
+    rc.rest.screen = static_cast<uint8_t>(RestScreen::SMITH);
+    sts::replay::GridSession g2;
+    sts::replay::open_grid_session(rc, g2);
+    ASSERT_FALSE(g2.filtered.empty());
+    EXPECT_TRUE(std::is_sorted(g2.filtered.begin(), g2.filtered.end()));
 }
 
 // --- the neighbouring elisions, pinned so the EVENT fix cannot disturb them --

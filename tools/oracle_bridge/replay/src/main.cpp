@@ -1094,6 +1094,28 @@ struct ShopTarget {
     uint8_t index = 0;
 };
 
+// A capture's `choose` argument is an INDEX from the live policies, but the
+// protocol equally accepts the exact choice string ("`choose` matches the
+// exact choice string first, else parses an integer index" -- PROTOCOL.md §2),
+// and the wave2cap Courier scripts buy by name precisely because a restock
+// renumbers the list under a script written in advance. Resolve the way the
+// game does: the exact (case-folded) choice string first, the integer second.
+[[nodiscard]] int shop_choice_arg_to_index(const ScreenInfo& s,
+                                           const std::vector<std::string>& c) {
+    if (c.size() < 2) return -1;
+    std::string arg = c[1];
+    for (std::size_t i = 2; i < c.size(); ++i) arg += " " + c[i];
+    const std::string want = lower(arg);
+    for (std::size_t i = 0; i < s.choice_list.size(); ++i) {
+        if (lower(s.choice_list[i]) == want) return static_cast<int>(i);
+    }
+    try {
+        return std::stoi(arg);
+    } catch (...) {
+        return -1;  // reported by the caller as an unresolvable merchant action
+    }
+}
+
 [[nodiscard]] ShopTarget resolve_shop_choice(const ScreenInfo& s, int choice) {
     ShopTarget t;
     if (choice < 0 || choice >= static_cast<int>(s.choice_list.size())) return t;
@@ -1373,14 +1395,19 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
             }
             if (c[0] == "leave" || c[0] == "proceed" || c[0] == "return") continue;
             if (screens[j].screen_type == "SHOP_ROOM" && c[0] == "choose") continue;
+            // `state` is the protocol's pure no-op (a forced dump; changes
+            // nothing). Scripted captures append them so every post-purchase
+            // state lands in an ordinary action record -- the record was
+            // already compared above, so the command itself is elided.
+            if (c[0] == "state") continue;
             if (screens[j].screen_type != "SHOP_SCREEN" || c[0] != "choose") {
                 stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
                        run.records[j].action_command +
                        "' is not a merchant action and has no run-layer analogue";
                 break;
             }
-            const ShopTarget t =
-                resolve_shop_choice(screens[j], c.size() >= 2 ? std::stoi(c[1]) : -1);
+            const ShopTarget t = resolve_shop_choice(
+                screens[j], shop_choice_arg_to_index(screens[j], c));
             bool applied = false;
             switch (t.what) {
                 case ShopPick::COLORED:
