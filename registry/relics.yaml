@@ -1123,7 +1123,7 @@
   game_id: "Orrery"
   tier: SHOP
   pool_order: 5
-  provenance: "Orrery.onEquip (Orrery.java:1270-1276) -- addCardToRewards() four times, then opens the combat-reward screen. DEFERRED: card-reward assembly and the reward screen are owned by the rewards layer; NOTE for that owner, the four addCardToRewards calls are cardRng-visible. The row, its pool slot and its relicRng draw are live."
+  provenance: "Orrery.onEquip (Orrery.java:27-33; the file is 40 lines -- the former :1270-1276 was the +1000-offset drift class) -- addCardToRewards() four times, then opens the combat-reward screen (combatRewardScreen.open, :31). STILL DEFERRED, but for the CURRENT reason (the old 'owned by the rewards layer' premise expired at B4.5): the reward screen EXISTS (RewardScreen / claim_reward, combat_rewards.cpp) -- what is missing is this relic's onEquip body, which must assemble and present a fresh card-reward screen at equip time and therefore needs the equip-screen surface (pickup: on_equip_screen / RelicEquipContext, relic_pools.hpp) -- the same equip-plumbing decision the 'Egg trio onEquip reward-screen preview pass' ledger row records. NOTE for that owner: the four addCardToRewards calls are cardRng-visible. The row, its pool slot and its relicRng draw are live."
 
 - id: 100
   name: DOLLYS_MIRROR
@@ -1192,7 +1192,7 @@
   game_id: "Cauldron"
   tier: SHOP
   pool_order: 13
-  provenance: "Cauldron.onEquip (Cauldron.java:1075-1092) -- addPotionToRewards(PotionHelper.getRandomPotion()) five times, then opens the combat-reward screen with the card reward removed. DEFERRED: the reward screen and shop acquisition are owned by the run layer; NOTE for that owner, the five getRandomPotion() calls are potionRng-visible. The row, its pool slot and its relicRng draw are live."
+  provenance: "Cauldron.onEquip (Cauldron.java:30-45; the file is 52 lines -- the former :1075-1092 was the +1000-offset drift class) -- addPotionToRewards(PotionHelper.getRandomPotion()) five times, then opens the combat-reward screen with the CARD reward row removed (:36-44). STILL DEFERRED, but for the CURRENT reason (the old 'owned by the run layer' premise expired: B4.8 landed shop acquisition and B4.5 the reward screen -- RewardScreen / claim_reward, combat_rewards.cpp): what is missing is this relic's onEquip body, which must assemble and present a fresh potion-reward screen at equip time and therefore needs the equip-screen surface (pickup: on_equip_screen / RelicEquipContext, relic_pools.hpp) -- the same equip-plumbing decision the 'Egg trio onEquip reward-screen preview pass' ledger row records. NOTE for that owner: the five getRandomPotion() calls are potionRng-visible. The row, its pool slot and its relicRng draw are live."
 
 - id: 108
   name: STRANGE_SPOON
