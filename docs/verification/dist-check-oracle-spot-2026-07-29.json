@@ -1,0 +1,114 @@
+{
+  "campaign_id": "b53_full_act1_20260729",
+  "cell_order": [
+    "oracle",
+    "simulator"
+  ],
+  "correction": "Holm-Bonferroni",
+  "family_alpha": 0.01,
+  "flagged": false,
+  "full_act1_runs": 200,
+  "policy": "random-legal",
+  "rare_category_pooling_min_combined": 10,
+  "schema_version": 1,
+  "tests": [
+    {
+      "cells": {
+        "AcidSlime_M+SpikeSlime_S": [
+          45,
+          43
+        ],
+        "AcidSlime_S+SpikeSlime_M": [
+          52,
+          57
+        ],
+        "Cultist": [
+          104,
+          105
+        ],
+        "FuzzyLouseDefensive+FuzzyLouseDefensive": [
+          29,
+          27
+        ],
+        "FuzzyLouseDefensive+FuzzyLouseNormal": [
+          41,
+          44
+        ],
+        "FuzzyLouseNormal+FuzzyLouseNormal": [
+          29,
+          24
+        ],
+        "GremlinNob": [
+          5,
+          5
+        ],
+        "JawWorm": [
+          113,
+          123
+        ],
+        "Lagavulin": [
+          7,
+          12
+        ],
+        "OTHER": [
+          11,
+          26
+        ],
+        "Sentry+Sentry+Sentry": [
+          10,
+          7
+        ]
+      },
+      "chi_square": 8.492694308548334,
+      "degrees_of_freedom": 10,
+      "flagged": false,
+      "holm_threshold": 0.005,
+      "name": "encounters",
+      "p_value": 0.5808267009306654
+    },
+    {
+      "cells": {
+        "COMMON": [
+          389,
+          531
+        ],
+        "RARE": [
+          4,
+          6
+        ],
+        "UNCOMMON": [
+          195,
+          282
+        ]
+      },
+      "chi_square": 0.26714349193327847,
+      "degrees_of_freedom": 2,
+      "flagged": false,
+      "holm_threshold": 0.01,
+      "name": "reward_rarity",
+      "p_value": 0.8749646915380599
+    },
+    {
+      "cells": {
+        "EVENT": [
+          119,
+          122
+        ],
+        "MONSTER": [
+          14,
+          20
+        ],
+        "OTHER": [
+          9,
+          7
+        ]
+      },
+      "chi_square": 1.1784649575806825,
+      "degrees_of_freedom": 2,
+      "flagged": false,
+      "holm_threshold": 0.0033333333333333335,
+      "name": "event_outcomes",
+      "p_value": 0.5547529059984131
+    }
+  ]
+}

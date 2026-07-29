@@ -644,3 +644,14 @@ sts_add_test(fuzz_test
 # WRONG capture seed list rather than an error -- which is why they are pinned
 # here rather than noticed during a capture.
 sts_add_test(seed_scan_test LIBS seed_scan_core)
+
+# B5.3: the dependency-free chi-square survival function, impossible-support
+# handling, and the pre-registered Holm-Bonferroni step-down procedure. The
+# >=10k-seed analytic sweep itself is tools/dist_check/dist_check and remains a
+# campaign rather than a per-commit ctest.
+sts_add_test(dist_check_test LIBS dist_check_stats)
+add_test(
+    NAME dist_check_spot_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -B -m unittest -v test_oracle_spot.py)
+set_tests_properties(dist_check_spot_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/dist_check")

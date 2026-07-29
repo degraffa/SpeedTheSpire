@@ -1943,6 +1943,12 @@ Then: update CLAUDE.md "Current state".
   10,000 seeds / 250,000 cases**, zero failures, plus ASan-clean **2,500 /
   250,000 cases = 1.00 %** disjoint sample; 959/959 ×3 ·
   [log](stage-b-log.md#b51)
+- **B5.3** `[x]` ∥ Tier-4 distributional suite — 16 pre-registered analytic
+  hypotheses passed over 20,000 seeds with Holm-Bonferroni family-wise
+  α=0.01; the distinct 200-run A20 oracle spot set passed all three aggregate
+  comparisons, after its stop-line exposed and fixed an entry-pump combat
+  finalization bug · [report](verification/dist-check-oracle-spot-2026-07-29.json)
+  · [log](stage-b-log.md#b53)
 
 - **B5.2** `[x]` ∥ Oracle campaign automation — one-command resumable/sharded
   Windows capture + WSL translation/replay/list-oracle pipeline, nightly
@@ -1950,19 +1956,6 @@ Then: update CLAUDE.md "Current state".
   reproducers; acceptance `b52_accept_locked_20260729_71000_71049`: all 50
   seeds, 2,740 actions, 40 replay-clean, every raw encounter list zero-diff ·
   [log](stage-b-log.md#b52)
-
-### B5.3 `[ ]` ∥ Tier-4 distributional suite
-**Deps:** G6 · **Spec:** design §3.4 (analytic-first scope)
-**Deliverables:** `tools/dist_check/`: the §3.4 analytic expectation set
-(encounter weights, compositions, rarity+pity dynamics, potion ratchet,
-chest tables, ?-room pity, relic/potion tier rolls, map quotas) with
-chi-square/exact tests over ≥ 10k sim seeds; the ≥ 200-run oracle-harvested
-spot comparison.
-**Acceptance:** all analytic tests pass at pre-registered significance
-(document the correction for multiple comparisons in the tool README —
-choose and justify); oracle spot set shows no flagged aggregate; failures
-are stop-the-line divergences, not tuning targets.
-**Log:** —
 
 ### B5.4 `[ ]` Verification report + CI corpus
 **Deps:** B5.2 · **Spec:** design §7.4-7.5, §7.1(1)
@@ -2029,6 +2022,18 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-07-29 — **B5.3 `[x]`: the pre-registered Tier-4 distribution family
+  and its 200-run oracle spot set are green.** The analytic executable covers
+  the frozen §3.4 expectation set over 20,000 seeds and controls 16
+  hypotheses with Holm-Bonferroni at family-wise α=0.01. The same-seed A20
+  oracle spot comparison controls its three aggregate tests independently;
+  all passed without changing the registered alpha, correction, support
+  rules, or pooling threshold. Its first run stopped before statistics on
+  STS100142: Neow's Lament plus Mercury Hourglass killed both Louses inside
+  the entry pump, but the run layer exposed `COMBAT/COMBAT_OVER` until a
+  player action that could never be legal. The existing combat-finalization
+  path now runs at entry too, with a focused regression and no schema/API
+  change. [Archive log and evidence.](stage-b-log.md#b53)
 - 2026-07-27 — **B4.5 `[!]` → `[x]`: the oracle spot-diff ran and passed, and
   the card-pool library order turned out to be computable rather than
   recoverable.** Two operator-launched campaigns

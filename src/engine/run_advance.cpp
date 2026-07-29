@@ -547,9 +547,13 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
     res.terminal = false;  // the run continues at a CHOOSE/proceed screen.
 }
 
+void finish_combat_after_action(RunController& rc, StepResult& res) noexcept;
+
 // Build the live combat for `enc_key` and set rc.phase accordingly. Returns true
-// iff a real combat was entered (phase COMBAT); false parks the run at
-// ROOM_UNIMPLEMENTED (unknown encounter / a member monster not yet implemented).
+// iff a real combat was entered; false parks the run at ROOM_UNIMPLEMENTED
+// (unknown encounter / a member monster not yet implemented). A battle-start
+// effect can kill the whole group before player control, in which case the
+// successful entry has already advanced to COMBAT_REWARD when this returns.
 // The five floor streams are re-derived here (identical to the caller's reseed) so
 // the build is a pure function of (run, floor, encounter).
 //
@@ -872,6 +876,14 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     rc.room_type = static_cast<uint8_t>(room);
     rc.combat_outcome = static_cast<uint8_t>(RunCombatOutcome::NONE);
     rc.phase = static_cast<uint8_t>(RunPhase::COMBAT);
+    // The turn-1 pump can itself finish combat: for example, Neow's Lament
+    // puts the first three groups at 1 HP and Mercury Hourglass's queued
+    // at-turn-start damage kills them before the player receives control.
+    // AbstractRoom opens rewards from that same battle-update pass. Collapse
+    // the run phase here as well, rather than exposing a live COMBAT phase with
+    // a COMBAT_OVER child and therefore an empty legal-action set.
+    StepResult entry_result{};
+    finish_combat_after_action(rc, entry_result);
     return true;
 }
 
