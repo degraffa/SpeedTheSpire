@@ -255,4 +255,47 @@ TEST(EventJoin, NeowSentinelIsRefusedByName) {
     EXPECT_NE(v.problem.find("--neow"), std::string::npos) << v.problem;
 }
 
+// --- the Smoke-Bomb escape-settlement race (shape 3) --------------------------
+//
+// The field-set rule IS the narrowness (see the header): a record inside the
+// escape-animation window may differ ONLY in what the one-frame settlement
+// moves. STS00241 seq 96 is the live pin -- exactly these eight fields, one
+// record, zero-diff to the run terminal on both sides of it.
+
+using sts::replay::is_escape_settlement_fields;
+
+std::vector<std::string> settlement_fields() {
+    return {"hp",
+            "blizzard_potion_mod",
+            "treasure_rng.s0",
+            "treasure_rng.s1",
+            "treasure_rng.counter",
+            "potion_rng.s0",
+            "potion_rng.s1",
+            "potion_rng.counter"};
+}
+
+TEST(EscapeSettlementRace, TheSts00241FieldSetIsRecognised) {
+    EXPECT_TRUE(is_escape_settlement_fields(settlement_fields()));
+    // A subset is still the settlement (a run without Burning Blood heals
+    // nothing, a run whose potion roll misses moves fewer fields).
+    EXPECT_TRUE(is_escape_settlement_fields(
+        {"blizzard_potion_mod", "potion_rng.counter"}));
+}
+
+TEST(EscapeSettlementRace, AnyFieldOutsideTheSettlementSetIsARealDivergence) {
+    for (const char* extra :
+         {"gold", "floor", "master_deck_count", "master_deck[3]",
+          "event_rng.s0", "card_rng.counter", "max_hp", "relics[0].counter",
+          "keys"}) {
+        std::vector<std::string> fields = settlement_fields();
+        fields.push_back(extra);
+        EXPECT_FALSE(is_escape_settlement_fields(fields)) << extra;
+    }
+}
+
+TEST(EscapeSettlementRace, AnEmptyReportIsNotARace) {
+    EXPECT_FALSE(is_escape_settlement_fields({}));
+}
+
 }  // namespace

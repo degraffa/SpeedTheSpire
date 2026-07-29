@@ -414,6 +414,31 @@ whole twelve-artifact corpus replays CLEAN to terminal. G6-main thirty and
 the bottle seven byte-identical to the previous section (10 / 3 not clean,
 same rows); full-output diff shows exactly the two artifacts above changed.
 
+## `wave3-followup` — the Smoke-Bomb escape-settlement race is classified (2026-07-28)
+
+STS00241 seq 96 — the wave-2 record's "documented benign" single-record
+transient — now classifies as **RACE** instead of reading as a divergence.
+The recognition is the escape-animation analogue of the obtain race and
+equally narrow, split the same way: the FIELD-SET rule
+(`is_escape_settlement_fields`, readout_shapes.hpp — every differing field
+must be `hp` or a reward-assembly mover: `blizzard_potion_mod`,
+`treasure_rng.*`, `potion_rng.*`; gold is deliberately OUT, assembled rewards
+sit on the screen and never in the purse) is unit-tested JSON-free
+(`EscapeSettlementRace.*`, with the outside-the-set negative control sweep),
+and the WINDOW gates live at the one call site: capture screen `NONE` (still
+in combat), sim phase `COMBAT_REWARD`, sim combat flagged PLAYER-ESCAPED. A
+settlement computed WRONG rather than early still surfaces: the capture's own
+settled records from the next seq on fail the window and diff for real.
+
+| Run | Before | After |
+|---|---|---|
+| STS00241 | 218 records, ONE divergent record (seq 96, 8 fields) | **CLEAN to run terminal, 218 records, 1 escape-race** |
+
+Whole-corpus check: exactly ONE escape-race record across all 49 artifacts
+(STS00241's), every other verdict byte-identical — the recognition fired
+nowhere else. The bottle seven is now `--- 7 file(s), 2 not clean ---` (the
+two standing gold-class (c) rows, STS04925 s137 and STS06578 s81).
+
 ## `wave3-followup` — `boss_ids` compared for real (2026-07-28)
 
 The act_boss row's re-owned mirror is discharged: `run_begin` records

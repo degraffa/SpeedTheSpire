@@ -380,6 +380,16 @@ struct Options {
 //            could not simply reuse the --event call and had to be told the
 //            direction. (Deferred-obligations row "`--replay` lacks `--event`'s
 //            obtain-race recognition".)
+// The field-name projection the escape-settlement classifier consumes
+// (readout_shapes.hpp keeps the field-set rule JSON-free and unit-tested).
+[[nodiscard]] std::vector<std::string> diff_field_names(
+    const sts::diff::DiffReport& rep) {
+    std::vector<std::string> names;
+    names.reserve(rep.diffs.size());
+    for (const auto& d : rep.diffs) names.push_back(d.field_name);
+    return names;
+}
+
 [[nodiscard]] bool is_obtain_race(const sts::diff::DiffReport& rep,
                                   const RunState& ahead,
                                   const RunState& behind) {
@@ -408,6 +418,7 @@ struct Verdict {
     std::size_t diverged_fields = 0;
     int deck_identity_records = 0;  // records whose only diff was library order
     int obtain_race_records = 0;    // ...whose only diff was the obtain race
+    int escape_race_records = 0;    // ...the Smoke-Bomb escape-settlement race
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
 };
@@ -486,6 +497,26 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                                               expected.master_deck_count),
                         actual.master_deck_count - expected.master_deck_count == 1
                             ? "" : "s");
+        } else if (!rep.empty() && s.screen_type == "NONE" &&
+                   rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD) &&
+                   (rc.combat.flags & kCombatFlagPlayerEscaped) != 0u &&
+                   is_escape_settlement_fields(diff_field_names(rep))) {
+            // The Smoke-Bomb escape-settlement race (readout_shapes.hpp): the
+            // capture's dump is inside the escape animation, still listing the
+            // fight, while the sim settled the escape synchronously on the
+            // potion use. Single-record by construction -- the capture's own
+            // settled records from the next seq on fail the window gates and
+            // would diff for real.
+            ++v.escape_race_records;
+            std::printf("RACE  seq=%d floor=%d screen=%s cmd='%s': the sim settled a "
+                        "Smoke-Bomb escape (victory heal + battle-over assembly) that "
+                        "this dump catches mid-escape-animation "
+                        "(AbstractPlayer.updateEscapeAnimation -> endBattle, "
+                        "AbstractPlayer.java:2281-2292); %zu field%s, all in the "
+                        "settlement set\n",
+                        rec.seq, s.floor, s.screen_type.c_str(),
+                        rec.action_command.c_str(), rep.size(),
+                        rep.size() == 1 ? "" : "s");
         } else if (!rep.empty()) {
             if (v.diverged_at < 0) {
                 v.diverged_at = static_cast<int>(k);
@@ -2793,11 +2824,12 @@ int main(int argc, char** argv) {
         try {
             const Verdict v = replay_one(f, opts);
             std::printf("%s %s: %d record%s compared (%d on reward screens), "
-                        "%d library-order-only, %d obtain-race; stop: %s\n",
+                        "%d library-order-only, %d obtain-race, %d escape-race; stop: %s\n",
                         v.clean ? "CLEAN" : "PART ", f.c_str(), v.records_compared,
                         v.records_compared == 1 ? "" : "s",
                         v.reward_records_compared, v.deck_identity_records,
-                        v.obtain_race_records, v.stop_reason.c_str());
+                        v.obtain_race_records, v.escape_race_records,
+                        v.stop_reason.c_str());
             // The frontier, always on its own line and never folded into the
             // stop -- see `Verdict`. "no divergence" is said out loud too: a
             // replay that stopped without ever disagreeing is a coverage gap in

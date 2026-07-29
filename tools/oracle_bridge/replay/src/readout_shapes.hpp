@@ -265,4 +265,41 @@ struct EventJoin {
     return j;
 }
 
+// --- 3. The Smoke-Bomb escape-settlement race --------------------------------
+//
+// The escape-animation analogue of `is_obtain_race` (main.cpp), and the same
+// single-frame family: SmokeBomb.use latches the escape, but the game's combat
+// only ENDS when `AbstractPlayer.updateEscapeAnimation` reaches
+// `getCurrRoom().endBattle()` (AbstractPlayer.java:2281-2292) -- an animation
+// clock away. A capture dump taken inside that window still lists the fight,
+// while the sim (which has no animation clock) settled the escape
+// synchronously on the `potion use`: onVictory ran (Burning Blood's heal,
+// BurningBlood.java:30) and the battle-over screen assembled (the potion-drop
+// roll + ratchet and the gold roll -- potionRng, blizzardPotionMod,
+// treasureRng). STS00241 seq 96 is the live pin: exactly those fields, one
+// record, zero-diff from seq 97 to the run terminal.
+//
+// THE FIELD SET IS THE NARROWNESS, exactly as the obtain race's deck-suffix
+// shape is: every differing field must be one the one-frame settlement can
+// move -- hp (the victory heal) or the reward-assembly movers
+// (blizzard_potion_mod, treasure_rng.*, potion_rng.*). Anything else -- gold
+// (assembled rewards sit on the SCREEN, never in the purse), floor, a deck or
+// relic field, any other stream -- makes this return false and the record a
+// real divergence. The caller supplies the equally-narrow WINDOW gates (the
+// capture still in-combat, the sim already on a reward screen, the sim's
+// combat flagged PLAYER-ESCAPED); a settlement computed WRONG rather than
+// early still surfaces, because the capture's own settled records from the
+// next seq on no longer satisfy the window and diff for real.
+[[nodiscard]] inline bool is_escape_settlement_fields(
+    const std::vector<std::string>& field_names) {
+    if (field_names.empty()) return false;
+    for (const std::string& f : field_names) {
+        if (f == "hp" || f == "blizzard_potion_mod") continue;
+        if (f.rfind("treasure_rng.", 0) == 0) continue;
+        if (f.rfind("potion_rng.", 0) == 0) continue;
+        return false;
+    }
+    return true;
+}
+
 }  // namespace sts::replay
