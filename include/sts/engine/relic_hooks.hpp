@@ -186,7 +186,7 @@ void dispatch_relics_on_block_broken(CombatState& s, RelicSlot* relics,
 // The player's single in-combat heal seam: HealAction / AbstractPlayer.heal run
 // every owned relic's onPlayerHeal over the amount before it lands, and Magic
 // Flower is the only S1 relic that overrides it -- MathUtils.round(amount *
-// 1.5f) while the room phase is COMBAT (MagicFlower.java:728-735). Every relic,
+// 1.5f) while the room phase is COMBAT (MagicFlower.java:30-37). Every relic,
 // power and potion heal inside a combat goes through here so the modifier cannot
 // be forgotten at one site; the no-Magic-Flower path is byte-identical to a plain
 // clamped heal.

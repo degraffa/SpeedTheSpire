@@ -510,7 +510,7 @@ TEST(RelicRaresShop, OddMushroomSoftensVulnerableOnThePlayerOnly) {
     }
 }
 
-// Torii.onAttacked (Torii.java:1197-1205): a NORMAL hit whose post-block damage
+// Torii.onAttacked (Torii.java:31-38): a NORMAL hit whose post-block damage
 // is 2..5 becomes 1. 1 stays 1, 6 is untouched, and HP_LOSS / THORNS are exempt.
 TEST(RelicRaresShop, ToriiFloorsSmallNormalHitsToOne) {
     struct Case { int base; int expect_loss; };
@@ -543,7 +543,7 @@ TEST(RelicRaresShop, ToriiReadsThePostBlockRemainder) {
     EXPECT_EQ(s.player_hp, 69);
 }
 
-// TungstenRod.onLoseHpLast (TungstenRod.java:1238-1245): -1 on every positive
+// TungstenRod.onLoseHpLast (TungstenRod.java:26-32): -1 on every positive
 // player HP loss, of ANY damage type, and it is the LAST modifier -- so a
 // 1-damage hit becomes 0 and no HP is lost at all.
 TEST(RelicRaresShop, TungstenRodReducesEveryPositiveHpLossByOne) {
@@ -670,7 +670,7 @@ TEST(RelicRaresShop, BootAndBufferComposeAndAFullyBlockedHitSpendsNoStack) {
     EXPECT_EQ(queued(open, 0).opcode, kOp(Opcode::REDUCE_POWER));
 }
 
-// LizardTail (LizardTail.java:672-690 via AbstractPlayer.java:1487-1493): a
+// LizardTail (LizardTail.java:28-45 via AbstractPlayer.java:1487-1493): a
 // lethal hit leaves the player at maxHealth/2 instead of dead, once.
 TEST(RelicRaresShop, LizardTailRevivesOnceAtHalfMaxHp) {
     CombatState s = MakeState();
@@ -768,7 +768,7 @@ TEST(RelicRaresShop, FairyInABottleAlsoFiresOnASelfInflictedHpLoss) {
 }
 
 // The revive is a player HEAL, so Magic Flower multiplies it
-// (MagicFlower.onPlayerHeal, MagicFlower.java:728-735): 40 -> round(60.0) = 60.
+// (MagicFlower.onPlayerHeal, MagicFlower.java:30-37): 40 -> round(60.0) = 60.
 TEST(RelicRaresShop, MagicFlowerMultipliesTheLizardTailRevive) {
     CombatState s = MakeState();
     Relics r;

@@ -41,7 +41,7 @@ void relic_native_bird_faced_urn(CombatState& s, RelicHook hook,
     // addToTop HealAction(player, player, 2). No opcode encodes a heal, and a
     // pure heal has no queue-ordering interplay with the other S1 relic effects,
     // so it is applied directly at dispatch time -- through the shared seam, so
-    // Magic Flower's x1.5 applies (MagicFlower.java:728-735).
+    // Magic Flower's x1.5 applies (MagicFlower.java:30-37).
     if (hook != RelicHook::ON_USE_CARD) {
         return;
     }

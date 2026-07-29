@@ -33,7 +33,7 @@ namespace {
 // atDamageGive: attacker-owned hooks. StrengthPower.atDamageGive (+amount),
 // WeakPower.atDamageGive (*0.75f). Others pass through. `strength_mult` scales the
 // Strength contribution (Heavy Blade counts Strength x magicNumber by temporarily
-// multiplying strength.amount before applyPowers; HeavyBlade.java:426-435). The
+// multiplying strength.amount before applyPowers; HeavyBlade.java:47-56). The
 // default 1 is bit-identical to an unmultiplied hook: float(amount) * 1.0f == float(
 // amount), so every non-Heavy-Blade damage number is unchanged.
 // The `default: return dmg` below is a deliberate subset, not an oversight: most
@@ -373,7 +373,7 @@ void cards_took_player_damage(CombatState& s) noexcept;
 
 // Step 3 (AbstractPlayer.java:1430-1432): the player's relics' onAttacked, run
 // AFTER the victim powers' onAttacked (Thorns / Flame Barrier). Torii.onAttacked
-// (Torii.java:1197-1205) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
+// (Torii.java:31-38) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
 // into 1. `info.owner != null` holds for every hit this engine produces.
 [[nodiscard]] int apply_torii(const CombatState& s, uint8_t tgt, int dmg,
                               DamageType type) noexcept {
@@ -387,7 +387,7 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // Step 4 (AbstractPlayer.java:1433-1435): the player's relics' onLoseHpLast --
 // the LAST modifier before the `if (damageAmount > 0)` block, so a 1-damage hit
 // reduced to 0 here fires no wasHPLost at all. TungstenRod.onLoseHpLast
-// (TungstenRod.java:1238-1245): positive damage becomes damage - 1.
+// (TungstenRod.java:26-32): positive damage becomes damage - 1.
 [[nodiscard]] int apply_tungsten_rod(const CombatState& s, uint8_t tgt,
                                      int dmg) noexcept {
     if (tgt == kActorPlayer && dmg > 0 &&
@@ -431,12 +431,12 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // BEFORE the heal, so the outcome is exactly healAmt (clamped to maxHealth by
 // heal, AbstractCreature.java:386-395) and never hp + healAmt. Routed through
 // the shared in-combat heal seam so Magic Flower's x1.5 applies: its
-// onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:31-38) and this site
+// onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:30-37) and this site
 // IS combat. Sacred Bark doubles potency 30 -> 60, i.e. a revive at 60% of max
 // HP; the relic has no engine hook, so def->potency is what arrives.
 //
 // LizardTail.onTrigger heals maxHealth/2 (min 1) and sets the counter to -2
-// (LizardTail.java:672-690).
+// (LizardTail.java:28-45).
 void try_player_revive(CombatState& s) noexcept {
     if (s.player_hp > 0) {
         return;
@@ -577,7 +577,7 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // The player's relics' onAttacked, then onLoseHpLast -- the last two
     // modifiers before the HP write (AbstractPlayer.java:1430-1435). Torii's
     // own gate includes `info.owner != null` (Torii.java:32); Tungsten Rod's
-    // onLoseHpLast has no owner test (TungstenRod.java:1238-1245).
+    // onLoseHpLast has no owner test (TungstenRod.java:26-32).
     if (!source_null) {
         dmg = apply_torii(s, tgt, dmg, type);
     }

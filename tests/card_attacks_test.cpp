@@ -3,7 +3,7 @@
 // D:\STS_BG_Mod\SlayTheSpireDecompiled\...\cards\red -- never read back from the
 // implementation. New engine mechanics exercised (all cited at their card):
 //   * Body Slam         -- DAMAGE_BLOCK: base == current player block (BodySlam.java:96).
-//   * Heavy Blade       -- DAMAGE_STR_MULT: Strength x magic (HeavyBlade.java:426-435).
+//   * Heavy Blade       -- DAMAGE_STR_MULT: Strength x magic (HeavyBlade.java:47-56).
 //   * Perfected Strike  -- DAMAGE_PER_STRIKE: +magic per "Strike"-named card; a
 //                          hand play counts itself, still in hand at
 //                          calculateCardDamage time (PerfectedStrike.java:37-52;

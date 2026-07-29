@@ -149,7 +149,7 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             // ((float)potency / 100.0f)) (BloodPotion.java:43). heal() clamps to
             // [0, maxHealth]. potency is the heal PERCENT (20).
             // Routed through the shared in-combat heal seam so Magic Flower's
-            // x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:728-735 --
+            // x1.5 applies (MagicFlower.onPlayerHeal, MagicFlower.java:30-37 --
             // the relic hooks AbstractPlayer.heal, so it sees EVERY heal in a
             // combat room, not only relic-sourced ones). Without the relic the
             // seam is the same clamped add this used to spell inline.

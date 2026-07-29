@@ -30,7 +30,7 @@
 namespace sts::engine::events {
 
 // AbstractCreature.heal: clamped at maxHealth, and a dying creature is skipped.
-// Magic Flower's onPlayerHeal is COMBAT-phase gated (MagicFlower.java:31-38),
+// Magic Flower's onPlayerHeal is COMBAT-phase gated (MagicFlower.java:30-37),
 // so no relic modifies an event-room heal in S1.
 inline void heal(RunState& rs, int amount) noexcept {
     if (amount <= 0 || rs.hp <= 0) {

@@ -99,7 +99,7 @@ namespace {
             return m < 0.0f ? 0.0f : m;                 // modifyBlock floors at 0
         }
         case PowerId::FRAIL:
-            return blk * 0.75f;                         // FrailPower.java:59-61
+            return blk * 0.75f;                         // FrailPower.java:58-60
         default:
             return blk;
     }

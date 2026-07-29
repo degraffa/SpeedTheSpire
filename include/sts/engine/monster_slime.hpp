@@ -10,7 +10,7 @@
 //   AcidSlime_S.java:45-95; AcidSlime_M.java:56-168;
 //   AbstractMonster.java:431-491,712-715,765-775;
 //   MakeTempCardInDiscardAction.java:24-50;
-//   FrailPower.java:25-54; WeakPower.java:27-60.
+//   FrailPower.java:24-37; WeakPower.java:27-60.
 // All named classes were read in full before implementation.
 //
 // Draw accounting at A20:

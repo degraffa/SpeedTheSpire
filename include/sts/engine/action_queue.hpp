@@ -11,23 +11,29 @@
 //
 // -------------------------------------------------------------------------
 // monster_attacks_queued reset placement (non-obvious, Java-faithful). The
-// decompiled GameActionManager.java sets `monsterAttacksQueued` to `true`
-// (declaration + line 304) but NEVER sets it back to false anywhere in the
-// whole tree (grep-confirmed: 3 occurrences, one file, none `= false`). Taken
-// literally that flag can never re-open step 4, so monsters would be queued at
-// most once and never take a second turn -- not the game's observable behavior,
-// so this decompiled copy is missing the reset. Clearing it in the start-of-turn
-// sequence (step 6) would leave the flag false *during the player's turn*, so
-// the first mid-turn pump (a card play) would wrongly fire step 4 and run a
-// spurious monster turn. The correct placement -- and what design doc §5.2
-// step 6's generic "reset per-turn counters" actually enumerates
-// (cardsPlayedThisTurn, turnHasEnded, ..., NOT monsterAttacksQueued;
-// GameActionManager.java:333,349-351) -- is: clear the flag when the turn *ends*
-// (the end-turn sentinel, step 3), priming step 4 to queue monsters exactly
-// once, and leave it set through the whole next player turn. Start-of-turn
-// (step 6) does NOT touch it, matching the Java. This keeps the invariant
-// "monster_attacks_queued is true throughout the player's turn" so card-play
-// pumps never trip step 4.
+// reset was never missing from the GAME -- only from this tree's original
+// decompile pass, which stripped every inner class: the recovered
+// AbstractRoom$1.java (decompiled from the shipped desktop-1.0.jar; provenance
+// header in the file) is the end-turn action AbstractRoom queues, and its
+// LAST line is exactly
+//     AbstractDungeon.actionManager.monsterAttacksQueued = false;
+// after addToBot'ing EndTurnAction / WaitAction / MonsterStartTurnAction. So
+// the game clears the flag when the turn ENDS. (This note used to reason from
+// "the decompiled copy is missing the reset" -- true of the copy, wrong as a
+// premise about where the evidence lay; the conclusion below was derived from
+// behavior and is confirmed verbatim by the recovered class.) Clearing it in
+// the start-of-turn sequence (step 6) would leave the flag false *during the
+// player's turn*, so the first mid-turn pump (a card play) would wrongly fire
+// step 4 and run a spurious monster turn. The correct placement -- what
+// AbstractRoom$1 does, and what design doc §5.2 step 6's generic "reset
+// per-turn counters" pointedly does NOT enumerate (cardsPlayedThisTurn,
+// turnHasEnded, ..., NOT monsterAttacksQueued;
+// GameActionManager.java:333,349-351) -- is: clear the flag when the turn
+// *ends* (the end-turn sentinel, step 3), priming step 4 to queue monsters
+// exactly once, and leave it set through the whole next player turn.
+// Start-of-turn (step 6) does NOT touch it, matching the Java. This keeps the
+// invariant "monster_attacks_queued is true throughout the player's turn" so
+// card-play pumps never trip step 4.
 
 #include <cstdint>
 

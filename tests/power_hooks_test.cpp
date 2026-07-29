@@ -23,7 +23,7 @@
 //   (ApplyPowerAction.java:106-138; SadisticPower.java:38-44).
 //   STRESS 5 -- wasHPLost attribution (Rupture): Rupture grants Strength for
 //   self-inflicted (card/LOSE_HP) HP loss, NOT for unblocked enemy damage
-//   (RupturePower.java:60-66; AbstractPlayer.damage:1445-1447).
+//   (RupturePower.java:32-37; AbstractPlayer.damage:1445-1447).
 
 #include <cstdint>
 
@@ -802,7 +802,7 @@ TEST(PowerHooks, NewPowerSequenceIsDeterministic) {
 //
 // VulnerablePower.atEndOfRound (VulnerablePower.java:44-53),
 // WeakPower.atEndOfRound (WeakPower.java:44-53) and FrailPower.atEndOfRound
-// (FrailPower.java:40-52) are the same body: consume a justApplied latch if one
+// (FrailPower.java:40-49) are the same body: consume a justApplied latch if one
 // is set, otherwise queue a one-stack ReducePowerAction (which REMOVES rather
 // than reduces once the request meets the stack, ReducePowerAction.java:45-51).
 // The three differ ONLY in when their ctor sets justApplied -- Vulnerable needs

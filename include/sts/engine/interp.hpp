@@ -150,7 +150,7 @@ enum class Opcode : uint16_t {
                          // (Body Slam; BodySlam.java:96 baseDamage = p.currentBlock).
     DAMAGE_STR_MULT = 16, // src attacks tgt for `amount` base with Strength counted
                            // x `flags` (the multiplier), then the pipeline (Heavy
-                           // Blade; HeavyBlade.java:426-435 strength.amount *= magic).
+                           // Blade; HeavyBlade.java:47-56 strength.amount *= magic).
     DAMAGE_PER_STRIKE = 17, // deal `amount` + `extra` per STRIKE-tagged card in
                              // hand+draw+discard (PerfectedStrike.java:37-52).
                              // BAKED into plain DAMAGE at QUEUE time
@@ -1414,7 +1414,7 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // same float->double promotion order: `(int)((double)value + 16384.5) - 16384`.
 // It is a half-up round for |value| < 16384, NOT the C `std::round`'s
 // half-away-from-zero. Two callers, from different layers: Magic Flower's
-// in-combat heal multiplier (MagicFlower.java:732, relic_hooks.cpp) and the
+// in-combat heal multiplier (MagicFlower.java:34, relic_hooks.cpp) and the
 // run-setup 90 %-of-max HP rewrite (run_advance.hpp run_setup_hp, where 90 % of
 // 75 lands on exactly 67.5f and the half-up tie is what makes an ascension-20
 // Ironclad 68/75). `constexpr` for that second caller, which is itself
@@ -1435,7 +1435,7 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 
 // As compute_damage, but the attacker's Strength contributes `strength_mult` x
 // its stacks in the atDamageGive pass (Heavy Blade: strength.amount *= magicNumber
-// before applyPowers, /= after; HeavyBlade.java:426-435). strength_mult == 1
+// before applyPowers, /= after; HeavyBlade.java:47-56). strength_mult == 1
 // reproduces compute_damage bit-for-bit (float * 1.0f is exact). Exposed pure so
 // the Heavy Blade tier-2 test can check the hand-computed number directly.
 [[nodiscard]] int compute_damage(const CombatState& state, uint8_t src_actor,

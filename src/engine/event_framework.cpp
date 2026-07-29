@@ -590,7 +590,7 @@ bool apply_event_damage(RunController& rc, int32_t amount,
         // ONE is consumed.
         //
         // Magic Flower amplifies NEITHER heal here: its onPlayerHeal is
-        // explicitly phase==COMBAT-gated (MagicFlower.java:31-38) and an
+        // explicitly phase==COMBAT-gated (MagicFlower.java:30-37) and an
         // EventRoom is not COMBAT.
         {
             const uint8_t slots =

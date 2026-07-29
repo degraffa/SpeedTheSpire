@@ -5,7 +5,7 @@
 //
 // WHY ONE BODY. VulnerablePower.atEndOfRound (VulnerablePower.java:44-53),
 // WeakPower.atEndOfRound (WeakPower.java:44-53) and FrailPower.atEndOfRound
-// (FrailPower.java:40-52) are the same six lines in the Java, differing only in
+// (FrailPower.java:40-49) are the same six lines in the Java, differing only in
 // POWER_ID:
 //
 //     if (this.justApplied) { this.justApplied = false; return; }
