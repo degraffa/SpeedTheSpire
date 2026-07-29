@@ -1128,6 +1128,36 @@ TEST(RunCombatBattleStart, SeveralBattleStartRelicsAllLandBeforeTheFirstAction) 
     EXPECT_EQ(rc.combat.player_energy, 3);
 }
 
+// A combat can end inside the entry pump before the player receives control.
+// Neow's Lament sets every enemy to 1 HP at battle start, then Mercury
+// Hourglass's turn-start damage kills the whole group. AbstractRoom's battle
+// update opens the reward screen directly; the run layer must not leave a
+// COMBAT/COMBAT_OVER state whose legal-action mask is empty.
+TEST(RunCombatBattleStart, EntryKillOpensRewardsWithoutADeadCombatStep) {
+    RunController rc = run_begin(find_two_louse_seed(), kA20);
+    set_run_relics(
+        rc, {RelicId::NEOWS_LAMENT, RelicId::MERCURY_HOURGLASS});
+    leave_neow(rc);
+
+    const StepResult result = step_with_result(
+        rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    EXPECT_EQ(rc.combat.phase,
+              static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
+    EXPECT_EQ(rc.combat_outcome,
+              static_cast<uint8_t>(RunCombatOutcome::KILLED));
+    EXPECT_EQ(rc.combat.monster_count, 2);
+    EXPECT_EQ(rc.combat.monsters[0].hp, 0);
+    EXPECT_EQ(rc.combat.monsters[1].hp, 0);
+    EXPECT_EQ(rc.run.relics[0].counter, 2);
+    EXPECT_FALSE(result.terminal);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_proceed);
+}
+
 // atBattleStartPreDraw is a DISTINCT hook (AT_BATTLE_START_PRE_DRAW), fired from
 // applyStartOfCombatPreDrawLogic (AbstractPlayer.java:1903-1908) at
 // AbstractRoom.java:241 -- genuinely before the opening draw, unlike the

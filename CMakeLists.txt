@@ -224,6 +224,12 @@ if(STS_BUILD_TESTS)
     add_subdirectory(tools/oracle_bridge/planner)
 endif()
 
+# B5.3: tier-4 analytic distribution campaign + dependency-free statistics.
+# This follows tools/fuzz so test-enabled builds can also compile the full-run
+# oracle-spot simulator against fuzz_core without copying its policy loop.
+# The analytic executable remains unconditional; neither campaign is a ctest.
+add_subdirectory(tools/dist_check)
+
 if(STS_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)

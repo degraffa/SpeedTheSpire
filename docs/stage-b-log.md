@@ -3629,6 +3629,97 @@ The fuzzer build identity was therefore advanced from
 `schema5-b51fix2` to `schema5-b51fix2-cardgate1`; summaries produced before
 and after queued-play revalidation cannot be merged.
 
+<a id="b53"></a>
+
+### B5.3 `[x]` ∥ Tier-4 distributional suite
+**Deps:** G6 · **Spec:** design §3.4 (analytic-first scope)
+**Deliverables:** `tools/dist_check/`: the §3.4 analytic expectation set
+(encounter weights, compositions, rarity+pity dynamics, potion ratchet,
+chest tables, ?-room pity, relic/potion tier rolls, map quotas) with
+chi-square/exact tests over ≥ 10k sim seeds; the ≥ 200-run oracle-harvested
+spot comparison.
+**Acceptance:** all analytic tests pass at pre-registered significance
+(document the correction for multiple comparisons in the tool README —
+choose and justify); oracle spot set shows no flagged aggregate; failures
+are stop-the-line divergences, not tuning targets.
+
+**Log:** `tools/dist_check/` is a dependency-free C++/Python verification
+tool, not a test-only bag of magic thresholds. `dist_check_stats` implements
+Pearson chi-square, the incomplete-gamma survival function, exact
+zero-support rejection, and Holm-Bonferroni; focused C++ tests pin the
+statistics and step-down correction. The analytic executable registers 16
+stochastic hypotheses spanning weak/strong/elite/boss encounter selection,
+five composition families, card rarity and pity, potion-drop ratchet, the
+joint chest size/gold/relic table, question-room pity, and reward/shop
+relic plus potion tiers. Map fixed rows and quotas, category support, and
+other deterministic invariants are exact failures. The CLI refuses fewer
+than 10,000 seeds.
+
+The correction was frozen before the acceptance runs: strong family-wise
+α=0.01 under arbitrary dependence, using Holm-Bonferroni because it preserves
+Bonferroni's strong control while rejecting at least as much. The Release
+acceptance command
+`tools/wsl_run.cmd --script tools/dist_check/run.sh release --seeds 20000`
+passed all 16 hypotheses. The smallest unadjusted p-value was **0.2185602**
+(`composition.small_slimes`), against its **0.000625** Holm threshold.
+Impossible support and the exact map checks were clean.
+
+The oracle family was independently pre-registered as three homogeneity
+tests — encounter signatures, combat-reward card rarity, and question-room
+outcome — with its own Holm family-wise α=0.01. Categories with fewer than
+10 combined oracle+simulator sightings pool into `OTHER`; empty encounters,
+non-C/U/R rarity, and unknown question outcomes remain exact failures.
+`oracle_spot.py` also refuses anything but a `complete` campaign with at
+least 200 distinct seed longs, zero driver failures, one unique artifact per
+seed, and a gameplay terminal (`death` or `act1_boss_reward`). Timing
+sidecars and partial captures cannot enter the counts.
+
+The live campaign `b53_full_act1_20260729` used 200 distinct A20 seeds
+STS100000–STS100199 under `random-legal`. It finished **200/200, 0 driver
+failures**; every attempt terminated in death. The capture was deliberately
+paused after 14 artifacts when it was found sharing the single game process
+with the B5.2 acceptance, then resumed under the campaign lock after B5.2
+released it. The partial STS100014 artifact was replaced by its complete
+second attempt; the strict spot validator counted exactly 200 complete
+artifacts. The campaign pipeline's separate replay/diff postprocessor
+reported 167 clean, 18 replay-harness-error, and 15 state-divergence
+classifications (33 pending triage) and therefore exited nonzero; those
+action-level classifications are B5.2/B5.4 input, not silently treated as
+distribution evidence.
+
+The first same-seed simulator pass honored the stop-line: before any
+statistic was computed, STS100142 (signed seed `62651821554530`) reproduced
+`NO_LEGAL_MOVES` at action 34 in `RunPhase::COMBAT`. Neow's Lament had set
+both Louses to 1 HP and Mercury Hourglass killed them during the turn-1 entry
+pump. `CombatState` correctly reached `COMBAT_OVER`, but `enter_combat`
+unconditionally published `RunPhase::COMBAT`, and the existing
+`finish_combat_after_action` fold/reward transition was reachable only after
+a later combat action — none could be legal. The RED regression
+`RunCombatBattleStart.EntryKillOpensRewardsWithoutADeadCombatStep` pins the
+two-monster entry kill, relic-counter fold-back, killed outcome, reward
+screen, and legal proceed. `enter_combat` now invokes the existing
+finalization path immediately after construction; no layout, schema, public
+API, fixture, or frozen-design change was required.
+
+With that product defect fixed, the unchanged registered spot family passed:
+
+- encounters: χ²=8.4926943, df=10, **p=0.5808267**;
+- combat-reward rarity: χ²=0.2671435, df=2, **p=0.8749647**;
+- question-room outcomes: χ²=1.1784650, df=2, **p=0.5547529**.
+
+The deterministic, committed report records cell order as
+`[oracle, simulator]`:
+[dist-check-oracle-spot-2026-07-29.json](verification/dist-check-oracle-spot-2026-07-29.json).
+It has `flagged: false`; no alpha, correction, support rule, or pooling
+threshold changed after either stop-line.
+
+Final-tree `tools/wsl_run.cmd debug asan release` passed **1752/1752** in all
+three presets, including the new run-entry regression, the C++ statistics
+tests, and eight strict Python campaign/aggregation tests. The 20,000-seed
+analytic family and the 200-run live spot command were then rerun on the same
+tree and passed. Documentation link/stale-count checks, whitespace checks,
+and the no-generated-dist-check-`__pycache__` check completed before commit.
+
 <a id="b45-oracle-preflight"></a>
 
 ### B4.5 oracle-capture preflight hardening `[x]` (non-task)
