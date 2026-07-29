@@ -247,3 +247,66 @@ branch saw**, and no run compares fewer records than any branch's own run of
 it. The six wave2cap bottle captures' union verdicts (the payoff the
 `SHOP_ROOM` arm + the bottle captures were jointly gated on) are recorded in
 [`wave2cap_capture_runbook.md`](wave2cap_capture_runbook.md) §7.
+
+## `wave3-followup` — the Elixir HAND_SELECT class is gone (2026-07-28)
+
+The class had TWO stacked causes, root-caused offline from the STS05143
+reproducer and separated by which artifact each fix cleaned. Both fixes are on
+`wave3-followup`; same offline command set, `debug` build, no game.
+
+**1. Harness: the HAND_SELECT `proceed` was not the confirm verb.** The
+mapping sent `proceed` to `CHOOSE(kChooseProceed)` = CHOOSE(0xFF), which the
+combat layer's OPTIONAL path reads as a toggle of hand slot 0xFF — an
+illegal, silent no-op. Elixir's zero-to-99 exhaust screen (a blocking
+CHOOSE_CARD at the queue head) therefore never closed: every later
+`play`/`end` was illegal while the choice blocked, the sim froze at its
+pre-Elixir hp and stayed parked in COMBAT to the artifact's end (the seq-58
+stop reason "sim is in COMBAT" was the giveaway; the exhaust pile read empty
+because neither the picks nor the end-of-turn ethereal exhaust ever ran). The
+confirm button is the combat layer's own `ActionVerb::CONFIRM`. The branch
+now also discriminates on the sim's phase and mask exactly as the REST/SHOP
+branches do — a hand-select command outside COMBAT, a `choose` with no screen
+open, or a slot the open screen does not offer are STOPS with the desync
+named, never silent no-ops; the one legitimate no-screen `proceed` (a
+MANDATORY selection resolves on its last pick, so the game's trailing confirm
+press has no sim analogue) is elided as the UI bounce it is. The `choose N`
+index space is proven IDENTITY over the unpicked prefix: the fork walks
+`player.hand.group` (ChoiceScreenUtils.getHandSelectScreenChoices) — the hand
+minus the already-selected cards — the engine keeps picked cards as the hand
+TAIL in pick order, and the fork can only select, never unselect. Pinned by
+the six `ReplayCommandMap.AHandSelect*` tests (RED-first: five failed on the
+old mapping; the identity pin was the control that already passed).
+
+**2. Engine: Toy Ornithopter's in-combat heal was inline instead of queued.**
+With the screen finally confirming, STS03352 still diverged by 1 field for
+exactly the two records its screen was open (seq 143-144, capture hp 58 / sim
+63, reconverging at the confirm). `ToyOrnithopter.onUsePotion` in a
+COMBAT-phase room is `addToBot(new HealAction(player, player, 5))`
+(ToyOrnithopter.java:31-41), queued BEHIND the potion's own actions
+(PotionPopUp.java:234-239 runs potion.use first) — so the game's +5 waits
+behind Elixir's open ExhaustAction until the button. The engine's
+`dispatch_run_relics_on_use_potion` healed inline at use time. It now queues
+a HEAL item in combat (which also routes the heal through
+`heal_player_with_relics`, i.e. Magic Flower's onPlayerHeal pass the inline
+write skipped) and routes the out-of-combat branch through
+`heal_out_of_combat` (the not-bloodied cross of AbstractPlayer.heal:404-408
+the inline write also skipped — an Ornithopter heal past half now disarms an
+active Red Skull). RED-first: `RunPotion.ToyOrnithopter*` — the blocked-heal,
+Magic Flower and not-bloodied-cross tests failed on the inline write; the
+immediate-heal and plain out-of-combat tests are the named controls that
+passed throughout.
+
+| Run | Before | After harness fix alone | After both | Class |
+|---|---|---|---|---|
+| STS05143 | stop seq 58, first div seq 51 (hp, then 12-24 fields/record) | **CLEAN to run terminal, 113 records** | CLEAN, 113 | fixed (harness) |
+| STS03352 | first div seq 143, cascading | 248 records, first div seq 143-144 only (hp, 2 records, reconverging) | **CLEAN to run terminal, 248 records** | fixed (harness + engine) |
+
+Standing corpus, re-run whole after both fixes: b45+b47 twelve — ten CLEAN,
+STS00052/STS00054 still the two `Recall` stops at seq 78/122, zero divergence
+anywhere, record-for-record identical to the wave-2 baseline. G6-main thirty —
+`--- 30 file(s), 12 not clean ---`, the SAME twelve at the same first-diff
+seqs. wave2cap bottle seven — STS05143 and STS03352 now CLEAN (above);
+STS04888/STS03244 still CLEAN; STS00241 (seq-96 Smoke-Bomb race), STS04925
+(s137 gold class (c)) and STS06578 (s81 gold class (c)) byte-identical to
+their §7 runbook rows. **No run anywhere compares fewer records or acquires
+an earlier first divergence.**

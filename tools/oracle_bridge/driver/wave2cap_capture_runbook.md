@@ -134,7 +134,14 @@ Cascade: different hand next turn, different block, 3 HP through. Candidate
 owners: the HAND_SELECT command-map arm (Track H's file) or the engine's
 Elixir/ethereal path (Track E). NOT touched from this track; reproducer:
 `(STS05143, --replay, first divergent field RunState.hp at seq 51; Elixir at
-seq 40)`.
+seq 40)`. **RESOLVED by `wave3-followup` — it was BOTH candidate owners,
+stacked**: the HAND_SELECT `proceed` mapping was not the combat CONFIRM verb
+(the optional screen never closed, so the sim froze mid-fight — the "empty
+exhaust pile" was the frozen screen, not an ethereal miss), and, behind that,
+Toy Ornithopter's in-combat heal was inline instead of the queued HealAction.
+STS05143 and STS03352 both replay **CLEAN to their run terminals** now; the
+full triage is the `wave3-followup` section of
+[wavec_track2_replay_triage.md](wavec_track2_replay_triage.md).
 
 ## 4. The Courier captures — THIRTEEN PURCHASES, THE STREAM ACCOUNTING MEASURED
 
@@ -244,3 +251,10 @@ campaign reproduces §4b on the union exactly: stock clean 5, purchase walks
 clean 5, 0 divergences — which also exercises the union composition of this
 file's two §4b fixes (`shop_choice_arg_to_index` + the `state` elision, now
 living beside the shared resolvers in `command_map.hpp`).
+
+**`wave3-followup` update**: the STS05143 and STS03352 rows above are
+superseded — both replay **CLEAN to their run terminals** (113 / 248 records)
+after the Elixir-class fixes (§3c resolution note; full before/after in the
+`wave3-followup` section of
+[wavec_track2_replay_triage.md](wavec_track2_replay_triage.md)). The other
+five rows reproduce byte-identically.

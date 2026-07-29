@@ -883,15 +883,74 @@ struct ShopTarget {
     }
 
     if (s.screen_type == "HAND_SELECT") {
+        // HandCardSelectScreen is COMBAT-only (a CHOOSE_CARD blocking the
+        // action queue). Anywhere else the two sides are on different screens,
+        // and a forwarded CHOOSE would spend whatever phase is live -- a map
+        // node, a reward row -- so it stops instead.
+        if (rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
+            m.reason = "hand-select command '" + verb +
+                       "' arrived while the sim is in " +
+                       std::string(phase_name(rc.phase)) + ", not a combat";
+            return m;
+        }
+        RunActionMask mask{};
+        legal_actions(rc, mask);
         if (verb == "choose") {
+            // IDENTITY over the unpicked prefix. The fork's choice_list walks
+            // `player.hand.group` (ChoiceScreenUtils.getHandSelectScreenChoices)
+            // -- the hand MINUS the already-selected cards, in hand order --
+            // and the engine keeps exactly that prefix in that order: a picked
+            // card moves to the hand's TAIL (interp.hpp, the [unpicked] ++
+            // [picked] split), and the fork can only select, never unselect
+            // (makeHandSelectScreenChoice addresses hand.group alone). So the
+            // capture's N is the sim's hand slot N, and a slot the sim's
+            // screen does not offer is a DESYNC to stop on -- an illegal
+            // CHOOSE is a silent no-op at the combat layer, which is exactly
+            // how the frozen-screen shape below stayed invisible for ten
+            // records.
+            const int i = arg(1);
+            if (!mask.combat.choice_pending) {
+                m.reason = "hand-select `choose " + std::to_string(i) +
+                           "` arrived while the sim has no hand-select screen "
+                           "open (no CHOOSE_CARD is blocking its combat queue)";
+                return m;
+            }
+            if (i < 0 || i >= sts::engine::kHandCap ||
+                !mask.combat.can_choose[i]) {
+                m.reason = "hand-select `choose " + std::to_string(i) +
+                           "` names a slot the sim's open screen does not "
+                           "offer; the two hands disagree";
+                return m;
+            }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
+                                            static_cast<uint8_t>(i)));
             return m;
         }
         if (verb == "proceed") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+            // The screen's confirm button. For an OPTIONAL (anyNumber +
+            // canPickZero) selection -- Elixir, Purity, upgraded Forethought,
+            // Gambler's Brew -- the button is the combat layer's own CONFIRM
+            // verb, the one move that resolves the accumulated picks. Mapping
+            // it to CHOOSE(kChooseProceed) instead is what this branch used to
+            // do, and the optional path read that as a TOGGLE of hand slot
+            // 0xFF: an illegal, silent no-op that left the screen open
+            // forever, froze the sim mid-fight (every later play/end is
+            // illegal while the choice blocks), and surfaced ten records
+            // later as an hp field at the fold-back. STS05143 seq 42 /
+            // STS03352 seq 143.
+            //
+            // A MANDATORY selection resolves on its last pick (the engine pops
+            // the satisfied CHOOSE_CARD; the button is never the thing that
+            // ends it -- advance.hpp), so the capture's trailing confirm press
+            // arrives with no screen open and is elided as the UI bounce it
+            // is.
+            if (mask.combat.can_confirm_choice) {
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(make_action(ActionVerb::CONFIRM));
+                return m;
+            }
+            m.kind = MapKind::NOOP;
             return m;
         }
         m.reason = "HAND_SELECT command '" + verb + "' is not modelled";

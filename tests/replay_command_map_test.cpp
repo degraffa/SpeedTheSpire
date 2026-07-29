@@ -20,6 +20,9 @@
 #include <gtest/gtest.h>
 
 #include "command_map.hpp"
+#include "sts/engine/action_queue.hpp"
+#include "sts/engine/combat_state.hpp"
+#include "sts/engine/interp.hpp"
 #include "sts/engine/run_advance.hpp"
 
 namespace {
@@ -900,6 +903,118 @@ TEST(ReplayCommandMap, ARestProceedWhileTheCampfireIsLiveIsStillTheExit) {
     ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
     ASSERT_EQ(m.actions.size(), 1u);
     EXPECT_EQ(action_arg0(m.actions[0]), kChooseProceed);
+}
+
+// --- the in-combat hand-select screen ----------------------------------------
+//
+// HandCardSelectScreen is COMBAT-only, and its confirm button is the combat
+// layer's OWN verb: ActionVerb::CONFIRM, the one move that resolves an
+// optional (anyNumber + canPickZero) selection. This branch used to map
+// `proceed` to CHOOSE(kChooseProceed), which the combat layer's optional path
+// reads as a TOGGLE of hand slot 0xFF -- an illegal, silent no-op. The Elixir
+// screen (a CHOOSE_CARD with amount 99, optional) then stayed open forever:
+// every later `play` / `end` was illegal while the choice blocked, the sim
+// froze at its pre-Elixir hp, and the first evidence was an hp field at the
+// fight's fold-back ten records later. STS05143 (seq 42, first divergence seq
+// 51) and STS03352 (seq 143) both did exactly that.
+//
+// The `choose N` index space is the IDENTITY over the unpicked prefix: the
+// fork walks `player.hand.group` (ChoiceScreenUtils.getHandSelectScreenChoices),
+// which is the hand MINUS the already-selected cards, and the engine keeps
+// exactly that prefix in order (picked cards move to the hand's tail, in pick
+// order -- interp.hpp). The fork can only select, never unselect
+// (makeHandSelectScreenChoice addresses hand.group alone), so the prefix is
+// the whole of the space a capture can name.
+
+// A controller parked mid-combat on Elixir's optional zero-to-99 exhaust
+// screen: two hand cards, the CHOOSE_CARD item open at the queue head.
+[[nodiscard]] RunController at_optional_hand_select() {
+    namespace se = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT);
+    se::CombatState& cs = rc.combat;
+    cs.phase = static_cast<uint8_t>(se::CombatPhase::WAITING_ON_USER);
+    cs.player_hp = 10;
+    cs.player_max_hp = 10;
+    cs.card_pool[0].card_id = static_cast<uint16_t>(se::CardId::DEFEND);
+    cs.card_pool[1].card_id = static_cast<uint16_t>(se::CardId::STRIKE);
+    cs.hand[0] = 0;
+    cs.hand[1] = 1;
+    cs.hand_count = 2;
+    se::ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(se::Opcode::CHOOSE_CARD);
+    item.src = se::kActorPlayer;
+    item.tgt = se::kActorPlayer;
+    item.amount = 99;  // ExhaustAction.java:56-58
+    item.flags = se::make_choose_flags(se::ChoiceKind::EXHAUST, /*random=*/false,
+                                       /*copies=*/1, se::kChoiceNoTypeFilter,
+                                       /*optional=*/true);
+    se::add_to_bottom(cs, item);
+    return rc;
+}
+
+[[nodiscard]] ScreenInfo hand_select_screen() {
+    ScreenInfo s;
+    s.screen_type = "HAND_SELECT";
+    s.choice_list = {"defend", "strike"};
+    return s;
+}
+
+TEST(ReplayCommandMap, AHandSelectProceedIsTheOptionalScreensConfirmButton) {
+    const RunController rc = at_optional_hand_select();
+    const MappedCommand m = map_command(rc, hand_select_screen(), "proceed");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CONFIRM)
+        << "the confirm button is CONFIRM, not a CHOOSE the optional path "
+           "reads as an illegal slot-0xFF toggle";
+}
+
+TEST(ReplayCommandMap, AHandSelectChooseIsTheHandSlotIdentity) {
+    const RunController rc = at_optional_hand_select();
+    const MappedCommand m = map_command(rc, hand_select_screen(), "choose 1");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
+    EXPECT_EQ(action_arg0(m.actions[0]), 1);
+}
+
+// Negative control: a slot the sim's screen does not offer is a desync to
+// stop on, not an illegal CHOOSE to swallow -- swallowing is exactly how the
+// frozen-screen shape stayed invisible for ten records.
+TEST(ReplayCommandMap, AHandSelectChooseNamingNoEligibleSlotStops) {
+    const RunController rc = at_optional_hand_select();
+    const MappedCommand m = map_command(rc, hand_select_screen(), "choose 7");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("hand-select"), std::string::npos) << m.reason;
+}
+
+// Negative control: HAND_SELECT is a combat screen; anywhere else the two
+// sides are on different screens and a CHOOSE would spend whatever phase is
+// live (a map node, a reward row).
+TEST(ReplayCommandMap, AHandSelectCommandOutsideACombatStopsInsteadOfSpendingTheRun) {
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::MAP_CHOICE), hand_select_screen(), "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("MAP_CHOICE"), std::string::npos) << m.reason;
+}
+
+// Negative control: in combat with NO choice open, a `choose` names a screen
+// the sim never opened -- the desync is the message.
+TEST(ReplayCommandMap, AHandSelectChooseWithNoScreenOpenStopsInsteadOfNoOpping) {
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::COMBAT), hand_select_screen(), "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("no hand-select"), std::string::npos) << m.reason;
+}
+
+// A MANDATORY selection resolves on its last pick (the engine pops the
+// satisfied CHOOSE_CARD with no button move), so the capture's trailing
+// confirm press arrives with no screen open. That press is the one legitimate
+// no-screen `proceed`, and it is elided rather than stopped.
+TEST(ReplayCommandMap, AHandSelectProceedAfterAMandatoryChoiceResolvedIsElided) {
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::COMBAT), hand_select_screen(), "proceed");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
 }
 
 }  // namespace

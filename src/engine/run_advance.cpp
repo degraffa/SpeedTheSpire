@@ -27,6 +27,7 @@
 #include "sts/engine/combat_rewards.hpp"   // reward assembly + the claim flow
 #include "sts/engine/encounters.hpp"       // generate_monster_lists / resolve_encounter
 #include "sts/engine/event_framework.hpp"  // ?-room roll + selection + dialog dispatch
+#include "sts/engine/interp.hpp"           // Opcode::HEAL (Toy Ornithopter's queued heal)
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
@@ -351,23 +352,44 @@ void use_entropic_brew(RunController& rc, uint8_t slot) noexcept {
 void dispatch_run_relics_on_use_potion(RunController& rc) noexcept {
     // PotionPopUp invokes every relic.onUsePotion after potion.use and before
     // destroying the slot. Toy Ornithopter is the only registered S1 consumer.
+    //
+    // ToyOrnithopter.onUsePotion (ToyOrnithopter.java:31-41) forks on the
+    // room's phase:
+    //
+    //   COMBAT: addToBot(new HealAction(player, player, 5)) -- a QUEUED heal,
+    //     landing BEHIND whatever the potion's own use() queued, because
+    //     PotionPopUp runs potion.use first (PotionPopUp.java:234-239). The
+    //     ordering is observable: Elixir's blocking optional exhaust screen
+    //     holds the queue head, so the game's +5 waits for the confirm button
+    //     -- STS03352's capture reads 5 hp under the sim for exactly the two
+    //     records its screen is open (seq 143-144), reconverging at the
+    //     confirm. The old inline write here healed at use time, and also
+    //     skipped heal_player_with_relics -- i.e. Magic Flower's onPlayerHeal
+    //     pass -- which a real HealAction goes through (HEAL opcode, op_heal).
+    //
+    //   otherwise: a plain player.heal(5) (:39), whose tail is the
+    //     not-bloodied cross (AbstractCreature.heal:404-408) --
+    //     heal_out_of_combat IS that shape (clamp, then the cross), so an
+    //     Ornithopter heal past half disarms an active Red Skull exactly as a
+    //     rest's heal does. Magic Flower does not scale here: its override is
+    //     gated on the room being in RoomPhase.COMBAT (MagicFlower.java:30-37).
+    //
+    // The caller owns the pump: every in-combat step_potion branch pumps after
+    // this dispatch, so a heal nothing blocks resolves before control returns.
     for (uint8_t i = 0; i < rc.run.relic_count; ++i) {
         if (static_cast<RelicId>(rc.run.relics[i].relic_id) !=
             RelicId::TOY_ORNITHOPTER) {
             continue;
         }
         if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
-            int hp = static_cast<int>(rc.combat.player_hp) + 5;
-            if (hp > rc.combat.player_max_hp) {
-                hp = rc.combat.player_max_hp;
-            }
-            rc.combat.player_hp = static_cast<int16_t>(hp);
+            ActionQueueItem heal{};
+            heal.opcode = static_cast<uint16_t>(Opcode::HEAL);
+            heal.src = kActorPlayer;
+            heal.tgt = kActorPlayer;
+            heal.amount = 5;  // HEAL_AMT (ToyOrnithopter.java:22)
+            add_to_bottom(rc.combat, heal);
         } else {
-            int hp = static_cast<int>(rc.run.hp) + 5;
-            if (hp > rc.run.max_hp) {
-                hp = rc.run.max_hp;
-            }
-            rc.run.hp = static_cast<int16_t>(hp);
+            heal_out_of_combat(rc.run, 5);
         }
     }
 }
@@ -1689,9 +1711,19 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
     if (id == PotionId::FRUIT_JUICE) {
         use_fruit_juice(rc, slot);
         dispatch_run_relics_on_use_potion(rc);
+        // Fruit Juice / Entropic Brew are usable IN combat too, where the
+        // dispatch queues Toy Ornithopter's HealAction rather than writing hp
+        // -- drain it now, exactly as the game's action queue drains once the
+        // pop-up closes. Out of combat the queue is untouched and this no-ops.
+        if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            pump(rc.combat, dispatch_monster_turn);
+        }
     } else if (id == PotionId::ENTROPIC_BREW) {
         use_entropic_brew(rc, slot);
         dispatch_run_relics_on_use_potion(rc);
+        if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            pump(rc.combat, dispatch_monster_turn);
+        }
     } else if (id == PotionId::SMOKE_BOMB) {
         // SmokeBomb.use marks the room smoked; the player's escape timer calls
         // endBattle, which runs onVictory and opens the battle-over screen. If
@@ -1708,6 +1740,12 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
             return true;
         }
         dispatch_run_relics_on_use_potion(rc);
+        // The dispatch queues Toy Ornithopter's HealAction; the game's queue
+        // keeps draining while the escape animation plays (the room phase is
+        // still COMBAT until endBattle), so the heal lands BEFORE the
+        // fold-back reads player_hp. Drain it here for the same reason --
+        // collapsing to COMBAT_OVER with the heal still queued would lose it.
+        pump(rc.combat, dispatch_monster_turn);
         clear_potion_slot(rc.run, slot);
         rc.combat.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
         fill_combat_result(rc.combat, res);

@@ -1394,6 +1394,102 @@ TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     EXPECT_EQ(rc.run.hp, 60);  // Fruit Juice +5, then Toy Ornithopter +5.
 }
 
+// ToyOrnithopter.onUsePotion IN a COMBAT-phase room is two addToBots
+// (ToyOrnithopter.java:31-41): the +5 is a QUEUED HealAction, landing BEHIND
+// whatever the potion's own use() queued -- not an inline hp write. Elixir is
+// the observable: its blocking optional exhaust screen (ExhaustAction) holds
+// the queue head, so the game's heal waits for the confirm button. STS03352
+// seq 143-144 diverged by exactly that window's 5 hp (capture 58, sim 63)
+// before reconverging at the confirm.
+TEST(RunPotion, ToyOrnithopterHealWaitsBehindElixirsOpenScreenInCombat) {
+    RunController rc = enter_jaw_worm_combat();
+    ASSERT_GT(rc.combat.hand_count, 0) << "the opening hand feeds the screen";
+    rc.combat.player_hp = 40;
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), 0};
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::ELIXIR);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.combat.choice_pending);
+    ASSERT_TRUE(mask.combat.can_confirm_choice);
+    EXPECT_EQ(rc.combat.player_hp, 40)
+        << "the HealAction is addToBot'd behind the open ExhaustAction "
+           "(PotionPopUp order: potion.use first, then onUsePotion)";
+
+    step(rc, make_action(ActionVerb::CONFIRM));
+    EXPECT_EQ(rc.combat.player_hp, 45) << "the confirm unblocks the queued heal";
+}
+
+// Control: with nothing blocking the queue the same heal lands before control
+// returns -- the queued form is not a deferral to the next action.
+TEST(RunPotion, ToyOrnithopterHealLandsAtOnceWhenNothingBlocksTheQueue) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.combat.player_hp = 40;
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), 0};
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FIRE_POTION);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0, 0));
+    EXPECT_EQ(rc.combat.player_hp, 45);
+}
+
+// The queued heal goes through the HEAL opcode and therefore through
+// heal_player_with_relics, so Magic Flower's onPlayerHeal pass scales it in
+// combat exactly as it scales every other HealAction:
+// MathUtils.round(5 * 1.5f) == 8 (MagicFlower.java:30-37). The old inline
+// write skipped the pass.
+TEST(RunPotion, ToyOrnithopterHealInCombatIsScaledByMagicFlower) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.combat.player_hp = 40;
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), 0};
+    ++rc.run.relic_count;
+    // Magic Flower's check reads the COMBAT relic mirror (player_has_relic), so
+    // the test plants it in both lists the way enter_combat's fold would have.
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::MAGIC_FLOWER), -1};
+    ++rc.run.relic_count;
+    rc.combat.relics[rc.combat.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::MAGIC_FLOWER), -1};
+    ++rc.combat.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FIRE_POTION);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0, 0));
+    EXPECT_EQ(rc.combat.player_hp, 48);
+}
+
+// OUT of combat the Java is a plain `player.heal(5)` (ToyOrnithopter.java:39),
+// and AbstractPlayer.heal ends with the not-bloodied cross
+// (AbstractCreature.heal:404-408) -- so a Toy Ornithopter heal that carries the
+// player past half disarms an active Red Skull, exactly as a rest's heal does.
+// The old inline write skipped the cross. Numbers chosen so Fruit Juice's own
+// +5 does NOT cross (41 * 2 < 85) and the Ornithopter's +5 does (46 * 2 > 85).
+TEST(RunPotion, ToyOrnithopterOutOfCombatHealRunsTheNotBloodiedCross) {
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    rc.run.hp = 36;
+    rc.run.max_hp = 80;
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), 0};
+    ++rc.run.relic_count;
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};  // isActive
+    ++rc.run.relic_count;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+    EXPECT_EQ(rc.run.max_hp, 85);
+    EXPECT_EQ(rc.run.hp, 46);
+    const RelicSlot& skull = rc.run.relics[rc.run.relic_count - 1];
+    ASSERT_EQ(skull.relic_id, static_cast<uint16_t>(RelicId::RED_SKULL));
+    EXPECT_EQ(skull.counter, 0)
+        << "isActive = false sits OUTSIDE the phase gate (RedSkull.java:61)";
+}
+
 TEST(RunPotion, EntropicBrewOutOfCombatDrawsAreUnlimited) {
     // EntropicBrew.use (EntropicBrew.java:46-48): OUT of combat the non-Sozu
     // branch rolls potionSlots x returnRandomPotion() -- the no-arg overload,
