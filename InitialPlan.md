@@ -2,7 +2,13 @@
  
 **Scope of this document:** the concrete build plan for the simulator (design → verified implementation → performance hardening) and the training-experiment program that runs on it. Design decisions are stated as decisions, with rationale and exit criteria. Guiding principles are collected at the end. Difficulty target is **Ascension 20 from day one** (rationale in §2.4).
  
-**Ground rules established elsewhere and assumed here:** hierarchical agent (combat MCTS + acquisition scoring + pathing expectimax + meta-value function), imitation prior from public run data, hardware = 5800X3D/5070 Ti primary + 3600X sim node, cloud burst optional and gated on profiling.
+**Ground rules established elsewhere and assumed here:** hierarchical agent
+(public-information combat search + structured run planning + one canonical
+Heart-win value), imitation warm-start from public run data, exact simulator
+dynamics rather than a learned world model, hardware = 5800X3D/5070 Ti primary
++ 3600X sim node, cloud burst optional and gated on profiling. The final agent
+is the model **plus** search; policy-only play is a latency baseline, not the
+maximum-win-rate endpoint.
  
 ---
  
@@ -12,17 +18,45 @@ The simulator is a product with one customer: the training loop. So we specify t
  
 ### 0.1 What the trainer will actually do to the simulator
  
-**Combat training (MCTS self-play).** The search will: snapshot a combat state thousands of times per decision, roll forward under determinized draw orders, evaluate leaves via batched GPU inference, and restore. Requirements imposed: O(memcpy) state snapshot/restore; explicit, forkable RNG streams so a rollout can fix the shuffle stream while sampling others; a step API that can advance *heterogeneous batches* of states; states compact enough that ~10k live states per worker stay L3-resident.
+**Combat training (public-information expert iteration).** This is a
+single-player stochastic control problem, so "self-play" is the wrong model:
+search improves the current policy, and the network distils that improved
+policy. Search will snapshot a combat state thousands of times per decision,
+sample hidden-state particles consistent with what the player has observed,
+evaluate leaves via batched GPU inference, and restore. Requirements imposed:
+O(memcpy) state snapshot/restore; explicit, forkable RNG streams; a first-class
+belief sampler for hidden draw order / intent / future pools; a step API that
+can advance *heterogeneous batches* of states; states compact enough that ~10k
+live states per worker stay L3-resident. "Determinization" always means a fresh
+compatible sample for a rollout — never the live state's true hidden future.
+
+**Fair-information boundary.** Raw simulator state is omniscient: it includes
+RNG state, shuffled pile order, hidden intent under Runic Dome, and pre-shuffled
+future pools. Neither the network nor a search-tree key may consume those bytes.
+The trainer acts from a versioned public observation plus a public knowledge
+state (observable history and legitimately known card positions). Search nodes
+are keyed by public action-observation history; exact-state hashes are allowed
+only inside a sampled particle. A separate omniscient/debug agent is useful as
+an upper bound but is never mixed into headline results.
  
 **Counterfactual resets.** Experiments will repeatedly ask "same run state, different choice" — e.g., re-simulate a fight 500 times from the same pre-combat state for the gauntlet evaluator, or branch a run at a card-reward screen. Requirement: any state, at any decision point, is constructible from bytes alone — no hidden globals, no ambient singletons, no state living outside the struct. This single requirement drives most of the architecture below.
  
 **Full-run generation.** Fine-tuning consumes complete A20 runs at reduced search budgets. Requirement: the *entire* run loop (Neow through boss, including map, events, shops, rest sites, rewards with pity counters) must exist in the fast simulator — a sim that covers only combat would force the meta-level to train against the slow real game, which the compute math forbids.
  
-**Trajectory schema.** Every component trains from the same logged representation. Requirement: a versioned, fixed-layout binary state encoding, defined *before* simulator code is written, used identically by the simulator, the CommunicationMod bridge (real-game states translate into the same schema), the replay buffer, and the networks' feature encoders. Schema version is stamped into every trajectory; loaders refuse mismatches.
+**Trajectory schema.** Every record carries two deliberately different
+representations: (1) the exact versioned simulator snapshot used by the oracle,
+replay, counterfactual reset, and reanalysis; and (2) the versioned
+player-visible observation / knowledge state used by the network. The full
+snapshot is a restricted sidecar and must never become an accidental model
+feature. Records also stamp the simulator commit, state schema, observation
+schema, action schema, registry/rules hash, model id, and search configuration;
+loaders refuse incompatible versions.
  
 ### 0.2 Throughput contract
  
-Derived from the experiment budget (10–30 full-run experiments of ~300k runs each, plus combat self-play of 1–10M encounters, on 8+6 local cores):
+Derived from the experiment budget (10–30 full-run experiments of ~300k runs
+each, plus 1–10M self-generated/search-labelled combat encounters, on 8+6 local
+cores):
  
 | Metric | Target | Floor (acceptable) |
 |---|---|---|
@@ -33,6 +67,13 @@ Derived from the experiment budget (10–30 full-run experiments of ~300k runs e
 | Sim → schema serialization | zero-copy | ≤ 1µs |
  
 These numbers are the Stage C exit criteria. They are set so that a 300k-run experiment completes in ≤ 4 days on the primary machine alone.
+
+The 25-simulation row is the mandatory cheap configuration and throughput
+baseline, not a declaration that 25 simulations is the final agent. Stage C
+also measures the complete actor path — public encoding, belief sampling,
+search, batched neural inference, and trajectory writing — and publishes a
+win-rate/latency curve for policy-only, normal-search, and maximum-search
+budgets. No fixed final search budget is chosen before that profile exists.
  
 ### 0.3 Decisions the training design forces on the simulator
  
@@ -41,6 +82,36 @@ D0.1 — **Batch-of-states is the only public API.** Single-game convenience wra
 D0.2 — **The simulator is headless-only and UI-ignorant from the first commit.** No rendering hooks, no frame concepts, no animation timing. Anything in the base game that exists for presentation (queued VFX ordering that does not affect outcomes) is explicitly out of scope; anything presentation-adjacent that *does* affect outcomes (action-queue resolution order — it does) is in scope.
  
 D0.3 — **Observation encoding lives inside the simulator.** The NN feature encoder (int8/fp16 tensors for the inference server) is a simulator module compiled with the engine, so encoding is one pass over the flat state with no intermediate allocation, and Python never touches hot-path bytes.
+
+D0.4 — **Public observation is not raw state.** The engine exposes a
+player-visible observation for every run phase and a separate public-information
+hash. It omits unrevealed order, RNG internals, future outcomes and hidden
+intent, while representing legitimate knowledge such as Frozen Eye order or
+cards deliberately placed on top of the draw pile.
+
+D0.5 — **Belief sampling is a verified simulator service.** Search asks for
+hidden-state particles conditional on public history; it does not call ad-hoc
+`shuffle()` code. Each hidden category has preserved constraints and
+distributional tests against fresh simulator seeds.
+
+D0.6 — **The policy scores an enumerated legal-action list.** The simulator
+continues to execute the packed `Action`, but the trainer logs stable semantic
+descriptors (verb, source entity, target entity, option identity) and the
+behavior probability. The model never learns legality and never relies on one
+giant fixed action vocabulary.
+
+D0.7 — **The exact simulator is the dynamics model.** Use the useful
+AlphaZero/Expert-Iteration loop (policy/value prior → stronger search → distil)
+without learning MuZero dynamics. Learned encounter-outcome models may
+accelerate run planning, but exact combat search remains their teacher and
+validation oracle.
+
+D0.8 — **The objective and information/compute contract are frozen together.**
+The headline is mean probability of an A20 Act-4 Heart kill on fresh seeds,
+under UI-equivalent information and a declared search/inference budget. Terminal
+reward is 1 for a Heart kill and 0 otherwise, with no discount. HP, act reached,
+death risk and resource outcomes are auxiliary predictions, not alternative
+utilities.
  
 ---
  
@@ -78,7 +149,7 @@ Deliverable: a design document freezing the decisions below, plus a walking skel
 **A.4 — RNG: exact replication of the base game's mechanism.** This is a correctness cornerstone, specified precisely:
  
 - **Generator:** libGDX `RandomXS128` — xorshift128+ with libGDX's specific seeding scramble (murmurhash3-style mix of the input seed). Implement it bit-exactly; unit-test the raw stream against captured Java outputs (first 10k longs for a battery of seeds) before anything else is built on it.
-- **Named streams, not one RNG:** replicate the game's full set — among them `monsterRng`, `aiRng`, `shuffleRng`, `cardRandomRng` (in-combat card randomness: Snecko, discoveries), `monsterHpRng`, `potionRng`, `treasureRng`, `relicRng`, `eventRng`, `merchantRng`, `cardRng` (reward pools), `miscRng`, plus map-gen. Each stream's **counter is part of the state struct**, and streams are restorable as (seed, stream-id, counter) triples — this is what makes both seed-replay diffing and determinized MCTS forking possible.
+- **Named streams, not one RNG:** replicate the game's full set — among them `monsterRng`, `aiRng`, `shuffleRng`, `cardRandomRng` (in-combat card randomness: Snecko, discoveries), `monsterHpRng`, `potionRng`, `treasureRng`, `relicRng`, `eventRng`, `merchantRng`, `cardRng` (reward pools), `miscRng`, plus map-gen. Each stream's **counter is part of the state struct**, and streams are restorable as (seed, stream-id, counter) triples — this makes seed-replay diffing exact and lets the belief sampler construct controlled public-history-compatible particles without exposing the live hidden future.
 - **Correlated/per-floor reseeding:** the base game re-derives several streams per floor as a function of (run seed, floor number) rather than advancing one global stream — which is why, e.g., unrelated actions on one floor don't perturb the next floor's event roll, and why some outcomes are correlated in ways players exploit. Replicate this derivation exactly, from source, stream by stream; document each stream's lifecycle (run-scoped vs floor-scoped vs combat-scoped) in the registry.
 - **Pity/counter systems ride on top:** rare-card pity offsets, potion-drop counter (±10% steps), and shop pricing draw from specific streams with persistent counters stored in RunState.
 - **Seed format:** accept both raw signed-64 seeds and the game's base-35 display alphabet, converting exactly as `SeedHelper` does, so a seed copied from the desktop game addresses the identical run in the simulator.
@@ -108,7 +179,15 @@ The rule: **no card, relic, or subsystem is "done" until its verification exists
  
 Entry condition: S1 verified. Protocol: benchmark-driven, one hypothesis at a time, never trading verified behavior for speed — the diff suite runs after every optimization, no exceptions (fast-but-wrong is the project's death mode).
  
-Measurement rig: fixed benchmark workloads (10k-combat batch, 1k-full-run batch) in CI, reporting steps/sec/core, IPC, L3 miss rate, branch miss rate via `perf stat`. The two health metrics from the design: L3 misses ≈ 0 (if not: states got fat, or allocation crept in) and branch misses low (if not: re-bucket dispatch by encounter/effect).
+Measurement rig: fixed simulator workloads (10k-combat batch, 1k-full-run
+batch) plus a trainer-facing actor benchmark, reporting steps/sec/core,
+decisions/sec, neural evaluations/decision, belief particles/decision, GPU batch
+occupancy, IPC, L3 miss rate, and branch miss rate. The two simulator health
+metrics from the design remain L3 misses ≈ 0 (if not: states got fat, or
+allocation crept in) and branch misses low (if not: re-bucket dispatch by
+encounter/effect). The end-to-end benchmark is authoritative for training
+capacity: once neural inference or orchestration dominates, faster rule
+execution alone does not shorten experiments.
  
 Ordered optimization backlog (stop when §0.2 targets are met): confirm zero hot-loop allocations (arena audit); dispatch bucketing — sort work by (encounter, phase) so warps of identical effects run consecutively; observation-encoding fusion into the step loop; SMT on/off A-B on the 5800X3D (uncertain win with a cache-resident loop — measure, don't assume); `-march=native`/LTO/PGO pass; only then micro-SIMD of damage/block math if still short. Exit: targets met on both the 5800X3D and (scaled) the 3600X node, results pinned in CI so regressions fail the build.
  
@@ -120,15 +199,63 @@ Ordered optimization backlog (stop when §0.2 targets are met): confirm zero hot
  
 Each rung has an entry gate (what must exist), a success metric, and a cheap config. All rungs run at A20 rules.
  
-**E0 — Baselines (gate: S1 sim).** Random-legal and scripted-heuristic agents (simple priority scripts) through Act 1. Purpose: reference numbers for every later claim, and adversarial fuzz traffic for B.3. Metric: none to beat; these *are* the floor.
- 
-**E1 — Imitation (gate: schema + datasets; runs before/parallel to sim completion).** Train acquisition, pathing-prior, and meta-value nets on human data filtered to high-ascension runs (A15+ where volume allows, weighting A20). Metric: held-out decision accuracy vs A20 winners; qualitative review of picks in curated scenarios.
- 
-**E2 — Combat agent, Act 1 pool (gate: S1 + E1 nets).** MCTS self-play over Act-1 encounters at A20 stats, deck contexts sampled from human-run distributions. Metric: beats scripted baseline and matches/exceeds human HP-loss distributions per encounter on a frozen (deck, encounter, seed) benchmark suite.
- 
-**E3 — Assembled hierarchy, Act 1 (gate: E2).** Full Act-1 runs: pathing expectimax with known tables, acquisition net, combat agent. First measure the *untrained assembly* — that number is the baseline all fine-tuning must beat. Then fine-tune meta-value + acquisition on self-generated Act-1 runs, with the gauntlet evaluator (simulated boss/elite win-rates) as auxiliary value targets. Metric: Act-1 completion rate and exit-state quality (HP, deck strength per gauntlet) on 500 frozen seeds, verified by real-game replay of a sample.
- 
-**E4 — Full game (gate: S2/S3 sim tiers).** Extend to Acts 2–3, then keys + Heart. Same pattern: assemble, baseline, fine-tune, verify in the real game.
+**E−1 — Trainer contract (gate: S1 schema/API).** Ship the versioned
+public observation and knowledge state, dynamic legal-action descriptors,
+public-information hash, verified belief sampler, trajectory container, and
+evaluation harness. Leak-invariance tests pair internal states that differ only
+in hidden order/RNG/intent and require identical public encodings and direct
+policy outputs. Belief-sampler tests pin conditional constraints and
+frequencies. No durable model training begins before this gate.
+
+**E0 — Baselines (gate: E−1 + S1 sim).** Random-legal,
+scripted-heuristic, behavioral-cloning, policy-only, and small-search agents
+through Act 1. Add a deliberately omniscient full-state agent as a debug upper
+bound, labelled ineligible for headline comparison. Purpose: reference numbers
+for every later claim, search-correctness tests on exactly enumerable
+micro-combats, and adversarial fuzz traffic for B.3.
+
+**E1 — Human/data bootstrap (gate: E−1 + datasets; runs before/parallel to
+later sim scope).** Pretrain shared content embeddings, macro-policy priors, and
+the meta-value on high-ascension human runs (A15+ where volume requires,
+weighting A20). Use wins **and losses**, split by player and seed; winner-only
+accuracy has survivorship bias and cannot calibrate win probability.
+Counterfactually re-label selected human states with simulator search rather
+than treating the recorded action as truth. Metrics: held-out action likelihood,
+Heart/act value calibration, and curated scenario review.
+
+**E2 — Combat agent, Act 1 pool (gate: S1 + E1).** Train a shared combat
+policy/value from realistic deck/relic/HP contexts using high-budget
+public-information search as teacher, then distil it into a cheaper student.
+Contexts increasingly come from the current agent rather than permanently from
+the human distribution. Metrics: direct policy beats scripts; belief search
+measurably improves over the direct policy at equal states; distillation retains
+most of that gain; and both improve downstream continuation value on a frozen
+combat suite. HP loss and death distributions remain diagnostics, not the
+objective.
+
+**E3 — Assembled hierarchy, Act 1 (gate: E2).** Full Act-1 runs combine
+structured map search, enumerated reward/shop/rest/event alternatives, the
+combat agent, an encounter-outcome model, and one canonical meta-value. First
+measure the untrained assembly. Then fine-tune on self-generated Act-1 runs,
+with boss/elite gauntlets and resource-outcome predictions as auxiliary targets.
+Metric: paired improvement in Act-1 exit continuation value over the assembly
+baseline, plus real-game replay of a sample.
+
+**E4 — Acts 2–3 continuation (gate: S2).** Replace the Act-1 bootstrap with
+real continuation, re-baseline every component, and train through the A20 double
+Act-3 boss. A changed combat policy invalidates the encounter-outcome model
+until that model is refreshed from new combat results.
+
+**E5 — A20 Heart (gate: S3).** Add key strategy, Act 4, Shield and Spear, and
+the Heart; remove every act-boundary surrogate; run end-to-end search-guided
+policy iteration. Primary metric: Heart-kill rate on the untouched A20H
+evaluation population at a declared compute budget, with a real-client
+zero-divergence sample.
+
+**E6 — Other characters (gate: S4 + E5).** Share representation pretraining
+where it helps, then allow character-specific fine-tuning/checkpoints for peak
+win rate. Report each character independently; an aggregate never hides a weak
+character.
  
 ### 2.2 End-to-end simulation vs staged scope — the explicit trade
  
@@ -136,17 +263,154 @@ Arguments for full-game e2e from the start: no distribution mismatch at act boun
  
 Arguments for staged (chosen): simulator verification is the schedule's long pole, and Act 1 verified is months earlier than Act 3 verified; every pipeline bug is cheaper to find on short episodes; E2/E3 results are meaningful and motivating early.
  
-**Resolution: staged execution with e2e-aware objectives.** Act-1 training uses a *bootstrapped horizon*: episodes end at the act boss but are rewarded by the imitation-pretrained meta-value's assessment of the exit state (deck/relics/HP as priced by full-run human outcomes), not by mere completion. This imports the long-horizon signal before the long-horizon simulator exists, and is precisely the mechanism that prevents "Act-1 myopia." When S2 lands, the bootstrap is replaced by real continuation, and E3 policies are re-baselined rather than trusted.
- 
-### 2.3 Experiment hygiene (mechanics, not principles)
- 
-Frozen seed sets per rung (E2: 2k combat seeds; E3/E4: 500 run seeds), never trained on. Miniature config (reduced card pool, 25-sim search, 50-seed eval) as the mandatory first pass for every idea; full config only after a mini-config win. One-page journal entry per experiment: hypothesis, config hash, sim version, result, verdict. Behavioral dashboards (elites fought/act, deck size, rest ratios, HP-per-relic exchange) with A20-human sanity bands; out-of-band = automatic replay review. Any simulator fix invalidates results trained on the buggy version — retrain, don't rationalize.
+**Resolution: staged execution with e2e-aware objectives.** Act-1 training
+uses a *bootstrapped horizon*: episodes end at the act boss but are valued by a
+frozen meta-value's assessment of the full exit state, not by mere completion.
+This imports long-horizon signal before the long-horizon simulator exists.
+When S2 lands, the bootstrap is replaced by real continuation and E3 policies
+are re-baselined rather than trusted.
+
+Curriculum changes **horizon and starting-state distribution, not ascension**:
+exactly enumerable micro-combats → realistic combat snapshots → late-run/Heart
+snapshots → act continuations → full runs, all under A20 rules. Snapshots come
+from real or self-generated reachable states; impossible hand-authored decks do
+not become the training distribution.
+
+### 2.3 Experiment and evaluation hygiene
+
+Three disjoint seed populations: a small development/smoke set; a large frozen
+paired-validation population used for checkpoint promotion; and an untouched
+or rotating final holdout, because repeated selection over a "never trained on"
+validation set still overfits it. Model comparisons use the same game seeds and
+planner-randomness streams with paired bootstrap or McNemar intervals. Near a
+50% win rate, roughly 10k independent runs still gives only about
+one-percentage-point precision; sub-point claims need tens of thousands, not a
+story built from a few wins.
+
+Every candidate is evaluated as three explicit agents: direct policy,
+standard/adaptive search, and maximum-search. Report wall time, simulator nodes,
+belief particles and neural evaluations per decision with win rate; model size
+and search budget trade against one another, so a score without its compute
+contract is incomplete.
+
+Miniature config (reduced card pool, 25-simulation search, smoke evaluation) is
+the mandatory first pass for every idea; full config only follows a mini-config
+win. Each experiment records hypothesis, config hash, simulator commit, state
+schema, observation schema, action schema, registry hash, model id, search
+config, result, and verdict.
+Behavioral dashboards track act/Heart reach, death floor/cause, elites,
+deck size, keys, rest/smith ratio, potion use, shops, and value calibration.
+Out-of-band behavior triggers replay review. Any simulator fix quarantines
+affected trajectories and invalidates results trained on the buggy version —
+retrain, don't rationalize.
  
 ### 2.4 Why A20 from day one
  
 Adopted, with the reasoning made explicit: difficulty changes the *optimal policy*, not just the score. A0-optimal play is materially laxer — sloppier blocking, greedier picks, cheaper elite math — and curriculum from A0 would spend compute learning habits A20 punishes, then more compute unlearning them (negative transfer). Training at A20 also matches the best available imitation data (top players' public runs skew A20) and makes every benchmark comparable to the most-studied human baselines.
  
-Costs, and their mitigations: terminal wins are rare at A20 (strong humans sit roughly 10–50% depending on character and player), so pure win/loss signal is sparse — mitigated by the bootstrapped meta-value (dense, human-anchored) and gauntlet auxiliary targets, which is exactly why those exist in the design. Evaluation must therefore never be win-rate alone: HP-adjusted progress, act-completion rates, and gauntlet-scored exit states are the tracked metrics, with win rate as the headline that moves last. One honest fallback is pre-registered: if E3 fine-tuning shows no improvement over the assembled baseline after three full-config attempts, run a *diagnostic* A10 arm — not as curriculum, but to distinguish "signal too sparse" from "pipeline broken."
+Costs, and their mitigations: terminal wins are rare enough that pure win/loss
+supervision is sparse. Auxiliary heads predict act/Heart reach, combat survival,
+death floor, exit-HP distribution, incoming damage, potion/resource use,
+permanent gains, and clutter; targeted late-run starts and the bootstrapped
+meta-value shorten credit assignment. These heads improve representation and
+diagnosis but do not redefine utility: final action selection maximizes expected
+Heart-win probability. One honest fallback is pre-registered: if E3
+fine-tuning shows no improvement over the assembled baseline after three
+full-config attempts, run a *diagnostic* A10 arm — not as curriculum, but to
+distinguish "signal too sparse" from "pipeline broken."
+
+### 2.5 Model and planner architecture
+
+**Typed entity representation.** Use content embeddings and typed tokens rather
+than a giant flat vector: global run/combat context; card instances with
+upgrade/cost/zone and legitimately known position; player powers; monsters and
+visible intent/history; relics in acquisition order; potions; the master deck;
+the current offer/screen; and the visible map graph. Hidden draw contents are
+represented as an unordered multiset except for positions the player actually
+knows. Start with a modest entity/set transformer for combat and owned content,
+plus a map-graph encoder; scale only after inference profiling.
+
+**Dynamic action scoring.** Enumerate legal candidates and score each from the
+global state, verb, source entity, target entity and option identity. This one
+shape covers card×target, potion×target, end turn, reward/skip, map node,
+master-deck selection, shop item, confirm and dialog choices. Truly forced UI
+transitions may be auto-collapsed; sequential choices whose order changes state
+remain real decisions.
+
+**Two brains, one currency.** Combat and run planning use separate trunks with
+shared content embeddings. Both ultimately estimate
+`V(I) = P(A20H win | public information I, declared downstream compute)`.
+Combat leaf evaluation includes full run context; fight victory with maximum HP
+is not a sufficient objective because potions, Feed/Ritual Dagger, relic
+counters and future paths matter. Card/relic/event choices enumerate
+alternatives; shops beam-search purchase/removal sequences; map planning searches
+the visible DAG and samples uncertain rooms. A learned encounter-outcome model
+predicts death, exit HP, resource use and permanent gains to screen many paths;
+exact combat search trains it and rechecks finalists.
+
+Begin with a shared encounter-conditioned combat model. Per-encounter
+specialists, adapters, mixture-of-experts, ensembles and per-character final
+models are ablations after a shared baseline demonstrates where capacity or
+negative transfer remains.
+
+### 2.6 Public-information search
+
+At a root information state, the belief sampler constructs compatible hidden
+particles. The same scenario bank is used across candidate root actions for
+variance reduction, but it is independent of the live state's true hidden
+future. A simulation alternates deterministic player afterstates and exact
+chance/RNG transitions. When an outcome becomes observable, the public-history
+tree branches on that observation. Descendant policies cannot condition on
+which particle was sampled unless its distinguishing fact has been revealed.
+
+Use a POMCP-style public tree / particle search or an equivalent batched sparse
+search first. Compare ordinary policy-guided PUCT against Gumbel sequential
+halving at the root, which is attractive when the budget cannot visit every
+action. Enumerate the ordinary legal action set; sampled-action methods are
+reserved for a future genuinely combinatorial macro action. Use public hashes
+for cross-particle statistics and exact hashes only for transpositions within a
+particle. Search budget is adaptive: little or none for forced/high-margin
+decisions, more for lethal turns, bosses, path forks, card rewards, shops and
+high ensemble disagreement.
+
+Method anchors: [Expert Iteration](https://arxiv.org/abs/1705.08439),
+[POMCP](https://papers.nips.cc/paper/2010/hash/edfbe1afcf9246bb0d40eb4d8027d90f-Abstract.html),
+[Gumbel policy improvement](https://openreview.net/forum?id=bERaNdoegnO), and
+[Reanalyse](https://arxiv.org/abs/2104.06294). These are patterns to adapt, not
+excuses to replace the exact simulator with a learned dynamics model.
+
+### 2.7 Training flywheel and promotion
+
+1. **Bootstrap** shared embeddings, macro priors and a calibrated value from
+   human wins/losses plus heuristic and exact-search microcases.
+2. **Teach** realistic states with expensive public-information search. Store
+   the improved root distribution and action values, not only the chosen move.
+3. **Distil** with policy cross-entropy, binary Heart-win value loss, an
+   optional robust action-value/ranking loss, and auxiliary prediction losses.
+   Search values at small budgets are noisy; do not force exact regression to
+   every estimate.
+4. **Generate** fresh A20 experience with the current student plus modest
+   search. Spend the expensive teacher on high-entropy, ensemble-disagreement,
+   rare-mechanic, high-impact and fatal states.
+5. **Reanalyse** prioritized old states using the latest network/search so
+   expensive full trajectories continue to improve their targets.
+6. **Mine failures.** Deaths and suspicious high-value lines become permanent
+   tactical cases and oracle-replay candidates. The trained agent is also an
+   adversarial simulator fuzzer.
+
+C++ actor/search workers link the simulator directly and submit leaves from
+many unrelated roots to one asynchronous fp16/bf16 GPU inference service.
+Python/PyTorch owns optimization, scheduling and analysis, never hot-path state
+handling. If one GPU cannot learn and serve inference concurrently without
+starvation, alternate collection and learner epochs before buying cloud
+capacity. Profile the 3600X node for quantized CPU inference versus large
+remote batches; never pay a LAN round trip per individual action.
+
+A candidate promotes only when its paired Heart-win interval improves at the
+declared compute budget, it does not regress the tactical suite, calibration and
+behavioral diagnostics remain sane, and sampled real-client replays remain
+zero-diff. The tactical suite prevents forgetting but never substitutes for the
+untouched seed population.
  
 ---
  
@@ -157,8 +421,24 @@ Costs, and their mitigations: terminal wins are rare at A20 (strong humans sit r
 **The trainer is the customer.** Every simulator decision traces to a training requirement (Part 0). When a sim convenience conflicts with a trainer need, the trainer wins.
  
 **Determinism everywhere.** Same seed + same actions + same binary = same bytes, across machines. This is what makes bugs reproducible, experiments comparable, and the oracle usable.
+
+**Fair information is part of correctness.** Simulator truth, player knowledge,
+and model input are three different objects. Exact hidden state is retained for
+replay and counterfactuals; policy and search decisions use only public
+information and a verified belief over what remains hidden. A clairvoyant agent
+is a failed experiment even if every simulator transition is correct.
  
 **Bake in what is known; learn only what is hard.** Probability tables, RNG structure, and map search are engineered; deck evaluation and exchange rates are learned. Never spend model capacity on facts the source code states.
+
+**One value currency.** Combat, pathing, acquisition, shops and events all
+serve expected A20 Heart-win probability. Local HP, death risk, act progress and
+gauntlet scores teach perception and shorten credit assignment; none becomes a
+permanent competing objective.
+
+**Search teaches and remains available at test time.** High-budget search
+creates counterfactual supervision, the network amortizes it, and adaptive
+search spends compute where the student is uncertain or the decision is
+important. Policy-only strength is useful, but it is not the ceiling.
  
 **Feedback-loop latency is the real budget.** Mini-configs, walking skeletons, staged scope, and behavioral dashboards all exist to shorten the time between an idea and its verdict. Protect that loop before protecting throughput.
  
@@ -168,16 +448,41 @@ Costs, and their mitigations: terminal wins are rare at A20 (strong humans sit r
  
 ## Milestones
  
-| # | Milestone | Exit evidence | Target week |
+| # | Milestone | Exit evidence | Depends on |
 |---|---|---|---|
-| M1 | Design doc frozen + walking skeleton | Skeleton passes diff harness on 5-card micro-game | 4 |
-| M2 | Oracle bridge + RNG bit-exactness | Tier-1 tests green across 100 seeds, incl. floor reseeding | 6 |
-| M3 | S1 rules complete | 100% registry tier-2 coverage | 12 |
-| M4 | S1 verified | 1M actions / 2k seeds, zero diffs; floor throughput | 16 |
-| M5 | Perf targets met | §0.2 table green in CI on both machines | 18 |
-| M6 | E1 imitation nets shipped | Held-out accuracy report + scenario review | 14 (parallel) |
-| M7 | E2 combat agent | Beats baselines on frozen combat suite | 24 |
-| M8 | E3 assembled + first fine-tune win | Improvement over assembly baseline on 500 seeds, real-game-verified sample | 30 |
-| M9 | S2 sim + E4 kickoff | Acts 2–3 verified; re-baselined hierarchy | 34+ |
- 
-Weeks assume 10–15 hobby hours plus unattended machine time; 1.5× slippage is normal and the gates matter more than the dates.
+| M1 | Design doc frozen + walking skeleton | Skeleton passes its independent diff harness | — |
+| M2 | Oracle bridge + RNG bit-exactness | Tier-1 stream/floor tests and live bridge green | M1 |
+| M3 | S1 rules complete | Registry tier-2 coverage gate | M2 + registry |
+| M4 | S1 verified | Frozen Stage-B zero-diff, coverage, A20, fuzz and throughput gates | M3 |
+| M5 | Simulator + actor performance targets met | §0.2 simulator floors plus end-to-end search/inference profile green | M4 |
+| M6 | E−1 trainer contract shipped | Public observation/knowledge/action schemas; leak-invariance and belief-distribution tests; versioned replay/eval harness | stable S1 API |
+| M7 | E0/E1 baselines and bootstrap shipped | Baseline report; player/seed-disjoint human-data policy and calibrated value report | M6 + datasets |
+| M8 | E2 combat agent | Direct policy beats scripts; belief search adds paired value; distilled student retains the gain | M6–M7 + S1 |
+| M9 | E3 integrated Act-1 agent | Paired improvement over the assembled baseline; real-game-verified sample | M8 |
+| M10 | S2 + E4 continuation | Acts 2–3 verified; surrogate removed; hierarchy re-baselined through the double boss | M9 + S2 |
+| M11 | S3 + E5 A20H agent | Keys/Act 4/Heart complete; untouched-seed Heart-win report at declared compute; real-client zero-diff sample | M10 + S3 |
+| M12 | S4 + E6 character agents | Per-character A20H reports after shared pretraining and character-specific tuning | M11 + S4 |
+
+The milestones are dependency gates, not calendar promises. Feedback-loop
+latency and acceptance evidence determine sequencing; unattended compute is
+scheduled only after the corresponding miniature experiment wins.
+
+---
+
+## Training-plan revision note — 2026-07-29
+
+The original hierarchy, A20-first stance, human-data warm-start, meta-value,
+batched simulator contract, staged scope and real-game verification remain.
+The training plan now makes five previously implicit requirements explicit:
+
+1. Raw simulator state and player-visible model input are separate versioned
+   artifacts.
+2. Hidden-state determinization is a verified public-history-conditioned belief
+   sampler, not the live future copied into MCTS.
+3. The useful learning loop is exact-model expert iteration with optional
+   adaptive test-time search, not two-player "self-play" or learned MuZero
+   dynamics.
+4. Every module optimizes expected A20 Heart-win probability; HP, risk and
+   gauntlet outputs are auxiliary.
+5. A headline result is inseparable from its information contract, seed split,
+   statistical interval, simulator/version provenance and compute budget.
