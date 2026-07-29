@@ -17,6 +17,7 @@
 #include "sts/engine/rng_stream.hpp"
 #include "sts/engine/run_deck.hpp"  // the master-deck bottle flag bits
 #include "sts/engine/types.hpp"
+#include "sts/registry/encounter_table.hpp"  // act_boss -> EncounterId
 #include "sts/registry/game_ids.hpp"
 
 // The translator is the one place the game's string ids and the fork's hidden
@@ -739,8 +740,74 @@ struct OracleAnchors {
             << (eng::kSpecialListFirstId - 1u);
         fr.mapped();
     }
-    fr.defer("monster_move_history");     // full per-monster history (§2.5 #9);
-                                          // CombatState holds only move_history[3]
+    // monster_move_history (§2.5 #9 / PROTOCOL §5): the fork emits the FULL
+    // `AbstractMonster.moveHistory` per monster, in room order -- up to 14
+    // entries in the current corpus, where stock's own JSON gives 2. The schema
+    // keeps the last THREE (`MonsterState.move_history[3]`, `[0]` most recent),
+    // so the tail is what this can carry and the rest stays deferred.
+    //
+    // WHY THE LAST THREE AND NOT THE FIRST. `moveHistory` is appended
+    // (`AbstractMonster.setMove`), so the most recent move is the LAST element;
+    // the schema is most-recent-first. Reading the head would silently store a
+    // monster's OPENING moves as if they were its latest, which is exactly the
+    // kind of wrong-but-plausible value a differ cannot flag.
+    //
+    // The join is positional, because "one per monster in room order" is the
+    // fork's own contract -- but it is CHECKED against the ids the combat block
+    // already parsed rather than trusted, since a silent misalignment would
+    // attribute one monster's history to another.
+    if (const json* mh = fr.take("monster_move_history")) {
+        if (!mh->is_array())
+            throw TranslateError(loc(ctx) + " expected array at " +
+                                 path + ".monster_move_history");
+        if (mh->size() != static_cast<std::size_t>(cs.monster_count)) {
+            throw TranslateError(
+                loc(ctx) + " monster_move_history has " +
+                std::to_string(mh->size()) + " entr" +
+                (mh->size() == 1 ? "y" : "ies") + " but combat_state has " +
+                std::to_string(cs.monster_count) +
+                " monster(s) (schema drift, translation aborted)");
+        }
+        for (std::size_t i = 0; i < mh->size(); ++i) {
+            const std::string at =
+                path + ".monster_move_history[" + std::to_string(i) + "]";
+            const json& e = (*mh)[i];
+            if (!e.is_object())
+                throw TranslateError(loc(ctx) + " expected object at " + at);
+            const eng::MonsterId want =
+                join_monster(as_str(e.at("id"), ctx, at + ".id"), ctx, at + ".id");
+            if (static_cast<uint16_t>(want) != cs.monsters[i].monster_id) {
+                throw TranslateError(
+                    loc(ctx) + " " + at + " is \"" +
+                    std::string(sts::registry::monster_game_id(want)) +
+                    "\" but combat_state monster " + std::to_string(i) +
+                    " is \"" +
+                    std::string(sts::registry::monster_game_id(
+                        static_cast<eng::MonsterId>(cs.monsters[i].monster_id))) +
+                    "\" -- the two lists are not in the same room order");
+            }
+            const json& hist = e.at("move_history");
+            if (!hist.is_array())
+                throw TranslateError(loc(ctx) + " expected array at " +
+                                     at + ".move_history");
+            const std::size_t n = hist.size();
+            for (std::size_t k = 0; k < 3; ++k) {
+                if (k >= n) break;
+                const int64_t v =
+                    as_i64(hist[n - 1 - k], ctx,
+                           at + ".move_history[" + std::to_string(n - 1 - k) + "]");
+                if (v < 0 || v > 255)
+                    throw TranslateError(loc(ctx) + " move id at " + at +
+                                         " does not fit uint8");
+                cs.monsters[i].move_history[k] = static_cast<uint8_t>(v);
+            }
+        }
+        // Entries past the third have no schema home -- the deferred remainder
+        // of this row. Nothing the run layer models reads more than two moves
+        // back (stock's `lastTwoMoves`), so carrying them would be a
+        // CombatState layout change with no consumer.
+        fr.mapped();
+    }
     fr.finish();
     return a;
 }
@@ -1335,7 +1402,46 @@ void parse_game_state(const json& j, const std::string& path, Ctx& ctx,
     fr.defer("room_phase");
     fr.defer("action_phase");
     fr.defer("room_type");
-    fr.defer("act_boss");         // bossKey -> boss_ids placeholder (B4.3)
+    // act_boss (§3.2): the act's chosen boss, as `AbstractDungeon.bossKey` --
+    // which is the SAME string the encounter registry keys on (`game_id`:
+    // "The Guardian" / "Hexaghost" / "Slime Boss", `MonsterHelper.getEncounter`,
+    // Exordium.initializeBoss). So the join is the registry's own lookup and not
+    // a table of spellings: an unknown key is schema drift and aborts, exactly
+    // like every other id join here.
+    //
+    // WHICH ID SPACE, and why EncounterId. `RunState.boss_ids` is documented as
+    // "one boss id per act" without naming an enum, and nothing had ever written
+    // it. EncounterId is the space the RUN LAYER already speaks: its
+    // `boss_list[]` holds encounter `game_id`s and `enter_combat` is called with
+    // one (encounters.cpp `initializeBoss`), so a consumer seeded from a
+    // translated RunState can join straight back to the list the sim shuffles.
+    // A MonsterId would not: "Slime Boss" the ENCOUNTER and `SlimeBoss` the
+    // monster are different registries, and a two-monster boss would have no
+    // single answer.
+    //
+    // HONEST LIMIT, and why this does not immediately turn the differ red: the
+    // run layer does NOT populate `boss_ids` yet (grep: the field has no writer
+    // in src/engine), so `--replay` neutralizes it the way it already
+    // neutralizes `map[]`. Discharging the translator row does not discharge
+    // that; see the ledger row.
+    if (const json* ab = fr.take("act_boss")) {
+        if (!ab->is_string())
+            throw TranslateError(loc(ctx) + " expected string at " + path + ".act_boss");
+        const std::string key = ab->get<std::string>();
+        const sts::registry::EncounterDef* def =
+            sts::registry::encounter_by_game_id(key);
+        if (def == nullptr ||
+            def->pool != sts::registry::EncounterPool::BOSS) {
+            throw TranslateError(loc(ctx) + " act_boss \"" + key +
+                                 "\" is not a BOSS row in the encounter registry "
+                                 "(schema drift, translation aborted)");
+        }
+        const int64_t act_index = stock_act - 1;
+        if (act_index >= 0 && act_index < eng::kBossIdCap) {
+            rs.boss_ids[static_cast<std::size_t>(act_index)] = def->id;
+        }
+        fr.mapped();
+    }
     fr.defer("choice_list");
 
     // map (§3.11): structurally validate nodes, then defer (storage is B4.1-4.3).

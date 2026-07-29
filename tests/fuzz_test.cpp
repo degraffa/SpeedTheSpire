@@ -1125,6 +1125,74 @@ TEST(FuzzCoverage, KvRoundTripsAndMergesByAddition) {
     EXPECT_EQ(sum.max_turn, a.max_turn);                          // max, not sum
 }
 
+// --- ARCHIVED summaries: read them, and say that you did --------------------
+//
+// `coverage_from_kv` is strict about the field set, on purpose: for a live
+// sweep a missing counter is drift. But summaries written before the
+// `victories` counter landed (pre-6d7efc4) do not carry that key and cannot be
+// rewritten -- regenerating one means re-running the whole campaign it
+// summarises. The tolerant read is opt-in, names what it defaulted, and covers
+// EXACTLY the known-vintage key set.
+TEST(FuzzCoverage, AnArchivedSummaryMissingVictoriesIsRejectedByTheStrictRead) {
+    Coverage a;
+    CaseResult r;
+    ASSERT_TRUE(run_case(make_case(PolicyKind::GREEDY_DAMAGE), limits(), &a, r, true));
+    a.victories = 3;
+
+    // Delete exactly the `victories` line, which is what an old binary's output
+    // looks like.
+    std::string text = a.kv();
+    const std::size_t at = text.find("\nvictories ");
+    ASSERT_NE(at, std::string::npos);
+    const std::size_t eol = text.find('\n', at + 1);
+    ASSERT_NE(eol, std::string::npos);
+    const std::string legacy = text.substr(0, at) + text.substr(eol);
+    ASSERT_EQ(legacy.find("\nvictories "), std::string::npos);
+
+    Coverage strict;
+    EXPECT_FALSE(coverage_from_kv(legacy, strict))
+        << "a missing counter must stay loud for the live path";
+
+    Coverage tolerant;
+    std::vector<std::string> defaulted;
+    ASSERT_TRUE(coverage_from_kv_legacy(legacy, tolerant, defaulted));
+    ASSERT_EQ(defaulted.size(), 1u);
+    EXPECT_EQ(defaulted[0], "victories");
+    EXPECT_EQ(tolerant.victories, 0u) << "defaulted, not measured";
+    // Everything the vintage DID carry still round-trips exactly -- the
+    // tolerance is a hole of known shape, not a relaxation.
+    EXPECT_EQ(tolerant.actions, a.actions);
+    EXPECT_EQ(tolerant.cases, a.cases);
+    EXPECT_EQ(tolerant.deaths, a.deaths);
+    EXPECT_EQ(tolerant.cards_played.count(), a.cards_played.count());
+}
+
+TEST(FuzzCoverage, TheLegacyToleranceCoversOnlyItsNamedKeys) {
+    Coverage a;
+    CaseResult r;
+    ASSERT_TRUE(run_case(make_case(PolicyKind::GREEDY_DAMAGE), limits(), &a, r, true));
+
+    // The list is the whole of the tolerance, and it is asserted rather than
+    // assumed: a counter quietly added to it would make its absence silent
+    // forever after.
+    ASSERT_EQ(legacy_optional_kv_keys().size(), 1u);
+    EXPECT_EQ(legacy_optional_kv_keys()[0], "victories");
+
+    // A key OUTSIDE the list is still fatal, tolerance or not.
+    std::string text = a.kv();
+    const std::size_t at = text.find("\ndeaths ");
+    ASSERT_NE(at, std::string::npos);
+    const std::size_t eol = text.find('\n', at + 1);
+    ASSERT_NE(eol, std::string::npos);
+    const std::string mangled = text.substr(0, at) + text.substr(eol);
+
+    Coverage out;
+    std::vector<std::string> defaulted;
+    EXPECT_FALSE(coverage_from_kv(mangled, out));
+    EXPECT_FALSE(coverage_from_kv_legacy(mangled, out, defaulted))
+        << "tolerance is for history, never for drift";
+}
+
 TEST(FuzzCoverage, ReportNamesWhatWasNeverReached) {
     // The report must state absences rather than leaving them to be inferred:
     // a one-case soak cannot have used a potion, and must say so.

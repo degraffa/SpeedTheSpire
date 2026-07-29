@@ -129,6 +129,13 @@ void usage() {
   --inject-no-progress CASE:STEP
                         restore the pre-step state after one legal action.
   --merge FILE...       merge kv summaries and print the report; runs nothing
+  --allow-legacy-summaries
+                        with --merge: accept ARCHIVED summaries written by an
+                        older fuzz_soak whose counter set was smaller. The
+                        missing counters default to 0 and are named LOUDLY on
+                        stderr per file; the report is then regenerated from an
+                        archive, not measured, and those counters must not be
+                        quoted. Rejected without this flag, on purpose.
 
 exit: 0 clean, 1 failures found, 2 bad usage
 )");
@@ -253,7 +260,8 @@ std::string summary_text(const SummaryMeta& m, const Coverage& c) {
 bool valid_seed_interval(int64_t first, uint64_t count);
 
 bool parse_summary(const std::string& text, SummaryMeta& m, Coverage& c,
-                   std::string& error) {
+                   std::string& error, bool allow_legacy,
+                   std::vector<std::string>* defaulted) {
     std::istringstream is(text);
     std::string line;
     if (!std::getline(is, line) || line != "STSFUZZ_SUMMARY v1") {
@@ -324,7 +332,14 @@ bool parse_summary(const std::string& text, SummaryMeta& m, Coverage& c,
     }
     std::string coverage((std::istreambuf_iterator<char>(is)),
                          std::istreambuf_iterator<char>());
-    if (!coverage_from_kv(coverage, c)) {
+    if (allow_legacy) {
+        std::vector<std::string> missing;
+        if (!coverage_from_kv_legacy(coverage, c, missing)) {
+            error = "malformed coverage body (and not merely an older vintage)";
+            return false;
+        }
+        if (defaulted != nullptr) *defaulted = std::move(missing);
+    } else if (!coverage_from_kv(coverage, c)) {
         error = "malformed or incomplete coverage body";
         return false;
     }
@@ -380,13 +395,15 @@ int main(int argc, char** argv) {
     Options o;
     std::vector<std::string> merge_files;
     bool merge_mode = false;
+    bool allow_legacy = false;
     bool run_option_seen = false;
     bool policies_seen = false;
     bool injection_seen = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
-        if (a != "--merge" && a != "--help" && a != "-h") {
+        if (a != "--merge" && a != "--allow-legacy-summaries" &&
+            a != "--help" && a != "-h") {
             run_option_seen = true;
         }
         auto next = [&](const char* what) -> std::string {
@@ -493,6 +510,8 @@ int main(int argc, char** argv) {
                 std::fprintf(stderr, "--inject-no-progress wants CASE:STEP\n"); return 2;
             }
             o.inject_no_progress = true;
+        } else if (a == "--allow-legacy-summaries") {
+            allow_legacy = true;
         } else if (a == "--merge") {
             if (merge_mode) {
                 std::fprintf(stderr, "--merge may appear only once\n");
@@ -507,6 +526,11 @@ int main(int argc, char** argv) {
         }
     }
 
+    if (allow_legacy && !merge_mode) {
+        std::fprintf(stderr,
+                     "--allow-legacy-summaries is only meaningful with --merge\n");
+        return 2;
+    }
     if (merge_mode) {
         if (run_option_seen) {
             std::fprintf(stderr, "--merge cannot be combined with sweep options\n");
@@ -518,6 +542,7 @@ int main(int argc, char** argv) {
         }
         Coverage total;
         SummaryMeta common;
+        int legacy_files = 0;
         bool have_common = false;
         std::unordered_set<uint64_t> shards;
         uint64_t total_failures = 0;
@@ -529,10 +554,28 @@ int main(int argc, char** argv) {
             Coverage c;
             SummaryMeta meta;
             std::string error;
-            if (!parse_summary(text, meta, c, error)) {
+            std::vector<std::string> defaulted;
+            if (!parse_summary(text, meta, c, error, allow_legacy, &defaulted)) {
                 std::fprintf(stderr, "malformed summary %s: %s\n", f.c_str(),
                              error.c_str());
                 return 2;
+            }
+            if (!defaulted.empty()) {
+                // LOUD, on stderr, once per file, and named. A merged report
+                // that silently carried a defaulted counter would read as a
+                // measurement.
+                std::string names;
+                for (const std::string& k : defaulted) {
+                    if (!names.empty()) names += ", ";
+                    names += k;
+                }
+                std::fprintf(stderr,
+                             "LEGACY SUMMARY %s: written by an older fuzz_soak; "
+                             "%s defaulted to 0 and NOT measured. The merged "
+                             "report below is regenerated from an archive, not "
+                             "from a sweep -- do not quote those counters.\n",
+                             f.c_str(), names.c_str());
+                ++legacy_files;
             }
             if (!have_common) {
                 common = meta;
@@ -572,6 +615,14 @@ int main(int argc, char** argv) {
         std::cout << total.report(0.0);
         std::cout << "failures: " << total_failures << "\n"
                   << "build_id: " << common.build_id << "\n";
+        if (legacy_files > 0) {
+            // In the REPORT and not only on stderr: a report is what gets
+            // pasted into a task log, and a pipeline that dropped stderr would
+            // otherwise present a regenerated archive as a measurement.
+            std::cout << "provenance: REGENERATED FROM ARCHIVE -- " << legacy_files
+                      << " summary file(s) predate a counter in this build; the "
+                         "missing counters read 0 and were NOT measured\n";
+        }
         std::cout.flush();
         if (!std::cout) {
             std::fprintf(stderr, "cannot write merged report\n");

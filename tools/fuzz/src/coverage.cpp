@@ -1,5 +1,6 @@
 #include "sts/fuzz/coverage.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdio>
 #include <cstdlib>
@@ -189,7 +190,23 @@ std::string Coverage::kv() const {
     return os.str();
 }
 
-bool coverage_from_kv(const std::string& text, Coverage& out) {
+const std::vector<std::string>& legacy_optional_kv_keys() {
+    // ONE entry today, and the list is the whole of the tolerance. `victories`
+    // was added by 6d7efc4; every summary written before it lacks the key.
+    // A future counter joins this list ONLY together with the archive it has to
+    // read -- an entry here is a permanent statement that the field may be
+    // silently 0, so it is not somewhere to park a field that is merely new.
+    static const std::vector<std::string> kKeys = {"victories"};
+    return kKeys;
+}
+
+namespace {
+
+// The shared body. `optional` names the keys a summary may lack; anything else
+// missing, unknown or malformed is still a hard failure.
+bool parse_kv(const std::string& text, Coverage& out,
+              const std::vector<std::string>* optional,
+              std::vector<std::string>* defaulted) {
     Coverage c;
     std::vector<std::string> keys;
     std::vector<uint64_t*> slots;
@@ -283,9 +300,33 @@ bool coverage_from_kv(const std::string& text, Coverage& out) {
         if (ls >> extra) return false;
         *slot = v;
     }
-    if (seen.size() != expected.size()) return false;
+    if (seen.size() != expected.size()) {
+        // Something is missing. That is drift unless EVERY absentee is a known
+        // legacy key and the caller asked for tolerance.
+        if (optional == nullptr) return false;
+        for (const std::string& k : expected) {
+            if (seen.contains(k)) continue;
+            if (std::find(optional->begin(), optional->end(), k) == optional->end())
+                return false;
+            if (defaulted != nullptr) defaulted->push_back(k);
+        }
+        // Every missing key was legacy-optional, and `c` already holds the
+        // value-initialised 0 for each -- that is the default, stated.
+    }
     out = c;
     return true;
+}
+
+}  // namespace
+
+bool coverage_from_kv(const std::string& text, Coverage& out) {
+    return parse_kv(text, out, /*optional=*/nullptr, /*defaulted=*/nullptr);
+}
+
+bool coverage_from_kv_legacy(const std::string& text, Coverage& out,
+                             std::vector<std::string>& defaulted) {
+    defaulted.clear();
+    return parse_kv(text, out, &legacy_optional_kv_keys(), &defaulted);
 }
 
 namespace {

@@ -793,6 +793,122 @@ TEST(Translator, TolerateUnknownIdsTalliesInsteadOfThrowing) {
                   -2945499761529171947LL, "relicRng");
 }
 
+// --- act_boss joins through the ENCOUNTER registry (B1.5/B4.3 deferral) -----
+//
+// `AbstractDungeon.bossKey` is the same string the encounter registry keys on
+// ("The Guardian" / "Hexaghost" / "Slime Boss" -- Exordium.initializeBoss,
+// MonsterHelper.getEncounter), so the join is the registry's own lookup rather
+// than a table of spellings, and an unknown key is schema drift like any other
+// id join. The stored value is the EncounterId because that is the space the
+// run layer speaks: its `boss_list[]` holds encounter game_ids.
+TEST(Translator, ActBossJoinsThroughTheEncounterRegistry) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string anchor = "\"game_state\":{";
+    auto with_boss = [&](const std::string& key) {
+        std::string out = lines[1];
+        const auto pos = out.find(anchor);
+        EXPECT_NE(pos, std::string::npos);
+        out.insert(pos + anchor.size(), "\"act_boss\":\"" + key + "\",");
+        return out;
+    };
+
+    for (const auto& [key, id] : std::vector<std::pair<std::string, int>>{
+             {"The Guardian", 18}, {"Hexaghost", 19}, {"Slime Boss", 20}}) {
+        tr::TranslatedRun run = tr::translate_lines({lines[0], with_boss(key)}, key);
+        ASSERT_EQ(run.records.size(), 1u) << key;
+        // The sample is act 1, so the value lands in boss_ids[0].
+        EXPECT_EQ(run.records[0].run.boss_ids[0], id) << key;
+        for (std::size_t i = 1; i < engine::kBossIdCap; ++i)
+            EXPECT_EQ(run.records[0].run.boss_ids[i], 0) << key << " slot " << i;
+    }
+}
+
+// A key the registry does not carry -- or one that is a real encounter but not
+// a BOSS row -- aborts rather than silently writing 0, which is the same
+// fail-loud discipline every other id join here has.
+TEST(Translator, AnActBossTheRegistryDoesNotCarryAborts) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string anchor = "\"game_state\":{";
+    auto with_boss = [&](const std::string& key) {
+        std::string out = lines[1];
+        const auto pos = out.find(anchor);
+        EXPECT_NE(pos, std::string::npos);
+        out.insert(pos + anchor.size(), "\"act_boss\":\"" + key + "\",");
+        return out;
+    };
+    EXPECT_THROW((void)tr::translate_lines({lines[0], with_boss("Not A Boss")}, "bad"),
+                 tr::TranslateError);
+    // "Cultist" IS an encounter row -- a WEAK one. The pool check is what makes
+    // the difference, and it is checked rather than assumed.
+    EXPECT_THROW((void)tr::translate_lines({lines[0], with_boss("Cultist")}, "weak"),
+                 tr::TranslateError);
+}
+
+// --- monster_move_history: the LAST three, most-recent-first ---------------
+//
+// The fork emits the full `AbstractMonster.moveHistory` (up to 14 entries in
+// the campaign corpus, where stock's own JSON gives 2); the schema keeps three.
+// `moveHistory` is APPENDED, so the newest move is the last element and the
+// schema is most-recent-first -- reading the head would store a monster's
+// opening moves as if they were its latest, a wrong-but-plausible value no
+// differ can flag. The committed sample carries [1, 2, 1] for its Jaw Worm,
+// which is deliberately not a palindrome-free case on its own, so the test also
+// drives a longer history where head and tail cannot be confused.
+TEST(Translator, MonsterMoveHistoryTakesTheNewestThreeNewestFirst) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+
+    tr::TranslatedRun run = tr::translate_file(sample_path());
+    ASSERT_GE(run.records.size(), 2u);
+    const engine::CombatState& cs = run.records[1].combat;
+    ASSERT_GE(cs.monster_count, 1);
+    EXPECT_EQ(cs.monsters[0].move_history[0], 1);  // last element of [1,2,1]
+    EXPECT_EQ(cs.monsters[0].move_history[1], 2);
+    EXPECT_EQ(cs.monsters[0].move_history[2], 1);
+
+    // A history longer than the schema's three: only the tail lands, and the
+    // head (3, 4, 5) must not appear anywhere.
+    std::string longer = lines[2];
+    const std::string from = "\"move_history\": [1, 2, 1]";
+    const std::string from_compact = "\"move_history\":[1,2,1]";
+    const std::string to = "\"move_history\":[3,4,5,7,8,9]";
+    if (longer.find(from) != std::string::npos) {
+        longer.replace(longer.find(from), from.size(), to);
+    } else {
+        ASSERT_NE(longer.find(from_compact), std::string::npos) << longer.substr(0, 200);
+        longer.replace(longer.find(from_compact), from_compact.size(), to);
+    }
+    tr::TranslatedRun run2 = tr::translate_lines({lines[0], longer}, "longer");
+    ASSERT_EQ(run2.records.size(), 1u);
+    const engine::CombatState& cs2 = run2.records[0].combat;
+    ASSERT_GE(cs2.monster_count, 1);
+    EXPECT_EQ(cs2.monsters[0].move_history[0], 9);
+    EXPECT_EQ(cs2.monsters[0].move_history[1], 8);
+    EXPECT_EQ(cs2.monsters[0].move_history[2], 7);
+}
+
+// The positional join is the fork's contract, and it is CHECKED: a list whose
+// ids do not line up with the combat block's monsters would attribute one
+// monster's history to another, silently.
+TEST(Translator, AMisalignedMonsterMoveHistoryAborts) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 3u);
+    std::string bad = lines[2];
+    const std::string from = "\"id\": \"JawWorm\", \"move_history\"";
+    const std::string from_compact = "\"id\":\"JawWorm\",\"move_history\"";
+    const std::string to = "\"id\":\"Cultist\",\"move_history\"";
+    if (bad.find(from) != std::string::npos) {
+        bad.replace(bad.find(from), from.size(), to);
+    } else {
+        ASSERT_NE(bad.find(from_compact), std::string::npos);
+        bad.replace(bad.find(from_compact), from_compact.size(), to);
+    }
+    EXPECT_THROW((void)tr::translate_lines({lines[0], bad}, "misaligned"),
+                 tr::TranslateError);
+}
+
 TEST(Translator, TolerateUnknownIdsStillFailsOnUnknownField) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 3u);

@@ -20,6 +20,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "sts/fuzz/policy.hpp"
 #include "sts/registry/manifest.hpp"
@@ -156,7 +157,37 @@ struct Coverage {
 };
 
 // Parse a `kv()` blob back into a Coverage (for merging shard summaries).
-// Returns false on a malformed line.
+// Returns false on a malformed line, on an unknown key, and -- deliberately --
+// on a MISSING one. Strictness is the point: a merge that silently dropped a
+// field would understate a soak's totals.
 [[nodiscard]] bool coverage_from_kv(const std::string& text, Coverage& out);
+
+// The keys a summary written by an older `fuzz_soak` may legitimately lack, in
+// the order they were added. Exposed so a test can prove the tolerance covers
+// exactly this set and nothing more.
+[[nodiscard]] const std::vector<std::string>& legacy_optional_kv_keys();
+
+// The same parse, tolerating summaries written by an OLDER `fuzz_soak` whose
+// counter set was smaller.
+//
+// WHY THIS EXISTS, and why it is not the default. Summaries written before the
+// `victories` counter landed (pre-`6d7efc4`) do not carry that key, so
+// `coverage_from_kv` rejects them -- correctly, because for a LIVE sweep a
+// missing counter is drift. But an ARCHIVED campaign summary is a historical
+// artifact: it cannot be rewritten, and regenerating it means re-running the
+// whole sweep it summarises. This reads it, defaults every field that vintage
+// did not have to 0, and reports WHICH ones through `defaulted` so the caller
+// can say so out loud.
+//
+// A summary read this way is NOT equivalent to a native one: `victories` reads
+// 0 whether the sweep won nothing or simply never counted, so any report built
+// on it must carry that caveat rather than present the number as measured. That
+// is why the flag is opt-in and why `--merge` prints a banner.
+//
+// Only keys in `legacy_optional_kv_keys()` may be absent. A missing key outside
+// that set, an unknown key, or a malformed line still returns false -- the
+// tolerance is for history, never for drift.
+[[nodiscard]] bool coverage_from_kv_legacy(const std::string& text, Coverage& out,
+                                           std::vector<std::string>& defaulted);
 
 }  // namespace sts::fuzz

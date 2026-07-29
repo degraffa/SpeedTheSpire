@@ -55,7 +55,43 @@ overflowing shards and propagates any shard failure:
 fuzz_soak --merge shard0_summary.kv shard1_summary.kv
 ```
 
+### Merging an ARCHIVED campaign
+
+Summaries written before the `victories` counter landed (pre-`6d7efc4`) do not
+carry that key, and `--merge` rejects them — correctly, because for a live sweep
+a missing counter is drift. They cannot be rewritten, and regenerating one
+honestly means re-running the whole sweep it summarises.
+`--allow-legacy-summaries` reads them anyway:
+
+```bash
+fuzz_soak --merge --allow-legacy-summaries old_shard0.kv old_shard1.kv
+```
+
+Every counter that vintage lacked reads **0**, which is not the same as having
+measured zero. The flag is loud about it in two places, because either one can
+be lost: a `LEGACY SUMMARY <file>: … NOT measured` line per file on **stderr**,
+and a `provenance: REGENERATED FROM ARCHIVE` line in the **report** itself,
+which is the part that gets pasted into a task log. Do not quote a defaulted
+counter as a result. Only the keys in `legacy_optional_kv_keys()` may be absent;
+any other missing key, unknown key or malformed line is still a hard failure,
+with or without the flag.
+
 ## Triage
+
+### Exit codes — the one that reads backwards
+
+**`fuzz_repro` exits 1 on NOT REPRODUCED, and that is the PASS verdict on a
+fixed build.** Its codes describe what the *replay* did, not whether you are
+pleased about it: `0` replayed clean and matched, `1` a failure was reproduced
+**or** the recorded one was not, `2` bad usage or an unreadable file. Re-run an
+old reproducer against a build that has since been fixed and the recorded
+failure no longer happens — the tool prints `RESULT: NOT REPRODUCED` and exits
+**1**.
+
+Any CI wiring that equates exit 0 with success therefore reads a **confirmed fix
+as a failure** — and reads a reproducer that still fails on an unfixed build the
+same way, so the two are indistinguishable by exit code alone. When the question
+is "is this finding fixed?", gate on the `RESULT:` line, not on `$?`.
 
 A normal mismatch writes a `STSFUZZ v1` file containing both the case identity
 and the minimal action prefix through the first divergent step:
