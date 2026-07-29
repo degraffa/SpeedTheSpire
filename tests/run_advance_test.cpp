@@ -722,11 +722,21 @@ TEST(RunCombatBottle, StandaloneCombatBeginRunsTheSameOverflowDraw) {
 // sites, because a direct-call test cannot distinguish "wired" from
 // "unreachable". Only entry through enter_combat can.
 
-// Replace the run's relics with `ids`, in acquisition order.
+// Replace the run's relics with `ids`, in acquisition order. Each slot's
+// counter is seeded from the registry row's `initial_counter`, exactly as
+// acquire_relic does (relic_pools.cpp `slot.counter = def->initial_counter`)
+// -- the AbstractRelic ctor's counter (-1 default; 0/N for counting relics).
+// The helper used to hardcode 0, so run-level relic tests could silently
+// disagree with acquisition about starting counters (the Centennial Puzzle
+// defect class, one layer up -- ledger: "Run-level relic tests seed counters
+// by hand, not from the registry").
 void set_run_relics(RunController& rc, std::initializer_list<RelicId> ids) {
     uint8_t i = 0;
     for (const RelicId id : ids) {
-        rc.run.relics[i] = RelicSlot{static_cast<uint16_t>(id), 0};
+        const RelicDef* def = relic_def(id);
+        ASSERT_NE(def, nullptr) << "unknown relic id in set_run_relics";
+        rc.run.relics[i] = RelicSlot{static_cast<uint16_t>(id),
+                                     def->initial_counter};
         ++i;
     }
     rc.run.relic_count = i;
@@ -2467,8 +2477,15 @@ TEST(QuestionMarkRoom, MawBankPaysExactlyTwelveOnceAcrossEveryResolvedKind) {
         EXPECT_EQ(rc.run.gold, gold_before + 12);
         EXPECT_EQ(rc.room_type, static_cast<uint8_t>(tc.resolved));
         // Entry does NOT use the relic up -- only onSpendGold does
-        // (MawBank.java:38-44), and that is a ShopRoom-only fan-out.
-        EXPECT_EQ(rc.run.relics[0].counter, 0);
+        // (MawBank.java:38-44), and that is a ShopRoom-only fan-out. The
+        // counter therefore still reads the ACQUISITION value: -1, the
+        // AbstractRelic default (MawBank's ctor sets none; registry row has
+        // no initial_counter). This expectation read 0 while set_run_relics
+        // hardcoded 0 -- exactly the silent-reliance the ledger row warned
+        // about; usedUp is the counter == -2 encoding, so -1 vs 0 is
+        // test-seeding only, not a behavior difference (the engine gate is
+        // `counter != -2`, event_framework.cpp).
+        EXPECT_EQ(rc.run.relics[0].counter, -1);
     }
 }
 
