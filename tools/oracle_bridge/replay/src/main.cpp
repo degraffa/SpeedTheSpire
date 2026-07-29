@@ -253,16 +253,10 @@ void neutralize_incomparable(RunState& s) noexcept {
     for (auto& n : s.map) n = MapNode{};
     s.purge_cost = 0;
     s.neow_rng = RngStream{};
-    // `boss_ids` -- the translator joins `act_boss` through the encounter
-    // registry and writes it (the "Translator: real act_boss" row), but the RUN
-    // LAYER has no writer for the field: it keeps the act's boss in
-    // `RunController.lists.boss_list[]` as a game_id and never mirrors it into
-    // RunState. So the capture side carries a value and the sim side is
-    // structurally 0 on EVERY record. Comparing that would paint the whole
-    // corpus red for a field neither side disagrees about. Dropped here, with
-    // the gap named rather than hidden: it comes back the moment `run_begin`
-    // records `boss_list[0]`, which is a run-layer change and not this tool's.
-    for (auto& b : s.boss_ids) b = 0;
+    // `boss_ids` is COMPARED now: run_begin mirrors the rolled act boss
+    // (`boss_list[0]`) into `boss_ids[0]` in the same EncounterId space the
+    // translator writes from `act_boss`, so the old neutralization here is
+    // gone (it existed only while the run layer had no writer for the field).
     // `keys` -- the OPPOSITE gap: the SIM writes the Ruby bit when a capture's
     // recall press is replayed (RestOptionKind::RECALL), but neither
     // CommunicationMod's game_state nor the fork's oracle block exposes the
@@ -281,7 +275,6 @@ void neutralize_incomparable(RunState& s) noexcept {
 void neutralize_presentation_only(RunState& s) noexcept {
     for (auto& c : s.master_deck) c.cost_now = 0;
     for (auto& n : s.map) n = MapNode{};
-    for (auto& b : s.boss_ids) b = 0;  // no run-layer writer -- see above
 }
 
 // DURING a combat the run layer deliberately does not write the live sheet back

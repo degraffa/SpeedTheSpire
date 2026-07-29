@@ -1250,6 +1250,19 @@ RunController run_begin(int64_t seed, uint8_t ascension) noexcept {
     // (1) monsterRng: generateMonsters + initializeBoss -> the encounter lists
     //     (Exordium.java:110-221; generate_monster_lists).
     generate_monster_lists(/*act=*/1, rs.monster_rng, rc.lists);
+    // The act boss, mirrored into save-parity state: setBoss(bossList.get(0))
+    // (Exordium.initializeBoss) is what the game persists as the act's boss,
+    // and the translator writes the capture's `act_boss` into
+    // `boss_ids[act-1]` as an ENCOUNTER id (the space boss_list[] holds and
+    // enter_combat takes) -- so the mirror uses the same registry join and the
+    // differ compares the field for real.
+    if (rc.lists.boss_list_count > 0) {
+        const sts::registry::EncounterDef* boss =
+            sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+        if (boss != nullptr) {
+            rs.boss_ids[0] = static_cast<uint16_t>(boss->id);
+        }
+    }
 
     // (2) relicRng: initializeRelicList population + five unconditional
     //     randomLong-seeded JDK shuffles (AbstractDungeon.java:1221-1241).

@@ -246,6 +246,26 @@ TEST(RunBegin, MonsterRngMatchesIndependentListGeneration) {
     EXPECT_EQ(rc.lists.boss_list_count, ml.boss_list_count);
 }
 
+// The act boss's EncounterId, mirrored into save-parity state. The translator
+// writes `boss_ids[act-1]` from the capture's `act_boss` through the encounter
+// registry (the "Translator: real act_boss" ledger row), and the differ
+// compares the field -- so the run layer must record its own rolled boss
+// (`boss_list[0]`, setBoss(bossList.get(0)) in Exordium.initializeBoss) in the
+// SAME id space: the EncounterId, which is what boss_list[] holds and
+// enter_combat takes.
+TEST(RunBegin, BossIdsMirrorsTheRolledActBoss) {
+    const RunController rc = run_begin(kSeed, kA20);
+    ASSERT_GT(rc.lists.boss_list_count, 0);
+    const sts::registry::EncounterDef* boss =
+        sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+    ASSERT_NE(boss, nullptr);
+    EXPECT_EQ(rc.run.boss_ids[0], static_cast<uint16_t>(boss->id));
+    EXPECT_NE(rc.run.boss_ids[0], 0) << "0 is the 'unset' sentinel";
+    for (int i = 1; i < kBossIdCap; ++i) {
+        EXPECT_EQ(rc.run.boss_ids[i], 0) << "acts beyond S1 stay unset";
+    }
+}
+
 TEST(RunBegin, NeowHasGenerateSeedsFloorStreamsAtFloorZero) {
     const RunController rc = run_begin(kSeed, kA20);
     const RngStream floor0 = floor_stream(kSeed, 0);

@@ -413,3 +413,14 @@ The class-(c) frontier from stage 2 is closed. `RecallOption`
 whole twelve-artifact corpus replays CLEAN to terminal. G6-main thirty and
 the bottle seven byte-identical to the previous section (10 / 3 not clean,
 same rows); full-output diff shows exactly the two artifacts above changed.
+
+## `wave3-followup` — `boss_ids` compared for real (2026-07-28)
+
+The act_boss row's re-owned mirror is discharged: `run_begin` records
+`encounter_by_game_id(boss_list[0])->id` into `RunState.boss_ids[0]` — the
+same EncounterId join and space the translator writes from the capture's
+`act_boss` — and `--replay`'s `boss_ids` neutralization is REMOVED (it
+existed only while the run layer had no writer). The whole 49-artifact corpus
+re-ran with the field live: **zero `boss_ids` divergence anywhere**, all
+verdicts byte-identical to the RecallOption section above (12/0, 30/10, 7/3).
+Pinned by `RunBegin.BossIdsMirrorsTheRolledActBoss`.
