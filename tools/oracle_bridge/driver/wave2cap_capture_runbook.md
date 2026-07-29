@@ -220,3 +220,27 @@ shop.hpp's Courier block; guard test
   game time against a row that "says not needed". Declined under the explicit
   budget permission; the search space actually tried is the one §2-§4
   document.
+
+## 7. `wave2-integrate` union — the §3b window closed (2026-07-28)
+
+The `SHOP_ROOM` arm (`wave2-harness` stage 2) and these captures met for the
+first time on the `wave2-integrate` union (all four wave branches on master
+`e15ebad`). `replay_run_diff --replay` over all seven bottle runs, offline,
+`debug` build:
+
+| Run | §3b window (pre-arm) | Union verdict | Attribution |
+|---|---|---|---|
+| STS04888 | zero-diff over 34, shop stop | **CLEAN to run terminal**, 159 records | — |
+| STS03244 | shop stop | **CLEAN to run terminal**, 156 records | **the Bottled Lightning SKILL-grid descending-order proof, now live** — the whole run, bottling included, zero-diff |
+| STS03352 | shop stop | 167 records, first div seq 143 (floor 11, `hp` 1 field) | **second reproducer of the §3c Elixir class**: `potion use 0` → HAND_SELECT `choose 1`/`proceed` (seq 142-144), sim under-takes ~5 HP, cascades — same shape as STS05143 seq 40-42. Zero-diff through its floor-9 bottling |
+| STS04925 | CLEAN over 91 (§3a) | 159 records, first div seq 137 (floor 14, `gold` only) | the standing class-(c) mid-combat stolen-gold row (game purse drops −20/−40/−60 during the fight, sim settles at fold-back); reconverges after the combat, zero-diff to artifact end |
+| STS06578 | zero-diff over 34, shop stop | 149 records to run terminal, first div seq 81 (floor 7, `gold` only) | same class-(c) row; reconverges, zero-diff to terminal |
+| STS05143 | zero-diff over 50 (§3c) | 59 records, first div seq 51 — **the §3c divergence, byte-identical** | the known standing stop; not chased |
+| STS00241 | zero-diff over 41, shop stop | 218 records to run terminal, **ONE divergent record** (seq 96, 8 fields) | **NEW, benign, race-class**: seq 95 is a Smoke Bomb use; the sim settles the escape synchronously (Burning Blood +6, end-of-combat settlement) while the capture's seq-96 dump catches the game mid-escape-animation still listing the fight; seq 97 on is zero-diff to terminal — the same mid-animation-dump family as the §"obtain race", a candidate for the same narrow classifier treatment |
+
+Every merchant in all seven runs walked zero-diff (the shops were the §3b
+gate; none produced a divergence). The Courier `--shop` walk over the buy
+campaign reproduces §4b on the union exactly: stock clean 5, purchase walks
+clean 5, 0 divergences — which also exercises the union composition of this
+file's two §4b fixes (`shop_choice_arg_to_index` + the `state` elision, now
+living beside the shared resolvers in `command_map.hpp`).

@@ -213,3 +213,37 @@ carries an `obtain-race` count beside the library-order one. The current corpus
 produces none (0 across all 42 artifacts run here), which is exactly the state
 the ledger row records; what changes is that such a record can no longer read as
 a deck divergence.
+
+## `wave2-integrate` — the four-track union (2026-07-28)
+
+Same offline command set (`debug` build, no game, no capture pipeline), re-run
+on the `wave2-integrate` union — `wave2-harness` + `wave2-engine` +
+`wave2-prov` + `wave2-capture` merged onto master `e15ebad`, with the
+integration commit (Orrery/Cauldron provenance re-derivation) applied. The
+acceptance bar: no artifact regresses vs the best per-branch result anywhere.
+
+b45+b47, all twelve artifacts — **identical to the stage-2 table above,
+record for record**:
+
+| Run | Union verdict | vs stage-2 baseline |
+|---|---|---|
+| STS00042 | **CLEAN to terminal**, 85 records | unchanged |
+| STS00043 | **CLEAN to terminal**, 67 records | unchanged |
+| STS00044 / 45 / 46 / 47 / 48 / 49 / 50 / 51 | **CLEAN to terminal** | unchanged |
+| STS00052 | zero-diff over 79 records, stop seq 78 rest `Recall` | unchanged |
+| STS00054 | zero-diff over 123 records, stop seq 122 rest `Recall` | unchanged |
+
+`--- 12 file(s), 2 not clean ---`, first divergence: none, on every file.
+
+G6 main campaign, all 30 runs — `--- 30 file(s), 12 not clean ---`, the SAME
+twelve as the stage-2 table, each at its recorded first-divergence seq
+(STS00221 s25 / STS01314 s22 / STS02009 s61 EVENT class (d); STS00462 s85,
+STS00683 s79, STS01372 s91, STS01221 s145 gold class (c); STS00283 s85,
+STS00856 s80 FairyPotion class (c); STS01789 s130 and STS00353 s97, the two
+(a)-candidates, byte-identical shapes; STS01068 zero-diff to its seq-39 grid
+stop). STS00509 — the Explosive-Potion retype pin — stays **CLEAN to
+terminal, 171 records**. **No new divergence appeared on the union that no
+branch saw**, and no run compares fewer records than any branch's own run of
+it. The six wave2cap bottle captures' union verdicts (the payoff the
+`SHOP_ROOM` arm + the bottle captures were jointly gated on) are recorded in
+[`wave2cap_capture_runbook.md`](wave2cap_capture_runbook.md) §7.
