@@ -74,9 +74,12 @@
 //   AbstractPlayer.loseGold                   AbstractPlayer.java:697-717
 //   MealTicket.justEnteredRoom                MealTicket.java:31-38
 //   MawBank.onSpendGold / setCounter          MawBank.java:38-53
-//   SmilingMask / Courier / MembershipCard    SmilingMask.java:1-60,
-//                                             Courier.java:1-60,
-//                                             MembershipCard.java:1-56
+//   SmilingMask.onEnterRoom / canSpawn        SmilingMask.java:31-38, :41-43
+//   Courier.onEnterRoom / canSpawn            Courier.java:31-38, :41-43
+//   MembershipCard MULTIPLIER + onEnterRoom   MembershipCard.java:17-36
+// SmilingMask and Courier are byte-identical to each other in both bodies, and
+// their canSpawn is byte-identical to OldCoin.java:37-39 as well (the shared
+// "not in a shop, floorNum <= 48 unless endless" shop-relic gate).
 
 #include <cstdint>
 #include <type_traits>

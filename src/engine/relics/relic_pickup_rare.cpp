@@ -10,17 +10,17 @@ namespace sts::engine {
 // --- canSpawn: the plain "Settings.isEndless || floorNum <= N" family ---------
 
 bool relic_can_spawn_prayer_wheel(const RelicSpawnContext& ctx) noexcept {
-    return ctx.endless || ctx.floor <= 48;  // PrayerWheel.java:986-989
+    return ctx.endless || ctx.floor <= 48;  // PrayerWheel.java:33-35
 }
 
 bool relic_can_spawn_wing_boots(const RelicSpawnContext& ctx) noexcept {
-    return ctx.endless || ctx.floor <= 40;  // WingBoots.java:1383-1386
+    return ctx.endless || ctx.floor <= 40;  // WingBoots.java:38-40
 }
 
 // --- canSpawn: floor gate AND "not in a shop" --------------------------------
 
 bool relic_can_spawn_old_coin(const RelicSpawnContext& ctx) noexcept {
-    // OldCoin.canSpawn (OldCoin.java:818-821):
+    // OldCoin.canSpawn (OldCoin.java:37-39):
     //   (Settings.isEndless || floorNum <= 48) && !(getCurrRoom() instanceof ShopRoom)
     // Endless bypasses the floor clause only, never the shop clause -- the same
     // shape as MawBank / SmilingMask / Courier.
@@ -29,8 +29,8 @@ bool relic_can_spawn_old_coin(const RelicSpawnContext& ctx) noexcept {
 
 // --- canSpawn: the campfire trio ---------------------------------------------
 //
-// Girya.canSpawn (Girya.java:538-549), PeacePipe.canSpawn (PeacePipe.java:
-// 862-873) and Shovel.canSpawn (Shovel.java:1024-1035) have byte-identical
+// Girya.canSpawn (Girya.java:47-57), PeacePipe.canSpawn (PeacePipe.java:
+// 862-873) and Shovel.canSpawn (Shovel.java:33-43) have byte-identical
 // bodies:
 //
 //     if (floorNum >= 48 && !Settings.isEndless) return false;
@@ -67,7 +67,7 @@ bool relic_can_spawn_shovel(const RelicSpawnContext& ctx) noexcept {
 
 void relic_on_equip_du_vu_doll(RunState& rs, RngStream& /*misc_rng*/,
                                RelicSlot& slot) noexcept {
-    // DuVuDoll.onEquip (DuVuDoll.java:334-345): counter = the number of
+    // DuVuDoll.onEquip (DuVuDoll.java:56-66): counter = the number of
     // CURSE-type cards in the master deck. This is a real RunState-READING
     // override, not the `this.counter = 0` shape initial_counter already models,
     // which is why the row carries the pickup key. The identical recount on every
@@ -85,7 +85,7 @@ void relic_on_equip_du_vu_doll(RunState& rs, RngStream& /*misc_rng*/,
 
 void relic_on_equip_mango(RunState& rs, RngStream& /*misc_rng*/,
                           RelicSlot& /*slot*/) noexcept {
-    // Mango.onEquip (Mango.java:771-774): increaseMaxHp(14, true) -- +14 max AND
+    // Mango.onEquip (Mango.java:29-31): increaseMaxHp(14, true) -- +14 max AND
     // +14 current (increaseMaxHp heals the gained amount when the flag is set).
     rs.max_hp = static_cast<int16_t>(rs.max_hp + 14);
     rs.hp = static_cast<int16_t>(rs.hp + 14);
@@ -93,7 +93,7 @@ void relic_on_equip_mango(RunState& rs, RngStream& /*misc_rng*/,
 
 void relic_on_equip_old_coin(RunState& rs, RngStream& /*misc_rng*/,
                              RelicSlot& /*slot*/) noexcept {
-    // OldCoin.onEquip (OldCoin.java:812-816): gainGold(300). Routed through the
+    // OldCoin.onEquip (OldCoin.java:31-34): gainGold(300). Routed through the
     // shared gain_gold door (relics/relic_pickup.hpp) rather than a direct
     // `rs.gold +=`, which is what this comment asked for "when the boss tier
     // lands": Ectoplasm (registry id ECTOPLASM) makes gainGold return without

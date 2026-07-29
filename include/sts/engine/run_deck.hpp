@@ -118,7 +118,7 @@ void dispatch_relics_on_obtain_card(RunState& run, CardInstance& card,
                                     const CardDef& def) noexcept;
 
 // AbstractRelic.onMasterDeckChange, fired from every master-deck edit. Du-Vu
-// Doll is the only S1 override (DuVuDoll.java:321-332): its counter is the
+// Doll is the only S1 override (DuVuDoll.java:43-53): its counter is the
 // number of CURSE-type cards in the master deck, RECOMPUTED from scratch each
 // time rather than adjusted by the delta -- which is what the Java does, and is
 // also what keeps a RunState assembled by hand (tests, the fixture loader)

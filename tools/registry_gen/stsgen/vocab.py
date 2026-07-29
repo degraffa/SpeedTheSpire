@@ -39,7 +39,7 @@ OPCODES = {
     "REMOVE_POWER": 14,
     # Stage B B3.3 additions (append-only from 15): dynamic-base attack damage.
     # DAMAGE_BLOCK reads the player's current block as the base at EXECUTE time
-    # (Body Slam, BodySlam.java:96). DAMAGE_STR_MULT deals `amount` base with the
+    # (Body Slam, BodySlam.java:37). DAMAGE_STR_MULT deals `amount` base with the
     # player's Strength counted x `extra` (Heavy Blade, HeavyBlade.java:47-56).
     # DAMAGE_PER_STRIKE deals `amount` + `extra` per STRIKE-tagged card in
     # hand+draw+discard. It is BAKED into a plain DAMAGE at queue time, matching

@@ -1170,7 +1170,7 @@ TEST(RunCombatBattleStart, NoRegisteredRelicBindsThePreDrawHook) {
 // wins). These walk the REAL entry path; the relic BODIES are pinned by
 // relic_rares_shop_test's direct-call loops, which cannot see the wiring.
 
-// StoneCalendar (StoneCalendar.java:1083-1116): atBattleStart counter = 0,
+// StoneCalendar (StoneCalendar.java:36-68): atBattleStart counter = 0,
 // atTurnStart ++counter, onPlayerEndTurn fires 52 THORNS at counter == 7,
 // onVictory counter = -1. Out of combat the counter is -1 (pickup default and
 // the onVictory latch), which is exactly what makes the wrong order visible:
@@ -1209,9 +1209,9 @@ TEST(RunCombatBattleStart, StoneCalendarCounterSequenceMatchesTheJavaOrder) {
     step(rc, make_action(ActionVerb::END_TURN));  // ends turn 7 -> 52 THORNS
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD))
         << "StoneCalendar.onPlayerEndTurn at counter == 7 kills every Sentry "
-           "(StoneCalendar.java:1101; the STS00683 fight the sim used to LOSE)";
+           "(StoneCalendar.java:53; the STS00683 fight the sim used to LOSE)";
     EXPECT_EQ(rc.run.relics[0].counter, -1)
-        << "onVictory latches -1 back into the run (StoneCalendar.java:1112-1116)";
+        << "onVictory latches -1 back into the run (StoneCalendar.java:65-68)";
 }
 
 // HornCleat (HornCleat.java:36-53): "at the start of your 2nd turn, gain 14
@@ -1235,7 +1235,7 @@ TEST(RunCombatBattleStart, HornCleatBlocksOnTurnTwoNotTurnThree) {
            "++ lands on 2 -- turn 2 under the Java order";
 }
 
-// Pocketwatch (Pocketwatch.java:906-946): counter == -1 is the armed firstTurn
+// Pocketwatch (Pocketwatch.java:20-60): counter == -1 is the armed firstTurn
 // flag (atBattleStart sets it), the post-draw check treats a negative counter
 // as "this is turn 1, no bonus", and a non-negative counter <= 3 plays draws 3.
 // Under the inverted order the turn-1 post-draw check ran BEFORE atBattleStart
@@ -1249,13 +1249,13 @@ TEST(RunCombatBattleStart, PocketwatchGrantsTheTurnTwoBonusDraw) {
     step(rc, make_action(ActionVerb::CHOOSE, first_start_column(rc)));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     EXPECT_EQ(rc.combat.hand_count, 5)
-        << "turn 1 is the armed firstTurn: no bonus draw (Pocketwatch.java:923)";
+        << "turn 1 is the armed firstTurn: no bonus draw (Pocketwatch.java:39-43)";
     step(rc, make_action(ActionVerb::END_TURN));  // 0 cards played <= 3
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT));
     ASSERT_EQ(rc.combat.turn, 2);
     EXPECT_EQ(rc.combat.hand_count, 8)
         << "0 plays on turn 1 -> the turn-2 post-draw check draws 3 "
-           "(Pocketwatch.java:926)";
+           "(Pocketwatch.java:40)";
 }
 
 // =============================================================================

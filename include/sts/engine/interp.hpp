@@ -147,7 +147,7 @@ enum class Opcode : uint16_t {
     // --- Dynamic-base attack damage (append-only from 15) ------------------
     DAMAGE_BLOCK = 15,  // src (player) attacks tgt for base == player_block, read
                          // at EXECUTE time, then the normal DamageInfo pipeline
-                         // (Body Slam; BodySlam.java:96 baseDamage = p.currentBlock).
+                         // (Body Slam; BodySlam.java:37 baseDamage = p.currentBlock).
     DAMAGE_STR_MULT = 16, // src attacks tgt for `amount` base with Strength counted
                            // x `flags` (the multiplier), then the pipeline (Heavy
                            // Blade; HeavyBlade.java:47-56 strength.amount *= magic).

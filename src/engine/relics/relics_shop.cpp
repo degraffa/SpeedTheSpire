@@ -72,7 +72,7 @@ void relic_native_hand_drill(CombatState& s, RelicHook hook, RelicSlot& /*slot*/
 
 void relic_native_medical_kit(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
                               const RelicHookContext& ctx) noexcept {
-    // MedicalKit.onUseCard (MedicalKit.java:1153-1159): a played STATUS card sets
+    // MedicalKit.onUseCard (MedicalKit.java:35-41): a played STATUS card sets
     // card.exhaust = true and action.exhaustCard = true. Both reduce to the same
     // thing here: set the played INSTANCE's EXHAUST flag, which
     // resolve_card_play reads AFTER the hook fan-out when it moves the card out

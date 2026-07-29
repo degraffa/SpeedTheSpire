@@ -2,7 +2,7 @@
 // BOTH upgrade rows, every expected value hand-computed from the cited use() in
 // D:\STS_BG_Mod\SlayTheSpireDecompiled\...\cards\red -- never read back from the
 // implementation. New engine mechanics exercised (all cited at their card):
-//   * Body Slam         -- DAMAGE_BLOCK: base == current player block (BodySlam.java:96).
+//   * Body Slam         -- DAMAGE_BLOCK: base == current player block (BodySlam.java:37).
 //   * Heavy Blade       -- DAMAGE_STR_MULT: Strength x magic (HeavyBlade.java:47-56).
 //   * Perfected Strike  -- DAMAGE_PER_STRIKE: +magic per "Strike"-named card; a
 //                          hand play counts itself, still in hand at
@@ -10,7 +10,7 @@
 //                          AbstractPlayer.java:1361 before :1373).
 //   * Anger             -- MAKE_CARD self-copy to discard, upgrade preserved
 //                          (Anger.java:42; makeStatEquivalentCopy).
-//   * Wild Strike       -- MAKE_CARD Wound to a random draw-pile spot (WildStrike.java:840).
+//   * Wild Strike       -- MAKE_CARD Wound to a random draw-pile spot (WildStrike.java:41).
 //   * Cleave/Thunderclap-- ALL_ENEMY AoE (separate DamageInfo per live monster).
 //   * Sword Boomerang   -- RANDOM_ENEMY per-hit roll (one card_random_rng draw/hit).
 //   * Headbutt          -- CHOOSE_CARD discard_to_draw_top; the just-played

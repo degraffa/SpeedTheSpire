@@ -295,8 +295,8 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 // function exists to prevent, one build later. What remains deferred whole
 // (registry/relics.yaml provenance, each row re-read): DOLLYS_MIRROR (the only
 // one whose deferred onEquip is itself a master-deck grid, DollysMirror.java:
-// 33-43), and ORRERY / CAULDRON (reward-screen assembly, Orrery.java:1270-1276
-// / Cauldron.java:1075-1092 -- no grid of their own, but a capture that drives
+// 33-43), and ORRERY / CAULDRON (reward-screen assembly, Orrery.java:27-33
+// / Cauldron.java:30-45 -- no grid of their own, but a capture that drives
 // their unmodelled reward screens desyncs and can surface here, so ruling them
 // "modelled" would be false). A deferred surface cannot be told from an
 // implemented one through `relic_on_equip_fn` -- it maps to a real function

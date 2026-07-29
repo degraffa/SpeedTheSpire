@@ -224,7 +224,7 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     dispatch_on_apply_power_source(s, src, tgt, static_cast<uint16_t>(id),
                                    is_debuff);
     // (2) Champion Belt (ApplyPowerAction.java:111-113 -> ChampionsBelt.onTrigger,
-    // ChampionsBelt.java:172-176): the player owns it, the source IS the player,
+    // ChampionsBelt.java:32-35): the player owns it, the source IS the player,
     // target != source, the applied power is Vulnerable, and the target does NOT
     // already have Artifact -> addToBot ApplyPowerAction(target, player, Weak 1).
     // The Artifact test is READ-ONLY and happens HERE, before step (4) spends the

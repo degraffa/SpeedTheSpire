@@ -54,7 +54,7 @@ void relic_native_bird_faced_urn(CombatState& s, RelicHook hook,
 
 void relic_native_captains_wheel(CombatState& s, RelicHook hook, RelicSlot& slot,
                                  const RelicHookContext& /*ctx*/) noexcept {
-    // CaptainsWheel (CaptainsWheel.java:110-133): atBattleStart arms (counter =
+    // CaptainsWheel (CaptainsWheel.java:31-53): atBattleStart arms (counter =
     // 0); atTurnStart increments WHILE NOT grayscale and fires once at turn 3
     // (18 block), then counter = -1 and grayscale = true; onVictory counter = -1.
     // counter < 0 IS the grayscale latch: the Java sets both together and never
@@ -74,18 +74,18 @@ void relic_native_captains_wheel(CombatState& s, RelicHook hook, RelicSlot& slot
             blk.tgt = kActorPlayer;
             blk.amount = 18;
             blk.flags = kBlockNoPowers;  // direct GainBlockAction: no Dexterity
-            add_to_bottom(s, blk);       // addToBot (CaptainsWheel.java:123)
+            add_to_bottom(s, blk);       // addToBot (CaptainsWheel.java:43)
             slot.counter = -1;
         }
     } else if (hook == RelicHook::ON_VICTORY) {
-        slot.counter = -1;  // CaptainsWheel.java:129-133
+        slot.counter = -1;  // CaptainsWheel.java:50-53
     }
 }
 
 void relic_native_charons_ashes(CombatState& s, RelicHook hook,
                                 RelicSlot& /*slot*/,
                                 const RelicHookContext& /*ctx*/) noexcept {
-    // CharonsAshes.onExhaust (CharonsAshes.java:219-227): addToTop
+    // CharonsAshes.onExhaust (CharonsAshes.java:36-43): addToTop
     // DamageAllEnemiesAction(createDamageMatrix(3, true), DamageType.THORNS).
     // Native rather than a data step purely for the queue END -- a data-bound
     // relic step is always addToBot, and on_exhaust fires mid-resolution.
@@ -103,7 +103,7 @@ void relic_native_charons_ashes(CombatState& s, RelicHook hook,
 
 void relic_native_du_vu_doll(CombatState& s, RelicHook hook, RelicSlot& slot,
                              const RelicHookContext& /*ctx*/) noexcept {
-    // DuVuDoll.atBattleStart (DuVuDoll.java:347-354): if counter > 0, addToTop
+    // DuVuDoll.atBattleStart (DuVuDoll.java:69-75): if counter > 0, addToTop
     // ApplyPowerAction(player, player, StrengthPower(counter), counter). The
     // counter is the master deck's CURSE count, maintained by onEquip /
     // onMasterDeckChange at the run layer (relic_pickup_rare.cpp, run_deck.hpp).
@@ -114,7 +114,7 @@ void relic_native_du_vu_doll(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 void relic_native_girya(CombatState& s, RelicHook hook, RelicSlot& slot,
                         const RelicHookContext& /*ctx*/) noexcept {
-    // Girya.atBattleStart (Girya.java:529-536): if counter != 0, addToTop
+    // Girya.atBattleStart (Girya.java:38-44): if counter != 0, addToTop
     // ApplyPowerAction(player, player, StrengthPower(counter), counter). NOT
     // `> 0` -- the Java tests inequality, and the counter only ever rises via the
     // campfire Lift option, which is not implemented, so the branch is a live
@@ -126,7 +126,7 @@ void relic_native_girya(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 void relic_native_incense_burner(CombatState& s, RelicHook hook, RelicSlot& slot,
                                  const RelicHookContext& /*ctx*/) noexcept {
-    // IncenseBurner.atTurnStart (IncenseBurner.java:628-637):
+    // IncenseBurner.atTurnStart (IncenseBurner.java:36-44):
     //   counter = (counter == -1) ? counter + 2 : counter + 1;
     //   if (counter == 6) { counter = 0; addToBot ApplyPowerAction(player, null,
     //                                     IntangiblePlayerPower 1); }
@@ -145,13 +145,13 @@ void relic_native_incense_burner(CombatState& s, RelicHook hook, RelicSlot& slot
         p.tgt = kActorPlayer;
         p.amount = 1;
         p.flags = make_apply_power_flags(PowerId::INTANGIBLE);
-        add_to_bottom(s, p);  // addToBot (IncenseBurner.java:635)
+        add_to_bottom(s, p);  // addToBot (IncenseBurner.java:42)
     }
 }
 
 void relic_native_pocketwatch(CombatState& s, RelicHook hook, RelicSlot& slot,
                               const RelicHookContext& /*ctx*/) noexcept {
-    // Pocketwatch (Pocketwatch.java:917-946). The Java carries TWO pieces of
+    // Pocketwatch (Pocketwatch.java:32-60). The Java carries TWO pieces of
     // state: the public `counter` (cards played this turn) and a PRIVATE
     // `firstTurn` boolean the oracle never serializes. They are packed into the
     // one signed counter this engine stores per relic slot:
@@ -189,7 +189,7 @@ void relic_native_pocketwatch(CombatState& s, RelicHook hook, RelicSlot& slot,
                 d.src = kActorPlayer;
                 d.tgt = kActorPlayer;
                 d.amount = 3;
-                add_to_bottom(s, d);  // addToBot (Pocketwatch.java:926)
+                add_to_bottom(s, d);  // addToBot (Pocketwatch.java:40)
             }
             // Both branches then set counter = 0; the else-branch additionally
             // clears firstTurn, which is the same thing in this encoding.
@@ -197,7 +197,7 @@ void relic_native_pocketwatch(CombatState& s, RelicHook hook, RelicSlot& slot,
             break;
         }
         case RelicHook::ON_VICTORY:
-            slot.counter = -1;  // Pocketwatch.java:942-946
+            slot.counter = -1;  // Pocketwatch.java:57-60
             break;
         default:
             break;
@@ -206,7 +206,7 @@ void relic_native_pocketwatch(CombatState& s, RelicHook hook, RelicSlot& slot,
 
 void relic_native_stone_calendar(CombatState& s, RelicHook hook, RelicSlot& slot,
                                  const RelicHookContext& /*ctx*/) noexcept {
-    // StoneCalendar (StoneCalendar.java:1083-1116): atBattleStart counter = 0;
+    // StoneCalendar (StoneCalendar.java:36-68): atBattleStart counter = 0;
     // atTurnStart ++counter; onPlayerEndTurn -- if counter == 7 addToBot
     // DamageAllEnemiesAction(createDamageMatrix(52, true), THORNS); onVictory
     // counter = -1. The equality (not >=) plus the unconditional increment is
@@ -226,11 +226,11 @@ void relic_native_stone_calendar(CombatState& s, RelicHook hook, RelicSlot& slot
                 d.tgt = kActorAllEnemies;
                 d.amount = 52;
                 d.flags = make_damage_flags(DamageType::THORNS);
-                add_to_bottom(s, d);  // addToBot (StoneCalendar.java:1101)
+                add_to_bottom(s, d);  // addToBot (StoneCalendar.java:53)
             }
             break;
         case RelicHook::ON_VICTORY:
-            slot.counter = -1;  // StoneCalendar.java:1112-1116
+            slot.counter = -1;  // StoneCalendar.java:65-68
             break;
         default:
             break;

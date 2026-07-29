@@ -207,7 +207,7 @@ TEST(RelicRaresShop, TierRostersAreExactlyTheLivePools) {
 // Rare -- battle-start and turn-start relics
 // ============================================================================
 
-// FossilizedHelix.atBattleStart (FossilizedHelix.java:392-398): Buffer 1.
+// FossilizedHelix.atBattleStart (FossilizedHelix.java:31-36): Buffer 1.
 // BufferPower.onAttackedToChangeDamage (BufferPower.java:44-47): the next hit
 // that would land is cancelled to 0 and one stack is spent via a top-queued
 // ReducePowerAction.
@@ -245,7 +245,7 @@ TEST(RelicRaresShop, BufferRunsAfterBlockAndAFullyBlockedHitSpendsNoStack) {
     EXPECT_EQ(player_power(s, PowerId::BUFFER)->amount, 1);
 }
 
-// ThreadAndNeedle.atBattleStart (ThreadAndNeedle.java:1154-1159): Plated Armor 4.
+// ThreadAndNeedle.atBattleStart (ThreadAndNeedle.java:31-35): Plated Armor 4.
 TEST(RelicRaresShop, ThreadAndNeedleGrantsPlatedArmorFour) {
     CombatState s = MakeState();
     const RelicView rv = give(s, RelicId::THREAD_AND_NEEDLE);
@@ -273,7 +273,7 @@ TEST(RelicRaresShop, ClockworkSouvenirGrantsArtifactOne) {
     EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 0) << "stack consumed";
 }
 
-// DuVuDoll.atBattleStart (DuVuDoll.java:347-354): Strength == the master deck's
+// DuVuDoll.atBattleStart (DuVuDoll.java:69-75): Strength == the master deck's
 // CURSE count, and NOTHING at all when that count is 0 (`if (counter > 0)`).
 TEST(RelicRaresShop, DuVuDollGrantsStrengthEqualToTheCurseCount) {
     CombatState s = MakeState();
@@ -289,7 +289,7 @@ TEST(RelicRaresShop, DuVuDollGrantsStrengthEqualToTheCurseCount) {
     EXPECT_EQ(none.action_count, 0) << "counter 0 queues nothing";
 }
 
-// DuVuDoll.onEquip / onMasterDeckChange (DuVuDoll.java:321-345): the counter is
+// DuVuDoll.onEquip / onMasterDeckChange (DuVuDoll.java:43-66): the counter is
 // recomputed from the master deck on pickup AND on every later deck edit.
 TEST(RelicRaresShop, DuVuDollCounterTracksTheMasterDeck) {
     RunState rs{};
@@ -307,7 +307,7 @@ TEST(RelicRaresShop, DuVuDollCounterTracksTheMasterDeck) {
     EXPECT_EQ(rs.relics[0].counter, 1) << "onMasterDeckChange on remove";
 }
 
-// Girya.atBattleStart (Girya.java:529-536) tests `counter != 0`, not `> 0`, and
+// Girya.atBattleStart (Girya.java:38-44) tests `counter != 0`, not `> 0`, and
 // the campfire Lift that raises the counter is not implemented -- so with a
 // fresh Girya the branch is a LIVE no-op rather than an unreachable one.
 TEST(RelicRaresShop, GiryaGrantsStrengthOnlyOnceLifted) {
@@ -324,7 +324,7 @@ TEST(RelicRaresShop, GiryaGrantsStrengthOnlyOnceLifted) {
     EXPECT_EQ(player_power(lifted, PowerId::STRENGTH)->amount, 2);
 }
 
-// CaptainsWheel (CaptainsWheel.java:110-133): armed at battle start, 18 block on
+// CaptainsWheel (CaptainsWheel.java:31-53): armed at battle start, 18 block on
 // the THIRD turn start, then latched off for the rest of the combat.
 TEST(RelicRaresShop, CaptainsWheelGivesEighteenBlockOnTurnThreeOnlyOnce) {
     CombatState s = MakeState();
@@ -352,7 +352,7 @@ TEST(RelicRaresShop, CaptainsWheelGivesEighteenBlockOnTurnThreeOnlyOnce) {
     EXPECT_EQ(rv.relics[0].counter, -1);
 }
 
-// StoneCalendar (StoneCalendar.java:1083-1116): 52 THORNS to every enemy at the
+// StoneCalendar (StoneCalendar.java:36-68): 52 THORNS to every enemy at the
 // END of turn 7, exactly once (the `counter == 7` equality plus the
 // unconditional increment).
 TEST(RelicRaresShop, StoneCalendarFiresFiftyTwoThornsAtEndOfTurnSeven) {
@@ -397,7 +397,7 @@ TEST(RelicRaresShop, StoneCalendarDamageIsUnscaledThorns) {
     EXPECT_EQ(s.monsters[0].hp, 148) << "flat 52, no Strength, no Vulnerable";
 }
 
-// IncenseBurner (IncenseBurner.java:623-637): Intangible 1 on every SIXTH turn
+// IncenseBurner (IncenseBurner.java:31-44): Intangible 1 on every SIXTH turn
 // start, counter resetting each time.
 TEST(RelicRaresShop, IncenseBurnerGrantsIntangibleEverySixthTurn) {
     CombatState s = MakeState();
@@ -424,7 +424,7 @@ TEST(RelicRaresShop, IncenseBurnerGrantsIntangibleEverySixthTurn) {
 }
 
 // The -1 counter branch (`counter == -1 ? counter + 2 : counter + 1`,
-// IncenseBurner.java:630) is the save-loaded/unset path: it lands on 1, not 0,
+// IncenseBurner.java:37) is the save-loaded/unset path: it lands on 1, not 0,
 // so a restored relic does not lose a turn.
 TEST(RelicRaresShop, IncenseBurnerMinusOneCounterAdvancesByTwo) {
     CombatState s = MakeState();
@@ -854,7 +854,7 @@ TEST(RelicRaresShop, GingerRejectionDoesNotConsumeArtifact) {
     EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 1) << "not spent";
 }
 
-// ChampionsBelt (ApplyPowerAction.java:111-113 -> ChampionsBelt.java:172-176):
+// ChampionsBelt (ApplyPowerAction.java:111-113 -> ChampionsBelt.java:32-35):
 // a player-sourced Vulnerable on a monster also queues Weak 1 on it.
 TEST(RelicRaresShop, ChampionBeltAddsWeakToPlayerAppliedVulnerable) {
     CombatState s = MakeState();
@@ -906,7 +906,7 @@ TEST(RelicRaresShop, ChampionBeltGateRejectsArtifactAndNonPlayerSources) {
 // Rare -- the queue-mechanics relics
 // ============================================================================
 
-// CharonsAshes.onExhaust (CharonsAshes.java:219-227): 3 THORNS to every enemy,
+// CharonsAshes.onExhaust (CharonsAshes.java:36-43): 3 THORNS to every enemy,
 // queued at the TOP -- ahead of anything already waiting.
 TEST(RelicRaresShop, CharonsAshesQueuesThreeThornsAtTheTopOnExhaust) {
     CombatState s = MakeState(2, /*monster_hp=*/40);
@@ -955,7 +955,7 @@ TEST(RelicRaresShop, BirdFacedUrnHealsTwoOnlyForPowerCards) {
     EXPECT_EQ(s.player_hp, 42) << "SKILL does not heal";
 }
 
-// Pocketwatch (Pocketwatch.java:917-946): no draw on the opening turn, then 3
+// Pocketwatch (Pocketwatch.java:32-60): no draw on the opening turn, then 3
 // cards at the start of any turn following one where 3 or fewer were played.
 TEST(RelicRaresShop, PocketwatchDrawsThreeAfterAQuietTurnButNotOnTurnOne) {
     CombatState s = MakeState();
@@ -1101,7 +1101,7 @@ TEST(RelicRaresShop, MedicalKitMakesStatusCardsPlayable) {
     EXPECT_FALSE(mask.can_play[1]) << "but not the curse -- that is Blue Candle";
 }
 
-// MedicalKit.onUseCard (MedicalKit.java:1153-1159): the played status exhausts
+// MedicalKit.onUseCard (MedicalKit.java:35-41): the played status exhausts
 // rather than going to the discard pile, and runs no effect program.
 TEST(RelicRaresShop, MedicalKitExhaustsThePlayedStatus) {
     CombatState s = MakeState();
@@ -1285,9 +1285,9 @@ TEST(RelicRaresShop, HandDrillVulnerableIsPlayerSourcedSoChampionBeltSeesIt) {
 // Pickup surfaces -- canSpawn gates and onEquip effects
 // ============================================================================
 
-// Mango.onEquip (Mango.java:771-774): +14 max HP AND +14 current.
-// Waffle.onEquip (Waffle.java:1300-1303): +7 max HP, then heal to FULL.
-// OldCoin.onEquip (OldCoin.java:812-816): +300 gold.
+// Mango.onEquip (Mango.java:29-31): +14 max HP AND +14 current.
+// Waffle.onEquip (Waffle.java:28-31): +7 max HP, then heal to FULL.
+// OldCoin.onEquip (OldCoin.java:31-34): +300 gold.
 TEST(RelicRaresShop, EquipEffectsMoveHpAndGold) {
     RunState rs{};
     rs.hp = 30;
@@ -1311,7 +1311,7 @@ TEST(RelicRaresShop, EquipEffectsMoveHpAndGold) {
 }
 
 // Wing Boots is seeded with its three path-jump charges at pickup
-// (WingBoots.java:1364-1367).
+// (WingBoots.java:18-21).
 TEST(RelicRaresShop, WingBootsArrivesWithThreeCharges) {
     RunState rs{};
     RngStream misc = from_seed(1);

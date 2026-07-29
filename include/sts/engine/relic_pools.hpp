@@ -49,7 +49,7 @@ struct RelicSpawnContext {
     // BottledTornado.canSpawn (:93-95) -> CardHelper.hasCardType(POWER)
     // (CardHelper.java:80-86): any POWER-type master-deck card, ANY rarity.
     bool deck_has_power = false;
-    // Girya / PeacePipe / Shovel canSpawn (Girya.java:538-549 and the two
+    // Girya / PeacePipe / Shovel canSpawn (Girya.java:47-57 and the two
     // byte-identical siblings): the number of OWNED relics that are one of those
     // three -- each spawns only while that count is < 2. Filled by
     // fill_campfire_relic_count; a draw that does not fill it sees 0, which is

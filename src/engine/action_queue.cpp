@@ -389,7 +389,7 @@ void start_of_turn(CombatState& s, TurnStart when) noexcept {
     //
     // Known deviation, unobservable: in the Java the combat-start block's
     // GainEnergyAndEnableControlsAction is queued at :240, ahead of the draw,
-    // so an addToTop atBattleStart body (Girya.java:532, DuVuDoll.java:31)
+    // so an addToTop atBattleStart body (Girya.java:41, DuVuDoll.java:72)
     // resolves before the energy gain too; here energy is an inline SET (below)
     // that no queued item ever reads, so only the order against the DRAW is
     // observable -- and that order is faithful on both halves.

@@ -415,7 +415,7 @@ TEST(CombatStart, BothConstructionPathsDelegateToTheSharedTurnOneBlock) {
 // first reaches the player.
 TEST(CombatStart, SharedTurnOneBlockRunsAtBattleStartBeforeAtTurnStart) {
     CombatState s = make_constructed_combat();
-    // StoneCalendar at its out-of-combat counter (StoneCalendar.java:1112-1116
+    // StoneCalendar at its out-of-combat counter (StoneCalendar.java:65-68
     // onVictory latches -1; a fresh pickup carries AbstractRelic's -1 too).
     s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::STONE_CALENDAR),
                             int16_t{-1}};

@@ -217,7 +217,7 @@ B4.5 §6's card-pool library order stays closed.
 relic whose `atBattleStart` writes state directly is off by one turn for the
 whole fight.** Stone Calendar is the S1 row that makes it observable.
 
-`StoneCalendar.java:1083-1116` is `atBattleStart { counter = 0 }`, `atTurnStart {
+`StoneCalendar.java:36-68` is `atBattleStart { counter = 0 }`, `atTurnStart {
 ++counter }`, `onPlayerEndTurn { if (counter == 7) → 52 THORNS to all enemies }`,
 `onVictory { counter = -1 }`. The engine's body
 (`src/engine/relics/relics_rare.cpp:206-237`) is a faithful transcription and is

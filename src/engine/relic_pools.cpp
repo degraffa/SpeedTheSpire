@@ -166,7 +166,7 @@ RelicTier return_random_relic_tier(RunState& rs) noexcept {
 
 void fill_campfire_relic_count(const RunState& rs,
                                RelicSpawnContext& ctx) noexcept {
-    // Girya.canSpawn (Girya.java:538-549), PeacePipe.canSpawn (:862-873) and
+    // Girya.canSpawn (Girya.java:47-57), PeacePipe.canSpawn (:862-873) and
     // Shovel.canSpawn (:1024-1035) each walk player.relics counting instances of
     // PeacePipe, Shovel or Girya and spawn only while that count is < 2. The scan
     // is identical in all three, so it is done once here and the three predicates

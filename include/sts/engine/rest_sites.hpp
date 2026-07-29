@@ -17,11 +17,11 @@
 //   * SmithOption.useOption / CampfireSmithEffect.update
 //     (SmithOption.java:31-36; CampfireSmithEffect.java:42-72)
 //   * Girya.addCampfireOption / CampfireLiftEffect.update
-//     (Girya.java:50-53; CampfireLiftEffect.java:35-58)
+//     (Girya.java:60-62; CampfireLiftEffect.java:35-58)
 //   * PeacePipe.addCampfireOption / CampfireTokeEffect.update
-//     (PeacePipe.java:47-50; CampfireTokeEffect.java:40-67)
+//     (PeacePipe.java:47-49; CampfireTokeEffect.java:40-67)
 //   * Shovel.addCampfireOption / CampfireDigEffect.update
-//     (Shovel.java:47-50; CampfireDigEffect.java:35-55)
+//     (Shovel.java:46-48; CampfireDigEffect.java:35-55)
 //   * CardGroup.getUpgradableCards / getPurgeableCards /
 //     getGroupWithoutBottledCards (CardGroup.java:961-969, 978-986,
 //     1084-1092)
