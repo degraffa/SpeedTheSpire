@@ -158,6 +158,27 @@ void dispatch_monster_turn(CombatState& state, uint8_t monster_index) noexcept;
 // record -- hard-asserts rather than spawning a blank.
 void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept;
 
+// Spawn a resolved group's CONSTRUCTION trace (ResolvedGroup, encounters.hpp):
+// walk `constructed` in order; a kept entry (bit i of `kept_mask`) is spawned
+// into the next monster slot exactly as spawn_group does, and a DISCARDED PICK
+// candidate burns its constructor's monster_hp_rng draws without spawning --
+// the game constructed it (setHp; a Louse's biteDamage too) and then dropped
+// it on the ArrayList pick (MonsterHelper.java:799-822), so the draws are
+// consumed either way and every kept monster's HP roll must sit at its
+// construction-order position (the STS01789 class). A discarded candidate is
+// never init()ed, so it draws NO ai_rng. Equivalent to spawn_group when the
+// mask keeps everything.
+void spawn_group_trace(CombatState& state,
+                       std::span<const MonsterId> constructed,
+                       uint16_t kept_mask) noexcept;
+
+// The ctor-only monster_hp_rng burn for one discarded candidate: the setHp
+// draw over the id's A7-column HP range, plus every registry roll with timing
+// CONSTRUCTOR_AFTER_HP on the MONSTER_HP stream (today: the Louse biteDamage).
+// PRE_BATTLE rolls (Curl Up) do NOT burn -- usePreBattleAction runs only on
+// spawned monsters.
+void burn_unspawned_ctor_rolls(CombatState& state, MonsterId id) noexcept;
+
 // Run every live monster's usePreBattleAction in spawn order (design §5.2: the
 // player's preBattlePrep phase, AFTER spawn_group's ctors+init). This is the
 // second monster_hp_rng phase (Louse curl-up rolls) -- separate from the ctor HP

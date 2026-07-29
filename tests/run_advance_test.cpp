@@ -37,7 +37,10 @@
 #include "sts/engine/interp.hpp"       // Opcode::DRAW (Centennial Puzzle)
 #include "sts/engine/map_gen.hpp"
 #include "sts/engine/map_rooms.hpp"
+#include "sts/engine/monster_dispatch.hpp"  // kMonsterAscension (ctor-draw derivations)
 #include "sts/engine/monster_looter.hpp"  // kLooterGoldAmt / looter_steal_count
+#include "sts/registry/game_ids.hpp"       // monster_from_game_id (ctor-draw derivations)
+#include "sts/registry/monster_table.hpp"  // monster_def / MonsterRollTiming
 #include "sts/engine/potions.hpp"
 #include "sts/engine/power_hooks.hpp"  // dispatch_was_hp_lost (Centennial Puzzle)
 #include "sts/engine/relic_hooks.hpp"  // RelicHook (the pre-draw emptiness pin)
@@ -481,6 +484,134 @@ TEST(RunCombat, LousePreBattleAndInnateResolveBeforePlayerControl) {
     EXPECT_EQ(rc.combat.card_queue_count, 0);
     EXPECT_EQ(rc.combat.monster_queue_count, 0);
     EXPECT_TRUE(hand_contains(rc.combat, CardId::WRITHE));
+}
+
+// =============================================================================
+// PICK candidates' construction draws (the STS01789 class)
+// =============================================================================
+//
+// MonsterHelper's bottomGet* helpers build an ArrayList of CONSTRUCTED monsters
+// and then keep one (MonsterHelper.java:799-822): by the time random(0, n-1)
+// selects, every candidate's constructor has already drawn its max HP off
+// monsterHpRng (setHp -> AbstractDungeon.monsterHpRng, AbstractMonster.java),
+// and a Louse constructor has drawn its biteDamage too (LouseNormal.java:60 /
+// LouseDefensive.java:63). The discarded candidates' draws are permanently
+// consumed, and the kept monster's HP comes from its POSITION in that
+// construction order -- not from the front of the stream.
+//
+// STS01789 is the live pin: its floor-10 "Exordium Thugs" rolled
+// {Acid Slime (M) 30, Slaver 49} in the game, while a sim that rolled only the
+// two kept members got {33, 51} -- the slime survived the killing blow with 3
+// hp, took its queued turn, and the replay's first RunState evidence was the
+// player 8 hp short at seq 130 (the sim then died at seq 133 while the capture
+// fought on).
+
+// One candidate construction: the ctor's monster_hp_rng draws, returning the
+// HP roll (the value a kept candidate would spawn with).
+int32_t ctor_walk_draw(RngStream& hp, std::string_view game_id) {
+    const sts::registry::MonsterDef* def = sts::registry::monster_def(
+        static_cast<MonsterId>(sts::registry::monster_from_game_id(game_id)));
+    EXPECT_NE(def, nullptr) << game_id;
+    const int32_t rolled = random(hp, def->hp_min(kMonsterAscension),
+                                  def->hp_max(kMonsterAscension));
+    for (uint8_t i = 0; i < def->roll_count; ++i) {
+        const sts::registry::MonsterRollDef& r = def->rolls[i];
+        if (r.timing == sts::registry::MonsterRollTiming::CONSTRUCTOR_AFTER_HP &&
+            r.stream == sts::registry::MonsterRollStream::MONSTER_HP) {
+            (void)random(hp, r.min(kMonsterAscension), r.max(kMonsterAscension));
+        }
+    }
+    return rolled;
+}
+
+TEST(RunCombatSpawn, ExordiumThugsDiscardedCandidatesBurnTheirCtorRolls) {
+    for (int64_t seed = 900; seed < 908; ++seed) {
+        RunController rc = run_begin(seed, kA20);
+        leave_neow(rc);
+
+        // Derive the composition and the full construction walk independently,
+        // off copies of the streams the spawn will consume.
+        RngStream misc = rc.combat.misc_rng;
+        RngStream hp = rc.combat.monster_hp_rng;
+        const int32_t ai_before = rc.combat.ai_rng.counter;
+
+        const bool louse_normal = random_boolean(misc);
+        const std::string_view louse =
+            louse_normal ? "FuzzyLouseNormal" : "FuzzyLouseDefensive";
+        const int32_t wsel = random(misc, 0, 2);
+        const bool slaver_red = random_boolean(misc);
+        const std::string_view slaver = slaver_red ? "SlaverRed" : "SlaverBlue";
+        const int32_t ssel = random(misc, 0, 2);
+
+        const int32_t weak_hp[3] = {ctor_walk_draw(hp, louse),
+                                    ctor_walk_draw(hp, "SpikeSlime_M"),
+                                    ctor_walk_draw(hp, "AcidSlime_M")};
+        const int32_t strong_hp[3] = {ctor_walk_draw(hp, "Cultist"),
+                                      ctor_walk_draw(hp, slaver),
+                                      ctor_walk_draw(hp, "Looter")};
+
+        ASSERT_TRUE(enter_event_combat(rc, "Exordium Thugs")) << "seed=" << seed;
+        ASSERT_EQ(rc.combat.monster_count, 2) << "seed=" << seed;
+        EXPECT_EQ(rc.combat.monsters[0].hp, weak_hp[wsel])
+            << "seed=" << seed << ": the kept weak member's HP is its "
+            << "construction-order draw, after the discarded candidates'";
+        EXPECT_EQ(rc.combat.monsters[1].hp, strong_hp[ssel]) << "seed=" << seed;
+        // Stream totals: 7 ctor draws (louse hp+bite, 5 more hp rolls), plus the
+        // kept louse's PRE_BATTLE Curl Up roll when the weak pick IS the louse.
+        EXPECT_EQ(rc.combat.monster_hp_rng.counter,
+                  hp.counter + (wsel == 0 ? 1 : 0))
+            << "seed=" << seed;
+        // rollMove only for SPAWNED monsters -- a discarded candidate is never
+        // init()ed, so exactly two aiRng draws.
+        EXPECT_EQ(rc.combat.ai_rng.counter, ai_before + 2) << "seed=" << seed;
+    }
+}
+
+TEST(RunCombatSpawn, ExordiumWildlifeDiscardedCandidatesBurnTheirCtorRolls) {
+    for (int64_t seed = 900; seed < 908; ++seed) {
+        RunController rc = run_begin(seed, kA20);
+        leave_neow(rc);
+
+        RngStream misc = rc.combat.misc_rng;
+        RngStream hp = rc.combat.monster_hp_rng;
+
+        // bottomGetStrongWildlife: [FungiBeast, JawWorm], no coin, random(0,1).
+        const int32_t ssel = random(misc, 0, 1);
+        // bottomGetWeakWildlife: getLouse coin, then random(0,2).
+        const bool louse_normal = random_boolean(misc);
+        const std::string_view louse =
+            louse_normal ? "FuzzyLouseNormal" : "FuzzyLouseDefensive";
+        const int32_t wsel = random(misc, 0, 2);
+
+        const int32_t strong_hp[2] = {ctor_walk_draw(hp, "FungiBeast"),
+                                      ctor_walk_draw(hp, "JawWorm")};
+        const int32_t weak_hp[3] = {ctor_walk_draw(hp, louse),
+                                    ctor_walk_draw(hp, "SpikeSlime_M"),
+                                    ctor_walk_draw(hp, "AcidSlime_M")};
+
+        ASSERT_TRUE(enter_event_combat(rc, "Exordium Wildlife")) << "seed=" << seed;
+        ASSERT_EQ(rc.combat.monster_count, 2) << "seed=" << seed;
+        EXPECT_EQ(rc.combat.monsters[0].hp, strong_hp[ssel]) << "seed=" << seed;
+        EXPECT_EQ(rc.combat.monsters[1].hp, weak_hp[wsel]) << "seed=" << seed;
+        EXPECT_EQ(rc.combat.monster_hp_rng.counter,
+                  hp.counter + (wsel == 0 ? 1 : 0))
+            << "seed=" << seed;
+    }
+}
+
+// Negative control: an encounter with NO pick step constructs exactly its kept
+// members -- the burn must not touch a plain composition. "2 Louse" spawns two
+// louses whose six monster_hp_rng draws (hp+bite each, then a Curl Up each) are
+// already pinned by LousePreBattleAndInnateResolveBeforePlayerControl above;
+// this pins the same property through enter_event_combat's spawn glue.
+TEST(RunCombatSpawn, APlainCompositionBurnsNothing) {
+    RunController rc = run_begin(kSeed, kA20);
+    leave_neow(rc);
+    const int32_t hp_before = rc.combat.monster_hp_rng.counter;
+    ASSERT_TRUE(enter_event_combat(rc, "2 Louse"));
+    ASSERT_EQ(rc.combat.monster_count, 2);
+    EXPECT_EQ(rc.combat.monster_hp_rng.counter, hp_before + 6)
+        << "hp+bite per louse ctor, one Curl Up each -- and nothing else";
 }
 
 // =============================================================================

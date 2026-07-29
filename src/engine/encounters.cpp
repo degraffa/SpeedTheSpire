@@ -24,9 +24,21 @@ using sts::registry::kMaxCompRefs;
 
 ResolvedGroup resolve_composition(const EncounterDef& enc, RngStream& misc) noexcept {
     ResolvedGroup g{};
+    // A KEPT member: it is both a spawn slot and a construction-trace entry.
     const auto push = [&](std::string_view m) noexcept {
         if (g.count < kMonsterCap) {
             g.members[g.count++] = m;
+        }
+        if (g.constructed_count < kConstructedCap) {
+            g.kept_mask |= static_cast<uint16_t>(1u << g.constructed_count);
+            g.constructed[g.constructed_count++] = m;
+        }
+    };
+    // A DISCARDED PICK candidate: constructed (its ctor draws are consumed,
+    // see the ResolvedGroup comment) but never spawned.
+    const auto push_discard = [&](std::string_view m) noexcept {
+        if (g.constructed_count < kConstructedCap) {
+            g.constructed[g.constructed_count++] = m;
         }
     };
 
@@ -74,7 +86,17 @@ ResolvedGroup resolve_composition(const EncounterDef& enc, RngStream& misc) noex
                 }
                 const int32_t sel =
                     random(misc, 0, static_cast<int32_t>(n) - 1);  // random(0, size-1)
-                push(cand[static_cast<uint8_t>(sel)]);
+                // Trace ALL candidates in construction order; only the selected
+                // one is a member. The kept entry keeps its position, so the
+                // spawn layer's burn walk reads each candidate's ctor draws at
+                // the position the game consumed them.
+                for (uint8_t i = 0; i < n; ++i) {
+                    if (i == static_cast<uint8_t>(sel)) {
+                        push(cand[i]);
+                    } else {
+                        push_discard(cand[i]);
+                    }
+                }
                 break;
             }
             case CompOp::POOL: {

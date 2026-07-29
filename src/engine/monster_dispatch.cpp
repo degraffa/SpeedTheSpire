@@ -562,6 +562,51 @@ void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept 
     }
 }
 
+void burn_unspawned_ctor_rolls(CombatState& state, MonsterId id) noexcept {
+    const sts::registry::MonsterDef* def = sts::registry::monster_def(id);
+    assert(def != nullptr &&
+           "burn_unspawned_ctor_rolls: no registry def for a constructed "
+           "candidate -- the composition named an unknown monster");
+    if (def == nullptr) {
+        return;
+    }
+    // setHp: one inclusive draw over the A7 column at the skeleton A20 --
+    // identical bounds to the roll the candidate would have kept.
+    (void)random(state.monster_hp_rng, def->hp_min(kMonsterAscension),
+                 def->hp_max(kMonsterAscension));
+    // Constructor-time extras on the same stream (Louse biteDamage,
+    // LouseNormal.java:60 / LouseDefensive.java:63). PRE_BATTLE rolls are not
+    // ctor draws and never fire for a discarded candidate.
+    for (uint8_t i = 0; i < def->roll_count; ++i) {
+        const sts::registry::MonsterRollDef& r = def->rolls[i];
+        if (r.timing ==
+                sts::registry::MonsterRollTiming::CONSTRUCTOR_AFTER_HP &&
+            r.stream == sts::registry::MonsterRollStream::MONSTER_HP) {
+            (void)random(state.monster_hp_rng, r.min(kMonsterAscension),
+                         r.max(kMonsterAscension));
+        }
+    }
+}
+
+void spawn_group_trace(CombatState& state,
+                       std::span<const MonsterId> constructed,
+                       uint16_t kept_mask) noexcept {
+    state.monster_count = 0;
+    for (std::size_t i = 0; i < constructed.size(); ++i) {
+        if ((kept_mask & (1u << i)) != 0u) {
+            assert(state.monster_count < kMonsterCap &&
+                   "spawn_group_trace: kept members exceed kMonsterCap");
+            const MonsterInitFn init = monster_init_fn(constructed[i]);
+            assert(init != nullptr &&
+                   "spawn_group_trace: no init fn for a kept member");
+            const uint8_t slot = state.monster_count++;
+            init(state, slot);
+        } else {
+            burn_unspawned_ctor_rolls(state, constructed[i]);
+        }
+    }
+}
+
 void use_pre_battle_actions(CombatState& state) noexcept {
     // preBattlePrep runs usePreBattleAction over the group in spawn order
     // (MonsterRoom.onPlayerEntry -> player.preBattlePrep, AbstractPlayer.java:1602).

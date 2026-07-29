@@ -310,3 +310,59 @@ STS04888/STS03244 still CLEAN; STS00241 (seq-96 Smoke-Bomb race), STS04925
 (s137 gold class (c)) and STS06578 (s81 gold class (c)) byte-identical to
 their §7 runbook rows. **No run anywhere compares fewer records or acquires
 an earlier first divergence.**
+
+## `wave3-followup` — the two (a)-candidates were ONE engine defect (2026-07-28)
+
+STS01789 seq 130 and STS00353 seq 97 — the stage-2 table's two sim-side
+(a)-candidates — shared a root cause, found by reproducing STS01789 offline
+with the `--replay --combat` triage print: the sim's floor-10 monsters carried
+**different max-HP rolls** (Acid Slime (M) 33/Slaver 51 vs the game's 30/49;
+ids, intents and every player-side number identical). The hand-computed game
+deltas then pinned the mechanism: the game's Slaver-only turn dealt 13-5=8,
+the sim's 21-5=16 — exactly one Corrosive Spit more, i.e. a slime the game
+had killed was still alive sim-side, because its max HP was 3 higher and the
+killing blow left it at 3.
+
+**Root cause (engine): a PICK composition's discarded candidates still draw
+their constructors' monsterHpRng rolls.** `bottomGetWeakWildlife` /
+`bottomGetStrongHumanoid` / `bottomGetStrongWildlife`
+(MonsterHelper.java:799-822) CONSTRUCT their whole candidate ArrayList — every
+ctor runs setHp (one monsterHpRng draw; a Louse ctor draws biteDamage too,
+LouseNormal.java:60) — and only then does `random(0, n-1)` keep one. The
+engine's `resolve_composition` consumed the miscRng coins faithfully but
+returned only the kept members, so `spawn_group` rolled HP for two monsters
+where the game had rolled seven — every kept monster's HP came from the wrong
+stream position. Both mixed encounters are affected ("Exordium Thugs",
+"Exordium Wildlife") and no other S1 program over-constructs (BOOL/SEQ_BOOL/
+POOL construct exactly what they keep).
+
+**Fix**: `ResolvedGroup` now carries the CONSTRUCTION trace
+(`constructed[]`/`kept_mask`), and the run layer spawns through
+`spawn_group_trace` — kept members init at their construction-order positions,
+discarded candidates burn their ctor draws (`burn_unspawned_ctor_rolls`,
+ranges straight from the registry defs, CONSTRUCTOR_AFTER_HP rolls included,
+no ai_rng and no PRE_BATTLE roll). RED-first:
+`RunCombatSpawn.ExordiumThugs/ExordiumWildlifeDiscardedCandidatesBurnTheirCtorRolls`
+(both failed on the kept-only spawn; hand-derived construction walks over
+seeds 900-907), with `RunCombatSpawn.APlainCompositionBurnsNothing` ("2
+Louse") as the named negative control (passed throughout).
+
+**Why STS00353's two halves were one cause**: its floor-8 fight is an
+Exordium Wildlife ({Fungi Beast, Spike Slime (M)}); the sim's mis-rolled
+monster survived the capture's killing blow, so the sim never reached the
+victory path — no Burning Blood +6 (the `hp 50 -> 44` field) — and never
+assembled the reward screen (the card/treasure/potion stream-counter and
+`blizzard_potion_mod` fields), then sat parked in COMBAT to the artifact's
+end (its final stop read "sim is in COMBAT").
+
+| Run | Before | After | Class |
+|---|---|---|---|
+| STS01789 | first div seq 130 (hp 14 vs 6), sim dead by seq 134, RUN_OVER while the capture fought on | **CLEAN to run terminal, 147 records** | fixed (engine) |
+| STS00353 | first div seq 97 (11 fields at a COMBAT_REWARD), parked in COMBAT, stop seq 169 | **CLEAN to run terminal, 238 records** | fixed (engine, same defect) |
+
+Standing corpus after this fix: G6-main `--- 30 file(s), 10 not clean ---` —
+the remaining ten are the same rows at the same seqs (EVENT class (d) x3,
+gold class (c) x4, FairyPotion class (c) x2, STS01068's grid stop); b45+b47
+twelve and the bottle seven byte-identical to the section above. Full-output
+diff between the two corpus runs shows exactly the two artifacts above
+changed, both to CLEAN.

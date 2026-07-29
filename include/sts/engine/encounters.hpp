@@ -44,13 +44,35 @@ namespace sts::engine {
 
 // --- Composition resolution (miscRng) ---------------------------------------
 
+// Capacity of a group's CONSTRUCTION trace (below). The widest S1 program is
+// Exordium Thugs: two PICKs of three candidates each = 6 constructions.
+inline constexpr uint8_t kConstructedCap = 12;
+
 // One resolved monster group: the spawn-order list of monster game_ids (== turn
 // order). game_ids are the game's AbstractMonster.ID strings (the join keys to
 // monsters.yaml); the spawn layer maps them to MonsterId. Capacity kMonsterCap
 // (7) covers the largest S1 composition (Lots of Slimes = 5) with headroom.
+//
+// `constructed`/`kept_mask` carry the CONSTRUCTION trace: every monster the
+// game's list build CONSTRUCTS, in construction order, bit i of the mask set
+// when constructed[i] is a kept member. The two lists are identical except
+// under a PICK step (bottomGet*, MonsterHelper.java:799-822), which
+// eager-constructs its whole candidate ArrayList before random(0, n-1) keeps
+// one -- and every construction has already drawn its max HP off monsterHpRng
+// (setHp in the AbstractMonster ctor; a Louse ctor draws biteDamage too,
+// LouseNormal.java:60 / LouseDefensive.java:63). The discarded candidates'
+// draws are permanently consumed, so the spawn layer must burn them in trace
+// order or every kept monster's HP is read from the wrong stream position --
+// the STS01789 class: the game's floor-10 Thugs rolled {30, 49}, a kept-only
+// sim rolled {33, 51}, and the killing blow the game landed left the sim's
+// slime alive to keep attacking. Kept members appear in the trace in slot
+// order, so `members` is exactly the kept subsequence of `constructed`.
 struct ResolvedGroup {
     uint8_t count = 0;
     std::array<std::string_view, kMonsterCap> members{};
+    uint8_t constructed_count = 0;
+    std::array<std::string_view, kConstructedCap> constructed{};
+    uint16_t kept_mask = 0;
 };
 
 // Resolve an encounter's composition program into a ResolvedGroup, consuming

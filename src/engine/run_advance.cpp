@@ -620,6 +620,21 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
         }
         ids[i] = id;
     }
+    // The construction trace (kept members plus every discarded PICK
+    // candidate, in ctor order -- see ResolvedGroup). A discarded candidate
+    // needs only a registry def (its ctor draws burn off the ranges); an
+    // unknown one would corrupt the monster_hp_rng accounting, so it parks
+    // exactly as an unimplemented member does.
+    MonsterId trace_ids[kConstructedCap] = {};
+    for (uint8_t i = 0; i < grp.constructed_count; ++i) {
+        const MonsterId id = static_cast<MonsterId>(
+            sts::registry::monster_from_game_id(grp.constructed[i]));
+        if (id == MonsterId::NONE ||
+            sts::registry::monster_def(id) == nullptr) {
+            all_impl = false;
+        }
+        trace_ids[i] = id;
+    }
     if (!all_impl) {
         rc.combat = s;
         rc.phase = static_cast<uint8_t>(RunPhase::ROOM_UNIMPLEMENTED);
@@ -689,14 +704,18 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     s.player_max_hp = rc.run.max_hp;
     s.player_block = 0;
 
-    // (6) Spawn the resolved group (monster_hp_rng HP rolls + ai_rng rollMove, in
-    //     spawn order).
+    // (6) Spawn the resolved group's CONSTRUCTION trace: kept members roll HP
+    //     (monster_hp_rng) + rollMove (ai_rng) at their construction-order
+    //     positions; discarded PICK candidates burn their ctor draws in place
+    //     (spawn_group_trace -- the STS01789 class).
     if (variant == EventCombatVariant::LAGAVULIN_AWAKE &&
         grp.count == 1 && ids[0] == MonsterId::LAGAVULIN) {
         s.monster_count = 1;
         lagavulin_init_awake(s, 0);
     } else {
-        spawn_group(s, std::span<const MonsterId>(ids, grp.count));
+        spawn_group_trace(
+            s, std::span<const MonsterId>(trace_ids, grp.constructed_count),
+            grp.kept_mask);
     }
 
     // (7) Monster pre-battle actions run after every member is spawned and
