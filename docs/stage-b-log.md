@@ -5442,3 +5442,70 @@ NoteForYourself's NOTE_CARD/NOTE_UPGRADE profile pin was discharged
 separately by direct reference-profile inspection (no `NOTE_*` key in any
 preferences file; the event is unreachable at A20 in both game and sim) —
 recorded in the ledger's Landed non-task work.
+
+---
+
+<a id="b55"></a>
+
+### B5.5 `[x]` Throughput floors
+**Deps:** G6 · **Spec:** design §8(4); InitialPlan §0.2 floors
+**Deliverables:** benchmark additions: full-combat/sec/core (random policy)
+and full-run/sec whole-machine on `bench_advance`'s pattern; methodology
+notes (random-policy stand-in for 25-sim MCTS, per design §8).
+**Acceptance:** release-preset numbers recorded here: ≥ 50k combat
+steps/sec/core, ≥ 300 combats/sec/core, ≥ 0.4 runs/sec whole-machine — or a
+stop-the-line design-doc amendment with profiling evidence (fast-but-wrong
+is death; slow-but-honest gets a Stage C plan).
+**Log:** Verified by running, not inferred. `bench_throughput` adds two
+complete-trajectory measurements beside the existing mask-reusing
+`bench_advance` batch measurement:
+
+- `BM_RandomPolicyFullCombatPerCore` includes fresh combat construction,
+  legal-mask construction, uniformly random action selection, and every
+  engine step through win or loss. `items_per_second` is completed
+  combats/sec/core, with `combat_steps` as an active-work cross-check.
+- `BM_RandomPolicyFullA20RunWholeMachine` uses one worker per logical CPU,
+  includes `run_begin`, the fuzz soak's canonical run-level move enumerator
+  and random policy, and every engine step through `RunPhase::RUN_OVER`.
+  Victory and death are both complete terminal trajectories. A
+  `ROOM_UNIMPLEMENTED` state, empty legal mask, or action cap calls
+  `SkipWithError`; the acceptance wrapper then sees no rate and fails.
+  Workers cycle the exact 1,000-seed/policy-stream corpus accepted by the G6
+  random-policy soak, making this a fixed performance workload rather than a
+  new content sweep.
+- Google Benchmark sums both counters and elapsed time across workers, so its
+  unadjusted multithread rate is a per-worker average. The benchmark
+  compensates from the library's source-defined aggregation rule by
+  multiplying each worker's counts by the registered worker count before
+  setting the rate. The reported A20 rate is therefore a whole-machine total.
+- The frozen design says to measure raw random-policy full runs until the
+  25-simulation MCTS harness exists. The rate is therefore not divided by 25:
+  random policy is the named temporary stand-in, not a claim that one
+  trajectory reproduces future search-tree reuse, branching, snapshot
+  traffic, or neural-network inference. `benchmarks/README.md` records that
+  boundary so Stage C can replace the surrogate honestly.
+
+`benchmarks/run_throughput.sh` is the reproducible release floor check. It
+runs each benchmark separately, requires exactly one
+`items_per_second` result, normalizes the SI suffix, and exits nonzero below
+any frozen floor. This is an absolute one-build check; no A/B delta was
+claimed, so the interleaved `tools/bench_ab.sh` comparison was not applicable.
+
+**Release acceptance**, Windows host command
+`tools\wsl_run.cmd --script benchmarks/run_throughput.sh`, on the 8-core /
+16-thread 5800X3D:
+
+- combat batch: **27,163,500 steps/sec/core** (floor 50,000);
+- complete random-policy combats: **84,624.2 combats/sec/core**, with
+  **1,998,800 active combat steps/sec** (floor 300);
+- complete random-policy A20 runs: **204,749 runs/sec whole-machine**, with
+  **9,608,930 run steps/sec** across 16 workers (floor 0.4).
+
+All three floors passed. No measured full run hit `ROOM_UNIMPLEMENTED`, the
+action cap, or an empty legal mask; any one would have suppressed its result
+and failed the wrapper. Final benchmark-enabled
+`tools\wsl_run.cmd debug asan -DSTS_BUILD_BENCHMARKS=ON` and
+`tools\wsl_run.cmd release -DSTS_BUILD_BENCHMARKS=ON` passed every registered
+test under each preset, including the fixture oracle; the release numbers
+above came only from the release preset. No engine mechanic, state schema,
+registry id/opcode, fixture, golden file, or external artifact changed.

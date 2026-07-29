@@ -40,3 +40,21 @@ add_executable(bench_advance_mask
 target_link_libraries(bench_advance_mask PRIVATE sts_engine benchmark::benchmark)
 target_compile_definitions(bench_advance_mask PRIVATE STS_BENCH_REUSE_MASK)
 sts_set_warnings(bench_advance_mask)
+
+# B5.5 throughput exit-bar benchmarks. The run benchmark compiles the fuzz
+# tool's policy implementation directly so benchmark-only configurations do
+# not need to build the fuzz executables, while both consumers still exercise
+# one canonical random-legal move enumerator.
+add_executable(bench_throughput
+    bench_throughput.cpp
+    ${PROJECT_SOURCE_DIR}/tools/fuzz/src/policy.cpp
+)
+
+target_include_directories(bench_throughput PRIVATE
+    ${PROJECT_SOURCE_DIR}/tools/fuzz/include
+)
+target_link_libraries(bench_throughput PRIVATE
+    sts_engine
+    benchmark::benchmark
+)
+sts_set_warnings(bench_throughput)

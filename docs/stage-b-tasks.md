@@ -1974,16 +1974,13 @@ injected synthetic divergence (proven once, then reverted); report
 regenerates deterministically from campaign artifacts.
 **Log:** —
 
-### B5.5 `[ ]` Throughput floors
-**Deps:** G6 · **Spec:** design §8(4); InitialPlan §0.2 floors
-**Deliverables:** benchmark additions: full-combat/sec/core (random policy)
-and full-run/sec whole-machine on `bench_advance`'s pattern; methodology
-notes (random-policy stand-in for 25-sim MCTS, per design §8).
-**Acceptance:** release-preset numbers recorded here: ≥ 50k combat
-steps/sec/core, ≥ 300 combats/sec/core, ≥ 0.4 runs/sec whole-machine — or a
-stop-the-line design-doc amendment with profiling evidence (fast-but-wrong
-is death; slow-but-honest gets a Stage C plan).
-**Log:** —
+- **B5.5** `[x]` Throughput floors — release-preset acceptance:
+  **27,163,500 combat steps/sec/core**, **84,624.2 random-policy full
+  combats/sec/core**, **204,749 random-policy full A20 runs/sec
+  whole-machine** (16 logical workers); fixed accepted run corpus, exact fuzz
+  policy reuse, fail-loud terminal guards, and the 25-sim MCTS stand-in
+  boundary documented; debug/ASan/release green ·
+  [log](stage-b-log.md#b55)
 
 ### G7 `[ ]` **Gate: S1 verified (M4)** — tag `g7-s1-verified`
 **Deps:** B5.1-B5.5, G6
