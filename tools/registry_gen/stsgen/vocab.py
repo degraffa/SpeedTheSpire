@@ -443,6 +443,11 @@ PLAY_CARD_FLAGS = {
     "exhaust": 1 << 2,
     "from_draw_top": 1 << 3,
     "queue_front": 1 << 4,
+    # Engine-only, like `copy`: Mayhem's recovered MayhemPower$1 two-level
+    # deferral (roll the target at item execute, re-queue the play at the
+    # bottom -- behind the turn's draw). Listed to keep the mirror complete;
+    # never authored from YAML (the native body sets it).
+    "defer_roll": 1 << 5,
 }
 
 # RANDOM_COLORLESS_TO_HAND `extra` bits -- MIRROR of interp.hpp's

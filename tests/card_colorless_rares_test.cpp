@@ -1760,52 +1760,129 @@ TEST(CardColorlessRaresMagnetism, DeadMonstersSuppressTheWholeHook) {
 }
 
 // ---------------------------------------------------------------------------
-// Mayhem -- PowerId 81, the pre-draw play-the-top-card generator
+// Mayhem -- PowerId 81, the POST-draw play-the-top-card generator
 // ---------------------------------------------------------------------------
+// MayhemPower.atStartOfTurn (MayhemPower.java:33-39) addToBots ONE anonymous
+// action per stack, and the RECOVERED MayhemPower$1 (MayhemPower$1.java, from
+// the shipped desktop-1.0.jar -- fills the :37 CFR hole) is exactly:
+//     this.addToBot(new PlayTopCardAction(AbstractDungeon.getCurrRoom()
+//         .monsters.getRandomMonster(null, true, cardRandomRng), false));
+//     this.isDone = true;
+// TWO queue levels. The $1 items sit AHEAD of the turn's DrawCardAction
+// (GameActionManager.java:361) but each merely rolls its target (the
+// getRandomMonster is a CONSTRUCTOR ARGUMENT, evaluated when $1 executes --
+// BEFORE the draw) and addToBots the real PlayTopCardAction to the very END of
+// the queue -- BEHIND the draw and behind anything else queued at step 6. So
+// with draw pile [A..F] top-first, the game draws A-E and plays F; at >= 2
+// stacks every target roll is spent before ANY play resolves. (These two tests
+// previously pinned the single-level reconstruction -- play first, then draw --
+// which the recovered class disproved; re-based 2026-07-28.)
 
-TEST(CardColorlessRaresMayhem, TopCardIsPlayedBeforeTheTurnsDraw) {
+TEST(CardColorlessRaresMayhem, TopCardIsPlayedAfterTheTurnsDraw) {
     CombatState s = MakeCombat();
     AddPlayerPower(s, PowerId::MAYHEM, 1);
-    for (int i = 0; i < 8; ++i) {
+    // Bottom-to-top: 3 filler STRIKEs, the DEFEND (6th from the top -- the
+    // card Mayhem must play), then the 5 STRIKEs the turn draw takes.
+    for (int i = 0; i < 3; ++i) {
         AddDrawTop(s, CardId::STRIKE);
     }
-    const CardPoolIndex top = AddDrawTop(s, CardId::DEFEND);  // played, not drawn
+    const CardPoolIndex sixth = AddDrawTop(s, CardId::DEFEND);
+    for (int i = 0; i < 5; ++i) {
+        AddDrawTop(s, CardId::STRIKE);
+    }
     s.card_random_rng = from_seed(2024);
 
     Step(s, make_action(ActionVerb::END_TURN));
 
-    EXPECT_FALSE(PileHas(s.hand, s.hand_count, top))
-        << "the played card is not among the five drawn";
-    EXPECT_TRUE(PileHas(s.discard, s.discard_count, top))
+    EXPECT_EQ(s.hand_count, 5) << "the turn draw took the top five";
+    EXPECT_FALSE(PileHas(s.hand, s.hand_count, sixth))
+        << "the played card is the SIXTH from the top, not one of the drawn";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, sixth))
         << "exhausts = FALSE -- Mayhem files the card normally (contrast Havoc)";
-    EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, top));
+    EXPECT_FALSE(PileHas(s.exhaust, s.exhaust_count, sixth));
     EXPECT_GT(s.player_block, 0) << "the Defend actually resolved";
     EXPECT_EQ(s.cards_played_this_turn, 1);
 }
 
-TEST(CardColorlessRaresMayhem, TwoStacksPlayTwoCardsInDrawOrder) {
+TEST(CardColorlessRaresMayhem, TwoStacksPlayPostDrawInOrderRollingBeforeThePlays) {
     CombatState s = MakeCombat();
     AddPlayerPower(s, PowerId::MAYHEM, 2);
-    const CardPoolIndex second = AddDrawTop(s, CardId::DEFEND);
-    const CardPoolIndex first = AddDrawTop(s, CardId::STRIKE);  // top of pile
+    // Bottom-to-top: DEFEND (7th -- the second play), STRIKE (6th -- the first
+    // play), then the 5 STRIKEs the turn draw takes.
+    const CardPoolIndex seventh = AddDrawTop(s, CardId::DEFEND);
+    const CardPoolIndex sixth = AddDrawTop(s, CardId::STRIKE);
+    for (int i = 0; i < 5; ++i) {
+        AddDrawTop(s, CardId::STRIKE);
+    }
     s.card_random_rng = from_seed(606);
     const int32_t before = s.card_random_rng.counter;
 
     dispatch_at_start_of_turn(s);
     EXPECT_EQ(s.card_random_rng.counter, before)
-        << "the target roll is deferred to the queued action, not the hook";
+        << "the target roll is deferred to the queued $1 action, not the hook";
     EXPECT_EQ(s.action_count, 2);
+    // The turn's DrawCardAction(gameHandSize), queued BEHIND the hook's items
+    // exactly as GameActionManager.java:361 does after applyStartOfTurnPowers.
+    ActionQueueItem draw{};
+    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+    draw.src = kActorPlayer;
+    draw.tgt = kActorPlayer;
+    draw.amount = game_hand_size(s);
+    add_to_bottom(s, draw);
     Pump(s);
 
     EXPECT_EQ(s.card_random_rng.counter - before, 2)
-        << "exactly one getRandomMonster draw per play";
+        << "exactly one getRandomMonster draw per stack";
+    EXPECT_EQ(s.hand_count, 5) << "the draw resolved before either play";
     EXPECT_EQ(s.draw_count, 0);
     ASSERT_EQ(s.discard_count, 2);
-    EXPECT_EQ(s.discard[0], first) << "top card first";
-    EXPECT_EQ(s.discard[1], second);
+    EXPECT_EQ(s.discard[0], sixth) << "post-draw top card first";
+    EXPECT_EQ(s.discard[1], seventh);
     EXPECT_LT(s.monsters[0].hp, 100) << "the Strike hit";
     EXPECT_GT(s.player_block, 0) << "the Defend blocked";
     EXPECT_EQ(s.cards_played_this_turn, 2);
+}
+
+// The lethal-interrupt shape of the two-level model: at 2 stacks both target
+// rolls are spent (each $1's ctor argument) before ANY play resolves, and both
+// PlayTopCardActions pop POST-draw cards -- the card queue only drains once
+// the action queue is empty, so the second pop precedes the first play even
+// when that play kills the fight. The 7th card (popped but never legally
+// played) takes the cancelled-autoplay filing to the discard; the drawn hand
+// is exactly the pre-Mayhem top five. (The old single-level model popped the
+// PRE-draw tops, so the 7th card was DRAWN INTO THE HAND -- the RED value.)
+TEST(CardColorlessRaresMayhem, BothRollsSpentEvenWhenTheFirstPlayEndsCombat) {
+    CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/6);
+    AddPlayerPower(s, PowerId::MAYHEM, 2);
+    const CardPoolIndex seventh = AddDrawTop(s, CardId::DEFEND);
+    AddDrawTop(s, CardId::STRIKE);  // 6th: kills the 6-hp Jaw Worm
+    for (int i = 0; i < 5; ++i) {
+        AddDrawTop(s, CardId::STRIKE);
+    }
+    s.card_random_rng = from_seed(31337);
+    const int32_t before = s.card_random_rng.counter;
+
+    dispatch_at_start_of_turn(s);
+    ActionQueueItem draw{};
+    draw.opcode = static_cast<uint16_t>(Opcode::DRAW);
+    draw.src = kActorPlayer;
+    draw.tgt = kActorPlayer;
+    draw.amount = game_hand_size(s);
+    add_to_bottom(s, draw);  // GameActionManager.java:361
+    Pump(s);
+
+    EXPECT_EQ(s.monsters[0].hp, 0);
+    EXPECT_EQ(s.card_random_rng.counter - before, 2)
+        << "the second $1 rolled its target before the first play resolved "
+           "(MayhemPower$1.java: the roll is the PlayTopCardAction ctor arg)";
+    EXPECT_EQ(s.cards_played_this_turn, 1) << "combat ended before the Defend";
+    EXPECT_EQ(s.hand_count, 5) << "the turn draw took the pre-Mayhem top five";
+    EXPECT_FALSE(PileHas(s.hand, s.hand_count, seventh))
+        << "the 7th card was POPPED by the second play, never drawn -- under "
+           "the old pre-draw model it landed in the hand";
+    EXPECT_TRUE(PileHas(s.discard, s.discard_count, seventh))
+        << "popped, combat over before it could play: cancelled-autoplay filing";
+    EXPECT_EQ(s.player_block, 0) << "the Defend never resolved";
 }
 
 // An unplayable status on top: the dequeue-time canUse revalidation refuses it,

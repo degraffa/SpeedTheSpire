@@ -692,6 +692,23 @@ inline constexpr uint32_t kPlayCardFromDrawTop = 1u << 3;
 // GameActionManager.java:102-108, which lands at index 1 behind the
 // currently-resolving head) instead of at the back.
 inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
+// TWO-LEVEL DEFERRAL -- the recovered MayhemPower$1 (MayhemPower$1.java, from
+// the shipped desktop-1.0.jar; fills MayhemPower.java:37's CFR hole). The
+// game's Mayhem hook does NOT queue the play itself: it queues an anonymous
+// action whose update() is
+//     addToBot(new PlayTopCardAction(getRandomMonster(null, true,
+//                                    cardRandomRng), false)); isDone = true;
+// i.e. the queued item, when it executes, ROLLS THE TARGET (the ctor argument
+// -- one card_random_rng draw, before anything else) and addToBots the real
+// play to the very END of the queue. Because the hook's items sit AHEAD of
+// the turn's DrawCardAction (GameActionManager.java:361) while their re-queued
+// plays land BEHIND it, Mayhem plays the POST-draw top card, and at >= 2
+// stacks every target roll is spent before any play resolves. An item with
+// this bit reproduces exactly that: op_play_card rolls one live-monster
+// target NOW and re-queues the same item -- bit cleared, target baked -- at
+// the bottom, touching no pile. Engine-only (Mayhem's native body); never
+// authored from YAML.
+inline constexpr uint32_t kPlayCardDeferRoll = 1u << 5;
 
 // --- CHOOSE_CARD field encoding ---------------------------------------------
 // The blocking hand-card select verb. `amount` carries how many cards to select;

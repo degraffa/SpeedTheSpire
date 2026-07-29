@@ -19,30 +19,35 @@ namespace sts::engine {
 //         this.addToBot(new /* Unavailable Anonymous Inner Class!! */);
 //     }
 //
-// EVIDENCE GAP, stated rather than papered over: CFR could not decompile the
-// queued action -- MayhemPower.java:37 is literally the comment above and no
-// MayhemPower$1.java exists in the reference tree. The body below is a
-// RECONSTRUCTION from the two verified in-repo parallels that queue the same
-// effect, both read in full:
-//   * DistilledChaosPotion.use (DistilledChaosPotion.java:41) --
-//       addToBot(new PlayTopCardAction(
-//           AbstractDungeon.getCurrRoom().monsters.getRandomMonster(
-//               null, true, AbstractDungeon.cardRandomRng), false))
-//   * Havoc.use (Havoc.java:31) -- the same shape with exhausts = TRUE.
-// Mayhem is the DistilledChaos shape: exhausts = FALSE (the played card files
-// normally -- Mayhem is the card that does NOT burn the deck, which is exactly
-// what distinguishes it from Havoc).
+// The anonymous action is now RECOVERED -- MayhemPower$1.java, decompiled from
+// the shipped desktop-1.0.jar (byte-identical outer class; provenance header
+// in the recovered file) fills the :37 hole:
 //
-// WHY THE WRAPPER MATTERS. In DistilledChaosPotion the getRandomMonster call is
-// an ARGUMENT, evaluated when the PlayTopCardAction is CONSTRUCTED. Mayhem
-// queues an anonymous action instead, so its roll happens when that deferred
-// action EXECUTES -- during the start-of-turn queue drain, not during the power
-// hook walk. Queuing one kActorRandomEnemy PLAY_CARD per stack reproduces
-// exactly that: execute_opcode resolves the sentinel with ONE
-// roll_random_target (== getRandomMonster(null, true, cardRandomRng), one
-// card_random_rng draw over the live monsters) at EXECUTE time, before
-// op_play_card's own pile checks -- the same order the Java has, where the
-// argument is evaluated before PlayTopCardAction.update runs.
+//     public void update() {
+//         this.addToBot(new PlayTopCardAction(AbstractDungeon.getCurrRoom()
+//             .monsters.getRandomMonster(null, true,
+//                                        AbstractDungeon.cardRandomRng),
+//                                        false));
+//         this.isDone = true;
+//     }
+//
+// TWO QUEUE LEVELS, and the level count is the whole mechanic. The $1 items
+// are queued by the hook AHEAD of the turn's DrawCardAction
+// (GameActionManager.java:361), but each $1 only ROLLS ITS TARGET (the
+// getRandomMonster is the PlayTopCardAction's constructor argument, evaluated
+// when $1 executes -- before the draw resolves) and addToBots the real play to
+// the very END of the queue, BEHIND the draw and behind anything else step 6
+// queued. So Mayhem plays the POST-draw top card -- pile [A..F] top-first:
+// draw A-E, play F -- and at >= 2 stacks every target roll is spent before
+// any play resolves. The previous single-level reconstruction here (one
+// kActorRandomEnemy PLAY_CARD per stack, derived from the Distilled Chaos /
+// Havoc parallels) played the PRE-draw top; the recovered class disproved it,
+// and the three CardColorlessRaresMayhem tests were re-based RED-first.
+//
+// Reproduced with kPlayCardDeferRoll (interp.hpp): the hook queues one
+// deferred item per stack; op_play_card's defer branch rolls one live-monster
+// target (== getRandomMonster(null, true, cardRandomRng), one card_random_rng
+// draw) and re-queues the play, bit cleared and target baked, at the bottom.
 //
 // NO exhaust flag (contrast op_play_top_draw / Havoc, which sets
 // EXHAUST_ON_USE_ONCE), and add_to_bottom per stack so two stacks play two
@@ -53,12 +58,11 @@ namespace sts::engine {
 // interp/interp_cards.cpp), which the ledger mandates reusing unchanged.
 //
 // NOTE (documented, not a silent difference): when NO monster is in the fight
-// roll_random_target returns kActorPlayer and execute_opcode's random-enemy
-// fan-out drops the item without playing anything, whereas the Java would still
-// play the top card at a null target. Unreachable from a real turn start --
-// every monster being dead ends the combat before the start-of-turn sequence --
-// and MayhemPower, unlike MagnetismPower, has no areMonstersBasicallyDead guard
-// of its own to model.
+// the defer branch's roll_random_target returns kActorPlayer and the re-queued
+// play carries that as a plain target; the Java would play the top card at a
+// null target. Unreachable from a real turn start -- every monster being dead
+// ends the combat before the start-of-turn sequence -- and MayhemPower, unlike
+// MagnetismPower, has no areMonstersBasicallyDead guard of its own to model.
 void power_native_mayhem(CombatState& s, Hook hook,
                          const HookContext& ctx) noexcept {
     if (hook != Hook::AT_START_OF_TURN) {
@@ -68,9 +72,9 @@ void power_native_mayhem(CombatState& s, Hook hook,
         ActionQueueItem play{};
         play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
         play.src = ctx.owner;
-        play.tgt = kActorRandomEnemy;
+        play.tgt = kActorPlayer;  // ignored: the defer branch rolls at execute
         play.amount = 0;  // unused: the source is the draw-pile top
-        play.flags = kPlayCardFromDrawTop;
+        play.flags = kPlayCardFromDrawTop | kPlayCardDeferRoll;
         add_to_bottom(s, play);
     }
 }

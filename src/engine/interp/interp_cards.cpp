@@ -816,6 +816,22 @@ void op_play_top_draw(CombatState& s) noexcept {
 // USE_CARD then files it (a purge instance lands in no pile).
 void op_play_card(CombatState& s, uint8_t target, int source_index,
                   uint32_t flags) noexcept {
+    if ((flags & kPlayCardDeferRoll) != 0u) {
+        // MayhemPower$1.update (recovered class; see kPlayCardDeferRoll): roll
+        // the target NOW -- the getRandomMonster is the PlayTopCardAction's
+        // CONSTRUCTOR argument, so the draw precedes everything, including the
+        // turn's DrawCardAction still sitting in the queue -- and addToBot the
+        // real play with the target baked, exactly one level down. No pile is
+        // touched here; the pop happens when the re-queued item executes.
+        ActionQueueItem play{};
+        play.opcode = static_cast<uint16_t>(Opcode::PLAY_CARD);
+        play.src = kActorPlayer;
+        play.tgt = roll_random_target(s);
+        play.amount = source_index;
+        play.flags = flags & ~kPlayCardDeferRoll;
+        add_to_bottom(s, play);
+        return;
+    }
     const uint8_t resolved =
         (target == kActorRandomEnemy) ? roll_random_target(s) : target;
     CardPoolIndex pi = 0;
