@@ -838,7 +838,7 @@
   game_id: "Unceasing Top"
   tier: RARE
   pool_order: 3
-  provenance: "UnceasingTop.onRefreshHand (UnceasingTop.java:1331-1338) -- with the action queue empty, the hand empty, the turn not ended, canDraw armed (set atTurnStart :1321-1325, cleared atPreBattle :1316-1319), no No Draw power, no screen up, room phase COMBAT, not disabledUntilTurnEnds, and at least one card in draw+discard: addToBot DrawCardAction(player, 1). DEFERRED: onRefreshHand has NO dispatch site -- the per-frame refreshHandLayout seam the game fires it from does not exist in the engine (the pump hands control back to the player at its idle boundary instead, action_queue.cpp pump_step step 7), and adding a RelicHook value nothing ever fires would be inert code. The row, its pool slot and its relicRng draw are live."
+  provenance: "UnceasingTop.onRefreshHand (UnceasingTop.java:48-54 in a 61-line file; the former :1331-1338 was the wave-2 bad-batch drift) -- with the action queue empty, the hand empty, the turn not ended, canDraw armed (set atTurnStart :38-41, cleared atPreBattle :33-35), no No Draw power, no screen up, room phase COMBAT, not disabledUntilEndOfTurn (that is the FIELD name; the setter is disableUntilTurnEnds(), :43-45), and at least one card in draw+discard: addToBot DrawCardAction(player, 1). DEFERRED: onRefreshHand has NO dispatch site -- the per-frame refreshHandLayout seam the game fires it from does not exist in the engine (the pump hands control back to the player at its idle boundary instead, action_queue.cpp pump_step step 7), and adding a RelicHook value nothing ever fires would be inert code. The row, its pool slot and its relicRng draw are live."
 
 - id: 70
   name: TORII
@@ -858,7 +858,7 @@
     at_turn_start: []         # ++counter
     on_player_end_turn: []    # counter == 7 -> 52 THORNS to all enemies, once
     on_victory: []            # counter = -1
-  provenance: "StoneCalendar (StoneCalendar.java:1083-1116): atBattleStart counter=0; atTurnStart ++counter; onPlayerEndTurn -- if counter == 7 addToBot DamageAllEnemiesAction(createDamageMatrix(52, true), THORNS) and grayscale=true; onVictory counter=-1. The `counter == 7` equality (not >=) plus the unconditional ++ is what makes it fire exactly once: turn 8's increment moves the counter past 7. THORNS skips the NORMAL-only power pipeline (no Strength/Vulnerable scaling)."
+  provenance: "StoneCalendar (StoneCalendar.java:36-68 in a 75-line file; the former :1083-1116 was the wave-2 bad-batch drift): atBattleStart counter=0; atTurnStart ++counter; onPlayerEndTurn -- if counter == 7 addToBot DamageAllEnemiesAction(createDamageMatrix(52, true), THORNS) and grayscale=true; onVictory counter=-1. The `counter == 7` equality (not >=) plus the unconditional ++ is what makes it fire exactly once: turn 8's increment moves the counter past 7. THORNS skips the NORMAL-only power pipeline (no Strength/Vulnerable scaling)."
 
 - id: 72
   name: SHOVEL
@@ -867,7 +867,7 @@
   pool_order: 6
   pickup:
     can_spawn: true
-  provenance: "Shovel.canSpawn (Shovel.java:1024-1035) -- false when floorNum >= 48 && !Settings.isEndless, then a count over the owned relics of PeacePipe/Shovel/Girya instances: spawns only while that count < 2. addCampfireOption (:1037-1040) adds DigOption -- the campfire Dig itself is a rest-room concern; the spawn gate is live here because it is relicRng-visible."
+  provenance: "Shovel.canSpawn (Shovel.java:33-43 in a 55-line file; the former :1024-1035 was the wave-2 bad-batch drift) -- false when floorNum >= 48 && !Settings.isEndless, then a count over the owned relics of PeacePipe/Shovel/Girya instances: spawns only while that count < 2. addCampfireOption (:46-48) adds DigOption -- the campfire Dig itself is a rest-room concern; the spawn gate is live here because it is relicRng-visible."
 
 - id: 73
   name: WING_BOOTS
@@ -877,7 +877,7 @@
   initial_counter: 3
   pickup:
     can_spawn: true
-  provenance: "WingBoots constructor (WingBoots.java:1364-1367) -- counter = 3 path-jump charges; setCounter(-2) marks it used up (:1374-1381). canSpawn (:1383-1386) -- Settings.isEndless || floorNum <= 40. Charge consumption is a map/path-choice effect owned by the floor-transition layer; the row, its counter seed and its spawn gate are live."
+  provenance: "WingBoots constructor (WingBoots.java:18-21 in a 47-line file; the former :1364-1367 was the wave-2 bad-batch drift) -- counter = 3 path-jump charges; setCounter(-2) marks it used up (:29-35). canSpawn (:38-40) -- Settings.isEndless || floorNum <= 40. Charge consumption is a map/path-choice effect owned by the floor-transition layer; the row, its counter seed and its spawn gate are live."
 
 - id: 74
   name: THREAD_AND_NEEDLE
@@ -887,14 +887,14 @@
   hooks:
     at_battle_start:
       - {op: APPLY_POWER, target: SELF, amount: 4, power: PLATED_ARMOR}
-  provenance: "ThreadAndNeedle.atBattleStart (ThreadAndNeedle.java:1154-1159) -- addToTop ApplyPowerAction(player, player, PlatedArmorPower 4). A DATA hook: PLATED_ARMOR is registered (powers.yaml id 17). Queued addToBot like every other at_battle_start relic step (the battle-start dispatch runs with an empty action queue, so top and bottom coincide -- the Vajra / Bronze Scales / Oddly Smooth Stone precedent)."
+  provenance: "ThreadAndNeedle.atBattleStart (ThreadAndNeedle.java:31-35 in a 42-line file; the former :1154-1159 was the wave-2 bad-batch drift) -- flash(), then addToTop ApplyPowerAction(player, player, PlatedArmorPower 4, 4), then addToTop a cosmetic RelicAboveCreatureAction (:34). A DATA hook: PLATED_ARMOR is registered (powers.yaml id 17). Queued addToBot like every other at_battle_start relic step (the battle-start dispatch runs with an empty action queue, so top and bottom coincide -- the Vajra / Bronze Scales / Oddly Smooth Stone precedent)."
 
 - id: 75
   name: TURNIP
   game_id: "Turnip"
   tier: RARE
   pool_order: 9
-  provenance: "Turnip (Turnip.java:1265-1281) -- a marker relic with no overrides; the behaviour lives in ApplyPowerAction.update (ApplyPowerAction.java:125-130): if the player owns Turnip and the target is the player and the power is 'Frail', the action returns without applying -- after the source hooks, before the Artifact nullify. Implemented at op_apply_power (interp/interp_powers.cpp)."
+  provenance: "Turnip (Turnip.java:12-29, the whole 30-line class; the former :1265-1281 was the wave-2 bad-batch drift) -- a marker relic with no behavioural hook overrides (only the getUpdatedDescription/makeCopy boilerplate every relic carries); the behaviour lives in ApplyPowerAction.update (ApplyPowerAction.java:125-130): if the player owns Turnip and the target is the player and the power is 'Frail', the action returns without applying -- after the source hooks, before the Artifact nullify. Implemented at op_apply_power (interp/interp_powers.cpp)."
 
 - id: 76
   name: ICE_CREAM
@@ -1100,14 +1100,14 @@
   game_id: "Toolbox"
   tier: SHOP
   pool_order: 2
-  provenance: "Toolbox.atBattleStartPreDraw (Toolbox.java:1024-1028) -- addToBot ChooseOneColorless(), a choose-one-of-three over the COLORLESS card pool, before the opening draw. DEFERRED on two counts: no colorless card rows exist yet, and atBattleStartPreDraw has no dispatch site (the engine's opening turn draws without a pre-draw relic phase). Registering an unfired hook would be inert code, so the row carries none; the row, its pool slot and its relicRng draw are live."
+  provenance: "Toolbox.atBattleStartPreDraw (Toolbox.java:29-32 in a 39-line file; the former :1024-1028 was the wave-2 bad-batch drift) -- addToBot a cosmetic RelicAboveCreatureAction, then addToBot ChooseOneColorless(), a choose-one-of-three over the COLORLESS card pool, before the opening draw. DEFERRED on two counts: no colorless card rows exist yet, and atBattleStartPreDraw has no dispatch site (the engine's opening turn draws without a pre-draw relic phase). Registering an unfired hook would be inert code, so the row carries none; the row, its pool slot and its relicRng draw are live."
 
 - id: 97
   name: CHEMICAL_X
   game_id: "Chemical X"
   tier: SHOP
   pool_order: 3
-  provenance: "ChemicalX (ChemicalX.java:12-30) -- a marker relic (BOOST = 2) read by every X-cost card's action: WhirlwindAction.update and SkewerAction.update each compute the effect count as energyOnUse + (player.hasRelic('Chemical X') ? 2 : 0) while the energy actually SPENT is still energyOnUse. Implemented at resolve_card_play's X-cost repetition count (card_play.cpp), which is where energy_on_use is already read."
+  provenance: "ChemicalX (ChemicalX.java:13-34, the whole 35-line class; the former :12-30 was StrangeSpoon's span copied onto this row -- IN RANGE, so no out-of-range sweep can catch it) -- a marker relic (BOOST = 2) read by every X-cost card's action: WhirlwindAction.update and SkewerAction.update each compute the effect count as energyOnUse + (player.hasRelic('Chemical X') ? 2 : 0) while the energy actually SPENT is still energyOnUse. Implemented at resolve_card_play's X-cost repetition count (card_play.cpp), which is where energy_on_use is already read."
 
 - id: 98
   name: LEES_WAFFLE
@@ -1116,7 +1116,7 @@
   pool_order: 4
   pickup:
     on_equip: true
-  provenance: "Waffle.onEquip (Waffle.java:1300-1303) -- player.increaseMaxHp(7, false) then player.heal(maxHealth). The `false` means increaseMaxHp does NOT heal the gained amount; the explicit heal-to-full afterwards makes the distinction invisible today, but the two calls are reproduced separately so the shape survives a future partial-heal modifier."
+  provenance: "Waffle.onEquip (Waffle.java:28-31 in a 38-line file; the former :1300-1303 was the wave-2 bad-batch drift) -- player.increaseMaxHp(7, false) then player.heal(maxHealth). The `false` means increaseMaxHp does NOT heal the gained amount; the explicit heal-to-full afterwards makes the distinction invisible today, but the two calls are reproduced separately so the shape survives a future partial-heal modifier."
 
 - id: 99
   name: ORRERY
@@ -1148,7 +1148,7 @@
   game_id: "PrismaticShard"
   tier: SHOP
   pool_order: 8
-  provenance: "PrismaticShard.onEquip (PrismaticShard.java:1236-1241) -- sets masterMaxOrbs = 1 for a non-Defect player; its real effect is the reward-pool marker AbstractDungeon reads to offer cards from ALL character colours. DELIBERATE NO-OP: no character other than the Ironclad exists, so the cross-colour reward pool has nothing to draw from, and orbs are out of scope (the combat state has no orb slots). The row, its absent canSpawn gate and its pool membership are EXACT AND LIVE -- it occupies a SHOP pool slot and consumes relicRng draws, so omitting it would desync the stream. Only the reward effect is inert -- the Matryoshka / The Courier / Eternal Feather pattern."
+  provenance: "PrismaticShard.onEquip (PrismaticShard.java:34-38 in a 40-line file; the former :1236-1241 was the wave-2 bad-batch drift) -- sets masterMaxOrbs = 1 only when chosenClass != DEFECT AND masterMaxOrbs is still 0 (the row previously stated the class clause alone); its real effect is the reward-pool marker AbstractDungeon reads to offer cards from ALL character colours. DELIBERATE NO-OP: no character other than the Ironclad exists, so the cross-colour reward pool has nothing to draw from, and orbs are out of scope (the combat state has no orb slots). The row, its absent canSpawn gate and its pool membership are EXACT AND LIVE -- it occupies a SHOP pool slot and consumes relicRng draws, so omitting it would desync the stream. Only the reward effect is inert -- the Matryoshka / The Courier / Eternal Feather pattern."
 
 - id: 103
   name: CLOCKWORK_SOUVENIR
@@ -1185,7 +1185,7 @@
   native: true
   hooks:
     on_use_card: []           # STATUS played -> exhaust it
-  provenance: "MedicalKit.onUseCard (MedicalKit.java:1153-1159) -- if card.type == STATUS: card.exhaust = true and action.exhaustCard = true. PLAYABILITY is AbstractCard.canUse (AbstractCard.java:914-924): an unplayable STATUS with costForTurn < -1 is playable iff the player has Medical Kit -- modeled in legal_actions (advance.cpp), the same shape Blue Candle uses for curses. A played status runs NO effect program (the ON_PLAY trigger guard in resolve_card_play)."
+  provenance: "MedicalKit.onUseCard (MedicalKit.java:35-41 in a 43-line file; the former :1153-1159 was the wave-2 bad-batch drift) -- if card.type == STATUS: card.exhaust = true and action.exhaustCard = true. PLAYABILITY is AbstractCard.canUse (AbstractCard.java:916-924; the former :914-924 opened two lines early, on canPlay's closing brace): an unplayable STATUS with costForTurn < -1 is playable iff the player has Medical Kit -- modeled in legal_actions (advance.cpp), the same shape Blue Candle uses for curses. A played status runs NO effect program (the ON_PLAY trigger guard in resolve_card_play)."
 
 - id: 107
   name: CAULDRON
@@ -1206,7 +1206,7 @@
   game_id: "Membership Card"
   tier: SHOP
   pool_order: 15
-  provenance: "MembershipCard (MembershipCard.java:1198-1215) -- MULTIPLIER = 0.5f, read by ShopScreen's price calculation; onEnterRoom only sets the pulse animation. A run-layer (shop) price modifier; no combat trigger. The row, its pool slot and its relicRng draw are live."
+  provenance: "MembershipCard (MembershipCard.java:17-36 in a 43-line file; the former :1198-1215 was the wave-2 bad-batch drift) -- MULTIPLIER = 0.5f (:17), read by ShopScreen's price calculation; onEnterRoom (:29-36) only sets the pulse animation. A run-layer (shop) price modifier; no combat trigger. The row, its pool slot and its relicRng draw are live."
 
 - id: 110
   name: BRIMSTONE
