@@ -811,7 +811,7 @@
   game_id: "Ginger"
   tier: RARE
   pool_order: 0
-  provenance: "Ginger (Ginger.java:473-489) -- a marker relic with no overrides at all; the behaviour lives in ApplyPowerAction.update (ApplyPowerAction.java:119-124): if the player owns Ginger and the target is the player and the power is 'Weakened', the action returns without applying -- AFTER the source-side onApplyPower fan-out and BEFORE the Artifact nullify. Implemented at op_apply_power (interp/interp_powers.cpp)."
+  provenance: "Ginger (Ginger.java:12-29, the whole 30-line class; the former :473-489 was bad-batch drift) -- a marker relic with no behavioural hook overrides (only the getUpdatedDescription/makeCopy boilerplate); the behaviour lives in ApplyPowerAction.update (ApplyPowerAction.java:119-124): if the player owns Ginger and the target is the player and the power is 'Weakened', the action returns without applying -- AFTER the source-side onApplyPower fan-out and BEFORE the Artifact nullify. Implemented at op_apply_power (interp/interp_powers.cpp)."
 
 - id: 67
   name: OLD_COIN
@@ -821,7 +821,7 @@
   pickup:
     can_spawn: true
     on_equip: true
-  provenance: "OldCoin.onEquip (OldCoin.java:812-816) -- player.gainGold(300). canSpawn (:818-821) -- (Settings.isEndless || floorNum <= 48) && !(getCurrRoom() instanceof ShopRoom); endless bypasses the floor clause only, never the shop clause (the MawBank/Courier shape)."
+  provenance: "OldCoin.onEquip (OldCoin.java:31-34 in a 46-line file; the former :812-816 was bad-batch drift) -- player.gainGold(300). canSpawn (:37-39) -- (Settings.isEndless || floorNum <= 48) && !(getCurrRoom() instanceof ShopRoom); endless bypasses the floor clause only, never the shop clause (the MawBank/Courier shape)."
 
 - id: 68
   name: BIRD_FACED_URN
@@ -901,14 +901,14 @@
   game_id: "Ice Cream"
   tier: RARE
   pool_order: 10
-  provenance: "IceCream (IceCream.java:574-590) -- a marker relic; the behaviour lives in EnergyManager.recharge (EnergyManager.java:25-40): with Ice Cream owned the turn's energy is EnergyPanel.addEnergy(energyMaster) -- ADD, capped at 999 by EnergyPanel.addEnergy (EnergyPanel.java:59-68) -- instead of EnergyPanel.setEnergy(energyMaster). This retires stage-a's SET-to-constant simplification: action_queue.cpp's start_of_turn now carries the conditional carry-over, and the no-relic branch is byte-identical to the old unconditional SET."
+  provenance: "IceCream (IceCream.java:12-29, the whole 30-line class; the former :574-590 was bad-batch drift) -- a marker relic; the behaviour lives in EnergyManager.recharge (EnergyManager.java:25-41; the former :25-40 stopped one line short of the closing brace): with Ice Cream owned the turn's energy is EnergyPanel.addEnergy(this.energy) -- ADD, capped at 999 by EnergyPanel.addEnergy (EnergyPanel.java:59-69, likewise one short before) -- instead of EnergyPanel.setEnergy(this.energy). The argument is `this.energy`, which prep() (:20-23) has already set to energyMaster; the row previously named energyMaster directly. The Ice Cream branch's inner `totalCount > 0` test gates only the flash / RelicAboveCreatureAction, never the addEnergy. This retires stage-a's SET-to-constant simplification: action_queue.cpp's start_of_turn now carries the conditional carry-over, and the no-relic branch is byte-identical to the old unconditional SET."
 
 - id: 77
   name: CALIPERS
   game_id: "Calipers"
   tier: RARE
   pool_order: 11
-  provenance: "Calipers (Calipers.java:60-77) -- a marker relic (BLOCK_LOSS = 15) read by GameActionManager's start-of-turn block decay (GameActionManager.java:353-359): with neither Barricade nor Blur, the player loses ALL block unless Calipers is owned, in which case loseBlock(15). This retires the structural `has_calipers = false` stage-a left in action_queue.cpp."
+  provenance: "Calipers (Calipers.java:12-30, the whole 31-line class; the former :60-77 was bad-batch drift) -- a marker relic (BLOCK_LOSS = 15, :15) read by GameActionManager's start-of-turn block decay (GameActionManager.java:353-359, re-read and CORRECT as cited): with neither Barricade nor Blur, the player loses ALL block unless Calipers is owned, in which case loseBlock(15). This retires the structural `has_calipers = false` stage-a left in action_queue.cpp."
 
 - id: 78
   name: LIZARD_TAIL
@@ -924,7 +924,7 @@
   pool_order: 13
   pickup:
     can_spawn: true
-  provenance: "PrayerWheel.canSpawn (PrayerWheel.java:986-989) -- Settings.isEndless || floorNum <= 48. The extra normal-combat card reward is a combat-reward-screen modifier owned by the rewards layer; no combat trigger."
+  provenance: "PrayerWheel.canSpawn (PrayerWheel.java:33-35 in a 37-line file; the former :986-989 was bad-batch drift) -- Settings.isEndless || floorNum <= 48. The extra normal-combat card reward is a combat-reward-screen modifier owned by the rewards layer; no combat trigger."
 
 - id: 80
   name: GIRYA
@@ -937,7 +937,7 @@
     at_battle_start: []       # Strength equal to the lift counter (0 -> nothing)
   pickup:
     can_spawn: true
-  provenance: "Girya (Girya.java:519-559): constructor counter = 0; atBattleStart -- if counter != 0 addToTop ApplyPowerAction(player, player, StrengthPower(counter), counter). canSpawn -- false when floorNum >= 48 && !isEndless, then the shared PeacePipe/Shovel/Girya owned-count < 2 gate. addCampfireOption adds LiftOption(counter < 3); the campfire Lift that raises the counter is a rest-room concern, so the counter stays 0 today and the battle-start branch is a live no-op until it lands."
+  provenance: "Girya (Girya.java:27-62 in a 69-line file; the former :519-559 was bad-batch drift): constructor (:27-30) counter = 0; atBattleStart (:38-44) -- if counter != 0 addToTop ApplyPowerAction(player, player, StrengthPower(counter), counter). canSpawn (:47-57) -- false when floorNum >= 48 && !isEndless, then the shared PeacePipe/Shovel/Girya owned-count < 2 gate. addCampfireOption (:60-62) adds LiftOption(counter < 3), the 3 being STR_LIMIT (:25); the campfire Lift that raises the counter is a rest-room concern, so the counter stays 0 today and the battle-start branch is a live no-op until it lands."
 
 - id: 81
   name: DEAD_BRANCH
@@ -960,7 +960,7 @@
     at_battle_start: []       # Strength equal to the master deck's CURSE count
   pickup:
     on_equip: true
-  provenance: "DuVuDoll (DuVuDoll.java:303-354): onEquip (:334-345) and onMasterDeckChange (:321-332) both recompute counter as the number of CURSE-type cards in the master deck; atBattleStart (:347-354) -- if counter > 0 addToTop ApplyPowerAction(player, player, StrengthPower(counter), counter). The onEquip recount READS RunState (it is not the `this.counter = 0` shape initial_counter already models), so it takes the pickup key; the onMasterDeckChange recount is wired into run_deck.hpp's add and remove paths."
+  provenance: "DuVuDoll (DuVuDoll.java:43-75 in an 82-line file; the former :303-354 was bad-batch drift): onEquip (:56-66) and onMasterDeckChange (:43-53) both recompute counter as the number of CURSE-type cards in the master deck (onMasterDeckChange comes FIRST in the file); atBattleStart (:69-75) -- if counter > 0 addToTop ApplyPowerAction(player, player, StrengthPower(counter), counter). The onEquip recount READS RunState (it is not the `this.counter = 0` shape initial_counter already models), so it takes the pickup key; the onMasterDeckChange recount is wired into run_deck.hpp's add and remove paths."
 
 - id: 83
   name: POCKETWATCH
@@ -973,7 +973,7 @@
     on_play_card: []             # ++counter (cards played THIS turn)
     at_turn_start_post_draw: []  # <= 3 played last turn and not the opening turn -> draw 3
     on_victory: []               # counter = -1
-  provenance: "Pocketwatch (Pocketwatch.java:917-946): atBattleStart counter=0 and firstTurn=true; onPlayCard ++counter (and stops the pulse past 3); atTurnStartPostDraw -- if counter <= 3 && !firstTurn addToBot DrawCardAction(player, 3), ELSE firstTurn = false; then counter = 0 unconditionally; onVictory counter = -1. Native: `firstTurn` is a private boolean the oracle never serializes, so it is encoded in the SIGN of the public counter (negative == the opening turn's armed state, the magnitude still the play count) rather than in a second field."
+  provenance: "Pocketwatch (Pocketwatch.java:32-60 in a 67-line file; the former :917-946 was bad-batch drift): atBattleStart (:32-35) counter=0 and firstTurn=true; onPlayCard ++counter (and stops the pulse past 3); atTurnStartPostDraw -- if counter <= 3 && !firstTurn addToBot DrawCardAction(player, 3), ELSE firstTurn = false; then counter = 0 unconditionally; onVictory counter = -1. Native: `firstTurn` is a private boolean the oracle never serializes, so it is encoded in the SIGN of the public counter (negative == the opening turn's armed state, the magnitude still the play count) rather than in a second field."
 
 - id: 84
   name: MANGO
@@ -982,7 +982,7 @@
   pool_order: 18
   pickup:
     on_equip: true
-  provenance: "Mango.onEquip (Mango.java:771-774) -- player.increaseMaxHp(14, true): +14 max HP AND +14 current HP (increaseMaxHp heals the gained amount when the flag is set, AbstractCreature.java:199+). An equip-time effect, wired in acquire_relic -- the Pear / Strawberry precedent."
+  provenance: "Mango.onEquip (Mango.java:29-31 in a 38-line file; the former :771-774 was bad-batch drift) -- player.increaseMaxHp(14, true): +14 max HP AND +14 current HP (increaseMaxHp heals the gained amount when the flag is set, AbstractCreature.java:199+). An equip-time effect, wired in acquire_relic -- the Pear / Strawberry precedent. MISMATCH FLAGGED (wave3-citations, 2026-07-28) -- the OUTCOME above is right but the parenthesised MECHANISM is not: AbstractCreature.increaseMaxHp(int, boolean) (:199-209, re-read; it is the ONLY definition in the tree and AbstractPlayer does not override it) never reads its second parameter, which is named showEffect, and the this.heal(amount, true) at :206 is UNCONDITIONAL. The flag does not gate the heal. Claim preserved rather than rewritten -- see the increaseMaxHp-family ledger row."
 
 - id: 85
   name: INCENSE_BURNER
@@ -993,7 +993,7 @@
   native: true
   hooks:
     at_turn_start: []         # every 6th turn start -> Intangible 1
-  provenance: "IncenseBurner (IncenseBurner.java:623-637): onEquip counter = 0; atTurnStart -- counter = (counter == -1 ? counter + 2 : counter + 1), then at 6 reset to 0 and addToBot ApplyPowerAction(player, null, IntangiblePlayerPower 1). The -1 special case is the unset/save-loaded counter path and is reproduced exactly rather than normalized away. INTANGIBLE is registered (powers.yaml id 29)."
+  provenance: "IncenseBurner (IncenseBurner.java:31-44 in a 51-line file; the former :623-637 was bad-batch drift): onEquip (:31-33) counter = 0; atTurnStart (:36-44) -- counter = (counter == -1 ? counter + 2 : counter + 1), then at 6 reset to 0 and addToBot ApplyPowerAction(player, null, IntangiblePlayerPower 1). The -1 special case is the unset/save-loaded counter path and is reproduced exactly rather than normalized away. INTANGIBLE is registered (powers.yaml id 29)."
 
 - id: 86
   name: GAMBLING_CHIP
@@ -1012,7 +1012,7 @@
   pool_order: 21
   pickup:
     can_spawn: true
-  provenance: "PeacePipe.canSpawn (PeacePipe.java:862-873) -- false when floorNum >= 48 && !Settings.isEndless, then the shared PeacePipe/Shovel/Girya owned-count < 2 gate (byte-identical bodies in all three files). addCampfireOption (:875-878) adds TokeOption; the campfire Toke is a rest-room concern, and the spawn gate is live here because it is relicRng-visible."
+  provenance: "PeacePipe.canSpawn (PeacePipe.java:34-44 in a 56-line file; the former :862-873 was bad-batch drift) -- false when floorNum >= 48 && !Settings.isEndless, then the shared PeacePipe/Shovel/Girya owned-count < 2 gate (byte-identical bodies in all three files, re-confirmed line by line against Girya.java:47-57 and Shovel.java:33-43). addCampfireOption (:47-49) adds TokeOption; the campfire Toke is a rest-room concern, and the spawn gate is live here because it is relicRng-visible."
 
 - id: 88
   name: CAPTAINS_WHEEL
@@ -1024,7 +1024,7 @@
     at_battle_start: []       # counter = 0
     at_turn_start: []         # ++counter while armed; turn 3 -> 18 block, then latch
     on_victory: []            # counter = -1
-  provenance: "CaptainsWheel (CaptainsWheel.java:110-133): atBattleStart counter = 0; atTurnStart -- if !grayscale ++counter, and at counter == 3 addToBot GainBlockAction(player, player, 18), counter = -1, grayscale = true; onVictory counter = -1, grayscale = false. Native: counter < 0 encodes the grayscale latch (no further increments) -- the Horn Cleat shape. The direct GainBlockAction takes no Dexterity (kBlockNoPowers)."
+  provenance: "CaptainsWheel (CaptainsWheel.java:31-53 in a 60-line file; the former :110-133 was bad-batch drift): atBattleStart (:31-33) counter = 0; atTurnStart (:36-47) -- if !grayscale ++counter, and at counter == 3 addToBot GainBlockAction(player, player, 18), counter = -1, grayscale = true; onVictory counter = -1, grayscale = false. Native: counter < 0 encodes the grayscale latch (no further increments) -- the Horn Cleat shape. The direct GainBlockAction takes no Dexterity (kBlockNoPowers)."
 
 - id: 89
   name: FOSSILIZED_HELIX
@@ -1034,7 +1034,7 @@
   hooks:
     at_battle_start:
       - {op: APPLY_POWER, target: SELF, amount: 1, power: BUFFER}
-  provenance: "FossilizedHelix.atBattleStart (FossilizedHelix.java:392-398) -- addToBot ApplyPowerAction(player, player, BufferPower 1). A DATA hook: BUFFER is registered (powers.yaml id 28) and its damage cancellation is the bespoke onAttackedToChangeDamage site in interp/interp_damage.cpp."
+  provenance: "FossilizedHelix.atBattleStart (FossilizedHelix.java:31-36 in a 48-line file; the former :392-398 was bad-batch drift) -- addToBot ApplyPowerAction(player, player, BufferPower 1). A DATA hook: BUFFER is registered (powers.yaml id 28) and its damage cancellation is the bespoke onAttackedToChangeDamage site in interp/interp_damage.cpp."
 
 - id: 90
   name: TUNGSTEN_ROD
@@ -1058,14 +1058,14 @@
   native: true
   hooks:
     on_exhaust: []            # 3 THORNS to all enemies, addToTop
-  provenance: "CharonsAshes.onExhaust (CharonsAshes.java:219-227) -- addToTop DamageAllEnemiesAction(createDamageMatrix(3, true), DamageType.THORNS). Native rather than DATA purely for the queue END: a data-bound relic step is always addToBot, and on_exhaust fires mid-resolution (unlike at_battle_start, where top and bottom coincide), so the addToTop is load-bearing. THORNS skips the NORMAL-only power pipeline."
+  provenance: "CharonsAshes.onExhaust (CharonsAshes.java:36-43 in a 50-line file; the former :219-227 was bad-batch drift) -- addToTop DamageAllEnemiesAction(createDamageMatrix(3, true), DamageType.THORNS). Native rather than DATA purely for the queue END: a data-bound relic step is always addToBot, and on_exhaust fires mid-resolution (unlike at_battle_start, where top and bottom coincide), so the addToTop is load-bearing. THORNS skips the NORMAL-only power pipeline."
 
 - id: 93
   name: CHAMPION_BELT
   game_id: "Champion Belt"
   tier: RARE
   pool_order: 27
-  provenance: "ChampionsBelt.onTrigger (ChampionsBelt.java:172-176) -- addToBot ApplyPowerAction(target, player, WeakPower(target, 1, false), 1). Fired from ApplyPowerAction.update (ApplyPowerAction.java:111-113): the player owns Champion Belt, the source is the player, target != source, the applied power is 'Vulnerable', and the target does NOT already have Artifact -- checked AFTER the source-side onApplyPower fan-out and BEFORE the Artifact nullify, so a Vulnerable that Artifact is about to eat grants no Weak. Implemented at op_apply_power (interp/interp_powers.cpp)."
+  provenance: "ChampionsBelt.onTrigger (ChampionsBelt.java:32-35 in a 42-line file; the former :172-176 was bad-batch drift) -- addToBot ApplyPowerAction(target, player, WeakPower(target, 1, false), 1). Fired from ApplyPowerAction.update (ApplyPowerAction.java:111-113, re-read and CORRECT as cited): the player owns Champion Belt, the source is non-null and is the player, target != source, the applied power is 'Vulnerable', and the target does NOT already have Artifact -- checked AFTER the source-side onApplyPower fan-out and BEFORE the Artifact nullify, so a Vulnerable that Artifact is about to eat grants no Weak. Implemented at op_apply_power (interp/interp_powers.cpp)."
 
 # --- Shop (Ironclad-obtainable) --------------------------------------------------
 #
@@ -1116,7 +1116,7 @@
   pool_order: 4
   pickup:
     on_equip: true
-  provenance: "Waffle.onEquip (Waffle.java:28-31 in a 38-line file; the former :1300-1303 was the wave-2 bad-batch drift) -- player.increaseMaxHp(7, false) then player.heal(maxHealth). The `false` means increaseMaxHp does NOT heal the gained amount; the explicit heal-to-full afterwards makes the distinction invisible today, but the two calls are reproduced separately so the shape survives a future partial-heal modifier."
+  provenance: "Waffle.onEquip (Waffle.java:28-31 in a 38-line file; the former :1300-1303 was the wave-2 bad-batch drift) -- player.increaseMaxHp(7, false) then player.heal(maxHealth). The `false` means increaseMaxHp does NOT heal the gained amount; the explicit heal-to-full afterwards makes the distinction invisible today, but the two calls are reproduced separately so the shape survives a future partial-heal modifier. MISMATCH FLAGGED (wave3-citations, 2026-07-28) -- the preceding two sentences are CONTRADICTED by the Java. AbstractCreature.increaseMaxHp(int, boolean) (:199-209, re-read; the ONLY definition in the tree, not overridden by AbstractPlayer) NEVER READS its second parameter, which is named showEffect, not `heal`; the this.heal(amount, true) at :206 is unconditional. So increaseMaxHp(7, false) DOES heal 7, and the `false` suppresses nothing. No observable divergence today -- the heal-to-full lands on the same state either way -- but the rationale for keeping the two calls separate is inverted, and anyone who 'simplifies' this by trusting the false would be relying on a mechanism that does not exist. Claim preserved rather than rewritten -- see the increaseMaxHp-family ledger row."
 
 - id: 99
   name: ORRERY
@@ -1555,7 +1555,7 @@
   native: true
   hooks:
     on_victory: []            # +1 max HP after every combat (and +1 current)
-  provenance: "FaceOfCleric.onVictory (FaceOfCleric.java:22-26) -- increaseMaxHp(1, true). AbstractPlayer.increaseMaxHp(amount, heal) raises maxHealth and, with heal set, heals the same amount, so both current and max HP rise by 1. Max HP is a CombatState mirror folded back into RunState at end_combat (run_advance.cpp fold_back_combat), so writing it here persists across the run."
+  provenance: "FaceOfCleric.onVictory (FaceOfCleric.java:27-30 in a 37-line file; the former :22-26 pointed at getUpdatedDescription and was IN RANGE, so no out-of-range sweep could catch it) -- flash() then increaseMaxHp(1, true). AbstractPlayer.increaseMaxHp(amount, heal) raises maxHealth and, with heal set, heals the same amount, so both current and max HP rise by 1. MISMATCH FLAGGED (wave3-citations, 2026-07-28) -- the OUTCOME (+1/+1) is right; the preceding sentence names the wrong class and the wrong parameter. There is no AbstractPlayer.increaseMaxHp: the only definition is AbstractCreature.increaseMaxHp(int, boolean) (:199-209), its second parameter is showEffect (not `heal`), the body never reads it, and this.heal(amount, true) at :206 is unconditional. Claim preserved rather than rewritten -- see the increaseMaxHp-family ledger row. Max HP is a CombatState mirror folded back into RunState at end_combat (run_advance.cpp fold_back_combat), so writing it here persists across the run."
 
 - id: 140
   name: GREMLIN_MASK
