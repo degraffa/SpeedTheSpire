@@ -717,7 +717,7 @@
     can_spawn: true
     on_equip: true
     on_obtain_card: true
-  provenance: "FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50) -- a POWER card is added to the deck upgraded (canUpgrade && !upgraded). Wired in run_deck.hpp add_card_to_master_deck; the registry has carried POWER-type card rows since B3.7, so the branch is reachable. canSpawn floor<=48 (:53-55). onEquip (:31-38) re-previews the cards already offered on the combat-reward screen -- a reward-screen concern, and the reward screen does not exist yet, so the handler is an explicit no-op."
+  provenance: "FrozenEgg2.onObtainCard (FrozenEgg2.java:46-50) -- a POWER card is added to the deck upgraded (canUpgrade && !upgraded). Wired in run_deck.hpp add_card_to_master_deck; the registry has carried POWER-type card rows since B3.7, so the branch is reachable. canSpawn floor<=48 (:53-55). onEquip (:31-38) re-previews the cards already offered on the combat-reward screen; the handler is STILL an explicit no-op, but not because the screen is missing -- RewardScreen/RunRewardItem.card_upgrades exist -- rather because the plain on_equip dispatch cannot see the reward screen (only on_equip_screen bodies get RelicEquipContext, and the eggs must stay claimable through the ctx-less acquire_relic door used by event grants). Master-deck outcome converges via onObtainCard; the still-open OFFER's upgrade bits are the residual divergence, carried as the ledger row 'Egg trio onEquip reward-screen preview pass' (see relic_pickup_uncommon.cpp)."
 
 - id: 58
   name: MOLTEN_EGG

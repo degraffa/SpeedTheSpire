@@ -150,7 +150,7 @@ enum class Opcode : uint16_t {
                          // (Body Slam; BodySlam.java:96 baseDamage = p.currentBlock).
     DAMAGE_STR_MULT = 16, // src attacks tgt for `amount` base with Strength counted
                            // x `flags` (the multiplier), then the pipeline (Heavy
-                           // Blade; HeavyBlade.java:426-435 strength.amount *= magic).
+                           // Blade; HeavyBlade.java:47-56 strength.amount *= magic).
     DAMAGE_PER_STRIKE = 17, // deal `amount` + `extra` per STRIKE-tagged card in
                              // hand+draw+discard (PerfectedStrike.java:37-52).
                              // BAKED into plain DAMAGE at QUEUE time
@@ -692,6 +692,23 @@ inline constexpr uint32_t kPlayCardFromDrawTop = 1u << 3;
 // GameActionManager.java:102-108, which lands at index 1 behind the
 // currently-resolving head) instead of at the back.
 inline constexpr uint32_t kPlayCardQueueFront = 1u << 4;
+// TWO-LEVEL DEFERRAL -- the recovered MayhemPower$1 (MayhemPower$1.java, from
+// the shipped desktop-1.0.jar; fills MayhemPower.java:37's CFR hole). The
+// game's Mayhem hook does NOT queue the play itself: it queues an anonymous
+// action whose update() is
+//     addToBot(new PlayTopCardAction(getRandomMonster(null, true,
+//                                    cardRandomRng), false)); isDone = true;
+// i.e. the queued item, when it executes, ROLLS THE TARGET (the ctor argument
+// -- one card_random_rng draw, before anything else) and addToBots the real
+// play to the very END of the queue. Because the hook's items sit AHEAD of
+// the turn's DrawCardAction (GameActionManager.java:361) while their re-queued
+// plays land BEHIND it, Mayhem plays the POST-draw top card, and at >= 2
+// stacks every target roll is spent before any play resolves. An item with
+// this bit reproduces exactly that: op_play_card rolls one live-monster
+// target NOW and re-queues the same item -- bit cleared, target baked -- at
+// the bottom, touching no pile. Engine-only (Mayhem's native body); never
+// authored from YAML.
+inline constexpr uint32_t kPlayCardDeferRoll = 1u << 5;
 
 // --- CHOOSE_CARD field encoding ---------------------------------------------
 // The blocking hand-card select verb. `amount` carries how many cards to select;
@@ -1334,6 +1351,47 @@ enum class DamageType : uint8_t {
     return static_cast<DamageType>(static_cast<uint8_t>(flags & 0xFFu));
 }
 
+// --- DAMAGE pure-matrix / null-source bits (flags bits 8..9) -----------------
+// Two INDEPENDENT properties the DamageType byte cannot carry, split exactly
+// as the Java splits them:
+//   * kDamagePure -- DamageInfo.createDamageMatrix(amount, /*isPureDamage=*/
+//     true) (DamageInfo.java:126-136) never calls info.applyPowers, so the
+//     landed number is the raw base: no attacker atDamageGive (Strength/Weak),
+//     no target atDamageReceive (Vulnerable), no stance, no final passes.
+//     op_damage skips compute_damage entirely for a pure item -- no float op
+//     runs at all, so the FP contract for the surviving (non-pure) paths is
+//     untouched.
+//   * kDamageNullSource -- the DamageInfo was built with a NULL owner
+//     (DamageAllEnemiesAction(null, ...), ExplosivePotion.java:52). The
+//     victim's onAttacked loop still RUNS in the game (AbstractPlayer.damage:
+//     1425-1426 / AbstractMonster.damage:667 iterate unconditionally); it is
+//     each power BODY's `info.owner != null` gate that fails (CurlUpPower.
+//     java:38, ThornsPower.java:52, FlameBarrierPower.java:54, AngryPower.
+//     java:36), so op_damage still dispatches ON_ATTACKED and the bodies read
+//     HookContext::source_null -- a future owner-INsensitive body fires,
+//     exactly as it would in the game. Relic sites whose Java gate includes an
+//     owner test (Boot's `info.owner == player` call site, Torii.java:32's
+//     `info.owner != null`) test the bit directly in op_damage's helpers.
+// They are orthogonal because the game combines them freely: Explosive Potion
+// is pure + null-source NORMAL; Panache/The Bomb are pure matrices with a
+// REAL owner (typed THORNS at their call sites); Fire Potion's THORNS item
+// keeps a real owner and needs neither bit.
+// Bits 8..9 were claimed from the free bits 8+ by the wave2-engine track; no
+// other DAMAGE-item flag bits are allocated above the DamageType byte.
+inline constexpr uint32_t kDamagePure = 1u << 8;
+inline constexpr uint32_t kDamageNullSource = 1u << 9;
+[[nodiscard]] constexpr bool damage_is_pure(uint32_t flags) noexcept {
+    return (flags & kDamagePure) != 0u;
+}
+[[nodiscard]] constexpr bool damage_source_is_null(uint32_t flags) noexcept {
+    return (flags & kDamageNullSource) != 0u;
+}
+[[nodiscard]] constexpr uint32_t make_damage_flags(DamageType t, bool pure,
+                                                   bool null_source) noexcept {
+    return make_damage_flags(t) | (pure ? kDamagePure : 0u) |
+           (null_source ? kDamageNullSource : 0u);
+}
+
 // --- BLOCK opcode: skip the owner's block-modifier powers (Dexterity) --------
 // DexterityPower.modifyBlock (+amount, floor 0) is applied by AbstractCard.
 // applyPowers, so ONLY card block gets Dexterity; a power/relic/potion block calls
@@ -1356,7 +1414,7 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 // same float->double promotion order: `(int)((double)value + 16384.5) - 16384`.
 // It is a half-up round for |value| < 16384, NOT the C `std::round`'s
 // half-away-from-zero. Two callers, from different layers: Magic Flower's
-// in-combat heal multiplier (MagicFlower.java:732, relic_hooks.cpp) and the
+// in-combat heal multiplier (MagicFlower.java:34, relic_hooks.cpp) and the
 // run-setup 90 %-of-max HP rewrite (run_advance.hpp run_setup_hp, where 90 % of
 // 75 lands on exactly 67.5f and the half-up tie is what makes an ascension-20
 // Ironclad 68/75). `constexpr` for that second caller, which is itself
@@ -1377,7 +1435,7 @@ inline constexpr uint32_t kBlockNoPowers = 1u << 0;
 
 // As compute_damage, but the attacker's Strength contributes `strength_mult` x
 // its stacks in the atDamageGive pass (Heavy Blade: strength.amount *= magicNumber
-// before applyPowers, /= after; HeavyBlade.java:426-435). strength_mult == 1
+// before applyPowers, /= after; HeavyBlade.java:47-56). strength_mult == 1
 // reproduces compute_damage bit-for-bit (float * 1.0f is exact). Exposed pure so
 // the Heavy Blade tier-2 test can check the hand-computed number directly.
 [[nodiscard]] int compute_damage(const CombatState& state, uint8_t src_actor,

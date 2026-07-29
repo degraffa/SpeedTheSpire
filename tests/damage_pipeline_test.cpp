@@ -565,6 +565,106 @@ TEST(ApplyPowerSort, StackingRefreshDoesNotResort) {
     EXPECT_EQ(s.player_powers[2].power_id, pid(PowerId::WEAK));
 }
 
+// --- The pure-damage matrix (kDamagePure / kDamageNullSource) ---------------
+//
+// DamageInfo.createDamageMatrix(amount, /*isPureDamage=*/true) (DamageInfo.
+// java:126-136) SKIPS info.applyPowers entirely -- no attacker atDamageGive
+// (Strength/Weak), no target atDamageReceive (Vulnerable), no final passes --
+// and DamageAllEnemiesAction built with a NULL source hits each monster with
+// a null-owner NORMAL DamageInfo, whose null owner fails every registered
+// onAttacked power's `info.owner != null` gate (CurlUpPower.java:38,
+// ThornsPower.java:52, FlameBarrierPower.java:54, AngryPower.java:36).
+//
+// The two properties are INDEPENDENT bits in the DAMAGE item's flags word
+// (bits 8/9; bits 0..7 stay the DamageType), because the Java separates them:
+// a pure matrix can carry a real owner (Panache/The Bomb pass the player), and
+// the on-attacked power loop still RUNS for a null-source NORMAL hit -- the
+// owner gates live in the power BODIES (AbstractPlayer.damage:1425-1426 /
+// AbstractMonster.damage:667 loop unconditionally), so a hypothetical
+// owner-INsensitive onAttacked power would still fire, exactly as in the game.
+// (None is shipped: a whole-tree sweep of the live `onAttacked` overriders
+// shows every one either tests `info.owner != null` -- including Act-2
+// Malleable, MalleablePower.java:64, which the ledger row mis-recorded as
+// owner-ungated -- or, like ShiftingPower.java:32-38, ignores owner AND type
+// and so behaves identically under both models.)
+
+TEST(DamagePure, PureFlagSkipsModifiersButKeepsOnAttackedDispatch) {
+    // A pure hit with a REAL owner: the shape the old THORNS stand-in could
+    // not express -- under THORNS typing the on-attacked dispatch never ran
+    // at all, so Curl Up could never fire on an unscaled hit. Faithfully
+    // (DamageInfo.java:126-134 + CurlUpPower.java:38: owner non-null, type
+    // NORMAL) the number is flat AND Curl Up triggers.
+    CombatState s = make_combat();
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::VULNERABLE, 1);
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::CURL_UP, 7);
+    execute_opcode(s, op(Opcode::DAMAGE, kActorPlayer, 0, 10,
+                         /*flags=*/1u << 8));  // kDamagePure, type NORMAL
+    // NEGATIVE CONTROL baked into the expectation: without the pure bit this
+    // reads 40 - floor(10 * 1.5) = 25 (the RED value before the flag existed).
+    EXPECT_EQ(s.monsters[0].hp, 30);  // 40 - 10 flat: applyPowers skipped
+    // ...but the owner is real, so Curl Up fires (queued block gain).
+    ActionQueueItem it{};
+    bool saw_block = false;
+    while (pop_action_front(s, it)) {
+        if (static_cast<Opcode>(it.opcode) == Opcode::BLOCK) {
+            saw_block = true;
+            EXPECT_EQ(it.amount, 7);
+        }
+        execute_opcode(s, it);
+    }
+    EXPECT_TRUE(saw_block) << "a pure hit with a real owner must still "
+                              "dispatch onAttacked (gates live in the bodies)";
+    EXPECT_EQ(s.monsters[0].block, 7);
+}
+
+TEST(DamagePure, NullSourceFailsEveryRegisteredOwnerGate) {
+    // Explosive Potion's exact shape: pure + null source + NORMAL. The number
+    // is flat AND no registered onAttacked power fires -- Curl Up keeps its
+    // stack (CurlUpPower.java:38 `info.owner != null`).
+    CombatState s = make_combat();
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::VULNERABLE, 1);
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::CURL_UP, 7);
+    execute_opcode(s, op(Opcode::DAMAGE, kActorPlayer, 0, 10,
+                         /*flags=*/(1u << 8) | (1u << 9)));
+    ActionQueueItem it{};
+    while (pop_action_front(s, it)) {
+        execute_opcode(s, it);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 30);   // 40 - 10 flat
+    EXPECT_EQ(s.monsters[0].block, 0)  // Curl Up never fired
+        << "null-source hit must fail the body-level owner gate";
+    // The stack is intact (not consumed).
+    bool curl_up_intact = false;
+    for (uint8_t i = 0; i < s.monsters[0].power_count; ++i) {
+        if (s.monsters[0].powers[i].power_id ==
+            static_cast<uint16_t>(PowerId::CURL_UP)) {
+            curl_up_intact = s.monsters[0].powers[i].amount == 7;
+        }
+    }
+    EXPECT_TRUE(curl_up_intact);
+}
+
+TEST(DamagePure, UnflaggedNormalDamageStillScalesAndDispatches) {
+    // NEGATIVE CONTROL (green before and after the flag landed): a plain
+    // NORMAL item keeps the full pipeline and the on-attacked dispatch.
+    CombatState s = make_combat();
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::VULNERABLE, 1);
+    add_power(s.monsters[0].powers, s.monsters[0].power_count,
+              PowerId::CURL_UP, 7);
+    execute_opcode(s, op(Opcode::DAMAGE, kActorPlayer, 0, 10));
+    ActionQueueItem it{};
+    while (pop_action_front(s, it)) {
+        execute_opcode(s, it);
+    }
+    EXPECT_EQ(s.monsters[0].hp, 25);    // 40 - floor(10 * 1.5)
+    EXPECT_EQ(s.monsters[0].block, 7);  // Curl Up fired
+}
+
 TEST(ApplyPowerSort, InstancedSlotsTravelWholeAndKeepRelativeOrder) {
     // Two Bombs (instanced, default priority) then a Weak: the sort moves
     // whole PowerSlot rows, so each fuse keeps its own counter, and the

@@ -473,9 +473,15 @@ bool card_can_use(const CombatState& s, CardPoolIndex pool_index,
     if (def == nullptr || monsters_basically_dead(s)) {
         return false;
     }
+    // UPGRADE-AWARE kind: the game's canUse reads the live `card.target`
+    // field, which upgrade() may have reassigned (Blind+ / Trip+ ->
+    // ALL_ENEMY, Blind.java:48 / Trip.java:53) -- an upgraded Blind takes no
+    // target, so no selected-monster test applies to it.
+    const CardTargetKind kind =
+        card_target_kind(*def, s.card_pool[pool_index].upgrade);
     const bool selected_enemy_target =
-        def->target_kind == CardTargetKind::ENEMY ||
-        def->target_kind == CardTargetKind::SELF_AND_ENEMY;
+        kind == CardTargetKind::ENEMY ||
+        kind == CardTargetKind::SELF_AND_ENEMY;
     if (selected_enemy_target && target < s.monster_count &&
         s.monsters[target].hp <= 0) {
         return false;
@@ -518,11 +524,15 @@ void resolve_card_play(CombatState& s, const CardQueueItem& item) noexcept {
 
     // GameActionManager.java:264-283 is AFTER the successful gate and hook /
     // counter sequence, but BEFORE AbstractPlayer.useCard. It applies only to
-    // exact CardTarget.ENEMY. A null, dead, or escaping selected monster
-    // suppresses useCard; a limbo autoplay is removed with no filing, while an
-    // ordinary queued card remains in hand. SELF_AND_ENEMY deliberately
-    // proceeds (Spot Weakness).
-    if (def->target_kind == CardTargetKind::ENEMY &&
+    // exact CardTarget.ENEMY -- read UPGRADE-AWARE, because the Java reads the
+    // live `card.target` field: an upgraded Blind/Trip is ALL_ENEMY
+    // (Blind.java:48 / Trip.java:53) and plays through a dead baked target
+    // (the Distilled Chaos interleaving the tier-2 test reproduces). A null,
+    // dead, or escaping selected monster suppresses useCard; a limbo autoplay
+    // is removed with no filing, while an ordinary queued card remains in
+    // hand. SELF_AND_ENEMY deliberately proceeds (Spot Weakness).
+    if (card_target_kind(*def, s.card_pool[pool_index].upgrade) ==
+            CardTargetKind::ENEMY &&
         (resolved_target >= s.monster_count ||
          monster_dead_or_escaped(s.monsters[resolved_target]))) {
         if (autoplay) {

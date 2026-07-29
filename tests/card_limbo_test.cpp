@@ -572,6 +572,61 @@ TEST(CardLimbo, QueuedAutoplayCancelsWhenItsSelectedTargetDies) {
 // another remains, the replay reaches the same canUse rejection above: it
 // neither retargets nor fires play/use hooks, and its no-trigger UseCardAction
 // merely purges the temporary limbo copy.
+// The DELIBERATE purged-copy pool-row leak, pinned as documentation (ledger:
+// "Purged replay copies leak a card-pool row", re-assessed 2026-07-28). A
+// purge filing (UseCardAction.java:89-94) lands the instance in NO pile and
+// the engine leaves its pool row occupied -- the row is never freed for
+// reuse. The recorded reason NOT to free it ("would race a queued
+// DAMAGE_RAMPAGE stamping that index") is no longer constructible: every
+// DAMAGE_RAMPAGE is queued by resolve_card_play's program pass, strictly
+// BEFORE that same card's filing USE_CARD in the one FIFO action ring, and
+// both replay verbs create their copy SYNCHRONOUSLY inside the onUseCard
+// fan-out (power_double_tap.cpp / power_duplication.cpp call op_play_card
+// directly), so no queued item can outlive its row's filing. The copy's
+// stamped `misc` below is the proof the stamp resolved first. The leak stays
+// because freeing buys nothing observable (the game's purged AbstractCard
+// simply becomes unreferenced) while making later free-slot scans reuse
+// rows -- a byte-visible, play-invisible churn. Bounded: one 160-row pool,
+// one row per replayed play, no replay of a replay (`!card.purgeOnUse`).
+TEST(CardLimbo, PurgedReplayCopyLeaksItsStampedPoolRowByDesign) {
+    CombatState s = MakeCombat();
+    s.player_powers[0].power_id = static_cast<uint16_t>(PowerId::DOUBLE_TAP);
+    s.player_powers[0].amount = 1;
+    s.player_power_count = 1;
+    const CardPoolIndex original = AddHand(s, CardId::RAMPAGE);
+
+    ASSERT_TRUE(queue_card_play(s, 0, 0));
+    pump(s);
+
+    // Both plays landed (8 + 8: each instance stamps only its OWN misc).
+    EXPECT_EQ(s.monsters[0].hp, 84);
+    EXPECT_EQ(s.card_pool[original].misc, 5) << "original stamped once";
+    // The copy's row: occupied (the leak), stamped (its DAMAGE_RAMPAGE
+    // resolved BEFORE the purge -- the FIFO order that retired the recorded
+    // race), and a member of NO pile.
+    int copy = -1;
+    for (int pi = 0; pi < kCardPoolCap; ++pi) {
+        if (pi != original &&
+            s.card_pool[pi].card_id == static_cast<uint16_t>(CardId::RAMPAGE)) {
+            copy = pi;
+        }
+    }
+    ASSERT_GE(copy, 0) << "the purged copy's pool row must stay occupied";
+    EXPECT_EQ(s.card_pool[copy].misc, 5)
+        << "the copy's DAMAGE_RAMPAGE stamped its row before the purge filing";
+    const auto in_pile = [&](const CardPoolIndex* pile, uint8_t n) {
+        for (uint8_t i = 0; i < n; ++i) {
+            if (pile[i] == static_cast<CardPoolIndex>(copy)) return true;
+        }
+        return false;
+    };
+    EXPECT_FALSE(in_pile(s.hand, s.hand_count));
+    EXPECT_FALSE(in_pile(s.draw, s.draw_count));
+    EXPECT_FALSE(in_pile(s.discard, s.discard_count));
+    EXPECT_FALSE(in_pile(s.exhaust, s.exhaust_count));
+    EXPECT_FALSE(in_pile(s.limbo, s.limbo_count));
+}
+
 TEST(CardLimbo, DoubleTapReplayCancelsWhenOriginalTargetDies) {
     CombatState s = MakeCombat(/*energy=*/6, /*monster_hp=*/6);
     s.monster_count = 2;

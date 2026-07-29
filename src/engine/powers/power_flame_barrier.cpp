@@ -18,12 +18,14 @@ void power_native_flame_barrier(CombatState& s, Hook hook,
     // 53-59): reflect `amount` THORNS damage to a DISTINCT attacker --
     // op_damage already gated dispatch to NORMAL src != tgt after
     // decrementBlock (fires whether or not the hit penetrated); the
-    // owner != attacker guard is re-checked. addToTop, THORNS-typed
+    // owner != attacker guard is re-checked, and so is
+    // `info.owner != null` (:54) -- a null-source hit (kDamageNullSource)
+    // reflects nothing. addToTop, THORNS-typed
     // (skips the NORMAL-only power modifiers -- a Vulnerable attacker
     // is NOT amplified). atStartOfTurn (:62-64): addToBot
     // RemoveSpecificPowerAction -- gone at the player's next turn start.
     if (hook == Hook::ON_ATTACKED) {
-        if (ctx.source == ctx.owner) {
+        if (ctx.source_null || ctx.source == ctx.owner) {
             return;
         }
         ActionQueueItem dmg{};

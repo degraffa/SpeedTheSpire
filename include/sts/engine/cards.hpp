@@ -211,6 +211,27 @@ struct CardEffectView {
     return upgrade > 0 ? def.upgraded_flags : def.flags;
 }
 
+// Card-level targeting at the given upgrade level. Blind+ and Trip+ reassign
+// this.target to CardTarget.ALL_ENEMY in upgrade() (Blind.java:48 /
+// Trip.java:53) -- the ONLY two cards in the whole game that reassign
+// `this.target` inside upgrade() (whole-tree grep, 2026-07-28), so the column
+// is bounded forever. Every targeting consumer must go through these, never
+// def.target_kind / def.needs_target directly: the ActionMask row shape
+// (advance.cpp legal_actions), card_can_use's dead-target rejection, and
+// resolve_card_play's GameActionManager.java:264-283 ENEMY-only suppression
+// all read the UPGRADE-AWARE kind, because the game reads the live
+// `card.target` field at each of those sites. (`random_target` is deliberately
+// NOT upgrade-aware: no card changes it in upgrade(), and the generator
+// refuses an `upgraded_target:` that would.)
+[[nodiscard]] inline CardTargetKind card_target_kind(const CardDef& def,
+                                                     uint8_t upgrade) noexcept {
+    return upgrade > 0 ? def.upgraded_target_kind : def.target_kind;
+}
+[[nodiscard]] inline bool card_needs_target(const CardDef& def,
+                                            uint8_t upgrade) noexcept {
+    return upgrade > 0 ? def.upgraded_needs_target : def.needs_target;
+}
+
 // The card's triggerOnExhaust program at the given upgrade level
 // (CardGroup.moveToExhaustPile:857 fires card.triggerOnExhaust AFTER the relic
 // and power onExhaust hooks; Sentinel is the S1 consumer -- addToTop

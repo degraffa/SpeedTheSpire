@@ -12,7 +12,7 @@ namespace sts::engine {
 
 void power_native_frail(CombatState& s, Hook hook,
                         const HookContext& ctx) noexcept {
-    // FrailPower.atEndOfRound (FrailPower.java:40-52). Identical to Vulnerable's
+    // FrailPower.atEndOfRound (FrailPower.java:40-49). Identical to Vulnerable's
     // and Weak's, so it shares their body -- including the OWNER generality the
     // former CombatState.flags latch could not express: a monster-owned Frail now
     // ticks like the player's.

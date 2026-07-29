@@ -23,7 +23,7 @@ void relic_on_equip_lees_waffle(RunState& rs, RngStream& /*misc_rng*/,
     // are still written separately so the shape survives a future modifier that
     // can make the heal partial (the run-layer heal has no Magic Flower
     // multiplier -- MagicFlower.onPlayerHeal only fires while the room phase is
-    // COMBAT, MagicFlower.java:730).
+    // COMBAT, MagicFlower.java:32).
     rs.max_hp = static_cast<int16_t>(rs.max_hp + 7);
     rs.hp = rs.max_hp;
 }

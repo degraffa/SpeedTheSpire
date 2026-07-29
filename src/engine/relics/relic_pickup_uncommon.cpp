@@ -160,18 +160,34 @@ void relic_on_equip_screen_bottled_tornado(
 // FrozenEgg2.onEquip (FrozenEgg2.java:31-38) walks the cards ALREADY OFFERED on
 // the combat-reward screen and re-runs onPreviewObtainCard over them, so a card
 // on the current reward screen shows its upgraded form the moment the egg is
-// picked up. That is a reward-SCREEN concern -- neither the screen nor its
-// RewardItem list exists yet -- not a RunState mutation at acquisition: the
-// actual upgrade-on-obtain is onObtainCard, defined below. Nothing to do here
-// until the reward screen lands; when it does, the preview pass goes here.
+// picked up.
+//
+// STILL A DOCUMENTED NO-OP, but the reason CHANGED (wave2-engine stage 3d,
+// 2026-07-28). The old justification -- "neither the screen nor its RewardItem
+// list exists yet" -- EXPIRED: RewardScreen and RunRewardItem.card_upgrades
+// exist (combat_rewards.hpp) and an elite reward screen can hold a RELIC and a
+// CARDS item at once, so claiming an egg while an offer is still open is the
+// game's preview case. What is missing is PLUMBING, not the screen: this plain
+// on_equip surface receives (RunState, miscRng, slot) only -- the reward
+// screen travels in RelicEquipContext, which only on_equip_screen bodies get,
+// and the eggs cannot move to that surface because the PLAIN acquire_relic
+// door (event grants, exordium_events_*; the ctx-less shop fallback) refuses
+// on_equip_screen ids by design. The divergence this leaves is NARROW: the
+// still-open OFFER's upgrade bits (a reward-screen observation the run differ
+// compares); the MASTER DECK converges regardless, because the pick lands
+// through onObtainCard below with the egg then owned. Carried as its own
+// Deferred-obligations row ("Egg trio onEquip reward-screen preview pass");
+// do not fix it here without deciding how every equip site sees the screen.
 void relic_on_equip_frozen_egg(RunState& /*rs*/, RngStream& /*misc_rng*/,
                                RelicSlot& /*slot*/) noexcept {}
 
-// MoltenEgg2.onEquip (MoltenEgg2.java:31-38) -- identical preview pass, ATTACKs.
+// MoltenEgg2.onEquip (MoltenEgg2.java:31-38) -- identical preview pass, ATTACKs;
+// same expired premise, same open row as Frozen Egg above.
 void relic_on_equip_molten_egg(RunState& /*rs*/, RngStream& /*misc_rng*/,
                                RelicSlot& /*slot*/) noexcept {}
 
-// ToxicEgg2.onEquip (ToxicEgg2.java:31-38) -- identical preview pass, SKILLs.
+// ToxicEgg2.onEquip (ToxicEgg2.java:31-38) -- identical preview pass, SKILLs;
+// same expired premise, same open row as Frozen Egg above.
 void relic_on_equip_toxic_egg(RunState& /*rs*/, RngStream& /*misc_rng*/,
                               RelicSlot& /*slot*/) noexcept {}
 

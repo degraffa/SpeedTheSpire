@@ -40,7 +40,7 @@ OPCODES = {
     # Stage B B3.3 additions (append-only from 15): dynamic-base attack damage.
     # DAMAGE_BLOCK reads the player's current block as the base at EXECUTE time
     # (Body Slam, BodySlam.java:96). DAMAGE_STR_MULT deals `amount` base with the
-    # player's Strength counted x `extra` (Heavy Blade, HeavyBlade.java:426-435).
+    # player's Strength counted x `extra` (Heavy Blade, HeavyBlade.java:47-56).
     # DAMAGE_PER_STRIKE deals `amount` + `extra` per STRIKE-tagged card in
     # hand+draw+discard. It is BAKED into a plain DAMAGE at queue time, matching
     # applyPowers-at-use timing: a hand play counts itself because it has not
@@ -400,6 +400,20 @@ CARD_TYPES = {"ATTACK": 0, "SKILL": 1, "STATUS": 2, "CURSE": 3, "POWER": 4}
 # player's own Strength/Vulnerable do NOT scale the self-damage (but block still
 # absorbs it, unlike LOSE_HP). MIRROR of interp.hpp make_damage_flags.
 DAMAGE_TYPES = {"NORMAL": 0, "THORNS": 1, "HP_LOSS": 2}
+# DAMAGE `flags` bits 8..9 (interp.hpp kDamagePure / kDamageNullSource). Two
+# independent step keys, MIRRORS of the C++ constants:
+#   pure: true        -- DamageInfo.createDamageMatrix(amount, true) (DamageInfo.
+#                        java:126-136): applyPowers never runs, the landed number
+#                        is the raw base whatever the DamageType.
+#   null_source: true -- the DamageInfo was built with a NULL owner
+#                        (DamageAllEnemiesAction(null, ...), ExplosivePotion.
+#                        java:52): every body-level `info.owner != null` gate
+#                        (onAttacked powers, Boot's call site, Torii, Plated
+#                        Armor's wasHPLost) fails.
+# Explosive Potion authors both on one NORMAL step; Panache/The Bomb's matrices
+# are pure with a REAL owner but are native bodies, not YAML steps.
+DAMAGE_PURE_BIT = 1 << 8
+DAMAGE_NULL_SOURCE_BIT = 1 << 9
 # CardTrigger (cards.hpp CardTrigger): WHEN a card's effect program runs. Default
 # ON_PLAY (the played-card path, every ATTACK/SKILL + playable Slimed). The
 # unplayable statuses/curses instead run their `effects` program at a passive
@@ -429,6 +443,11 @@ PLAY_CARD_FLAGS = {
     "exhaust": 1 << 2,
     "from_draw_top": 1 << 3,
     "queue_front": 1 << 4,
+    # Engine-only, like `copy`: Mayhem's recovered MayhemPower$1 two-level
+    # deferral (roll the target at item execute, re-queue the play at the
+    # bottom -- behind the turn's draw). Listed to keep the mirror complete;
+    # never authored from YAML (the native body sets it).
+    "defer_roll": 1 << 5,
 }
 
 # RANDOM_COLORLESS_TO_HAND `extra` bits -- MIRROR of interp.hpp's

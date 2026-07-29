@@ -174,6 +174,28 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
                        f"{target!r}")
         needs_target, random_target, target_kind = CARD_TARGETING[target]
 
+        # Upgraded-target column: `upgraded_target:` mirrors an upgrade() that
+        # reassigns this.target. Blind+ / Trip+ -> ALL_ENEMY (Blind.java:48 /
+        # Trip.java:53) are the ONLY two such cards in the whole game
+        # (whole-tree grep for `this.target = ` inside upgrade(), 2026-07-28),
+        # so the default -- targeting unchanged by upgrade -- is right for
+        # every other row. The consumers are cards.hpp card_target_kind /
+        # card_needs_target (mask row shape, dead-target canUse rejection, the
+        # GameActionManager.java:264-283 ENEMY-only suppression).
+        up_target = c.get("upgraded_target", target)
+        if up_target not in CARD_TARGETING:
+            raise fail(f"cards.yaml: card {c['name']} has unknown "
+                       f"upgraded_target {up_target!r}")
+        up_needs_target, up_random_target, up_target_kind = \
+            CARD_TARGETING[up_target]
+        if up_random_target != random_target:
+            raise fail(
+                f"cards.yaml: card {c['name']} upgraded_target {up_target!r} "
+                f"changes random_target vs base {target!r} -- no consumer is "
+                "upgrade-aware for the dequeue-time random roll "
+                "(resolve_play_target reads def.random_target), and no game "
+                "card does this; teach the consumers first")
+
         cost = int(c.get("cost", 0))
         flags, base_cost = parse_card_flags(c["name"], c.get("flags"), cost)
         steps = program(c["name"], c.get("effects"))
@@ -277,6 +299,8 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
             "name": c["name"], "cost": base_cost, "flags": flags,
             "ctype": CARD_TYPES[ctype], "needs_target": needs_target,
             "random_target": random_target, "target_kind": target_kind,
+            "up_needs_target": up_needs_target,
+            "up_target_kind": up_target_kind,
             "steps": steps,
             "up_cost": up_base_cost, "up_flags": up_flags_bits,
             "up_steps": up_steps, "is_strike": is_strike,
@@ -383,6 +407,13 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
     out.append("    std::array<CardEffectStep, kMaxCardSteps> on_exhaust_steps;")
     out.append("    uint8_t upgraded_on_exhaust_step_count;")
     out.append("    std::array<CardEffectStep, kMaxCardSteps> upgraded_on_exhaust_steps;")
+    out.append("    // Upgraded-target column (wave2-engine): upgrade() can")
+    out.append("    // reassign this.target -- Blind+ / Trip+ -> ALL_ENEMY")
+    out.append("    // (Blind.java:48 / Trip.java:53), the only two such cards")
+    out.append("    // in the game. Read via cards.hpp card_target_kind /")
+    out.append("    // card_needs_target, never directly.")
+    out.append("    bool upgraded_needs_target;")
+    out.append("    CardTargetKind upgraded_target_kind;")
     out.append("};\n")
 
     def pad(steps) -> list[str]:
@@ -423,7 +454,9 @@ def emit_card_table(domains: dict[str, list[dict]]) -> str:
         out.append(f"    {len(r['up_ox_steps'])},")
         out.append("    {{")
         out.append(f"        {up_ox_txt},")
-        out.append("    }}};\n")
+        out.append("    }},")
+        out.append(f"    {'true' if r['up_needs_target'] else 'false'}, "
+                   f"CardTargetKind::{next(k for k, v in CARD_TARGET_KINDS.items() if v == r['up_target_kind'])}}};\n")
 
     # CardLibrary.getCurse (CardLibrary.java:1043-1050) walks the SEPARATE
     # `curses` HashMap (CardLibrary.java:410, written at :949) -- 14 entries, so

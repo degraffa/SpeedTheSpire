@@ -24,7 +24,10 @@ void power_native_curl_up(CombatState& s, Hook hook,
     if (hook != Hook::ON_ATTACKED) {
         return;
     }
-    if (ctx.source == ctx.owner || ctx.amount <= 0 ||
+    // `info.owner != null` (CurlUpPower.java:38): a null-source hit (Explosive
+    // Potion's pure matrix, kDamageNullSource) does not trigger or consume
+    // Curl Up -- the dispatch still runs, the body's own gate is what fails.
+    if (ctx.source_null || ctx.source == ctx.owner || ctx.amount <= 0 ||
         ctx.owner >= kMonsterCap) {
         return;
     }

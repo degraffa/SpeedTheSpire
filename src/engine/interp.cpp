@@ -69,9 +69,14 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             return;  // reserved safe no-op (value-init / unrecognized item)
         case Opcode::DAMAGE:
             // Plain DAMAGE: strength_mult 1; `flags` carries the DamageType
-            // (0 == NORMAL for card attacks; THORNS for reflected damage).
+            // in its low byte (0 == NORMAL for card attacks; THORNS for
+            // reflected damage) plus the pure-matrix / null-source bits 8..9
+            // (Explosive Potion's createDamageMatrix(amount, true) with a
+            // null owner, ExplosivePotion.java:52).
             op_damage(s, item.src, item.tgt, item.amount, /*strength_mult=*/1,
-                      damage_type_from_flags(item.flags));
+                      damage_type_from_flags(item.flags),
+                      damage_is_pure(item.flags),
+                      damage_source_is_null(item.flags));
             return;
         case Opcode::BLOCK:
             op_block(s, item.tgt, item.amount, item.flags);

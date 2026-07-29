@@ -126,7 +126,7 @@ TEST(EventDamage, LizardTailRevivesOutsideCombatWithoutMagicFlowerBonus) {
 // and its revive block prefers a held Fairy over a Lizard Tail -- the tail arm
 // is an `else if` on hasPotion, so the tail is not even consulted, let alone
 // spent. Out here Magic Flower amplifies neither heal: its onPlayerHeal is
-// phase==COMBAT-gated (MagicFlower.java:31-38).
+// phase==COMBAT-gated (MagicFlower.java:30-37).
 //
 // This is also the answer to "which out-of-combat lethal sites exist in S1?":
 // apply_event_damage is the only one. Every other run-layer HP write is a heal

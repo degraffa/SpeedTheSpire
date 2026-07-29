@@ -19,11 +19,13 @@ void power_native_angry(CombatState& s, Hook hook,
     //       && info.type != THORNS)
     //       addToTop(ApplyPowerAction(owner, owner, StrengthPower(owner, amount)))
     // op_damage already gates dispatch_on_attacked to NORMAL damage from a
-    // DISTINCT attacker, which covers `info.owner != null` and both type
-    // exclusions, and it passes the POST-block damage as ctx.amount. So the only
-    // guard left to re-check is damageAmount > 0 -- Angry, unlike Curl Up, does
-    // NOT fire on a fully-blocked hit.
-    if (hook != Hook::ON_ATTACKED || ctx.amount <= 0) {
+    // DISTINCT attacker, which covers both type exclusions, and it passes the
+    // POST-block damage as ctx.amount. `info.owner != null` is re-checked HERE
+    // (ctx.source_null): a null-source NORMAL hit (Explosive Potion's pure
+    // matrix) is still dispatched but must not anger. The other remaining
+    // guard is damageAmount > 0 -- Angry, unlike Curl Up, does NOT fire on a
+    // fully-blocked hit.
+    if (hook != Hook::ON_ATTACKED || ctx.source_null || ctx.amount <= 0) {
         return;
     }
     ActionQueueItem up{};

@@ -20,7 +20,7 @@ void power_native_rupture(CombatState& s, Hook hook,
         return;
     }
     if (ctx.source != ctx.owner || ctx.amount <= 0) {
-        return;  // attribution guard (RupturePower.java:61)
+        return;  // attribution guard (RupturePower.java:33)
     }
     ActionQueueItem gain{};
     gain.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
@@ -28,7 +28,7 @@ void power_native_rupture(CombatState& s, Hook hook,
     gain.tgt = ctx.owner;
     gain.amount = ctx.power_amount;  // +amount Strength
     gain.flags = make_apply_power_flags(PowerId::STRENGTH);
-    add_to_top(s, gain);             // addToTop (RupturePower.java:63)
+    add_to_top(s, gain);             // addToTop (RupturePower.java:35)
 }
 
 }  // namespace sts::engine

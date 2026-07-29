@@ -235,7 +235,7 @@ void dispatch_relics_on_block_broken(CombatState& s, RelicSlot* relics,
 void heal_player_with_relics(CombatState& s, int32_t amount) noexcept {
     // AbstractPlayer.heal runs every owned relic's onPlayerHeal over the amount
     // before it lands. Magic Flower is the only S1 override
-    // (MagicFlower.onPlayerHeal, MagicFlower.java:728-735): inside a COMBAT-phase
+    // (MagicFlower.onPlayerHeal, MagicFlower.java:30-37): inside a COMBAT-phase
     // room the amount becomes MathUtils.round(amount * 1.5f). Everything reached
     // through this function is by construction in combat (it takes a
     // CombatState), so the room-phase test is satisfied by the call site.

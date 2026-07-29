@@ -33,7 +33,7 @@ namespace {
 // atDamageGive: attacker-owned hooks. StrengthPower.atDamageGive (+amount),
 // WeakPower.atDamageGive (*0.75f). Others pass through. `strength_mult` scales the
 // Strength contribution (Heavy Blade counts Strength x magicNumber by temporarily
-// multiplying strength.amount before applyPowers; HeavyBlade.java:426-435). The
+// multiplying strength.amount before applyPowers; HeavyBlade.java:47-56). The
 // default 1 is bit-identical to an unmultiplied hook: float(amount) * 1.0f == float(
 // amount), so every non-Heavy-Blade damage number is unchanged.
 // The `default: return dmg` below is a deliberate subset, not an oversight: most
@@ -373,7 +373,7 @@ void cards_took_player_damage(CombatState& s) noexcept;
 
 // Step 3 (AbstractPlayer.java:1430-1432): the player's relics' onAttacked, run
 // AFTER the victim powers' onAttacked (Thorns / Flame Barrier). Torii.onAttacked
-// (Torii.java:1197-1205) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
+// (Torii.java:31-38) turns a NORMAL, non-THORNS, non-HP_LOSS hit of 2..5
 // into 1. `info.owner != null` holds for every hit this engine produces.
 [[nodiscard]] int apply_torii(const CombatState& s, uint8_t tgt, int dmg,
                               DamageType type) noexcept {
@@ -387,7 +387,7 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // Step 4 (AbstractPlayer.java:1433-1435): the player's relics' onLoseHpLast --
 // the LAST modifier before the `if (damageAmount > 0)` block, so a 1-damage hit
 // reduced to 0 here fires no wasHPLost at all. TungstenRod.onLoseHpLast
-// (TungstenRod.java:1238-1245): positive damage becomes damage - 1.
+// (TungstenRod.java:26-32): positive damage becomes damage - 1.
 [[nodiscard]] int apply_tungsten_rod(const CombatState& s, uint8_t tgt,
                                      int dmg) noexcept {
     if (tgt == kActorPlayer && dmg > 0 &&
@@ -431,12 +431,12 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // BEFORE the heal, so the outcome is exactly healAmt (clamped to maxHealth by
 // heal, AbstractCreature.java:386-395) and never hp + healAmt. Routed through
 // the shared in-combat heal seam so Magic Flower's x1.5 applies: its
-// onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:31-38) and this site
+// onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:30-37) and this site
 // IS combat. Sacred Bark doubles potency 30 -> 60, i.e. a revive at 60% of max
 // HP; the relic has no engine hook, so def->potency is what arrives.
 //
 // LizardTail.onTrigger heals maxHealth/2 (min 1) and sets the counter to -2
-// (LizardTail.java:672-690).
+// (LizardTail.java:28-45).
 void try_player_revive(CombatState& s) noexcept {
     if (s.player_hp > 0) {
         return;
@@ -502,16 +502,20 @@ void cards_took_player_damage(CombatState& s) noexcept {
 // pump's hp<=0 check drives the COMBAT_OVER transition.)
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                int strength_mult,
-               DamageType type) noexcept {
+               DamageType type, bool pure, bool source_null) noexcept {
     if (tgt != kActorPlayer && tgt >= kMonsterCap) {
         return;
     }
     // THORNS / HP_LOSS damage skips the NORMAL-only power pipeline (every skeleton
     // applyPowers hook is `if (type == NORMAL)` in the Java): a Vulnerable attacker
     // does NOT amplify reflected Thorns, and player Strength/Weak do not scale it.
-    // NORMAL damage runs the full DamageInfo.applyPowers pipeline, carrying the
-    // Strength multiplier (Heavy-Blade-style attacks).
-    const int out = (type == DamageType::NORMAL)
+    // A PURE item (kDamagePure -- createDamageMatrix(amount, true), DamageInfo.
+    // java:126-136) skips the pipeline too, whatever its type: applyPowers is
+    // never called on it, so no float op runs at all (the surviving NORMAL
+    // non-pure path is untouched -- FP contract preserved by omission, not
+    // reordering). NORMAL non-pure damage runs the full DamageInfo.applyPowers
+    // pipeline, carrying the Strength multiplier (Heavy-Blade-style attacks).
+    const int out = (type == DamageType::NORMAL && !pure)
                         ? compute_damage(s, src, tgt, base, strength_mult)
                         : (base < 0 ? 0 : base);
     int16_t* hp = actor_hp(s, tgt);
@@ -545,23 +549,38 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // BEFORE the victim's onAttackedToChangeDamage (AbstractMonster.java:639-643
     // / AbstractPlayer.java:1399-1403). The Boot -- see apply_boot for why this
     // is a post-block site, which is the opposite of what the hook's name
-    // suggests.
-    dmg = apply_boot(s, src, dmg, type);
+    // suggests. A null-source hit skips it: the call-site gate is
+    // `info.owner == AbstractDungeon.player` (AbstractMonster.java:639), which
+    // a null owner fails -- src still reads kActorPlayer for a null-source item
+    // (the queue slot has no null encoding), so the bit is what carries it.
+    if (!source_null) {
+        dmg = apply_boot(s, src, dmg, type);
+    }
     // The victim's powers' onAttackedToChangeDamage (AbstractPlayer.java:
-    // 1412-1415), between decrementBlock and the onAttacked fan-out. Buffer.
+    // 1412-1415), between decrementBlock and the onAttacked fan-out. Buffer --
+    // whose Java body has NO owner test (BufferPower.java:41-47), so a
+    // null-source hit still spends it.
     dmg = apply_buffer(s, tgt, dmg);
     // onAttacked (AbstractPlayer.damage:1425-1426): the VICTIM's powers fire on a
     // NORMAL attack from a DISTINCT attacker -- AFTER decrementBlock and REGARDLESS
     // of whether damage penetrated (Thorns reflects even a fully-blocked hit). A
     // THORNS/HP_LOSS incoming does NOT trigger onAttacked (ThornsPower's own type
-    // guard), so it is dispatched only for NORMAL damage with src != tgt. No-op
-    // unless a power binds ON_ATTACKED, so skeleton/relic-free DAMAGE is unchanged.
+    // guard), so it is dispatched only for NORMAL damage with src != tgt. A
+    // NULL-SOURCE NORMAL hit still dispatches -- the game's loop runs
+    // unconditionally and the `info.owner != null` gates live in the power
+    // BODIES, which read HookContext::source_null -- so a future
+    // owner-INsensitive body fires exactly as in the game. No-op unless a
+    // power binds ON_ATTACKED, so skeleton/relic-free DAMAGE is unchanged.
     if (type == DamageType::NORMAL && src != tgt) {
-        dispatch_on_attacked(s, tgt, src, dmg);
+        dispatch_on_attacked(s, tgt, src, dmg, source_null);
     }
     // The player's relics' onAttacked, then onLoseHpLast -- the last two
-    // modifiers before the HP write (AbstractPlayer.java:1430-1435).
-    dmg = apply_torii(s, tgt, dmg, type);
+    // modifiers before the HP write (AbstractPlayer.java:1430-1435). Torii's
+    // own gate includes `info.owner != null` (Torii.java:32); Tungsten Rod's
+    // onLoseHpLast has no owner test (TungstenRod.java:26-32).
+    if (!source_null) {
+        dmg = apply_torii(s, tgt, dmg, type);
+    }
     dmg = apply_tungsten_rod(s, tgt, dmg);
     const int old_hp = *hp;
     int new_hp = old_hp - dmg;
@@ -573,10 +592,13 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // for the HP actually lost, with the ATTACKER as source. Rupture's guard
     // (source == victim) means unblocked enemy damage does NOT grant Strength --
     // only self-inflicted (card) HP loss does; Plated Armor's guard also reads the
-    // damage `type` (it does not decrement on THORNS/HP_LOSS). No-op without those,
-    // so skeleton DAMAGE is unchanged.
+    // damage `type` (it does not decrement on THORNS/HP_LOSS) AND
+    // `info.owner != null` (PlatedArmorPower.java:58), which is why the
+    // null-source bit rides along. No-op without those, so skeleton DAMAGE is
+    // unchanged.
     const int hp_lost = old_hp - new_hp;
-    dispatch_was_hp_lost(s, tgt, src, hp_lost, static_cast<uint8_t>(type));
+    dispatch_was_hp_lost(s, tgt, src, hp_lost, static_cast<uint8_t>(type),
+                         source_null);
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
     }
