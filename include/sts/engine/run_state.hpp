@@ -153,6 +153,11 @@ struct RunState {
 
     // -- placeholders (design doc §4.3), not exercised by the skeleton --
     uint16_t boss_ids[kBossIdCap];    // one boss id per act (0 = unset)
+    // The game's three run-scoped key booleans (Settings.hasEmeraldKey /
+    // hasRubyKey / hasSapphireKey -- reset per run, carried by the save file),
+    // packed as the kKey* bits declared below the struct. The RUBY bit has a
+    // live writer: the campfire's RecallOption (rest_sites.hpp,
+    // CampfireUI.java:94-96 -> CampfireRecallEffect -> ObtainKeyEffect).
     uint8_t keys;                     // emerald/ruby/sapphire key bitflags
     uint8_t pad_keys;                 // explicit padding
     uint32_t event_flags;             // one-shot event *fired* bitset (Stage B)
@@ -242,5 +247,13 @@ static_assert(std::is_trivially_copyable_v<RunState>,
               "snapshot = memcpy)");
 static_assert(sizeof(RunState) <= 8192,
               "RunState exceeds its 8 KB budget (design doc §4.3)");
+
+// Bit assignment for RunState::keys. The game stores three independent
+// booleans (Settings.hasEmeraldKey / hasRubyKey / hasSapphireKey); the packing
+// order here is this engine's own and is append-only like every shared
+// encoding.
+inline constexpr uint8_t kKeyEmerald = 1u << 0;
+inline constexpr uint8_t kKeyRuby = 1u << 1;
+inline constexpr uint8_t kKeySapphire = 1u << 2;
 
 }  // namespace sts::engine

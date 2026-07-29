@@ -366,3 +366,50 @@ gold class (c) x4, FairyPotion class (c) x2, STS01068's grid stop); b45+b47
 twelve and the bottle seven byte-identical to the section above. Full-output
 diff between the two corpus runs shows exactly the two artifacts above
 changed, both to CLEAN.
+
+## `wave3-followup` — RecallOption modelled; the `Recall` stops are gone (2026-07-28)
+
+The class-(c) frontier from stage 2 is closed. `RecallOption`
+(RecallOption.java; CampfireUI.java:94-96) is now a real campfire button:
+
+- **Presence**: appended AFTER the veto sweep whenever
+  `Settings.isFinalActAvailable && !Settings.hasRubyKey`. isFinalActAvailable
+  is PROFILE-derived (the AND of all three characters' _WIN prefs,
+  Settings.java:642) and TRUE for the frozen capture profile, so the engine
+  carries it as the profile constant `kFinalActAvailable` (rest_sites.hpp) on
+  the same footing as the fixed A20; hasRubyKey is the run's `kKeyRuby` bit in
+  the EXISTING `RunState.keys` bitfield (no new field, no schema question —
+  the placeholder gained its first live writer and its bit constants).
+- **Effect** (RecallOption.useOption -> CampfireRecallEffect.java:39-53 ->
+  ObtainKeyEffect): the run records the RED key and the room COMPLETES — the
+  campfire action is spent, no rest or smith at that site.
+- **The ordering consequence nobody had modelled**: CampfireUI's cannotProceed
+  auto-complete check (:97-104) runs AFTER the append, so a
+  boss-relic-locked campfire does NOT auto-complete while the Ruby Key is
+  still on offer; the auto-complete path is reachable again once the key is
+  taken. Pinned by `RestSites.RecallSurvivesEveryVetoAndKeepsALockedCampfireOpen`
+  (the existing auto-complete pins now take the key first, faithfully).
+- **Harness**: the REST `choose` index space is the fork's USABLE-button list
+  (`getValidRestRoomButtons` filters to `button.usable`), not the sim's full
+  menu — every previously-replayed campfire was fully usable, so the identity
+  held by luck. The mapping now walks the capture's N to the N-th usable
+  ordinal and cross-checks the picked label ("rest"/"smith"/"lift"/"toke"/
+  "dig"/"recall" — class SimpleName minus "Option") against the sim's option
+  kind, stopping on any disagreement (`ReplayCommandMap.ARestChoose*` /
+  `ARestLabelThatContradictsTheSimsMenuStops`). `RunState.keys` is
+  differ-neutralized in `--replay` with the gap named: no capture surface
+  exposes the game's key booleans, so the capture side is structurally 0 —
+  the recall is validated by the sim walking past the spent campfire in
+  lockstep instead.
+- **Fuzz**: `MoveCat` 27 `RECALL` claimed (ledger namespace table updated;
+  COUNT = 28), weight below rest/smith so soaks still mostly camp.
+
+| Run | Before (stage-2 / union rows) | After | Delta |
+|---|---|---|---|
+| STS00052 | zero-diff over 79, stop seq 78 rest `Recall` | **CLEAN to run terminal, 97 records** | +18, frontier gone |
+| STS00054 | zero-diff over 123, stop seq 122 rest `Recall` | **CLEAN to run terminal, 155 records** | +32, frontier gone |
+
+**b45+b47 is now `--- 12 file(s), 0 not clean ---`** — the first time the
+whole twelve-artifact corpus replays CLEAN to terminal. G6-main thirty and
+the bottle seven byte-identical to the previous section (10 / 3 not clean,
+same rows); full-output diff shows exactly the two artifacts above changed.

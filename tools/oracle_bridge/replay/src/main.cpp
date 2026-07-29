@@ -263,6 +263,15 @@ void neutralize_incomparable(RunState& s) noexcept {
     // the gap named rather than hidden: it comes back the moment `run_begin`
     // records `boss_list[0]`, which is a run-layer change and not this tool's.
     for (auto& b : s.boss_ids) b = 0;
+    // `keys` -- the OPPOSITE gap: the SIM writes the Ruby bit when a capture's
+    // recall press is replayed (RestOptionKind::RECALL), but neither
+    // CommunicationMod's game_state nor the fork's oracle block exposes the
+    // run's key booleans, so the translator has nothing to write and the
+    // capture side is structurally 0. The recall itself IS still validated --
+    // the sim must walk past the spent campfire exactly as the capture does,
+    // or every later record diverges. The field comes back if the fork ever
+    // emits the three Settings.has*Key booleans.
+    s.keys = 0;
 }
 
 // The floor-0 / merchant subset of the above. `map[]` is still unavailable from

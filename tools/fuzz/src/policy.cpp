@@ -73,6 +73,7 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::EVENT_GRID: return "event_grid";
         case MoveCat::CHOICE_CONFIRM: return "choice_confirm";
         case MoveCat::SHOP: return "shop";
+        case MoveCat::RECALL: return "recall";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -367,6 +368,9 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                             break;
                         case engine::RestOptionKind::DIG:
                             cat = MoveCat::DIG;
+                            break;
+                        case engine::RestOptionKind::RECALL:
+                            cat = MoveCat::RECALL;
                             break;
                     }
                     s.add(make_action(ActionVerb::CHOOSE, i), cat);
@@ -687,6 +691,11 @@ struct CardScore {
             // walked through -- but the Proceed that leaves shares the bucket,
             // so an unaffordable shop still exits on the first pick.
             return kind == PolicyKind::HOARD_GOLD ? 10 : 100;
+        case MoveCat::RECALL:
+            // Below the rest/smith weights: taking the key forfeits the whole
+            // campfire, so a soak should mostly camp -- but the branch (and the
+            // no-Recall menu behind it) still needs traffic.
+            return 25;
         case MoveCat::COUNT:
             break;
     }

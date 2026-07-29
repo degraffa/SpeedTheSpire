@@ -189,10 +189,19 @@ RestMenu build_rest_menu(const RunState& rs) noexcept {
             menu.entries[i].usable = false;
         }
     }
-    // RecallOption (CampfireUI.java:94-96) is appended AFTER the sweep and is
-    // therefore never vetoed -- but it needs Settings.isFinalActAvailable and a
-    // missing Ruby Key, both Act-4 concerns with no S1 representation, so it is
-    // deliberately absent rather than modelled as always-off.
+    // RecallOption (CampfireUI.java:94-96) is appended AFTER the sweep, so it
+    // is never vetoed and always usable. The gate is
+    // `Settings.isFinalActAvailable && !Settings.hasRubyKey`:
+    // isFinalActAvailable is the profile constant (kFinalActAvailable,
+    // rest_sites.hpp) and hasRubyKey is the run's kKeyRuby bit. NOTE the
+    // ordering consequence: the cannotProceed check that auto-completes an
+    // all-unusable campfire (CampfireUI.java:97-104, applied at rest-room
+    // entry in run_advance.cpp) runs AFTER this append, so a
+    // boss-relic-locked campfire stays OPEN while the Ruby Key is still on
+    // offer.
+    if (kFinalActAvailable && (rs.keys & kKeyRuby) == 0u) {
+        push_option(menu, RestOptionKind::RECALL, true);
+    }
     return menu;
 }
 

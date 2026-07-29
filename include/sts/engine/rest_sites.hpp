@@ -48,10 +48,25 @@ enum class RestOptionKind : uint8_t {
     LIFT = 2,
     TOKE = 3,
     DIG = 4,
+    // The Ruby Key button (RecallOption.java; CampfireUI.java:94-96): appended
+    // AFTER the veto sweep whenever the final act is available and the run's
+    // Ruby Key is untaken, always usable. Pressing it obtains the RED key and
+    // completes the room -- the campfire action is spent
+    // (RecallOption.useOption -> CampfireRecallEffect.java:39-53 ->
+    // ObtainKeyEffect: Settings.hasRubyKey = true).
+    RECALL = 5,
 };
 
-// Rest + Smith + at most one option from each owned relic.
-inline constexpr int kRestOptionCap = 2 + kRelicCap;
+// Settings.isFinalActAvailable (Settings.java:642): the AND of all three
+// characters' profile _WIN prefs -- PROFILE-derived and constant for a whole
+// run. The frozen capture profile has it TRUE (every captured rest site lists
+// the Recall button third), so the engine carries it as a profile constant on
+// the same footing as the skeleton's fixed A20 (kMonsterAscension). A profile
+// without the final act simply never appends the button.
+inline constexpr bool kFinalActAvailable = true;
+
+// Rest + Smith + at most one option from each owned relic, + Recall.
+inline constexpr int kRestOptionCap = 2 + kRelicCap + 1;
 
 struct RestOptionEntry {
     uint8_t kind;         // RestOptionKind

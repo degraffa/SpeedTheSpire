@@ -873,20 +873,70 @@ TEST(ReplayCommandMap, AShopRowTheSimHasNoUnsoldSlotForStopsWithBothIds) {
 
 // --- the campfire ------------------------------------------------------------
 
-// `build_rest_menu` (rest_sites.cpp) deliberately omits RecallOption -- the Ruby
-// Key button, appended after CampfireUI's veto sweep, with no S1 Act-4 content
-// behind it. Every capture from this profile lists it third, and pressing it
-// used to be an ILLEGAL CHOOSE, which the run layer defines as a non-corrupting
-// NO-OP: the sim stayed parked on the campfire while the capture walked on, and
-// the first evidence was a `floor` field a dozen records later. STS00052 (seq
-// 78) and STS00054 (seq 122) both did exactly that.
-TEST(ReplayCommandMap, ARestOptionTheSimDoesNotOfferStopsAndNamesRecall) {
+// THE CAPTURE'S REST INDEX SPACE IS THE USABLE-BUTTON LIST: the fork's
+// getValidRestRoomButtons filters CampfireUI's buttons to `usable`, while the
+// sim's ordinal space is the FULL built menu, locked buttons included. Every
+// campfire the corpus replayed before the Recall modelling was fully usable,
+// so the identity mapping held by luck; a Coffee-Dripper campfire breaks it
+// (choice_list ["smith","recall"] while the sim's menu is [rest, smith,
+// recall]). The mapping walks the capture's N to the N-th usable ordinal and
+// cross-checks the picked label against the sim's option kind.
+
+// A rest site whose Smith is unusable (empty deck): the sim's menu is
+// [REST(usable), SMITH(unusable), RECALL(usable)], the capture's list is
+// ["rest", "recall"].
+[[nodiscard]] RunController at_campfire_menu() {
     RunController rc = at_phase(RunPhase::REST_SITE);
+    rc.rest.screen = static_cast<uint8_t>(RestScreen::MENU);
+    return rc;
+}
+
+TEST(ReplayCommandMap, ARestChooseIsTranslatedThroughTheUsableButtonList) {
+    const RunController rc = at_campfire_menu();
     ScreenInfo s;
     s.screen_type = "REST";
-    const MappedCommand m = map_command(rc, s, "choose 2");
+    s.choice_list = {"rest", "recall"};
+    const MappedCommand m = map_command(rc, s, "choose 1");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
+    EXPECT_EQ(action_arg0(m.actions[0]), 2)
+        << "the capture's second usable button is the sim's third ordinal "
+           "(the unusable Smith holds no capture index)";
+}
+
+TEST(ReplayCommandMap, ARestChooseOffTheUsableListStops) {
+    const RunController rc = at_campfire_menu();
+    ScreenInfo s;
+    s.screen_type = "REST";
+    s.choice_list = {"rest", "recall"};
+    const MappedCommand m = map_command(rc, s, "choose 7");
     EXPECT_EQ(m.kind, MapKind::UNMAPPED);
-    EXPECT_NE(m.reason.find("RecallOption"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("usable list"), std::string::npos) << m.reason;
+}
+
+// Negative control: a capture label that names a different button than the
+// sim's matching usable ordinal is a desync between the two campfires, never
+// something to press through.
+TEST(ReplayCommandMap, ARestLabelThatContradictsTheSimsMenuStops) {
+    const RunController rc = at_campfire_menu();
+    ScreenInfo s;
+    s.screen_type = "REST";
+    s.choice_list = {"rest", "toke"};
+    const MappedCommand m = map_command(rc, s, "choose 1");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("toke"), std::string::npos) << m.reason;
+    EXPECT_NE(m.reason.find("recall"), std::string::npos) << m.reason;
+}
+
+TEST(ReplayCommandMap, ARestChooseWhileTheSimIsElsewhereStops) {
+    ScreenInfo s;
+    s.screen_type = "REST";
+    s.choice_list = {"rest"};
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::MAP_CHOICE), s, "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("MAP_CHOICE"), std::string::npos) << m.reason;
 }
 
 TEST(ReplayCommandMap, ARestProceedAfterTheSimLeftTheCampfireIsAUiBounce) {

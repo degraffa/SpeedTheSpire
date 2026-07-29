@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include "sts/engine/rest_sites.hpp"  // RestMenu / RestOptionKind (label check)
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_deck.hpp"  // MasterBottleKind (the bottle overlay)
 #include "sts/engine/run_state.hpp"
@@ -494,6 +495,24 @@ struct MatchPlayScreen {
     return s;
 }
 
+// The fork names a campfire button by its class SimpleName minus "Option",
+// lowercased (ChoiceScreenUtils.getCampfireOptionName): RestOption -> "rest",
+// SmithOption -> "smith", LiftOption -> "lift", TokeOption -> "toke",
+// DigOption -> "dig", RecallOption -> "recall". The REST branch checks a
+// capture's picked label against the sim's option kind through this table.
+[[nodiscard]] inline const char* rest_option_fork_label(
+    sts::engine::RestOptionKind k) noexcept {
+    switch (k) {
+        case sts::engine::RestOptionKind::REST: return "rest";
+        case sts::engine::RestOptionKind::SMITH: return "smith";
+        case sts::engine::RestOptionKind::LIFT: return "lift";
+        case sts::engine::RestOptionKind::TOKE: return "toke";
+        case sts::engine::RestOptionKind::DIG: return "dig";
+        case sts::engine::RestOptionKind::RECALL: return "recall";
+    }
+    return "?";
+}
+
 enum class ShopPick : uint8_t { NONE, COLORED, COLORLESS, RELIC, POTION, PURGE };
 
 struct ShopTarget {
@@ -828,37 +847,62 @@ struct ShopTarget {
         const bool in_rest = rc.phase == static_cast<uint8_t>(RunPhase::REST_SITE);
         if (verb == "choose") {
             const int i = arg(1);
-            // THE CAMPFIRE'S MENU CAN BE LONGER THAN THE SIM'S. `build_rest_menu`
-            // (rest_sites.cpp) deliberately omits `RecallOption`
-            // (CampfireUI.java:94-96) -- it is the Ruby Key button, appended
-            // after the veto sweep, and the run layer has no Act-4 key content.
-            // The capture profile HAS the final act available, so every captured
-            // rest site lists `["rest", "smith", "recall"]` and a capture that
-            // presses index 2 is naming a button the sim does not have.
-            //
-            // Left unchecked, `CHOOSE 2` is simply illegal at the run layer and
-            // therefore a NO-OP -- the sim silently stays parked on the campfire
-            // while the capture walks on, and the first evidence is a `floor`
-            // field a dozen records later with no hint of what caused it. That
-            // is exactly what STS00052 (seq 78) and STS00054 (seq 122) did.
-            // Ask the mask instead and name the button.
-            if (in_rest) {
-                RunActionMask mask{};
-                legal_actions(rc, mask);
-                if (i < 0 || i >= kRestOptionCap || !mask.can_choose_rest[i]) {
+            // THE CAPTURE'S INDEX SPACE IS THE USABLE-BUTTON LIST. The fork's
+            // `getValidRestRoomButtons` (ChoiceScreenUtils.java) filters
+            // CampfireUI's button list to `button.usable`, so a locked button
+            // (Coffee Dripper's Rest, an unusable Smith) occupies NO position
+            // in the capture's `choose N` -- while the sim's ordinal space is
+            // the FULL built menu, locked buttons included, exactly as
+            // CampfireUI keeps them. Translate N to the N-th USABLE ordinal.
+            // (Every campfire the corpus had replayed before the Recall
+            // landing happened to be fully usable, which is why the identity
+            // held.) The fork's label for a button is its class SimpleName
+            // minus "Option", lowercased -- "rest" / "smith" / "lift" /
+            // "toke" / "dig" / "recall" -- so when the capture carries a
+            // choice_list the picked label is CHECKED against the sim's
+            // option kind rather than assumed.
+            if (!in_rest) {
+                m.reason = "rest `choose " + std::to_string(i) +
+                           "` arrived while the sim is in " +
+                           std::string(phase_name(rc.phase)) +
+                           ", not a rest site";
+                return m;
+            }
+            RunActionMask mask{};
+            legal_actions(rc, mask);
+            int ordinal = -1;
+            int seen = 0;
+            for (int k = 0; k < kRestOptionCap && ordinal < 0; ++k) {
+                if (!mask.can_choose_rest[k]) continue;
+                if (seen == i) ordinal = k;
+                ++seen;
+            }
+            if (i < 0 || ordinal < 0) {
+                m.reason = "rest `choose " + std::to_string(i) +
+                           "` is off the campfire's " + std::to_string(seen) +
+                           "-button usable list -- the two menus disagree";
+                return m;
+            }
+            const sts::engine::RestMenu menu =
+                sts::engine::build_rest_menu(rc.run);
+            if (ordinal < menu.count &&
+                i < static_cast<int>(s.choice_list.size())) {
+                const char* expect = rest_option_fork_label(
+                    static_cast<sts::engine::RestOptionKind>(
+                        menu.entries[ordinal].kind));
+                if (lower(s.choice_list[static_cast<std::size_t>(i)]) !=
+                    expect) {
                     m.reason = "rest `choose " + std::to_string(i) +
-                               "` is not a campfire option the sim offers; the "
-                               "run layer models Rest/Smith plus the Girya, "
-                               "Peace Pipe and Shovel buttons, and DEFERS "
-                               "RecallOption (the Ruby Key button, "
-                               "rest_sites.cpp `build_rest_menu`), which every "
-                               "capture from this profile lists third";
+                               "` names \"" +
+                               s.choice_list[static_cast<std::size_t>(i)] +
+                               "\" but the sim's matching usable button is " +
+                               expect + "; the two campfires disagree";
                     return m;
                 }
             }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(i)));
+                                            static_cast<uint8_t>(ordinal)));
             return m;
         }
         if (verb == "proceed") {

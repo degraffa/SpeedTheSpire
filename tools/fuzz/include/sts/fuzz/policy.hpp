@@ -121,7 +121,12 @@ enum class MoveCat : uint8_t {
     // than a task taking them. What is lost is coverage resolution inside one
     // shop; legality and enumeration are exact either way.
     SHOP = 26,
-    COUNT = 27,
+    // The campfire's Ruby Key button (RestOptionKind::RECALL): taking it spends
+    // the whole campfire action and flips the run's kKeyRuby bit, so the soak
+    // needs to know it is reached -- and reached SEPARATELY from REST, whose
+    // ordinal it can share a menu with.
+    RECALL = 27,
+    COUNT = 28,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

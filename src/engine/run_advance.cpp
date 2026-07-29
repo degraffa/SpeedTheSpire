@@ -2102,6 +2102,18 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                             case RestOptionKind::DIG:
                                 open_dig_reward(rc);
                                 break;
+                            case RestOptionKind::RECALL:
+                                // CampfireRecallEffect.update
+                                // (CampfireRecallEffect.java:39-53): clear the
+                                // room's rewards (a rest room has none;
+                                // finish_rest_site resets rc.rewards anyway),
+                                // obtain the RED key (ObtainKeyEffect ->
+                                // Settings.hasRubyKey = true) and complete the
+                                // room -- the campfire action is spent, no
+                                // rest or smith at this site.
+                                rc.run.keys |= kKeyRuby;
+                                finish_rest_site(rc);
+                                break;
                         }
                     }
                 } else if (screen == RestScreen::SMITH) {

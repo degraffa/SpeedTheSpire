@@ -379,7 +379,7 @@ TEST(RestSites, MenuOrderAndAvailabilityMatrixMatchCampfireUi) {
         CardInstance{static_cast<uint16_t>(CardId::ASCENDERS_BANE), 0, 0, 0, 0};
 
     RestMenu menu = build_rest_menu(rc.run);
-    ASSERT_EQ(menu.count, 5);
+    ASSERT_EQ(menu.count, 6);
     EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[0].kind),
               RestOptionKind::REST);
     EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[1].kind),
@@ -390,11 +390,15 @@ TEST(RestSites, MenuOrderAndAvailabilityMatrixMatchCampfireUi) {
               RestOptionKind::LIFT);
     EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[4].kind),
               RestOptionKind::TOKE);
+    EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[5].kind),
+              RestOptionKind::RECALL)
+        << "the Ruby Key button is appended last (CampfireUI.java:94-96)";
     EXPECT_TRUE(menu.entries[0].usable);
     EXPECT_FALSE(menu.entries[1].usable);  // no upgradable cards
     EXPECT_TRUE(menu.entries[2].usable);
     EXPECT_FALSE(menu.entries[3].usable);  // Girya counter reached 3
     EXPECT_FALSE(menu.entries[4].usable);  // only unpurgeable Ascender's Bane
+    EXPECT_TRUE(menu.entries[5].usable);
 
     RunActionMask mask{};
     legal_actions(rc, mask);
@@ -403,6 +407,7 @@ TEST(RestSites, MenuOrderAndAvailabilityMatrixMatchCampfireUi) {
     EXPECT_TRUE(mask.can_choose_rest[2]);
     EXPECT_FALSE(mask.can_choose_rest[3]);
     EXPECT_FALSE(mask.can_choose_rest[4]);
+    EXPECT_TRUE(mask.can_choose_rest[5]);
 
     // One ordinary base card opens Smith and Toke, and lowering Girya opens
     // Lift; the menu shape/order does not move.
@@ -410,7 +415,7 @@ TEST(RestSites, MenuOrderAndAvailabilityMatrixMatchCampfireUi) {
         CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
     rc.run.relics[1].counter = 2;
     menu = build_rest_menu(rc.run);
-    ASSERT_EQ(menu.count, 5);
+    ASSERT_EQ(menu.count, 6);
     EXPECT_TRUE(menu.entries[1].usable);
     EXPECT_TRUE(menu.entries[3].usable);
     EXPECT_TRUE(menu.entries[4].usable);
@@ -428,16 +433,19 @@ TEST(RestSites, FusionHammerLocksSmithAndCoffeeDripperLocksRest) {
     rc.run.master_deck[0] =
         CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
 
-    // Baseline: an upgradeable deck and no boss relic -- both base buttons live.
+    // Baseline: an upgradeable deck and no boss relic -- both base buttons
+    // live. The trailing entry on every menu below is the always-usable Recall
+    // (this profile's Ruby Key is unclaimed); RecallSurvivesEveryVeto pins it,
+    // so these assertions stay about the two vetoes.
     RestMenu menu = build_rest_menu(rc.run);
-    ASSERT_EQ(menu.count, 2);
+    ASSERT_EQ(menu.count, 3);
     EXPECT_TRUE(menu.entries[0].usable);
     EXPECT_TRUE(menu.entries[1].usable);
 
     set_relics(rc.run,
                {RelicSlot{static_cast<uint16_t>(RelicId::FUSION_HAMMER), -1}});
     menu = build_rest_menu(rc.run);
-    ASSERT_EQ(menu.count, 2);
+    ASSERT_EQ(menu.count, 3);
     EXPECT_TRUE(menu.entries[0].usable) << "Fusion Hammer does not touch Rest";
     EXPECT_FALSE(menu.entries[1].usable) << "Smith is locked";
     // The button is still THERE -- CampfireUI keeps it in the list and only
@@ -456,7 +464,7 @@ TEST(RestSites, FusionHammerLocksSmithAndCoffeeDripperLocksRest) {
     set_relics(rc.run,
                {RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
     menu = build_rest_menu(rc.run);
-    ASSERT_EQ(menu.count, 2);
+    ASSERT_EQ(menu.count, 3);
     EXPECT_FALSE(menu.entries[0].usable) << "Rest is locked";
     EXPECT_TRUE(menu.entries[1].usable) << "Coffee Dripper does not touch Smith";
 
@@ -467,7 +475,7 @@ TEST(RestSites, FusionHammerLocksSmithAndCoffeeDripperLocksRest) {
                 RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1},
                 RelicSlot{static_cast<uint16_t>(RelicId::SHOVEL), -1}});
     menu = build_rest_menu(rc.run);
-    ASSERT_EQ(menu.count, 3);
+    ASSERT_EQ(menu.count, 4);
     EXPECT_FALSE(menu.entries[0].usable);
     EXPECT_FALSE(menu.entries[1].usable);
     EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[2].kind),
@@ -491,7 +499,11 @@ TEST(RestSites, ACampfireWithNoUsableOptionCompletesTheRoomOnEntry) {
 
     set_relics(rc.run,
                {RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
-    // Nothing upgradeable: one already-upgraded Strike.
+    // Nothing upgradeable: one already-upgraded Strike. The Ruby Key is
+    // already taken -- while it is still on offer the always-usable Recall
+    // button keeps the campfire open (RecallSurvivesEveryVeto... above), so
+    // the auto-complete is reachable only after a recall.
+    rc.run.keys |= kKeyRuby;
     rc.run.master_deck_count = 1;
     rc.run.master_deck[0] =
         CardInstance{static_cast<uint16_t>(CardId::STRIKE), 1, 0, 0, 0};
@@ -526,6 +538,7 @@ TEST(RestSites, ACampfireWithNoUsableOptionCompletesTheRoomOnEntry) {
         static_cast<uint8_t>(RoomType::Rest);
     set_relics(open.run,
                {RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
+    open.run.keys |= kKeyRuby;
     open.run.master_deck_count = 1;
     open.run.master_deck[0] =
         CardInstance{static_cast<uint16_t>(CardId::STRIKE), 0, 0, 0, 0};
@@ -554,9 +567,11 @@ TEST(RestSites, FeatherHealsAndTeaSetArmsEvenWhenTheCampfireAutoCompletes) {
                {RelicSlot{static_cast<uint16_t>(RelicId::ETERNAL_FEATHER), -1},
                 RelicSlot{static_cast<uint16_t>(RelicId::ANCIENT_TEA_SET), -1},
                 RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
-    // Nothing upgradeable (Smith unusable) + Coffee Dripper (Rest vetoed):
+    // Nothing upgradeable (Smith unusable) + Coffee Dripper (Rest vetoed) +
+    // the Ruby Key already taken (no Recall to keep the campfire open):
     // the campfire has no usable option. Five cards make the Feather heal
     // 5 / 5 * 3 = 3.
+    rc.run.keys |= kKeyRuby;
     rc.run.master_deck_count = 5;
     for (uint16_t i = 0; i < 5; ++i) {
         rc.run.master_deck[i] =
@@ -843,6 +858,97 @@ TEST(RestSites, CopiedControllersExposeIdenticalMasksAndTransitions) {
     step(b, lift);
     EXPECT_EQ(std::memcmp(&a, &b, sizeof(a)), 0);
     EXPECT_EQ(hash_state(a.run), hash_state(b.run));
+}
+
+// =============================================================================
+// RecallOption -- the Ruby Key button (CampfireUI.java:94-96)
+// =============================================================================
+//
+//     if (Settings.isFinalActAvailable && !Settings.hasRubyKey) {
+//         this.buttons.add(new RecallOption());
+//     }
+//
+// Appended AFTER the canUseCampfireOption veto sweep, so no relic can refuse
+// it and it is always usable. `isFinalActAvailable` is PROFILE-derived (all
+// three characters' _WIN prefs, Settings.java:642) and TRUE for the frozen
+// capture profile -- every captured rest site lists the third button -- so the
+// engine carries it as the compile-time profile constant kFinalActAvailable
+// (rest_sites.hpp). Pressing it (RecallOption.useOption ->
+// CampfireRecallEffect.update, CampfireRecallEffect.java:39-53) clears the
+// room's rewards, obtains the RED key (ObtainKeyEffect -> Settings.hasRubyKey
+// = true) and completes the room: the campfire action is SPENT -- no rest, no
+// smith at that site.
+
+TEST(RestSites, RecallIsAppendedLastAndRecordsTheRubyKey) {
+    RunController rc = enter_floor_one_rest();
+    const RestMenu menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 3);
+    EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[2].kind),
+              RestOptionKind::RECALL);
+    EXPECT_TRUE(menu.entries[2].usable);
+    EXPECT_EQ(rc.run.keys & kKeyRuby, 0);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_choose_rest[2]);
+
+    const int16_t hp_before = rc.run.hp;
+    step(rc, make_action(ActionVerb::CHOOSE, 2));
+    EXPECT_EQ(rc.run.keys & kKeyRuby, kKeyRuby) << "hasRubyKey = true";
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE))
+        << "the room completes -- the campfire action is spent";
+    EXPECT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::NONE));
+    EXPECT_EQ(rc.run.hp, hp_before) << "no rest heal rode along";
+}
+
+TEST(RestSites, ARestSiteAfterTheRubyKeyOffersNoRecall) {
+    RunController rc = enter_floor_one_rest();
+    rc.run.keys |= kKeyRuby;
+    const RestMenu menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 2) << "!Settings.hasRubyKey gates the append";
+    for (uint8_t i = 0; i < menu.count; ++i) {
+        EXPECT_NE(static_cast<RestOptionKind>(menu.entries[i].kind),
+                  RestOptionKind::RECALL);
+    }
+}
+
+// The append runs AFTER the sweep (CampfireUI.java:87-96), so both boss-relic
+// vetoes together still leave Recall usable -- and the cannotProceed check
+// (:97-104) then finds a usable button, so a locked campfire does NOT
+// auto-complete while the Ruby Key is still on offer. The auto-complete path
+// is reachable again once the key is taken, which is what
+// ACampfireWithNoUsableOptionCompletesTheRoomOnEntry pins.
+TEST(RestSites, RecallSurvivesEveryVetoAndKeepsALockedCampfireOpen) {
+    RunController rc = run_begin(kSeed, 0);
+    rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
+    step(rc, make_action(ActionVerb::CHOOSE));
+    const uint8_t x = first_start_column(rc);
+    ASSERT_NE(x, 0xFF);
+    rc.run.map[run_state_map_index(x, 0)].room_type =
+        static_cast<uint8_t>(RoomType::Rest);
+    set_relics(rc.run,
+               {RelicSlot{static_cast<uint16_t>(RelicId::FUSION_HAMMER), -1},
+                RelicSlot{static_cast<uint16_t>(RelicId::COFFEE_DRIPPER), -1}});
+    rc.run.master_deck_count = 1;
+    rc.run.master_deck[0] =
+        CardInstance{static_cast<uint16_t>(CardId::STRIKE), 1, 0, 0, 0};
+
+    const RestMenu menu = build_rest_menu(rc.run);
+    ASSERT_EQ(menu.count, 3);
+    EXPECT_FALSE(menu.entries[0].usable) << "Rest vetoed by Coffee Dripper";
+    EXPECT_FALSE(menu.entries[1].usable) << "Smith vetoed by Fusion Hammer";
+    EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[2].kind),
+              RestOptionKind::RECALL);
+    EXPECT_TRUE(menu.entries[2].usable) << "appended after the sweep";
+    EXPECT_TRUE(rest_menu_has_usable_option(menu));
+
+    step(rc, make_action(ActionVerb::CHOOSE, x));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::REST_SITE))
+        << "a usable Recall keeps the campfire open";
+
+    step(rc, make_action(ActionVerb::CHOOSE, 2));
+    EXPECT_EQ(rc.run.keys & kKeyRuby, kKeyRuby);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
 }  // namespace
