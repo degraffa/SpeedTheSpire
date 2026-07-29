@@ -254,7 +254,7 @@
   cost: 1
   target: ENEMY
   flags: []
-  provenance: "BodySlam.use (BodySlam.java:95-98) -> baseDamage = p.currentBlock; DamageAction(damage). Damage == current player block (then the normal Strength/Vulnerable pipeline). upgrade() only upgradeBaseCost(0) (BodySlam.java:127-131) -> cost 1 -> 0, program unchanged."
+  provenance: "BodySlam.use (BodySlam.java:36-42 in an 80-line file; the former :95-98 was bad-batch drift) -> baseDamage = p.currentBlock; DamageAction(damage). Damage == current player block (then the normal Strength/Vulnerable pipeline). applyPowers (:45-51) recomputes baseDamage from currentBlock the same way, which is what makes the previewed number track block before the play. upgrade() only upgradeBaseCost(0) (BodySlam.java:68-73) -> cost 1 -> 0, program unchanged."
   effects:
     - {op: DAMAGE_BLOCK, target: CARD_TARGET}
   upgraded_cost: 0
@@ -286,7 +286,7 @@
   cost: 1
   target: ALL_ENEMY
   flags: []
-  provenance: "Cleave.use (Cleave.java:248-252) -> DamageAllEnemiesAction(multiDamage). isMultiDamage; baseDamage 8 (Cleave.java:243-244); upgradeDamage(3) -> 11 (Cleave.java:255-260). Separate DamageInfo per live monster (execute-time ALL_ENEMY fan-out)."
+  provenance: "Cleave.use (Cleave.java:37-41 in a 56-line file; the former :248-252 was bad-batch drift) -> DamageAllEnemiesAction(multiDamage). isMultiDamage; baseDamage 8 (Cleave.java:32-33); upgradeDamage(3) -> 11 (Cleave.java:44-49). Separate DamageInfo per live monster (execute-time ALL_ENEMY fan-out)."
   effects:
     - {op: DAMAGE, target: ALL_ENEMY, amount: 8}
   upgraded:
@@ -301,7 +301,7 @@
   cost: 2
   target: ENEMY
   flags: []
-  provenance: "Clothesline.use (Clothesline.java:305-308) -> DamageAction(12), ApplyPowerAction(WeakPower, magic). baseDamage 12 / magic 2 (Clothesline.java:300-301); upgradeDamage(2)->14, upgradeMagicNumber(1)->3 (Clothesline.java:311-317)."
+  provenance: "Clothesline.use (Clothesline.java:37-40 in a 56-line file; the former :305-308 was bad-batch drift) -> DamageAction(12), ApplyPowerAction(WeakPower, magic). baseDamage 12 / magic 2 (Clothesline.java:32-33); upgradeDamage(2)->14, upgradeMagicNumber(1)->3 (Clothesline.java:43-49)."
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 12}
     - {op: APPLY_POWER, target: CARD_TARGET, amount: 2, power: WEAK}
@@ -318,7 +318,7 @@
   cost: 1
   target: ENEMY
   flags: []
-  provenance: "Headbutt.use (Headbutt.java:360-363) -> DamageAction(9), DiscardPileToTopOfDeckAction(p). DiscardPileToTopOfDeckAction.update: discard empty -> nothing; size 1 -> auto-move that card to top of draw; size >= 2 -> gridSelect 1 card -> top of draw. baseDamage 9 (Headbutt.java:356); upgradeDamage(3) -> 12 (Headbutt.java:366-371)."
+  provenance: "Headbutt.use (Headbutt.java:35-38 in a 53-line file; the former :360-363 was bad-batch drift) -> DamageAction(9), DiscardPileToTopOfDeckAction(p). DiscardPileToTopOfDeckAction.update: discard empty -> nothing; size 1 -> auto-move that card to top of draw; size >= 2 -> gridSelect 1 card -> top of draw. baseDamage 9 (Headbutt.java:31); upgradeDamage(3) -> 12 (Headbutt.java:41-46)."
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 9}
     - {op: CHOOSE_CARD, target: SELF, choose: discard_to_draw_top, amount: 1}
@@ -350,7 +350,7 @@
   cost: 1
   target: ENEMY
   flags: []
-  provenance: "IronWave.use (IronWave.java:504-510) -> GainBlockAction(block) FIRST, then DamageAction(damage). baseDamage 5 / baseBlock 5 (IronWave.java:499-500); upgradeDamage(2)->7, upgradeBlock(2)->7 (IronWave.java:513-520)."
+  provenance: "IronWave.use (IronWave.java:39-46 in a 62-line file; the former :504-510 was bad-batch drift) -> GainBlockAction(block) FIRST, then DamageAction(damage) (a WaitAction and a null-guarded VFXAction sit between them, :41-44). baseDamage 5 / baseBlock 5 (IronWave.java:34-35); upgradeDamage(2)->7, upgradeBlock(2)->7 (IronWave.java:49-55)."
   effects:
     - {op: BLOCK, target: SELF, amount: 5}
     - {op: DAMAGE, target: CARD_TARGET, amount: 5}
@@ -383,7 +383,7 @@
   cost: 1
   target: ALL_ENEMY
   flags: []
-  provenance: "SwordBoomerang.use (SwordBoomerang.java:658-662) -> magicNumber x AttackDamageRandomEnemyAction(this). Each action re-rolls getRandomMonster(cardRandomRng) at execute -> one card_random_rng draw per hit, excluding dead. baseDamage 3 / magic 3 (:653-654); upgradeMagicNumber(1) -> 4 hits (:664-670). Card target ALL_ENEMY but effect is random-per-hit (no dequeue roll)."
+  provenance: "SwordBoomerang.use (SwordBoomerang.java:33-37 in a 52-line file; the former :658-662 was bad-batch drift) -> magicNumber x AttackDamageRandomEnemyAction(this). Each action re-rolls getRandomMonster(cardRandomRng) at execute -> one card_random_rng draw per hit, excluding dead. baseDamage 3 / magic 3 (:28-29); upgradeMagicNumber(1) -> 4 hits (:40-45). Card target ALL_ENEMY but effect is random-per-hit (no dequeue roll)."
   effects:
     - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
     - {op: DAMAGE, target: RANDOM_ENEMY, amount: 3}
@@ -403,7 +403,7 @@
   cost: 1
   target: ALL_ENEMY
   flags: []
-  provenance: "ThunderClap.use (ThunderClap.java:718-728) -> DamageAllEnemiesAction(multiDamage), then ApplyPowerAction(VulnerablePower, 1) on every monster. isMultiDamage; baseDamage 4 (:713-714); upgradeDamage(3) -> 7 (:730-736). Vulnerable 1 to all (both base and upgraded)."
+  provenance: "ThunderClap.use (ThunderClap.java:40-50 in a 65-line file; the former :718-728 was bad-batch drift) -> DamageAllEnemiesAction(multiDamage), then ApplyPowerAction(VulnerablePower, 1) on every monster -- and note the Vulnerable loop (:47-49) has NO isDeadOrEscaped guard, unlike the cosmetic lightning-VFX loop just above it (:42-45). isMultiDamage; baseDamage 4 (:35-36); upgradeDamage(3) -> 7 (:53-58). Vulnerable 1 to all (both base and upgraded)."
   effects:
     - {op: DAMAGE, target: ALL_ENEMY, amount: 4}
     - {op: APPLY_POWER, target: ALL_ENEMY, amount: 1, power: VULNERABLE}
@@ -421,7 +421,7 @@
   target: ENEMY
   flags: []
   strike: true
-  provenance: "TwinStrike.use (TwinStrike.java:780-782) -> DamageAction(damage) TWICE. baseDamage 5 (:775); upgradeDamage(2) -> 7 (:785-791). tags STRIKE (:776)."
+  provenance: "TwinStrike.use (TwinStrike.java:36-39 in a 54-line file; the former :780-782 was bad-batch drift) -> DamageAction(damage) TWICE. baseDamage 5 (:31); upgradeDamage(2) -> 7 (:42-47). tags STRIKE (:32)."
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 5}
     - {op: DAMAGE, target: CARD_TARGET, amount: 5}
@@ -439,7 +439,7 @@
   target: ENEMY
   flags: []
   strike: true
-  provenance: "WildStrike.use (WildStrike.java:838-841) -> DamageAction(12), MakeTempCardInDrawPileAction(new Wound(), 1, randomSpot=true, autoPosition=true) -> a fresh (base) Wound at a random draw-pile spot (one card_random_rng draw). baseDamage 12 (:832); upgradeDamage(5) -> 17 (:843-849). tags STRIKE (:833)."
+  provenance: "WildStrike.use (WildStrike.java:39-42 in a 57-line file; the former :838-841 was bad-batch drift) -> DamageAction(12), MakeTempCardInDrawPileAction(new Wound(), 1, randomSpot=true, autoPosition=true) -> a fresh (base) Wound at a random draw-pile spot (one card_random_rng draw). baseDamage 12 (:33); upgradeDamage(5) -> 17 (:45-50). tags STRIKE (:34)."
   effects:
     - {op: DAMAGE, target: CARD_TARGET, amount: 12}
     - {op: MAKE_CARD, card: WOUND, pile: DRAW_RANDOM, amount: 1}
