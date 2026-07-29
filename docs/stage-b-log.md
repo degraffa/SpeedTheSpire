@@ -5591,3 +5591,77 @@ crash.
   had passed 1748/1748 before the final narrow GRID policy fix; the final-tree
   Debug rerun, doc link/stale-number checks and `git diff --check` are recorded
   in the landing commit's verification handoff.
+
+---
+
+<a id="b54"></a>
+
+### B5.4 `[x]` Verification report + CI corpus
+**Deps:** B5.2 · **Spec:** design §7.4-7.5, §7.1(1)
+**Deliverables:** `tools/verify_report/` (diffs per million actions,
+divergence inventory, per-registry-row oracle-sighting + tier coverage join
+via `game_id`); latest report committed under `docs/verification/`; the
+curated 50-seed CI corpus (compressed translated traces +
+zero-diff-replay gtest wired into the existing CI matrix).
+**Acceptance:** CI runs the 50-seed replay smoke in seconds and fails on an
+injected synthetic divergence (proven once, then reverted); report
+regenerates deterministically from campaign artifacts.
+**Log:** `generate_report.py` consumes the B5.2 aggregation schema without
+weakening its classifications. It validates complete campaign identity and
+source hashes, rejects conflicting duplicate seed identities, counts exact
+`game_id` string occurrences only inside campaign states, and joins the same
+registry rows to `check_tier2_coverage.py`'s named passing-test attribution.
+The deterministic JSON/Markdown/CSV outputs are committed under
+`docs/verification/`.
+
+The latest report combines the two provenance-compatible B5.2 campaigns
+`b52_accept_locked_20260729_71000_71049` and
+`b52_accept_20260729_70000_70049`, plus the provenance-compatible B5.3
+200-seed harvest `b53_full_act1_20260729`. Their seed ranges do not overlap:
+**300 distinct seeds**, **16,094 captured actions**, **12,888 replay-clean
+actions**, and **12,815 strict zero-diff actions**. Every one of the 14 B5.2
+non-clean runs has an exact `(campaign, seed, classification)` row in
+`divergence_dispositions.json`, while the B5.3 harvest's 33 whole-run replay
+findings are deliberately still **untriaged** here: B5.3's distributional
+acceptance did not classify their mechanics, and B5.4 does not infer that a
+similar-looking field is the same root cause. The standing stolen-gold
+deviation is the only standing-deviation row; no new mechanic was classified.
+The report states the current G7 shortfall literally: 1,700 seeds and 987,185
+strict zero-diff actions, and both zero-untriaged and volume status are **NO**.
+At the fresh debug acceptance revision all 452 registry rows retained named
+passing tier-2 attribution; 28 `game_id` rows had zero oracle sightings in
+these three campaigns and remain the working-to-fuzz list. `a20.yaml` has no
+`game_id`, so those rows report `n/a` rather than receiving invented
+sightings.
+
+The committed `act1_a20_50.tar.gz` is a deterministic 798,559-byte archive:
+all 40 clean/race-free runs from the locked campaign plus the first 10
+eligible clean/race-free runs from the exercise campaign. Its manifest binds
+50 distinct seeds to campaign identity, action count, source-artifact hash,
+translated-trace hash/header, and the archive SHA-256
+`786767d40a9033296d923137b127e1cf986896e0111cae29a5883cc070646007`.
+The archive contains both the source records needed to drive the existing
+whole-run harness and B5.2's translated combat traces. The smoke wrapper
+checks every hash/header and rejects unsafe or extra archive members before
+running `replay_run_diff --replay --stop-on-diff`.
+
+**Synthetic-divergence proof:** the permanent
+`OracleCorpusReplay.InjectedSyntheticDivergenceFailsLoud` test changes
+`game_state.current_hp` in an extracted temporary copy of the first corpus
+record, invokes the same replay path, and requires its nonzero result. The
+final debug acceptance run passed that guard in 1.08 seconds; no divergent corpus
+member is committed. `OracleCorpusReplay.FiftySeedCorpusReplaysZeroDiff`
+replayed all 50 committed runs clean in 8.33 seconds.
+
+**Verification:** `tools\wsl_run.cmd debug asan` passed all 1,751 registered
+tests in both presets,
+including both corpus tests and `verify_report_python_test`; the latter
+covers deterministic generation, exact `game_id` joins, duplicate policy,
+explicit-disposition semantics, archive integrity and corruption rejection.
+`tools\wsl_run.cmd --script
+tools/verify_report/check_tier2_coverage.sh debug --use-last-log` passed every
+freshly regenerated manifest row. Regenerating the three committed dashboard
+files twice produced byte-identical SHA-256 values. The ASan/UBSan corpus
+replay completed in 35.97 seconds and its synthetic-divergence guard in 3.61
+seconds. Document-link/stale-number checks and `git diff --check` are recorded
+in the landing commit's verification handoff.

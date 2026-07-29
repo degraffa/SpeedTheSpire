@@ -1,7 +1,57 @@
 # tools/verify_report — verification reporting
 
-Home of the scripted checks behind the G6/G7 checklist lines and, later, the
-B5.4 verification report (design doc B §7.4–7.5). First resident:
+Home of the scripted checks behind the G6/G7 checklist lines and the B5.4
+verification dashboard (design doc B §7.4–7.5).
+
+## `generate_report.py` — campaign dashboard (B5.4)
+
+Aggregates one or more B5.2 `report.json` files, verifies each included source
+artifact against its recorded SHA-256, and writes deterministic Markdown,
+JSON, and CSV under `docs/verification/`:
+
+```bat
+C:\Python39\python.exe tools\verify_report\generate_report.py
+```
+
+The defaults name the two B5.2 acceptance/exercise campaigns and the compatible
+B5.3 200-seed harvest under the fixed
+`D:\STS_BG_Mod\_oracle_data\campaigns` root, and consume the fresh debug
+`tier2_coverage.json`. Repeated `--campaign` flags select a different aggregate.
+An exact repeated seed is counted once only when its artifact hash, action
+count, outcome, and classification agree; a conflicting repeat is fatal.
+
+The report keeps three action totals separate:
+
+- `captured_actions`: every injected oracle action;
+- `replay_clean_actions`: actions from runs classified wholly clean;
+- `strict_zero_diff_actions`: the clean total excluding a known capture race.
+
+Only the last total drives the displayed G7 action shortfall. The report never
+infers that captured actions were diff-clean. Likewise, “zero untriaged” means
+every non-clean `(campaign, seed, classification)` has an exact reviewed row in
+`divergence_dispositions.json`; an `open-*` disposition remains visibly open
+and is not acceptance.
+
+Oracle sightings are literal exact-string `game_id` occurrences recursively
+found in campaign `state_json` objects. The same registry loader used by
+codegen supplies the rows, and the join refuses a tier-2 report whose registry
+shape has drifted. `a20.yaml` has no `game_id`, so those rows report `n/a`
+rather than manufacturing a sighting.
+
+## Compressed CI corpus (B5.4)
+
+`build_ci_corpus.py` deterministically curates exactly 50 distinct,
+classification-clean, race-free runs. The committed
+`tests/golden/oracle_corpus/act1_a20_50.tar.gz` contains each source JSONL
+needed for whole-run replay and its B5.2 translated binary trace. Its adjacent
+manifest binds every member hash, trace header, seed, campaign, action count,
+and the archive hash.
+
+`ci_corpus_smoke.py` verifies those hashes and safe archive paths, extracts to
+the test target's scratch directory, and invokes the real `replay_run_diff
+--replay --stop-on-diff` binary. `OracleCorpusReplay.FiftySeedCorpusReplaysZeroDiff`
+is in every debug/ASan CI matrix. The sibling synthetic-divergence case mutates
+only an extracted copy and requires replay to return nonzero.
 
 ## `check_tier2_coverage.py` — tier-2 registry coverage (G6 leg 1, design §8(2))
 
@@ -84,12 +134,6 @@ comes from `ctest -N`; "passing" from a fresh full `ctest` run (default,
   destroyed or silently stale. A bare `ctest -N` typed by hand still clobbers
   the log; `--use-last-log` fails loud on such an empty log.
 
-### How B5.4 extends this (rather than replaces it)
-
-B5.4's dashboard (design §7.4) is the same row enumeration joined against a
-*second* source: per-`game_id` oracle-sighting counts from campaign logs. The
-JSON already carries the row→test attribution keyed by domain/row name;
-B5.4 adds an `oracle_sightings` field per row from the campaign artifacts,
-emits the combined markdown/CSV under `docs/verification/`, and keeps this
-script's exit-code contract as the G7 re-run of the coverage bar. Nothing in
-this tool needs replacing: the campaign join is additive.
+The dashboard extends rather than replaces this check: it consumes the JSON
+row→test attribution and adds the campaign `game_id` sighting count. This
+script's exit-code contract remains the G7 re-run of the tier-2 coverage bar.

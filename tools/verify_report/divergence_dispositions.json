@@ -1,0 +1,117 @@
+{
+  "format": "STS-DIVERGENCE-DISPOSITIONS v1",
+  "items": [
+    {
+      "campaign_id": "b52_accept_20260729_70000_70049",
+      "classification": "state_divergence",
+      "note": "Lantern observable counter mismatch remains owned by the relic-engine obligation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS70011",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_20260729_70000_70049",
+      "classification": "replay_harness_error",
+      "note": "HAND_SELECT command-map disagreement remains a replay-harness obligation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS70022",
+      "status": "open-harness-gap"
+    },
+    {
+      "campaign_id": "b52_accept_20260729_70000_70049",
+      "classification": "state_divergence",
+      "note": "Spike Slime block/HP mismatch remains a product-divergence candidate pending reduction.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS70023",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_20260729_70000_70049",
+      "classification": "state_divergence",
+      "note": "Wheel result-page timing mismatch remains a product-divergence candidate pending reduction.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS70037",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "replay_harness_error",
+      "note": "Captured play has no mappable simulator card index; prefix remains zero-diff.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71009",
+      "status": "open-harness-gap"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "replay_harness_error",
+      "note": "Reward-screen potion use remains unmapped; prefix remains zero-diff.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71015",
+      "status": "open-harness-gap"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "state_divergence",
+      "note": "Lantern observable counter mismatch remains owned by the relic-engine obligation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71017",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "state_divergence",
+      "note": "Tiny House Neow payout mismatch remains owned by the boss-relic/run-layer obligation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71018",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "replay_harness_error",
+      "note": "Captured play has no mappable simulator card index; prefix remains zero-diff.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71022",
+      "status": "open-harness-gap"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "state_divergence",
+      "note": "This is the already-decided stolen-gold ordering deviation; the faithful schema-changing fix remains separately scoped.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71025",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "replay_harness_error",
+      "note": "Shop choose after simulator MAP_CHOICE remains a command-map gap; prefix remains zero-diff.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71030",
+      "status": "open-harness-gap"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "state_divergence",
+      "note": "Gambling Chip private latch leaking through its observable counter remains a relic-engine defect.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71033",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "state_divergence",
+      "note": "Calling Bell Neow onEquip grid/pool timing remains a boss-relic/run-layer candidate pending reduction.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71039",
+      "status": "open-product-divergence"
+    },
+    {
+      "campaign_id": "b52_accept_locked_20260729_71000_71049",
+      "classification": "replay_harness_error",
+      "note": "Shop choose after simulator MAP_CHOICE remains a command-map gap; prefix remains zero-diff.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS71040",
+      "status": "open-harness-gap"
+    }
+  ]
+}

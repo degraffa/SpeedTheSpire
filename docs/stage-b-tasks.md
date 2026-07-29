@@ -1964,17 +1964,12 @@ choose and justify); oracle spot set shows no flagged aggregate; failures
 are stop-the-line divergences, not tuning targets.
 **Log:** —
 
-### B5.4 `[ ]` Verification report + CI corpus
-**Deps:** B5.2 · **Spec:** design §7.4-7.5, §7.1(1)
-**Deliverables:** `tools/verify_report/` (diffs per million actions,
-divergence inventory, per-registry-row oracle-sighting + tier coverage join
-via `game_id`); latest report committed under `docs/verification/`; the
-curated 50-seed CI corpus (compressed translated traces +
-zero-diff-replay gtest wired into the existing CI matrix).
-**Acceptance:** CI runs the 50-seed replay smoke in seconds and fails on an
-injected synthetic divergence (proven once, then reverted); report
-regenerates deterministically from campaign artifacts.
-**Log:** —
+- **B5.4** `[x]` Verification report + CI corpus — deterministic campaign
+  aggregation with exact dispositions, literal G7 shortfalls, diffs/million
+  and registry `game_id` sightings joined to passing tier-2 coverage; compressed
+  50-seed clean corpus with manifest/hash provenance and fail-loud whole-run
+  replay in every CI preset · [report](verification/stage-b-verification.md) ·
+  [log](stage-b-log.md#b54)
 
 - **B5.5** `[x]` Throughput floors — release-preset acceptance:
   **27,163,500 combat steps/sec/core**, **84,624.2 random-policy full
