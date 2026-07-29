@@ -1943,19 +1943,19 @@ Then: update CLAUDE.md "Current state".
   10,000 seeds / 250,000 cases**, zero failures, plus ASan-clean **2,500 /
   250,000 cases = 1.00 %** disjoint sample; 959/959 ×3 ·
   [log](stage-b-log.md#b51)
-- **B5.3** `[x]` ∥ Tier-4 distributional suite — 16 pre-registered analytic
-  hypotheses passed over 20,000 seeds with Holm-Bonferroni family-wise
-  α=0.01; the distinct 200-run A20 oracle spot set passed all three aggregate
-  comparisons, after its stop-line exposed and fixed an entry-pump combat
-  finalization bug · [report](verification/dist-check-oracle-spot-2026-07-29.json)
-  · [log](stage-b-log.md#b53)
-
 - **B5.2** `[x]` ∥ Oracle campaign automation — one-command resumable/sharded
   Windows capture + WSL translation/replay/list-oracle pipeline, nightly
   scheduling, singleton game lock, generated reports/triage queue and promoted
   reproducers; acceptance `b52_accept_locked_20260729_71000_71049`: all 50
   seeds, 2,740 actions, 40 replay-clean, every raw encounter list zero-diff ·
   [log](stage-b-log.md#b52)
+
+- **B5.3** `[x]` ∥ Tier-4 distributional suite — 16 pre-registered analytic
+  hypotheses passed over 20,000 seeds with Holm-Bonferroni family-wise
+  α=0.01; the distinct 200-run A20 oracle spot set passed all three aggregate
+  comparisons, after its stop-line exposed and fixed an entry-pump combat
+  finalization bug · [report](verification/dist-check-oracle-spot-2026-07-29.json)
+  · [log](stage-b-log.md#b53)
 
 ### B5.4 `[ ]` Verification report + CI corpus
 **Deps:** B5.2 · **Spec:** design §7.4-7.5, §7.1(1)
