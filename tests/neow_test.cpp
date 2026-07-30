@@ -649,10 +649,10 @@ TEST(NeowPayout, BossSwapOntoAstrolabeTransformsThreePicksOnMiscRng) {
     EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
 }
 
-// Pandora's Box is screenless at the run layer (its confirmation grid has no
-// choice): nine starter replacements land synchronously, in reverse draw
-// order, and the payout ends at DONE.
-TEST(NeowPayout, BossSwapOntoPandorasBoxReplacesTheNineStartersSynchronously) {
+// Pandora's choice-free confirmation grid is nevertheless a real timing
+// boundary: starter removals, previews and RNG move first; replacement obtains
+// wait for Proceed.
+TEST(NeowPayout, BossSwapOntoPandorasBoxWaitsForConfirmation) {
     RunController rc = run_begin(42, kA20);
     force_boss_front(rc, RelicId::PANDORAS_BOX);
     force_option(rc, 0, NeowRewardType::BOSS_RELIC);
@@ -678,9 +678,24 @@ TEST(NeowPayout, BossSwapOntoPandorasBoxReplacesTheNineStartersSynchronously) {
     step(rc, choose(0));
 
     EXPECT_TRUE(owns(rc.run, RelicId::PANDORAS_BOX));
-    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
+    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::GRID));
+    EXPECT_EQ(rc.neow.grid_mode,
+              static_cast<uint8_t>(NeowGridMode::CONFIRM_PANDORA));
     EXPECT_EQ(rc.combat.card_random_rng.counter, probe.counter)
         << "exactly nine cardRandomRng draws";
+    ASSERT_EQ(rc.run.master_deck_count, 2)
+        << "Pandora removes starters before opening its confirmation grid";
+    EXPECT_EQ(rc.run.master_deck[0].card_id,
+              static_cast<uint16_t>(CardId::ASCENDERS_BANE));
+    EXPECT_EQ(rc.run.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::BASH));
+    const RunActionMask confirmation = mask_of(rc);
+    EXPECT_TRUE(confirmation.can_proceed);
+    for (bool pick : confirmation.can_choose_master_deck) {
+        EXPECT_FALSE(pick);
+    }
+    step(rc, choose(kChooseProceed));
+    EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
     ASSERT_EQ(rc.run.master_deck_count, want.size());
     EXPECT_EQ(count_card(rc.run, CardId::STRIKE), 0);
     EXPECT_EQ(count_card(rc.run, CardId::DEFEND), 0);
@@ -728,6 +743,30 @@ TEST(NeowPayout, BossSwapOntoTinyHouseOpensItsRewardScreenAndClaims) {
     ASSERT_TRUE(m.can_claim_reward[0]);
     step(rc, choose(0));
     EXPECT_EQ(rc.run.gold, gold0 + 50);
+
+    uint8_t cards = kNoOpenCardReward;
+    for (uint8_t i = 0; i < rc.rewards.count; ++i) {
+        if (static_cast<RewardItemKind>(rc.rewards.items[i].kind) ==
+            RewardItemKind::CARDS) {
+            cards = i;
+        }
+    }
+    ASSERT_NE(cards, kNoOpenCardReward);
+    step(rc, choose(cards));
+    ASSERT_NE(rc.rewards.open_card_item, kNoOpenCardReward);
+    m = mask_of(rc);
+    ASSERT_TRUE(m.can_take_card[1]);
+    const RunRewardItem& offer =
+        rc.rewards.items[rc.rewards.open_card_item];
+    const uint16_t picked = offer.card_ids[1];
+    const uint16_t deck_before = rc.run.master_deck_count;
+    step(rc, choose(1));
+    ASSERT_EQ(rc.run.master_deck_count, deck_before + 1);
+    EXPECT_EQ(rc.run.master_deck[deck_before].card_id, picked);
+    EXPECT_EQ(rc.neow.screen,
+              static_cast<uint8_t>(NeowScreen::ITEM_REWARD))
+        << "taking Tiny House's card returns to its item reward screen";
+
     step(rc, choose(kChooseProceed));
     EXPECT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::DONE));
     step(rc, choose(kChooseProceed));
@@ -746,6 +785,13 @@ TEST(NeowPayout, BossSwapOntoCallingBellOffersThreeRelicsAndTheCurse) {
     step(rc, choose(0));
 
     EXPECT_TRUE(owns(rc.run, RelicId::CALLING_BELL));
+    ASSERT_EQ(rc.neow.screen, static_cast<uint8_t>(NeowScreen::GRID));
+    EXPECT_EQ(rc.neow.grid_mode,
+              static_cast<uint8_t>(NeowGridMode::CONFIRM_CALLING_BELL));
+    EXPECT_EQ(rc.run.master_deck_count, 11);
+    EXPECT_EQ(rc.run.relic_rng.counter, relic_rng0);
+    EXPECT_EQ(rc.run.card_rng.counter, card_rng0);
+    step(rc, choose(kChooseProceed));
     ASSERT_EQ(rc.run.master_deck_count, 12);
     EXPECT_EQ(rc.run.master_deck[11].card_id,
               static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL));

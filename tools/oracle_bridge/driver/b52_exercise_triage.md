@@ -35,3 +35,41 @@ convert newly found mismatches into accepted mechanics.
 The three newly exposed product families are filed in the live obligations
 table alongside Lantern. All exact source hashes, first-diff reports and traces
 remain under the fixed external campaign root.
+
+## G7 supersession — every open row resolved
+
+The G7 final tree re-ran the B5.2 postprocessor over both preserved campaigns
+and the B5.3 harvest rather than inferring resolution from unit tests:
+
+| Campaign | Final whole-run replay |
+|---|---|
+| `b52_accept_20260729_70000_70049` | 50/50 clean; 2,853 strict zero-diff actions |
+| `b52_accept_locked_20260729_71000_71049` | 49 clean plus only `STS71025`, the exact standing Looter-gold deviation; 2,640 strict zero-diff actions |
+| `b53_full_act1_20260729` | 196 clean plus four exact standing Looter-gold deviations; 10,071 strict zero-diff actions and one narrowly classified obtain-animation race |
+
+No open product or harness finding remains. The formerly queued families were
+closed as follows:
+
+- Lantern and Gambling Chip now derive their first-use decision from combat
+  position while leaving the Java-private latch out of
+  `AbstractRelic.counter`; Red Skull uses a separate private combat bit for the
+  same reason.
+- Gremlin Visage carries `isSourceMonster=false` into Weak, so its one-turn
+  debuff expires before the first enemy attack; this was the Spike Slime
+  block/HP root cause.
+- Wheel of Change models reveal, result acknowledgement, and payout as three
+  distinct steps. Pandora's Box and Calling Bell preserve their choice-free
+  confirmation grids, and Tiny House returns correctly through its nested card
+  reward.
+- Whole-run command mapping now covers the filtered HAND_SELECT index space,
+  the tenth combat hand slot encoded as `play 0`, reward-screen potion use,
+  combat discard/exhaust grids, and shop/chest/reward overlays whose `proceed`
+  opens the map without destroying the underlying room.
+
+The replay-expanded B5.3 queue additionally exposed and fixed the same timing
+and mapping families plus Armaments retrieval order, Blood Potion outside
+combat, Corruption's constructor-time four-pile cost walk, terminal Reaper
+healing, Java's trailing empty-deck shuffle action, and the special-curse
+exclusion in the Fountain gate. Focused regressions carry each rule; the
+preserved raw artifacts and regenerated external reports are the end-to-end
+proof.

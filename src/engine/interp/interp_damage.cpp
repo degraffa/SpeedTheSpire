@@ -433,7 +433,8 @@ void cards_took_player_damage(CombatState& s) noexcept;
 // the shared in-combat heal seam so Magic Flower's x1.5 applies: its
 // onPlayerHeal is `phase == COMBAT`-gated (MagicFlower.java:30-37) and this site
 // IS combat. Sacred Bark doubles potency 30 -> 60, i.e. a revive at 60% of max
-// HP; the relic has no engine hook, so def->potency is what arrives.
+// HP; the relic has no engine hook, so this direct trigger site applies the
+// same use-time modifier as the ordinary potion path.
 //
 // LizardTail.onTrigger heals maxHealth/2 (min 1) and sets the counter to -2
 // (LizardTail.java:28-45).
@@ -447,7 +448,9 @@ void try_player_revive(CombatState& s) noexcept {
                                           static_cast<uint8_t>(fairies - 1));
         s.player_hp = 0;  // this.currentHealth = 0, BEFORE the heal
         const PotionDef* def = potion_def(PotionId::FAIRY_POTION);
-        const int potency = def == nullptr ? 0 : def->potency;
+        const int potency =
+            (def == nullptr ? 0 : def->potency) *
+            (player_has_relic(s, RelicId::SACRED_BARK) ? 2 : 1);
         const float percent = static_cast<float>(potency) / 100.0f;
         int heal =
             static_cast<int>(static_cast<float>(s.player_max_hp) * percent);
@@ -477,14 +480,49 @@ void try_player_revive(CombatState& s) noexcept {
 // EVENT, updateCost(-1) on every copy in hand/discard/draw (but not exhaust or
 // limbo/cardInUse). The reduction is per event, not per HP point, and clamps at
 // zero. AbstractPlayer.updateCardsOnDamage (AbstractPlayer.java:1518-1530).
+//
+// `updateCost` changes AbstractCard.cost (the combat-persistent base) while
+// preserving the existing `cost - costForTurn` delta (AbstractCard.java:
+// 1977-1992). That distinction is observable when Infernal Blade generated the
+// card and set costForTurn to zero: the visible zero stays zero, but the hidden
+// base still falls 4 -> 3 and resetAttributes must reveal 3 next turn. The
+// SAVED_BASE_COST payload is exactly that hidden base while a this-turn
+// modifier is live.
 void cards_took_player_damage(CombatState& s) noexcept {
     auto update = [&](const CardPoolIndex* pile, uint8_t count) noexcept {
         for (uint8_t i = 0; i < count; ++i) {
             CardInstance& c = s.card_pool[pile[i]];
-            if (c.card_id == static_cast<uint16_t>(CardId::BLOOD_FOR_BLOOD) &&
-                c.cost_now > 0) {
-                --c.cost_now;
+            if (c.card_id != static_cast<uint16_t>(CardId::BLOOD_FOR_BLOOD)) {
+                continue;
             }
+            if (!has_card_flag(c.flags, CardFlag::COST_MODIFIED_FOR_TURN)) {
+                if (c.cost_now > 0) {
+                    --c.cost_now;
+                }
+                continue;
+            }
+
+            const CardDef* def = card_def(CardId::BLOOD_FOR_BLOOD);
+            const int registry_base =
+                def == nullptr ? 0 : static_cast<int>(card_cost(*def, c.upgrade));
+            const int base =
+                has_card_flag(c.flags, CardFlag::SAVED_BASE_COST)
+                    ? static_cast<int>(saved_base_cost(c.flags))
+                    : registry_base;
+            const int delta = base - static_cast<int>(c.cost_now);
+            const int new_base = base > 0 ? base - 1 : 0;
+            int new_turn = new_base - delta;
+            if (new_turn < 0) {
+                new_turn = 0;
+            }
+            c.cost_now = static_cast<uint8_t>(new_turn);
+
+            const uint16_t encoded = static_cast<uint16_t>(
+                static_cast<uint16_t>(new_base > 7 ? 7 : new_base)
+                << kSavedBaseCostShift);
+            c.flags = static_cast<uint16_t>(
+                (c.flags & ~kSavedBaseCostMask) |
+                card_flag_bit(CardFlag::SAVED_BASE_COST) | encoded);
         }
     };
     update(s.hand, s.hand_count);

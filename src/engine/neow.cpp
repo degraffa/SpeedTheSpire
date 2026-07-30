@@ -105,6 +105,12 @@ void spawn_relic_and_obtain(RunState& rs, NeowState& st, RewardScreen& rewards,
             // payout can produce the request.
             assert(false && "a bottle grid request from the Neow boss swap");
             break;
+        case RelicEquipScreen::GRID_CONFIRM_PANDORA:
+            open_grid(st, NeowGridMode::CONFIRM_PANDORA, 0);
+            break;
+        case RelicEquipScreen::GRID_CONFIRM_CALLING_BELL:
+            open_grid(st, NeowGridMode::CONFIRM_CALLING_BELL, 0);
+            break;
     }
 }
 
@@ -561,6 +567,11 @@ bool neow_grid_card_legal(const RunState& rs, const NeowState& st,
         deck_index >= rs.master_deck_count) {
         return false;
     }
+    const auto mode = static_cast<NeowGridMode>(st.grid_mode);
+    if (mode == NeowGridMode::CONFIRM_PANDORA ||
+        mode == NeowGridMode::CONFIRM_CALLING_BELL) {
+        return false;
+    }
     for (uint8_t i = 0; i < st.grid_done && i < kNeowGridPickCap; ++i) {
         if (st.grid_picked[i] == deck_index) {
             return false;  // gridSelectScreen never re-offers a selected card
@@ -576,7 +587,7 @@ bool neow_grid_card_legal(const RunState& rs, const NeowState& st,
     // Java -- do not "fix" this to match the event/shop/Toke grids, which DO
     // exclude (master_card_purgeable_unbottled and its site map,
     // relic_pools.hpp).
-    return static_cast<NeowGridMode>(st.grid_mode) == NeowGridMode::UPGRADE
+    return mode == NeowGridMode::UPGRADE
                ? rest_card_upgradeable(card)
                : rest_card_purgeable(card);
 }

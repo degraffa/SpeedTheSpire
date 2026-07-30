@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import build_ci_corpus as corpus_builder
 import generate_report as vr
 from ci_corpus_smoke import CorpusError, validate_archive
 
@@ -47,14 +48,23 @@ class VerifyReportTest(unittest.TestCase):
         self.temp.cleanup()
 
     def campaign(self, campaign_id="c1", seed="S1", classification="clean",
-                 artifact_hash=None):
+                 artifact_hash=None, policy="random-legal"):
         directory = self.root / "campaigns" / campaign_id
         directory.mkdir(parents=True, exist_ok=True)
         artifact = directory / f"run_{seed}_a20_ironclad.jsonl"
-        artifact.write_text(json.dumps({
-            "record_kind": "action",
-            "state_json": {"nested": ["gid-cards", {"x": "gid-relics"}]},
-        }) + "\n", encoding="utf-8")
+        artifact.write_text(
+            json.dumps({
+                "record_kind": "header", "campaign_id": campaign_id,
+                "seed": {"string": seed}, "ascension": 20,
+                "character": "IRONCLAD",
+            }) + "\n" +
+            json.dumps({
+                "record_kind": "action",
+                "state_json": {
+                    "nested": ["gid-cards", {"x": "gid-relics"}],
+                },
+            }) + "\n",
+            encoding="utf-8")
         digest = artifact_hash or vr.sha256_file(artifact)
         run = {
             "seed": seed, "actions": 7, "classification": classification,
@@ -67,7 +77,7 @@ class VerifyReportTest(unittest.TestCase):
             "campaign_id": campaign_id, "campaign_status": "complete",
             "schema_version": 1, "driver_version": "d",
             "pipeline_version": "p", "fork_jar_sha256": "f",
-            "policy": "random-legal", "runs": [run],
+            "policy": policy, "runs": [run],
         }
         dump(directory / "report.json", report)
         return run
@@ -86,20 +96,173 @@ class VerifyReportTest(unittest.TestCase):
         self.assertEqual(rows["gid-relics"]["oracle_sightings"], 1)
         self.assertEqual(rows["gid-potions"]["oracle_sightings"], 0)
         self.assertTrue(first["registry_coverage"]["tier2_complete"])
+        self.assertTrue(first["g7_evidence"]["a20_modifiers_verified"])
+
+    def test_strict_actions_exclude_all_current_and_legacy_capture_races(self):
+        self.campaign()
+        report_path = self.root / "campaigns" / "c1" / "report.json"
+        report = vr.read_json(report_path)
+        run = report["runs"][0]
+        run.update({
+            "known_capture_race_records": 1,
+            "known_capture_race_records_by_kind": {
+                "escape-race": 1,
+                "obtain-race": 0,
+            },
+            "known_escape_race_records": 1,
+        })
+        dump(report_path, report)
+        current = vr.aggregate(
+            self.root / "campaigns", ["c1"], self.coverage,
+            self.dispositions, self.registry)
+        self.assertEqual(current["g7_evidence"]["replay_clean_actions"], 7)
+        self.assertEqual(current["g7_evidence"]["strict_zero_diff_actions"], 0)
+        self.assertEqual(
+            current["g7_evidence"]["known_capture_race_records"], 1)
+        self.assertEqual(current["g7_evidence"]["known_capture_race_runs"], 1)
+
+        # An old STS-ORACLE-CAMPAIGN-REPORT v1 has only the obtain field.
+        run.pop("known_capture_race_records")
+        run.pop("known_capture_race_records_by_kind")
+        run.pop("known_escape_race_records")
+        run["known_obtain_race_records"] = 1
+        dump(report_path, report)
+        legacy = vr.aggregate(
+            self.root / "campaigns", ["c1"], self.coverage,
+            self.dispositions, self.registry)
+        self.assertEqual(legacy["g7_evidence"]["replay_clean_actions"], 7)
+        self.assertEqual(legacy["g7_evidence"]["strict_zero_diff_actions"], 0)
+        self.assertEqual(
+            legacy["g7_evidence"]["known_capture_race_records"], 1)
+
+        # A transitional per-family field is conservative even without the
+        # new authoritative total.
+        run["known_obtain_race_records"] = 0
+        run["known_escape_race_records"] = 1
+        dump(report_path, report)
+        transitional = vr.aggregate(
+            self.root / "campaigns", ["c1"], self.coverage,
+            self.dispositions, self.registry)
+        self.assertEqual(
+            transitional["g7_evidence"]["strict_zero_diff_actions"], 0)
+
+    def test_capture_race_total_and_by_kind_must_agree(self):
+        self.campaign()
+        report_path = self.root / "campaigns" / "c1" / "report.json"
+        report = vr.read_json(report_path)
+        report["runs"][0].update({
+            "known_capture_race_records": 0,
+            "known_capture_race_records_by_kind": {"escape-race": 1},
+        })
+        dump(report_path, report)
+        with self.assertRaisesRegex(vr.ReportError, "disagrees"):
+            vr.aggregate(
+                self.root / "campaigns", ["c1"], self.coverage,
+                self.dispositions, self.registry)
+
+        report["runs"][0].update({
+            "known_capture_race_records": 0,
+            "known_capture_race_records_by_kind": {
+                "escape-race": 0,
+                "obtain-race": 0,
+            },
+            "known_escape_race_records": 1,
+        })
+        dump(report_path, report)
+        with self.assertRaisesRegex(
+                vr.ReportError, "legacy escape-race count 1 disagrees"):
+            vr.aggregate(
+                self.root / "campaigns", ["c1"], self.coverage,
+                self.dispositions, self.registry)
+
+    def test_ci_corpus_excludes_escape_race_clean_run(self):
+        self.campaign()
+        report_path = self.root / "campaigns" / "c1" / "report.json"
+        report = vr.read_json(report_path)
+        report["runs"][0].update({
+            "known_capture_race_records": 1,
+            "known_capture_race_records_by_kind": {"escape-race": 1},
+        })
+        dump(report_path, report)
+        with self.assertRaisesRegex(vr.ReportError, "0 eligible clean seeds"):
+            corpus_builder.select(
+                self.root / "campaigns", ["c1"], 1)
+
+    def test_non_a20_artifact_is_rejected(self):
+        self.campaign()
+        path = (
+            self.root / "campaigns" / "c1" /
+            "run_S1_a20_ironclad.jsonl"
+        )
+        lines = path.read_text(encoding="utf-8").splitlines()
+        header = json.loads(lines[0])
+        header["ascension"] = 19
+        path.write_text(
+            json.dumps(header) + "\n" + "\n".join(lines[1:]) + "\n",
+            encoding="utf-8")
+        report = vr.read_json(
+            self.root / "campaigns" / "c1" / "report.json")
+        report["runs"][0]["source_artifact_sha256"] = vr.sha256_file(path)
+        dump(self.root / "campaigns" / "c1" / "report.json", report)
+        with self.assertRaisesRegex(vr.ReportError, "not a full-scope A20"):
+            vr.aggregate(
+                self.root / "campaigns", ["c1"], self.coverage,
+                self.dispositions, self.registry)
+
+    def test_non_gameplay_terminal_is_rejected(self):
+        self.campaign()
+        report_path = (
+            self.root / "campaigns" / "c1" / "report.json"
+        )
+        report = vr.read_json(report_path)
+        report["runs"][0]["outcome"] = "legal_exhaustion"
+        dump(report_path, report)
+        with self.assertRaisesRegex(vr.ReportError, "non-gameplay terminal"):
+            vr.aggregate(
+                self.root / "campaigns", ["c1"], self.coverage,
+                self.dispositions, self.registry)
+
+    def test_missing_a20_tier2_row_cannot_satisfy_the_gate(self):
+        self.campaign()
+        self.coverage["coverage"]["a20"]["A1"]["tier"] = None
+        report = vr.aggregate(
+            self.root / "campaigns", ["c1"], self.coverage,
+            self.dispositions, self.registry)
+        self.assertFalse(report["g7_evidence"]["a20_modifiers_verified"])
+        self.assertFalse(report["g7_evidence"]["g7_oracle_volume_met"])
 
     def test_exact_duplicate_is_deduplicated_conflict_is_rejected(self):
         run = self.campaign("c1", "S1")
-        self.campaign("c2", "S1")
-        first = vr.aggregate(self.root / "campaigns", ["c1", "c2"],
+        report = vr.read_json(
+            self.root / "campaigns" / "c1" / "report.json")
+        report["runs"].append(dict(run))
+        dump(self.root / "campaigns" / "c1" / "report.json", report)
+        first = vr.aggregate(self.root / "campaigns", ["c1"],
                              self.coverage, self.dispositions, self.registry)
         self.assertEqual(first["g7_evidence"]["distinct_seeds"], 1)
         self.assertEqual(first["g7_evidence"]["captured_actions"], 7)
-        report = vr.read_json(self.root / "campaigns" / "c2" / "report.json")
-        report["runs"][0]["actions"] = run["actions"] + 1
-        dump(self.root / "campaigns" / "c2" / "report.json", report)
+        self.assertEqual(
+            first["inputs"]["campaigns"][0]["deduplicated_runs"], 1)
+
+        self.campaign("c2", "S1")
         with self.assertRaisesRegex(vr.ReportError, "conflicting duplicate"):
             vr.aggregate(self.root / "campaigns", ["c1", "c2"],
                          self.coverage, self.dispositions, self.registry)
+
+    def test_mixed_generator_status_is_literal(self):
+        self.campaign("c1", "S1", policy="random-legal")
+        self.campaign("c2", "S2", policy="greedy")
+        report = vr.aggregate(
+            self.root / "campaigns", ["c1", "c2"], self.coverage,
+            self.dispositions, self.registry)
+        evidence = report["g7_evidence"]
+        self.assertEqual(evidence["generator_policies"],
+                         ["greedy", "random-legal"])
+        self.assertTrue(evidence["mixed_generators"])
+        rendered = vr.markdown(report)
+        self.assertIn("mixed-generator requirement met: **YES**", rendered)
+        self.assertIn("| c1 | random-legal |", rendered)
+        self.assertIn("| c2 | greedy |", rendered)
 
     def test_disposition_is_exact_and_does_not_close_open_finding(self):
         self.campaign("c1", "S1", "state_divergence")
@@ -121,6 +284,8 @@ class VerifyReportTest(unittest.TestCase):
         self.assertEqual(
             report["divergence_inventory"][0]["disposition"]["status"],
             "open-product-divergence")
+        self.assertEqual(report["g7_evidence"]["open_findings"], 1)
+        self.assertFalse(report["g7_evidence"]["zero_open_findings"])
         self.assertFalse(report["g7_evidence"]["g7_oracle_volume_met"])
 
     def test_committed_corpus_integrity_and_manifest_hash(self):

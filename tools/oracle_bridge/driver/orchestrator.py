@@ -138,6 +138,23 @@ def heartbeat_path(args) -> str:
         args.data_root, args.campaign_id, "campaign_heartbeat.json")
 
 
+def restart_requested_for_launch(prog, launch_token: str) -> bool:
+    """Whether `prog` asks us to retire the launch bound to `launch_token`.
+
+    A request from the prior launch can coexist briefly with a newly spawned
+    game before its driver resumes and clears the field.  The one-use token
+    digest makes that old request harmless instead of creating a relaunch loop.
+    """
+    request = prog.get("restart_requested") if isinstance(prog, dict) else None
+    if not isinstance(request, dict):
+        return False
+    observed = request.get("launch_token_sha256")
+    if not isinstance(observed, str):
+        return False
+    expected = hashlib.sha256(launch_token.encode("utf-8")).hexdigest()
+    return secrets.compare_digest(observed, expected)
+
+
 def read_json(path):
     try:
         with open(path, "r", encoding="utf-8") as fh:
@@ -485,6 +502,16 @@ def main(argv=None) -> int:
                                  "done": done, "failed": failed})
                 _summary(args, timeline)
                 return 0
+
+            if restart_requested_for_launch(prog, args.launch_token):
+                request = prog.get("restart_requested") or {}
+                reason = request.get("reason") or "driver request"
+                log(f"driver requested restart ({reason}); {done} done -- "
+                    "killing + relaunching")
+                kill_tree(proc)
+                timeline.append({"event": "driver_restart", "utc": utc(),
+                                 "reason": reason, "done": done})
+                break
 
             # induced kill for acceptance (once)
             if (args.kill_after_seeds is not None and not kill_done

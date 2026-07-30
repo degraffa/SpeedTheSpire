@@ -59,6 +59,21 @@ inline constexpr CardPoolIndex kEndTurnSentinel = 255;
 // (kOpcodeDrawCard == (uint16_t)Opcode::DRAW).
 inline constexpr uint16_t kOpcodeDrawCard = 4;
 
+// Internal action-queue marker for MonsterStartTurnAction. This is deliberately
+// outside the registry Opcode vocabulary: it is queue-control, not a content
+// effect, and 0xFFFF can never collide with an append-only generated opcode.
+//
+// Its POSITION is gameplay-visible. DiscardAtEndOfTurnAction first queues the
+// primary actions produced by ethereal-card exhaustion (Feel No Pain's
+// GainBlockAction), then AbstractRoom$1 queues EndTurnAction / WaitAction /
+// MonsterStartTurnAction. A primary action can itself queue a secondary action
+// (that block makes Juggernaut add DamageRandomEnemyAction), which lands BEHIND
+// MonsterStartTurnAction. Thus monster block clears after Feel No Pain grants
+// block but before Juggernaut's damage resolves. STS304016 is the oracle witness:
+// the clear exposes a 3-HP Defensive Louse behind 11 Curl Up block, Juggernaut
+// kills it, and the dead louse never takes its queued turn.
+inline constexpr uint16_t kOpcodeMonsterStartTurn = 0xFFFFu;
+
 // Reserved actor index meaning "the player" in an ActionQueueItem's src/tgt
 // (combat_state.hpp: "player is a reserved sentinel, monsters are monster-array
 // indices"). 0xFF cannot alias a monster slot (0..4).

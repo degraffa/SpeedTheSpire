@@ -18,8 +18,10 @@
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "sts/engine/interp.hpp"
 #include "sts/engine/rest_sites.hpp"  // RestMenu / RestOptionKind (label check)
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_deck.hpp"  // MasterBottleKind (the bottle overlay)
@@ -33,7 +35,9 @@
 namespace sts::replay {
 
 using sts::engine::Action;
+using sts::engine::ActionMask;
 using sts::engine::ActionVerb;
+using sts::engine::CardPoolIndex;
 using sts::engine::EventGridKind;
 using sts::engine::kChooseBoss;
 using sts::engine::kChooseOpenChest;
@@ -46,6 +50,7 @@ using sts::engine::kRestOptionCap;
 using sts::engine::legal_actions;
 using sts::engine::make_action;
 using sts::engine::MasterBottleKind;
+using sts::engine::NeowGridMode;
 using sts::engine::NeowScreen;
 using sts::engine::RelicId;
 using sts::engine::RestScreen;
@@ -62,9 +67,13 @@ using sts::engine::kShopColorlessCount;
 using sts::engine::kShopPotionCount;
 using sts::engine::kShopRelicCount;
 using sts::engine::CardId;
+using sts::engine::ChoiceKind;
 using sts::engine::PotionId;
+using sts::engine::RewardItemKind;
+using sts::engine::RngStream;
 using sts::engine::ShopScreenKind;
 using sts::engine::ShopSlot;
+using sts::engine::ShopState;
 
 // --- the screen context the translator does not carry -----------------------
 
@@ -89,6 +98,12 @@ struct StockRow {
 struct ScreenInfo {
     std::string screen_type;
     int floor = 0;
+    // Capture-side current gold. Shop `choice_list` affordability is built
+    // from this value, not from the replaying simulator's value: an accepted
+    // standing deviation (notably Looter stolen-gold ordering) can leave the
+    // two gold totals temporarily different without changing the captured
+    // command's index space. -1 keeps hand-built unit-test screens compatible.
+    int gold = -1;
     std::string room_type;
     std::vector<int> map_next_x;
     // The MAP screen's outgoing edges by ROOM SYMBOL (`M`/`?`/`R`/`T`/`$`/`E`).
@@ -221,6 +236,12 @@ struct MappedCommand {
 // the capture confirms; a `cancel` simply drops the buffer, and because nothing
 // was applied, nothing has to be undone. That is the whole of the `cancel` gap.
 //
+// A `choose i` is a CLICK, not an append: clicking an unselected row adds it and
+// clicking an already-selected row removes it. CommunicationMod records both
+// clicks (the random policy commonly produces `choose 4`, `choose 4`), so the
+// pending buffer has to toggle too. Otherwise a deselected card is committed
+// twice and a two-card Neow removal mutates four cards.
+//
 // The session ALSO freezes the index space at open, which is a second, separate
 // correctness point: CommunicationMod's `choice_list` is the UNSHRUNK filtered
 // deck, so selecting the 5th row does not renumber the 8th, whereas the sim's
@@ -230,6 +251,33 @@ struct GridSession {
     std::vector<int> filtered;  // master-deck indices, in grid order
     std::vector<int> pending;   // grid indices selected, not yet committed
 };
+
+inline void toggle_grid_pick(GridSession& g, int grid_index) {
+    const auto it = std::find(g.pending.begin(), g.pending.end(), grid_index);
+    if (it == g.pending.end()) {
+        g.pending.push_back(grid_index);
+    } else {
+        g.pending.erase(it);
+    }
+}
+
+// RandomXS128's state transition is bijective. Rewind one raw nextLong step
+// without observing its discarded return value. This is harness-local because
+// the simulator never rewinds gameplay RNG; the replay mapper needs it only to
+// recover a draw-grid's already-built temporary browse order from the
+// post-build state captured at the blocking screen.
+inline void rewind_xs128(RngStream& rng) noexcept {
+    const uint64_t old_s1 = rng.s0;
+    const uint64_t right =
+        rng.s1 ^ old_s1 ^ (old_s1 >> 26u);
+    const uint64_t shifted =
+        right ^ (right >> 17u) ^ (right >> 34u) ^ (right >> 51u);
+    const uint64_t old_s0 =
+        shifted ^ (shifted << 23u) ^ (shifted << 46u);
+    rng.s0 = old_s0;
+    rng.s1 = old_s1;
+    --rng.counter;
+}
 
 // The grid's index space, snapshotted from the sim's legal mask at open. The
 // game's grid lists a FILTERED master deck (getPurgeableCards drops curses,
@@ -287,6 +335,17 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
     }
 }
 
+[[nodiscard]] inline bool sim_choice_free_confirmation_grid(
+    const RunController& rc) noexcept {
+    if (rc.phase != static_cast<uint8_t>(RunPhase::NEOW) ||
+        rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
+        return false;
+    }
+    const auto mode = static_cast<NeowGridMode>(rc.neow.grid_mode);
+    return mode == NeowGridMode::CONFIRM_PANDORA ||
+           mode == NeowGridMode::CONFIRM_CALLING_BELL;
+}
+
 // The relics whose `onEquip` the engine defers WHOLE. Re-derived at the Wave-C
 // integration: the five BOSS bodies this list used to name (Pandora's Box,
 // Tiny House, Astrolabe, Empty Cage, Calling Bell) are LIVE on the
@@ -341,12 +400,11 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 // papered over with an index guess. It has TWO causes, and this reason must say
 // which, because the two want opposite responses from the reader.
 //
-//   1. A DEFERRED BODY. A Neow boss-relic blessing hands over one of the five
-//      relics above, its onEquip opens a transform / removal grid, and the sim
-//      -- which took the relic, popped its pool and moved every stream
-//      correctly -- has no grid to drive. Naming the relic is the whole point,
-//      and reporting "grid index has no legal master-deck slot" instead is what
-//      made this look like an index-mapping defect.
+//   1. A DEFERRED BODY. A reward/shop/event acquisition hands over one of the
+//      relics above -- Dolly's Mirror is the direct master-deck-grid case --
+//      and the sim has no corresponding screen to drive. Naming the relic is
+//      the whole point, and reporting "grid index has no legal master-deck
+//      slot" instead is what made this look like an index-mapping defect.
 //
 //   2. A DESYNC. The two sides are simply on different screens, and the sim's
 //      relic list has nothing to do with it.
@@ -513,12 +571,13 @@ struct MatchPlayScreen {
     return "?";
 }
 
-enum class ShopPick : uint8_t { NONE, COLORED, COLORLESS, RELIC, POTION, PURGE };
+enum class ShopPick : uint8_t { NONE, CARD, RELIC, POTION, PURGE };
 
 struct ShopTarget {
     ShopPick what = ShopPick::NONE;
-    uint8_t index = 0;   // position in the CAPTURE's stock array
-    std::string id;      // the capture row's game id; empty for PURGE / NONE
+    uint8_t occurrence = 0;  // this id's ordinal among the capture's live rows
+    int price = -1;           // exact price of that occurrence
+    std::string id;           // the capture row's game id; empty for PURGE / NONE
 };
 
 // A capture's `choose` argument is an INDEX from the live policies, but the
@@ -546,7 +605,8 @@ struct ShopTarget {
 // Which shop row a `choose i` names, resolved through the capture's own
 // choice_list: the game lists the AFFORDABLE unsold rows by DISPLAY name, so
 // the index means nothing without it.
-[[nodiscard]] inline ShopTarget resolve_shop_choice(const ScreenInfo& s, int choice) {
+[[nodiscard]] inline ShopTarget resolve_shop_choice(const ScreenInfo& s, int choice,
+                                                    int gold) {
     ShopTarget t;
     if (choice < 0 || choice >= static_cast<int>(s.choice_list.size())) return t;
     const std::string want = lower(s.choice_list[static_cast<std::size_t>(choice)]);
@@ -554,32 +614,96 @@ struct ShopTarget {
         t.what = ShopPick::PURGE;
         return t;
     }
-    for (std::size_t i = 0; i < s.shop_cards.size(); ++i) {
-        if (lower(s.shop_cards[i].name) != want) continue;
-        t.what = i < static_cast<std::size_t>(kShopColoredCount) ? ShopPick::COLORED
-                                                                 : ShopPick::COLORLESS;
-        t.index = static_cast<uint8_t>(
-            i < static_cast<std::size_t>(kShopColoredCount)
-                ? i
-                : i - static_cast<std::size_t>(kShopColoredCount));
-        t.id = s.shop_cards[i].id;
-        return t;
+
+    // `choice_list` is getAvailableShopItems(): only rows whose price is at
+    // most the player's CURRENT gold, in shelf order. Display names are not
+    // unique -- STS303331's shelf held two Dexterity Potions at 54 and 57
+    // gold, and `choose 9` selected the SECOND. Resolving a name to the first
+    // matching stock row silently bought the 54-gold copy sim-side.
+    //
+    // First recover which occurrence of the display name the command names.
+    // Then walk the capture's affordable rows in the same cards/relics/potions
+    // order. Once found, preserve the row's occurrence among ALL remaining
+    // rows with that game id (including an unaffordable earlier twin); the sim
+    // join below uses the same occurrence among its unsold fixed slots.
+    int wanted_name_occurrence = 0;
+    for (int i = 0; i < choice; ++i) {
+        if (lower(s.choice_list[static_cast<std::size_t>(i)]) == want) {
+            ++wanted_name_occurrence;
+        }
     }
-    for (std::size_t i = 0; i < s.shop_relics.size(); ++i) {
-        if (lower(s.shop_relics[i].name) != want) continue;
-        t.what = ShopPick::RELIC;
-        t.index = static_cast<uint8_t>(i);
-        t.id = s.shop_relics[i].id;
-        return t;
-    }
-    for (std::size_t i = 0; i < s.shop_potions.size(); ++i) {
-        if (lower(s.shop_potions[i].name) != want) continue;
-        t.what = ShopPick::POTION;
-        t.index = static_cast<uint8_t>(i);
-        t.id = s.shop_potions[i].id;
-        return t;
-    }
+    auto scan = [&](const std::vector<StockRow>& rows, ShopPick kind) {
+        for (std::size_t i = 0; i < rows.size(); ++i) {
+            const StockRow& row = rows[i];
+            if (row.price > gold || lower(row.name) != want) continue;
+            if (wanted_name_occurrence-- != 0) continue;
+            t.what = kind;
+            t.id = row.id;
+            t.price = row.price;
+            for (std::size_t j = 0; j < i; ++j) {
+                if (rows[j].id == row.id) ++t.occurrence;
+            }
+            return true;
+        }
+        return false;
+    };
+    if (scan(s.shop_cards, ShopPick::CARD)) return t;
+    if (scan(s.shop_relics, ShopPick::RELIC)) return t;
+    if (scan(s.shop_potions, ShopPick::POTION)) return t;
     return t;
+}
+
+// Join a resolved capture row to the simulator's fixed shop-slot layout.
+// Shared by the full command replay and the focused `--shop` purchase walker,
+// so duplicate-row semantics cannot drift between the two oracle modes.
+[[nodiscard]] inline int shop_target_ordinal(const ShopState& shop,
+                                             const ShopTarget& t) {
+    if (t.what == ShopPick::PURGE) return kChooseShopPurge;
+    int occurrence = 0;
+    auto find = [&](const ShopSlot* group, int count, int base,
+                    auto game_id) -> int {
+        for (int i = 0; i < count; ++i) {
+            if (group[i].sold || game_id(group[i].id) != t.id) continue;
+            if (occurrence++ != static_cast<int>(t.occurrence)) continue;
+            // Occurrence is resolved BEFORE price: a swapped-price duplicate
+            // is stock drift, not permission to buy a different twin whose
+            // price happens to match.
+            return group[i].price == t.price ? base + i : -1;
+        }
+        return -1;
+    };
+    if (t.what == ShopPick::CARD) {
+        int ordinal = find(
+            shop.colored, kShopColoredCount, kChooseShopColoredBase,
+            [](uint16_t id) {
+                return std::string(sts::registry::card_game_id(
+                    static_cast<CardId>(id)));
+            });
+        if (ordinal >= 0) return ordinal;
+        return find(
+            shop.colorless, kShopColorlessCount, kChooseShopColorlessBase,
+            [](uint16_t id) {
+                return std::string(sts::registry::card_game_id(
+                    static_cast<CardId>(id)));
+            });
+    }
+    if (t.what == ShopPick::RELIC) {
+        return find(
+            shop.relics, kShopRelicCount, kChooseShopRelicBase,
+            [](uint16_t id) {
+                return std::string(sts::registry::relic_game_id(
+                    static_cast<RelicId>(id)));
+            });
+    }
+    if (t.what == ShopPick::POTION) {
+        return find(
+            shop.potions, kShopPotionCount, kChooseShopPotionBase,
+            [](uint16_t id) {
+                return std::string(sts::registry::potion_game_id(
+                    static_cast<PotionId>(id)));
+            });
+    }
+    return -1;
 }
 
 // The run layer's dense CHOOSE ordinal for a resolved shop row, or -1 with a
@@ -601,13 +725,13 @@ struct ShopTarget {
 // shelf) resolve to the one still for sale.
 [[nodiscard]] inline int shop_choose_ordinal(const RunController& rc, const ScreenInfo& s,
                                              int choice, std::string& why) {
-    const ShopTarget t = resolve_shop_choice(s, choice);
+    const int capture_gold = s.gold >= 0 ? s.gold : rc.run.gold;
+    const ShopTarget t = resolve_shop_choice(s, choice, capture_gold);
     const std::string named =
         (choice >= 0 && choice < static_cast<int>(s.choice_list.size()))
             ? s.choice_list[static_cast<std::size_t>(choice)]
             : std::string("<index " + std::to_string(choice) + " off the list>");
 
-    if (t.what == ShopPick::PURGE) return kChooseShopPurge;
     if (t.what == ShopPick::NONE) {
         why = "shop `choose " + std::to_string(choice) + "` names \"" + named +
               "\", which is on none of the merchant's three shelves in this "
@@ -617,50 +741,48 @@ struct ShopTarget {
         return -1;
     }
 
-    const ShopSlot* group = nullptr;
-    int count = 0;
-    int base = 0;
-    switch (t.what) {
-        case ShopPick::COLORED:
-            group = rc.shop.colored; count = kShopColoredCount;
-            base = kChooseShopColoredBase; break;
-        case ShopPick::COLORLESS:
-            group = rc.shop.colorless; count = kShopColorlessCount;
-            base = kChooseShopColorlessBase; break;
-        case ShopPick::RELIC:
-            group = rc.shop.relics; count = kShopRelicCount;
-            base = kChooseShopRelicBase; break;
-        case ShopPick::POTION:
-            group = rc.shop.potions; count = kShopPotionCount;
-            base = kChooseShopPotionBase; break;
-        default:
-            break;
-    }
+    const int ordinal = shop_target_ordinal(rc.shop, t);
+    if (ordinal >= 0) return ordinal;
 
-    for (int i = 0; i < count; ++i) {
-        if (group[i].sold) continue;
-        std::string sim_id;
-        switch (t.what) {
-            case ShopPick::COLORED:
-            case ShopPick::COLORLESS:
-                sim_id = sts::registry::card_game_id(static_cast<CardId>(group[i].id));
-                break;
-            case ShopPick::RELIC:
-                sim_id = sts::registry::relic_game_id(static_cast<RelicId>(group[i].id));
-                break;
-            case ShopPick::POTION:
-                sim_id = sts::registry::potion_game_id(static_cast<PotionId>(group[i].id));
-                break;
-            default:
-                break;
+    std::ostringstream stock;
+    stock << "[";
+    bool first = true;
+    auto append = [&](const ShopSlot* group, int count, auto game_id) {
+        for (int i = 0; i < count; ++i) {
+            if (group[i].sold) continue;
+            if (!first) stock << ", ";
+            first = false;
+            stock << game_id(group[i].id) << "@" << group[i].price;
         }
-        if (sim_id == t.id) return base + i;
+    };
+    if (t.what == ShopPick::CARD) {
+        append(rc.shop.colored, kShopColoredCount, [](uint16_t id) {
+            return std::string(sts::registry::card_game_id(
+                static_cast<CardId>(id)));
+        });
+        append(rc.shop.colorless, kShopColorlessCount, [](uint16_t id) {
+            return std::string(sts::registry::card_game_id(
+                static_cast<CardId>(id)));
+        });
+    } else if (t.what == ShopPick::RELIC) {
+        append(rc.shop.relics, kShopRelicCount, [](uint16_t id) {
+            return std::string(sts::registry::relic_game_id(
+                static_cast<RelicId>(id)));
+        });
+    } else if (t.what == ShopPick::POTION) {
+        append(rc.shop.potions, kShopPotionCount, [](uint16_t id) {
+            return std::string(sts::registry::potion_game_id(
+                static_cast<PotionId>(id)));
+        });
     }
-
+    stock << "]";
     why = "shop `choose " + std::to_string(choice) + "` names \"" + named +
-          "\" (game id \"" + t.id +
-          "\"), which the sim's merchant has no UNSOLD slot for -- the two "
-          "stocks disagree, or the row was already bought sim-side";
+          "\" (game id \"" + t.id + "\", occurrence " +
+          std::to_string(static_cast<int>(t.occurrence) + 1) +
+          ", price " + std::to_string(t.price) +
+          "), which the sim's merchant has no UNSOLD slot for -- the two "
+          "stocks disagree, or the row was already bought sim-side; sim's "
+          "unsold rows in that shelf group are " + stock.str();
     return -1;
 }
 
@@ -682,20 +804,30 @@ struct ShopTarget {
         return m;
     }
 
-    // `potion discard i` is SCREEN-INDEPENDENT, so it is resolved ahead of the
-    // screen dispatch rather than inside one branch. The potion belt lives on
+    // Potion belt commands are SCREEN-INDEPENDENT, so they are resolved ahead
+    // of the screen dispatch rather than inside one branch. The potion belt lives on
     // the top panel, which is drawn over whatever screen is up: the captures
     // issue this at a MAP (STS00049 seq 46, STS00052 seq 49) exactly as they
     // could at a shop or mid-fight, and CommandExecutor.executePotionCommand
     // never consults the screen -- it checks the slot and canDiscard, then
     // destroys the slot. The run layer mirrors that with a phase-independent
     // DISCARD_POTION dispatched ahead of its own phase switch, so one entry
-    // here covers every screen. `potion use` stays in the combat branch below:
-    // it is the one that needs a live target.
+    // here covers every screen. USE is equally phase-independent: Fruit Juice
+    // and Entropic Brew are legal outside combat and the run layer already
+    // publishes that mask; target-required combat potions simply carry arg 3.
     if (verb == "potion" && p.size() >= 3 && p[1] == "discard") {
         m.kind = MapKind::ACTIONS;
         m.actions.push_back(make_action(ActionVerb::DISCARD_POTION,
                                         static_cast<uint8_t>(arg(2) < 0 ? 0 : arg(2))));
+        return m;
+    }
+    if (verb == "potion" && p.size() >= 3 && p[1] == "use") {
+        const int slot = arg(2);
+        const int target = p.size() >= 4 ? arg(3) : 0;
+        m.kind = MapKind::ACTIONS;
+        m.actions.push_back(make_action(
+            ActionVerb::USE_POTION, static_cast<uint8_t>(slot < 0 ? 0 : slot),
+            static_cast<uint8_t>(target < 0 ? 0 : target)));
         return m;
     }
 
@@ -703,28 +835,25 @@ struct ShopTarget {
         if (verb == "play") {
             const int hand_1based = arg(1);
             const int target = p.size() >= 3 ? arg(2) : 0;
-            if (hand_1based < 1) {
+            if (hand_1based < 0 || hand_1based > 10) {
                 m.reason = "play with no card index";
                 return m;
             }
+            // CommunicationMod indexes hand slots 1..9 and spells the tenth
+            // slot as 0 (CommandExecutor / PROTOCOL.md). The random-legal
+            // driver reaches that form whenever a full hand's final card is
+            // playable; STS300331 seq 61 is the first G7 capture witness.
+            const int hand_zero_based =
+                hand_1based == 0 ? 9 : hand_1based - 1;
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::PLAY_CARD,
-                                            static_cast<uint8_t>(hand_1based - 1),
+                                            static_cast<uint8_t>(hand_zero_based),
                                             static_cast<uint8_t>(target < 0 ? 0 : target)));
             return m;
         }
         if (verb == "end") {
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::END_TURN));
-            return m;
-        }
-        if (verb == "potion" && p.size() >= 3 && p[1] == "use") {
-            const int slot = arg(2);
-            const int target = p.size() >= 4 ? arg(3) : 0;
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::USE_POTION,
-                                            static_cast<uint8_t>(slot),
-                                            static_cast<uint8_t>(target < 0 ? 0 : target)));
             return m;
         }
         m.reason = "combat command '" + verb + "' has no run-layer analogue";
@@ -940,35 +1069,41 @@ struct ShopTarget {
         RunActionMask mask{};
         legal_actions(rc, mask);
         if (verb == "choose") {
-            // IDENTITY over the unpicked prefix. The fork's choice_list walks
-            // `player.hand.group` (ChoiceScreenUtils.getHandSelectScreenChoices)
-            // -- the hand MINUS the already-selected cards, in hand order --
-            // and the engine keeps exactly that prefix in that order: a picked
-            // card moves to the hand's TAIL (interp.hpp, the [unpicked] ++
-            // [picked] split), and the fork can only select, never unselect
-            // (makeHandSelectScreenChoice addresses hand.group alone). So the
-            // capture's N is the sim's hand slot N, and a slot the sim's
-            // screen does not offer is a DESYNC to stop on -- an illegal
-            // CHOOSE is a silent no-op at the combat layer, which is exactly
-            // how the frozen-screen shape below stayed invisible for ten
-            // records.
-            const int i = arg(1);
+            // The fork's choice_list is the FILTERED selectable group, not the
+            // whole hand: Dual Wield, for example, omits Skills from its
+            // HandCardSelectScreen (STS300004 has Defend in full-hand slot 0
+            // and its first offered Strike in slot 1). The engine deliberately
+            // keeps full-hand indices in can_choose[], so translate capture N
+            // to the N-th true mask bit. Already-picked cards are likewise
+            // absent on both sides.
+            const int capture_index = arg(1);
             if (!mask.combat.choice_pending) {
-                m.reason = "hand-select `choose " + std::to_string(i) +
+                m.reason = "hand-select `choose " +
+                           std::to_string(capture_index) +
                            "` arrived while the sim has no hand-select screen "
                            "open (no CHOOSE_CARD is blocking its combat queue)";
                 return m;
             }
-            if (i < 0 || i >= sts::engine::kHandCap ||
-                !mask.combat.can_choose[i]) {
-                m.reason = "hand-select `choose " + std::to_string(i) +
-                           "` names a slot the sim's open screen does not "
-                           "offer; the two hands disagree";
+            int sim_slot = -1;
+            int eligible_index = 0;
+            for (int i = 0; i < rc.combat.hand_count; ++i) {
+                if (!mask.combat.can_choose[i]) continue;
+                if (eligible_index == capture_index) {
+                    sim_slot = i;
+                    break;
+                }
+                ++eligible_index;
+            }
+            if (capture_index < 0 || sim_slot < 0) {
+                m.reason = "hand-select `choose " +
+                           std::to_string(capture_index) +
+                           "` names no card on the sim's filtered selectable "
+                           "list; the two hands disagree";
                 return m;
             }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(i)));
+                                            static_cast<uint8_t>(sim_slot)));
             return m;
         }
         if (verb == "proceed") {
@@ -1002,6 +1137,140 @@ struct ShopTarget {
     }
 
     if (s.screen_type == "GRID") {
+        // Headbutt, Exhume, Secret Technique and Secret Weapon use
+        // GridCardSelectScreen over a COMBAT pile. They are not run-layer
+        // master-deck grids: the combat engine already has the corresponding
+        // mandatory choice open, and its arg0 is a SOURCE-pile slot.
+        //
+        // The game's cards[] is the source pile FILTERED by the action's
+        // predicate. That filter is identity for Headbutt, drops Exhumes for
+        // Exhume, and keeps only SKILL / ATTACK for Secret Technique / Weapon.
+        // A captured `choose i` therefore names one filtered source slot, not
+        // necessarily source slot i.
+        //
+        // Secret Technique / Weapon have one more wrinkle: their temporary
+        // browse CardGroup is built with addToRandomSpot. The engine already
+        // billed those k-1 cardRandomRng draws before blocking, but its public
+        // CHOOSE still names the REAL draw-pile slot. Recover the exact browse
+        // order by rewinding those k-1 draws from the post-build state and
+        // replaying the insertions on source-slot indices. Matching only card
+        // identity is insufficient when the grid contains duplicate Defends:
+        // STS300734 chose one duplicate whose removal changed the later draw
+        // order. Reuse the combat engine's eligibility predicate throughout,
+        // and verify that rebuilding lands on the exact stored RNG state.
+        if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
+            ActionMask cm{};
+            legal_actions(rc.combat, cm);
+            if (cm.choice_pending &&
+                (cm.choice_from_discard || cm.choice_from_exhaust ||
+                 cm.choice_from_draw)) {
+                if (verb != "choose") {
+                    m.reason = "combat pile grid command '" + verb +
+                               "' is not modelled";
+                    return m;
+                }
+                const int ordinal = arg(1);
+                const CardPoolIndex* pile = nullptr;
+                uint8_t count = 0;
+                const char* source_name = nullptr;
+                if (cm.choice_from_discard) {
+                    pile = rc.combat.discard;
+                    count = rc.combat.discard_count;
+                    source_name = "discard";
+                } else if (cm.choice_from_exhaust) {
+                    pile = rc.combat.exhaust;
+                    count = rc.combat.exhaust_count;
+                    source_name = "exhaust";
+                } else {
+                    pile = rc.combat.draw;
+                    count = rc.combat.draw_count;
+                    source_name = "draw";
+                }
+                const auto& front =
+                    rc.combat.action_queue[rc.combat.action_head];
+                const ChoiceKind kind =
+                    sts::engine::choose_kind_from_flags(front.flags);
+                const uint8_t type_filter =
+                    sts::engine::choose_type_filter_from_flags(front.flags);
+                std::vector<uint8_t> filtered;
+                filtered.reserve(count);
+                for (uint8_t i = 0; i < count; ++i) {
+                    if (sts::engine::choice_slot_eligible(
+                            rc.combat, i, kind, type_filter)) {
+                        filtered.push_back(i);
+                    }
+                }
+                if (kind == ChoiceKind::DRAW_TO_HAND &&
+                    filtered.size() > 1u) {
+                    const int32_t billed =
+                        static_cast<int32_t>(filtered.size() - 1u);
+                    if (rc.combat.card_random_rng.counter < billed) {
+                        m.reason = "combat draw grid has fewer card-rng draws "
+                                   "than its temporary browse group";
+                        return m;
+                    }
+                    RngStream browse_rng = rc.combat.card_random_rng;
+                    for (int32_t i = 0; i < billed; ++i) {
+                        rewind_xs128(browse_rng);
+                    }
+                    std::vector<uint8_t> browse_order;
+                    browse_order.reserve(filtered.size());
+                    for (const uint8_t source_slot : filtered) {
+                        if (browse_order.empty()) {
+                            browse_order.push_back(source_slot);
+                            continue;
+                        }
+                        const int32_t pos = sts::engine::random(
+                            browse_rng,
+                            static_cast<int32_t>(browse_order.size() - 1u));
+                        browse_order.insert(
+                            browse_order.begin() + pos, source_slot);
+                    }
+                    if (browse_rng.s0 != rc.combat.card_random_rng.s0 ||
+                        browse_rng.s1 != rc.combat.card_random_rng.s1 ||
+                        browse_rng.counter !=
+                            rc.combat.card_random_rng.counter) {
+                        m.reason = "combat draw grid browse-order RNG could "
+                                   "not be reconstructed exactly";
+                        return m;
+                    }
+                    filtered = std::move(browse_order);
+                }
+                if (ordinal < 0 ||
+                    ordinal >= static_cast<int>(filtered.size())) {
+                    m.reason = "combat " + std::string(source_name) +
+                               " grid index " + std::to_string(ordinal) +
+                               " is off the sim's " +
+                               std::to_string(filtered.size()) +
+                               "-row filtered source pile";
+                    return m;
+                }
+                if (ordinal >= static_cast<int>(s.card_offer.size())) {
+                    m.reason = "combat pile grid index has no capture card row";
+                    return m;
+                }
+                const uint8_t source_index =
+                    filtered[static_cast<std::size_t>(ordinal)];
+                const CardId id = static_cast<CardId>(
+                    rc.combat.card_pool[pile[source_index]].card_id);
+                const auto capture_index =
+                    static_cast<std::size_t>(ordinal);
+                if (sts::registry::card_game_id(id) !=
+                    s.card_offer[capture_index]) {
+                    m.reason = "combat pile grid row " +
+                               std::to_string(ordinal) + " is " +
+                               std::string(sts::registry::card_game_id(id)) +
+                               " in the sim but " +
+                               s.card_offer[capture_index] +
+                               " in the capture";
+                    return m;
+                }
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(make_action(
+                    ActionVerb::CHOOSE, source_index));
+                return m;
+            }
+        }
         // FIRST, the classification that used to be missing. If the sim has no
         // grid up, the capture is driving a screen the engine never opened, and
         // the old code found that out one step later as "grid choose index has
@@ -1034,9 +1303,64 @@ struct ShopTarget {
 
     if (s.screen_type == "COMBAT_REWARD") {
         if (verb == "choose") {
+            const int capture_index = arg(1);
+            if (capture_index < 0 ||
+                capture_index >= static_cast<int>(s.reward_rows.size())) {
+                m.reason = "combat-reward choose index out of range";
+                return m;
+            }
+            const CaptureRewardRow& chosen =
+                s.reward_rows[static_cast<std::size_t>(capture_index)];
+            // Both key rows are capture-only in S1. Claiming an Emerald Key
+            // mutates only a field the fork cannot emit; claiming a Sapphire
+            // Key abandons its linked relic, which the simulator likewise
+            // leaves unclaimed. In either case no run-layer action is the
+            // faithful mapping. The eventual Proceed discards the simulator's
+            // still-visible linked relic.
+            if (chosen.type == "EMERALD_KEY" ||
+                chosen.type == "SAPPHIRE_KEY") {
+                m.kind = MapKind::NOOP;
+                return m;
+            }
+
+            // CommunicationMod deletes a claimed reward row immediately. The
+            // run layer does the same, but deliberately never assembled the
+            // capture-only key rows. Translate the CURRENT visible ordinal by
+            // removing those rows from the capture's index space.
+            int sim_index = 0;
+            for (int i = 0; i < capture_index; ++i) {
+                const std::string& type =
+                    s.reward_rows[static_cast<std::size_t>(i)].type;
+                if (type != "EMERALD_KEY" && type != "SAPPHIRE_KEY") {
+                    ++sim_index;
+                }
+            }
+            if (sim_index < 0 || sim_index >= rc.rewards.count) {
+                m.reason = "combat-reward row '" + chosen.type +
+                           "' has no corresponding sim row after key elision";
+                return m;
+            }
+            const RewardItemKind sim_kind = static_cast<RewardItemKind>(
+                rc.rewards.items[static_cast<std::size_t>(sim_index)].kind);
+            const bool kind_matches =
+                (chosen.type == "GOLD" && sim_kind == RewardItemKind::GOLD) ||
+                (chosen.type == "STOLEN_GOLD" &&
+                 sim_kind == RewardItemKind::STOLEN_GOLD) ||
+                (chosen.type == "POTION" &&
+                 sim_kind == RewardItemKind::POTION) ||
+                (chosen.type == "RELIC" &&
+                 sim_kind == RewardItemKind::RELIC) ||
+                (chosen.type == "CARD" &&
+                 sim_kind == RewardItemKind::CARDS);
+            if (!kind_matches) {
+                m.reason = "combat-reward row '" + chosen.type +
+                           "' does not match sim row " +
+                           std::to_string(sim_index);
+                return m;
+            }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
+                                            static_cast<uint8_t>(sim_index)));
             return m;
         }
         if (verb == "proceed") {
@@ -1067,14 +1391,11 @@ struct ShopTarget {
             // forever: the following map `choose` became LEAVE_ROOM, and its
             // CHOOSE(dst) fell into `ITEM_REWARD`'s `else` branch as
             // `claim_reward(dst)`.
-            if (rc.phase == static_cast<uint8_t>(RunPhase::NEOW) &&
-                rc.neow.screen == static_cast<uint8_t>(NeowScreen::ITEM_REWARD)) {
-                m.kind = MapKind::ACTIONS;
-                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-                return m;
-            }
-            // See the header note: leaving is deferred to the map choice.
+            // Leaving is deferred to the map choice. This applies at Neow too:
+            // the map is an overlay and `return` can reopen the still-mounted
+            // item-reward screen, including claimable potions. The actual map
+            // node choice closes ITEM_REWARD and DONE in main.cpp immediately
+            // before it applies the destination.
             m.kind = MapKind::NOOP;
             return m;
         }
@@ -1105,13 +1426,32 @@ struct ShopTarget {
 
     if (s.screen_type == "CHEST") {
         if (verb == "choose") {
+            if (rc.phase != static_cast<uint8_t>(RunPhase::TREASURE_ROOM)) {
+                m.reason = "chest open arrived while the sim is in " +
+                           std::string(phase_name(rc.phase)) +
+                           ", not a treasure room";
+                return m;
+            }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseOpenChest));
             return m;
         }
         if (verb == "proceed") {
-            m.kind = MapKind::ACTIONS;
-            m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
+            // AbstractRoom.proceedButton opens the map OVER the still-mounted
+            // unopened chest. A map `return` dismisses that overlay and exposes
+            // the same CHEST screen, so this press cannot permanently skip the
+            // sim's chest yet: STS300022 does two proceed/return bounces and
+            // then opens it. As with combat rewards and shops, leaving is
+            // deferred until a MAP node is actually chosen; replay_one closes
+            // TREASURE_ROOM immediately before applying that LEAVE_ROOM.
+            if (rc.phase != static_cast<uint8_t>(RunPhase::TREASURE_ROOM) &&
+                rc.phase != static_cast<uint8_t>(RunPhase::MAP_CHOICE)) {
+                m.reason = "chest proceed arrived while the sim is in " +
+                           std::string(phase_name(rc.phase)) +
+                           ", not a treasure room or its map overlay";
+                return m;
+            }
+            m.kind = MapKind::NOOP;
             return m;
         }
         m.reason = "chest command '" + verb + "' is not modelled";
@@ -1154,12 +1494,8 @@ struct ShopTarget {
             // exit and every later one is a UI bounce -- discriminated on the
             // SIM's phase, never on the record, precisely as the EVENT branch
             // separates a real exit from its bounce.
-            if (in_shop) {
-                m.kind = MapKind::ACTIONS;
-                m.actions.push_back(make_action(ActionVerb::CHOOSE, kChooseProceed));
-                return m;
-            }
-            if (rc.phase == static_cast<uint8_t>(RunPhase::MAP_CHOICE)) {
+            if (in_shop ||
+                rc.phase == static_cast<uint8_t>(RunPhase::MAP_CHOICE)) {
                 m.kind = MapKind::NOOP;
                 return m;
             }

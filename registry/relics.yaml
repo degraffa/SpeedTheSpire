@@ -205,11 +205,10 @@
   game_id: "Lantern"
   tier: COMMON
   pool_order: 6
-  initial_counter: 0
   native: true
   hooks:
     at_turn_start: []         # +1 energy on the FIRST turn only
-  provenance: "Lantern.atTurnStart (Lantern.java:56-61) -- if first turn addToTop GainEnergyAction(1); atPreBattle arms the first-turn flag (:51-54)"
+  provenance: "Lantern.atTurnStart (Lantern.java:56-61) -- if private `firstTurn` is true, clear it and addToTop GainEnergyAction(1); atPreBattle arms that private flag (:51-54). The class never writes AbstractRelic.counter, so the observable counter remains its inherited -1; the engine identifies the first atTurnStart call by CombatState.turn == 0."
 
 - id: 9
   name: NUNCHAKU
@@ -259,12 +258,11 @@
   game_id: "Red Skull"
   tier: COMMON
   pool_order: 32
-  initial_counter: 0
   native: true
   hooks:
     at_battle_start: []       # native: reset isActive, then the owner-specified entered-bloodied +3
     was_hp_lost: []           # onBloodied: cross to <=50% HP -> +3 Strength (once, while armed)
-  provenance: "RedSkull, read in full. slot.counter IS isActive (:24). onBloodied (RedSkull.java:41-52) -- if !isActive && COMBAT phase (:45), addToTop ApplyPowerAction(StrengthPower 3) (:47), isActive = true (:49); routed through wasHPLost because AbstractPlayer.damage's bloodied cross (AbstractPlayer.java:1476-1481) fires it only when isBloodied flips false->true. onNotBloodied (:54-63) -- if isActive && COMBAT phase (:56), addToTop ApplyPowerAction(StrengthPower -3) (:58); then isActive = false (:61) OUTSIDE that block, so a run-layer cross-up disarms the relic without moving any Strength. The -3 goes through the ORDINARY APPLY_POWER door and Artifact eats it with no special case: a StrengthPower built with a non-positive amount types itself DEBUFF (StrengthPower.java:37 -> :81-89) and ApplyPowerAction.java:131-138 spends a stack (ArtifactPower.onSpecificTrigger, ArtifactPower.java:33-40) and returns without applying -- so crossings are CUMULATIVE DELTAS (a blocked -3 then another cross-down leaves +6), not an invariant. NOT a registry RelicHook: Red Skull is the game's only mechanical onNotBloodied implementor (MeatOnTheBone's is stopPulse(), :47-50), so it rides a hand-written fan-out (the Philosopher's Stone onSpawnMonster precedent) from heal_player_with_relics in combat (AbstractCreature.heal:404-408, reached via AbstractPlayer.heal:1544-1552) and from heal_out_of_combat on the run layer. ENTRY SEMANTICS: preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2 (AbstractPlayer.java:1575) so a combat ENTERED at or below half HP never fires the damage-side onBloodied, and atBattleStart (:35-39) resets isActive = false (:37) every combat -- both reproduced by the at_battle_start seed (the three bloodied tests agree for integer HP: cur <= max/2 == cur <= max/2.0f == cur*2 <= max; max 7 -> hp <= 3). atBattleStart then addToBot's an action (:38) that is an UNAVAILABLE ANONYMOUS INNER CLASS in this decompiled tree (CFR hole; the class file shows only that it reads/writes isActive, per the synthetic access$000/002 :76-83). Its behaviour -- entering combat already bloodied grants the +3 as well -- is OWNER-SPECIFIED (project owner, 2026-07-28), NOT derived, and is PENDING ORACLE-CAPTURE VALIDATION; only the addToBot queue end is Java-pinned. onVictory (:66-69) also clears isActive and is deliberately NOT bound: the at_battle_start re-seed re-derives the latch from HP, so the binding would change nothing."
+  provenance: "RedSkull, read in full, plus recovered RedSkull$1. `private boolean isActive` (:24) is NOT AbstractRelic.counter: the inherited oracle-visible counter remains -1 for the whole run (completed G7 capture g7_greedy_b153_20260729_200000_200011 STS200002 pins -1 from acquisition onward). The private latch lives in kCombatFlagRedSkullActive, never RelicSlot.counter. onBloodied (RedSkull.java:41-52) -- if !isActive && COMBAT phase (:45), addToTop ApplyPowerAction(StrengthPower 3) (:47), isActive = true (:49); routed through wasHPLost because AbstractPlayer.damage's bloodied cross (AbstractPlayer.java:1476-1481) fires it only when isBloodied flips false->true. onNotBloodied (:54-63) -- if isActive && COMBAT phase (:56), addToTop ApplyPowerAction(StrengthPower -3) (:58); then isActive = false (:61) OUTSIDE that block. The -3 goes through the ORDINARY APPLY_POWER door and Artifact eats it: a non-positive StrengthPower types itself DEBUFF (StrengthPower.java:37,81-89), so crossings are cumulative deltas, not an invariant. Red Skull is the only mechanical onNotBloodied implementor, so the combat cross rides a hand-written fan-out from heal_player_with_relics. The out-of-combat private write is behaviorally inert in this engine and intentionally stores nothing: no power survives the room boundary, onVictory clears isActive, and atBattleStart clears and re-derives it before the next possible read. ENTRY: preBattlePrep seeds isBloodied from currentHealth <= maxHealth/2 (AbstractPlayer.java:1575); atBattleStart (:35-39) clears isActive and addToBots recovered RedSkull$1, whose resolve-time `!isActive && player.isBloodied` grants direct +3 and sets the private bit after top-queued battle-start heals settle. Red Skull is unique in the S1 pools, making one combat-global bit the exact reachable shape; no schema/layout change."
 
 - id: 14
   name: VAJRA
@@ -1003,7 +1001,7 @@
   native: true
   hooks:
     at_turn_start_post_draw: []  # native body: relics/relics_rare.cpp
-  provenance: "GamblingChip (GamblingChip.java, read in full -- the file is 48 lines, NOT the 426-453 range this row used to cite): a private `activated` field (:18) cleared by atBattleStartPreDraw (:30-32); atTurnStartPostDraw (:34-42) is `if (!activated) { activated = true; flash(); addToBot(RelicAboveCreatureAction); addToBot(new GamblingChipAction(player)); }`. ONCE PER COMBAT, not every turn -- the latch IS the relic. IMPLEMENTED: the deferral's stated blocker (no OPTIONAL multi-select with an explicit confirm) arrived with the optional-choice machinery, and the body is now ChoiceKind::HAND_TO_DISCARD_THEN_DRAW queued through the shared queue_gambling_chip_choice builder that Gambler's Brew also calls -- GamblingChipAction is ONE action and its notChip boolean selects only a prompt string (GamblingChipAction.java:42-46). The draw count is selectedCards.size() read AT CONFIRM; there is no relic-side count. RelicSlot.counter carries `activated` (the -1 unset default IS 'not activated'). Only atTurnStartPostDraw is bound: atBattleStartPreDraw has no dispatch site and a fresh CombatState already starts at -1, so binding it would be inert code."
+  provenance: "GamblingChip (GamblingChip.java, read in full -- the file is 48 lines, NOT the 426-453 range this row used to cite): a private `activated` field (:18) cleared by atBattleStartPreDraw (:30-32); atTurnStartPostDraw (:34-42) is `if (!activated) { activated = true; flash(); addToBot(RelicAboveCreatureAction); addToBot(new GamblingChipAction(player)); }`. ONCE PER COMBAT, not every turn -- the latch is private and the class never writes AbstractRelic.counter, so the observable counter remains its inherited -1. The engine identifies the first post-draw hook by CombatState.turn == 1. IMPLEMENTED: the deferral's stated blocker (no OPTIONAL multi-select with an explicit confirm) arrived with the optional-choice machinery, and the body is now ChoiceKind::HAND_TO_DISCARD_THEN_DRAW queued through the shared queue_gambling_chip_choice builder that Gambler's Brew also calls -- GamblingChipAction is ONE action and its notChip boolean selects only a prompt string (GamblingChipAction.java:42-46). The draw count is selectedCards.size() read AT CONFIRM; there is no relic-side count."
 
 - id: 87
   name: PEACE_PIPE
@@ -1398,7 +1396,7 @@
   game_id: "SacredBark"
   tier: BOSS
   pool_order: 14
-  provenance: "SacredBark.onEquip (SacredBark.java:20-25) -- re-run initializeData() on every held potion; the doubling itself is AbstractPotion.initializeData's SacredBark branch (AbstractPotion.java:643), which doubles each potion's potency. potions.yaml stores a single potency per row and use_potion reads it directly (potions.cpp), so this is a potion-layer modifier with no relic-side hook. Row, pool slot and relicRng draw are live."
+  provenance: "SacredBark.onEquip (SacredBark.java:20-25) -- re-run initializeData() on every held potion; the doubling itself is AbstractPotion.initializeData's SacredBark branch (AbstractPotion.java:643), which doubles each potion's potency. The simulator keeps potions.yaml's base potency immutable and applies the equivalent x2 at every use/trigger site: the central combat data/native path (potions.cpp), direct run-layer Fruit Juice and Blood Potion use (run_advance.cpp), and Fairy in a Bottle's in-combat and event-damage revives (interp_damage.cpp / event_framework.cpp). No relic-side hook is needed. Row, pool slot and relicRng draw are live."
 
 - id: 127
   name: EMPTY_CAGE
@@ -1561,10 +1559,10 @@
   name: GREMLIN_MASK
   game_id: "GremlinMask"
   tier: SPECIAL
+  native: true
   hooks:
-    at_battle_start:
-      - {op: APPLY_POWER, target: SELF, amount: 1, power: WEAK}
-  provenance: "GremlinMask.atBattleStart (GremlinMask.java:26-32) -- addToBot RelicAboveCreatureAction then addToBot ApplyPowerAction(player, player, WeakPower(player, 1, false), 1). A DATA hook: WEAK is registered (powers.yaml id 3) and the step is queued addToBot exactly as the Java queues it. The false is WeakPower's justApplied flag, which only affects the end-of-round decrement of a debuff applied BY a monster; a self-applied Weak decrements normally."
+    at_battle_start: []
+  provenance: "GremlinMask.atBattleStart (GremlinMask.java:26-32) -- addToBot RelicAboveCreatureAction then addToBot ApplyPowerAction(player, player, WeakPower(player, 1, false), 1). Native only because the otherwise-data-shaped APPLY_POWER must carry WeakPower's explicit isSourceMonster=false constructor argument: a player-owned Weak normally defaults to the monster-source justApplied latch (including Doubt, whose ApplyPowerAction source is still the player), while this relic's one stack must decrement at the end of round 1. relic_native_gremlin_mask queues the same addToBot item with that boolean encoded; every interception/Artifact path remains the shared APPLY_POWER body."
 
 - id: 141
   name: NLOTHS_MASK

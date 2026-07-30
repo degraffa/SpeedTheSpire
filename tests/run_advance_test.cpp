@@ -1560,6 +1560,29 @@ TEST(RunPotion, FruitJuiceIsLegalOutsideCombatAndMutatesPersistentHp) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
+// Blood Potion is not combat-only. Its canUse override permits a reward-screen
+// drink, and use() heals the persistent player synchronously outside combat
+// (BloodPotion.java:39-59). STS300092 does exactly this at seq 28.
+TEST(RunPotion, BloodPotionHealsPersistentHpOnACombatRewardScreen) {
+    RunController rc = run_begin(kSeed, kA20);
+    rc.phase = static_cast<uint8_t>(RunPhase::COMBAT_REWARD);
+    rc.run.hp = 15;
+    rc.run.max_hp = 80;
+    rc.combat.player_hp = 3;  // stale fight state must not be the heal target.
+    rc.combat.player_max_hp = 75;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::BLOOD_POTION);
+
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_use_potion[0]);
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+
+    EXPECT_EQ(rc.run.hp, 31) << "floor(80 * 20%) heals the persistent player";
+    EXPECT_EQ(rc.combat.player_hp, 3);
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+}
+
 TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     RunController rc = run_begin(kSeed, kA20);
     leave_neow(rc);
@@ -1573,6 +1596,28 @@ TEST(RunPotion, ToyOrnithopterTriggersOutsideCombat) {
     step(rc, make_action(ActionVerb::USE_POTION, 0));
     EXPECT_EQ(rc.run.max_hp, 85);
     EXPECT_EQ(rc.run.hp, 60);  // Fruit Juice +5, then Toy Ornithopter +5.
+}
+
+TEST(RunPotion, SacredBarkDoublesFruitJuiceInCombat) {
+    RunController rc = enter_jaw_worm_combat();
+    rc.run.relics[rc.run.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SACRED_BARK), -1};
+    ++rc.run.relic_count;
+    rc.combat.relics[rc.combat.relic_count] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SACRED_BARK), -1};
+    ++rc.combat.relic_count;
+    rc.combat.player_hp = 33;
+    rc.combat.player_max_hp = 75;
+    rc.run.hp = 33;
+    rc.run.max_hp = 75;
+    rc.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
+
+    step(rc, make_action(ActionVerb::USE_POTION, 0));
+
+    EXPECT_EQ(rc.combat.player_hp, 43);
+    EXPECT_EQ(rc.combat.player_max_hp, 85);
+    EXPECT_EQ(rc.run.max_hp, 85);
+    EXPECT_EQ(rc.run.potions[0], static_cast<uint16_t>(PotionId::NONE));
 }
 
 // ToyOrnithopter.onUsePotion IN a COMBAT-phase room is two addToBots
@@ -1646,10 +1691,12 @@ TEST(RunPotion, ToyOrnithopterHealInCombatIsScaledByMagicFlower) {
 // OUT of combat the Java is a plain `player.heal(5)` (ToyOrnithopter.java:39),
 // and AbstractPlayer.heal ends with the not-bloodied cross
 // (AbstractCreature.heal:404-408) -- so a Toy Ornithopter heal that carries the
-// player past half disarms an active Red Skull, exactly as a rest's heal does.
-// The old inline write skipped the cross. Numbers chosen so Fruit Juice's own
-// +5 does NOT cross (41 * 2 < 85) and the Ornithopter's +5 does (46 * 2 > 85).
-TEST(RunPotion, ToyOrnithopterOutOfCombatHealRunsTheNotBloodiedCross) {
+// player past half disarms Red Skull's private isActive, exactly as a rest's
+// heal does.  That write is behaviorally inert at the run layer (onVictory and
+// the next atBattleStart clear it before another read), and must never leak
+// into AbstractRelic.counter. Numbers chosen so Fruit Juice's own +5 does NOT
+// cross (41 * 2 < 85) and the Ornithopter's +5 does (46 * 2 > 85).
+TEST(RunPotion, ToyOrnithopterOutOfCombatCrossKeepsRedSkullCounterHidden) {
     RunController rc = run_begin(kSeed, kA20);
     leave_neow(rc);
     rc.run.hp = 36;
@@ -1658,7 +1705,7 @@ TEST(RunPotion, ToyOrnithopterOutOfCombatHealRunsTheNotBloodiedCross) {
         RelicSlot{static_cast<uint16_t>(RelicId::TOY_ORNITHOPTER), 0};
     ++rc.run.relic_count;
     rc.run.relics[rc.run.relic_count] =
-        RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};  // isActive
+        RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     ++rc.run.relic_count;
     rc.run.potions[0] = static_cast<uint16_t>(PotionId::FRUIT_JUICE);
 
@@ -1667,8 +1714,8 @@ TEST(RunPotion, ToyOrnithopterOutOfCombatHealRunsTheNotBloodiedCross) {
     EXPECT_EQ(rc.run.hp, 46);
     const RelicSlot& skull = rc.run.relics[rc.run.relic_count - 1];
     ASSERT_EQ(skull.relic_id, static_cast<uint16_t>(RelicId::RED_SKULL));
-    EXPECT_EQ(skull.counter, 0)
-        << "isActive = false sits OUTSIDE the phase gate (RedSkull.java:61)";
+    EXPECT_EQ(skull.counter, -1)
+        << "private isActive is not the oracle-visible relic counter";
 }
 
 TEST(RunPotion, EntropicBrewOutOfCombatDrawsAreUnlimited) {
@@ -2493,6 +2540,57 @@ TEST(MapChoice, LegalColumnsMatchGeneratedEdges) {
         const bool connected = rc.run.map[run_state_map_index(x, 0)].edges != 0;
         EXPECT_EQ(m.can_choose_node[x], connected) << "row-0 col " << x;
     }
+}
+
+// WingBoots / MapRoomNode.wingedIsConnectedTo: every non-empty node on the
+// next row is exposed while a charge is live, but only a destination lacking a
+// real edge spends one. The final spend uses the relic's exhausted sentinel
+// -2, not a visible zero.
+TEST(MapChoice, WingBootsOffersRemoteNodesAndSpendsOnlyOnAJump) {
+    RunController base = run_begin(kSeed, kA20);
+    leave_neow(base);
+    base.run.floor = 1;
+    base.cur_x = 3;
+    base.room_type = static_cast<uint8_t>(RoomType::Shop);
+    base.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
+
+    for (int x = 0; x < kMapCols; ++x) {
+        base.run.map[run_state_map_index(x, 1)] = MapNode{};
+    }
+    base.run.map[run_state_map_index(3, 0)].edges = kEdgeCenter;
+    for (const int x : {0, 3}) {
+        MapNode& dst = base.run.map[run_state_map_index(x, 1)];
+        dst.edges = kEdgeCenter;
+        dst.room_type = static_cast<uint8_t>(RoomType::Shop);
+    }
+
+    RunActionMask none{};
+    legal_actions(base, none);
+    EXPECT_FALSE(none.can_choose_node[0]);
+    EXPECT_TRUE(none.can_choose_node[3]);
+
+    RunController jump = base;
+    set_run_relics(jump, {RelicId::WING_BOOTS});
+    RunActionMask offered{};
+    legal_actions(jump, offered);
+    EXPECT_TRUE(offered.can_choose_node[0]);
+    EXPECT_TRUE(offered.can_choose_node[3]);
+    step(jump, make_action(ActionVerb::CHOOSE, 0));
+    ASSERT_EQ(jump.run.relic_count, 1);
+    EXPECT_EQ(jump.run.relics[0].counter, 2);
+    EXPECT_EQ(jump.run.floor, 2);
+
+    RunController connected = base;
+    set_run_relics(connected, {RelicId::WING_BOOTS});
+    step(connected, make_action(ActionVerb::CHOOSE, 3));
+    EXPECT_EQ(connected.run.relics[0].counter, 3)
+        << "a real map edge is free";
+
+    RunController last = base;
+    set_run_relics(last, {RelicId::WING_BOOTS});
+    last.run.relics[0].counter = 1;
+    step(last, make_action(ActionVerb::CHOOSE, 0));
+    EXPECT_EQ(last.run.relics[0].counter, -2);
 }
 
 TEST(RoomRouting, ShopRoomsOpenTheMerchant) {

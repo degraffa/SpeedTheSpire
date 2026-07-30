@@ -126,7 +126,10 @@ class ReportAndTriageTest(unittest.TestCase):
             with open(os.path.join(
                     campaign_dir, "diffs", "STS00001.log"),
                     "w", encoding="utf-8") as fh:
-                fh.write("CLEAN run: 2 records; 0 obtain-race\n")
+                fh.write(
+                    "CLEAN run: 2 records; 0 library-order-only, "
+                    "0 obtain-race, 1 escape-race, 1 preview-race; "
+                    "stop: run terminal\n")
             with open(os.path.join(
                     campaign_dir, "diffs", "STS00002.status"),
                     "w", encoding="ascii") as fh:
@@ -148,7 +151,15 @@ class ReportAndTriageTest(unittest.TestCase):
             self.assertAlmostEqual(report["actions_per_second"], 1.0)
             self.assertEqual(report["captured_actions"], 4)
             self.assertEqual(report["replay_clean_actions"], 2)
-            self.assertEqual(report["strict_zero_diff_actions"], 2)
+            self.assertEqual(report["strict_zero_diff_actions"], 0)
+            self.assertEqual(report["known_capture_race_records"], 2)
+            self.assertEqual(report["known_obtain_race_records"], 0)
+            self.assertEqual(report["known_escape_race_records"], 1)
+            self.assertEqual(
+                report["known_capture_race_records_by_kind"],
+                {"obtain-race": 0, "escape-race": 1, "preview-race": 1})
+            self.assertEqual(
+                report["runs"][0]["known_capture_race_records"], 2)
             self.assertEqual(report["outcome_counts"], {"death": 2})
             self.assertEqual(report["floor_counts"], {"3": 1, "4": 1})
             self.assertEqual(
@@ -161,6 +172,26 @@ class ReportAndTriageTest(unittest.TestCase):
                 ["choose 0", "play 1 0"])
             self.assertEqual(
                 repro["first_divergence"]["first_divergence_seq"], 1)
+
+    def test_capture_race_parser_is_all_family_and_old_log_compatible(self):
+        self.assertEqual(
+            campaign_pipeline._capture_race_counts(
+                "RACE diagnostic cites B5.2 obtain-race\n"
+                "CLEAN old: 2 records; 3 obtain-race\n"),
+            {"obtain-race": 3})
+        self.assertEqual(
+            campaign_pipeline._capture_race_counts(
+                "CLEAN new: 2 records; 1 obtain-race, 2 escape-race, "
+                "3 preview-race, 4 future-race; stop: run terminal\n"),
+            {
+                "obtain-race": 1,
+                "escape-race": 2,
+                "preview-race": 3,
+                "future-race": 4,
+            })
+        with self.assertRaisesRegex(ValueError, "repeats"):
+            campaign_pipeline._capture_race_counts(
+                "CLEAN duplicate: 1 obtain-race, 1 obtain-race")
 
 
 class ProcessBoundaryTest(unittest.TestCase):

@@ -764,14 +764,24 @@ TEST(RelicBossSpecial, GremlinMaskWeakensThePlayerAtBattleStart) {
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
     EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
     EXPECT_EQ(queued(s, 0).amount, 1);
-    EXPECT_EQ(queued(s, 0).flags, make_apply_power_flags(PowerId::WEAK));
+    EXPECT_EQ(queued(s, 0).flags,
+              make_apply_power_flags(PowerId::WEAK, 0, false));
     drain(s);
-    bool weak = false;
-    for (uint8_t i = 0; i < s.player_power_count; ++i) {
-        weak = weak || s.player_powers[i].power_id ==
-                           static_cast<uint16_t>(PowerId::WEAK);
-    }
-    EXPECT_TRUE(weak);
+    const auto has_weak = [&]() {
+        bool weak = false;
+        for (uint8_t i = 0; i < s.player_power_count; ++i) {
+            weak = weak || s.player_powers[i].power_id ==
+                               static_cast<uint16_t>(PowerId::WEAK);
+        }
+        return weak;
+    };
+    ASSERT_TRUE(has_weak());
+    ASSERT_EQ(s.player_powers[0].counter, 0)
+        << "WeakPower(player, 1, false) is not justApplied";
+    dispatch_at_end_of_round(s);
+    drain(s);
+    EXPECT_FALSE(has_weak())
+        << "Gremlin Visage's one Weak expires after the first round";
 }
 
 // ============================================================================
@@ -1149,10 +1159,15 @@ TEST(RelicBossSpecial, PandorasBoxReplacesEveryStarterInReverseDrawOrder) {
 
     ASSERT_EQ(acquire_relic(rs, misc, RelicId::PANDORAS_BOX, ctx),
               RelicAcquireResult::ACQUIRED);
-    EXPECT_EQ(ctx.screen, RelicEquipScreen::NONE)
-        << "the confirmation grid carries no choice; the run layer skips it";
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::GRID_CONFIRM_PANDORA);
     EXPECT_EQ(misc.counter, 0) << "no miscRng on any Pandora path";
     EXPECT_EQ(card_random.counter, 3);
+    ASSERT_EQ(rs.master_deck_count, 2)
+        << "starter removals precede the preview grid confirmation";
+    EXPECT_EQ(rs.master_deck[0].card_id, static_cast<uint16_t>(CardId::BASH));
+    EXPECT_EQ(rs.master_deck[1].card_id,
+              static_cast<uint16_t>(CardId::ASCENDERS_BANE));
+    relic_confirm_pandoras_box(rs, rewards);
     ASSERT_EQ(rs.master_deck_count, 5);
     EXPECT_EQ(rs.master_deck[0].card_id, static_cast<uint16_t>(CardId::BASH));
     EXPECT_EQ(rs.master_deck[1].card_id,
@@ -1381,6 +1396,11 @@ TEST(RelicBossSpecial, CallingBellRollsTheDiscardedRewardAndFrontPopsThreeTiers)
     ASSERT_EQ(acquire_relic(rs, misc, RelicId::CALLING_BELL, ctx),
               RelicAcquireResult::ACQUIRED);
 
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::GRID_CONFIRM_CALLING_BELL);
+    EXPECT_EQ(rs.master_deck_count, 1);
+    EXPECT_EQ(rs.card_rng.counter, 0)
+        << "all Bell update-side work waits for confirmation";
+    relic_confirm_calling_bell(rs, rewards, RoomType::Event);
     ASSERT_EQ(rs.master_deck_count, 2);
     EXPECT_EQ(rs.master_deck[1].card_id,
               static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL))
@@ -1390,7 +1410,9 @@ TEST(RelicBossSpecial, CallingBellRollsTheDiscardedRewardAndFrontPopsThreeTiers)
     EXPECT_EQ(rs.card_blizz_randomizer, clone.card_blizz_randomizer);
     EXPECT_EQ(rs.relic_rng.counter, relic_counter_after_init)
         << "front-pops move no relicRng counter";
-    EXPECT_EQ(ctx.screen, RelicEquipScreen::ITEM_REWARD);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::GRID_CONFIRM_CALLING_BELL)
+        << "the confirmation helper mutates gameplay state; its screen owner "
+           "performs the transition";
     ASSERT_EQ(rewards.count, 3) << "the card row was rolled AND removed";
     for (int i = 0; i < 3; ++i) {
         EXPECT_EQ(rewards.items[i].kind,
@@ -1426,6 +1448,8 @@ TEST(RelicBossSpecial, CallingBellCurseIsEatenByAHeldOmamoriCharge) {
     RelicEquipContext ctx{card_random, rewards, RoomType::Event};
     ASSERT_EQ(acquire_relic(rs, misc, RelicId::CALLING_BELL, ctx),
               RelicAcquireResult::ACQUIRED);
+    EXPECT_EQ(ctx.screen, RelicEquipScreen::GRID_CONFIRM_CALLING_BELL);
+    relic_confirm_calling_bell(rs, rewards, RoomType::Event);
     EXPECT_EQ(rs.master_deck_count, 1) << "the curse was consumed, not added";
     EXPECT_EQ(rs.relics[0].counter, 0) << "and the charge was spent";
     EXPECT_EQ(rewards.count, 3) << "the reward flow is unaffected";

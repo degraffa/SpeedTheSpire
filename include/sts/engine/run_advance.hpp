@@ -229,6 +229,7 @@ inline constexpr uint8_t kNoEmeraldNode = 0xFF;
 // lives at the lowest layer that consumes it.
 inline constexpr uint8_t kChooseProceed = 0xFF;
 inline constexpr uint8_t kChooseSing = 0xFD;
+inline constexpr uint8_t kChooseCancelGrid = 0xFC;
 inline constexpr uint8_t kChooseOpenChest = 0;
 
 // CHOOSE arg0 layout on the shop floor (RunPhase::SHOP, ShopScreenKind::MENU).
@@ -363,9 +364,11 @@ enum class EventCombatVariant : uint8_t {
 //   NEOW                 : depends on rc.neow.screen -- BLESSING offers
 //                          can_choose_neow_option[0..3] (CHOOSE i); CARD_REWARD
 //                          offers can_take_card / can_skip_card / can_sing;
-//                          GRID offers can_choose_master_deck[i]; ITEM_REWARD
-//                          offers can_claim_reward[i] + can_proceed; DONE offers
-//                          can_proceed, which opens the map.
+//                          a card-select GRID offers
+//                          can_choose_master_deck[i], while Pandora / Calling
+//                          Bell confirmation grids offer can_proceed;
+//                          ITEM_REWARD offers can_claim_reward[i] + can_proceed;
+//                          DONE offers can_proceed, which opens the map.
 //   TREASURE_ROOM        : can_open_chest (CHOOSE kChooseOpenChest) and
 //                          can_proceed (CHOOSE kChooseProceed) to skip it.
 //   COMBAT_REWARD        : with no card screen open -- can_proceed (CHOOSE
@@ -379,14 +382,16 @@ enum class EventCombatVariant : uint8_t {
 //                          (0..kMapCols-1) or kChooseBoss.
 //   COMBAT               : `combat` holds PLAY_CARD / END_TURN / CHOOSE;
 //                          run-owned potion masks below hold USE_POTION.
-//   REST_SITE            : menu buttons, a Smith/Toke master-deck grid, or
-//                          Dream Catcher's direct card-pick screen.
+//   REST_SITE            : menu buttons, a Smith/Toke master-deck grid (cards
+//                          plus can_cancel_grid), or Dream Catcher's direct
+//                          card-pick screen.
 //   EVENT_DIALOG         : can_choose_event_option[i] (CHOOSE i) over a dialog,
 //                          or can_choose_master_deck[i] over an event grid.
 //   SHOP                 : can_buy_shop_item[i] (CHOOSE i) over the fixed row
 //                          layout, can_purge (CHOOSE kChooseShopPurge) and
 //                          can_proceed (CHOOSE kChooseProceed); once the purge
-//                          grid is open, can_choose_master_deck[i] only.
+//                          grid is open, can_choose_master_deck[i] plus
+//                          can_cancel_grid.
 //   ROOM_UNIMPLEMENTED / RUN_OVER : nothing legal (the run is parked/terminal).
 struct RunActionMask {
     uint8_t phase;                     // RunPhase echo (== controller.phase).
@@ -408,6 +413,7 @@ struct RunActionMask {
     // reuses the card-pick fields above.
     bool can_choose_rest[kRestOptionCap];
     bool can_choose_master_deck[kMasterDeckCap];
+    bool can_cancel_grid;  // Smith/Toke/shop-purge modal -> parent menu
     // EVENT_DIALOG: the current screen's options, rebuilt from the event's
     // build_menu on every call (never cached). CHOOSE arg0 is the option index.
     bool can_choose_event_option[kEventOptionCap];
@@ -415,8 +421,8 @@ struct RunActionMask {
     // kChooseShop*Base layout above; can_purge opens the removal grid and
     // can_proceed leaves for the map. The grid screen instead uses
     // can_choose_master_deck[] and offers nothing else -- the same shape the
-    // rest site's Smith/Toke grids use (GridCardSelectScreen's cancel button is
-    // not modelled at the run layer by any grid yet).
+    // rest site's Smith/Toke grids use. can_cancel_grid is their and the shop
+    // purge grid's Cancel button, encoded as CHOOSE(kChooseCancelGrid).
     bool can_buy_shop_item[kShopItemCount];
     bool can_purge;
     // USE_POTION owns a RunState slot, so its legality lives at this layer.

@@ -112,6 +112,78 @@
       "reference": "../stage-b-tasks.md#deferred-obligations",
       "seed": "STS71040",
       "status": "open-harness-gap"
+    },
+    {
+      "campaign_id": "g7_greedy_b153_20260729_200000_200011",
+      "classification": "state_divergence",
+      "note": "All five divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS200002",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_greedy_b153_20260729_200000_200011",
+      "classification": "state_divergence",
+      "note": "All six divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS200003",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_greedy_b153_20260729_200000_200011",
+      "classification": "state_divergence",
+      "note": "All ten divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS200007",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_greedy_b153_20260729_200000_200011",
+      "classification": "state_divergence",
+      "note": "All seven divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS200011",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_b153_20260729_300000_324999",
+      "classification": "state_divergence",
+      "note": "All eleven divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS300037",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_b153_20260729_300000_324999",
+      "classification": "state_divergence",
+      "note": "All seven divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS300078",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_b153_20260729_300000_324999",
+      "classification": "state_divergence",
+      "note": "All three divergent records (seq 105-107) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS300195",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_b153_20260729_300000_324999",
+      "classification": "state_divergence",
+      "note": "All seven divergent records (seq 43-49) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS300305",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_b153_20260729_300000_324999",
+      "classification": "state_divergence",
+      "note": "All three divergent records (seq 46-48) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS300433",
+      "status": "standing-deviation"
     }
   ]
 }

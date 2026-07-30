@@ -37,6 +37,8 @@ _RUN_RE = re.compile(r"run_([0-9A-Z]+)_a20_ironclad\.jsonl")
 _FIRST_DIFF_RE = re.compile(
     r"first divergence: seq=(\d+) floor=(\d+) screen=([^ ]+) "
     r"\((\d+) field")
+_CAPTURE_RACE_RE = re.compile(
+    r"\b(\d+)\s+([a-z][a-z0-9-]*-race)\b")
 
 
 class GameResourceBusy(RuntimeError):
@@ -322,6 +324,34 @@ def _timing_summary(campaign_dir: str, seed: str, actions: int) -> dict:
             "actions_per_second": rate}
 
 
+def _capture_race_counts(diff_text: str) -> dict[str, int]:
+    """Extract every named capture-race family from a replay summary.
+
+    The replay executable currently reports obtain-race (card/potion obtain
+    animation, including Entropic Brew), escape-race (Smoke Bomb settlement)
+    and preview-race (Living Wall's wall-clock curse preview). Matching named
+    ``*-race`` fields keeps strict accounting conservative when the replay
+    classifier grows another narrowly reviewed capture-race family.
+    """
+    summaries = [
+        line for line in diff_text.splitlines()
+        if line.startswith("CLEAN ") or line.startswith("PART ")
+    ]
+    if not summaries:
+        return {}
+    if len(summaries) != 1:
+        raise ValueError(
+            f"replay report has {len(summaries)} verdict summaries")
+    counts: dict[str, int] = {}
+    for value, name in _CAPTURE_RACE_RE.findall(summaries[0]):
+        count = int(value)
+        if name in counts:
+            raise ValueError(
+                f"replay report repeats capture-race field {name!r}")
+        counts[name] = count
+    return counts
+
+
 def _action_prefix(path: str, through_seq: Optional[int]) -> list:
     out = []
     with open(path, "r", encoding="utf-8") as fh:
@@ -396,7 +426,8 @@ def generate_report(campaign_id: str) -> dict:
     triage = []
     total_active = 0.0
     active_known = True
-    known_race_records = 0
+    known_capture_race_records = 0
+    known_capture_race_records_by_kind: dict[str, int] = {}
     for row in progress.get("seeds_done", []):
         seed = row["seed"]
         translation_rc = _read_status(os.path.join(
@@ -407,9 +438,14 @@ def generate_report(campaign_id: str) -> dict:
             campaign_dir, "encounter_lists", f"{seed}.status"))
         diff_text = _read_text(os.path.join(
             campaign_dir, "diffs", f"{seed}.log"))
-        race_match = re.search(r"(\d+) obtain-race", diff_text)
-        race_records = int(race_match.group(1)) if race_match else 0
-        known_race_records += race_records
+        race_counts = _capture_race_counts(diff_text)
+        capture_race_records = sum(race_counts.values())
+        obtain_race_records = race_counts.get("obtain-race", 0)
+        escape_race_records = race_counts.get("escape-race", 0)
+        known_capture_race_records += capture_race_records
+        for name, count in race_counts.items():
+            known_capture_race_records_by_kind[name] = (
+                known_capture_race_records_by_kind.get(name, 0) + count)
         first = _FIRST_DIFF_RE.search(diff_text)
         detail = {}
         if first:
@@ -445,7 +481,12 @@ def generate_report(campaign_id: str) -> dict:
             "actions": row.get("actions"),
             "attempts": row.get("attempts"),
             "classification": classification,
-            "known_obtain_race_records": race_records,
+            # Keep the original obtain-only field so existing report consumers
+            # remain compatible. Strict evidence uses the all-family total.
+            "known_obtain_race_records": obtain_race_records,
+            "known_escape_race_records": escape_race_records,
+            "known_capture_race_records": capture_race_records,
+            "known_capture_race_records_by_kind": race_counts,
             "translation_exit": translation_rc,
             "replay_exit": diff_rc,
             "encounter_lists_exit": lists_rc,
@@ -478,7 +519,7 @@ def generate_report(campaign_id: str) -> dict:
         int(result.get("actions", 0))
         for result in results
         if result["classification"] == "clean"
-        and result["known_obtain_race_records"] == 0)
+        and result["known_capture_race_records"] == 0)
     outcome_counts = {}
     floor_counts = {}
     for result in results:
@@ -520,7 +561,13 @@ def generate_report(campaign_id: str) -> dict:
         "outcome_counts": outcome_counts,
         "floor_counts": floor_counts,
         "diff_counts": counts,
-        "known_obtain_race_records": known_race_records,
+        "known_obtain_race_records":
+            known_capture_race_records_by_kind.get("obtain-race", 0),
+        "known_escape_race_records":
+            known_capture_race_records_by_kind.get("escape-race", 0),
+        "known_capture_race_records": known_capture_race_records,
+        "known_capture_race_records_by_kind":
+            known_capture_race_records_by_kind,
         "untriaged_count": len(triage),
         "runs": results,
         "triage_queue": triage,
@@ -549,7 +596,8 @@ def generate_report(campaign_id: str) -> dict:
         f"{strict_zero_diff_actions}; active throughput: "
         f"{rate_text} actions/s",
         f"- Diff classifications: `{json.dumps(counts, sort_keys=True)}`",
-        f"- Known obtain-race records: {known_race_records}",
+        f"- Known capture-race records: {known_capture_race_records} "
+        f"(`{json.dumps(known_capture_race_records_by_kind, sort_keys=True)}`)",
         f"- Pending triage: {len(triage)}",
         "",
         "| Seed | Outcome | Floor | Actions | Classification |",

@@ -78,6 +78,12 @@ CardPoolIndex AddDrawTop(CombatState& s, CardId id, uint8_t upgrade = 0) {
     return pi;
 }
 
+CardPoolIndex AddDiscard(CombatState& s, CardId id, uint8_t upgrade = 0) {
+    const CardPoolIndex pi = AddCard(s, id, upgrade);
+    s.discard[s.discard_count++] = pi;
+    return pi;
+}
+
 CardPoolIndex AddExhaust(CombatState& s, CardId id, uint8_t upgrade = 0) {
     const CardPoolIndex pi = AddCard(s, id, upgrade);
     s.exhaust[s.exhaust_count++] = pi;
@@ -398,21 +404,57 @@ TEST(CardRaresCorruption, AppliesOnceAndRedirectsSkillsToExhaust) {
     EXPECT_EQ(s.player_power_count, 1);
 }
 
-TEST(CardRaresCorruption, PlayedSkillSpendsNoEnergyEvenWhenItStillCostsTwo) {
+TEST(CardRaresCorruption, ApplicationPermanentlyZeroesSkillsInAllFourPiles) {
     CombatState s = MakeCombat(/*energy=*/6);
     AddHand(s, CardId::CORRUPTION);   // 3
-    AddHand(s, CardId::IMPERVIOUS);   // a 2-cost SKILL already in hand
+    const CardPoolIndex hand = AddHand(s, CardId::IMPERVIOUS);
+    const CardPoolIndex draw = AddDrawTop(s, CardId::SHRUG_IT_OFF);
+    const CardPoolIndex discard = AddDiscard(s, CardId::BASH);
+    const CardPoolIndex exhaust = AddExhaust(s, CardId::EXHUME);
     Play(s, 0);
     EXPECT_EQ(s.player_energy, 3);
-    const CardPoolIndex imp = s.hand[0];
-    EXPECT_EQ(s.card_pool[imp].cost_now, 2)
-        << "a SKILL already in hand keeps its displayed cost -- "
-           "CorruptionPower.onCardDraw only reaches cards drawn afterwards";
+    EXPECT_EQ(s.card_pool[hand].cost_now, 0);
+    EXPECT_EQ(s.card_pool[draw].cost_now, 0);
+    EXPECT_EQ(s.card_pool[discard].cost_now, 2)
+        << "the constructor walk changes SKILLs only";
+    EXPECT_EQ(s.card_pool[exhaust].cost_now, 0);
+    EXPECT_FALSE(has_card_flag(s.card_pool[hand].flags,
+                               CardFlag::COST_MODIFIED_FOR_TURN))
+        << "modifyCostForCombat changes cost, not merely costForTurn";
     Play(s, 0);
     EXPECT_EQ(s.player_energy, 3)
         << "AbstractPlayer.useCard:1378 skips energy.use for a SKILL under "
            "Corruption";
     EXPECT_EQ(s.player_block, 30);
+}
+
+TEST(CardRaresCorruption, CostWalkRunsWhenTheApplyActionIsConstructed) {
+    CombatState s = MakeCombat(/*energy=*/6);
+    const CardPoolIndex corruption = AddHand(s, CardId::CORRUPTION);
+    const CardPoolIndex skill = AddHand(s, CardId::IMPERVIOUS);
+
+    CardQueueItem item{};
+    item.card_index = corruption;
+    resolve_card_play(s, item);
+
+    EXPECT_EQ(s.card_pool[skill].cost_now, 0);
+    EXPECT_EQ(FindPower(s, kActorPlayer, PowerId::CORRUPTION), nullptr)
+        << "the cost walk is synchronous, but the power is still queued";
+    EXPECT_GT(s.action_count, 0);
+}
+
+TEST(CardRaresCorruption, SecondCopyDoesNotReRunTheConstructorCostWalk) {
+    CombatState s = MakeCombat(/*energy=*/9);
+    AddHand(s, CardId::CORRUPTION);
+    Play(s, 0);
+
+    const CardPoolIndex later_skill = AddHand(s, CardId::IMPERVIOUS);
+    AddHand(s, CardId::CORRUPTION);
+    ASSERT_EQ(s.card_pool[later_skill].cost_now, 2);
+
+    Play(s, 1);
+    EXPECT_EQ(s.card_pool[later_skill].cost_now, 2)
+        << "Corruption.use skips construction when its power already exists";
 }
 
 TEST(CardRaresCorruption, DrawnSkillCostsZeroAndIsCostModifiedForTurn) {
@@ -798,6 +840,16 @@ TEST(CardRaresReaper, HealsTheDamageThatActuallyLanded) {
     AddHand(flower, CardId::REAPER);
     Play(flower, 0);
     EXPECT_EQ(flower.player_hp, 76) << "round(4 * 1.5f) == 6";
+
+    // HealAction is one of the action shapes clearPostCombatActions explicitly
+    // keeps. A lethal Reaper must therefore finish its queued heal before the
+    // room settles, even though no monster remains alive (STS300219 seq 23-24).
+    CombatState lethal = MakeGroup(1);
+    lethal.monsters[0].hp = 2;
+    AddHand(lethal, CardId::REAPER);
+    Play(lethal, 0);
+    EXPECT_EQ(lethal.monsters[0].hp, 0);
+    EXPECT_EQ(lethal.player_hp, 72);
 }
 
 // ===========================================================================

@@ -79,6 +79,23 @@ void relic_native_face_of_cleric(CombatState& s, RelicHook hook,
     }
 }
 
+void relic_native_gremlin_mask(CombatState& s, RelicHook hook,
+                               RelicSlot& /*slot*/,
+                               const RelicHookContext& /*ctx*/) noexcept {
+    if (hook != RelicHook::AT_BATTLE_START) {
+        return;
+    }
+    ActionQueueItem weak{};
+    weak.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
+    weak.src = kActorPlayer;
+    weak.tgt = kActorPlayer;
+    weak.amount = 1;
+    // WeakPower(player, 1, false): the false prevents the justApplied latch, so
+    // this one-turn Weak expires at the first round end.
+    weak.flags = make_apply_power_flags(PowerId::WEAK, 0, false);
+    add_to_bottom(s, weak);
+}
+
 // --- DEFERRED combat bodies --------------------------------------------------
 
 void relic_native_warped_tongs(CombatState& s, RelicHook hook,

@@ -427,8 +427,8 @@ TEST(LouseCurlUp, FullyBlockedAndLethalHitsDoNotTrigger) {
 // is local: Curl Up grants block when the monster is first attacked
 // (CurlUpPower.onAttacked), and MonsterGroup.applyPreTurnLogic
 // (MonsterGroup.java:98-105) clears it at the start of the MONSTER's next turn --
-// reached from AbstractRoom.endTurn through the anonymous inner class CFR dropped
-// (bytecode AbstractRoom$1, javap; see action_queue.cpp's apply_pre_turn_logic).
+// reached from AbstractRoom.endTurn through the recovered AbstractRoom$1.java
+// (see action_queue.cpp's apply_pre_turn_logic).
 // Two Louse, so the walk has to cover a sibling slot as well.
 TEST(LouseCurlUp, BlockDoesNotSurviveIntoThePlayersNextTurn) {
     CombatState s = MakeState(/*seed=*/51);

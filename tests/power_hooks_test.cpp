@@ -334,12 +334,7 @@ ActionQueueItem apply_power_item(uint8_t src, uint8_t tgt, PowerId id,
 TEST(PowerHooks, SadisticFiresWhenPlayerDebuffsUnprotectedTarget) {
     // Source-side onApplyPower fires first: applying a DEBUFF to a monster with no
     // Artifact makes Sadistic queue damage on that monster, AND the debuff still
-    // lands. Uses WEAK (a debuff that alters the target's OUTGOING damage, not
-    // incoming) rather than Vulnerable: Sadistic's damage is THORNS-typed in the
-    // game (Vulnerable, a NORMAL-only receive hook, does not boost it), but the
-    // DAMAGE opcode does not yet carry a damage-type (deferred -- see the Log), so
-    // a Vulnerable target would over-count the queued damage here. WEAK keeps the
-    // check on the DISPATCH/ordering the framework owns, not damage typing.
+    // lands.
     CombatState s{};
     s.monster_count = 1;
     s.monsters[0].hp = 30;
@@ -356,8 +351,39 @@ TEST(PowerHooks, SadisticFiresWhenPlayerDebuffsUnprotectedTarget) {
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::DAMAGE));
     EXPECT_EQ(queued(s, 0).tgt, 0);
     EXPECT_EQ(queued(s, 0).amount, 5);
+    EXPECT_EQ(damage_type_from_flags(queued(s, 0).flags),
+              DamageType::THORNS);
     drain_actions(s);
     EXPECT_EQ(s.monsters[0].hp, 30 - 5);
+}
+
+TEST(PowerHooks, SadisticThornsIsNotAmplifiedByTheDebuffItTriggeredOn) {
+    // STS302329: a 10-HP Jaw Worm behind 5 block receives Bash (8), then
+    // Sadistic 5 from the newly applied Vulnerable. The ordinary hit leaves 7
+    // HP; THORNS ignores Vulnerable and leaves 2. Treating Sadistic as NORMAL
+    // amplified it to 7, killed the monster one command early, and assembled a
+    // reward with twelve downstream RunState fields out of sync.
+    CombatState s{};
+    s.monster_count = 1;
+    s.monsters[0].hp = 10;
+    s.monsters[0].max_hp = 10;
+    s.monsters[0].block = 5;
+    give_player_power(s, PowerId::SADISTIC, 5);
+
+    ActionQueueItem bash_hit{};
+    bash_hit.opcode = kOp(Opcode::DAMAGE);
+    bash_hit.src = kActorPlayer;
+    bash_hit.tgt = 0;
+    bash_hit.amount = 8;
+    execute_opcode(s, bash_hit);
+    ASSERT_EQ(s.monsters[0].hp, 7);
+    ASSERT_EQ(s.monsters[0].block, 0);
+
+    execute_opcode(
+        s, apply_power_item(kActorPlayer, 0, PowerId::VULNERABLE, 2));
+    ASSERT_EQ(s.action_count, 1);
+    drain_actions(s);
+    EXPECT_EQ(s.monsters[0].hp, 2);
 }
 
 TEST(PowerHooks, ArtifactNullifiesDebuffAndBeatsSadistic) {

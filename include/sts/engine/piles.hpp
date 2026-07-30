@@ -57,11 +57,13 @@ namespace sts::engine {
 // shuffles the discard pool-index array, appends the shuffled array onto the tail
 // of draw[] (so the last shuffled element becomes the top / drawn-first card, per
 // the game's addToTop-to-END convention paired with our draw[draw_count-1]==top
-// convention), then clears the discard pile. Empty discard pile is a no-op (no
-// random_long is drawn, matching the game where an empty discard shuffles to
-// nothing -- though in practice draw_cards only calls this with a non-empty
-// discard). Overflowing kDrawCap is a defensive silent clamp (never reached in
-// the skeleton: hand+draw+discard <= the master deck size).
+// convention), then clears the discard pile. This public entry point represents
+// the authored sites that predicate construction on a non-empty discard, so an
+// empty discard is a no-op. DrawCardAction's distinct recursive-overdraw case
+// can construct an EmptyDeckShuffleAction over an empty discard anyway; that
+// action still fires onShuffle and consumes one random_long, and draw_cards
+// models it internally. Overflowing kDrawCap is a defensive silent clamp (never
+// reached in the skeleton: hand+draw+discard <= the master deck size).
 void shuffle_discard_into_draw(CombatState& state) noexcept;
 
 // The RESHUFFLE_ALL opcode's body (Deep Breath). DeepBreath.use (DeepBreath.java:
@@ -94,7 +96,11 @@ void reshuffle_all(CombatState& state) noexcept;
 //       hand-size rule above -- overflow cards are never drawn);
 //   (3) draw one card at a time; if the draw pile is empty, reshuffle the discard
 //       in and continue, but if BOTH piles are empty stop early (the game's
-//       deckSize+discardSize==0 guard).
+//       deckSize+discardSize==0 guard);
+//   (4) when the capped request began with at least one card but exceeds the
+//       total draw+discard population, reproduce the recursive DrawCardAction's
+//       final EmptyDeckShuffleAction over an empty discard: fire onShuffle and
+//       consume one shuffle_rng draw even though no card moves.
 // Returns the number of cards actually drawn (<= the capped amount). A non-
 // positive `amount` draws nothing.
 int draw_cards(CombatState& state, int amount) noexcept;

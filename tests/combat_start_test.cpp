@@ -464,7 +464,8 @@ TEST(CombatStart, GamblingChipScreenOpensOnTheBagOfPreparationExtendedHand) {
     EXPECT_EQ(front.opcode, static_cast<uint16_t>(Opcode::CHOOSE_CARD));
     EXPECT_EQ(choose_kind_from_flags(front.flags),
               ChoiceKind::HAND_TO_DISCARD_THEN_DRAW);
-    EXPECT_NE(s.relics[1].counter, -1) << "activated = true, once per combat";
+    EXPECT_EQ(s.relics[1].counter, -1)
+        << "the private activated latch never changes the relic counter";
 }
 
 // THE SECOND UNION PIN (final-integrate fix-forward): Red Skull's entry
@@ -483,7 +484,7 @@ TEST(CombatStart, RedSkullEntryDeciderResolvesAfterHealsInTheSharedBlock) {
     s.player_max_hp = 80;           // 80 <= 80 -> bloodied at the hook...
     give_player_power(s, PowerId::ARTIFACT, 1);
     s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL),
-                            int16_t{0}};
+                            int16_t{-1}};
     s.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::BLOOD_VIAL),
                             int16_t{0}};
     s.relic_count = 2;
@@ -497,7 +498,8 @@ TEST(CombatStart, RedSkullEntryDeciderResolvesAfterHealsInTheSharedBlock) {
     ASSERT_NE(player_power(s, PowerId::ARTIFACT), nullptr);
     EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 1)
         << "no -3 was ever queued, so no Artifact charge is spent";
-    EXPECT_EQ(s.relics[0].counter, 0) << "latch stays armed";
+    EXPECT_FALSE(combat_red_skull_active(s.flags)) << "private latch stays armed";
+    EXPECT_EQ(s.relics[0].counter, -1) << "oracle-visible counter stays hidden";
 }
 
 TEST(CombatStart, NeitherConstructionPathHandRollsTurnOnePriming) {

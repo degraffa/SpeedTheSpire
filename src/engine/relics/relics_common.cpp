@@ -170,12 +170,14 @@ void relic_native_happy_flower(CombatState& s, RelicHook hook, RelicSlot& slot,
     }
 }
 
-void relic_native_lantern(CombatState& s, RelicHook hook, RelicSlot& slot,
+void relic_native_lantern(CombatState& s, RelicHook hook, RelicSlot& /*slot*/,
                           const RelicHookContext& /*ctx*/) noexcept {
-    // Lantern.atTurnStart: +1 energy on the FIRST turn only. slot.counter is
-    // the fired-flag (0 = not yet).
-    if (hook == RelicHook::AT_TURN_START && slot.counter == 0) {
-        slot.counter = 1;
+    // Lantern.atTurnStart: +1 energy on the FIRST turn only. The Java latch is
+    // private `firstTurn`, reset by atPreBattle; it never writes the inherited
+    // relic counter, which therefore remains the observable -1. AT_TURN_START
+    // is dispatched before begin_player_turn increments `s.turn`, so turn 0 is
+    // precisely the private latch's armed call.
+    if (hook == RelicHook::AT_TURN_START && s.turn == 0) {
         ActionQueueItem e{};
         e.opcode = static_cast<uint16_t>(Opcode::GAIN_ENERGY);
         e.src = kActorPlayer;
@@ -220,13 +222,13 @@ void queue_red_skull_strength(CombatState& s, int32_t amount,
 
 }  // namespace
 
-void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
+void relic_native_red_skull(CombatState& s, RelicHook hook,
+                            RelicSlot& /*slot*/,
                             const RelicHookContext& /*ctx*/) noexcept {
-    // slot.counter IS RedSkull's `isActive` (RedSkull.java:24): 1 while the +3
-    // is standing, 0 while armed. It is the run-persistent RelicSlot counter
-    // (fold_back_combat mirrors it into RunState), and AT_BATTLE_START rewrites
-    // it unconditionally, so nothing a previous combat or a run-layer crossing
-    // left behind can leak into this one.
+    // RedSkull's `private boolean isActive` (RedSkull.java:24) lives in
+    // kCombatFlagRedSkullActive.  AbstractRelic.counter is a different,
+    // oracle-visible field and stays -1.  Red Skull is unique in the S1 pools,
+    // so one combat-global bit is the exact reachable private-latch shape.
     //
     // AT_BATTLE_START reproduces three Java facts:
     //
@@ -263,12 +265,10 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
     // case). So the hook does exactly what the Java does: clear the latch,
     // queue the decider (op_red_skull_entry, Opcode::RED_SKULL_ENTRY).
     //
-    // The resolve-time decision is also what makes `counter == isActive` exact
-    // rather than approximate: the latch is set on exactly the crossings that
-    // set isActive, which is what lets the heal-side cross below use the
-    // counter as its guard.
+    // The latch is set on exactly the crossings that set isActive, which is
+    // what lets the heal-side cross below use the private bit as its guard.
     if (hook == RelicHook::AT_BATTLE_START) {
-        slot.counter = 0;  // isActive = false (:37)
+        s.flags &= ~kCombatFlagRedSkullActive;  // isActive = false (:37)
         ActionQueueItem decider{};
         decider.opcode = static_cast<uint16_t>(Opcode::RED_SKULL_ENTRY);
         decider.src = kActorPlayer;
@@ -280,9 +280,10 @@ void relic_native_red_skull(CombatState& s, RelicHook hook, RelicSlot& slot,
     // when the HP loss drops the player to <=50% max HP while the latch is
     // clear, gain 3 Strength (addToTop ApplyPowerAction(StrengthPower 3),
     // :47) and latch (isActive = true, :49). Strength IS registered (id 1).
-    if (hook == RelicHook::WAS_HP_LOST && slot.counter == 0 &&
+    if (hook == RelicHook::WAS_HP_LOST &&
+        !combat_red_skull_active(s.flags) &&
         player_is_bloodied(s)) {
-        slot.counter = 1;                          // isActive = true (:49)
+        s.flags |= kCombatFlagRedSkullActive;             // isActive = true (:49)
         queue_red_skull_strength(s, 3, /*to_top=*/true);  // addToTop (:47)
     }
 }
@@ -294,13 +295,9 @@ void op_red_skull_entry(CombatState& s) noexcept {
     // at the bottom of the battle-start drain, after every addToTop heal has
     // settled -- which is the whole point of it being an action.
     //
-    // PER SLOT, matching the Java: each RedSkull instance queues its own
-    // action testing its own isActive, so two copies would EACH grant +3.
-    // One decider item looping every slot is equivalent to N queued deciders
-    // in sequence, because nothing between two of them can change isBloodied
-    // (a Strength grant moves no HP). The slots are found by id in s.relics --
-    // the queue item carries no operand, so a malformed or stale item over a
-    // relic-less state is a safe no-op.
+    // The queue item carries no operand, so first prove the unique S1 relic is
+    // still held; a malformed or stale item over a relic-less state is a safe
+    // no-op.
     //
     // The grant is the game's DIRECT AbstractCreature.addPower (:506-527):
     // stack-or-append with NO priority sort and NO ApplyPowerAction
@@ -311,16 +308,18 @@ void op_red_skull_entry(CombatState& s) noexcept {
     // sort_powers_like_the_game). StrengthPower.stackPower's land-on-zero
     // removal (:48-53) is carried for exactness; a battle start cannot reach
     // it in S1 (no negative Strength can precede this action).
+    bool held = false;
     for (uint8_t i = 0; i < s.relic_count; ++i) {
-        RelicSlot& slot = s.relics[i];
-        if (slot.relic_id != static_cast<uint16_t>(RelicId::RED_SKULL) ||
-            slot.counter != 0) {  // !isActive
-            continue;
-        }
-        if (!player_is_bloodied(s)) {  // player.isBloodied, at resolve time
-            continue;
-        }
-        slot.counter = 1;  // isActive = true (inside RedSkull$1's if)
+        held = held ||
+               s.relics[i].relic_id ==
+                   static_cast<uint16_t>(RelicId::RED_SKULL);
+    }
+    if (!held || combat_red_skull_active(s.flags) ||
+        !player_is_bloodied(s)) {
+        return;
+    }
+    s.flags |= kCombatFlagRedSkullActive;  // isActive = true (RedSkull$1)
+    {
         bool stacked = false;
         for (uint8_t p = 0; p < s.player_power_count; ++p) {
             PowerSlot& ps = s.player_powers[p];
@@ -365,8 +364,8 @@ void dispatch_relics_on_not_bloodied(CombatState& s, RelicSlot* relics,
     // twin, where the clause is false and only the :61 latch write survives, is
     // heal_out_of_combat (relics/relic_pickup.hpp).
     //
-    // isActive == 0 makes the :61 write a no-op, so the guarded and unguarded
-    // halves collapse into one branch -- and that is also why the caller does
+    // isActive == false makes the :61 write a no-op, so the guarded and
+    // unguarded halves collapse into one branch -- and that is also why the caller does
     // NOT need to carry AbstractCreature.heal:404's `&& isBloodied` conjunct as
     // a separate latch: the only body this fan-out reaches re-tests isActive
     // itself, at :56.
@@ -376,17 +375,17 @@ void dispatch_relics_on_not_bloodied(CombatState& s, RelicSlot* relics,
     // that eats the -3 leaves the Strength standing and the next cross-down
     // adds another +3 on top of it.
     //
-    // Per SLOT, matching the Java's `for (AbstractRelic r : relics)` -- two
-    // copies of one relic would each fire (Red Skull is not duplicable in S1;
-    // the loop shape is the point).
+    if (!combat_red_skull_active(s.flags)) {
+        return;
+    }
     for (uint8_t i = 0; i < count; ++i) {
-        RelicSlot& slot = relics[i];
-        if (slot.relic_id != static_cast<uint16_t>(RelicId::RED_SKULL) ||
-            slot.counter == 0) {
+        if (relics[i].relic_id !=
+            static_cast<uint16_t>(RelicId::RED_SKULL)) {
             continue;
         }
-        slot.counter = 0;                                  // isActive = false (:61)
+        s.flags &= ~kCombatFlagRedSkullActive;              // isActive = false (:61)
         queue_red_skull_strength(s, -3, /*to_top=*/true);  // addToTop (:58)
+        return;  // Red Skull is unique in the S1 relic pools.
     }
 }
 

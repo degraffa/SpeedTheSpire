@@ -114,9 +114,16 @@ report.md                            generated operator summary
 `report.json` is aggregation-ready: it binds schema/driver/fork provenance,
 hashes every source artifact, keeps the per-seed outcome/floor/action/attempt
 rows, emits outcome and floor histograms, and distinguishes captured,
-replay-clean, and strict-zero-diff action totals. Known capture-race records
-remain an explicit separate count; a later gate report must join their reviewed
-dispositions rather than silently treating every pending or known item alike.
+replay-clean, and strict-zero-diff action totals. Strict totals exclude every
+capture-race family named by the replay summary (currently obtain/Entropic,
+Smoke-Bomb escape settlement, and Living Wall's transform-preview cardRng
+burn). Reports retain the legacy obtain-only field and
+add an all-family total plus by-kind map, so older v1 reports remain readable
+without allowing a current escape race into strict evidence. Known
+capture-race records remain an explicit separate count and never enter strict
+evidence. Adding another family requires its own narrow replay classifier;
+ordinary pending product or harness findings still follow the exact
+disposition workflow instead of being treated as capture races.
 
 Exit `0` means the full pipeline completed with no untriaged item. Exit `10`
 means every artifact/report was produced but one or more translation, raw-list,
@@ -148,6 +155,19 @@ per-run protocol, the artifacts, and a durable `campaign_progress.json`; a
 crashed game costs one run, not the campaign (design 7.1(2)). Resume granularity
 is **one seed** (the protocol exposes no mid-run save): an interrupted seed is
 re-run from `start` on the next launch (retry-once, then failed).
+
+**Current capture driver: `b1.5.3`.** A driver exit code is not visible to the
+orchestrator because the game owns the child process. The driver therefore
+publishes a durable, one-launch-token-bound restart request before every
+mid-dungeon or broken-pipe exit; the orchestrator sees it on its ordinary poll,
+kills that exact game process, and relaunches immediately. A stale request from
+the previous launch cannot kill its successor. Progress and heartbeat atomic
+renames retry only the bounded Windows sharing/access errors caused by the
+orchestrator reading the same file and otherwise fail loud. Finally, a
+temporarily empty action expansion is allowed a bounded 50 ms-per-probe render
+settle window, and Calling Bell's three mandatory Neow relic rows suppress the
+misleading simultaneously advertised `proceed`. These are capture-liveness
+rules, not changes to artifact or simulator semantics.
 
 ### Running a campaign (operator, Windows host)
 

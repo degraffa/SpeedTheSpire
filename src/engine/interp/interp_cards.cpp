@@ -564,6 +564,47 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
 
 // --- Opcode bodies ----------------------------------------------------------
 
+void apply_corruption_cost_modifier(CombatState& s) noexcept {
+    // ApplyPowerAction's CONSTRUCTOR special-case (ApplyPowerAction.java:
+    // 49-67), not CorruptionPower.onCardDraw: constructing a Corruption
+    // application walks hand, drawPile, discardPile, then exhaustPile and
+    // calls modifyCostForCombat(-9) on every SKILL. That writes BOTH `cost`
+    // and `costForTurn`, clamped at zero, so this is permanent for the combat
+    // and supersedes any previous this-turn cost.
+    //
+    // STS300219 is the observable trap: Corruption+ consumes the player's last
+    // two energy while Exhume is already in hand. The constructor makes that
+    // Exhume cost zero, so it remains playable and opens its exhaust grid.
+    auto reduce = [&](CardPoolIndex pi) {
+        if (pi >= kCardPoolCap) {
+            return;
+        }
+        CardInstance& c = s.card_pool[pi];
+        const CardDef* def = card_def(static_cast<CardId>(c.card_id));
+        if (def == nullptr || def->type != CardType::SKILL ||
+            has_card_flag(c.flags, CardFlag::XCOST)) {
+            return;
+        }
+        c.cost_now = 0;
+        c.flags = static_cast<uint16_t>(
+            c.flags & ~card_flag_bit(CardFlag::COST_MODIFIED_FOR_TURN) &
+            ~card_flag_bit(CardFlag::SAVED_BASE_COST) &
+            ~kSavedBaseCostMask);
+    };
+    for (uint8_t i = 0; i < s.hand_count; ++i) {
+        reduce(s.hand[i]);
+    }
+    for (uint8_t i = 0; i < s.draw_count; ++i) {
+        reduce(s.draw[i]);
+    }
+    for (uint8_t i = 0; i < s.discard_count; ++i) {
+        reduce(s.discard[i]);
+    }
+    for (uint8_t i = 0; i < s.exhaust_count; ++i) {
+        reduce(s.exhaust[i]);
+    }
+}
+
 // MAKE_CARD: create `count` copies of `id` into `pile`. Each copy
 // takes a free card_pool row (card_id == NONE); a new instance's cost_now/flags
 // come from the registry (base, upgrade 0). Provenance: MakeTempCardInHandAction
@@ -1991,6 +2032,43 @@ void prepare_choice_draw_source(CombatState& s, ActionQueueItem& item) noexcept 
 
 void apply_choice_selection(CombatState& s, uint8_t slot, ChoiceKind kind,
                             int copies, bool prompted) noexcept {
+    if (kind == ChoiceKind::UPGRADE && prompted) {
+        // ArmamentsAction removes every cannotUpgrade card before opening
+        // HandCardSelectScreen, then retrieves the selected card and finally
+        // returnCards() appends those ineligibles in their original order
+        // (ArmamentsAction.java:45-91). The full hand visible after the prompt
+        // is therefore:
+        //   [other upgradeables] + [selected, now upgraded] + [ineligibles].
+        // Keeping the ineligible cards in place is mechanically observable:
+        // STS300091's next `play 2` must name the selected Defend+ and gain 8
+        // block; the old order named Bash and lost 7 HP at end turn.
+        if (slot >= s.hand_count ||
+            !choice_slot_eligible(s, slot, ChoiceKind::UPGRADE)) {
+            return;
+        }
+        const CardPoolIndex sel = s.hand[slot];
+        CardPoolIndex reordered[kHandCap];
+        uint8_t n = 0;
+        for (uint8_t i = 0; i < s.hand_count; ++i) {
+            if (i != slot &&
+                choice_slot_eligible(s, i, ChoiceKind::UPGRADE)) {
+                reordered[n++] = s.hand[i];
+            }
+        }
+        reordered[n++] = sel;
+        for (uint8_t i = 0; i < s.hand_count; ++i) {
+            if (i != slot &&
+                !choice_slot_eligible(s, i, ChoiceKind::UPGRADE)) {
+                reordered[n++] = s.hand[i];
+            }
+        }
+        for (uint8_t i = 0; i < n; ++i) {
+            s.hand[i] = reordered[i];
+        }
+        s.hand_count = n;
+        upgrade_instance(s, sel);
+        return;
+    }
     if (kind == ChoiceKind::DUPLICATE && prompted) {
         // DualWieldAction's PROMPTED branch (DualWieldAction.java:59-84): the
         // screen removed the ineligible cards from the hand up front and

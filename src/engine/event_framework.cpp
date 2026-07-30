@@ -235,11 +235,12 @@ void init_event_pools(RunState& rs) noexcept {
 
 bool event_player_is_cursed(const RunState& rs) noexcept {
     // AbstractPlayer.isCursed (AbstractPlayer.java:741-748). Exclusions:
-    // Necronomicurse, CurseOfTheBell, AscendersBane. Only Ascender's Bane has
-    // a registry row today; the other two join this check with their rows.
+    // Necronomicurse, CurseOfTheBell, AscendersBane. Necronomicurse has no S1
+    // registry row; keep this list in sync when that Act-2 card lands.
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         const CardId id = static_cast<CardId>(rs.master_deck[i].card_id);
-        if (id == CardId::ASCENDERS_BANE) {
+        if (id == CardId::ASCENDERS_BANE ||
+            id == CardId::CURSE_OF_THE_BELL) {
             continue;
         }
         const CardDef* def = card_def(id);
@@ -603,7 +604,9 @@ bool apply_event_damage(RunController& rc, int32_t amount,
                     continue;
                 }
                 const PotionDef* def = potion_def(PotionId::FAIRY_POTION);
-                const int potency = def == nullptr ? 0 : def->potency;
+                const int potency =
+                    (def == nullptr ? 0 : def->potency) *
+                    (has_relic(rc.run, RelicId::SACRED_BARK) ? 2 : 1);
                 const float percent = static_cast<float>(potency) / 100.0f;
                 int heal = static_cast<int>(
                     static_cast<float>(rc.run.max_hp) * percent);

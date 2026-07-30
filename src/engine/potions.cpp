@@ -31,7 +31,7 @@ namespace {
 // step's symbolic target (SELF -> player, CARD_TARGET -> the used-on monster,
 // ALL_ENEMY/RANDOM_ENEMY -> the execute-time fan-out sentinels).
 void queue_use_step(CombatState& s, const CardEffectStep& step,
-                    uint8_t target) noexcept {
+                    uint8_t target, int potency_scale) noexcept {
     ActionQueueItem item{};
     item.opcode = static_cast<uint16_t>(step.op);
     item.src = kActorPlayer;
@@ -52,7 +52,11 @@ void queue_use_step(CombatState& s, const CardEffectStep& step,
             item.tgt = kActorPlayer;
             break;
     }
-    item.amount = step.amount;
+    // Every registry potion step's authored amount is its getPotency result
+    // (zero-amount structural steps stay zero). AbstractPotion.initializeData
+    // doubles that result while Sacred Bark is held, before use() constructs
+    // any of these actions.
+    item.amount = step.amount * potency_scale;
     item.flags = step.extra;  // APPLY_POWER: PowerId flags; else 0
     if (step.op == static_cast<decltype(step.op)>(Opcode::BLOCK)) {  // registry mirror
         // A potion's block is a direct GainBlockAction (Block Potion), not card
@@ -126,12 +130,15 @@ bool use_potion(CombatState& s, PotionId id, uint8_t target) noexcept {
         // mask; this is the second line of defence for a direct caller.
         return false;
     }
+    const int potency_scale =
+        player_has_relic(s, RelicId::SACRED_BARK) ? 2 : 1;
     if (def->native) {
-        dispatch_native_potion(s, id, def->potency, target);
+        dispatch_native_potion(s, id, def->potency * potency_scale, target);
         return true;
     }
     for (uint8_t k = 0; k < def->step_count; ++k) {
-        queue_use_step(s, def->steps[static_cast<std::size_t>(k)], target);
+        queue_use_step(s, def->steps[static_cast<std::size_t>(k)], target,
+                       potency_scale);
     }
     return true;
 }
@@ -332,7 +339,8 @@ void dispatch_native_potion(CombatState& s, PotionId id, int potency,
             // SACRED BARK doubles potency 1 -> 2, and here potency IS the
             // MANDATORY PICK COUNT: the screen then requires exactly two picks
             // (:83/:85), and the forced branch widens to a 2-card discard pile.
-            // The relic has no engine hook, so `def->potency` is what arrives.
+            // The relic has no engine hook; use_potion's central use-time
+            // modifier is what passes doubled `potency` into this native body.
             //
             // Native rather than data for the standing reason: CHOOSE_CARD is a
             // CARD_CONTEXT op and the potion domain admits only GENERAL ops.

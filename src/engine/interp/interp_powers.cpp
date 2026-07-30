@@ -58,11 +58,13 @@ namespace {
 // queue the ApplyPowerAction only when it is absent. A registry effect program
 // has no conditional, so the guard lives here instead, at the apply.
 //
-// Moving it from use()-time to apply-time is observably identical: the two side
-// effects a skipped ApplyPowerAction would also have skipped -- the source
-// onApplyPower fan-out (Sadistic) and the target Artifact nullify -- are both
-// gated on the applied power being a DEBUFF (SadisticPower.java:39,
-// ApplyPowerAction.java:131), and both of these are BUFFs.
+// Barricade's guard can move from use-time to apply-time without changing its
+// two other possible effects: source onApplyPower (Sadistic) and target
+// Artifact nullify are both DEBUFF-gated (SadisticPower.java:39,
+// ApplyPowerAction.java:131), while Barricade is a BUFF. Corruption additionally
+// has a use-time guard in card_play.cpp because constructing its action performs
+// the synchronous four-pile cost walk; this apply-time check remains necessary
+// if two applications were queued before the first one landed.
 [[nodiscard]] bool apply_is_a_no_op_repeat(const CombatState& s, uint8_t tgt,
                                            PowerId id) noexcept {
     if (id != PowerId::BARRICADE && id != PowerId::CORRUPTION) {
@@ -188,7 +190,8 @@ void sort_powers_like_the_game(PowerSlot* slots, uint8_t count) noexcept {
 // consumed and the power does NOT land. Both are no-ops without Sadistic/Artifact,
 // so skeleton APPLY_POWER (Bash's Vulnerable, Bellow's Strength) is unchanged.
 void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
-                    int amount, int counter) noexcept {
+                    int amount, int counter,
+                    bool is_source_monster) noexcept {
     if (id == PowerId::NONE) {
         return;
     }
@@ -352,7 +355,8 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
     // latched: stacking returned above, which is exactly ApplyPowerAction's
     // behaviour -- addPower hands the amount to the LIVE object and throws away
     // the freshly constructed one, latch and all (AbstractCreature.java:506-513).
-    if (duration_debuff_starts_just_applied(s, tgt, id)) {
+    if (duration_debuff_starts_just_applied(
+            s, tgt, id, is_source_monster)) {
         fresh.counter = 1;
     }
     slots[*count] = fresh;

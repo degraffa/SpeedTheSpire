@@ -641,6 +641,25 @@ TEST(RestSites, SmithGridWritesExistingUpgradeCountByMasterDeckIndex) {
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 }
 
+TEST(RestSites, CancellingSmithReturnsToTheCampfireMenuWithoutSpendingIt) {
+    RunController rc = enter_floor_one_rest();
+    step(rc, make_action(ActionVerb::CHOOSE,
+                         option_index(rc.run, RestOptionKind::SMITH)));
+    ASSERT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::SMITH));
+    RunActionMask mask{};
+    legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_cancel_grid);
+
+    const RunState before = rc.run;
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseCancelGrid));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::REST_SITE));
+    EXPECT_EQ(rc.rest.screen, static_cast<uint8_t>(RestScreen::MENU));
+    EXPECT_EQ(std::memcmp(&rc.run, &before, sizeof(before)), 0);
+    legal_actions(rc, mask);
+    EXPECT_TRUE(mask.can_choose_rest[
+        option_index(rc.run, RestOptionKind::RECALL)]);
+}
+
 TEST(RestSites, SmithingABottledCardKeepsTheBottleBit) {
     // The Smith grid is getUpgradableCards() with NO bottled exclusion
     // (CampfireSmithEffect.java:62), so a bottled card CAN be upgraded -- and

@@ -14,6 +14,7 @@
 // artifact, no JSON, no campaign data root.
 
 #include <algorithm>
+#include <array>
 #include <string>
 #include <vector>
 
@@ -32,7 +33,9 @@ using sts::engine::action_verb;
 using sts::engine::ActionVerb;
 using sts::engine::EventGridKind;
 using sts::engine::kChooseProceed;
+using sts::engine::NeowGridMode;
 using sts::engine::NeowScreen;
+using sts::engine::PotionId;
 using sts::engine::RelicId;
 using sts::engine::RelicSlot;
 using sts::engine::RestScreen;
@@ -43,7 +46,9 @@ using sts::replay::map_command;
 using sts::replay::MapKind;
 using sts::replay::MappedCommand;
 using sts::replay::ScreenInfo;
+using sts::replay::sim_choice_free_confirmation_grid;
 using sts::replay::sim_grid_open;
+using sts::replay::toggle_grid_pick;
 
 // The mapping reads `rc.phase` and, on the GRID path, the sub-screen field that
 // phase owns plus the relic list -- never the master deck, since the grid's
@@ -216,17 +221,33 @@ TEST(ReplayCommandMap, APotionDiscardIsTheSameMappingOnEveryScreen) {
     }
 }
 
-// The sibling verb must not be swept up with it: `potion use` needs a live
-// target and stays the combat branch's business.
-TEST(ReplayCommandMap, APotionUseIsStillTheCombatScreensTargetedVerb) {
+// `potion use` is equally top-panel-owned. Fruit Juice and Entropic Brew are
+// legal outside combat; target-required combat potions simply carry arg1.
+TEST(ReplayCommandMap, APotionUseIsTheSameMappingOnEveryScreen) {
+    for (const char* screen : {"MAP", "SHOP_SCREEN", "COMBAT_REWARD", "NONE",
+                               "EVENT", "GRID", "REST"}) {
+        ScreenInfo s;
+        s.screen_type = screen;
+        const MappedCommand m =
+            map_command(at_phase(RunPhase::MAP_CHOICE), s, "potion use 0 2");
+        ASSERT_EQ(m.kind, MapKind::ACTIONS) << screen << ": " << m.reason;
+        ASSERT_EQ(m.actions.size(), 1u) << screen;
+        EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::USE_POTION) << screen;
+        EXPECT_EQ(action_arg0(m.actions[0]), 0) << screen;
+        EXPECT_EQ(sts::engine::action_arg1(m.actions[0]), 2) << screen;
+    }
+}
+
+TEST(ReplayCommandMap, CombatPlayZeroNamesTheTenthHandSlot) {
     ScreenInfo s;
     s.screen_type = "NONE";
     const MappedCommand m =
-        map_command(at_phase(RunPhase::COMBAT), s, "potion use 0 2");
+        map_command(at_phase(RunPhase::COMBAT), s, "play 0 2");
     ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
     ASSERT_EQ(m.actions.size(), 1u);
-    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::USE_POTION);
-    EXPECT_EQ(action_arg0(m.actions[0]), 0);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::PLAY_CARD);
+    EXPECT_EQ(action_arg0(m.actions[0]), 9);
+    EXPECT_EQ(sts::engine::action_arg1(m.actions[0]), 2);
 }
 
 // --- grid screens ------------------------------------------------------------
@@ -257,6 +278,21 @@ TEST(ReplayCommandMap, AGridChooseIsBufferedRatherThanAppliedImmediately) {
         << "nothing may reach the run layer until the capture confirms";
 }
 
+// GridCardSelectScreen.selectHoveredCard is a toggle. The random campaign's
+// two-card Neow grids commonly clicked one row twice before settling on the
+// final pair; treating both clicks as picks removed/transformed four cards.
+TEST(ReplayCommandMap, ClickingAnAlreadySelectedGridRowTogglesItBackOut) {
+    sts::replay::GridSession g;
+    toggle_grid_pick(g, 4);
+    ASSERT_EQ(g.pending, std::vector<int>({4}));
+    toggle_grid_pick(g, 4);
+    EXPECT_TRUE(g.pending.empty());
+
+    toggle_grid_pick(g, 5);
+    toggle_grid_pick(g, 9);
+    EXPECT_EQ(g.pending, std::vector<int>({5, 9}));
+}
+
 // The gap this closes. STS00047's Neow removal grid reads `choose 2`, `cancel`,
 // `choose 0`, `proceed`: the player eyed one Strike, changed their mind, and
 // removed a different one. Because the pick was never applied, honouring the
@@ -273,6 +309,105 @@ TEST(ReplayCommandMap, AGridProceedIsTheCommitAndNotAScreenExit) {
     EXPECT_EQ(m.kind, MapKind::GRID_COMMIT) << m.reason;
     EXPECT_TRUE(m.actions.empty())
         << "the commit applies the buffered picks; it is not a kChooseProceed";
+}
+
+TEST(ReplayCommandMap, ChoiceFreeBossRelicGridsAreRecognisedAsConfirmations) {
+    RunController rc = at_neow_grid();
+    rc.neow.grid_mode =
+        static_cast<uint8_t>(NeowGridMode::CONFIRM_PANDORA);
+    EXPECT_TRUE(sim_grid_open(rc));
+    EXPECT_TRUE(sim_choice_free_confirmation_grid(rc));
+    EXPECT_EQ(map_command(rc, grid_screen(), "proceed").kind,
+              MapKind::GRID_COMMIT);
+
+    rc.neow.grid_mode =
+        static_cast<uint8_t>(NeowGridMode::CONFIRM_CALLING_BELL);
+    EXPECT_TRUE(sim_choice_free_confirmation_grid(rc));
+    rc.neow.grid_mode = static_cast<uint8_t>(NeowGridMode::REMOVE);
+    EXPECT_FALSE(sim_choice_free_confirmation_grid(rc));
+}
+
+TEST(ReplayCommandMap, CombatDiscardGridMapsByPileRowIdentity) {
+    namespace eng = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT);
+    rc.combat.phase =
+        static_cast<uint8_t>(eng::CombatPhase::WAITING_ON_USER);
+    rc.combat.action_count = 1;
+    eng::ActionQueueItem& choose = rc.combat.action_queue[0];
+    choose.opcode = static_cast<uint16_t>(eng::Opcode::CHOOSE_CARD);
+    choose.amount = 1;
+    choose.flags = eng::make_choose_flags(
+        eng::ChoiceKind::DISCARD_TO_DRAW_TOP, false);
+    rc.combat.card_pool[3].card_id =
+        static_cast<uint16_t>(eng::CardId::STRIKE);
+    rc.combat.card_pool[4].card_id =
+        static_cast<uint16_t>(eng::CardId::DEFEND);
+    rc.combat.discard[0] = 3;
+    rc.combat.discard[1] = 4;
+    rc.combat.discard_count = 2;
+
+    ScreenInfo s = grid_screen();
+    s.card_offer = {"Strike_R", "Defend_R"};
+    const MappedCommand m = map_command(rc, s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
+    EXPECT_EQ(action_arg0(m.actions[0]), 0);
+
+    s.card_offer[0] = "Defend_R";
+    const MappedCommand mismatch = map_command(rc, s, "choose 0");
+    EXPECT_EQ(mismatch.kind, MapKind::UNMAPPED);
+    EXPECT_NE(mismatch.reason.find("Strike_R"), std::string::npos)
+        << mismatch.reason;
+}
+
+// Secret Technique's grid is a RANDOMIZED FILTERED view of the draw pile. In
+// STS300734 the capture's row 0 was one of four Defends; mapping by identity or
+// filtered ordinal selected a different duplicate and changed the later draw
+// order. The mapper has to reconstruct addToRandomSpot's exact browse order
+// from the already-billed card-rng state.
+TEST(ReplayCommandMap, CombatDrawGridMapsFilteredOrdinalToSourcePileSlot) {
+    namespace eng = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT);
+    rc.combat.phase =
+        static_cast<uint8_t>(eng::CombatPhase::WAITING_ON_USER);
+    rc.combat.action_count = 1;
+    eng::ActionQueueItem& choose = rc.combat.action_queue[0];
+    choose.opcode = static_cast<uint16_t>(eng::Opcode::CHOOSE_CARD);
+    choose.amount = 1;
+    choose.flags = eng::make_choose_flags(
+        eng::ChoiceKind::DRAW_TO_HAND, false, 1,
+        static_cast<uint8_t>(eng::CardType::SKILL));
+
+    const std::array<eng::CardId, 4> ids = {
+        eng::CardId::STRIKE, eng::CardId::DEFEND,
+        eng::CardId::STRIKE, eng::CardId::SHRUG_IT_OFF};
+    for (uint8_t i = 0; i < ids.size(); ++i) {
+        const eng::CardPoolIndex pi =
+            static_cast<eng::CardPoolIndex>(i + 2);
+        rc.combat.card_pool[pi].card_id =
+            static_cast<uint16_t>(ids[i]);
+        rc.combat.draw[i] = pi;
+    }
+    rc.combat.draw_count = static_cast<uint8_t>(ids.size());
+    rc.combat.card_random_rng = eng::from_seed(123);
+    eng::prepare_choice_draw_source(rc.combat, choose);
+
+    ScreenInfo s = grid_screen();
+    // The first matching card is appended with no draw. Adding the second
+    // spends random(0), necessarily inserting it at position zero.
+    s.card_offer = {"Shrug It Off", "Defend_R"};
+    const MappedCommand first = map_command(rc, s, "choose 0");
+    ASSERT_EQ(first.kind, MapKind::ACTIONS) << first.reason;
+    ASSERT_EQ(first.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(first.actions[0]), 3)
+        << "capture row 0 is the randomized browse group's first card";
+
+    const MappedCommand second = map_command(rc, s, "choose 1");
+    ASSERT_EQ(second.kind, MapKind::ACTIONS) << second.reason;
+    ASSERT_EQ(second.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(second.actions[0]), 1)
+        << "capture row 1 maps back through the randomized browse order";
 }
 
 // The classification, RE-POINTED after Wave-C track 2 and reconciled with the
@@ -522,7 +657,55 @@ TEST(ReplayCommandMap, ARewardScreenProceedIsDeferredToTheMapChoiceThatMoves) {
     EXPECT_EQ(action_arg0(move.actions[0]), 3);
 }
 
-// --- Neow's three-potion payout is a COMBAT_REWARD screen that MUST be left --
+// Burning-elite rewards carry an EMERALD_KEY row that the S1 reward engine
+// deliberately does not assemble. CommunicationMod's visible rows include it
+// and compact after every claim, so every later ordinal must be translated
+// through that missing row on the CURRENT screen.
+TEST(ReplayCommandMap, CombatRewardOrdinalsElideTheEmeraldKeyRow) {
+    namespace eng = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT_REWARD);
+    rc.rewards.count = 4;
+    rc.rewards.open_card_item = eng::kNoOpenCardReward;
+    rc.rewards.items[0].kind =
+        static_cast<uint8_t>(eng::RewardItemKind::GOLD);
+    rc.rewards.items[1].kind =
+        static_cast<uint8_t>(eng::RewardItemKind::RELIC);
+    rc.rewards.items[2].kind =
+        static_cast<uint8_t>(eng::RewardItemKind::POTION);
+    rc.rewards.items[3].kind =
+        static_cast<uint8_t>(eng::RewardItemKind::CARDS);
+
+    ScreenInfo s;
+    s.screen_type = "COMBAT_REWARD";
+    for (const char* type :
+         {"GOLD", "RELIC", "EMERALD_KEY", "POTION", "CARD"}) {
+        sts::replay::CaptureRewardRow row;
+        row.type = type;
+        s.reward_rows.push_back(std::move(row));
+    }
+
+    const MappedCommand card = map_command(rc, s, "choose 4");
+    ASSERT_EQ(card.kind, MapKind::ACTIONS) << card.reason;
+    ASSERT_EQ(card.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(card.actions[0]), 3);
+
+    const MappedCommand key = map_command(rc, s, "choose 2");
+    EXPECT_EQ(key.kind, MapKind::NOOP) << key.reason;
+    EXPECT_TRUE(key.actions.empty());
+
+    // After the potion is claimed both sides compact, but only the capture
+    // still has the key row. Its visible CARD row 3 is sim row 2.
+    rc.rewards.count = 3;
+    rc.rewards.items[2].kind =
+        static_cast<uint8_t>(eng::RewardItemKind::CARDS);
+    s.reward_rows.erase(s.reward_rows.begin() + 3);
+    const MappedCommand reopened = map_command(rc, s, "choose 3");
+    ASSERT_EQ(reopened.kind, MapKind::ACTIONS) << reopened.reason;
+    ASSERT_EQ(reopened.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(reopened.actions[0]), 2);
+}
+
+// --- Neow's item payout is a dismissible COMBAT_REWARD overlay ---------------
 //
 // The lazy-leave elision above is right for a combat-reward ROOM and wrong for
 // the NeowRoom. `NeowRewardType::THREE_SMALL_POTIONS` delivers through
@@ -537,29 +720,31 @@ TEST(ReplayCommandMap, ARewardScreenProceedIsDeferredToTheMapChoiceThatMoves) {
 // its CHOOSE(dst) was executed by `ITEM_REWARD`'s else branch as
 // `claim_reward(dst)`. Seq 0-6 were zero-diff on both, and `--neow` reads both
 // out fully clean, so the engine half was never at fault.
-TEST(ReplayCommandMap, NeowsPotionRewardScreenIsLeftRatherThanNoOpped) {
+TEST(ReplayCommandMap, NeowsPotionRewardProceedIsDeferredForMapReturn) {
     RunController rc = at_phase(RunPhase::NEOW);
     rc.neow.screen = static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
     ScreenInfo s;
     s.screen_type = "COMBAT_REWARD";
 
     const MappedCommand m = map_command(rc, s, "proceed");
-    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
-    // Two presses, because the run layer spells in two states what the game
-    // passed through in one frame: ITEM_REWARD -> DONE (neow_finish_payout),
-    // then DONE -> RunPhase::MAP_CHOICE (run_advance.cpp:1478-1494).
-    ASSERT_EQ(m.actions.size(), 2u);
-    for (const auto& a : m.actions) {
-        EXPECT_EQ(action_verb(a), ActionVerb::CHOOSE);
-        EXPECT_EQ(action_arg0(a), kChooseProceed);
-    }
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+    EXPECT_TRUE(m.actions.empty());
 }
 
 TEST(ReplayCommandMap, ClaimingAPotionOnNeowsRewardScreenIsStillAPlainChoose) {
     RunController rc = at_phase(RunPhase::NEOW);
     rc.neow.screen = static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
+    rc.rewards.count = 2;
+    rc.rewards.open_card_item = sts::engine::kNoOpenCardReward;
+    rc.rewards.items[0].kind =
+        static_cast<uint8_t>(sts::engine::RewardItemKind::POTION);
+    rc.rewards.items[1].kind =
+        static_cast<uint8_t>(sts::engine::RewardItemKind::POTION);
     ScreenInfo s;
     s.screen_type = "COMBAT_REWARD";
+    s.reward_rows.resize(2);
+    s.reward_rows[0].type = "POTION";
+    s.reward_rows[1].type = "POTION";
 
     const MappedCommand m = map_command(rc, s, "choose 1");
     ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
@@ -789,15 +974,13 @@ TEST(ReplayCommandMap, LeavingTheStockScreenIsNotTheExitFromTheShop) {
     EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
 }
 
-TEST(ReplayCommandMap, TheShopRoomsProceedIsTheRunLayersOnlyDoorOutOfAShop) {
+TEST(ReplayCommandMap, TheShopRoomsProceedIsDeferredUntilAMapNodeMoves) {
     ScreenInfo s;
     s.screen_type = "SHOP_ROOM";
     s.choice_list = {"shop"};
     const MappedCommand m = map_command(at_shop_menu(), s, "proceed");
-    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
-    ASSERT_EQ(m.actions.size(), 1u);
-    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
-    EXPECT_EQ(action_arg0(m.actions[0]), kChooseProceed);
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+    EXPECT_TRUE(m.actions.empty());
 }
 
 // The bounce, and the reason the phase (not the record) decides. STS00052
@@ -831,9 +1014,11 @@ TEST(ReplayCommandMap, APurchaseArrivingOutsideAShopStopsInsteadOfSpendingTheRun
 // slot 1 and not to the capture's position 0.
 TEST(ReplayCommandMap, APurchaseResolvesThroughIdentityNotThroughTheCapturesPosition) {
     RunController rc = at_shop_menu();
+    rc.run.gold = 99;
     rc.shop.colored[0].id = static_cast<uint16_t>(sts::engine::CardId::WHIRLWIND);
     rc.shop.colored[0].sold = 1;
     rc.shop.colored[1].id = static_cast<uint16_t>(sts::engine::CardId::TWIN_STRIKE);
+    rc.shop.colored[1].price = 51;
     rc.shop.colored[1].sold = 0;
 
     ScreenInfo s;
@@ -846,6 +1031,117 @@ TEST(ReplayCommandMap, APurchaseResolvesThroughIdentityNotThroughTheCapturesPosi
     ASSERT_EQ(m.actions.size(), 1u);
     EXPECT_EQ(action_arg0(m.actions[0]),
               sts::engine::kChooseShopColoredBase + 1);
+}
+
+// DISPLAY NAME IS NOT AN IDENTITY. A merchant may roll the same potion twice,
+// and ChoiceScreenUtils keeps both copies in `choice_list`. STS303331 chose
+// the second Dexterity Potion (57 gold); resolving the duplicated name to the
+// first row bought the 54-gold copy sim-side and created a permanent 3-gold
+// divergence.
+TEST(ReplayCommandMap, ADuplicateShopNamePreservesTheChosenOccurrence) {
+    RunController rc = at_shop_menu();
+    rc.run.gold = 99;
+    rc.shop.potions[0].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[0].price = 54;
+    rc.shop.potions[1].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[1].price = 57;
+
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"dexterity potion", "dexterity potion"};
+    s.shop_potions = {
+        stock("Dexterity Potion", "Dexterity Potion", 54),
+        stock("Dexterity Potion", "Dexterity Potion", 57),
+    };
+
+    const MappedCommand m = map_command(rc, s, "choose 1");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]),
+              sts::engine::kChooseShopPotionBase + 1);
+}
+
+// Affordability filters the command's index space, but not the identity
+// occurrence. If an expensive first twin is absent from `choice_list`, the
+// affordable second twin still maps to the sim's SECOND fixed slot.
+TEST(ReplayCommandMap, AnUnaffordableDuplicateStillOccupiesItsStockOccurrence) {
+    RunController rc = at_shop_menu();
+    rc.run.gold = 55;
+    rc.shop.potions[0].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[0].price = 57;
+    rc.shop.potions[1].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[1].price = 54;
+
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"dexterity potion"};
+    s.shop_potions = {
+        stock("Dexterity Potion", "Dexterity Potion", 57),
+        stock("Dexterity Potion", "Dexterity Potion", 54),
+    };
+
+    const MappedCommand m = map_command(rc, s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]),
+              sts::engine::kChooseShopPotionBase + 1);
+}
+
+// The accepted Looter reward-order deviation can leave capture and sim gold
+// temporarily different. `choice_list` belongs to the capture, so its
+// affordability filter must use capture gold or an unaffordable earlier twin
+// can be mistaken for the selected row.
+TEST(ReplayCommandMap, ShopAffordabilityUsesCaptureGoldAcrossAStandingDeviation) {
+    RunController rc = at_shop_menu();
+    rc.run.gold = 57;  // replay-side standing deviation
+    rc.shop.potions[0].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[0].price = 57;
+    rc.shop.potions[1].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[1].price = 54;
+
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.gold = 55;  // capture-side value that built choice_list
+    s.choice_list = {"dexterity potion"};
+    s.shop_potions = {
+        stock("Dexterity Potion", "Dexterity Potion", 57),
+        stock("Dexterity Potion", "Dexterity Potion", 54),
+    };
+
+    const MappedCommand m = map_command(rc, s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]),
+              sts::engine::kChooseShopPotionBase + 1);
+}
+
+TEST(ReplayCommandMap, ADuplicateShopOccurrenceWithTheWrongPriceStops) {
+    RunController rc = at_shop_menu();
+    rc.run.gold = 99;
+    rc.shop.potions[0].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[0].price = 54;
+    rc.shop.potions[1].id =
+        static_cast<uint16_t>(PotionId::DEXTERITY_POTION);
+    rc.shop.potions[1].price = 58;
+
+    ScreenInfo s;
+    s.screen_type = "SHOP_SCREEN";
+    s.choice_list = {"dexterity potion", "dexterity potion"};
+    s.shop_potions = {
+        stock("Dexterity Potion", "Dexterity Potion", 54),
+        stock("Dexterity Potion", "Dexterity Potion", 57),
+    };
+
+    const MappedCommand m = map_command(rc, s, "choose 1");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("price 57"), std::string::npos) << m.reason;
 }
 
 TEST(ReplayCommandMap, TheShopsPurgeServiceIsItsOwnOrdinalAndOpensTheGrid) {
@@ -861,6 +1157,7 @@ TEST(ReplayCommandMap, TheShopsPurgeServiceIsItsOwnOrdinalAndOpensTheGrid) {
 
 TEST(ReplayCommandMap, AShopRowTheSimHasNoUnsoldSlotForStopsWithBothIds) {
     RunController rc = at_shop_menu();  // every slot is CardId 0 / unsold
+    rc.run.gold = 99;
     ScreenInfo s;
     s.screen_type = "SHOP_SCREEN";
     s.choice_list = {"whirlwind"};
@@ -955,6 +1252,42 @@ TEST(ReplayCommandMap, ARestProceedWhileTheCampfireIsLiveIsStillTheExit) {
     EXPECT_EQ(action_arg0(m.actions[0]), kChooseProceed);
 }
 
+// --- the unopened treasure chest -------------------------------------------
+//
+// Proceed opens the dungeon map as an overlay; it does not destroy the chest
+// screen. A map return can therefore expose and open the same chest later.
+// The general replay keeps TREASURE_ROOM live through those UI bounces and
+// closes it only when a MAP command actually chooses the next node.
+
+TEST(ReplayCommandMap, AChestProceedIsDeferredUntilAMapNodeMoves) {
+    ScreenInfo s;
+    s.screen_type = "CHEST";
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::TREASURE_ROOM), s, "proceed");
+    EXPECT_EQ(m.kind, MapKind::NOOP) << m.reason;
+    EXPECT_TRUE(m.actions.empty());
+}
+
+TEST(ReplayCommandMap, AChestCanStillOpenAfterProceedReturnBounces) {
+    ScreenInfo s;
+    s.screen_type = "CHEST";
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::TREASURE_ROOM), s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
+    EXPECT_EQ(action_arg0(m.actions[0]), sts::engine::kChooseOpenChest);
+}
+
+TEST(ReplayCommandMap, AChestOpenOutsideATreasureRoomStops) {
+    ScreenInfo s;
+    s.screen_type = "CHEST";
+    const MappedCommand m =
+        map_command(at_phase(RunPhase::MAP_CHOICE), s, "choose 0");
+    EXPECT_EQ(m.kind, MapKind::UNMAPPED);
+    EXPECT_NE(m.reason.find("MAP_CHOICE"), std::string::npos) << m.reason;
+}
+
 // --- the in-combat hand-select screen ----------------------------------------
 //
 // HandCardSelectScreen is COMBAT-only, and its confirm button is the combat
@@ -968,13 +1301,10 @@ TEST(ReplayCommandMap, ARestProceedWhileTheCampfireIsLiveIsStillTheExit) {
 // fight's fold-back ten records later. STS05143 (seq 42, first divergence seq
 // 51) and STS03352 (seq 143) both did exactly that.
 //
-// The `choose N` index space is the IDENTITY over the unpicked prefix: the
-// fork walks `player.hand.group` (ChoiceScreenUtils.getHandSelectScreenChoices),
-// which is the hand MINUS the already-selected cards, and the engine keeps
-// exactly that prefix in order (picked cards move to the hand's tail, in pick
-// order -- interp.hpp). The fork can only select, never unselect
-// (makeHandSelectScreenChoice addresses hand.group alone), so the prefix is
-// the whole of the space a capture can name.
+// The `choose N` index space is the FILTERED selectable-card list: the fork
+// walks HandCardSelectScreen's group, while the engine's CHOOSE action names a
+// slot in the full hand. They are identical only when every hand card passes
+// the choice's type predicate.
 
 // A controller parked mid-combat on Elixir's optional zero-to-99 exhaust
 // screen: two hand cards, the CHOOSE_CARD item open at the queue head.
@@ -1026,6 +1356,39 @@ TEST(ReplayCommandMap, AHandSelectChooseIsTheHandSlotIdentity) {
     ASSERT_EQ(m.actions.size(), 1u);
     EXPECT_EQ(action_verb(m.actions[0]), ActionVerb::CHOOSE);
     EXPECT_EQ(action_arg0(m.actions[0]), 1);
+}
+
+// Dual Wield's screen contains only ATTACK/POWER cards. Defend occupies full
+// hand slot 0 but no capture index; `choose 0` therefore maps to hand slot 1.
+TEST(ReplayCommandMap, AHandSelectChooseMapsThroughTheSelectableCardFilter) {
+    namespace se = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT);
+    se::CombatState& cs = rc.combat;
+    cs.phase = static_cast<uint8_t>(se::CombatPhase::WAITING_ON_USER);
+    cs.card_pool[0].card_id = static_cast<uint16_t>(se::CardId::DEFEND);
+    cs.card_pool[1].card_id = static_cast<uint16_t>(se::CardId::STRIKE);
+    cs.card_pool[2].card_id = static_cast<uint16_t>(se::CardId::BASH);
+    cs.hand[0] = 0;
+    cs.hand[1] = 1;
+    cs.hand[2] = 2;
+    cs.hand_count = 3;
+    se::ActionQueueItem item{};
+    item.opcode = static_cast<uint16_t>(se::Opcode::CHOOSE_CARD);
+    item.src = se::kActorPlayer;
+    item.tgt = se::kActorPlayer;
+    item.amount = 1;
+    item.flags =
+        se::make_choose_flags(se::ChoiceKind::DUPLICATE, /*random=*/false);
+    se::add_to_bottom(cs, item);
+
+    ScreenInfo s;
+    s.screen_type = "HAND_SELECT";
+    s.choice_list = {"strike", "bash"};
+    const MappedCommand m = map_command(rc, s, "choose 0");
+    ASSERT_EQ(m.kind, MapKind::ACTIONS) << m.reason;
+    ASSERT_EQ(m.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(m.actions[0]), 1)
+        << "capture slot 0 is the first eligible full-hand slot";
 }
 
 // Negative control: a slot the sim's screen does not offer is a desync to

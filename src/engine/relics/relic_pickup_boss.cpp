@@ -166,25 +166,36 @@ void relic_astrolabe_transform_cards(RunState& rs, RngStream& misc_rng,
 void relic_on_equip_screen_pandoras_box(RunState& rs, RngStream& /*misc_rng*/,
                                         RelicSlot& /*slot*/,
                                         RelicEquipContext& ctx) noexcept {
-    // PandorasBox.onEquip (PandorasBox.java:54-77). Step 1: iterator-remove
-    // every starter-tagged card from the master deck, SYNCHRONOUSLY, counting
-    // them. The Java's i.remove() edits the raw group with no removeCard()
-    // call; remove_master_deck_card differs only in the onMasterDeckChange
-    // recompute it runs per removal (idempotent -- Du-Vu Doll recounts from
-    // scratch) and Parasite's on-remove loss (never starter-tagged), so the
-    // resulting state is identical.
+    // PandorasBox.onEquip (PandorasBox.java:54-77). Step 1 counts AND removes
+    // every starter-tagged card from masterDeck immediately (:56-62). The
+    // choice-free confirmation grid delays only the replacement obtains. This
+    // timing is observable in the grid record: the old Strikes/Defends are
+    // already gone while the preview cards have not landed yet.
     int count = 0;
+    for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
+        if (pandoras_starter_tagged(
+                static_cast<CardId>(rs.master_deck[i].card_id))) {
+            ++count;
+        }
+    }
+    constexpr int kPreviewCap = kRewardItemCap * kRewardCardCap;
+    if (count > kPreviewCap) {
+        // Impossible for a legal Act-1 Neow boss swap (Ironclad has ten
+        // starter-tagged rows), but keep a malformed synthetic RunState from
+        // indexing past RewardScreen in release builds.
+        assert(false && "Pandora preview exceeds RewardScreen capacity");
+        return;
+    }
+    if (count == 0) {
+        return;  // no draws, no screen (:64) -- fully inert.
+    }
     for (uint16_t i = 0; i < rs.master_deck_count;) {
         if (pandoras_starter_tagged(
                 static_cast<CardId>(rs.master_deck[i].card_id))) {
             (void)remove_master_deck_card(rs, i);
-            ++count;
         } else {
             ++i;
         }
-    }
-    if (count == 0) {
-        return;  // no draws, no screen (:64) -- fully inert.
     }
 
     // Step 2: `count` returnTrulyRandomCard().makeCopy() draws (:67) -- ONE
@@ -192,13 +203,23 @@ void relic_on_equip_screen_pandoras_box(RunState& rs, RngStream& /*misc_rng*/,
     // concatenation (AbstractDungeon.java:936-942; kIroncladTrulyRandomPool is
     // that list -- NOT the HEALING-filtered kIroncladCombatPool). No miscRng,
     // no relicRng, no cardRng.
-    CardId drawn[kMasterDeckCap] = {};
+    ctx.rewards = RewardScreen{};
+    ctx.rewards.open_card_item = kNoOpenCardReward;
     for (int i = 0; i < count; ++i) {
         const int32_t roll = random(
             ctx.card_random_rng,
             sts::registry::kIroncladTrulyRandomPoolCount - 1);
-        drawn[i] = sts::registry::kIroncladTrulyRandomPool[
-            static_cast<std::size_t>(roll)];
+        const int item_index = i / kRewardCardCap;
+        const int card_index = i % kRewardCardCap;
+        RunRewardItem& item = ctx.rewards.items[item_index];
+        item.kind = static_cast<uint8_t>(RewardItemKind::CARDS);
+        item.card_ids[card_index] = static_cast<uint16_t>(
+            sts::registry::kIroncladTrulyRandomPool[
+                static_cast<std::size_t>(roll)]);
+        ++item.card_count;
+        if (item_index >= ctx.rewards.count) {
+            ctx.rewards.count = static_cast<uint8_t>(item_index + 1);
+        }
     }
 
     // Step 3: the deck receives them in REVERSE draw order. addToBottom
@@ -216,15 +237,27 @@ void relic_on_equip_screen_pandoras_box(RunState& rs, RngStream& /*misc_rng*/,
     // boss swap the relic list holds only Pandora's Box itself (Burning Blood
     // was removed before the pool pop), so the fan-outs see no listener.
     //
-    // The confirmation grid itself (openConfirmationGrid, :75) carries NO
-    // choice -- one Confirm button over a display-only group -- so the run
-    // layer skips it: ctx.screen stays NONE and the deck edit is synchronous.
-    // A capture WILL contain that grid and its confirm command; the replay
-    // harness's GRID classification is the named seam for that (command_map
-    // triage note), not this body.
-    for (int i = count - 1; i >= 0; --i) {
-        (void)add_card_to_master_deck(rs, drawn[i]);
+    // openConfirmationGrid (:75) is a real state boundary. The removals,
+    // preview cards and advanced cardRandomRng are observable while the
+    // replacements are not yet in masterDeck; the caller presents the
+    // choice-free grid and invokes the update-side helper below on Confirm.
+    ctx.screen = RelicEquipScreen::GRID_CONFIRM_PANDORA;
+}
+
+void relic_confirm_pandoras_box(RunState& rs, RewardScreen& rewards) noexcept {
+    uint16_t drawn[kRewardItemCap * kRewardCardCap] = {};
+    int count = 0;
+    for (uint8_t i = 0; i < rewards.count && i < kRewardItemCap; ++i) {
+        const RunRewardItem& item = rewards.items[i];
+        for (uint8_t j = 0; j < item.card_count && j < kRewardCardCap; ++j) {
+            drawn[count++] = item.card_ids[j];
+        }
     }
+    for (int i = count - 1; i >= 0; --i) {
+        (void)add_card_to_master_deck(rs, static_cast<CardId>(drawn[i]));
+    }
+    rewards = RewardScreen{};
+    rewards.open_card_item = kNoOpenCardReward;
 }
 
 void relic_on_equip_screen_tiny_house(RunState& rs, RngStream& misc_rng,
@@ -350,12 +383,16 @@ void relic_on_equip_screen_empty_cage(RunState& rs, RngStream& /*misc_rng*/,
 void relic_on_equip_screen_calling_bell(RunState& rs, RngStream& /*misc_rng*/,
                                         RelicSlot& /*slot*/,
                                         RelicEquipContext& ctx) noexcept {
-    // CallingBell.onEquip (CallingBell.java:36-45) + update (:47-65). The
-    // onEquip half presents the Bell Curse on a choice-free confirmation grid;
-    // the update half fires the frame after it closes. Both are synchronous
-    // here; the confirmation grid is skipped for the same reason as Pandora's
-    // (zero choice content -- the capture-side confirm is the harness's seam).
-    //
+    (void)rs;
+    // CallingBell.onEquip (CallingBell.java:36-45) presents the Bell Curse on
+    // a choice-free confirmation grid. update (:47-65) performs every gameplay
+    // mutation only after that grid closes, so this body merely requests the
+    // screen. The helper below is the update half.
+    ctx.screen = RelicEquipScreen::GRID_CONFIRM_CALLING_BELL;
+}
+
+void relic_confirm_calling_bell(RunState& rs, RewardScreen& rewards,
+                                RoomType reward_room) noexcept {
     // 1. The curse reaches the deck through FastCardObtainEffect -> souls
     //    .obtain -> masterDeck.addToTop == APPEND (CardGroup.java:455-457),
     //    with the constructor's Omamori branch ahead of the add
@@ -374,10 +411,10 @@ void relic_on_equip_screen_calling_bell(RunState& rs, RngStream& /*misc_rng*/,
     //    cardBlizzRandomizer for the rest of the run; this is the single
     //    easiest thing to get wrong in this relic. (Contrast Tiny House: same
     //    roll, KEPT.)
-    ctx.rewards = RewardScreen{};
-    ctx.rewards.open_card_item = kNoOpenCardReward;
-    roll_setup_item_card_reward(rs, ctx.reward_room, ctx.rewards);
-    (void)remove_first_card_reward_item(ctx.rewards);
+    rewards = RewardScreen{};
+    rewards.open_card_item = kNoOpenCardReward;
+    roll_setup_item_card_reward(rs, reward_room, rewards);
+    (void)remove_first_card_reward_item(rewards);
 
     // 3. Three fixed-tier returnRandomScreenlessRelic pops (:53-55), strictly
     //    COMMON then UNCOMMON then RARE: pool front-pops off the lists
@@ -390,12 +427,11 @@ void relic_on_equip_screen_calling_bell(RunState& rs, RngStream& /*misc_rng*/,
                                 RelicTier::RARE};
     for (const RelicTier tier : tiers) {
         const RelicId id = return_random_screenless_relic(rs, tier, sctx);
-        RunRewardItem& item = ctx.rewards.items[ctx.rewards.count++];
+        RunRewardItem& item = rewards.items[rewards.count++];
         item = RunRewardItem{};
         item.kind = static_cast<uint8_t>(RewardItemKind::RELIC);
         item.id = static_cast<uint16_t>(id);
     }
-    ctx.screen = RelicEquipScreen::ITEM_REWARD;
 }
 
 }  // namespace sts::engine

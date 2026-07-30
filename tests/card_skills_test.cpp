@@ -605,6 +605,19 @@ TEST(CardSkillsUpgradeEligibility, ArmamentsPromptMaskExcludesCurseAndStatusSlot
     EXPECT_FALSE(m.can_choose[1]) << "curse slot is not selectable";
     EXPECT_TRUE(m.can_choose[2]);
     EXPECT_FALSE(m.can_choose[3]) << "status slot is not selectable";
+
+    const CardPoolIndex strike = s.hand[0];
+    const CardPoolIndex curse = s.hand[1];
+    const CardPoolIndex defend = s.hand[2];
+    const CardPoolIndex status = s.hand[3];
+    Step(s, make_action(ActionVerb::CHOOSE, 0));
+    ASSERT_EQ(s.hand_count, 4);
+    EXPECT_EQ(s.hand[0], defend) << "other eligible cards stay first";
+    EXPECT_EQ(s.hand[1], strike) << "the selected upgraded card is retrieved next";
+    EXPECT_EQ(s.hand[2], curse);
+    EXPECT_EQ(s.hand[3], status)
+        << "Armaments returnCards appends ineligibles in original order";
+    EXPECT_EQ(s.card_pool[strike].upgrade, 1);
 }
 
 TEST(CardSkillsUpgradeEligibility, ArmamentsPlusSkipsCurseAndStatusInTheForcedSweep) {

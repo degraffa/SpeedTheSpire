@@ -181,7 +181,7 @@
   hooks:
     on_use_card: []             # a played SKILL is redirected to exhaust
     on_card_draw: []            # a drawn SKILL costs 0 this turn
-  provenance: "CorruptionPower.onUseCard (CorruptionPower.java:45-49) -- if card.type==SKILL: card.exhaustOnUseOnce=true; onCardDraw (CorruptionPower.java:38-43) -- if card.type==SKILL: card.setCostForTurn(0). Skills-cost-0 at play is AbstractPlayer.useCard's hasPower(Corruption) energy skip (AbstractPlayer.java:1378)."
+  provenance: "CorruptionPower.onUseCard (CorruptionPower.java:45-49) -- if card.type==SKILL: card.exhaustOnUseOnce=true; onCardDraw (CorruptionPower.java:38-43) -- if card.type==SKILL: card.setCostForTurn(0). ApplyPowerAction's Corruption-specific constructor branch (ApplyPowerAction.java:49-67) also permanently reduces every SKILL already in hand/draw/discard/exhaust to zero cost for the combat. Skills-cost-0 at play is additionally enforced by AbstractPlayer.useCard's hasPower(Corruption) energy skip (AbstractPlayer.java:1378)."
 
 - id: 12
   name: RAGE

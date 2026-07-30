@@ -992,6 +992,39 @@ TEST(FuzzPolicy, EventGridEnumeratesOnlyLegalMasterDeckCards) {
     EXPECT_EQ(engine::action_arg0(moves[0].action), 1);
 }
 
+TEST(FuzzPolicy, RestGridCancelIsEnumeratedAndReturnsToTheMenu) {
+    engine::RunController rc = engine::run_begin(8083, 20);
+    rc.phase = static_cast<uint8_t>(engine::RunPhase::REST_SITE);
+    rc.rest.screen = static_cast<uint8_t>(engine::RestScreen::SMITH);
+    rc.run.master_deck_count = 1;
+    rc.run.master_deck[0] =
+        engine::CardInstance{
+            static_cast<uint16_t>(engine::CardId::STRIKE), 0, 0, 0, 0};
+
+    engine::RunActionMask mask{};
+    engine::legal_actions(rc, mask);
+    ASSERT_TRUE(mask.can_cancel_grid);
+    Move moves[kMoveCap];
+    const size_t n = enumerate_moves(rc, mask, moves, kMoveCap);
+    const Move* cancel = nullptr;
+    for (size_t i = 0; i < n; ++i) {
+        if (engine::action_arg0(moves[i].action) ==
+            engine::kChooseCancelGrid) {
+            cancel = &moves[i];
+            break;
+        }
+    }
+    ASSERT_NE(cancel, nullptr);
+    EXPECT_EQ(cancel->cat, MoveCat::SMITH_CARD);
+
+    engine::StepResult result{};
+    engine::advance(std::span<engine::RunController>(&rc, 1),
+                    std::span<const engine::Action>(&cancel->action, 1),
+                    std::span<engine::StepResult>(&result, 1));
+    EXPECT_EQ(static_cast<engine::RestScreen>(rc.rest.screen),
+              engine::RestScreen::MENU);
+}
+
 // --- 3b. the controller hash is a CONTENT hash, not a byte hash --------------
 
 TEST(FuzzHash, ControllerHashIgnoresEncounterKeyADDRESSES) {

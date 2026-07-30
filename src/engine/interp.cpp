@@ -82,11 +82,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             op_block(s, item.tgt, item.amount, item.flags);
             return;
         case Opcode::APPLY_POWER:
-            // `flags` low 16 = the PowerId, high 16 = the applied instance's
-            // counter operand (0 for every power but The Bomb).
+            // `flags` bits 0..14 = PowerId, bit 15 = source-kind override,
+            // high 16 = the applied instance's counter operand.
             op_apply_power(s, item.src, item.tgt,
                            apply_power_id_from_flags(item.flags), item.amount,
-                           apply_power_counter_from_flags(item.flags));
+                           apply_power_counter_from_flags(item.flags),
+                           apply_power_is_source_monster(item.flags));
             return;
         case Opcode::DRAW: {
             // DrawCardAction.update:69-73: while the player has No Draw,

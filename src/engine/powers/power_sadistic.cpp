@@ -50,6 +50,7 @@ void power_native_sadistic(CombatState& s, Hook hook,
     dmg.src = ctx.owner;         // owner-owned THORNS damage
     dmg.tgt = ctx.target;
     dmg.amount = ctx.power_amount;
+    dmg.flags = make_damage_flags(DamageType::THORNS);
     add_to_bottom(s, dmg);       // addToBot (SadisticPower.java:43)
 }
 

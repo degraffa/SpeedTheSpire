@@ -124,8 +124,20 @@ EventDialogStatus big_fish_choose(RunController& rc, EventDialogState& es,
     } else if (option == 1) {
         increase_max_hp(rc.run, 5);
     } else {
-        (void)add_card_to_master_deck(rc.run, CardId::REGRET);
+        // BigFish.buttonEffect option 2 CONSTRUCTS ShowCardAndObtainEffect
+        // first, which spends any already-owned Omamori charge synchronously
+        // (BigFish.java:67-71; ShowCardAndObtainEffect.java:30-36). It then
+        // obtains the relic immediately; only later does the pending effect
+        // append Regret and fan out onObtainCard (:94-108). Both halves matter:
+        // a newly rolled Omamori cannot eat this Regret (STS301389), while a
+        // newly rolled Darkstone Periapt does see it (STS301937).
+        const bool blocked =
+            omamori_blocks_card_obtain(rc.run, CardId::REGRET);
         acquire_event_relic(rc, /*screenless=*/true);
+        if (!blocked) {
+            (void)add_card_to_master_deck_after_omamori(
+                rc.run, CardId::REGRET);
+        }
     }
     es.screen = 1;
     return EventDialogStatus::CONTINUE;

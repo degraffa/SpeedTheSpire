@@ -302,7 +302,7 @@ void relic_native_dead_branch(CombatState& s, RelicHook hook,
 }
 
 void relic_native_gambling_chip(CombatState& s, RelicHook hook,
-                                RelicSlot& slot,
+                                RelicSlot& /*slot*/,
                                 const RelicHookContext& /*ctx*/) noexcept {
     // GamblingChip.java, read in full -- the file is 48 lines, not the 426-453
     // range the deferral note cited:
@@ -318,13 +318,11 @@ void relic_native_gambling_chip(CombatState& s, RelicHook hook,
     //       }
     //   }
     //
-    // ONCE PER COMBAT, NOT EVERY TURN. atTurnStartPostDraw fires every turn but
-    // the `activated` latch lets the body run only on the first. `slot.counter`
-    // carries the latch: the registry row leaves it at the -1 unset default,
-    // which IS "not yet activated", and a fresh CombatState starts there -- so
-    // no combat-scoped reset is needed at this hook, and binding
-    // atBattleStartPreDraw (the Java's reset) would be inert code, since the
-    // engine has no dispatch site for it.
+    // ONCE PER COMBAT, NOT EVERY TURN. The private `activated` latch is reset
+    // by atBattleStartPreDraw and never touches AbstractRelic.counter, so the
+    // observable counter stays -1 throughout the run. The shared start block
+    // increments `s.turn` before dispatching AT_TURN_START_POST_DRAW; turn 1 is
+    // therefore exactly the first call on which the private latch is false.
     //
     // The queued action is the SAME GamblingChipAction Gambler's Brew queues,
     // one presentation-only boolean apart (notChip false here, true there,
@@ -341,10 +339,9 @@ void relic_native_gambling_chip(CombatState& s, RelicHook hook,
     // kChoiceOptionalBit, ActionVerb::CONFIRM and the runtime selected-count
     // nibble are live -- which is exactly the conventions §8 signal that a
     // comment justifying inert code by a missing prerequisite has gone stale.
-    if (hook != RelicHook::AT_TURN_START_POST_DRAW || slot.counter != -1) {
+    if (hook != RelicHook::AT_TURN_START_POST_DRAW || s.turn != 1) {
         return;
     }
-    slot.counter = 1;               // this.activated = true (:36)
     queue_gambling_chip_choice(s);  // addToBot (:40)
 }
 

@@ -323,30 +323,55 @@ TEST(RelicHooks, RedSkullGainsStrengthWhenBloodied) {
     // Dropping to <= 50% max HP grants +3 Strength, once while active.
     CombatState s = MakeState();
     s.player_hp = 40;               // 40*2 == 80 == max -> bloodied
-    Relics r; r.add(RelicId::RED_SKULL);
+    Relics r; r.add(RelicId::RED_SKULL, -1);
     dispatch_relics_was_hp_lost(s, r.slots, r.count, /*amount=*/6);
     ASSERT_EQ(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
     EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
     EXPECT_EQ(queued(s, 0).amount, 3);
-    EXPECT_EQ(r.slots[0].counter, 1) << "isActive set";
+    EXPECT_TRUE(combat_red_skull_active(s.flags)) << "private isActive set";
+    EXPECT_EQ(r.slots[0].counter, -1)
+        << "RedSkull.isActive is not AbstractRelic.counter";
     drain(s);
     EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
 
     // Above 50% -> not bloodied -> no Strength.
     CombatState s2 = MakeState();
     s2.player_hp = 50;              // 100 > 80 -> not bloodied
-    Relics r2; r2.add(RelicId::RED_SKULL);
+    Relics r2; r2.add(RelicId::RED_SKULL, -1);
     dispatch_relics_was_hp_lost(s2, r2.slots, r2.count, /*amount=*/6);
     EXPECT_EQ(s2.action_count, 0);
+}
+
+TEST(RelicHooks, RedSkullPrivateLatchNeverChangesOracleCounter) {
+    // Completed G7 capture g7_greedy_b153_20260729_200000_200011 STS200002,
+    // seq 132 onward: a newly claimed Red Skull reports counter == -1 before,
+    // during and after its private isActive transitions. The old
+    // counter-backed latch produced the exact acceptance diff
+    // `relics[3].counter: -1 -> 0`.
+    CombatState s = MakeState();
+    s.player_hp = 40;
+    s.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
+    s.relic_count = 1;
+
+    dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
+    EXPECT_EQ(s.relics[0].counter, -1);
+    drain(s);
+    EXPECT_TRUE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
+
+    heal_player_with_relics(s, 5);
+    EXPECT_FALSE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullDoesNotFireTwiceWhenCombatBeganBloodied) {
     // preBattlePrep pre-seeds isBloodied = currentHealth <= maxHealth / 2
     // (AbstractPlayer.java:1575), so a combat ENTERED at or below half HP
     // never fires the damage-side onBloodied cross (:1476-1481 fires only on
-    // the false->true flip). The battle-start hook seeds the slot latch from
-    // starting HP; an HP loss while already bloodied then grants nothing.
+    // the false->true flip). The battle-start decider seeds the private latch
+    // from starting HP; an HP loss while already bloodied then grants nothing.
     //
     // b4faf1c's fix, unchanged. What DID change is the first half: entering
     // bloodied now grants the +3 once, decided by the queued battle-start
@@ -356,14 +381,16 @@ TEST(RelicHooks, RedSkullDoesNotFireTwiceWhenCombatBeganBloodied) {
     // because the decider finds its slot there at resolve time.
     CombatState s = MakeState();
     s.player_hp = 38;               // 76 <= 80 -> entered combat bloodied
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relic_count = 1;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
-    EXPECT_EQ(s.relics[0].counter, 0)
+    EXPECT_FALSE(combat_red_skull_active(s.flags))
         << "isActive = false at dispatch (RedSkull.java:37); the DECIDER sets "
            "it when it resolves (RedSkull$1)";
     drain(s);
-    EXPECT_EQ(s.relics[0].counter, 1) << "entered bloodied -> isActive";
+    EXPECT_TRUE(combat_red_skull_active(s.flags))
+        << "entered bloodied -> isActive";
+    EXPECT_EQ(s.relics[0].counter, -1);
     ASSERT_NE(player_power(s, PowerId::STRENGTH), nullptr);
     EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
 
@@ -391,31 +418,34 @@ TEST(RelicHooks, RedSkullGrantsStrengthOnAnAlreadyBloodiedEntry) {
     // bloodied is decided by the queued action, not by the hook.
     CombatState s = MakeState();
     s.player_hp = 40;               // 80 <= 80 -> entered combat bloodied
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relic_count = 1;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
     ASSERT_EQ(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::RED_SKULL_ENTRY))
         << "the hook queues the DECIDER (RedSkull.java:38), not the grant";
-    EXPECT_EQ(s.relics[0].counter, 0)
+    EXPECT_FALSE(combat_red_skull_active(s.flags))
         << "isActive = false (:37); RedSkull$1 sets it at resolve, not here";
     drain(s);
     EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
-    EXPECT_EQ(s.relics[0].counter, 1) << "isActive set inside the action";
+    EXPECT_TRUE(combat_red_skull_active(s.flags))
+        << "isActive set inside the action";
+    EXPECT_EQ(s.relics[0].counter, -1);
 
     // Negative control: entering ABOVE half still queues the decider (:38 is
     // unconditional); the decider then grants nothing and leaves the latch
     // armed.
     CombatState s2 = MakeState();
     s2.player_hp = 41;              // 82 > 80 -> not bloodied
-    s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s2.relic_count = 1;
     dispatch_relics_at_battle_start(s2, s2.relics, s2.relic_count);
     ASSERT_EQ(s2.action_count, 1);
     EXPECT_EQ(queued(s2, 0).opcode, kOp(Opcode::RED_SKULL_ENTRY));
     drain(s2);
     EXPECT_EQ(player_power(s2, PowerId::STRENGTH), nullptr);
-    EXPECT_EQ(s2.relics[0].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s2.flags));
+    EXPECT_EQ(s2.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullEntryDecidesAfterBattleStartHealsSettle) {
@@ -429,7 +459,7 @@ TEST(RelicHooks, RedSkullEntryDecidesAfterBattleStartHealsSettle) {
     // up into a -3, a spurious pair the game never fires.
     CombatState s = MakeState();
     s.player_hp = 40;               // 80 <= 80 -> bloodied at the hook...
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::BLOOD_VIAL), 0};
     s.relic_count = 2;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
@@ -440,19 +470,21 @@ TEST(RelicHooks, RedSkullEntryDecidesAfterBattleStartHealsSettle) {
     drain(s);
     EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
         << "42/80 > half at resolve time -> RedSkull$1 grants nothing";
-    EXPECT_EQ(s.relics[0].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 
     // The reverse acquisition order agrees -- the Java is order-independent
     // here by construction (heals top, decider bottom).
     CombatState s2 = MakeState();
     s2.player_hp = 40;
     s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::BLOOD_VIAL), 0};
-    s2.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s2.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s2.relic_count = 2;
     dispatch_relics_at_battle_start(s2, s2.relics, s2.relic_count);
     drain(s2);
     EXPECT_EQ(player_power(s2, PowerId::STRENGTH), nullptr);
-    EXPECT_EQ(s2.relics[1].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s2.flags));
+    EXPECT_EQ(s2.relics[1].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullEntryHealCrossWithArtifactSpendsNoCharge) {
@@ -467,7 +499,7 @@ TEST(RelicHooks, RedSkullEntryHealCrossWithArtifactSpendsNoCharge) {
     s.player_powers[0] =
         PowerSlot{static_cast<uint16_t>(PowerId::ARTIFACT), 1, 0, 0};
     s.player_power_count = 1;
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relics[1] = RelicSlot{static_cast<uint16_t>(RelicId::BLOOD_VIAL), 0};
     s.relic_count = 2;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
@@ -477,7 +509,8 @@ TEST(RelicHooks, RedSkullEntryHealCrossWithArtifactSpendsNoCharge) {
     ASSERT_NE(player_power(s, PowerId::ARTIFACT), nullptr);
     EXPECT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 1)
         << "no -3 was ever queued, so no Artifact charge is spent";
-    EXPECT_EQ(s.relics[0].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullBloodiedBoundaryRoundsHalfDown) {
@@ -490,14 +523,17 @@ TEST(RelicHooks, RedSkullBloodiedBoundaryRoundsHalfDown) {
         CombatState s = MakeState();
         s.player_max_hp = 7;
         s.player_hp = static_cast<int16_t>(hp);
-        s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+        s.relics[0] =
+            RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
         s.relic_count = 1;
         dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
         drain(s);  // the decider resolves here (RedSkull$1)
         const bool bloodied = hp <= 3;
         EXPECT_EQ(player_power(s, PowerId::STRENGTH) != nullptr, bloodied)
             << "hp " << hp << "/7";
-        EXPECT_EQ(s.relics[0].counter, bloodied ? 1 : 0) << "hp " << hp << "/7";
+        EXPECT_EQ(combat_red_skull_active(s.flags), bloodied)
+            << "hp " << hp << "/7";
+        EXPECT_EQ(s.relics[0].counter, -1) << "hp " << hp << "/7";
     }
 }
 
@@ -510,7 +546,7 @@ TEST(RelicHooks, RedSkullRemovesStrengthWhenAHealLiftsAboveHalf) {
     // AbstractPlayer.heal (:1544-1552).
     CombatState s = MakeState();
     s.player_hp = 40;               // bloodied at entry -> the entry grant
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relic_count = 1;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
     drain(s);
@@ -522,7 +558,9 @@ TEST(RelicHooks, RedSkullRemovesStrengthWhenAHealLiftsAboveHalf) {
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
     EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
     EXPECT_EQ(queued(s, 0).amount, -3);
-    EXPECT_EQ(s.relics[0].counter, 0) << "isActive cleared (RedSkull.java:61)";
+    EXPECT_FALSE(combat_red_skull_active(s.flags))
+        << "isActive cleared (RedSkull.java:61)";
+    EXPECT_EQ(s.relics[0].counter, -1);
     drain(s);
     EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr)
         << "3 + (-3) == 0 -> StrengthPower.stackPower queues its own removal";
@@ -531,14 +569,15 @@ TEST(RelicHooks, RedSkullRemovesStrengthWhenAHealLiftsAboveHalf) {
     // cross at all -- the Java's condition is strictly greater than half.
     CombatState s2 = MakeState();
     s2.player_hp = 30;
-    s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s2.relic_count = 1;
     dispatch_relics_at_battle_start(s2, s2.relics, s2.relic_count);
     drain(s2);
     ASSERT_EQ(player_power(s2, PowerId::STRENGTH)->amount, 3);
     heal_player_with_relics(s2, 10);  // 40 -> 80 == 80, still bloodied
     EXPECT_EQ(s2.action_count, 0);
-    EXPECT_EQ(s2.relics[0].counter, 1) << "still isActive";
+    EXPECT_TRUE(combat_red_skull_active(s2.flags)) << "still isActive";
+    EXPECT_EQ(s2.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullHealCrossDoesNothingWhileArmed) {
@@ -547,14 +586,15 @@ TEST(RelicHooks, RedSkullHealCrossDoesNothingWhileArmed) {
     // (This is the guard at RedSkull.java:56, not an outer isBloodied test.)
     CombatState s = MakeState();
     s.player_hp = 60;
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relic_count = 1;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
     drain(s);  // the decider resolves (not bloodied -> nothing)
-    ASSERT_EQ(s.relics[0].counter, 0);
+    ASSERT_FALSE(combat_red_skull_active(s.flags));
     heal_player_with_relics(s, 10);
     EXPECT_EQ(s.action_count, 0);
-    EXPECT_EQ(s.relics[0].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullRemovalIsBlockedByArtifact) {
@@ -570,7 +610,7 @@ TEST(RelicHooks, RedSkullRemovalIsBlockedByArtifact) {
     s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::ARTIFACT), 1,
                                    0, 0};
     s.player_power_count = 1;
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relic_count = 1;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
     drain(s);
@@ -584,9 +624,10 @@ TEST(RelicHooks, RedSkullRemovalIsBlockedByArtifact) {
     ASSERT_NE(player_power(s, PowerId::STRENGTH), nullptr);
     EXPECT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3)
         << "the Strength survives the nullified removal";
-    EXPECT_EQ(s.relics[0].counter, 0)
+    EXPECT_FALSE(combat_red_skull_active(s.flags))
         << "isActive is cleared regardless -- RedSkull.java:61 sits OUTSIDE "
            "the guarded block, and the relic never learns the -3 was eaten";
+    EXPECT_EQ(s.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullCrossingsAreCumulativeDeltasNotAnInvariant) {
@@ -598,7 +639,7 @@ TEST(RelicHooks, RedSkullCrossingsAreCumulativeDeltasNotAnInvariant) {
     s.player_powers[0] = PowerSlot{static_cast<uint16_t>(PowerId::ARTIFACT), 1,
                                    0, 0};
     s.player_power_count = 1;
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 0};
+    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     s.relic_count = 1;
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
     drain(s);  // the decider resolves (above half -> nothing)
@@ -613,7 +654,9 @@ TEST(RelicHooks, RedSkullCrossingsAreCumulativeDeltasNotAnInvariant) {
     drain(s);
     ASSERT_EQ(player_power(s, PowerId::ARTIFACT)->amount, 0);
     ASSERT_EQ(player_power(s, PowerId::STRENGTH)->amount, 3);
-    ASSERT_EQ(s.relics[0].counter, 0) << "re-armed by the cross-up";
+    ASSERT_FALSE(combat_red_skull_active(s.flags))
+        << "re-armed by the cross-up";
+    ASSERT_EQ(s.relics[0].counter, -1);
 
     s.player_hp = 39;               // 78 <= 80 -> second cross DOWN
     dispatch_relics_was_hp_lost(s, s.relics, s.relic_count, /*amount=*/6);
@@ -622,21 +665,22 @@ TEST(RelicHooks, RedSkullCrossingsAreCumulativeDeltasNotAnInvariant) {
         << "+3, blocked -3, +3 -- deltas, not an invariant";
 }
 
-TEST(RelicHooks, RedSkullOutOfCombatCrossOnlyMovesTheLatch) {
+TEST(RelicHooks, RedSkullOutOfCombatCrossNeedsNoRunStateLatch) {
     // Out of combat there are no powers to move (resetPlayer clears the list,
     // AbstractDungeon.java:1671) and RedSkull.onNotBloodied's -3 is gated on
     // RoomPhase.COMBAT (RedSkull.java:56) -- but `isActive = false` (:61) sits
-    // outside that guard, so a run-layer cross-up still clears the latch. The
-    // bridge to the next combat is the at_battle_start re-seed either way.
+    // outside that guard.  No RunState field is needed for that private write:
+    // onVictory and the next atBattleStart clear it before another read.
     RunState rs{};
     rs.max_hp = 80;
     rs.hp = 38;                     // 76 <= 80 -> bloodied out of combat
-    rs.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};
+    rs.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     rs.relic_count = 1;
 
     EXPECT_TRUE(rest_apply_heal(rs));  // (int)(80 * 0.3f) == 24 -> 62
     EXPECT_EQ(rs.hp, 62);
-    EXPECT_EQ(rs.relics[0].counter, 0) << "the run-layer cross clears isActive";
+    EXPECT_EQ(rs.relics[0].counter, -1)
+        << "private isActive must never leak into AbstractRelic.counter";
 
     // ... and the NEXT combat opens armed, so nothing is granted at entry.
     CombatState s = MakeState();
@@ -647,7 +691,8 @@ TEST(RelicHooks, RedSkullOutOfCombatCrossOnlyMovesTheLatch) {
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
     drain(s);  // the decider resolves (62/80 above half -> nothing)
     EXPECT_EQ(player_power(s, PowerId::STRENGTH), nullptr);
-    EXPECT_EQ(s.relics[0].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 
     // Negative control: a run-layer heal that does NOT lift the player above
     // half is no cross -- and the next combat is still entered bloodied, so it
@@ -655,11 +700,11 @@ TEST(RelicHooks, RedSkullOutOfCombatCrossOnlyMovesTheLatch) {
     RunState rs2{};
     rs2.max_hp = 80;
     rs2.hp = 10;
-    rs2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};
+    rs2.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
     rs2.relic_count = 1;
     EXPECT_TRUE(rest_apply_heal(rs2));  // 10 + 24 == 34, still <= 40
     EXPECT_EQ(rs2.hp, 34);
-    EXPECT_EQ(rs2.relics[0].counter, 1) << "no cross -> latch untouched";
+    EXPECT_EQ(rs2.relics[0].counter, -1);
 
     CombatState s2 = MakeState();
     s2.player_hp = rs2.hp;
@@ -672,24 +717,27 @@ TEST(RelicHooks, RedSkullOutOfCombatCrossOnlyMovesTheLatch) {
     drain(s2);  // 34/80 still bloodied at resolve -> the entry grant
     ASSERT_NE(player_power(s2, PowerId::STRENGTH), nullptr);
     EXPECT_EQ(player_power(s2, PowerId::STRENGTH)->amount, 3);
-    EXPECT_EQ(s2.relics[0].counter, 1);
+    EXPECT_TRUE(combat_red_skull_active(s2.flags));
+    EXPECT_EQ(s2.relics[0].counter, -1);
 }
 
 TEST(RelicHooks, RedSkullReArmsAtEveryBattleStart) {
-    // fold_back_combat persists the mirrored counter into the run's RelicSlot,
-    // so a combat where Red Skull fired leaves counter == 1 behind. The game
-    // resets isActive at every atBattleStart (RedSkull.java:37) and re-derives
-    // isBloodied from starting HP (AbstractPlayer.java:1575): entering the
-    // next combat above half HP must re-arm the grant.
+    // The game resets private isActive at every atBattleStart
+    // (RedSkull.java:37) and re-derives isBloodied from starting HP
+    // (AbstractPlayer.java:1575): entering the next combat above half HP must
+    // re-arm the grant without touching AbstractRelic.counter.
     CombatState s = MakeState();
     s.player_hp = 60;               // 120 > 80 -> not bloodied at entry
-    s.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), 1};
-    s.relic_count = 1;              // stale isActive from the previous combat
+    s.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::RED_SKULL), -1};
+    s.relic_count = 1;
+    s.flags |= kCombatFlagRedSkullActive;  // stale private latch
     dispatch_relics_at_battle_start(s, s.relics, s.relic_count);
-    EXPECT_EQ(s.relics[0].counter, 0)
+    EXPECT_FALSE(combat_red_skull_active(s.flags))
         << "atBattleStart resets isActive synchronously (RedSkull.java:37)";
     drain(s);  // the decider resolves (not bloodied -> nothing, still armed)
-    EXPECT_EQ(s.relics[0].counter, 0);
+    EXPECT_FALSE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 
     s.player_hp = 35;               // 70 <= 80 -> the cross happens in-combat
     dispatch_relics_was_hp_lost(s, s.relics, s.relic_count, /*amount=*/25);
@@ -697,7 +745,8 @@ TEST(RelicHooks, RedSkullReArmsAtEveryBattleStart) {
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
     EXPECT_EQ(apply_power_id_from_flags(queued(s, 0).flags), PowerId::STRENGTH);
     EXPECT_EQ(queued(s, 0).amount, 3);
-    EXPECT_EQ(s.relics[0].counter, 1);
+    EXPECT_TRUE(combat_red_skull_active(s.flags));
+    EXPECT_EQ(s.relics[0].counter, -1);
 }
 
 // --- Counter relics (persist counter in the RelicSlot) -----------------------
@@ -841,13 +890,16 @@ TEST(RelicHooks, HappyFlowerGrantsEnergyEveryThirdTurn) {
 
 TEST(RelicHooks, LanternGrantsEnergyOnFirstTurnOnly) {
     CombatState s = MakeState();
-    Relics r; r.add(RelicId::LANTERN);
+    Relics r; r.add(RelicId::LANTERN, -1);
     dispatch_relics_at_turn_start(s, r.slots, r.count);
     ASSERT_EQ(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::GAIN_ENERGY));
     drain(s);
     EXPECT_EQ(s.player_energy, 4);
+    EXPECT_EQ(r.slots[0].counter, -1)
+        << "Lantern's latch is private, not AbstractRelic.counter";
     // Second turn: nothing.
+    s.turn = 1;
     dispatch_relics_at_turn_start(s, r.slots, r.count);
     EXPECT_EQ(s.action_count, 0);
 }

@@ -13,24 +13,37 @@ JSON, and CSV under `docs/verification/`:
 C:\Python39\python.exe tools\verify_report\generate_report.py
 ```
 
-The defaults name the two B5.2 acceptance/exercise campaigns and the compatible
-B5.3 200-seed harvest under the fixed
+The dashboard defaults name the final provenance-compatible G7 cohorts:
+`g7_greedy_b153_20260729_200000_200011` and
+`g7_random_b153_20260729_300000_324999`, under the fixed
 `D:\STS_BG_Mod\_oracle_data\campaigns` root, and consume the fresh debug
 `tier2_coverage.json`. Repeated `--campaign` flags select a different aggregate.
-An exact repeated seed is counted once only when its artifact hash, action
-count, outcome, and classification agree; a conflicting repeat is fatal.
+Every report row's local artifact is hash- and header-validated before any
+de-duplication. An exact repeated seed is counted once only when its entire
+report row agrees; a conflicting repeat is fatal.
 
 The report keeps three action totals separate:
 
 - `captured_actions`: every injected oracle action;
 - `replay_clean_actions`: actions from runs classified wholly clean;
-- `strict_zero_diff_actions`: the clean total excluding a known capture race.
+- `strict_zero_diff_actions`: the clean total excluding every replay-recognized
+  capture-race family (currently obtain/Entropic, Smoke-Bomb escape
+  settlement, and Living Wall's transform-preview cardRng burn). Current
+  reports carry an all-family total plus a by-kind map;
+  the reader remains backward-compatible with old obtain-only v1 reports.
 
 Only the last total drives the displayed G7 action shortfall. The report never
 infers that captured actions were diff-clean. Likewise, “zero untriaged” means
 every non-clean `(campaign, seed, classification)` has an exact reviewed row in
 `divergence_dispositions.json`; an `open-*` disposition remains visibly open
-and is not acceptance.
+and is not acceptance. The G7 volume verdict also requires at least two literal
+campaign policy names; a million actions from one generator cannot satisfy the
+frozen mixed-generator clause. Every hashed source artifact is reopened at its
+header and must identify the selected campaign/seed as A20 Ironclad; joined
+with complete named tier-2 coverage of the `a20.yaml` rows, that is the
+dashboard's mechanical A20-modifier check. A run whose outcome is anything
+other than death or an Act-1 boss-reward claim is rejected rather than counted
+as a full-run attempt.
 
 Oracle sightings are literal exact-string `game_id` occurrences recursively
 found in campaign `state_json` objects. The same registry loader used by
@@ -52,6 +65,12 @@ the test target's scratch directory, and invokes the real `replay_run_diff
 --replay --stop-on-diff` binary. `OracleCorpusReplay.FiftySeedCorpusReplaysZeroDiff`
 is in every debug/ASan CI matrix. The sibling synthetic-divergence case mutates
 only an extracted copy and requires replay to return nonzero.
+
+The corpus builder's no-argument campaign set remains pinned to the original
+B5.4 B5.2/B5.3 inputs recorded in its committed manifest. It is intentionally
+independent of the moving dashboard defaults: regenerating a frozen CI corpus
+must not silently select a different 50 runs merely because G7 added a larger
+evidence cohort.
 
 ## `check_tier2_coverage.py` — tier-2 registry coverage (G6 leg 1, design §8(2))
 

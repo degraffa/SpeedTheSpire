@@ -36,6 +36,11 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept;
 // SET_COST.
 void op_set_cost(CombatState& s, uint8_t pool_index, int new_cost) noexcept;
 
+// ApplyPowerAction's Corruption-specific constructor side effect: permanently
+// reduce every SKILL in hand, draw, discard, and exhaust to zero cost for this
+// combat before the power action itself resolves.
+void apply_corruption_cost_modifier(CombatState& s) noexcept;
+
 // EXHAUST_NON_ATTACKS (Sever Soul).
 void op_exhaust_non_attacks(CombatState& s) noexcept;
 

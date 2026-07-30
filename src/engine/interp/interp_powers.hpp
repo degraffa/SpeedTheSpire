@@ -13,10 +13,12 @@ namespace sts::engine {
 
 // APPLY_POWER (see the definition for the Sadistic/Artifact interception).
 // `counter` is the applied instance's SECOND number (interp.hpp
-// kApplyPowerCounterShift); 0 for every power that declares no meaning for it,
-// which is every power but The Bomb.
+// kApplyPowerCounterShift); 0 for every power that declares no meaning for it.
+// `is_source_monster` reproduces DurationPower's source-sensitive justApplied
+// constructor argument (normally true; Gremlin Visage is the known false path).
 void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
-                    int amount, int counter = 0) noexcept;
+                    int amount, int counter = 0,
+                    bool is_source_monster = true) noexcept;
 
 // REMOVE_POWER. `flags` is the queued item's whole flags word, so an INSTANCED
 // power can name one specific slot (interp.hpp make_power_instance_flags); a
