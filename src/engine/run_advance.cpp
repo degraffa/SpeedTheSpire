@@ -78,6 +78,60 @@ void reseed_floor_streams(CombatState& s, int64_t seed, int32_t floor) noexcept 
     s.misc_rng = floor_stream(seed, floor);
 }
 
+// WingBoots / MapRoomNode.wingedIsConnectedTo. A live charge makes every
+// non-empty node on the NEXT row selectable; a charge is spent only when the
+// chosen node is not connected by a real edge. WingBoots.setCounter turns the
+// last `1 -> 0` into `-2` (used up), which is the counter CommunicationMod
+// publishes after the third jump.
+[[nodiscard]] int wing_boots_slot(const RunState& rs) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::WING_BOOTS)) {
+            return static_cast<int>(i);
+        }
+    }
+    return -1;
+}
+
+[[nodiscard]] bool wing_boots_active(const RunState& rs) noexcept {
+    const int slot = wing_boots_slot(rs);
+    return slot >= 0 && rs.relics[slot].counter > 0;
+}
+
+[[nodiscard]] bool map_edge_connects(const RunController& rc,
+                                     uint8_t dst_x) noexcept {
+    if (rc.run.floor == 0 || dst_x >= kMapCols) {
+        return false;
+    }
+    const int y = run_cur_row(rc);
+    if (y < 0 || y >= kMapRows) {
+        return false;
+    }
+    const uint8_t edges =
+        rc.run.map[run_state_map_index(rc.cur_x, y)].edges;
+    if (dst_x + 1u == rc.cur_x) {
+        return (edges & kEdgeLeft) != 0u;
+    }
+    if (dst_x == rc.cur_x) {
+        return (edges & kEdgeCenter) != 0u;
+    }
+    if (dst_x == rc.cur_x + 1u) {
+        return (edges & kEdgeRight) != 0u;
+    }
+    return false;
+}
+
+void spend_wing_boots_charge(RunState& rs) noexcept {
+    const int slot = wing_boots_slot(rs);
+    if (slot < 0 || rs.relics[slot].counter <= 0) {
+        return;
+    }
+    --rs.relics[slot].counter;
+    if (rs.relics[slot].counter == 0) {
+        rs.relics[slot].counter = -2;
+    }
+}
+
 // Fold CombatState-owned persistent fields back into RunState. Potion slots and
 // the master deck are already canonical in rc.run while combat is live
 // (CombatState deliberately has no duplicate copies), so combat mutations to
@@ -258,7 +312,18 @@ bool noncombat_potion_legal(const RunController& rc, uint8_t slot) noexcept {
         return false;
     }
     const PotionId id = static_cast<PotionId>(rc.run.potions[slot]);
-    return id == PotionId::FRUIT_JUICE || id == PotionId::ENTROPIC_BREW;
+    // BloodPotion overrides AbstractPotion.canUse: unlike ordinary combat
+    // potions it is legal in every room phase (except We Meet Again) and its
+    // use() has a synchronous out-of-combat heal branch
+    // (BloodPotion.java:39-59). STS300092 drinks one from a combat-reward
+    // screen before claiming gold.
+    const bool blocked_by_we_meet_again =
+        rc.phase == static_cast<uint8_t>(RunPhase::EVENT_DIALOG) &&
+        static_cast<EventId>(rc.event.event_id) == EventId::WE_MEET_AGAIN;
+    return !blocked_by_we_meet_again &&
+           (id == PotionId::BLOOD_POTION ||
+            id == PotionId::FRUIT_JUICE ||
+            id == PotionId::ENTROPIC_BREW);
 }
 
 void clear_potion_slot(RunState& rs, uint8_t slot) noexcept {
@@ -289,7 +354,9 @@ bool potion_discard_legal(const RunController& rc, uint8_t slot) noexcept {
 }
 
 void use_fruit_juice(RunController& rc, uint8_t slot) noexcept {
-    const int amount = potion_def(PotionId::FRUIT_JUICE)->potency;
+    const int amount =
+        potion_def(PotionId::FRUIT_JUICE)->potency *
+        (run_has_relic(rc.run, RelicId::SACRED_BARK) ? 2 : 1);
     if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
         rc.combat.player_max_hp = static_cast<int16_t>(rc.combat.player_max_hp + amount);
         rc.combat.player_hp = static_cast<int16_t>(rc.combat.player_hp + amount);
@@ -1423,18 +1490,42 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                     break;
                 }
                 case NeowScreen::GRID:
-                    for (uint16_t i = 0;
-                         i < rc.run.master_deck_count && i < kMasterDeckCap; ++i) {
-                        out.can_choose_master_deck[i] =
-                            neow_grid_card_legal(rc.run, n, i);
+                    if (static_cast<NeowGridMode>(n.grid_mode) ==
+                            NeowGridMode::CONFIRM_PANDORA ||
+                        static_cast<NeowGridMode>(n.grid_mode) ==
+                            NeowGridMode::CONFIRM_CALLING_BELL) {
+                        out.can_proceed = true;
+                    } else {
+                        for (uint16_t i = 0;
+                             i < rc.run.master_deck_count &&
+                             i < kMasterDeckCap; ++i) {
+                            out.can_choose_master_deck[i] =
+                                neow_grid_card_legal(rc.run, n, i);
+                        }
                     }
                     break;
                 case NeowScreen::ITEM_REWARD: {
                     const RewardScreen& s = rc.rewards;
-                    out.can_proceed = true;
-                    for (uint8_t i = 0; i < s.count && i < kRewardItemCap; ++i) {
-                        out.can_claim_reward[i] =
-                            reward_claim_legal(rc.run, s, i);
+                    if (s.open_card_item != kNoOpenCardReward) {
+                        if (!reward_card_item_open_legal(s)) {
+                            break;
+                        }
+                        const RunRewardItem& item = s.items[s.open_card_item];
+                        for (uint8_t j = 0;
+                             j < item.card_count && j < kRewardCardCap; ++j) {
+                            out.can_take_card[j] =
+                                reward_take_card_legal(rc.run, s, j);
+                        }
+                        out.can_skip_card = true;
+                        out.can_sing =
+                            run_has_relic(rc.run, RelicId::SINGING_BOWL);
+                    } else {
+                        out.can_proceed = true;
+                        for (uint8_t i = 0;
+                             i < s.count && i < kRewardItemCap; ++i) {
+                            out.can_claim_reward[i] =
+                                reward_claim_legal(rc.run, s, i);
+                        }
                     }
                     break;
                 }
@@ -1503,6 +1594,18 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                 if (e & kEdgeBoss) {
                     out.can_choose_boss = true;
                 }
+                // MapRoomNode.wingedIsConnectedTo returns true for any
+                // hasEdges() node on the next row while Wing Boots has a live
+                // charge. The ordinary edge-derived choices above stay true;
+                // the transition path distinguishes them so they remain free.
+                if (wing_boots_active(rc.run) && y + 1 < kMapRows) {
+                    for (int x = 0; x < kMapCols; ++x) {
+                        if (rc.run.map[run_state_map_index(x, y + 1)].edges !=
+                            0u) {
+                            out.can_choose_node[x] = true;
+                        }
+                    }
+                }
             }
             break;
         }
@@ -1537,6 +1640,7 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                     out.can_choose_rest[i] = menu.entries[i].usable;
                 }
             } else if (screen == RestScreen::SMITH) {
+                out.can_cancel_grid = true;
                 // getUpgradableCards (CampfireSmithEffect.java:62): NO bottled
                 // exclusion -- a bottled card stays smithable.
                 for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
@@ -1544,6 +1648,7 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
                         rest_card_upgradeable(rc.run.master_deck[i]);
                 }
             } else if (screen == RestScreen::TOKE) {
+                out.can_cancel_grid = true;
                 // CampfireTokeEffect.java:57: the Toke grid is
                 // getGroupWithoutBottledCards(getPurgeableCards()).
                 for (uint16_t i = 0; i < rc.run.master_deck_count; ++i) {
@@ -1598,6 +1703,7 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             const ShopState& shop = rc.shop;
             if (static_cast<ShopScreenKind>(shop.screen) ==
                 ShopScreenKind::PURGE_GRID) {
+                out.can_cancel_grid = true;
                 // gridSelectScreen is modal over the shop: only the grid's own
                 // rows are legal while it is up (the Smith/Toke grid shape).
                 for (uint16_t i = 0;
@@ -1752,7 +1858,24 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
         return true;
     }
 
-    if (id == PotionId::FRUIT_JUICE) {
+    if (id == PotionId::BLOOD_POTION &&
+        rc.phase != static_cast<uint8_t>(RunPhase::COMBAT)) {
+        // BloodPotion.use's non-combat arm calls player.heal synchronously
+        // (BloodPotion.java:39-48), so it mutates the persistent RunState
+        // rather than the stale between-fights CombatState. Preserve Java's
+        // float/truncation expression exactly; Magic Flower is phase-gated off
+        // outside combat, and heal_out_of_combat owns the clamp + Red Skull
+        // not-bloodied cross.
+        const int potency =
+            potion_def(PotionId::BLOOD_POTION)->potency *
+            (run_has_relic(rc.run, RelicId::SACRED_BARK) ? 2 : 1);
+        const float ratio = static_cast<float>(potency) / 100.0f;
+        const int heal =
+            static_cast<int>(static_cast<float>(rc.run.max_hp) * ratio);
+        heal_out_of_combat(rc.run, heal);
+        dispatch_run_relics_on_use_potion(rc);
+        clear_potion_slot(rc.run, slot);
+    } else if (id == PotionId::FRUIT_JUICE) {
         use_fruit_juice(rc, slot);
         dispatch_run_relics_on_use_potion(rc);
         // Fruit Juice / Entropic Brew are usable IN combat too, where the
@@ -1885,6 +2008,8 @@ void apply_claim_equip_request(RunController& rc,
         case RelicEquipScreen::GRID_REMOVE:
         case RelicEquipScreen::GRID_TRANSFORM_UPGRADE:
         case RelicEquipScreen::ITEM_REWARD:
+        case RelicEquipScreen::GRID_CONFIRM_PANDORA:
+        case RelicEquipScreen::GRID_CONFIRM_CALLING_BELL:
         default:
             assert(false &&
                    "a BOSS on_equip_screen request reached a claim site");
@@ -1961,12 +2086,44 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         }
                         break;
                     case NeowScreen::GRID:
-                        // misc_rng feeds only the TRANSFORM_UPGRADE (Astrolabe)
-                        // mode; Neow's own grid modes draw rs.neow_rng.
-                        (void)neow_grid_pick(rc.run, n, rc.combat.misc_rng, a0);
+                        if (a0 == kChooseProceed &&
+                            static_cast<NeowGridMode>(n.grid_mode) ==
+                                NeowGridMode::CONFIRM_PANDORA) {
+                            relic_confirm_pandoras_box(rc.run, rc.rewards);
+                            n.grid_mode =
+                                static_cast<uint8_t>(NeowGridMode::NONE);
+                            neow_finish_payout(n);
+                        } else if (
+                            a0 == kChooseProceed &&
+                            static_cast<NeowGridMode>(n.grid_mode) ==
+                                NeowGridMode::CONFIRM_CALLING_BELL) {
+                            relic_confirm_calling_bell(
+                                rc.run, rc.rewards, kNeowRewardScreenRoom);
+                            n.grid_mode =
+                                static_cast<uint8_t>(NeowGridMode::NONE);
+                            n.screen =
+                                static_cast<uint8_t>(NeowScreen::ITEM_REWARD);
+                        } else {
+                            // misc_rng feeds only TRANSFORM_UPGRADE (Astrolabe);
+                            // Neow's own pick grids draw rs.neow_rng.
+                            (void)neow_grid_pick(rc.run, n,
+                                                 rc.combat.misc_rng, a0);
+                        }
                         break;
                     case NeowScreen::ITEM_REWARD:
-                        if (a0 == kChooseProceed) {
+                        if (rc.rewards.open_card_item !=
+                            kNoOpenCardReward) {
+                            if (reward_card_item_open_legal(rc.rewards)) {
+                                if (a0 == kChooseSkipCard) {
+                                    reward_skip_card(rc.rewards);
+                                } else if (a0 == kChooseSing) {
+                                    (void)reward_sing(rc.run, rc.rewards);
+                                } else {
+                                    (void)reward_take_card(
+                                        rc.run, rc.rewards, a0);
+                                }
+                            }
+                        } else if (a0 == kChooseProceed) {
                             // The reward screen's Proceed returns to Neow's
                             // final dialog button, which is what opens the map.
                             rc.rewards = RewardScreen{};
@@ -2006,6 +2163,10 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 if (a0 == kChooseBoss && m.can_choose_boss) {
                     next_room_transition(rc, 0, /*to_boss=*/true);
                 } else if (a0 < kMapCols && m.can_choose_node[a0]) {
+                    if (rc.run.floor > 0 &&
+                        !map_edge_connects(rc, a0)) {
+                        spend_wing_boots_charge(rc.run);
+                    }
                     next_room_transition(rc, a0, /*to_boss=*/false);
                 }
                 // else: illegal choice -- no-op (cannot corrupt state).
@@ -2142,7 +2303,10 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         }
                     }
                 } else if (screen == RestScreen::SMITH) {
-                    if (rest_upgrade_card(rc.run, a0)) {
+                    if (a0 == kChooseCancelGrid) {
+                        rc.rest.screen =
+                            static_cast<uint8_t>(RestScreen::MENU);
+                    } else if (rest_upgrade_card(rc.run, a0)) {
                         finish_rest_site(rc);
                     }
                 } else if (screen == RestScreen::TOKE) {
@@ -2154,7 +2318,10 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     // (CampfireTokeEffect.java:57), and this dispatch guard
                     // is that surface for the Toke grid; the OPTION gate is
                     // folded into build_rest_menu (PeacePipe.java:48).
-                    if (a0 < rc.run.master_deck_count &&
+                    if (a0 == kChooseCancelGrid) {
+                        rc.rest.screen =
+                            static_cast<uint8_t>(RestScreen::MENU);
+                    } else if (a0 < rc.run.master_deck_count &&
                         master_card_purgeable_unbottled(
                             rc.run.master_deck[a0]) &&
                         rest_purge_card(rc.run, a0)) {
@@ -2245,7 +2412,12 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 const uint8_t a0 = action_arg0(a);
                 if (static_cast<ShopScreenKind>(shop.screen) ==
                     ShopScreenKind::PURGE_GRID) {
-                    (void)shop_purge_card(rc.run, shop, a0);
+                    if (a0 == kChooseCancelGrid) {
+                        shop.screen =
+                            static_cast<uint8_t>(ShopScreenKind::MENU);
+                    } else {
+                        (void)shop_purge_card(rc.run, shop, a0);
+                    }
                 } else if (a0 == kChooseProceed) {
                     rc.shop = ShopState{};
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);

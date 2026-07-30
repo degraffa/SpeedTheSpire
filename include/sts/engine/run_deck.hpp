@@ -142,29 +142,42 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     }
 }
 
-// ShowCardAndObtainEffect's acquisition door: curses are first offered to the
-// first owned Omamori, whose nonzero counter consumes the card; otherwise the
-// card is appended and the obtain/master-deck-change passes run. The Omamori
-// check precedes the append exactly as ShowCardAndObtainEffect.<init>
-// (ShowCardAndObtainEffect.java:30-36) precedes its update-time obtain
-// (:72-82). Returns false only when an unblocked card cannot be appended.
-[[nodiscard]] inline bool add_card_to_master_deck(RunState& run, CardId id,
-                                                  uint8_t upgrade = 0) noexcept {
+// ShowCardAndObtainEffect's CONSTRUCTOR-time gate. A curse is offered to the
+// first owned Omamori; a nonzero charge consumes the effect immediately.
+// Keeping this gate separable from the later append matters for Big Fish: its
+// curse effect is constructed before the event obtains its relic, but the card
+// joins the deck after that relic is already owned. Thus a newly rolled
+// Omamori cannot eat the pending Regret, while a newly rolled Darkstone Periapt
+// does see Regret's later onObtainCard pass.
+[[nodiscard]] inline bool omamori_blocks_card_obtain(RunState& run,
+                                                     CardId id) noexcept {
+    const CardDef* def = card_def(id);
+    if (def == nullptr || def->type != CardType::CURSE) {
+        return false;
+    }
+    for (uint8_t i = 0; i < run.relic_count; ++i) {
+        RelicSlot& slot = run.relics[i];
+        if (slot.relic_id == static_cast<uint16_t>(RelicId::OMAMORI)) {
+            if (slot.counter != 0) {
+                --slot.counter;
+                return true;
+            }
+            break;  // getRelic returns the first copy, even when used up.
+        }
+    }
+    return false;
+}
+
+// The UPDATE-time half of ShowCardAndObtainEffect after its constructor gate
+// has already allowed the card: append, onObtainCard in relic acquisition
+// order, then onMasterDeckChange. Callers normally want the combined door
+// below; staged effects such as Big Fish deliberately call the two halves at
+// their separate Java-visible times.
+[[nodiscard]] inline bool add_card_to_master_deck_after_omamori(
+    RunState& run, CardId id, uint8_t upgrade = 0) noexcept {
     const CardDef* def = card_def(id);
     if (def == nullptr) {
         return false;
-    }
-    if (def->type == CardType::CURSE) {
-        for (uint8_t i = 0; i < run.relic_count; ++i) {
-            RelicSlot& slot = run.relics[i];
-            if (slot.relic_id == static_cast<uint16_t>(RelicId::OMAMORI)) {
-                if (slot.counter != 0) {
-                    --slot.counter;
-                    return true;
-                }
-                break;  // getRelic returns the first copy, even when used up.
-            }
-        }
     }
     if (run.master_deck_count >= kMasterDeckCap) {
         return false;
@@ -178,6 +191,17 @@ inline void dispatch_relics_on_master_deck_change(RunState& run) noexcept {
     dispatch_relics_on_obtain_card(run, c, *def);
     dispatch_relics_on_master_deck_change(run);
     return true;
+}
+
+// ShowCardAndObtainEffect's ordinary collapsed acquisition door: the
+// constructor-time Omamori check followed immediately by the later append and
+// relic passes. Returns false only when an unblocked card cannot be appended.
+[[nodiscard]] inline bool add_card_to_master_deck(RunState& run, CardId id,
+                                                  uint8_t upgrade = 0) noexcept {
+    if (omamori_blocks_card_obtain(run, id)) {
+        return true;
+    }
+    return add_card_to_master_deck_after_omamori(run, id, upgrade);
 }
 
 // CardGroup.addToTop -- the card lands at master-deck INDEX 0 and every later

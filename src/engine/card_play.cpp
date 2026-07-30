@@ -19,6 +19,7 @@
 #include "sts/engine/interp.hpp"        // Opcode
 #include "sts/engine/piles.hpp"         // limbo_add (cardInUse model)
 #include "sts/engine/power_hooks.hpp"   // onPlayCard/onUseCard fan-out + onExhaust
+#include "interp/interp_cards.hpp"      // Corruption ApplyPowerAction constructor
 #include "relics/relics_boss.hpp"       // kVelvetChokerPlayLimit
 #include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strike Dummy bake)
 #include "sts/engine/rng_stream.hpp"    // random (card_random_rng roll)
@@ -55,6 +56,18 @@ namespace {
     scan(s.draw, s.draw_count);
     scan(s.discard, s.discard_count);
     return n;
+}
+
+// Presence, not magnitude: Corruption's live slot carries amount -1. Its card
+// checks this synchronously in use() before it constructs an ApplyPowerAction.
+[[nodiscard]] bool player_has_power_slot(const CombatState& s,
+                                         PowerId id) noexcept {
+    for (uint8_t i = 0; i < s.player_power_count; ++i) {
+        if (s.player_powers[i].power_id == static_cast<uint16_t>(id)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Instantiate one registry effect step into a concrete ActionQueueItem and queue
@@ -174,28 +187,38 @@ void queue_effect_step(CombatState& s, const CardEffectStep& step,
             item.amount += 3;
         }
     }
+    if (static_cast<Opcode>(item.opcode) == Opcode::APPLY_POWER &&
+        item.tgt == kActorPlayer &&
+        apply_power_id_from_flags(item.flags) == PowerId::CORRUPTION) {
+        if (player_has_power_slot(s, PowerId::CORRUPTION)) {
+            // Corruption.use scans the live power list before constructing the
+            // action (Corruption.java:43-51). A second copy therefore neither
+            // queues an ApplyPowerAction nor re-runs its constructor cost walk.
+            return;
+        }
+        // ApplyPowerAction performs this walk in its constructor, synchronously
+        // at c.use()/queue time (ApplyPowerAction.java:49-67), not when the
+        // queued action later resolves. It therefore also runs if the action
+        // will become a no-op or combat ends before that resolution.
+        apply_corruption_cost_modifier(s);
+    }
     add_to_bottom(s, item);
 }
 
 // AbstractPlayer.useCard's energy skip (AbstractPlayer.java:1378): the deduction
 // is skipped entirely when the player has Corruption and the played card is a
-// SKILL. This is SEPARATE from CorruptionPower.onCardDraw's setCostForTurn(0),
-// which only reaches cards drawn AFTER the power lands -- a SKILL already in hand
-// keeps its displayed cost, so it still has to be affordable to be legal
-// (AbstractCard.hasEnoughEnergy:862-893 has no Corruption branch) and yet spends
-// nothing. Without this, playing such a SKILL would charge for it twice over.
+// SKILL. This is separate from both cost rewrites above: the power constructor
+// permanently zeroes every SKILL already in all four piles, and onCardDraw
+// zeroes later draws for the turn. A SKILL can still arrive directly in hand or
+// acquire a nonzero displayed cost; it must be affordable because
+// AbstractCard.hasEnoughEnergy:862-893 has no Corruption branch, but useCard
+// spends no energy once it is played.
 [[nodiscard]] bool corruption_makes_free(const CombatState& s,
                                          const CardDef& def) noexcept {
     if (def.type != CardType::SKILL) {
         return false;
     }
-    for (uint8_t i = 0; i < s.player_power_count; ++i) {
-        if (s.player_powers[i].power_id ==
-            static_cast<uint16_t>(PowerId::CORRUPTION)) {
-            return true;  // hasPower is a presence test; the slot amount is -1
-        }
-    }
-    return false;
+    return player_has_power_slot(s, PowerId::CORRUPTION);
 }
 
 // hand.removeCard(c); cardInUse = c (AbstractPlayer.useCard:1373-1375): the

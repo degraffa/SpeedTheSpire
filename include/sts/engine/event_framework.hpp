@@ -223,9 +223,8 @@ void init_event_pools(RunState& rs) noexcept;
 // AbstractPlayer.isCursed (AbstractPlayer.java:741-748): any master-deck card
 // of type CURSE EXCEPT Necronomicurse, CurseOfTheBell and AscendersBane.
 // Ascender's Bane is EXCLUDED -- an A10+ run's starting curse does NOT make
-// the player cursed for the Fountain of Cleansing gate. Of the three
-// exclusions only Ascender's Bane has a registry row today; the other two
-// must be added to the exclusion when their rows land.
+// the player cursed for the Fountain of Cleansing gate. Necronomicurse has no
+// S1 registry row; the other two exclusions are represented here.
 [[nodiscard]] bool event_player_is_cursed(const RunState& rs) noexcept;
 
 // The filtered draw lists, rebuilt at draw time exactly as the game builds its

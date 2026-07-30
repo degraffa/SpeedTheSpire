@@ -33,6 +33,7 @@
 #include "sts/engine/combat_rewards.hpp"
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
+#include "sts/engine/relic_pools.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/run_deck.hpp"
 #include "sts/registry/event_table.hpp"
@@ -344,8 +345,10 @@ TEST(WheelOfChange, SpinIsOneMiscRngDrawAndGoldPaysBeforeAcknowledgement) {
     choose(rc, 0);
     EXPECT_EQ(rc.combat.misc_rng.counter, before + 1);
     EXPECT_EQ(rc.event.scratch0, 0);
-    EXPECT_EQ(rc.run.gold, gold + 100);  // Exordium goldAmount, paid on the spin
-    choose(rc, 0);                       // applyResult: GOLD only logs
+    EXPECT_EQ(rc.run.gold, gold) << "[Play] only chooses the wheel result";
+    choose(rc, 0);  // physical spin -> preApplyResult
+    EXPECT_EQ(rc.run.gold, gold + 100);  // Exordium goldAmount
+    choose(rc, 0);                       // [Prize!] -> applyResult only logs
     EXPECT_EQ(rc.run.gold, gold + 100);
     choose(rc, 0);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
@@ -360,6 +363,14 @@ TEST(WheelOfChange, RelicResultOpensAScreenlessRelicRewardScreen) {
 
     choose(rc, 0);
     EXPECT_EQ(rc.event.scratch0, 1);
+    const int relic_rng_before = rc.run.relic_rng.counter;
+    const int common = static_cast<int>(RelicPool::COMMON);
+    const uint8_t common_before = rc.run.relic_pool_count[common];
+    choose(rc, 0);  // physical spin reveals the relic result
+    EXPECT_EQ(rc.run.relic_rng.counter, relic_rng_before)
+        << "the tier draw waits for [Prize!] acknowledgement";
+    EXPECT_EQ(rc.run.relic_pool_count[common], common_before)
+        << "no relic pool moves while the prize is merely visible";
     choose(rc, 0);
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
     ASSERT_EQ(rc.rewards.count, 1);
@@ -384,6 +395,8 @@ TEST(WheelOfChange, HealCurseAndCardRemovalResults) {
         rc.run.hp = 11;
         choose(rc, 0);
         choose(rc, 0);
+        EXPECT_EQ(rc.run.hp, 11) << "the spin reveals before applyResult";
+        choose(rc, 0);
         EXPECT_EQ(rc.run.hp, rc.run.max_hp);
     }
     {
@@ -392,6 +405,7 @@ TEST(WheelOfChange, HealCurseAndCardRemovalResults) {
         RunController rc = event_controller(EventId::WHEEL_OF_CHANGE);
         rc.combat.misc_rng = from_seed(seed);
         set_deck(rc.run, {{CardId::STRIKE, 0}});
+        choose(rc, 0);
         choose(rc, 0);
         choose(rc, 0);
         ASSERT_EQ(rc.run.master_deck_count, 2);
@@ -405,6 +419,7 @@ TEST(WheelOfChange, HealCurseAndCardRemovalResults) {
         give_relic(blocked.run, RelicId::OMAMORI, 1);
         choose(blocked, 0);
         choose(blocked, 0);
+        choose(blocked, 0);
         EXPECT_EQ(blocked.run.master_deck_count, 1);
         EXPECT_EQ(blocked.run.relics[1].counter, 0);
     }
@@ -414,6 +429,7 @@ TEST(WheelOfChange, HealCurseAndCardRemovalResults) {
         RunController rc = event_controller(EventId::WHEEL_OF_CHANGE);
         rc.combat.misc_rng = from_seed(seed);
         set_deck(rc.run, {{CardId::STRIKE, 0}, {CardId::DEFEND, 0}});
+        choose(rc, 0);
         choose(rc, 0);
         choose(rc, 0);
         EXPECT_EQ(rc.event.grid_kind,
@@ -429,6 +445,7 @@ TEST(WheelOfChange, HealCurseAndCardRemovalResults) {
         RunController empty = event_controller(EventId::WHEEL_OF_CHANGE, 20);
         empty.combat.misc_rng = from_seed(seed);
         set_deck(empty.run, {{CardId::ASCENDERS_BANE, 0}});
+        choose(empty, 0);
         choose(empty, 0);
         choose(empty, 0);
         EXPECT_EQ(empty.event.grid_kind,
@@ -450,6 +467,7 @@ TEST(WheelOfChange, DamageResultIsNullOwnerHpLossAndA15RaisesThePercent) {
         give_relic(rc.run, RelicId::TORII);
         choose(rc, 0);
         choose(rc, 0);
+        choose(rc, 0);
         EXPECT_EQ(rc.run.hp, 72);  // (int)(80 * 0.10f) == 8
     }
     {
@@ -457,6 +475,7 @@ TEST(WheelOfChange, DamageResultIsNullOwnerHpLossAndA15RaisesThePercent) {
         rc.combat.misc_rng = from_seed(seed);
         rc.run.max_hp = 80;
         rc.run.hp = 80;
+        choose(rc, 0);
         choose(rc, 0);
         choose(rc, 0);
         EXPECT_EQ(rc.run.hp, 68);  // (int)(80 * 0.15f) == 12
@@ -467,6 +486,7 @@ TEST(WheelOfChange, DamageResultIsNullOwnerHpLossAndA15RaisesThePercent) {
         rc.combat.misc_rng = from_seed(seed);
         rc.run.max_hp = 80;
         rc.run.hp = 3;
+        choose(rc, 0);
         choose(rc, 0);
         choose(rc, 0);
         EXPECT_EQ(rc.run.hp, 0);

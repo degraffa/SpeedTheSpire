@@ -150,6 +150,28 @@ inline constexpr uint32_t kCombatFlagPlayerEscaped = 1u << 3;
 // kCombatFlagPlayerEscaped, none of which the translator reconstructs either.
 inline constexpr uint32_t kCombatFlagCentennialPuzzleUsed = 1u << 4;
 
+// CombatState.flags bit for Red Skull's private `isActive` latch.
+//
+// RedSkull declares `private boolean isActive` (RedSkull.java:24); it never
+// writes AbstractRelic.counter, so CommunicationMod reports the inherited -1
+// for the entire run.  Storing the latch in RelicSlot.counter therefore leaks a
+// private field into an oracle-visible one and folds the wrong 0/1 back into
+// RunState.  Fresh G7 capture STS200002 pinned that exact failure at the first
+// Red Skull reward: oracle -1, old simulator 0.
+//
+// Red Skull is unique in the S1 relic pools, so one combat-global bit is the
+// exact reachable shape.  atBattleStart clears it, the queued RedSkull$1
+// decider and onBloodied set it, and onNotBloodied clears it.  A fresh
+// CombatState also starts clear, so this consumes no layout or schema change.
+// Like Centennial Puzzle's private/static latch above, this internal bit is not
+// reconstructed by the translator and is not an acceptance-diff field.
+inline constexpr uint32_t kCombatFlagRedSkullActive = 1u << 5;
+
+[[nodiscard]] inline constexpr bool combat_red_skull_active(
+    uint32_t flags) noexcept {
+    return (flags & kCombatFlagRedSkullActive) != 0u;
+}
+
 // CombustPower keeps a private hpLoss counter distinct from its visible damage
 // amount. The player-owned counter lives in otherwise-reserved CombatState
 // flags: the cards are self-only, and this preserves the frozen PowerSlot/POD

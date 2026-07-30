@@ -479,13 +479,14 @@ sts_add_test(oracle_corpus_replay_test
 # carries no JSON dependency, so no artifact and no data root is involved.
 sts_add_test(replay_command_map_test LIBS sts_engine replay_command_map)
 
-# The two SHAPE decisions the --treasure and --event read-outs make
-# (tools/oracle_bridge/replay/src/readout_shapes.hpp): which captured reward
-# rows a chest open may carry that the engine deliberately does not model, and
-# the capture-id -> EventId join. Both are places a read-out can quietly call a
-# real divergence benign -- a rule that elides too much simply reports zero-diff
-# and nobody notices -- so they get unit tests rather than only a green campaign
-# run. Same no-artifact, no-JSON contract as the command-map suite above.
+# The five SHAPE decisions the replay read-outs make
+# (tools/oracle_bridge/replay/src/readout_shapes.hpp): chest reward-row shape,
+# capture-id -> EventId joining, and the exact Smoke Bomb, Entropic Brew and
+# transform-preview capture-race shapes. Each is a place a read-out can quietly
+# call a real divergence benign -- a rule that elides too much simply reports
+# zero-diff and nobody notices -- so they get unit tests rather than only a
+# green campaign run. Same no-artifact, no-JSON contract as the command-map
+# suite above.
 sts_add_test(replay_readout_shapes_test LIBS sts_engine replay_readout_shapes)
 
 # B4.13: the Match and Keep! board decode

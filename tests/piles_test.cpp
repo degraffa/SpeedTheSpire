@@ -275,11 +275,28 @@ TEST(PilesDraw, DrawExhaustsBothPilesWhenRequestExceedsTotal) {
     CombatState s = make_combat();
     set_draw(s, {7, 8});
     set_discard(s, {1, 2, 3});
+    const int32_t shuffle_before = s.shuffle_rng.counter;
     const int drawn = draw_cards(s, 9);  // only 5 exist total (hand cap is 10)
     EXPECT_EQ(drawn, 5);
     EXPECT_EQ(s.hand_count, 5u);
     EXPECT_EQ(s.draw_count, 0u);
     EXPECT_EQ(s.discard_count, 0u);
+    EXPECT_EQ(s.shuffle_rng.counter, shuffle_before + 2)
+        << "one populated reshuffle plus the recursive empty reshuffle";
+}
+
+TEST(PilesDraw, OverdrawWithOnlyDrawCardsStillRunsTheEmptyShuffleAction) {
+    CombatState s = make_combat();
+    set_draw(s, {7, 8, 9, 10});
+    s.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SUNDIAL), 0};
+    s.relic_count = 1;
+    const int32_t shuffle_before = s.shuffle_rng.counter;
+
+    EXPECT_EQ(draw_cards(s, 5), 4);
+    EXPECT_EQ(s.shuffle_rng.counter, shuffle_before + 1);
+    EXPECT_EQ(s.relics[0].counter, 1)
+        << "EmptyDeckShuffleAction fires onShuffle even with no discard cards";
 }
 
 // --- Exhaust ----------------------------------------------------------------

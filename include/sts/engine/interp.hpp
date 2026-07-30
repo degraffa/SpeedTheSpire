@@ -1214,8 +1214,11 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
 }
 
 // --- APPLY_POWER field encoding ---------------------------------------------
-// `flags` low 16 bits hold the PowerId; `amount` holds the stack count. Use
-// these helpers so no caller hand-rolls the packing.
+// `flags` bits 0..14 hold the PowerId; bit 15 is an explicit
+// `isSourceMonster == false` constructor override for duration debuffs;
+// `amount` holds the stack count. Use these helpers so no caller hand-rolls
+// the packing. PowerId currently occupies less than eight bits, so reserving
+// bit 15 changes no existing id.
 //
 // `flags` bits 16..31 additionally carry the applied power's COUNTER OPERAND --
 // the second number a `counter`-carrying PowerSlot (types.hpp) is constructed
@@ -1232,15 +1235,21 @@ inline constexpr uint32_t kMakeCardUpgradedBit = 1u << 24;
 // `counter:` on an APPLY_POWER step (MIRRORED in
 // tools/registry_gen/stsgen/steps.py).
 inline constexpr uint32_t kApplyPowerCounterShift = 16;
+inline constexpr uint32_t kApplyPowerNotMonsterSourceBit = 1u << 15;
 
 [[nodiscard]] constexpr uint32_t make_apply_power_flags(
-    PowerId id, int counter = 0) noexcept {
+    PowerId id, int counter = 0, bool is_source_monster = true) noexcept {
     return static_cast<uint32_t>(static_cast<uint16_t>(id)) |
+           (is_source_monster ? 0u : kApplyPowerNotMonsterSourceBit) |
            (static_cast<uint32_t>(static_cast<uint16_t>(counter))
             << kApplyPowerCounterShift);
 }
 [[nodiscard]] constexpr PowerId apply_power_id_from_flags(uint32_t flags) noexcept {
-    return static_cast<PowerId>(static_cast<uint16_t>(flags & 0xFFFFu));
+    return static_cast<PowerId>(static_cast<uint16_t>(flags & 0x7FFFu));
+}
+[[nodiscard]] constexpr bool apply_power_is_source_monster(
+    uint32_t flags) noexcept {
+    return (flags & kApplyPowerNotMonsterSourceBit) == 0u;
 }
 [[nodiscard]] constexpr int apply_power_counter_from_flags(uint32_t flags) noexcept {
     return static_cast<int>(static_cast<int16_t>(

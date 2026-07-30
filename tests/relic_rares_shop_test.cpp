@@ -1462,6 +1462,7 @@ TEST(RelicRaresShop, GamblingChipQueuesTheOptionalDiscardScreenOnceOnly) {
     const RelicView rv = give(s, RelicId::GAMBLING_CHIP);
     ASSERT_EQ(rv.relics[0].counter, -1) << "-1 unset == not activated";
     s.card_random_rng = from_seed(3);
+    s.turn = 1;  // first atTurnStartPostDraw call
     const RngStream before = s.card_random_rng;
     RelicHookContext ctx{};
 
@@ -1477,12 +1478,15 @@ TEST(RelicRaresShop, GamblingChipQueuesTheOptionalDiscardScreenOnceOnly) {
     EXPECT_EQ(it.amount, 99);
     EXPECT_EQ(s.card_random_rng.counter, before.counter)
         << "the relic itself spends no rng";
-    EXPECT_NE(rv.relics[0].counter, -1) << "activated = true";
+    EXPECT_EQ(rv.relics[0].counter, -1)
+        << "activated is private; AbstractRelic.counter is untouched";
 
     // Every LATER turn start finds the latch set and does nothing. That is the
     // fact the relic is entirely made of, and the one a per-turn reading loses.
+    s.turn = 2;
     dispatch_relic_hook(s, rv.relics, rv.count,
                         RelicHook::AT_TURN_START_POST_DRAW, ctx);
+    s.turn = 3;
     dispatch_relic_hook(s, rv.relics, rv.count,
                         RelicHook::AT_TURN_START_POST_DRAW, ctx);
     EXPECT_EQ(s.action_count, 1) << "once per combat, not once per turn";
@@ -1495,6 +1499,7 @@ TEST(RelicRaresShop, GamblingChipQueuesEvenOnAnEmptyHandAndThenBlocksOnNothing) 
     CombatState s = MakeState();
     ASSERT_EQ(s.hand_count, 0);
     const RelicView rv = give(s, RelicId::GAMBLING_CHIP);
+    s.turn = 1;
     RelicHookContext ctx{};
 
     dispatch_relic_hook(s, rv.relics, rv.count,
@@ -1517,6 +1522,7 @@ TEST(RelicRaresShop, GamblingChipAndGamblersBrewQueueTheSameItem) {
     CombatState relic_state = MakeState();
     put_in_hand(relic_state, CardId::STRIKE);
     const RelicView rv = give(relic_state, RelicId::GAMBLING_CHIP);
+    relic_state.turn = 1;
     RelicHookContext ctx{};
     dispatch_relic_hook(relic_state, rv.relics, rv.count,
                         RelicHook::AT_TURN_START_POST_DRAW, ctx);

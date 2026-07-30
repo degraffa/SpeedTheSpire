@@ -178,6 +178,38 @@ TEST(ActionQueueSentinel, FullCycleIncrementsTurnAndReturnsToUser) {
     EXPECT_EQ(s.monster_queue_count, 0);
 }
 
+TEST(ActionQueueSentinel,
+     MonsterBlockClearsBetweenFeelNoPainAndJuggernautSecondaryDamage) {
+    // STS304016: the primary GainBlockAction queued by Feel No Pain is ahead
+    // of MonsterStartTurnAction, but Juggernaut's DamageRandomEnemyAction is
+    // queued BY that block action and therefore lands behind the monster-start
+    // marker. The marker clears Curl Up block before the damage resolves.
+    CombatState s = make_combat();
+    s.monsters[0].hp = 3;
+    s.monsters[0].max_hp = 16;
+    s.monsters[0].block = 11;
+    s.player_power_count = 2;
+    s.player_powers[0] = PowerSlot{
+        static_cast<uint16_t>(PowerId::JUGGERNAUT), 5, 0, 0};
+    s.player_powers[1] = PowerSlot{
+        static_cast<uint16_t>(PowerId::FEEL_NO_PAIN), 3, 0, 0};
+    s.card_pool[0].card_id =
+        static_cast<uint16_t>(CardId::ASCENDERS_BANE);
+    s.card_pool[0].flags = card_flag_bit(CardFlag::ETHEREAL);
+    s.hand[0] = 0;
+    s.hand_count = 1;
+    add_card_to_queue_bottom(s, make_end_turn_sentinel());
+
+    g_monster_turns = 0;
+    pump(s, probe_monster_turn);
+
+    EXPECT_EQ(s.monsters[0].hp, 0)
+        << "11 Curl Up block cleared before Juggernaut's 5 damage";
+    EXPECT_EQ(s.monsters[0].block, 0);
+    EXPECT_EQ(g_monster_turns, 0)
+        << "the louse killed behind the marker never takes its turn";
+}
+
 // --- Monster-turn extension point (steps 4/5) -------------------------------
 
 TEST(ActionQueueMonster, PumpCyclesLiveMonstersThroughExtensionPoint) {
@@ -216,15 +248,10 @@ TEST(ActionQueueMonster, DeadMonsterSlotIsNotQueued) {
 //
 // MonsterGroup.applyPreTurnLogic (MonsterGroup.java:98-105) clears a live
 // monster's block unless it has Barricade, then fires its start-of-turn powers.
-// Its caller is MonsterStartTurnAction, which the decompiled tree shows as
-// referenced by nothing -- `AbstractRoom.endTurn` queues it from an anonymous
-// inner class CFR dropped (AbstractRoom.java:409). The call site is pinned in
-// bytecode instead: `AbstractRoom.endTurn (bytecode AbstractRoom$1, javap) --
-// CFR-dropped anonymous class`, whose update() addToBot()s EndTurnAction,
-// WaitAction(1.2f) and (unless skipMonsterTurn) MonsterStartTurnAction before
-// clearing monsterAttacksQueued. Those actions drain before GameActionManager's
-// !monsterAttacksQueued branch, so the walk lands between the end-of-turn discard
-// and queueMonsters -- pump_step step 4.
+// Its caller is MonsterStartTurnAction, queued by the recovered
+// AbstractRoom$1.java after EndTurnAction and WaitAction. The pump represents it
+// with kOpcodeMonsterStartTurn so primary onExhaust actions stay ahead of the
+// clear and their second-order actions stay behind it.
 
 // The property that matters, and the one the sim got wrong: the clear is at the
 // start of the MONSTER's turn, not the player's. So block a monster gained on its

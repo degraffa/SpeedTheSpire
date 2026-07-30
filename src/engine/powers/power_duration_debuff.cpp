@@ -49,7 +49,8 @@ void duration_debuff_at_end_of_round(CombatState& s, Hook hook,
 }
 
 bool duration_debuff_starts_just_applied(const CombatState& s, uint8_t tgt,
-                                         PowerId id) noexcept {
+                                         PowerId id,
+                                         bool is_source_monster) noexcept {
     switch (id) {
         case PowerId::VULNERABLE:
             // `if (actionManager.turnHasEnded && isSourceMonster)`
@@ -63,19 +64,17 @@ bool duration_debuff_starts_just_applied(const CombatState& s, uint8_t tgt,
             // own turn, so both fall out unlatched exactly as the Java has them.
             // The `tgt == kActorPlayer` half is belt-and-braces: no S1 effect
             // applies Vulnerable to a monster during the enemy phase.
-            return tgt == kActorPlayer && s.turn_has_ended != 0;
+            return tgt == kActorPlayer && s.turn_has_ended != 0 &&
+                   is_source_monster;
         case PowerId::WEAK:
         case PowerId::FRAIL:
             // `if (isSourceMonster)` alone (WeakPower.java:35-37,
             // FrailPower.java:32-34). In S1 scope that predicate is exactly
-            // "the owner is the player": every application to the player passes
-            // true (Act-1 monster moves, plus the Doubt and Shame curses' own
-            // end-of-turn ApplyPowerAction -- Doubt.java:35, Shame.java:34), and
-            // every application to a monster passes false (player cards, Weak
-            // Potion, Champion's Belt). Recorded as an in-scope reading rather
-            // than a universal one: a future card that weakens the PLAYER with
-            // isSourceMonster=false would need the flag carried on the item.
-            return tgt == kActorPlayer;
+            // Most S1 applications default true when targeting the player
+            // (Act-1 monster moves, plus Doubt/Shame, whose ApplyPowerAction
+            // source is still the player). Gremlin Visage is the counterexample
+            // and carries false on its queued item exactly as its ctor does.
+            return tgt == kActorPlayer && is_source_monster;
         default:
             return false;
     }

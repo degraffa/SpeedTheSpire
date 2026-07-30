@@ -64,8 +64,26 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.5.0"
+DRIVER_VERSION = "b1.5.3"
 SCHEMA_VERSION = 1
+
+# A temporarily empty legal-action expansion is normal while an animated
+# reward/confirmation screen hands control back to the dungeon.  Communication
+# Mod can answer a burst of `state` requests inside one render frame, so twelve
+# immediate probes are not twelve independent chances for the screen to
+# advance.  Yield a small, bounded amount between probes even when the
+# operator's script-only settle delay is zero.
+TRANSIENT_NO_ACTION_SLEEP_S = 0.05
+
+# Windows' CRT opens do not necessarily share delete access. The
+# orchestrator's read of campaign_progress.json can therefore race the
+# driver's atomic os.replace and produce ERROR_SHARING_VIOLATION even though
+# both processes are behaving correctly. Retry only Windows sharing/lock/
+# access codes, for a bounded sub-second window; every other error and an
+# exhausted sharing error still fail loud.
+ATOMIC_REPLACE_ATTEMPTS = 40
+ATOMIC_REPLACE_RETRY_SLEEP_S = 0.025
+_WINDOWS_REPLACE_RETRY_ERRORS = frozenset((5, 32, 33))
 
 # The SANCTIONED runtime stack (design 1.2, amended at B4.5 / design 11 v0.1.7).
 #
@@ -191,6 +209,22 @@ def _now() -> float:
 
 def _utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def atomic_replace_with_retry(source: str, destination: str) -> None:
+    """os.replace with a bounded retry for transient Windows sharing errors."""
+    for attempt in range(ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(source, destination)
+            return
+        except OSError as exc:
+            retryable = (
+                getattr(exc, "winerror", None)
+                in _WINDOWS_REPLACE_RETRY_ERRORS
+            )
+            if not retryable or attempt + 1 >= ATOMIC_REPLACE_ATTEMPTS:
+                raise
+            time.sleep(ATOMIC_REPLACE_RETRY_SLEEP_S)
 
 
 def _log(msg: str) -> None:
@@ -443,7 +477,21 @@ def expand_legal_actions(state: dict, rng: random.Random) -> list:
             if p.get("can_discard"):
                 actions.append(f"potion discard {slot}")
 
-    if any(a in avail for a in ("confirm", "proceed")):
+    # Calling Bell's three Neow relic rows are mandatory even though the
+    # protocol advertises `proceed` beside them.  Proceeding early closes the
+    # reward screen without advancing Neow, after which no progress command is
+    # exposed and the live campaign ends in legal_exhaustion.  A Neow
+    # COMBAT_REWARD whose remaining rows are all relics is therefore a forced
+    # claim screen; once the final row is gone, `proceed` becomes legal again.
+    choices = gs.get("choice_list") or []
+    forced_neow_relic_reward = (
+        gs.get("screen_type") == "COMBAT_REWARD"
+        and gs.get("room_type") == "NeowRoom"
+        and bool(choices)
+        and all(str(choice).lower() == "relic" for choice in choices)
+    )
+    if any(a in avail for a in ("confirm", "proceed")) \
+            and not forced_neow_relic_reward:
         actions.append("proceed")
     for alias in ("skip", "cancel", "return", "leave"):
         if alias in avail:
@@ -712,6 +760,11 @@ class Progress:
                     "; ".join(mismatches))
             # A fresh launch resumed us; bump the launch count.
             self.data["launches"] = self.data.get("launches", 0) + 1
+            # A restart request is bound to the one-use token of the launch
+            # that wrote it.  The outer orchestrator already acted on it (or
+            # this new launch would not exist), so do not leave stale control
+            # state in the durable ledger.
+            self.data.pop("restart_requested", None)
         else:
             self.data = {
                 "campaign_id": campaign_id,
@@ -744,8 +797,9 @@ class Progress:
             json.dump(self.data, fh, indent=2)
             fh.flush()
             os.fsync(fh.fileno())
-        os.replace(exact_path_without_redirect(tmp),
-                   exact_path_without_redirect(destination))
+        atomic_replace_with_retry(
+            exact_path_without_redirect(tmp),
+            exact_path_without_redirect(destination))
 
     def heartbeat(self, seed, floor, actions) -> None:
         """Bump the heartbeat file -- through tmp + fsync + rename, same as
@@ -767,9 +821,27 @@ class Progress:
                            "floor": floor, "actions": actions}, fh)
                 fh.flush()
                 os.fsync(fh.fileno())
-            os.replace(tmp, destination)
+            atomic_replace_with_retry(tmp, destination)
         except (OSError, ValueError):
             pass
+
+    def request_restart(self, launch_token: str, reason: str) -> None:
+        """Durably ask the orchestrator to retire this exact game launch.
+
+        The driver is a child of the game, not of the orchestrator, so its exit
+        code is invisible.  Binding the request to the launch's one-use token
+        lets the orchestrator react on its next three-second poll without
+        mistaking a stale request for an instruction to kill the fresh launch.
+        Store only a digest; the binding nonce itself stays out of artifacts.
+        """
+        token_digest = hashlib.sha256(
+            launch_token.encode("utf-8")).hexdigest()
+        self.data["restart_requested"] = {
+            "launch_token_sha256": token_digest,
+            "reason": reason,
+            "utc": _utc(),
+        }
+        self.flush()
 
     def fatal_environment_drift(self, seed: str | None, attempt: int,
                                 message: str, kind: str) -> None:
@@ -1087,8 +1159,8 @@ class CampaignDriver:
                     rl.action("__terminal_observed__", state)
                     rl.terminal(ov, gs, actions)
                     # walk back to the menu so the next seed can `start`
-                    self._return_to_menu_from_gameover()
-                    return ov, floor, actions, True
+                    menu_ok = self._return_to_menu_from_gameover()
+                    return ov, floor, actions, menu_ok
 
                 if is_boss_combat_reward(gs):
                     outcome, actions = self._claim_boss_reward(
@@ -1154,13 +1226,19 @@ class CampaignDriver:
                 else:
                     cmd = self._policy_command(state)
                     if cmd is None:
-                        # no legal progress action; nudge and detect a real wedge
+                        # No legal progress action can be a one-frame reward or
+                        # confirmation transition.  Yield between probes so
+                        # this is a bounded settle window, not twelve requests
+                        # injected into the same frame.
                         stuck += 1
                         if stuck >= 12:
                             rl.terminal("legal_exhaustion", gs, actions)
                             _log(f"seed {seed}: legal-action exhaustion at "
                                  f"floor {floor} screen {gs.get('screen_type')}")
                             return "legal_exhaustion", floor, actions, False
+                        time.sleep(max(
+                            self.args.settle_sleep,
+                            TRANSIENT_NO_ACTION_SLEEP_S))
                         kind, state = self.stepper.step("state")
                         continue
 
@@ -1265,17 +1343,20 @@ class CampaignDriver:
 
     def _return_to_menu_from_gameover(self):
         """Press proceed on the GAME_OVER screen to return to the main menu so
-        the next seed's `start` is legal. Best-effort; failure -> relaunch."""
+        the next seed's `start` is legal. Return False on any failure so the
+        durable restart path relaunches instead of trusting a dead child pipe."""
         try:
             kind, state = self.stepper.step("proceed")
             deadline = _now() + self.args.menu_timeout
             while _now() < deadline:
-                gs = state.get("game_state") or {}
                 if not state.get("in_game"):
-                    return
+                    return True
                 kind, state = self.stepper.step("state")
-        except GameGone:
-            pass
+        except GameGone as exc:
+            _log(f"game-over menu return lost the game pipe: {exc}")
+            return False
+        _log("game-over menu return timed out")
+        return False
 
     # -- campaign loop -------------------------------------------------------
     def run(self) -> int:
@@ -1307,6 +1388,8 @@ class CampaignDriver:
             self.stepper.await_ready()  # drain the handshake dump
         except GameGone:
             _log("handshake produced no state")
+            self.progress.request_restart(
+                self.args.launch_token, "handshake_game_gone")
             return EXIT_GAME_GONE
 
         while True:
@@ -1350,6 +1433,8 @@ class CampaignDriver:
                     self.progress.data["current_seed_attempt"] = 0
                     self.progress.flush()
                 self.progress.flush()
+                self.progress.request_restart(
+                    self.args.launch_token, "game_gone_mid_run")
                 return EXIT_GAME_GONE
             except Exception as e:  # noqa: BLE001 - defensive, log loudly
                 _log(f"seed {seed}: driver error {e!r}; marking failed")
@@ -1375,6 +1460,8 @@ class CampaignDriver:
                 # ended mid-dungeon (boss reward / cap / wedge). The protocol
                 # cannot walk back to the menu -> ask the orchestrator to
                 # relaunch for the remaining seeds.
+                self.progress.request_restart(
+                    self.args.launch_token, "run_ended_mid_dungeon")
                 _log("run ended mid-dungeon; requesting relaunch for next seed")
                 return EXIT_NEED_RESTART
 
@@ -1474,6 +1561,28 @@ def resolve_seeds(spec: str) -> list:
     return validate_seed_list(seeds)
 
 
+def _request_restart_after_unexpected_exit(
+        driver, launch_token: str, reason: str) -> bool:
+    """Best-effort durable restart once a driver has initialized progress.
+
+    A driver-side exit code is invisible to the orchestrator because the game,
+    not the orchestrator, owns this process. If an exception escapes after
+    Progress.load_or_init, preserve the in-memory ledger (including a seed that
+    completed just before a failed atomic publish) and attach the same
+    launch-token-bound restart signal used by the ordinary paths.
+    """
+    if driver is None or getattr(driver, "progress", None) is None or \
+            driver.progress.data is None:
+        return False
+    try:
+        driver.progress.request_restart(launch_token, reason)
+        _log(f"durable restart requested after {reason}")
+        return True
+    except Exception as exc:  # noqa: BLE001 - already handling fatal unwind
+        _log(f"could not persist restart request after {reason}: {exc!r}")
+        return False
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     try:
@@ -1486,13 +1595,19 @@ def main(argv=None) -> int:
     if args.policy == "script" and not args.script and not args.script_dir:
         _log("--policy script requires --script or --script-dir")
         return EXIT_FATAL
+    driver = None
     try:
-        return CampaignDriver(args).run()
+        driver = CampaignDriver(args)
+        return driver.run()
     except GameGone as e:
         _log(f"game gone: {e}")
+        _request_restart_after_unexpected_exit(
+            driver, args.launch_token, "uncaught_game_gone")
         return EXIT_GAME_GONE
     except Exception as e:  # noqa: BLE001
         _log(f"FATAL {e!r}")
+        _request_restart_after_unexpected_exit(
+            driver, args.launch_token, "unexpected_driver_exception")
         return EXIT_FATAL
 
 

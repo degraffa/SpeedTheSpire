@@ -114,6 +114,20 @@ TEST(Potions, BlockPotionGainsBlock) {
     EXPECT_EQ(potion_def(PotionId::BLOCK_POTION)->potency, 12);
 }
 
+TEST(Potions, SacredBarkDoublesADataPotionsPotencyAtUseTime) {
+    CombatState s = MakeCombat();
+    s.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SACRED_BARK), -1};
+    s.relic_count = 1;
+
+    ASSERT_TRUE(use_potion(s, PotionId::BLOCK_POTION, 0));
+    drain_actions(s);
+
+    EXPECT_EQ(s.player_block, 24);
+    EXPECT_EQ(potion_def(PotionId::BLOCK_POTION)->potency, 12)
+        << "the registry stores base potency; the held relic scales the use";
+}
+
 TEST(Potions, EnergyPotionGainsEnergy) {
     CombatState s = MakeCombat();
     s.player_energy = 3;
@@ -717,16 +731,16 @@ TEST(Potions, DiscoverPotionCreatesOneCostZeroCopyOfTheChosenCard) {
 
 // SACRED BARK'S SHAPE. AbstractPotion.getPotency doubles potency, and for these
 // four potency IS DiscoveryAction's `amount`, i.e. the number of copies -- not
-// the offer size and not the pool. The relic has no engine hook yet (there is no
-// potency site at all), so the doubled value is stamped directly to pin the
-// encoding the hook will drive. `amount == 2` with hand + 2 <= 10 puts BOTH
+// the offer size and not the pool. `amount == 2` with hand + 2 <= 10 puts BOTH
 // copies in hand (:72-74).
 TEST(Potions, DiscoverPotionWithTwoCopiesMakesTwoOfTheSameCard) {
     CombatState s = MakeCombat();
+    s.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SACRED_BARK), -1};
+    s.relic_count = 1;
     s.card_random_rng = from_seed(5);
     ASSERT_TRUE(use_potion(s, PotionId::SKILL_POTION, 0));
     ActionQueueItem& item = s.action_queue[s.action_head];
-    item.tgt = 2;  // Sacred Bark: potency 1 -> 2
     ASSERT_EQ(discovery_copies(item), 2);
     prepare_discovery_choice(s, item);
     const CardId chosen = discovery_choice_card(item, 0);

@@ -125,27 +125,31 @@ int32_t game_hand_size(const CombatState& s) noexcept {
 
 namespace {
 
-// A lethal DamageAction calls clearPostCombatActions, which deliberately KEEPS
-// UseCardAction (GameActionManager.java:130-136; DamageAction.java:88-91).
-// Therefore terminal filing still performs gameplay-visible work: Strange
-// Spoon consumes its boolean, and moveToExhaustPile fires relic/power/card
-// onExhaust hooks. The headless pump otherwise keeps its established immediate
-// terminal halt. Rebuild the ring without USE_CARD, preserving every other
-// abandoned action, then resolve the saved filing actions in queue order. Any
-// hook actions they add land behind the preserved queue, exactly as addToBot
-// from UseCardAction's later position would.
-void resolve_pending_use_card_actions_at_terminal(CombatState& s) noexcept {
+// A lethal damage action calls clearPostCombatActions, which deliberately KEEPS
+// HealAction and UseCardAction (GameActionManager.java:130-136). Both remain
+// gameplay-visible after the last monster dies: filing can spend Strange Spoon
+// RNG / fire onExhaust, and Reaper's VampireDamageAllEnemiesAction queues its
+// heal before invoking the clear (STS300219 seq 23-24).
+//
+// The headless pump otherwise keeps its established immediate terminal halt.
+// Rebuild the ring without those two action shapes, preserving every abandoned
+// action, then resolve the saved post-combat actions in their original queue
+// order. Hook actions a UseCardAction adds land behind the preserved queue,
+// exactly as addToBot from its later position would; a saved HealAction then
+// executes before those new hooks when it originally followed the filing.
+void resolve_pending_post_combat_actions_at_terminal(CombatState& s) noexcept {
     ActionQueueItem kept[kActionQueueCap]{};
-    ActionQueueItem filing[kActionQueueCap]{};
+    ActionQueueItem post_combat[kActionQueueCap]{};
     uint8_t kept_count = 0;
-    uint8_t filing_count = 0;
+    uint8_t post_combat_count = 0;
     const uint8_t original_count = s.action_count;
     for (uint8_t i = 0; i < original_count; ++i) {
         const uint8_t src = static_cast<uint8_t>(
             (static_cast<unsigned>(s.action_head) + i) % kActionQueueCap);
         const ActionQueueItem item = s.action_queue[src];
-        if (static_cast<Opcode>(item.opcode) == Opcode::USE_CARD) {
-            filing[filing_count++] = item;
+        const Opcode opcode = static_cast<Opcode>(item.opcode);
+        if (opcode == Opcode::USE_CARD || opcode == Opcode::HEAL) {
+            post_combat[post_combat_count++] = item;
         } else {
             kept[kept_count++] = item;
         }
@@ -156,8 +160,8 @@ void resolve_pending_use_card_actions_at_terminal(CombatState& s) noexcept {
     for (uint8_t i = 0; i < kept_count; ++i) {
         add_to_bottom(s, kept[i]);
     }
-    for (uint8_t i = 0; i < filing_count; ++i) {
-        execute_opcode(s, filing[i]);
+    for (uint8_t i = 0; i < post_combat_count; ++i) {
+        execute_opcode(s, post_combat[i]);
     }
 }
 
@@ -179,17 +183,9 @@ void resolve_pending_use_card_actions_at_terminal(CombatState& s) noexcept {
 // turn-start walk. For every monster that is neither dying nor escaping, clear
 // its block unless it has Barricade, then fire its start-of-turn powers.
 //
-// WHERE IT IS CALLED FROM, AND WHY THE .java DOES NOT SAY SO. The decompiled tree
-// shows `MonsterStartTurnAction` -- applyPreTurnLogic's only caller -- as
-// referenced by nothing, because `AbstractRoom.endTurn` ends with
-// `addToBottom((AbstractGameAction)new /* Unavailable Anonymous Inner Class!! */)`
-// (AbstractRoom.java:409): CFR dropped the anonymous class that queues it. The
-// call site is therefore grounded in BYTECODE --
-// `AbstractRoom.endTurn (bytecode AbstractRoom$1, javap) -- CFR-dropped anonymous
-// class`. `javap -c com.megacrit.cardcrawl.rooms.AbstractRoom` shows endTurn at
-// offsets 167-178 constructing `AbstractRoom$1` and passing it to
-// `GameActionManager.addToBottom`, and `javap -c AbstractRoom$1` shows update()
-// as, in order:
+// WHERE IT IS CALLED FROM. The recovered AbstractRoom$1.java (from the shipped,
+// build-identity-checked desktop jar; see that file's provenance header) is the
+// anonymous action at AbstractRoom.endTurn:409. Its update() is, in order:
 //
 //     addToBot(new EndTurnAction())                              // 0-8
 //     addToBot(new WaitAction(1.2f))                             // 11-21
@@ -197,17 +193,20 @@ void resolve_pending_use_card_actions_at_terminal(CombatState& s) noexcept {
 //         addToBot(new MonsterStartTurnAction())                 // 34-42
 //     AbstractDungeon.actionManager.monsterAttacksQueued = false // 45-51
 //
-// `javap -c MonsterStartTurnAction` then shows update() calling
-// `AbstractDungeon.getCurrRoom().monsters.applyPreTurnLogic()` (offsets 16-22).
+// MonsterStartTurnAction.update then calls
+// `AbstractDungeon.getCurrRoom().monsters.applyPreTurnLogic()`.
 //
-// THAT FIXES THE ORDER, and it is why this runs where it does. Those three
-// actions drain out of `actions` before GameActionManager's update loop can reach
-// its `!monsterAttacksQueued` branch (GameActionManager.java:303-307), so
-// applyPreTurnLogic resolves after the end-of-turn discard and IMMEDIATELY BEFORE
-// queueMonsters -- which is exactly pump_step step 4 below. It is also strictly
-// BEFORE the monster's move and strictly AFTER the previous round's
-// applyEndOfTurnPowers, which is what keeps a Metallicize monster's armour at one
-// tick rather than a running total.
+// THE QUEUE INTERLEAVE IS LOAD-BEARING. DiscardAtEndOfTurnAction is already
+// ahead of AbstractRoom$1. Ethereal exhaustion from that action queues primary
+// onExhaust work (Feel No Pain's GainBlockAction) behind AbstractRoom$1.
+// AbstractRoom$1 then appends MonsterStartTurnAction behind that primary work.
+// When the primary block resolves, a secondary action it creates (Juggernaut's
+// DamageRandomEnemyAction) appends behind MonsterStartTurnAction. Therefore the
+// order is [Feel No Pain block, monster block clear, Juggernaut damage], not a
+// single undifferentiated drain immediately before queueMonsters. The internal
+// kOpcodeMonsterStartTurn marker preserves that position. STS304016 is the
+// witness: the marker clears 11 Curl Up block from a 3-HP Defensive Louse before
+// Juggernaut hits, so it dies without taking its turn.
 //
 // `loseBlock()` is the no-argument overload -- `loseBlock(this.currentBlock)`
 // (AbstractCreature.java:485-487) -- a flat zeroing, with no Calipers-style
@@ -729,7 +728,7 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         // actions after lethal damage, so their Spoon RNG and onExhaust fan-out
         // remain gameplay-visible. Then normalize any limbo entry which never
         // acquired a USE_CARD (a terminal-cancelled queued autoplay).
-        resolve_pending_use_card_actions_at_terminal(s);
+        resolve_pending_post_combat_actions_at_terminal(s);
         normalize_terminal_card_queue(s);
         flush_limbo_at_combat_over(s);
         s.phase = static_cast<uint8_t>(CombatPhase::COMBAT_OVER);
@@ -773,7 +772,27 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
             return r;
         }
         pop_action_front(s, r.executed);
-        execute_opcode(s, r.executed);
+        if (r.executed.opcode == kOpcodeMonsterStartTurn) {
+            // AbstractRoom$1's queued MonsterStartTurnAction. Keeping this as a
+            // real queue marker, rather than folding it into step 4 below, is
+            // load-bearing: a primary end-of-turn action (Feel No Pain block)
+            // runs before the marker, while a secondary action it queues
+            // (Juggernaut damage) runs after it.
+            apply_pre_turn_logic(s);
+        } else {
+            execute_opcode(s, r.executed);
+            if (static_cast<Opcode>(r.executed.opcode) ==
+                Opcode::DISCARD_HAND) {
+                // discard_hand_at_end_of_turn synchronously exhausts ethereal
+                // cards, so their primary hook actions are already at the
+                // queue bottom. Append MonsterStartTurnAction behind those
+                // primaries; anything a primary queues later lands behind this
+                // marker, exactly as in AbstractRoom$1.
+                ActionQueueItem monster_start{};
+                monster_start.opcode = kOpcodeMonsterStartTurn;
+                add_to_bottom(s, monster_start);
+            }
+        }
         r.outcome = PumpOutcome::RAN_ACTION;
         return r;
     }
@@ -832,11 +851,10 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
     // 4. else if !monsterAttacksQueued -> set it, queue all live monsters.
     if (s.monster_attacks_queued == 0) {
         s.monster_attacks_queued = 1;
-        // MonsterStartTurnAction, queued by AbstractRoom.endTurn's CFR-dropped
-        // anonymous class and resolved out of `actions` before this branch can be
-        // reached -- see apply_pre_turn_logic above for the javap evidence that
-        // pins both the call site and this ordering.
-        apply_pre_turn_logic(s);
+        // MonsterStartTurnAction has already resolved as the internal action
+        // marker queued immediately after DISCARD_HAND. It cannot be folded
+        // into this branch: STS304016 proves that second-order actions queued by
+        // Feel No Pain -> Juggernaut must sit behind the block-clear marker.
         // skipMonsterTurn (GameActionManager.java:305) is tied to mechanics the
         // skeleton lacks (e.g. Entangled); future extension point, not queued.
         // Note it gates BOTH lines here in the Java: MonsterStartTurnAction is

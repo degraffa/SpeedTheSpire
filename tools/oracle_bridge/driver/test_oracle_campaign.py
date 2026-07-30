@@ -48,6 +48,11 @@ class _HandshakeStepper:
         }
 
 
+class _GoneHandshakeStepper(_HandshakeStepper):
+    def await_ready(self):
+        raise campaign_driver.GameGone("synthetic handshake pipe loss")
+
+
 class _Reader:
     def start(self):
         pass
@@ -275,6 +280,82 @@ def _stack_driver(root, campaign_id, state=None, max_actions=0,
     driver.stepper = _StartStepper(
         state if state is not None else _action(_oracle())["state_json"])
     return driver
+
+
+class LivePolicyTransientSettleTest(unittest.TestCase):
+    def test_empty_legal_set_yields_between_bounded_state_probes(self):
+        """Twelve probes must span frames, not race one animation frame."""
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "transient_settle"
+            _write_launch_log(os.path.join(root, campaign_id))
+            state = _action(_oracle())["state_json"]
+            state["available_commands"] = []
+            state["game_state"]["choice_list"] = []
+            driver = _stack_driver(
+                root, campaign_id, state=state, max_actions=100)
+            driver.args.settle_sleep = 0.0
+            driver.rng = random.Random(1234)
+            # The first state is consumed by `start`; eleven more probes occur
+            # before the twelfth empty expansion becomes legal_exhaustion.
+            driver.stepper.states.extend([state] * 11)
+
+            with mock.patch.dict(
+                    os.environ,
+                    {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+                     "unit-test-launch-token"}), \
+                    mock.patch.object(
+                        campaign_driver.time, "sleep") as sleep:
+                outcome, _floor, actions, menu_ok = driver.run_seed(SEED, 1)
+
+            self.assertEqual(("legal_exhaustion", 0, False),
+                             (outcome, actions, menu_ok))
+            self.assertEqual(11, sleep.call_count)
+            sleep.assert_has_calls([
+                mock.call(campaign_driver.TRANSIENT_NO_ACTION_SLEEP_S)
+            ] * 11)
+            self.assertEqual(
+                [f"start ironclad 20 {SEED}"] + ["state"] * 11,
+                driver.stepper.commands)
+
+    def test_neow_calling_bell_relic_rows_cannot_be_proceeded_past(self):
+        """Recorded b1.5.1 STS300076 state: all three rows are mandatory."""
+        state = {
+            "available_commands": ["choose", "proceed"],
+            "in_game": True,
+            "game_state": {
+                "choice_list": ["relic", "relic", "relic"],
+                "screen_type": "COMBAT_REWARD",
+                "room_type": "NeowRoom",
+                "screen_state": {
+                    "rewards": [
+                        {"reward_type": "RELIC"},
+                        {"reward_type": "RELIC"},
+                        {"reward_type": "RELIC"},
+                    ],
+                },
+            },
+        }
+        self.assertEqual(
+            ["choose 0", "choose 1", "choose 2"],
+            campaign_driver.expand_legal_actions(state, random.Random(0)))
+
+        # After the last mandatory row has been claimed, the same screen's
+        # proceed command is the only way to finish the Neow transition.
+        state["game_state"]["choice_list"] = []
+        state["game_state"]["screen_state"]["rewards"] = []
+        self.assertEqual(
+            ["proceed"],
+            campaign_driver.expand_legal_actions(state, random.Random(0)))
+
+    def test_game_over_pipe_loss_is_not_reported_as_menu_returnable(self):
+        driver = campaign_driver.CampaignDriver.__new__(
+            campaign_driver.CampaignDriver)
+        driver.args = SimpleNamespace(menu_timeout=1.0)
+        driver.stepper = mock.Mock()
+        driver.stepper.step.side_effect = campaign_driver.GameGone(
+            "synthetic game-over pipe loss")
+
+        self.assertFalse(driver._return_to_menu_from_gameover())
 
 
 class RuntimeStackParsingTest(unittest.TestCase):
@@ -698,6 +779,38 @@ class CampaignDriverPreflightTest(unittest.TestCase):
             self.assertEqual([], progress["seeds_done"])
             self.assertEqual([], progress["seeds_failed"])
 
+    def test_handshake_pipe_loss_writes_token_bound_restart_request(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "handshake_restart"
+            run_dir = os.path.join(root, campaign_id)
+            os.makedirs(run_dir)
+            driver = campaign_driver.CampaignDriver.__new__(
+                campaign_driver.CampaignDriver)
+            driver.args = SimpleNamespace(
+                seeds=[SEED],
+                campaign_id=campaign_id,
+                policy="random-legal",
+                policy_seed=1234,
+                launch_token="handshake-launch-token",
+            )
+            driver.reader = _Reader()
+            driver.stepper = _GoneHandshakeStepper()
+            driver.fork_hash = "A" * 64
+            progress_path = os.path.join(
+                run_dir, "campaign_progress.json")
+            driver.progress = campaign_driver.Progress(
+                progress_path,
+                os.path.join(run_dir, "campaign_heartbeat.json"))
+
+            self.assertEqual(campaign_driver.EXIT_GAME_GONE, driver.run())
+            with open(progress_path, "r", encoding="utf-8") as fh:
+                progress = json.load(fh)
+            self.assertTrue(orchestrator.restart_requested_for_launch(
+                progress, "handshake-launch-token"))
+            self.assertEqual(
+                "handshake_game_gone",
+                progress["restart_requested"]["reason"])
+
 
 class HeartbeatAtomicWriteTest(unittest.TestCase):
     """g6_campaign_spotdiff.md §9: Progress.heartbeat() used to be a plain
@@ -752,6 +865,53 @@ class HeartbeatAtomicWriteTest(unittest.TestCase):
             self.assertEqual(17, data["actions"])
             # The rename consumes the tmp file -- nothing left behind.
             self.assertFalse(os.path.exists(progress.hb_tmp_path))
+
+
+class AtomicReplaceRetryTest(unittest.TestCase):
+    @staticmethod
+    def _sharing_error():
+        exc = PermissionError("synthetic Windows sharing violation")
+        exc.winerror = 32
+        return exc
+
+    def test_transient_sharing_violation_retries_then_publishes(self):
+        with mock.patch.object(
+                campaign_driver.os, "replace",
+                side_effect=[self._sharing_error(),
+                             self._sharing_error(), None]) as replace, \
+             mock.patch.object(campaign_driver.time, "sleep") as sleep:
+            campaign_driver.atomic_replace_with_retry("tmp", "progress")
+
+        self.assertEqual(3, replace.call_count)
+        self.assertEqual(2, sleep.call_count)
+        sleep.assert_has_calls([
+            mock.call(campaign_driver.ATOMIC_REPLACE_RETRY_SLEEP_S),
+            mock.call(campaign_driver.ATOMIC_REPLACE_RETRY_SLEEP_S),
+        ])
+
+    def test_exhausted_sharing_violation_still_fails_loud(self):
+        with mock.patch.object(
+                campaign_driver, "ATOMIC_REPLACE_ATTEMPTS", 3), \
+             mock.patch.object(
+                campaign_driver.os, "replace",
+                side_effect=self._sharing_error()) as replace, \
+             mock.patch.object(campaign_driver.time, "sleep") as sleep:
+            with self.assertRaises(PermissionError):
+                campaign_driver.atomic_replace_with_retry("tmp", "progress")
+
+        self.assertEqual(3, replace.call_count)
+        self.assertEqual(2, sleep.call_count)
+
+    def test_non_sharing_error_is_not_hidden_or_retried(self):
+        with mock.patch.object(
+                campaign_driver.os, "replace",
+                side_effect=OSError("real filesystem failure")) as replace, \
+             mock.patch.object(campaign_driver.time, "sleep") as sleep:
+            with self.assertRaisesRegex(OSError, "real filesystem failure"):
+                campaign_driver.atomic_replace_with_retry("tmp", "progress")
+
+        replace.assert_called_once_with("tmp", "progress")
+        sleep.assert_not_called()
 
 
 class OrchestratorPreflightTest(unittest.TestCase):
@@ -1045,6 +1205,107 @@ class OrchestratorStallWatchdogTest(unittest.TestCase):
             stall_event = next(
                 t for t in timeline if t["event"] == "stall_relaunch")
             self.assertEqual(61.0, stall_event["age"])
+
+    def test_current_launch_restart_request_relaunches_without_stall_wait(self):
+        """A driver-requested mid-dungeon restart is acted on at the next poll.
+
+        The heartbeat is deliberately never sampled: this proves the explicit
+        signal wins before the old four-minute stale-heartbeat fallback.
+        """
+        with tempfile.TemporaryDirectory() as root:
+            def progress_by_call(n):
+                if n >= 4:
+                    return _progress(
+                        "restart", status="complete", done=[_done()],
+                        failed=[])
+                return _progress(
+                    "restart", status="in_progress", done=[], failed=[])
+
+            with mock.patch.object(
+                    orchestrator, "restart_requested_for_launch",
+                    return_value=True) as requested:
+                result, timeline, launch, kill = self._run(
+                    root, "restart",
+                    heartbeats=[],
+                    progress_by_call=progress_by_call,
+                    times=[
+                        0.0, 0.0, 100.0, 101.0,
+                        102.0, 200.0, 201.0,
+                    ])
+
+            self.assertEqual(0, result)
+            self.assertEqual(2, launch.call_count)
+            self.assertGreaterEqual(kill.call_count, 1)
+            self.assertEqual(
+                ["launch", "driver_restart", "launch", "complete"],
+                [row["event"] for row in timeline])
+            requested.assert_called()
+
+
+class DurableRestartRequestTest(unittest.TestCase):
+    def test_request_is_token_bound_and_cleared_by_the_fresh_launch(self):
+        with tempfile.TemporaryDirectory() as root:
+            progress_path = os.path.join(root, "campaign_progress.json")
+            heartbeat_path = os.path.join(root, "campaign_heartbeat.json")
+            progress = campaign_driver.Progress(
+                progress_path, heartbeat_path)
+            progress.load_or_init(
+                "restart", [SEED], "random-legal", "A" * 64,
+                policy_seed=1234)
+
+            progress.request_restart("launch-one", "unit-test")
+
+            self.assertTrue(orchestrator.restart_requested_for_launch(
+                progress.data, "launch-one"))
+            self.assertFalse(orchestrator.restart_requested_for_launch(
+                progress.data, "launch-two"))
+
+            resumed = campaign_driver.Progress(
+                progress_path, heartbeat_path)
+            resumed.load_or_init(
+                "restart", [SEED], "random-legal", "A" * 64,
+                policy_seed=1234)
+            self.assertEqual(2, resumed.data["launches"])
+            self.assertNotIn("restart_requested", resumed.data)
+
+
+class UnexpectedDriverExitRestartTest(unittest.TestCase):
+    def test_post_init_exceptions_request_a_durable_restart(self):
+        cases = [
+            (RuntimeError("synthetic unexpected failure"),
+             campaign_driver.EXIT_FATAL, "unexpected_driver_exception"),
+            (campaign_driver.GameGone("synthetic uncaught pipe loss"),
+             campaign_driver.EXIT_GAME_GONE, "uncaught_game_gone"),
+        ]
+        for raised, expected_exit, expected_reason in cases:
+            with self.subTest(reason=expected_reason), \
+                 tempfile.TemporaryDirectory() as root:
+                args = SimpleNamespace(
+                    campaign_id="unexpected_restart",
+                    seeds=SEED,
+                    data_root=root,
+                    policy="random-legal",
+                    script=None,
+                    script_dir=None,
+                    launch_token="unexpected-launch-token",
+                )
+                progress = mock.Mock()
+                progress.data = {"status": "in_progress"}
+                driver = mock.Mock()
+                driver.progress = progress
+                driver.run.side_effect = raised
+
+                with mock.patch.object(
+                        campaign_driver, "parse_args",
+                        return_value=args), \
+                     mock.patch.object(
+                        campaign_driver, "CampaignDriver",
+                        return_value=driver):
+                    result = campaign_driver.main([])
+
+                self.assertEqual(expected_exit, result)
+                progress.request_restart.assert_called_once_with(
+                    "unexpected-launch-token", expected_reason)
 
 
 class ArtifactOracleRequirementTest(unittest.TestCase):
@@ -1787,6 +2048,7 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 policy_seed=1234,
                 data_root=root,
                 max_attempts=1,
+                launch_token="retry-launch-token",
             )
 
             def make_driver():
@@ -1807,6 +2069,15 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 (_ for _ in ()).throw(campaign_driver.GameGone(
                     "synthetic retry exhaustion")))
             self.assertEqual(campaign_driver.EXIT_GAME_GONE, first.run())
+            with open(os.path.join(
+                    campaign_dir, "campaign_progress.json"),
+                    "r", encoding="utf-8") as fh:
+                after_pipe_loss = json.load(fh)
+            self.assertTrue(orchestrator.restart_requested_for_launch(
+                after_pipe_loss, "retry-launch-token"))
+            self.assertEqual(
+                "game_gone_mid_run",
+                after_pipe_loss["restart_requested"]["reason"])
 
             second = make_driver()
             second.run_seed = mock.Mock(

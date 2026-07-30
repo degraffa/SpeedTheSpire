@@ -436,11 +436,13 @@ constexpr EventDialogImpl kUpgradeShrine = {
 };
 
 // --- Wheel of Change --------------------------------------------------------
-// Screens: 0 INTRO (spin), 1 COMPLETE (acknowledge -> applyResult), 2 LEAVE.
+// Screens: 0 INTRO ([Play]), 1 SPIN (the physical wheel), 2 RESULT
+// ([Prize!] acknowledgement -> applyResult), 3 LEAVE.
 // scratch0 holds the spin result 0..5.
 constexpr uint8_t kWheelIntro = 0;
-constexpr uint8_t kWheelResult = 1;
-constexpr uint8_t kWheelLeave = 2;
+constexpr uint8_t kWheelSpin = 1;
+constexpr uint8_t kWheelResult = 2;
+constexpr uint8_t kWheelLeave = 3;
 
 constexpr int wheel_gold_amount(const RunState& rs) noexcept {
     // setGold (GremlinWheelGame.java:100-108) keys off the dungeon id.
@@ -475,9 +477,15 @@ EventDialogStatus wheel_choose(RunController& rc, EventDialogState& es,
     if (es.screen == kWheelIntro) {
         // buttonEffect INTRO (:226-236): one miscRng.random(0, 5).
         es.scratch0 = static_cast<int16_t>(random(rc.combat.misc_rng, 0, 5));
+        es.screen = kWheelSpin;
+        return EventDialogStatus::CONTINUE;
+    }
+    if (es.screen == kWheelSpin) {
         // preApplyResult (:186-221) is reached before the player acknowledges
-        // the spin, and the GOLD result pays out THERE (:191-192), not in
-        // applyResult -- which only logs it (:257-260).
+        // the revealed prize, on the separate physical-spin command. The GOLD
+        // result pays out THERE (:191-192), not in applyResult -- which only
+        // logs it (:257-260). The live oracle sequence is [Play] -> spin ->
+        // [Prize!] -> applyResult.
         if (es.scratch0 == 0) {
             gain_gold(rc.run, wheel_gold_amount(rc.run));
         }

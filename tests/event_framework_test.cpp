@@ -557,12 +557,15 @@ TEST(EventPools, InitSetsFullActOneListsWithNoteForYourselfGate) {
     }
 }
 
-TEST(EventPools, IsCursedExcludesAscendersBane) {
-    // AbstractPlayer.isCursed skips AscendersBane (AbstractPlayer.java:744):
-    // an A10+ starting deck is NOT cursed for the Fountain gate.
+TEST(EventPools, IsCursedExcludesTheThreeSpecialCurses) {
+    // AbstractPlayer.isCursed skips AscendersBane, CurseOfTheBell, and
+    // Necronomicurse (AbstractPlayer.java:744-746). The first two have S1
+    // rows; Necronomicurse does not.
     RunState rs{};
     add_card(rs, CardId::ASCENDERS_BANE);
     add_card(rs, CardId::STRIKE);
+    EXPECT_FALSE(event_player_is_cursed(rs));
+    add_card(rs, CardId::CURSE_OF_THE_BELL);
     EXPECT_FALSE(event_player_is_cursed(rs));
     add_card(rs, CardId::CLUMSY);
     EXPECT_TRUE(event_player_is_cursed(rs));

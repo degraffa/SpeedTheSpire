@@ -1,9 +1,9 @@
-// Tier-2 tests for the two SHAPE decisions the `--treasure` and `--event`
-// read-outs make before any comparison happens
+// Tier-2 tests for the five SHAPE decisions the replay read-outs make before
+// any comparison happens
 // (tools/oracle_bridge/replay/src/readout_shapes.hpp).
 //
-// WHY THESE ARE UNIT TESTS AND NOT "IT RAN CLEAN ON THE CAPTURES". Both
-// functions exist to let a read-out call something benign, which is the one
+// WHY THESE ARE UNIT TESTS AND NOT "IT RAN CLEAN ON THE CAPTURES". These
+// functions let a read-out call something benign, which is the one
 // class of bug a green campaign run cannot show you: a rule that elides too
 // much simply reports zero-diff. The chest key-row rule in particular is asked
 // to ignore a row that appears on EVERY Act-1 chest open, so the interesting
@@ -296,6 +296,54 @@ TEST(EscapeSettlementRace, AnyFieldOutsideTheSettlementSetIsARealDivergence) {
 
 TEST(EscapeSettlementRace, AnEmptyReportIsNotARace) {
     EXPECT_FALSE(is_escape_settlement_fields({}));
+}
+
+// --- Entropic Brew's out-of-combat ObtainPotionEffect race (shape 4) --------
+
+using sts::replay::is_potion_obtain_animation_fields;
+
+TEST(PotionObtainAnimationRace, OnlyPotionSlotFieldsCanBeAnimationLag) {
+    EXPECT_TRUE(is_potion_obtain_animation_fields(
+        {"potions[0]", "potions[1]"}));
+    EXPECT_TRUE(is_potion_obtain_animation_fields({"potions[2]"}));
+    EXPECT_FALSE(is_potion_obtain_animation_fields(
+        {"potions[0]", "potion_rng.counter"}));
+    EXPECT_FALSE(is_potion_obtain_animation_fields(
+        {"potions[0]", "gold"}));
+    EXPECT_FALSE(is_potion_obtain_animation_fields({}));
+}
+
+// --- transform-confirm curse preview cardRng burn (shape 5) -----------------
+
+using sts::replay::is_transform_preview_rng_advance;
+
+TEST(TransformPreviewRace, ExactCursePreviewDrawsAreRecognised) {
+    const sts::engine::RngStream sim = sts::engine::from_seed(303586);
+    sts::engine::RngStream capture = sim;
+    for (int i = 0; i < 3; ++i) {
+        (void)sts::engine::random(capture, 0, 9);
+    }
+    EXPECT_TRUE(is_transform_preview_rng_advance(
+        {"card_rng.s0", "card_rng.s1", "card_rng.counter"}, sim, capture));
+}
+
+TEST(TransformPreviewRace, FieldOrStreamDriftCannotHideAsPreviewTiming) {
+    const sts::engine::RngStream sim = sts::engine::from_seed(303586);
+    sts::engine::RngStream capture = sim;
+    (void)sts::engine::random(capture, 0, 9);
+
+    EXPECT_FALSE(is_transform_preview_rng_advance(
+        {"card_rng.s0", "card_rng.counter"}, sim, capture));
+    EXPECT_FALSE(is_transform_preview_rng_advance(
+        {"card_rng.s0", "card_rng.s1", "card_rng.counter", "gold"},
+        sim, capture));
+
+    sts::engine::RngStream wrong = capture;
+    wrong.s0 ^= 1u;
+    EXPECT_FALSE(is_transform_preview_rng_advance(
+        {"card_rng.s0", "card_rng.s1", "card_rng.counter"}, sim, wrong));
+    EXPECT_FALSE(is_transform_preview_rng_advance(
+        {"card_rng.s0", "card_rng.s1", "card_rng.counter"}, sim, sim));
 }
 
 }  // namespace

@@ -54,7 +54,7 @@
 //   COMBAT_REWARD proceed   -> DEFERRED, see below
 //   CARD_REWARD choose i    -> CHOOSE(i)          take offered card i
 //   CARD_REWARD skip        -> CHOOSE(kChooseSkipCard)
-//   NONE    play i [t]      -> PLAY_CARD(i-1, t)  the game's index is 1-based
+//   NONE    play i [t]      -> PLAY_CARD(i-1, t), except 0 -> hand slot 9
 //   NONE    end             -> END_TURN
 //   NONE    potion use s t  -> USE_POTION(s, t)
 //   (any)   potion discard s-> DISCARD_POTION(s)   screen-independent: the belt
@@ -64,7 +64,7 @@
 //   GRID    choose i        -> buffer the pick     see GridSession
 //   GRID    cancel          -> drop the buffer
 //   GRID    proceed         -> flush the buffer as CHOOSE(master-deck index)
-//   HAND_SELECT choose i    -> CHOOSE(i)
+//   HAND_SELECT choose i    -> CHOOSE(Nth legal full-hand slot)
 //
 // WHY `proceed` IS DEFERRED. Pressing Proceed on a reward screen that still has
 // unclaimed items shows the map WITHOUT leaving the room, and the driver's
@@ -160,6 +160,7 @@ void read_stock(const json& screen_state, const char* key,
         const json& gs = rec.at("state_json").at("game_state");
         s.screen_type = gs.value("screen_type", std::string{});
         s.floor = gs.value("floor", 0);
+        s.gold = gs.value("gold", -1);
         s.room_type = gs.value("room_type", std::string{});
         if (const auto cl = gs.find("choice_list"); cl != gs.end() && cl->is_array()) {
             for (const json& c : *cl)
@@ -408,6 +409,71 @@ struct Options {
     return true;
 }
 
+[[nodiscard]] bool is_entropic_brew_obtain_race(
+    const sts::diff::DiffReport& rep,
+    const sts::translate::TranslatedRun& run,
+    std::size_t record_index,
+    const RunState& actual,
+    const RunState& expected) {
+    if (record_index == 0 || record_index + 1 >= run.records.size() ||
+        !is_potion_obtain_animation_fields(diff_field_names(rep))) {
+        return false;
+    }
+    const std::vector<std::string> use =
+        split_ws(run.records[record_index - 1].action_command);
+    if (use.size() < 3 || use[0] != "potion" || use[1] != "use") {
+        return false;
+    }
+    const int slot = std::atoi(use[2].c_str());
+    if (slot < 0 || slot >= kPotionCap ||
+        run.records[record_index - 1].run
+                .potions[static_cast<std::size_t>(slot)] !=
+            static_cast<uint16_t>(PotionId::ENTROPIC_BREW)) {
+        return false;
+    }
+    // A command typed during the animation normally must not touch the belt.
+    // One narrow exception is independently provable: discarding a DIFFERENT
+    // occupied slot. STS302912 uses Entropic Brew in slot 1, the next dump
+    // catches the generated potion before its ObtainPotionEffect lands, and
+    // that dump's command discards slot 0. The following dump must then equal
+    // the sim belt exactly except for that one explicitly emptied slot.
+    const std::vector<std::string> during =
+        split_ws(run.records[record_index].action_command);
+    int discarded_slot = -1;
+    if (!during.empty() && during[0] == "potion") {
+        if (during.size() != 3 || during[1] != "discard") return false;
+        discarded_slot = std::atoi(during[2].c_str());
+        if (discarded_slot < 0 || discarded_slot >= kPotionCap ||
+            actual.potions[static_cast<std::size_t>(discarded_slot)] ==
+                static_cast<uint16_t>(PotionId::NONE)) {
+            return false;
+        }
+    }
+    const RunState& settled = run.records[record_index + 1].run;
+    bool saw_delayed_slot = false;
+    for (int i = 0; i < kPotionCap; ++i) {
+        const std::size_t p = static_cast<std::size_t>(i);
+        if (actual.potions[p] != expected.potions[p]) {
+            if (expected.potions[p] !=
+                    static_cast<uint16_t>(PotionId::NONE) ||
+                actual.potions[p] ==
+                    static_cast<uint16_t>(PotionId::NONE)) {
+                return false;
+            }
+            if (i == discarded_slot) return false;
+            saw_delayed_slot = true;
+        }
+        const uint16_t want_settled =
+            i == discarded_slot
+                ? static_cast<uint16_t>(PotionId::NONE)
+                : actual.potions[p];
+        if (settled.potions[p] != want_settled) {
+            return false;
+        }
+    }
+    return saw_delayed_slot;
+}
+
 struct Verdict {
     int records_compared = 0;
     int reward_records_compared = 0;
@@ -417,8 +483,9 @@ struct Verdict {
     std::string diverged_screen;
     std::size_t diverged_fields = 0;
     int deck_identity_records = 0;  // records whose only diff was library order
-    int obtain_race_records = 0;    // ...whose only diff was the obtain race
+    int obtain_race_records = 0;    // ...whose only diff was an obtain animation
     int escape_race_records = 0;    // ...the Smoke-Bomb escape-settlement race
+    int preview_race_records = 0;   // ...a curse transform-preview cardRng burn
     std::string stop_reason;
     bool clean = false;          // no real divergence anywhere
 };
@@ -453,8 +520,12 @@ void print_pool_evidence(const std::string& seed_string, int floor,
 
     RunController rc = run_begin(run.seed, 20);
     GridSession grid;
+    bool pending_curse_transform_preview = false;
 
     for (std::size_t k = 0; k < run.records.size(); ++k) {
+        const bool curse_transform_preview_window =
+            pending_curse_transform_preview;
+        pending_curse_transform_preview = false;
         const sts::translate::TranslatedRecord& rec = run.records[k];
         const ScreenInfo& s = screens[k];
         const bool is_reward = s.screen_type == "COMBAT_REWARD" ||
@@ -497,6 +568,38 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                                               expected.master_deck_count),
                         actual.master_deck_count - expected.master_deck_count == 1
                             ? "" : "s");
+        } else if (is_entropic_brew_obtain_race(
+                       rep, run, k, actual, expected)) {
+            // Entropic Brew's out-of-combat ObtainPotionEffects have advanced
+            // potionRng but have not inserted their potion rows yet. The
+            // classifier requires the very next capture record to hold exactly
+            // these simulator identities, so a wrong roll cannot hide here.
+            ++v.obtain_race_records;
+            std::printf(
+                "RACE  seq=%d floor=%d screen=%s cmd='%s': the sim's potion "
+                "belt already holds %zu delayed Entropic-Brew obtain%s that "
+                "this dump catches mid-ObtainPotionEffect animation; the next "
+                "capture record contains exactly those identities\n",
+                rec.seq, s.floor, s.screen_type.c_str(),
+                rec.action_command.c_str(), rep.size(),
+                rep.size() == 1 ? "" : "s");
+        } else if (curse_transform_preview_window &&
+                   is_transform_preview_rng_advance(
+                       diff_field_names(rep), actual.card_rng,
+                       expected.card_rng)) {
+            ++v.preview_race_records;
+            std::printf(
+                "RACE  seq=%d floor=%d screen=%s cmd='%s': the capture spent "
+                "%d wall-clock cardRng draws in a CURSE transform-confirm "
+                "preview; its endpoint is the exact result of that many "
+                "CardLibrary.getCurse rolls from the sim stream\n",
+                rec.seq, s.floor, s.screen_type.c_str(),
+                rec.action_command.c_str(),
+                expected.card_rng.counter - actual.card_rng.counter);
+            // The UI-only draws still affect later gameplay rolls in the live
+            // run. Carry their proven endpoint forward in the REPLAY HARNESS;
+            // the headless engine itself remains independent of wall-clock UI.
+            rc.run.card_rng = expected.card_rng;
         } else if (!rep.empty() && s.screen_type == "NONE" &&
                    rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD) &&
                    (rc.combat.flags & kCombatFlagPlayerEscaped) != 0u &&
@@ -504,9 +607,10 @@ void print_pool_evidence(const std::string& seed_string, int floor,
             // The Smoke-Bomb escape-settlement race (readout_shapes.hpp): the
             // capture's dump is inside the escape animation, still listing the
             // fight, while the sim settled the escape synchronously on the
-            // potion use. Single-record by construction -- the capture's own
-            // settled records from the next seq on fail the window gates and
-            // would diff for real.
+            // potion use. A slow animation can yield several consecutive
+            // records (STS300133 yields four); every one must independently
+            // satisfy the narrow screen/phase/field-set gates, and the first
+            // settled capture record stops matching them.
             ++v.escape_race_records;
             std::printf("RACE  seq=%d floor=%d screen=%s cmd='%s': the sim settled a "
                         "Smoke-Bomb escape (victory heal + battle-over assembly) that "
@@ -577,15 +681,53 @@ void print_pool_evidence(const std::string& seed_string, int floor,
             if (!grid.open) open_grid_session(rc, grid);
             if (m.kind == MapKind::GRID_CANCEL) {
                 grid.pending.clear();
+                const bool closes =
+                    k + 1 >= screens.size() ||
+                    screens[k + 1].screen_type != "GRID";
+                if (closes) {
+                    RunActionMask mask{};
+                    legal_actions(rc, mask);
+                    if (mask.can_cancel_grid) {
+                        step(rc, make_action(ActionVerb::CHOOSE,
+                                             kChooseCancelGrid));
+                    }
+                }
                 continue;
             }
-            if (m.kind == MapKind::GRID_PICK) grid.pending.push_back(m.grid_index);
+            if (m.kind == MapKind::GRID_PICK) {
+                toggle_grid_pick(grid, m.grid_index);
+            }
             // A two-pick grid has no confirm button: it commits on the pick that
             // fills it, and the only evidence of that is the screen being gone
             // from the next record. Flush on either signal.
             const bool closes =
                 k + 1 >= screens.size() || screens[k + 1].screen_type != "GRID";
             if (m.kind != MapKind::GRID_COMMIT && !closes) continue;
+            bool committed_curse_transform = false;
+            if (rc.phase == static_cast<uint8_t>(RunPhase::EVENT_DIALOG) &&
+                rc.event.grid_kind ==
+                    static_cast<uint8_t>(EventGridKind::TRANSFORMABLE)) {
+                for (const int g : grid.pending) {
+                    if (g < 0 ||
+                        g >= static_cast<int>(grid.filtered.size())) {
+                        continue;
+                    }
+                    const int deck_index =
+                        grid.filtered[static_cast<std::size_t>(g)];
+                    if (deck_index < 0 ||
+                        deck_index >=
+                            static_cast<int>(rc.run.master_deck_count)) {
+                        continue;
+                    }
+                    const CardId id = static_cast<CardId>(
+                        rc.run.master_deck[static_cast<std::size_t>(
+                            deck_index)].card_id);
+                    const CardDef* def = card_def(id);
+                    committed_curse_transform =
+                        committed_curse_transform ||
+                        (def != nullptr && def->type == CardType::CURSE);
+                }
+            }
             for (const int g : grid.pending) {
                 if (g < 0 || g >= static_cast<int>(grid.filtered.size())) {
                     v.stop_reason = "seq " + std::to_string(rec.seq) + ": grid index " +
@@ -598,6 +740,11 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                                      static_cast<uint8_t>(
                                          grid.filtered[static_cast<std::size_t>(g)])));
             }
+            if (m.kind == MapKind::GRID_COMMIT &&
+                grid.pending.empty() &&
+                sim_choice_free_confirmation_grid(rc)) {
+                step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+            }
             if (sim_grid_open(rc)) {
                 // The sim wants picks the capture did not make, so the two are
                 // not looking at the same grid. Stop: handing the next command
@@ -608,21 +755,29 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                                 std::to_string(grid.pending.size()) + " pick(s)";
                 return v;
             }
+            pending_curse_transform_preview = committed_curse_transform;
             grid = GridSession{};
             continue;
         }
         // The map can be up OVER a room the capture has not formally left --
         // that is the whole of the "leaving is deferred to the map choice"
-        // convention. Two phases park that way: COMBAT_REWARD (whose `proceed`
-        // is NOOPped in the table) and SHOP (whose room `proceed` is normally
-        // the exit, but a capture can dismiss the map with `return` and then
-        // `choose` a node without ever issuing one -- `--shop`'s own in-room
-        // walk already handles a MAP screen appearing mid-visit for the same
-        // reason). Without this the node CHOOSE would land on the shop menu and
-        // buy row `dst` instead of moving the run.
+        // convention. Three phases park that way: COMBAT_REWARD, SHOP, and an
+        // unopened TREASURE_ROOM chest. Their `proceed` opens a dismissable map
+        // overlay capture-side and is NOOPped in the table; the actual node
+        // choice is the irreversible exit. Without this the node CHOOSE would
+        // land on the still-mounted reward/shop/chest screen rather than move
+        // the run.
         if (m.kind == MapKind::LEAVE_ROOM &&
             (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD) ||
-             rc.phase == static_cast<uint8_t>(RunPhase::SHOP))) {
+             rc.phase == static_cast<uint8_t>(RunPhase::SHOP) ||
+             rc.phase == static_cast<uint8_t>(RunPhase::TREASURE_ROOM))) {
+            step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+        }
+        if (m.kind == MapKind::LEAVE_ROOM &&
+            rc.phase == static_cast<uint8_t>(RunPhase::NEOW) &&
+            rc.neow.screen ==
+                static_cast<uint8_t>(NeowScreen::ITEM_REWARD)) {
+            step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
             step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
         }
         for (const Action a : m.actions) step(rc, a);
@@ -916,10 +1071,10 @@ void diff_assembly_fields(const RunState& expected, const RunState& actual,
 //   POST-CHOICE at the first floor-0 MAP record -- the payout's sub-screen has
 //               resolved and Neow is finished.
 //
-// A boss relic whose onEquip body is DEFERRED (Astrolabe and Empty Cage each
-// open a grid the sim does not) reaches ACTIVATION and stops there. That is the
-// documented divergence class, and it is exactly why ACTIVATION is a checkpoint
-// of its own rather than a step on the way to the last one.
+// ACTIVATION is a checkpoint of its own because every boss relic mutates state
+// before its follow-on screen resolves. All five S1 boss-relic onEquip bodies
+// and their grids/reward screens are live; a stop before POST-CHOICE is now an
+// upstream state or command-shape divergence, not a deferred Neow body.
 
 // THE LABEL JOIN. The capture carries NeowReward's localized optionLabel; the
 // sim carries the meaning. The table is written in the RENDER direction -- sim
@@ -1104,11 +1259,8 @@ struct NeowVerdict {
         if (s.screen_type == "GRID") {
             if (!grid.open) {
                 // A grid the BLESSING did not open belongs to whatever the
-                // payout handed over. Since Wave-C track 2 the boss relics'
-                // grids (Astrolabe, Empty Cage) are LIVE and the sim opens
-                // them itself, so reaching this stop now means a body still
-                // deferred in the running build or an upstream divergence --
-                // the same honesty note as unsimulated_grid_reason.
+                // payout handed over. Every S1 boss-relic grid is live, so
+                // reaching this stop means the sim diverged before the grid.
                 if (rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
                     std::string who = "?";
                     if (rc.run.relic_count > 0)
@@ -1117,7 +1269,7 @@ struct NeowVerdict {
                                 rc.run.relics[rc.run.relic_count - 1].relic_id)));
                     v.stop_reason =
                         "the capture opens a grid the blessing did not: " + who +
-                        "'s onEquip body is deferred in this build, or the sim "
+                        "'s S1 onEquip grid is implemented, so the sim "
                         "diverged earlier";
                     return v;
                 }
@@ -1127,7 +1279,9 @@ struct NeowVerdict {
                 grid.pending.clear();
                 continue;
             }
-            if (c[0] == "choose" && c.size() >= 2) grid.pending.push_back(std::stoi(c[1]));
+            if (c[0] == "choose" && c.size() >= 2) {
+                toggle_grid_pick(grid, std::stoi(c[1]));
+            }
             const bool closes = j + 1 >= screens.size() || screens[j + 1].screen_type != "GRID";
             if (c[0] != "proceed" && !closes) continue;
             for (const int g : grid.pending) {
@@ -1138,11 +1292,17 @@ struct NeowVerdict {
                 step(rc, make_action(ActionVerb::CHOOSE,
                                      static_cast<uint8_t>(grid.filtered[static_cast<std::size_t>(g)])));
             }
+            if (c[0] == "proceed" && grid.pending.empty() &&
+                sim_choice_free_confirmation_grid(rc)) {
+                step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+            }
             if (rc.neow.screen == static_cast<uint8_t>(NeowScreen::GRID)) {
                 // The sim still wants picks the capture did not make: the grid
-                // belongs to a relic body the sim defers, not to the blessing.
+                // shape or an earlier state differs; no S1 Neow onEquip body
+                // remains deferred.
                 v.stop_reason = "sim's Neow grid outlived the capture's picks "
-                                "(a deferred relic onEquip owns this grid)";
+                                "(selection/card identity or earlier state "
+                                "diverged; every S1 Neow grid is implemented)";
                 return v;
             }
             grid = GridSession{};
@@ -1430,7 +1590,9 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
                     grid.pending.clear();
                     continue;
                 }
-                if (c[0] == "choose" && c.size() >= 2) grid.pending.push_back(std::stoi(c[1]));
+                if (c[0] == "choose" && c.size() >= 2) {
+                    toggle_grid_pick(grid, std::stoi(c[1]));
+                }
                 const bool closes =
                     j + 1 >= screens.size() || screens[j + 1].screen_type != "GRID";
                 if (c[0] != "proceed" && !closes) continue;
@@ -1468,26 +1630,35 @@ void diff_stock_row(const char* group, std::size_t i, const std::string& game_id
                 break;
             }
             const ShopTarget t = resolve_shop_choice(
-                screens[j], shop_choice_arg_to_index(screens[j], c));
+                screens[j], shop_choice_arg_to_index(screens[j], c),
+                screens[j].gold >= 0 ? screens[j].gold : buy.gold);
+            const int ordinal = shop_target_ordinal(live, t);
             bool applied = false;
-            switch (t.what) {
-                case ShopPick::COLORED:
-                    applied = shop_buy_card(buy, live, t.index, /*colorless=*/false);
-                    break;
-                case ShopPick::COLORLESS:
-                    applied = shop_buy_card(buy, live, t.index, /*colorless=*/true);
-                    break;
-                case ShopPick::RELIC:
-                    applied = shop_buy_relic(buy, misc, live, t.index);
-                    break;
-                case ShopPick::POTION:
-                    applied = shop_buy_potion(buy, live, t.index);
-                    break;
-                case ShopPick::PURGE:
-                    applied = shop_purge_legal(buy, live);  // opens the grid, spends nothing
-                    break;
-                case ShopPick::NONE:
-                    break;
+            if (ordinal >= kChooseShopColoredBase &&
+                ordinal < kChooseShopColorlessBase) {
+                applied = shop_buy_card(
+                    buy, live,
+                    static_cast<uint8_t>(ordinal - kChooseShopColoredBase),
+                    /*colorless=*/false);
+            } else if (ordinal >= kChooseShopColorlessBase &&
+                       ordinal < kChooseShopRelicBase) {
+                applied = shop_buy_card(
+                    buy, live,
+                    static_cast<uint8_t>(ordinal - kChooseShopColorlessBase),
+                    /*colorless=*/true);
+            } else if (ordinal >= kChooseShopRelicBase &&
+                       ordinal < kChooseShopPotionBase) {
+                applied = shop_buy_relic(
+                    buy, misc, live,
+                    static_cast<uint8_t>(ordinal - kChooseShopRelicBase));
+            } else if (ordinal >= kChooseShopPotionBase &&
+                       ordinal < kChooseShopPurge) {
+                applied = shop_buy_potion(
+                    buy, live,
+                    static_cast<uint8_t>(ordinal - kChooseShopPotionBase));
+            } else if (ordinal == kChooseShopPurge) {
+                applied = shop_purge_legal(
+                    buy, live);  // opens the grid, spends nothing
             }
             if (!applied) {
                 stop = "seq " + std::to_string(run.records[j].seq) + " cmd '" +
@@ -2824,11 +2995,13 @@ int main(int argc, char** argv) {
         try {
             const Verdict v = replay_one(f, opts);
             std::printf("%s %s: %d record%s compared (%d on reward screens), "
-                        "%d library-order-only, %d obtain-race, %d escape-race; stop: %s\n",
+                        "%d library-order-only, %d obtain-race, %d escape-race, "
+                        "%d preview-race; stop: %s\n",
                         v.clean ? "CLEAN" : "PART ", f.c_str(), v.records_compared,
                         v.records_compared == 1 ? "" : "s",
                         v.reward_records_compared, v.deck_identity_records,
                         v.obtain_race_records, v.escape_race_records,
+                        v.preview_race_records,
                         v.stop_reason.c_str());
             // The frontier, always on its own line and never folded into the
             // stop -- see `Verdict`. "no divergence" is said out loud too: a

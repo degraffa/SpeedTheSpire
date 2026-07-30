@@ -28,9 +28,8 @@ from stsgen.vocab import DOMAINS  # noqa: E402
 
 REPORT_FORMAT = "STS-VERIFICATION-REPORT v1"
 DEFAULT_CAMPAIGNS = (
-    "b52_accept_locked_20260729_71000_71049",
-    "b52_accept_20260729_70000_70049",
-    "b53_full_act1_20260729",
+    "g7_greedy_b153_20260729_200000_200011",
+    "g7_random_b153_20260729_300000_324999",
 )
 
 
@@ -54,6 +53,106 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def capture_race_record_count(run: dict[str, Any],
+                              identity: str = "campaign run") -> int:
+    """Return the conservative all-family capture-race count.
+
+    Current reports carry an authoritative total and a by-kind map. Reports
+    written before that additive v1 extension carry only
+    ``known_obtain_race_records``; accepting those remains intentional, with
+    every available legacy ``known_*_race_records`` field included.
+    """
+    try:
+        legacy = {
+            key.removeprefix("known_").removesuffix(
+                "_records").replace("_", "-"): int(value)
+            for key, value in run.items()
+            if key.startswith("known_")
+            and key.endswith("_race_records")
+            and key != "known_capture_race_records"
+        }
+        if any(value < 0 for value in legacy.values()):
+            raise ReportError(f"{identity}: negative legacy capture-race count")
+
+        kinds_value = run.get("known_capture_race_records_by_kind")
+        kinds = None
+        if kinds_value is not None:
+            if not isinstance(kinds_value, dict):
+                raise ReportError(
+                    f"{identity}: capture-race by-kind value is not an object")
+            kinds = {
+                str(name): int(value) for name, value in kinds_value.items()
+            }
+            if any(value < 0 for value in kinds.values()):
+                raise ReportError(
+                    f"{identity}: negative capture-race by-kind count")
+
+        if "known_capture_race_records" in run:
+            total = int(run["known_capture_race_records"])
+        elif kinds is not None:
+            total = sum(kinds.values())
+        else:
+            total = sum(legacy.values())
+
+        if kinds is not None:
+            by_kind_total = sum(kinds.values())
+            if by_kind_total != total:
+                raise ReportError(
+                    f"{identity}: capture-race total {total} disagrees "
+                    f"with by-kind total {by_kind_total}")
+            for name, value in legacy.items():
+                if kinds.get(name, 0) != value:
+                    raise ReportError(
+                        f"{identity}: legacy {name} count {value} disagrees "
+                        f"with by-kind count {kinds.get(name, 0)}")
+        elif legacy and sum(legacy.values()) > total:
+            # An additive total may include a future family that lacks a
+            # duplicated legacy field, but it may never be smaller than the
+            # explicit legacy components.
+            raise ReportError(
+                f"{identity}: capture-race total {total} is smaller than "
+                f"legacy component total {sum(legacy.values())}")
+    except (TypeError, ValueError) as exc:
+        raise ReportError(
+            f"{identity}: malformed capture-race count") from exc
+    if total < 0:
+        raise ReportError(f"{identity}: negative capture-race count")
+    return total
+
+
+def validate_s1_artifact_header(path: Path, campaign_id: str,
+                                seed: str) -> None:
+    """Require the frozen G7 corpus scope on the hashed source artifact."""
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            first = stream.readline()
+        header = json.loads(first)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReportError(f"{campaign_id}/{seed}: unreadable artifact header") \
+            from exc
+    seed_value = header.get("seed")
+    seed_string = (
+        seed_value.get("string") if isinstance(seed_value, dict)
+        else seed_value
+    )
+    expected = {
+        "record_kind": "header",
+        "campaign_id": campaign_id,
+        "ascension": 20,
+        "character": "IRONCLAD",
+    }
+    mismatches = {
+        key: (header.get(key), want)
+        for key, want in expected.items() if header.get(key) != want
+    }
+    if seed_string != seed:
+        mismatches["seed.string"] = (seed_string, seed)
+    if mismatches:
+        raise ReportError(
+            f"{campaign_id}/{seed}: artifact is not a full-scope A20 "
+            f"Ironclad run: {mismatches}")
 
 
 def write_text_lf(path: Path, value: str) -> None:
@@ -192,12 +291,23 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
         deduplicated = 0
         for run in report.get("runs", []):
             seed = str(run.get("seed", ""))
-            identity = {
-                "source_artifact_sha256": run.get("source_artifact_sha256"),
-                "actions": run.get("actions"),
-                "classification": run.get("classification"),
-                "outcome": run.get("outcome"),
-            }
+            outcome = str(run.get("outcome", ""))
+            if outcome not in {"death", "act1_boss_reward"}:
+                raise ReportError(
+                    f"{campaign_id}/{seed}: non-gameplay terminal outcome "
+                    f"{outcome!r}")
+            artifact = campaign_dir / str(run.get("source_artifact", ""))
+            expected_hash = str(run.get("source_artifact_sha256", ""))
+            if sha256_file(artifact) != expected_hash:
+                raise ReportError(
+                    f"{campaign_id}/{seed}: source artifact hash drift")
+            validate_s1_artifact_header(artifact, campaign_id, seed)
+            # De-duplication means an exact repeated report row, not merely
+            # equality of the fields this version happens to consume.  Binding
+            # the whole row prevents a future evidence field (or today's
+            # capture-race fields / first_divergence) from disagreeing
+            # silently while one copy is skipped.
+            identity = dict(run)
             if seed in seen:
                 if seen[seed] != identity:
                     raise ReportError(
@@ -207,15 +317,18 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
             seen[seed] = identity
             accepted += 1
             actions = int(run.get("actions", 0))
+            capture_races = capture_race_record_count(
+                run, f"{campaign_id}/{seed}")
             totals["captured_actions"] += actions
+            totals["known_capture_race_records"] += capture_races
+            if capture_races:
+                totals["known_capture_race_runs"] += 1
             if run.get("classification") == "clean":
                 totals["replay_clean_actions"] += actions
-                if int(run.get("known_obtain_race_records", 0)) == 0:
+                if capture_races == 0:
                     totals["strict_zero_diff_actions"] += actions
-            artifact = campaign_dir / str(run.get("source_artifact", ""))
-            expected_hash = str(run.get("source_artifact_sha256", ""))
-            if sha256_file(artifact) != expected_hash:
-                raise ReportError(f"{campaign_id}/{seed}: source artifact hash drift")
+            totals["a20_ironclad_runs"] += 1
+            totals["gameplay_terminal_runs"] += 1
             sightings.update(artifact_sightings(artifact, game_ids))
 
             if run.get("classification") != "clean":
@@ -248,6 +361,11 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
         raise ReportError(f"dispositions do not match an included finding: "
                           f"{stale_dispositions}")
     untriaged = [f for f in findings if f["disposition"] is None]
+    open_findings = [
+        f for f in findings
+        if f["disposition"] is not None and
+        str(f["disposition"]["status"]).startswith("open-")
+    ]
 
     rows_out: list[dict[str, Any]] = []
     tier2_total = tier2_covered = 0
@@ -279,6 +397,15 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
     per_million = lambda n: (n * 1_000_000.0 / captured) if captured else None
     strict = totals["strict_zero_diff_actions"]
     distinct = len(seen)
+    generator_policies = sorted({
+        str(campaign["policy"]) for campaign in campaigns
+        if campaign.get("policy")
+    })
+    mixed_generators = len(generator_policies) >= 2
+    a20_rows = [row for row in rows_out if row["domain"] == "a20"]
+    a20_rows_covered = sum(bool(row["tier2"]["tier"]) for row in a20_rows)
+    all_runs_a20_ironclad = totals["a20_ironclad_runs"] == distinct
+    all_runs_gameplay_terminal = totals["gameplay_terminal_runs"] == distinct
     return {
         "format": REPORT_FORMAT,
         "inputs": {
@@ -296,13 +423,32 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
             "captured_actions": totals["captured_actions"],
             "replay_clean_actions": totals["replay_clean_actions"],
             "strict_zero_diff_actions": strict,
+            "known_capture_race_records":
+                totals["known_capture_race_records"],
+            "known_capture_race_runs": totals["known_capture_race_runs"],
             "untriaged_findings": len(untriaged),
             "zero_untriaged": not untriaged,
+            "open_findings": len(open_findings),
+            "zero_open_findings": not open_findings,
+            "generator_policies": generator_policies,
+            "mixed_generators": mixed_generators,
+            "a20_ironclad_runs": totals["a20_ironclad_runs"],
+            "all_runs_a20_ironclad": all_runs_a20_ironclad,
+            "gameplay_terminal_runs": totals["gameplay_terminal_runs"],
+            "all_runs_gameplay_terminal": all_runs_gameplay_terminal,
+            "a20_modifier_rows": len(a20_rows),
+            "a20_modifier_rows_tier2_covered": a20_rows_covered,
+            "a20_modifiers_verified":
+                all_runs_a20_ironclad and a20_rows_covered == len(a20_rows),
             "seed_shortfall_to_2000": max(0, 2000 - distinct),
             "strict_zero_diff_action_shortfall_to_1000000":
                 max(0, 1_000_000 - strict),
             "g7_oracle_volume_met": distinct >= 2000 and strict >= 1_000_000
-                                     and not untriaged,
+                                     and not untriaged and not open_findings
+                                     and mixed_generators
+                                     and all_runs_a20_ironclad
+                                     and all_runs_gameplay_terminal
+                                     and a20_rows_covered == len(a20_rows),
         },
         "diffs_per_million_captured_actions": {
             "state_divergence_runs": per_million(state_diff_count),
@@ -342,11 +488,42 @@ def markdown(report: dict[str, Any]) -> str:
         f"- Strict zero-diff actions: **{ev['strict_zero_diff_actions']}**; "
         f"shortfall to 1,000,000: "
         f"**{ev['strict_zero_diff_action_shortfall_to_1000000']}**.",
+        f"- Replay-recognized capture races: "
+        f"**{ev['known_capture_race_records']} records across "
+        f"{ev['known_capture_race_runs']} runs**; those runs are excluded "
+        "from the strict total.",
+        f"- Generator policies: **{', '.join(ev['generator_policies'])}**; "
+        f"mixed-generator requirement met: **"
+        f"{'YES' if ev['mixed_generators'] else 'NO'}**.",
+        f"- A20 Ironclad source runs: **{ev['a20_ironclad_runs']} / "
+        f"{ev['distinct_seeds']}**; A20 modifier rows with tier-2 coverage: "
+        f"**{ev['a20_modifier_rows_tier2_covered']} / "
+        f"{ev['a20_modifier_rows']}**; modifier criterion met: **"
+        f"{'YES' if ev['a20_modifiers_verified'] else 'NO'}**.",
+        f"- Gameplay-terminal full-run attempts (death or Act-1 boss reward): "
+        f"**{ev['gameplay_terminal_runs']} / {ev['distinct_seeds']}**.",
         f"- Untriaged findings: **{ev['untriaged_findings']}**. "
         "A finding counts as triaged only when an exact campaign/seed/"
         "classification disposition exists.",
+        f"- Open findings: **{ev['open_findings']}**. An `open-*` disposition "
+        "is reviewed but cannot satisfy the gate.",
         f"- Oracle volume criterion met: **"
         f"{'YES' if ev['g7_oracle_volume_met'] else 'NO'}**.",
+        "",
+        "## Campaign inputs",
+        "",
+        "| Campaign | Policy | Requested runs | Included distinct | "
+        "Deduplicated |",
+        "|---|---|---:|---:|---:|",
+    ]
+    for campaign in report["inputs"]["campaigns"]:
+        lines.append(
+            f"| {campaign['campaign_id']} | {campaign['policy']} | "
+            f"{campaign['requested_runs']} | "
+            f"{campaign['included_distinct_runs']} | "
+            f"{campaign['deduplicated_runs']} |"
+        )
+    lines += [
         "",
         "## Diff rates",
         "",

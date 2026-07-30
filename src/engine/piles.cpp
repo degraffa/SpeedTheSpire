@@ -25,6 +25,34 @@
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
+namespace {
+
+// Execute one EmptyDeckShuffleAction exactly as the game does.  The action is
+// allowed to see an empty discard pile: CardGroup.shuffle(Random) still draws
+// one shuffleRng.randomLong(), and the constructor has already fired every
+// relic's onShuffle hook.  DrawCardAction can create precisely that empty
+// action when a draw request exceeds every card left in draw + discard.
+//
+// Most authored shuffle sites guard on a non-empty discard before constructing
+// the action.  Their public helper below preserves that guard; draw_cards calls
+// this lower-level body for the one unguarded recursive-DrawCardAction case.
+void execute_empty_deck_shuffle(CombatState& s) noexcept {
+    const RelicView rv = player_relics(s);
+    dispatch_relics_on_shuffle(s, rv.relics, rv.count);
+
+    JdkRandom rng(random_long(s.shuffle_rng));
+    jdk_shuffle(std::span<CardPoolIndex>(s.discard, s.discard_count), rng);
+
+    int n = s.discard_count;
+    if (s.draw_count + n > kDrawCap) {
+        n = kDrawCap - s.draw_count;  // defensive clamp; unreachable in S1
+    }
+    std::copy(s.discard, s.discard + n, s.draw + s.draw_count);
+    s.draw_count = static_cast<uint8_t>(s.draw_count + n);
+    s.discard_count = 0;
+}
+
+}  // namespace
 
 void reset_cost_for_turn(CombatState& s, uint8_t pool_index) noexcept {
     if (pool_index >= kCardPoolCap) {
@@ -47,43 +75,16 @@ void reset_cost_for_turn(CombatState& s, uint8_t pool_index) noexcept {
 
 void shuffle_discard_into_draw(CombatState& s) noexcept {
     if (s.discard_count == 0) {
-        return;  // nothing to reshuffle -- no random_long drawn (matches the game)
+        return;  // guarded authored sites never construct an empty action
     }
 
     // Relics onShuffle (EmptyDeckShuffleAction ctor, EmptyDeckShuffleAction.java:
     // 37-39): fires as the reshuffle action is created -- i.e. BEFORE the shuffle
-    // draw -- and only when a reshuffle actually happens (DrawCardAction only
-    // constructs the action when the discard is non-empty). Sundial counts these
-    // (Sundial); its GainEnergy is QUEUED (addToBot), so the shuffle/draw math
-    // below and shuffle_rng consumption are untouched. No-op without a
-    // responding relic (fixtures byte-identical).
-    {
-        const RelicView rv = player_relics(s);
-        dispatch_relics_on_shuffle(s, rv.relics, rv.count);
-    }
-
-    // CardGroup.shuffle(shuffleRng): exactly one shuffleRng.randomLong() seeds a
-    // fresh java.util.Random, whose LCG drives Collections.shuffle's Fisher-Yates
-    // over the discard list (trap 2: JDK LCG, NOT xorshift128+). This is the ONLY
-    // shuffle_rng draw here -- the Fisher-Yates swaps consume JdkRandom-internal
-    // draws, never the RngStream -- so shuffle_rng.counter advances by exactly 1.
-    const int64_t seed = random_long(s.shuffle_rng);
-    JdkRandom rng(seed);
-    jdk_shuffle(std::span<CardPoolIndex>(s.discard, s.discard_count), rng);
-
-    // EmptyDeckShuffleAction walks the shuffled discard front-to-back, moving each
-    // card to the draw pile via Soul.shuffle -> drawPile.addToTop (append to the
-    // END of the list). The draw pile is empty at this point, so its list becomes
-    // the shuffled discard array in the SAME order; getTopCard (== last element)
-    // is drawn first. Our array convention mirrors that list (draw[draw_count-1]
-    // == top), so a straight std::copy onto the draw[] tail reproduces it exactly.
-    int n = s.discard_count;
-    if (s.draw_count + n > kDrawCap) {
-        n = kDrawCap - s.draw_count;  // defensive clamp; unreachable in the skeleton
-    }
-    std::copy(s.discard, s.discard + n, s.draw + s.draw_count);
-    s.draw_count = static_cast<uint8_t>(s.draw_count + n);
-    s.discard_count = 0;
+    // draw. CardGroup.shuffle then draws exactly one shuffleRng.randomLong() to
+    // seed its private JDK Fisher-Yates, and Soul.shuffle moves the result into
+    // draw-pile order. The shared body also handles the empty action that only
+    // DrawCardAction's recursive overdraw path can construct.
+    execute_empty_deck_shuffle(s);
 }
 
 void reshuffle_all(CombatState& s) noexcept {
@@ -153,6 +154,19 @@ int draw_cards(CombatState& s, int amount) noexcept {
         return 0;  // DrawCardAction: amount <= 0 draws nothing
     }
 
+    // DrawCardAction does not merely loop until both piles are empty.  If this
+    // request begins with at least one available card but asks for more than
+    // draw + discard contain, its recursive tail sees a non-empty draw pile,
+    // notices amount > deckSize, and constructs one final
+    // EmptyDeckShuffleAction over an EMPTY discard.  That action still fires
+    // onShuffle and consumes one shuffle_rng draw.  STS300219 turns 4-5 are the
+    // live witness: four surviving cards requested by a five-card turn draw
+    // advance shuffle_rng twice (the real reshuffle, then this empty one).
+    const int available_at_entry =
+        static_cast<int>(s.draw_count) + static_cast<int>(s.discard_count);
+    const bool trailing_empty_shuffle =
+        available_at_entry > 0 && amount > available_at_entry;
+
     int drawn = 0;
     for (int i = 0; i < amount; ++i) {
         if (s.draw_count == 0) {
@@ -168,6 +182,9 @@ int draw_cards(CombatState& s, int amount) noexcept {
         s.hand[s.hand_count] = top;
         ++s.hand_count;
         ++drawn;
+    }
+    if (trailing_empty_shuffle) {
+        execute_empty_deck_shuffle(s);
     }
     return drawn;
 }

@@ -14,10 +14,19 @@ from pathlib import Path
 from typing import Any
 
 from generate_report import (
-    DEFAULT_CAMPAIGNS, ReportError, read_json, sha256_file, write_text_lf,
+    ReportError, capture_race_record_count, read_json, sha256_file,
+    write_text_lf,
 )
 
 FORMAT = "STS-ORACLE-CI-CORPUS v1"
+# The committed smoke corpus is a frozen B5.4 artifact, not a moving sample of
+# whichever campaigns the latest dashboard aggregates. Keep its no-argument
+# regeneration inputs pinned independently from generate_report's G7 defaults.
+DEFAULT_CORPUS_CAMPAIGNS = (
+    "b52_accept_locked_20260729_71000_71049",
+    "b52_accept_20260729_70000_70049",
+    "b53_full_act1_20260729",
+)
 
 
 def trace_header(path: Path) -> dict[str, int]:
@@ -64,7 +73,8 @@ def select(campaign_root: Path, campaign_ids: list[str],
                 break
             seed = str(run.get("seed", ""))
             if seed in seen or run.get("classification") != "clean" or \
-                    int(run.get("known_obtain_race_records", 0)) != 0:
+                    capture_race_record_count(
+                        run, f"{campaign_id}/{seed}") != 0:
                 continue
             raw = campaign_dir / str(run["source_artifact"])
             trace = campaign_dir / str(run["trace"])
@@ -158,7 +168,7 @@ def main() -> int:
     args = parser.parse_args()
     try:
         manifest = build(args.artifact_root,
-                         args.campaigns or list(DEFAULT_CAMPAIGNS),
+                         args.campaigns or list(DEFAULT_CORPUS_CAMPAIGNS),
                          args.count, args.archive, args.manifest)
     except ReportError as exc:
         print(f"corpus build error: {exc}")

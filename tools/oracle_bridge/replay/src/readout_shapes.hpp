@@ -1,13 +1,19 @@
 #pragma once
 
-// readout_shapes.hpp -- the two SHAPE decisions the `--treasure` and `--event`
-// read-outs make before any comparison happens:
+// readout_shapes.hpp -- the five SHAPE decisions the replay read-outs make
+// before any comparison happens:
 //
 //   1. `strip_sapphire_key_row` -- which captured reward rows a chest open is
 //      allowed to carry that the simulator does not model, and which absence or
 //      misplacement of that row is a real divergence.
 //   2. `join_capture_event` -- the capture's event identity -> the registry's
 //      `EventId`, fail-loud on anything the registry does not know.
+//   3. `is_escape_settlement_fields` -- the exact field set that may lag while
+//      a Smoke Bomb escape animation settles.
+//   4. `is_potion_obtain_animation_fields` -- the exact field set that may lag
+//      while Entropic Brew's ObtainPotionEffects animate.
+//   5. `is_transform_preview_rng_advance` -- a proved cardRng-only advance
+//      caused by the transform confirmation's curse preview animation.
 //
 // INTERNAL header, same rationale as `command_map.hpp` next door (conventions
 // "Where a new header goes"): its consumers are this tool's `main.cpp` and its
@@ -15,13 +21,14 @@
 // decisions are places the harness can quietly call a divergence benign, and
 // until they were separable the only way to see one go wrong was to read a
 // whole campaign's output by eye. Everything here is plain data plus the
-// generated registry, so both are directly testable without an artifact.
+// generated registry, so all five are directly testable without an artifact.
 
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "sts/engine/rng_stream.hpp"
 #include "sts/registry/game_ids.hpp"
 #include "sts/registry/ids.hpp"
 
@@ -300,6 +307,74 @@ struct EventJoin {
         return false;
     }
     return true;
+}
+
+// --- 4. Entropic Brew's out-of-combat obtain-animation race -----------------
+//
+// The out-of-combat branch queues one ObtainPotionEffect per roll
+// (EntropicBrew.java:46-48). The potion RNG advances synchronously, but each
+// effect inserts its potion only after its animation clock runs. A driver dump
+// may therefore see the consumed Brew's slots empty for one ready-for-command
+// record while the headless simulator has already filled them. This predicate
+// is only the field-set half of the classifier; main.cpp additionally requires
+// the immediately preceding command to have used an Entropic Brew and the
+// immediately following capture record to contain exactly the simulator's
+// potion identities.
+[[nodiscard]] inline bool is_potion_obtain_animation_fields(
+    const std::vector<std::string>& field_names) {
+    if (field_names.empty()) return false;
+    for (const std::string& f : field_names) {
+        if (f.rfind("potions[", 0) != 0) return false;
+    }
+    return true;
+}
+
+// --- 5. Transform-grid curse preview's wall-clock cardRng burn ---------------
+//
+// GridCardSelectScreen's transform confirmation animates a replacement preview
+// every 0.1 seconds (GridCardSelectScreen.java:264-268). It calls
+// returnTrulyRandomCardFromAvailable(preview, new Random()), which normally
+// confines the roll to that throwaway RNG -- except its CURSE branch ignores
+// the supplied RNG and calls CardLibrary.getCurse(), consuming GLOBAL cardRng
+// instead (AbstractDungeon.java:1016-1045; CardLibrary.java:1022-1029).
+// Therefore the number of cardRng draws depends on wall-clock time spent on
+// the confirmation animation, information the headless action API neither has
+// nor should invent. STS303586's Living Wall confirmation burned three.
+//
+// This is the stream-proof half of the classifier. The caller additionally
+// requires the immediately preceding replay command to have confirmed an
+// event TRANSFORMABLE grid whose selected card was a CURSE. We accept exactly
+// card_rng.{s0,s1,counter}, require a positive bounded counter delta, and replay
+// that many getCurse() `random(0, 9)` calls from the sim stream to prove the
+// captured endpoint byte-for-byte. A wrong stream state, any gameplay field,
+// or any other grid therefore cannot hide here.
+[[nodiscard]] inline bool is_transform_preview_rng_advance(
+    const std::vector<std::string>& field_names,
+    const sts::engine::RngStream& sim,
+    const sts::engine::RngStream& capture) noexcept {
+    if (field_names.size() != 3) return false;
+    bool s0 = false;
+    bool s1 = false;
+    bool counter = false;
+    for (const std::string& f : field_names) {
+        if (f == "card_rng.s0") {
+            s0 = true;
+        } else if (f == "card_rng.s1") {
+            s1 = true;
+        } else if (f == "card_rng.counter") {
+            counter = true;
+        } else {
+            return false;
+        }
+    }
+    const int32_t draws = capture.counter - sim.counter;
+    if (!s0 || !s1 || !counter || draws <= 0 || draws > 1000) return false;
+    sts::engine::RngStream probe = sim;
+    for (int32_t i = 0; i < draws; ++i) {
+        (void)sts::engine::random(probe, 0, 9);  // ten ordinary curse ids
+    }
+    return probe.s0 == capture.s0 && probe.s1 == capture.s1 &&
+           probe.counter == capture.counter && probe.pad == capture.pad;
 }
 
 }  // namespace sts::replay

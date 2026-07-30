@@ -202,6 +202,75 @@ TEST(BigFish, AllThreeOptionsApplyTheirExactImmediateMutations) {
     }
 }
 
+// Big Fish constructs Regret's visual obtain before acquiring the relic, then
+// resolves the card after the relic is owned. That split is observable when
+// the rolled relic is Darkstone Periapt: the curse must immediately grant +6
+// max HP and the companion +6 heal.
+TEST(BigFish, BoxRelicHooksTheFollowingRegretObtain) {
+    RunController rc = event_controller(EventId::BIG_FISH);
+    for (const RelicPool pool :
+         {RelicPool::COMMON, RelicPool::UNCOMMON, RelicPool::RARE}) {
+        const int p = static_cast<int>(pool);
+        rc.run.relic_pool_count[p] = 1;
+        rc.run.relic_pools[p][0] =
+            static_cast<uint16_t>(RelicId::DARKSTONE_PERIAPT);
+    }
+    rc.run.hp = 21;
+    rc.run.max_hp = 75;
+    const uint16_t before = rc.run.master_deck_count;
+
+    choose(rc, 2);
+
+    EXPECT_TRUE(owns(rc.run, RelicId::DARKSTONE_PERIAPT));
+    ASSERT_EQ(rc.run.master_deck_count, before + 1);
+    EXPECT_EQ(rc.run.master_deck[before].card_id,
+              static_cast<uint16_t>(CardId::REGRET));
+    EXPECT_EQ(rc.run.max_hp, 81);
+    EXPECT_EQ(rc.run.hp, 27);
+}
+
+// ShowCardAndObtainEffect spends Omamori in its constructor. Big Fish creates
+// that effect before acquiring the Box relic, so a newly rolled Omamori is too
+// late to block this Regret; an Omamori owned on entry still blocks it.
+TEST(BigFish, BoxRegretUsesThePreRelicOmamoriSnapshot) {
+    RunController rolled = event_controller(EventId::BIG_FISH);
+    for (const RelicPool pool :
+         {RelicPool::COMMON, RelicPool::UNCOMMON, RelicPool::RARE}) {
+        const int p = static_cast<int>(pool);
+        rolled.run.relic_pool_count[p] = 1;
+        rolled.run.relic_pools[p][0] =
+            static_cast<uint16_t>(RelicId::OMAMORI);
+    }
+    const uint16_t rolled_before = rolled.run.master_deck_count;
+
+    choose(rolled, 2);
+
+    EXPECT_TRUE(owns(rolled.run, RelicId::OMAMORI));
+    EXPECT_EQ(relic_counter(rolled.run, RelicId::OMAMORI), 2);
+    ASSERT_EQ(rolled.run.master_deck_count, rolled_before + 1);
+    EXPECT_EQ(rolled.run.master_deck[rolled_before].card_id,
+              static_cast<uint16_t>(CardId::REGRET));
+
+    RunController held = event_controller(EventId::BIG_FISH);
+    give_relic(held.run, RelicId::OMAMORI);
+    held.run.relics[held.run.relic_count - 1].counter = 2;
+    for (const RelicPool pool :
+         {RelicPool::COMMON, RelicPool::UNCOMMON, RelicPool::RARE}) {
+        const int p = static_cast<int>(pool);
+        held.run.relic_pool_count[p] = 1;
+        held.run.relic_pools[p][0] =
+            static_cast<uint16_t>(RelicId::STRAWBERRY);
+    }
+    const uint16_t held_before = held.run.master_deck_count;
+    const uint8_t held_relics = held.run.relic_count;
+
+    choose(held, 2);
+
+    EXPECT_EQ(held.run.master_deck_count, held_before);
+    EXPECT_EQ(relic_counter(held.run, RelicId::OMAMORI), 1);
+    EXPECT_EQ(held.run.relic_count, held_relics + 1);
+}
+
 TEST(Cleric, AscensionCostHealAndPurgeGridShareTheMasterDeckDoor) {
     RunController low = event_controller(EventId::THE_CLERIC, 14);
     low.run.gold = 74;

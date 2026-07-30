@@ -170,28 +170,14 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
 // `this.isActive = false` (:61) sits OUTSIDE that block and runs regardless, so
 // a run-layer cross-up still disarms the relic.
 //
-// That latch write is OBSERVATIONALLY INERT in this engine and is written
-// anyway, because inert-by-accident and inert-by-derivation are different
-// things: relic_native_red_skull's AT_BATTLE_START clears the counter
-// synchronously (atBattleStart's isActive = false, RedSkull.java:37) and its
-// queued decider (RedSkull$1, op_red_skull_entry) re-derives the entry grant
-// from live HP when it resolves, so the NEXT combat's entry grant cannot read
-// a stale latch. The game reaches the same place by a second road --
-// RedSkull.onVictory (:66-69) also clears isActive, which is why that hook is
-// NOT bound on the row: binding it would change nothing the re-seed does not
-// already guarantee. Keeping the write here is what makes "counter == isActive"
-// true at every point in a run rather than only inside a combat.
-//
-// A fan-out over every held copy rather than a getRelic, matching the Java's
-// relic iteration.
-inline void dispatch_relics_on_not_bloodied_out_of_combat(RunState& rs) noexcept {
-    for (uint8_t i = 0; i < rs.relic_count; ++i) {
-        RelicSlot& slot = rs.relics[i];
-        if (slot.relic_id == static_cast<uint16_t>(RelicId::RED_SKULL)) {
-            slot.counter = 0;  // isActive = false (RedSkull.java:61)
-        }
-    }
-}
+// That private latch write is OBSERVATIONALLY INERT at the run layer: no power
+// survives the room boundary, onVictory clears isActive, and the next combat's
+// atBattleStart clears then re-derives it before any possible read.  There is
+// therefore deliberately no RunState storage or write here.  In particular,
+// RelicSlot.counter is AbstractRelic.counter, not RedSkull.isActive, and must
+// remain the oracle-visible -1.
+inline void dispatch_relics_on_not_bloodied_out_of_combat(
+    RunState& /*rs*/) noexcept {}
 
 inline void heal_out_of_combat(RunState& rs, int32_t amount) noexcept {
     int32_t hp = static_cast<int32_t>(rs.hp) + amount;

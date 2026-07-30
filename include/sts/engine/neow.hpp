@@ -165,6 +165,10 @@ enum class NeowGridMode : uint8_t {
                     // in click order when the set completes (giveCards,
                     // :65-79). The only grid mode drawing miscRng, which is
                     // why neow_grid_pick takes the stream.
+    CONFIRM_PANDORA = 5,     // choice-free openConfirmationGrid; previews are
+                             // parked in RewardScreen until Proceed
+    CONFIRM_CALLING_BELL = 6, // choice-free Curse of the Bell grid; its
+                              // update-side effects wait until Proceed
 };
 
 inline constexpr uint8_t kNeowNoChoice = 0xFF;

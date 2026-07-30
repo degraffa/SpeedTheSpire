@@ -607,6 +607,49 @@ TEST(CardUncommonSkillsInfernalBlade, OneDrawCostZeroThisTurnAndReset) {
         has_card_flag(s.card_pool[gen].flags, CardFlag::COST_MODIFIED_FOR_TURN));
 }
 
+TEST(CardUncommonSkillsInfernalBlade,
+     GeneratedBloodForBloodKeepsZeroButRevealsReducedBaseNextTurn) {
+    int64_t seed = 0;
+    for (int64_t candidate = 1; candidate < 10000; ++candidate) {
+        RngStream probe = from_seed(candidate);
+        const int32_t index =
+            random(probe, kIroncladAttackPoolCount - 1);
+        if (kIroncladAttackPool[static_cast<unsigned>(index)] ==
+            CardId::BLOOD_FOR_BLOOD) {
+            seed = candidate;
+            break;
+        }
+    }
+    ASSERT_NE(seed, 0);
+
+    CombatState s = MakeCombat();
+    AddHand(s, CardId::INFERNAL_BLADE);
+    s.card_random_rng = from_seed(seed);
+    Play(s);
+    ASSERT_EQ(s.hand_count, 1);
+    const CardPoolIndex generated = s.hand[0];
+    ASSERT_EQ(s.card_pool[generated].card_id,
+              static_cast<uint16_t>(CardId::BLOOD_FOR_BLOOD));
+    ASSERT_EQ(s.card_pool[generated].cost_now, 0);
+
+    ActionQueueItem hit{};
+    hit.opcode = static_cast<uint16_t>(Opcode::DAMAGE);
+    hit.src = 0;
+    hit.tgt = kActorPlayer;
+    hit.amount = 1;
+    execute_opcode(s, hit);
+    EXPECT_EQ(s.card_pool[generated].cost_now, 0)
+        << "updateCost preserves the existing base-vs-turn delta";
+    EXPECT_TRUE(has_card_flag(s.card_pool[generated].flags,
+                              CardFlag::SAVED_BASE_COST));
+    EXPECT_EQ(saved_base_cost(s.card_pool[generated].flags), 3)
+        << "the hidden Blood for Blood base fell 4 -> 3";
+
+    EndTurn(s);
+    EXPECT_EQ(s.card_pool[generated].cost_now, 3)
+        << "resetAttributes reveals the reduced base, not registry cost 4";
+}
+
 TEST(CardUncommonSkillsInfernalBlade, UpgradedCostsZero) {
     const CardDef* d = card_def(CardId::INFERNAL_BLADE);
     ASSERT_NE(d, nullptr);

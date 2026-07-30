@@ -49,6 +49,8 @@ void duration_debuff_at_end_of_round(CombatState& s, Hook hook,
 // amount to the live object and discarding the freshly built one).
 [[nodiscard]] bool duration_debuff_starts_just_applied(const CombatState& s,
                                                        uint8_t tgt,
-                                                       PowerId id) noexcept;
+                                                       PowerId id,
+                                                       bool is_source_monster)
+    noexcept;
 
 }  // namespace sts::engine

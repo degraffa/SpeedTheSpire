@@ -404,6 +404,11 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                               cat);
                     }
                 }
+                if (mask.can_cancel_grid) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      engine::kChooseCancelGrid),
+                          cat);
+                }
             }
             break;
         }
@@ -457,6 +462,11 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
             }
             if (mask.can_purge) {
                 s.add(make_action(ActionVerb::CHOOSE, engine::kChooseShopPurge),
+                      MoveCat::SHOP);
+            }
+            if (mask.can_cancel_grid) {
+                s.add(make_action(ActionVerb::CHOOSE,
+                                  engine::kChooseCancelGrid),
                       MoveCat::SHOP);
             }
             if (mask.can_proceed) {

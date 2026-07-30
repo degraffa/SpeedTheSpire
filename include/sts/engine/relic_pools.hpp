@@ -158,6 +158,13 @@ enum class RelicEquipScreen : uint8_t {
                                  // rendering of the game's modal
                                  // gridSelectScreen + RoomPhase.INCOMPLETE
                                  // (BottledFlame.java:49-51).
+    GRID_CONFIRM_PANDORA = 5,    // Pandora's Box: display-only confirmation
+                                 // grid; preview identities have been drawn
+                                 // and starter removals already applied, while
+                                 // replacement obtains wait for Confirm
+    GRID_CONFIRM_CALLING_BELL = 6, // Calling Bell: display-only curse grid;
+                                   // curse obtain and reward assembly wait for
+                                   // Confirm
 };
 
 struct RelicEquipContext {
@@ -180,6 +187,15 @@ struct RelicEquipContext {
     // OUT (GRID_BOTTLE only): which bottle wants the pick. NONE otherwise.
     MasterBottleKind bottle = MasterBottleKind::NONE;
 };
+
+// Resolve the choice-free confirmation screens requested by Pandora's Box and
+// Calling Bell. These are public run-layer transitions because the screen
+// owner (Neow now, a future boss-chest controller later) invokes them only
+// after the player acknowledges the preview grid.
+void relic_confirm_pandoras_box(
+    RunState& rs, RewardScreen& rewards) noexcept;
+void relic_confirm_calling_bell(
+    RunState& rs, RewardScreen& rewards, RoomType reward_room) noexcept;
 
 // One master-deck row's eligibility on a bottle's grid:
 // getPurgeableCards().getCardsOfType(type) (BottledFlame.java:43/:51 and
