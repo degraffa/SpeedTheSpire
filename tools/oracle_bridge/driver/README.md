@@ -10,7 +10,8 @@ This directory holds the oracle-bridge driver family. Protocol details are in
 | `cards_sidetable.json` | **B4.x** | committed per-card damage/block numbers the greedy policy scores with |
 | `gen_cards_sidetable.py` | **B4.x** | regenerates `cards_sidetable.json` from `registry/cards.yaml` (dev-time, needs PyYAML; the driver itself never imports it) |
 | `orchestrator.py` | **B1.4** | Windows-host outer loop that owns the game process: writes config.properties, launches ModTheSpire under the bundled JRE 8, relaunches on crash/hang/boss-reward, induces a kill for acceptance |
-| `campaign_pipeline.py` | **B5.2** | one-command capture → strict validation → translation/traces → replay + encounter-list diffs → generated report/triage; deterministic seed shards and Windows nightly scheduling |
+| `campaign_pipeline.py` | **B5.2+** | one-command isolated N-instance capture → strict validation → serial translation/traces → replay + encounter-list diffs → per-worker and aggregate reports/triage; deterministic seed shards and Windows nightly scheduling |
+| `instance_runtime.py` | **B5.2+** | fail-closed per-worker game/config/temp/profile runtime materialization and resume identity |
 | `postprocess_campaign.sh` | **B5.2** | WSL half of the pipeline, reached only through `tools/wsl_run.cmd --script`; builds the release tools and writes per-seed derived artifacts |
 | `validate_artifacts.py` | **B1.4** | validates run JSONL against the PROTOCOL.md schema (header + action `state_json` + oracle block + terminal) |
 | `echo_driver.py` | B0.2 | bring-up child: logs every state JSON, forwards side-channel commands, `--verify` re-parse |
@@ -29,7 +30,8 @@ On the Windows host, one command owns the whole path:
 C:\Python39\python.exe campaign_pipeline.py run ^
   --campaign-id b52_nightly_20260729 ^
   --seeds D:/STS_BG_Mod/_oracle_data/b52_50_seeds.txt ^
-  --policy random-legal
+  --policy random-legal ^
+  --instances auto
 ```
 
 Resume is the default. Re-running the identical command resumes the seed-level
@@ -40,12 +42,50 @@ An interrupted current seed is retried first; its incomplete JSONL and timing
 sidecar are replaced before the new attempt writes its header, while completed
 seeds are retained.
 
-The game and CommunicationMod config are a machine-wide singleton. `run` and
-`nightly` take a nonblocking OS-backed lock at
-`D:\STS_BG_Mod\_oracle_data\oracle_game.lock` before launching the
-orchestrator. A concurrent campaign fails immediately with exit `11` and names
-the owning campaign id and PID. The OS releases the lock if the pipeline exits
-or crashes, so the next invocation can reacquire it without manual cleanup.
+`--instances N` starts that many simultaneous isolated game workers;
+`--instances auto` (the default for a new campaign group) resolves a
+conservative count from the selected seed count, one slot per presumed
+physical core (half the logical CPU count), and currently available RAM. The
+resolved number, exact seed partition, JVM heap/recycle
+limits and worker campaign ids are persisted before launch. Resume reuses that
+topology; requesting an explicit count that would change it under the same id
+is refused.
+An explicit count larger than the selected seed set is reduced to one worker
+per seed.
+
+The top-level coordinator still takes the nonblocking OS-backed lock at
+`D:\STS_BG_Mod\_oracle_data\oracle_game.lock`. It now protects scheduler and
+capacity ownership rather than a shared game config: a second coordinator
+fails immediately with exit `11` and names the owner, while the one owner may
+launch all of its recorded workers. The OS releases the lock after a crash.
+Existing in-progress campaigns created before multi-instance support are
+detected and resume through their original one-game/install-directory path;
+start a new campaign id to gain parallelism.
+
+Before any worker starts, the Windows entrypoint places the coordinator itself
+in a kill-on-close Job Object, so every orchestrator inherits containment at
+process creation. Each orchestrator gives its JVM tree a nested kill-on-close
+job. A coordinator crash therefore retires the orchestrators and games before
+a successor can safely reuse their runtimes; ordinary exceptions and
+interrupts use the same cleanup path explicitly.
+
+Every new worker is an ordinary B5.2 shard with its own artifact directory and
+an external runtime under `D:\STS_BG_Mod\_oracle_data\runtimes`. The runtime
+hard-links the large immutable game jar, copies the exact fork jar it loads,
+copies the fixed fully-unlocked profile template, and gives the JVM private
+`preferences/`, `saves/`, `runs/`, logs, temp, `LOCALAPPDATA` and `APPDATA`.
+The driver hashes the worker-local fork copy, so artifact provenance names the
+bytes ModTheSpire actually loaded. Immutable runtime inputs, the pinned profile
+template, or any worker unlock-state drift refuse resume; ordinary statistics
+changes in the original install profile do not replace an existing template.
+The first template snapshot also refuses if the install profile changes while
+it is being copied; stop any legacy install-directory campaign and retry.
+
+Workers use the installed game's own memory boundary (`-Xms256m -Xmx1g`) and
+are recycled after a bounded number of completed seeds (default 50). Override
+the count with `--seeds-per-launch` when measuring a different lifecycle.
+Capture workers overlap; translation/replay/report post-processing is joined
+and run serially because all shards share the repository's WSL build tree.
 
 Arbitrary campaign sizes use the same format. This is the 200-run harvest shape
 for the distributional suite:
@@ -72,10 +112,11 @@ C:\Python39\python.exe campaign_pipeline.py run ^
 The script path and SHA-256 are part of the resumable campaign identity.
 
 For multiple hosts, pass the same source list and `--shard-count N
---shard-index I` (zero-based). Selection is `seeds[I::N]`; the artifact
-directory is named
-`<campaign-id>.shard-<I+1>-of-<N>`, so shards never share progress files and
-their union is exactly the input list.
+--shard-index I` (zero-based). The host first selects `seeds[I::N]`, then its
+local `--instances` workers interleave only that selection. Hosts may therefore
+use different local worker counts without changing one another's seed sets.
+The host group is named `<campaign-id>.shard-<I+1>-of-<N>` and every worker has
+its own suffix and progress ledger; their union is exactly the input list.
 
 Install a resumable daily Windows Task Scheduler entry (local time):
 
@@ -83,7 +124,7 @@ Install a resumable daily Windows Task Scheduler entry (local time):
 C:\Python39\python.exe campaign_pipeline.py schedule ^
   --campaign-prefix oracle_nightly ^
   --seeds D:/STS_BG_Mod/_oracle_data/nightly_seeds.txt ^
-  --policy greedy --at 01:00
+  --policy greedy --instances auto --at 01:00
 ```
 
 The scheduled action runs the `nightly` subcommand, whose campaign id includes
@@ -129,8 +170,8 @@ Exit `0` means the full pipeline completed with no untriaged item. Exit `10`
 means every artifact/report was produced but one or more translation, raw-list,
 or replay divergences were queued; this is intentionally non-green and must be
 triaged, not tuned away. Infrastructure/validation failures retain their own
-nonzero exit; exit `11` specifically means another campaign owns the live
-game/config resource.
+nonzero exit; exit `11` specifically means another campaign owns the
+machine-wide coordinator/capacity lock.
 
 Promoted, minimized cases live under
 `tests/golden/oracle_reproducers/`; its README defines the review and promotion
@@ -169,7 +210,7 @@ settle window, and Calling Bell's three mandatory Neow relic rows suppress the
 misleading simultaneously advertised `proceed`. These are capture-liveness
 rules, not changes to artifact or simulator semantics.
 
-### Running a campaign (operator, Windows host)
+### Running a lower-level single campaign (diagnostics only, Windows host)
 
 ```bat
 C:\Python39\python.exe orchestrator.py ^
@@ -179,13 +220,17 @@ C:\Python39\python.exe orchestrator.py ^
     --kill-after-seeds 3 --fresh
 ```
 
-The orchestrator writes `%LOCALAPPDATA%\ModTheSpire\CommunicationMod\config.properties`
-(so `runAtGameStart=true` spawns the driver with the right args), launches the
-game under `<game>\jre\bin\java.exe` (bundled JRE 8 — never system Java, ledger
-B1.1 Log), watches `campaign_progress.json` + `campaign_heartbeat.json`, and
-relaunches on crash / hang / boss-reward until the driver marks the campaign
-complete. `--kill-after-seeds N` induces one deliberate mid-campaign game kill to
-exercise crash-resume (the B1.4 acceptance bar).
+Use `campaign_pipeline.py run` for ordinary and parallel campaigns. A direct
+orchestrator invocation is retained for diagnostics and historical acceptance;
+never run two of them independently. In the legacy form above it writes the
+host `%LOCALAPPDATA%\ModTheSpire\CommunicationMod\config.properties`. The
+pipeline instead supplies the private runtime working/config/temp paths and
+worker-local fork jar. In either form the orchestrator launches under
+`<game>\jre\bin\java.exe` (bundled JRE 8 — never system Java), watches
+`campaign_progress.json` + `campaign_heartbeat.json`, and relaunches on crash,
+hang, boss reward or the configured seed-recycle boundary until the driver
+marks the campaign complete. `--kill-after-seeds N` induces one deliberate
+mid-campaign game kill to exercise crash-resume.
 
 An oracle campaign is valid only when the explicitly selected
 `CommunicationMod-oracle` fork emits `game_state.oracle`. The driver checks the

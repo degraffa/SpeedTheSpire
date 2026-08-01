@@ -665,12 +665,13 @@ behaviour beats instruction count here — measure before "optimising".
 
 ---
 
-**Two oracle campaigns cannot share the live game/config resource.** Two
+**Two oracle campaigns cannot share writable game/config namespaces.** Two
 campaign agents launched within seconds of each other, creating two game
 instances after each had rewritten CommunicationMod's singleton
 `config.properties`. Separate artifact directories prevented path aliasing, but
-neither the resumable ledgers nor per-campaign launch bindings serialized that
-machine-wide resource.
+both games also shared relative `preferences/`, `saves/`, `runs/`, temp files
+and logs. Neither the resumable ledgers nor per-campaign launch bindings
+serialized those machine-wide resources.
 
 > **ELIMINATED 2026-07-29: `campaign_pipeline.py run` and `nightly` now take a
 > nonblocking OS-backed singleton lock before the orchestrator can touch the
@@ -681,6 +682,20 @@ machine-wide resource.
 > entry point documented in
 > [`tools/oracle_bridge/driver/README.md`](../tools/oracle_bridge/driver/README.md#b52-one-command-campaigns);
 > never launch two lower-level orchestrators independently.
+
+> **SUPERSEDED 2026-08-01: the pipeline coordinator may now own multiple
+> isolated workers.** The OS-backed lock still rejects a second coordinator;
+> inside the owner, `--instances N` (or `auto`) deterministically partitions
+> seeds into separate campaign shards. Every worker has a private game working
+> directory, unlocked-profile copy, save/run/log tree, JVM temp directory and
+> `LOCALAPPDATA`/`APPDATA` ModTheSpire config tree. Large immutable game files
+> are hard-linked and the fork jar is copied, hashed and passed to the driver
+> from the exact worker path ModTheSpire loads. Capture is concurrent;
+> post-processing is serialized because all shards share this repo's WSL build
+> tree. The pipeline process joins a kill-on-close Windows Job Object before
+> spawning; orchestrators inherit it and place their JVMs in nested jobs, so a
+> hard coordinator death cannot release the lock while leaving games behind.
+> Direct lower-level orchestrators are still not a parallelism API.
 
 **An advertised CommunicationMod command can still be a progress no-op.**
 Random-legal campaigns selected `cancel` after a mandatory GRID card pick

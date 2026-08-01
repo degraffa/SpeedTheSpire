@@ -69,6 +69,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| Parallel oracle two-JVM live smoke | parallel-oracle | Next new oracle campaign after the active legacy G7 owner releases `oracle_game.lock` | The isolated topology, launch environment, overlap, resume, partial-failure and lifecycle paths are covered synthetically and in every build preset, but this change deliberately did not start or kill a second game while `g7_random_b153_20260729_300000_324999` owns the legacy install/config namespace. On the next new campaign, run at least two seeds with `--instances 2` and retain the aggregate report plus both runtime manifests as the operational read-out; a failure reopens this implementation. |
 | Meal Ticket `justEnteredRoom` shop heal, including ?→Shop | B4.10 | B4.8 `[x]` | **DISCHARGED by B4.8.** `dispatch_just_entered_room_relics` (`shop.hpp`) is the shared entry effect, called from `on_player_entry` for every non-Event room and, for a ?, only AFTER the roll has replaced the room — which is where the game calls it (`AbstractDungeon.java:1763-1789`), so a ?→Shop and a static ShopRoom are the same room by then. Both paths are named tests (`ShopFlow.MealTicketHealsOnAStaticShopRoomEntry`, `ShopFlow.MealTicketAlsoHealsWhenAQuestionMarkResolvesToAShop`). The heal is out of combat, so Magic Flower's `onPlayerHeal` (combat-only, `MagicFlower.java:31-37`) cannot scale it and the fan-out is named rather than written, as `rest_apply_heal` already does |
 | Maw Bank `onEnterRoom` outside original EventRooms | B4.10 | wave-runlayer S2 | **DISCHARGED by Wave-C track 2 stage 2.** `dispatch_event_room_entry_relics` is generalised into `dispatch_on_enter_room_relics(RunState&, RoomType)` (`event_framework.hpp`), called ONCE per transition from `on_player_entry` — so every static monster / elite / rest / shop / treasure entry pays 12 through the Ectoplasm-aware `gain_gold` door, and so does the BOSS entry (`DungeonMap.java:77-87` assigns `nextRoom` a MonsterRoomBoss and runs the same `nextRoomTransition`, whose relic loop at `AbstractDungeon.java:1755-1757` has no room-type guard beyond `nextRoom != null`). **`onEnterRoom` is NOT `justEnteredRoom`**: it fires pre-`?`-roll and pre-`setCurrMapNode`, exactly once, so the run layer's `?` recursion re-enters through `on_player_entry_impl(..., fire_on_enter_room=false)`. A `bool` parameter, not a `room != Event` test — that predicate is the one the recursion breaks, and wiring the hook at the `justEnteredRoom` site would pay a `?`→Shop twice (proven RED before the fix). Ssserpent Head keeps its `room instanceof EventRoom` gate (`SsserpentHead.java:29-35`) now that the fan-out is room-aware; `RoomType::None` is the Java's `nextRoom == null` and fires nothing |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot. **FURTHER DISCHARGED by `wave-combat` (Track 1 stage 4), and the row's premise was wrong for six of its seven potions — none of them needed `MAKE_CARD` work.** Elixir needed no new machinery at all: it is Purity's `CHOOSE_CARD{exhaust, optional: true}` with `ExhaustAction`'s literal amount 99 (`ExhaustAction.java:56-58`). The four discovery potions needed none either — only a pool selector and a copy count, carried in the already-live `DISCOVERY` item's unused `src`/`tgt` bytes, plus the generated `kIroncladPowerPool`, which was the one thing genuinely missing. Liquid Memories and Gambler's Brew each did need one new `ChoiceKind` — `DISCARD_TO_HAND_FREE` (11) and `HAND_TO_DISCARD_THEN_DRAW` (12), the latter shared with the Gambling Chip relic. **THE ROW IS NOW FULLY DISCHARGED**: all seven potions have bodies and the in-combat card-CHOOSE deferral group is empty |
@@ -408,6 +409,24 @@ rows change Bottled Tornado's gate — so it is answered, not bumped. (For B3.10
 twenty: none is BASIC or POWER-type, so the gate is unaffected.)
 
 ## Landed non-task work
+
+- **Parallel oracle campaign coordinator** `[x]` — `campaign_pipeline.py`
+  now accepts `--instances N|auto`, resolves a conservative CPU/RAM budget,
+  persists the resolved topology, partitions each outer host shard into
+  disjoint resumable worker campaigns, captures them concurrently, then joins
+  and serializes post-processing under the machine-wide coordinator lock.
+  `instance_runtime.py` gives every JVM private cwd/preferences/saves/runs,
+  `LOCALAPPDATA`/`APPDATA`, temp and logs; hard-links the immutable desktop jar,
+  privately copies and hashes the loaded fork, and pins a stable fully-unlocked
+  profile template plus runtime manifest. JVMs have explicit heap bounds,
+  recycle after a bounded seed count, and live in kill-on-close Windows Job
+  Objects with exception/interrupt cleanup. Existing pre-parallel campaign ids
+  retain the legacy single-runtime resume path. Synthetic acceptance covers
+  deterministic two-level sharding, real worker overlap, namespace
+  non-aliasing, resume/topology/drift refusal, partial-worker failure reports,
+  schedule propagation and JVM lifecycle; the live two-worker smoke is carried
+  explicitly in Deferred obligations because the active legacy G7 campaign
+  owns the install/config namespace and was not interrupted.
 
 - **Wave-3: the follow-up + citations union proven on `wave3-integrate`** `[x]`
   — merges `wave3-followup` (6 commits, head `07f4873`) and `wave3-citations`

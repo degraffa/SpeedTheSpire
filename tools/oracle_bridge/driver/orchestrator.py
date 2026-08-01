@@ -27,6 +27,7 @@ Stdlib-only. Run it from anywhere on the Windows host with Python 3.
 from __future__ import annotations
 
 import argparse
+import ctypes
 import hashlib
 import json
 import os
@@ -60,6 +61,92 @@ SCHEMA_VERSION = 1
 # threshold as before -- that path is unchanged.
 STALL_UNREADABLE_STREAK = 3
 STALL_POLL_INTERVAL_S = 3.0
+JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+_ACTIVE_PROCESSES = []
+_TRACK_LAUNCHES = False
+
+
+class _IoCounters(ctypes.Structure):
+    _fields_ = [(name, ctypes.c_ulonglong) for name in (
+        "ReadOperationCount", "WriteOperationCount", "OtherOperationCount",
+        "ReadTransferCount", "WriteTransferCount", "OtherTransferCount")]
+
+
+class _BasicLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("PerProcessUserTimeLimit", ctypes.c_longlong),
+        ("PerJobUserTimeLimit", ctypes.c_longlong),
+        ("LimitFlags", ctypes.c_ulong),
+        ("MinimumWorkingSetSize", ctypes.c_size_t),
+        ("MaximumWorkingSetSize", ctypes.c_size_t),
+        ("ActiveProcessLimit", ctypes.c_ulong),
+        ("Affinity", ctypes.c_size_t),
+        ("PriorityClass", ctypes.c_ulong),
+        ("SchedulingClass", ctypes.c_ulong),
+    ]
+
+
+class _ExtendedLimitInformation(ctypes.Structure):
+    _fields_ = [
+        ("BasicLimitInformation", _BasicLimitInformation),
+        ("IoInfo", _IoCounters),
+        ("ProcessMemoryLimit", ctypes.c_size_t),
+        ("JobMemoryLimit", ctypes.c_size_t),
+        ("PeakProcessMemoryUsed", ctypes.c_size_t),
+        ("PeakJobMemoryUsed", ctypes.c_size_t),
+    ]
+
+
+class _WindowsKillJob:
+    """Best-effort kill-on-close container for one launched JVM tree."""
+
+    def __init__(self, proc: subprocess.Popen):
+        self.handle = None
+        if os.name != "nt":
+            return
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.CreateJobObjectW.restype = ctypes.c_void_p
+        kernel32.SetInformationJobObject.argtypes = [
+            ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p, ctypes.c_ulong]
+        kernel32.SetInformationJobObject.restype = ctypes.c_int
+        kernel32.AssignProcessToJobObject.argtypes = [
+            ctypes.c_void_p, ctypes.c_void_p]
+        kernel32.AssignProcessToJobObject.restype = ctypes.c_int
+        kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+        kernel32.CloseHandle.restype = ctypes.c_int
+        handle = kernel32.CreateJobObjectW(None, None)
+        if not handle:
+            raise OSError(ctypes.get_last_error(), "CreateJobObjectW failed")
+        info = _ExtendedLimitInformation()
+        info.BasicLimitInformation.LimitFlags = (
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE)
+        if not kernel32.SetInformationJobObject(
+                handle, 9, ctypes.byref(info), ctypes.sizeof(info)):
+            error = ctypes.get_last_error()
+            if not kernel32.CloseHandle(handle):
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "CloseHandle failed after job configuration error")
+            raise OSError(error, "SetInformationJobObject failed")
+        if not kernel32.AssignProcessToJobObject(
+                handle, ctypes.c_void_p(proc._handle)):
+            error = ctypes.get_last_error()
+            if not kernel32.CloseHandle(handle):
+                raise OSError(
+                    ctypes.get_last_error(),
+                    "CloseHandle failed after job assignment error")
+            raise OSError(error, "AssignProcessToJobObject failed")
+        self.handle = handle
+
+    def close(self) -> None:
+        if self.handle is not None:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel32.CloseHandle.restype = ctypes.c_int
+            handle = self.handle
+            self.handle = None
+            if not kernel32.CloseHandle(handle):
+                raise OSError(ctypes.get_last_error(), "CloseHandle failed")
 
 
 def utc() -> str:
@@ -100,6 +187,7 @@ def write_config(config_path: str, command: str, oracle_block: bool,
 
 
 def build_driver_command(args) -> str:
+    effective_fork_jar = getattr(args, "effective_fork_jar", args.fork_jar)
     parts = [
         args.python.replace("\\", "/"),
         os.path.join(args.driver_dir, "campaign_driver.py").replace("\\", "/"),
@@ -107,7 +195,7 @@ def build_driver_command(args) -> str:
         "--campaign-id", args.campaign_id,
         "--seeds", args.seeds_arg,
         "--policy", args.policy,
-        "--fork-jar", args.fork_jar.replace("\\", "/"),
+        "--fork-jar", effective_fork_jar.replace("\\", "/"),
         "--launch-log", args.launch_log,
         "--launch-token", args.launch_token,
         "--policy-seed", str(args.policy_seed),
@@ -293,6 +381,21 @@ def kill_tree(proc: subprocess.Popen) -> None:
         proc.kill()
 
 
+def cleanup_process(proc: subprocess.Popen) -> None:
+    """Retire the JVM tree and close its kill-on-close job handle."""
+    try:
+        kill_tree(proc)
+    finally:
+        job = getattr(proc, "_oracle_kill_job", None)
+        if job is not None:
+            job.close()
+            proc._oracle_kill_job = None
+        try:
+            _ACTIVE_PROCESSES.remove(proc)
+        except ValueError:
+            pass
+
+
 def launch_game(args, launch_idx: int) -> subprocess.Popen:
     expected_log = f"mts_launch{launch_idx}.log"
     if args.launch_log != expected_log:
@@ -300,23 +403,54 @@ def launch_game(args, launch_idx: int) -> subprocess.Popen:
             f"launch #{launch_idx} must bind {expected_log!r}, got "
             f"{args.launch_log!r}")
     java = os.path.join(args.game_dir, "jre", "bin", "java.exe")
-    cmd = [java, "-jar", args.mts_jar,
-           "--skip-launcher", "--mods", "basemod,CommunicationMod-oracle"]
+    private_runtime = getattr(args, "private_runtime", False)
+    effective_workdir = getattr(args, "effective_workdir", args.game_dir)
+    cmd = [java]
+    if private_runtime:
+        cmd.extend([
+            f"-Xms{args.java_xms_mib}m",
+            f"-Xmx{args.java_xmx_mib}m",
+            f"-Djava.io.tmpdir={args.runtime_temp_dir}",
+        ])
+    cmd.extend(["-jar", args.mts_jar,
+                "--skip-launcher", "--mods",
+                "basemod,CommunicationMod-oracle"])
     out = open(campaign_file_under_root(
         args.data_root, args.campaign_id, args.launch_log), "x",
                encoding="utf-8", newline="\n")
     env = os.environ.copy()
     env[ORACLE_LAUNCH_TOKEN_ENV] = args.launch_token
+    if private_runtime:
+        env.update({
+            "LOCALAPPDATA": args.runtime_local_app_data,
+            "APPDATA": args.runtime_app_data,
+            "TEMP": args.runtime_temp_dir,
+            "TMP": args.runtime_temp_dir,
+        })
     log(f"launch #{launch_idx}: {java} -jar {args.mts_jar} --skip-launcher "
-        f"--mods basemod,CommunicationMod-oracle  (cwd={args.game_dir})")
+        "--mods basemod,CommunicationMod-oracle  "
+        f"(cwd={effective_workdir})")
     try:
-        return subprocess.Popen(cmd, cwd=args.game_dir, stdout=out,
+        proc = subprocess.Popen(cmd, cwd=effective_workdir, stdout=out,
                                 stderr=subprocess.STDOUT, env=env)
+        try:
+            kill_job = _WindowsKillJob(proc)
+            setattr(proc, "_oracle_kill_job", kill_job)
+        except (OSError, AttributeError) as exc:
+            if private_runtime:
+                kill_tree(proc)
+                raise RuntimeError(
+                    "private-runtime JVM could not be placed in its "
+                    f"kill-on-close job: {exc}") from exc
+            log(f"warning: JVM job-object containment unavailable: {exc}")
+        if _TRACK_LAUNCHES:
+            _ACTIVE_PROCESSES.append(proc)
+        return proc
     finally:
         out.close()
 
 
-def main(argv=None) -> int:
+def _main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Oracle campaign orchestrator (B1.4)")
     ap.add_argument("--data-root", default=r"D:\STS_BG_Mod\_oracle_data\campaigns")
     ap.add_argument("--campaign-id", required=True)
@@ -352,6 +486,20 @@ def main(argv=None) -> int:
                     default=os.path.dirname(os.path.abspath(__file__)))
     ap.add_argument("--fork-jar",
                     default=r"D:\SteamLibrary\steamapps\common\SlayTheSpire\mods\CommunicationMod-oracle.jar")
+    ap.add_argument("--runtime-workdir",
+                    help="isolated game working directory for this worker")
+    ap.add_argument("--runtime-local-app-data",
+                    help="isolated LOCALAPPDATA root for this worker")
+    ap.add_argument("--runtime-app-data",
+                    help="isolated APPDATA root for this worker")
+    ap.add_argument("--runtime-temp-dir",
+                    help="isolated TEMP/TMP root for this worker")
+    ap.add_argument("--runtime-fork-jar",
+                    help="private runtime copy of CommunicationMod fork")
+    ap.add_argument("--java-xms-mib", type=int, default=256)
+    ap.add_argument("--java-xmx-mib", type=int, default=1024)
+    ap.add_argument("--seeds-per-launch", type=int, default=50,
+                    help="recycle a JVM after this many newly completed seeds")
     ap.add_argument("--command-timeout", type=float, default=90.0,
                     help="driver per-command watchdog (s)")
     ap.add_argument("--stall-timeout", type=float, default=240.0,
@@ -367,11 +515,30 @@ def main(argv=None) -> int:
                     help="wipe any existing progress for this campaign first")
     args = ap.parse_args(argv)
 
+    runtime_values = (
+        args.runtime_workdir, args.runtime_local_app_data,
+        args.runtime_app_data, args.runtime_temp_dir, args.runtime_fork_jar)
+    if any(runtime_values) and not all(runtime_values):
+        ap.error("the five --runtime-* arguments must be supplied together")
+    if (args.java_xms_mib < 1 or args.java_xmx_mib < 1
+            or args.java_xms_mib > args.java_xmx_mib):
+        ap.error("Java heap sizes must be positive and Xms must not exceed Xmx")
+    if args.seeds_per_launch < 1:
+        ap.error("--seeds-per-launch must be positive")
+    args.private_runtime = all(runtime_values)
+    args.effective_workdir = (
+        args.runtime_workdir if args.private_runtime else args.game_dir)
+    args.effective_fork_jar = (
+        args.runtime_fork_jar if args.private_runtime else args.fork_jar)
+    config_local_app_data = (
+        args.runtime_local_app_data if args.private_runtime
+        else os.environ.get("LOCALAPPDATA"))
+
     args.seeds_arg = args.seeds  # passed through to the driver verbatim
     try:
         validate_campaign_id(args.campaign_id)
         args.seed_list = resolve_seeds(args.seeds)
-        args.fork_hash = sha256_file(args.fork_jar)
+        args.fork_hash = sha256_file(args.effective_fork_jar)
         camp_dir = campaign_dir_under_root(args.data_root, args.campaign_id)
     except (OSError, ValueError) as exc:
         log(f"INVALID CAMPAIGN INPUT -- {exc}")
@@ -393,15 +560,17 @@ def main(argv=None) -> int:
         log(f"--fresh: cleared {len(removed)} owned prior file(s) in "
             f"{camp_dir}")
 
-    config_path = os.path.join(
-        os.environ["LOCALAPPDATA"], "ModTheSpire", "CommunicationMod",
-        "config.properties")
     start = time.time()
     try:
         launch_idx = highest_launch_index(args.data_root, args.campaign_id)
     except ValueError as exc:
         log(f"INVALID EXISTING LAUNCH LOG -- {exc}")
         return EXIT_CAMPAIGN_INVALID
+    if not config_local_app_data:
+        ap.error("LOCALAPPDATA is unavailable")
+    config_path = os.path.join(
+        config_local_app_data, "ModTheSpire", "CommunicationMod",
+        "config.properties")
     kill_done = False
     timeline = []
 
@@ -446,8 +615,11 @@ def main(argv=None) -> int:
             f"cadence={args.strip_cadence}")
         log("driver command prepared with one-use launch binding "
             "(token omitted)")
+        done_rows = prog.get("seeds_done", []) if isinstance(prog, dict) else []
+        launch_done_start = len(done_rows) if isinstance(done_rows, list) else 0
         proc = launch_game(args, launch_idx)
-        timeline.append({"event": "launch", "idx": launch_idx, "utc": utc()})
+        timeline.append({"event": "launch", "idx": launch_idx, "utc": utc(),
+                         "done_at_launch": launch_done_start})
         launch_started = time.time()
         hb_unreadable_streak = 0
 
@@ -457,7 +629,7 @@ def main(argv=None) -> int:
             now = time.time()
             if now - start > args.campaign_timeout:
                 log("CAMPAIGN TIMEOUT during launch -- killing game")
-                kill_tree(proc)
+                cleanup_process(proc)
                 return 2
 
             prog = read_json(progress_path(args))
@@ -466,7 +638,7 @@ def main(argv=None) -> int:
             identity_error = progress_identity_error(prog, args)
             if identity_error:
                 log(f"CAMPAIGN IDENTITY MISMATCH -- {identity_error}")
-                kill_tree(proc)
+                cleanup_process(proc)
                 timeline.append({"event": "campaign_identity_mismatch",
                                  "utc": utc()})
                 _summary(args, timeline)
@@ -474,7 +646,7 @@ def main(argv=None) -> int:
 
             if fatal_progress(prog):
                 log_fatal_progress(prog)
-                kill_tree(proc)
+                cleanup_process(proc)
                 timeline.append({
                     "event": "fatal_environment_drift",
                     "utc": utc(),
@@ -489,7 +661,7 @@ def main(argv=None) -> int:
                 error = completion_error(prog, args.seed_list)
                 if error:
                     log(f"CAMPAIGN NOT ACCEPTABLE -- {error}")
-                    kill_tree(proc)
+                    cleanup_process(proc)
                     timeline.append({"event": "campaign_failed",
                                      "utc": utc(), "done": done,
                                      "failed": failed})
@@ -497,7 +669,7 @@ def main(argv=None) -> int:
                     return EXIT_CAMPAIGN_INVALID
                 log(f"campaign COMPLETE ({done} done, {failed} failed) -- "
                     f"stopping game")
-                kill_tree(proc)
+                cleanup_process(proc)
                 timeline.append({"event": "complete", "utc": utc(),
                                  "done": done, "failed": failed})
                 _summary(args, timeline)
@@ -508,9 +680,22 @@ def main(argv=None) -> int:
                 reason = request.get("reason") or "driver request"
                 log(f"driver requested restart ({reason}); {done} done -- "
                     "killing + relaunching")
-                kill_tree(proc)
+                cleanup_process(proc)
                 timeline.append({"event": "driver_restart", "utc": utc(),
                                  "reason": reason, "done": done})
+                break
+
+            newly_completed = done - launch_done_start
+            if newly_completed >= args.seeds_per_launch:
+                log(f"capacity recycle: {newly_completed} seed(s) completed "
+                    f"on launch #{launch_idx}; killing + relaunching")
+                cleanup_process(proc)
+                timeline.append({
+                    "event": "capacity_recycle", "utc": utc(),
+                    "done": done, "done_at_launch": launch_done_start,
+                    "completed_this_launch": newly_completed,
+                    "limit": args.seeds_per_launch,
+                })
                 break
 
             # induced kill for acceptance (once)
@@ -518,7 +703,7 @@ def main(argv=None) -> int:
                     and done >= args.kill_after_seeds):
                 log(f"INDUCED KILL: {done} seeds done >= {args.kill_after_seeds}"
                     f"; killing game to exercise crash-resume")
-                kill_tree(proc)
+                cleanup_process(proc)
                 kill_done = True
                 timeline.append({"event": "induced_kill", "utc": utc(),
                                  "after_seeds": done})
@@ -530,6 +715,7 @@ def main(argv=None) -> int:
                     f"{done} done, {failed} failed -- relaunching if incomplete")
                 timeline.append({"event": "game_exit", "utc": utc(),
                                  "code": proc.returncode, "done": done})
+                cleanup_process(proc)
                 break
 
             # heartbeat stall while the game is still alive: driver gone
@@ -571,7 +757,7 @@ def main(argv=None) -> int:
             if stalled:
                 log(f"{reason} (> {args.stall_timeout:.0f}); game still up -- "
                     f"killing + relaunching")
-                kill_tree(proc)
+                cleanup_process(proc)
                 timeline.append({"event": "stall_relaunch", "utc": utc(),
                                  "age": round(hb_age, 1), "done": done})
                 break
@@ -597,9 +783,25 @@ def _summary(args, timeline) -> None:
         log(f"  FAIL  {s['seed']}  reason={s['reason']}  attempts={s['attempts']}")
     kills = [t for t in timeline if t["event"] == "induced_kill"]
     relaunch = [t for t in timeline if t["event"] in
-                ("game_exit", "stall_relaunch", "induced_kill")]
+                ("game_exit", "stall_relaunch", "induced_kill",
+                 "driver_restart", "capacity_recycle")]
     log(f"induced kills: {len(kills)}  relaunch events: {len(relaunch)}  "
         f"total launches: {len([t for t in timeline if t['event']=='launch'])}")
+
+
+def main(argv=None) -> int:
+    """Run one campaign and never leave a successfully launched JVM behind."""
+    global _TRACK_LAUNCHES
+    _TRACK_LAUNCHES = True
+    try:
+        return _main(argv)
+    finally:
+        for proc in list(_ACTIVE_PROCESSES):
+            try:
+                cleanup_process(proc)
+            except Exception as exc:  # noqa: BLE001 - final safety boundary
+                log(f"warning: final JVM cleanup failed: {exc}")
+        _TRACK_LAUNCHES = False
 
 
 if __name__ == "__main__":

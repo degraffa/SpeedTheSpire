@@ -1719,6 +1719,136 @@ class CampaignIdentityAndFreshTest(unittest.TestCase):
                 orchestrator.launch_game(args, 1)
             second_popen.assert_not_called()
 
+    def test_private_runtime_launch_uses_canonical_java_and_isolated_process(self):
+        with tempfile.TemporaryDirectory() as data_root:
+            campaign_id = "private"
+            campaign_dir = os.path.join(data_root, campaign_id)
+            os.makedirs(campaign_dir)
+            game_dir = os.path.join(data_root, "canonical-game")
+            workdir = os.path.join(data_root, "runtime", "game")
+            local_app_data = os.path.join(data_root, "runtime", "local")
+            app_data = os.path.join(data_root, "runtime", "roaming")
+            temp_dir = os.path.join(data_root, "runtime", "tmp")
+            for path in (game_dir, workdir, local_app_data, app_data,
+                         temp_dir, os.path.join(workdir, "mods")):
+                os.makedirs(path, exist_ok=True)
+            private_fork = os.path.join(
+                workdir, "mods", "CommunicationMod-oracle.jar")
+            with open(private_fork, "wb") as fh:
+                fh.write(b"private fork")
+            args = SimpleNamespace(
+                game_dir=game_dir,
+                mts_jar=os.path.join(data_root, "ModTheSpire.jar"),
+                data_root=data_root,
+                campaign_id=campaign_id,
+                launch_log="mts_launch1.log",
+                launch_token="private-launch-binding",
+                private_runtime=True,
+                effective_workdir=workdir,
+                runtime_local_app_data=local_app_data,
+                runtime_app_data=app_data,
+                runtime_temp_dir=temp_dir,
+                runtime_fork_jar=private_fork,
+                java_xms_mib=384,
+                java_xmx_mib=1536,
+            )
+            proc = mock.Mock()
+            job = mock.Mock()
+            with mock.patch.object(
+                    orchestrator.subprocess, "Popen",
+                    return_value=proc) as popen, \
+                    mock.patch.object(
+                        orchestrator, "_WindowsKillJob",
+                        return_value=job):
+                self.assertIs(proc, orchestrator.launch_game(args, 1))
+
+            command = popen.call_args.args[0]
+            kwargs = popen.call_args.kwargs
+            self.assertEqual(
+                os.path.join(game_dir, "jre", "bin", "java.exe"),
+                command[0])
+            self.assertIn("-Xms384m", command)
+            self.assertIn("-Xmx1536m", command)
+            self.assertIn(f"-Djava.io.tmpdir={temp_dir}", command)
+            self.assertEqual(workdir, kwargs["cwd"])
+            self.assertEqual(local_app_data, kwargs["env"]["LOCALAPPDATA"])
+            self.assertEqual(app_data, kwargs["env"]["APPDATA"])
+            self.assertEqual(temp_dir, kwargs["env"]["TEMP"])
+            self.assertEqual(temp_dir, kwargs["env"]["TMP"])
+            self.assertEqual(
+                args.launch_token,
+                kwargs["env"][campaign_paths.ORACLE_LAUNCH_TOKEN_ENV])
+            self.assertEqual(
+                os.path.join(kwargs["cwd"], "mods",
+                             "CommunicationMod-oracle.jar"),
+                args.runtime_fork_jar)
+            self.assertIs(job, proc._oracle_kill_job)
+
+    def test_seed_capacity_recycles_once_and_preserves_completed_ledger(self):
+        with tempfile.TemporaryDirectory() as data_root:
+            campaign_id = "capacity"
+            os.makedirs(os.path.join(data_root, campaign_id))
+            seeds = ["STS00001", "STS00002", "STS00003"]
+
+            def progress(status, completed):
+                return {
+                    **_progress(
+                        campaign_id, status=status,
+                        done=[_done(seed) for seed in seeds[:completed]],
+                        failed=[]),
+                    "seed_list": seeds,
+                }
+
+            before = progress("in_progress", 0)
+            at_capacity = progress("in_progress", 2)
+            complete = progress("complete", 3)
+            reads = iter([
+                before, at_capacity, at_capacity, complete, complete,
+            ])
+
+            def read_json(path):
+                if os.path.basename(path) == "campaign_heartbeat.json":
+                    return {"t": 1.0}
+                return next(reads)
+
+            process = mock.Mock()
+            process.poll.return_value = None
+            local_app_data = os.path.join(data_root, "local")
+            with mock.patch.dict(
+                    os.environ, {"LOCALAPPDATA": local_app_data}), \
+                    mock.patch.object(
+                        orchestrator, "sha256_file",
+                        return_value="A" * 64), \
+                    mock.patch.object(
+                        orchestrator, "read_json",
+                        side_effect=read_json), \
+                    mock.patch.object(
+                        orchestrator, "launch_game",
+                        return_value=process) as launch, \
+                    mock.patch.object(
+                        orchestrator, "cleanup_process") as cleanup, \
+                    mock.patch.object(orchestrator.time, "sleep"):
+                result = orchestrator.main([
+                    "--data-root", data_root,
+                    "--campaign-id", campaign_id,
+                    "--seeds", ",".join(seeds),
+                    "--seeds-per-launch", "2",
+                ])
+
+            self.assertEqual(0, result)
+            self.assertEqual(2, launch.call_count)
+            self.assertEqual(2, cleanup.call_count)
+            with open(os.path.join(
+                    data_root, campaign_id, "orchestrator_timeline.json"),
+                    "r", encoding="utf-8") as fh:
+                timeline = json.load(fh)["timeline"]
+            self.assertEqual(
+                ["launch", "capacity_recycle", "launch", "complete"],
+                [row["event"] for row in timeline])
+            self.assertEqual(2, timeline[1]["completed_this_launch"])
+            self.assertEqual(2, timeline[2]["done_at_launch"])
+            self.assertEqual(3, timeline[3]["done"])
+
     def test_launch_indices_resume_numerically_without_overwriting(self):
         with tempfile.TemporaryDirectory() as data_root:
             campaign_id = "resume"

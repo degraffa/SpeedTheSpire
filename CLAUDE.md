@@ -147,21 +147,21 @@ Run it from Windows — it refuses under WSL, for the gitdir reason above.
 ### Oracle bridge — operational state (read before touching the bridge)
 
 - Data root (uncommitted, design §7.3): **`D:\STS_BG_Mod\_oracle_data`** — the
-  live `config.properties` targets, JSONL captures, `latest_state.json`,
-  campaign artifacts, and throwaway helpers (`send.sh`, `autopilot.py`,
-  `compare_neow.py`). These stay uncommitted on purpose; the committed tools
-  are `driver/echo_driver.py`, `driver/campaign_driver.py`,
+  private per-worker config/game roots, JSONL captures, campaign artifacts,
+  and throwaway helpers (`send.sh`, `autopilot.py`, `compare_neow.py`). These
+  stay uncommitted on purpose; the committed tools are
+  `driver/campaign_pipeline.py`, `driver/campaign_driver.py`, and
   `driver/orchestrator.py`.
-- CommunicationMod reads
-  `%LOCALAPPDATA%\ModTheSpire\CommunicationMod\config.properties` **only at
-  game launch**. Wiring + the scriptable `--skip-launcher --mods
-  basemod,CommunicationMod-oracle` launch are in
-  `tools/oracle_bridge/driver/README.md`; run ModTheSpire under the game's
-  **bundled JRE 8** (`<game>\jre\bin\java.exe`). The **game is launched
-  manually**; the driver auto-attaches; drive it by appending commands to the
-  command file, and only send state-changing commands while
-  `ready_for_command: true`. The game runs on Windows Python
-  (`C:/Python39/python.exe`), outside WSL.
+- Use `campaign_pipeline.py run --instances N` (or `auto`) for campaigns. The
+  coordinator launches each ModTheSpire worker under the game's **bundled JRE
+  8** with a private working directory, profile/save/run tree, temp directory
+  and `LOCALAPPDATA`/`APPDATA` config namespace; capture runs concurrently and
+  WSL post-processing runs serially. CommunicationMod still reads its
+  `ModTheSpire\CommunicationMod\config.properties` only at JVM launch. Never
+  launch lower-level orchestrators in parallel or point two games at the
+  install directory. The manual `echo_driver.py` side channel remains only for
+  protocol bring-up and must send state-changing commands solely while
+  `ready_for_command: true`.
 - Profile audit result (design §1.1): the save is **fully unlocked** at the
   pool gate (all 60 `UnlockTracker.refresh()` gated keys have `STSUnlocks`
   flag=2 → `lockedCards`/`lockedRelics` empty). The `IRONCLADUnlockLevel=3`

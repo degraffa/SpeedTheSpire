@@ -142,10 +142,13 @@ entry here or in stage-a §12, exactly like A3.1's.
 Five components, one direction of data flow:
 
 ```
-[1] Slay the Spire (Windows host, Steam install, ModTheSpire launch)
+[1..N] Slay the Spire workers (Windows host, shared read-only install)
       + BaseMod + CommunicationMod-oracle (our fork, §2.3–2.5)
-        │  state JSON → child stdin, commands ← child stdout, \n-delimited (resolved B0.1, §11)
-[2] Campaign driver — Python 3, Windows host (tools/oracle_bridge/driver/)
+      + private working directory, profile, save/run paths, temp and
+        ModTheSpire config namespace per worker
+          │  state JSON → child stdin, commands ← child stdout, \n-delimited (resolved B0.1, §11)
+[2] Campaign drivers — one Python 3 child per worker, Windows host
+      (tools/oracle_bridge/driver/)
       starts seeded runs, injects action scripts, records every state
         │  JSONL campaign artifacts (one file per run, version-stamped)
 [3] Translator — C++ (tools/oracle_bridge/translator/)
@@ -752,8 +755,12 @@ just produce an unrunnable ledger. **Adapted operating model (frozen):**
    full speed (millions of actions/hour; catches asserts, nondeterminism,
    memory corruption via stage-a §2's replay-twice-hash-compare) and
    oracle campaigns at bridge speed (§2.2 budget: 1M oracle-diffed actions ≈
-   50–200 unattended hours — one to three weeks of nights). Campaign state is
-   resumable; a crashed game process costs one run, not the campaign.
+   50–200 single-worker hours). One coordinator may run as many isolated game
+   workers as the host's CPU/RAM budget permits. Seeds are deterministically
+   partitioned into ordinary resumable campaign shards; a crashed game process
+   costs one run in one shard, not the campaign group. Each JVM has a bounded
+   heap and is periodically recycled so an unattended worker cannot consume an
+   unbounded share of the host.
 3. **If a second machine materializes**, the campaign scripts already
    shard by seed range — nothing in the design assumes one host. But no task
    in the ledger depends on hardware that doesn't currently exist.
@@ -770,7 +777,11 @@ InitialPlan §2.3's hygiene, honored from the start).
 Campaign outputs (JSONL, translated traces, diff reports) live under a
 non-repo data root (`D:\STS_BG_Mod\SpeedTheSpire-campaigns\` or similar,
 fixed at B5.2); the repo holds the curated CI corpus, reproducers promoted to
-regression fixtures, and generated reports.
+regression fixtures, and generated reports. Per-worker game directories and
+private ModTheSpire configuration trees are runtime scratch under that same
+external data area, never campaign evidence and never committed. They bind the
+exact game/fork/profile hashes used by the shard and are reused only by that
+shard's resume path.
 
 ### 7.4 The "divergence dashboard", right-sized
 
@@ -1292,3 +1303,24 @@ Continuing stage-a §10's numbering:
   a stronger, independent reason for the same conclusion, and it is why the
   mini-blessing path is out of the model's domain rather than merely assumed
   away.
+- v0.1.10 (2026-08-01) — the single-host campaign topology in §2.1 and
+  §7.1–7.3 now permits multiple simultaneous oracle workers. This is a
+  throughput amendment, not a game-mechanics or evidence-bar change: each
+  worker remains the same windowed, rendering-stripped runtime and writes the
+  same self-describing per-run artifacts. The former one-game limit was an
+  implementation consequence of two shared writable namespaces, not a frozen
+  semantic requirement: ModTheSpire derives `SpireConfig` from the JVM's
+  `LOCALAPPDATA`, while libGDX and the game resolve preferences, autosaves,
+  runs, display config and CommunicationMod's error log from the process
+  working directory. The pipeline now gives every worker private versions of
+  both namespaces (plus private JVM temp), snapshots the exact fork/profile it
+  loads, partitions seeds into disjoint resumable shards, captures concurrently
+  and serializes the shared WSL post-processing build. The coordinator retains
+  an OS-backed ownership lock, so independent coordinators still cannot
+  oversubscribe or race the same campaign group. The Windows entrypoint joins
+  a kill-on-close Job Object before spawning children, and every orchestrator
+  places its JVM in a nested job, so a hard coordinator death cannot leave
+  workers alive after its ownership lock is released. Existing in-progress
+  pre-amendment campaigns retain their legacy one-instance resume path. No
+  artifact/schema/registry/opcode value changes, and the G7 action/seed bar is
+  unchanged.
