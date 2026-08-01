@@ -17,14 +17,18 @@ tables remain).
 
 | File | Generates | Notes |
 |---|---|---|
-| `cards.yaml` | `CardId` enum + `CardDef` effect-program table + game_id table | 5 skeleton cards |
-| `powers.yaml` | `PowerId` enum + game_id table | 3 skeleton powers |
-| `monsters.yaml` | `MonsterId` enum + `MonsterDef` stat/move table + game_id table | Jaw Worm (per-ascension-tier HP/amount columns; `ai: native`) |
-| `relics.yaml` | `RelicId` enum + game_id table | empty (skeleton has none) |
-| `potions.yaml` | `PotionId` enum + game_id table | empty |
-| `events.yaml` | `EventId` enum + game_id table | Act-1 `eventList` / `shrineList` / `specialOneTimeEventList` rows, metadata-only (`native: true`) in canonical Java insertion order |
-| `encounters.yaml` | manifest row count only | empty |
-| `a20.yaml` | manifest row count only | empty (A20 table deferred) |
+| `cards.yaml` | `CardId` enum + `CardDef` effect-program table + pool tables + game_id table | full S1 scope: Ironclad red + colorless + curses, base **and** upgraded programs |
+| `powers.yaml` | `PowerId` enum + hook-program table + game_id table | buff/debuff type, stacking rule, priority |
+| `monsters.yaml` | `MonsterId` enum + `MonsterDef` stat/move table + game_id table | Act-1 roster incl. elites/bosses; per-ascension-tier HP/amount columns; move-selection sometimes `ai: native` |
+| `relics.yaml` | `RelicId` enum + tier/hook tables + game_id table | shared pools + Ironclad starter/boss; `pool_order` is RNG-relevant |
+| `potions.yaml` | `PotionId` enum + effect-program table + game_id table | Ironclad-obtainable pool |
+| `events.yaml` | `EventId` enum + option-metadata table + game_id table | Act-1 `eventList` / `shrineList` / `specialOneTimeEventList` rows in canonical Java insertion order |
+| `encounters.yaml` | `encounter_table.hpp` pool weights + composition programs (no enum; identity is the `game_id` string) | Act-1 pools with exclusion rules |
+| `a20.yaml` | manifest row count only (no game_id; no emitter) | one provenance-backed row per ascension level; the engine implements the modifiers, tier-2 tests verify them |
+
+Entry counts are deliberately not stated here — they go stale; re-derive with
+`grep -c '^- id:' registry/<domain>.yaml`. Per-stage scope lives in the design
+docs.
 
 ## Frozen schema rules (Stage B design §4.2, §4.4)
 

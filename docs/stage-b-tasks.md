@@ -1988,7 +1988,13 @@ hardening) and the S2 scope conversation as fresh planning exercises.
 **Inherited:** revisit the Infernal-Blade-generated Blood for Blood cost model — B3.6
 models it via `cost_now` only, so an end-of-turn reset restores 4 rather than the
 game's reduced base; judged unreachable, “revisit if G7 ever hits it”.
-**Log:** —
+**Log:** campaign `g7_random_b153` paused mid-volume at the 2026-07-30
+checkpoint; live counters, reprocessing state, and the coverage analysis
+motivating survival-biased drivers are in
+[handoff-2026-07-30.md](handoff-2026-07-30.md). That analysis is also the
+origin of Phase T task TE.1 ([training-tasks.md](training-tasks.md)), and
+TE.2 there now owns this gate's "open the S2 scope conversation" closing
+action.
 
 ---
 

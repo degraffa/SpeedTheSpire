@@ -24,13 +24,16 @@
 #   * "<N>/<M> tests":                              "569/570 tests"        stale-count-ok
 #
 # WHAT IS NOT SCANNED, and why:
-#   * docs/stage-*-log.md  - append-only archives of past runs. An old count is
-#                            the point of the file.
-#   * docs/stage-*-tasks.md, on `[x]` / `[!]` lines only - a landed task's index
+#   * docs/*-log.md        - append-only archives of past runs (stage-a/b,
+#                            training, future stages). An old count is the
+#                            point of the file.
+#   * docs/*-tasks.md, on `[x]` / `[!]` lines only - a landed task's index
 #                            line records what was green when it landed, which
 #                            conventions §2 requires. `[ ]` and `[~]` lines ARE
 #                            scanned: a pending task brief quoting a count is
-#                            precisely the incident above.
+#                            precisely the incident above. The glob covers
+#                            every ledger (stage-a/b, training-tasks, future
+#                            stages) so a new ledger needs no checker edit.
 #   * tests/golden/, build/ - fixture data and build output.
 #   * A line containing `stale-count-ok` is skipped. That escape hatch is for
 #     prose describing a historical incident, not for new claims.
@@ -62,7 +65,7 @@ cd "$(git rev-parse --show-toplevel)"
 hits=$(git grep --untracked -nIiE \
         '[0-9]{2,5}/[0-9]{2,5}|[0-9]{2,5} +([a-z]+ +)?(tests?|cases?) +(are +)?(pass|green)' \
         -- "${@:-.}" \
-        ':!build' ':!docs/stage-a-log.md' ':!docs/stage-b-log.md' ':!tests/golden' \
+        ':!build' ':!docs/*-log.md' ':!tests/golden' \
     | awk '
     {
         if (!match($0, /^[^:]+:[0-9]+:/)) next
@@ -73,7 +76,7 @@ hits=$(git grep --untracked -nIiE \
 
         if (index(low, "stale-count-ok")) next
         # A landed ledger entry is a historical record, not a live claim.
-        if (path ~ /^docs\/stage-[ab]-tasks\.md$/ && low ~ /\[x\]|\[!\]/) next
+        if (path ~ /^docs\/[a-z0-9-]+-tasks\.md$/ && low ~ /\[x\]|\[!\]/) next
 
         testish = (low ~ /test|suite|ctest|gtest|pass|green/)
         why = ""

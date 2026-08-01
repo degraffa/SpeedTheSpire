@@ -81,8 +81,14 @@ independently-generated combat fixtures replaying with zero diffs.
 tier-2 registry coverage by scripted check, 1,000-seed random-policy soak
 clean in debug + asan, and a 75-run oracle spot campaign spanning Neow
 through a claimed Act-1 boss reward with zero un-triaged diffs through the
-run-level differ. Open gate: **G7** (S1 verified = M4). Current work is
-Phase B5 (verification campaigns).
+run-level differ. Open gates: **G7** (S1 verified = M4 — every B5 task `[x]`;
+the closing oracle campaign is paused mid-volume, live state in
+[docs/handoff-2026-07-30.md](docs/handoff-2026-07-30.md)) and **GT0** (Phase T
+information layer). The training program has a binding spec and ledger —
+[docs/training-plan.md](docs/training-plan.md) and
+[docs/training-tasks.md](docs/training-tasks.md); read them before any
+training-related work, and respect their capacity rule (G7 close → T0.x → S2
+authoring).
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
 in [docs/stage-b-tasks.md](docs/stage-b-tasks.md); **do not restate it here.**

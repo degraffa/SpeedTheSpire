@@ -63,10 +63,10 @@ cores):
 | Combat steps/sec/core (interpreter, no NN) | 150k | 50k |
 | Full combats/sec/core (random policy) | 1,000 | 300 |
 | Full A20 runs/sec, whole 5800X3D, 25-sim MCTS | 1.0 | 0.4 |
-| State snapshot cost | one memcpy ≤ 4KB | ≤ 8KB |
+| State snapshot cost | one memcpy; the `combat_state.hpp` static_assert ceiling (raised with schema growth) is the live bound | ≤ 8KB |
 | Sim → schema serialization | zero-copy | ≤ 1µs |
  
-These numbers are the Stage C exit criteria. They are set so that a 300k-run experiment completes in ≤ 4 days on the primary machine alone.
+These numbers are the Stage C exit criteria. They are set so that a 300k-run experiment completes in ≤ 4 days on the primary machine alone. (Stage B's B5.5 acceptance already measured the simulator-only floors far above target; the open Stage C question is the actor path — encoding, belief sampling, search, inference — not the interpreter.)
 
 The 25-simulation row is the mandatory cheap configuration and throughput
 baseline, not a declaration that 25 simulations is the final agent. Stage C
@@ -119,7 +119,7 @@ utilities.
  
 No usable headless, high-performance StS implementation exists; we build one, using the game's source as the behavioral reference and the desktop game (via CommunicationMod) as the runtime oracle.
  
-### Stage A — High-Level Design (Weeks 1–4)
+### Stage A — High-Level Design (landed; stage-a-design.md is the frozen record)
  
 Deliverable: a design document freezing the decisions below, plus a walking skeleton — one enemy, five cards, full RNG plumbing, batch API, and the diff harness connected end to end. The skeleton exists to prove the architecture before mass card implementation begins.
  
@@ -134,7 +134,7 @@ Deliverable: a design document freezing the decisions below, plus a walking skel
 | Direct transliteration from Java reference | Slightly more natural | Requires more idiom translation |
 | Future CUDA port of combat kernel | First-class | Via FFI boundary (fine — the kernel would be C++/CUDA either way) |
  
-**Decision: Rust, unless you are materially more fluent in C++.** The deciding factor is failure mode, not speed: the worst project outcome is a memory bug that corrupts one state in ten million and shows up as unexplainable training divergence months later. Rust converts that class of bug into compile errors. Escape hatch: the effect-interpreter inner loop may use `unsafe` blocks after the safe version is proven correct, benchmarked, and differential-tested.
+**Decision: Rust, unless you are materially more fluent in C++ — resolved: C++20, the fluency clause applied.** The original deciding factor was failure mode, not speed: the worst project outcome is a memory bug that corrupts one state in ten million and shows up as unexplainable training divergence months later, which Rust converts into compile errors. The C++ execution compensates with the mitigations the repo now carries: the oracle diff harness, byte-identical builds across three compilers, ASan/UBSan presets on both hosts, and the continuous fuzz soak. The comparison table is preserved above for the record.
  
 **A.2 — GPU role: none in the simulator, by design, with the door held open.** All rule execution on CPU. The GPU serves NN inference exclusively. The architecture nevertheless preserves the port option: flat SoA-compatible state, batch semantics, and effect dispatch as a bytecode interpreter — exactly the megakernel shape a CUDA port wants. Re-evaluation trigger: only if Stage C targets are met and profiling still shows experiment throughput gated on rule execution (not inference, not I/O) — then port the *combat inner loop only*, validated by the same diff harness against the CPU engine.
  
@@ -159,7 +159,7 @@ Acceptance test for this whole section: for N=100 seeds, the simulator's Neow op
  
 **A.6 — Source-code usage protocol.** The decompiled source is the *specification*; the implementation is a re-expression, not a transliteration (both for licence hygiene in a personal project and because transliterating Java object soup would forfeit the performance design). Working rule: for every registry entry and engine subsystem, cite the source class/method it was derived from in a `provenance` field — when the diff harness finds a divergence, the first debugging step is re-reading the cited Java.
  
-### Stage B — Implementation with Continuous Verification (Weeks 4–16)
+### Stage B — Implementation with Continuous Verification (landed through M3; G7 open in stage-b-tasks.md)
  
 The rule: **no card, relic, or subsystem is "done" until its verification exists.** Verification is not a phase after implementation; it is the definition of implemented.
  
@@ -175,7 +175,7 @@ The rule: **no card, relic, or subsystem is "done" until its verification exists
  
 **B.4 — Definition of done for S1 (Act 1/Ironclad/A20):** 1M+ fuzzed actions across ≥ 2,000 seeds with zero state diffs; 100% registry coverage by tier-2 tests; all A20 modifiers verified (elite/boss HP and damage tables, curse in starting deck, reduced potion/gold/healing rules — each is a registry entry with provenance); throughput ≥ floor targets (hardening to *target* levels is Stage C, but floors must hold here so training can start).
  
-### Stage C — Performance Hardening (Weeks 14–18, overlapping B's tail)
+### Stage C — Performance Hardening (not yet opened; gated on G7)
  
 Entry condition: S1 verified. Protocol: benchmark-driven, one hypothesis at a time, never trading verified behavior for speed — the diff suite runs after every optimization, no exceptions (fast-but-wrong is the project's death mode).
  
@@ -194,7 +194,13 @@ Ordered optimization backlog (stop when §0.2 targets are met): confirm zero hot
 ---
  
 ## Part 2 — Training Program on the Simulator
- 
+
+> **Execution note (2026-08-01):** Phase T execution of this part is governed
+> by [docs/training-plan.md](docs/training-plan.md) (spec) and
+> [docs/training-tasks.md](docs/training-tasks.md) (ledger); where they refine
+> or contradict details below, they win. This part remains the
+> intent-and-rationale record.
+
 ### 2.1 Experiment ladder
  
 Each rung has an entry gate (what must exist), a success metric, and a cheap config. All rungs run at A20 rules.
