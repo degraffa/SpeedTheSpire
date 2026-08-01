@@ -237,17 +237,19 @@ TEST(CardLimbo, UpgradedPerfectedStrikeCountsItselfAtThree) {
 // stream -- a different consumption order over the same stream.
 TEST(CardLimbo, StrangeSpoonRollsAfterTheCardsOwnRandomDraws) {
     // Expected-side derivation, game order, on a copy of the stream:
-    //   [exhaust pick over 2 cards, spoon boolean].
-    // The SECOND single-card ExhaustAction fires with one card left in hand,
-    // and hand.size() <= amount exhausts with NO roll (ExhaustAction's
-    // no-screen branch), so the program consumes exactly ONE cardRandomRng
-    // draw -- and the spoon boolean is the SECOND draw of the stream, not the
-    // first. Only the POSITION of the boolean is under test, so derive the
-    // expected spoon outcome with the engine's own golden-tested primitives.
+    //   [exhaust pick over 2 cards, exhaust pick over 1 card, spoon boolean].
+    // FiendFireAction passes `anyNumber=true` to BOTH random ExhaustActions
+    // (FiendFireAction.java:32-46), so its final singleton still reaches
+    // hand.getRandomCard(cardRandomRng) rather than ExhaustAction's
+    // `!anyNumber && hand.size() <= amount` forced-all branch.  The spoon
+    // boolean is therefore the THIRD draw of the stream. Only the POSITION of
+    // the boolean is under test, so derive the expected outcome with the
+    // engine's own golden-tested primitives.
     bool expected_spoon = false;
     {
         RngStream probe = from_seed(11);
         (void)random(probe, 1);           // FiendFire exhaust pick #1 (2 cards)
+        (void)random(probe, 0);           // FiendFire exhaust pick #2 (1 card)
         expected_spoon = random_boolean(probe);  // THEN the spoon
     }
 
@@ -266,8 +268,8 @@ TEST(CardLimbo, StrangeSpoonRollsAfterTheCardsOwnRandomDraws) {
     ASSERT_TRUE(queue_card_play(s, 0, 0));
     pump(s);
 
-    EXPECT_EQ(s.card_random_rng.counter, 2)
-        << "one exhaust pick (the second is forced) + one spoon boolean";
+    EXPECT_EQ(s.card_random_rng.counter, 3)
+        << "two anyNumber random exhaust picks + one spoon boolean";
     if (expected_spoon) {
         ASSERT_EQ(s.discard_count, 1) << "spoon proc: Fiend Fire is discarded";
         EXPECT_EQ(s.card_pool[s.discard[0]].card_id,
@@ -372,16 +374,17 @@ TEST(CardLimbo, HavocExhumeReplayConsumesOneShotExhaust) {
 // UseCardAction (DamageAction.java:88-91; GameActionManager.java:130-136).
 // Therefore the filing action still consumes Strange Spoon RNG and
 // moveToExhaustPile still fires onExhaust hooks. With one other hand card,
-// Fiend Fire's random ExhaustAction is forced (zero RNG): the only draw is the
-// deliberately-selected false Spoon boolean. Feel No Pain queues one BLOCK for
+// Fiend Fire's anyNumber random ExhaustAction still draws random(0); filing
+// then draws the deliberately-selected false Spoon boolean. Feel No Pain queues one BLOCK for
 // the hand card before lethal damage and a second for Fiend Fire at terminal
 // filing; both stay queued under the engine's established immediate halt.
 TEST(CardLimbo, TerminalUseCardStillRollsSpoonAndDispatchesOnExhaustInOrder) {
     int64_t seed = 0;
     for (;; ++seed) {
         RngStream probe = from_seed(seed);
+        static_cast<void>(random(probe, 0));
         if (!random_boolean(probe)) {
-            break;  // force the played Fiend Fire to exhaust, not Spoon-save
+            break;  // force filing Fiend Fire to exhaust, not Spoon-save
         }
     }
 
@@ -399,8 +402,8 @@ TEST(CardLimbo, TerminalUseCardStillRollsSpoonAndDispatchesOnExhaustInOrder) {
     pump(s);
 
     EXPECT_EQ(s.phase, static_cast<uint8_t>(CombatPhase::COMBAT_OVER));
-    EXPECT_EQ(s.card_random_rng.counter, 1)
-        << "lethal filing still executes Strange Spoon's boolean";
+    EXPECT_EQ(s.card_random_rng.counter, 2)
+        << "Fiend Fire draws random(0), then lethal filing executes Strange Spoon";
     ASSERT_EQ(s.exhaust_count, 2);
     EXPECT_EQ(s.exhaust[0], strike)
         << "Fiend Fire's own program exhausts the hand first";

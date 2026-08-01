@@ -474,6 +474,79 @@ struct Options {
     return saw_delayed_slot;
 }
 
+// The ordinary Smoke-Bomb settlement shape deliberately rejects relic counters:
+// a generic counter change can be an unrelated combat defect.  This extension
+// admits one only when the capture itself proves the exact sequence whose Java
+// onVictory hooks write -1: it spent Smoke Bomb immediately before this row,
+// every changed counter is non-negative -> -1, and the next capture row is the
+// simulator's whole normalized RunState.  That final equality means a wrong
+// reward roll, pool mutation, or counter reset cannot hide behind the one-frame
+// animation window.
+[[nodiscard]] bool is_escape_settlement_counter_reset_race(
+    const sts::diff::DiffReport& rep,
+    const sts::translate::TranslatedRun& run,
+    std::size_t record_index,
+    const RunState& actual,
+    const RunState& expected) {
+    if (record_index == 0 || record_index + 1 >= run.records.size() ||
+        !is_escape_settlement_with_relic_counter_resets(diff_field_names(rep))) {
+        return false;
+    }
+    const std::vector<std::string> use =
+        split_ws(run.records[record_index - 1].action_command);
+    if (use.size() < 3 || use[0] != "potion" || use[1] != "use") {
+        return false;
+    }
+    const int slot = std::atoi(use[2].c_str());
+    if (slot < 0 || slot >= kPotionCap || use[2] != std::to_string(slot) ||
+        run.records[record_index - 1].run
+                .potions[static_cast<std::size_t>(slot)] !=
+            static_cast<uint16_t>(PotionId::SMOKE_BOMB)) {
+        return false;
+    }
+
+    bool saw_counter = false;
+    for (const sts::diff::FieldDiff& d : rep.diffs) {
+        if (!is_relic_counter_field(d.field_name)) {
+            continue;
+        }
+        constexpr std::size_t kPrefixSize = sizeof("relics[") - 1;
+        const std::size_t close = d.field_name.find(']');
+        const int relic_index = std::atoi(
+            d.field_name.substr(kPrefixSize, close - kPrefixSize).c_str());
+        if (relic_index < 0 ||
+            relic_index >= static_cast<int>(expected.relic_count) ||
+            relic_index >= static_cast<int>(actual.relic_count) ||
+            expected.relics[static_cast<std::size_t>(relic_index)].counter < 0 ||
+            actual.relics[static_cast<std::size_t>(relic_index)].counter != -1) {
+            return false;
+        }
+        saw_counter = true;
+    }
+    if (!saw_counter) {
+        return false;
+    }
+
+    RunState settled = run.records[record_index + 1].run;
+    neutralize_incomparable(settled);
+    if (!sts::diff::diff_run_states(settled, actual).empty()) {
+        return false;
+    }
+    // State equality above already entails this, but name the semantic fact so
+    // the counter requirement remains local if normalisation ever grows.
+    for (const sts::diff::FieldDiff& d : rep.diffs) {
+        if (!is_relic_counter_field(d.field_name)) continue;
+        constexpr std::size_t kPrefixSize = sizeof("relics[") - 1;
+        const std::size_t close = d.field_name.find(']');
+        const int relic_index = std::atoi(
+            d.field_name.substr(kPrefixSize, close - kPrefixSize).c_str());
+        if (settled.relics[static_cast<std::size_t>(relic_index)].counter != -1) {
+            return false;
+        }
+    }
+    return true;
+}
+
 struct Verdict {
     int records_compared = 0;
     int reward_records_compared = 0;
@@ -544,6 +617,8 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         for (const auto& d : rep.diffs)
             if (is_deck_identity_diff(d)) ++deck_id_diffs;
         const bool only_library_order = !rep.empty() && deck_id_diffs == rep.size();
+        const bool escape_counter_reset =
+            is_escape_settlement_counter_reset_race(rep, run, k, actual, expected);
 
         if (only_library_order) {
             ++v.deck_identity_records;
@@ -603,7 +678,8 @@ void print_pool_evidence(const std::string& seed_string, int floor,
         } else if (!rep.empty() && s.screen_type == "NONE" &&
                    rc.phase == static_cast<uint8_t>(RunPhase::COMBAT_REWARD) &&
                    (rc.combat.flags & kCombatFlagPlayerEscaped) != 0u &&
-                   is_escape_settlement_fields(diff_field_names(rep))) {
+                   (is_escape_settlement_fields(diff_field_names(rep)) ||
+                    escape_counter_reset)) {
             // The Smoke-Bomb escape-settlement race (readout_shapes.hpp): the
             // capture's dump is inside the escape animation, still listing the
             // fight, while the sim settled the escape synchronously on the
@@ -617,10 +693,13 @@ void print_pool_evidence(const std::string& seed_string, int floor,
                         "this dump catches mid-escape-animation "
                         "(AbstractPlayer.updateEscapeAnimation -> endBattle, "
                         "AbstractPlayer.java:2281-2292); %zu field%s, all in the "
-                        "settlement set\n",
+                        "settlement set%s\n",
                         rec.seq, s.floor, s.screen_type.c_str(),
                         rec.action_command.c_str(), rep.size(),
-                        rep.size() == 1 ? "" : "s");
+                        rep.size() == 1 ? "" : "s",
+                        escape_counter_reset
+                            ? " (proved onVictory relic-counter reset + next-record reconvergence)"
+                            : "");
         } else if (!rep.empty()) {
             if (v.diverged_at < 0) {
                 v.diverged_at = static_cast<int>(k);

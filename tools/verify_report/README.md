@@ -16,7 +16,8 @@ C:\Python39\python.exe tools\verify_report\generate_report.py
 The dashboard defaults name the final provenance-compatible G7 cohorts:
 `g7_greedy_b153_20260729_200000_200011`,
 `g7_random_b153_20260729_300000_324999`, and the simulator-planned late-Act-1
-cohort `g7_late_act1_b153_20260801_boss_min4`, under the fixed
+cohorts `g7_late_act1_b153_20260801_boss_min4` and
+`g7_late_act1_b153_20260801_boss_min4_scan14k`, under the fixed
 `D:\STS_BG_Mod\_oracle_data\campaigns` root, and consume the fresh debug
 `tier2_coverage.json`. Repeated `--campaign` flags select a different aggregate.
 Every report row's local artifact is hash- and header-validated before any

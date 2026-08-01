@@ -704,6 +704,22 @@ void op_choose_card(CombatState& s, const ActionQueueItem& item) noexcept {
         // opens the screen rather than silently exhausting both.
         return;
     }
+    if (is_random && choose_random_any_number(item.flags)) {
+        // FiendFireAction queues `new ExhaustAction(1, true, true)` once per
+        // card.  `anyNumber=true` skips ExhaustAction's otherwise-forced
+        // hand.size() <= amount branch, so even its final one-card action calls
+        // hand.getRandomCard(cardRandomRng) and consumes random(0).  The action
+        // is still auto-resolved (isRandom), never a user prompt.
+        for (int k = 0; k < need; ++k) {
+            if (s.hand_count == 0) {
+                break;
+            }
+            const int32_t ridx = random(s.card_random_rng,
+                                        static_cast<int32_t>(s.hand_count) - 1);
+            apply_choice_to_slot(s, static_cast<uint8_t>(ridx), kind);
+        }
+        return;
+    }
     const int eligible = count_eligible(s, kind, type_filter);
     if (eligible <= need && kind == ChoiceKind::PUT_ON_DRAW_TOP && !is_random) {
         // PutOnDeckAction.update's NO-SCREEN branch, in full
@@ -1011,9 +1027,12 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
 // FIEND_FIRE (FiendFireAction.update, FiendFireAction.java:32-46): count =
 // hand.size() at EXECUTE time; addToTop `count` DamageActions, then addToTop
 // `count` ExhaustAction(1, isRandom = true) -- the SECOND addToTop loop lands in
-// front, so the random exhausts all resolve before the first hit. Both loops
-// preserve their internal order because each pushes onto the front in turn, which
-// reverses an already-uniform list into itself.
+// front, so the random exhausts all resolve before the first hit.  Its third
+// constructor argument is `anyNumber=true`, which means the final singleton is
+// STILL chosen by `getRandomCard(cardRandomRng)`, rather than taking
+// ExhaustAction's forced-all shortcut.  Both loops preserve their internal order
+// because each pushes onto the front in turn, which reverses an already-uniform
+// list into itself.
 void op_fiend_fire(CombatState& s, uint8_t target, int base) noexcept {
     const int count = static_cast<int>(s.hand_count);
     for (int i = 0; i < count; ++i) {
@@ -1030,7 +1049,8 @@ void op_fiend_fire(CombatState& s, uint8_t target, int base) noexcept {
         ex.src = kActorPlayer;
         ex.tgt = kActorPlayer;
         ex.amount = 1;
-        ex.flags = make_choose_flags(ChoiceKind::EXHAUST, /*random=*/true);
+        ex.flags = make_choose_flags(ChoiceKind::EXHAUST, /*random=*/true) |
+                   kChoiceRandomAnyNumberBit;
         add_to_top(s, ex);
     }
 }

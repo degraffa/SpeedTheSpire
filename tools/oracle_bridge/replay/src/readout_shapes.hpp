@@ -8,8 +8,9 @@
 //      misplacement of that row is a real divergence.
 //   2. `join_capture_event` -- the capture's event identity -> the registry's
 //      `EventId`, fail-loud on anything the registry does not know.
-//   3. `is_escape_settlement_fields` -- the exact field set that may lag while
-//      a Smoke Bomb escape animation settles.
+//   3. `is_escape_settlement_fields` -- the exact ordinary field set that may
+//      lag while a Smoke Bomb escape animation settles, plus the separately
+//      named counter-reset extension for a proved onVictory settlement.
 //   4. `is_potion_obtain_animation_fields` -- the exact field set that may lag
 //      while Entropic Brew's ObtainPotionEffects animate.
 //   5. `is_transform_preview_rng_advance` -- a proved cardRng-only advance
@@ -300,7 +301,11 @@ struct EventJoin {
 // gates (the capture still in-combat, the sim already on a reward screen, the sim's
 // combat flagged PLAYER-ESCAPED); a settlement computed WRONG rather than
 // early still surfaces, because the capture's own settled records from the
-// next seq on no longer satisfy the window and diff for real.
+// next seq on no longer satisfy the window and diff for real.  Relic counters
+// are deliberately NOT part of this ordinary set: a counter may change for
+// unrelated combat reasons, so the narrowly proved onVictory-reset extension
+// below has its own source, previous-command, value, and reconvergence gates in
+// main.cpp.
 [[nodiscard]] inline bool is_escape_settlement_fields(
     const std::vector<std::string>& field_names) {
     if (field_names.empty()) return false;
@@ -313,6 +318,50 @@ struct EventJoin {
         return false;
     }
     return true;
+}
+
+// A field spelling accepted only by the counter-reset extension below.  It is
+// deliberately strict: pool rows, id changes, and every other RelicSlot member
+// stay ordinary divergences.
+[[nodiscard]] inline bool is_relic_counter_field(std::string_view field) {
+    constexpr std::string_view prefix = "relics[";
+    constexpr std::string_view suffix = "].counter";
+    if (!field.starts_with(prefix) || !field.ends_with(suffix) ||
+        field.size() <= prefix.size() + suffix.size()) {
+        return false;
+    }
+    const std::size_t number_end = field.size() - suffix.size();
+    for (std::size_t i = prefix.size(); i < number_end; ++i) {
+        if (field[i] < '0' || field[i] > '9') {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The field-set half of the rare counter-reset escape settlement.  This alone
+// is NOT a race classifier: main.cpp also proves the immediately preceding
+// command spent Smoke Bomb, every changed counter is a non-negative -> -1
+// onVictory reset, and the next capture record equals the simulator exactly.
+// The helper insists on at least one counter so callers cannot accidentally
+// substitute it for the ordinary settlement set above.
+[[nodiscard]] inline bool is_escape_settlement_with_relic_counter_resets(
+    const std::vector<std::string>& field_names) {
+    if (field_names.empty()) return false;
+    bool saw_counter = false;
+    for (const std::string& f : field_names) {
+        if (is_relic_counter_field(f)) {
+            saw_counter = true;
+            continue;
+        }
+        if (f == "hp" || f == "blizzard_potion_mod") continue;
+        if (f.rfind("treasure_rng.", 0) == 0) continue;
+        if (f.rfind("potion_rng.", 0) == 0) continue;
+        if (f.rfind("relic_rng.", 0) == 0) continue;
+        if (f.rfind("relic_pool[", 0) == 0) continue;
+        return false;
+    }
+    return saw_counter;
 }
 
 // --- 4. Entropic Brew's out-of-combat obtain-animation race -----------------

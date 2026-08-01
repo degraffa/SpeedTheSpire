@@ -1068,6 +1068,15 @@ inline constexpr uint8_t kChoiceNoTypeFilter = 0xFFu;
 // Authored as `optional: true`; MIRRORED as CHOICE_OPTIONAL_BIT in vocab.py.
 inline constexpr uint32_t kChoiceOptionalBit = 1u << 14;
 
+// RANDOM_ANY_NUMBER (bit 15): a random ExhaustAction whose `anyNumber` argument
+// is true.  It never opens a selection screen -- RANDOM already takes that
+// path -- but it must NOT take ExhaustAction's `!anyNumber && hand <= amount`
+// forced-all shortcut.  FiendFireAction creates one such action per card in the
+// hand, so its final one-card action still calls hand.getRandomCard(cardRandomRng)
+// and spends `random(0)`.  This is a native runtime bit, not an authored
+// registry field.
+inline constexpr uint32_t kChoiceRandomAnyNumberBit = 1u << 15;
+
 [[nodiscard]] constexpr uint32_t make_choose_flags(
     ChoiceKind kind, bool random, int copies = 1,
     uint8_t type_filter = kChoiceNoTypeFilter, bool optional = false) noexcept {
@@ -1102,6 +1111,9 @@ inline constexpr uint32_t kChoiceOptionalBit = 1u << 14;
 }
 [[nodiscard]] constexpr bool choose_is_optional(uint32_t flags) noexcept {
     return (flags & kChoiceOptionalBit) != 0u;
+}
+[[nodiscard]] constexpr bool choose_random_any_number(uint32_t flags) noexcept {
+    return (flags & kChoiceRandomAnyNumberBit) != 0u;
 }
 
 // --- The OPTIONAL selection's accumulated picks ------------------------------
