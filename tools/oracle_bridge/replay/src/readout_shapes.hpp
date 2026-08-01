@@ -283,17 +283,21 @@ struct EventJoin {
 // synchronously on the `potion use`: onVictory ran (Burning Blood's heal,
 // BurningBlood.java:30) and the battle-over screen assembled (the potion-drop
 // roll + ratchet and the gold roll -- potionRng, blizzardPotionMod,
-// treasureRng). STS00241 seq 96 is the live pin: exactly those fields, one
-// record, zero-diff from seq 97 to the run terminal.
+// treasureRng). Elite rooms also pop their relic reward during this same
+// assembly, advancing relicRng and removing the selected row from its dungeon
+// pool. STS00241 seq 96 is the ordinary-room live pin; STS400327 seq 83 and
+// STS401257 seq 95 are the elite-room pins. Every pin is exactly one record and
+// zero-diff again on the following capture record.
 //
 // THE FIELD SET IS THE NARROWNESS, exactly as the obtain race's deck-suffix
 // shape is: every differing field must be one the one-frame settlement can
 // move -- hp (the victory heal) or the reward-assembly movers
-// (blizzard_potion_mod, treasure_rng.*, potion_rng.*). Anything else -- gold
+// (blizzard_potion_mod, treasure_rng.*, potion_rng.*), plus the elite relic
+// reward movers (relic_rng.* and relic_pool[*]). Anything else -- gold
 // (assembled rewards sit on the SCREEN, never in the purse), floor, a deck or
-// relic field, any other stream -- makes this return false and the record a
-// real divergence. The caller supplies the equally-narrow WINDOW gates (the
-// capture still in-combat, the sim already on a reward screen, the sim's
+// an acquired-relic field, any other stream -- makes this return false and the
+// record a real divergence. The caller supplies the equally-narrow WINDOW
+// gates (the capture still in-combat, the sim already on a reward screen, the sim's
 // combat flagged PLAYER-ESCAPED); a settlement computed WRONG rather than
 // early still surfaces, because the capture's own settled records from the
 // next seq on no longer satisfy the window and diff for real.
@@ -304,6 +308,8 @@ struct EventJoin {
         if (f == "hp" || f == "blizzard_potion_mod") continue;
         if (f.rfind("treasure_rng.", 0) == 0) continue;
         if (f.rfind("potion_rng.", 0) == 0) continue;
+        if (f.rfind("relic_rng.", 0) == 0) continue;
+        if (f.rfind("relic_pool[", 0) == 0) continue;
         return false;
     }
     return true;

@@ -259,8 +259,10 @@ TEST(EventJoin, NeowSentinelIsRefusedByName) {
 //
 // The field-set rule IS the narrowness (see the header): a record inside the
 // escape-animation window may differ ONLY in what the one-frame settlement
-// moves. STS00241 seq 96 is the live pin -- exactly these eight fields, one
-// record, zero-diff to the run terminal on both sides of it.
+// moves. STS00241 seq 96 is the ordinary-room live pin -- exactly these eight
+// fields, one record, zero-diff to the run terminal on both sides of it. The
+// elite-room pins STS400327 seq 83 and STS401257 seq 95 additionally pop a
+// relic reward from its pool during the same one-frame settlement.
 
 using sts::replay::is_escape_settlement_fields;
 
@@ -281,6 +283,15 @@ TEST(EscapeSettlementRace, TheSts00241FieldSetIsRecognised) {
     // nothing, a run whose potion roll misses moves fewer fields).
     EXPECT_TRUE(is_escape_settlement_fields(
         {"blizzard_potion_mod", "potion_rng.counter"}));
+}
+
+TEST(EscapeSettlementRace, EliteRelicRewardAssemblyIsRecognised) {
+    std::vector<std::string> fields = settlement_fields();
+    fields.insert(fields.end(),
+                  {"relic_rng.s0", "relic_rng.s1", "relic_rng.counter",
+                   "relic_pool[1].count", "relic_pool[1][0]",
+                   "relic_pool[1][29]"});
+    EXPECT_TRUE(is_escape_settlement_fields(fields));
 }
 
 TEST(EscapeSettlementRace, AnyFieldOutsideTheSettlementSetIsARealDivergence) {

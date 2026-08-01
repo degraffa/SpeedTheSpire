@@ -184,6 +184,102 @@
       "reference": "../stage-b-tasks.md#deferred-obligations",
       "seed": "STS300433",
       "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All four divergent records (seq 97-100) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS400075",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "After one replay-recognized elite Smoke-Bomb escape race, all fourteen real divergent records (seq 95-108) are gold-only Looter reads matching the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS400327",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All five divergent records (seq 108-112) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS400656",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All four divergent records (seq 134-137) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS400818",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All four real divergent records (seq 140-143) are gold-only Looter reads matching the already-decided stolen-gold ordering deviation; the following record is a separately replay-recognized ordinary Smoke-Bomb escape race.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401080",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "The captured Fairy in a Bottle is consumed immediately at seq 178 while the simulator deliberately burns its mirrored run-layer belt slot only at combat fold-back; HP and every other compared field agree through the terminal combat.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401126",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "After one replay-recognized elite Smoke-Bomb escape race, all seventeen real divergent records (seq 132-137 and 148-158) are gold-only Looter reads matching the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401257",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "The captured Fairy in a Bottle is consumed immediately at seq 87 while the simulator deliberately burns its mirrored run-layer belt slot only at combat fold-back; HP and every other compared field agree through the terminal combat.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401321",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All seven divergent records (seq 135-141) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401351",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "The sole divergent record (seq 125) is a gold-only read during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401439",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All six divergent records (seq 151-156) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401635",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4",
+      "classification": "state_divergence",
+      "note": "All seven divergent records (seq 103-109) are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS401784",
+      "status": "standing-deviation"
     }
   ]
 }
