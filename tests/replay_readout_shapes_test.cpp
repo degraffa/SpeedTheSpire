@@ -265,6 +265,7 @@ TEST(EventJoin, NeowSentinelIsRefusedByName) {
 // relic reward from its pool during the same one-frame settlement.
 
 using sts::replay::is_escape_settlement_fields;
+using sts::replay::is_escape_settlement_with_relic_counter_resets;
 
 std::vector<std::string> settlement_fields() {
     return {"hp",
@@ -303,6 +304,26 @@ TEST(EscapeSettlementRace, AnyFieldOutsideTheSettlementSetIsARealDivergence) {
         fields.push_back(extra);
         EXPECT_FALSE(is_escape_settlement_fields(fields)) << extra;
     }
+}
+
+TEST(EscapeSettlementRace, CounterResetExtensionAcceptsOnlyRelicCounters) {
+    std::vector<std::string> fields = settlement_fields();
+    fields.push_back("relics[3].counter");
+    EXPECT_TRUE(is_escape_settlement_with_relic_counter_resets(fields));
+    EXPECT_FALSE(is_escape_settlement_fields(fields))
+        << "the ordinary rule must never quietly accept a relic counter";
+
+    for (const char* bad : {"relics[].counter", "relics[x].counter",
+                            "relics[3].relic_id", "relics[3].counter_extra",
+                            "relics[3].counter[0]"}) {
+        std::vector<std::string> malformed = settlement_fields();
+        malformed.push_back(bad);
+        EXPECT_FALSE(is_escape_settlement_with_relic_counter_resets(malformed)) << bad;
+    }
+}
+
+TEST(EscapeSettlementRace, CounterResetExtensionRequiresACounter) {
+    EXPECT_FALSE(is_escape_settlement_with_relic_counter_resets(settlement_fields()));
 }
 
 TEST(EscapeSettlementRace, AnEmptyReportIsNotARace) {

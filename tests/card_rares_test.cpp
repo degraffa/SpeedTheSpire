@@ -727,6 +727,24 @@ TEST(CardRaresFiendFire, ExhaustsTheHandThenHitsOncePerCard) {
     EXPECT_EQ(lone.exhaust_count, 1);
 }
 
+TEST(CardRaresFiendFire, RandomExhaustsBillTheFinalSingletonToo) {
+    CombatState s = MakeCombat(/*energy=*/2);
+    AddHand(s, CardId::FIEND_FIRE);
+    AddHand(s, CardId::STRIKE);
+    AddHand(s, CardId::DEFEND);
+    s.card_random_rng = from_seed(42);
+
+    RngStream expected = s.card_random_rng;
+    (void)random(expected, 1);  // first ExhaustAction over Strike / Defend
+    (void)random(expected, 0);  // its final singleton; anyNumber remains true
+
+    Play(s, 0, 0);
+
+    EXPECT_EQ(s.card_random_rng.counter, expected.counter);
+    EXPECT_EQ(s.card_random_rng.s0, expected.s0);
+    EXPECT_EQ(s.card_random_rng.s1, expected.s1);
+}
+
 // ===========================================================================
 // Immolate -- AoE + a Burn into the discard
 // ===========================================================================
