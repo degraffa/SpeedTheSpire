@@ -1269,8 +1269,16 @@ class CampaignDriver:
                     # command left readiness unrestored. Escape by completing the
                     # pending screen (confirm/proceed), else nudge; bounded so a
                     # genuinely wedged screen ends the run instead of hanging.
-                    noops += 1
                     gs2 = state.get("game_state") or {}
+                    # Some end-of-combat transitions reply to the action with a
+                    # protocol noop but have already entered GAME_OVER.  Do not
+                    # consume that screen's `proceed` here: the next iteration
+                    # must record the terminal state and return to the menu via
+                    # the dedicated terminal path.
+                    if game_over_outcome(gs2) is not None \
+                            or is_boss_combat_reward(gs2):
+                        continue
+                    noops += 1
                     _log(f"seed {seed}: no-op after {cmd!r} (game alive, screen "
                          f"{gs2.get('screen_type')}, ready="
                          f"{state.get('ready_for_command')}) #{noops}")

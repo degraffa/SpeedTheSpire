@@ -357,6 +357,54 @@ class LivePolicyTransientSettleTest(unittest.TestCase):
 
         self.assertFalse(driver._return_to_menu_from_gameover())
 
+    def test_noop_that_reveals_game_over_is_recorded_before_proceed(self):
+        """A no-op response may already carry GAME_OVER, not a recovery screen."""
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "noop_game_over"
+            _write_launch_log(os.path.join(root, campaign_id))
+            initial = _action(_oracle())["state_json"]
+            initial["available_commands"] = ["end"]
+            initial["game_state"]["screen_type"] = "COMBAT"
+            game_over = {
+                "available_commands": ["proceed"],
+                "ready_for_command": False,
+                "in_game": True,
+                "game_state": {
+                    "screen_type": "GAME_OVER",
+                    "screen_state": {"victory": False},
+                    "floor": 1,
+                    "act": 1,
+                },
+            }
+            menu = {
+                "available_commands": ["start"],
+                "ready_for_command": True,
+                "in_game": False,
+            }
+            driver = _stack_driver(root, campaign_id, state=initial,
+                                   max_actions=100)
+            driver.stepper.states.extend([game_over, menu])
+
+            with mock.patch.dict(
+                    os.environ,
+                    {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+                     "unit-test-launch-token"}):
+                outcome, floor, actions, menu_ok = driver.run_seed(SEED, 1)
+
+            self.assertEqual(("death", 1, 1, True),
+                             (outcome, floor, actions, menu_ok))
+            self.assertEqual(
+                [f"start ironclad 20 {SEED}", "end", "proceed"],
+                driver.stepper.commands)
+            with open(os.path.join(
+                    root, campaign_id, f"run_{SEED}_a20_ironclad.jsonl"),
+                    encoding="utf-8") as fh:
+                records = [json.loads(line) for line in fh]
+            self.assertEqual("__terminal_observed__",
+                             records[-2]["action_command"])
+            self.assertEqual("death", records[-1]["outcome"])
+            self.assertEqual(1, records[-1]["floor"])
+
 
 class RuntimeStackParsingTest(unittest.TestCase):
     def test_parses_version_info_and_mod_list(self):
