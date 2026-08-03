@@ -38,6 +38,12 @@ Resume is the default. Re-running the identical command resumes the seed-level
 progress ledger and then regenerates derived outputs. `--fresh` is explicit and
 has the orchestrator's narrow cleanup semantics; a changed seed list, policy,
 policy seed, or shard identity is refused under an existing campaign id.
+
+If a parallel campaign's original source list has been retired, resume it with
+`--resume-existing` instead of `--seeds`. The pipeline reloads only that
+group's persisted, canonical seed partition and still refuses policy, shard,
+topology, runtime, or worker-identity drift. This option does not apply to the
+pre-parallel single-runtime layout, which still requires its original list.
 An interrupted current seed is retried first; its incomplete JSONL and timing
 sidecar are replaced before the new attempt writes its header, while completed
 seeds are retained.

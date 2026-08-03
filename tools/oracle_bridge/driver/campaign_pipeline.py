@@ -491,7 +491,7 @@ def _prepare_exact_worker(group: dict, worker: dict) -> dict:
     return {"campaign_dir": campaign_dir, "paths": paths, **worker}
 
 
-def prepare_parallel_group(base_id: str, seeds_spec: str,
+def prepare_parallel_group(base_id: str, seeds_spec: Optional[str],
                            outer_shard_count: int,
                            outer_shard_index: int, policy: str,
                            policy_seed: int, instance_spec,
@@ -499,7 +499,8 @@ def prepare_parallel_group(base_id: str, seeds_spec: str,
                            java_xmx_mib: int = DEFAULT_JAVA_XMX_MIB,
                            java_xms_mib: int = DEFAULT_JAVA_XMS_MIB,
                            seeds_per_launch: int =
-                           DEFAULT_SEEDS_PER_LAUNCH) -> tuple:
+                           DEFAULT_SEEDS_PER_LAUNCH,
+                           resume_existing: bool = False) -> tuple:
     """Persist a deterministic host-shard then local-worker topology."""
     if (not isinstance(java_xms_mib, int) or java_xms_mib < 1
             or not isinstance(java_xmx_mib, int) or java_xmx_mib < 1
@@ -508,27 +509,84 @@ def prepare_parallel_group(base_id: str, seeds_spec: str,
             "Java heap sizes must be positive and Xms must not exceed Xmx")
     if not isinstance(seeds_per_launch, int) or seeds_per_launch < 1:
         raise ValueError("seeds_per_launch must be positive")
-    all_seeds = _read_seeds(seeds_spec)
-    selected = shard_seeds(
-        all_seeds, outer_shard_count, outer_shard_index)
     group_id = shard_campaign_id(
         base_id, outer_shard_count, outer_shard_index)
     group_dir, paths = _group_paths(group_id)
-    os.makedirs(group_dir, exist_ok=True)
-    group_dir, paths = _group_paths(group_id)
-    identity = _parallel_identity(
-        base_id, group_id, all_seeds, selected,
-        outer_shard_count, outer_shard_index, policy, policy_seed, script)
-    if os.path.exists(paths["manifest"]):
+    if resume_existing:
+        if not os.path.exists(paths["manifest"]):
+            raise ValueError(
+                "--resume-existing requires an existing parallel group")
         group = _read_json(paths["manifest"])
         if group.get("format") != PARALLEL_GROUP_FORMAT:
             raise ValueError("parallel group manifest has an unknown format")
-        prior_identity = {
-            key: group.get(key) for key in identity
+        selected = validate_seed_list(group.get("selected_seed_list"))
+        if group.get("selected_seed_list") != selected:
+            raise ValueError(
+                "parallel group selected seed list is not canonical")
+        if not isinstance(group.get("source_seed_count"), int) or \
+                group["source_seed_count"] < len(selected):
+            raise ValueError("parallel group has an invalid source seed count")
+        resume_identity = {
+            "base_campaign_id": base_id,
+            "group_campaign_id": group_id,
+            "artifact_root": CAMPAIGN_ROOT,
+            "outer_shard_count": outer_shard_count,
+            "outer_shard_index": outer_shard_index,
+            "policy": policy,
+            "policy_seed": policy_seed,
         }
-        if prior_identity != identity:
+        prior_identity = {
+            key: group.get(key) for key in resume_identity
+        }
+        if prior_identity != resume_identity or group.get("script") != script:
             raise ValueError(
                 "parallel campaign identity mismatch; use a new campaign id")
+    else:
+        if seeds_spec is None:
+            raise ValueError("parallel campaign requires a seed list")
+        all_seeds = _read_seeds(seeds_spec)
+        selected = shard_seeds(
+            all_seeds, outer_shard_count, outer_shard_index)
+        identity = _parallel_identity(
+            base_id, group_id, all_seeds, selected,
+            outer_shard_count, outer_shard_index, policy, policy_seed, script)
+        os.makedirs(group_dir, exist_ok=True)
+        group_dir, paths = _group_paths(group_id)
+        if os.path.exists(paths["manifest"]):
+            group = _read_json(paths["manifest"])
+            if group.get("format") != PARALLEL_GROUP_FORMAT:
+                raise ValueError("parallel group manifest has an unknown format")
+            prior_identity = {
+                key: group.get(key) for key in identity
+            }
+            if prior_identity != identity:
+                raise ValueError(
+                    "parallel campaign identity mismatch; use a new campaign id")
+        else:
+            count = resolve_instance_count(
+                instance_spec, len(selected), java_xmx_mib)
+            workers = [
+                {
+                    "index": index,
+                    "campaign_id": worker_campaign_id(group_id, count, index),
+                    "seed_list": selected[index::count],
+                }
+                for index in range(count)
+            ]
+            group = {
+                "format": PARALLEL_GROUP_FORMAT,
+                "orchestration_version": PARALLEL_ORCHESTRATION_VERSION,
+                **identity,
+                "requested_instances": instance_spec,
+                "resolved_instances": count,
+                "java_xms_mib": java_xms_mib,
+                "java_xmx_mib": java_xmx_mib,
+                "seeds_per_launch": seeds_per_launch,
+                "workers": workers,
+            }
+            _write_json(paths["manifest"], group)
+
+    if resume_existing or os.path.exists(paths["manifest"]):
         count = group.get("resolved_instances")
         if not isinstance(count, int) or count < 1:
             raise ValueError("parallel group has an invalid instance count")
@@ -547,29 +605,6 @@ def prepare_parallel_group(base_id: str, seeds_spec: str,
                 raise ValueError(
                     f"parallel topology {key} is already {group.get(key)!r}, "
                     f"not {value!r}; use a new campaign id")
-    else:
-        count = resolve_instance_count(
-            instance_spec, len(selected), java_xmx_mib)
-        workers = [
-            {
-                "index": index,
-                "campaign_id": worker_campaign_id(group_id, count, index),
-                "seed_list": selected[index::count],
-            }
-            for index in range(count)
-        ]
-        group = {
-            "format": PARALLEL_GROUP_FORMAT,
-            "orchestration_version": PARALLEL_ORCHESTRATION_VERSION,
-            **identity,
-            "requested_instances": instance_spec,
-            "resolved_instances": count,
-            "java_xms_mib": java_xms_mib,
-            "java_xmx_mib": java_xmx_mib,
-            "seeds_per_launch": seeds_per_launch,
-            "workers": workers,
-        }
-        _write_json(paths["manifest"], group)
     workers = group.get("workers")
     if not isinstance(workers, list) or len(workers) != count:
         raise ValueError("parallel group worker topology is malformed")
@@ -1375,7 +1410,7 @@ def run_parallel_pipeline(args, base: str) -> int:
                 base, args.seeds, args.shard_count, args.shard_index,
                 args.policy, args.policy_seed, args.instances,
                 script_identity(args), args.java_xmx_mib, args.java_xms_mib,
-                args.seeds_per_launch)
+                args.seeds_per_launch, args.resume_existing)
         except (OSError, ValueError) as exc:
             print(f"invalid parallel pipeline input: {exc}", file=sys.stderr)
             return 2
@@ -1394,6 +1429,12 @@ def run_pipeline(args, campaign_base: Optional[str] = None) -> int:
     base = campaign_base or args.campaign_id
     if _legacy_campaign_exists(
             base, args.shard_count, args.shard_index):
+        if args.resume_existing:
+            print(
+                "--resume-existing applies only to parallel campaign groups; "
+                "pass the original --seeds for this legacy campaign",
+                file=sys.stderr)
+            return 2
         print(
             "existing pre-parallel campaign detected; resuming the legacy "
             "single shared-runtime topology", flush=True)
@@ -1482,8 +1523,12 @@ def run_scheduled(config_path: str) -> int:
 def add_run_options(parser, campaign_required=True) -> None:
     if campaign_required:
         parser.add_argument("--campaign-id", required=True)
-    parser.add_argument("--seeds", required=True,
-                        help="comma-separated seeds or seed-list file")
+    seed_source = parser.add_mutually_exclusive_group(required=True)
+    seed_source.add_argument(
+        "--seeds", help="comma-separated seeds or seed-list file")
+    seed_source.add_argument(
+        "--resume-existing", action="store_true",
+        help="resume an existing parallel group from its persisted seed set")
     parser.add_argument("--policy", choices=["random-legal", "greedy", "script"],
                         default="random-legal")
     parser.add_argument("--script",

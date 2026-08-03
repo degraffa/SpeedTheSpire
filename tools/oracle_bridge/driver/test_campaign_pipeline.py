@@ -154,6 +154,36 @@ class ShardingTest(unittest.TestCase):
                         "parallel", seed_path, 1, 0,
                         "random-legal", 7, 2)
 
+    def test_parallel_resume_without_source_reuses_persisted_seed_set(self):
+        with tempfile.TemporaryDirectory() as root:
+            seeds = [f"STS{i:05d}" for i in range(12)]
+            seed_path = os.path.join(root, "vanishing-seeds.txt")
+            with open(seed_path, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(seeds) + "\n")
+            campaign_root = os.path.join(root, "campaigns")
+            with mock.patch.object(
+                    campaign_pipeline, "CAMPAIGN_ROOT", campaign_root):
+                original, _ = campaign_pipeline.prepare_parallel_group(
+                    "parallel", seed_path, 3, 1, "greedy", 17, 2)
+                os.remove(seed_path)
+                resumed, _ = campaign_pipeline.prepare_parallel_group(
+                    "parallel", None, 3, 1, "greedy", 17, 2,
+                    resume_existing=True)
+                with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                    campaign_pipeline.prepare_parallel_group(
+                        "parallel", None, 3, 1, "random-legal", 17, 2,
+                        resume_existing=True)
+
+            self.assertEqual(original, resumed)
+
+    def test_resume_existing_is_an_alternative_to_seeds(self):
+        args = campaign_pipeline.parse_args([
+            "run", "--campaign-id", "parallel", "--resume-existing"])
+        self.assertTrue(args.resume_existing)
+        self.assertIsNone(args.seeds)
+        with self.assertRaises(SystemExit):
+            campaign_pipeline.parse_args(["run", "--campaign-id", "parallel"])
+
     def test_auto_instance_count_obeys_cpu_memory_and_seed_caps(self):
         with self.subTest("cpu"), \
                 mock.patch.object(
