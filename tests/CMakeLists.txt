@@ -645,6 +645,13 @@ sts_add_test(relic_rares_shop_test)
 # asserted inertness of every deliberate no-op in both tiers.
 sts_add_test(relic_boss_special_test)
 
+# The S2 event-content identity rows: the eight Act-2/3-event-reachable SPECIAL
+# relics (relics.yaml 143-150) and the five event/relic-granted SPECIAL cards
+# (cards.yaml 128-132). Tier/rarity and pool-exclusion invariants, the translator
+# join keys, Necronomicon's onEquip curse rider, Necronomicurse's two separate
+# unremovability sites, and the asserted inertness of every deferred body.
+sts_add_test(s2_event_content_test)
+
 # B3.4 red common skills + CHOOSE-in-combat plumbing.
 sts_add_test(card_skills_test)
 

@@ -388,10 +388,11 @@ TEST(RegistryGen, GameIdTablesRoundTrip) {
 // --- B3.24 relic table: tier + hook bindings match the registry --------------
 TEST(RegistryGen, RelicTableMatchesRegistry) {
     namespace r = sts::registry;
-    EXPECT_EQ(r::manifest::kRelicsCount, 142u);  // + the 28 rares, 17 shop
+    EXPECT_EQ(r::manifest::kRelicsCount, 150u);  // + the 28 rares, 17 shop
                                                  // relics and Odd Mushroom,
                                                  // + the 22-relic BOSS pool and
-                                                 // the 9 Act-1 event SPECIALs
+                                                 // the 9 Act-1 event SPECIALs,
+                                                 // + the 8 Act-2/3 SPECIALs
 
     // Burning Blood (starter, native on_victory).
     const r::RelicDef* bb = r::relic_def(r::RelicId::BURNING_BLOOD);
@@ -424,7 +425,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
     EXPECT_EQ(r::relic_def(r::RelicId::RED_SKULL)->pool_order, 32);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->pool_order, -1);
     EXPECT_EQ(r::relic_def(r::RelicId::CIRCLET)->initial_counter, 1);
-    EXPECT_EQ(r::kRelicDefs.size(), 142u);
+    EXPECT_EQ(r::kRelicDefs.size(), 150u);
 
     // --- B3.25 uncommon rows ------------------------------------------------
     // Mercury Hourglass (data): atTurnStart DAMAGE 3 to ALL enemies, THORNS-typed
@@ -470,7 +471,7 @@ TEST(RegistryGen, RelicTableMatchesRegistry) {
 // --- 5. Manifest row counts match the seeded content ------------------------
 TEST(RegistryGen, ManifestCounts) {
     namespace m = sts::registry::manifest;
-    EXPECT_EQ(m::kCardsCount, 127u);  // B3.7: prior 67 + 8 red uncommon POWER cards
+    EXPECT_EQ(m::kCardsCount, 132u);  // B3.7: prior 67 + 8 red uncommon POWER cards
                                       // + the 16 red RARE cards (ids 76-91)
                                       // + the 20 colorless UNCOMMONs at ids
                                       // 92-111: 18 landed first, and B3.10c's
@@ -500,8 +501,14 @@ TEST(RegistryGen, ManifestCounts) {
                                       // and holds no gap at all.
                                       // + Wave-C track 2's Curse of the Bell
                                       // (127), Calling Bell's SPECIAL curse;
-                                      // 128 is that track's published reserve
-                                      // and stays unissued.
+                                      // 128 was that track's published reserve
+                                      // and is now issued.
+                                      // + S2.03's 5 Act-2/3 SPECIAL cards (128
+                                      // Apparition, 129 Bite, 130 J.A.X., 131
+                                      // Ritual Dagger, 132 Necronomicurse); the
+                                      // S2 block's 133 stays the reserve. All
+                                      // five are CardRarity.SPECIAL, so none
+                                      // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
     EXPECT_EQ(m::kPowersCount, 53u);  // + REGENERATE_MONSTER (91), the emerald
@@ -571,8 +578,11 @@ TEST(RegistryGen, ManifestCounts) {
                                        // with the escape liveness predicate --
                                        // see the block comments in
                                        // registry/monsters.yaml
-    EXPECT_EQ(m::kRelicsCount, 142u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
+    EXPECT_EQ(m::kRelicsCount, 150u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
                                        // + B3.27's 22 boss + 9 Act-1 event specials
+                                       // + S2.03's 8 Act-2/3 event specials
+                                       // (143-150). With them the registered
+                                       // SPECIAL tier is closed at 19 rows.
     EXPECT_EQ(m::kPotionsCount, 33u);
     EXPECT_EQ(m::kEventsCount, 31u);  // the three canonical Act-1 dungeon lists:
                                       // Exordium.initializeEventList's 11 (ids
@@ -593,7 +603,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 492u);  // 127 + 53 + 25 + 142 + 33 + 31 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 505u);  // 132 + 53 + 25 + 150 + 33 + 31 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------

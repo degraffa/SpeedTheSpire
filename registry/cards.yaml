@@ -2182,3 +2182,106 @@
   flags: []
   provenance: "CurseOfTheBell (CurseOfTheBell.java:24): cost -2 CURSE, CardColor.CURSE, CardRarity.SPECIAL, CardTarget.NONE; use() and upgrade() are no-ops and there is NO isEthereal flag (unlike Ascender's Bane it stays in hand). Granted only by CallingBell.onEquip (CallingBell.java:42). UNREMOVABLE: CardGroup.getPurgeableCards excludes it by name (CardGroup.java:981), expressed at rest_card_purgeable (rest_sites.cpp) beside Ascender's Bane. NOT in the returnRandomCurse pool: CardLibrary.getCurse walks the poolable curses and AbstractDungeon.addCurseCards skips SPECIAL rarity (AbstractDungeon.java:1213-1219), so no curse_pool key. canUpgrade() is false for every CURSE (AbstractCard.java:672-679). Combat behavior = unplayable inert curse (cost -2 unplayable sentinel). No effect program."
   effects: []
+
+# --- S2.03: the Act-2/3 event- and relic-granted SPECIAL cards (ids 128-132) ---
+#
+# Five rows, none of them a pool member. Four are CardColor.COLORLESS with
+# CardRarity.SPECIAL and one is the CURSE Necronomicurse; SPECIAL rarity is
+# exactly what keeps all five out of every generated pool, and that is a fact
+# about the Java, not a convenience: addColorlessCards (AbstractDungeon.java:
+# 1203-1210) skips BASIC and SPECIAL, returnTrulyRandomColorlessCardInCombat
+# reads srcColorlessCardPool built from it, and addCurseCards (:1212-1219) skips
+# Necronomicurse BY NAME on top of the rarity rule. The generator's pool filters
+# already say `rarity in (COMMON, UNCOMMON, RARE)` / `(UNCOMMON, RARE)`, so these
+# rows add no member to kIroncladAttackPool, kIroncladSkillPool,
+# kColorlessCombatPool, kColorless{Uncommon,Rare}Pool, kColorlessPool or
+# kPoolableCurses -- every existing pool array is byte-identical after this task.
+#
+# All five ARE in CardLibrary.cards (CardLibrary.java:840-865), which is why they
+# need rows at all: the translator joins the oracle's cardID strings, and three of
+# the five join on a string that is not the class name (Ghostly, J.A.X.,
+# RitualDagger).
+#
+# Two of the five carry a DEFERRED effect program, spelled as an explicitly empty
+# one rather than a partial transcription -- an empty program is a loud divergence
+# (the card visibly does nothing) where a partial one would be a quiet one. Both
+# are named in their rows with the task that owns the body, and both are pinned
+# inert by the tier-2 suite so that task sees a failing test.
+
+- id: 128
+  name: APPARITION
+  game_id: "Ghostly"
+  color: COLORLESS
+  rarity: SPECIAL
+  type: SKILL
+  cost: 1
+  target: SELF
+  flags: [exhaust, ethereal]
+  upgraded_flags: [exhaust]
+  provenance: "Apparition (Apparition.java:20-50): the join key is the ID string 'Ghostly' (:22), NOT the class name -- the same shape as Nilry's Codex on the relic side. ctor (:25-29) cost 1, SKILL, COLORLESS, CardRarity.SPECIAL, CardTarget.SELF, exhaust = true, isEthereal = true. use (:31-34) is a single addToBot ApplyPowerAction(p, p, new IntangiblePlayerPower(p, 1), 1); IntangiblePlayerPower is powers.yaml INTANGIBLE (game_id 'IntangiblePlayer'), so the program is one APPLY_POWER step at both levels. upgrade (:36-44) sets isEthereal = false ONLY -- it does not touch cost, exhaust or the amount -- so `upgraded_flags: [exhaust]` is the whole upgraded delta and the two programs are identical (the Secret Technique / Thinking Ahead precedent, where the upgrade is a flag change). Source: Ghosts, 5 copies below A15 and 3 at A15+ (Ghosts.java:38-41 sets the option, becomeGhost :84-95 loops `amount = 5; if (ascensionLevel >= 15) amount -= 2`), each handed over by ShowCardAndObtainEffect so each takes the Omamori-free ordinary master-deck append."
+  effects:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: INTANGIBLE}
+  upgraded:
+    - {op: APPLY_POWER, target: SELF, amount: 1, power: INTANGIBLE}
+
+- id: 129
+  name: BITE
+  game_id: "Bite"
+  color: COLORLESS
+  rarity: SPECIAL
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: []
+  healing: true  # CardTags.HEALING (Bite.java:37) -- inert here (SPECIAL rarity
+                 # already keeps it out of every pool), recorded because the tag
+                 # is on the card and the pool filters read this column.
+  provenance: "Bite (Bite.java:28-66): ctor (:33-38) cost 1, ATTACK, COLORLESS, CardRarity.SPECIAL, CardTarget.ENEMY, baseDamage 7, magicNumber = baseMagicNumber = 2, tags.add(CardTags.HEALING). use (:40-51) queues a purely cosmetic VFXAction (BiteEffect, whose only branch is the FAST_MODE duration) and then addToBot DamageAction(m, DamageInfo(p, damage, damageTypeForTurn), AttackEffect.NONE) followed by addToBot HealAction(p, p, magicNumber) -- so damage first, heal second, and the heal is QUEUED, which routes it through the onPlayerHeal relic seam (Magic Flower today, Mark of the Bloom once relics.yaml id 150 goes live). upgrade (:53-60) upgradeDamage(1) -> 8 and upgradeMagicNumber(1) -> 3; nothing else moves. Source: Vampires, 5 copies (Vampires.java:109-113), which also strips every STARTER_STRIKE from the master deck first (:104-108)."
+  effects:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 7}
+    - {op: HEAL, target: SELF, amount: 2}
+  upgraded:
+    - {op: DAMAGE, target: CARD_TARGET, amount: 8}
+    - {op: HEAL, target: SELF, amount: 3}
+
+- id: 130
+  name: JAX
+  game_id: "J.A.X."
+  color: COLORLESS
+  rarity: SPECIAL
+  type: SKILL
+  cost: 0
+  target: SELF
+  flags: []
+  provenance: "JAX (JAX.java:21-49): the join key is the ID string 'J.A.X.' with its three dots (:23), not the class name. ctor (:26-29) cost 0, SKILL, COLORLESS, CardRarity.SPECIAL, CardTarget.SELF, magicNumber = baseMagicNumber = 2; NO exhaust flag -- J.A.X. is reusable. use (:31-35) addToBot LoseHPAction(p, p, 3) -- the LITERAL 3, which upgrade never touches -- then addToBot ApplyPowerAction(p, p, new StrengthPower(p, magicNumber), magicNumber). The HP loss bypasses block (HP_LOSS type) and is queued BEFORE the Strength, matching the step order below. upgrade (:37-43) is upgradeMagicNumber(1) -> 3 and nothing else. Source: Drug Dealer option 0 (DrugDealer.java:40, 55-58), handed over by ShowCardAndObtainEffect."
+  effects:
+    - {op: LOSE_HP, target: SELF, amount: 3}
+    - {op: APPLY_POWER, target: SELF, amount: 2, power: STRENGTH}
+  upgraded:
+    - {op: LOSE_HP, target: SELF, amount: 3}
+    - {op: APPLY_POWER, target: SELF, amount: 3, power: STRENGTH}
+
+- id: 131
+  name: RITUAL_DAGGER
+  game_id: "RitualDagger"
+  color: COLORLESS
+  rarity: SPECIAL
+  type: ATTACK
+  cost: 1
+  target: ENEMY
+  flags: [exhaust]
+  provenance: "RitualDagger (RitualDagger.java:20-57): the join key is 'RitualDagger', one word, not the display name. ctor (:25-31) cost 1, ATTACK, COLORLESS, CardRarity.SPECIAL, CardTarget.ENEMY, exhaust = true, misc = 15, magicNumber = baseMagicNumber = 3, baseDamage = misc. THE DAMAGE LIVES IN `misc`, NOT IN THE ROW: applyPowers (:38-43) re-seeds baseBlock from misc every time, and CardLibrary.getCopy (CardLibrary.java:958-979) special-cases this cardID to write damage/baseDamage back from a saved misc -- so the card's damage is PER-INSTANCE RUN-PERSISTENT STATE, starting at 15. use (:33-36) queues one RitualDaggerAction(m, DamageInfo(p, damage, damageTypeForTurn), magicNumber, this.uuid). RitualDaggerAction.update (RitualDaggerAction.java:34-58): ordinary target.damage(info); then, IF the target ended up dead (isDying || currentHealth <= 0) and is neither halfDead nor a Minion-power holder, `misc += increaseAmount` on the master-deck card with the same uuid AND on every in-battle instance of that uuid (GetAllInBattleInstances), each followed by applyPowers and baseDamage = misc. upgrade (:45-51) is upgradeMagicNumber(2) -> 5; the base damage is never upgraded (it is misc). EFFECT PROGRAM DEFERRED, owner S2.31 (Nest): it needs a bespoke opcode (kill-conditional permanent growth of a per-instance value, propagated to the master deck by identity), and CardInstance.misc is today a reserved scratch field with no writer. The program is left EXPLICITLY EMPTY rather than transcribed as a bare 15-damage attack, because a card that visibly does nothing is a loud divergence while a 15-damage attack that never grows is a silent one; ritual_dagger inertness is pinned in the tier-2 suite so the body task sees a failing test."
+  effects: []
+  upgraded: []
+
+- id: 132
+  name: NECRONOMICURSE
+  game_id: "Necronomicurse"
+  color: CURSE
+  rarity: SPECIAL
+  type: CURSE
+  cost: -2
+  target: NONE
+  flags: []
+  provenance: "Necronomicurse (Necronomicurse.java:22-59): ctor (:27-29) cost -2 (the unplayable sentinel), CardType.CURSE, CardColor.CURSE, CardRarity.SPECIAL, CardTarget.NONE; use (:31-33) and upgrade (:51-53) are empty, and there is NO isEthereal flag, so like Curse of the Bell (id 127) and unlike Ascender's Bane it simply sits in hand. SOURCE: Necronomicon.onEquip (Necronomicon.java:43), the relic's mandatory rider -- relics.yaml id 146 carries that half. UNREMOVABLE, at both of the game's two exclusion sites, and it is named at BOTH: CardGroup.getPurgeableCards (CardGroup.java:978-985) skips it at :981 alongside CurseOfTheBell and AscendersBane, which is rest_card_purgeable (rest_sites.cpp); and AbstractPlayer.isCursed (AbstractPlayer.java:741-748) skips it at :744 in the same company, which is event_player_is_cursed (event_framework.cpp) -- the Fountain of Cleansing gate, a DIFFERENT question from purgeability (holding only this curse leaves the player UNcursed). Note :744 compares with Java `==` on the interned ID literals rather than equals(); the cardIDs come from the classes' compile-time String constants, so the reference comparison does hold. NOT IN ANY CURSE POOL, and again by name rather than only by rarity: addCurseCards (AbstractDungeon.java:1212-1219) skips it at :1215, and both CardLibrary.getCurse overloads skip it while walking the separate `curses` map (CardLibrary.java:1022-1038, :1025 and :1034) -- so no curse_pool key, and the poolable-curse array is unchanged. NO on_remove_max_hp_loss (that is Parasite's alone). COMBAT BEHAVIOUR DEFERRED, owner S2.31 (Cursed Tome): triggerOnExhaust (:43-49) addToBot MakeTempCardInHandAction(this.makeCopy()), i.e. exhausting it puts a fresh copy straight back in hand, and there is no ON_EXHAUST member of CardTrigger today (the four are on_play/end_of_turn/on_draw/on_other_card_played). onRemoveFromMasterDeck (:35-41) is purely cosmetic given the exclusions above -- it is only reachable through a removal path that getPurgeableCards already forbids. Until the trigger lands the row is an inert unplayable curse, pinned as such in the tier-2 suite."
+  effects: []

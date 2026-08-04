@@ -59,7 +59,7 @@ int16_t energy_master(const CombatState& s) noexcept {
     // This is a deliberate SUBSET switch over the relic table, so it carries a
     // row-count pin rather than the link-error property the generated dispatch
     // surfaces have (relic_pools.cpp:18-30 states that distinction).
-    static_assert(sts::registry::manifest::kRelicsCount == 142,
+    static_assert(sts::registry::manifest::kRelicsCount == 150,
                   "new relic: does its onEquip touch "
                   "AbstractDungeon.player.energy.energyMaster? Only the ten "
                   "listed below do today, plus Slaver's Collar's conditional "
@@ -111,7 +111,7 @@ int32_t game_hand_size(const CombatState& s) noexcept {
     // game are the in-combat DrawPower / DrawReductionPower (DrawPower.java:38,
     // :43; DrawReductionPower.java:37, :51), which write gameHandSize -- the
     // per-combat snapshot -- not the master, and neither has a registry row.
-    static_assert(sts::registry::manifest::kRelicsCount == 142,
+    static_assert(sts::registry::manifest::kRelicsCount == 150,
                   "new relic: does its onEquip touch "
                   "AbstractPlayer.masterHandSize? Only Snecko Eye does today.");
     int32_t hand = kStartOfTurnDrawCount;

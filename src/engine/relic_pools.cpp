@@ -125,7 +125,7 @@ void remove_owned_from_pools(RunState& rs) noexcept {
 }  // namespace
 
 void initialize_relic_pools(RunState& rs) noexcept {
-    static_assert(sts::registry::manifest::kRelicsCount == 142,
+    static_assert(sts::registry::manifest::kRelicsCount == 150,
                   "new relic: it joins its tier's dungeon pool at its "
                   "pool_order, which fixes the relicRng shuffle order for that "
                   "tier. Confirm the row's tier is poolable, that pool_order is "
@@ -275,7 +275,18 @@ void fill_deck_spawn_gates(const RunState& rs, RelicSpawnContext& ctx) noexcept 
     // no new input and the POWER-row count stays at 12. Neither gate moved. (A
     // curse also cannot satisfy the ATTACK/SKILL bottle gates below, which
     // branch on those two types only.)
-    static_assert(sts::registry::manifest::kCardsCount == 127,
+    // Checked again for the five Act-2/3 SPECIAL cards (CardIds 128-132).
+    // BASIC: NO for all five -- every constructor passes CardRarity.SPECIAL
+    // (Apparition.java:26, Bite.java:34, JAX.java:27, RitualDagger.java:26,
+    // Necronomicurse.java:28), so the hard-coded BASIC set stays exactly
+    // {STRIKE, DEFEND, BASH}. POWER: NO for all five -- the same constructors
+    // pass SKILL, ATTACK, SKILL, ATTACK and CURSE -- so Bottled Tornado's
+    // rarity-agnostic type scan sees no new input and the POWER-row count stays
+    // at 12. Bite and Ritual Dagger DO satisfy Bottled Flame's non-basic ATTACK
+    // gate, and Apparition and J.A.X. Bottled Lightning's non-basic SKILL gate,
+    // which is the correct answer: an ordinary non-basic card of that type in
+    // the master deck is exactly what those gates ask about. No gate moved.
+    static_assert(sts::registry::manifest::kCardsCount == 132,
                   "new card: is it CardRarity.BASIC? The BASIC set is hard-coded "
                   "below as exactly {STRIKE, DEFEND, BASH}, and a fourth basic "
                   "row would wrongly satisfy the Bottled Flame/Lightning "

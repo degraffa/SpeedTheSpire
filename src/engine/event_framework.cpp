@@ -234,13 +234,19 @@ void init_event_pools(RunState& rs) noexcept {
 }
 
 bool event_player_is_cursed(const RunState& rs) noexcept {
-    // AbstractPlayer.isCursed (AbstractPlayer.java:741-748). Exclusions:
-    // Necronomicurse, CurseOfTheBell, AscendersBane. Necronomicurse has no S1
-    // registry row; keep this list in sync when that Act-2 card lands.
+    // AbstractPlayer.isCursed (AbstractPlayer.java:741-748). Exclusions, all
+    // three now registry rows: Necronomicurse, CurseOfTheBell, AscendersBane.
+    // The list is complete against :744 -- there is no fourth name there, and
+    // Pride (excluded from the CURSE POOLS by name) is deliberately absent from
+    // this one, so a Pride holder counts as cursed even though the pools skip it.
+    // Note the Java compares with `==` on interned ID literals rather than
+    // equals(); the cardIDs come from the classes' compile-time String
+    // constants, so the reference comparison does hold.
     for (uint16_t i = 0; i < rs.master_deck_count; ++i) {
         const CardId id = static_cast<CardId>(rs.master_deck[i].card_id);
         if (id == CardId::ASCENDERS_BANE ||
-            id == CardId::CURSE_OF_THE_BELL) {
+            id == CardId::CURSE_OF_THE_BELL ||
+            id == CardId::NECRONOMICURSE) {
             continue;
         }
         const CardDef* def = card_def(id);

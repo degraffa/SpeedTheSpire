@@ -128,16 +128,17 @@ bool rest_card_upgradeable(const CardInstance& card) noexcept {
 
 bool rest_card_purgeable(const CardInstance& card) noexcept {
     // CardGroup.getPurgeableCards (CardGroup.java:978-985) excludes exactly
-    // three ids by name: Necronomicurse, CurseOfTheBell, AscendersBane. Two of
-    // them are registry rows; Necronomicurse is not an S1 row (Act-2 event
-    // relic content). Bottled instances are NOT excluded here on purpose:
+    // three ids by name: Necronomicurse, CurseOfTheBell, AscendersBane. All
+    // three are registry rows now that Necronomicon's rider curse has landed,
+    // so the mirror is complete. Bottled instances are NOT excluded here on purpose:
     // this is the plain getPurgeableCards mirror, and the surfaces the Java
     // routes through getGroupWithoutBottledCards apply the stronger
     // master_card_purgeable_unbottled (relic_pools.hpp) one level up -- the
     // Toke option gate above, the Toke grid's dispatch guard
     // (run_advance.cpp), the event and shop purge grids.
     if (card.card_id == static_cast<uint16_t>(CardId::ASCENDERS_BANE) ||
-        card.card_id == static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL)) {
+        card.card_id == static_cast<uint16_t>(CardId::CURSE_OF_THE_BELL) ||
+        card.card_id == static_cast<uint16_t>(CardId::NECRONOMICURSE)) {
         return false;
     }
     return card_def(static_cast<CardId>(card.card_id)) != nullptr;

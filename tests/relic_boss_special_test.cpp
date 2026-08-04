@@ -171,8 +171,10 @@ TEST(RelicBossSpecial, TierRostersAreExactlyTheLivePools) {
     }
     EXPECT_EQ(boss, 22);
     // 9 Act-1 event specials + Circlet (the pool-exhaustion fallback) + Odd
-    // Mushroom (landed with the rare batch).
-    EXPECT_EQ(special, 11);
+    // Mushroom (landed with the rare batch) + the 8 Act-2/3 event specials,
+    // which close the registered SPECIAL tier (s2_event_content_test owns the
+    // closure claim and the per-row identity).
+    EXPECT_EQ(special, 19);
     for (bool slot : boss_slots) {
         EXPECT_TRUE(slot) << "boss pool_order must be dense 0..21";
     }

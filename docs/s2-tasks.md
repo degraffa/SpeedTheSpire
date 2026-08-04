@@ -49,8 +49,8 @@ from `registry/*.yaml` before extending):
 |---|---|---|
 | `encounters.yaml` | 22–43 (Act 2), 44–61 (Act 3) | S2.01 |
 | `events.yaml` | 32–44 (Act-2 list), 45–51 (Act-3 list) | S2.02 |
-| `relics.yaml` | 143–154 | S2.03 |
-| `cards.yaml` | 128–133 | S2.03 |
+| `relics.yaml` | 143–150 (151–154 returned unissued — design's ~10 was 8) | S2.03 |
+| `cards.yaml` | 128–132 used, 133 reserve | S2.03 |
 | `monsters.yaml` | 27–48 (Act 2), 49–66 (Act 3) | S2.2x batches, sub-blocks at dispatch |
 | `powers.yaml` | 93–135 | S2.2x batches, sub-blocks at dispatch |
 
@@ -119,7 +119,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   exactly once with S1 enum values unchanged (static_assert pins);
   membership/gate metadata pinned by tier-2 against the cited lines;
   six presets green.
-- **S2.03** `[ ]` ∥ **relics.yaml + cards.yaml S2 identity rows.** The ~10
+- **S2.03** `[x]` ∥ **relics.yaml + cards.yaml S2 identity rows.** The ~10
   event-relic rows already enumerated in relics.yaml's header commentary
   (Bloody Idol, Enchiridion, Nilry's Codex, Necronomicon, Mutagenic
   Strength, N'loth's Gift, Red Mask, Mark of the Bloom, Cultist Mask,
@@ -133,6 +133,22 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   sources, unremovability flags for Necronomicurse per CardGroup.java:981 /
   AbstractPlayer.java:744); id pins unchanged for all prior rows; six
   presets green.
+  **Log:** 2026-08-04 — landed. 8 SPECIAL relic rows (ids 143–150; the
+  design's "~10" counted two FaceTrader faces already landed in S1 —
+  correction recorded in the registry block comment, **ids 151–154
+  returned unissued**) + 5 SPECIAL card rows (128–132; 133 reserve).
+  Both canSpawn gate families were already fully S1-encoded (enumerated
+  and cross-checked complete); what S2 changes is reachability
+  (S2.11/S2.12). Bodies deferred with named owners except the two the
+  acceptance names: Necronomicon on_equip (Omamori/Calling Bell
+  precedent) and Necronomicurse's two unremovability sites; Ritual
+  Dagger's program deliberately EMPTY (loud) pending its bespoke misc
+  opcode. 16 tier-2 tests; six presets green. Ectoplasm provenance
+  corrected in place (canSpawn :54-57, onEquip :44-47 — design §2.4 and
+  the S1 row were both off). Flagged for S2.31/S2.32: Ghosts A15+ deals
+  3 Apparitions not 5; Vampires strips STARTER_STRIKE from the master
+  deck. Stale sidetable `_provenance.scope` string noted, left to its
+  generator's owner.
 - **S2.04** `[x]` ∥ **a20.yaml S2 status refresh.** Update the affected
   rows' notes/status per design §2.5/§4: A5 (between-act heal becomes
   live), A6 (verified run-start-only — negative pinned), A12 (per-act

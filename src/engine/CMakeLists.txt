@@ -94,6 +94,7 @@ add_library(sts_engine
     relics/relic_pickup_rare.cpp
     relics/relic_pickup_shop.cpp
     relics/relic_pickup_boss.cpp
+    relics/relic_pickup_special.cpp
     potions.cpp
     advance.cpp
     # Combat-reward assembly + claim (combat_rewards.hpp).
