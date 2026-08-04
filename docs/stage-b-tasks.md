@@ -2007,9 +2007,12 @@ The design §8 bar, checked literally (evidence linked in Log):
 - [x] Every `a20.yaml` row verified per design §8(3).
 - [x] Throughput floors hold (B5.5 re-run).
 - [x] Tier-4 suite green (B5.3 re-run).
-Then: CLAUDE.md "Current state" names M4 complete. Phase T's TE.2 retains
-ownership of the fresh S2 scope conversation; no S2 mechanics were inferred
-from closing this gate.
+Then: CLAUDE.md "Current state" names M4 complete. The fresh S2 scope
+exercise is SATISFIED by Phase T's TE.2 (2026-08-03): scope + verification
+design in [s2-design.md](s2-design.md), execution ledger in
+[s2-tasks.md](s2-tasks.md) — a G7-closing agent must not re-open a
+duplicate. No S2 mechanics were inferred from closing this gate. Stage C
+planning remains with G7, unclaimed.
 
 **Inherited — DISCHARGED:** the Infernal-Blade-generated Blood for Blood cost
 model is live, not unreachable. `updateCost(-1)` updates the saved combat base

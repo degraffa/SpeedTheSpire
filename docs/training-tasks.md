@@ -271,7 +271,7 @@ one exists, mirroring the Stage B convention.
   (see the stage-b deferred-obligations row this task added). Evidence:
   [verification/te1-survival-cohort.md](verification/te1-survival-cohort.md).
 
-- **TE.2** `[ ]` **Open S2 planning.** A fresh planning exercise per the
+- **TE.2** `[x]` **Open S2 planning.** A fresh planning exercise per the
   G7 closing action, pulled forward per plan §4.4: S2 scope doc (Acts 2–3
   content inventory, boss chest/act transition, boss-relic pick, A20
   double boss) and the S2 verification-gate design — coverage-cohort-based
@@ -285,7 +285,15 @@ one exists, mirroring the Stage B convention.
   **Acceptance:** S2 design doc + its own task ledger reviewed and landed
   with the scope inventory complete against the base game's Act 2–3
   content lists; G7 "Then:" cross-reference updated; first registry
-  authoring wave dispatched under it. **Log:** —
+  authoring wave dispatched under it. **Log:** 2026-08-04 — landed.
+  [s2-design.md](s2-design.md) (scope: 40 encounter rows, 37 monster
+  classes, 20 event list rows, ~10 relic + 5 card + 0 potion rows, run
+  layer incl. cardRng counter snap at act transition and RNG-free boss
+  chest; verification: S2-G1 content gate + S2-G2 coverage-cohort gate
+  built on the TE.1 STS-POLICY-IO seam) + [s2-tasks.md](s2-tasks.md)
+  (Phases S2.0–S2.4, local gate namespace, Wave-1 id blocks granted,
+  7 UNVERIFIED markers each owned by a ledger row). G7 "Then:" updated;
+  Wave 1 (S2.01–S2.04) dispatched by the orchestrator at landing.
 
 ---
 
