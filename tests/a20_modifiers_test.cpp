@@ -490,5 +490,98 @@ TEST(A20Negative, LevelTwentyAddsNothingToAnActOneRun) {
     EXPECT_EQ(a19.run.master_deck_count, a20.run.master_deck_count);
 }
 
+// =============================================================================
+// S2.04 -- S2 status refresh (status text + provenance only, no engine change)
+// =============================================================================
+//
+// s2-tasks.md S2.04: rows A5, A6, A12, A13, A20 gain S2-scoped facts and
+// explicit engine-work ownership, but their S1 STATUS (IMPLEMENTED /
+// N/A-FOR-S1) must NOT move until the owning task lands -- that is the whole
+// point of the task ("rows keep S1 status until their owner lands"). These
+// tests pin the new citations by substring, the same discipline the frozen
+// no-such-modifier block already uses, and re-assert the five rows' STATUS
+// prefixes stayed put.
+TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
+    const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
+    auto row = [&](int level) -> const A20Row& {
+        auto it = std::find_if(rows.begin(), rows.end(),
+                                [&](const A20Row& r) { return r.level == level; });
+        return *it;
+    };
+    EXPECT_EQ(row(5).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(6).notes.rfind("IMPLEMENTED", 0), std::size_t{0});
+    EXPECT_EQ(row(12).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(13).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(20).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+}
+
+// A5: the between-act heal (AbstractDungeon.java:2582-2586, the same line
+// already cited for the run-start no-op) becomes live once Acts 2-3 exist,
+// with the engine work owned by S2.12.
+TEST(A20S204, A5RecordsTheBetweenActHealBecomesLiveUnderS2) {
+    const std::string text = a20_yaml_text();
+    const std::vector<A20Row> rows = parse_a20_rows(text);
+    const auto it = std::find_if(rows.begin(), rows.end(),
+                                 [](const A20Row& r) { return r.level == 5; });
+    ASSERT_NE(it, rows.end());
+    EXPECT_NE(it->notes.find("S2 note (S2.04)"), std::string::npos);
+    EXPECT_NE(it->notes.find("owned by S2.12"), std::string::npos);
+    EXPECT_NE(it->notes.find("between-act heal becomes live"), std::string::npos);
+}
+
+// A6: the run-start guard (AbstractDungeon.java:2590) is one level above the
+// A6/A10/A14 ascensionLevel checks, so those three never recur at an act
+// transition. Design s2-design.md §4.2 states this explicitly; this pins the
+// citation landed in the registry row.
+TEST(A20S204, A6RecordsTheRunStartOnlyGuardCitation) {
+    const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
+    const auto it = std::find_if(rows.begin(), rows.end(),
+                                 [](const A20Row& r) { return r.level == 6; });
+    ASSERT_NE(it, rows.end());
+    EXPECT_NE(it->notes.find("AbstractDungeon.java:2590"), std::string::npos);
+    EXPECT_NE(it->notes.find("verified run-start-only"), std::string::npos);
+}
+
+// A12: the per-act halving values (TheCity.java:84, TheBeyond.java:81) match
+// the decompiled source exactly -- 0.25/0.125 in Act 2, 0.5/0.25 in Act 3.
+TEST(A20S204, A12RecordsThePerActHalvingCitations) {
+    const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
+    const auto it = std::find_if(rows.begin(), rows.end(),
+                                 [](const A20Row& r) { return r.level == 12; });
+    ASSERT_NE(it, rows.end());
+    EXPECT_NE(it->provenance.find("TheCity.java:84"), std::string::npos);
+    EXPECT_NE(it->provenance.find("TheBeyond.java:81"), std::string::npos);
+    EXPECT_NE(it->notes.find("0.25->0.125"), std::string::npos);
+    EXPECT_NE(it->notes.find("0.5->0.25"), std::string::npos);
+}
+
+// A13: two independent S2 facts -- the boss-gold branch fires per
+// MonsterRoomBoss instance (so the A20 double boss draws it twice), and Mind
+// Bloom's own boss re-fight has a SEPARATE fixed 25/50 branch on the same
+// threshold with no miscRng draw (MindBloom.java:73-77).
+TEST(A20S204, A13RecordsDoubleBossAndMindBloomCitations) {
+    const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
+    const auto it = std::find_if(rows.begin(), rows.end(),
+                                 [](const A20Row& r) { return r.level == 13; });
+    ASSERT_NE(it, rows.end());
+    EXPECT_NE(it->provenance.find("MindBloom.java:73-77"), std::string::npos);
+    EXPECT_NE(it->provenance.find("MonsterRoomBoss.java:27-36"), std::string::npos);
+    EXPECT_NE(it->notes.find("owned by S2.33"), std::string::npos);
+    EXPECT_NE(it->notes.find("owned by S2.24"), std::string::npos);
+    EXPECT_NE(it->notes.find("owned by S2.28"), std::string::npos);
+}
+
+// A20: the double-boss route's engine ownership (S2.12) is now explicit, so a
+// later reader cannot casually flip this row to IMPLEMENTED without landing
+// that task.
+TEST(A20S204, A20RecordsDoubleBossEngineOwnership) {
+    const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
+    const auto it = std::find_if(rows.begin(), rows.end(),
+                                 [](const A20Row& r) { return r.level == 20; });
+    ASSERT_NE(it, rows.end());
+    EXPECT_NE(it->notes.find("owned by S2.12"), std::string::npos);
+    EXPECT_NE(it->notes.find("S2 note (S2.04)"), std::string::npos);
+}
+
 }  // namespace
 }  // namespace sts::engine

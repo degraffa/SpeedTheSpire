@@ -133,7 +133,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   sources, unremovability flags for Necronomicurse per CardGroup.java:981 /
   AbstractPlayer.java:744); id pins unchanged for all prior rows; six
   presets green.
-- **S2.04** `[ ]` ∥ **a20.yaml S2 status refresh.** Update the affected
+- **S2.04** `[x]` ∥ **a20.yaml S2 status refresh.** Update the affected
   rows' notes/status per design §2.5/§4: A5 (between-act heal becomes
   live), A6 (verified run-start-only — negative pinned), A12 (per-act
   0.125/0.25 halving), A13 (boss gold in Acts 2–3 incl. double boss and
@@ -147,6 +147,13 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 
 ## Phase S2.1 — Run layer
 
+  **Log:** 2026-08-04 — landed. Five rows' notes/provenance extended
+  (A5/A6/A12/A13/A20) with re-verified citations; S1 STATUS prefixes
+  unmoved by design, pinned by `AffectedRowsKeepTheirS1StatusPrefix`;
+  new fact recorded: Mind Bloom boss re-fight pays fixed 25/50 gold at
+  A13+ with no miscRng draw (MindBloom.java:73-77), ownership split
+  S2.24/S2.28/S2.33. 6 tier-2 tests; six presets green; row count
+  unchanged (20).
 - **S2.11** `[ ]` **Boss chest + boss-relic pick.** TreasureRoomBoss room
   flow after Act-1/Act-2 boss rewards: chest construction at entry, 3
   front-pops of `bossRelicPool` with `canSpawn` recursion + Red Circlet

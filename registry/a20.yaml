@@ -95,14 +95,14 @@
   scope: run-setup
   mechanic: "between-act heal is 75% of MISSING HP instead of a full heal"
   provenance: "AbstractDungeon.dungeonTransitionSetup (AbstractDungeon.java:2582-2586): ascensionLevel >= 5 -> player.heal(MathUtils.round((maxHealth - currentHealth) * 0.75f), false), else player.heal(maxHealth, false)."
-  notes: "N/A-FOR-S1 at run setup: the same line runs on the floor-0 entry, but the character sheet arrives at full HP (80/80, Ironclad.java:114), so missing HP is 0 and BOTH branches are no-ops. It only bites as the post-boss between-act heal, which is Act 2 (out of S1 scope, design §1.1). Its POSITION is still load-bearing and is honoured: it runs BEFORE the A14/A6/A10 block, so it can never see the reduced max HP. Pinned by the run-setup sweep."
+  notes: "N/A-FOR-S1 at run setup: the same line runs on the floor-0 entry, but the character sheet arrives at full HP (80/80, Ironclad.java:114), so missing HP is 0 and BOTH branches are no-ops. It only bites as the post-boss between-act heal, which is Act 2 (out of S1 scope, design §1.1). Its POSITION is still load-bearing and is honoured: it runs BEFORE the A14/A6/A10 block, so it can never see the reduced max HP. Pinned by the run-setup sweep. S2 note (S2.04): the SAME line (AbstractDungeon.java:2582-2586, cited above) also runs at the Act 1->2 and Act 2->3 transitions, where missing HP is typically nonzero, so the branch stops being a no-op there and the between-act heal becomes live (s2-design.md §2.5). This row stays N/A-FOR-S1 (S1 is Act-1-only); the live behavior is engine work owned by S2.12 (act transition), landed with its own tier-2 coverage -- recorded here so the status is not casually flipped before S2.12 lands."
 
 - id: 6
   level: 6
   scope: run-setup
   mechanic: "act starts at 90% of max HP"
   provenance: "AbstractDungeon.dungeonTransitionSetup (AbstractDungeon.java:2594-2596): ascensionLevel >= 6 -> currentHealth = MathUtils.round(maxHealth * 0.9f). MathUtils.round (MathUtils.java:233-235) is (int)((double)v + 16384.5) - 16384."
-  notes: "IMPLEMENTED (run_begin). ORDER IS LOAD-BEARING: this runs AFTER the A14 max-HP loss inside the same floorNum <= 1 block, so at A14+ the 90% is taken of the ALREADY-REDUCED max. Ironclad: 90% of 75 = 67.5 -> 68, not 90% of 80 = 72."
+  notes: "IMPLEMENTED (run_begin). ORDER IS LOAD-BEARING: this runs AFTER the A14 max-HP loss inside the same floorNum <= 1 block, so at A14+ the 90% is taken of the ALREADY-REDUCED max. Ironclad: 90% of 75 = 67.5 -> 68, not 90% of 80 = 72. S2 note (S2.04), verified run-start-only: the A6/A10/A14 modifiers all live inside the SAME `floorNum <= 1 && dungeon instanceof Exordium` guard as the run-setup block itself (AbstractDungeon.java:2590), one level above the ascensionLevel checks cited above -- so none of the three recur at the Act 1->2 or Act 2->3 transition; only the A5 heal and the fixed-list/pity resets run every act. This S1 implementation is therefore already correct as run-start-only, and the Acts 2-3 negative is pinned by the tier-2 sweep."
 
 - id: 7
   level: 7
@@ -143,15 +143,15 @@
   level: 12
   scope: economy
   mechanic: "card rewards can arrive pre-upgraded"
-  provenance: "Exordium.initializeLevelSpecificChances (Exordium.java:107): cardUpgradedChance = 0.0f for Act 1, so the A12 branch has nothing to scale in Exordium."
-  notes: "N/A-FOR-S1 (frozen negative, design §6): A12 is a NO-OP in Act 1 because Exordium pins the upgrade chance to 0.0f. S1 is Act 1 only (design §1.1), so no A12 modifier may be added to the sim. no-such-modifier for S1."
+  provenance: "Exordium.initializeLevelSpecificChances (Exordium.java:107): cardUpgradedChance = 0.0f for Act 1, so the A12 branch has nothing to scale in Exordium. TheCity.initializeLevelSpecificChances (TheCity.java:84): cardUpgradedChance = ascensionLevel >= 12 ? 0.125f : 0.25f. TheBeyond.initializeLevelSpecificChances (TheBeyond.java:81): cardUpgradedChance = ascensionLevel >= 12 ? 0.25f : 0.5f."
+  notes: "N/A-FOR-S1 (frozen negative, design §6): A12 is a NO-OP in Act 1 because Exordium pins the upgrade chance to 0.0f. S1 is Act 1 only (design §1.1), so no A12 modifier may be added to the sim. no-such-modifier for S1. S2 note (S2.04): Acts 2-3 do NOT pin the chance to 0 -- TheCity and TheBeyond (cited above) instead HALVE their act's base chance at A12 (0.25->0.125 in Act 2, 0.5->0.25 in Act 3), the per-act 0.125/0.25 halving of s2-design.md §2.5. This row stays N/A-FOR-S1 (S1's base chance is fixed at 0.0f) until S2.12 lands the per-act constants; only then does A12 leave no-op status, and only for Acts 2-3."
 
 - id: 13
   level: 13
   scope: economy
   mechanic: "boss combat gold x0.75"
-  provenance: "AbstractRoom.update battle-over block (AbstractRoom.java:291-296): tmp = 100 + miscRng.random(-5, 5); ascensionLevel >= 13 -> addGoldToRewards(MathUtils.round(tmp * 0.75f)), else addGoldToRewards(tmp). The miscRng draw happens on BOTH branches, so the stream is unaffected by the level."
-  notes: "N/A-FOR-S1 for now: combat REWARD ASSEMBLY is not modelled at the run layer (run_advance.hpp scope note) -- the reward screen exists and assembles nothing, so there is no gold payout to scale. The row records the verified number for the reward-assembly owner. NOTE the negative twin: normal and elite gold have no such branch (see the no-such-modifier block at the top of this file)."
+  provenance: "AbstractRoom.update battle-over block (AbstractRoom.java:291-296): tmp = 100 + miscRng.random(-5, 5); ascensionLevel >= 13 -> addGoldToRewards(MathUtils.round(tmp * 0.75f)), else addGoldToRewards(tmp). The miscRng draw happens on BOTH branches, so the stream is unaffected by the level. The branch is keyed off `this instanceof MonsterRoomBoss` (AbstractRoom.java:286), not an act check, so it fires for every MonsterRoomBoss instance including the A20 double boss's synthetic second one (goToDoubleBoss, ProceedButton.java:210-220; MonsterRoomBoss.onPlayerEntry pops bossList, MonsterRoomBoss.java:27-36). Separately, the Mind Bloom event's own boss re-fight branches the SAME threshold independently for a fixed payout with no miscRng draw: MindBloom.java:73-77, ascensionLevel >= 13 -> addGoldToRewards(25), else addGoldToRewards(50)."
+  notes: "N/A-FOR-S1 for now: combat REWARD ASSEMBLY is not modelled at the run layer (run_advance.hpp scope note) -- the reward screen exists and assembles nothing, so there is no gold payout to scale. The row records the verified number for the reward-assembly owner. NOTE the negative twin: normal and elite gold have no such branch (see the no-such-modifier block at the top of this file). S2 note (S2.04): in Acts 2-3 (incl. the double boss) each MonsterRoomBoss fight draws its OWN independent miscRng.random(-5, 5) and applies the same x0.75 rounding -- two draws, two payouts, at the double boss (cited above). Mind Bloom's fixed 25/50 payout is a separate ascensionLevel >= 13 branch with no miscRng draw at all, owned by S2.33; the standard boss-gold draw for Act-2/3 fights is owned by S2.24 (City bosses) and owned by S2.28 (Beyond bosses). This row stays N/A-FOR-S1 until reward assembly lands with each of those tasks."
 
 - id: 14
   level: 14
@@ -200,4 +200,4 @@
   scope: monster
   mechanic: "double boss on the final act"
   provenance: "ProceedButton.update (ProceedButton.java:100-104): ascensionLevel >= 20 && bossList.size() == 2 -> goToDoubleBoss(), gated on AbstractDungeon.id.equals(\"TheBeyond\"). AbstractMonster.onFinalBossVictoryLogic (AbstractMonster.java:1058-1060) reads the same pair."
-  notes: "N/A-FOR-S1 (frozen negative, design §6): the double boss is Act-3-only (the TheBeyond gate above) and S1 is Act 1 (design §1.1). A20 adds NOTHING to an Act-1 run beyond the union of levels 1..19. no-such-modifier for S1."
+  notes: "N/A-FOR-S1 (frozen negative, design §6): the double boss is Act-3-only (the TheBeyond gate above) and S1 is Act 1 (design §1.1). A20 adds NOTHING to an Act-1 run beyond the union of levels 1..19. no-such-modifier for S1. S2 note (S2.04): the double-boss route is engine work owned by S2.12 (act transition / boss-list plumbing, the `bossList[1]` conditioning surface of s2-design.md §4.4); the second boss fight's own gold draw is owned per boss batch (S2.24, S2.28 -- see row 13's S2 note). This row stays N/A-FOR-S1 (S1 is Act 1) until S2.12 lands; the union claim above (level 19 == level 20 for an Act-1 run) is unchanged by S2."
