@@ -684,10 +684,25 @@ struct CombatState {
     //
     // It occupies what was `pad_piles[2]`, so it costs ZERO bytes and moves no
     // offset -- the turn_has_ended precedent below (a real field living in what
-    // would otherwise be ring padding). The 2 bytes of COMPILER padding before
-    // monsters[] (MonsterState is 4-aligned) were already implicit and are
-    // unchanged; value-initialization zeroes them (design §4.1).
+    // would otherwise be ring padding).
     uint16_t combat_gold;
+
+    // The 2 bytes MonsterState's 4-byte alignment inserts before monsters[].
+    //
+    // DECLARED, not implicit, and the difference is not cosmetic: CombatState is
+    // byte-compared and byte-hashed (hash_state, the diff harness, the twenty
+    // committed fixtures), and conventions §8 records the incident where exactly
+    // this shape -- an undeclared gap in a memcmp'd struct, with a comment
+    // asserting value-initialization zeroes it -- produced a one-byte difference
+    // between two translations of one capture on Windows only. Neither of the two
+    // ways a state is normally produced writes a byte belonging to no member:
+    // aggregate-initialisation initialises MEMBERS, and the implicit copy
+    // constructor copies MEMBERWISE. Making it a member is what makes it written.
+    // Adding it changes no offset and no size, so no fixture and no
+    // SCHEMA_VERSION moves (the same terms as the RunState pad_* elimination).
+    // Found by the T0.5 classification tripwire (byte_class.hpp), which is also
+    // the executable member walk that keeps it declared.
+    uint8_t pad_monsters[2];
 
     // -- monsters (design doc §4.2) --
     MonsterState monsters[kMonsterCap];
@@ -744,13 +759,21 @@ struct CombatState {
     //    20 combat fixtures carry a zeroed mirror (dispatch stays a no-op there). --
     RelicSlot relics[kRelicCap];
     uint8_t relic_count;
-    uint8_t pad_relics[7];            // explicit padding (keeps the RNG block aligned)
+    uint8_t pad_relics[7];            // explicit padding (rounds the mirror out)
+    // The 6 further bytes RngStream's 8-byte alignment inserts before the
+    // stream block. `pad_relics` above rounds the relic mirror to 8 bytes but
+    // does NOT reach the stream block, so these were implicit until the T0.5
+    // classification tripwire (byte_class.hpp) named them. Declared for the
+    // same reason as pad_monsters above -- conventions §8's memcmp'd-struct
+    // incident. Changes no offset and no size.
+    uint8_t pad_rng_align[6];
 
     // -- RNG: the 5 floor-scoped streams (design doc §3.4 / §3.6). Named
     //    exactly as the game's streams so combat_begin() can derive each via
     //    floor_stream(seed, floor) with an obvious 1:1 mapping. RngStream is
-    //    8-byte aligned, so CombatState is 8-byte aligned and the compiler
-    //    inserts (value-init-zeroed) padding ahead of this block. --
+    //    8-byte aligned, so CombatState is 8-byte aligned; the bytes that
+    //    alignment costs are declared as pad_rng_align above rather than left
+    //    to the compiler. --
     RngStream monster_hp_rng;         // monster max-HP rolls
     RngStream ai_rng;                 // monster move selection
     RngStream shuffle_rng;            // deck shuffles (feeds the JDK LCG)

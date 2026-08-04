@@ -123,6 +123,10 @@ add_library(sts_engine
     # resample_hidden -- the T0.4 belief sampler (resample.hpp): the plan §2.4
     # per-source table, drawn entirely from sampler-private randomness.
     resample.cpp
+    # make_hidden_twin -- the T0.5 leak gate's state generator (twin.hpp): a
+    # same-public draw from the resample_hidden belief, plus the PublicView
+    # difference diagnostic every twin assertion reports through.
+    twin.cpp
 )
 
 target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)

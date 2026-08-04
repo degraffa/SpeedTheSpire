@@ -309,6 +309,36 @@ sts_add_test(omniscient_boundary_test
         STS_OMNISCIENT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/omniscient_boundary"
         STS_OMNISCIENT_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/omniscient_boundary_scratch")
 
+# T0.5: the hidden-twin leak gate (training-plan §2.6a/§2.6c). Twin PublicView +
+# mask byte equality over >= 1,000 fuzz-harvested states with a per-phase count
+# asserted for every reachable RunPhase, reveal-timing pairs (chest / Louse
+# construction roll / Match-and-Keep board: masked-and-twin-varying before the
+# reveal, carried-and-pinned after), direct mask invariance, and the
+# characterisation test for the draw-source CHOOSE mask leak twin.hpp pins
+# around. Links fuzz_core for the run loop -- a forked policy loop drifts
+# (fuzz_run.hpp).
+sts_add_test(twin_test LIBS sts_engine fuzz_core)
+
+# T0.5: the total-byte classification tripwire (training-plan §2.6b). The
+# runtime half of include/sts/engine/byte_class.hpp -- the message naming the
+# byte range and the neighbouring members -- plus the negative controls that
+# prove the mechanism can fail: a scratch field added to a shadow RunController,
+# a removed classification row, an overlapping row, and a shrunken declared
+# alignment gap.
+sts_add_test(tripwire_test)
+
+# T0.5: the twin-fixture export the training repo consumes (training-plan
+# §2.6a). Round-trips the committed cases through the container, proves the
+# loader REFUSES every stamp mismatch and both length errors with a named
+# reason, and replays every committed case from its recipe -- the stored
+# PublicView, and its twin's, must come back byte for byte.
+sts_add_test(twin_fixture_test
+    LIBS twin_fixture
+    MAKE_DIRS twin_fixture_scratch
+    DEFS
+        STS_TWIN_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden/twin_fixtures"
+        STS_TWIN_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/twin_fixture_scratch")
+
 # A4.3: five skeleton cards + card-play flow (design doc §5.3, §9, §10 trap 10).
 # Per-card table tests (constructed state -> queue_card_play + pump -> assert
 # fields), the trap-10 dequeue-vs-enqueue random-target test, and a scripted

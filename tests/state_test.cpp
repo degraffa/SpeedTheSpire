@@ -200,6 +200,12 @@ struct MemberSpan {
 
 }  // namespace
 
+// The same property for CombatState, RunController and the transient structs is
+// held by the T0.5 classification tripwire (include/sts/engine/byte_class.hpp +
+// tests/tripwire_test.cpp), which walks every classified struct's members and
+// requires the declared rows to tile its `sizeof`. This RunState-only walk is
+// kept rather than folded into it: it is the original conventions §8
+// elimination and is cited by name there.
 TEST(StateLayout, RunStateHasNoImplicitPadding) {
     const MemberSpan members[] = {
         STS_MEMBER_SPAN(RunState, run_seed),

@@ -197,6 +197,10 @@ if(STS_BUILD_TESTS)
     # fuzz_test links its static library; the soak itself is a campaign driven
     # by tools/fuzz/soak.sh, never by ctest.
     add_subdirectory(tools/fuzz)
+    # T0.5: twin fixtures -- the leak-gate export the training repo consumes
+    # (training-plan §2.6a). Must come AFTER tools/fuzz: the generator links
+    # fuzz_core for the run loop rather than forking the policy loop.
+    add_subdirectory(tools/twin_fixtures)
     # B1.5: JSON->schema translator (campaign JSONL -> RunState/CombatState). Links
     # diff_harness (write_trace) + nlohmann/json (tools-only grant, PRIVATE); its
     # consumer is the WSL translator_test gtest.

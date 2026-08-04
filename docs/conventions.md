@@ -673,6 +673,29 @@ objects the runtime had handed over clean — a vacuous guard.
 > reproduce that way) — and its failure message names the byte range and the
 > member it precedes. Adding a pad member changes no offset and no size.
 
+> **RECURRED 2026-08-03, and the elimination is now general.** The 2026-07-28
+> fix covered `RunState` and nothing else, so the *same* shape survived
+> untouched in the two other byte-compared structs: `CombatState` carried an
+> implicit 2-byte gap before `monsters[]` **and** 6 more before its RNG block
+> (`pad_relics[7]` rounds the relic mirror out but does not reach the 8-aligned
+> streams), and `RunController` carried 2 at its tail. `CombatState`'s own
+> comment asserted the first of those was "value-init-zeroed", which is the
+> claim this entry exists to debunk. Nothing was looking: the RunState walk was
+> written for one struct, by name.
+>
+> **ELIMINATED 2026-08-03 (T0.5): `include/sts/engine/byte_class.hpp`.** Its
+> classification table must tile `sizeof` for `RunController`, `RunState`,
+> `CombatState` and the transient structs, each row carrying its own `offsetof`
+> and each alignment gap declared with a LITERAL byte count — so it is a member
+> walk for all of them at once, enforced by `static_assert` at build time and by
+> `tests/tripwire_test.cpp` (with negative controls) at run time. It exists for
+> the information-layer audit, but it subsumes the layout walk, which is why
+> `state_test.cpp`'s RunState-only version was left alone rather than copied
+> three more times. The three gaps above are now declared members
+> (`pad_monsters`, `pad_rng_align`, `pad_tail`); no offset, no `sizeof` and no
+> committed fixture moved, and `SCHEMA_VERSION` did not bump — the same terms as
+> the original elimination.
+
 **Hoisting a lookup out of a loop can be slower.** Moving a relic-array scan
 above a hand loop measured ~22% slower on `bench_advance`: the relic mirror is a
 region of `CombatState` the loop otherwise never touches, so the hoist dragged a

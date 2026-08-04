@@ -20,6 +20,19 @@ that both lack it, so it passes. Only this table catches an omission. The
 converse failure, carrying something hidden, IS caught by the twin suite, which
 is why the doubtful direction here is always "mask it and write down why".
 
+**Since T0.5 the Class column has an executable twin**:
+[`include/sts/engine/byte_class.hpp`](../include/sts/engine/byte_class.hpp)
+carries the same classification as a table of byte ranges that must tile
+`sizeof(RunController)` exactly, checked by `static_assert` at build time and by
+`tests/tripwire_test.cpp` at run time. It cannot tell whether a class is
+*right* — that stays a review question, and this file stays the reviewed
+artifact — but a field added to `RunController`, `RunState` or `CombatState`
+with no row now fails the build instead of silently vanishing from the
+observation. **Keep the two in step: a row here and a row there, in the same
+change.** The header's per-row `note` is the one-line form of this file's Notes
+cell, so a disagreement between them is a documentation conflict
+(conventions §4).
+
 **Class vocabulary** (one value per row):
 
 - `public` — carried at face value; the player has observed it or can derive
@@ -70,6 +83,7 @@ are carried whole, so every allocated bit is classified) and the
 | `hand_count` / `draw_count` / `discard_count` / `exhaust_count` / `limbo_count` | public | → same names | |
 | `monster_count` | public | → `monster_count` | |
 | `combat_gold` | public | → `combat_gold` | Gold gains are displayed as they happen (Hand of Greed flare). |
+| `pad_monsters[2]` | padding | excluded | Declared by T0.5. It was the compiler's implicit alignment gap before `monsters[]` until the classification tripwire named it; `CombatState` is memcmp'd and byte-hashed, which is exactly the conventions §8 incident. Adding the member moved no offset and no size. |
 | `monsters[7]` | see §2 | → `monsters[7]` | Per-field classification in §2 (MonsterState). |
 | `action_queue[64]` + `action_head/tail/count` + `pad_actionq` | derived | excluded | Resolution transients. At every decision boundary their contents are a deterministic function of the observed public action history (the pump is deterministic given public plays); carrying them adds no information. The pending-screen context a consumer does need arrives through the mask channel (§9) — `PublicView.ResolutionQueuesReachTheViewOnlyThroughTheMaskChannel` pins both halves: no queue byte reaches a data field, and a pending resolution DOES move the mask. |
 | `pre_turn_actions[16]` + `pre_turn_head/tail/count` | derived | excluded | Same as above; may be non-empty at WAITING_ON_USER (queued start-of-next-turn hooks), but every entry is the consequence of an observed play/trigger. |
@@ -78,6 +92,7 @@ are carried whole, so every allocated bit is classified) and the
 | `monster_queue[5]` + `monster_queue_count` + `monster_attacks_queued` | derived | excluded | Turn-order bookkeeping; deterministic from public state. |
 | `relics[40]` + `relic_count` | public | → `relics[40]`, `relic_count` | The combat relic mirror. Relics + displayed counters are the plan §2.1 always-block; while `phase == COMBAT` the encoder reads THIS live mirror, not `RunState.relics`, because in-combat counter ticks (Kunai, Ink Bottle) land here until the end-of-combat fold-back and the mirror is what the screen shows. Pinned by `PublicViewRun.RelicCountersComeFromTheCombatMirrorInCombat`. |
 | `pad_relics[7]` | padding | excluded | |
+| `pad_rng_align[6]` | padding | excluded | Declared by T0.5, same story as `pad_monsters`: `pad_relics` rounds the relic mirror out but does not reach the 8-aligned stream block, so six bytes were implicit. |
 | `monster_hp_rng` / `ai_rng` / `shuffle_rng` / `card_random_rng` / `misc_rng` | hidden | excluded | The five floor-scoped stream states are exactly the realizations the contract hides. Resampled by T0.4. |
 
 ## 2. Projected element types
@@ -190,6 +205,7 @@ does.
 | `pending_bottle` | public | → `pending_bottle` | The modal overlay is on screen. |
 | `pad2[3]` | padding | excluded | |
 | `knowledge` (KnowledgeState) | public (a record OF public reveals) | → projection (§10) | Never carried raw — its chain holds pool indices, which are engine bookkeeping. Projected as per-draw-slot order-constraint annotations plus the revealed monster construction rolls. |
+| `pad_tail[2]` | padding | excluded | Declared by T0.5. The struct's own 8-byte alignment (`MonsterLists` holds `std::string_view`) inserted it implicitly; `RunController` is memcpy'd and memcmp'd by the resample/twin suites, so conventions §8's rule applies. No offset and no size moved. |
 
 ## 6. RunState → PublicView
 
@@ -383,6 +399,36 @@ not a parallel object a consumer might hash and forget.
 `RunActionMask` is all `bool`/`uint8` today, so `alignof` is 1 and it has no
 implicit padding; a `static_assert` in public_view.hpp fails if that changes,
 because a padded mask would put indeterminate bytes into a hashed record.
+
+### 9a. Known mask leak — the draw-source CHOOSE window (found by T0.5)
+
+`ActionMask.can_choose[i]` for a **DRAW-source** choice (`ChoiceKind::DRAW_TO_HAND`
+— Secret Technique / Secret Weapon, both real S1 registry rows) is computed as
+`instance_has_type(s, s.draw[i], filter)` (`choice_slot_eligible`,
+interp_cards.cpp). It therefore reports the card TYPES of the first `kHandCap`
+draw-pile **array slots**, and draw-pile order is a shuffle realization (§1).
+That is hidden information reaching an observation channel.
+
+**The game does not do this.** `SkillFromDeckToHandAction.update` builds its
+browse group with `tmp.addToRandomSpot(c)` over the filtered draw pile and opens
+the grid on `tmp` (SkillFromDeckToHandAction.java:35-40, :65) — the presentation
+order is deliberately randomised, so a player sees the eligible cards but not
+their pile positions. The leak is our slot-indexed action space, not the rule.
+
+**Status.** Repairing it means giving the draw-source choice its own
+presentation order (and the draws that build it), i.e. an action-space change,
+which is outside T0.5. Until then:
+
+- `make_hidden_twin` PINS the draw pile whenever such a screen is open
+  (`draw_choice_pending`, twin.hpp), so the leak gate is green on a defect it
+  has already recorded rather than red on one it cannot fix;
+- `TwinDrawChoiceLeak.MaskReadsRawDrawSlotsWhileADrawSourcedChoiceIsOpen`
+  (tests/twin_test.cpp) asserts the leak **still exists**, so it turns red the
+  day the action space is repaired — which is the day the pin and that test are
+  both deleted;
+- the belief sampler (`resample_hidden`) is deliberately NOT pinned: it must
+  keep sampling the true belief. Sampler-side conditioning on this screen is a
+  question for the T0.6 distributional suite, not for the leak gate.
 
 ## 10. KnowledgeState → PublicView (the projection)
 

@@ -175,7 +175,7 @@ one exists, mirroring the Stage B convention.
   seed-filtered reality; chest contents conditioned on the public size
   band per §2.1.
 
-- **T0.5** `[ ]` **Leak-gate CI: twins + tripwire.**
+- **T0.5** `[x]` **Leak-gate CI: twins + tripwire.**
   `make_hidden_twin(state, rng)` utility (permute draw suffix, reroll
   streams, re-permute pool remainders, re-continue encounter suffix);
   per-commit tests: twin `PublicView`+mask byte-equality at every phase; the
@@ -187,7 +187,21 @@ one exists, mirroring the Stage B convention.
   **Deps:** T0.2, T0.4 **Acceptance:** twin equality green across ≥ 1,000
   fuzz-generated states covering every RunPhase; tripwire demonstrably
   fires on a scratch field addition (negative test); fixture export
-  round-trips; presets green incl. asan. **Log:** —
+  round-trips; presets green incl. asan. **Log:** 2026-08-04 — landed.
+  `make_hidden_twin` built ON `resample_hidden` (one definition of
+  hidden), `public_view_first_difference` names the leaking member;
+  queues/`turn_has_ended` unperturbed per the T0.2 note, pinned by test.
+  Byte tripwire in `byte_class.hpp`: literal-gap rows over
+  RunController + substructs, static_assert + runtime naming of
+  unclassified ranges; four parameterized negative controls. Twin sweep:
+  10,852 states, 9 phases (per-phase counts asserted), zero leaks.
+  Fixtures: recipe+payload `twins_v1.bin` (18 cases) — rebuild by
+  replay, loader refuses stamp/length mismatch. Found+fixed recurrence
+  of the undeclared-padding trap (CombatState ×2, RunController tail —
+  no offset/sizeof/fixture moved; conventions §8 updated, tripwire named
+  the general elimination). KNOWN mask leak documented (audit §9a):
+  slot-indexed DRAW-source CHOOSE exposes draw slot types — action-space
+  change, out of scope; `TwinDrawChoiceLeak` goes red when fixed.
 
 - **T0.6** `[x]` ∥ **Sampler distributional suite (nightly).** Tests
   against the *contract's* closed-form conditionals (plan §2.6d): small-pile

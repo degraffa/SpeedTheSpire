@@ -344,6 +344,15 @@ struct RunController {
     // hooks reach it through the KnowledgeScope attachment that step dispatch
     // and enter_combat set (knowledge.hpp's attachment contract).
     KnowledgeState knowledge;
+
+    // The 2 bytes the struct's own 8-byte alignment (MonsterLists holds
+    // std::string_view) inserts at the tail. DECLARED for the same reason
+    // CombatState.pad_monsters is: RunController is memcpy'd and memcmp'd (the
+    // resample/twin suites compare whole controllers), and conventions §8's
+    // incident is precisely an undeclared gap in a byte-compared struct. Adding
+    // it changes no offset and no size. Found by the T0.5 classification
+    // tripwire (byte_class.hpp).
+    uint8_t pad_tail[2];
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,
