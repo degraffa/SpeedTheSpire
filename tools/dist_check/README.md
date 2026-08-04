@@ -100,3 +100,43 @@ tools/wsl_run.sh --script tools/dist_check/oracle_spot.sh release \
 The report is nonzero/flagged on any corrected aggregate divergence. A flag
 requires investigation of wiring or capture fidelity; the test definitions,
 pooling threshold, alpha, and correction are not adjusted after seeing it.
+
+## Pre-registered belief-sampler family (nightly)
+
+The third family is the T0.6 distributional suite for `resample_hidden`, the
+belief sampler (training-plan §2.4). It lives as a gtest binary,
+`tests/sampler_dist_test.cpp`, because it needs no campaign, no capture and no
+data root: every null is a closed-form conditional of the DECLARED knowledge
+contract, enumerated in the test itself. The nine hypotheses, the family-wise
+alpha, the sample sizes, the fixed sampler seeds and the family-wise accounting
+are pre-registered in that file's header comment, which is the authority — this
+section only says where the thing is and how to run it.
+
+Two facts govern how it is read:
+
+- It tests the **contract, not the mechanic** (training-plan §2.6d). Three rows
+  of the sampler are deliberately coarser than the JDK (random insertion, relic
+  membership under pop-time `canSpawn`, Match & Keep miss memory), so a
+  seed-filtered comparison on those rows would fail by design. Exactly one
+  hypothesis is seed-filtered: the encounter suffix, whose conditional law
+  carries no coarsening, on a one-entry public prefix (~1/4 acceptance).
+- Its **power is asserted, not assumed**. Three deliberately-biased,
+  support-complete sampler mutants run through the identical machinery and must
+  be rejected at the strictest Holm threshold. They run at full sample size in
+  every mode, including the per-commit smoke run.
+
+Like the analytic family above, the heavy version is out of band. The
+per-commit `ctest` runs the same statistics in SMOKE mode (N/10, seed sweep
+skipped, well under a second); the nightly job runs the pre-registered sizes:
+
+```bash
+tools/wsl_run.sh release
+tools/wsl_run.sh --script tools/dist_check/sampler_dist.sh release
+```
+
+`sampler_dist.sh` is the entry point `.github/workflows/nightly.yml` runs on its
+schedule; the only thing it does beyond locating the built binary is set
+`STS_SAMPLER_DIST_MODE=nightly`. Alphas and sample sizes are deliberately not
+settable from the command line — a job that can dial its own alpha is not a
+pre-registered test — and, as above, nothing about the family is adjusted after
+seeing a flag.

@@ -50,7 +50,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| — | — | — | (empty at ledger creation) |
+| Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED |
 
 ---
 
@@ -189,7 +189,7 @@ one exists, mirroring the Stage B convention.
   fires on a scratch field addition (negative test); fixture export
   round-trips; presets green incl. asan. **Log:** —
 
-- **T0.6** `[ ]` ∥ **Sampler distributional suite (nightly).** Tests
+- **T0.6** `[x]` ∥ **Sampler distributional suite (nightly).** Tests
   against the *contract's* closed-form conditionals (plan §2.6d): small-pile
   permutation enumeration chi-square; encounter-suffix continuation vs
   brute-force chain enumeration; relic-remainder uniformity; a bounded
@@ -197,7 +197,21 @@ one exists, mirroring the Stage B convention.
   permit. Wired as a nightly job beside the existing dist-check tooling.
   **Deps:** T0.4 **Acceptance:** suite green on ≥ 3 consecutive nightly
   runs; each hypothesis pre-registered with its α in the test header;
-  deliberately-biased sampler mutant (negative control) rejected. **Log:** —
+  deliberately-biased sampler mutant (negative control) rejected.
+  **Log:** 2026-08-03 — landed. `tests/sampler_dist_test.cpp`: 9
+  pre-registered hypotheses (draw permutation/prefix/interleave,
+  encounter suffix ×3 vs brute-force chain enumeration, relic remainder
+  ×2, one seed-filtered sanity check on the sole uncoarsened row),
+  family-wise α = 1e-3 via Holm over the executed set, fixed sampler
+  seeds → deterministic across nights and hosts (GCC and clang-cl
+  byte-identical p-values). Three support-complete mutants rejected at
+  p ≤ 1.4e-130 through the identical statistic path at full N. Smoke
+  subset (N/10, K=8) in per-commit ctest; nightly entry
+  `tools/dist_check/sampler_dist.sh` + `.github/workflows/nightly.yml`
+  (07:00 UTC + workflow_dispatch). Six presets green. The ≥ 3
+  consecutive scheduled nightly runs remain OPEN — carried in Deferred
+  obligations (GT0 owns checking it; schedules only fire on master, so
+  force the first with workflow_dispatch).
 
 - **T0.7** `[ ]` ∥ **`public_hash` + omniscient boundary.** xxh3 over
   `PublicView`+mask bytes; raw-state access for the omniscient/debug agent

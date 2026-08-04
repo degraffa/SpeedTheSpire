@@ -704,6 +704,16 @@ sts_add_test(seed_scan_test LIBS seed_scan_core)
 # >=10k-seed analytic sweep itself is tools/dist_check/dist_check and remains a
 # campaign rather than a per-commit ctest.
 sts_add_test(dist_check_test LIBS dist_check_stats)
+
+# T0.6: the belief sampler's DISTRIBUTIONAL suite. Same split as dist_check
+# above -- the per-commit ctest runs it in SMOKE mode (the pre-registered
+# statistics at N/10, seed sweep skipped, ~a second), and the nightly job
+# (tools/dist_check/sampler_dist.sh, .github/workflows/nightly.yml) sets
+# STS_SAMPLER_DIST_MODE=nightly for the full pre-registered sample sizes. The
+# hypothesis family, its alpha and the family-wise accounting are pre-registered
+# in the file's header comment; the negative-control mutants always run at the
+# nightly N so the smoke run still proves the suite has power.
+sts_add_test(sampler_dist_test LIBS sts_engine dist_check_stats)
 add_test(
     NAME dist_check_spot_python_test
     COMMAND "${STS_PYTHON_EXECUTABLE}" -B -m unittest -v test_oracle_spot.py)

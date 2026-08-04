@@ -1,0 +1,57 @@
+name: Nightly
+
+# The out-of-band statistical jobs. Everything here is deliberately NOT in
+# ci.yml: these run pre-registered sample sizes that are worth minutes rather
+# than the seconds a per-commit gate may spend, and their per-commit smoke
+# counterparts already run in the three build-and-test presets. A red run here
+# is a stop-the-line finding, not a parameter-tuning signal -- the alphas, the
+# sample sizes and the correction are pre-registered in the suite's own header
+# and are never adjusted after seeing a result.
+on:
+  schedule:
+    # 07:00 UTC daily. Nothing downstream depends on the exact minute; it is
+    # off-peak for the hosted runners and gives a full working day of lead time
+    # on a finding.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+jobs:
+  sampler-dist:
+    name: sampler distributional suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build python3-yaml
+
+      # Same two cache scopes and the same key inputs as ci.yml's build job (see
+      # the rationale there); a separate cache key namespace would just make
+      # this job re-fetch everything every night.
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/deps
+            build/release/_deps/*-src
+            build/release/_deps/*-subbuild
+          key: sts-deps-${{ runner.os }}-release-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'benchmarks/CMakeLists.txt', 'tools/oracle_bridge/translator/CMakeLists.txt') }}
+          restore-keys: |
+            sts-deps-${{ runner.os }}-release-
+
+      - name: Configure
+        run: cmake --preset release
+
+      # Only the one target: the nightly value is in the statistics, not in
+      # relinking forty executables under LTO.
+      - name: Build the sampler distributional suite
+        run: cmake --build --preset release --target sampler_dist_test
+
+      # The entry point, not the binary: the script is what sets
+      # STS_SAMPLER_DIST_MODE=nightly, and running it here is what keeps the
+      # documented local command and the scheduled job the same command.
+      - name: Run the pre-registered family at nightly sample sizes
+        run: bash tools/dist_check/sampler_dist.sh release
