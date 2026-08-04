@@ -50,7 +50,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED |
+| Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
 
 ---
 
@@ -247,13 +247,37 @@ one exists, mirroring the Stage B convention.
   `stale-numbers` CI job; durable negative test via committed fixture
   dirs. Six presets green.
 
-### GT0 `[ ]` **Gate: sim-side information layer (schemas + leak gates — the sim half of M6)** — tag `gt0-info-layer`
+### GT0 `[x]` **Gate: sim-side information layer (schemas + leak gates — the sim half of M6)** — tag `gt0-info-layer`
 **Deps:** T0.1–T0.7
-- [ ] All T0 acceptance blocks re-run green at the gate.
-- [ ] Twin fixtures + `PublicView`/mask schema docs published for the
+- [x] All T0 acceptance blocks re-run green at the gate.
+- [x] Twin fixtures + `PublicView`/mask schema docs published for the
       training repo.
-- [ ] CLAUDE.md "Current state" updated.
-**Log:** —
+- [x] CLAUDE.md "Current state" updated.
+**Log:** 2026-08-04 — closed. Every T0.1–T0.7 acceptance re-run on the
+integrated tree (base `e7512c8`), not carried forward from the task Logs:
+six presets configure/build/`ctest` green (`ctest -N` for the count, same
+total under GCC and clang-cl); `public_view_test`, `knowledge_test` +
+`RegistryGen.UnknownObservabilityValueFailsWithClearError`, `resample_test`
+incl. `SamplerPoisonedSeedCanary.ParticleNeverTouchesTheTrueSeedOrItsStreams`,
+`twin_test` (sweep 10,852 states over 9 phases, per-phase counts asserted,
+zero leaks) + `tripwire_test` (4 negative controls fire) + `twin_fixture_test`
+(recipe replay + write/read round-trip + both refusal tests), `public_hash_test`,
+`omniscient_boundary_test`; all three check scripts clean. Sampler suite run
+3× in NIGHTLY mode via `tools/dist_check/sampler_dist.sh` — byte-identical
+p-values across all three, nine pre-registered hypotheses retained under Holm,
+three mutants rejected. **No acceptance failed to reproduce.** Published
+[training-contract.md](training-contract.md) (the consumer-facing contract:
+`PUBLIC_VIEW_VERSION` 2, layout + how to read the audit, `PvMask` embedding,
+`public_hash` and its soundness precondition, the omniscient-boundary rule and
+the check's contract, the twin-fixture container by reference, the
+`KnowledgeState` projection and all four declared §2.2/§2.6d coarsenings, and
+the audit-§9a mask leak with its canary test name); evidence in
+[verification/gt0-info-layer.md](verification/gt0-info-layer.md); CLAUDE.md
+"Current state" updated. **Sole open residue, explicitly re-owned by this
+gate and NOT discharged:** T0.6's ≥ 3 consecutive *scheduled* nightly runs —
+the Deferred-obligations row was verified present, and stays open until the
+three run URLs/dates are recorded there (schedules fire only on master, so
+force run 1 with `workflow_dispatch` after this lands).
 
 ---
 

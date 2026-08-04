@@ -82,15 +82,30 @@ S1 verified)**. G7 replaced its low-yield raw action quota by an approved
 coverage-directed bar: mixed-policy A20 breadth, a boss-reward claim for every
 Act-1 registry boss, zero untriaged/open findings, and an executable audit of
 the campaign-discovered defect families; the independent sim fuzz,
-tier-2/A20, Tier-4, and throughput bars remain green. Open gate: **GT0** (Phase
-T information layer). The training program has a binding spec and ledger —
-[docs/training-plan.md](docs/training-plan.md) and
+tier-2/A20, Tier-4, and throughput bars remain green. The training program has
+a binding spec and ledger — [docs/training-plan.md](docs/training-plan.md) and
 [docs/training-tasks.md](docs/training-tasks.md); read them before any
-training-related work, and respect their capacity rule (T0.x before TE.2's
-fresh S2 authoring exercise).
+training-related work.
+
+**Phase T / GT0 complete** (tag `gt0-info-layer` — the *sim half* of M6). The
+engine now publishes a player-information layer, not just state: a versioned
+`PublicView` (pull API beside `legal_actions`, mask channel embedded by value)
+with a field-by-field completeness audit, in-engine `KnowledgeState`
+draw-order tracking, `resample_hidden` exact-posterior belief sampling under
+the declared contract, `public_hash`, and the leak gates that hold all of it
+honest — hidden-twin byte equality in every phase, a total-byte classification
+tripwire over `RunController`, a nightly sampler distributional suite, and a
+grep-enforced omniscient boundary. **The consumer-facing contract is
+[docs/training-contract.md](docs/training-contract.md)** — read that, not the
+headers, before writing training-repo code against the engine; gate evidence in
+[docs/verification/gt0-info-layer.md](docs/verification/gt0-info-layer.md).
+Open next: the **GT1** track (T1.x is unblocked on the sim side — the training
+repo itself is T1.1's deliverable), and **S2 wave 1** in flight under
+[docs/s2-tasks.md](docs/s2-tasks.md).
 
 Per-task state — what is `[x]`, what is next, every deferred obligation — lives
-in [docs/stage-b-tasks.md](docs/stage-b-tasks.md); **do not restate it here.**
+in [docs/stage-b-tasks.md](docs/stage-b-tasks.md) and
+[docs/training-tasks.md](docs/training-tasks.md); **do not restate it here.**
 
 **The build is no longer WSL-only.** Six presets: `debug`/`asan`/`release`
 (WSL, GCC) and `win-debug`/`win-asan`/`win-release` (Windows, clang-cl + Ninja).
