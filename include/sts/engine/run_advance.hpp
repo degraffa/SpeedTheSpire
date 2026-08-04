@@ -122,6 +122,7 @@
 #include "sts/engine/encounters.hpp"    // MonsterLists
 #include "sts/engine/event_framework.hpp"  // EventDialogState / kEventOptionCap
 #include "sts/engine/interp.hpp"        // mathutils_round (run_setup_hp)
+#include "sts/engine/knowledge.hpp"     // KnowledgeState (player-information layer)
 #include "sts/engine/map_rooms.hpp"     // RoomType
 #include "sts/engine/neow.hpp"          // NeowState / the blessing screens
 #include "sts/engine/rest_sites.hpp"    // RestSiteState / menu constants
@@ -332,6 +333,17 @@ struct RunController {
     // above; the phase itself never changes while the overlay is up.
     uint8_t pending_bottle;
     uint8_t pad2[3];  // explicit padding (value-init zeroed, hash-stable).
+
+    // The player-information layer's in-combat knowledge (knowledge.hpp):
+    // draw-order constraints + revealed monster construction rolls. It lives
+    // HERE -- not in CombatState/RunState, whose byte layouts are hashed
+    // against committed fixtures -- following this struct's own precedent for
+    // transient derived state; a memcpy of the controller snapshots it like
+    // every other field. Combat-scoped: reset by enter_combat's
+    // knowledge_reset(), stale-but-unread outside COMBAT. The engine's event
+    // hooks reach it through the KnowledgeScope attachment that step dispatch
+    // and enter_combat set (knowledge.hpp's attachment contract).
+    KnowledgeState knowledge;
 };
 
 static_assert(std::is_trivially_copyable_v<RunController>,

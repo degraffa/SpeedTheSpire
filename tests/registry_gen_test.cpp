@@ -202,6 +202,33 @@ TEST(RegistryGen, DuplicateRelicPoolOrderFailsWithClearError) {
     EXPECT_NE(msg.find("duplicate COMMON pool_order 0"), std::string::npos) << msg;
 }
 
+// The `observability:` field (training-plan §2.3) must be parsed FAIL-LOUD:
+// the domain loader ignores unknown row KEYS silently, so an unknown transform
+// VALUE has to die in parse_observability rather than silently drop the row
+// from the generated membership table (the parse_pickup convention).
+TEST(RegistryGen, UnknownObservabilityValueFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_observability_registry");
+    {
+        std::ofstream relics(bad_reg / "relics.yaml", std::ios::app);
+        relics << "\n- id: 200\n  name: BOGUS_OBSERVER\n"
+                  "  game_id: \"Bogus Observer\"\n  tier: SPECIAL\n"
+                  "  observability: TELEPATHY\n"
+                  "  provenance: \"synthetic unknown-observability negative test\"\n";
+    }
+
+    const fs::path out = scratch / "bad_observability_out";
+    const fs::path err = scratch / "bad_observability_err.txt";
+    const int status = run_generator(bad_reg.string(), out.string(), err.string());
+    EXPECT_NE(status, 0) << "generator should fail on an unknown observability value";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("unknown observability"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("TELEPATHY"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("BOGUS_OBSERVER"), std::string::npos) << msg;
+}
+
 // --- 3. Generated enums match the engine's hand enums exactly ---------------
 TEST(RegistryGen, EnumIdsMatchEngine) {
     using sts::engine::CardId;

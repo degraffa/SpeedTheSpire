@@ -18,6 +18,7 @@
 
 #include "sts/engine/cards.hpp"        // card_cost (reset_cost_for_turn)
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/knowledge.hpp"    // draw/shuffle knowledge hooks (observers)
 #include "sts/engine/power_hooks.hpp"  // onExhaust dispatch (EXHAUST opcode path)
 #include "sts/engine/relic_hooks.hpp"  // onShuffle dispatch (Sundial)
 #include "sts/engine/rng_jdk.hpp"
@@ -43,6 +44,7 @@ void execute_empty_deck_shuffle(CombatState& s) noexcept {
     JdkRandom rng(random_long(s.shuffle_rng));
     jdk_shuffle(std::span<CardPoolIndex>(s.discard, s.discard_count), rng);
 
+    const int moved = s.discard_count;
     int n = s.discard_count;
     if (s.draw_count + n > kDrawCap) {
         n = kDrawCap - s.draw_count;  // defensive clamp; unreachable in S1
@@ -50,6 +52,14 @@ void execute_empty_deck_shuffle(CombatState& s) noexcept {
     std::copy(s.discard, s.discard + n, s.draw + s.draw_count);
     s.draw_count = static_cast<uint8_t>(s.draw_count + n);
     s.discard_count = 0;
+
+    // Knowledge observer (knowledge.hpp): the pile was rewritten. The empty
+    // action over an empty discard moves nothing and leaves the pile's order
+    // untouched, so it is NOT a knowledge event -- the RNG draw it spends is
+    // state evolution, not information.
+    if (moved > 0) {
+        knowledge_on_shuffle(s);
+    }
 }
 
 }  // namespace
@@ -135,6 +145,11 @@ void reshuffle_all(CombatState& s) noexcept {
         JdkRandom rng(random_long(s.shuffle_rng));
         jdk_shuffle(std::span<CardPoolIndex>(s.draw, s.draw_count), rng);
     }
+
+    // Knowledge observer: one hook for the whole composite -- the inlined
+    // first half above has no hook of its own, and only the final full-pile
+    // shuffle's outcome is observable, so firing once here is exact.
+    knowledge_on_shuffle(s);
 }
 
 int draw_cards(CombatState& s, int amount) noexcept {
@@ -182,6 +197,7 @@ int draw_cards(CombatState& s, int amount) noexcept {
         s.hand[s.hand_count] = top;
         ++s.hand_count;
         ++drawn;
+        knowledge_on_draw_top(s, top);  // observer: the known top (if any) left
     }
     if (trailing_empty_shuffle) {
         execute_empty_deck_shuffle(s);

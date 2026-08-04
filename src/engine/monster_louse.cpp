@@ -8,6 +8,7 @@
 
 #include "sts/engine/action_queue.hpp"      // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/interp.hpp"            // Opcode
+#include "sts/engine/knowledge.hpp"         // construction-roll reveal (observer)
 #include "sts/engine/monster_dispatch.hpp"  // queue_monster_move_effects, move-history helpers, kMonsterAscension
 #include "sts/engine/rng_stream.hpp"
 #include "sts/registry/monster_table.hpp"   // kLouseNormal/kLouseDefensive + move-id constants
@@ -79,6 +80,14 @@ void louse_init_impl(CombatState& state, uint8_t mi, MonsterId id,
     // tree runs on the drawn num.
     const int32_t num = random(state.ai_rng, 99);
     louse_get_move(m, num, move4_intent);
+
+    // Knowledge observer (knowledge.hpp): a BITE telegraph displays the
+    // per-instance rolled bite damage on the intent banner, revealing the
+    // construction roll. A construction-time reveal recorded before the relic
+    // mirror is copied is retro-gated by knowledge_on_combat_ready.
+    if (m.move_history[0] == kBite) {
+        knowledge_reveal_monster_roll(state, mi, m.pad0);
+    }
 }
 
 void louse_take_turn_impl(CombatState& state, uint8_t mi,
@@ -104,6 +113,12 @@ void louse_take_turn_impl(CombatState& state, uint8_t mi,
     // RollMoveAction -> getMove(aiRng.random(99)), num used.
     const int32_t num = random(state.ai_rng, 99);
     louse_get_move(m, num, move4_intent);
+
+    // Knowledge observer: same reveal as at construction -- the first BITE
+    // telegraph mid-combat shows the rolled number (no-op re-record after).
+    if (m.move_history[0] == kBite) {
+        knowledge_reveal_monster_roll(state, mi, m.pad0);
+    }
 }
 
 }  // namespace

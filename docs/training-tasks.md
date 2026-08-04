@@ -104,7 +104,7 @@ one exists, mirroring the Stage B convention.
   through `encode_public_view`; audit table extended to every RunController
   transient struct; presets green. **Log:** —
 
-- **T0.3** `[ ]` ∥ **KnowledgeState + observability transforms.** In-engine
+- **T0.3** `[x]` ∥ **KnowledgeState + observability transforms.** In-engine
   draw-position knowledge with **relative order constraints** (not absolute
   indices): set by Headbutt-style placement, full-order reveal by Frozen
   Eye, cleared/rewritten on shuffle, correctly weakened by random-position
@@ -120,7 +120,19 @@ one exists, mirroring the Stage B convention.
   value (negative test, `parse_pickup`-style — the loader currently
   ignores unknown row keys silently, so the field needs a fail-loud
   parser) and the generated membership table lists exactly the declared
-  rows (Runic Dome, Frozen Eye); presets green. **Log:** —
+  rows (Runic Dome, Frozen Eye); presets green. **Log:** 2026-08-03 —
+  landed. `KnowledgeState` lives as a by-value `RunController` member
+  (CombatState/RunState stay byte-hashed; controller is the sanctioned
+  transient layer), reached from engine mutation sites via a per-thread
+  RAII `KnowledgeScope`; hooks at every draw-pile mutation incl. Louse
+  bite-roll reveal with Runic Dome retro-gating. `observability:` registry
+  field + fail-loud parser + generated membership table (exactly
+  FROZEN_EYE/RUNIC_DOME). All named acceptance tests green; six presets
+  green. Deliberate contract choice recorded in `knowledge.hpp`: random
+  insertion implements the plan §2.2 uniform-interleave contract, which is
+  *coarser* than the JDK mechanic (`addToRandomSpot` can never displace
+  the top card) — sound but weaker; T0.4/T0.6 must sample against the
+  contract, not the mechanic.
 
 - **T0.4** `[ ]` **`resample_hidden` belief sampler.** Implements the plan
   §2.4 per-source table: draw permutation under KnowledgeState constraints

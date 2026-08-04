@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from ..loader import power_id_map
 from ..steps import RELIC_DOMAIN, padded_step_literals, parse_steps
-from ..vocab import BANNER, RELIC_HOOKS, RELIC_TIERS, fail, pascal
+from ..vocab import (BANNER, OBSERVABILITY_TRANSFORMS, RELIC_HOOKS, RELIC_TIERS,
+                     fail, pascal)
 from .powers import native_dispatch_macro
 
 # The out-of-combat ("pickup") dispatch surfaces a relic row may override, in
@@ -69,6 +70,26 @@ def parse_pickup(r: dict) -> set[str]:
                    f"on_equip_screen -- one Java onEquip body has exactly one "
                    f"rendering; pick the surface whose signature it needs")
     return surfaces
+
+
+def parse_observability(r: dict) -> str | None:
+    """The observability transform relic row `r` declares, or None.
+
+    `observability:` is a single enum token from OBSERVABILITY_TRANSFORMS
+    (training-plan §2.3). Absence means "no transform" -- there is deliberately
+    no NONE spelling, so the row cannot carry two representations of the same
+    fact (the parse_pickup convention). The parse is FAIL-LOUD on any unknown
+    value: the domain loader ignores unknown row KEYS silently, so a typo'd
+    transform value must die here rather than silently emit a membership table
+    missing the row.
+    """
+    raw = r.get("observability")
+    if raw is None:
+        return None
+    if not isinstance(raw, str) or raw not in OBSERVABILITY_TRANSFORMS:
+        raise fail(f"relics.yaml: relic {r['name']} has unknown observability "
+                   f"value {raw!r} (known: {sorted(OBSERVABILITY_TRANSFORMS)})")
+    return raw
 
 
 def pickup_dispatch_macro(rows: list[dict], surface: str) -> list[str]:
@@ -183,7 +204,8 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
                      "pool_order": raw_pool_order,
                      "initial_counter": raw_initial_counter,
                      "native": native, "bindings": bindings,
-                     "pickup": parse_pickup(r)})
+                     "pickup": parse_pickup(r),
+                     "observability": parse_observability(r)})
 
     for tier, orders in pool_orders.items():
         if orders and orders != set(range(len(orders))):
@@ -295,6 +317,50 @@ def emit_relic_table(domains: dict[str, list[dict]]) -> str:
                    f"return &k{pascal(r['name'])}Relic;")
     out.append("        case RelicId::NONE:")
     out.append("        default: return nullptr;")
+    out.append("    }")
+    out.append("}\n")
+
+    # --- Observability transforms (training-plan §2.3) -----------------------
+    obs_rows = [r for r in rows if r["observability"] is not None]
+    out.append("// Observability transforms (training-plan §2.3): relic rows that")
+    out.append("// transform the PLAYER'S INFORMATION rather than game state. The")
+    out.append("// vocabulary is pinned/append-only; membership is declared per row")
+    out.append("// via the registry's `observability:` field (fail-loud parse), so")
+    out.append("// this table is a projection of the registry, never hand-edited.")
+    out.append("// Consumers: observation.hpp (HIDE_INTENT gates the intent write)")
+    out.append("// and knowledge.hpp (REVEAL_DRAW_ORDER arms full-order reveals).")
+    out.append("enum class ObservabilityTransform : uint8_t {")
+    out.append("    NONE = 0,")
+    for name, val in sorted(OBSERVABILITY_TRANSFORMS.items(), key=lambda kv: kv[1]):
+        out.append(f"    {name} = {val},")
+    out.append("};")
+    out.append("static_assert(static_cast<uint8_t>(ObservabilityTransform::NONE) "
+               "== 0, \"ObservabilityTransform::NONE is pinned to 0 "
+               "(append-only, never renumber)\");")
+    for name, val in sorted(OBSERVABILITY_TRANSFORMS.items(), key=lambda kv: kv[1]):
+        out.append(f"static_assert(static_cast<uint8_t>(ObservabilityTransform::"
+                   f"{name}) == {val}, \"ObservabilityTransform::{name} is pinned "
+                   f"to {val} (append-only, never renumber)\");")
+    out.append("")
+    out.append("struct RelicObservabilityRow {")
+    out.append("    RelicId id;")
+    out.append("    ObservabilityTransform transform;")
+    out.append("};\n")
+    out.append("// EXACTLY the rows whose registry entry declares `observability:`,")
+    out.append("// in id order (the membership table the information-layer tests pin).")
+    out.append(f"inline constexpr std::array<RelicObservabilityRow, "
+               f"{len(obs_rows)}> kRelicObservability{{{{")
+    for r in obs_rows:
+        out.append(f"    {{RelicId::{r['name']}, "
+                   f"ObservabilityTransform::{r['observability']}}},")
+    out.append("}};\n")
+    out.append("[[nodiscard]] constexpr ObservabilityTransform "
+               "relic_observability(RelicId id) noexcept {")
+    out.append("    switch (id) {")
+    for r in obs_rows:
+        out.append(f"        case RelicId::{r['name']}: "
+                   f"return ObservabilityTransform::{r['observability']};")
+    out.append("        default: return ObservabilityTransform::NONE;")
     out.append("    }")
     out.append("}\n")
     out.append("}  // namespace sts::registry\n")

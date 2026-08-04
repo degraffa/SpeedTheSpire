@@ -273,6 +273,14 @@ sts_add_test(damage_pipeline_test)
 # as an independent oracle. Links sts_engine (piles.cpp).
 sts_add_test(piles_test)
 
+# Player-information layer (training-plan §2.2/§2.3): KnowledgeState draw-order
+# constraints (Headbutt known-top, shuffle clear, random-insertion weakening,
+# Frozen Eye full-order reveal), the Louse construction-roll reveal + Runic
+# Dome suppression, the generated observability membership table, and the
+# zero-perturbation guarantee (recording never touches CombatState or RNG).
+# Links sts_engine (knowledge.cpp + the pile/interp hook sites).
+sts_add_test(knowledge_test)
+
 # A4.3: five skeleton cards + card-play flow (design doc §5.3, §9, §10 trap 10).
 # Per-card table tests (constructed state -> queue_card_play + pump -> assert
 # fields), the trap-10 dequeue-vs-enqueue random-target test, and a scripted

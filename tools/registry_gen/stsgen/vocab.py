@@ -564,6 +564,20 @@ RELIC_TIERS = {
     "BOSS": 4, "SHOP": 5, "SPECIAL": 6, "EVENT": 7,
 }
 
+# Observability transforms (training-plan §2.3): what a relic row does to the
+# PLAYER'S INFORMATION rather than to game state. HIDE_INTENT is Runic Dome's
+# intent suppression (a rendering guard in the game, AbstractMonster.java:258,
+# :749 -- observation.hpp's encode site); REVEAL_DRAW_ORDER is Frozen Eye's
+# true-order draw-pile view (FrozenEye.java:12-27 -- knowledge.hpp's reveal
+# hooks). Pinned/append-only; the generated ObservabilityTransform enum
+# static_asserts these values, and knowledge.hpp reads membership through the
+# generated relic_observability() table. NONE (0) is reserved for "row declares
+# no transform" and is not a legal YAML spelling -- omit the key instead.
+OBSERVABILITY_TRANSFORMS = {
+    "HIDE_INTENT": 1,
+    "REVEAL_DRAW_ORDER": 2,
+}
+
 # Potion rarity (AbstractPotion.PotionRarity): the reward tier gate reads it
 # (65/25/10, PotionHelper.java:70-71). Pinned/append-only; the potion table and
 # the identity roll (AbstractDungeon.returnRandomPotion) join on it. YAML

@@ -29,7 +29,8 @@
 #include <type_traits>
 
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/relic_hooks.hpp"  // player_has_relic (Runic Dome)
+#include "sts/engine/knowledge.hpp"    // combat_hides_intent (HIDE_INTENT)
+#include "sts/engine/relic_hooks.hpp"  // player_has_relic
 #include "sts/engine/schema.hpp"
 #include "sts/engine/types.hpp"
 
@@ -193,7 +194,10 @@ inline void encode_observation(const CombatState& state, ObsBuffer& out) noexcep
     // per monster and NEVER 0 (0 is the move_history empty-slot marker), and no
     // row uses it -- so 0 reads unambiguously as "hidden", the same value an
     // unoccupied slot carries.
-    const bool hide_intents = player_has_relic(state, RelicId::RUNIC_DOME);
+    // Membership comes from the registry's `observability:` field through the
+    // generated table (HIDE_INTENT -- Runic Dome is its only S1 member), so
+    // this write site needs no edit when another intent-hiding source lands.
+    const bool hide_intents = combat_hides_intent(state);
     const int mon_n =
         state.monster_count < kObsMonsterCap ? state.monster_count : kObsMonsterCap;
     out.monster_count = static_cast<uint16_t>(state.monster_count);

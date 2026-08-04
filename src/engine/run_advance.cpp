@@ -28,6 +28,7 @@
 #include "sts/engine/encounters.hpp"       // generate_monster_lists / resolve_encounter
 #include "sts/engine/event_framework.hpp"  // ?-room roll + selection + dialog dispatch
 #include "sts/engine/interp.hpp"           // Opcode::HEAL (Toy Ornithopter's queued heal)
+#include "sts/engine/knowledge.hpp"        // KnowledgeScope + combat-start hooks
 #include "sts/engine/map_gen.hpp"          // generate_map / encode_paths_into_run_state / kBossCol / kEdge*
 #include "sts/engine/map_rooms.hpp"        // assign_room_types / encode_rooms_into_run_state / RoomType
 #include "sts/engine/monster_dispatch.hpp" // spawn_group / dispatch_monster_turn / monster_init_fn
@@ -636,6 +637,11 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     const int64_t seed = rc.run.run_seed;
     const int32_t floor = static_cast<int32_t>(rc.run.floor);
 
+    // The run's knowledge records through the construction below (nested
+    // no-op when step_one already attached the same target; live for direct
+    // enter_combat / enter_event_combat callers).
+    KnowledgeScope kscope(&rc.knowledge);
+
     CombatState s{};                              // value-init: byte-clean scratch
     // The room's eliteTrigger, set before ANY consumer runs: energy_master
     // (Slaver's Collar) is read by begin_first_turn's recharge line, and Sling /
@@ -775,6 +781,11 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
     s.player_max_hp = rc.run.max_hp;
     s.player_block = 0;
 
+    // Knowledge observer (knowledge.hpp): fresh combat -> fresh knowledge,
+    // BEFORE the spawns below can telegraph a reveal. The hand-rolled shuffle
+    // above fires no hook; initial pile knowledge is armed at step (9b).
+    knowledge_reset();
+
     // (6) Spawn the resolved group's CONSTRUCTION trace: kept members roll HP
     //     (monster_hp_rng) + rollMove (ai_rng) at their construction-order
     //     positions; discarded PICK candidates burn their ctor draws in place
@@ -876,6 +887,14 @@ bool enter_combat(RunController& rc, std::string_view enc_key,
                 break;
         }
     }
+
+    // (9b) Knowledge observer: construction is final (pile built at (4),
+    //      relic mirror final at (8), spawns telegraphed at (6)). Arms the
+    //      REVEAL_DRAW_ORDER full-order record and retro-gates any telegraph
+    //      reveal recorded while the mirror was still empty -- see
+    //      knowledge_on_combat_ready's contract for why this cannot move the
+    //      mirror copy itself (the (6)/(8) order is oracle-verified).
+    knowledge_on_combat_ready(s);
 
     // (10) applyPreCombatLogic (AbstractPlayer.java:1885-1890), the LAST line of
     //      preBattlePrep (:1607) -- the same call combat_begin (advance.cpp)
@@ -2047,6 +2066,11 @@ bool step_bottle_pick(RunController& rc, Action a, StepResult& res) noexcept {
 }
 
 void step_one(RunController& rc, Action a, StepResult& res) noexcept {
+    // Attach THIS controller's knowledge for everything the step touches
+    // (combat pumps, choice resolutions, room-entry combat construction), so
+    // the engine's event hooks record into rc.knowledge -- knowledge.hpp's
+    // attachment contract. Restored on every return path below.
+    KnowledgeScope kscope(&rc.knowledge);
     if (step_potion(rc, a, res)) {
         return;
     }

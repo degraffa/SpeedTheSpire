@@ -28,6 +28,7 @@ add_library(sts_engine
     interp/interp_powers.cpp
     interp/interp_cards.cpp
     piles.cpp
+    knowledge.cpp
     card_play.cpp
     power_hooks.cpp
     # Native power bodies, ONE TU PER POWER, each named for its power (see

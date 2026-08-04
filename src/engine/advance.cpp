@@ -21,6 +21,7 @@
 #include "sts/engine/cards.hpp"
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/knowledge.hpp"         // combat-start knowledge reset/reveal
 #include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
 #include "sts/engine/observation.hpp"
 #include "sts/engine/relic_hooks.hpp"       // atPreBattle dispatch
@@ -134,6 +135,11 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
     //    encounter-driven group derivation (resolve_composition -> game_ids ->
     //    MonsterIds) threads through here once the run layer supplies the
     //    encounter. --
+    // Knowledge observers (knowledge.hpp): fresh combat -> fresh knowledge,
+    // BEFORE the spawns below can telegraph a reveal. Pure observation, no
+    // state or RNG touch -- the 20 fixtures replay byte-identically.
+    knowledge_reset();
+
     static constexpr MonsterId kSkeletonGroup[] = {MonsterId::JAW_WORM};
     spawn_group(state, kSkeletonGroup);
     // usePreBattleAction phase (the player's preBattlePrep, AFTER all ctors+init;
@@ -161,6 +167,12 @@ CombatState combat_begin(int64_t run_seed, int32_t floor,
         const RelicView rv = player_relics(state);
         dispatch_relics_at_pre_battle(state, rv.relics, rv.count);
     }
+
+    // Knowledge observer: construction is final (pile built, mirror final --
+    // empty for this standalone entry point). Arms the REVEAL_DRAW_ORDER
+    // record and retro-gates telegraph reveals; the opening draws inside the
+    // turn-1 pump below then pop through the ordinary draw hook.
+    knowledge_on_combat_ready(state);
 
     // -- The game's turn-1 block (AbstractRoom.java:236-258). begin_first_turn
     //    (action_queue.cpp) owns it for BOTH combat-construction paths -- this one

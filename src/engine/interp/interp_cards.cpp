@@ -14,6 +14,7 @@
 #include "sts/engine/cards.hpp"         // card_def / card_cost / card_flags (MAKE_CARD)
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
+#include "sts/engine/knowledge.hpp"     // draw-pile knowledge hooks (observers)
 #include "sts/engine/piles.hpp"         // exhaust_card / shuffle_discard_into_draw / limbo
 #include "sts/engine/power_hooks.hpp"   // dispatch_on_exhaust (USE_CARD filing)
 #include "sts/engine/relic_hooks.hpp"   // player_has_relic (Strange Spoon)
@@ -163,6 +164,9 @@ void draw_card_to_hand_or_discard(CombatState& s, CardPoolIndex pi) noexcept {
     if (!remove_from_draw(s, pi)) {
         return;
     }
+    // Knowledge observer: a player-visible browse pick removed `pi` from a
+    // known pile position (knowledge.hpp).
+    knowledge_on_remove_known(s, pi);
     if (s.hand_count < kHandCap) {
         s.hand[s.hand_count++] = pi;  // hand.addToTop == append
     } else if (s.discard_count < kDiscardCap) {
@@ -378,6 +382,7 @@ void discard_slot_to_draw_top(CombatState& s, uint8_t slot) noexcept {
     --s.discard_count;
     if (s.draw_count < kDrawCap) {
         s.draw[s.draw_count++] = pi;  // top of draw (draw[draw_count-1])
+        knowledge_on_place_top(s, pi);  // observer: Headbutt-style known top
     }
 }
 
@@ -465,6 +470,7 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
             const CardPoolIndex pi = remove_from_hand(s, slot);
             if (s.draw_count < kDrawCap) {
                 s.draw[s.draw_count++] = pi;
+                knowledge_on_place_top(s, pi);  // observer: known top
             }
             break;
         }
@@ -495,6 +501,7 @@ void apply_choice_to_slot(CombatState& s, uint8_t slot, ChoiceKind kind,
                 }
                 s.draw[0] = pi;
                 ++s.draw_count;
+                knowledge_on_place_bottom(s, pi);  // observer: known bottom
             }
             break;
         }
@@ -656,6 +663,7 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
                 // Onto the top of the draw pile (draw[draw_count-1] == top).
                 if (s.draw_count < kDrawCap) {
                     s.draw[s.draw_count++] = idx;
+                    knowledge_on_place_top(s, idx);  // observer: known top
                 }
                 break;
             case CardPile::DRAW_RANDOM: {
@@ -673,6 +681,9 @@ void op_make_card(CombatState& s, uint16_t card_id_raw, CardPile pile,
                 }
                 s.draw[pos] = idx;
                 ++s.draw_count;
+                // Observer: random-position insertion weakens order knowledge
+                // to the relative-order constraint (knowledge.hpp contract).
+                knowledge_on_insert_random(s, idx);
                 break;
             }
         }
@@ -835,6 +846,7 @@ void op_play_top_draw(CombatState& s) noexcept {
     }
     const CardPoolIndex pi = s.draw[s.draw_count - 1];  // getTopCard
     --s.draw_count;
+    knowledge_on_draw_top(s, pi);  // observer: Havoc reveals+consumes the top
     // exhaustOnUseOnce = true (:48) -> force the played card to exhaust; play it
     // free (autoplay does not pay energy). The game moves the card into the
     // player's limbo CardGroup (PlayTopCardAction.update:
@@ -904,6 +916,7 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
         }
         pi = s.draw[s.draw_count - 1];  // getTopCard
         --s.draw_count;
+        knowledge_on_draw_top(s, pi);  // observer: Mayhem-style top autoplay
     } else {
         if (source_index < 0 || source_index >= kCardPoolCap) {
             return;
