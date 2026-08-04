@@ -1,12 +1,35 @@
 #pragma once
 
+// THE OMNISCIENT (FULL-STATE) OBSERVATION -- NOT the training observation.
+//
+// Everything in this header is spelled `omniscient_*` / `Omniscient*` on
+// purpose (task T0.7). This encoder reads CombatState WHOLESALE: it carries the
+// true monster intent whenever Runic Dome is absent, and it is filled from a
+// state whose hidden realizations (draw order, unconsumed encounter suffix,
+// unopened chest) the reader can also reach directly through the same
+// CombatState reference. It is the right tool for a debug dump, a diff harness,
+// or an OMNISCIENT baseline agent, and the WRONG tool for anything that trains
+// or acts under the information contract -- those read PublicView
+// (public_view.hpp) and hash it with public_hash().
+//
+// The spelling is the enforcement point, not a naming preference: it is a
+// distinct token nothing else in the tree uses, so
+// tools/check_omniscient_boundary.sh can prove by grep that no training-facing
+// file reaches any of it (that script's header names exactly what it scans, and
+// tests/omniscient_boundary_test.cpp proves it fires). The boundary marker sits
+// on the ACCESS POINTS -- this header's name, the encoder, the record it fills,
+// and StepResult::omniscient_obs, the one place a filled record is handed out.
+// The element types (ObsMonster, ObsPower) and the kObs* capacities are inert
+// shapes that carry no state access, so they keep their original names; a file
+// that mentions one but none of the access points has read nothing.
+//
 // Observation encoder stub (design doc §7, decision D0.3). Flattens a
-// CombatState into a fixed-size, trivially-copyable POD (`ObsBuffer`) that an
-// eventual out-of-engine NN feature encoder consumes. Per D0.3 the encoding
-// "lives inside the simulator ... one pass over the flat state with no
+// CombatState into a fixed-size, trivially-copyable POD (`OmniscientObsBuffer`)
+// that an eventual out-of-engine NN feature encoder consumes. Per D0.3 the
+// encoding "lives inside the simulator ... one pass over the flat state with no
 // intermediate allocation, and Python never touches hot-path bytes":
-// encode_observation() is a single linear pass that writes directly into the
-// caller-owned `out` buffer -- no heap allocation of any kind.
+// omniscient_encode_observation() is a single linear pass that writes directly
+// into the caller-owned `out` buffer -- no heap allocation of any kind.
 //
 // SCOPE: this is the observation stub -- it lands the flat, fixed layout the
 // batch API needs (hp/energy/block, hand card ids+costs, monster
@@ -14,14 +37,16 @@
 // D0.3 mentions for later. Values are copied out at their native
 // CombatState widths (mostly int16); a downstream encoder normalizes/quantizes.
 //
-// VERSIONING: ObsBuffer reuses the single engine SCHEMA_VERSION constant
+// VERSIONING: OmniscientObsBuffer reuses the single engine SCHEMA_VERSION
+// constant
 // (include/sts/engine/schema.hpp), the same stamp CombatState/RunState expose,
 // rather than a separate observation-schema number. Rationale: the observation
 // is a pure projection of CombatState's fields, so any CombatState layout change
 // that would alter the observation is already a SCHEMA_VERSION bump by that
 // header's own rule; a second independent version would be redundant to keep in
 // sync. Unlike the state structs (whose stamp is compile-time-only to stay
-// value-init/hash-stable, design doc §4.1), ObsBuffer is not hashed or
+// value-init/hash-stable, design doc §4.1), OmniscientObsBuffer is not hashed
+// or
 // value-init-for-hashing, so it stores the stamp as a real field -- matching
 // design doc §8's trajectory-container convention of a version-stamped record.
 
@@ -65,7 +90,8 @@ inline constexpr int16_t kObsEmptyCost = -1;    // impossible real cost -> senti
 // --- ObsPower ---------------------------------------------------------------
 
 // One power entry in the observation. Same shape as PowerSlot; kept as its own
-// type so ObsBuffer does not depend on PowerSlot's layout staying identical.
+// type so OmniscientObsBuffer does not depend on PowerSlot's layout staying
+// identical.
 struct ObsPower {
     uint16_t power_id;  // PowerId; NONE (0) == empty slot
     int16_t amount;
@@ -96,7 +122,7 @@ static_assert(std::is_trivially_copyable_v<ObsMonster>);
 static_assert(sizeof(ObsMonster) == 10 + 4 * kObsMonsterPowerCap,
               "ObsMonster layout drifted");
 
-// --- ObsBuffer --------------------------------------------------------------
+// --- OmniscientObsBuffer ----------------------------------------------------
 
 // Flat, fixed-size, trivially-copyable observation of a CombatState.
 //
@@ -111,10 +137,11 @@ static_assert(sizeof(ObsMonster) == 10 + 4 * kObsMonsterPowerCap,
 //   monsters[]     : per monster slot, ObsMonster (occupied==0 for empty slots)
 //
 // Total size: 188 bytes on the reference toolchain (see static_assert below).
-// No hard ceiling is specified for ObsBuffer (it is not CombatState/RunState,
-// so there is no §4.2/§4.3 budget row), but it is kept compact per D0.3's
+// No hard ceiling is specified for OmniscientObsBuffer (it is not
+// CombatState/RunState, so there is no §4.2/§4.3 budget row), but it is kept
+// compact per D0.3's
 // no-intermediate-allocation intent.
-struct ObsBuffer {
+struct OmniscientObsBuffer {
     uint32_t schema_version;
 
     int16_t player_hp;
@@ -130,22 +157,23 @@ struct ObsBuffer {
     ObsMonster monsters[kObsMonsterCap];
 };
 
-static_assert(std::is_trivially_copyable_v<ObsBuffer>,
-              "ObsBuffer must be trivially copyable (POD observation record)");
-static_assert(sizeof(ObsBuffer) == 240,
-              "ObsBuffer size changed -- update the layout comment and, if this "
+static_assert(std::is_trivially_copyable_v<OmniscientObsBuffer>,
+              "OmniscientObsBuffer must be trivially copyable (POD observation record)");
+static_assert(sizeof(OmniscientObsBuffer) == 240,
+              "OmniscientObsBuffer size changed -- update the layout comment and, if this "
               "reflects a CombatState field change, SCHEMA_VERSION");
 // 188 -> 240 when kMonsterCap grew: kObsMonsterCap tracks it (5 -> 7), so the
 // per-monster ObsMonster block grew by 2 slots (2 * 26 B). This mirrors the
 // CombatState kMonsterCap growth (SCHEMA_VERSION 3 -> 4).
 
-// --- encode_observation -----------------------------------------------------
+// --- omniscient_encode_observation -----------------------------------------------------
 
 // Single linear pass over `state`, writing directly into `out`. No heap
 // allocation (verified by observation_test's counting-allocator check). `out`
 // is fully overwritten -- every fixed slot is assigned, padded ones included --
 // so the caller need not pre-zero it.
-inline void encode_observation(const CombatState& state, ObsBuffer& out) noexcept {
+inline void omniscient_encode_observation(const CombatState& state,
+                                          OmniscientObsBuffer& out) noexcept {
     out.schema_version = SCHEMA_VERSION;
 
     out.player_hp = state.player_hp;
@@ -177,7 +205,7 @@ inline void encode_observation(const CombatState& state, ObsBuffer& out) noexcep
     // `player.hasRelic("Runic Dome")`, and `grep -rn "Runic Dome" com/` finds
     // only those two plus the relic's own ID constant. Neither touches game
     // state, so this is the ONE place it belongs: the observation is this
-    // engine's view-of-the-board, and hiding it here makes ObsBuffer a strictly
+    // engine's view-of-the-board, and hiding it here makes OmniscientObsBuffer a strictly
     // lossier projection of CombatState rather than changing CombatState.
     //
     // WHERE IT MUST NOT REACH -- and this is the whole reason the suppression is

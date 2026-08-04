@@ -52,7 +52,7 @@ void encode_combat_section(const CombatState& s, PublicView& out) noexcept {
     out.player_energy = s.player_energy;
     out.cards_played_this_turn = s.cards_played_this_turn;
 
-    // Player powers: the full list (the ObsBuffer stub carries none).
+    // Player powers: the full list (the 240-byte stub carries none).
     out.player_power_count = s.player_power_count;
     const int ppn =
         s.player_power_count < kPowerCap ? s.player_power_count : kPowerCap;
@@ -78,7 +78,8 @@ void encode_combat_section(const CombatState& s, PublicView& out) noexcept {
     std::sort(out.draw, out.draw + dn, pv_card_less);  // in-place; no heap
 
     // Monsters. Runic Dome hides the telegraphed intent exactly as
-    // encode_observation does (observation.hpp carries the full provenance
+    // omniscient_encode_observation does  [omniscient-boundary-ok]
+    // (omniscient_observation.hpp carries the full provenance  [omniscient-boundary-ok]
     // write-up: two rendering guards, AbstractMonster.java:258/:749, so the
     // observation layer is the ONE place the suppression belongs, and
     // MonsterState.intent itself is never touched). move_history stays

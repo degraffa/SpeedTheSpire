@@ -116,6 +116,10 @@ add_library(sts_engine
     # PublicView -- the T0.1 public-information observation record
     # (public_view.hpp): the pull encoder beside legal_actions().
     public_view.cpp
+    # public_hash (public_view.hpp): the XXH3-64 identity of a public
+    # information set. Its own TU because it includes xxhash.h with
+    # XXH_INLINE_ALL, exactly as state_hash.cpp does.
+    public_hash.cpp
     # resample_hidden -- the T0.4 belief sampler (resample.hpp): the plan §2.4
     # per-source table, drawn entirely from sampler-private randomness.
     resample.cpp
@@ -132,7 +136,8 @@ target_compile_features(sts_engine PUBLIC cxx_std_20)
 target_link_libraries(sts_engine PUBLIC registry_generated)
 add_dependencies(sts_engine registry_gen_headers)
 
-# state_hash.cpp includes xxhash.h (XXH_INLINE_ALL). PRIVATE: the header is an
+# state_hash.cpp and public_hash.cpp include xxhash.h (XXH_INLINE_ALL, one
+# internal-linkage copy each). PRIVATE: the header is an
 # implementation detail of the engine; nothing in the public headers exposes it.
 target_link_libraries(sts_engine PRIVATE xxhash)
 

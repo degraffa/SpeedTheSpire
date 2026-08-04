@@ -146,16 +146,17 @@ sts_add_test(types_test)
 # sts_engine, which now carries state_hash.cpp (and its private xxhash dep).
 sts_add_test(state_test)
 
-# A5.2: observation encoder stub (ObsBuffer + encode_observation) round-trip
+# A5.2: observation encoder stub (OmniscientObsBuffer + omniscient_encode_observation) round-trip
 # spot checks + zero-allocation check (TU-local counting operator new/delete).
 sts_add_test(observation_test)
 
 # T0.1: PublicView combat block + v1 schema skeleton (public_view.hpp): layout
 # walk (no implicit padding -- the struct is memcmp'd/hashed downstream),
-# populated-combat round trip incl. the ObsBuffer stub's gaps, draw-multiset
-# order invariance + hidden/transient non-leak checks, Runic Dome suppression
-# parity with encode_observation, full-overwrite + reserved-field zeroing, and
-# the zero-allocation check. Field audit: docs/public-view-audit.md.
+# populated-combat round trip incl. the OmniscientObsBuffer stub's gaps,
+# draw-multiset order invariance + hidden/transient non-leak checks, Runic Dome
+# suppression parity with omniscient_encode_observation, full-overwrite +
+# reserved-field zeroing, and the zero-allocation check. Field audit:
+# docs/public-view-audit.md.
 sts_add_test(public_view_test)
 
 # A3.1: action-queue pump + queue mechanics suite (design doc §5.1-§5.2, trap 9).
@@ -287,6 +288,26 @@ sts_add_test(knowledge_test)
 # encode_public_view byte equality, sampler determinism, and the poisoned-seed
 # canary proving a particle is a function of (public state, sampler seed) alone.
 sts_add_test(resample_test)
+
+# T0.7: public_hash -- the XXH3-64 identity of a public information set.
+# Hidden twins (drawn by the T0.4 sampler) hash equal, public differences and a
+# flipped mask bit do not, and an encode into a pre-dirtied buffer hashes the
+# same as one into a clean buffer (the raw-byte hash's precondition).
+sts_add_test(public_hash_test)
+
+# T0.7: the omniscient-boundary check, tested as a TOOL rather than trusted.
+# Runs tools/check_omniscient_boundary.sh in its git-free `--scan DIR` mode
+# against three committed fixture directories and requires it to accept the
+# PublicView-only actor, REJECT the one that reaches the full-state observation
+# surface (the standing negative control), accept a hatched contrasting
+# comment, and fail loudly on an unusable argument.
+sts_add_test(omniscient_boundary_test
+    MAKE_DIRS omniscient_boundary_scratch
+    DEFS
+        STS_TEST_BASH="${STS_TEST_BASH}"
+        STS_OMNISCIENT_CHECK="${CMAKE_SOURCE_DIR}/tools/check_omniscient_boundary.sh"
+        STS_OMNISCIENT_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/omniscient_boundary"
+        STS_OMNISCIENT_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/omniscient_boundary_scratch")
 
 # A4.3: five skeleton cards + card-play flow (design doc §5.3, §9, §10 trap 10).
 # Per-card table tests (constructed state -> queue_card_play + pump -> assert

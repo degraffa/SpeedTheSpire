@@ -5,11 +5,14 @@
 // encode_public_view(rc, out) flattens everything a perfect-memory player could
 // know from the revealed action-observation history into one fixed-layout,
 // trivially-copyable POD. It deliberately does NOT ride on StepResult (which
-// embeds ObsBuffer by value on the hot path -- fattening it would tax every
-// advance() call whether or not the caller wants the full view).
+// embeds the full-state observation buffer by value on the hot path --
+// fattening it would tax every advance() call whether or not the caller wants
+// the full view).
 //
 // SCOPE (task T0.1): the COMBAT section plus the v1 schema skeleton. The
-// combat section closes every gap in the ObsBuffer stub (observation.hpp):
+// combat section closes every gap in the full-state observation stub -- the
+// OTHER surface, whose whole rule is that nothing training-facing reads it
+// (omniscient_observation.hpp):  [omniscient-boundary-ok]
 // player powers, monster block, FULL per-monster power lists (no 4-of-24
 // truncation), the draw pile as an UNORDERED MULTISET, discard / exhaust /
 // limbo contents, and the potion belt.
@@ -51,12 +54,12 @@
 //     encoding order-invariant (the T0.5 hidden-twin byte-equality property).
 //     Hand / discard / exhaust / limbo order IS public (each card's arrival
 //     was an observed event), so those piles encode in engine order.
-//   * Runic Dome intent suppression happens HERE, exactly as in
-//     encode_observation (the game's two rendering guards,
-//     AbstractMonster.java:258/:749, touch no game state -- see the write-up
-//     at observation.hpp's encoder). move_history stays visible under the
-//     Dome: past moves were observed as they resolved; only the telegraphed
-//     NEXT move is hidden.
+//   * Runic Dome intent suppression happens HERE, exactly as it does in the
+//     other observation surface (the game's two rendering guards,
+//     AbstractMonster.java:258/:749, touch no game state -- the full write-up
+//     is at omniscient_observation.hpp's encoder).  [omniscient-boundary-ok]
+//     move_history stays visible under the Dome: past moves were observed as
+//     they resolved; only the telegraphed NEXT move is hidden.
 //   * MonsterState.pad0 is EXCLUDED: it is per-type scratch that can hold an
 //     unrevealed construction roll (the Louse bite damage, rolled at spawn).
 //     Revealed rolls surface through the T0.2 KnowledgeState projection, not
@@ -70,9 +73,9 @@
 // layout, that table, PUBLIC_VIEW_VERSION.
 //
 // VERSIONING: one stamp, PUBLIC_VIEW_VERSION, stored as a real field (the
-// trajectory-record convention ObsBuffer follows for SCHEMA_VERSION -- this
-// struct is a consumer-facing record, not a hashed engine state, so the stamp
-// is per-instance data). It is deliberately INDEPENDENT of the engine
+// trajectory-record convention the full-state observation buffer follows for
+// SCHEMA_VERSION -- this struct is a consumer-facing record, not a hashed
+// engine state, so the stamp is per-instance data). It is deliberately INDEPENDENT of the engine
 // SCHEMA_VERSION: a CombatState layout change that does not alter what is
 // public (e.g. a new hidden flags bit) must not invalidate training shards,
 // and a view-only change (a new encoded field) is invisible to engine traces.
@@ -142,8 +145,9 @@ static_assert(sizeof(PvPower) == 6, "PvPower layout drifted");
 // splits, curl-ups, mode shifts, escapes; audited bit-by-bit in the audit
 // doc), move_history, and the FULL kPowerCap power list (the stub truncates at
 // 4). `intent` is suppressed to 0 under Runic Dome, exactly as in
-// encode_observation. MonsterState.pad0 is deliberately absent (see the
-// header comment: it can hold an unrevealed construction roll).
+// omniscient_encode_observation.  [omniscient-boundary-ok]
+// MonsterState.pad0 is deliberately absent (see the header comment: it can
+// hold an unrevealed construction roll).
 struct PvMonster {
     uint16_t monster_id;  // MonsterId; NONE (0) == empty slot
     int16_t hp;
@@ -548,5 +552,47 @@ static_assert(sizeof(PublicView) == 6032,
 // why this is a pull API and not something advance() pays for on every step;
 // callers on the hot path keep using legal_actions() directly.
 void encode_public_view(const RunController& rc, PublicView& out) noexcept;
+
+// --- public_hash -------------------------------------------------------------
+
+// XXH3-64 over the whole OBJECT REPRESENTATION of a PublicView -- the same
+// primitive hash_state() (state_hash.hpp) applies to CombatState/RunState, and
+// the identity of a public information set: two states a perfect-memory player
+// could not tell apart hash equal, and any difference the player CAN see
+// changes the hash.
+//
+// THE MASK IS IN THE HASH, structurally. RunActionMask is a member of this
+// struct (see PvMask), so hashing sizeof(PublicView) bytes hashes the legality
+// channel too. Nothing downstream can hash "the view" and forget the mask,
+// which is the property plan §2.1 asks for.
+//
+// WHY HASHING RAW BYTES IS SOUND HERE. A byte hash is only meaningful when
+// every byte is deterministic, and both halves of that hold by test rather than
+// by convention:
+//   * PublicView has NO IMPLICIT PADDING. Every gap is a declared pad member
+//     (pad0 / pad_tail / PvMask::pad_end), and the layout-walk tests in
+//     tests/public_view_test.cpp require each member to start where the
+//     previous one ended -- for the struct itself and for every element type it
+//     contains. (This is the same discipline conventions.md §8 records for
+//     RunState, where undeclared gaps produced a host-dependent hash.)
+//   * encode_public_view() ASSIGNS EVERY BYTE. Its first statement is
+//     `out = PublicView{}`: the aggregate value-init zero-fills every member,
+//     explicit pads included, and the memberwise assignment then carries those
+//     zeros into `out`. Because no implicit padding exists, "every member" is
+//     "every byte" -- so a caller may hash a view encoded into a buffer holding
+//     arbitrary previous garbage and get the same answer as into a fresh one.
+//     PublicHash.EncodingTwiceIntoDirtyBuffersHashesEqual pins exactly that.
+//
+// The hash is NOT stable across PUBLIC_VIEW_VERSION bumps (the version stamp is
+// itself a hashed field, and a layout change moves everything after it) and is
+// NOT a substitute for hash_state(): it deliberately cannot distinguish states
+// that differ only in hidden realizations.
+[[nodiscard]] uint64_t public_hash(const PublicView& view) noexcept;
+
+// Convenience: encode `rc` into a temporary view and hash it. Equivalent to
+// encode_public_view() followed by public_hash(), and it pays that encode --
+// including the internal legal_actions() call PvMask costs. A caller that wants
+// both the view and its hash should encode once and hash the result.
+[[nodiscard]] uint64_t public_hash(const RunController& rc) noexcept;
 
 }  // namespace sts::engine

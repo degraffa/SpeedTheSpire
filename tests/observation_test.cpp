@@ -1,10 +1,10 @@
 // Observation encoder stub.
 //
 //   * Round-trip spot checks -- construct a CombatState with hand-picked
-//     non-default values, encode_observation(), assert the ObsBuffer fields
+//     non-default values, omniscient_encode_observation(), assert the OmniscientObsBuffer fields
 //     match exactly (player, hand cards+costs, monster hp/intent/powers), plus
 //     the padding/sentinel behavior for unused hand and monster slots.
-//   * Zero allocation -- encode_observation() performs no heap allocation,
+//   * Zero allocation -- omniscient_encode_observation() performs no heap allocation,
 //     checked by a global operator new/delete override IN THIS TRANSLATION UNIT
 //     ONLY that increments a counter, snapshotted tightly around just the call
 //     under test. (asan alone does not fail on "an allocation happened" -- it
@@ -23,14 +23,14 @@
 #include <gtest/gtest.h>
 
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/observation.hpp"
+#include "sts/engine/omniscient_observation.hpp"
 #include "sts/engine/types.hpp"
 
 // --- Global allocation counter (this TU only) -------------------------------
 //
 // A plain global counter bumped by every replaceable global operator new form.
 // We never assert on the process-wide count (GoogleTest and libstdc++ allocate
-// freely); we snapshot before/after a TIGHT scope around encode_observation().
+// freely); we snapshot before/after a TIGHT scope around omniscient_encode_observation().
 
 namespace {
 std::atomic<std::size_t> g_alloc_count{0};
@@ -75,8 +75,8 @@ namespace {
 
 // --- Regression-guard static asserts (mirror the header source of truth) ----
 
-static_assert(std::is_trivially_copyable_v<ObsBuffer>);
-static_assert(sizeof(ObsBuffer) == 240);  // B3.12: kObsMonsterCap 5 -> 7 (== kMonsterCap)
+static_assert(std::is_trivially_copyable_v<OmniscientObsBuffer>);
+static_assert(sizeof(OmniscientObsBuffer) == 240);  // B3.12: kObsMonsterCap 5 -> 7 (== kMonsterCap)
 
 // Build a CombatState with a small, fully-known combat situation.
 CombatState make_sample_state() {
@@ -111,8 +111,8 @@ CombatState make_sample_state() {
 
 TEST(Observation, PlayerFieldsRoundTrip) {
     const CombatState s = make_sample_state();
-    ObsBuffer obs{};
-    encode_observation(s, obs);
+    OmniscientObsBuffer obs{};
+    omniscient_encode_observation(s, obs);
 
     EXPECT_EQ(obs.schema_version, SCHEMA_VERSION);
     EXPECT_EQ(obs.player_hp, 68);
@@ -123,8 +123,8 @@ TEST(Observation, PlayerFieldsRoundTrip) {
 
 TEST(Observation, HandCardsRoundTrip) {
     const CombatState s = make_sample_state();
-    ObsBuffer obs{};
-    encode_observation(s, obs);
+    OmniscientObsBuffer obs{};
+    omniscient_encode_observation(s, obs);
 
     EXPECT_EQ(obs.hand_count, 2u);
     EXPECT_EQ(obs.hand_card_id[0], static_cast<uint16_t>(CardId::BASH));
@@ -135,8 +135,8 @@ TEST(Observation, HandCardsRoundTrip) {
 
 TEST(Observation, UnusedHandSlotsReadSentinels) {
     const CombatState s = make_sample_state();  // only 2 of 10 hand slots filled
-    ObsBuffer obs{};
-    encode_observation(s, obs);
+    OmniscientObsBuffer obs{};
+    omniscient_encode_observation(s, obs);
 
     for (int i = 2; i < kObsHandCap; ++i) {
         EXPECT_EQ(obs.hand_card_id[i], kObsEmptyCardId) << "hand slot " << i;
@@ -152,15 +152,15 @@ TEST(Observation, UnusedHandSlotsReadSentinels) {
 // unique per monster and never 0, and the empty-slot encoding already uses 0.
 TEST(Observation, RunicDomeHidesEveryMonsterIntentAndNothingElse) {
     const CombatState plain = make_sample_state();
-    ObsBuffer visible{};
-    encode_observation(plain, visible);
+    OmniscientObsBuffer visible{};
+    omniscient_encode_observation(plain, visible);
     ASSERT_EQ(visible.monsters[0].intent, 7) << "probe is wrong";
 
     CombatState domed = make_sample_state();
     domed.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RUNIC_DOME), -1};
     domed.relic_count = 1;
-    ObsBuffer hidden{};
-    encode_observation(domed, hidden);
+    OmniscientObsBuffer hidden{};
+    omniscient_encode_observation(domed, hidden);
 
     EXPECT_EQ(hidden.monsters[0].intent, 0) << "the intent is still readable";
     // EVERY other observed field is untouched -- the suppression is one field at
@@ -187,8 +187,8 @@ TEST(Observation, RunicDomeHidesEveryMonsterIntentAndNothingElse) {
     two.monsters[1].intent = 3;
     two.relics[0] = RelicSlot{static_cast<uint16_t>(RelicId::RUNIC_DOME), -1};
     two.relic_count = 1;
-    ObsBuffer both{};
-    encode_observation(two, both);
+    OmniscientObsBuffer both{};
+    omniscient_encode_observation(two, both);
     EXPECT_EQ(both.monsters[0].intent, 0);
     EXPECT_EQ(both.monsters[1].intent, 0);
 
@@ -203,8 +203,8 @@ TEST(Observation, RunicDomeHidesEveryMonsterIntentAndNothingElse) {
 
 TEST(Observation, MonsterFieldsRoundTrip) {
     const CombatState s = make_sample_state();
-    ObsBuffer obs{};
-    encode_observation(s, obs);
+    OmniscientObsBuffer obs{};
+    omniscient_encode_observation(s, obs);
 
     EXPECT_EQ(obs.monster_count, 1u);
     const ObsMonster& m = obs.monsters[0];
@@ -227,8 +227,8 @@ TEST(Observation, MonsterFieldsRoundTrip) {
 
 TEST(Observation, UnusedMonsterSlotsReadEmpty) {
     const CombatState s = make_sample_state();  // only 1 of 5 monster slots
-    ObsBuffer obs{};
-    encode_observation(s, obs);
+    OmniscientObsBuffer obs{};
+    omniscient_encode_observation(s, obs);
 
     for (int m = 1; m < kObsMonsterCap; ++m) {
         const ObsMonster& om = obs.monsters[m];
@@ -254,8 +254,8 @@ TEST(Observation, MonsterPowersTruncateButReportTrueCount) {
                                 static_cast<int16_t>(p + 1), 0, 0};
     }
 
-    ObsBuffer obs{};
-    encode_observation(s, obs);
+    OmniscientObsBuffer obs{};
+    omniscient_encode_observation(s, obs);
 
     EXPECT_EQ(obs.monsters[0].power_count, kObsMonsterPowerCap + 2);
     for (int p = 0; p < kObsMonsterPowerCap; ++p) {
@@ -267,15 +267,15 @@ TEST(Observation, MonsterPowersTruncateButReportTrueCount) {
 
 TEST(Observation, EncodeDoesNotAllocate) {
     const CombatState s = make_sample_state();
-    ObsBuffer obs{};
+    OmniscientObsBuffer obs{};
     // Warm anything lazy touched by the arguments BEFORE the measured window.
-    encode_observation(s, obs);
+    omniscient_encode_observation(s, obs);
 
     const std::size_t before = g_alloc_count;
-    encode_observation(s, obs);  // <- the only statement in the measured scope
+    omniscient_encode_observation(s, obs);  // <- the only statement in the measured scope
     const std::size_t after = g_alloc_count;
 
-    EXPECT_EQ(after, before) << "encode_observation allocated on the heap";
+    EXPECT_EQ(after, before) << "omniscient_encode_observation allocated on the heap";
 }
 
 }  // namespace

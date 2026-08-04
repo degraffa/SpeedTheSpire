@@ -29,7 +29,7 @@
 #include <type_traits>
 
 #include "sts/engine/combat_state.hpp"
-#include "sts/engine/observation.hpp"
+#include "sts/engine/omniscient_observation.hpp"
 #include "sts/engine/types.hpp"
 
 namespace sts::engine {
@@ -244,10 +244,17 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept;
 // reward fields, and an observation view -- no allocation anywhere in the
 // loop"). The engine's whole philosophy is POD / no pointers / no aliasing
 // between distinct CombatStates, so the zero-allocation-compliant reading of
-// "observation view" is to EMBED the ObsBuffer by value: encode_observation is
-// the one intentional, controlled projection of the state (not a second raw
-// state copy), and an embedded flat ObsBuffer holds no pointer back into the
-// state. StepResult is thus a self-contained POD.
+// "observation view" is to EMBED the OmniscientObsBuffer by value:
+// omniscient_encode_observation is the one intentional, controlled projection of
+// the state (not a second raw state copy), and an embedded flat
+// OmniscientObsBuffer holds no pointer back into the state. StepResult is thus a
+// self-contained POD.
+//
+// THE `omniscient_` SPELLING (task T0.7) is the information boundary, not a
+// decoration: this member is a FULL-STATE read that bypasses PublicView, so a
+// training-facing actor touching `.omniscient_obs` is reaching past the public
+// observation. tools/check_omniscient_boundary.sh greps for exactly this
+// spelling; omniscient_observation.hpp's header carries the whole rule.
 //
 // REWARD (placeholder, NOT a frozen design). The real reward shaping is
 // training-loop scope, wildly out of scope for M1. This is a minimal, honest,
@@ -261,11 +268,11 @@ void legal_actions(const CombatState& state, ActionMask& out) noexcept;
 struct StepResult {
     bool terminal;
     float reward;
-    ObsBuffer obs;
+    OmniscientObsBuffer omniscient_obs;
 };
 
 static_assert(std::is_trivially_copyable_v<StepResult>,
-              "StepResult must be trivially copyable (POD, embedded ObsBuffer)");
+              "StepResult must be trivially copyable (POD, embedded OmniscientObsBuffer)");
 
 // --- advance ----------------------------------------------------------------
 
@@ -287,7 +294,7 @@ static_assert(std::is_trivially_copyable_v<StepResult>,
 //                 is selected (including nothing)
 //   USE_POTION -> no-op here (the belt lives in RunState; the run overload owns it)
 // After pumping, results[i] is filled: terminal/reward from the post-pump state
-// and encode_observation(states[i], results[i].obs).
+// and omniscient_encode_observation(states[i], results[i].omniscient_obs).
 //
 // EVERY action is checked against legal_actions() before it is dispatched, for
 // every verb: an action the mask does not report as legal is a no-op that cannot
@@ -296,7 +303,7 @@ static_assert(std::is_trivially_copyable_v<StepResult>,
 // mask itself, once per state per step.
 //
 // NO heap allocation anywhere in the loop -- the spans are iterated directly, no
-// std::vector / new. (encode_observation is itself allocation-free.)
+// std::vector / new. (omniscient_encode_observation is itself allocation-free.)
 void advance(std::span<CombatState> states, std::span<const Action> actions,
              std::span<StepResult> results) noexcept;
 

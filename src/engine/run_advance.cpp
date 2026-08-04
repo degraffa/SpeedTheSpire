@@ -35,7 +35,7 @@
 #include "sts/engine/monster_lagavulin.hpp" // event ctor's awake variant
 #include "sts/engine/monster_looter.hpp"   // looter_stolen_gold (settlement)
 #include "sts/engine/neow.hpp"             // the floor-0 blessing + its screens
-#include "sts/engine/observation.hpp"      // encode_observation
+#include "sts/engine/omniscient_observation.hpp"      // omniscient_encode_observation
 #include "sts/engine/potions.hpp"          // PotionId / use_potion / slot count
 #include "sts/engine/relic_hooks.hpp"      // dispatch_relics_on_victory / room-entry hooks
 #include "sts/engine/relic_pools.hpp"      // pool init + acquisition/on-pickup
@@ -481,7 +481,7 @@ void fill_combat_result(const CombatState& s, StepResult& r) noexcept {
     } else if (!any_in_fight) {
         r.reward = 1.0f;
     }
-    encode_observation(s, r.obs);
+    omniscient_encode_observation(s, r.omniscient_obs);
 }
 
 // MonsterGroup.haveMonstersEscaped (MonsterGroup.java:124-130): true iff EVERY

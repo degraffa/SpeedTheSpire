@@ -13,14 +13,14 @@
 //     T0.7's public_hash, so implicit padding would be the exact Windows-only
 //     nondeterminism bug the RunState incident documents (run_state.hpp).
 //   * Round-trip spot checks over a POPULATED combat state: player scalars
-//     the ObsBuffer stub already carried PLUS everything it omitted -- player
+//     the OmniscientObsBuffer stub already carried PLUS everything it omitted -- player
 //     powers, monster block/flags/move_history, full 24-slot per-monster power
 //     lists, discard/exhaust/limbo contents, the potion belt.
 //   * The information boundary: two states differing ONLY in hidden data
 //     (draw-pile order, RNG stream state, monster construction scratch,
 //     resolution-queue contents) encode byte-identically -- the property the
 //     T0.5 hidden-twin suite scales up.
-//   * Runic Dome suppression parity with encode_observation (the T0.1
+//   * Runic Dome suppression parity with omniscient_encode_observation (the T0.1
 //     acceptance line): both encoders hide the telegraphed intent, and only
 //     it, and neither touches CombatState.
 //   * Zero allocation, via the same TU-local counting operator new/delete
@@ -41,7 +41,7 @@
 
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/knowledge.hpp"
-#include "sts/engine/observation.hpp"
+#include "sts/engine/omniscient_observation.hpp"
 #include "sts/engine/public_view.hpp"
 #include "sts/engine/run_advance.hpp"
 #include "sts/engine/types.hpp"
@@ -347,7 +347,7 @@ TEST(PublicView, PlayerScalarsAndPowersRoundTrip) {
     EXPECT_EQ(pv.stance, 0);
     EXPECT_EQ(pv.cards_played_this_turn, 2);
 
-    // Player powers -- absent from the ObsBuffer stub entirely, including the
+    // Player powers -- absent from the OmniscientObsBuffer stub entirely, including the
     // second per-instance number (`counter`).
     EXPECT_EQ(pv.player_power_count, 2);
     EXPECT_EQ(pv.player_powers[0].power_id,
@@ -426,8 +426,8 @@ TEST(PublicView, MonsterBlockFlagsHistoryAndFullPowerList) {
         EXPECT_EQ(m0.powers[p].amount, p + 1) << "power slot " << p;
         EXPECT_EQ(m0.powers[p].counter, p % 2) << "power slot " << p;
     }
-    // (Contrast: the ObsBuffer stub truncates the same monster at 4 slots --
-    // kObsMonsterPowerCap in observation.hpp -- which is the gap this closes.)
+    // (Contrast: the OmniscientObsBuffer stub truncates the same monster at 4 slots --
+    // kObsMonsterPowerCap in omniscient_observation.hpp -- which is the gap this closes.)
     static_assert(kObsMonsterPowerCap < kPowerCap);
 
     const PvMonster& m1 = pv.monsters[1];
@@ -527,14 +527,14 @@ TEST(PublicView, ResolutionQueuesReachTheViewOnlyThroughTheMaskChannel) {
            "unchanged -- the mask channel is supposed to carry exactly this";
 }
 
-// --- Runic Dome parity with encode_observation ----------------------------------
+// --- Runic Dome parity with the omniscient encoder ---------------------------
 
 TEST(PublicView, RunicDomeSuppressionParityWithEncodeObservation) {
     // Without the Dome: both encoders carry the telegraphed intents.
     const RunController plain = make_run_in_combat();
-    ObsBuffer obs_plain{};
+    OmniscientObsBuffer obs_plain{};
     PublicView pv_plain{};
-    encode_observation(plain.combat, obs_plain);
+    omniscient_encode_observation(plain.combat, obs_plain);
     encode_public_view(plain, pv_plain);
     for (int m = 0; m < 2; ++m) {
         EXPECT_EQ(pv_plain.monsters[m].intent, obs_plain.monsters[m].intent)
@@ -549,9 +549,9 @@ TEST(PublicView, RunicDomeSuppressionParityWithEncodeObservation) {
     domed.combat.relics[0] =
         RelicSlot{static_cast<uint16_t>(RelicId::RUNIC_DOME), -1};
     domed.combat.relic_count = 1;
-    ObsBuffer obs_domed{};
+    OmniscientObsBuffer obs_domed{};
     PublicView pv_domed{};
-    encode_observation(domed.combat, obs_domed);
+    omniscient_encode_observation(domed.combat, obs_domed);
     encode_public_view(domed, pv_domed);
     for (int m = 0; m < 2; ++m) {
         EXPECT_EQ(pv_domed.monsters[m].intent, 0) << "monster " << m;
@@ -567,7 +567,7 @@ TEST(PublicView, RunicDomeSuppressionParityWithEncodeObservation) {
     EXPECT_EQ(pv_domed.monsters[0].power_count, pv_plain.monsters[0].power_count);
 
     // And the suppression never reaches the simulated state (the capture-diff
-    // pipeline anchors on MonsterState.intent -- observation.hpp write-up).
+    // pipeline anchors on MonsterState.intent -- omniscient_observation.hpp write-up).
     EXPECT_EQ(domed.combat.monsters[0].intent, 7)
         << "Runic Dome reached MonsterState -- every capture diff is now wrong";
 }

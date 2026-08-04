@@ -10,7 +10,8 @@
 // lock, a run-layer marker or an observation-layer change binds no hook and
 // therefore has no handler: it is read at its consumer instead -- energy_master
 // (action_queue.cpp), build_rest_menu's veto sweep (rest_sites.cpp),
-// encode_observation (observation.hpp), gain_gold, the potion doors. Those reads
+// omniscient_encode_observation (omniscient_observation.hpp), gain_gold, the
+// potion doors. Those reads
 // are what make the row correct, alongside its pool slot and its relicRng draw;
 // registry/relics.yaml carries the reason per row. This header holds only the
 // relics that DO respond to a combat hook.

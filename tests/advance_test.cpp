@@ -657,8 +657,9 @@ TEST(AdvanceMaskOverload, IsByteIdenticalToTheMaskBuildingOverloadOverManySteps)
                 << "step " << step << " entry " << i << ": reward";
             // The observation is part of the result, so it is compared too --
             // "exactly equivalent" has to mean the whole StepResult.
-            ASSERT_EQ(0, std::memcmp(&r_plain[as_index(i)].obs, &r_masked[as_index(i)].obs,
-                                     sizeof(ObsBuffer)))
+            ASSERT_EQ(0, std::memcmp(&r_plain[as_index(i)].omniscient_obs,
+                                     &r_masked[as_index(i)].omniscient_obs,
+                                     sizeof(OmniscientObsBuffer)))
                 << "step " << step << " entry " << i << ": observation";
         }
     }

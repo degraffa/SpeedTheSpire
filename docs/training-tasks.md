@@ -213,14 +213,25 @@ one exists, mirroring the Stage B convention.
   obligations (GT0 owns checking it; schedules only fire on master, so
   force the first with workflow_dispatch).
 
-- **T0.7** `[ ]` ∥ **`public_hash` + omniscient boundary.** xxh3 over
+- **T0.7** `[x]` ∥ **`public_hash` + omniscient boundary.** xxh3 over
   `PublicView`+mask bytes; raw-state access for the omniscient/debug agent
   renamed to a grep-enforceable distinct spelling; a repo check (extending
   `tools/check_stale_counts.sh`-style scripting) fails if training-facing
   code paths reference the omniscient spelling.
   **Deps:** T0.2 **Acceptance:** hash stability test (twin states hash
   equal, public-differing states hash unequal); boundary grep check runs in
-  CI and fires on a negative test; presets green. **Log:** —
+  CI and fires on a negative test; presets green. **Log:** 2026-08-03 —
+  landed. `public_hash` (xxh3 over the full 6032-B padding-assigned
+  `PublicView`, mask structurally included; dirty-buffer test pins
+  byte-determinism) in `public_hash.cpp`. Omniscient spelling applied at
+  the only two real definition sites: `omniscient_observation.hpp`
+  (`omniscient_encode_observation` / `OmniscientObsBuffer`) and
+  `StepResult::omniscient_obs`; batch `advance()` untouched (legitimate
+  engine API). `tools/check_omniscient_boundary.sh` scans pre-declared
+  training trees + a public-side denylist (missing denylist file = hard
+  error), `omniscient-boundary-ok` line hatch, third step of the
+  `stale-numbers` CI job; durable negative test via committed fixture
+  dirs. Six presets green.
 
 ### GT0 `[ ]` **Gate: sim-side information layer (schemas + leak gates — the sim half of M6)** — tag `gt0-info-layer`
 **Deps:** T0.1–T0.7

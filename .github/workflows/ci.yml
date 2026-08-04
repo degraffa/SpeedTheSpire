@@ -35,6 +35,15 @@ jobs:
       - name: Every markdown link and anchor must resolve
         if: ${{ !cancelled() }}
         run: bash tools/check_doc_links.sh
+      # Third guard of the same class (T0.7): training-facing code may not reach
+      # the omniscient (full-state) observation surface. Like the two above it
+      # is a git-side grep that answers in about a second, and like them it is a
+      # rule whose author must be able to run it locally and get the same
+      # answer. tests/omniscient_boundary_test.cpp additionally proves the check
+      # still FIRES, which CI's green run cannot.
+      - name: Training-facing code may not reach the omniscient state reads
+        if: ${{ !cancelled() }}
+        run: bash tools/check_omniscient_boundary.sh
 
   build-and-test:
     name: ${{ matrix.preset }}

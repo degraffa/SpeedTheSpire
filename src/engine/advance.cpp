@@ -23,7 +23,7 @@
 #include "sts/engine/interp.hpp"
 #include "sts/engine/knowledge.hpp"         // combat-start knowledge reset/reveal
 #include "sts/engine/monster_dispatch.hpp"  // spawn_group, dispatch_monster_turn
-#include "sts/engine/observation.hpp"
+#include "sts/engine/omniscient_observation.hpp"
 #include "sts/engine/relic_hooks.hpp"       // atPreBattle dispatch
 #include "sts/engine/rng_jdk.hpp"
 #include "sts/engine/rng_stream.hpp"
@@ -398,7 +398,7 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
     } else {
         r.reward = 0.0f;                        // combat ongoing
     }
-    encode_observation(s, r.obs);
+    omniscient_encode_observation(s, r.omniscient_obs);
 }
 
 // PLAY_CARD legality, read ENTIRELY out of an ActionMask that legal_actions()
