@@ -19,6 +19,7 @@ import campaign_paths
 import gen_cards_sidetable
 import greedy_policy
 import orchestrator
+import survival_policy_cmd
 import validate_artifacts
 
 
@@ -3418,6 +3419,325 @@ class GreedyBossFightReplayLegalityTest(unittest.TestCase):
         self.assertGreater(differed, 0,
                            "a policy seed that can never change a decision is "
                            "not a tie-break")
+
+
+STUB_POLICY_SOURCE = '''\
+import json, sys
+mode = "last"
+if "--config" in sys.argv:
+    with open(sys.argv[sys.argv.index("--config") + 1]) as fh:
+        mode = json.load(fh).get("mode", "last")
+for line in sys.stdin:
+    req = json.loads(line)
+    if mode == "nonjson":
+        sys.stdout.write("not json\\n")
+    elif mode == "bogus":
+        sys.stdout.write(json.dumps({
+            "format": req["format"], "kind": "decision",
+            "command": "definitely-not-legal"}) + "\\n")
+    elif mode == "die":
+        sys.exit(3)
+    else:
+        sys.stdout.write(json.dumps({
+            "format": req["format"], "kind": "decision",
+            "command": req["candidates"][-1]}) + "\\n")
+    sys.stdout.flush()
+'''
+
+
+def _write_stub_policy(root, mode=None):
+    cmd_path = os.path.join(root, "stub_policy.py")
+    with open(cmd_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(STUB_POLICY_SOURCE)
+    config_path = None
+    if mode is not None:
+        config_path = os.path.join(root, "stub_config.json")
+        with open(config_path, "w", encoding="utf-8", newline="\n") as fh:
+            json.dump({"mode": mode}, fh)
+    return cmd_path, config_path
+
+
+class ExternalPolicyHookTest(unittest.TestCase):
+    """TE.1: the campaign harness takes actions from a policy binary/config."""
+
+    def test_decide_round_trips_and_binds_seed_and_policy_seed(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd_path, _ = _write_stub_policy(root)
+            policy = campaign_driver.ExternalPolicy(cmd_path)
+            try:
+                chosen = policy.decide(
+                    SEED, 1234, ["end", "choose 0"], {"in_game": True})
+                self.assertEqual("choose 0", chosen)
+                # the child stays up across decisions
+                self.assertEqual(
+                    "play 1", policy.decide(SEED, 1234, ["end", "play 1"],
+                                            {"in_game": True}))
+            finally:
+                policy.close()
+
+    def test_config_file_reaches_the_binary_as_dash_dash_config(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd_path, config_path = _write_stub_policy(root, mode="bogus")
+            policy = campaign_driver.ExternalPolicy(cmd_path, config_path)
+            try:
+                with self.assertRaisesRegex(
+                        campaign_driver.ExternalPolicyError,
+                        "not one of the 2 legal candidates"):
+                    policy.decide(SEED, 1234, ["end", "choose 0"], {})
+            finally:
+                policy.close()
+
+    def test_non_json_and_dead_binary_are_protocol_errors(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd_path, config_path = _write_stub_policy(root, mode="nonjson")
+            policy = campaign_driver.ExternalPolicy(cmd_path, config_path)
+            try:
+                with self.assertRaisesRegex(
+                        campaign_driver.ExternalPolicyError, "non-JSON"):
+                    policy.decide(SEED, 1234, ["end"], {})
+            finally:
+                policy.close()
+        with tempfile.TemporaryDirectory() as root:
+            cmd_path, config_path = _write_stub_policy(root, mode="die")
+            policy = campaign_driver.ExternalPolicy(cmd_path, config_path)
+            try:
+                with self.assertRaisesRegex(
+                        campaign_driver.ExternalPolicyError,
+                        "closed stdout"):
+                    policy.decide(SEED, 1234, ["end"], {})
+                # a later decide must not silently respawn past the fault
+                with self.assertRaisesRegex(
+                        campaign_driver.ExternalPolicyError,
+                        "refusing to respawn"):
+                    policy.decide(SEED, 1234, ["end"], {})
+            finally:
+                policy.close()
+
+    def test_paths_are_validated_before_any_launch(self):
+        with tempfile.TemporaryDirectory() as root:
+            with self.assertRaisesRegex(ValueError, "does not exist"):
+                campaign_driver.validate_external_policy_path(
+                    os.path.join(root, "missing.py"), "--policy-cmd")
+            spaced = os.path.join(root, "has space.py")
+            with open(spaced, "w", encoding="utf-8") as fh:
+                fh.write("pass\n")
+            with self.assertRaisesRegex(ValueError, "whitespace"):
+                campaign_driver.validate_external_policy_path(
+                    spaced, "--policy-cmd")
+
+    def test_external_identity_pins_binary_and_config_hashes(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd_path, config_path = _write_stub_policy(root, mode="last")
+            identity = campaign_driver.external_policy_identity(
+                cmd_path, config_path)
+            self.assertEqual(
+                {"cmd_path", "cmd_sha256", "config_path", "config_sha256"},
+                set(identity))
+            self.assertEqual(64, len(identity["cmd_sha256"]))
+
+            progress_path = os.path.join(root, "campaign_progress.json")
+            progress = campaign_driver.Progress(
+                progress_path, os.path.join(root, "hb.json"))
+            progress.load_or_init(
+                "external-pin", [SEED], "external", "A" * 64,
+                policy_seed=1234, external_policy=identity)
+            # same identity resumes
+            resumed = campaign_driver.Progress(
+                progress_path, os.path.join(root, "hb.json"))
+            resumed.load_or_init(
+                "external-pin", [SEED], "external", "A" * 64,
+                policy_seed=1234, external_policy=identity)
+            # a changed binary hash refuses
+            changed = dict(identity, cmd_sha256="B" * 64)
+            refused = campaign_driver.Progress(
+                progress_path, os.path.join(root, "hb.json"))
+            with self.assertRaisesRegex(
+                    campaign_driver.CampaignIdentityError,
+                    "external_policy"):
+                refused.load_or_init(
+                    "external-pin", [SEED], "external", "A" * 64,
+                    policy_seed=1234, external_policy=changed)
+
+    def test_policy_command_routes_through_external_and_fails_fatal(self):
+        driver = campaign_driver.CampaignDriver.__new__(
+            campaign_driver.CampaignDriver)
+        driver.args = SimpleNamespace(policy="external", policy_seed=77)
+        driver.rng = random.Random(0)
+        driver._current_seed = SEED
+        recorded = {}
+
+        class FakeExternal:
+            def decide(self, seed, policy_seed, candidates, state):
+                recorded.update(seed=seed, policy_seed=policy_seed,
+                                candidates=list(candidates))
+                return candidates[0]
+
+        driver.external = FakeExternal()
+        state = {
+            "available_commands": ["end"],
+            "in_game": True,
+            "game_state": {},
+        }
+        self.assertEqual("end", driver._policy_command(state))
+        self.assertEqual(
+            {"seed": SEED, "policy_seed": 77, "candidates": ["end"]},
+            recorded)
+
+        class BrokenExternal:
+            def decide(self, *_args, **_kwargs):
+                raise campaign_driver.ExternalPolicyError("synthetic break")
+
+        driver.external = BrokenExternal()
+        with self.assertRaises(campaign_driver.FatalEnvironmentDrift) as ctx:
+            driver._policy_command(state)
+        self.assertEqual("external_policy_error", ctx.exception.kind)
+
+    def test_boss_room_decision_state_records_boss_fight_reached(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "boss_reach"
+            _write_launch_log(os.path.join(root, campaign_id))
+            initial = _action(_oracle())["state_json"]
+            initial["available_commands"] = ["end"]
+            initial["game_state"]["screen_type"] = "COMBAT"
+            initial["game_state"]["room_type"] = "MonsterRoomBoss"
+            game_over = {
+                "available_commands": ["proceed"],
+                "ready_for_command": False,
+                "in_game": True,
+                "game_state": {
+                    "screen_type": "GAME_OVER",
+                    "screen_state": {"victory": False},
+                    "floor": 16,
+                    "act": 1,
+                },
+            }
+            menu = {
+                "available_commands": ["start"],
+                "ready_for_command": True,
+                "in_game": False,
+            }
+            driver = _stack_driver(root, campaign_id, state=initial,
+                                   max_actions=100)
+            driver.stepper.states.extend([game_over, menu])
+            with mock.patch.dict(
+                    os.environ,
+                    {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+                     "unit-test-launch-token"}):
+                outcome, _floor, _actions, _menu = driver.run_seed(SEED, 1)
+            self.assertEqual("death", outcome)
+            self.assertTrue(driver.last_run_boss_fight)
+
+            # the same shape outside the boss room stays False
+            campaign_id2 = "no_boss_reach"
+            _write_launch_log(os.path.join(root, campaign_id2))
+            initial2 = _action(_oracle())["state_json"]
+            initial2["available_commands"] = ["end"]
+            initial2["game_state"]["screen_type"] = "COMBAT"
+            initial2["game_state"]["room_type"] = "MonsterRoom"
+            driver2 = _stack_driver(root, campaign_id2, state=initial2,
+                                    max_actions=100)
+            driver2.stepper.states.extend([dict(game_over), dict(menu)])
+            with mock.patch.dict(
+                    os.environ,
+                    {campaign_paths.ORACLE_LAUNCH_TOKEN_ENV:
+                     "unit-test-launch-token"}):
+                driver2.run_seed(SEED, 1)
+            self.assertFalse(driver2.last_run_boss_fight)
+
+
+class SurvivalPolicyCmdTest(unittest.TestCase):
+    """The reference external binary: greedy scoring behind STS-POLICY-IO."""
+
+    def test_constants_overrides_are_strictly_validated(self):
+        original = greedy_policy.MAP_ELITE
+        try:
+            applied = survival_policy_cmd.apply_constants(
+                greedy_policy, {"MAP_ELITE": 150})
+            self.assertEqual({"MAP_ELITE": (original, 150)}, applied)
+            self.assertEqual(150, greedy_policy.MAP_ELITE)
+        finally:
+            greedy_policy.MAP_ELITE = original
+        for bad in ({"NOT_A_CONSTANT": 1},
+                    {"map_elite": 1},
+                    {"MAP_ELITE": "high"},
+                    {"MAP_ELITE": True},
+                    {"SYMBOL_MONSTER": 5}):
+            with self.assertRaises(survival_policy_cmd.ConfigError):
+                survival_policy_cmd.apply_constants(greedy_policy, bad)
+        self.assertEqual(original, greedy_policy.MAP_ELITE)
+
+    def test_unknown_config_keys_fail_loud(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, "config.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"constants": {}, "typo_key": 1}, fh)
+            with self.assertRaisesRegex(
+                    survival_policy_cmd.ConfigError, "typo_key"):
+                survival_policy_cmd.load_config(path)
+
+    def test_decisions_match_in_driver_greedy_from_the_same_seeds(self):
+        state = {
+            "available_commands": ["choose"],
+            "in_game": True,
+            "game_state": {
+                "screen_type": "UNKNOWN_SCREEN",
+                "choice_list": ["a", "b", "c"],
+            },
+        }
+        candidates = campaign_driver.expand_legal_actions(
+            state, random.Random(0))
+        self.assertEqual(["choose 0", "choose 1", "choose 2"], candidates)
+        policy = survival_policy_cmd.SurvivalPolicy({})
+        rng = random.Random(f"1234:{SEED}")
+        expected = [greedy_policy.pick(candidates, state, policy.table, rng)
+                    for _ in range(8)]
+        got = [policy.decide({"seed": SEED, "policy_seed": 1234,
+                              "candidates": candidates, "state": state})
+               for _ in range(8)]
+        self.assertEqual(expected, got)
+        # a fresh policy for a different seed diverges eventually
+        other = survival_policy_cmd.SurvivalPolicy({})
+        other_got = [other.decide({"seed": "STS09999", "policy_seed": 1234,
+                                   "candidates": candidates, "state": state})
+                     for _ in range(8)]
+        self.assertNotEqual(got, other_got)
+
+    def test_serve_answers_decide_and_rejects_out_of_contract(self):
+        request = {
+            "format": survival_policy_cmd.PROTOCOL,
+            "kind": "decide",
+            "seed": SEED,
+            "policy_seed": 1234,
+            "candidates": ["end"],
+            "state": {"in_game": True, "game_state": {}},
+        }
+        stdin = io.StringIO(json.dumps(request) + "\n")
+        stdout = io.StringIO()
+        self.assertEqual(0, survival_policy_cmd.serve(stdin, stdout, {}))
+        response = json.loads(stdout.getvalue())
+        self.assertEqual(
+            {"format": survival_policy_cmd.PROTOCOL, "kind": "decision",
+             "command": "end"}, response)
+
+        bad = dict(request, kind="mystery")
+        self.assertEqual(2, survival_policy_cmd.serve(
+            io.StringIO(json.dumps(bad) + "\n"), io.StringIO(), {}))
+
+    def test_end_to_end_through_the_driver_hook(self):
+        cmd_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "survival_policy_cmd.py")
+        policy = campaign_driver.ExternalPolicy(cmd_path)
+        try:
+            state = {
+                "available_commands": ["end"],
+                "in_game": True,
+                "game_state": {},
+            }
+            self.assertEqual(
+                "end", policy.decide(SEED, 1234, ["end"], state))
+        finally:
+            policy.close()
 
 
 if __name__ == "__main__":

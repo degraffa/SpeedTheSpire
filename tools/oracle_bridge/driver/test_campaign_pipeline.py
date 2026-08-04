@@ -1211,5 +1211,193 @@ class ProcessBoundaryTest(unittest.TestCase):
         self.assertNotIn("wsl.exe", command[4].lower())
 
 
+class ExternalPolicyPipelineTest(unittest.TestCase):
+    """TE.1: the pipeline pins and forwards an external action source."""
+
+    @staticmethod
+    def _policy_files(root):
+        cmd = os.path.join(root, "policy.py")
+        with open(cmd, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("pass\n")
+        config = os.path.join(root, "policy_config.json")
+        with open(config, "w", encoding="utf-8", newline="\n") as fh:
+            fh.write("{}\n")
+        return cmd, config
+
+    def test_external_identity_hashes_binary_and_config(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd, config = self._policy_files(root)
+            args = SimpleNamespace(policy="external", policy_cmd=cmd,
+                                   policy_config=config)
+            identity = campaign_pipeline.external_identity(args)
+            self.assertEqual(
+                {"cmd_path", "cmd_sha256", "config_path", "config_sha256"},
+                set(identity))
+            self.assertEqual(64, len(identity["cmd_sha256"]))
+            self.assertIsNone(campaign_pipeline.external_identity(
+                SimpleNamespace(policy="greedy")))
+            with self.assertRaisesRegex(ValueError, "requires --policy-cmd"):
+                campaign_pipeline.external_identity(
+                    SimpleNamespace(policy="external", policy_cmd=None))
+            with self.assertRaisesRegex(ValueError, "existing path"):
+                campaign_pipeline.external_identity(SimpleNamespace(
+                    policy="external",
+                    policy_cmd=os.path.join(root, "missing.py")))
+
+    def test_prepare_campaign_pins_external_identity(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd, config = self._policy_files(root)
+            seeds = os.path.join(root, "seeds.txt")
+            with open(seeds, "w", encoding="utf-8") as fh:
+                fh.write("STS00001\n")
+            identity = campaign_pipeline.external_identity(SimpleNamespace(
+                policy="external", policy_cmd=cmd, policy_config=config))
+            with mock.patch.object(
+                    campaign_pipeline, "CAMPAIGN_ROOT",
+                    os.path.join(root, "campaigns")):
+                _cid, campaign_dir, _paths, _sel = \
+                    campaign_pipeline.prepare_campaign(
+                        "external-pin", seeds, 1, 0, "external", 7,
+                        None, identity)
+                config_value = campaign_pipeline._read_json(os.path.join(
+                    campaign_dir, "pipeline_config.json"))
+                self.assertEqual(identity, config_value["external_policy"])
+                changed = dict(identity, cmd_sha256="B" * 64)
+                with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                    campaign_pipeline.prepare_campaign(
+                        "external-pin", seeds, 1, 0, "external", 7,
+                        None, changed)
+
+    def test_parallel_group_pins_external_identity_across_resume(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd, config = self._policy_files(root)
+            seeds = os.path.join(root, "seeds.txt")
+            with open(seeds, "w", encoding="utf-8") as fh:
+                fh.write("STS00001\nSTS00002\n")
+            identity = campaign_pipeline.external_identity(SimpleNamespace(
+                policy="external", policy_cmd=cmd, policy_config=config))
+            with mock.patch.object(
+                    campaign_pipeline, "CAMPAIGN_ROOT",
+                    os.path.join(root, "campaigns")):
+                group, _paths = campaign_pipeline.prepare_parallel_group(
+                    "external-par", seeds, 1, 0, "external", 7, 1,
+                    None, external=identity)
+                self.assertEqual(identity, group["external_policy"])
+                worker_config = campaign_pipeline._read_json(
+                    os.path.join(
+                        os.path.join(root, "campaigns"),
+                        group["workers"][0]["campaign_id"],
+                        "pipeline_config.json"))
+                self.assertEqual(identity,
+                                 worker_config["external_policy"])
+                # resume with the same identity succeeds ...
+                campaign_pipeline.prepare_parallel_group(
+                    "external-par", None, 1, 0, "external", 7, 1,
+                    None, resume_existing=True, external=identity)
+                # ... and a changed config hash refuses
+                changed = dict(identity, config_sha256="B" * 64)
+                with self.assertRaisesRegex(ValueError, "identity mismatch"):
+                    campaign_pipeline.prepare_parallel_group(
+                        "external-par", None, 1, 0, "external", 7, 1,
+                        None, resume_existing=True, external=changed)
+
+    def test_run_orchestrator_forwards_external_policy_arguments(self):
+        with tempfile.TemporaryDirectory() as root:
+            cmd, config = self._policy_files(root)
+            args = SimpleNamespace(
+                game_dir="game", fork_jar="fork.jar", policy="external",
+                policy_seed=7, campaign_timeout=10.0, max_actions=100,
+                seeds_per_launch=50, fresh=False,
+                policy_cmd=cmd, policy_config=config)
+            with mock.patch.object(
+                    campaign_pipeline.subprocess, "Popen") as popen:
+                popen.return_value.wait.return_value = 0
+                campaign_pipeline.run_orchestrator(
+                    args, "external-cmd", "seeds.txt")
+            command = popen.call_args[0][0]
+            self.assertIn("--policy-cmd", command)
+            self.assertEqual(os.path.abspath(cmd),
+                             command[command.index("--policy-cmd") + 1])
+            self.assertIn("--policy-config", command)
+            self.assertEqual(
+                os.path.abspath(config),
+                command[command.index("--policy-config") + 1])
+
+
+class BossReachReportTest(unittest.TestCase):
+    """TE.1 acceptance metrics: boss-fight reach and boss-reward claims."""
+
+    def test_report_counts_reach_claims_and_backfills_old_rows(self):
+        with tempfile.TemporaryDirectory() as root:
+            campaign_id = "boss-metrics"
+            campaign_dir = os.path.join(root, campaign_id)
+            os.makedirs(campaign_dir)
+            rows = [
+                # new-driver row: reached the boss and claimed its reward
+                {"seed": "STS00001", "outcome": "act1_boss_reward",
+                 "floor": 16, "actions": 2, "attempts": 1,
+                 "boss_fight_reached": True,
+                 "artifact": "run_STS00001_a20_ironclad.jsonl"},
+                # new-driver row: died in the boss room
+                {"seed": "STS00002", "outcome": "death", "floor": 16,
+                 "actions": 2, "attempts": 1, "boss_fight_reached": True,
+                 "artifact": "run_STS00002_a20_ironclad.jsonl"},
+                # old-driver row without the flag: the claimed reward must
+                # backfill reach rather than under-count it
+                {"seed": "STS00003", "outcome": "act1_boss_reward",
+                 "floor": 16, "actions": 2, "attempts": 1,
+                 "artifact": "run_STS00003_a20_ironclad.jsonl"},
+                # old-driver early death: no reach
+                {"seed": "STS00004", "outcome": "death", "floor": 3,
+                 "actions": 2, "attempts": 1,
+                 "artifact": "run_STS00004_a20_ironclad.jsonl"},
+            ]
+            _write_json(os.path.join(campaign_dir, "campaign_progress.json"), {
+                "status": "complete", "seed_list": [r["seed"] for r in rows],
+                "seeds_done": rows, "seeds_failed": [], "policy": "external",
+                "policy_seed": 11, "started_utc": "2026-08-03T00:00:00Z",
+            })
+            _write_json(os.path.join(campaign_dir, "campaign_manifest.json"), {
+                "finished_utc": "2026-08-03T01:00:00Z",
+            })
+            _write_json(os.path.join(campaign_dir, "pipeline_config.json"), {
+                "shard_count": 1, "shard_index": 0, "source_seed_count": 4,
+            })
+            for row in rows:
+                seed = row["seed"]
+                _run(os.path.join(
+                    campaign_dir, f"run_{seed}_a20_ironclad.jsonl"), seed)
+                _timing(os.path.join(
+                    campaign_dir, f"run_{seed}_a20_ironclad.timing.jsonl"))
+                for directory in ("translation", "diffs", "encounter_lists"):
+                    os.makedirs(os.path.join(campaign_dir, directory),
+                                exist_ok=True)
+                    with open(os.path.join(
+                            campaign_dir, directory, f"{seed}.status"),
+                            "w", encoding="ascii") as fh:
+                        fh.write("0\n")
+                with open(os.path.join(
+                        campaign_dir, "diffs", f"{seed}.log"),
+                        "w", encoding="utf-8") as fh:
+                    fh.write("CLEAN run: 2 records; 0 obtain-race; "
+                             "stop: run terminal\n")
+
+            with mock.patch.object(campaign_pipeline, "CAMPAIGN_ROOT", root):
+                report = campaign_pipeline.generate_report(campaign_id)
+
+            self.assertEqual(3, report["boss_fight_reached_count"])
+            self.assertEqual(2, report["boss_reward_claims"])
+            self.assertAlmostEqual(0.75, report["boss_fight_reach_fraction"])
+            reached = {run["seed"]: run["boss_fight_reached"]
+                       for run in report["runs"]}
+            self.assertEqual({"STS00001": True, "STS00002": True,
+                              "STS00003": True, "STS00004": False}, reached)
+            with open(os.path.join(campaign_dir, "report.md"),
+                      encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("Boss-fight reach: 3 / 4 (75.0 %); "
+                          "boss-reward claims: 2", text)
+
+
 if __name__ == "__main__":
     unittest.main()

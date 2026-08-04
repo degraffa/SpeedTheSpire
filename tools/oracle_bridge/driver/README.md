@@ -7,6 +7,8 @@ This directory holds the oracle-bridge driver family. Protocol details are in
 |---|---|---|
 | `campaign_driver.py` | **B1.4** | the real campaign driver — the CommunicationMod-oracle child: seeded A20 Ironclad starts, random-legal / greedy / scripted generators, per-run JSONL artifacts (design 2.7), crash detection, seed-level resume, batch over a seed list |
 | `greedy_policy.py` | **B4.x** | the `--policy greedy` scorer: a pure, depth-seeking heuristic over the parsed dump (combat, map, rewards, screens) |
+| `survival_policy_cmd.py` | **TE.1** | the survival-biased policy as an **external binary** (`--policy external --policy-cmd`): greedy scoring behind the STS-POLICY-IO v1 stdio protocol, with a strict JSON config surface for per-cohort constant overrides |
+| `standing_triage.py` | **TE.1** | conservative shape-checker that classifies a campaign's divergent runs against the reviewed standing deviations (Looter stolen-gold ordering, Fairy-bottle belt-slot timing); anything else stays unmatched for manual triage |
 | `cards_sidetable.json` | **B4.x** | committed per-card damage/block numbers the greedy policy scores with |
 | `gen_cards_sidetable.py` | **B4.x** | regenerates `cards_sidetable.json` from `registry/cards.yaml` (dev-time, needs PyYAML; the driver itself never imports it) |
 | `orchestrator.py` | **B1.4** | Windows-host outer loop that owns the game process: writes config.properties, launches ModTheSpire under the bundled JRE 8, relaunches on crash/hang/boss-reward, induces a kill for acceptance |
@@ -325,6 +327,24 @@ python validate_artifacts.py --campaign D:/STS_BG_Mod/_oracle_data/campaigns/b14
 | `random-legal` (default) | uniform over `expand_legal_actions` — the game's own `available_commands`, expanded to concrete arguments |
 | `greedy` | the **same** expansion, ranked by `greedy_policy.score_action` |
 | `script` | a fixed command list (one per line), `--script <file>` or `--script-dir <dir>` |
+| `external` | the **same** expansion, sent to a policy binary (`--policy-cmd <exe-or-.py>`, optional `--policy-config <file>`) over STS-POLICY-IO v1; the reply must be one of the candidates |
+
+**`--policy external` (TE.1 hook).** The campaign harness accepts a policy
+binary plus config as the action source: each decision ships
+`{seed, policy_seed, candidates, state}` as one JSON line to the child's
+stdin, and the child answers `{"kind": "decision", "command": <candidate>}`.
+Legality remains a property of the expansion — an out-of-candidate reply is a
+protocol violation that stops the campaign durably
+(`fatal_environment_drift`, kind `external_policy_error`), because a broken
+binary would fail every remaining seed identically. Determinism is the
+binary's obligation: the action sequence must be a pure function of
+(policy_seed, seed). Binary and config are SHA-256-pinned into the campaign
+identity, so a resume under a changed policy refuses exactly like a changed
+fork jar. The reference binary is `survival_policy_cmd.py` — the survival
+heuristic below behind the protocol, byte-identical to `--policy greedy`
+under an empty config, with `{"constants": {...}}` overrides for cohort
+tuning. Paths must contain no whitespace (the driver command line crosses the
+space-split `command=` value in config.properties).
 
 **`--policy greedy` (depth).** `random-legal` is unbiased and therefore shallow:
 across 41 recent runs its median death floor was 3 and its deepest was 12, so the

@@ -470,6 +470,13 @@ add_test(
 set_tests_properties(oracle_campaign_pipeline_python_test PROPERTIES
     WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
 
+# TE.1 standing-deviation shape checker (stdlib-only synthetic diffs).
+add_test(
+    NAME oracle_standing_triage_python_test
+    COMMAND "${STS_PYTHON_EXECUTABLE}" -m unittest -v test_standing_triage.py)
+set_tests_properties(oracle_standing_triage_python_test PROPERTIES
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}/tools/oracle_bridge/driver")
+
 # B5.4 deterministic dashboard aggregation + compressed-corpus integrity.
 add_test(
     NAME verify_report_python_test

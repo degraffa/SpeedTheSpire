@@ -49,6 +49,7 @@ import json
 import os
 import random
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -64,7 +65,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.5.3"
+DRIVER_VERSION = "b1.6.0"
 SCHEMA_VERSION = 1
 
 # A temporarily empty legal-action expansion is normal while an animated
@@ -514,6 +515,180 @@ def expand_legal_actions(state: dict, rng: random.Random) -> list:
 
 
 # ---------------------------------------------------------------------------
+# External policy hook (Phase T / TE.1).
+#
+# `--policy external` lets the campaign harness take its actions from a policy
+# BINARY plus an opaque CONFIG file instead of one of the built-in generators.
+# This is the seam through which the training program's scripted survival
+# policies -- and, later, agent checkpoints (training-tasks.md GT2) -- drive
+# oracle campaigns without teaching this driver anything about them.
+#
+# Contract (STS-POLICY-IO v1), line-delimited JSON over the child's stdio:
+#
+#   request  {"format": "STS-POLICY-IO v1", "kind": "decide", "seed": <str>,
+#             "policy_seed": <int>, "candidates": [<cmd>, ...],
+#             "state": <the full parsed CommunicationMod dump>}
+#   response {"format": "STS-POLICY-IO v1", "kind": "decision",
+#             "command": <one of candidates>}
+#
+# Legality stays a property of the EXPANSION, exactly as for random-legal and
+# greedy: the candidates are `expand_legal_actions` output, and a response
+# outside the candidate list is a protocol violation, never something this
+# driver sends to the game. Determinism is the binary's obligation: design 7.5
+# requires a run's action sequence to be a pure function of
+# (policy_seed, seed), which is why both ride on every request. A violation is
+# FATAL for the campaign (not one seed): a policy that answers out of
+# contract once will do so deterministically on retry, and burning the seed
+# list against a broken binary would only bury the defect.
+
+EXTERNAL_POLICY_PROTOCOL = "STS-POLICY-IO v1"
+
+
+class ExternalPolicyError(RuntimeError):
+    """The external policy binary broke the STS-POLICY-IO contract."""
+
+
+def validate_external_policy_path(path: str, what: str) -> str:
+    """A policy binary/config path must exist and carry no whitespace.
+
+    The orchestrator forwards the driver command line through a java
+    .properties `command=` value that CommunicationMod splits on spaces, so a
+    path with whitespace cannot survive the boundary. Refusing it here beats
+    silently truncating it there.
+    """
+    if not path or re.search(r"\s", path):
+        raise ValueError(
+            f"{what} must be a non-empty path without whitespace: {path!r}")
+    if not os.path.isfile(path):
+        raise ValueError(f"{what} does not exist: {path!r}")
+    return path
+
+
+class ExternalPolicy:
+    """Owns the policy child process and the STS-POLICY-IO exchange."""
+
+    def __init__(self, cmd_path: str, config_path: str | None = None,
+                 python: str = sys.executable) -> None:
+        self.cmd_path = validate_external_policy_path(
+            cmd_path, "--policy-cmd")
+        self.config_path = (
+            validate_external_policy_path(config_path, "--policy-config")
+            if config_path else None)
+        self.python = python
+        self.proc: subprocess.Popen | None = None
+        # Latched on the first contract violation: a policy that has answered
+        # out of contract once must never be silently respawned past the
+        # fault -- the campaign stops on it instead.
+        self.broken = False
+
+    def argv(self) -> list:
+        # A .py policy runs under this driver's own interpreter (the game's
+        # Windows Python); anything else is executed directly.
+        base = ([self.python, self.cmd_path]
+                if self.cmd_path.lower().endswith(".py")
+                else [self.cmd_path])
+        if self.config_path:
+            base += ["--config", self.config_path]
+        return base
+
+    def _ensure(self) -> subprocess.Popen:
+        if self.broken:
+            raise ExternalPolicyError(
+                "external policy already exited or broke the protocol; "
+                "refusing to respawn past the fault")
+        if self.proc is not None and self.proc.poll() is None:
+            return self.proc
+        if self.proc is not None:
+            raise ExternalPolicyError(
+                f"external policy exited with rc={self.proc.returncode}")
+        try:
+            # stderr inherits the driver's stderr so policy diagnostics land
+            # in the same mts_launch<N>.log the driver's own _log lines do.
+            self.proc = subprocess.Popen(
+                self.argv(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                text=True, encoding="utf-8", bufsize=1)
+        except OSError as exc:
+            raise ExternalPolicyError(
+                f"could not launch external policy {self.argv()!r}: {exc}")
+        return self.proc
+
+    def decide(self, seed: str, policy_seed, candidates: list,
+               state: dict) -> str:
+        try:
+            return self._decide(seed, policy_seed, candidates, state)
+        except ExternalPolicyError:
+            self.broken = True
+            raise
+
+    def _decide(self, seed: str, policy_seed, candidates: list,
+                state: dict) -> str:
+        proc = self._ensure()
+        request = {
+            "format": EXTERNAL_POLICY_PROTOCOL,
+            "kind": "decide",
+            "seed": seed,
+            "policy_seed": policy_seed,
+            "candidates": candidates,
+            "state": state,
+        }
+        try:
+            proc.stdin.write(json.dumps(request, ensure_ascii=False) + "\n")
+            proc.stdin.flush()
+            line = proc.stdout.readline()
+        except OSError as exc:
+            raise ExternalPolicyError(f"external policy pipe failed: {exc}")
+        if not line:
+            raise ExternalPolicyError(
+                "external policy closed stdout mid-campaign "
+                f"(rc={proc.poll()!r})")
+        try:
+            response = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ExternalPolicyError(
+                f"external policy answered non-JSON {line!r}: {exc}")
+        if not isinstance(response, dict) or \
+                response.get("format") != EXTERNAL_POLICY_PROTOCOL or \
+                response.get("kind") != "decision":
+            raise ExternalPolicyError(
+                f"external policy answered out of contract: {response!r}")
+        command = response.get("command")
+        if command not in candidates:
+            raise ExternalPolicyError(
+                f"external policy chose {command!r}, which is not one of the "
+                f"{len(candidates)} legal candidates")
+        return command
+
+    def close(self) -> None:
+        if self.proc is None:
+            return
+        try:
+            if self.proc.stdin:
+                self.proc.stdin.close()
+            self.proc.wait(timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            self.proc.kill()
+        self.proc = None
+
+
+def external_policy_identity(cmd_path: str,
+                             config_path: str | None) -> dict:
+    """Durable identity of the external action source (design 7.5).
+
+    The binary and its config are hashed so a resumed campaign refuses to
+    continue under a silently changed policy, the same way the fork jar and
+    the script file are pinned.
+    """
+    identity = {
+        "cmd_path": cmd_path.replace("\\", "/"),
+        "cmd_sha256": sha256_file(cmd_path),
+    }
+    if config_path:
+        identity["config_path"] = config_path.replace("\\", "/")
+        identity["config_sha256"] = sha256_file(config_path)
+    return identity
+
+
+# ---------------------------------------------------------------------------
 # Termination (scoping 4.3 / design 1.1).
 
 def cmd_verb_ready(state: dict, cmd: str) -> bool:
@@ -729,7 +904,7 @@ class Progress:
         self.data = None  # type: dict | None
 
     def load_or_init(self, campaign_id, seed_list, policy, fork_hash,
-                      policy_seed=None) -> dict:
+                      policy_seed=None, external_policy=None) -> dict:
         if os.path.exists(self.path):
             with open(exact_path_without_redirect(self.path), "r",
                       encoding="utf-8") as fh:
@@ -748,6 +923,11 @@ class Progress:
             # `None` stored value; the real driver always passes it.
             if policy_seed is not None:
                 expected["policy_seed"] = policy_seed
+            # Same additive contract as policy_seed: an external campaign
+            # refuses to resume under a changed binary/config hash, while
+            # campaigns from before the field existed stay valid.
+            if external_policy is not None:
+                expected["external_policy"] = external_policy
             mismatches = [
                 f"{key}={self.data.get(key)!r} (expected {value!r})"
                 for key, value in expected.items()
@@ -776,6 +956,8 @@ class Progress:
                 # validate_artifacts.STRICT_PROGRESS_KEYS, so an old
                 # campaign_progress.json without this field still validates.
                 "policy_seed": policy_seed,
+                **({"external_policy": external_policy}
+                   if external_policy is not None else {}),
                 "seed_list": seed_list,
                 "status": "in_progress",
                 "seeds_done": [],
@@ -889,6 +1071,9 @@ class CampaignDriver:
     # bypass __init__ to reach one method) never trips over a missing attribute.
     # `--policy greedy` replaces it with the real table in __init__.
     card_table: dict = {}
+    external = None
+    external_identity = None
+    last_run_boss_fight = False
 
     def __init__(self, args) -> None:
         self.args = args
@@ -913,6 +1098,16 @@ class CampaignDriver:
                 getattr(args, "card_table", None))
             _log(f"greedy policy: card side table has "
                  f"{len(self.card_table)} entries")
+        self.external = None
+        self.external_identity = None
+        if args.policy == "external":
+            self.external = ExternalPolicy(
+                args.policy_cmd, getattr(args, "policy_config", None))
+            self.external_identity = external_policy_identity(
+                self.external.cmd_path, self.external.config_path)
+            _log(f"external policy: cmd={self.external.cmd_path} "
+                 f"sha={self.external_identity['cmd_sha256'][:12]} "
+                 f"config={self.external.config_path or '(none)'}")
         self.single_script = None
         if args.policy == "script" and not args.script_dir:
             with open(args.script, "r", encoding="utf-8") as fh:
@@ -1056,6 +1251,12 @@ class CampaignDriver:
         Returns (outcome, floor, actions, menu_returnable)."""
         validate_seed_list([seed])
         artifact = self.run_file(f"run_{seed}_a20_ironclad.jsonl")
+        # Boss-fight reach (TE.1): a per-run coverage fact the cohort reports
+        # aggregate. Set from the decision states below; read by run() when it
+        # appends the seeds_done row. Instance state (not a return slot) so the
+        # long-stable 4-tuple contract of run_seed stays untouched.
+        self.last_run_boss_fight = False
+        self._current_seed = seed
         # Per-seed policy RNG: a run's action sequence depends only on
         # (policy_seed, seed), not on the campaign's position, so any run is
         # reproducible in isolation -- the (seed, action-prefix) reproducibility
@@ -1125,6 +1326,11 @@ class CampaignDriver:
             # output. Additive: NOT in validate_artifacts.HEADER_KEYS, so an
             # old artifact written before this field existed still validates.
             "policy_seed": self.args.policy_seed,
+            # Additive, external-policy-only (TE.1): the action source's own
+            # identity, so an external-policy artifact is reconstructible from
+            # its header alone exactly as a script/greedy one is.
+            **({"external_policy": self.external_identity}
+               if self.external_identity is not None else {}),
             "attempt": attempt,
             "campaign_id": self.args.campaign_id,
         }
@@ -1151,6 +1357,8 @@ class CampaignDriver:
             while True:
                 gs = state.get("game_state") or {}
                 floor = gs.get("floor")
+                if gs.get("room_type") == "MonsterRoomBoss":
+                    self.last_run_boss_fight = True
                 self.progress.heartbeat(seed, floor, actions)
 
                 # ---- terminal checks (on the fresh decision state) ----
@@ -1312,6 +1520,16 @@ class CampaignDriver:
             return None
         if self.args.policy == "greedy":
             return greedy_policy.pick(acts, state, self.card_table, self.rng)
+        if self.args.policy == "external":
+            try:
+                return self.external.decide(
+                    self._current_seed, self.args.policy_seed, acts, state)
+            except ExternalPolicyError as exc:
+                # A broken action source is an environment fault, not a seed
+                # fault: it would fail every remaining seed the same way, so
+                # stop the campaign durably instead of burning the list.
+                raise FatalEnvironmentDrift(
+                    str(exc), kind="external_policy_error")
         return self.rng.choice(acts)
 
     def _claim_boss_reward(self, rl, timing, state, seed, actions):
@@ -1378,7 +1596,8 @@ class CampaignDriver:
             self.progress.load_or_init(
                 self.args.campaign_id, seed_list,
                 self.args.policy, self.fork_hash,
-                policy_seed=self.args.policy_seed)
+                policy_seed=self.args.policy_seed,
+                external_policy=self.external_identity)
         except CampaignIdentityError as exc:
             message = str(exc)
             _log(f"FATAL CAMPAIGN IDENTITY: {message}")
@@ -1457,6 +1676,11 @@ class CampaignDriver:
             self.progress.data["seeds_done"].append({
                 "seed": seed, "outcome": outcome, "floor": floor,
                 "actions": acts, "attempts": attempt,
+                # Additive (TE.1 cohort metric): whether this run ever stood
+                # in the Act-1 boss room. NOT in validate_artifacts.
+                # STRICT_DONE_KEYS, so pre-b1.6.0 ledgers still validate.
+                "boss_fight_reached": bool(
+                    getattr(self, "last_run_boss_fight", False)),
                 "artifact": f"run_{seed}_a20_ironclad.jsonl"})
             self.progress.data["current_seed"] = None
             self.progress.data["current_seed_attempt"] = 0
@@ -1485,6 +1709,8 @@ class CampaignDriver:
             # to campaign_progress.json; absent on a manifest from before
             # this field existed, so `.get` rather than `[...]`.
             "policy_seed": d.get("policy_seed"),
+            **({"external_policy": d["external_policy"]}
+               if "external_policy" in d else {}),
             "seed_list": d["seed_list"],
             "status": d["status"],
             "launches": d["launches"],
@@ -1505,12 +1731,22 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--seeds", required=True,
                     help="comma-separated base-35 seeds, or a path to a file "
                          "with one seed per line")
-    ap.add_argument("--policy", choices=["random-legal", "greedy", "script"],
+    ap.add_argument("--policy",
+                    choices=["random-legal", "greedy", "script", "external"],
                     default="random-legal",
                     help="random-legal: uniform over the expanded legal "
                          "actions. greedy: the same expansion ranked by "
                          "greedy_policy.score_action (depth-seeking; use this "
-                         "to reach deep floors). script: a fixed command list.")
+                         "to reach deep floors). script: a fixed command list. "
+                         "external: a policy binary (--policy-cmd) chooses "
+                         "among the expanded legal actions over STS-POLICY-IO.")
+    ap.add_argument("--policy-cmd", default=None,
+                    help="external policy executable (a .py runs under this "
+                         "driver's interpreter). Required for "
+                         "--policy external; path must contain no whitespace")
+    ap.add_argument("--policy-config", default=None,
+                    help="opaque config file handed to the external policy as "
+                         "`--config <path>`; hashed into the campaign identity")
     ap.add_argument("--card-table", default=None,
                     help="override the greedy policy's card side table "
                          "(default: cards_sidetable.json beside the driver)")
@@ -1603,6 +1839,16 @@ def main(argv=None) -> int:
     if args.policy == "script" and not args.script and not args.script_dir:
         _log("--policy script requires --script or --script-dir")
         return EXIT_FATAL
+    if args.policy == "external":
+        try:
+            validate_external_policy_path(
+                args.policy_cmd or "", "--policy-cmd")
+            if args.policy_config:
+                validate_external_policy_path(
+                    args.policy_config, "--policy-config")
+        except ValueError as exc:
+            _log(f"invalid external policy input: {exc}")
+            return EXIT_FATAL
     driver = None
     try:
         driver = CampaignDriver(args)
@@ -1617,6 +1863,9 @@ def main(argv=None) -> int:
         _request_restart_after_unexpected_exit(
             driver, args.launch_token, "unexpected_driver_exception")
         return EXIT_FATAL
+    finally:
+        if driver is not None and driver.external is not None:
+            driver.external.close()
 
 
 if __name__ == "__main__":

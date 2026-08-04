@@ -213,6 +213,11 @@ def build_driver_command(args) -> str:
             parts += ["--script", args.script.replace("\\", "/")]
     if args.policy == "greedy" and args.card_table:
         parts += ["--card-table", args.card_table.replace("\\", "/")]
+    if args.policy == "external":
+        parts += ["--policy-cmd", args.policy_cmd.replace("\\", "/")]
+        if args.policy_config:
+            parts += ["--policy-config",
+                      args.policy_config.replace("\\", "/")]
     return " ".join(parts)
 
 
@@ -456,11 +461,20 @@ def _main(argv=None) -> int:
     ap.add_argument("--campaign-id", required=True)
     ap.add_argument("--seeds", required=True,
                     help="comma-separated seeds or a path to a seed-list file")
-    ap.add_argument("--policy", choices=["random-legal", "greedy", "script"],
+    ap.add_argument("--policy",
+                    choices=["random-legal", "greedy", "script", "external"],
                     default="random-legal",
                     help="passed straight through to campaign_driver.py; "
                          "`greedy` is the depth-seeking live policy "
-                         "(greedy_policy.py)")
+                         "(greedy_policy.py); `external` takes actions from "
+                         "a policy binary (--policy-cmd)")
+    ap.add_argument("--policy-cmd", default=None,
+                    help="external policy executable, forwarded to the "
+                         "driver. No whitespace: the driver command crosses "
+                         "a space-split .properties boundary")
+    ap.add_argument("--policy-config", default=None,
+                    help="external policy config file, forwarded to the "
+                         "driver")
     ap.add_argument("--card-table", default=None,
                     help="override the greedy policy's card side table "
                          "(default: cards_sidetable.json beside the driver)")
@@ -525,6 +539,17 @@ def _main(argv=None) -> int:
         ap.error("Java heap sizes must be positive and Xms must not exceed Xmx")
     if args.seeds_per_launch < 1:
         ap.error("--seeds-per-launch must be positive")
+    if args.policy == "external":
+        if not args.policy_cmd:
+            ap.error("--policy external requires --policy-cmd")
+        for label, value in (("--policy-cmd", args.policy_cmd),
+                             ("--policy-config", args.policy_config)):
+            # The driver command crosses a space-split java .properties
+            # `command=` value; a whitespace path cannot survive it.
+            if value and (re.search(r"\s", value)
+                          or not os.path.isfile(value)):
+                ap.error(f"{label} must be an existing path without "
+                         f"whitespace: {value!r}")
     args.private_runtime = all(runtime_values)
     args.effective_workdir = (
         args.runtime_workdir if args.private_runtime else args.game_dir)

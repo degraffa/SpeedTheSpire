@@ -220,7 +220,7 @@ one exists, mirroring the Stage B convention.
 
 ## Phase TE — Engine-track coordination (this repo; ∥ with T0)
 
-- **TE.1** `[ ]` ∥ **Survival-biased campaign drivers.** Promote the B5.1
+- **TE.1** `[x]` ∥ **Survival-biased campaign drivers.** Promote the B5.1
   heuristic policies into oracle-campaign drivers: a scripted
   survival-biased policy (block-aware, potion-using, elite-avoiding)
   driving campaign cohorts that reach late-Act-1 floors, boss fights, and
@@ -231,7 +231,20 @@ one exists, mirroring the Stage B convention.
   **Acceptance:** a 500-run campaign cohort reports ≥ 30 % boss-fight
   reach and ≥ 10 boss-reward claims; cohort report lands beside the
   existing campaign artifacts; zero un-triaged diffs or diffs triaged per
-  the Stage B process. **Log:** —
+  the Stage B process. **Log:** 2026-08-03 — landed. `campaign_driver.py`
+  b1.6.0: `--policy external --policy-cmd` (STS-POLICY-IO v1, line-JSON,
+  SHA-256-pinned into campaign identity); `survival_policy_cmd.py`
+  promotes the B5.1 survival heuristic (byte-identical to
+  `--policy greedy` under empty config) — the same seam GT2 routes agent
+  checkpoints through. 500-seed un-pre-scanned cohort
+  (STS420000–420499): boss-fight reach 155/500 = 31.0 % (bar 30),
+  35 boss-reward claims across all three registry bosses (bar 10),
+  0 failed seeds, zero untriaged: 110 auto-shape-checked standing
+  (Looter/Fairy via new `standing_triage.py`), 2 Smoke-Bomb
+  escape-window races per precedent, 1 open product divergence
+  promoted to a reproducer — Sharp Hide THORNS on the killing blow
+  (see the stage-b deferred-obligations row this task added). Evidence:
+  [verification/te1-survival-cohort.md](verification/te1-survival-cohort.md).
 
 - **TE.2** `[ ]` **Open S2 planning.** A fresh planning exercise per the
   G7 closing action, pulled forward per plan §4.4: S2 scope doc (Acts 2–3

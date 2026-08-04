@@ -29,7 +29,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-PIPELINE_VERSION = "b5.2.0"
+PIPELINE_VERSION = "b5.3.0"
 PARALLEL_GROUP_FORMAT = "STS-ORACLE-PARALLEL-GROUP v1"
 PARALLEL_REPORT_FORMAT = "STS-ORACLE-PARALLEL-REPORT v1"
 PARALLEL_ORCHESTRATION_VERSION = "parallel-oracle-v1"
@@ -437,7 +437,8 @@ def _group_paths(group_id: str) -> tuple:
 def _parallel_identity(base_id: str, group_id: str, all_seeds: list,
                        selected: list, outer_shard_count: int,
                        outer_shard_index: int, policy: str, policy_seed: int,
-                       script: Optional[dict]) -> dict:
+                       script: Optional[dict],
+                       external: Optional[dict] = None) -> dict:
     identity = {
         "base_campaign_id": base_id,
         "group_campaign_id": group_id,
@@ -451,6 +452,8 @@ def _parallel_identity(base_id: str, group_id: str, all_seeds: list,
     }
     if script is not None:
         identity["script"] = script
+    if external is not None:
+        identity["external_policy"] = external
     return identity
 
 
@@ -477,6 +480,8 @@ def _prepare_exact_worker(group: dict, worker: dict) -> dict:
     }
     if "script" in group:
         config["script"] = group["script"]
+    if "external_policy" in group:
+        config["external_policy"] = group["external_policy"]
     if os.path.exists(paths["config"]):
         prior = _read_json(paths["config"])
         if prior != config:
@@ -500,7 +505,8 @@ def prepare_parallel_group(base_id: str, seeds_spec: Optional[str],
                            java_xms_mib: int = DEFAULT_JAVA_XMS_MIB,
                            seeds_per_launch: int =
                            DEFAULT_SEEDS_PER_LAUNCH,
-                           resume_existing: bool = False) -> tuple:
+                           resume_existing: bool = False,
+                           external: Optional[dict] = None) -> tuple:
     """Persist a deterministic host-shard then local-worker topology."""
     if (not isinstance(java_xms_mib, int) or java_xms_mib < 1
             or not isinstance(java_xmx_mib, int) or java_xmx_mib < 1
@@ -538,7 +544,9 @@ def prepare_parallel_group(base_id: str, seeds_spec: Optional[str],
         prior_identity = {
             key: group.get(key) for key in resume_identity
         }
-        if prior_identity != resume_identity or group.get("script") != script:
+        if prior_identity != resume_identity or \
+                group.get("script") != script or \
+                group.get("external_policy") != external:
             raise ValueError(
                 "parallel campaign identity mismatch; use a new campaign id")
     else:
@@ -549,7 +557,8 @@ def prepare_parallel_group(base_id: str, seeds_spec: Optional[str],
             all_seeds, outer_shard_count, outer_shard_index)
         identity = _parallel_identity(
             base_id, group_id, all_seeds, selected,
-            outer_shard_count, outer_shard_index, policy, policy_seed, script)
+            outer_shard_count, outer_shard_index, policy, policy_seed,
+            script, external)
         os.makedirs(group_dir, exist_ok=True)
         group_dir, paths = _group_paths(group_id)
         if os.path.exists(paths["manifest"]):
@@ -632,6 +641,34 @@ def script_identity(args) -> Optional[dict]:
     return {"path": path.replace("\\", "/"), "sha256": digest}
 
 
+def external_identity(args) -> Optional[dict]:
+    """Durable identity of an external action source (TE.1, design 7.5).
+
+    Mirrors script_identity: the policy binary and its optional config are
+    hashed into the campaign identity so a resumed cohort refuses to continue
+    under a silently changed policy. Paths must carry no whitespace -- the
+    driver command line crosses a space-split java .properties value.
+    """
+    if getattr(args, "policy", None) != "external":
+        return None
+    cmd = getattr(args, "policy_cmd", None)
+    if not cmd:
+        raise ValueError("--policy external requires --policy-cmd")
+    identity = {}
+    for label, value in (("cmd", cmd),
+                         ("config", getattr(args, "policy_config", None))):
+        if value is None:
+            continue
+        path = os.path.abspath(value)
+        if re.search(r"\s", path) or not os.path.isfile(path):
+            raise ValueError(
+                f"external policy {label} must be an existing path without "
+                f"whitespace: {path!r}")
+        identity[f"{label}_path"] = path.replace("\\", "/")
+        identity[f"{label}_sha256"] = _sha256_file(path)
+    return identity
+
+
 def _campaign_paths(campaign_id: str) -> tuple:
     campaign_dir = campaign_dir_under_root(CAMPAIGN_ROOT, campaign_id)
     return campaign_dir, {
@@ -649,7 +686,8 @@ def _campaign_paths(campaign_id: str) -> tuple:
 def prepare_campaign(base_id: str, seeds_spec: str, shard_count: int,
                      shard_index: int, policy: str,
                      policy_seed: int,
-                     script: Optional[dict] = None) -> tuple:
+                     script: Optional[dict] = None,
+                     external: Optional[dict] = None) -> tuple:
     all_seeds = _read_seeds(seeds_spec)
     selected = shard_seeds(all_seeds, shard_count, shard_index)
     campaign_id = shard_campaign_id(base_id, shard_count, shard_index)
@@ -671,6 +709,8 @@ def prepare_campaign(base_id: str, seeds_spec: str, shard_count: int,
     }
     if script is not None:
         config["script"] = script
+    if external is not None:
+        config["external_policy"] = external
     if os.path.exists(paths["config"]):
         prior = _read_json(paths["config"])
         if prior != config:
@@ -732,6 +772,12 @@ def run_orchestrator(args, campaign_id: str, seed_path: str,
         command.append("--fresh")
     if args.policy == "script":
         command.extend(["--script", os.path.abspath(args.script)])
+    if args.policy == "external":
+        command.extend(
+            ["--policy-cmd", os.path.abspath(args.policy_cmd)])
+        if getattr(args, "policy_config", None):
+            command.extend(
+                ["--policy-config", os.path.abspath(args.policy_config)])
     proc = subprocess.Popen(command)
     try:
         if process_job is not None:
@@ -963,6 +1009,13 @@ def generate_report(campaign_id: str) -> dict:
             "floor": row.get("floor"),
             "actions": row.get("actions"),
             "attempts": row.get("attempts"),
+            # TE.1 cohort coverage: recorded by driver >= b1.6.0. For rows
+            # from older drivers the field is absent, but a claimed boss
+            # reward still proves the fight was reached, so that outcome
+            # backfills the flag rather than under-counting.
+            "boss_fight_reached": bool(
+                row.get("boss_fight_reached")
+                or row.get("outcome") == "act1_boss_reward"),
             "classification": classification,
             # Keep the original obtain-only field so existing report consumers
             # remain compatible. Strict evidence uses the all-family total.
@@ -1005,11 +1058,19 @@ def generate_report(campaign_id: str) -> dict:
         and result["known_capture_race_records"] == 0)
     outcome_counts = {}
     floor_counts = {}
+    boss_fight_reached_count = 0
+    boss_reward_claims = 0
     for result in results:
         outcome = str(result.get("outcome"))
         outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
         floor = str(result.get("floor"))
         floor_counts[floor] = floor_counts.get(floor, 0) + 1
+        if result["boss_fight_reached"]:
+            boss_fight_reached_count += 1
+        if result.get("outcome") == "act1_boss_reward":
+            boss_reward_claims += 1
+    boss_fight_reach_fraction = (
+        boss_fight_reached_count / len(results) if results else None)
     aggregate_rate = (
         actions / total_active
         if active_known and total_active > 0 else None)
@@ -1043,6 +1104,11 @@ def generate_report(campaign_id: str) -> dict:
         "actions_per_second": aggregate_rate,
         "outcome_counts": outcome_counts,
         "floor_counts": floor_counts,
+        # TE.1 acceptance metrics: how much of the cohort stood in the Act-1
+        # boss room, and how many claimed its combat reward.
+        "boss_fight_reached_count": boss_fight_reached_count,
+        "boss_fight_reach_fraction": boss_fight_reach_fraction,
+        "boss_reward_claims": boss_reward_claims,
         "diff_counts": counts,
         "known_obtain_race_records":
             known_capture_race_records_by_kind.get("obtain-race", 0),
@@ -1078,6 +1144,10 @@ def generate_report(campaign_id: str) -> dict:
         f"{replay_clean_actions}; strict zero-diff: "
         f"{strict_zero_diff_actions}; active throughput: "
         f"{rate_text} actions/s",
+        f"- Boss-fight reach: {boss_fight_reached_count} / {len(results)}"
+        + (f" ({100.0 * boss_fight_reach_fraction:.1f} %)"
+           if boss_fight_reach_fraction is not None else "")
+        + f"; boss-reward claims: {boss_reward_claims}",
         f"- Diff classifications: `{json.dumps(counts, sort_keys=True)}`",
         f"- Known capture-race records: {known_capture_race_records} "
         f"(`{json.dumps(known_capture_race_records_by_kind, sort_keys=True)}`)",
@@ -1141,7 +1211,8 @@ def _run_legacy_pipeline(args, base: str) -> int:
         try:
             campaign_id, _campaign_dir, paths, selected = prepare_campaign(
                 base, args.seeds, args.shard_count, args.shard_index,
-                args.policy, args.policy_seed, script_identity(args))
+                args.policy, args.policy_seed, script_identity(args),
+                external_identity(args))
         except (OSError, ValueError) as exc:
             print(f"invalid pipeline input: {exc}", file=sys.stderr)
             return 2
@@ -1187,6 +1258,8 @@ def generate_parallel_report(group: dict, paths: dict,
         "replay_clean_actions": 0,
         "strict_zero_diff_actions": 0,
         "untriaged_count": 0,
+        "boss_fight_reached_count": 0,
+        "boss_reward_claims": 0,
     }
     completed_seeds = []
     diff_counts = {}
@@ -1253,6 +1326,9 @@ def generate_parallel_report(group: dict, paths: dict,
         "capture_wall_seconds": capture_wall_seconds,
         "aggregate_actions_per_second": aggregate_rate,
         **totals,
+        "boss_fight_reach_fraction": (
+            totals["boss_fight_reached_count"] / len(completed_seeds)
+            if completed_seeds else None),
         "diff_counts": diff_counts,
         "workers": worker_rows,
     }
@@ -1267,6 +1343,11 @@ def generate_parallel_report(group: dict, paths: dict,
         f"- Captured actions: {totals['captured_actions']}",
         f"- Capture wall time: {capture_wall_seconds:.3f} s; aggregate: "
         f"{rate} actions/s",
+        f"- Boss-fight reach: {totals['boss_fight_reached_count']} / "
+        f"{len(completed_seeds)}"
+        + (f" ({100.0 * totals['boss_fight_reached_count'] / len(completed_seeds):.1f} %)"
+           if completed_seeds else "")
+        + f"; boss-reward claims: {totals['boss_reward_claims']}",
         f"- Pending triage: {totals['untriaged_count']}",
         "",
         "| Worker | Seeds | Capture | Post-process |",
@@ -1410,7 +1491,8 @@ def run_parallel_pipeline(args, base: str) -> int:
                 base, args.seeds, args.shard_count, args.shard_index,
                 args.policy, args.policy_seed, args.instances,
                 script_identity(args), args.java_xmx_mib, args.java_xms_mib,
-                args.seeds_per_launch, args.resume_existing)
+                args.seeds_per_launch, args.resume_existing,
+                external_identity(args))
         except (OSError, ValueError) as exc:
             print(f"invalid parallel pipeline input: {exc}", file=sys.stderr)
             return 2
@@ -1481,6 +1563,14 @@ def schedule_nightly(args) -> int:
         if not args.script:
             raise ValueError("--policy script requires --script")
         nightly_args.extend(["--script", os.path.abspath(args.script)])
+    if args.policy == "external":
+        if not args.policy_cmd:
+            raise ValueError("--policy external requires --policy-cmd")
+        nightly_args.extend(
+            ["--policy-cmd", os.path.abspath(args.policy_cmd)])
+        if args.policy_config:
+            nightly_args.extend(
+                ["--policy-config", os.path.abspath(args.policy_config)])
     # schtasks.exe limits /TR to 262 characters. Keep its action short and put
     # the fully audited nightly argv in a fixed non-repo config instead.
     os.makedirs(SCHEDULE_ROOT, exist_ok=True)
@@ -1529,10 +1619,18 @@ def add_run_options(parser, campaign_required=True) -> None:
     seed_source.add_argument(
         "--resume-existing", action="store_true",
         help="resume an existing parallel group from its persisted seed set")
-    parser.add_argument("--policy", choices=["random-legal", "greedy", "script"],
+    parser.add_argument("--policy",
+                        choices=["random-legal", "greedy", "script",
+                                 "external"],
                         default="random-legal")
     parser.add_argument("--script",
                         help="one-command-per-line script for script policy")
+    parser.add_argument("--policy-cmd", default=None,
+                        help="external policy executable for "
+                             "--policy external (no whitespace in the path)")
+    parser.add_argument("--policy-config", default=None,
+                        help="opaque config file handed to the external "
+                             "policy; hashed into the campaign identity")
     parser.add_argument("--policy-seed", type=int, default=1234)
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0,
@@ -1574,9 +1672,12 @@ def parse_args(argv=None):
                           default="SpeedTheSpire-Oracle-Nightly")
     schedule.add_argument("--print-only", action="store_true")
     schedule.add_argument("--policy",
-                          choices=["random-legal", "greedy", "script"],
+                          choices=["random-legal", "greedy", "script",
+                                   "external"],
                           default="random-legal")
     schedule.add_argument("--script")
+    schedule.add_argument("--policy-cmd", default=None)
+    schedule.add_argument("--policy-config", default=None)
     schedule.add_argument("--policy-seed", type=int, default=1234)
     schedule.add_argument("--shard-count", type=int, default=1)
     schedule.add_argument("--shard-index", type=int, default=0)
