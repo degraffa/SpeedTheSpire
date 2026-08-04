@@ -76,7 +76,7 @@ Safe to dispatch immediately: append-only ids, disjoint files, tier-2 tests
 are table-projection tests that do not require engine consumers. These four
 are the "first registry authoring wave" the TE.2 acceptance names.
 
-- **S2.01** `[ ]` ∥ **encounters.yaml Acts 2–3 + act-keyed codegen.** All 40
+- **S2.01** `[x]` ∥ **encounters.yaml Acts 2–3 + act-keyed codegen.** All 40
   rows of design §2.1 (Act 2: 5 weak / 8 strong / 3 elite / 3 boss / 3
   event; Act 3: 3 weak / 8 strong / 3 elite / 3 boss / 1 event), weights,
   exclusions (incl. Chosen's two-key exclusion and 3 Darklings'
@@ -92,6 +92,21 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   membership, weight, exclusion set, program shape) against the cited
   Java, re-read in full; codegen determinism check green; S1 encounter
   table hash unchanged; six presets green.
+  **Log:** 2026-08-04 — landed. 40 rows, ids 22–61 (both blocks exactly
+  filled); per-(act,pool) `EncounterPoolTable` emission with flat
+  `kEncounters` unchanged; NO new composition node kind ({pool:} covered
+  spawnGremlin with-replacement, spawnShapes 3/4 without-replacement,
+  getAncientShape construct-only); self-exclusion loosening with its own
+  negative test. Act-1 byte identity proven by diff (one deleted count
+  line) + sha256 of the extracted section + the durable
+  `ActOnePoolsUnchangedByTheActExtension`. 9 differential tier-2 tests +
+  2 codegen negatives; six presets green. Design-doc §2.1 fixes recorded
+  in-row: live Act-3 event key is "2 Orb Walkers" (the "Mysterious
+  Sphere" ENCOUNTER key at MonsterHelper.java:582-584 is dead content,
+  excluded per S1 practice); TheCity pool citations re-derived
+  (weak 94-104 / strong 106-120 / elite 122-130). The per-act weak-draw
+  count (Acts 2–3 use generateWeakEnemies(2) vs kWeakSegment = 3)
+  is run-layer state deliberately left to S2.12.
 - **S2.02** `[ ]` ∥ **events.yaml Act-2/3 rows.** 20 identity rows
   (design §2.3) in Java insertion order (TheCity.java:184-199 then
   TheBeyond.java:178-187), `implemented: false`, each with `conditions`

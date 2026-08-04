@@ -357,6 +357,14 @@ sts_add_test(advance_test)
 # draw.
 sts_add_test(encounters_test)
 
+# S2.01: the Act-2 (TheCity) / Act-3 (TheBeyond) encounter rows and the per-act
+# pool tables codegen emits -- pool membership/order/weights, the exclusion sets
+# (incl. Chosen's two-key set and the two Act-3 self-exclusions), the fixed
+# compositions, and the miscRng programs (spawnGremlin x2 with replacement,
+# spawnShapes' shared 6-slot pool at 3 and 4 draws, getAncientShape x2). Also
+# pins the Act-1 groups unchanged by the act extension.
+sts_add_test(encounters_s2_test)
+
 # B4.4: run-level advance + room lifecycle -- run_begin Neow-pending stream state,
 # trap-7 floor reseed, run-combat entry == combat_begin, full floor cycle, map
 # choice legality + non-combat routing + heterogeneous batch advance.

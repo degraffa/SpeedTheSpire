@@ -581,13 +581,19 @@ TEST(RegistryGen, ManifestCounts) {
                                       // TimeEventList's 14 (18-31). Metadata-only
                                       // rows: B4.10 owns list membership and
                                       // selection, B4.11-B4.13 the native bodies.
-    EXPECT_EQ(m::kEncountersCount, 21u);  // 20 generated-list encounters plus
-                                          // Mushrooms' fixed event group
+    EXPECT_EQ(m::kEncountersCount, 61u);  // Act 1 (B3.12): 20 generated-list
+                                          // encounters plus Mushrooms' fixed
+                                          // event group. + S2.01's Act 2 (22:
+                                          // 5 weak / 8 strong / 3 elite /
+                                          // 3 boss / 3 event) and Act 3 (18:
+                                          // 3 / 8 / 3 / 3 / 1). "3 Darklings"
+                                          // is TWO rows -- TheBeyond lists it
+                                          // in both its weak and strong pool.
     EXPECT_EQ(m::kA20Count, 20u);     // B4.15: one row per ascension level 1..20
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 452u);  // 127 + 53 + 25 + 142 + 33 + 31 + 21 + 20
+    EXPECT_EQ(m::kTotalCount, 492u);  // 127 + 53 + 25 + 142 + 33 + 31 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1726,4 +1732,68 @@ TEST(RegistryGen, DuplicateEventIdFailsWithClearError) {
     EXPECT_NE(msg.find("duplicate"), std::string::npos) << msg;
     EXPECT_NE(msg.find("DUPLICATE_BIG_FISH"), std::string::npos) << msg;  // new row
     EXPECT_NE(msg.find("BIG_FISH"), std::string::npos) << msg;  // what it collides with
+}
+
+// --- S2.01: the composition-program grammar must fail loudly ----------------
+// The Acts 2-3 rows needed no new CompOp -- spawnShapes' shared 6-slot 3-or-4
+// draw is exactly the existing POOL node, spawnGremlin is a count-1 POOL per
+// call (it rebuilds its pool, so the two draws are with replacement), and
+// getAncientShape is a count-1 POOL over the three shapes in index order. That
+// makes the "unknown node kind" gate the thing standing between a typo and a
+// silently-dropped miscRng draw, so it gets its own negative test.
+
+TEST(RegistryGen, UnknownCompositionNodeKindFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_comp_node_registry");
+    {
+        std::ofstream encs(bad_reg / "encounters.yaml", std::ios::app);
+        encs << "\n- id: 900\n  name: SYNTH_BAD_NODE\n"
+                "  game_id: \"Synth Bad Node\"\n  act: 3\n  pool: EVENT\n"
+                "  weight: 0.0\n  program:\n"
+                "    - {summon: \"Darkling\"}\n"
+                "  provenance: \"synthetic unknown-node negative test\"\n";
+    }
+
+    const fs::path out = scratch / "bad_comp_node_out";
+    const fs::path err = scratch / "bad_comp_node_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "generator should reject an unknown composition node kind";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("encounters.yaml"), std::string::npos) << msg;   // domain
+    EXPECT_NE(msg.find("Synth Bad Node"), std::string::npos) << msg;    // row
+    EXPECT_NE(msg.find("summon"), std::string::npos) << msg;            // the node
+    EXPECT_NE(msg.find("unknown program node kind"), std::string::npos) << msg;
+}
+
+// The exclusion cross-check gained ONE escape hatch in S2.01 -- a row may
+// exclude its own key, which is how TheBeyond.java:135-138's inert "Orb Walker"
+// self-exclusion is modeled. Everything else must still fail: a key that names
+// no strong encounter in the row's act is a typo, and a silently-dropped
+// exclusion changes the first-strong rejection loop's draw count.
+TEST(RegistryGen, UnknownEncounterExclusionKeyFailsWithClearError) {
+    const fs::path scratch = fs::path(kScratchDir);
+    const fs::path bad_reg = clone_registry(scratch, "bad_exclusion_registry");
+    {
+        std::ofstream encs(bad_reg / "encounters.yaml", std::ios::app);
+        encs << "\n- id: 901\n  name: SYNTH_BAD_EXCLUSION\n"
+                "  game_id: \"Synth Bad Exclusion\"\n  act: 2\n  pool: WEAK\n"
+                "  weight: 2.0\n  excludes: [\"Sentry and Spear\"]\n"
+                "  program:\n    - {emit: \"Chosen\"}\n"
+                "  provenance: \"synthetic bad-exclusion negative test\"\n";
+    }
+
+    const fs::path out = scratch / "bad_exclusion_out";
+    const fs::path err = scratch / "bad_exclusion_err.txt";
+    fs::remove_all(out);
+    EXPECT_NE(run_generator(bad_reg.string(), out.string(), err.string()), 0)
+        << "generator should reject an exclusion naming no act-2 strong key";
+
+    const std::string msg = read_text(err);
+    EXPECT_NE(msg.find("error:"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("encounters.yaml"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("Sentry and Spear"), std::string::npos) << msg;
+    EXPECT_NE(msg.find("inert self-exclusion"), std::string::npos) << msg;
 }

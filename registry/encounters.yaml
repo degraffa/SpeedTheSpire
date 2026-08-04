@@ -13,18 +13,35 @@
 #                          order, so the engine's stable-sort-by-weight roll
 #                          (MonsterInfo.normalizeWeights, TRAP 1) reproduces the
 #                          game's tie order.
-#     name: <SYMBOL>       symbolic name (documentation; this domain emits no enum)
-#     game_id: "<string>"  the game's encounter/monster-group KEY (Exordium pool
+#     name: <SYMBOL>       symbolic name (documentation; this domain emits no enum).
+#                          UNIQUE across the domain even where game_id is not.
+#     game_id: "<string>"  the game's encounter/monster-group KEY (dungeon pool
 #                          string == MonsterHelper.getEncounter key) -- join key.
-#     act: <int>           1 (Exordium) for every B3.12 entry.
+#                          NOT unique: TheBeyond lists "3 Darklings" in BOTH its
+#                          weak and its strong pool, so two rows share that key
+#                          (ids 44/53) with identical programs. Generated
+#                          encounter_by_game_id returns the FIRST (lowest-id)
+#                          match, which is exactly right for key -> composition;
+#                          pool membership comes from the per-act pool tables.
+#     act: <int>           1 (Exordium, B3.12), 2 (TheCity) or 3 (TheBeyond)
+#                          (S2.01). Codegen emits one EncounterPoolTable per
+#                          (act, pool) group alongside the flat kEncounters
+#                          array; the Act-1 rows and their emitted literals are
+#                          untouched by the act extension (append-only applies
+#                          to emitted table SHAPES too -- additive only).
 #     pool: WEAK|STRONG|ELITE|BOSS|EVENT   which generateXxx list it belongs
 #                          to; EVENT rows are lookup-only fixed groups.
 #     weight: <float>      MonsterInfo weight (pool-roll band width). BOSS = 0.0
 #                          (bosses are shuffled, not weight-rolled).
 #     excludes: [<game_id>, ...]   WEAK only, optional: strong-pool keys forbidden
-#                          as the FIRST strong enemy when THIS is the 3rd weak
-#                          monster (Exordium.generateExclusions, keyed on
-#                          monsterList.last()). Absent == no exclusions.
+#                          as the FIRST strong enemy when THIS is the LAST weak
+#                          monster (generateExclusions, keyed on
+#                          monsterList.last() -- the 3rd in Act 1, the 2nd in
+#                          Acts 2-3, which draw only two weak entries). Absent ==
+#                          no exclusions. A row may also exclude its OWN key: in
+#                          Act 3 that bites for "3 Darklings" (also a strong key)
+#                          and is inert for "Orb Walker" (weak-only), and both
+#                          are modeled verbatim.
 #     program: [ <node>, ... ]     the miscRng COMPOSITION PROGRAM: an ordered list
 #                          of spawn nodes (spawn order == turn order). Nodes:
 #             {emit: "<MonsterGameId>"}                 -- one fixed monster, 0 draws
@@ -305,3 +322,538 @@
     - {emit: "FungiBeast"}
     - {emit: "FungiBeast"}
   provenance: "Mushrooms.buttonEffect (Mushrooms.java:70-80) enters MonsterHelper.getEncounter(\"The Mushroom Lair\"); MonsterHelper.getEncounter (MonsterHelper.java:430-435) constructs three FungiBeast actors."
+
+
+# =============================================================================
+# ACT 2 -- TheCity (S2.01, ids 22-43). Pool mechanics are identical to
+# Exordium's (MonsterInfo.normalizeWeights stable ascending sort, then the
+# AbstractDungeon.java:1057-1096 roll/rejection rules); only the lists and the
+# weak-draw COUNT differ -- TheCity.generateMonsters calls
+# generateWeakEnemies(2), not (3) (TheCity.java:88-92). That count lives in the
+# run layer (S2.12), not in this file; these rows are the pool CONTENTS.
+#
+# Provenance base (read in full from D:\STS_BG_Mod\SlayTheSpireDecompiled):
+#   TheCity.generateMonsters/generateWeakEnemies/generateStrongEnemies/
+#   generateElites/generateExclusions/initializeBoss (TheCity.java:87-182);
+#   MonsterHelper.getEncounter (MonsterHelper.java:461-531) and the spawn
+#   helper spawnGremlin (MonsterHelper.java:767-778).
+# Monster refs are AbstractMonster.ID strings read from the classes themselves,
+# NOT class names -- three differ here: Taskmaster.ID == "SlaverBoss",
+# BanditPointy.ID == "BanditChild", ShelledParasite.ID == "Shelled Parasite".
+# =============================================================================
+
+# --- WEAK pool -- generateWeakEnemies (TheCity.java:94-104), all weight 2.0 ---
+- id: 22
+  name: SPHERIC_GUARDIAN_ENC
+  game_id: "Spheric Guardian"
+  act: 2
+  pool: WEAK
+  weight: 2.0
+  excludes: ["Sentry and Sphere"]
+  program:
+    - {emit: "SphericGuardian"}
+  provenance: "TheCity.generateWeakEnemies (TheCity.java:97), generateExclusions \"Spheric Guardian\" (TheCity.java:136-139); MonsterHelper.getEncounter \"Spheric Guardian\" (MonsterHelper.java:477-479)"
+
+- id: 23
+  name: CHOSEN_ENC
+  game_id: "Chosen"
+  act: 2
+  pool: WEAK
+  weight: 2.0
+  # The only two-key exclusion in the game (TheCity.java:144-148): the Chosen
+  # weak entry forbids BOTH strong keys that contain a Chosen.
+  excludes: ["Chosen and Byrds", "Cultist and Chosen"]
+  program:
+    - {emit: "Chosen"}
+  provenance: "TheCity.generateWeakEnemies (TheCity.java:98), generateExclusions \"Chosen\" (TheCity.java:144-148); MonsterHelper.getEncounter \"Chosen\" (MonsterHelper.java:471-473)"
+
+- id: 24
+  name: SHELL_PARASITE_ENC
+  game_id: "Shell Parasite"
+  act: 2
+  pool: WEAK
+  weight: 2.0
+  program:
+    - {emit: "Shelled Parasite"}
+  provenance: "TheCity.generateWeakEnemies (TheCity.java:99); MonsterHelper.getEncounter \"Shell Parasite\" (MonsterHelper.java:474-476); ShelledParasite.ID == \"Shelled Parasite\" (ShelledParasite.java)"
+
+- id: 25
+  name: THREE_BYRDS
+  game_id: "3 Byrds"
+  act: 2
+  pool: WEAK
+  weight: 2.0
+  excludes: ["Chosen and Byrds"]
+  program:
+    # The y-offsets are unseeded libGDX MathUtils.random (cosmetic, NOT miscRng).
+    - {emit: "Byrd"}
+    - {emit: "Byrd"}
+    - {emit: "Byrd"}
+  provenance: "TheCity.generateWeakEnemies (TheCity.java:100), generateExclusions \"3 Byrds\" (TheCity.java:140-143); MonsterHelper.getEncounter \"3 Byrds\" (MonsterHelper.java:465-467)"
+
+- id: 26
+  name: TWO_THIEVES
+  game_id: "2 Thieves"
+  act: 2
+  pool: WEAK
+  weight: 2.0
+  program:
+    - {emit: "Looter"}
+    - {emit: "Mugger"}
+  provenance: "TheCity.generateWeakEnemies (TheCity.java:101); MonsterHelper.getEncounter \"2 Thieves\" (MonsterHelper.java:462-464)"
+
+# --- STRONG pool -- generateStrongEnemies (TheCity.java:106-120), weights /29 -
+- id: 27
+  name: CHOSEN_AND_BYRDS
+  game_id: "Chosen and Byrds"
+  act: 2
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {emit: "Byrd"}
+    - {emit: "Chosen"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:109); MonsterHelper.getEncounter \"Chosen and Byrds\" (MonsterHelper.java:486-488)"
+
+- id: 28
+  name: SENTRY_AND_SPHERE
+  game_id: "Sentry and Sphere"
+  act: 2
+  pool: STRONG
+  weight: 2.0
+  program:
+    - {emit: "Sentry"}
+    - {emit: "SphericGuardian"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:110); MonsterHelper.getEncounter \"Sentry and Sphere\" (MonsterHelper.java:489-491)"
+
+- id: 29
+  name: SNAKE_PLANT_ENC
+  game_id: "Snake Plant"
+  act: 2
+  pool: STRONG
+  weight: 6.0
+  program:
+    - {emit: "SnakePlant"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:111); MonsterHelper.getEncounter \"Snake Plant\" (MonsterHelper.java:492-494)"
+
+- id: 30
+  name: SNECKO_ENC
+  game_id: "Snecko"
+  act: 2
+  pool: STRONG
+  weight: 4.0
+  program:
+    - {emit: "Snecko"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:112); MonsterHelper.getEncounter \"Snecko\" (MonsterHelper.java:495-497)"
+
+- id: 31
+  name: CENTURION_AND_HEALER
+  game_id: "Centurion and Healer"
+  act: 2
+  pool: STRONG
+  weight: 6.0
+  program:
+    - {emit: "Centurion"}
+    - {emit: "Healer"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:113); MonsterHelper.getEncounter \"Centurion and Healer\" (MonsterHelper.java:498-500)"
+
+- id: 32
+  name: CULTIST_AND_CHOSEN
+  game_id: "Cultist and Chosen"
+  act: 2
+  pool: STRONG
+  weight: 3.0
+  program:
+    - {emit: "Cultist"}
+    - {emit: "Chosen"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:114); MonsterHelper.getEncounter \"Cultist and Chosen\" (MonsterHelper.java:480-482)"
+
+- id: 33
+  name: THREE_CULTISTS
+  game_id: "3 Cultists"
+  act: 2
+  pool: STRONG
+  weight: 3.0
+  program:
+    - {emit: "Cultist"}
+    - {emit: "Cultist"}
+    - {emit: "Cultist"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:115); MonsterHelper.getEncounter \"3 Cultists\" (MonsterHelper.java:483-485)"
+
+- id: 34
+  name: SHELLED_PARASITE_AND_FUNGI
+  game_id: "Shelled Parasite and Fungi"
+  act: 2
+  pool: STRONG
+  weight: 3.0
+  program:
+    - {emit: "Shelled Parasite"}
+    - {emit: "FungiBeast"}
+  provenance: "TheCity.generateStrongEnemies (TheCity.java:116); MonsterHelper.getEncounter \"Shelled Parasite and Fungi\" (MonsterHelper.java:501-503)"
+
+# --- ELITE pool -- generateElites (TheCity.java:122-130), all weight 1.0 ------
+- id: 35
+  name: GREMLIN_LEADER_ENC
+  game_id: "Gremlin Leader"
+  act: 2
+  pool: ELITE
+  weight: 1.0
+  program:
+    # spawnGremlin (MonsterHelper.java:767-778) rebuilds the 8-slot pool on EVERY
+    # call and draws miscRng.random(0, size-1) -- so the two minions are drawn
+    # WITH replacement (duplicates legal), unlike Gremlin Gang's spawnGremlins.
+    # Two count-1 POOL steps express exactly that: each step re-seeds its own
+    # pool, and random(0, 7) == random(7) (Random.java:53-61, both nextInt(8)).
+    - {pool: {members: ["GremlinWarrior", "GremlinWarrior", "GremlinThief", "GremlinThief", "GremlinFat", "GremlinFat", "GremlinTsundere", "GremlinWizard"], count: 1}}
+    - {pool: {members: ["GremlinWarrior", "GremlinWarrior", "GremlinThief", "GremlinThief", "GremlinFat", "GremlinFat", "GremlinTsundere", "GremlinWizard"], count: 1}}
+    - {emit: "GremlinLeader"}
+  provenance: "TheCity.generateElites (TheCity.java:125); MonsterHelper.getEncounter \"Gremlin Leader\" (MonsterHelper.java:507-509) -> spawnGremlin x2 then new GremlinLeader (MonsterHelper.java:767-778); Random.random(int)/random(int,int) (Random.java:53-61)"
+
+- id: 36
+  name: SLAVERS
+  game_id: "Slavers"
+  act: 2
+  pool: ELITE
+  weight: 1.0
+  program:
+    - {emit: "SlaverBlue"}
+    - {emit: "SlaverBoss"}
+    - {emit: "SlaverRed"}
+  provenance: "TheCity.generateElites (TheCity.java:126); MonsterHelper.getEncounter \"Slavers\" (MonsterHelper.java:510-512); Taskmaster.ID == \"SlaverBoss\" (Taskmaster.java)"
+
+- id: 37
+  name: BOOK_OF_STABBING_ENC
+  game_id: "Book of Stabbing"
+  act: 2
+  pool: ELITE
+  weight: 1.0
+  program:
+    - {emit: "BookOfStabbing"}
+  provenance: "TheCity.generateElites (TheCity.java:127); MonsterHelper.getEncounter \"Book of Stabbing\" (MonsterHelper.java:504-506)"
+
+# =============================================================================
+# BOSS list -- initializeBoss (TheCity.java:153-182). The fully-unlocked
+# else-branch adds all three IN THIS ORDER, then Collections.shuffle(bossList,
+# new Random(monsterRng.randomLong())). weight 0.0 (shuffled, not weight-rolled).
+# =============================================================================
+- id: 38
+  name: AUTOMATON
+  game_id: "Automaton"
+  act: 2
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "BronzeAutomaton"}
+  provenance: "TheCity.initializeBoss (TheCity.java:168); MonsterHelper.getEncounter \"Automaton\" (MonsterHelper.java:522-524)"
+
+- id: 39
+  name: COLLECTOR
+  game_id: "Collector"
+  act: 2
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "TheCollector"}
+  provenance: "TheCity.initializeBoss (TheCity.java:169); MonsterHelper.getEncounter \"Collector\" (MonsterHelper.java:528-530)"
+
+- id: 40
+  name: CHAMP
+  game_id: "Champ"
+  act: 2
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "Champ"}
+  provenance: "TheCity.initializeBoss (TheCity.java:170); MonsterHelper.getEncounter \"Champ\" (MonsterHelper.java:525-527)"
+
+# =============================================================================
+# EVENT groups (Act 2) -- fixed groups looked up by native event bodies; they
+# never enter TheCity's monster/elite/boss lists.
+# =============================================================================
+- id: 41
+  name: MASKED_BANDITS_ENC
+  game_id: "Masked Bandits"
+  act: 2
+  pool: EVENT
+  weight: 0.0
+  program:
+    - {emit: "BanditChild"}
+    - {emit: "BanditLeader"}
+    - {emit: "BanditBear"}
+  provenance: "MaskedBandits.onEnterRoom (MaskedBandits.java:43) enters MonsterHelper.getEncounter(ID == \"Masked Bandits\"); MonsterHelper.getEncounter (MonsterHelper.java:513-515) constructs BanditPointy/BanditLeader/BanditBear; BanditPointy.ID == \"BanditChild\" (BanditPointy.java)"
+
+- id: 42
+  name: COLOSSEUM_NOBS
+  game_id: "Colosseum Nobs"
+  act: 2
+  pool: EVENT
+  weight: 0.0
+  program:
+    - {emit: "SlaverBoss"}
+    - {emit: "GremlinNob"}
+  provenance: "Colosseum.buttonEffect (Colosseum.java:70,77) enters MonsterHelper.getEncounter(\"Colosseum Nobs\"); MonsterHelper.getEncounter (MonsterHelper.java:516-518) constructs Taskmaster + GremlinNob"
+
+- id: 43
+  name: COLOSSEUM_SLAVERS
+  game_id: "Colosseum Slavers"
+  act: 2
+  pool: EVENT
+  weight: 0.0
+  program:
+    - {emit: "SlaverBlue"}
+    - {emit: "SlaverRed"}
+  provenance: "Colosseum.buttonEffect (Colosseum.java:53,57) enters MonsterHelper.getEncounter(\"Colosseum Slavers\"); MonsterHelper.getEncounter (MonsterHelper.java:519-521) constructs SlaverBlue + SlaverRed"
+
+# =============================================================================
+# ACT 3 -- TheBeyond (S2.01, ids 44-61).
+#
+# Provenance base (read in full): TheBeyond.generateMonsters/generateWeak-
+# Enemies/generateStrongEnemies/generateElites/generateExclusions/initializeBoss
+# (TheBeyond.java:84-176); MonsterHelper.getEncounter (MonsterHelper.java:
+# 532-594) and the helpers spawnShapes (664-692) / getAncientShape (636-646).
+#
+# TRAP (s2-design section 5 item 8): "3 Darklings" is in BOTH pools -- two rows,
+# one game_id (ids 44 weak / 53 strong). encounter_by_game_id returns the FIRST
+# match (id order), and both rows carry the identical composition program, so
+# key -> composition lookup stays unambiguous; only pool membership differs, and
+# the per-act pool tables carry that. Its weak-row exclusion names its own key.
+#
+# Monster refs are AbstractMonster.ID strings: three differ from the class name
+# -- SpireGrowth.ID == "Serpent", SnakeDagger.ID == "Dagger", OrbWalker.ID ==
+# "Orb Walker" (which is also an encounter key; different domains, no clash).
+# =============================================================================
+
+# --- WEAK pool -- generateWeakEnemies (TheBeyond.java:91-99), all weight 2.0 --
+- id: 44
+  name: THREE_DARKLINGS_WEAK
+  game_id: "3 Darklings"
+  act: 3
+  pool: WEAK
+  weight: 2.0
+  # Self-exclusion that really bites: the same key is in the strong pool (id 53)
+  # (TheBeyond.java:131-134).
+  excludes: ["3 Darklings"]
+  program:
+    - {emit: "Darkling"}
+    - {emit: "Darkling"}
+    - {emit: "Darkling"}
+  provenance: "TheBeyond.generateWeakEnemies (TheBeyond.java:94), generateExclusions \"3 Darklings\" (TheBeyond.java:131-134); MonsterHelper.getEncounter \"3 Darklings\" (MonsterHelper.java:543-545)"
+
+- id: 45
+  name: ORB_WALKER_ENC
+  game_id: "Orb Walker"
+  act: 3
+  pool: WEAK
+  weight: 2.0
+  # INERT self-exclusion: generateExclusions adds "Orb Walker", which is not a
+  # strong-pool key, so the first-strong rejection loop can never match it
+  # (TheBeyond.java:135-138). Modeled verbatim rather than dropped -- dropping it
+  # would silently hide a future upstream change.
+  excludes: ["Orb Walker"]
+  program:
+    - {emit: "Orb Walker"}
+  provenance: "TheBeyond.generateWeakEnemies (TheBeyond.java:95), generateExclusions \"Orb Walker\" (TheBeyond.java:135-138); MonsterHelper.getEncounter \"Orb Walker\" (MonsterHelper.java:555-557); OrbWalker.ID == \"Orb Walker\" (OrbWalker.java)"
+
+- id: 46
+  name: THREE_SHAPES
+  game_id: "3 Shapes"
+  act: 3
+  pool: WEAK
+  weight: 2.0
+  excludes: ["4 Shapes"]
+  program:
+    # spawnShapes(weak=true): draw-WITHOUT-replacement, 3 draws of
+    # miscRng.random(pool.size()-1) over the 6-slot shape pool in add() order
+    # (MonsterHelper.java:664-684). getShape's keys are the monster IDs.
+    - {pool: {members: ["Repulsor", "Repulsor", "Exploder", "Exploder", "Spiker", "Spiker"], count: 3}}
+  provenance: "TheBeyond.generateWeakEnemies (TheBeyond.java:96), generateExclusions \"3 Shapes\" (TheBeyond.java:139-142); MonsterHelper.getEncounter \"3 Shapes\" -> spawnShapes(true) (MonsterHelper.java:546-548, 664-692)"
+
+# --- STRONG pool -- generateStrongEnemies (TheBeyond.java:101-115), all 1.0 ---
+- id: 47
+  name: SPIRE_GROWTH_ENC
+  game_id: "Spire Growth"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {emit: "Serpent"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:104); MonsterHelper.getEncounter \"Spire Growth\" (MonsterHelper.java:558-560); SpireGrowth.ID == \"Serpent\" (SpireGrowth.java)"
+
+- id: 48
+  name: TRANSIENT_ENC
+  game_id: "Transient"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {emit: "Transient"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:105); MonsterHelper.getEncounter \"Transient\" (MonsterHelper.java:540-542)"
+
+- id: 49
+  name: FOUR_SHAPES
+  game_id: "4 Shapes"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    # spawnShapes(weak=false): the SAME 6-slot pool, 4 draws (MonsterHelper.java:
+    # 664-690) -- the fourth draw is the only difference from "3 Shapes".
+    - {pool: {members: ["Repulsor", "Repulsor", "Exploder", "Exploder", "Spiker", "Spiker"], count: 4}}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:106); MonsterHelper.getEncounter \"4 Shapes\" -> spawnShapes(false) (MonsterHelper.java:564-566, 664-692)"
+
+- id: 50
+  name: MAW_ENC
+  game_id: "Maw"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {emit: "Maw"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:107); MonsterHelper.getEncounter \"Maw\" (MonsterHelper.java:561-563)"
+
+- id: 51
+  name: SPHERE_AND_TWO_SHAPES
+  game_id: "Sphere and 2 Shapes"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    # getAncientShape x2 (MonsterHelper.java:636-646): each call is ONE
+    # miscRng.random(2) mapping 0 -> Spiker, 1 -> Repulsor, default (2) ->
+    # Exploder, and constructs ONLY the selected monster. A count-1 POOL over the
+    # three in that exact order is the same single random(2) draw, the same
+    # index -> monster mapping, and the same single construction.
+    - {pool: {members: ["Spiker", "Repulsor", "Exploder"], count: 1}}
+    - {pool: {members: ["Spiker", "Repulsor", "Exploder"], count: 1}}
+    - {emit: "SphericGuardian"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:108); MonsterHelper.getEncounter \"Sphere and 2 Shapes\" (MonsterHelper.java:567-569) -> getAncientShape x2 then new SphericGuardian; getAncientShape (MonsterHelper.java:636-646)"
+
+- id: 52
+  name: JAW_WORM_HORDE
+  game_id: "Jaw Worm Horde"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    # NOTE (deferred obligation, ledger row owned by S2.26): all three are
+    # constructed as JawWorm(x, y, TRUE) -- a constructor variant S1's row never
+    # exercised. The composition (three JawWorm actors, 0 miscRng draws) is
+    # settled here; what the boolean changes is that row's business.
+    - {emit: "JawWorm"}
+    - {emit: "JawWorm"}
+    - {emit: "JawWorm"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:109); MonsterHelper.getEncounter \"Jaw Worm Horde\" (MonsterHelper.java:549-551)"
+
+- id: 53
+  name: THREE_DARKLINGS_STRONG
+  game_id: "3 Darklings"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {emit: "Darkling"}
+    - {emit: "Darkling"}
+    - {emit: "Darkling"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:110) -- the SAME key as the weak-pool row id 44; MonsterHelper.getEncounter \"3 Darklings\" (MonsterHelper.java:543-545)"
+
+- id: 54
+  name: WRITHING_MASS_ENC
+  game_id: "Writhing Mass"
+  act: 3
+  pool: STRONG
+  weight: 1.0
+  program:
+    - {emit: "WrithingMass"}
+  provenance: "TheBeyond.generateStrongEnemies (TheBeyond.java:111); MonsterHelper.getEncounter \"Writhing Mass\" (MonsterHelper.java:576-578)"
+
+# --- ELITE pool -- generateElites (TheBeyond.java:117-125), all weight 2.0 ----
+- id: 55
+  name: GIANT_HEAD_ENC
+  game_id: "Giant Head"
+  act: 3
+  pool: ELITE
+  weight: 2.0
+  program:
+    - {emit: "GiantHead"}
+  provenance: "TheBeyond.generateElites (TheBeyond.java:120); MonsterHelper.getEncounter \"Giant Head\" (MonsterHelper.java:579-581)"
+
+- id: 56
+  name: NEMESIS_ENC
+  game_id: "Nemesis"
+  act: 3
+  pool: ELITE
+  weight: 2.0
+  program:
+    - {emit: "Nemesis"}
+  provenance: "TheBeyond.generateElites (TheBeyond.java:121); MonsterHelper.getEncounter \"Nemesis\" (MonsterHelper.java:573-575)"
+
+- id: 57
+  name: REPTOMANCER_ENC
+  game_id: "Reptomancer"
+  act: 3
+  pool: ELITE
+  weight: 2.0
+  program:
+    # Spawn order is dagger, Reptomancer, dagger (POSX[1] then POSX[0]) -- the
+    # array order IS the turn order, so it is not cosmetic.
+    - {emit: "Dagger"}
+    - {emit: "Reptomancer"}
+    - {emit: "Dagger"}
+  provenance: "TheBeyond.generateElites (TheBeyond.java:122); MonsterHelper.getEncounter \"Reptomancer\" (MonsterHelper.java:536-539); SnakeDagger.ID == \"Dagger\" (SnakeDagger.java)"
+
+# =============================================================================
+# BOSS list -- initializeBoss (TheBeyond.java:147-176): the same fully-unlocked
+# else-branch + Collections.shuffle(new Random(monsterRng.randomLong())).
+# =============================================================================
+- id: 58
+  name: AWAKENED_ONE_ENC
+  game_id: "Awakened One"
+  act: 3
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "Cultist"}
+    - {emit: "Cultist"}
+    - {emit: "AwakenedOne"}
+  provenance: "TheBeyond.initializeBoss (TheBeyond.java:162); MonsterHelper.getEncounter \"Awakened One\" (MonsterHelper.java:588-590) -- two Cultists then the AwakenedOne"
+
+- id: 59
+  name: TIME_EATER_ENC
+  game_id: "Time Eater"
+  act: 3
+  pool: BOSS
+  weight: 0.0
+  program:
+    - {emit: "TimeEater"}
+  provenance: "TheBeyond.initializeBoss (TheBeyond.java:163); MonsterHelper.getEncounter \"Time Eater\" (MonsterHelper.java:585-587)"
+
+- id: 60
+  name: DONU_AND_DECA
+  game_id: "Donu and Deca"
+  act: 3
+  pool: BOSS
+  weight: 0.0
+  program:
+    # Spawn order is Deca FIRST despite the key's name (MonsterHelper.java:592).
+    - {emit: "Deca"}
+    - {emit: "Donu"}
+  provenance: "TheBeyond.initializeBoss (TheBeyond.java:164); MonsterHelper.getEncounter \"Donu and Deca\" (MonsterHelper.java:591-593)"
+
+# --- EVENT group (Act 3) -----------------------------------------------------
+# s2-design section 2.1 names this row "Mysterious Sphere (spawns 2 Orb
+# Walkers)" and cites MonsterHelper.java:582-584. "Mysterious Sphere" is the
+# EVENT id; the encounter key the event actually enters is "2 Orb Walkers"
+# (MysteriousSphere.java:39,87), which is what this row is. The separate
+# "Mysterious Sphere" ENCOUNTER key at MonsterHelper.java:582-584 (2x
+# getAncientShape + an OrbWalker) has no constructing caller anywhere in the
+# tree -- dead content, not authored, per the S1 practice for unreachable keys
+# ("4 Byrds", "Snecko and Mystics").
+- id: 61
+  name: TWO_ORB_WALKERS
+  game_id: "2 Orb Walkers"
+  act: 3
+  pool: EVENT
+  weight: 0.0
+  program:
+    - {emit: "Orb Walker"}
+    - {emit: "Orb Walker"}
+  provenance: "MysteriousSphere.onEnterRoom (MysteriousSphere.java:39) enters MonsterHelper.getEncounter(\"2 Orb Walkers\"); MonsterHelper.getEncounter (MonsterHelper.java:570-572) constructs two OrbWalker actors"

@@ -112,14 +112,21 @@ def emit_encounter_table(domains: dict[str, list[dict]]) -> str:
     encs = [parse_encounter(e) for e in domains["encounters"]]
 
     # Cross-check: every `excludes` entry names a real STRONG encounter key in the
-    # same act (the exclusion loop rejects strong-pool rolls by key).
+    # same act (the exclusion loop rejects strong-pool rolls by key) -- OR the
+    # row's own key. The second case is TheBeyond's INERT self-exclusion
+    # (TheBeyond.java:135-138 adds "Orb Walker", a weak-only key the first-strong
+    # loop can never match); the registry models it verbatim rather than dropping
+    # it, so the escape hatch is exactly that shape and nothing wider. A typo'd
+    # or otherwise unknown key still fails.
     for e in encs:
         strong_keys = {o["game_id"] for o in encs
                        if o["pool"] == "STRONG" and o["act"] == e["act"]}
         for x in e["excludes"]:
-            if x not in strong_keys:
-                raise fail(f"encounters.yaml: encounter '{e['game_id']}' excludes "
-                           f"'{x}', which is not a STRONG encounter in act {e['act']}")
+            if x in strong_keys or x == e["game_id"]:
+                continue
+            raise fail(f"encounters.yaml: encounter '{e['game_id']}' excludes "
+                       f"'{x}', which is neither a STRONG encounter in act "
+                       f"{e['act']} nor its own key (an inert self-exclusion)")
 
     # Array budgets, floored at 1 so the header stays valid when the domain is empty.
     max_refs = 1
@@ -238,6 +245,66 @@ def emit_encounter_table(domains: dict[str, list[dict]]) -> str:
         out.append("    }},")
         out.append(f"        {excl_count}, {{{{{excl_txt}}}}}}},")
     out.append("}};\n")
+
+    # --- Per-act pool tables (S2.01) ----------------------------------------
+    # One row per (act, pool) group that has members. Members are listed in the
+    # game's ArrayList add() order, which the registry's id order reproduces --
+    # that order is what MonsterInfo.normalizeWeights' STABLE ascending-weight
+    # sort ties on, so it is load-bearing, not presentation. Emitting the groups
+    # keeps the act dimension out of every consumer's inner loop; the Act-1
+    # groups are the same rows, in the same order, that the pre-S2.01 header's
+    # single kEncounters array already carried.
+    groups: dict[tuple[int, str], list[dict]] = {}
+    for e in encs:
+        groups.setdefault((e["act"], e["pool"]), []).append(e)
+    pool_order = {name: val for name, val in ENCOUNTER_POOLS.items()}
+    group_keys = sorted(groups, key=lambda k: (k[0], pool_order[k[1]]))
+    max_members = max((len(v) for v in groups.values()), default=1)
+    max_members = max(max_members, 1)
+    max_act = max((e["act"] for e in encs), default=1)
+
+    out.append(f"inline constexpr int kMaxEncounterPoolMembers = {max_members};")
+    out.append(f"inline constexpr int32_t kEncounterMaxAct = {max_act};\n")
+    out.append("// One generateXxx list: the (act, pool) group's members in the "
+               "game's ArrayList")
+    out.append("// add() order (== registry id order -- the stable sort's tie "
+               "order, TRAP 1).")
+    out.append("// EVENT groups are lookup-only and never enter a generated "
+               "list; they are")
+    out.append("// tabulated here too so the act dimension is complete.")
+    out.append("struct EncounterPoolTable {")
+    out.append("    int32_t act;")
+    out.append("    EncounterPool pool;")
+    out.append("    uint8_t count;")
+    out.append("    std::array<std::string_view, kMaxEncounterPoolMembers> keys;")
+    out.append("    std::array<float, kMaxEncounterPoolMembers> weights;")
+    out.append("};\n")
+    out.append(f"inline constexpr int kEncounterPoolTableCount = {len(group_keys)};")
+    out.append("inline constexpr std::array<EncounterPoolTable, "
+               "kEncounterPoolTableCount>")
+    out.append("    kEncounterPoolTables{{")
+    for act, pool in group_keys:
+        rows = groups[(act, pool)]
+        keys = [sv(r["game_id"]) for r in rows]
+        wts = [f"{r['weight']}f" for r in rows]
+        while len(keys) < max_members:
+            keys.append("std::string_view{}")
+            wts.append("0.0f")
+        out.append(f"    EncounterPoolTable{{{act}, EncounterPool::{pool}, "
+                   f"{len(rows)},")
+        out.append(f"        {{{{{', '.join(keys)}}}}},")
+        out.append(f"        {{{{{', '.join(wts)}}}}}}},")
+    out.append("}};\n")
+    out.append("// The generateXxx list for one act, or nullptr when that act "
+               "has no such pool.")
+    out.append("[[nodiscard]] inline const EncounterPoolTable* "
+               "encounter_pool_table(")
+    out.append("    int32_t act, EncounterPool pool) noexcept {")
+    out.append("    for (const auto& t : kEncounterPoolTables) {")
+    out.append("        if (t.act == act && t.pool == pool) { return &t; }")
+    out.append("    }")
+    out.append("    return nullptr;")
+    out.append("}\n")
 
     out.append("// Lookup an encounter by its game key (Exordium pool / getEncounter "
                "string).")
