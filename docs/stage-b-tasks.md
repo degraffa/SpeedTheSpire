@@ -69,7 +69,7 @@ discharge** — they need re-owning by the orchestrator, not silent closure.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
-| Parallel oracle two-JVM live smoke | parallel-oracle | Next new oracle campaign after the active legacy G7 owner releases `oracle_game.lock` | The isolated topology, launch environment, overlap, resume, partial-failure and lifecycle paths are covered synthetically and in every build preset, but this change deliberately did not start or kill a second game while `g7_random_b153_20260729_300000_324999` owns the legacy install/config namespace. On the next new campaign, run at least two seeds with `--instances 2` and retain the aggregate report plus both runtime manifests as the operational read-out; a failure reopens this implementation. |
+| Parallel oracle two-JVM live smoke | parallel-oracle | G7 campaign | **DISCHARGED by G7.** `g7_random_parallel_b153_20260802_325000_336999` resolved `--instances 4`, retained four hash-bound private runtime manifests in `parallel_group.json`, and captured concurrently at 35.829 aggregate actions/s. Its aggregate reports 9,000 completed of 12,000 requested seeds; worker 1 is a complete 3,000-run random-legal cohort in the final G7 dashboard. This is stronger than the requested two-seed/two-instance operational smoke and proves the isolated config/game/profile topology under sustained overlap. The raw aggregate remains under the uncommitted oracle data root by design. |
 | Meal Ticket `justEnteredRoom` shop heal, including ?→Shop | B4.10 | B4.8 `[x]` | **DISCHARGED by B4.8.** `dispatch_just_entered_room_relics` (`shop.hpp`) is the shared entry effect, called from `on_player_entry` for every non-Event room and, for a ?, only AFTER the roll has replaced the room — which is where the game calls it (`AbstractDungeon.java:1763-1789`), so a ?→Shop and a static ShopRoom are the same room by then. Both paths are named tests (`ShopFlow.MealTicketHealsOnAStaticShopRoomEntry`, `ShopFlow.MealTicketAlsoHealsWhenAQuestionMarkResolvesToAShop`). The heal is out of combat, so Magic Flower's `onPlayerHeal` (combat-only, `MagicFlower.java:31-37`) cannot scale it and the fan-out is named rather than written, as `rest_apply_heal` already does |
 | Maw Bank `onEnterRoom` outside original EventRooms | B4.10 | wave-runlayer S2 | **DISCHARGED by Wave-C track 2 stage 2.** `dispatch_event_room_entry_relics` is generalised into `dispatch_on_enter_room_relics(RunState&, RoomType)` (`event_framework.hpp`), called ONCE per transition from `on_player_entry` — so every static monster / elite / rest / shop / treasure entry pays 12 through the Ectoplasm-aware `gain_gold` door, and so does the BOSS entry (`DungeonMap.java:77-87` assigns `nextRoom` a MonsterRoomBoss and runs the same `nextRoomTransition`, whose relic loop at `AbstractDungeon.java:1755-1757` has no room-type guard beyond `nextRoom != null`). **`onEnterRoom` is NOT `justEnteredRoom`**: it fires pre-`?`-roll and pre-`setCurrMapNode`, exactly once, so the run layer's `?` recursion re-enters through `on_player_entry_impl(..., fire_on_enter_room=false)`. A `bool` parameter, not a `room != Event` test — that predicate is the one the recursion breaks, and wiring the hook at the `justEnteredRoom` site would pay a `?`→Shop twice (proven RED before the fix). Ssserpent Head keeps its `room instanceof EventRoom` gate (`SsserpentHead.java:29-35`) now that the fan-out is room-aware; `RoomType::None` is the Java's `nextRoom == null` and fires nothing |
 | In-combat card-CHOOSE potion bodies: Elixir, Attack/Skill/Power/Colorless Potion, Gambler's Brew, Liquid Memories | B3.23 | B3.4 `[x]` | B3.23 named B3.4 as the verb owner; B3.4 landed CHOOSE-in-combat but recorded no potion un-deferral. **PARTIALLY DISCHARGED** on `discharge` (Blessing of the Forge, commit `d710d50`) — it needed only the already-live `CHOOSE_CARD{upgrade}` kind, so it left this row; the potions still listed above need real hand-select-screen / `MAKE_CARD` work and stay open. As of the same branch they are also **fail-loud**: `potion_use_implemented` keeps every still-deferred potion off the legal-action mask (the potion-legality commit on `discharge`, immediately following `d710d50`) instead of letting a USE silently burn the slot. **FURTHER DISCHARGED by `wave-combat` (Track 1 stage 4), and the row's premise was wrong for six of its seven potions — none of them needed `MAKE_CARD` work.** Elixir needed no new machinery at all: it is Purity's `CHOOSE_CARD{exhaust, optional: true}` with `ExhaustAction`'s literal amount 99 (`ExhaustAction.java:56-58`). The four discovery potions needed none either — only a pool selector and a copy count, carried in the already-live `DISCOVERY` item's unused `src`/`tgt` bytes, plus the generated `kIroncladPowerPool`, which was the one thing genuinely missing. Liquid Memories and Gambler's Brew each did need one new `ChoiceKind` — `DISCARD_TO_HAND_FREE` (11) and `HAND_TO_DISCARD_THEN_DRAW` (12), the latter shared with the Gambling Chip relic. **THE ROW IS NOW FULLY DISCHARGED**: all seven potions have bodies and the in-combat card-CHOOSE deferral group is empty |
@@ -1992,28 +1992,65 @@ Then: update CLAUDE.md "Current state".
   boundary documented; debug/ASan/release green ·
   [log](stage-b-log.md#b55)
 
-### G7 `[ ]` **Gate: S1 verified (M4)** — tag `g7-s1-verified`
+### G7 `[x]` **Gate: S1 verified (M4)** — tag `g7-s1-verified`
 **Deps:** B5.1-B5.5, G6
 The design §8 bar, checked literally (evidence linked in Log):
-- [ ] ≥ 1,000,000 oracle-diffed actions across ≥ 2,000 seeds, zero
-      un-triaged diffs (campaign reports).
-- [ ] ≥ 10M sim-side fuzz actions, zero nondeterminism/asserts (B5.1).
-- [ ] 100 % tier-2 registry coverage (manifest check, re-run at gate).
-- [ ] Every a20.yaml row verified per design §8(3).
-- [ ] Throughput floors hold (B5.5 numbers).
-- [ ] Tier-4 suite green (B5.3).
-Then: update CLAUDE.md "Current state"; open Stage C planning (perf
-hardening) and the S2 scope conversation as fresh planning exercises.
-**Inherited:** revisit the Infernal-Blade-generated Blood for Blood cost model — B3.6
-models it via `cost_now` only, so an end-of-turn reset restores 4 rather than the
-game's reduced base; judged unreachable, “revisit if G7 ever hits it”.
-**Log:** campaign `g7_random_b153` paused mid-volume at the 2026-07-30
-checkpoint; live counters, reprocessing state, and the coverage analysis
-motivating survival-biased drivers are in
-[handoff-2026-07-30.md](handoff-2026-07-30.md). That analysis is also the
-origin of Phase T task TE.1 ([training-tasks.md](training-tasks.md)), and
-TE.2 there now owns this gate's "open the S2 scope conversation" closing
-action.
+- [x] Coverage-directed oracle evidence: ≥2,000 distinct A20 seeds under mixed
+      policies, zero untriaged/open findings, and ≥1 Act-1 boss-reward claim
+      for every registry BOSS row ([report](verification/stage-b-verification.md)).
+- [x] Historical-risk audit: multiple named registered passing regressions per
+      campaign-discovered defect family
+      ([audit](verification/g7_proactive_audit.md)).
+- [x] ≥10M sim-side fuzz actions, zero nondeterminism/asserts (B5.1).
+- [x] 100 % tier-2 registry coverage (manifest check, re-run at gate).
+- [x] Every `a20.yaml` row verified per design §8(3).
+- [x] Throughput floors hold (B5.5 re-run).
+- [x] Tier-4 suite green (B5.3 re-run).
+Then: CLAUDE.md "Current state" names M4 complete. Phase T's TE.2 retains
+ownership of the fresh S2 scope conversation; no S2 mechanics were inferred
+from closing this gate.
+
+**Inherited — DISCHARGED:** the Infernal-Blade-generated Blood for Blood cost
+model is live, not unreachable. `updateCost(-1)` updates the saved combat base
+while preserving the current turn override; the focused
+`CardUncommonSkillsInfernalBlade.GeneratedBloodForBloodKeepsZeroButRevealsReducedBaseNextTurn`
+regression is a required passing member of the proactive audit.
+
+**Log (2026-08-03):** Design v0.1.11 records the owner-approved evidence
+amendment that removed the strict one-million-action quota. The measured
+reason was coverage yield: the reviewed 5,000-run random prefix had 253,737
+strict zero-diff actions, but 4,879 runs (97.58 %) died on floors 1–7 and zero
+claimed a boss reward; 175 simulator-selected late-Act-1 attempts instead
+claimed 23 rewards across all three bosses. The replacement keeps the broad
+seed bar and adds a registry-derived boss-depth bar plus an executable audit
+of the historical bug families.
+
+The final deterministic dashboard hashes and reopens every selected artifact:
+3,175 distinct A20 Ironclad attempts, 186,035 captured actions (diagnostic),
+random-legal + greedy policies, 23 boss rewards (Slime Boss 10, The Guardian
+7, Hexaghost 6), and zero untriaged or open findings. All 127 non-clean run
+classifications have exact reviewed standing-deviation dispositions: the
+already-decided Looter stolen-gold ordering, Fairy/Entropic obtain timing, or
+Smoke-Bomb escape settlement timing. No wildcard disposition is accepted.
+The campaign refresh also found a real harness bug: CommunicationMod appends
+Singing Bowl after the card rows, so `choose 3` on a three-card offer had been
+silently treated as an absent fourth card. The mapper now selects the named
+Singing Bowl action only when the captured ordinal follows the offer and the
+simulator exposes `can_sing`; a real fourth card remains index 3. Both live
+witnesses, STS329072 and STS335832, replay clean to terminal after the fix.
+
+`check_g7_proactive_coverage.sh debug --use-last-log` passed all six historical
+risk families and every required regression. The independent B5.1 acceptance
+remains 10,808,430 sim actions with zero failures. The regenerated tier-2
+check passed every registry row, including every `a20.yaml` row. A fresh
+20,000-seed Tier-4 run passed all 16 pre-registered hypotheses under the
+unchanged Holm-Bonferroni family α=0.01. Release throughput re-measured
+27,013,000 combat steps/sec/core, 90,347.1 full combats/sec/core, and 246,408
+full A20 runs/sec whole-machine, all above the frozen floors. Debug, ASan, and
+release suites are green; stale-count and document-link checks are clean.
+Historical pause context remains in
+[handoff-2026-07-30.md](handoff-2026-07-30.md); this Log supersedes its live
+campaign status.
 
 ---
 
@@ -2043,6 +2080,15 @@ G6 ─▶ B5.3 ∥ B5.5 ; B5.2 ─▶ B5.4 ; B5.1-B5.5 ─▶ G7
 
 ## Change log
 
+- 2026-08-03 — **G7 `[x]`: S1 verified; M4 is complete.** Design v0.1.11
+  replaces the low-yield million-action quota with coverage-directed oracle
+  evidence: 3,175 distinct mixed-policy A20 attempts, registry-derived depth
+  through every Act-1 boss reward, zero untriaged/open findings, and a
+  fail-closed six-family historical-risk regression audit. The refreshed
+  campaign exposed and fixed the Singing Bowl reward-ordinal mapper; both live
+  witnesses now replay clean. Tier-2/A20 coverage, the independent ≥10M sim
+  soak, Tier-4 statistics, throughput floors, and the full build matrix are
+  green. [Gate evidence.](verification/stage-b-verification.md)
 - 2026-07-29 — **B5.3 `[x]`: the pre-registered Tier-4 distribution family
   and its 200-run oracle spot set are green.** The analytic executable covers
   the frozen §3.4 expectation set over 20,000 seeds and controls 16

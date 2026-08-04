@@ -1,0 +1,131 @@
+{
+  "families": [
+    {
+      "id": "observable-private-state",
+      "regressions": [
+        {
+          "test": "RelicHooks.LanternGrantsEnergyOnFirstTurnOnly",
+          "witness": "Lantern's Java-private firstTurn latch must not leak through AbstractRelic.counter."
+        },
+        {
+          "test": "RelicHooks.RedSkullPrivateLatchNeverChangesOracleCounter",
+          "witness": "Red Skull's private isActive state remains separate from its observable counter."
+        },
+        {
+          "test": "RelicRaresShop.GamblingChipQueuesTheOptionalDiscardScreenOnceOnly",
+          "witness": "Gambling Chip's private activated latch fires once without mutating its observable counter."
+        }
+      ],
+      "risk": "Campaigns repeatedly found correct mechanics represented through the wrong oracle-visible field."
+    },
+    {
+      "id": "lifecycle-and-queue-order",
+      "regressions": [
+        {
+          "test": "RunCombatBattleStart.StoneCalendarCounterSequenceMatchesTheJavaOrder",
+          "witness": "Battle-start initialization precedes the first turn-start counter increment."
+        },
+        {
+          "test": "RelicBossSpecial.GremlinMaskWeakensThePlayerAtBattleStart",
+          "witness": "Gremlin Visage's source flag and end-of-round expiry match the Java lifecycle."
+        },
+        {
+          "test": "CardRaresCorruption.CostWalkRunsWhenTheApplyActionIsConstructed",
+          "witness": "Corruption walks all piles at action construction time, not delayed resolution time."
+        },
+        {
+          "test": "CardRaresReaper.HealsTheDamageThatActuallyLanded",
+          "witness": "Reaper retains terminal-hit healing through damage resolution and combat settlement."
+        }
+      ],
+      "risk": "Several deep diffs were ordering defects at combat entry, hook construction, turn expiry, or terminal settlement."
+    },
+    {
+      "id": "rng-cardinality-boundaries",
+      "regressions": [
+        {
+          "test": "CardRaresFiendFire.RandomExhaustsBillTheFinalSingletonToo",
+          "witness": "A Java random(0) draw still occurs for the final singleton candidate."
+        },
+        {
+          "test": "PilesDraw.OverdrawWithOnlyDrawCardsStillRunsTheEmptyShuffleAction",
+          "witness": "The trailing empty-discard shuffle action still executes its hook boundary."
+        },
+        {
+          "test": "RunEmeraldElite.EntryConsumesOneMapRngDrawAndAppliesStrength",
+          "witness": "The burning-elite entry consumes its singleton mapRng draw before applying the rolled buff."
+        }
+      ],
+      "risk": "Uniform campaigns exposed missed RNG work at zero/one-element and conditionally empty boundaries."
+    },
+    {
+      "id": "filtered-command-identity",
+      "regressions": [
+        {
+          "test": "ReplayCommandMap.CombatPlayZeroNamesTheTenthHandSlot",
+          "witness": "CommunicationMod's play-zero alias maps to the tenth hand slot."
+        },
+        {
+          "test": "ReplayCommandMap.CombatDrawGridMapsFilteredOrdinalToSourcePileSlot",
+          "witness": "A filtered capture ordinal maps back to the simulator's source-pile identity."
+        },
+        {
+          "test": "ReplayCommandMap.CombatRewardOrdinalsElideTheEmeraldKeyRow",
+          "witness": "Reward ordinals remain stable when the oracle-only Emerald Key row is present."
+        },
+        {
+          "test": "ReplayCommandMap.SingingBowlOrdinalAfterCardRowsMapsToTheNamedAction",
+          "witness": "The capture's post-card Singing Bowl ordinal maps to the named max-HP action without stealing a real fourth card."
+        }
+      ],
+      "risk": "Harness gaps clustered where visible ordinals differed from fixed simulator slots or identities."
+    },
+    {
+      "id": "nested-screen-transitions",
+      "regressions": [
+        {
+          "test": "WheelOfChange.SpinIsOneMiscRngDrawAndGoldPaysBeforeAcknowledgement",
+          "witness": "The spin, result acknowledgement, payout, and leave states remain distinct."
+        },
+        {
+          "test": "NeowPayout.BossSwapOntoPandorasBoxWaitsForConfirmation",
+          "witness": "Pandora's Box preserves its confirmation boundary before applying replacements."
+        },
+        {
+          "test": "NeowPayout.BossSwapOntoTinyHouseOpensItsRewardScreenAndClaims",
+          "witness": "Tiny House returns from its nested card screen to the still-live item reward."
+        },
+        {
+          "test": "NeowPayout.BossSwapOntoCallingBellOffersThreeRelicsAndTheCurse",
+          "witness": "Calling Bell confirmation precedes the mandatory curse/relic reward sequence."
+        }
+      ],
+      "risk": "Choice-bearing events and onEquip bodies failed at nested acknowledgement and return boundaries."
+    },
+    {
+      "id": "persistent-state-and-exclusions",
+      "regressions": [
+        {
+          "test": "CardUncommonSkillsInfernalBlade.GeneratedBloodForBloodKeepsZeroButRevealsReducedBaseNextTurn",
+          "witness": "A generated Blood for Blood keeps its turn override while updating the saved combat base."
+        },
+        {
+          "test": "RunPotion.BloodPotionHealsPersistentHpOnACombatRewardScreen",
+          "witness": "Out-of-combat potion use updates persistent run HP at the reward boundary."
+        },
+        {
+          "test": "FountainOfCleansing.DrinkRemovesEveryCurseButAscendersBane",
+          "witness": "The special-curse exclusion survives the broad curse-removal path."
+        }
+      ],
+      "risk": "Late findings crossed transient/combat/run state or used broad filters with one source-level exclusion."
+    }
+  ],
+  "format": "STS-G7-PROACTIVE-MANIFEST v1",
+  "sources": [
+    "tools/oracle_bridge/driver/b52_exercise_triage.md",
+    "tools/oracle_bridge/driver/g6_campaign_spotdiff.md",
+    "tools/oracle_bridge/driver/g6_campaign2_spotdiff.md",
+    "docs/handoff-2026-07-30.md"
+  ]
+}

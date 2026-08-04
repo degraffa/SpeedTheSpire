@@ -1405,9 +1405,35 @@ struct ShopTarget {
 
     if (s.screen_type == "CARD_REWARD") {
         if (verb == "choose") {
+            const int capture_index = arg(1);
+            // CardRewardScreen's command index appends Singing Bowl after the
+            // visible card rows.  The run layer deliberately represents that
+            // button with kChooseSing rather than as card slot N.  A raw
+            // `choose 3` on a three-card offer therefore used to call
+            // reward_take_card(..., 3), a no-op, and miss the +2 max-HP gain
+            // (G7 witnesses STS329072 seq 86 and STS335832 seq 149).
+            //
+            // Question Card can make a real fourth card, so position alone is
+            // not enough: only the index immediately after card_offer AND a
+            // live simulator can_sing bit identifies the bowl button.
+            RunActionMask mask{};
+            legal_actions(rc, mask);
+            if (capture_index == static_cast<int>(s.card_offer.size()) &&
+                mask.can_sing) {
+                m.kind = MapKind::ACTIONS;
+                m.actions.push_back(
+                    make_action(ActionVerb::CHOOSE, kChooseSing));
+                return m;
+            }
+            if (capture_index < 0 ||
+                capture_index >= static_cast<int>(s.card_offer.size())) {
+                m.reason = "card-screen choose index is outside the captured "
+                           "card offer and is not a live Singing Bowl button";
+                return m;
+            }
             m.kind = MapKind::ACTIONS;
             m.actions.push_back(make_action(ActionVerb::CHOOSE,
-                                            static_cast<uint8_t>(arg(1))));
+                                            static_cast<uint8_t>(capture_index)));
             return m;
         }
         if (verb == "skip") {

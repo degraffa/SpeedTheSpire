@@ -705,6 +705,39 @@ TEST(ReplayCommandMap, CombatRewardOrdinalsElideTheEmeraldKeyRow) {
     EXPECT_EQ(action_arg0(reopened.actions[0]), 2);
 }
 
+// A card reward's `choose` index includes Singing Bowl after the card rows.
+// STS329072 and STS335832 each sent `choose 3` on an ordinary three-card offer;
+// passing 3 through as a card index silently no-opped and lost the game's +2
+// max HP. A real fourth card remains index 3 when Question Card expands the
+// offer, so the mapper also consults the simulator's can_sing bit.
+TEST(ReplayCommandMap, SingingBowlOrdinalAfterCardRowsMapsToTheNamedAction) {
+    namespace eng = sts::engine;
+    RunController rc = at_phase(RunPhase::COMBAT_REWARD);
+    rc.run.relics[0] =
+        RelicSlot{static_cast<uint16_t>(RelicId::SINGING_BOWL), -1};
+    rc.run.relic_count = 1;
+    rc.rewards.count = 1;
+    rc.rewards.open_card_item = 0;
+    rc.rewards.items[0].kind =
+        static_cast<uint8_t>(eng::RewardItemKind::CARDS);
+    rc.rewards.items[0].card_count = 3;
+
+    ScreenInfo ordinary;
+    ordinary.screen_type = "CARD_REWARD";
+    ordinary.card_offer = {"Strike_R", "Bash", "Defend_R"};
+    const MappedCommand bowl = map_command(rc, ordinary, "choose 3");
+    ASSERT_EQ(bowl.kind, MapKind::ACTIONS) << bowl.reason;
+    ASSERT_EQ(bowl.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(bowl.actions[0]), eng::kChooseSing);
+
+    ScreenInfo four_cards = ordinary;
+    four_cards.card_offer.push_back("Anger");
+    const MappedCommand card = map_command(rc, four_cards, "choose 3");
+    ASSERT_EQ(card.kind, MapKind::ACTIONS) << card.reason;
+    ASSERT_EQ(card.actions.size(), 1u);
+    EXPECT_EQ(action_arg0(card.actions[0]), 3);
+}
+
 // --- Neow's item payout is a dismissible COMBAT_REWARD overlay ---------------
 //
 // The lazy-leave elision above is right for a combat-reward ROOM and wrong for

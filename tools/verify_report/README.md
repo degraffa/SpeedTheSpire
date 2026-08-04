@@ -13,10 +13,11 @@ JSON, and CSV under `docs/verification/`:
 C:\Python39\python.exe tools\verify_report\generate_report.py
 ```
 
-The dashboard defaults name the final provenance-compatible G7 cohorts:
-`g7_greedy_b153_20260729_200000_200011`,
-`g7_random_b153_20260729_300000_324999`, and the simulator-planned late-Act-1
-cohorts `g7_late_act1_b153_20260801_boss_min4` and
+The dashboard defaults name the final provenance-compatible G7 cohorts: the
+complete 3,000-run random-legal shard
+`g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004`, and the
+simulator-planned late-Act-1 greedy cohorts
+`g7_late_act1_b153_20260801_boss_min4` and
 `g7_late_act1_b153_20260801_boss_min4_scan14k`, under the fixed
 `D:\STS_BG_Mod\_oracle_data\campaigns` root, and consume the fresh debug
 `tier2_coverage.json`. Repeated `--campaign` flags select a different aggregate.
@@ -34,13 +35,15 @@ The report keeps three action totals separate:
   reports carry an all-family total plus a by-kind map;
   the reader remains backward-compatible with old obtain-only v1 reports.
 
-Only the last total drives the displayed G7 action shortfall. The report never
-infers that captured actions were diff-clean. Likewise, “zero untriaged” means
+The report never infers that captured actions were diff-clean, and all three
+totals remain visible diagnostics. There is no G7 action-count quota after the
+v0.1.11 design amendment: the oracle leg instead requires at least 2,000
+distinct A20 seeds under at least two policies, no untriaged or open findings,
+and an Act-1 boss-reward claim for every BOSS encounter row in the registry.
+Likewise, “zero untriaged” means
 every non-clean `(campaign, seed, classification)` has an exact reviewed row in
 `divergence_dispositions.json`; an `open-*` disposition remains visibly open
-and is not acceptance. The G7 volume verdict also requires at least two literal
-campaign policy names; a million actions from one generator cannot satisfy the
-frozen mixed-generator clause. Every hashed source artifact is reopened at its
+and is not acceptance. Every hashed source artifact is reopened at its
 header and must identify the selected campaign/seed as A20 Ironclad; joined
 with complete named tier-2 coverage of the `a20.yaml` rows, that is the
 dashboard's mechanical A20-modifier check. A run whose outcome is anything
@@ -158,3 +161,22 @@ comes from `ctest -N`; "passing" from a fresh full `ctest` run (default,
 The dashboard extends rather than replaces this check: it consumes the JSON
 row→test attribution and adds the campaign `game_id` sighting count. This
 script's exit-code contract remains the G7 re-run of the tier-2 coverage bar.
+
+## `check_g7_proactive_coverage.py` — historical-risk regression audit
+
+The raw action quota was replaced with an executable audit of the defect
+families the campaigns actually found: observable/private state, lifecycle and
+queue ordering, RNG cardinality boundaries, filtered command identities,
+nested screen transitions, and persistent-state/exclusion boundaries. The
+checked-in `g7_proactive_manifest.json` maps every family to multiple focused
+CTest names and a concrete witness statement.
+
+```bash
+tools/verify_report/check_g7_proactive_coverage.sh debug
+tools/verify_report/check_g7_proactive_coverage.sh release --use-last-log
+```
+
+The checker fails if any required name is absent from CTest or did not pass.
+It writes deterministic `g7_proactive_audit.{md,json}` beside the tier-2
+report; the gate invocation commits the Markdown result under
+`docs/verification/`.

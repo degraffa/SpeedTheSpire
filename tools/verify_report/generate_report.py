@@ -4,8 +4,10 @@
 The report aggregates B5.2 campaign reports, de-duplicates exact repeated
 seeds, joins literal game_id sightings from the source campaign states to the
 G6 tier-2 coverage report, and applies only explicit divergence dispositions.
-It never turns a captured action into a replay-clean action and never infers
-G7 acceptance from campaign completion.
+It never turns a captured action into a replay-clean action.  G7's oracle leg
+is breadth/depth based: mixed-policy A20 seeds plus boss-reward coverage for
+all three Act-1 bosses, with no untriaged or open findings.  Action totals stay
+visible diagnostic evidence, but are not a quota.
 """
 
 from __future__ import annotations
@@ -26,10 +28,9 @@ sys.path.insert(0, str(REPO / "tools" / "registry_gen"))
 from stsgen.loader import load_registry  # noqa: E402
 from stsgen.vocab import DOMAINS  # noqa: E402
 
-REPORT_FORMAT = "STS-VERIFICATION-REPORT v1"
+REPORT_FORMAT = "STS-VERIFICATION-REPORT v2"
 DEFAULT_CAMPAIGNS = (
-    "g7_greedy_b153_20260729_200000_200011",
-    "g7_random_b153_20260729_300000_324999",
+    "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
     "g7_late_act1_b153_20260801_boss_min4",
     "g7_late_act1_b153_20260801_boss_min4_scan14k",
 )
@@ -173,9 +174,11 @@ def walk_strings(value: Any) -> Iterable[str]:
             yield from walk_strings(item)
 
 
-def artifact_sightings(path: Path, game_ids: set[str]) -> Counter[str]:
-    """Count exact game_id string occurrences in action state_json objects."""
+def artifact_observations(
+        path: Path, game_ids: set[str]) -> tuple[Counter[str], str | None]:
+    """Count game_id strings and recover the run's stable Act-1 boss."""
     counts: Counter[str] = Counter()
+    act_boss: str | None = None
     try:
         with path.open("r", encoding="utf-8") as stream:
             for number, line in enumerate(stream, 1):
@@ -190,12 +193,22 @@ def artifact_sightings(path: Path, game_ids: set[str]) -> Counter[str]:
                 state = record.get("state_json")
                 if not isinstance(state, dict):
                     raise ReportError(f"{path}:{number}: action has no state_json object")
+                game_state = state.get("game_state")
+                if isinstance(game_state, dict):
+                    observed = game_state.get("act_boss")
+                    if observed is not None:
+                        observed = str(observed)
+                        if act_boss is not None and observed != act_boss:
+                            raise ReportError(
+                                f"{path}:{number}: act_boss changed from "
+                                f"{act_boss!r} to {observed!r}")
+                        act_boss = observed
                 for value in walk_strings(state):
                     if value in game_ids:
                         counts[value] += 1
     except OSError as exc:
         raise ReportError(f"cannot scan {path}: {exc}") from exc
-    return counts
+    return counts, act_boss
 
 
 def row_label(domain: str, row: dict[str, Any]) -> str:
@@ -262,11 +275,18 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
         for domain, rows in domains.items() if domain != "a20"
         for row in rows
     }
+    expected_act1_bosses = {
+        str(row["game_id"])
+        for row in domains["encounters"]
+        if row.get("act") == 1 and row.get("pool") == "BOSS"
+    }
     dispositions = load_dispositions(dispositions_path)
     seen: dict[str, dict[str, Any]] = {}
     campaigns: list[dict[str, Any]] = []
     findings: list[dict[str, Any]] = []
     sightings: Counter[str] = Counter()
+    boss_runs: Counter[str] = Counter()
+    boss_reward_claims: Counter[str] = Counter()
     totals = Counter()
     provenance: tuple[Any, ...] | None = None
 
@@ -331,7 +351,16 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
                     totals["strict_zero_diff_actions"] += actions
             totals["a20_ironclad_runs"] += 1
             totals["gameplay_terminal_runs"] += 1
-            sightings.update(artifact_sightings(artifact, game_ids))
+            run_sightings, act_boss = artifact_observations(artifact, game_ids)
+            sightings.update(run_sightings)
+            if expected_act1_bosses:
+                if act_boss not in expected_act1_bosses:
+                    raise ReportError(
+                        f"{campaign_id}/{seed}: missing or unknown Act-1 boss "
+                        f"{act_boss!r}")
+                boss_runs[act_boss] += 1
+                if outcome == "act1_boss_reward":
+                    boss_reward_claims[act_boss] += 1
 
             if run.get("classification") != "clean":
                 key = (campaign_id, seed, str(run.get("classification")))
@@ -358,7 +387,10 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
     finding_keys = {
         (f["campaign_id"], f["seed"], f["classification"]) for f in findings
     }
-    stale_dispositions = sorted(set(dispositions) - finding_keys)
+    selected_campaigns = set(campaign_ids)
+    stale_dispositions = sorted(
+        key for key in set(dispositions) - finding_keys
+        if key[0] in selected_campaigns)
     if stale_dispositions:
         raise ReportError(f"dispositions do not match an included finding: "
                           f"{stale_dispositions}")
@@ -408,6 +440,10 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
     a20_rows_covered = sum(bool(row["tier2"]["tier"]) for row in a20_rows)
     all_runs_a20_ironclad = totals["a20_ironclad_runs"] == distinct
     all_runs_gameplay_terminal = totals["gameplay_terminal_runs"] == distinct
+    all_act1_bosses_reward_claimed = (
+        expected_act1_bosses and
+        all(boss_reward_claims[boss] > 0 for boss in expected_act1_bosses)
+    )
     return {
         "format": REPORT_FORMAT,
         "inputs": {
@@ -438,19 +474,30 @@ def aggregate(campaign_root: Path, campaign_ids: list[str],
             "all_runs_a20_ironclad": all_runs_a20_ironclad,
             "gameplay_terminal_runs": totals["gameplay_terminal_runs"],
             "all_runs_gameplay_terminal": all_runs_gameplay_terminal,
+            "expected_act1_bosses": sorted(expected_act1_bosses),
+            "act1_boss_runs_by_boss": {
+                boss: boss_runs[boss] for boss in sorted(expected_act1_bosses)
+            },
+            "act1_boss_reward_claims": sum(boss_reward_claims.values()),
+            "act1_boss_reward_claims_by_boss": {
+                boss: boss_reward_claims[boss]
+                for boss in sorted(expected_act1_bosses)
+            },
+            "all_act1_bosses_reward_claimed":
+                bool(all_act1_bosses_reward_claimed),
             "a20_modifier_rows": len(a20_rows),
             "a20_modifier_rows_tier2_covered": a20_rows_covered,
             "a20_modifiers_verified":
                 all_runs_a20_ironclad and a20_rows_covered == len(a20_rows),
             "seed_shortfall_to_2000": max(0, 2000 - distinct),
-            "strict_zero_diff_action_shortfall_to_1000000":
-                max(0, 1_000_000 - strict),
-            "g7_oracle_volume_met": distinct >= 2000 and strict >= 1_000_000
-                                     and not untriaged and not open_findings
-                                     and mixed_generators
-                                     and all_runs_a20_ironclad
-                                     and all_runs_gameplay_terminal
-                                     and a20_rows_covered == len(a20_rows),
+            "g7_oracle_evidence_met": distinct >= 2000
+                                       and not untriaged
+                                       and not open_findings
+                                       and mixed_generators
+                                       and all_runs_a20_ironclad
+                                       and all_runs_gameplay_terminal
+                                       and a20_rows_covered == len(a20_rows)
+                                       and all_act1_bosses_reward_claimed,
         },
         "diffs_per_million_captured_actions": {
             "state_divergence_runs": per_million(state_diff_count),
@@ -487,9 +534,8 @@ def markdown(report: dict[str, Any]) -> str:
         f"**{ev['seed_shortfall_to_2000']}**.",
         f"- Captured actions: **{ev['captured_actions']}**.",
         f"- Replay-clean actions: **{ev['replay_clean_actions']}**.",
-        f"- Strict zero-diff actions: **{ev['strict_zero_diff_actions']}**; "
-        f"shortfall to 1,000,000: "
-        f"**{ev['strict_zero_diff_action_shortfall_to_1000000']}**.",
+        f"- Strict zero-diff actions: **{ev['strict_zero_diff_actions']}** "
+        "(reported diagnostically; no action-count quota).",
         f"- Replay-recognized capture races: "
         f"**{ev['known_capture_race_records']} records across "
         f"{ev['known_capture_race_runs']} runs**; those runs are excluded "
@@ -504,13 +550,18 @@ def markdown(report: dict[str, Any]) -> str:
         f"{'YES' if ev['a20_modifiers_verified'] else 'NO'}**.",
         f"- Gameplay-terminal full-run attempts (death or Act-1 boss reward): "
         f"**{ev['gameplay_terminal_runs']} / {ev['distinct_seeds']}**.",
+        f"- Act-1 boss-reward claims: **{ev['act1_boss_reward_claims']}**; "
+        f"by boss: **" + ", ".join(
+            f"{boss}={ev['act1_boss_reward_claims_by_boss'][boss]}"
+            for boss in ev["expected_act1_bosses"]) + "**; all three met: **" +
+        f"{'YES' if ev['all_act1_bosses_reward_claimed'] else 'NO'}**.",
         f"- Untriaged findings: **{ev['untriaged_findings']}**. "
         "A finding counts as triaged only when an exact campaign/seed/"
         "classification disposition exists.",
         f"- Open findings: **{ev['open_findings']}**. An `open-*` disposition "
         "is reviewed but cannot satisfy the gate.",
-        f"- Oracle volume criterion met: **"
-        f"{'YES' if ev['g7_oracle_volume_met'] else 'NO'}**.",
+        f"- Oracle breadth/depth criterion met: **"
+        f"{'YES' if ev['g7_oracle_evidence_met'] else 'NO'}**.",
         "",
         "## Campaign inputs",
         "",

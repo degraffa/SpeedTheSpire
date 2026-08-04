@@ -281,66 +281,925 @@
       "seed": "STS401784",
       "status": "standing-deviation"
     },
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS402015","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS402072","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS402815","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS402852","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS403271","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS403429","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS403479","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS403498","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS403761","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS403945","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS404000","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS404056","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS404138","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS404140","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS404620","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS405809","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS405874","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS405111","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS405688","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS405717","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS406682","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS406737","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS406751","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS406763","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation; the separately proven counter reset is a replay-recognized Smoke-Bomb escape race.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS406808","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS407222","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS407381","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS407605","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS407711","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS407979","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS408083","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS408517","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS408677","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS408815","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS408898","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS409143","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS409642","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS410366","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS410404","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS410602","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS410822","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411202","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411361","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411502","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411617","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411694","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411802","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS411938","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS412075","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS412123","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS412424","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS412788","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS412843","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree; the separately proven counter reset is a replay-recognized Smoke-Bomb escape race.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS413052","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS413172","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS413197","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS413217","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is only Fairy in a Bottle's immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS413504","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS414014","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS405981","status":"standing-deviation"},
-    {"campaign_id":"g7_late_act1_b153_20260801_boss_min4_scan14k","classification":"state_divergence","note":"End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.","reference":"../stage-b-tasks.md#deferred-obligations","seed":"STS414142","status":"standing-deviation"}
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS402015",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS402072",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS402815",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS402852",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS403271",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS403429",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS403479",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS403498",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS403761",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS403945",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS404000",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS404056",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS404138",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS404140",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS404620",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS405809",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS405874",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS405111",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS405688",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS405717",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS406682",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS406737",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS406751",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS406763",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation; the separately proven counter reset is a replay-recognized Smoke-Bomb escape race.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS406808",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS407222",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS407381",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS407605",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS407711",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS407979",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS408083",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS408517",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS408677",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS408815",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS408898",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS409143",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS409642",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS410366",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS410404",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS410602",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS410822",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411202",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411361",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411502",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411617",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411694",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411802",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS411938",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS412075",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS412123",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS412424",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS412788",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS412843",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: non-race differences are only the Looter stolen-gold ordering and Fairy bottle fold-back belt-slot timing; HP and mechanics agree; the separately proven counter reset is a replay-recognized Smoke-Bomb escape race.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS413052",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS413172",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS413197",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS413217",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is only Fairy in a Bottle\u0027s immediate-capture versus simulator fold-back belt-slot timing; HP and mechanics agree.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS413504",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS414014",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS405981",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_late_act1_b153_20260801_boss_min4_scan14k",
+      "classification": "state_divergence",
+      "note": "End-to-end replay review: every non-race difference is gold-only during Looter combat, the already-decided stolen-gold ordering deviation.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS414142",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS325092",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 11 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS325500",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 6 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS325776",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 3 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS325796",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 4 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS325972",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 10 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS326200",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 2 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS326268",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 9 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS326376",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 14 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS326492",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 14 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS326864",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 6 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS326924",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 11 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS327264",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 12 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS327536",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 4 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS327676",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 9 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS327812",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 10 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328044",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328164",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 7 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328268",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 12 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328316",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 4 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328384",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328772",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328816",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 5 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328968",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 13 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS328976",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 3 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS329448",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS329464",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 12 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS329544",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 12 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS329656",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 10 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS330924",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 5 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS331152",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "The captured command overtook Entropic Brew\u0027s out-of-combat ObtainPotionEffects on the Neow reward screen: potion RNG agrees, but the live dump catches empty slots before asynchronous settlement while the simulator settles synchronously. This is the known obtain/capture-timing standing deviation, not a rules mismatch.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS331608",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 6 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS331992",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 3 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS332232",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 5 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS332276",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "The replay proves the recognized Smoke Bomb escape-settlement race at seq 46 with no pre-race difference; the next-floor reward command was injected before the capture settled the room transition, so the downstream reward/map state is incomparable. This is a capture artifact, not a rules mismatch.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS332332",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 10 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS332536",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 11 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS332680",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 9 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS332884",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 13 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333032",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 5 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333056",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 12 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333100",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 6 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333108",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 11 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333508",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 12 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333528",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS333584",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS334468",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 11 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS335168",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 14 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS335176",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 8 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS335220",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 13 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS335616",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 1 divergent record is gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS336072",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 5 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS336308",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 11 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS336592",
+      "status": "standing-deviation"
+    },
+    {
+      "campaign_id": "g7_random_parallel_b153_20260802_325000_336999.worker-001-of-004",
+      "classification": "state_divergence",
+      "note": "All 9 divergent records are gold-only reads during a Looter combat, exactly the already-decided stolen-gold ordering deviation; no other field differs.",
+      "reference": "../stage-b-tasks.md#deferred-obligations",
+      "seed": "STS336812",
+      "status": "standing-deviation"
+    }
   ]
 }

@@ -1,4 +1,4 @@
-# Stage B Design — Frozen Decisions (v0.1)
+# Stage B Design — Frozen Decisions (v0.1.11)
 
 **Status:** frozen. This document is the Stage B design deliverable from
 [InitialPlan.md](../InitialPlan.md) §Stage B (B.1–B.4), covering scope tier
@@ -806,13 +806,18 @@ divergence anywhere remains stop-the-line (InitialPlan A.4).
 
 Gate G7 (= InitialPlan milestone M4) requires **all** of:
 
-1. **≥ 1,000,000 oracle-diffed actions across ≥ 2,000 distinct seeds with
-   zero un-triaged state diffs** — full Act-1 A20 Ironclad runs (Neow through
-   boss-reward claim), mixed generators (§7.2). Sim-side self-replay fuzz
-   (≥ 10M actions, zero nondeterminism/asserts) runs in addition, not as a
-   substitute. If bridge throughput lands below the 5 actions/s floor, this
-   criterion must be amended by change-log entry with new math — it does not
-   silently shrink (§2.2).
+1. **Coverage-directed oracle evidence, with no raw action quota:** ≥ 2,000
+   distinct full-run A20 Ironclad attempts (Neow through death or boss-reward
+   claim), mixed generators (§7.2), zero un-triaged state diffs, and zero open
+   dispositions. A depth cohort must claim at least one Act-1 boss reward for
+   **each** BOSS encounter row in the §4.3 registry. In addition, every
+   campaign-discovered defect family recorded in
+   `tools/verify_report/g7_proactive_manifest.json` must retain multiple named,
+   registered, passing focused regressions; the executable audit is
+   `check_g7_proactive_coverage.py`. Captured, replay-clean, and strict
+   zero-diff action totals remain reported as diagnostics, never a threshold.
+   Sim-side self-replay fuzz (≥ 10M actions, zero nondeterminism/asserts) runs
+   in addition, not as a substitute.
 2. **100 % tier-2 registry coverage** — every registry row has its named
    passing test(s), counted against the §4.3 manifest; native branches
    included.
@@ -1324,3 +1329,26 @@ Continuing stage-a §10's numbering:
   pre-amendment campaigns retain their legacy one-instance resume path. No
   artifact/schema/registry/opcode value changes, and the G7 action/seed bar is
   unchanged.
+- v0.1.11 (2026-08-03) — G7 §8(1) replaces the one-million oracle-action
+  minimum with a coverage-directed breadth/depth bar. This is an explicitly
+  approved evidence amendment, not a mechanics change. The measured reason is
+  diminishing coverage yield: the last reviewed 5,000-run random prefix
+  produced 253,737 strict zero-diff actions, but 4,879 runs (97.58 %) died on
+  floors 1–7 and none claimed a boss reward. In contrast, the 175
+  simulator-selected late-Act-1 attempts claimed 23 rewards across all three
+  bosses (Slime Boss 10, The Guardian 7, Hexaghost 6). More uniform-random
+  actions would mostly repeat early-floor states while still undersampling the
+  lifecycle, singleton-RNG, nested-screen, and terminal branches where prior
+  campaigns found real defects.
+
+  The retained breadth bar is ≥2,000 distinct A20 seeds under mixed policies,
+  with zero untriaged or open findings. The new depth bar mechanically derives
+  the Act-1 BOSS rows from `encounters.yaml` and requires a boss-reward claim
+  for each. The proactive bar separately enumerates the six historical defect
+  families and binds each to multiple registered passing regressions through
+  `g7_proactive_manifest.json`; absent or failing tests make the audit fail.
+  The dashboard report format moves to v2, keeps all action totals visible,
+  and removes action shortfall/acceptance math. The ≥10M independent
+  simulator-replay soak, complete tier-2/A20 coverage, Tier-4 suite, and
+  throughput floors are unchanged. No artifact, engine schema, registry id, or
+  opcode changes.

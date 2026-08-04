@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import build_ci_corpus as corpus_builder
+import check_g7_proactive_coverage as proactive
 import generate_report as vr
 from ci_corpus_smoke import CorpusError, validate_archive
 
@@ -48,7 +49,8 @@ class VerifyReportTest(unittest.TestCase):
         self.temp.cleanup()
 
     def campaign(self, campaign_id="c1", seed="S1", classification="clean",
-                 artifact_hash=None, policy="random-legal"):
+                 artifact_hash=None, policy="random-legal", outcome="death",
+                 act_boss=None):
         directory = self.root / "campaigns" / campaign_id
         directory.mkdir(parents=True, exist_ok=True)
         artifact = directory / f"run_{seed}_a20_ironclad.jsonl"
@@ -62,13 +64,15 @@ class VerifyReportTest(unittest.TestCase):
                 "record_kind": "action",
                 "state_json": {
                     "nested": ["gid-cards", {"x": "gid-relics"}],
+                    **({"game_state": {"act_boss": act_boss}}
+                       if act_boss is not None else {}),
                 },
             }) + "\n",
             encoding="utf-8")
         digest = artifact_hash or vr.sha256_file(artifact)
         run = {
             "seed": seed, "actions": 7, "classification": classification,
-            "known_obtain_race_records": 0, "outcome": "death",
+            "known_obtain_race_records": 0, "outcome": outcome,
             "source_artifact": artifact.name,
             "source_artifact_sha256": digest,
         }
@@ -229,7 +233,7 @@ class VerifyReportTest(unittest.TestCase):
             self.root / "campaigns", ["c1"], self.coverage,
             self.dispositions, self.registry)
         self.assertFalse(report["g7_evidence"]["a20_modifiers_verified"])
-        self.assertFalse(report["g7_evidence"]["g7_oracle_volume_met"])
+        self.assertFalse(report["g7_evidence"]["g7_oracle_evidence_met"])
 
     def test_exact_duplicate_is_deduplicated_conflict_is_rejected(self):
         run = self.campaign("c1", "S1")
@@ -286,7 +290,89 @@ class VerifyReportTest(unittest.TestCase):
             "open-product-divergence")
         self.assertEqual(report["g7_evidence"]["open_findings"], 1)
         self.assertFalse(report["g7_evidence"]["zero_open_findings"])
-        self.assertFalse(report["g7_evidence"]["g7_oracle_volume_met"])
+        self.assertFalse(report["g7_evidence"]["g7_oracle_evidence_met"])
+
+    def test_action_total_is_diagnostic_not_a_gate_quota(self):
+        self.campaign()
+        report = vr.aggregate(
+            self.root / "campaigns", ["c1"], self.coverage,
+            self.dispositions, self.registry)
+        evidence = report["g7_evidence"]
+        self.assertEqual(evidence["strict_zero_diff_actions"], 7)
+        self.assertNotIn(
+            "strict_zero_diff_action_shortfall_to_1000000", evidence)
+        self.assertIn("no action-count quota", vr.markdown(report))
+
+    def test_depth_coverage_is_derived_from_registry_boss_rows(self):
+        encounter_path = self.registry / "encounters.yaml"
+        encounters = json.loads(encounter_path.read_text(encoding="utf-8"))
+        encounters[0].update({"act": 1, "pool": "BOSS"})
+        dump(encounter_path, encounters)
+        self.campaign(
+            outcome="act1_boss_reward", act_boss="gid-encounters")
+        report = vr.aggregate(
+            self.root / "campaigns", ["c1"], self.coverage,
+            self.dispositions, self.registry)
+        evidence = report["g7_evidence"]
+        self.assertEqual(evidence["expected_act1_bosses"], ["gid-encounters"])
+        self.assertEqual(
+            evidence["act1_boss_reward_claims_by_boss"],
+            {"gid-encounters": 1})
+        self.assertTrue(evidence["all_act1_bosses_reward_claimed"])
+
+    def test_dispositions_for_unselected_campaigns_are_not_stale(self):
+        self.campaign("selected", "S1")
+        dump(self.dispositions, {
+            "format": "STS-DIVERGENCE-DISPOSITIONS v1",
+            "items": [{
+                "campaign_id": "historical", "seed": "S9",
+                "classification": "state_divergence",
+                "status": "resolved", "reference": "history",
+                "note": "Not part of this aggregate.",
+            }],
+        })
+        report = vr.aggregate(
+            self.root / "campaigns", ["selected"], self.coverage,
+            self.dispositions, self.registry)
+        self.assertEqual(report["g7_evidence"]["untriaged_findings"], 0)
+
+    def test_proactive_manifest_requires_registered_passing_regressions(self):
+        manifest = {
+            "sources": ["docs/stage-b-design.md"],
+            "families": [{
+                "id": "family", "risk": "historical risk",
+                "regressions": [
+                    {"test": "Suite.Pass", "witness": "one"},
+                    {"test": "Suite.Missing", "witness": "two"},
+                ],
+            }],
+        }
+        report = proactive.evaluate(
+            manifest, {"Suite.Pass"}, {"Suite.Pass": True})
+        self.assertFalse(report["passed"])
+        self.assertTrue(report["families"][0]["regressions"][0]["passed"])
+        self.assertFalse(
+            report["families"][0]["regressions"][1]["registered"])
+
+    def test_proactive_manifest_requires_existing_historical_sources(self):
+        path = self.root / "proactive.json"
+        manifest = {
+            "format": proactive.FORMAT,
+            "sources": ["docs/stage-b-design.md"],
+            "families": [{
+                "id": "family", "risk": "historical risk",
+                "regressions": [
+                    {"test": "Suite.One", "witness": "one"},
+                    {"test": "Suite.Two", "witness": "two"},
+                ],
+            }],
+        }
+        dump(path, manifest)
+        self.assertEqual(proactive.load_manifest(path), manifest)
+        manifest["sources"] = ["docs/does-not-exist.md"]
+        dump(path, manifest)
+        with self.assertRaises(proactive.AuditError):
+            proactive.load_manifest(path)
 
     def test_committed_corpus_integrity_and_manifest_hash(self):
         corpus = vr.REPO / "tests" / "golden" / "oracle_corpus"
