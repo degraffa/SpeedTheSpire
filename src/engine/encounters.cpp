@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <utility>
 
 #include "sts/engine/rng_jdk.hpp"     // JdkRandom, jdk_shuffle (Collections.shuffle)
 #include "sts/engine/rng_stream.hpp"
@@ -226,6 +227,26 @@ void populate_first_strong(std::span<std::string_view> list, uint8_t& count,
     list[count++] = m;
 }
 
+// The weak-pool segment length (generateWeakEnemies(3)); index 3 is the
+// first-strong slot and everything past it is the strong pass.
+constexpr uint8_t kWeakSegment = 3;
+
+// The exclusion set generateExclusions keys on: the encounter sitting at
+// `list[index-1]` when the first-strong roll happens.
+std::span<const std::string_view> exclusions_from(
+    std::span<const std::string_view> list, uint8_t count) noexcept {
+    if (count == 0) {
+        return {};
+    }
+    const sts::registry::EncounterDef* last =
+        sts::registry::encounter_by_game_id(list[count - 1]);
+    if (last == nullptr) {
+        return {};
+    }
+    return std::span<const std::string_view>(last->excludes.data(),
+                                             last->exclude_count);
+}
+
 }  // namespace
 
 void generate_monster_lists(int32_t act, RngStream& mrng,
@@ -242,16 +263,8 @@ void generate_monster_lists(int32_t act, RngStream& mrng,
     // monster (monster_list.last()), then populateFirstStrongEnemy(exclusions),
     // then populateMonsterList(12).
     const uint8_t ns = build_pool(act, EncounterPool::STRONG, pool);
-    std::span<const std::string_view> excl{};
-    if (out.monster_list_count > 0) {
-        const sts::registry::EncounterDef* last =
-            sts::registry::encounter_by_game_id(
-                out.monster_list[out.monster_list_count - 1]);
-        if (last != nullptr) {
-            excl = std::span<const std::string_view>(last->excludes.data(),
-                                                     last->exclude_count);
-        }
-    }
+    const std::span<const std::string_view> excl =
+        exclusions_from(out.monster_list, out.monster_list_count);
     populate_first_strong(out.monster_list, out.monster_list_count,
                           {pool.data(), ns}, excl, mrng);
     populate_monster_list(out.monster_list, out.monster_list_count,
@@ -279,6 +292,79 @@ void generate_monster_lists(int32_t act, RngStream& mrng,
         jdk_shuffle(std::span<std::string_view>(out.boss_list.data(),
                                                 out.boss_list_count),
                     jr);
+    }
+}
+
+// --- Suffix continuation (see encounters.hpp for the Markov argument) --------
+
+void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
+                            uint8_t elite_keep, MonsterLists& lists) noexcept {
+    std::array<PoolEntry, 16> pool{};
+
+    // -- monster_list --------------------------------------------------------
+    const uint8_t monster_target = lists.monster_list_count;
+    if (monster_keep > monster_target) {
+        monster_keep = monster_target;
+    }
+    for (uint8_t i = monster_keep; i < monster_target; ++i) {
+        lists.monster_list[i] = std::string_view{};
+    }
+    lists.monster_list_count = monster_keep;
+
+    // Weak segment: whatever of [keep, 3) is still missing. populate_monster_list
+    // compares against the PRESERVED entries below the cursor, which is exactly
+    // the conditioning the Markov continuation needs.
+    const uint8_t nw = build_pool(act, EncounterPool::WEAK, pool);
+    const uint8_t weak_end = std::min(kWeakSegment, monster_target);
+    if (lists.monster_list_count < weak_end) {
+        populate_monster_list(
+            lists.monster_list, lists.monster_list_count, {pool.data(), nw},
+            static_cast<int32_t>(weak_end - lists.monster_list_count),
+            /*elites=*/false, rng);
+    }
+
+    const uint8_t ns = build_pool(act, EncounterPool::STRONG, pool);
+    // First strong (index 3): the exclusion-rejection loop, keyed on the third
+    // weak entry. Only runs when the cursor is standing exactly on that slot.
+    if (lists.monster_list_count == kWeakSegment &&
+        monster_target > kWeakSegment) {
+        populate_first_strong(
+            lists.monster_list, lists.monster_list_count, {pool.data(), ns},
+            exclusions_from(lists.monster_list, lists.monster_list_count), rng);
+    }
+    // Strong tail.
+    if (lists.monster_list_count < monster_target) {
+        populate_monster_list(
+            lists.monster_list, lists.monster_list_count, {pool.data(), ns},
+            static_cast<int32_t>(monster_target - lists.monster_list_count),
+            /*elites=*/false, rng);
+    }
+
+    // -- elite_list ----------------------------------------------------------
+    const uint8_t elite_target = lists.elite_list_count;
+    if (elite_keep > elite_target) {
+        elite_keep = elite_target;
+    }
+    for (uint8_t i = elite_keep; i < elite_target; ++i) {
+        lists.elite_list[i] = std::string_view{};
+    }
+    lists.elite_list_count = elite_keep;
+    const uint8_t ne = build_pool(act, EncounterPool::ELITE, pool);
+    if (lists.elite_list_count < elite_target) {
+        populate_monster_list(
+            lists.elite_list, lists.elite_list_count, {pool.data(), ne},
+            static_cast<int32_t>(elite_target - lists.elite_list_count),
+            /*elites=*/true, rng);
+    }
+}
+
+void condition_boss_list(MonsterLists& lists, RngStream& rng) noexcept {
+    // Uniform permutation of [1, count): Fisher-Yates downward, each swap
+    // partner drawn inclusively over the still-unfixed span.
+    for (int i = static_cast<int>(lists.boss_list_count) - 1; i > 1; --i) {
+        const int32_t j = random(rng, 1, static_cast<int32_t>(i));
+        std::swap(lists.boss_list[static_cast<std::size_t>(i)],
+                  lists.boss_list[static_cast<std::size_t>(j)]);
     }
 }
 

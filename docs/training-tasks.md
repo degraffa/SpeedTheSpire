@@ -134,7 +134,7 @@ one exists, mirroring the Stage B convention.
   the top card) — sound but weaker; T0.4/T0.6 must sample against the
   contract, not the mechanic.
 
-- **T0.4** `[ ]` **`resample_hidden` belief sampler.** Implements the plan
+- **T0.4** `[x]` **`resample_hidden` belief sampler.** Implements the plan
   §2.4 per-source table: draw permutation under KnowledgeState constraints
   (sampler-private RNG — zero engine-stream draws); encounter-suffix Markov
   continuation overwriting `RunController.lists`, boss list conditioned on
@@ -147,7 +147,20 @@ one exists, mirroring the Stage B convention.
   preserve/condition/fresh behavior asserted on constructed states); a
   particle stepped through a full combat + floor transition never touches
   the true seed (asserted via a poisoned-seed canary state); determinism:
-  same sampler seed → identical particle; presets green. **Log:** —
+  same sampler seed → identical particle; presets green. **Log:** 2026-08-03 —
+  landed. `resample_hidden` in `resample.hpp/.cpp` with a distinct
+  `SamplerRng` type so zero-engine-draw is type-checked; per-row coverage
+  incl. marker-shuffle draw permutation against the §2.2 contract,
+  Markov encounter-suffix continuation (`continue_monster_lists`),
+  boss-list conditioning, relic-remainder re-permutation (Girya-forced
+  canSpawn rejection verified), Match & Keep pin-and-permute, fresh
+  independent streams + fake run seed per particle. Poisoned-seed canary
+  replaces run_seed and all fourteen streams and demands byte-identical
+  particles through combat + reward + floor reseed. Six presets green.
+  Contract coarsenings declared at-site (relic membership under canSpawn;
+  Match & Keep miss-memory) — T0.6 must test the contract, not
+  seed-filtered reality; chest contents conditioned on the public size
+  band per §2.1.
 
 - **T0.5** `[ ]` **Leak-gate CI: twins + tripwire.**
   `make_hidden_twin(state, rng)` utility (permute draw suffix, reroll

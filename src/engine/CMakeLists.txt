@@ -116,6 +116,9 @@ add_library(sts_engine
     # PublicView -- the T0.1 public-information observation record
     # (public_view.hpp): the pull encoder beside legal_actions().
     public_view.cpp
+    # resample_hidden -- the T0.4 belief sampler (resample.hpp): the plan §2.4
+    # per-source table, drawn entirely from sampler-private randomness.
+    resample.cpp
 )
 
 target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)

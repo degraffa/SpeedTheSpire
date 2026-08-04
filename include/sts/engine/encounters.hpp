@@ -115,4 +115,43 @@ struct MonsterLists {
 void generate_monster_lists(int32_t act, RngStream& monster_rng,
                             MonsterLists& out) noexcept;
 
+// --- Suffix continuation (the belief sampler's encounter row) ----------------
+//
+// CONDITION, DON'T REROLL (training-plan §2.4). List generation is SEQUENTIAL
+// with last-one / last-two exclusions -- i.e. a Markov chain -- so the exact
+// conditional law of the unconsumed suffix given the observed prefix is "run
+// the same chain forward from where the prefix left off". This continues
+// `lists` past its first `monster_keep` / `elite_keep` entries with `rng`,
+// preserving the kept prefixes byte-for-byte and each list's original length,
+// and applying the SAME rules generate_monster_lists applies at each index:
+//   * indices [0,3)  -- WEAK pool, no immediate repeat, no A-B-A;
+//   * index 3        -- STRONG pool through the first-strong exclusion loop,
+//                       keyed on the third weak entry;
+//   * indices (3,16) -- STRONG pool, no immediate repeat, no A-B-A;
+//   * elites         -- ELITE pool, no immediate repeat only.
+// Because the rejection rules read only the one or two entries before the
+// cursor, a continuation from `keep` is exactly the run-start generation
+// conditioned on that prefix. `continue_monster_lists(act, rng, 0, 0, lists)`
+// on a list pair whose counts are the run-start lengths therefore reproduces
+// generate_monster_lists' two lists exactly, from an identically-positioned
+// stream -- the equivalence the sampler tests assert.
+//
+// A keep count larger than the list's length is clamped to it. The boss list
+// is NOT touched here (its conditional law is a different shape) -- see
+// condition_boss_list.
+void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
+                            uint8_t elite_keep, MonsterLists& lists) noexcept;
+
+// The boss list's own row: `boss_list[0]` is PUBLIC (the act boss is named on
+// the map from floor 1), and the run-start order is a uniform shuffle, so the
+// exact conditional law of the remainder given the observed head is a uniform
+// permutation of `boss_list[1..count)`. Preserves entry 0 and the multiset.
+//
+// Load-bearing for S2's A20 double boss, where a second entry is consumed; in
+// S1 only entry 0 is ever fought, so this row is about not LEAKING the rest.
+// The permutation is a plain Fisher-Yates over `rng` -- this is sampler-side
+// belief machinery, never a game-parity path, so it deliberately does not
+// reproduce Collections.shuffle.
+void condition_boss_list(MonsterLists& lists, RngStream& rng) noexcept;
+
 }  // namespace sts::engine

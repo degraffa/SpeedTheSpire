@@ -281,6 +281,13 @@ sts_add_test(piles_test)
 # Links sts_engine (knowledge.cpp + the pile/interp hook sites).
 sts_add_test(knowledge_test)
 
+# T0.4: resample_hidden -- the belief sampler (training-plan §2.4). One test
+# group per table row (preserve / condition / fresh), the Markov-continuation
+# equivalence for the encounter suffix, public-quantity preservation via
+# encode_public_view byte equality, sampler determinism, and the poisoned-seed
+# canary proving a particle is a function of (public state, sampler seed) alone.
+sts_add_test(resample_test)
+
 # A4.3: five skeleton cards + card-play flow (design doc §5.3, §9, §10 trap 10).
 # Per-card table tests (constructed state -> queue_card_play + pump -> assert
 # fields), the trap-10 dequeue-vs-enqueue random-target test, and a scripted
