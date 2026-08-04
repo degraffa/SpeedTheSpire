@@ -56,7 +56,7 @@ one exists, mirroring the Stage B convention.
 
 ## Phase T0 — Information layer, simulator repo (Gate GT0 = InitialPlan M6)
 
-- **T0.1** `[ ]` ∥ **PublicView: combat block + schema skeleton.** New
+- **T0.1** `[x]` ∥ **PublicView: combat block + schema skeleton.** New
   versioned POD `PublicView` and pull API
   `encode_public_view(const RunController&, PublicView&)` beside
   `legal_actions` (do not fatten `StepResult`). Combat section closes every
@@ -73,7 +73,16 @@ one exists, mirroring the Stage B convention.
   note (which changes are additive vs breaking) committed beside the
   header; unit tests cover a populated combat state incl. Runic Dome
   suppression parity with `encode_observation`; all six presets green.
-  **Log:** —
+  **Log:** 2026-08-03 — landed. `PublicView` v1 (3760 B POD, 24-slot power
+  lists, sorted draw multiset, reserved S2/S3 fields) +
+  `encode_public_view`; audit table + schema-evolution note in
+  [public-view-audit.md](public-view-audit.md) (both `flags` words audited
+  bit-by-bit, T0.2 rows pre-structured); 16 unit tests incl. Runic Dome
+  parity and draw-permutation byte-equality; six presets green
+  (`ctest -N` for the count). Open notes for T0.2: combat relic mirror is
+  deferred to the always-block; queues/`turn_has_ended` classified
+  derived-excluded pending the mask channel; `MonsterState.pad0` excluded
+  wholesale — revealed rolls arrive via T0.3 projection.
 
 - **T0.2** `[ ]` **PublicView: run phases + mask channel + knowledge
   projection.** Per-phase sections projecting the

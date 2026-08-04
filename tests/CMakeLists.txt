@@ -150,6 +150,14 @@ sts_add_test(state_test)
 # spot checks + zero-allocation check (TU-local counting operator new/delete).
 sts_add_test(observation_test)
 
+# T0.1: PublicView combat block + v1 schema skeleton (public_view.hpp): layout
+# walk (no implicit padding -- the struct is memcmp'd/hashed downstream),
+# populated-combat round trip incl. the ObsBuffer stub's gaps, draw-multiset
+# order invariance + hidden/transient non-leak checks, Runic Dome suppression
+# parity with encode_observation, full-overwrite + reserved-field zeroing, and
+# the zero-allocation check. Field audit: docs/public-view-audit.md.
+sts_add_test(public_view_test)
+
 # A3.1: action-queue pump + queue mechanics suite (design doc §5.1-§5.2, trap 9).
 # Links sts_engine, which now carries action_queue.cpp.
 sts_add_test(action_queue_test)
