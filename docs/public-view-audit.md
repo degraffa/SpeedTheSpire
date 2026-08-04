@@ -1,4 +1,4 @@
-# PublicView field audit — v1 (T0.1)
+# PublicView field audit — v2 (T0.1 + T0.2)
 
 The field-by-field completeness proof for `encode_public_view`
 ([../include/sts/engine/public_view.hpp](../include/sts/engine/public_view.hpp),
@@ -8,11 +8,17 @@ derivable by a perfect-memory player from the revealed action–observation
 history; the boundary hides RNG *realizations*, never rules.
 
 **How to read this file.** Every `CombatState` and `RunController` member has a
-row. The **Class** column is the information classification the T0.5
-total-byte tripwire consumes; the **v1** column says what T0.1's encoder does
-with it. T0.2 extends this table by filling the `T0.2` rows (run-phase screen
-structs, the always-block, the mask channel, the KnowledgeState projection) —
-the rows are already present so T0.2 edits statuses, it does not restructure.
+row, and — since T0.2 — so does every member of every transient struct
+`RunController` owns (§8), of the mask channel (§9) and of `KnowledgeState`
+(§10). The **Class** column is the information classification the T0.5
+total-byte tripwire consumes; the **v1** column says what the encoder does with
+it (the column keeps its name; a cell reading `→ field` is current as of v2).
+
+**Completeness is the deliverable, and it is not test-enforced.** A field this
+table forgets is *twin-invariant* — the T0.5 twin suite compares two states
+that both lack it, so it passes. Only this table catches an omission. The
+converse failure, carrying something hidden, IS caught by the twin suite, which
+is why the doubtful direction here is always "mask it and write down why".
 
 **Class vocabulary** (one value per row):
 
@@ -27,9 +33,9 @@ the rows are already present so T0.2 edits statuses, it does not restructure.
   that the player has not observed. Never carried raw.
 - `padding` — declared pad bytes; no information content.
 
-**v1 status vocabulary:** `→ field` (encoded now), `T0.2` (owed by T0.2's
-extension), `reserved` (a v1 zero-filled reserved field exists for it),
-`excluded` (deliberately not carried — the Notes say why).
+**v1 status vocabulary:** `→ field` (encoded now), `reserved` (a zero-filled
+reserved field exists for it), `excluded` (deliberately not carried — the Notes
+say why). No `T0.2` cell remains: the column is complete as of v2.
 
 Companion pieces at the bottom: the **flags bit audits** (both `flags` words
 are carried whole, so every allocated bit is classified) and the
@@ -65,12 +71,12 @@ are carried whole, so every allocated bit is classified) and the
 | `monster_count` | public | → `monster_count` | |
 | `combat_gold` | public | → `combat_gold` | Gold gains are displayed as they happen (Hand of Greed flare). |
 | `monsters[7]` | see §2 | → `monsters[7]` | Per-field classification in §2 (MonsterState). |
-| `action_queue[64]` + `action_head/tail/count` + `pad_actionq` | derived | excluded | Resolution transients. At every decision boundary their contents are a deterministic function of the observed public action history (the pump is deterministic given public plays); carrying them adds no information. The pending-screen context a consumer does need arrives through the mask channel (T0.2). |
+| `action_queue[64]` + `action_head/tail/count` + `pad_actionq` | derived | excluded | Resolution transients. At every decision boundary their contents are a deterministic function of the observed public action history (the pump is deterministic given public plays); carrying them adds no information. The pending-screen context a consumer does need arrives through the mask channel (§9) — `PublicView.ResolutionQueuesReachTheViewOnlyThroughTheMaskChannel` pins both halves: no queue byte reaches a data field, and a pending resolution DOES move the mask. |
 | `pre_turn_actions[16]` + `pre_turn_head/tail/count` | derived | excluded | Same as above; may be non-empty at WAITING_ON_USER (queued start-of-next-turn hooks), but every entry is the consequence of an observed play/trigger. |
 | `turn_has_ended` | derived | excluded | Pump bookkeeping; deterministic at every boundary. |
 | `card_queue[16]` + `card_queue_count` + `pad_cardq` | derived | excluded | Pending plays the player queued; deterministic from public history. |
 | `monster_queue[5]` + `monster_queue_count` + `monster_attacks_queued` | derived | excluded | Turn-order bookkeeping; deterministic from public state. |
-| `relics[40]` + `relic_count` | public | T0.2 | The combat relic mirror. Relics + displayed counters are the plan §2.1 always-block, owned by T0.2 — **T0.2 note:** while `combat_active`, encode from THIS live mirror, not `RunState.relics` (in-combat counter ticks, e.g. Kunai, live here until fold-back). |
+| `relics[40]` + `relic_count` | public | → `relics[40]`, `relic_count` | The combat relic mirror. Relics + displayed counters are the plan §2.1 always-block; while `phase == COMBAT` the encoder reads THIS live mirror, not `RunState.relics`, because in-combat counter ticks (Kunai, Ink Bottle) land here until the end-of-combat fold-back and the mirror is what the screen shows. Pinned by `PublicViewRun.RelicCountersComeFromTheCombatMirrorInCombat`. |
 | `pad_relics[7]` | padding | excluded | |
 | `monster_hp_rng` / `ai_rng` / `shuffle_rng` / `card_random_rng` / `misc_rng` | hidden | excluded | The five floor-scoped stream states are exactly the realizations the contract hides. Resampled by T0.4. |
 
@@ -167,22 +173,23 @@ does.
 | `run` | see §6 | — | Row-by-row in §6. |
 | `combat` | see §1 | → combat section | Encoded only while `phase == COMBAT` in v1 (`combat_active == 1`); zeroed otherwise. |
 | `phase` | public | → `run_phase` | Screen identity. |
-| `cur_x` | public | T0.2 | Own map position. |
-| `room_type` | public | T0.2 | The entered room's kind. |
-| `combat_outcome` | public | T0.2 | How the last combat ended — observed. |
-| `lists` (MonsterLists) | consumed prefix public / **suffix hidden** | T0.2 (prefix) | The consumed encounter prefix is plan §1 tracker state and encodes in T0.2; the unconsumed suffix is a realization — excluded, resampled by T0.4's Markov continuation. `boss_list[0]` is public from the map. |
-| `monster_cursor` / `elite_cursor` / `boss_cursor` | public | T0.2 | The consumed-prefix lengths. |
+| `cur_x` | public | → `cur_x` | Own map position (`kNeowColumn` at Neow). |
+| `room_type` | public | → `room_type` | The entered room's kind. |
+| `combat_outcome` | public | → `combat_outcome` | How the last combat ended — observed. |
+| `lists` (MonsterLists) | consumed prefix public / **suffix hidden** | → `monster_prefix` / `elite_prefix` / `boss_prefix` (prefix only) | Per-field rows in §8.7. The consumed prefix is plan §1 tracker state, carried as registry `EncounterDef.id`s; the unconsumed suffix is a monsterRng realization — excluded, resampled by T0.4's Markov continuation. `boss_list[0]` is carried regardless of the cursor: the act boss is public from the map screen. `PublicViewRun.EncounterSuffixDoesNotLeak`. |
+| `monster_cursor` / `elite_cursor` / `boss_cursor` | public | → same names | The consumed-prefix lengths. The encounter the player is currently INSIDE is carried separately as `current_encounter_id` (revealed by room entry; the cursor still points at it, since it advances on room exit). |
 | `pad1` | padding | excluded | |
-| `emerald_x` / `emerald_y` | public | T0.2 | The burning-elite node is drawn on the map. |
+| `emerald_x` / `emerald_y` | public | → `emerald_x` / `emerald_y` | The burning-elite node is drawn on the map. |
 | `pad_emerald[2]` | padding | excluded | |
-| `rewards` (RewardScreen) | public (post-assembly) | T0.2 | Direct projection of the open reward screen. Assembled contents are revealed when the screen opens. |
-| `rest` (RestSiteState) | public | T0.2 | Screen projection. |
-| `shop` (ShopState) | public | T0.2 | Current-visit stock is public once the floor is entered (plan §2.4 table). |
-| `treasure_chest` (TreasureChest) | **contents hidden pre-open** / size public | T0.2 | The one masking trap named by plan §2.1: contents roll at construction; pre-open the player sees chest size only. T0.2 masks until the open action. |
-| `event` (EventDialogState) | public | T0.2 | Open dialog projection; Match & Keep hidden board state is a T0.4 sampler row. |
-| `neow` (NeowState) | public | T0.2 | The rolled options are displayed. |
-| `pending_bottle` | public | T0.2 | The modal overlay is on screen. |
+| `rewards` (RewardScreen) | public **while on screen** | → `rewards` (§8.1) | Gated on the screen actually being up (COMBAT_REWARD, or Neow's ITEM_REWARD), never on the struct being non-empty: Dead Adventurer loads this struct with the rewards the player never searched out and THEN starts its combat, so an emptiness gate would hand over unrevealed rolls. `PublicViewScreens.RewardScreenIsNotEncodedWhileItIsNotOnScreen`. |
+| `rest` (RestSiteState) | public | → `rest_screen` (§8.2) | Only the screen id is stored; the campfire's option list is rebuilt per call and reaches the consumer through the mask (§9). |
+| `shop` (ShopState) | public | → `shop` (§8.3) | Current-visit stock is public once the floor is entered (plan §2.4 table); gated on `phase == SHOP` so a left shop's stale stock does not follow the player. |
+| `treasure_chest` (TreasureChest) | **contents hidden pre-open** / size public | → `chest_*` (§8.4) | The one masking trap named by plan §2.1: contents roll at construction; pre-open only the chest SIZE is carried. The `PublicViewChest.*` tests pin the reveal timing and the pre-open byte-equality. |
+| `event` (EventDialogState) | mixed — see §8.5 | → `event` (§8.5) | Per-event scratch publicity plus a masked Match & Keep board; the board's unflipped identities are the plan §2.4 sampler row. |
+| `neow` (NeowState) | public | → `neow` (§8.6) | The rolled options are displayed. |
+| `pending_bottle` | public | → `pending_bottle` | The modal overlay is on screen. |
 | `pad2[3]` | padding | excluded | |
+| `knowledge` (KnowledgeState) | public (a record OF public reveals) | → projection (§10) | Never carried raw — its chain holds pool indices, which are engine bookkeeping. Projected as per-draw-slot order-constraint annotations plus the revealed monster construction rolls. |
 
 ## 6. RunState → PublicView
 
@@ -190,30 +197,30 @@ does.
 |---|---|---|---|
 | `kSchemaVersion` | — | excluded | Compile-time constant. |
 | `run_seed` | **hidden** | excluded | Explicitly hidden by plan §2.6b — knowing it is seed-cracking. |
-| `master_deck[128]` + `master_deck_count` | public | T0.2 | Always-block: master deck as multiset. |
-| `hp` / `max_hp` | public | T0.2 | Always-block. |
+| `master_deck[128]` + `master_deck_count` | public | → `master_deck[128]`, `master_deck_count` | Always-block. Carried in ENGINE ORDER, not sorted: unlike the draw pile this order is not a hidden realization (it is the fold of observed acquisitions), and it is the index space the mask's `can_choose_master_deck[]` addresses — sorting would desynchronize the observation from the action space. Plan §2.1's word "multiset" is about *content*, which is complete either way. |
+| `hp` / `max_hp` | public | → `run_hp` / `run_max_hp` | Always-block. Separate fields from the combat block's `player_hp`, which is zero outside combat. |
 | `pad_gold_align` | padding | excluded | |
-| `gold` | public | T0.2 | Always-block. |
-| `ascension` | public | T0.2 | Always-block. |
-| `act` | public | reserved (`act_reserved`) | Constant 1 in S1; the reserved field is populated when S2 lands (additive — see the note below). |
-| `floor` | public | T0.2 | Always-block. |
-| `relics[40]` + `relic_count` | public | T0.2 | Always-block: relics with displayed counters (see the §1 mirror note for in-combat reads). |
+| `gold` | public | → `gold` | Always-block. |
+| `ascension` | public | → `ascension` | Always-block. |
+| `act` | public | → `act_reserved` | POPULATED from v2 (1..4). The declared reader rule stands: a record with `public_view_version < 2` reads 0 and maps to act 1, exact for S1 data. |
+| `floor` | public | → `floor` | Always-block. |
+| `relics[40]` + `relic_count` | public | → `relics[40]`, `relic_count` | Always-block: relics with displayed counters. The source is the §1 combat MIRROR while `phase == COMBAT`, this array otherwise. |
 | `pad_relic` | padding | excluded | |
 | `potions[5]` | public | → `potions[5]` | The belt, public in every phase. |
-| `map[105]` | public | T0.2 | Always-block: full current-act map incl. the emerald node. |
-| `boss_ids[4]` | public | T0.2 | The act boss's identity is displayed on the map screen. |
-| `keys` | public | reserved (`keys_reserved`) | Exists today (kKey* bits); zero through S1/S2-pre-keys. Population is additive. |
+| `map[105]` | public | → `map[105]` | Always-block: the full current-act map (room kind + edge bitfield per node). The burning-elite node is the `emerald_x`/`emerald_y` pair, drawn on the same screen. |
+| `boss_ids[4]` | public | → `boss_ids[4]` | The act boss's identity is displayed on the map screen. |
+| `keys` | public | → `keys_reserved` | POPULATED from v2: the bits exist and have a live S1 writer (the campfire's Recall sets the ruby key). Zero in a v1 record already MEANS "no keys", so the reinterpretation is exact. |
 | `pad_keys` | padding | excluded | |
-| `event_flags` / `shop_flags` | public | T0.2 | One-shot *fired* bitsets — the fires were observed. |
-| `card_blizz_randomizer` / `blizzard_potion_mod` | public | T0.2 | Plan §1: pity counters are tracker state, encoded verbatim. |
-| `event_pity_monster` / `event_pity_shop` / `event_pity_treasure` | public | T0.2 | Same. |
-| `purge_cost` | public | T0.2 | Displayed in every shop. |
+| `event_flags` / `shop_flags` | public | → same names | One-shot *fired* bitsets — the fires were observed. |
+| `card_blizz_randomizer` / `blizzard_potion_mod` | public | → same names | Plan §1: pity counters are tracker state, encoded verbatim. |
+| `event_pity_monster` / `event_pity_shop` / `event_pity_treasure` | public | → same names | Same; carried as `float`, the storage width, so no rounding is introduced. |
+| `purge_cost` | public | → `purge_cost` | Displayed in every shop. |
 | `potion_slots` | public | → `potion_slot_count` | |
 | `pad_potion_slots` | padding | excluded | |
-| `event_membership` / `special_membership` / `shrine_membership` | public | T0.2 | Remaining-pool membership: initial lists are public rules, removals were observed. |
+| `event_membership` / `special_membership` / `shrine_membership` | public | → same names | Remaining-pool membership: initial lists are public rules, removals were observed. |
 | `pad_membership` | padding | excluded | |
 | `relic_pools[5][48]` | **hidden** (unrevealed window) | excluded | The remaining order/composition of each tier's `[0, count)` window is a shuffle realization. Resampled by T0.4 (with the pop-time canSpawn corner cases). Observed pops are public via `relics[]`. |
-| `relic_pool_count[5]` | derived | excluded | Initial tier size (public rule) minus observed pops; carrying it would add nothing and T0.2 may still choose to surface it as a convenience — that would be an additive change. |
+| `relic_pool_count[5]` | derived | excluded | Initial tier size (public rule) minus observed pops. T0.2 declined the convenience copy: it is exactly re-derivable, and every carried byte is one the twin suite and the tripwire must keep honest. Surfacing it later remains an additive change. |
 | `pad_relic_pools[3]` / `pad_rng_align[6]` | padding | excluded | |
 | `monster_rng` … `neow_rng` (9 streams) | hidden | excluded | Run-/act-/event-scoped stream states are realizations. Resampled fresh by T0.4. |
 
@@ -224,9 +231,183 @@ does.
 | `public_view_version` | constant | `PUBLIC_VIEW_VERSION` at encode time. |
 | `combat_active` | derived | `rc.phase == COMBAT`. |
 | `monsters[i].occupied` | derived | `i < monster_count`. |
-| `boss_relic_choice_reserved[3]` | reserved | S2 boss-chest relic screen (zero in v1). |
-| `second_boss_reserved` | reserved | S2 A20 double-boss slot (zero in v1). |
-| `pad_tail[3]` | padding | Always zero. |
+| `boss_relic_choice_reserved[3]` | reserved | S2 boss-chest relic screen (still zero in v2). |
+| `second_boss_reserved` | reserved | S2 A20 double-boss slot (still zero in v2). |
+| `pad_tail[3]` | padding | Always zero. Retained as a member at its v1 offset — the v2 tail appends *after* it, so no v1 offset moves. |
+| `current_encounter_id` | derived | The encounter of the room being occupied, resolved from `lists` + the matching cursor while in COMBAT / COMBAT_REWARD. 0 for event combats (their monsters are on screen in the combat section) and outside such a room. |
+| `rewards.active` / `shop.active` / `event.active` / `neow.active` | derived | 1 iff that screen is the one on screen. Zero elsewhere is the declared "not present" value the additive-append rule requires. |
+| `event.scratch_public_mask` | derived | Which `scratch[i]` words this event declares public (§8.5). Carried so a consumer can tell "zero because masked" from "zero because zero". |
+| `event.board[i].revealed` | derived | Whether a Match & Keep slot's identity is public (§8.5). |
+| `draw_constraint_rank[]` / `draw_exact_pos[]` | derived (from KnowledgeState) | §10. |
+| `action_mask.pad_end[]` | padding | Always zero; rounds the record back to 4-byte alignment so `PublicView` itself carries no compiler-inserted bytes. |
+
+## 8. RunController transient structs → PublicView (T0.2)
+
+Every struct `RunController` owns by value gets a member-level table here. The
+shared rule for all of them: **a screen section is encoded only while that
+screen is on screen.** A transient struct is not cleared the moment its screen
+closes, and worse, one of them is *filled ahead of time* — so "non-empty"
+is not a safe gate and phase is.
+
+### 8.1 RewardScreen / RunRewardItem → `PvReward` / `PvRewardItem`
+
+Gate: `phase == COMBAT_REWARD`, or `phase == NEOW && neow.screen == ITEM_REWARD`.
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `RewardScreen.items[8]` | public while on screen | → `rewards.items[8]` | Per-field below. |
+| `RewardScreen.count` | public | → `rewards.count` | |
+| `RewardScreen.open_card_item` | public | → `rewards.open_card_item` | Which CARD row's pick screen is up (`kNoOpenCardReward` when none). |
+| `RewardScreen.pad[2]` | padding | excluded | |
+| `RunRewardItem.gold` / `bonus_gold` | public | → same names | Rolled at assembly, printed on the row (Golden Idol's bonus included). |
+| `RunRewardItem.id` | public | → `id` | RelicId / PotionId of the row. |
+| `RunRewardItem.card_ids[4]` | public | → `card_ids[4]` | The card offer; revealed with the screen. |
+| `RunRewardItem.card_upgrades[4]` | public | → `card_upgrades[4]` | |
+| `RunRewardItem.kind` | public | → `kind` | RewardItemKind. |
+| `RunRewardItem.card_count` | public | → `card_count` | |
+
+### 8.2 RestSiteState → `rest_screen`
+
+Gate: `phase == REST_SITE`.
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `screen` | public | → `rest_screen` | RestScreen (menu / Smith / Toke / Dream Catcher). |
+| `pad[3]` | padding | excluded | |
+
+`RestMenu` / `RestOptionEntry` are **not** `RunController` state — the campfire
+menu is rebuilt from relics and run state on every `legal_actions` call. Its
+information therefore reaches the consumer through §9's mask
+(`can_choose_rest[]`), which is the case plan §2.1 introduces the channel for.
+
+### 8.3 ShopState / ShopSlot → `PvShop` / `PvShopSlot`
+
+Gate: `phase == SHOP`.
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `colored[5]` / `colorless[2]` / `relics[3]` / `potions[3]` | public | → same names | The whole visit's stock is built on room entry and drawn with prices (plan §2.4: "current-visit shop stock … public — copy"). |
+| `sale_index` | public | → `sale_index` | The sale tag is rendered on its shelf. |
+| `screen` | public | → `screen` | ShopScreenKind (floor vs purge grid). |
+| `purge_available` | public | → `purge_available` | |
+| `pad` / `pad2` | padding | excluded | |
+| `actual_purge_cost` | public | → `actual_purge_cost` | This visit's price, displayed on the service. |
+| `ShopSlot.id` | public | → `id` | `kShopRestockedUnknownCard` is itself public: the Courier's one unmodelled restock slot holds a card that IS on the shelf whose identity this engine cannot name (shop.hpp's Courier block). |
+| `ShopSlot.price` | public | → `price` | Post-discount, as shown. |
+| `ShopSlot.sold` | public | → `sold` | |
+| `ShopSlot.upgrade` | public | → `upgrade` | The eggs' preview upgrade is on the card the player sees. |
+| `ShopSlot.pad[2]` | padding | excluded | |
+
+### 8.4 TreasureChest → `chest_*` (the masked one)
+
+Gate: `phase == TREASURE_ROOM || phase == COMBAT_REWARD` (opening moves the
+controller to the reward screen with the chest record retained; skipping or
+proceeding zeroes it).
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `size` | public | → `chest_size` | The chest model on the floor tells the player its size before any interaction. |
+| `relic_tier` | **hidden until opened** | → `chest_relic_tier` (0 pre-open) | `AbstractChest.randomizeReward` rolls the contents at CONSTRUCTION, i.e. on room entry (treasure_rooms.hpp); the player learns them only from the open action. |
+| `has_gold` | **hidden until opened** | → `chest_has_gold` (0 pre-open) | Same roll. |
+| `opened` | public | → `chest_opened` | The player performed the action. |
+
+### 8.5 EventDialogState / EventBoardCard → `PvEvent` / `PvEventBoardCard`
+
+Gate: `phase == EVENT_DIALOG || phase == ROOM_UNIMPLEMENTED` (a resolved event
+with no implemented body parks there with its selection committed, and the
+player is standing in that room, so the id is public).
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `event_id` | public | → `event.event_id` | Which event the room resolved to. |
+| `screen` | public | → `event.screen` | The page the dialog is on. |
+| `grid_kind` | public | → `event.grid_kind` | Which card grid is open. |
+| `scratch0..3` | **mixed, per event** | → `event.scratch[4]` under `scratch_public_mask` | See the table below. |
+| `board[12]` | **mixed** | → `event.board[12]` | Per-field below. |
+| `EventBoardCard.card_id` / `upgrade` | **hidden until revealed** | → same, 0 unless `revealed` | The twelve cards are dealt FACE DOWN from a miscRng shuffle. |
+| `EventBoardCard.taken` | public | → `taken` | A matched pair visibly leaves the board. |
+
+**Per-event scratch publicity** (`event_scratch_public_mask`, public_view.cpp).
+The switch there has no `default:`, so a new `EventId` is a diagnostic at the
+site that must classify it rather than inheriting somebody else's answer.
+
+| Event | Mask | Why |
+|---|---|---|
+| `DEAD_ADVENTURER` | `0` | `scratch0` packs a miscRng JDK shuffle of {gold, nothing, relic} plus the search count; `scratch1` names the elite the fight will spring. Both are rolled at ROOM ENTRY and neither is on screen — the reward order is revealed one search at a time, the elite only when the fight starts. The search-count bits *are* public but are exactly derivable from the observed presses, so the word is masked rather than carried under a per-event transform. |
+| every other event | `0x0F` | The word is either never written (reads zero) or holds a number the dialog prints: Scrap Ooze's ramping chance/damage, World of Goop's gold, FaceTrader's gold/HP offer, We Meet Again's three offers, Match and Keep's attempts-left and currently-flipped slot. |
+
+**Known coarsening (T0.4 owns it).** A perfect-memory player also remembers the
+identities of a MISSED Match-and-Keep pair, which the game flips back face
+down. The engine keeps no record of past flips, so the view under-informs there
+rather than leaking. Widening it needs a per-slot "seen" latch in the event
+body — which is exactly plan §2.4's "pin revealed flips, permute the rest"
+sampler row.
+
+### 8.6 NeowState → `PvNeow`
+
+Gate: `phase == NEOW`.
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `option_type[4]` | public | → `neow.option_type[4]` | The four rolled blessings are the screen. |
+| `option_drawback[4]` | public | → `neow.option_drawback[4]` | Printed under their options. |
+| `grid_picked[3]` | public | → `neow.grid_picked[3]` | The player's own picks, in pick order. |
+| `hp_bonus` | public | → `neow.hp_bonus` | Frozen at blessing time from public max HP. |
+| `screen` | public | → `neow.screen` | NeowScreen. |
+| `chosen` | public | → `neow.chosen` | The player's own choice. |
+| `grid_mode` / `grid_needed` / `grid_done` | public | → same names | The open grid's terms. |
+| `pad` | padding | excluded | |
+
+### 8.7 MonsterLists → prefix arrays
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `monster_list[16]` | prefix public / suffix **hidden** | → `monster_prefix[16]` for `i < monster_cursor` | Entries are registry encounter keys; carried as `EncounterDef.id`. |
+| `elite_list[10]` | same | → `elite_prefix[10]` for `i < elite_cursor` | |
+| `boss_list[3]` | same, plus `[0]` always | → `boss_prefix[3]` | `boss_list[0]` is public from the map screen from act start, so it is carried whether or not the cursor has passed it. |
+| `monster_list_count` / `elite_list_count` / `boss_list_count` | **hidden** | excluded | The generated list LENGTH is a property of the unrevealed suffix, not of anything observed; the cursors are the public counts. |
+
+## 9. RunActionMask / ActionMask → the mask channel
+
+Plan §2.1: *"The legal-action mask is an observation channel. A legality bit
+computed from hidden state is a leak the observation-equality test cannot
+catch."* The bytes are therefore a MEMBER of `PublicView` (`action_mask.mask`),
+not a parallel object a consumer might hash and forget.
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| every `RunActionMask` field | derived | → `action_mask.mask` (whole struct, byte for byte) | Filled by `legal_actions(rc, ...)` at encode time. Nothing here is classified individually **on purpose**: the point of carrying the bytes is that whether each bit is truly derivable from public state becomes a *tested* property (T0.5's twin-invariant-mask requirement) instead of a reviewed one. |
+| `ActionMask combat` (nested) | derived | → same | Ditto for the delegated in-combat mask. |
+| `PvMask.pad_end[]` | padding | always zero | Alignment only. |
+
+`RunActionMask` is all `bool`/`uint8` today, so `alignof` is 1 and it has no
+implicit padding; a `static_assert` in public_view.hpp fails if that changes,
+because a padded mask would put indeterminate bytes into a hashed record.
+
+## 10. KnowledgeState → PublicView (the projection)
+
+`KnowledgeState` (knowledge.hpp) is a record OF public reveals, so nothing in it
+is hidden — but it cannot be carried raw, because its chain holds
+`CardPoolIndex` values, and pool indices are engine bookkeeping rather than
+information (the same reason §1 excludes `card_pool`). It is projected instead.
+
+| Member | Class | v1 | Notes |
+|---|---|---|---|
+| `chain[128]` | public (as constraints) | → `draw_constraint_rank[128]` / `draw_exact_pos[128]` | The draw pile is encoded as a canonically SORTED multiset, so order knowledge cannot be expressed by rearranging it — unsorting would put the hidden arrangement straight back into the bytes. It is expressed as two annotations parallel to `draw[]`: the 1-based rank of that card in the known relative-order chain, and its 1-based exact from-top position where it has one. The projection walks the chain top-first and binds each entry to the lowest not-yet-annotated sorted slot holding that card VALUE; identical values are interchangeable under a multiset encoding, so the tie-break is canonical. |
+| `chain_count` | public | → `knowledge_chain_count` | |
+| `exact_prefix` | public | → `knowledge_exact_prefix` | How many leading chain entries are position-exact. |
+| `full_order` | public | → `knowledge_full_order` | Frozen Eye. Under it every slot carries an exact position, which reconstructs the true order exactly — pinned by `PublicViewKnowledge.FrozenEyeFullOrderRoundTrips`. |
+| `monster_roll_known[7]` | public | → `monster_roll_known[7]` | |
+| `monster_roll[7]` | public **iff known** | → `monster_roll[7]` (0 when not known) | The declared reveal channel for `MonsterState.pad0`, which stays excluded wholesale (§2). |
+| `pad0` / `pad1[2]` | padding | excluded | |
+
+The projection runs only while `phase == COMBAT`: knowledge is combat-scoped
+(reset by `enter_combat`) and its annotations index the combat section's draw
+pile, which is zero in every other phase.
+
+These are the plan §3.1 order-constraint flags the training repo's card token
+reads. They are also the field class this audit exists for: an omitted
+constraint flag is twin-invariant, so no later test class would have caught it.
 
 ---
 
@@ -284,4 +465,29 @@ lifecycle rule; no in-place reinterpretation exists):
 
 **Version log:**
 
-- v1 — T0.1: combat block + v1 skeleton (this initial layout, 3760 bytes).
+- v1 — T0.1: combat block + v1 skeleton (the initial layout, 3760 bytes).
+- v2 — T0.2: run always-block, per-phase screen sections, the RunActionMask
+  channel and the KnowledgeState projection. **ADDITIVE.** Classified against
+  the two rules it uses:
+  - *Case 2 (tail append).* Every new field sits after the v1 `pad_tail`, so
+    every v1 offset holds — `PublicViewLayout.V2TailHasNoImplicitPadding`
+    asserts `offsetof(PublicView, gold) == 3760` precisely so that a future
+    edit that would break this stops being silent. `sizeof` grows 3760 → 6032.
+    The declared "not present" value of every appended field is **zero**, and
+    it is a truthful reading of a v1 record in each case: a zero `*.active`
+    byte means "that screen section is absent", a zero
+    `draw_constraint_rank[i]` means "no order constraint known", a zero
+    `chest_size` means "no chest", a zero `current_encounter_id` means "not in
+    a list-drawn combat room", and a zeroed `action_mask` means "mask not
+    carried" (v1 readers never had one). Reserved fields keep the meanings
+    already declared for them.
+  - *Case 1 (populating a reserved field).* `keys_reserved` and `act_reserved`
+    now carry `RunState.keys` and `RunState.act`. Both reinterpretations of a
+    v1 record are exact, per the existing case-1 text.
+  - Two decisions recorded here because a later reader will otherwise re-litigate
+    them: the **master deck is carried in engine order** (its order is public
+    and it is the mask's index space — see §6), and the **mask is embedded
+    rather than parallel** (§9), which makes `sizeof(RunActionMask)` part of
+    this schema. That is deliberate: a mask that grows is a public-view change
+    and gets reviewed like one, which is why public_view.hpp pins the total
+    size to a literal as well as to a formula.

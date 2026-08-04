@@ -84,7 +84,7 @@ one exists, mirroring the Stage B convention.
   derived-excluded pending the mask channel; `MonsterState.pad0` excluded
   wholesale — revealed rolls arrive via T0.3 projection.
 
-- **T0.2** `[ ]` **PublicView: run phases + mask channel + knowledge
+- **T0.2** `[x]` **PublicView: run phases + mask channel + knowledge
   projection.** Per-phase sections projecting the
   reward/shop/event/Neow/rest/treasure screen structs; `TreasureChest`
   contents masked until opened (size only); `RunActionMask` bytes included
@@ -102,7 +102,20 @@ one exists, mirroring the Stage B convention.
   in chest contents is byte-identical pre-open, (d) a Headbutt-known top
   card and a Frozen-Eye full-order state each round-trip their constraints
   through `encode_public_view`; audit table extended to every RunController
-  transient struct; presets green. **Log:** —
+  transient struct; presets green. **Log:** 2026-08-03 — landed.
+  `PublicView` v2 (additive tail-append, 6032 B, v1 offsets pinned by
+  test): always-block incl. full act map + emerald node, per-phase screens
+  gated on *on-screen* (not non-empty — Dead Adventurer pre-stocks
+  `rc.rewards`), `PvMask` embedded by value so the mask cannot be dropped
+  from the hash, knowledge projection as per-slot constraint ranks
+  parallel to the sorted draw multiset. Two unbriefed leaks found and
+  masked: per-event `EventDialogState.scratch` publicity (Dead Adventurer
+  packs its loot shuffle + elite id there at room entry) and Match & Keep
+  face-down board ids. Master deck deliberately carried in engine order —
+  it is the index space `can_choose_master_deck[]` addresses. Audit
+  extended (§8 transients / §9 mask / §10 knowledge). Six presets green.
+  Note for T0.5: `make_hidden_twin` must NOT perturb resolution queues or
+  `turn_has_ended` (derived, mask-moving — not twin material).
 
 - **T0.3** `[x]` ∥ **KnowledgeState + observability transforms.** In-engine
   draw-position knowledge with **relative order constraints** (not absolute
