@@ -230,6 +230,39 @@ void encode_knowledge(const CombatState& s, const KnowledgeState& k,
         case sts::registry::EventId::WE_MEET_AGAIN:
         case sts::registry::EventId::THE_WOMAN_IN_BLUE:
             return 0x0Fu;
+
+        // S2.02's twenty Act-2/3 eventList rows (registry/events.yaml ids
+        // 32-51). They are IDENTITY ROWS: no body is linked, so nothing ever
+        // writes their scratch and it reads zero whichever answer this switch
+        // gives. Masked rather than carried because that is the only choice
+        // that stays correct if a body lands WITHOUT revisiting this site --
+        // Mind Bloom's boss shuffle and Cursed Tome's book draw are exactly
+        // the Dead-Adventurer shape (a miscRng realization parked at entry and
+        // not on screen), and a leak here is invisible to every downstream
+        // twin test. S2.31-S2.33 own the reclassification: a body that parks a
+        // DISPLAYED number moves its id up into the 0x0F group above, with the
+        // same one-line justification the rows there carry.
+        case sts::registry::EventId::ADDICT:
+        case sts::registry::EventId::BACK_TO_BASICS:
+        case sts::registry::EventId::BEGGAR:
+        case sts::registry::EventId::COLOSSEUM:
+        case sts::registry::EventId::CURSED_TOME:
+        case sts::registry::EventId::DRUG_DEALER:
+        case sts::registry::EventId::FORGOTTEN_ALTAR:
+        case sts::registry::EventId::GHOSTS:
+        case sts::registry::EventId::MASKED_BANDITS:
+        case sts::registry::EventId::NEST:
+        case sts::registry::EventId::THE_LIBRARY:
+        case sts::registry::EventId::THE_MAUSOLEUM:
+        case sts::registry::EventId::VAMPIRES:
+        case sts::registry::EventId::FALLING:
+        case sts::registry::EventId::MIND_BLOOM:
+        case sts::registry::EventId::THE_MOAI_HEAD:
+        case sts::registry::EventId::MYSTERIOUS_SPHERE:
+        case sts::registry::EventId::SENSORY_STONE:
+        case sts::registry::EventId::TOMB_OF_LORD_RED_MASK:
+        case sts::registry::EventId::WINDING_HALLS:
+            return 0;
     }
     // An id outside the generated enum (tests use kSyntheticEventId): carry
     // nothing. Masking is the safe direction -- it under-informs, it cannot

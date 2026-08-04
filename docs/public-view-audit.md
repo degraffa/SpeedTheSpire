@@ -349,8 +349,9 @@ site that must classify it rather than inheriting somebody else's answer.
 
 | Event | Mask | Why |
 |---|---|---|
+| the twenty Act-2/3 `eventList` rows (S2.02, ids 32-51) | `0` | Identity rows: no body is linked, so nothing writes their scratch and it reads zero either way. Masked because that is the answer that stays correct if a body lands without revisiting the switch — Mind Bloom's boss shuffle and Cursed Tome's book draw are the Dead-Adventurer shape, and a leak here is invisible to every downstream twin test. S2.31–S2.33 reclassify per body. |
 | `DEAD_ADVENTURER` | `0` | `scratch0` packs a miscRng JDK shuffle of {gold, nothing, relic} plus the search count; `scratch1` names the elite the fight will spring. Both are rolled at ROOM ENTRY and neither is on screen — the reward order is revealed one search at a time, the elite only when the fight starts. The search-count bits *are* public but are exactly derivable from the observed presses, so the word is masked rather than carried under a per-event transform. |
-| every other event | `0x0F` | The word is either never written (reads zero) or holds a number the dialog prints: Scrap Ooze's ramping chance/damage, World of Goop's gold, FaceTrader's gold/HP offer, We Meet Again's three offers, Match and Keep's attempts-left and currently-flipped slot. |
+| every other event (the S1 Act-1 rows) | `0x0F` | The word is either never written (reads zero) or holds a number the dialog prints: Scrap Ooze's ramping chance/damage, World of Goop's gold, FaceTrader's gold/HP offer, We Meet Again's three offers, Match and Keep's attempts-left and currently-flipped slot. |
 
 **Known coarsening (T0.4 owns it).** A perfect-memory player also remembers the
 identities of a MISSED Match-and-Keep pair, which the game flips back face

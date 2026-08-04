@@ -107,7 +107,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   (weak 94-104 / strong 106-120 / elite 122-130). The per-act weak-draw
   count (Acts 2–3 use generateWeakEnemies(2) vs kWeakSegment = 3)
   is run-layer state deliberately left to S2.12.
-- **S2.02** `[ ]` ∥ **events.yaml Act-2/3 rows.** 20 identity rows
+- **S2.02** `[x]` ∥ **events.yaml Act-2/3 rows.** 20 identity rows
   (design §2.3) in Java insertion order (TheCity.java:184-199 then
   TheBeyond.java:178-187), `implemented: false`, each with `conditions`
   metadata for its draw gate (Moai Head's idol/hp gate, Colosseum's
@@ -119,6 +119,20 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   exactly once with S1 enum values unchanged (static_assert pins);
   membership/gate metadata pinned by tier-2 against the cited lines;
   six presets green.
+  **Log:** 2026-08-04 — landed. 20 identity rows (32–44 City, 45–51
+  Beyond) in Java add order; `conditions` now mandatory with
+  `pool` + `acts` → `EventDef::pool`/`act_mask`/`event_in_act()`;
+  SPECIAL masks carry the getShrine act-gate half (list built once in
+  Exordium, carried by reference — CardCrawlGame.java:1102-1119).
+  16 tier-2 tests + 6 generator negatives; six presets green. Found
+  load-bearing: **shrine list order differs between Act 1 and Acts
+  2–3** (Wheel of Change last vs first) — Act-1 shrine-bitset
+  bit↔position mapping must be re-derived per act, pinned by
+  `ShrineListOrderDivergesBetweenActOneAndActsTwoThree`, owned by
+  S2.13; also S2.13's: `event_flags` uint32 has no bit for ids 32–51
+  (guarded + tested). Beggar's gold ≥ 75 gate authored from source
+  (design §2.3 omitted it); Cursed Tome Circlet fallback flagged for
+  S2.31–S2.33.
 - **S2.03** `[x]` ∥ **relics.yaml + cards.yaml S2 identity rows.** The ~10
   event-relic rows already enumerated in relics.yaml's header commentary
   (Bloody Idol, Enchiridion, Nilry's Codex, Necronomicon, Mutagenic

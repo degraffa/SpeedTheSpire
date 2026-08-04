@@ -62,6 +62,29 @@ const std::vector<EventName>& event_name_table() {
         {EventId::THE_JOUST, "THE_JOUST", "The Joust"},
         {EventId::WE_MEET_AGAIN, "WE_MEET_AGAIN", "WeMeetAgain"},
         {EventId::THE_WOMAN_IN_BLUE, "THE_WOMAN_IN_BLUE", "The Woman in Blue"},
+        // TheCity.initializeEventList (TheCity.java:185-198) -- ids 32..44.
+        {EventId::ADDICT, "ADDICT", "Addict"},
+        {EventId::BACK_TO_BASICS, "BACK_TO_BASICS", "Back to Basics"},
+        {EventId::BEGGAR, "BEGGAR", "Beggar"},
+        {EventId::COLOSSEUM, "COLOSSEUM", "Colosseum"},
+        {EventId::CURSED_TOME, "CURSED_TOME", "Cursed Tome"},
+        {EventId::DRUG_DEALER, "DRUG_DEALER", "Drug Dealer"},
+        {EventId::FORGOTTEN_ALTAR, "FORGOTTEN_ALTAR", "Forgotten Altar"},
+        {EventId::GHOSTS, "GHOSTS", "Ghosts"},
+        {EventId::MASKED_BANDITS, "MASKED_BANDITS", "Masked Bandits"},
+        {EventId::NEST, "NEST", "Nest"},
+        {EventId::THE_LIBRARY, "THE_LIBRARY", "The Library"},
+        {EventId::THE_MAUSOLEUM, "THE_MAUSOLEUM", "The Mausoleum"},
+        {EventId::VAMPIRES, "VAMPIRES", "Vampires"},
+        // TheBeyond.initializeEventList (TheBeyond.java:179-186) -- ids 45..51.
+        {EventId::FALLING, "FALLING", "Falling"},
+        {EventId::MIND_BLOOM, "MIND_BLOOM", "MindBloom"},
+        {EventId::THE_MOAI_HEAD, "THE_MOAI_HEAD", "The Moai Head"},
+        {EventId::MYSTERIOUS_SPHERE, "MYSTERIOUS_SPHERE", "Mysterious Sphere"},
+        {EventId::SENSORY_STONE, "SENSORY_STONE", "SensoryStone"},
+        {EventId::TOMB_OF_LORD_RED_MASK, "TOMB_OF_LORD_RED_MASK",
+         "Tomb of Lord Red Mask"},
+        {EventId::WINDING_HALLS, "WINDING_HALLS", "Winding Halls"},
     };
     return kNames;
 }
@@ -69,7 +92,7 @@ const std::vector<EventName>& event_name_table() {
 // The guard that makes the hand copy above honest: adding a row to
 // registry/events.yaml grows the GENERATED table, and this stops compiling.
 // (kEventTable is generated from the same yaml -- sts/registry/event_table.hpp.)
-constexpr std::size_t kNameTableSize = 31;
+constexpr std::size_t kNameTableSize = 51;
 static_assert(registry::kEventTable.size() == kNameTableSize,
               "registry/events.yaml gained or lost an event row: add the matching "
               "{EventId, symbol, game_id} entry to event_name_table() in "
@@ -113,8 +136,13 @@ std::string_view event_game_id(EventId id) {
 bool event_flag_set(uint32_t flags, EventId id) {
     const auto v = static_cast<uint32_t>(id);
     // event_framework.cpp:392 writes bit (id-1); EventId 0 is NONE and never
-    // fires, and ids run 1..31 (event_framework.hpp:164-169), so the shift is
-    // always in range for a real id.
+    // fires. RunState::event_flags is a uint32_t, so only ids 1..31 -- the S1
+    // Act-1 rows generate_event can currently return -- have a bit at all.
+    // S2.02's Act-2/3 ids 32..51 exist in the enum but have NO flag bit yet;
+    // widening the word (or splitting it per act) belongs to S2.13, the task
+    // that first makes those ids drawable. Until then this bound is what keeps
+    // the shift in range, so it is a live guard, not a restatement of the
+    // enum's extent.
     if (v == 0 || v > 31) return false;
     return (flags & (1u << (v - 1u))) != 0u;
 }

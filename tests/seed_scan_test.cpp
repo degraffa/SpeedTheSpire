@@ -76,11 +76,13 @@ int CountTabs(const std::string& s) {
 
 TEST(SeedScanEventNames, CoversEveryGeneratedEventRow) {
     // The hand table must have exactly one row per generated event, and the
-    // ids must be the canonical 1..31 run of event_framework.hpp:164-169
-    // (11 event-list + 6 shrine-list + 14 special = 31).
+    // ids must be the canonical dense run of the five dungeon lists:
+    // 11 Exordium event-list + 6 shrine-list + 14 special (the 1..31 layout of
+    // event_framework.hpp:164-169) + S2.02's 13 TheCity event-list (32-44) and
+    // 7 TheBeyond event-list (45-51) = 51.
     const auto& names = sts::planner::event_names();
     EXPECT_EQ(names.size(), sts::registry::kEventTable.size());
-    ASSERT_EQ(names.size(), 31u);
+    ASSERT_EQ(names.size(), 51u);
 
     for (std::size_t i = 0; i < names.size(); ++i) {
         SCOPED_TRACE(std::string(names[i].symbol));
@@ -93,11 +95,16 @@ TEST(SeedScanEventNames, CoversEveryGeneratedEventRow) {
         EXPECT_NE(sts::registry::event_def(names[i].id), nullptr);
     }
 
-    // The three canonical list boundaries (event_framework.hpp:164-169).
+    // The five canonical list boundaries (event_framework.hpp:164-169 for the
+    // first three; TheCity.java:186-198 / TheBeyond.java:180-186 for the rest).
     EXPECT_EQ(static_cast<int>(EventId::BIG_FISH), 1);
     EXPECT_EQ(static_cast<int>(EventId::MATCH_AND_KEEP), 12);
     EXPECT_EQ(static_cast<int>(EventId::ACCURSED_BLACKSMITH), 18);
     EXPECT_EQ(static_cast<int>(EventId::THE_WOMAN_IN_BLUE), 31);
+    EXPECT_EQ(static_cast<int>(EventId::ADDICT), 32);
+    EXPECT_EQ(static_cast<int>(EventId::VAMPIRES), 44);
+    EXPECT_EQ(static_cast<int>(EventId::FALLING), 45);
+    EXPECT_EQ(static_cast<int>(EventId::WINDING_HALLS), 51);
 }
 
 TEST(SeedScanEventNames, ResolvesBothSpellingsCaseInsensitively) {
@@ -129,7 +136,14 @@ TEST(SeedScanEventNames, ResolvesBothSpellingsCaseInsensitively) {
 
 TEST(SeedScanEventFlags, BitIsIdMinusOne) {
     // src/engine/event_framework.cpp:392 -- `rs.event_flags |= 1u << (id - 1)`.
+    // RunState::event_flags is a uint32_t, so only ids 1..31 have a bit; the
+    // loop is bounded by the WORD, not by the enum, and `1u << 31` upward would
+    // itself be UB in this test.
+    const auto has_bit = [](EventId id) {
+        return static_cast<uint32_t>(id) >= 1u && static_cast<uint32_t>(id) <= 31u;
+    };
     for (const auto& e : sts::planner::event_names()) {
+        if (!has_bit(e.id)) continue;
         SCOPED_TRACE(std::string(e.symbol));
         const uint32_t bit = 1u << (static_cast<uint32_t>(e.id) - 1u);
         EXPECT_TRUE(sts::planner::event_flag_set(bit, e.id));
@@ -142,6 +156,17 @@ TEST(SeedScanEventFlags, BitIsIdMinusOne) {
     }
     // EventId::NONE never fires and has no bit; a shift by -1 would be UB.
     EXPECT_FALSE(sts::planner::event_flag_set(0xFFFFFFFFu, EventId::NONE));
+    // S2.02's Act-2/3 ids 32..51 are past the end of the word. They read false
+    // for EVERY flags value -- including all-ones -- rather than shifting out
+    // of range. That is a live guard, not a formality: S2.13 makes those ids
+    // drawable and has to widen the storage (or split it per act) first.
+    for (const auto& e : sts::planner::event_names()) {
+        if (has_bit(e.id)) continue;
+        SCOPED_TRACE(std::string(e.symbol));
+        EXPECT_GT(static_cast<uint32_t>(e.id), 31u);
+        EXPECT_FALSE(sts::planner::event_flag_set(0xFFFFFFFFu, e.id));
+        EXPECT_FALSE(sts::planner::event_flag_set(0u, e.id));
+    }
 }
 
 TEST(SeedScanEventFlags, DecodesInAscendingIdOrder) {

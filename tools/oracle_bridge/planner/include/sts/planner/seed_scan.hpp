@@ -90,7 +90,9 @@ struct EventName {
 [[nodiscard]] std::string_view event_game_id(registry::EventId id);
 
 // Decode RunState::event_flags -- bit (id-1) per event_framework.cpp:392, with
-// the EventId 1..31 layout of event_framework.hpp:164-169.
+// the EventId 1..31 layout of event_framework.hpp:164-169. The word is a
+// uint32_t, so S2.02's Act-2/3 ids 32..51 have no bit and always read false;
+// S2.13, which makes them drawable, owns widening the storage.
 [[nodiscard]] bool event_flag_set(uint32_t flags, registry::EventId id);
 [[nodiscard]] std::vector<registry::EventId> decode_event_flags(uint32_t flags);
 // '|'-joined game ids, in ascending id order; "" for no flags. This is the

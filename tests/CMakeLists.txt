@@ -420,6 +420,23 @@ sts_add_test(exordium_events_ii_test)
 sts_add_test(shrines_test)
 sts_add_test(one_time_specials_test)
 
+# S2.02: the Act-2/Act-3 eventList rows and the per-act membership / draw-gate
+# metadata every events.yaml row now carries -- the two new lists in Java add()
+# order, the shrine list's ACT-2/3 ORDER DIVERGENCE from Exordium's, the
+# one-time specials' getShrine act gates, and the generator's refusal of every
+# malformed `conditions` block. Runs the generator as a subprocess for the
+# negative cases, so it takes the same DEFS as registry_gen_test and its own
+# scratch root; every case writes a distinctly-named subdirectory under it.
+sts_add_test(act_event_lists_test
+    LIBS sts_engine registry_generated
+    DEPENDS registry_gen_headers
+    MAKE_DIRS act_event_lists_scratch
+    DEFS
+        STS_PYTHON_EXECUTABLE="${STS_PYTHON_EXECUTABLE}"
+        STS_REGISTRY_GEN_PY="${STS_REGISTRY_GEN_PY}"
+        STS_REGISTRY_DIR="${STS_REGISTRY_DIR}"
+        STS_GEN_SCRATCH="${CMAKE_CURRENT_BINARY_DIR}/act_event_lists_scratch")
+
 # The floor-0 Neow blessing: the four-category option roll against a draw-by-
 # draw hand derivation, trap 17 (a fresh Random(seed) that no other stream can
 # move), the category tables incl. category 2's drawback-first roll order and

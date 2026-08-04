@@ -13,11 +13,14 @@
 //                        hand-derived JawWorm.java ascension columns, including
 //                        tier-threshold resolution at the branch boundaries; a
 //                        duplicate move_id fails generation with a clear error.
-//   7. Events        -- (B4.10 checkpoint) the 31 metadata-only events.yaml rows
-//                        reproduce the three canonical dungeon lists in Java
-//                        insertion order, their game_id join keys round-trip,
-//                        an unknown id is rejected in both directions, and a
-//                        reused event id fails generation with a clear error.
+//   7. Events        -- the metadata-only events.yaml rows reproduce the five
+//                        canonical dungeon lists in Java insertion order, their
+//                        game_id join keys round-trip, an unknown id is rejected
+//                        in both directions, and a reused event id fails
+//                        generation with a clear error. The per-act membership
+//                        and draw-gate metadata added by S2.02, and the
+//                        conditions-schema negative tests, live in
+//                        tests/act_event_lists_test.cpp.
 //
 // "Generated headers compile standalone" is proven by registry_gen_standalone.cpp
 // (this TU additionally includes the engine headers to run the equivalence checks).
@@ -105,11 +108,15 @@ fs::path clone_registry(const fs::path& scratch, const char* name) {
     return dst;
 }
 
-const std::array<const char*, 8> kGenFiles = {
+const std::array<const char*, 9> kGenFiles = {
     "sts/registry/ids.hpp", "sts/registry/card_table.hpp",
     "sts/registry/power_table.hpp", "sts/registry/relic_table.hpp",
     "sts/registry/potion_table.hpp",
     "sts/registry/monster_table.hpp",
+    // S2.02: event_table.hpp now carries per-row pool/act_mask columns, so it
+    // is a content table like the rest and belongs under the determinism
+    // guard rather than being covered only indirectly via ids.hpp.
+    "sts/registry/event_table.hpp",
     "sts/registry/game_ids.hpp", "sts/registry/manifest.hpp"};
 
 }  // namespace
@@ -584,13 +591,18 @@ TEST(RegistryGen, ManifestCounts) {
                                        // (143-150). With them the registered
                                        // SPECIAL tier is closed at 19 rows.
     EXPECT_EQ(m::kPotionsCount, 33u);
-    EXPECT_EQ(m::kEventsCount, 31u);  // the three canonical Act-1 dungeon lists:
+    EXPECT_EQ(m::kEventsCount, 51u);  // the five canonical dungeon lists:
                                       // Exordium.initializeEventList's 11 (ids
                                       // 1-11) + initializeShrineList's 6 (12-17)
                                       // + AbstractDungeon.initializeSpecialOne-
-                                      // TimeEventList's 14 (18-31). Metadata-only
-                                      // rows: B4.10 owns list membership and
-                                      // selection, B4.11-B4.13 the native bodies.
+                                      // TimeEventList's 14 (18-31) + S2.02's
+                                      // TheCity.initializeEventList 13 (32-44)
+                                      // and TheBeyond.initializeEventList 7
+                                      // (45-51). Metadata-only rows: B4.10 owns
+                                      // Act-1 list membership and selection,
+                                      // B4.11-B4.13 the Act-1 bodies, S2.13 the
+                                      // per-act rebuild, S2.31-S2.33 the
+                                      // Act-2/3 bodies.
     EXPECT_EQ(m::kEncountersCount, 61u);  // Act 1 (B3.12): 20 generated-list
                                           // encounters plus Mushrooms' fixed
                                           // event group. + S2.01's Act 2 (22:
@@ -603,7 +615,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 505u);  // 132 + 53 + 25 + 150 + 33 + 31 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 525u);  // 132 + 53 + 25 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1524,18 +1536,18 @@ TEST(RegistryGen, NativeDispatchHandlerNamesFollowTheRowNameConvention) {
 
 // --- 8. B4.10/B4.11 event registry: identities + native-body metadata --------
 //
-// events.yaml is metadata-only at this checkpoint (`native: true` on every row):
-// B4.10 owns list membership and selection, B4.11-B4.13 the native bodies. So
-// the only thing there IS to pin is the data -- that the 31 ids reproduce the
-// three canonical dungeon lists in Java insertion order, that the game_id join
-// keys round-trip, and that this domain refuses a reused id like every other.
+// events.yaml is metadata-only (`native: true` on every row): B4.10 owns Act-1
+// list membership and selection, B4.11-B4.13 the Act-1 bodies, S2.13 the
+// per-act list rebuild and S2.31-S2.33 the Act-2/3 bodies. So the only thing
+// there IS to pin is the data -- that the ids reproduce the five canonical
+// dungeon lists in Java insertion order, that the game_id join keys round-trip,
+// and that this domain refuses a reused id like every other.
 //
 // Determinism is deliberately NOT re-tested per-domain here. Deterministic-
 // ByteIdentical above already generates the real registry twice and byte-
-// compares ids.hpp and game_ids.hpp, which are exactly the two headers the
-// events domain contributes to (emit_ids / emit_game_ids -- events has no table
-// emitter of its own). A per-domain determinism case would be a second copy of
-// that one shared test, which is not the shape the other seven domains use.
+// compares ids.hpp, game_ids.hpp and event_table.hpp -- every header the events
+// domain contributes to. A per-domain determinism case would be a second copy
+// of that one shared test, which is not the shape the other seven domains use.
 //
 // Every expected value below is hand-carried from the cited Java, NOT read back
 // from the generator.
@@ -1560,7 +1572,13 @@ struct EventRow {
 // runtime list is length 13 and SecretPortal sits at runtime index 9, not 10.
 // The registry id is identity only and never moves -- which is precisely why
 // the conditional entry can hold a dense id here.
-constexpr std::array<EventRow, 31> kCanonicalEvents = {{
+// S2.02 appended two more canonical lists after the special block:
+//   TheCity.initializeEventList          (TheCity.java:185-198)          -- 13
+//   TheBeyond.initializeEventList        (TheBeyond.java:179-186)        --  7
+// Their ids stay dense and ascending in add() order for the same reason the
+// first three blocks do. The per-act membership/gate METADATA those rows carry
+// is pinned in tests/act_event_lists_test.cpp; this table pins identity only.
+constexpr std::array<EventRow, 51> kCanonicalEvents = {{
     // -- Exordium.initializeEventList, positions 0-10 --
     {1, sts::registry::EventId::BIG_FISH, "Big Fish"},
     {2, sts::registry::EventId::THE_CLERIC, "The Cleric"},
@@ -1596,6 +1614,28 @@ constexpr std::array<EventRow, 31> kCanonicalEvents = {{
     {29, sts::registry::EventId::THE_JOUST, "The Joust"},
     {30, sts::registry::EventId::WE_MEET_AGAIN, "WeMeetAgain"},
     {31, sts::registry::EventId::THE_WOMAN_IN_BLUE, "The Woman in Blue"},
+    // -- TheCity.initializeEventList, positions 0-12 --
+    {32, sts::registry::EventId::ADDICT, "Addict"},
+    {33, sts::registry::EventId::BACK_TO_BASICS, "Back to Basics"},
+    {34, sts::registry::EventId::BEGGAR, "Beggar"},
+    {35, sts::registry::EventId::COLOSSEUM, "Colosseum"},
+    {36, sts::registry::EventId::CURSED_TOME, "Cursed Tome"},
+    {37, sts::registry::EventId::DRUG_DEALER, "Drug Dealer"},
+    {38, sts::registry::EventId::FORGOTTEN_ALTAR, "Forgotten Altar"},
+    {39, sts::registry::EventId::GHOSTS, "Ghosts"},
+    {40, sts::registry::EventId::MASKED_BANDITS, "Masked Bandits"},
+    {41, sts::registry::EventId::NEST, "Nest"},
+    {42, sts::registry::EventId::THE_LIBRARY, "The Library"},
+    {43, sts::registry::EventId::THE_MAUSOLEUM, "The Mausoleum"},
+    {44, sts::registry::EventId::VAMPIRES, "Vampires"},
+    // -- TheBeyond.initializeEventList, positions 0-6 --
+    {45, sts::registry::EventId::FALLING, "Falling"},
+    {46, sts::registry::EventId::MIND_BLOOM, "MindBloom"},
+    {47, sts::registry::EventId::THE_MOAI_HEAD, "The Moai Head"},
+    {48, sts::registry::EventId::MYSTERIOUS_SPHERE, "Mysterious Sphere"},
+    {49, sts::registry::EventId::SENSORY_STONE, "SensoryStone"},
+    {50, sts::registry::EventId::TOMB_OF_LORD_RED_MASK, "Tomb of Lord Red Mask"},
+    {51, sts::registry::EventId::WINDING_HALLS, "Winding Halls"},
 }};
 
 }  // namespace
@@ -1625,7 +1665,7 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
     EXPECT_EQ(std::adjacent_find(ids.begin(), ids.end()), ids.end())
         << "EventId values must be unique";
     EXPECT_EQ(ids.front(), 1) << "0 is reserved for EventId::NONE";
-    EXPECT_EQ(ids.back(), 31);
+    EXPECT_EQ(ids.back(), 51);
 
     // Block boundaries, so a row appended to the wrong list is caught even when
     // the overall sequence stays dense.
@@ -1639,6 +1679,14 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
         << "first initializeSpecialOneTimeEventList entry";
     EXPECT_EQ(static_cast<int>(r::EventId::THE_WOMAN_IN_BLUE), 31)
         << "last initializeSpecialOneTimeEventList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::ADDICT), 32)
+        << "first TheCity.initializeEventList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::VAMPIRES), 44)
+        << "last TheCity.initializeEventList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::FALLING), 45)
+        << "first TheBeyond.initializeEventList entry";
+    EXPECT_EQ(static_cast<int>(r::EventId::WINDING_HALLS), 51)
+        << "last TheBeyond.initializeEventList entry";
 
     // NoteForYourself holds a real, dense id between N'loth and SecretPortal
     // even though its runtime slot is conditional: the conditionality lives in
@@ -1659,6 +1707,10 @@ TEST(RegistryGen, EventIdsFollowCanonicalJavaListOrder) {
         << "game_id strings must be unique -- they are the translator join key";
 }
 
+// Scope: the S1 block, ids 1-31. S2.02's ids 32-51 are identity rows with no
+// body (implemented false, zero screens) and are pinned in
+// tests/act_event_lists_test.cpp instead, so this case keeps saying exactly
+// what it said about the Act-1 rows.
 TEST(RegistryGen, ExordiumEventsCarryAuditedNativeBodyMetadata) {
     namespace r = sts::registry;
     // The only unimplemented rows are the six one-time specials whose

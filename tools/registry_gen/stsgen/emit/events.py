@@ -4,6 +4,63 @@ from __future__ import annotations
 
 from ..vocab import BANNER, fail
 
+# The three canonical draw lists an event row can belong to. `pool` names which
+# one holds the key, and it decides what `acts` means (S2.02):
+#   EVENT   -- the per-act eventList (Exordium.java:223-236,
+#              TheCity.java:185-198, TheBeyond.java:179-186). Each act builds
+#              its OWN list, so `acts` is literal list membership.
+#   SHRINE  -- the per-act shrineList (Exordium.java:238-246,
+#              TheCity.java:211-217, TheBeyond.java:199-205). All three acts
+#              add the same six keys, so every shrine row is acts [1, 2, 3].
+#   SPECIAL -- specialOneTimeEventList, which is built ONCE in Exordium and
+#              carried by reference across acts (CardCrawlGame.java:1102-1119;
+#              only call site Exordium.java:54). Membership is therefore
+#              act-independent and `acts` records the ACT HALF of the row's
+#              getShrine gate instead (AbstractDungeon.java:1886-1936).
+# In every case `acts` is the set of acts in which the row can be DRAWN, and
+# `draw` carries whatever is left of the gate once the act test is removed.
+EVENT_POOLS = ("EVENT", "SHRINE", "SPECIAL")
+EVENT_ACTS = (1, 2, 3)
+
+
+def _validate_conditions(event: dict) -> tuple[str, int]:
+    """Check `conditions` and return (pool, act_mask). Mandatory on EVERY row,
+    implemented or not: the draw gate is the identity metadata S2.13 consumes,
+    and a row that arrives without it is exactly the silent drift this rejects."""
+    name = event["name"]
+    conditions = event.get("conditions")
+    if not isinstance(conditions, dict) or not conditions:
+        raise fail(
+            f"events.yaml: event {name} needs non-empty conditions metadata "
+            "(pool + acts + draw)")
+    pool = conditions.get("pool")
+    if pool not in EVENT_POOLS:
+        raise fail(
+            f"events.yaml: event {name} has unknown conditions.pool {pool!r}; "
+            f"expected one of {', '.join(EVENT_POOLS)}")
+    acts = conditions.get("acts")
+    if not isinstance(acts, list) or not acts:
+        raise fail(
+            f"events.yaml: event {name} needs a non-empty conditions.acts list "
+            "(the acts in which the row can be drawn)")
+    if any(not isinstance(a, int) or isinstance(a, bool) or a not in EVENT_ACTS
+           for a in acts):
+        raise fail(
+            f"events.yaml: event {name} conditions.acts must hold only act "
+            f"numbers {EVENT_ACTS}, got {acts!r}")
+    if acts != sorted(set(acts)):
+        raise fail(
+            f"events.yaml: event {name} conditions.acts must be strictly "
+            f"ascending with no repeats, got {acts!r}")
+    if not str(conditions.get("draw", "")).strip():
+        raise fail(
+            f"events.yaml: event {name} needs a conditions.draw gate string "
+            "(ALWAYS when the act test is the whole gate)")
+    mask = 0
+    for a in acts:
+        mask |= 1 << (a - 1)
+    return pool, mask
+
 
 def emit_event_table(domains: dict[str, list[dict]]) -> str:
     rows: list[dict] = []
@@ -13,14 +70,10 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         if implemented and not native:
             raise fail(
                 f"events.yaml: event {event['name']} is implemented but not native")
+        pool, act_mask = _validate_conditions(event)
         if implemented:
-            conditions = event.get("conditions")
             options = event.get("options")
             a15 = event.get("a15")
-            if not isinstance(conditions, dict) or not conditions:
-                raise fail(
-                    f"events.yaml: implemented event {event['name']} needs "
-                    "non-empty conditions metadata")
             if (not isinstance(options, list) or not options or
                     any(not isinstance(screen, list) or not screen
                         for screen in options)):
@@ -45,6 +98,8 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
             "name": event["name"],
             "native": native,
             "implemented": implemented,
+            "pool": pool,
+            "act_mask": act_mask,
             "screen_count": len(event.get("options", [])),
             "a15_count": len(event.get("a15", {}).get("changes", [])),
         })
@@ -57,10 +112,39 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "#include <cstdint>\n",
         '#include "sts/registry/ids.hpp"\n',
         "namespace sts::registry {\n",
+        "// Which canonical draw list holds the row's key.",
+        "//   EVENT   per-act eventList   (Exordium.java:223-236,",
+        "//                                TheCity.java:185-198,",
+        "//                                TheBeyond.java:179-186)",
+        "//   SHRINE  per-act shrineList  (Exordium.java:238-246,",
+        "//                                TheCity.java:211-217,",
+        "//                                TheBeyond.java:199-205)",
+        "//   SPECIAL specialOneTimeEventList (AbstractDungeon.java:1340-1358),",
+        "//           built ONCE in Exordium and carried by reference across",
+        "//           acts (CardCrawlGame.java:1102-1119).",
+        "enum class EventPool : uint8_t {",
+        "    NONE = 0,",
+        "    EVENT = 1,",
+        "    SHRINE = 2,",
+        "    SPECIAL = 3,",
+        "};\n",
+        "// act_mask bit (act - 1). For EVENT/SHRINE rows it is literal per-act",
+        "// list membership; for SPECIAL rows -- whose list is act-independent --",
+        "// it is the ACT HALF of the row's getShrine gate",
+        "// (AbstractDungeon.java:1886-1936). Either way it answers \"can this",
+        "// key be drawn in act N\", and EventDef carries nothing of the",
+        "// remaining gate (gold/HP/relic/map-position tests): those stay",
+        "// conditions.draw prose in events.yaml until an engine consumer",
+        "// (S2.13) implements them against the Java it cites.",
+        "inline constexpr uint8_t kEventActMaskExordium = 0x1u;",
+        "inline constexpr uint8_t kEventActMaskCity = 0x2u;",
+        "inline constexpr uint8_t kEventActMaskBeyond = 0x4u;\n",
         "struct EventDef {",
         "    EventId id;",
         "    bool native;",
         "    bool implemented;",
+        "    EventPool pool;",
+        "    uint8_t act_mask;",
         "    uint8_t screen_count;",
         "    uint8_t a15_change_count;",
         "};\n",
@@ -71,6 +155,7 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
             f"    {{EventId::{row['name']}, "
             f"{'true' if row['native'] else 'false'}, "
             f"{'true' if row['implemented'] else 'false'}, "
+            f"EventPool::{row['pool']}, {row['act_mask']}, "
             f"{row['screen_count']}, {row['a15_count']}}},")
     out.extend([
         "}};\n",
@@ -80,6 +165,16 @@ def emit_event_table(domains: dict[str, list[dict]]) -> str:
         "        if (row.id == id) return &row;",
         "    }",
         "    return nullptr;",
+        "}\n",
+        "// `act` is 1-based (1 = Exordium, 2 = TheCity, 3 = TheBeyond). An",
+        "// unknown id or an out-of-range act is false -- never a shift by a",
+        "// negative or oversized amount.",
+        "[[nodiscard]] inline constexpr bool event_in_act(",
+        "    EventId id, int act) noexcept {",
+        "    if (act < 1 || act > 3) return false;",
+        "    const EventDef* row = event_def(id);",
+        "    if (row == nullptr) return false;",
+        "    return (row->act_mask & (1u << (act - 1))) != 0u;",
         "}\n",
         "// THE EVENT-GRID TRANSFORM POOLS ARE DELIBERATELY NOT EMITTED HERE.",
         "// Living Wall / Transmorgrifier reach AbstractDungeon.transformCard",

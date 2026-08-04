@@ -9,14 +9,39 @@
 #                          metadata (design doc B §4.1: dialog trees are irreducibly
 #                          bespoke). Default true in practice for events.
 #     implemented: <bool>  OPTIONAL; true only once the native body is linked.
-#                          Such rows must also carry audited `conditions`,
-#                          `options`, and `a15` metadata. The generated native
-#                          dispatch macro makes a missing body a link error.
+#                          Such rows must also carry audited `options` and
+#                          `a15` metadata. The generated native dispatch macro
+#                          makes a missing body a link error.
+#     conditions:          MANDATORY on every row (S2.02):
+#       pool: EVENT|SHRINE|SPECIAL   which canonical draw list holds the key
+#       acts: [<int>, ...]           the acts the row can be DRAWN in, ascending
+#       draw: <string>               the rest of the gate; ALWAYS when the act
+#                                    test is the whole gate
 #
-# Event ids are ordered by the three canonical dungeon lists. The ids are
-# identity only: B4.10 owns list membership and selection; B4.11-B4.13 own the
-# native bodies. Keeping all three blocks in Java insertion order makes the
+# Event ids are ordered by the canonical dungeon lists. The ids are identity
+# only: B4.10 owns Act-1 list membership and selection; B4.11-B4.13 own the
+# Act-1 native bodies; S2.13 owns the per-act list rebuild and S2.31-S2.33 the
+# Act-2/3 bodies. Keeping every block in Java insertion order makes the
 # generated enum and translator join auditable against the pool bit positions.
+#
+# WHAT `acts` MEANS PER POOL (S2.02; the generator pins the vocabulary, and
+# emits it as EventDef.act_mask -- tools/registry_gen/stsgen/emit/events.py):
+#   * EVENT   -- each act builds its OWN eventList (Exordium.java:223-236,
+#                TheCity.java:185-198, TheBeyond.java:179-186), so `acts` is
+#                literal list membership. No key appears in two acts' lists.
+#   * SHRINE  -- each act adds the SAME six keys (Exordium.java:238-246,
+#                TheCity.java:211-217, TheBeyond.java:199-205), so every shrine
+#                row is [1, 2, 3]. The rebuild is per act; the membership is not.
+#   * SPECIAL -- specialOneTimeEventList is built ONCE, in Exordium, and carried
+#                by reference across acts (CardCrawlGame.java:1102-1119; only
+#                call site Exordium.java:54). Membership is act-INDEPENDENT, so
+#                `acts` records the ACT HALF of the row's getShrine gate
+#                (AbstractDungeon.java:1886-1936) -- and a row drawn in Act 1 is
+#                gone from the list for Acts 2-3, which is exactly why the act
+#                gate and the membership have to be recorded separately.
+# `draw` is the residual, non-act gate, in prose: it is provenance for the
+# engine consumer, never parsed. Every gate string below was read off
+# AbstractDungeon.getShrine (:1882-1942) / getEvent (:1944-1990) in full.
 
 # Exordium.initializeEventList (Exordium.java:223-236).
 - id: 1
@@ -25,7 +50,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 0; BigFish.ID (BigFish.java:24) is \"Big Fish\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [BANANA_HEAL_ONE_THIRD, DONUT_GAIN_MAX_HP_5, BOX_REGRET_AND_RANDOM_RELIC]
     - [PROCEED]
@@ -36,7 +61,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 1; Cleric.ID (Cleric.java:18) is \"The Cleric\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: "gold >= 35"}
+  conditions: {pool: EVENT, acts: [1], draw: "gold >= 35"}
   options:
     - [HEAL_25_PERCENT_FOR_35_GOLD, PURIFY_ONE_FOR_TIERED_GOLD, LEAVE]
     - [PURIFY_GRID_ONE]
@@ -50,7 +75,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 2; DeadAdventurer.ID (DeadAdventurer.java:37) is \"Dead Adventurer\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: "floor > 6"}
+  conditions: {pool: EVENT, acts: [1], draw: "floor > 6"}
   options:
     - [SEARCH_AT_TIERED_RISK, LEAVE]
     - [ENTER_EVENT_COMBAT]
@@ -64,7 +89,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 3; GoldenIdolEvent.ID (GoldenIdolEvent.java:27) is \"Golden Idol\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [TAKE_GOLDEN_IDOL, LEAVE]
     - [TAKE_INJURY, TAKE_DAMAGE_TIERED, LOSE_MAX_HP_TIERED]
@@ -79,7 +104,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 4; GoldenWing.ID (GoldenWing.java:30) is \"Golden Wing\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [TAKE_7_DAMAGE_THEN_PURIFY_ONE, "GAIN_MISC_RNG_GOLD_50_TO_80_IF_BASE_DAMAGE_GE_10", LEAVE]
     - [PURIFY_GRID_ONE]
@@ -91,7 +116,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 5; GoopPuddle.ID (GoopPuddle.java:25) is \"World of Goop\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [GAIN_75_GOLD_AND_TAKE_11_DAMAGE, LOSE_TIERED_RANDOM_GOLD]
     - [PROCEED]
@@ -104,7 +129,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 6; Sssserpent.ID (Sssserpent.java:25) is \"Liars Game\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [AGREE_FOR_TIERED_GOLD_AND_DOUBT, DISAGREE]
     - [AGREE_CONFIRM]
@@ -119,7 +144,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 7; LivingWall.ID (LivingWall.java:26) is \"Living Wall\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [FORGET_ONE, CHANGE_ONE, GROW_ONE_IF_UPGRADABLE]
     - [MASTER_DECK_GRID_ONE]
@@ -131,7 +156,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 8; Mushrooms.ID (Mushrooms.java:34) is \"Mushrooms\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: "floor > 6"}
+  conditions: {pool: EVENT, acts: [1], draw: "floor > 6"}
   options:
     - [FIGHT_THREE_FUNGI_BEASTS, HEAL_25_PERCENT_AND_GAIN_PARASITE]
     - [ENTER_EVENT_COMBAT]
@@ -143,7 +168,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 9; ScrapOoze.ID (ScrapOoze.java:24) is \"Scrap Ooze\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [TAKE_CURRENT_DAMAGE_AND_ROLL_RELIC, LEAVE]
     - [PROCEED]
@@ -156,7 +181,7 @@
   provenance: "Exordium.initializeEventList (Exordium.java:223-236) position 10; ShiningLight.ID (ShiningLight.java:31) is \"Shining Light\"."
   native: true
   implemented: true
-  conditions: {pool: EVENT, draw: ALWAYS}
+  conditions: {pool: EVENT, acts: [1], draw: ALWAYS}
   options:
     - [TAKE_TIERED_MAX_HP_PERCENT_DAMAGE_AND_UPGRADE_RANDOM_TWO, LEAVE]
     - [PROCEED]
@@ -166,6 +191,31 @@
 
 # Exordium.initializeShrineList (Exordium.java:238-246).
 #
+# ALL THREE ACTS ADD THE SAME SIX KEYS, so every row here is acts [1, 2, 3].
+# What is per act is the REBUILD, not the membership: a shrine drawn in Act 1 is
+# removed from that act's shrineList (:1938) and comes back when the next act's
+# initializeShrineList runs.
+#
+# S2.02 TRAP -- THE THREE LISTS ARE NOT IN THE SAME ORDER. Read in full:
+#   Exordium.java:238-246   Match and Keep!, Golden Shrine, Transmorgrifier,
+#                           Purifier, Upgrade Shrine, Wheel of Change
+#   TheCity.java:211-217    Match and Keep!, Wheel of Change, Golden Shrine,
+#   TheBeyond.java:199-205  Transmorgrifier, Purifier, Upgrade Shrine
+# City and Beyond are identical to each other and BOTH move Wheel of Change from
+# position 5 to position 1, shifting Golden Shrine/Transmorgrifier/Purifier/
+# Upgrade Shrine down by one. Order is load-bearing twice over: getShrine seeds
+# `tmp.addAll(shrineList)` in list order (:1884) and then indexes it with
+# `rng.random(tmp.size() - 1)` (:1937), so the SAME draw lands on a DIFFERENT
+# shrine in Act 2 than in Act 1; and RunState's shrine membership bitset maps
+# bit i to position i of the act's list (event_framework.hpp:198-199), a
+# mapping that is currently Exordium's and is NOT valid for Acts 2-3.
+#
+# The registry `id` order below is Exordium's and stays Exordium's -- ids are
+# append-only identity and must never be renumbered to chase a runtime order.
+# The per-act positions are recorded per row and pinned, both orders spelled
+# out, in tests/act_event_lists_test.cpp. Re-deriving the Act-2/3 bit<->position
+# mapping is S2.13's; this file's job is to make sure it cannot be assumed.
+#
 # Every shrine is drawn UNCONDITIONALLY: getShrine seeds its filtered list with
 # `tmp.addAll(shrineList)` (AbstractDungeon.java:1884) and only the
 # specialOneTimeEventList block below it carries per-key gates. So each row's
@@ -174,10 +224,10 @@
 - id: 12
   name: MATCH_AND_KEEP
   game_id: "Match and Keep!"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 0; GremlinMatchGame.ID (GremlinMatchGame.java:36) is \"Match and Keep!\"; body GremlinMatchGame.java:55-92, 179-285."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 0; GremlinMatchGame.ID (GremlinMatchGame.java:36) is \"Match and Keep!\"; body GremlinMatchGame.java:55-92, 179-285. Act-2/3 position 0 (TheCity.java:212, TheBeyond.java:200)."
   native: true
   implemented: true
-  conditions: {pool: SHRINE, draw: ALWAYS}
+  conditions: {pool: SHRINE, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [ACKNOWLEDGE]
     - [BEGIN_PLAY]
@@ -189,10 +239,10 @@
 - id: 13
   name: GOLDEN_SHRINE
   game_id: "Golden Shrine"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 1; GoldShrine.ID (GoldShrine.java:24) is \"Golden Shrine\"; body GoldShrine.java:39-101."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 1; GoldShrine.ID (GoldShrine.java:24) is \"Golden Shrine\"; body GoldShrine.java:39-101. Act-2/3 position 2 (TheCity.java:214, TheBeyond.java:202)."
   native: true
   implemented: true
-  conditions: {pool: SHRINE, draw: ALWAYS}
+  conditions: {pool: SHRINE, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [PRAY_FOR_TIERED_GOLD, DESECRATE_FOR_275_GOLD_AND_REGRET, LEAVE]
     - [PROCEED]
@@ -202,10 +252,10 @@
 - id: 14
   name: TRANSMORGRIFIER
   game_id: "Transmorgrifier"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 2; Transmogrifier.ID (Transmogrifier.java:22) is \"Transmorgrifier\"; body Transmogrifier.java:32-84."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 2; Transmogrifier.ID (Transmogrifier.java:22) is \"Transmorgrifier\"; body Transmogrifier.java:32-84. Act-2/3 position 3 (TheCity.java:215, TheBeyond.java:203)."
   native: true
   implemented: true
-  conditions: {pool: SHRINE, draw: ALWAYS}
+  conditions: {pool: SHRINE, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [TRANSFORM_ONE, LEAVE]
     - [TRANSFORMABLE_GRID_ONE]
@@ -214,10 +264,10 @@
 - id: 15
   name: PURIFIER
   game_id: "Purifier"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 3; PurificationShrine.ID (PurificationShrine.java:21) is \"Purifier\"; body PurificationShrine.java:31-81."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 3; PurificationShrine.ID (PurificationShrine.java:21) is \"Purifier\"; body PurificationShrine.java:31-81. Act-2/3 position 4 (TheCity.java:216, TheBeyond.java:204)."
   native: true
   implemented: true
-  conditions: {pool: SHRINE, draw: ALWAYS}
+  conditions: {pool: SHRINE, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [PURIFY_ONE, LEAVE]
     - [PURIFY_GRID_ONE]
@@ -226,10 +276,10 @@
 - id: 16
   name: UPGRADE_SHRINE
   game_id: "Upgrade Shrine"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 4; UpgradeShrine.ID (UpgradeShrine.java:24) is \"Upgrade Shrine\"; body UpgradeShrine.java:34-92."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 4; UpgradeShrine.ID (UpgradeShrine.java:24) is \"Upgrade Shrine\"; body UpgradeShrine.java:34-92. Act-2/3 position 5 (TheCity.java:217, TheBeyond.java:205)."
   native: true
   implemented: true
-  conditions: {pool: SHRINE, draw: ALWAYS}
+  conditions: {pool: SHRINE, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [UPGRADE_ONE_IF_UPGRADABLE, LEAVE]
     - [UPGRADE_GRID_ONE]
@@ -238,10 +288,10 @@
 - id: 17
   name: WHEEL_OF_CHANGE
   game_id: "Wheel of Change"
-  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 5; GremlinWheelGame.ID (GremlinWheelGame.java:48) is \"Wheel of Change\"; body GremlinWheelGame.java:84-313."
+  provenance: "Exordium.initializeShrineList (Exordium.java:238-246) position 5; GremlinWheelGame.ID (GremlinWheelGame.java:48) is \"Wheel of Change\"; body GremlinWheelGame.java:84-313. Act-2/3 position 1 (TheCity.java:213, TheBeyond.java:201)."
   native: true
   implemented: true
-  conditions: {pool: SHRINE, draw: ALWAYS}
+  conditions: {pool: SHRINE, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [SPIN_THE_WHEEL]
     - [APPLY_SPIN_RESULT]
@@ -282,13 +332,34 @@
 # of one test, not a two-act disjunction), while FaceTrader -- which the brief
 # did not name -- IS Act-1 reachable because its gate is TheCity **or**
 # Exordium (:1904-1908).
+#
+# S2.02 SPLITS THAT GATE IN TWO. Each row's `conditions.acts` now holds the ACT
+# half, read off the same switch, and `conditions.draw` the residual state test:
+#   acts [1, 2, 3]  18 Accursed Blacksmith, 19 Bonfire Elementals,
+#                   23 Fountain of Cleansing, 25 Lab, 27 NoteForYourself,
+#                   30 WeMeetAgain, 31 The Woman in Blue -- no id.equals test
+#   acts [1, 2]     22 FaceTrader                       (:1904-1908)
+#   acts [2]        24 Knowing Skull, 26 N'loth, 29 The Joust
+#   acts [2, 3]     20 Designer, 21 Duplicator
+#   acts [3]        28 SecretPortal
+# The six previously-bare rows gain conditions here for the first time; that is
+# metadata only -- `implemented` stays false and the bodies remain S2.32/S2.33's
+# (SecretPortal is pinned unreachable by s2-design §5 trap 5, and its `acts: [3]`
+# is the ACT half of the gate, not a claim that it fires).
+#
+# LIST MEMBERSHIP IS NOT PER ACT HERE. initializeSpecialOneTimeEventList runs
+# once, from Exordium.java:54, and CardCrawlGame.java:1102-1119 carries the same
+# ArrayList into TheCity and TheBeyond -- so an entry drawn (and removed at
+# :1939) in Act 1 is gone for the rest of the run, and an Act-2-gated entry that
+# was never drawn is still there in Act 3 unless its own gate says otherwise.
+# `acts` is a per-draw eligibility test, never a membership rebuild.
 - id: 18
   name: ACCURSED_BLACKSMITH
   game_id: "Accursed Blacksmith"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 0; AccursedBlacksmith.ID (AccursedBlacksmith.java:22); body AccursedBlacksmith.java:35-105; unconditional getShrine add (:1935)."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: ALWAYS}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [FORGE_ONE_IF_UPGRADABLE, RUMMAGE_FOR_PAIN_AND_WARPED_TONGS, LEAVE]
     - [UPGRADE_GRID_ONE]
@@ -300,7 +371,7 @@
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 1; Bonfire.ID (Bonfire.java:26); body Bonfire.java:38-152; unconditional getShrine add (:1935)."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: ALWAYS}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [APPROACH_THE_BONFIRE]
     - [OFFER_A_CARD]
@@ -312,18 +383,20 @@
   game_id: "Designer"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 2; Designer.ID (Designer.java:31)."
   native: true
+  conditions: {pool: SPECIAL, acts: [2, 3], draw: "gold >= 75 (AbstractDungeon.java:1894-1898)"}
 - id: 21
   name: DUPLICATOR
   game_id: "Duplicator"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 3; Duplicator.ID (Duplicator.java:17)."
   native: true
+  conditions: {pool: SPECIAL, acts: [2, 3], draw: ALWAYS}
 - id: 22
   name: FACE_TRADER
   game_id: "FaceTrader"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 4; FaceTrader.ID (FaceTrader.java:27); body FaceTrader.java:36-122; getShrine gate TheCity OR Exordium (:1904-1908) -- Act-1 reachable."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: "act == 1 or act == 2"}
+  conditions: {pool: SPECIAL, acts: [1, 2], draw: ALWAYS}
   options:
     - [APPROACH]
     - [TOUCH_FOR_TIERED_GOLD_AND_TENTH_MAX_HP_DAMAGE, TRADE_FOR_A_RANDOM_UNOWNED_FACE, LEAVE]
@@ -337,7 +410,7 @@
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 5; FountainOfCurseRemoval.ID (FountainOfCurseRemoval.java:21); body FountainOfCurseRemoval.java:31-86; getShrine gate player.isCursed (:1889-1893)."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: "player is cursed (AbstractPlayer.isCursed)"}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: "player is cursed (AbstractPlayer.isCursed)"}
   options:
     - [DRINK_TO_REMOVE_EVERY_CURSE, LEAVE]
     - [PROCEED]
@@ -347,13 +420,14 @@
   game_id: "Knowing Skull"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 6; KnowingSkull.ID (events/city/KnowingSkull.java:35) -- city/, not shrines/."
   native: true
+  conditions: {pool: SPECIAL, acts: [2], draw: "currentHealth > 12 (AbstractDungeon.java:1909-1913)"}
 - id: 25
   name: LAB
   game_id: "Lab"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 7; Lab.ID (Lab.java:24); body Lab.java:32-66; unconditional getShrine add (:1935)."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: ALWAYS}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [TAKE_TIERED_POTIONS]
   a15:
@@ -364,13 +438,14 @@
   game_id: "N'loth"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 8; Nloth.ID (Nloth.java:21)."
   native: true
+  conditions: {pool: SPECIAL, acts: [2], draw: "player.relics.size() >= 2 (AbstractDungeon.java:1914-1918)"}
 - id: 27
   name: NOTE_FOR_YOURSELF
   game_id: "NoteForYourself"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 9, present only when isNoteForYourselfAvailable (:1360-1378) is true (:1351-1353); NoteForYourself.ID (NoteForYourself.java:25); body NoteForYourself.java:36-106; unconditional getShrine add (:1935) once the list holds it."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: "list membership only -- ascension < 15 under the pinned reference profile"}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: "list membership only -- ascension < 15 under the pinned reference profile"}
   options:
     - [READ_THE_NOTE]
     - [TAKE_THE_CARD_AND_GIVE_ONE_BACK, LEAVE]
@@ -384,18 +459,20 @@
   game_id: "SecretPortal"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 10 with NoteForYourself present, 9 without; com.megacrit.cardcrawl.events.beyond.SecretPortal.ID (events/beyond/SecretPortal.java:24) -- beyond/, not shrines/ (EventHelper.java:18 imports it from there)."
   native: true
+  conditions: {pool: SPECIAL, acts: [3], draw: "CardCrawlGame.playtime >= 800.0f (AbstractDungeon.java:1929-1933) -- pinned unreachable, s2-design §5 trap 5"}
 - id: 29
   name: THE_JOUST
   game_id: "The Joust"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 11 with NoteForYourself present, 10 without; TheJoust.ID (events/city/TheJoust.java:22) -- city/, not shrines/."
   native: true
+  conditions: {pool: SPECIAL, acts: [2], draw: "gold >= 50 (AbstractDungeon.java:1919-1923)"}
 - id: 30
   name: WE_MEET_AGAIN
   game_id: "WeMeetAgain"
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 12 with NoteForYourself present, 11 without; WeMeetAgain.ID (WeMeetAgain.java:32); body WeMeetAgain.java:45-140; unconditional getShrine add (:1935)."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: ALWAYS}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: ALWAYS}
   options:
     - [GIVE_A_HELD_POTION, GIVE_TIERED_GOLD_IF_50_OR_MORE, GIVE_A_NON_BASIC_NON_CURSE_CARD, REFUSE]
     - [PROCEED]
@@ -406,10 +483,150 @@
   provenance: "AbstractDungeon.initializeSpecialOneTimeEventList (AbstractDungeon.java:1340-1358) position 13 with NoteForYourself present, 12 without; WomanInBlue.ID (WomanInBlue.java:29); body WomanInBlue.java:41-111; getShrine gate gold >= 50, act-independent (:1924-1928)."
   native: true
   implemented: true
-  conditions: {pool: SPECIAL, draw: "gold >= 50"}
+  conditions: {pool: SPECIAL, acts: [1, 2, 3], draw: "gold >= 50"}
   options:
     - [BUY_ONE_POTION_FOR_20, BUY_TWO_POTIONS_FOR_30, BUY_THREE_POTIONS_FOR_40, REFUSE]
     - [PROCEED]
   a15:
     changes:
       - {field: REFUSAL_HP_LOSS_MAX_HP_PERCENT, base: 0.0, a15: 0.05}
+
+# TheCity.initializeEventList (TheCity.java:185-198) -- the Act-2 eventList,
+# 13 keys, in add() order. S2.02 lands these as IDENTITY + draw-gate metadata
+# only: no `implemented`, no `options`/`a15`. The bodies are S2.31 (the eight
+# non-combat rows) and S2.32 (the rest); the per-act list rebuild that makes
+# them drawable is S2.13's.
+#
+# THE ACT-2 LIST SHARES NO KEY WITH ACT 1 OR ACT 3 -- every row here is
+# acts: [2]. getEvent's per-key switch (AbstractDungeon.java:1950-1979) gates
+# only three of the twenty new keys; the other seventeen fall through to the
+# unconditional `tmp.add(e)` at :1981 and are ALWAYS.
+#
+# Payout manifests are deliberately NOT encoded here. They belong to the body
+# tasks, which read each option tree and its A15 branch in full (the B4.11-B4.13
+# pattern); what this file records is the per-row payout CITATION, so the body
+# task starts from a named line range rather than a search.
+- id: 32
+  name: ADDICT
+  game_id: "Addict"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 0; Addict.ID (events/city/Addict.java:19) is \"Addict\"; no getEvent gate (AbstractDungeon.java:1944-1990 read in full); payouts Addict.java:40-62 (85g for a returnRandomRelicTier relic, or steal -> relic + Shame)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 33
+  name: BACK_TO_BASICS
+  game_id: "Back to Basics"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 1; BackToBasics.ID (events/city/BackToBasics.java:28) is \"Back to Basics\"; no getEvent gate; payouts are master-deck only (upgrade Strikes/Defends, or purge)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 34
+  name: BEGGAR
+  game_id: "Beggar"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 2; Beggar.ID (events/city/Beggar.java:21) is \"Beggar\"; getEvent gate gold >= 75 (AbstractDungeon.java:1970-1974); payouts are gold-for-purge only."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: "gold >= 75 (AbstractDungeon.java:1970-1974)"}
+- id: 35
+  name: COLOSSEUM
+  game_id: "Colosseum"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 3; Colosseum.ID (events/city/Colosseum.java:23) is \"Colosseum\"; getEvent gate currMapNode != null AND currMapNode.y > map.size() / 2 (AbstractDungeon.java:1975-1979) -- the top half of the Act-2 map; combat-embedding (ProceedButton.java:115), Colosseum.java:53-76 fights Colosseum Slavers then Colosseum Nobs and rewards a RARE + an UNCOMMON pool relic (:72-73)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: "currMapNode != null and currMapNode.y > map.size() / 2 (AbstractDungeon.java:1975-1979)"}
+- id: 36
+  name: CURSED_TOME
+  game_id: "Cursed Tome"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 4; CursedTome.ID (events/city/CursedTome.java:25) is \"Cursed Tome\"; no getEvent gate; payouts CursedTome.randomBook (CursedTome.java:143-161): Necronomicon / Enchiridion / Nilry's Codex filtered by hasRelic, with a Circlet fallback when all three are owned, drawn on miscRng."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 37
+  name: DRUG_DEALER
+  game_id: "Drug Dealer"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 5; DrugDealer.ID (events/city/DrugDealer.java:30) is \"Drug Dealer\"; no getEvent gate; payouts DrugDealer.java:40-77 (Mutagenic Strength, or J.A.X.)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 38
+  name: FORGOTTEN_ALTAR
+  game_id: "Forgotten Altar"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 6; ForgottenAltar.ID (events/city/ForgottenAltar.java:29) is \"Forgotten Altar\"; no getEvent gate; payouts ForgottenAltar.java:46-113 (Bloody Idol for a held Golden Idol, or Decay)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 39
+  name: GHOSTS
+  game_id: "Ghosts"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 7; Ghosts.ID (events/city/Ghosts.java:18) is \"Ghosts\"; no getEvent gate; payouts Ghosts.java:33-91 -- 5x Apparition for a ceil(maxHealth * 0.5f) max-HP cost, clamped to maxHealth - 1 (Ghosts.java:26, 33-36)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 40
+  name: MASKED_BANDITS
+  game_id: "Masked Bandits"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 8; MaskedBandits.ID (events/city/MaskedBandits.java:26) is \"Masked Bandits\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MaskedBandits.java:43 enters the fight and :75-78 pays Red Mask on a win."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 41
+  name: NEST
+  game_id: "Nest"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 9; Nest.ID (events/city/Nest.java:19) is \"Nest\"; no getEvent gate; payouts Nest.java:35-62 (Ritual Dagger, or gold -- 99 base / 50 at A15+, Nest.java:35)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 42
+  name: THE_LIBRARY
+  game_id: "The Library"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 10; TheLibrary.ID (events/city/TheLibrary.java:24) is \"The Library\"; no getEvent gate; payouts TheLibrary.java:39-75 (1 of 20 random cards, or a rest heal)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 43
+  name: THE_MAUSOLEUM
+  game_id: "The Mausoleum"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 11; TheMausoleum.ID (events/city/TheMausoleum.java:23) is \"The Mausoleum\"; no getEvent gate; payouts TheMausoleum.java:39-74 (a returnRandomRelicTier relic with a Writhe chance)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+- id: 44
+  name: VAMPIRES
+  game_id: "Vampires"
+  provenance: "TheCity.initializeEventList (TheCity.java:185-198) position 12; Vampires.ID (events/city/Vampires.java:24) is \"Vampires\"; no getEvent gate; payouts Vampires.java:41-110 -- 5x Bite for a ceil(maxHealth * 0.3f) max-HP cost (Vampires.java:40-43), with an owned Blood Vial adding the free-trade option (:48-51)."
+  native: true
+  conditions: {pool: EVENT, acts: [2], draw: ALWAYS}
+
+# TheBeyond.initializeEventList (TheBeyond.java:179-186) -- the Act-3 eventList,
+# 7 keys, in add() order. Identity + draw-gate metadata only, exactly as the
+# Act-2 block above; the bodies are S2.33's.
+- id: 45
+  name: FALLING
+  game_id: "Falling"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 0; Falling.ID (events/beyond/Falling.java:24) is \"Falling\"; no getEvent gate (AbstractDungeon.java:1944-1990 read in full); payouts Falling.java:52-90 (forced removal of a random Skill / Power / Attack)."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+- id: 46
+  name: MIND_BLOOM
+  game_id: "MindBloom"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 1; MindBloom.ID (events/beyond/MindBloom.java:35) is \"MindBloom\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MindBloom.java:66-81 shuffles {The Guardian, Hexaghost, Slime Boss} with new Random(miscRng.randomLong()), fights list.get(0), and rewards 50 gold (25 at A13+) plus a RARE pool relic; other branches MindBloom.java:50-126 (Mark of the Bloom, 2x Normality, full heal + Doubt)."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+- id: 47
+  name: THE_MOAI_HEAD
+  game_id: "The Moai Head"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 2; MoaiHead.ID (events/beyond/MoaiHead.java:21) is \"The Moai Head\"; getEvent gate hasRelic(\"Golden Idol\") OR currentHealth / maxHealth <= 0.5f (AbstractDungeon.java:1960-1964, the skip test negated); payouts MoaiHead.java:35-74 (surrender Golden Idol for 333 gold -- MoaiHead.java:29, 69-74; or heal to full for max-HP loss, :61)."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: "player.hasRelic(\"Golden Idol\") or currentHealth / maxHealth <= 0.5f (AbstractDungeon.java:1960-1964)"}
+- id: 48
+  name: MYSTERIOUS_SPHERE
+  game_id: "Mysterious Sphere"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 3; MysteriousSphere.ID (events/beyond/MysteriousSphere.java:24) is \"Mysterious Sphere\"; no getEvent gate; combat-embedding (ProceedButton.java:115), MysteriousSphere.java:39 enters the fight and :80 pays a RARE pool relic on a win."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+- id: 49
+  name: SENSORY_STONE
+  game_id: "SensoryStone"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 4; SensoryStone.ID (events/beyond/SensoryStone.java:29) is \"SensoryStone\"; no getEvent gate; payouts SensoryStone.java:83-121 (1-3 colorless card rewards, each bought with HP)."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+- id: 50
+  name: TOMB_OF_LORD_RED_MASK
+  game_id: "Tomb of Lord Red Mask"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 5; TombRedMask.ID (events/beyond/TombRedMask.java:21) is \"Tomb of Lord Red Mask\"; no getEvent gate; payouts TombRedMask.java:34-56 (Red Mask for ALL the player's gold; the option is presented differently when Red Mask is already held, :34-38)."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
+- id: 51
+  name: WINDING_HALLS
+  game_id: "Winding Halls"
+  provenance: "TheBeyond.initializeEventList (TheBeyond.java:179-186) position 6; WindingHalls.ID (events/beyond/WindingHalls.java:26) is \"Winding Halls\"; no getEvent gate; payouts WindingHalls.java:54-98 (Madness; or heal + Writhe; or max-HP loss)."
+  native: true
+  conditions: {pool: EVENT, acts: [3], draw: ALWAYS}
