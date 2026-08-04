@@ -50,6 +50,7 @@ one exists, mirroring the Stage B convention.
 
 | Obligation | Deferred by | Owner task | Detail |
 |---|---|---|---|
+| Engine CMake uses `CMAKE_SOURCE_DIR` in 18 places, so `add_subdirectory` consumption is impossible (SpireTrainer must use ExternalProject: coarse 1-entry engine ctest, duplicate gtest fetch) | T1.1 | UNASSIGNED — sim-repo CMake hygiene task | Replace with `CMAKE_CURRENT_SOURCE_DIR`/`PROJECT_SOURCE_DIR` semantics so the engine is embeddable; the quiet failure mode is `target_include_directories(sts_engine PUBLIC ${CMAKE_SOURCE_DIR}/include)` exporting the CONSUMER's headers. Acceptance: SpireTrainer switches to add_subdirectory and its engine_suite becomes per-test ctest entries |
 | Sampler distributional suite green on ≥ 3 consecutive *scheduled* nightly runs (local 3× stability + cross-host determinism proven at landing; schedules fire only on master — force run 1 via workflow_dispatch) | T0.6 | GT0 gate check | `.github/workflows/nightly.yml` → `tools/dist_check/sampler_dist.sh`; record the three run URLs/dates here when observed, then mark DISCHARGED. **Re-owned at the GT0 gate (2026-08-04) and still OPEN** — the gate re-ran the suite 3× locally in nightly mode with byte-identical p-values, which is everything short of the scheduled runs themselves |
 
 ---
@@ -337,7 +338,7 @@ force run 1 with `workflow_dispatch` after this lands).
 
 ## Phase T1 — Training repo bootstrap (Gate GT1)
 
-- **T1.1** `[ ]` **Training repo scaffold.** New repo; engine consumed as a
+- **T1.1** `[x]` **Training repo scaffold.** New repo; engine consumed as a
   pinned submodule/subtree with the six-preset CMake flow; CI (build +
   engine fixture replay + unit tests); its own conventions/ledger docs
   seeded from this file's protocol; version-stamp plumbing (sim commit,
@@ -345,7 +346,19 @@ force run 1 with `workflow_dispatch` after this lands).
   version, search config id).
   **Deps:** — **Acceptance:** CI green on a hello-world actor that steps a
   batch of `RunController`s through `advance` and hashes states
-  byte-identically to a committed fixture. **Log:** —
+  byte-identically to a committed fixture. **Log:** 2026-08-04 — landed
+  as `D:\STS_BG_Mod\SpireTrainer` (commit `85a9639`, local only — remote
+  creation pending). Engine = pinned submodule at `gt0-info-layer`
+  (`bfd95a2`), pin enforced by `check_submodule_pin.sh` (refuses
+  `branch =` entries); six-field VersionStamp (CRLF-normalized registry
+  hash — cross-host stable); acceptance fixture: 8 A20 seeds →
+  RUN_OVER, run_state_hash + public_hash identical under clang-cl and
+  GCC, loader refuses stamp mismatch; six presets green incl. the full
+  engine suite via ExternalProject. Boundary check wraps the engine's
+  script over the four training trees. **Per the two-repo rule, T1.x
+  tracking now lives in `SpireTrainer/docs/training-tasks.md`; this
+  ledger keeps the GT1+ cross-repo gates.** Engine-side follow-up filed
+  below: `CMAKE_SOURCE_DIR` → `CMAKE_CURRENT_SOURCE_DIR` refactor.
 
 - **T1.2** `[ ]` ∥ **Trajectory schema + storage.** Fixed-layout POD
   records (public obs, mask, sparse search distribution, action, outcome,
