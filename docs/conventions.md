@@ -361,6 +361,22 @@ therefore shares only the deps with **no sub-build** (xxHash, nlohmann). Do not
 measured 278 MB → 186 MB, not the ~2 MB you would expect. Prefer a pinned
 release asset (`URL` + `URL_HASH`); that took the same dependency to 1.9 MB.
 
+#### A failed `win-*` configure poisons the cache: `/EHsc` silently vanishes
+
+Symptom: only the exception-using tools fail — `error: cannot use 'try' with
+exceptions disabled` in `tools/oracle_bridge/replay` / dist_check — while the
+engine and most tests build fine. Cause: `cmake --preset win-*` run in a shell
+where `clang-cl` is not resolvable (no vcvars, LLVM not on PATH) aborts at
+`project()` **after writing a partial `CMakeCache.txt`**; the next configure in
+a fixed shell then succeeds but skips first-run flag initialization, so
+`CMAKE_CXX_FLAGS` stays empty instead of CMake's MSVC default
+`/DWIN32 /D_WINDOWS /EHsc` — nothing in this repo sets `/EHsc` itself. Two
+agents lost time to this on 2026-08-03 (rule of two). Rule: if a `win-*`
+configure ever fails on compiler detection, **delete that preset's build dir**
+before reconfiguring; a fresh configure restores the defaults. Verify with
+`grep CMAKE_CXX_FLAGS: build/<preset>/CMakeCache.txt` — it must contain
+`/EHsc`.
+
 #### Two build commands in one build tree corrupt each other's objects
 
 **Symptom:** a link fails with `file format not recognized` for an object that
