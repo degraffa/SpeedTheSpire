@@ -250,12 +250,18 @@ TEST(GuardianRegistry, ModeShiftThresholdColumnsIncludingA19) {
 // Init + pre-battle
 // ===========================================================================
 
-TEST(GuardianInit, FixedHpOneIgnoredAiRollAndModeShiftAtPreBattle) {
+TEST(GuardianInit, DegenerateHpDrawOneIgnoredAiRollAndModeShiftAtPreBattle) {
     CombatState s{};
     s.monster_count = 1;
     s.monster_hp_rng = from_seed(21002);
     s.ai_rng = from_seed(21002);
-    const RngStream hp_before = s.monster_hp_rng;
+    // setHp(250) (TheGuardian.java:97-106) is setHp(hp, hp)
+    // (AbstractMonster.java:777-779) -> monsterHpRng.random(min,max) (:765-767),
+    // which increments and advances the stream even on a degenerate range
+    // (Random.java:58-61). Fixed sheet, real draw.
+    RngStream hp_expected = s.monster_hp_rng;
+    ASSERT_EQ(random(hp_expected, kA20Hp, kA20Hp), kA20Hp)
+        << "a degenerate range can only return its endpoint";
 
     guardian_init(s, 0);
 
@@ -263,10 +269,10 @@ TEST(GuardianInit, FixedHpOneIgnoredAiRollAndModeShiftAtPreBattle) {
     EXPECT_EQ(g.monster_id, static_cast<uint16_t>(MonsterId::THE_GUARDIAN));
     EXPECT_EQ(g.hp, kA20Hp);
     EXPECT_EQ(g.max_hp, kA20Hp);
-    EXPECT_EQ(s.monster_hp_rng.counter, hp_before.counter)
-        << "setHp(int) is fixed: no monsterHpRng draw";
-    EXPECT_EQ(s.monster_hp_rng.s0, hp_before.s0);
-    EXPECT_EQ(s.monster_hp_rng.s1, hp_before.s1);
+    EXPECT_EQ(s.monster_hp_rng.counter, hp_expected.counter)
+        << "setHp(int) still draws once: fixed sheet, consumed stream";
+    EXPECT_EQ(s.monster_hp_rng.s0, hp_expected.s0);
+    EXPECT_EQ(s.monster_hp_rng.s1, hp_expected.s1);
     EXPECT_EQ(s.ai_rng.counter, 1)
         << "init rollMove consumes random(99); getMove then ignores num";
     EXPECT_EQ(g.move_history[0], kChargeUp)

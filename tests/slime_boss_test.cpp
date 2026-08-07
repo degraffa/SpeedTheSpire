@@ -155,12 +155,18 @@ TEST(SlimeBossRegistry, NativeEntryAndA4A9A19ColumnsMatchJava) {
     EXPECT_EQ(group.members[0], "SlimeBoss");
 }
 
-TEST(SlimeBossAI, InitUsesFixedA20HpAndOneIgnoredAiRoll) {
+TEST(SlimeBossAI, InitDrawsTheDegenerateA20HpRollAndOneIgnoredAiRoll) {
     CombatState s{};
     s.monster_count = 1;
     s.monster_hp_rng = from_seed(12002);
     s.ai_rng = from_seed(12002);
-    const RngStream hp_before = s.monster_hp_rng;
+    // setHp(150) (SlimeBoss.java:89-93) is setHp(hp, hp)
+    // (AbstractMonster.java:777-779) -> monsterHpRng.random(min,max) (:765-767),
+    // which increments and advances the stream even on a degenerate range
+    // (Random.java:58-61). Fixed sheet, real draw.
+    RngStream hp_expected = s.monster_hp_rng;
+    ASSERT_EQ(random(hp_expected, 150, 150), 150)
+        << "a degenerate range can only return its endpoint";
 
     slime_boss_init(s, 0);
 
@@ -169,10 +175,10 @@ TEST(SlimeBossAI, InitUsesFixedA20HpAndOneIgnoredAiRoll) {
               static_cast<uint16_t>(MonsterId::SLIME_BOSS));
     EXPECT_EQ(boss.hp, 150);
     EXPECT_EQ(boss.max_hp, 150);
-    EXPECT_EQ(s.monster_hp_rng.counter, hp_before.counter)
-        << "setHp(int) is fixed: no monsterHpRng draw";
-    EXPECT_EQ(s.monster_hp_rng.s0, hp_before.s0);
-    EXPECT_EQ(s.monster_hp_rng.s1, hp_before.s1);
+    EXPECT_EQ(s.monster_hp_rng.counter, hp_expected.counter)
+        << "setHp(int) still draws once: fixed sheet, consumed stream";
+    EXPECT_EQ(s.monster_hp_rng.s0, hp_expected.s0);
+    EXPECT_EQ(s.monster_hp_rng.s1, hp_expected.s1);
     EXPECT_EQ(s.ai_rng.counter, 1)
         << "init rollMove consumes random(99), then getMove ignores num";
     EXPECT_EQ(boss.move_history[0], kSticky);

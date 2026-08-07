@@ -30,7 +30,9 @@
 
 namespace sts::engine {
 
-// Constructor + init(): fixed registry HP (NO monsterHpRng draw), SplitPower,
+// Constructor + init(): fixed registry HP (setHp(int) -- a fixed value, but
+// STILL ONE monsterHpRng draw: AbstractMonster.java:765-779 +
+// Random.java:58-61), SplitPower,
 // one aiRng.random(99) draw whose value is ignored, forced first STICKY move.
 void slime_boss_init(CombatState& state, uint8_t monster_index) noexcept;
 

@@ -187,9 +187,18 @@ void hexaghost_init(CombatState& s, uint8_t mi) noexcept {
     const auto& def = sts::registry::kHexaghost;
     MonsterState& m = s.monsters[mi];
     m.monster_id = static_cast<uint16_t>(MonsterId::HEXAGHOST);
-    // setHp(int), not setHp(min,max): no monsterHpRng draw (Hexaghost.java:
-    // 102-106 -- both branches call the fixed-value overload).
-    m.hp = static_cast<int16_t>(def.hp_min(kMonsterAscension));
+    // setHp(int) is a FIXED SHEET but NOT a free one. Both ctor branches
+    // (Hexaghost.java:102-106) call setHp(int), which is literally
+    // `setHp(hp, hp)` (AbstractMonster.java:777-779); the two-arg overload then
+    // draws `monsterHpRng.random(minHp, maxHp)` unconditionally
+    // (AbstractMonster.java:765-767). Random.random(int,int) increments the
+    // counter and calls nextInt(end - start + 1) even when start == end
+    // (Random.java:58-61), so a degenerate range still consumes one draw and
+    // advances the stream. The rolled value can only be the endpoint -- the
+    // observable is the STREAM, not the HP.
+    const int32_t rolled = random(s.monster_hp_rng, def.hp_min(kMonsterAscension),
+                                  def.hp_max(kMonsterAscension));
+    m.hp = static_cast<int16_t>(rolled);
     m.max_hp = m.hp;
     m.block = 0;
     m.flags = 0;  // orbActiveCount 0, burnUpgraded false (:92-93)

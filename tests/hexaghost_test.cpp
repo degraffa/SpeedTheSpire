@@ -363,12 +363,21 @@ TEST(HexaghostState, OrbCountAndBurnLatchLiveInSpareFlagBitsOnly) {
 // Init + the two-turn opener
 // ===========================================================================
 
-TEST(HexaghostInit, FixedHpAndOneIgnoredAiRollForcingTheActivateOpener) {
+TEST(HexaghostInit, DegenerateHpDrawAndOneIgnoredAiRollForcingTheActivateOpener) {
     CombatState s{};
     s.monster_count = 1;
     s.monster_hp_rng = from_seed(22003);
     s.ai_rng = from_seed(22003);
-    const RngStream hp_before = s.monster_hp_rng;
+    // setHp(264) (Hexaghost.java:102-106) is setHp(hp, hp)
+    // (AbstractMonster.java:777-779), and setHp(min,max) draws
+    // monsterHpRng.random(min,max) UNCONDITIONALLY (:765-767). Random.random(
+    // int,int) increments the counter and calls nextInt(end - start + 1) even
+    // for a degenerate range (Random.java:58-61). The SHEET is fixed; the DRAW
+    // is not optional, and the stream must land exactly where one such draw
+    // leaves it.
+    RngStream hp_expected = s.monster_hp_rng;
+    ASSERT_EQ(random(hp_expected, kA20Hp, kA20Hp), kA20Hp)
+        << "a degenerate range can only return its endpoint";
 
     hexaghost_init(s, 0);
 
@@ -376,10 +385,10 @@ TEST(HexaghostInit, FixedHpAndOneIgnoredAiRollForcingTheActivateOpener) {
     EXPECT_EQ(h.monster_id, static_cast<uint16_t>(MonsterId::HEXAGHOST));
     EXPECT_EQ(h.hp, kA20Hp);
     EXPECT_EQ(h.max_hp, kA20Hp);
-    EXPECT_EQ(s.monster_hp_rng.counter, hp_before.counter)
-        << "setHp(int) is fixed: no monsterHpRng draw (:102-106)";
-    EXPECT_EQ(s.monster_hp_rng.s0, hp_before.s0);
-    EXPECT_EQ(s.monster_hp_rng.s1, hp_before.s1);
+    EXPECT_EQ(s.monster_hp_rng.counter, hp_expected.counter)
+        << "setHp(int) still draws once: fixed sheet, consumed stream";
+    EXPECT_EQ(s.monster_hp_rng.s0, hp_expected.s0);
+    EXPECT_EQ(s.monster_hp_rng.s1, hp_expected.s1);
     EXPECT_EQ(s.ai_rng.counter, 1)
         << "init rollMove consumes random(99); getMove then ignores num";
     EXPECT_EQ(h.move_history[0], kActivate)

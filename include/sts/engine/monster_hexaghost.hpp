@@ -10,7 +10,9 @@
 //                           2, infernoHits 6, and the `activated` /
 //                           `burnUpgraded` / `orbActiveCount` state),
 //     :96-128  (ctor: EnemyType.BOSS (:98); setHp(int) -- a FIXED sheet, 264
-//               from A9 else 250 (:102-106), so NO monsterHpRng draw; a
+//               from A9 else 250 (:102-106), but STILL ONE monsterHpRng draw
+//               (setHp(int) == setHp(hp, hp), AbstractMonster.java:765-779;
+//               Random.java:58-61 advances on a degenerate range too); a
 //               DESCENDING stat chain (:107-122) -- A19+ str 3 / burns 2 /
 //               tackle 6 / inferno 3, A4+ str 2 / burns 1 / tackle 6 /
 //               inferno 3, else str 2 / burns 1 / tackle 5 / inferno 2; the
@@ -108,8 +110,10 @@
 
 namespace sts::engine {
 
-// Constructor + init(), folded: the fixed registry HP sheet (setHp(int) -- NO
-// monsterHpRng draw, Hexaghost.java:102-106) and the one aiRng.random(99) draw
+// Constructor + init(), folded: the fixed registry HP sheet (setHp(int),
+// Hexaghost.java:102-106 -- fixed value, but ONE monsterHpRng draw all the
+// same, AbstractMonster.java:765-779 + Random.java:58-61) and the one
+// aiRng.random(99) draw
 // whose value getMove discards in favour of the forced opening ACTIVATE
 // (:220-222).
 void hexaghost_init(CombatState& state, uint8_t monster_index) noexcept;

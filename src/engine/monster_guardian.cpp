@@ -148,9 +148,16 @@ void guardian_init(CombatState& s, uint8_t mi) noexcept {
     const auto& def = sts::registry::kTheGuardian;
     MonsterState& m = s.monsters[mi];
     m.monster_id = static_cast<uint16_t>(MonsterId::THE_GUARDIAN);
-    // setHp(int), not setHp(min,max): no monsterHpRng draw (TheGuardian.java:98,
-    // :101, :104 -- all three branches call the fixed-value overload).
-    m.hp = static_cast<int16_t>(def.hp_min(kMonsterAscension));
+    // setHp(int) is a FIXED SHEET but NOT a free one. All three ctor branches
+    // (TheGuardian.java:98, :101, :104) call setHp(int) == `setHp(hp, hp)`
+    // (AbstractMonster.java:777-779), and the two-arg overload draws
+    // `monsterHpRng.random(minHp, maxHp)` unconditionally (:765-767).
+    // Random.random(int,int) increments the counter and calls
+    // nextInt(end - start + 1) even when start == end (Random.java:58-61), so
+    // the degenerate range still consumes one draw and advances the stream.
+    const int32_t rolled = random(s.monster_hp_rng, def.hp_min(kMonsterAscension),
+                                  def.hp_max(kMonsterAscension));
+    m.hp = static_cast<int16_t>(rolled);
     m.max_hp = m.hp;
     m.block = 0;
     m.flags = kMonsterFlagGuardianOpen;  // isOpen = true (:76)

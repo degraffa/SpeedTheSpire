@@ -68,7 +68,8 @@
 namespace sts::engine {
 
 // Constructor + usePreBattleAction + init(), folded: the fixed registry HP sheet
-// (setHp(int) -- NO monsterHpRng draw), the Mode Shift power at this ascension's
+// (setHp(int) -- a fixed value, but STILL ONE monsterHpRng draw:
+// AbstractMonster.java:765-779 + Random.java:58-61), the Mode Shift power at this ascension's
 // starting threshold, and the one aiRng.random(99) draw whose value getMove
 // discards in favour of the forced opening CHARGE_UP.
 void guardian_init(CombatState& state, uint8_t monster_index) noexcept;
