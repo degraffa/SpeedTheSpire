@@ -102,7 +102,13 @@ namespace {
     // atStartOfTurn / atDamageFinalReceive / onAttacked / onRemove
     // (FlightPower.java:47-78, read in full) -- Flight scales only damage it
     // RECEIVES, which is the third pass below, never damage its owner gives.
-    static_assert(sts::registry::manifest::kPowersCount == 55,
+    // Checked for S2.22's one power, MALLEABLE (id 95, MalleablePower.java:42-82,
+    // read in full): its overrides are onAttacked, atEndOfTurn, atEndOfRound and
+    // stackPower. It READS the damage its owner receives (inside onAttacked, to
+    // decide whether the hit was survivable) but MODIFIES no damage number in any
+    // pass, giving or receiving -- so all three of this file's counts move again,
+    // caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 56,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -183,7 +189,9 @@ namespace {
     // default, and the distinction is not cosmetic: the FINAL pass runs after
     // Vulnerable's multiply, so a Vulnerable Byrd takes floor(base*1.5/2), not
     // floor(base/2*1.5).
-    static_assert(sts::registry::manifest::kPowersCount == 55,
+    // MALLEABLE: same answer as the pass above -- it reads the incoming damage in
+    // onAttacked and modifies none (MalleablePower.java:62-75).
+    static_assert(sts::registry::manifest::kPowersCount == 56,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -258,7 +266,10 @@ namespace {
     // (FlightPower.java:53-63) and has its case below; it overrides neither
     // atDamageGive nor atDamageReceive nor modifyBlock/modifyBlockLast, so the
     // other two counts here and interp_block.cpp's took the move caseless.
-    static_assert(sts::registry::manifest::kPowersCount == 55,
+    // MALLEABLE needs no case in ANY of the three: it hooks onAttacked, which
+    // fires AFTER all three passes with the already-modified number, and it
+    // returns `damageAmount` unchanged (MalleablePower.java:74).
+    static_assert(sts::registry::manifest::kPowersCount == 56,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as Intangible and Flight do)? Add a case "
                   "here if so.");
@@ -694,6 +705,14 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     // lethal hit. No-op with an empty relic mirror and no ON_DEATH power
     // (fixtures unchanged).
     if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
+        // The dying monster's OWN die() body runs FIRST, because the Java
+        // subclass override does its work and THEN calls `super.die()` -- and
+        // super.die() is what the two fan-outs below model
+        // (AbstractMonster.java:925-937). The Mugger's seeded playDeathSfx draw
+        // is the first content this seam carries (monster_dispatch.hpp
+        // MonsterDieFn); it is a no-op for every monster whose die() is
+        // presentation.
+        dispatch_monster_die(s, tgt);
         dispatch_on_death(s, tgt);
         const RelicView rv = player_relics(s);
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
@@ -750,6 +769,14 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
     // A direct HP loss can also kill a monster -> the same die() power-then-relic
     // dispatch (AbstractMonster.die:925-937), before the override seam as above.
     if (tgt != kActorPlayer && old_hp > 0 && new_hp == 0) {
+        // The dying monster's OWN die() body runs FIRST, because the Java
+        // subclass override does its work and THEN calls `super.die()` -- and
+        // super.die() is what the two fan-outs below model
+        // (AbstractMonster.java:925-937). The Mugger's seeded playDeathSfx draw
+        // is the first content this seam carries (monster_dispatch.hpp
+        // MonsterDieFn); it is a no-op for every monster whose die() is
+        // presentation.
+        dispatch_monster_die(s, tgt);
         dispatch_on_death(s, tgt);
         const RelicView rv = player_relics(s);
         dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
@@ -917,22 +944,74 @@ void op_vampire_damage(CombatState& s, uint8_t src, uint8_t tgt,
     m.hp = static_cast<int16_t>(nhp);
 }
 
-// HEAL (HealAction.update, HealAction.java:30-34 -> AbstractCreature.heal): the
-// player's heal, routed through heal_player_with_relics so the onPlayerHeal relic
-// pass (Magic Flower) applies and the result is clamped to max HP. A monster
-// target is a no-op HERE -- the ONE S1 effect that heals a monster,
-// RegenerateMonsterPower (PowerId::REGENERATE_MONSTER, id 91), does not come
-// through this opcode at all: it is native and writes the monster's HP
-// directly at end of turn (power_regenerate_monster.cpp), the same escape
-// hatch the player's own REGEN (id 18) uses. So this op_heal no-op is not a
-// dead branch to "fix" if a monster-heal need ever shows up here -- it means
-// that need is data-program-shaped and REGENERATE_MONSTER's native precedent
-// is not it.
+// HEAL (HealAction.update, HealAction.java:30-34 -> target.heal(amount)). TWO
+// branches, because the game has two heal() bodies and they are NOT the same
+// method:
+//
+//   * PLAYER  -- AbstractPlayer.heal (AbstractPlayer.java:1545-1553) calls
+//     super.heal, i.e. AbstractCreature.heal (:386-417), whose relic loop
+//     `for (AbstractRelic r : player.relics) { if (!isPlayer) continue;
+//     healAmount = r.onPlayerHeal(healAmount); }` is the Magic Flower pass.
+//     Routed through heal_player_with_relics, which also clamps to max HP.
+//
+//   * MONSTER -- AbstractMonster.heal (AbstractMonster.java:383-399) OVERRIDES
+//     it and is a genuinely different body, three lines shorter:
+//
+//         if (this.isDying) return;
+//         for (AbstractPower p : this.powers) healAmount = p.onHeal(healAmount);
+//         this.currentHealth += healAmount;
+//         if (this.currentHealth > this.maxHealth) this.currentHealth = maxHealth;
+//
+//     There is NO relic pass at all here -- and that is not merely because the
+//     base class's loop is `isPlayer`-gated (AbstractCreature.java:392-395); the
+//     override never reaches that code. There is also NO isEscaping test: only
+//     `isDying`, modelled here as hp <= 0. An escaped-but-alive monster WOULD be
+//     healed by a HealAction that reached it; nothing queues one, because the only
+//     producer (the Healer) filters escapees at QUEUE time (Healer.java:104-106).
+//     Reproduced as written rather than "corrected" with a liveness predicate.
+//
+// THE ONHEAL POWER PASS IS A DOCUMENTED, CHECKED NO-OP. `grep -rn onHeal com/`
+// over the decompiled tree finds AbstractPower's identity base and exactly ONE
+// override in the whole game -- MagicFlower is a RELIC, not a power, and the sole
+// power-side implementor is out of S1/S2 scope -- so no registered PowerId can
+// change a heal amount today. When one lands, THIS is the site that gains the
+// hook dispatch, and the comment is phrased so that going stale is visible.
+//
+// HISTORY, because the previous comment here is the kind conventions §8 warns
+// about. It read "a monster target is a no-op HERE ... this is not a dead branch
+// to fix if a monster-heal need ever shows up -- it means that need is
+// data-program-shaped and REGENERATE_MONSTER's native precedent is not it." That
+// was a correct reading of S1, where the one monster-healing effect
+// (RegenerateMonsterPower, id 91) is a power hook writing HP directly
+// (power_regenerate_monster.cpp), and it was also a comment justifying inert code
+// by a missing prerequisite. The prerequisite arrived: the Healer's HEAL move
+// (Healer.java:104-107) queues one real HealAction per live group member, which
+// IS data-program-shaped, so the branch is now live and the old claim is deleted
+// rather than left to be believed. VAMPIRE_DAMAGE (66) keeps its INLINE write and
+// does NOT route here -- its Java addToTop's the HealAction ahead of whatever the
+// hit queued at the front, which a queued HEAL item cannot reproduce.
 void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept {
-    if (tgt != kActorPlayer || amount <= 0) {
+    if (amount <= 0) {
         return;
     }
-    heal_player_with_relics(s, amount);
+    if (tgt == kActorPlayer) {
+        heal_player_with_relics(s, amount);
+        return;
+    }
+    if (tgt >= kMonsterCap) {
+        return;
+    }
+    MonsterState& m = s.monsters[tgt];
+    if (m.hp <= 0) {
+        return;  // `if (this.isDying) return;` (AbstractMonster.java:385-387)
+    }
+    // No relic pass and no onHeal implementor (see above), so the amount lands
+    // as authored; clamp to maxHealth (:391-394).
+    int nhp = m.hp + amount;
+    if (nhp > m.max_hp) {
+        nhp = m.max_hp;
+    }
+    m.hp = static_cast<int16_t>(nhp);
 }
 
 // DropkickAction.update: test Vulnerable when the action resolves. Damage is

@@ -47,20 +47,20 @@
 //     per attack via an anonymous queued action (:97,115 -- the synthetic
 //     accessors :181-192 are its decompiled residue), one queue slot ahead of
 //     the DamageAction whose stealGold (DamageAction.java:98-114) clamps to
-//     the player's gold and deducts it. The engine stores the count and the
-//     settlement layer computes min(count * goldAmt, gold) at combat end.
-//     (This comment used to justify that with "CombatState carries NO gold
-//     field" -- stale since schema 6: CombatState.combat_gold exists, but it
-//     is the Hand of Greed GAIN accumulator settled once through gain_gold at
-//     fold-back, not a mirror of the purse a steal-time clamp could read; the
-//     end-of-combat settlement is the recorded, orchestrator-adjudicated
-//     deviation -- see settle_stolen_gold and the ledger's stolen-gold row,
-//     whose faithful fix is re-scoped to an owner-approved Act-2-adjacent
-//     task.) That sum-then-clamp equals the
-//     game's per-steal clamping whenever the thief's steals are the only gold
-//     movement in the combat -- true for every Act-1 group, since none fields
-//     two thieves ("Looter" is solo; "Exordium Thugs" emits at most one). An
-//     Act-2 owner adding the Mugger to a shared group must revisit this.
+//     the player's gold and deducts it. Both read the SAME purse at the same
+//     instant, which is what makes the per-steal clamp well-defined. The engine
+//     stores the COUNT and settles at combat end -- see thief_stolen_gold and
+//     settle_stolen_gold below, which reconstruct the per-steal clamping rather
+//     than approximating it.
+//
+//     HISTORY: this used to be a sum-then-clamp, min(count * goldAmt, gold),
+//     and that was a recorded deviation naming an Act-2-adjacent task as its
+//     owner. S2.22 is that task and the deviation is GONE. The two forms agree
+//     on the TOTAL taken (min over a shrinking purse telescopes to
+//     min(total_requested, initial_purse)) and disagree on ATTRIBUTION as soon
+//     as a group fields TWO thieves whose fates differ -- which "2 Thieves"
+//     (Looter + Mugger, MonsterHelper.java:462-464) does. See settle_stolen_gold
+//     for how the order is reconstructed.
 //
 // (3) THE ESCAPE IS TWO SYNCHRONOUS HALVES AND ONE QUEUED ONE. room.mugged is
 //     set synchronously inside takeTurn (:128 -> kCombatFlagMugged), the
@@ -71,7 +71,7 @@
 //     KILLED -- hp <= 0, die() returns stolenGold via the reward screen
 //     (addStolenGoldToRewards, :170-172, BEFORE super.die()'s power/relic
 //     walks); ESCAPED -- hp > 0 + kMonsterFlagEscaped + kCombatFlagMugged, the
-//     gold is gone. Both are reads on the surviving record (looter_stolen_gold
+//     gold is gone. Both are reads on the surviving record (thief_stolen_gold
 //     below), and the consumer EXISTS (this line used to say it did not):
 //     run_advance.cpp settle_stolen_gold computes the dead thieves' clamped
 //     return and seed_combat_rewards presents it as the STOLEN_GOLD reward
@@ -87,6 +87,7 @@
 #include <cstdint>
 
 #include "sts/engine/combat_state.hpp"
+#include "sts/engine/monster_mugger.hpp"  // kMuggerGoldAmt (the second thief)
 
 namespace sts::engine {
 
@@ -102,13 +103,58 @@ inline constexpr int32_t kLooterGoldAmt = 20;
     return m.pad0;
 }
 
-// The gold this Looter has taken so far, UNCLAMPED (the game clamps each steal
-// to the player's remaining gold at steal time; the engine's settlement layer
-// applies min(total, gold) at combat end instead -- exact per note (2)).
-// On a KILLED record this is what die() returns to the rewards; on an ESCAPED
-// record it is what the player lost.
+// --- The thief interface -----------------------------------------------------
+//
+// TWO monster types steal gold: the Looter (id 26) and the Mugger (id 32). They
+// are separate classes with separate fields and separate sound behaviour, but
+// their ACCOUNTING is identical -- a per-attack steal of `goldAmt`, clamped at
+// steal time to the player's remaining purse -- so the settlement layer treats
+// them through the three helpers below rather than by naming ids twice.
+//
+// A NEW THIEF IS A ONE-LINE CHANGE HERE plus its id in the settlement walk; the
+// helpers are written so that forgetting the second half is a zero return rather
+// than a wrong number.
+
+// Is this record a gold-stealing monster at all?
+[[nodiscard]] inline bool is_thief(const MonsterState& m) noexcept {
+    const MonsterId id = static_cast<MonsterId>(m.monster_id);
+    return id == MonsterId::LOOTER || id == MonsterId::MUGGER;
+}
+
+// This thief's per-steal `goldAmt`. NOT a shared constant: Looter.goldAmt
+// (Looter.java:63) and Mugger.goldAmt (Mugger.java:61) are separate fields in
+// separate classes that happen to carry the same 20 at A17+, and a future thief
+// (or a future ascension column) need not agree with either.
+[[nodiscard]] inline int32_t thief_gold_amount(MonsterId id) noexcept {
+    switch (id) {
+        case MonsterId::LOOTER:
+            return kLooterGoldAmt;
+        case MonsterId::MUGGER:
+            return kMuggerGoldAmt;
+        default:
+            return 0;
+    }
+}
+
+// How many steals this thief has made -- pad0 for both types (see note (2)).
+[[nodiscard]] inline uint8_t thief_steal_count(const MonsterState& m) noexcept {
+    return is_thief(m) ? m.pad0 : static_cast<uint8_t>(0);
+}
+
+// The gold this thief has REQUESTED so far: steals x goldAmt, UNCLAMPED. The
+// clamp is not a property of the thief -- it is a property of the purse at each
+// steal -- so it is applied by settle_stolen_gold (run_advance.cpp), which knows
+// both the purse and the interleaving of every thief's steals.
+[[nodiscard]] inline int32_t thief_stolen_gold(const MonsterState& m) noexcept {
+    return static_cast<int32_t>(thief_steal_count(m)) *
+           thief_gold_amount(static_cast<MonsterId>(m.monster_id));
+}
+
+// The Looter-specific spelling, kept because it is what the Looter's own tests
+// and the replay tool's readout name. Identical to thief_stolen_gold on a Looter
+// record; prefer thief_stolen_gold in anything that walks a whole group.
 [[nodiscard]] inline int32_t looter_stolen_gold(const MonsterState& m) noexcept {
-    return static_cast<int32_t>(m.pad0) * kLooterGoldAmt;
+    return thief_stolen_gold(m);
 }
 
 void looter_init(CombatState& state, uint8_t monster_index) noexcept;

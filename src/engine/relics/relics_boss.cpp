@@ -12,6 +12,7 @@
 #include "sts/engine/action_queue.hpp"  // add_to_bottom / add_to_top / kActor*
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"        // Opcode, make_apply_power_flags, CardPile
+#include "sts/engine/monster_snecko.hpp"  // kConfusionAppliedAmount (shared with GLARE)
 #include "sts/engine/run_state.hpp"     // RelicSlot
 #include "sts/engine/types.hpp"
 
@@ -63,9 +64,36 @@ void relic_native_snecko_eye(CombatState& s, RelicHook hook,
     // cost-randomised. Binding this to atBattleStart instead would put it AFTER
     // the opening draw and silently spare the first hand.
     //
-    // ConfusionPower carries no amount (its ctor takes only the owner,
-    // ConfusionPower.java:23-31), so the stack amount is the 1 an
-    // ApplyPowerAction without an explicit amount uses; the row is `stack: none`.
+    // THE APPLIED AMOUNT IS -1, NOT 1. This comment used to read "so the stack
+    // amount is the 1 an ApplyPowerAction without an explicit amount uses", and
+    // that claim about the Java was simply false; the code matched the comment,
+    // so the engine wrote 1. The actual chain:
+    //
+    //   * ConfusionPower's ctor takes only the owner and assigns no amount
+    //     (ConfusionPower.java:23-31), so the object carries AbstractPower's
+    //     field initializer `public int amount = -1` (AbstractPower.java:65).
+    //   * SneckoEye.atPreBattle uses the 3-ARG ApplyPowerAction (SneckoEye.java:
+    //     42), whose ctor forwards `powerToApply.amount` as the stack amount
+    //     (ApplyPowerAction.java:80-82) -- i.e. -1. There is no "default 1"
+    //     form: the 3-arg ctor IS the no-explicit-amount form, and it reads the
+    //     power's own field.
+    //   * On a NEW slot the game adds the POWER OBJECT itself
+    //     (ApplyPowerAction.update:164-166; AbstractCreature.addPower:506-513 on
+    //     the direct path), so -1 is what the slot holds and what
+    //     CommunicationMod reports.
+    //
+    // Verified against a live capture rather than reasoned alone, per the S2.22
+    // adjudication procedure: tests/golden/oracle_corpus/act1_a20_50 carries
+    // `{"amount": -1, "name": "Confusion", "id": "Confusion"}` on the player's
+    // power list. The powers.yaml row's `stack: none` was right for the wrong
+    // reason and stays; the MECHANISM is AbstractPower.stackPower's
+    // `amount == -1` early return (:152-158), which op_apply_power now
+    // reproduces -- reachable, because the Snecko's GLARE can land Confusion on
+    // a player who already carries this relic's.
+    //
+    // The amount is behaviourally inert (nothing reads it; power_confusion.cpp's
+    // onCardDraw body ignores it), so this changes no simulated outcome -- but it
+    // is ORACLE-VISIBLE, which is the whole reason to be right about it.
     if (hook != RelicHook::AT_PRE_BATTLE) {
         return;
     }
@@ -73,7 +101,7 @@ void relic_native_snecko_eye(CombatState& s, RelicHook hook,
     p.opcode = static_cast<uint16_t>(Opcode::APPLY_POWER);
     p.src = kActorPlayer;
     p.tgt = kActorPlayer;
-    p.amount = 1;
+    p.amount = kConfusionAppliedAmount;
     p.flags = make_apply_power_flags(PowerId::CONFUSION);
     add_to_bottom(s, p);  // addToBot (SneckoEye.java:42)
 }

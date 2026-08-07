@@ -216,7 +216,13 @@ TEST(RelicBossSpecial, SneckoEyeQueuesConfusionAtPreBattleOnly) {
     ASSERT_EQ(s.action_count, 1);
     EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::APPLY_POWER));
     EXPECT_EQ(queued(s, 0).tgt, kActorPlayer);
-    EXPECT_EQ(queued(s, 0).amount, 1);
+    // -1, NOT 1: the 3-arg ApplyPowerAction forwards `powerToApply.amount`
+    // (ApplyPowerAction.java:80-82) and ConfusionPower never assigns one, so the
+    // object carries AbstractPower's field initializer (AbstractPower.java:65).
+    // Corrected in S2.22 against a live capture -- tests/golden/oracle_corpus/
+    // act1_a20_50 reports {"amount": -1, "name": "Confusion"} -- and shared with
+    // the Snecko's GLARE, the second producer.
+    EXPECT_EQ(queued(s, 0).amount, -1);
     EXPECT_EQ(queued(s, 0).flags, make_apply_power_flags(PowerId::CONFUSION));
 
     drain(s);

@@ -17,15 +17,11 @@ constexpr uint8_t kBullRush = sts::registry::kGremlinNobMoveBullRush;    // 1
 constexpr uint8_t kSkullBash = sts::registry::kGremlinNobMoveSkullBash;  // 2
 constexpr uint8_t kBellow = sts::registry::kGremlinNobMoveBellow;        // 3
 
-// AbstractMonster.lastMoveBefore (AbstractMonster.java:437-444): the move decided
-// one BEFORE the most recent one. move_history[1] is that slot, and the ring's 0
-// empty-slot sentinel already encodes the "history shorter than 2" false answer
-// (a real move id is never 0). Kept local to this module because the Nob's A18
-// branch is the only getMove in the roster that reads it.
-[[nodiscard]] bool last_move_before_is(const MonsterState& m,
-                                       uint8_t move) noexcept {
-    return m.move_history[1] == move;
-}
+// AbstractMonster.lastMoveBefore (AbstractMonster.java:437-444) used to be a
+// file-local copy here, justified by the Nob's A18 branch being its only reader
+// in the Act-1 roster. The Snake Plant's A17 arm (SnakePlant.java:132) made that
+// two, so the helper moved up to monster_dispatch.hpp beside lastMove /
+// lastTwoMoves and this copy is deleted (rule of two, conventions §7).
 
 // Both branches of getMove share this tail (GremlinNob.java:142-150 and
 // :160-168): two Bull Rushes in a row force a Skull Bash, otherwise Bull Rush.

@@ -47,6 +47,19 @@ inline bool last_move_is(const MonsterState& m, uint8_t move) noexcept {
     return m.move_history[0] == move;
 }
 
+// lastMoveBefore(byte): the move decided one BEFORE the most recent one
+// (:437-444). move_history[1] is that slot, and the ring's 0 empty-slot sentinel
+// already encodes the "history shorter than 2" false answer (a real move id is
+// never 0).
+//
+// PROMOTED from a file-local helper in monster_gremlin_nob.cpp (rule of two,
+// conventions §7): the Nob's A18 branch was the only reader in the Act-1 roster,
+// and the note there said so; the Snake Plant's A17 arm (SnakePlant.java:132) is
+// the second, so the copy is gone and both call this.
+inline bool last_move_before_is(const MonsterState& m, uint8_t move) noexcept {
+    return m.move_history[1] == move;
+}
+
 // lastTwoMoves(byte): the two most-recent decided moves both == move (:486-491).
 inline bool last_two_moves_are(const MonsterState& m, uint8_t move) noexcept {
     return m.move_history[0] == move && m.move_history[1] == move;
@@ -68,6 +81,34 @@ inline constexpr int32_t kMonsterAscension = 20;
 void queue_monster_move_effects(CombatState& state, uint8_t mi,
                                 const sts::registry::MonsterDef& def,
                                 uint8_t move) noexcept;
+
+// `target_override` sentinel for queue_monster_move_effect below: resolve the
+// target from the STEP (SELF -> mi, PLAYER -> the player), as the whole-program
+// helper above always does. kActorPlayer is a legal override value, so the
+// sentinel cannot be a real actor index -- 0xFF is neither a monster slot nor the
+// player.
+inline constexpr uint8_t kMoveTargetFromStep = 0xFFu;
+
+// Queue ONE step of a decided move's program -- the per-step body
+// queue_monster_move_effects loops over, exposed because two S2.22 monsters need
+// it and neither can use the whole-program helper:
+//
+//   * the Snecko's TAIL SKIPS a step below A17 (the Weak between the damage and
+//     the Vulnerable is inside an ascension branch, Snecko.java:112-114), and an
+//     effect list expresses per-tier amounts but not per-tier PRESENCE;
+//   * the Healer's HEAL and BUFF FAN ONE step out over every live group member
+//     (Healer.java:104-107,114-117), a count no effect list can carry, so the row
+//     authors one SELF-targeted template and the module retargets it per member.
+//
+// `target_override` is kMoveTargetFromStep to use the step's own target, or an
+// actor index (a monster slot, or kActorPlayer) to force one. Everything else --
+// the tier resolution at kMonsterAscension, the `extra` packing, MAKE_CARD's
+// CardPile split into `src` -- is identical to the whole-program helper, because
+// this IS its body.
+void queue_monster_move_effect(CombatState& state, uint8_t mi,
+                               const sts::registry::MonsterDef& def,
+                               uint8_t move, uint8_t effect_index,
+                               uint8_t target_override) noexcept;
 
 // A monster's spawn-time init: set id, roll HP (monster_hp_rng), do the first
 // rollMove (ai_rng) -- the jaw_worm_init shape, generalized. Every registry
@@ -132,6 +173,51 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 // because a hit fully absorbed by its sleeping armour must NOT wake it.
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept;
+
+// --- The death edge (AbstractMonster.die overrides) --------------------------
+
+// A monster's own die() body: the part a subclass runs BEFORE `super.die()`.
+//
+// WHY THIS EXISTS AS A DISPATCH SLOT rather than a special case somewhere. Ten
+// Act-1 monsters override die() and every one of them is presentation (a sound,
+// a shake, a time-scale) -- so until now the death edge needed no monster-side
+// seam at all, and the two things the BASE die() does (the dying monster's own
+// powers' onDeath, then the player's relics' onMonsterDeath) were dispatched
+// directly. The Mugger is the first override with COMBAT-VISIBLE content, and it
+// has two pieces:
+//
+//     public void die() {
+//         this.playDeathSfx();                          // ONE SEEDED aiRng draw
+//         ... animation ...
+//         if (this.stolenGold > 0)
+//             AbstractDungeon.getCurrRoom().addStolenGoldToRewards(stolenGold);
+//         super.die();                                  // powers, then relics
+//     }
+//                                          (Mugger.java:156-165, :147-154)
+//
+// The aiRng.random(2) in playDeathSfx is the point: a Mugger's death MOVES THE
+// SHARED AI STREAM, so every later monster decision in that combat shifts. The
+// Looter's identical-looking playDeathSfx rolls UNSEEDED MathUtils and costs
+// nothing (Looter.java:151-157) -- the two thieves differ here, which is exactly
+// why this cannot be a blanket "thieves draw on death" rule.
+//
+// ORDERING IS PART OF THE CONTRACT: this fires at the SAME edge as
+// dispatch_on_death and strictly BEFORE it, because the subclass body runs
+// before `super.die()` -- and super.die() is what the power/relic fan-outs model.
+// Acts 2-4 have more overrides with real content, which is why this is a general
+// slot and not a Mugger branch.
+//
+// nullptr == this monster's die() is presentation only (or absent). Spell an
+// explicit nullptr case rather than leaning on the `default:` when the class DOES
+// declare die(), so the reading is checkable.
+using MonsterDieFn = void (*)(CombatState& state, uint8_t monster_index);
+[[nodiscard]] MonsterDieFn monster_die_fn(MonsterId id) noexcept;
+
+// The death-edge hook: run the dying monster's own die() body. Called from the
+// monster-death edge in interp/interp_damage.cpp (both op_damage's and
+// op_lose_hp's), immediately before dispatch_on_death. Safe no-op for a monster
+// with no die() body of its own.
+void dispatch_monster_die(CombatState& state, uint8_t monster_index) noexcept;
 
 // The init function for a monster id; nullptr only for NONE / an id outside the
 // enum (see the exhaustiveness note at the top of this file).

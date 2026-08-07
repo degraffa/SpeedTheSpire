@@ -264,6 +264,12 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::HEAL:
             op_heal(s, item.tgt, item.amount);
             return;
+        case Opcode::BLOCK_RANDOM_MONSTER:
+            // The Centurion's Protect: `item.tgt` is deliberately NOT passed --
+            // the op picks its own recipient from the live group (and spends the
+            // ai_rng draw only when it has a choice to make).
+            op_block_random_monster(s, item.src, item.amount);
+            return;
         case Opcode::DAMAGE_BLOCK:
             // Body Slam: base == the player's CURRENT block (read here at execute
             // time), then the normal DamageInfo pipeline (Strength/Vulnerable still

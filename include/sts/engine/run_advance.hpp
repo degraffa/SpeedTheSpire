@@ -779,6 +779,21 @@ static_assert(act_floor_base(3) == 34);
 void on_boss_chest_proceed(RunController& rc, RunState& rs,
                            StepResult& res) noexcept;
 
+// Settle every thief's stolen gold against the run purse at combat end, with a
+// FAITHFUL PER-STEAL CLAMP, and return the portion carried by DEAD thieves (the
+// claimable STOLEN_GOLD amount). Deducts what was actually taken from
+// `rc.run.gold`. See the definition in run_advance.cpp for why the per-steal
+// ORDER is reconstructible from the steal counts alone, and monster_looter.hpp
+// for the thief interface it walks.
+//
+// PUBLISHED FOR TESTING. Its two real callers are internal (the reward entry and
+// the defeat path), and both reach it only from a combat the run layer built.
+// The case that must be pinned -- two thieves, a purse smaller than their
+// combined take, and exactly one of them killed -- lives in the Act-2 "2 Thieves"
+// group, which the run layer cannot reach until the act transition lands, so the
+// pin is a direct call on a hand-built controller rather than a scripted run.
+[[nodiscard]] int32_t settle_stolen_gold(RunController& rc) noexcept;
+
 // The current grid row for a controller on the map, or -1 when it is standing
 // BELOW row 0 -- at Neow (floor 0), or on the act-boundary floor from which the
 // new act's first node is picked (floor 17 in Act 2, 34 in Act 3, whose

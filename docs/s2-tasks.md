@@ -382,10 +382,87 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   `usedHex`) proved unnecessary at A20 and is RELEASED. `MonsterId` **31**
   released unspent (permanent gap). All six presets green (`ctest -N` for
   the current suite size).
-- **S2.22** `[ ]` ∥ City normals II — Mugger, Snake Plant, Snecko,
+- **S2.22** `[x]` ∥ City normals II — Mugger, Snake Plant, Snecko,
   Centurion + Healer (2 Thieves / Snake Plant / Snecko / Centurion and
-  Healer / 3 Cultists / Cultist and Chosen groups).
+  Healer / 3 Cultists / Cultist and Chosen groups); `powers.yaml`
+  **Malleable (95)** — the batch's whole `PowerId` grant, spent.
   **Deps:** S2.01 **Acceptance:** as S2.21.
+  **Log:** `MonsterId` **32–36** all spent (Mugger, Snake Plant, Snecko,
+  Centurion, Healer); id **31 stays S2.21's permanent gap**. `PowerId`
+  **95 MALLEABLE** spent. Opcode **67 `BLOCK_RANDOM_MONSTER`** (the
+  Centurion's Protect): an opcode rather than a BLOCK step because the
+  recipient AND whether any `ai_rng` draw happens at all are execute-time
+  facts — an empty valid list spends ZERO draws, and the exclusion reads
+  the TELEGRAPHED `Intent.ESCAPE`, not the escaped flag, so a thief that
+  has merely announced its exit is already skipped while still fighting.
+  Opcode **`HEAL` (39) extended** with the monster branch
+  (`AbstractMonster.heal`, AbstractMonster.java:383-399 — a genuinely
+  different method from `AbstractCreature.heal`, with no relic pass and no
+  `isEscaping` test), and the `interp_damage.cpp` comment that justified
+  the old no-op was DELETED rather than amended: it was a
+  "prerequisite has not arrived" comment and the prerequisite arrived
+  (conventions §8). New **`MonsterDieFn`** dispatch slot, fired at both
+  monster-death edges strictly BEFORE `dispatch_on_death` (the subclass
+  body runs before `super.die()`); its one entry is the Mugger, whose
+  `playDeathSfx` draws a SEEDED `aiRng.random(2)` where the Looter's
+  identically-shaped method rolls unseeded MathUtils. Same divergence on
+  the per-attack `playSfx`, and the Mugger's talk gate fires on the SECOND
+  Mug (`slashCount == 1`) against the Looter's first.
+
+  **Stolen gold: the deviation is GONE.** `settle_stolen_gold` now
+  reconstructs the game's per-steal clamp instead of summing then
+  clamping. The order needs no new state: both thieves steal on
+  consecutive turns from turn 1, so a thief's k-th steal is its turn k and
+  the interleaving follows from the steal counts plus slot order. The two
+  models agree on the TOTAL and disagree on ATTRIBUTION, which is why only
+  a two-thief group could expose it; RED-first evidence recorded in-test —
+  purse 30, one steal each, the MUGGER killed returns **10** where the old
+  body returned 20. The LOOTER filter is generalised to an
+  `is_thief` / `thief_gold_amount` / `thief_stolen_gold` interface
+  (`monster_looter.hpp`), and the two `goldAmt` constants stay SEPARATE
+  because the Java fields are.
+
+  **Confusion's slot amount: adjudicated by EVIDENCE, not by consistency.**
+  The corpus has it — `tests/golden/oracle_corpus/act1_a20_50` carries
+  `{"amount": -1, "name": "Confusion", "id": "Confusion"}`. So the engine
+  was wrong: it wrote 1, from a `relics_boss.cpp` comment asserting a
+  "default 1" the Java does not have (the 3-arg `ApplyPowerAction`
+  forwards `powerToApply.amount`, and `ConfusionPower` never assigns one,
+  so it is `AbstractPower`'s `-1` field initializer). Fixed in place for
+  BOTH producers — Snecko Eye and the Snecko's GLARE — through the shared
+  `kConfusionAppliedAmount`, plus `AbstractPower.stackPower`'s
+  `amount == -1` early return in `op_apply_power`, which those two
+  producers together make reachable. Behaviourally inert, oracle-visible.
+  **No S2.43 note was needed**: the evidence branch of the adjudication
+  fired.
+
+  **One divergence found and FIXED rather than recorded.** The Centurion's
+  `aliveCount` and the Healer's `needToHeal` are the first getMoves to read
+  the GROUP during `init()`, and this engine folds each monster's ctor and
+  init into one call while the game constructs every member first and
+  `MonsterGroup.init()`s them second (MonsterGroup.java:31-33,62-66). A
+  Centurion at slot 0 would have decided its OPENING telegraph against a
+  still-zeroed slot 1 and could never have opened on PROTECT.
+  `spawn_group` / `spawn_group_trace` now pre-mark the group's slots as
+  constructed-and-alive before running any init; every init overwrites its
+  own slot, so no existing monster's behaviour and no fixture moves.
+
+  Released / not spent: **ZERO new `MonsterState.flags` bits** — the
+  Mugger's `slashCount` reuses `pad0` as the Looter's does, and the
+  Snecko's `firstTurn` needs no storage at all (it is consumed on the init
+  rollMove, the Chosen `usedHex` precedent), so its granted `pad0` slot is
+  RELEASED — and **no new `MonsterIntent`** (`ESCAPE` 13 exists; 14 stays
+  reserve). `last_move_before_is` was PROMOTED out of
+  `monster_gremlin_nob.cpp` to `monster_dispatch.hpp` (rule of two,
+  conventions §7 — the Snake Plant's A17 arm is the second reader). Two
+  schema limitations are recorded rather than worked around: the Snecko's
+  A17-only Weak step and the Healer's per-member fan-out are PRESENCE and
+  COUNT facts an effect list cannot express, so both rows author the exact
+  amounts and the module owns the shape, through the new per-step form of
+  the existing helper (`queue_monster_move_effect`). The Healer's
+  `ENC_NAME "HealerTank"` is dead content and is deliberately unregistered;
+  the Centurion's third `playSfx` branch is unreachable and unseeded.
+  All six presets green.
 - **S2.23** `[ ]` ∥ City elites — Gremlin Leader (minion mechanics +
   spawnGremlin), Slavers (Taskmaster + S1 slavers), Book of Stabbing.
   **Inherited:** the stage-b Gremlin move-99 escape row (see Deferred

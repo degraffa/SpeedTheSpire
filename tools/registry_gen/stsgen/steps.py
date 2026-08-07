@@ -103,6 +103,13 @@ GENERAL_OPS = frozenset({
     # helper. GENERAL_OPS, not CARD_CONTEXT_OPS: it is authored in a MONSTER move
     # program, where there is no played card to stamp anything from.
     "VAMPIRE_DAMAGE",
+    # S2.22 (the Centurion's Protect). BLOCK_RANDOM_MONSTER carries `amount` (the
+    # block) and nothing else -- the recipient is chosen at EXECUTE time from the
+    # live group, and `src` (the acting monster) is both the exclusion key and the
+    # no-valid-ally fallback recipient -- so it carries identically from any
+    # domain's queue helper. GENERAL_OPS, not CARD_CONTEXT_OPS: it is authored in
+    # a MONSTER move program, where there is no played card to stamp from.
+    "BLOCK_RANDOM_MONSTER",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -199,10 +206,21 @@ POTION_DOMAIN = StepDomain(
 # queue helper sets to the acting monster. It carries no extra operand -- the
 # heal amount is an execute-time read of what the hit actually removed -- so it
 # needs no branch in pack_extra either.
+#
+# S2.22 adds two more. BLOCK_RANDOM_MONSTER is monster-only for the same reason:
+# the game's single GainBlockRandomMonsterAction caller is the Centurion's
+# Protect (Centurion.java:93), and the opcode's `src` -- the exclusion key and
+# the fallback recipient -- is what this domain's queue helper sets to the acting
+# monster. HEAL joins the set because op_heal's MONSTER branch is now live
+# (interp/interp_damage.cpp, this task's HEAL-39 extension): a monster move may
+# now author a heal, which the Healer's HEAL row does (fanned out natively over
+# the live group -- see monster_healer.cpp). Neither carries an extra operand, so
+# neither needs a pack_extra branch.
 MONSTER_MOVE_OPS = frozenset({
     "NOP", "DAMAGE", "BLOCK", "LOSE_HP",
     "APPLY_POWER", "REMOVE_POWER", "REDUCE_POWER", "MAKE_CARD",
     "VAMPIRE_DAMAGE",
+    "BLOCK_RANDOM_MONSTER", "HEAL",
 })
 MONSTER_DOMAIN = StepDomain("monsters", "monsters.yaml", MONSTER_MOVE_OPS)
 

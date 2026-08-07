@@ -449,6 +449,19 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "despite the 20 HP / Barricade / 40 block sheet, which reads like a "
          "boss mechanic: it is an ordinary Act-2 weak-pool enemy, and Pantograph "
          "must NOT see this group as a boss fight (Pantograph.java:32-40)"},
+        {MonsterId::MUGGER,             MonsterEnemyType::NORMAL,
+         "Mugger.java -- no this.type assignment (ctor :57-79); NORMAL matters "
+         "here for the same reason the Looter's does -- SmokeBomb.canUse's BOSS "
+         "scan must not veto the potion against a thief fight"},
+        {MonsterId::SNAKE_PLANT,        MonsterEnemyType::NORMAL,
+         "SnakePlant.java -- no this.type assignment (ctor :52-66)"},
+        {MonsterId::SNECKO,             MonsterEnemyType::NORMAL,
+         "Snecko.java -- no this.type assignment (ctor :64-86); the no-arg ctor "
+         "(:60-62) only forwards a position and assigns nothing either"},
+        {MonsterId::CENTURION,          MonsterEnemyType::NORMAL,
+         "Centurion.java -- no this.type assignment (ctor :55-79)"},
+        {MonsterId::HEALER,             MonsterEnemyType::NORMAL,
+         "Healer.java -- no this.type assignment (ctor :57-84)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

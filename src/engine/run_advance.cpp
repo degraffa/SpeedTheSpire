@@ -500,57 +500,127 @@ bool have_monsters_escaped(const CombatState& s) noexcept {
     return true;
 }
 
-// Settle the thieves' stolen gold against the run's purse at combat end.
-// The game deducts at STEAL time (DamageAction.stealGold, DamageAction.java:
-// 98-114 -- a direct target.gold write, clamped per steal to the player's
-// remaining gold, bypassing gainGold and its relic hooks); the engine instead
-// accrues the UNCLAMPED count on the monster
-// record (looter_stolen_gold) and settles min(total, gold) here -- a
-// DELIBERATE deviation that preserves exactly-once settlement on every
-// combat-end path (orchestrator decision 2026-07-28: the deviation stands;
-// the faithful steal-time signed purse delta is re-scoped to an owner-approved
-// Act-2-adjacent task alongside the Mugger work flagged below). This header
-// used to say "CombatState carries no gold field"; that has been stale since
-// schema 6 -- CombatState.combat_gold exists, but it is the Hand of Greed
-// GAIN accumulator (settled once through gain_gold at fold-back, next
-// paragraph), not a purse mirror a steal-time clamp could read. The clamp is
-// equal to the game's per-steal clamps whenever the thief's steals are the
-// combat's only gold movement. Every Act-1 group fields at most one thief, and
-// gold moves again only at reward claim, after this. ONE combat effect now also
-// produces gold -- Hand of Greed (DAMAGE_GREED) -- and its accumulator is
-// settled by fold_back_combat, which runs just BEFORE this on both combat-end
-// paths. So a Greed payout is already in the purse this clamp reads, which
-// models the game whenever the greed kill preceded the steal (the game's
-// gainGold is immediate) and over-credits the thief only in the corner where the
-// steal came first AND the purse was below the steal amount. Nothing else in the
-// combat layer touches RunState.gold while a combat is live.
+}  // namespace
+
+// settle_stolen_gold is PUBLISHED (run_advance.hpp) rather than file-local: the
+// case that has to be pinned -- two thieves, a purse smaller than their combined
+// take, exactly one of them killed -- lives in an Act-2 group the run layer
+// cannot yet reach, so its test calls it directly. The anonymous namespace
+// resumes immediately after it.
+
+// Settle the thieves' stolen gold against the run's purse at combat end --
+// FAITHFULLY, with a per-steal clamp.
 //
-// Returns the portion carried by DEAD thieves -- exactly what Looter.die()
-// feeds addStolenGoldToRewards (its clamped accrual, Looter.java:170-172),
-// i.e. the claimable STOLEN_GOLD return. An ESCAPED thief's share is simply
-// gone. Called on EVERY combat end, defeat included: the game's deduction
-// happened at steal time, so a dead player's final purse is short too.
+// WHAT THE GAME DOES. Each stealing attack queues two things one slot apart: the
+// thief's own accrual action (`stolenGold += Math.min(goldAmt, player.gold)` --
+// Looter's anonymous inner action at Looter.java:97,115; the Mugger's recovered
+// Mugger$1/$2 at Mugger.java:95,113) and then the 3-arg DamageAction, whose
+// stealGold (DamageAction.java:98-114) clamps the SAME way against the SAME purse
+// and deducts it. So every steal takes min(goldAmt, purse-at-that-instant), the
+// purse shrinks by exactly that, and each thief keeps a private running total of
+// what IT took.
+//
+// WHY A LATE SETTLEMENT AT ALL. CombatState carries no purse. combat_gold is the
+// Hand of Greed GAIN accumulator, settled once through gain_gold at fold-back --
+// not a mirror of RunState.gold that a steal-time clamp could read -- and adding
+// one would be a CombatState layout change for a number the combat layer never
+// otherwise consults. The engine therefore records each thief's STEAL COUNT
+// (MonsterState.pad0, monster_looter.hpp) and reconstructs the clamping here.
+//
+// WHY RECONSTRUCTION IS EXACT AND NOT AN APPROXIMATION. Both thieves steal on
+// consecutive turns starting at turn 1, and on no others: their machines are
+// Mug (t1), Mug (t2), then either Smoke Bomb or Lunge/Big Swipe (t3), and only
+// the Mug/Lunge/Big-Swipe moves steal (Looter.java:99,113 / Mugger.java:97,111).
+// So a thief's k-th steal happens on turn k, and the global steal ORDER is fully
+// determined by the per-thief counts plus slot order -- which is what the loop
+// below replays: round r, each thief with count >= r takes min(goldAmt, purse),
+// in slot order. No stored history is needed and none is guessed.
+//
+// WHAT THIS REPLACES, AND WHY IT MATTERED. The previous implementation summed
+// every thief's UNCLAMPED request and applied ONE min against the purse. That
+// agrees on the TOTAL deducted -- clamping a shrinking purse telescopes to
+// min(total_requested, initial_purse) -- and disagrees on ATTRIBUTION the moment
+// a group fields TWO thieves with different fates. "2 Thieves" (Looter then
+// Mugger, MonsterHelper.java:462-464) is exactly that group, which is why the
+// deviation's own header named this task as its owner. Concretely, at 20 gold
+// each against a 30-gold purse the Looter takes 20 and the Mugger 10; if the
+// MUGGER is the one killed the player reclaims 10, where sum-then-clamp returned
+// 20. Every Act-1 group fields at most one thief, so no Act-1 number moves.
+//
+// ONE ORDERING CORNER REMAINS, unchanged and unrelated to the clamp: Hand of
+// Greed's payout reaches the purse through fold_back_combat, which runs just
+// BEFORE this on both combat-end paths, so a Greed kill's gold is in the purse
+// this settlement reads. That models the game whenever the greed kill preceded
+// the steal (gainGold is immediate there) and over-credits the thieves only when
+// the steal came first AND the purse was below the steal amount. Nothing else in
+// the combat layer touches RunState.gold while a combat is live.
+//
+// Returns the portion carried by DEAD thieves -- exactly what die() feeds
+// addStolenGoldToRewards (Looter.java:170-172 / Mugger.java:161-163), i.e. the
+// claimable STOLEN_GOLD return. An ESCAPED thief's share is simply gone. Called
+// on EVERY combat end, defeat included: the game's deduction happened at steal
+// time, so a dead player's final purse is short too.
 int32_t settle_stolen_gold(RunController& rc) noexcept {
-    int32_t total = 0;
-    int32_t dead = 0;
-    for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
+    // Gather the thieves in SLOT order -- the group order the game's turn queue
+    // follows, and therefore the order two steals in the same round happen in.
+    uint8_t slot[kMonsterCap];
+    uint8_t steals[kMonsterCap];
+    int32_t per_steal[kMonsterCap];
+    uint8_t n = 0;
+    uint8_t max_steals = 0;
+    for (uint8_t m = 0; m < rc.combat.monster_count && m < kMonsterCap; ++m) {
         const MonsterState& ms = rc.combat.monsters[m];
-        if (static_cast<MonsterId>(ms.monster_id) != MonsterId::LOOTER) {
+        if (!is_thief(ms)) {
             continue;
         }
-        const int32_t g = looter_stolen_gold(ms);
-        total += g;
-        if (ms.hp <= 0) {
-            dead += g;
+        const uint8_t c = thief_steal_count(ms);
+        const int32_t amt = thief_gold_amount(static_cast<MonsterId>(ms.monster_id));
+        if (c == 0 || amt <= 0) {
+            continue;
         }
+        slot[n] = m;
+        steals[n] = c;
+        per_steal[n] = amt;
+        if (c > max_steals) {
+            max_steals = c;
+        }
+        ++n;
     }
-    if (total <= 0) {
+    if (n == 0) {
         return 0;
     }
-    const int32_t settled = total < rc.run.gold ? total : rc.run.gold;
-    rc.run.gold -= settled;
-    return dead < settled ? dead : settled;
+    // Replay the steals against the live purse, round by round. `took[i]` ends up
+    // as the thief's own clamped `stolenGold` field.
+    int32_t took[kMonsterCap] = {};
+    int32_t purse = rc.run.gold;
+    for (uint8_t round = 1; round <= max_steals && purse > 0; ++round) {
+        for (uint8_t i = 0; i < n; ++i) {
+            if (steals[i] < round) {
+                continue;  // this thief had already stopped stealing
+            }
+            const int32_t take = per_steal[i] < purse ? per_steal[i] : purse;
+            took[i] += take;
+            purse -= take;
+            if (purse == 0) {
+                break;  // stealGold returns immediately on an empty purse (:99-101)
+            }
+        }
+    }
+    // The purse the replay left IS the purse the game would hold: every steal
+    // deducted exactly what it took, so no second clamp belongs here.
+    rc.run.gold = purse;
+    int32_t dead = 0;
+    for (uint8_t i = 0; i < n; ++i) {
+        // KILLED thieves return their share; an ESCAPED one keeps it. `hp <= 0`
+        // is isDying, the same predicate die() fires on.
+        if (rc.combat.monsters[slot[i]].hp <= 0) {
+            dead += took[i];
+        }
+    }
+    return dead;
 }
+
+namespace {
 
 // THE reward gate: which RewardOutcome a finished combat earned. Explicit and
 // exhaustive -- "combat over" does not imply a kill, and a kill is not the

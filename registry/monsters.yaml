@@ -1409,3 +1409,278 @@
                # whole reason this is native rather than an empty table.
                # `secondMove` is kMonsterFlagSphericSecondMove.
                # See monster_spheric_guardian.cpp.
+
+# --- S2.22 (Act-2 city normals II): Mugger, Snake Plant, Snecko, Centurion, ---
+# --- Healer. MonsterId 32-36 are this task's grant (stage-b-tasks.md "S2 ---
+# --- Wave-2 allocations"); all five are spent, so the block leaves no gap. ---
+# --- 31 stays the PERMANENT GAP S2.21 released; it is never backfilled. ---
+#
+# All five are NORMAL (none assigns this.type, so AbstractMonster.java:99's field
+# initializer stands) and all five are `ai: native` -- each reads move history, a
+# per-instance latch, the live-monster count, or a group-wide HP sum, and no ai
+# table expresses any of those.
+
+- id: 32
+  name: MUGGER
+  game_id: "Mugger"
+  provenance: "Mugger (Mugger.java, read in full, PLUS the recovered anonymous inner classes Mugger$1 and Mugger$2 -- see RECOVERED-INNER-CLASSES.md at the decompile root). ID \"Mugger\" (:34). ctor (:57-79): goldAmt = 20 at ascension >= 17 else 15 (:61); setHp(50,54) at >= 7 else (48,52) (:62-66); the >= 2 branch (:67-73) gives swipeDmg 11 / bigSwipeDmg 18 (10 / 16 below), added to damage in that order (:74-75). escapeDef 11 (:47), +6 at A17 (:119-123). Move ids MUG=1, SMOKE_BOMB=2, ESCAPE=3, BIGSWIPE=4 (:48-51). usePreBattleAction (:81-84): ApplyPowerAction(this, this, ThieveryPower(this, goldAmt)) -- powers.yaml id 75, the same marker the Looter applies. takeTurn (:86-136) has NO trailing RollMoveAction: every case decides the next move itself. playSfx (:138-145) and playDeathSfx (:147-154) each draw ONE aiRng.random(2) -- SEEDED, and that is the Mugger's sharpest divergence from the Looter, whose sound rolls are unseeded MathUtils. die (:156-165): playDeathSfx FIRST, then addStolenGoldToRewards when stolenGold > 0, then super.die(). getMove (:167-170) ignores num and forces MUG. The stolen-gold accrual is the recovered Mugger.1 (site :95, case MUG) and Mugger.2 (site :113, case BIGSWIPE), both `stolenGold += Math.min(goldAmt, player.gold)`, QUEUED one slot ahead of the 3-arg DamageAction whose stealGold (DamageAction.java:98-114) deducts the same clamped amount."
+  enemy_type: NORMAL   # AbstractMonster.java:99 -- no this.type assignment
+  hp:
+    base: {min: 48, max: 52}    # Mugger.java:65 (ascension < 7)
+    a7:   {min: 50, max: 54}    # Mugger.java:63 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: MUG
+      move_id: 1               # Mugger.java:48
+      intent: ATTACK
+      effects:
+        # damage.get(0) == swipeDmg: 10, or 11 from A2 (Mugger.java:67-73). The
+        # 3-arg DamageAction (:96) also steals goldAmt; the steal ACCOUNTING is
+        # native (monster_mugger.cpp -- pad0 is the steal count, exactly the
+        # Looter's shape), the damage is this program. AnimateSlowAttackAction
+        # (:94) and the gated TalkAction (:92) are presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+    - name: SMOKE_BOMB
+      move_id: 2               # Mugger.java:49
+      intent: DEFEND           # setMove((byte)2, Intent.DEFEND) (:100,115)
+      effects:
+        # GainBlockAction(this, this, escapeDef [+ 6 at A17]) -- escapeDef is a
+        # FIELD initializer, 11 (:47), and the A17 arm adds a literal 6 at :120,
+        # which is why this column reads 17 rather than a named constant. NOTE
+        # the Looter's sibling move gains 6 flat; these two thieves do NOT share
+        # a block number. Unlike the Looter's, this case has NO TalkAction and
+        # draws nothing at all.
+        - {op: BLOCK, target: SELF, amount: {base: 11, a17: 17}}
+    - name: ESCAPE
+      move_id: 3               # Mugger.java:50
+      intent: ESCAPE           # SetMoveAction(this, 3, Intent.ESCAPE) (:124,132)
+      effects:
+        # The whole body is native (monster_mugger.cpp): room.mugged is set
+        # SYNCHRONOUSLY (:129, kCombatFlagMugged), then the queued EscapeAction
+        # (:131) and the re-telegraphing SetMoveAction (:132). The Talk (:128)
+        # and the smoke-bomb VFX (:130) are presentation and roll nothing.
+        # NOP placeholder (the Looter precedent).
+        - {op: NOP, target: SELF, amount: 0}
+    - name: BIGSWIPE
+      move_id: 4               # Mugger.java:51
+      intent: ATTACK           # SetMoveAction(..., 4, Intent.ATTACK, dmg[1]) (:103)
+      effects:
+        # damage.get(1) == bigSwipeDmg: 16, or 18 from A2 (:67-73). The 3-arg
+        # DamageAction (:114) steals like Mug's does.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 16, a2: 18}}
+  ai: native   # getMove (:167-170) IGNORES its rolled num (the init draw still
+               # happens and is discarded -- the Looter/Guardian precedent) and
+               # every later move is decided inside takeTurn by slashCount plus
+               # aiRng draws: a per-attack playSfx random(2) (:139 -- SEEDED,
+               # unlike the Looter's), the SECOND-Mug 0.6 talk gate (:91), and
+               # the 0.5 Smoke-Bomb-or-BigSwipe coin at slashCount == 2 (:99).
+               # slashCount lives in MonsterState.pad0 and doubles as the steal
+               # count. See monster_mugger.cpp.
+
+- id: 33
+  name: SNAKE_PLANT
+  game_id: "SnakePlant"
+  provenance: "SnakePlant (SnakePlant.java, read in full). ID \"SnakePlant\" (:36). ctor (:52-66): setHp(78,82) at ascension >= 7 else (75,79) (:59-63); rainBlowsDmg = 8 at >= 2 else 7 (:64), one DamageInfo (:65). CHOMPY_AMT 3 (:48) is the hit count and does NOT move with ascension. Move ids CHOMPY_CHOMPS=1, SPORES=2 (:45-46). usePreBattleAction (:69-72): ApplyPowerAction(this, this, new MalleablePower(this)) -- the 1-ARG ctor, so amount 3 (MalleablePower.java:22,24-26); powers.yaml id 95. takeTurn (:94-118): CHOMPY queues THREE separate DamageActions in a loop (:99-104), SPORES queues Frail(2,true) THEN Weak(2,true) in that order (:107-110), and the trailing RollMoveAction (:114) sits outside the switch so both cases reach it. changeState (:75-82) and damage() (:85-91) are animation only. No die() override."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 75, max: 79}    # SnakePlant.java:62 (ascension < 7)
+    a7:   {min: 78, max: 82}    # SnakePlant.java:60 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: CHOMPY_CHOMPS
+      move_id: 1               # SnakePlant.java:45
+      intent: ATTACK
+      effects:
+        # THREE SEPARATE DamageActions on damage.get(0) (:99-104, numBlows = 3),
+        # not one tripled hit -- so block, a halving power and a lethal clamp all
+        # apply per hit. rainBlowsDmg 7, or 8 from A2 (:64). numBlows is a LOCAL
+        # `int numBlows = 3` and CHOMPY_AMT is 3 at every ascension, so unlike the
+        # Byrd's peckCount this step count needs no tier column. The
+        # ChangeStateAction / WaitAction / BiteEffect VFX around them (:97-101)
+        # are presentation; the BiteEffect's MathUtils.random jitter is UNSEEDED.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 8}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 8}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a2: 8}}
+    - name: SPORES
+      move_id: 2               # SnakePlant.java:46
+      intent: STRONG_DEBUFF    # setMove(MOVES[0], 2, Intent.STRONG_DEBUFF)
+      effects:
+        # ORDER IS LOAD-BEARING (:107-110): FRAIL first, THEN WEAK. Both are
+        # (player, 2, true) -- the `true` is isSourceMonster, which is what makes
+        # the duration debuffs skip their first decrement, and op_apply_power
+        # already derives that from the monster source. Flat 2 each, no branch.
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: FRAIL}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+  ai: native   # getMove (:121-142) is TWO whole arms, one per side of
+               # `ascensionLevel >= 17`, and BOTH read move history: the num < 65
+               # arm is shared (`lastTwoMoves(CHOMPY) ? SPORES : CHOMPY`), while
+               # the num >= 65 arm widens from `lastMove(SPORES)` to
+               # `lastMove(SPORES) || lastMoveBefore(SPORES)` at A17. lastMoveBefore
+               # is the ring's SECOND slot and had no shared helper before this
+               # batch. See monster_snake_plant.cpp.
+
+- id: 34
+  name: SNECKO
+  game_id: "Snecko"
+  provenance: "Snecko (Snecko.java, read in full). ID \"Snecko\" (:38). TWO ctors: the no-arg (:60-62) delegates to (0,0) and is the one MonsterHelper's solo \"Snecko\" group uses (MonsterHelper.java:495-497) -- position only, no behavioural difference. ctor (:64-86): setHp(120,125) at ascension >= 7 else (114,120) (:73-77); the >= 2 branch (:78-84) gives biteDmg 18 / tailDmg 10 (15 / 8 below), added in that order (:85-86). VULNERABLE_AMT 2 (:53). Move ids GLARE=1, BITE=2, TAIL=3 (:41-43). No usePreBattleAction. takeTurn (:89-121): GLARE applies ConfusionPower(player) via the 3-ARG ApplyPowerAction (:97), BITE is one DamageAction on damage.get(0) (:104), TAIL is DamageAction on damage.get(1) then -- A17 ONLY -- Weak(2,true) then -- ALWAYS -- Vulnerable(2,true) (:108-118); the trailing RollMoveAction (:120) sits outside the switch. getMove (:141-158) has NO ascension branch at all. die (:161-164) is super.die() plus one UNSEEDED sound."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 114, max: 120}  # Snecko.java:76 (ascension < 7)
+    a7:   {min: 120, max: 125}  # Snecko.java:74 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: GLARE
+      move_id: 1               # Snecko.java:41
+      intent: STRONG_DEBUFF    # setMove(MOVES[0], 1, Intent.STRONG_DEBUFF) (:144)
+      effects:
+        # ApplyPowerAction(player, this, new ConfusionPower(player)) -- the 3-ARG
+        # ctor (:97), so the stack amount is `powerToApply.amount`
+        # (ApplyPowerAction.java:80-82). ConfusionPower's ctor takes no amount and
+        # never assigns one (ConfusionPower.java:23-31), so that is AbstractPower's
+        # field initializer -1 (AbstractPower.java:65) -- NOT 1. Pinned against a
+        # live capture: tests/golden/oracle_corpus/act1_a20_50 reports
+        # {"amount": -1, "name": "Confusion"} on the player's power list. The
+        # ChangeState / SFX / Intimidate VFX / FastShake around it (:91-96) are
+        # presentation and roll nothing.
+        - {op: APPLY_POWER, target: PLAYER, amount: -1, power: CONFUSION}
+    - name: BITE
+      move_id: 2               # Snecko.java:42
+      intent: ATTACK           # setMove(MOVES[2], 2, Intent.ATTACK, dmg[0]) (:156)
+      effects:
+        # damage.get(0) == biteDmg: 15, or 18 from A2 (:78-84).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 15, a2: 18}}
+    - name: TAIL
+      move_id: 3               # Snecko.java:43
+      intent: ATTACK_DEBUFF    # setMove(MOVES[1], 3, Intent.ATTACK_DEBUFF, dmg[1])
+      effects:
+        # ORDER IS LOAD-BEARING (:108-118): damage, THEN Weak, THEN Vulnerable.
+        #
+        # THE WEAK STEP IS ASCENSION-GATED BY PRESENCE, NOT BY AMOUNT (:112-114
+        # sits inside `if (ascensionLevel >= 17)`), and an effect list can express
+        # only per-tier AMOUNTS. This is the Byrd peckCount schema limitation
+        # again, and it is handled the same way: recorded, not worked around. The
+        # amounts below are exact at every ascension the columns name; what the
+        # table cannot say is that the WEAK step does not exist at all below A17.
+        # monster_snecko.cpp therefore hand-queues this ONE move's three steps and
+        # skips step index 1 when kMonsterAscension < 17, so the ENGINE is exact
+        # at every ascension while the table stays the pinned amount source. If a
+        # real ascension is ever threaded through combat_begin, this row is a
+        # candidate for a per-step tier gate rather than a native workaround.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 8, a2: 10}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+  ai: native   # getMove (:141-158) is history-guarded and latch-opened: firstTurn
+               # forces GLARE and returns without reading num, then num < 40 takes
+               # TAIL, and otherwise lastTwoMoves(BITE) decides TAIL vs BITE. There
+               # is NO ascension branch anywhere in it. `firstTurn` needs no state
+               # bit -- it is consumed on the init rollMove and true never again,
+               # the Chosen `usedHex` / Red Slaver `firstTurn` precedent. See
+               # monster_snecko.cpp.
+
+- id: 35
+  name: CENTURION
+  game_id: "Centurion"
+  provenance: "Centurion (Centurion.java, read in full). ID \"Centurion\" (:30). ctor (:55-79): setHp(78,83) at ascension >= 7 else (76,80) (:57-61); blockAmount = A_17_BLOCK_AMOUNT 20 at >= 17 else BLOCK_AMOUNT 15 (:62, fields at :48-49); the >= 2 branch (:63-71) gives slashDmg 14 / furyDmg 7 / furyHits 3 (12 / 6 / 3 below -- furyHits is 3 on BOTH sides, a deliberate non-difference), added in slash-then-fury order (:72-73). Move ids SLASH=1, PROTECT=2, FURY=3 (:51-53). No usePreBattleAction. takeTurn (:82-110): SLASH is playSfx + one DamageAction (:84-89), PROTECT is a single GainBlockRandomMonsterAction(this, blockAmount) (:92-93), FURY loops furyHits times queueing playSfx + ChangeState + Wait + DamageAction each (:96-102); the trailing RollMoveAction (:107) sits outside the switch. playSfx (:112-120) rolls MathUtils.random(1) -- UNSEEDED libGDX, no seeded draw -- and its third branch is UNREACHABLE (random(1) returns 0 or 1). getMove (:132-160) has NO ascension branch. die (:172-176) draws nothing."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 76, max: 80}    # Centurion.java:60 (ascension < 7)
+    a7:   {min: 78, max: 83}    # Centurion.java:58 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: SLASH
+      move_id: 1               # Centurion.java:51
+      intent: ATTACK
+      effects:
+        # damage.get(0) == slashDmg: 12, or 14 from A2 (:63-71). playSfx (:85),
+        # ChangeStateAction("MACE_HIT") and WaitAction (:86-87) are presentation;
+        # the sfx roll is UNSEEDED MathUtils, unlike the Mugger's.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 12, a2: 14}}
+    - name: PROTECT
+      move_id: 2               # Centurion.java:52
+      intent: DEFEND           # setMove((byte)2, Intent.DEFEND) (:139,153)
+      effects:
+        # GainBlockRandomMonsterAction(this, blockAmount) (:93) -- opcode 67,
+        # BLOCK_RANDOM_MONSTER. It is an OPCODE and not a plain BLOCK step because
+        # the recipient is chosen at EXECUTE time from the live group, and the
+        # aiRng draw that chooses it happens only when a valid ally exists
+        # (GainBlockRandomMonsterAction.java:26-38). blockAmount 15, or 20 from
+        # A17 (:62). `target: SELF` names the SOURCE monster (the fallback
+        # recipient when no ally is valid), which is what the opcode's `src`
+        # carries -- the tgt it writes is resolved inside the op.
+        - {op: BLOCK_RANDOM_MONSTER, target: SELF, amount: {base: 15, a17: 20}}
+    - name: FURY
+      move_id: 3               # Centurion.java:53
+      intent: ATTACK           # setMove(3, ATTACK, dmg[1], furyHits, true) (:141)
+      effects:
+        # THREE SEPARATE DamageActions on damage.get(1) (:96-102, furyHits = 3),
+        # each with its own playSfx. furyDmg 6, or 7 from A2. furyHits is 3 on
+        # BOTH sides of the A2 branch (:66,70) -- explicitly assigned twice with
+        # the same value -- so this step count needs no tier column and is a
+        # deliberate NEGATIVE test in the tier-2 table.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a2: 7}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a2: 7}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a2: 7}}
+  ai: native   # getMove (:132-160) reads the LIVE MONSTER COUNT -- a group-wide
+               # property no ai table expresses -- through a walk the Java
+               # duplicates verbatim in both arms (:134-138 and :150-154):
+               # aliveCount counts every record that is neither isDying nor
+               # isEscaping, INCLUDING ITSELF, and > 1 is what decides PROTECT vs
+               # FURY. The tree: num >= 65 && !lastTwoMoves(2) && !lastTwoMoves(3)
+               # -> PROTECT-or-FURY; else !lastTwoMoves(1) -> SLASH; else
+               # PROTECT-or-FURY again. No ascension branch. See
+               # monster_centurion.cpp.
+
+- id: 36
+  name: HEALER
+  game_id: "Healer"
+  provenance: "Healer (Healer.java, read in full). ID \"Healer\" (:34). ENC_NAME \"HealerTank\" (:41) is DEAD CONTENT -- grep finds no MonsterHelper case and no encounter key for it, so it is deliberately not registered. ctor (:57-84): setHp(50,58) at ascension >= 7 else (48,56) (:59-63); then a FULL else-if CHAIN (:64-76) that RESTATES every value rather than inheriting the A2 arm -- >= 17 gives magicDmg 9 / strAmt 4 / healAmt 20, >= 2 gives 9 / 3 / 16, and below gives 8 / 2 / 16, so healAmt is UNCHANGED at A2 and magicDmg is UNCHANGED at A17. One DamageInfo (:77). Move ids ATTACK=1, HEAL=2, BUFF=3 (:53-55). No usePreBattleAction. takeTurn (:87-125): ATTACK is playSfx + DamageAction + Frail(2,true) (:89-95); HEAL and BUFF both walk AbstractDungeon.getMonsters().monsters skipping isDying/isEscaping -- INCLUDING THEMSELVES -- and queue one HealAction(m, this, healAmt) (:104-107) or one ApplyPowerAction(m, this, StrengthPower(m, strAmt), strAmt) (:114-117) per survivor, in GROUP ORDER, with the liveness read at QUEUE time; the trailing RollMoveAction (:124) sits outside the switch. playSfx (:127-133) is an UNSEEDED MathUtils.randomBoolean; playDeathSfx (:135-143) is an UNSEEDED MathUtils.random(2). getMove (:156-183). die (:196-201) draws no seeded RNG."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 48, max: 56}    # Healer.java:62 (ascension < 7)
+    a7:   {min: 50, max: 58}    # Healer.java:60 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: ATTACK
+      move_id: 1               # Healer.java:53
+      intent: ATTACK_DEBUFF    # setMove(1, Intent.ATTACK_DEBUFF, dmg[0])
+      effects:
+        # damage.get(0) == magicDmg: 8, 9 from A2, and STILL 9 at A17 -- the A17
+        # arm restates 9 rather than raising it (:66,71), which is why the a17
+        # column is spelled out instead of omitted. Then Frail(player, 2, true).
+        # ORDER: damage first (:91-94). playSfx / AnimateSlowAttack are
+        # presentation and draw no seeded RNG.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 8, a2: 9, a17: 9}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: FRAIL}
+    - name: HEAL
+      move_id: 2               # Healer.java:54
+      intent: BUFF             # setMove((byte)2, Intent.BUFF) (:161,165) -- BUFF,
+                               # not DEFEND: moves 2 and 3 telegraph the SAME intent.
+      effects:
+        # ONE AUTHORED STEP, FANNED OUT NATIVELY. The Java queues one
+        # HealAction(m, this, healAmt) PER live group member INCLUDING ITSELF
+        # (:104-107) -- a per-combat-shaped count no effect list can express -- so
+        # monster_healer.cpp reads this step's tier-resolved amount and emits one
+        # HEAL item per survivor in group order. `target: SELF` is the template's
+        # own recipient, which is exactly what the self-inclusive walk means for a
+        # SOLO Healer. healAmt 16, UNCHANGED at A2, 20 from A17 (:68,73,75) --
+        # the a2 column is spelled out to pin that non-change.
+        - {op: HEAL, target: SELF, amount: {base: 16, a2: 16, a17: 20}}
+    - name: BUFF
+      move_id: 3               # Healer.java:55
+      intent: BUFF             # setMove((byte)3, Intent.BUFF) (:179)
+      effects:
+        # Same one-step / native fan-out as HEAL above: ApplyPowerAction(m, this,
+        # StrengthPower(m, strAmt), strAmt) per live member including itself
+        # (:114-117). strAmt 2 / 3 from A2 / 4 from A17 (:67,69,74 -- the chain
+        # restates all three).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 2, a2: 3, a17: 4}, power: STRENGTH}
+  ai: native   # getMove (:156-183) reads a GROUP-WIDE HP SUM -- needToHeal is
+               # sum(maxHealth - currentHealth) over every non-dying, non-escaping
+               # member INCLUDING ITSELF -- which no ai table expresses, and BOTH
+               # of its first two gates are ascension-switched: the heal threshold
+               # is > 20 at A17 and > 15 below (:161,165), and the ATTACK guard
+               # moves the OTHER way -- it TIGHTENS, from !lastTwoMoves(ATTACK)
+               # below to the stricter !lastMove(ATTACK) at A17, so a single
+               # preceding attack is now enough to block it (:172,176). Both
+               # changes push the A17 Healer toward BUFF. See
+               # monster_healer.cpp.
