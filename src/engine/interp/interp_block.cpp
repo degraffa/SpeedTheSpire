@@ -75,7 +75,13 @@ namespace {
     // onUseCard and atEndOfRound (DuplicationPower.java:19-72, read in full)
     // -- no modifyBlock or modifyBlockLast -- so the count moves and no case
     // is added.
-    static_assert(sts::registry::manifest::kPowersCount == 53,
+    // Checked for S2.21's two powers, neither of which needs a case in EITHER
+    // block pass: HEX overrides only onUseCard (HexPower.java:36-42) and FLIGHT
+    // only atStartOfTurn / atDamageFinalReceive / onAttacked / onRemove
+    // (FlightPower.java:47-78) -- both read in full. Flight halves incoming
+    // DAMAGE, which is interp_damage.cpp's third pass; it does not touch a block
+    // gain, so the count moves here with no case.
+    static_assert(sts::registry::manifest::kPowersCount == 55,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

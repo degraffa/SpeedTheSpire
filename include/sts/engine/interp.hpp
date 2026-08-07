@@ -598,6 +598,38 @@ enum class Opcode : uint16_t {
                               // slot is found by id in s.relics at resolve
                               // (per-slot latch, matching the per-instance
                               // isActive of N queued Java actions).
+    // --- S2.21 (Act-2 city normals I) ---
+    VAMPIRE_DAMAGE = 66,      // VampireDamageAction.update (VampireDamageAction.
+                              // java:29-45): src attacks tgt for `amount` base
+                              // through the full DAMAGE pipeline, then heals the
+                              // ATTACKER by the HP that hit ACTUALLY removed
+                              // (`target.lastDamageTaken`,
+                              // AbstractMonster.java:669 -- block, Intangible and
+                              // a lethal clamp all shrink it). The Shelled
+                              // Parasite's Life Suck (ShelledParasite.java:132).
+                              //
+                              // DISTINCT from VAMPIRE_DAMAGE_ALL (38), which is
+                              // the player's Reaper: that hits EVERY live monster
+                              // and addToBot's ONE summed player HEAL. This hits
+                              // ONE target and heals `this.source` -- the
+                              // attacker setValues took from info.owner.
+                              //
+                              // It cannot be a DAMAGE step followed by a HEAL
+                              // step, which is why it is an opcode: the heal
+                              // amount is only known after the hit lands.
+                              //
+                              // THE HEAL IS APPLIED INLINE, and that is exact.
+                              // The Java addToTop's the HealAction, jumping it
+                              // ahead of everything target.damage() just queued
+                              // at the FRONT (a Thorns reflect), which is the
+                              // same position an inline write occupies. It is
+                              // also the only form available: op_heal (39) is
+                              // player-only and its monster branch is S2.22's
+                              // grant. The write follows AbstractMonster.heal
+                              // (AbstractMonster.java:384-399) -- no relic pass,
+                              // clamp to maxHealth, nothing at all while isDying
+                              // -- the same direct-HP-write escape hatch
+                              // RegenerateMonsterPower already uses.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------

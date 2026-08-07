@@ -230,8 +230,10 @@ OPCODES = {
     "DAMAGE_GREED": 57,
     # Wave-C track 1, relic-tail stage: 63-64 out of the 63-66 block that stage
     # owns. 58-59 remain B3.11's published reserve, 60-62 the potions stage's,
-    # 65-66 are RELEASED unspent (an opcode gap costs nothing -- the numbering is
-    # append-only, never dense).
+    # 65-66 were RELEASED unspent (an opcode gap costs nothing -- the numbering is
+    # append-only, never dense). Both were later claimed by name: 65 by the
+    # final-integrate fix-forward (RED_SKULL_ENTRY) and 66 by S2.21
+    # (VAMPIRE_DAMAGE), so this block is now fully spent.
     #
     # REMOVE_DEBUFFS is RemoveDebuffsAction.update (RemoveDebuffsAction.java:
     # 23-30): `for (p : c.powers) if (p.type == DEBUFF) addToTop(new
@@ -295,6 +297,31 @@ OPCODES = {
     # AbstractCreature.addPower (:506-527) -- no sort, no ApplyPowerAction
     # interception -- so it is its own opcode, not an APPLY_POWER item.
     "RED_SKULL_ENTRY": 65,
+    # S2.21 (Act-2 city normals I). 66 was the last of Wave-C's relic-tail block
+    # to be released unspent -- 65 was taken by the final-integrate fix-forward
+    # above, and this takes the other one, so that block is now fully spent.
+    #
+    # VAMPIRE_DAMAGE is VampireDamageAction.update (VampireDamageAction.java:
+    # 29-45): the SINGLE-TARGET, MONSTER-SOURCED lifesteal the Shelled Parasite's
+    # Life Suck uses (ShelledParasite.java:132). Distinct from VAMPIRE_DAMAGE_ALL
+    # (38), which is the player's Reaper: that one hits EVERY live monster and
+    # sums their losses into one queued player HEAL. This one hits ONE target and
+    # heals the ATTACKER (`this.source`, which setValues takes from info.owner).
+    #
+    # It cannot be a DAMAGE step plus a HEAL step, which is the whole reason it
+    # needs an opcode: the heal amount is `target.lastDamageTaken` -- the HP the
+    # hit ACTUALLY removed -- so block, Intangible and a lethal clamp all shrink
+    # it, and none of those is known when the move's program is authored.
+    #
+    # The heal is applied INLINE rather than queued, and that is exact rather
+    # than a shortcut: the Java addToTop's the HealAction, so it jumps ahead of
+    # everything target.damage() just queued at the front (a Thorns reflect), and
+    # an inline write lands in exactly that position. It is also the only form
+    # available -- op_heal (39) is player-only, and the monster branch is S2.22's
+    # grant -- and it follows RegenerateMonsterPower's precedent of writing a
+    # monster's HP directly (AbstractMonster.heal, AbstractMonster.java:384-399:
+    # no relic pass, clamp to maxHealth, and nothing at all while isDying).
+    "VAMPIRE_DAMAGE": 66,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -517,6 +544,16 @@ HOOKS = {
     "on_apply_power": 11,            # inside the APPLY_POWER opcode
     "was_hp_lost": 12,               # after an HP write (LOSE_HP / DAMAGE)
     "on_death": 13,                  # actor death
+    # S2.21. AbstractPower.onRemove -- fired on the power BEING DESTROYED, from
+    # the engine's single removal choke point (remove_slot_at,
+    # interp/interp_powers.cpp), which every REMOVE_POWER / REDUCE_POWER-to-zero /
+    # REMOVE_DEBUFFS path reaches. NOT a fan-out like every other entry here: the
+    # one body that runs is the removed power's own, so power_hooks.cpp routes it
+    # straight to that PowerId's native handler instead of walking a power list.
+    # Only a `native: true` row may bind it -- a data program would have to queue
+    # against a list that is mid-compaction. Flight is the first binder
+    # (FlightPower.onRemove, FlightPower.java:75-78 -> the Byrd's GROUNDED).
+    "on_power_removed": 14,
 }
 # Power type (AbstractPower.PowerType): the APPLY_POWER interception (Artifact /
 # Sadistic) reads this. Pinned/append-only (fixtures never store it, but the

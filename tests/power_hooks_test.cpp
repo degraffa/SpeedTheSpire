@@ -35,6 +35,7 @@
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/interp.hpp"
 #include "sts/engine/power_hooks.hpp"
+#include "sts/engine/monster_dispatch.hpp"  // MonsterIntent (the Flight onRemove telegraph)
 #include "sts/engine/powers.hpp"
 #include "sts/engine/state_hash.hpp"
 #include "sts/engine/types.hpp"
@@ -677,6 +678,14 @@ TEST(PowerHooks, PlatedArmorGainsBlockPreCardWithoutDexterity) {
 }
 
 // PLATED_ARMOR loses 1 stack on a NORMAL attack from a distinct attacker.
+//
+// THE REDUCTION IS QUEUED, NOT SYNCHRONOUS: PlatedArmorPower.wasHPLost addToBot's
+// a ReducePowerAction (PlatedArmorPower.java:58), so the stack does not move
+// until the queue drains. This test used to read the stack immediately and
+// expect 3, because the native body decremented its own slot in place -- which
+// was wrong in TIMING and, worse, BYPASSED the removal choke point
+// (remove_slot_at), so a power carrying an onRemove could never fire it. See
+// power_plated_armor.cpp.
 TEST(PowerHooks, PlatedArmorLosesStackOnNormalAttack) {
     CombatState s{};
     s.player_hp = 50;
@@ -690,7 +699,100 @@ TEST(PowerHooks, PlatedArmorLosesStackOnNormalAttack) {
     hit.tgt = kActorPlayer;
     hit.amount = 5;
     execute_opcode(s, hit);
+    EXPECT_EQ(player_power_stack(s, PowerId::PLATED_ARMOR), 4)
+        << "still 4: the ReducePowerAction is addToBot and has not resolved";
+    ASSERT_EQ(s.action_count, 1);
+    EXPECT_EQ(queued(s, 0).opcode, kOp(Opcode::REDUCE_POWER));
+    drain_actions(s);
     EXPECT_EQ(player_power_stack(s, PowerId::PLATED_ARMOR), 3) << "lost 1 stack";
+}
+
+// The last stack REMOVES the power, through op_reduce_power -> remove_slot_at.
+// That path is what makes an armour-break telegraph possible at all.
+TEST(PowerHooks, PlatedArmorLastStackRemovesThePowerThroughTheChokePoint) {
+    CombatState s{};
+    s.player_hp = 50;
+    s.player_max_hp = 50;
+    s.monster_count = 1;
+    s.monsters[0].hp = 30;
+    give_player_power(s, PowerId::PLATED_ARMOR, 1);
+    ActionQueueItem hit{};
+    hit.opcode = kOp(Opcode::DAMAGE);
+    hit.src = 0;
+    hit.tgt = kActorPlayer;
+    hit.amount = 5;
+    execute_opcode(s, hit);
+    drain_actions(s);
+    EXPECT_EQ(player_power_stack(s, PowerId::PLATED_ARMOR), -1)
+        << "the slot is GONE (the helper's absent sentinel), not left at 0";
+    EXPECT_EQ(s.player_power_count, 0);
+    EXPECT_EQ(s.action_count, 0)
+        << "onRemove is gated on a non-player owner (PlatedArmorPower.java:66), "
+           "so a player's armour running out telegraphs nothing";
+}
+
+// ON_POWER_REMOVED ROUTING GUARD.
+//
+// The hook fires exactly ONE body -- the REMOVED power's own -- from
+// remove_slot_at, the single point every destruction path reaches. This test
+// exists so the hook cannot become silently unrouted: it drives the removal
+// through the TWO distinct opcodes that reach that point (a bare REMOVE_POWER,
+// and a REDUCE_POWER falling to zero) and requires the observable consequence
+// both times. Flight is the only binder today and its consequence is the Byrd's
+// GROUNDED change of state, so a refactor that stopped dispatching -- or that
+// dispatched to the wrong power -- leaves the Byrd airborne here.
+TEST(PowerHooks, OnPowerRemovedFiresTheRemovedPowersOwnBodyFromBothPaths) {
+    for (int path = 0; path < 2; ++path) {
+        CombatState s{};
+        s.player_hp = 50;
+        s.player_max_hp = 50;
+        s.monster_count = 1;
+        s.monsters[0].monster_id = static_cast<uint16_t>(MonsterId::BYRD);
+        s.monsters[0].hp = 30;
+        s.monsters[0].max_hp = 30;
+        s.monsters[0].flags = kMonsterFlagByrdFlying;
+        give_monster_power(s, 0, PowerId::FLIGHT, 1);
+
+        ActionQueueItem it{};
+        it.src = 0;
+        it.tgt = 0;
+        it.flags = make_apply_power_flags(PowerId::FLIGHT);
+        if (path == 0) {
+            it.opcode = kOp(Opcode::REMOVE_POWER);
+        } else {
+            it.opcode = kOp(Opcode::REDUCE_POWER);
+            it.amount = 1;  // 1 - 1 == 0 -> remove_slot_at
+        }
+        execute_opcode(s, it);
+        drain_actions(s);
+
+        EXPECT_EQ(s.monsters[0].power_count, 0) << "path " << path;
+        EXPECT_EQ(s.monsters[0].flags & kMonsterFlagByrdFlying, 0u)
+            << "path " << path << ": onRemove must have run";
+        EXPECT_EQ(s.monsters[0].intent,
+                  static_cast<uint8_t>(MonsterIntent::STUN))
+            << "path " << path << ": onRemove's queued STUN telegraph";
+    }
+}
+
+// ...and it must NOT fire for a power that does not bind it. A power with no
+// on_power_removed binding is destroyed with no side effect at all, which is
+// what keeps every landed fixture byte-identical across this hook's arrival.
+TEST(PowerHooks, OnPowerRemovedIsANoOpForAPowerThatDoesNotBindIt) {
+    CombatState s{};
+    s.player_hp = 50;
+    s.player_max_hp = 50;
+    give_player_power(s, PowerId::STRENGTH, 3);
+    give_player_power(s, PowerId::THORNS, 2);
+    ActionQueueItem rem{};
+    rem.opcode = kOp(Opcode::REMOVE_POWER);
+    rem.src = kActorPlayer;
+    rem.tgt = kActorPlayer;
+    rem.flags = make_apply_power_flags(PowerId::THORNS);
+    execute_opcode(s, rem);
+    EXPECT_EQ(s.player_power_count, 1);
+    EXPECT_EQ(player_power_stack(s, PowerId::STRENGTH), 3);
+    EXPECT_EQ(s.action_count, 0) << "no hook queued anything";
 }
 
 // PLATED_ARMOR is NOT reduced by THORNS damage or self HP loss.

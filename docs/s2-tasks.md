@@ -57,10 +57,12 @@ from `registry/*.yaml` before extending):
 Wave-2 sub-blocks (granted 2026-08-07; full table incl. RunPhase/MoveCat/
 RoomType/opcode/hook claims and adjudications is in
 [stage-b-tasks.md](stage-b-tasks.md) "S2 Wave-2 allocations"):
-`monsters.yaml` S2.21 = 27–30 (+31 reserve), S2.22 = 32–36;
-`powers.yaml` S2.21 = 93–94 (HEX, FLIGHT), S2.22 = 95 (MALLEABLE — row
-ownership corrected from the S2.21 block text, which stale-listed Malleable/
-PlatedArmor/Barricade; the design doc wins).
+`monsters.yaml` S2.21 = 27–30 (**31 released unspent — permanent gap**),
+S2.22 = 32–36;
+`powers.yaml` S2.21 = 93–94 (HEX, FLIGHT — **both spent**), S2.22 = 95
+(MALLEABLE — row ownership corrected from the S2.21 block text, which
+stale-listed Malleable/PlatedArmor/Barricade; the design doc wins, and the
+S2.21 block text has now been corrected in place).
 
 ## Deferred obligations
 
@@ -232,12 +234,42 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 
 ## Phase S2.2 — Monster batches (each = YAML rows + engine bodies + tier-2, the B3.13–B3.22 pattern; ∥ across disjoint batches once S2.01 lands)
 
-- **S2.21** `[ ]` ∥ City normals I — Chosen, Byrd, Shelled Parasite,
-  Spheric Guardian (+ Hex/Flight/PlatedArmor/Barricade/Malleable-family
-  power rows their moves pull in).
+- **S2.21** `[x]` ∥ City normals I — Chosen (27), Byrd (28), Shelled
+  Parasite (29), Spheric Guardian (30); `powers.yaml` **Hex (93)** and
+  **Flight (94)** — the only two NEW power rows the batch needed.
+  *Corrected from the original block text, which listed
+  "Hex/Flight/PlatedArmor/Barricade/Malleable-family power rows".* Plated
+  Armor (17) and Barricade (48) were **already registered** and needed no
+  row: this batch only routes them — Plated Armor gained an
+  `on_power_removed` binding (its `onRemove` had never been modelled) and
+  Barricade's monster-side presence test was already live in
+  `apply_pre_turn_logic`, so only its id-48 provenance line, which read
+  player-only, was amended. **Malleable is S2.22's row (95), not this
+  task's** — the design doc and the Wave-2 allocation table both say so,
+  and this line was the stale parenthetical they overrode.
   **Deps:** S2.01 **Acceptance:** per-monster move/stat tables pinned
   against every ascension branch read in full; encounter compositions
   spawn-order-exact; six presets green.
+  **Log:** `Hook::ON_POWER_REMOVED = 14` added as framework, dispatched
+  from `remove_slot_at` — the single choke point every destruction path
+  (`REMOVE_POWER`, `REDUCE_POWER`-to-zero, `REMOVE_DEBUFFS`) reaches, and
+  the first hook that fires ONE body (the removed power's own) rather than
+  fanning out. It exposed a real defect: Plated Armor's native body
+  decremented its own slot and zeroed `power_id` in place, which never
+  reached that choke point, so the Shelled Parasite's ARMOR_BREAK stun
+  could never fire. Rerouted through a queued `REDUCE_POWER`, which is
+  also what `PlatedArmorPower.java:58` does — the in-place write was a
+  timing deviation too. RED-first evidence recorded: with the pre-fix body
+  restored, `CityNormalsI.PlatedArmorRunningOutStunsTheShelledParasite`
+  fails with `move_history[0] == 1 (FELL)` instead of `4 (STUNNED)`.
+  Opcode **66 `VAMPIRE_DAMAGE`** (single-target monster-sourced lifesteal;
+  the heal is applied inline, which is exact — the Java `addToTop`s it
+  ahead of anything the hit queued at the front). Monster-flag bits
+  **0x8000** (Byrd `isFlying`) and **0x10000** (Spheric `secondMove`) —
+  fresh bits, argued in-row against reuse; the third granted bit (Chosen
+  `usedHex`) proved unnecessary at A20 and is RELEASED. `MonsterId` **31**
+  released unspent (permanent gap). All six presets green (`ctest -N` for
+  the current suite size).
 - **S2.22** `[ ]` ∥ City normals II — Mugger, Snake Plant, Snecko,
   Centurion + Healer (2 Thieves / Snake Plant / Snecko / Centurion and
   Healer / 3 Cultists / Cultist and Chosen groups).

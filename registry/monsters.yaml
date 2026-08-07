@@ -1137,3 +1137,275 @@
                # (the 0.6 first-Mug talk gate and the 0.5 Smoke-Bomb-or-Lunge
                # coin). slashCount lives in MonsterState.pad0 and doubles as the
                # steal count. See monster_looter.cpp.
+
+# --- S2.21 (Act-2 city normals I): Chosen, Byrd, Shelled Parasite, Spheric ---
+# --- Guardian. MonsterId 27-30 are this task's grant (stage-b-tasks.md "S2 ---
+# --- Wave-2 allocations"). 31 was held in reserve, is NOT needed, and is ---
+# --- RELEASED unspent -- a permanent gap, per the append-only rule. ---
+#
+# All four are NORMAL (none assigns this.type, so AbstractMonster.java:99's field
+# initializer stands) and all four are `ai: native` -- every one of them reads
+# move history, a per-instance latch, or both, which no ai table expresses.
+
+- id: 27
+  name: CHOSEN
+  game_id: "Chosen"
+  provenance: "Chosen (Chosen.java, read in full). ID \"Chosen\" (:37). ctor (:76-103): setHp(98,103) at ascension >= 7 else (95,99) (:80-84) -- the constants are NAMED A_2_HP_MIN/MAX (:45-46) but the BRANCH IS >= 7, and the branch is what is reproduced; the damage branch at >= 2 (:85-93) gives zapDmg 21 / debilitateDmg 12 / pokeDmg 6, and damage.get(0..2) are added in that order (:94-96). Fixed constants: DEBILITATE_VULN 2 (:60), DRAIN_STR 3 (:61), DRAIN_WEAK 3 (:62), HEX_AMT 1 (:68). Move ids ZAP=1, DRAIN=2, DEBILITATE=3, HEX=4, POKE=5 (:63-67). takeTurn (:105-138): every case falls through to a trailing RollMoveAction (:137). getMove (:151-197) is TWO arms; at the engine's fixed A20 the A17+ arm (:153-173) is the live one. No usePreBattleAction. damage() (:199-207) is animation only and die() (:209-213) is a sound, so neither needs an engine hook."
+  enemy_type: NORMAL   # AbstractMonster.java:99 -- no this.type assignment
+  hp:
+    base: {min: 95, max: 99}    # Chosen.java:83 (ascension < 7)
+    a7:   {min: 98, max: 103}   # Chosen.java:81 (ascension >= 7) -- >= 7, not >= 2
+  rolls: []
+  moves:
+    - name: ZAP
+      move_id: 1               # Chosen.java:63
+      intent: ATTACK
+      effects:
+        # FastShakeAction (:115) is presentation. damage.get(0) == zapDmg: 18, or
+        # 21 from A2 (:85-93). AttackEffect.FIRE is presentation too.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 18, a2: 21}}
+    - name: DRAIN
+      move_id: 2               # Chosen.java:64
+      intent: DEBUFF
+      effects:
+        # ORDER IS LOAD-BEARING (:119-123): Weak on the PLAYER first, THEN
+        # Strength on the Chosen itself. Both flat, no ascension branch
+        # (DRAIN_WEAK 3 at :62, DRAIN_STR 3 at :61).
+        - {op: APPLY_POWER, target: PLAYER, amount: 3, power: WEAK}
+        - {op: APPLY_POWER, target: SELF, amount: 3, power: STRENGTH}
+    - name: DEBILITATE
+      move_id: 3               # Chosen.java:65
+      intent: ATTACK_DEBUFF
+      effects:
+        # damage.get(1) == debilitateDmg: 10, or 12 from A2; then Vulnerable 2
+        # (DEBILITATE_VULN, :60). Damage first (:124-129).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 12}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+    - name: HEX
+      move_id: 4               # Chosen.java:66
+      intent: STRONG_DEBUFF
+      effects:
+        # TalkAction / ChangeStateAction("ATTACK") / WaitAction (:131-133) are all
+        # presentation -- changeState's ATTACK branch (:141-149) is two spine
+        # animation calls and nothing else. HexPower(player, 1) is the whole move
+        # (:134; HEX_AMT at :68). powers.yaml id 93.
+        - {op: APPLY_POWER, target: PLAYER, amount: 1, power: HEX}
+    - name: POKE
+      move_id: 5               # Chosen.java:67
+      intent: ATTACK
+      effects:
+        # TWO SEPARATE DamageActions on damage.get(2) (:110-111), not one doubled
+        # hit -- so block, a Flight-style halving and a lethal clamp all apply per
+        # hit. pokeDmg 5, or 6 from A2. setMove telegraphs it as `2, true`
+        # (multi-hit) at :171/:176/:196.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a2: 6}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 5, a2: 6}}
+  ai: native   # getMove (:151-197) reads a HEX latch and TWO history predicates
+               # (!lastMove(3) && !lastMove(2)) before it reads its rolled num, and
+               # the whole tree is arm-switched on ascension. At A20 the A17+ arm
+               # is live: HEX is the forced opener, then num<50 Debilitate else
+               # Drain while neither of those was last, else num<40 Zap else Poke.
+               # `usedHex` needs no state bit at A20 -- it is true on every call
+               # after init's (see combat_state.hpp). See monster_chosen.cpp.
+
+- id: 28
+  name: BYRD
+  game_id: "Byrd"
+  provenance: "Byrd (Byrd.java, read in full). ID \"Byrd\" (:36). ctor (:76-99): setHp(26,33) at ascension >= 7 else (25,31) (:78-82); flightAmt = 4 at >= 17 else 3 (:83); the >= 2 branch (:84-92) sets peckDmg 1 (the SAME either side), peckCount 6 (5 below) and swoopDmg 14 (12 below); damage.get(0..2) = peckDmg, swoopDmg, and a LITERAL 3 with no branch at all (:93-95; HEADBUTT_DMG at :63). CAW_STR 1 (:64). Move ids PECK=1, GO_AIRBORNE=2, SWOOP=3, STUNNED=4, HEADBUTT=5, CAW=6 (:65-70). usePreBattleAction (:101-104): ApplyPowerAction(self, self, FlightPower(flightAmt)). takeTurn (:106-146): cases 1/2/3/4/6 fall through to the trailing RollMoveAction (:145); case 5 RETURNS EARLY (:121) after a synchronous setMove(2, UNKNOWN). changeState(\"GROUNDED\") (:162-170) is setMove(4, STUN) + createIntent + isFlying=false, fired by FlightPower.onRemove. getMove (:175-219). die() (:221-225) is a sound only."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 25, max: 31}    # Byrd.java:81 (ascension < 7)
+    a7:   {min: 26, max: 33}    # Byrd.java:79 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: PECK
+      move_id: 1               # Byrd.java:65
+      intent: ATTACK
+      effects:
+        # SCHEMA LIMITATION, RECORDED RATHER THAN WORKED AROUND: peckCount is
+        # ASCENSION-VARYING (5 base, 6 from A2 -- Byrd.java:55,57,86,90) and an
+        # effect list cannot express a per-tier STEP COUNT, only per-tier amounts.
+        # The six steps below are EXACT at the engine's fixed A20; a
+        # base-ascension run would need five. If a real ascension is ever threaded
+        # through combat_begin, this move is one of the rows that must change
+        # SHAPE (a `count:` column on the step, or a native body), not just its
+        # numbers.
+        #
+        # The loop at :111-114 queues peckCount SEPARATE 4-arg DamageActions on
+        # damage.get(0). peckDmg is 1 at EVERY ascension (:85,89 -- both branches
+        # assign 1), so the amount needs no tier column. playRandomBirdSFx
+        # (:148-150) rolls libGDX MathUtils, an UNSEEDED generator, and costs no
+        # seeded draw.
+        - {op: DAMAGE, target: PLAYER, amount: 1}
+        - {op: DAMAGE, target: PLAYER, amount: 1}
+        - {op: DAMAGE, target: PLAYER, amount: 1}
+        - {op: DAMAGE, target: PLAYER, amount: 1}
+        - {op: DAMAGE, target: PLAYER, amount: 1}
+        - {op: DAMAGE, target: PLAYER, amount: 1}
+    - name: GO_AIRBORNE
+      move_id: 2               # Byrd.java:66
+      intent: UNKNOWN          # setMove((byte)2, Intent.UNKNOWN) (:120)
+      effects:
+        # `isFlying = true` (:124) is SYNCHRONOUS and native (the flag bit), one
+        # slot ahead of this; ChangeStateAction(FLY_STATE) (:125) is animation and
+        # hitbox only (:155-160). The ApplyPowerAction re-grants Flight at
+        # flightAmt (:126), 3 or 4 from A17 (:83). powers.yaml id 94.
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a17: 4}, power: FLIGHT}
+    - name: SWOOP
+      move_id: 3               # Byrd.java:67
+      intent: ATTACK
+      effects:
+        # damage.get(1) == swoopDmg: 12, or 14 from A2 (:87,91).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 12, a2: 14}}
+    - name: STUNNED
+      move_id: 4               # Byrd.java:68
+      intent: STUN             # changeState("GROUNDED") setMove(4, Intent.STUN) (:163)
+      effects:
+        # The whole body (:140-143) is presentation: a SetAnimationAction
+        # ("head_lift") and a TextAboveCreatureAction. The turn is spent and the
+        # trailing RollMoveAction (:145) still runs -- that roll is native. NOP
+        # placeholder (the Lagavulin / Looter precedent).
+        - {op: NOP, target: SELF, amount: 0}
+    - name: HEADBUTT
+      move_id: 5               # Byrd.java:69
+      intent: ATTACK
+      effects:
+        # damage.get(2) is a LITERAL 3 (:95; HEADBUTT_DMG at :63) with NO
+        # ascension branch -- the one Byrd number that never moves. The
+        # setMove(2, UNKNOWN) and the EARLY RETURN that follow (:120-121) are
+        # native: this is the only Byrd move that does NOT reach the trailing roll.
+        - {op: DAMAGE, target: PLAYER, amount: 3}
+    - name: CAW
+      move_id: 6               # Byrd.java:70
+      intent: BUFF
+      effects:
+        # SFXAction + TalkAction (:130-131) are presentation. CAW_STR 1 (:64), flat.
+        - {op: APPLY_POWER, target: SELF, amount: 1, power: STRENGTH}
+  ai: native   # getMove (:175-219) is history-guarded AND spends EXTRA
+               # randomBoolean draws inside those guards, which no ai table
+               # expresses: firstMove is a bare randomBoolean(0.375) CAW-or-PECK
+               # (:179), and each of the three isFlying arms spends a SECOND
+               # randomBoolean only when its history predicate holds (0.4 / 0.375 /
+               # 0.2857 at :189,199,208). A grounded Byrd (kMonsterFlagByrdFlying
+               # clear) takes HEADBUTT unconditionally and never reads num (:217).
+               # See monster_byrd.cpp.
+
+- id: 29
+  name: SHELLED_PARASITE
+  game_id: "Shelled Parasite"
+  provenance: "ShelledParasite (ShelledParasite.java, read in full). ID \"Shelled Parasite\" (:41) -- WITH the space, and DISTINCT from the encounter key \"Shell Parasite\" (encounters.yaml); the two are joined by name, so they must not be conflated. ctor (:73-98): setHp(70,75) at ascension >= 7 else (68,72) (:81-85); the >= 2 branch (:86-94) sets doubleStrikeDmg 7 / fellDmg 21 / suckDmg 12, and damage.get(0..2) are added in THAT order (:95-97) -- doubleStrike, fell, suck, which is NOT the move-id order. PLATED_ARMOR_AMT 14 (:54), FELL_FRAIL_AMT 2 (:65), DOUBLE_STRIKE_COUNT 2 (:64). Move ids FELL=1, DOUBLE_STRIKE=2, LIFE_SUCK=3, STUNNED=4 (:66-69). usePreBattleAction (:104-108): PlatedArmorPower(14) THEN GainBlockAction(14). takeTurn (:110-141): ALL FOUR cases reach the trailing RollMoveAction (:140), INCLUDING case 4. changeState(\"ARMOR_BREAK\") (:151-159) is setMove(4, STUN) + createIntent, fired by PlatedArmorPower's removal. damage() (:163-170) is animation only. getMove (:172-204)."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    base: {min: 68, max: 72}    # ShelledParasite.java:84 (ascension < 7)
+    a7:   {min: 70, max: 75}    # ShelledParasite.java:82 (ascension >= 7)
+  rolls: []
+  moves:
+    - name: FELL
+      move_id: 1               # ShelledParasite.java:66
+      intent: ATTACK_DEBUFF
+      effects:
+        # damage.get(1) == fellDmg: 18, or 21 from A2. AnimateSlowAttack + Wait
+        # (:114-115) are presentation. Frail 2 after the damage (:117).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 18, a2: 21}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: FRAIL}
+    - name: DOUBLE_STRIKE
+      move_id: 2               # ShelledParasite.java:67
+      intent: ATTACK
+      effects:
+        # TWO INDEPENDENT hits on damage.get(0) (the :121-125 loop, count 2 at
+        # :64): doubleStrikeDmg 6, or 7 from A2. Separate DamageActions, so block
+        # and a lethal clamp apply per hit.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a2: 7}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 6, a2: 7}}
+    - name: LIFE_SUCK
+      move_id: 3               # ShelledParasite.java:68
+      intent: ATTACK_BUFF
+      effects:
+        # VampireDamageAction(player, damage.get(2), NONE) (:132) -- opcode 66,
+        # this task's grant. suckDmg 10, or 12 from A2. The heal is the HP the hit
+        # ACTUALLY removed, so this cannot be a DAMAGE step plus a HEAL step; see
+        # the opcode's note in interp.hpp. The ChangeStateAction("ATTACK") / Wait /
+        # BiteEffect VFX either side (:129-131) are presentation -- and the VFX's
+        # two MathUtils.random calls are the UNSEEDED libGDX generator, so they
+        # cost no seeded draw.
+        - {op: VAMPIRE_DAMAGE, target: PLAYER, amount: {base: 10, a2: 12}}
+    - name: STUNNED
+      move_id: 4               # ShelledParasite.java:69
+      intent: STUN             # changeState("ARMOR_BREAK") setMove(4, Intent.STUN) (:157)
+      effects:
+        # The body (:135-138) is a SYNCHRONOUS setMove(1, ATTACK_DEBUFF) -- native,
+        # and load-bearing: it pushes move id 1 into the history ring, and then the
+        # trailing roll (:140), which this case DOES reach, re-decides with
+        # lastMove(1) already true. Plus a TextAboveCreatureAction, which is
+        # presentation. NOP placeholder (the Lagavulin / Looter precedent).
+        - {op: NOP, target: SELF, amount: 0}
+  ai: native   # getMove (:172-204) RECURSES: the num<20 arm re-enters with a fresh
+               # aiRng.random(20,99) when Fell was the last move (:191), spending a
+               # SECOND draw one level deep. It also reads lastMove and
+               # lastTwoMoves, and its firstMove branch is ascension-switched (A17+
+               # takes Fell with NO draw at all; below it spends a randomBoolean).
+               # See monster_shelled_parasite.cpp.
+
+- id: 30
+  name: SPHERIC_GUARDIAN
+  game_id: "SphericGuardian"
+  provenance: "SphericGuardian (SphericGuardian.java, read in full). ID \"SphericGuardian\" (:36) -- NO space, and DISTINCT from the encounter keys \"Spheric Guardian\" / \"Sphere and 2 Shapes\", which do have one. ctor (:66-75) passes maxHealth 20 straight to super and NEVER calls setHp -- see the hp block below. `dmg` is a FIELD INITIALIZER, `ascensionLevel >= 2 ? 11 : 10` (:48), which Java runs after super() and before the ctor body, so damage.get(0) at :68 already has the branched value. Fixed constants: SLAM_AMT 2 (:49), HARDEN_BLOCK 15 (:50), FRAIL_AMT 5 (:51), ACTIVATE_BLOCK 25 (:52), ARTIFACT_AMT 3 (:53), STARTING_BLOCK_AMT 40 (:54). Move ids BIG_ATTACK=1, INITIAL_BLOCK_GAIN=2, BLOCK_ATTACK=3, FRAIL_ATTACK=4 (:55-58). usePreBattleAction (:77-82) in order: Barricade, Artifact(3), GainBlock(40). takeTurn (:84-121): all four cases reach the trailing RollMoveAction (:120). getMove (:145-162). die() (:164-172) picks a sound with UNSEEDED MathUtils and models nothing."
+  enemy_type: NORMAL   # AbstractMonster.java:99
+  hp:
+    # FIXED 20 AT EVERY ASCENSION, AND THIS MONSTER DRAWS ZERO monster_hp_rng.
+    # setHp is NEVER called: the ctor hands maxHealth 20 to super
+    # (SphericGuardian.java:67) and AbstractMonster's ctor (AbstractMonster.java:
+    # 135-155) assigns `currentHealth = maxHealth` with no RNG anywhere in it.
+    # It is the FIRST registry monster with no HP draw, so encounter-level draw
+    # accounting differs from every other group: "Spheric Guardian" solo costs 0
+    # monster_hp_rng draws, and "Sentry and Sphere" costs 1 (the Sentry's), not 2.
+    # A single {min: 20, max: 20} column is the honest spelling -- there is no tier
+    # branch to record -- and the native module SKIPS the draw entirely rather than
+    # calling random() with a degenerate range, which WOULD move the stream.
+    base: {min: 20, max: 20}   # SphericGuardian.java:67 -- ctor arg, no setHp
+  rolls: []
+  moves:
+    - name: BIG_ATTACK
+      move_id: 1               # SphericGuardian.java:55
+      intent: ATTACK
+      effects:
+        # TWO SEPARATE DamageActions on damage.get(0) (:90-91) -- SLAM_AMT 2 (:49)
+        # is the telegraphed multiplier, and setMove passes `2, true` (:160). dmg
+        # is 10, or 11 from A2 (:48). ChangeState("ATTACK") + Wait (:88-89) are
+        # presentation.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+    - name: INITIAL_BLOCK_GAIN
+      move_id: 2               # SphericGuardian.java:56
+      intent: DEFEND
+      effects:
+        # THE ONLY IN-takeTurn ASCENSION BRANCH IN THIS WHOLE BATCH (:95-99): 35
+        # at A17+, else 25. It has NO named constant for the A17 value --
+        # ACTIVATE_BLOCK (:52) is only the 25 -- so the 35 is a literal in the
+        # branch and is transcribed as one. Every other ascension branch across
+        # these four monsters lives in a ctor. The WaitAction and the
+        # MathUtils-coin-flipped SFX after it (:100-106) are presentation on an
+        # UNSEEDED generator.
+        - {op: BLOCK, target: SELF, amount: {base: 25, a17: 35}}
+    - name: BLOCK_ATTACK
+      move_id: 3               # SphericGuardian.java:57
+      intent: ATTACK_DEFEND
+      effects:
+        # ORDER IS LOAD-BEARING (:109-111): the block lands FIRST, then the
+        # attack. HARDEN_BLOCK 15 (:50), flat.
+        - {op: BLOCK, target: SELF, amount: 15}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+    - name: FRAIL_ATTACK
+      move_id: 4               # SphericGuardian.java:58
+      intent: ATTACK_DEBUFF
+      effects:
+        # Damage then Frail 5 (FRAIL_AMT at :51), :115-117.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 10, a2: 11}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 5, power: FRAIL}
+  ai: native   # getMove (:145-162) NEVER READS num: firstMove -> 2, secondMove ->
+               # 4, then strict alternation on lastMove(1) between 3 and 1. The
+               # rolls still happen and still move the ai_rng stream (the Guardian
+               # / Red Slaver / Looter discarded-draw precedent), which is the
+               # whole reason this is native rather than an empty table.
+               # `secondMove` is kMonsterFlagSphericSecondMove.
+               # See monster_spheric_guardian.cpp.

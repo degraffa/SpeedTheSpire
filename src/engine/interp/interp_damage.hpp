@@ -41,6 +41,12 @@ void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 // VAMPIRE_DAMAGE_ALL (Reaper): hit every live monster, then queue the summed heal.
 void op_vampire_damage_all(CombatState& s, int base) noexcept;
 
+// VAMPIRE_DAMAGE (the Shelled Parasite's Life Suck): hit ONE target, then heal the
+// monster attacker by the HP that hit actually removed. See the definition for why
+// the heal is applied inline rather than queued.
+void op_vampire_damage(CombatState& s, uint8_t src, uint8_t tgt,
+                       int base) noexcept;
+
 // HEAL: the queued HealAction, routed through the onPlayerHeal relic seam.
 void op_heal(CombatState& s, uint8_t tgt, int amount) noexcept;
 

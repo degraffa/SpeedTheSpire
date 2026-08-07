@@ -518,7 +518,7 @@ TEST(RegistryGen, ManifestCounts) {
                                       // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 53u);  // + REGENERATE_MONSTER (91), the emerald
+    EXPECT_EQ(m::kPowersCount, 55u);  // + REGENERATE_MONSTER (91), the emerald
                                       // elite entry roll's arm 3, and
                                       // DUPLICATION (92), the potion's power.
                                       // B3.7 appends Evolve (26) + Fire Breathing (27);
@@ -570,7 +570,14 @@ TEST(RegistryGen, ManifestCounts) {
                                       // Duplication (92), the Duplication
                                       // Potion's any-card-type replay; 91 is a
                                       // sibling stage's allocation, untouched
-    EXPECT_EQ(m::kMonstersCount, 25u); // + B3.14 four small/medium slimes
+                                      // + S2.21's Hex (93), the Chosen's
+                                      // non-ATTACK Dazed generator, and Flight
+                                      // (94), the Byrd's halving shield and the
+                                      // first power to bind ON_POWER_REMOVED.
+                                      // The block 93-94 is spent exactly; 95
+                                      // (Malleable) is the NEXT city batch's row,
+                                      // not this one's
+    EXPECT_EQ(m::kMonstersCount, 29u); // + B3.14 four small/medium slimes
                                        // + B3.17 two large + B3.20 Slime Boss
                                        // + Gremlin Nob (12), Sentry (13),
                                        // Lagavulin (15)
@@ -585,6 +592,16 @@ TEST(RegistryGen, ManifestCounts) {
                                        // with the escape liveness predicate --
                                        // see the block comments in
                                        // registry/monsters.yaml
+                                       // + S2.21's four Act-2 city normals:
+                                       // Chosen (27), Byrd (28), Shelled
+                                       // Parasite (29) and Spheric Guardian
+                                       // (30). Id 31 was that batch's reserve
+                                       // and is RELEASED unspent, so it is a
+                                       // permanent gap and the row count adds 4,
+                                       // not 5. The Spheric Guardian is the
+                                       // first row whose spawn draws NO
+                                       // monster_hp_rng at all (its Java ctor
+                                       // never calls setHp)
     EXPECT_EQ(m::kRelicsCount, 150u);  // 65 + B3.26's 28 rare + 17 shop + Odd Mushroom
                                        // + B3.27's 22 boss + 9 Act-1 event specials
                                        // + S2.03's 8 Act-2/3 event specials
@@ -615,7 +632,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 525u);  // 132 + 53 + 25 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 531u);  // 132 + 55 + 29 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1477,6 +1494,15 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
     EXPECT_EQ(r::power_def(r::PowerId::INTANGIBLE)->priority, 75);
     EXPECT_EQ(r::power_def(r::PowerId::CONFUSION)->priority, 0);
     EXPECT_EQ(r::power_def(r::PowerId::PEN_NIB)->priority, 6);
+    // Flight 50 (FlightPower.java:34) -- the Byrd's halving shield. It sits
+    // between the priority-5/6 additive class and Intangible's 75 / Weak's 99,
+    // and slot order IS the atDamage* walk order, so this number decides whether
+    // a Weak attacker's damage is halved before or after the 0.75 multiply.
+    EXPECT_EQ(r::power_def(r::PowerId::FLIGHT)->priority, 50);
+    // Hex's ctor sets NO priority (HexPower.java:26-34), so -- unlike its batch
+    // sibling above -- it takes the default and belongs in the sweep below.
+    EXPECT_EQ(r::power_def(r::PowerId::HEX)->priority,
+              r::kDefaultPowerPriority);
     // Vigor's ctor sets NO priority (VigorPower.java:30-38), so it takes the
     // default and belongs in the sweep below rather than in the list above --
     // which is exactly why ((base + Str + Vigor) * 2) is the game's grouping.
@@ -1487,7 +1513,7 @@ TEST(RegistryGen, PowerPrioritiesMirrorTheJavaCtors) {
         const auto id = static_cast<r::PowerId>(i);
         if (id == r::PowerId::WEAK || id == r::PowerId::FRAIL ||
             id == r::PowerId::INTANGIBLE || id == r::PowerId::CONFUSION ||
-            id == r::PowerId::PEN_NIB) {
+            id == r::PowerId::PEN_NIB || id == r::PowerId::FLIGHT) {
             continue;
         }
         const r::PowerDef* d = r::power_def(id);

@@ -261,6 +261,23 @@ sts_add_test(fungi_beast_test FIXTURES)
 # escape) pins the Smoke-Bomb-or-Lunge coin.
 sts_add_test(looter_test FIXTURES)
 
+# Act-2 city normals I -- the Chosen, the Byrd, the Shelled Parasite and the
+# Spheric Guardian, with the two powers they bring (Hex, Flight), the
+# VAMPIRE_DAMAGE opcode and the ON_POWER_REMOVED hook. Per-monster stat/move
+# tables asserted at EVERY ascension boundary the Java branches on -- the
+# Chosen's HP gate is >= 7 behind A_2_HP_* constant names, which is the
+# transcription trap these rows most easily fail. Per-monster, per-phase RNG draw
+# counts, including the two easiest to get wrong: the Spheric Guardian draws ZERO
+# monster_hp_rng (its ctor never calls setHp -- a first for the registry, and the
+# reason "Sentry and Sphere" costs one HP draw rather than two), and the
+# Parasite's getMove recurses one level for a second ai draw. Flight's full
+# lifecycle including the no-shed-on-lethal edge and the start-of-turn refresh;
+# Hex including the zero-draw empty-pile case; and the ARMOUR-BREAK REGRESSION --
+# Plated Armor's removal now reaches remove_slot_at, so the Parasite's stun
+# telegraph fires at all. Compositions are asserted spawn-order-exact, because
+# spawn order fixes the group index the Sentry's opener is chosen from.
+sts_add_test(city_normals_i_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

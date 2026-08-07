@@ -368,7 +368,9 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::RANDOMIZE_HAND_COST) ==
             static_cast<uint16_t>(Opcode::RANDOMIZE_HAND_COST) &&
         static_cast<uint16_t>(sts::registry::Opcode::RED_SKULL_ENTRY) ==
-            static_cast<uint16_t>(Opcode::RED_SKULL_ENTRY),
+            static_cast<uint16_t>(Opcode::RED_SKULL_ENTRY) &&
+        static_cast<uint16_t>(sts::registry::Opcode::VAMPIRE_DAMAGE) ==
+            static_cast<uint16_t>(Opcode::VAMPIRE_DAMAGE),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

@@ -496,6 +496,14 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //   * `flags` bits kMonsterFlagGuardian* -- The Guardian: the two mode latches
 //     plus the count of Defensive-Mode flips so far, which is what makes the
 //     mode-shift threshold GROW (TheGuardian.java:61,245).
+//   * `flags` bit kMonsterFlagByrdFlying -- Byrd: `isFlying` (Byrd.java:72,124,
+//     165), the airborne latch its getMove reads to choose between the flying
+//     move tree and the unconditional grounded HEADBUTT. Set by GO_AIRBORNE,
+//     cleared by the GROUNDED change of state that Flight's removal triggers.
+//   * `flags` bit kMonsterFlagSphericSecondMove -- Spheric Guardian:
+//     `secondMove` (SphericGuardian.java:60), the one-shot that makes the
+//     SECOND decision a forced Frail Attack before the strict Big-Attack /
+//     Block-Attack alternation starts.
 //   * `flags` bits kMonsterFlagHexaghostOrb* / *BurnUpgraded -- Hexaghost:
 //     `orbActiveCount` (the ONLY thing its six presentation orbs contribute to
 //     combat state) and the `burnUpgraded` latch (Hexaghost.java:92-93). See
@@ -584,6 +592,54 @@ inline constexpr uint32_t kMonsterFlagGuardianShiftMask = 0x0700u;
 inline constexpr uint32_t kMonsterFlagHexaghostOrbShift = 11u;
 inline constexpr uint32_t kMonsterFlagHexaghostOrbMask = 0x3800u;
 inline constexpr uint32_t kMonsterFlagHexaghostBurnUpgraded = 0x4000u;
+
+// S2.21 (Act-2 city normals I). Allocated from 0x8000 up -- FRESH bits, not a
+// reuse of Lagavulin's 0x0008/0x0010/0x0020, and that choice is argued rather
+// than defaulted because the policy above prefers reuse where types provably
+// cannot co-occur (which these do not: an Act-1 elite is never an Act-2 normal,
+// so reuse WOULD have been sound).
+//
+// The reason not to: reuse conserves a resource that is not scarce. The
+// widening to 32 bits left bits 15-23 free, this batch needs two of them, and
+// six remain after it -- while a reused bit makes every raw read of `flags` (a
+// debugger, a log line, a future audit) ambiguous until the reader has also
+// checked monster_id. The existing precedent already chose the same way: the
+// Guardian's batch was allocated from 0x0040 "rather than appending into"
+// Lagavulin's bits and left the gap (see the note above kMonsterFlagGuardianOpen).
+//
+// Only TWO bits are spent. The third this batch was granted -- the Chosen's
+// `usedHex` -- turned out to need NO storage at all, and the reason is worth
+// recording because it is not obvious from the Java. At A17+ (the engine's fixed
+// A20) getMove's first arm is `if (!usedHex) { usedHex = true; HEX; return; }`
+// (Chosen.java:154-158), and getMove runs from exactly two places: init()'s
+// rollMove and a queued RollMoveAction. So the latch is false on precisely the
+// init call and true forever after -- it IS "is this the init call", which the
+// module's init/roll split already answers structurally. The Red Slaver's
+// `firstTurn` needs no storage for the same reason (see the pad0 note above).
+// The bit would become real if the sub-A17 arm (:174-197) were ever made live,
+// because there `firstTurn` forces a POKE opener and HEX moves to the SECOND
+// decision -- a genuine second-call latch. The unused bit is RELEASED to free
+// rather than left as a gap: "a gap costs nothing" holds for registry ids, whose
+// numbering is append-only, and NOT for a bitfield, where the supply is finite
+// and nothing ever encoded the value -- the same call the unused fuzz MoveCat
+// and CardFlag contingencies made.
+
+// Byrd `isFlying` (Byrd.java:72,124,165). SET == airborne, and it starts SET
+// because the field initializer is `= true`. It is NOT derivable from the
+// presence of the Flight power, and the two genuinely diverge: changeState
+// ("GROUNDED") clears this the moment Flight's onRemove fires, while case 2
+// (GO_AIRBORNE) sets it SYNCHRONOUSLY at :124, one queue slot AHEAD of the
+// ApplyPowerAction that re-grants Flight at :126. Its only reader is the Byrd's
+// own getMove (:186), which sends a grounded Byrd to HEADBUTT unconditionally.
+inline constexpr uint32_t kMonsterFlagByrdFlying = 0x8000u;
+
+// Spheric Guardian `secondMove` (SphericGuardian.java:60,152-155). SET == the
+// second getMove has not happened yet, so the next decision is the forced
+// FRAIL_ATTACK; cleared when it does. Distinct from its sibling `firstMove`
+// (:59,147-151), which needs no storage because it is consumed on the init
+// rollMove -- this one is consumed on the FIRST QUEUED roll, one decision later,
+// which the init/roll split does not distinguish for free.
+inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
 
 // ESCAPED -- the first (and today only) GLOBAL flag bit, bit 24, the bottom of
 // the 24-31 global region: the monster left the fight ALIVE.

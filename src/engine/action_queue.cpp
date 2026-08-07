@@ -231,10 +231,14 @@ void apply_pre_turn_logic(CombatState& s) noexcept {
             m.block = 0;  // loseBlock()
         }
         // m.applyStartOfTurnPowers() (AbstractCreature.java:529-533) -- the
-        // monster side of AT_START_OF_TURN, which nothing dispatched before. No
-        // S1 monster-ownable power binds that hook today, so it is a no-op in
-        // every current fixture; it is here because it is the other half of the
-        // method, and omitting half a method is how the block clear went missing.
+        // monster side of AT_START_OF_TURN. It landed with NO binder at all (it
+        // is here because it is the other half of the method, and omitting half
+        // a method is how the block clear above went missing); FLIGHT
+        // (powers.yaml id 94, S2.21) is the FIRST one. FlightPower.atStartOfTurn
+        // (FlightPower.java:47-51) restores `amount` to the value its ctor
+        // stored, so a Byrd whose Flight was worn down by attacks is back at full
+        // strength every time its own turn begins. Still a no-op in every S1
+        // fixture: no Act-1 monster carries a power that binds this hook.
         dispatch_monster_at_start_of_turn(s, i);
     }
 }

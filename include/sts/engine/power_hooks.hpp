@@ -75,9 +75,11 @@ enum class Hook : uint8_t {
     ON_APPLY_POWER = 11,            // inside the APPLY_POWER opcode
     WAS_HP_LOST = 12,               // after an HP write (LOSE_HP / DAMAGE)
     ON_DEATH = 13,                  // actor death
+    ON_POWER_REMOVED = 14,          // a power's own onRemove, at the removal
+                                    // choke point (remove_slot_at)
 };
 
-inline constexpr int kHookCount = 14;
+inline constexpr int kHookCount = 15;
 
 // --- HookContext ------------------------------------------------------------
 //
@@ -243,6 +245,36 @@ void dispatch_was_hp_lost(CombatState& state, uint8_t victim, uint8_t source,
 //
 // No-op unless a power on the dying actor binds ON_DEATH.
 void dispatch_on_death(CombatState& state, uint8_t actor) noexcept;
+
+// onRemove (AbstractPower.onRemove, AbstractPower.java:186-188 -- an empty base
+// every override extends): fires on the power being DESTROYED, and on nothing
+// else. Dispatched from remove_slot_at (interp/interp_powers.cpp), which is the
+// single choke point every destruction reaches -- REMOVE_POWER (op_remove_power),
+// REDUCE_POWER's fall-to-zero (op_reduce_power) and REMOVE_DEBUFFS (which expands
+// into REMOVE_POWER items). The Java has no such choke point: every caller ends at
+// AbstractCreature.removePower / RemoveSpecificPowerAction.update
+// (RemoveSpecificPowerAction.java:29-40), and BOTH call p.onRemove() before the
+// list drops the object, which is the property reproduced here.
+//
+// UNLIKE EVERY OTHER HOOK ON THIS PAGE, THIS ONE IS NOT A FAN-OUT. It fires
+// exactly one body -- the REMOVED power's own -- because `onRemove` is a
+// self-notification, not an event other powers observe. So it takes the slot
+// being destroyed rather than an actor, and routes straight to that PowerId's
+// native handler.
+//
+// FIRES BEFORE THE SLOT CLEARS, which is load-bearing in both directions: the
+// body can still read its own {amount, counter} (Flight's stored amount), and a
+// body that queues an action naming its owner is queuing while the list still has
+// the shape the game's did. It must NOT mutate the list -- remove_slot_at is
+// mid-compaction -- so a body that wants to remove something else queues a
+// REMOVE_POWER item instead of touching slots directly.
+//
+// No-op unless the removed power is `native` AND lists on_power_removed. Every
+// S1 power that reaches remove_slot_at today binds nothing here, so all landed
+// fixtures dispatch nothing and stay byte-identical.
+void dispatch_on_power_removed(CombatState& state, uint8_t owner,
+                               const PowerSlot& slot,
+                               uint8_t slot_index) noexcept;
 
 // --- APPLY_POWER interception (opposite sides of the opcode) -----------------
 
