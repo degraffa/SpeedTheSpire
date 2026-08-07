@@ -84,6 +84,75 @@ it), determinism from (policy_seed, seed) (every rule here is a pure function of
 the parsed dump plus the side table, and the tie-break still draws exactly once),
 never-claim-SAPPHIRE_KEY (`_score_reward`), and never-swap-the-boss-relic at
 Neow (`_score_event` has no opinion that reaches it).
+
+--------------------------------------------------------------------------
+b1.7.0 (S2.42) -- THREE-ACT SURVIVAL: ACT PROFILES AND THE BOSS-RELIC PICK
+--------------------------------------------------------------------------
+
+S1 stopped the driver at the Act-1 boss combat reward, so every constant above
+is Act-1-tuned and every rule above was derived from Act-1 evidence. S2 drives
+all three acts (design 6 / S2.42), and two of the S1 tunings are actively wrong
+past Act 1:
+
+  * **A 20-card, 10-attack deck is a floor-17 deck.** R1's gate is what stops a
+    reward-screen 2-cycle, so it cannot simply be widened -- but its two
+    thresholds are numbers, and an Act-3-capable deck is 25-35 cards.
+  * **`MAP_ELITE 200` is a survival tuning that starves the run of relics.**
+    Skipping every elite is how a run reaches the Act-1 boss; it is also how a
+    run arrives at the Act-3 boss with no relics and dies. Act 2/3 must be able
+    to want an elite -- but only while healthy, so the rule degrades to the
+    Act-1 behaviour exactly when survival is actually at stake.
+
+The mechanism is `ACT_PROFILES`, a per-act overlay over the SAME ALL-CAPS
+numeric constants, read through `_const(name, state)`. Three properties, each
+with a test:
+
+  * **Act 1 is byte-identical to b1.6.0 by construction.** `ACT_PROFILES` has no
+    key `1` and `act_of` answers 1 for a dump with no `act`, so `_const` returns
+    the module constant unchanged. The TE.1 cohort's measured 31.0 % Act-1 boss
+    reach stays reproducible in behaviour (the binary's SHA-256 necessarily
+    moves -- see docs/verification/s242-deep-reach.md).
+  * **The cohort config still wins.** `survival_policy_cmd.apply_constants`
+    setattrs module constants for a named, SHA-pinned cohort; if a profile
+    overlay were consulted afterwards, that cohort would silently be a no-op in
+    Acts 2/3 -- a cohort labelled with a policy it did not run, which is the one
+    failure the strict config validation exists to prevent. So the overlay
+    checks `CONFIG_PINNED` first and yields to any explicitly configured name.
+  * **R1's two-screens invariant survives.** `wants_card_reward` still reads the
+    DECK ALONE; the act is a property of the same dump and cannot change between
+    the COMBAT_REWARD row and the CARD_REWARD screen it opens, so the two
+    decisions still agree by construction.
+
+And one genuinely new rule, because the screen did not exist in S1:
+
+  R4 `_score_boss_reward` -- the BOSS_REWARD (boss-chest) pick. The screen
+     offers three BOSS-tier relics plus `skip`; the design 6 S2-G2 bar needs
+     BOTH a take and a skip witnessed, per Act-2 boss. That is a COHORT
+     selection, not a coin flip: `BOSS_RELIC_SKIP_MODE` is an ordinary numeric
+     constant, so `policy_bossrelic_take.json` / `policy_bossrelic_skip.json`
+     are two SHA-pinned campaign identities over one binary, and the resulting
+     cohort is named rather than hoped for.
+
+     WHAT IS NEVER TAKEN, AND WHY IT IS NOT A TASTE LIST. Five BOSS relics do
+     not merely make the run harder, they invalidate a rule THIS MODULE owns,
+     so taking one would leave the policy scoring a game it is no longer
+     playing: Sozu (no potions -- R2 has nothing left to decide), Runic Dome
+     (no intents -- `attacker_count`, and therefore R3's whole block weight,
+     reads zero forever), Snecko Eye (randomised costs -- the cheap-utility
+     term and the side table's cost column stop describing the hand), Pandora's
+     Box (rewrites every Strike/Defend -- R1's deck-attack gate is counting a
+     deck that no longer exists), and Calling Bell (a three-relic modal reward
+     screen plus a curse; the driver carries a b1.5.3 suppression path for
+     exactly that screen at Neow). Anything else is takeable. The criterion is
+     "names a rule above", which is checkable; "is a bad relic" is not.
+
+     Skip is a REVERSIBLE screen close (boss_chest.hpp: `relicSkipLogic` calls
+     `chest.close()`, which does not clear the offers, so the chest reopens with
+     the same three). A stateless policy that both opens chests and skips picks
+     therefore has a legal 2-cycle available to it. This module does NOT close
+     that hole -- `campaign_driver._run_boss_chest` sequences the boss chest
+     (open once -> ask this policy for the pick -> leave) precisely so the
+     termination argument lives somewhere that can count.
 """
 
 from __future__ import annotations
@@ -136,6 +205,14 @@ END_TURN = 1
 HIGH_STAKES_ROOMS = ("MonsterRoomBoss", "MonsterRoomElite")
 POTION_LOW_HP_FRACTION = 0.40
 EMPTY_POTION_IDS = (None, "", "Potion Slot", "PotionSlot")
+# b1.7.0 (A3). From this act onwards EVERY combat room is high-stakes, not just
+# boss/elite: an Act-3 normal (Spire Growth, Transient, Reptomancer) hits harder
+# than an Act-1 elite, and R2's room-name gate was written when "normal room"
+# meant Cultist. Numeric on purpose -- `HIGH_STAKES_ROOMS` is a tuple and so
+# cannot be reached by the cohort config surface, which only carries numbers.
+# 4 disables the rule (there is no act 4), which is the Act-1-era behaviour.
+POTION_HIGH_STAKES_FROM_ACT = 3
+ANY_COMBAT_ROOMS = ("MonsterRoom", "MonsterRoomElite", "MonsterRoomBoss")
 
 # Map.
 MAP_BOSS = 700
@@ -144,6 +221,11 @@ MAP_MONSTER = 400
 MAP_UNKNOWN_SYMBOL = 300
 MAP_ELITE = 200
 MAP_LEAVE_SCREEN = 0        # `return` backs out of the map without moving
+# b1.7.0 (A1). The act profiles raise MAP_ELITE in Acts 2/3 -- but only while
+# the run is healthy. At or below this HP fraction the raised value is dropped
+# and the Act-1 value applies again, so the elite appetite degrades back to pure
+# survival exactly when survival is the binding constraint.
+ELITE_APPETITE_HP_FRACTION = 0.60
 
 # Combat / treasure rewards.
 REWARD_RELIC = 900
@@ -176,6 +258,28 @@ DECK_ATTACK_TARGET = 10
 DECK_SIZE_CAP = 20
 CARD_TYPE_ATTACK = "ATTACK"
 CARD_TYPE_CURSE = "CURSE"
+
+# Boss-relic pick screen (BOSS_REWARD), b1.7.0 R4. Three relics plus `skip`.
+BOSS_RELIC_TAKE = 900       # a takeable relic outranks `skip`
+BOSS_RELIC_SKIP = 500       # `skip` on the BOSS_REWARD screen
+BOSS_RELIC_AVOID = 100      # < BOSS_RELIC_SKIP: a relic on the never-take list
+BOSS_RELIC_SKIP_WINS = 1000  # skip-cohort `skip`: above every relic score
+# 0 = take cohort (the default), 1 = skip cohort. A number, so a cohort is a
+# SHA-pinned `{"constants": {"BOSS_RELIC_SKIP_MODE": 1}}` config over the one
+# binary rather than a probabilistic draw -- see the module header (R4).
+BOSS_RELIC_SKIP_MODE = 0
+
+# The five BOSS relics that invalidate a rule this module owns; see the module
+# header (R4) for the per-relic reason. Names are the exact registry game ids
+# (registry/relics.yaml `game_id`), the same join key the capture artifacts
+# carry.
+BOSS_RELIC_NEVER_TAKE = (
+    "Sozu",             # R2: no potions
+    "Runic Dome",       # R3: no intents -> attacker_count is always 0
+    "Snecko Eye",       # cheap-utility / side-table cost column
+    "Pandora's Box",    # R1: the deck-attack gate counts a rewritten deck
+    "Calling Bell",     # three-relic modal reward screen + curse
+)
 
 # Chest / rest / shop / event / select screens.
 CHEST_OPEN = 900
@@ -222,6 +326,92 @@ EVENT_SAFE_WORDS = (
 )
 
 _ALIAS_VERBS = ("skip", "cancel", "return", "leave", "proceed", "confirm")
+
+
+# --- act profiles (b1.7.0) --------------------------------------------------
+#
+# Per-act overlays over the ALL-CAPS numeric constants above. THERE IS NO KEY
+# `1` AND THERE MUST NEVER BE ONE: its absence is what makes Act-1 behaviour
+# byte-identical to b1.6.0 (see the module header), and
+# `test_act1_profile_is_the_module_constants` pins it.
+#
+# The numbers, and why each is the number it is:
+#   MAP_ELITE          Act 2: above MAP_MONSTER (400) but still below
+#                      MAP_NON_COMBAT (600) -- an elite is now preferred to a
+#                      normal fight, never to a rest or a shop. Act 3: higher
+#                      again, because a run that reaches Act 3 relic-poor
+#                      cannot pay the Act-3 boss's HP. Both are gated on
+#                      ELITE_APPETITE_HP_FRACTION, so a hurt run keeps the
+#                      Act-1 avoidance.
+#   DECK_ATTACK_TARGET / DECK_SIZE_CAP
+#                      R1's gate. 10-in-20 is a floor-17 deck; a deck that can
+#                      pay an Act-2 boss is ~12 attacks in ~28 cards and an
+#                      Act-3 one ~14 in ~35. Both thresholds move together so
+#                      the gate keeps its shape (attacks short AND under cap).
+#   POTION_LOW_HP_FRACTION
+#                      R2's floor. Deeper acts kill from a higher HP fraction,
+#                      so the "any fight, if hurt enough" arm opens earlier.
+ACT_PROFILES = {
+    2: {
+        "MAP_ELITE": 450,
+        "DECK_ATTACK_TARGET": 12,
+        "DECK_SIZE_CAP": 28,
+        "POTION_LOW_HP_FRACTION": 0.50,
+    },
+    3: {
+        "MAP_ELITE": 500,
+        "DECK_ATTACK_TARGET": 14,
+        "DECK_SIZE_CAP": 35,
+        "POTION_LOW_HP_FRACTION": 0.60,
+    },
+}
+
+# Names an explicit cohort config pinned via `survival_policy_cmd
+# .apply_constants`. A pinned name is NEVER overlaid by ACT_PROFILES: a cohort
+# labelled with a policy it did not run in Acts 2/3 is the exact failure the
+# strict config validation exists to prevent. Module-level mutable state is
+# deliberate and confined -- it is written once at process start, before any
+# decision, by the one caller that owns the config surface.
+CONFIG_PINNED = set()
+
+
+def act_of(state):
+    """The dump's act, defaulting to 1.
+
+    A dump with no `act` (a pre-run state, a unit-test fixture, a screen the
+    game answers before the dungeon exists) resolves to the Act-1 profile,
+    which is the module constants -- so an absent field can never silently
+    select a deeper act's tuning.
+    """
+    act = _gs(state).get("act")
+    if isinstance(act, bool) or not isinstance(act, int):
+        return 1
+    return act
+
+
+def _const(name, state):
+    """The value of an ALL-CAPS constant for this state's act.
+
+    Precedence, loudly: cohort config > act profile > module constant. See the
+    module header for why the config must win.
+    """
+    module_value = globals()[name]
+    if name in CONFIG_PINNED:
+        return module_value
+    overlay = ACT_PROFILES.get(act_of(state))
+    if overlay is None or name not in overlay:
+        return module_value
+    return overlay[name]
+
+
+def hp_fraction(state):
+    """current_hp / max_hp, or None when the dump does not carry both."""
+    gs = _gs(state)
+    max_hp = gs.get("max_hp") or 0
+    current = gs.get("current_hp") or 0
+    if max_hp <= 0:
+        return None
+    return float(current) / float(max_hp)
 
 
 # --- side table ------------------------------------------------------------
@@ -360,10 +550,14 @@ def wants_card_reward(state, table=None):
     deck = _gs(state).get("deck")
     if not isinstance(deck, list) or not deck:
         return False
-    if len(deck) >= DECK_SIZE_CAP:
+    # b1.7.0: both thresholds are act-resolved, and BOTH decisions that call
+    # this function see the same dump -- so R1's two-screens invariant is
+    # unchanged (the act cannot differ between a COMBAT_REWARD row and the
+    # CARD_REWARD screen that row opens).
+    if len(deck) >= _const("DECK_SIZE_CAP", state):
         return False
     attacks = deck_attack_count(state, table)
-    return attacks is not None and attacks < DECK_ATTACK_TARGET
+    return attacks is not None and attacks < _const("DECK_ATTACK_TARGET", state)
 
 
 def hand_slot_to_index(slot):
@@ -477,8 +671,27 @@ def _score_map(index, state):
     if symbol == SYMBOL_MONSTER:
         return MAP_MONSTER
     if symbol == SYMBOL_ELITE:
-        return MAP_ELITE
+        return elite_map_value(state)
     return MAP_UNKNOWN_SYMBOL
+
+
+def elite_map_value(state):
+    """A1 (b1.7.0): the elite node's map score for this act and this HP.
+
+    Acts 2/3 raise it (a relic-poor deck cannot pay a deep boss), but only
+    while the run is above ELITE_APPETITE_HP_FRACTION. Below that the Act-1
+    value applies again, so the appetite degrades to the pure-survival Act-1
+    behaviour exactly when survival is the binding constraint -- rather than
+    flipping the band unconditionally and walking a 30 %-HP run into a
+    Gremlin Nob.
+    """
+    raised = _const("MAP_ELITE", state)
+    if raised <= MAP_ELITE:
+        return raised
+    frac = hp_fraction(state)
+    if frac is not None and frac <= ELITE_APPETITE_HP_FRACTION:
+        return MAP_ELITE
+    return raised
 
 
 def _score_reward(index, state, table=None):
@@ -556,6 +769,48 @@ def _score_card_reward(index, state, table=None):
     return CARD_REWARD_TAKE_OPEN + _card_reward_rank(index, state, table)
 
 
+def boss_relic_name(index, state):
+    """The offered relic's game id, from `screen_state.relics` or `choice_list`.
+
+    `getBossRewardState` (:320-328) publishes `relics`, and
+    `getBossRewardScreenChoices` builds `choice_list` from the SAME list in one
+    pass, so the two are index-parallel; the choice list is the fallback for a
+    dump whose screen_state slice is absent. "" for an index off the end.
+    """
+    relics = _screen_state(state).get("relics") or []
+    if index < len(relics):
+        return ((relics[index] or {}).get("id") or "")
+    choices = _choice_list(state)
+    return choices[index] if index < len(choices) else ""
+
+
+def boss_relic_is_takeable(name):
+    """R4's never-take list; see the module header for the per-relic reason."""
+    return name not in BOSS_RELIC_NEVER_TAKE
+
+
+def _score_boss_reward(index, state, table=None):
+    """R4: the boss-chest relic pick.
+
+    In the SKIP cohort every relic scores below `skip` and none is taken. In
+    the TAKE cohort a takeable relic outranks `skip` and one of the five
+    never-take relics does not, so a chest offering three of those five skips
+    by construction rather than picking one that would silently unseat a rule
+    above.
+
+    All takeable relics score EQUAL. The choice among them is left to the
+    one-draw tie-break in `pick`, which keeps the decision a pure function of
+    (policy_seed, seed): a preference order over BOSS relics would be a taste
+    judgement with no captured evidence behind it, and R1/R2/R3's precedent is
+    that a rule ships with the evidence that motivated it.
+    """
+    if BOSS_RELIC_SKIP_MODE:
+        return BOSS_RELIC_AVOID
+    name = boss_relic_name(index, state)
+    return BOSS_RELIC_TAKE if boss_relic_is_takeable(name) \
+        else BOSS_RELIC_AVOID
+
+
 def _score_rest(index, state):
     choices = _choice_list(state)
     option = (choices[index] if index < len(choices) else "").lower()
@@ -588,6 +843,8 @@ def _score_choose(index, state, table=None):
         return _score_reward(index, state, table)
     if screen == "CARD_REWARD":
         return _score_card_reward(index, state, table)
+    if screen == "BOSS_REWARD":
+        return _score_boss_reward(index, state, table)
     if screen == "CHEST":
         return CHEST_OPEN
     if screen == "REST":
@@ -647,6 +904,14 @@ def _score_alias(verb, state, table=None):
             return SELECT_CONFIRM if confirmable else DEFAULT_CANCEL
         return DEFAULT_PROCEED
     # skip / cancel / return / leave
+    if screen == "BOSS_REWARD":
+        # R4. `skip` is the BOSS_REWARD cancel button
+        # (ChoiceScreenUtils.getCancelButtonText -> "skip"). In the skip cohort
+        # it must beat every relic; in the take cohort it sits between a
+        # takeable relic and a never-take one, so a chest offering only
+        # never-take relics leaves without picking.
+        return BOSS_RELIC_SKIP_WINS if BOSS_RELIC_SKIP_MODE \
+            else BOSS_RELIC_SKIP
     if screen == "CARD_REWARD":
         # Unchanged constant; R1 moves the CARDS above it, not this below them,
         # so a closed gate still skips and an absent side table still skips.
@@ -679,10 +944,15 @@ def potion_worth_spending(state):
     gs = _gs(state)
     if gs.get("room_type") in HIGH_STAKES_ROOMS:
         return True
-    max_hp = gs.get("max_hp") or 0
-    current = gs.get("current_hp") or 0
-    if max_hp > 0 and \
-            (float(current) / float(max_hp)) <= POTION_LOW_HP_FRACTION:
+    # A3 (b1.7.0): from POTION_HIGH_STAKES_FROM_ACT onwards a NORMAL fight is
+    # high-stakes too. Deliberately not folded into HIGH_STAKES_ROOMS: that
+    # tuple is not reachable from the numeric cohort-config surface, and a
+    # cohort must be able to move this.
+    if act_of(state) >= POTION_HIGH_STAKES_FROM_ACT and \
+            gs.get("room_type") in ANY_COMBAT_ROOMS:
+        return True
+    frac = hp_fraction(state)
+    if frac is not None and frac <= _const("POTION_LOW_HP_FRACTION", state):
         return True
     return belt_is_full(state)
 

@@ -1218,10 +1218,34 @@ void parse_screen_state(const json& j, const std::string& path, Ctx& ctx,
         fr.defer("first_node_chosen");
         fr.defer("boss_available");
     } else if (screen_type == "BOSS_REWARD") {
-        if (const json* rl = fr.take("relics")) {  // S2 scope; validated structurally
+        // S2.42 promoted this from `I` (ignored-with-reason, "S2 scope") to
+        // DEFERRED -- a known S field with no schema storage yet.
+        //
+        // WHY THE PROMOTION IS NOT COSMETIC. An `I` field is never diffed by
+        // construction, so design 6's S2-G2 item 2 -- a ZERO-DIFF boss-chest
+        // boss-relic pick -- was unachievable while this said `I`, and no S2
+        // ledger row owned changing it. `I` was also the wrong CATEGORY: its
+        // stated reason ("the run terminates at act-1 boss combat rewards,
+        // before the boss chest") stopped being true when driver b1.7.0 played
+        // on through the chest. Deferred is the honest classification, and it
+        // puts the gap in the drift stats where its owner will meet it.
+        //
+        // WHY THE STORAGE IS NOT HERE. The three offers live in
+        // `RunController.boss_chest` (BossChestState, boss_chest.hpp), which is
+        // TRANSIENT -- this translator emits RunState/CombatState and the differ
+        // compares those, so landing this field means new RunState storage, a
+        // SCHEMA_VERSION bump, a trace-container change and an oracle-adapter
+        // change. A SCHEMA_VERSION bump outside the places the ledger plans for
+        // it is stop-the-line (conventions 5), so S2.42 does not take it; the
+        // ledger's Deferred obligations table names S2.43 as the owner.
+        //
+        // The relic ids are still JOINED through the registry here, so an
+        // unknown boss relic on this screen fails the translation loudly rather
+        // than waiting for the storage to exist.
+        if (const json* rl = fr.take("relics")) {
             for (std::size_t i = 0; i < rl->size(); ++i)
                 parse_relic((*rl)[i], path + ".relics[" + std::to_string(i) + "]", ctx, nullptr);
-            fr.ignore("relics");
+            fr.defer("relics");
         }
     } else if (screen_type == "SHOP_SCREEN") {
         // The shop slice, content-validated on the same terms as the reward

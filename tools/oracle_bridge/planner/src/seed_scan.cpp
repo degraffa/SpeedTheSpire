@@ -12,6 +12,7 @@
 #include "sts/engine/map_rooms.hpp"
 #include "sts/engine/run_state.hpp"
 #include "sts/engine/shop.hpp"  // kShopRelicCount (the merchant shelf)
+#include "sts/registry/encounter_table.hpp"  // kEncounters (boss identity)
 #include "sts/registry/event_table.hpp"
 #include "sts/registry/game_ids.hpp"  // relic_game_id (the join key)
 
@@ -165,6 +166,35 @@ std::string event_flags_text(uint32_t flags) {
     return s;
 }
 
+// --- Act depth ---------------------------------------------------------------
+
+std::string_view encounter_game_id_from_id(uint16_t id) {
+    if (id == 0) return {};
+    for (const registry::EncounterDef& e : registry::kEncounters) {
+        if (static_cast<uint16_t>(e.id) == id) return e.game_id;
+    }
+    return {};
+}
+
+std::string boss_ids_text(const uint16_t (&boss_ids)[kMaxActs]) {
+    std::string s;
+    for (int i = 0; i < kMaxActs; ++i) {
+        if (boss_ids[i] == 0) continue;
+        if (!s.empty()) s += '|';
+        s += "act" + std::to_string(i + 1) + "=";
+        const std::string_view name = encounter_game_id_from_id(boss_ids[i]);
+        // An id with no registry row is reported as the NUMBER rather than
+        // dropped: a boss the encounter table does not know is a finding about
+        // the registry, and silently emitting "" would hide it.
+        if (name.empty()) {
+            s += "#" + std::to_string(boss_ids[i]);
+        } else {
+            s.append(name);
+        }
+    }
+    return s;
+}
+
 // --- Scanning ----------------------------------------------------------------
 
 fuzz::CaseId ScanCase::case_id() const {
@@ -186,6 +216,13 @@ struct Watch {
     uint32_t event_flags = 0;
     bool treasure = false;
     bool boss = false;
+    // S2.42 per-act depth. Every one of these is a max / OR / latch, so the
+    // double observation of the terminal controller costs nothing.
+    uint8_t max_act = 0;
+    uint8_t boss_reached_acts = 0;
+    uint8_t boss_killed_acts = 0;
+    bool victory = false;
+    uint16_t boss_ids[kMaxActs]{};
     std::vector<RelicObs> relics;  // one per target, latched (OR) per step
 };
 
@@ -208,6 +245,36 @@ void observe(const engine::RunController& rc, void* ctx) noexcept {
     // edge, which sets room_type (src/engine/run_advance.cpp:849, :679-681).
     if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss)) {
         w->boss = true;
+    }
+
+    // --- S2.42 per-act depth -------------------------------------------------
+    //
+    // The three probes, and why each is the one it is, are in the header. The
+    // act is read from the SAME controller as the room/phase, so a probe can
+    // never be attributed to a neighbouring act across a transition.
+    const auto act = static_cast<unsigned>(rc.run.act);
+    if (act > w->max_act && act <= static_cast<unsigned>(kMaxActs)) {
+        w->max_act = static_cast<uint8_t>(act);
+    }
+    if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss)) {
+        w->boss_reached_acts |= act_bit(act);
+    }
+    // Standing in the post-boss chest IS the act's boss kill: the chest is
+    // entered only through the boss reward's proceed. Acts 1-2 only; act 3
+    // opens no chest, and its kill is the victory below.
+    if (rc.phase == static_cast<uint8_t>(engine::RunPhase::BOSS_TREASURE)) {
+        w->boss_killed_acts |= act_bit(act);
+    }
+    if (engine::run_is_victory(rc)) {
+        w->victory = true;
+        w->boss_killed_acts |= act_bit(engine::kFinalAct);
+    }
+    // Boss identity, mirrored into RunState at act init
+    // (run_advance.cpp:1601, :1769) as an ENCOUNTER id. Copied rather than
+    // read at the end because a run that dies mid-act still testifies about
+    // the boss it was walking towards.
+    for (int i = 0; i < kMaxActs && i < engine::kBossIdCap; ++i) {
+        if (rc.run.boss_ids[i] != 0) w->boss_ids[i] = rc.run.boss_ids[i];
     }
 
     // Relic targets. Every latch is idempotent, per the StepObserver contract.
@@ -288,6 +355,11 @@ ScanRow scan_case(const ScanCase& c, const ScanLimits& lim,
     row.event_flags = w.event_flags;
     row.treasure_entered = w.treasure;
     row.boss_reached = w.boss;
+    row.max_act = w.max_act;
+    row.boss_reached_acts = w.boss_reached_acts;
+    row.boss_killed_acts = w.boss_killed_acts;
+    row.victory = w.victory;
+    for (int i = 0; i < kMaxActs; ++i) row.boss_ids[i] = w.boss_ids[i];
     row.relic_obs = std::move(w.relics);
     row.fail_kind = fuzz::fail_kind_name(result.failure.kind);
     return row;
@@ -299,7 +371,9 @@ bool Filter::empty() const {
     return need_events.empty() && !need_treasure && !need_boss &&
            min_floor == 0 && need_relic_offered.empty() &&
            need_relic_reward_offered.empty() && need_relic_acquired.empty() &&
-           need_shop_after_relic.empty();
+           need_shop_after_relic.empty() && need_boss_reached_act == 0 &&
+           need_boss_killed_act == 0 && !need_victory && min_act == 0 &&
+           need_boss_ids.empty();
 }
 
 namespace {
@@ -325,6 +399,25 @@ bool row_hits(const ScanRow& row, const Filter& f) {
     if (f.need_treasure && !row.treasure_entered) return false;
     if (f.need_boss && !row.boss_reached) return false;
     if (row.max_floor < f.min_floor) return false;
+    if (row.max_act < f.min_act) return false;
+    if (f.need_boss_reached_act != 0 &&
+        !act_bit_set(row.boss_reached_acts, f.need_boss_reached_act)) {
+        return false;
+    }
+    if (f.need_boss_killed_act != 0 &&
+        !act_bit_set(row.boss_killed_acts, f.need_boss_killed_act)) {
+        return false;
+    }
+    if (f.need_victory && !row.victory) return false;
+    if (!f.need_boss_ids.empty()) {
+        bool any = false;
+        for (uint16_t want : f.need_boss_ids) {
+            for (int i = 0; i < kMaxActs; ++i) {
+                if (row.boss_ids[i] == want && want != 0) any = true;
+            }
+        }
+        if (!any) return false;
+    }
     for (EventId id : f.need_events) {
         if (!event_flag_set(row.event_flags, id)) return false;
     }
@@ -372,9 +465,14 @@ bool format_from_name(std::string_view name, Format& out) {
 }
 
 std::string_view tsv_header() {
+    // Column order is the contract. The S2.42 columns are APPENDED AFTER
+    // `fail_kind` rather than inserted next to `boss`, so a script that has
+    // been doing `cut -f10` for the boss column since S1 still selects the
+    // boss column.
     return "seed\tseed_int\tpolicy\tpolicy_seed\tascension\tend_reason\tactions\t"
            "max_floor\ttreasure\tboss\tevent_flags\tevents\trelic_obs\t"
-           "final_hash\tfail_kind";
+           "final_hash\tfail_kind\t"
+           "act\tboss_reached_acts\tboss_killed_acts\tvictory\tboss_ids";
 }
 
 namespace {
@@ -449,6 +547,11 @@ std::string row_to_tsv(const ScanRow& row) {
         relic_obs_text(row.relic_obs),
         hash_buf,
         row.fail_kind,
+        std::to_string(static_cast<unsigned>(row.max_act)),
+        std::to_string(static_cast<unsigned>(row.boss_reached_acts)),
+        std::to_string(static_cast<unsigned>(row.boss_killed_acts)),
+        row.victory ? "1" : "0",
+        boss_ids_text(row.boss_ids),
     };
     std::string s;
     bool first = true;
@@ -506,8 +609,75 @@ std::string row_to_jsonl(const ScanRow& row) {
                       static_cast<unsigned long long>(row.final_hash));
         return std::string(buf);
     }() + "\",";
-    s += "\"fail_kind\":\"" + json_escape(row.fail_kind) + "\"";
+    s += "\"fail_kind\":\"" + json_escape(row.fail_kind) + "\",";
+    // S2.42. The masks are emitted as NUMBERS beside a decoded per-act array:
+    // the number is what a script filters on, the array is what a human reads,
+    // and neither side has to own a copy of the bit layout -- the same
+    // arrangement `event_flags` / `events` already uses above.
+    s += "\"act\":" + std::to_string(static_cast<unsigned>(row.max_act)) + ",";
+    s += "\"boss_reached_acts\":" +
+         std::to_string(static_cast<unsigned>(row.boss_reached_acts)) + ",";
+    s += "\"boss_killed_acts\":" +
+         std::to_string(static_cast<unsigned>(row.boss_killed_acts)) + ",";
+    s += "\"boss_reached\":[";
+    first = true;
+    for (int a = 1; a <= kMaxActs; ++a) {
+        if (!act_bit_set(row.boss_reached_acts, static_cast<unsigned>(a))) continue;
+        if (!first) s += ',';
+        first = false;
+        s += std::to_string(a);
+    }
+    s += "],\"boss_killed\":[";
+    first = true;
+    for (int a = 1; a <= kMaxActs; ++a) {
+        if (!act_bit_set(row.boss_killed_acts, static_cast<unsigned>(a))) continue;
+        if (!first) s += ',';
+        first = false;
+        s += std::to_string(a);
+    }
+    s += "],";
+    s += std::string("\"victory\":") + (row.victory ? "true" : "false") + ",";
+    s += "\"boss_ids\":[";
+    first = true;
+    for (int i = 0; i < kMaxActs; ++i) {
+        if (row.boss_ids[i] == 0) continue;
+        if (!first) s += ',';
+        first = false;
+        s += "{\"act\":" + std::to_string(i + 1) + ",\"id\":" +
+             std::to_string(row.boss_ids[i]) + ",\"encounter\":\"" +
+             json_escape(encounter_game_id_from_id(row.boss_ids[i])) + "\"}";
+    }
+    s += "]";
     s += "}";
+    return s;
+}
+
+// --- Cohort triples ----------------------------------------------------------
+
+CohortTriple cohort_triple(const ScanRow& row) {
+    CohortTriple t;
+    t.seed = row.seed.text;
+    t.policy = row.policy;
+    t.policy_seed = row.policy_seed;
+    t.boss_reached_acts = row.boss_reached_acts;
+    t.boss_killed_acts = row.boss_killed_acts;
+    for (int i = 0; i < kMaxActs; ++i) t.boss_ids[i] = row.boss_ids[i];
+    return t;
+}
+
+std::string_view cohort_tsv_header() {
+    return "seed\tpolicy\tpolicy_seed\tboss_reached_acts\tboss_killed_acts\t"
+           "boss_ids";
+}
+
+std::string cohort_triple_to_tsv(const CohortTriple& t) {
+    std::string s = t.seed;
+    s += '\t';
+    s.append(fuzz::policy_name(t.policy));
+    s += '\t' + std::to_string(t.policy_seed);
+    s += '\t' + std::to_string(static_cast<unsigned>(t.boss_reached_acts));
+    s += '\t' + std::to_string(static_cast<unsigned>(t.boss_killed_acts));
+    s += '\t' + boss_ids_text(t.boss_ids);
     return s;
 }
 
@@ -517,11 +687,27 @@ std::string row_to_text(const ScanRow& row, Format f) {
 
 // --- Aggregate report --------------------------------------------------------
 
+void ActDepth::add(const ScanRow& row) {
+    ++rows;
+    for (int a = 1; a <= kMaxActs; ++a) {
+        const auto act = static_cast<unsigned>(a);
+        if (act_bit_set(row.boss_reached_acts, act)) ++boss_reached[a - 1];
+        if (act_bit_set(row.boss_killed_acts, act)) ++boss_killed[a - 1];
+    }
+    if (row.victory) ++victories;
+    if (row.end_reason == fuzz::EndReason::ACTION_CAP) ++action_cap;
+}
+
 void ScanSummary::add(const ScanRow& row) {
     ++rows;
     actions += row.actions;
     if (row.treasure_entered) ++treasure_rows;
     if (row.boss_reached) ++boss_rows;
+    depth.add(row);
+    const auto pk = static_cast<int>(row.policy);
+    if (pk >= 0 && pk < static_cast<int>(fuzz::PolicyKind::COUNT)) {
+        per_policy[pk].add(row);
+    }
     if (row.max_floor > max_floor) max_floor = row.max_floor;
     const uint32_t b = row.max_floor < static_cast<uint32_t>(kFloorHistogramBuckets)
                            ? row.max_floor
@@ -565,6 +751,29 @@ std::string pct(uint64_t num, uint64_t den) {
     return buf;
 }
 
+// One per-act depth stanza, for the whole scan or for one policy.
+std::string depth_text(std::string_view label, const ActDepth& d) {
+    std::string s = "depth [" + std::string(label) + "] rows=" +
+                    std::to_string(d.rows) + "\n";
+    s += "  act boss FIGHT:";
+    for (int a = 0; a < kMaxActs; ++a) {
+        s += " a" + std::to_string(a + 1) + "=" +
+             std::to_string(d.boss_reached[a]) + " (" +
+             pct(d.boss_reached[a], d.rows) + ")";
+    }
+    s += "\n  act boss KILL: ";
+    for (int a = 0; a < kMaxActs; ++a) {
+        s += " a" + std::to_string(a + 1) + "=" +
+             std::to_string(d.boss_killed[a]) + " (" +
+             pct(d.boss_killed[a], d.rows) + ")";
+    }
+    s += "\n  victories=" + std::to_string(d.victories) + " (" +
+         pct(d.victories, d.rows) + ")  action_cap=" +
+         std::to_string(d.action_cap) + " (" + pct(d.action_cap, d.rows) +
+         ")\n";
+    return s;
+}
+
 }  // namespace
 
 std::string ScanSummary::text() const {
@@ -577,6 +786,18 @@ std::string ScanSummary::text() const {
          std::to_string(rows) + " (" + pct(treasure_rows, rows) + ")\n";
     s += "boss_reached:     " + std::to_string(boss_rows) + "/" +
          std::to_string(rows) + " (" + pct(boss_rows, rows) + ")\n";
+    // S2.42: the per-act depth block IS the reach report's table. Fight and
+    // kill are printed on adjacent lines on purpose -- the gap between them is
+    // the number the S2-G2 depth bars are about -- and ACTION_CAP sits next to
+    // them so a truncation artifact (ScanLimits::max_actions) is visible rather
+    // than inferred from a suspiciously low kill rate.
+    s += depth_text("all policies", depth);
+    for (int p = 0; p < static_cast<int>(fuzz::PolicyKind::COUNT); ++p) {
+        if (per_policy[p].rows == 0) continue;
+        s += depth_text(
+            fuzz::policy_name(static_cast<fuzz::PolicyKind>(p)),
+            per_policy[p]);
+    }
     s += "end reasons:\n";
     for (int i = 0; i < static_cast<int>(fuzz::EndReason::COUNT); ++i) {
         if (end_reason[i] == 0) continue;

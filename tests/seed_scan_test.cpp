@@ -531,3 +531,373 @@ TEST(SeedScanOutput, SummaryBucketsFloorsAndEvents) {
     EXPECT_NE(text.find("Match and Keep!: 2"), std::string::npos) << text;
     EXPECT_NE(text.find("treasure_entered: 1/3"), std::string::npos) << text;
 }
+
+// --- 5. per-act depth (S2.42) ------------------------------------------------
+//
+// The instrument the S2-G2 depth bars are read off. Two failure modes it must
+// not have, both of which produce a plausible-looking WRONG cohort rather than
+// an error: an act mask that is off by one (a cohort aimed at the wrong act),
+// and a kill probe that fires on a boss REACHED rather than KILLED (a cohort of
+// runs that died to the boss they were supposed to have beaten).
+
+namespace {
+
+ScanRow DepthRow(uint8_t max_act, uint8_t reached, uint8_t killed,
+                 bool victory = false) {
+    ScanRow r;
+    r.seed = MakeSeed("STS00001");
+    r.max_act = max_act;
+    r.boss_reached_acts = reached;
+    r.boss_killed_acts = killed;
+    r.victory = victory;
+    return r;
+}
+
+}  // namespace
+
+TEST(SeedScanActMask, BitIsActMinusOneAndZeroIsNotAnAct) {
+    EXPECT_EQ(sts::planner::act_bit(1), 0x1);
+    EXPECT_EQ(sts::planner::act_bit(2), 0x2);
+    EXPECT_EQ(sts::planner::act_bit(3), 0x4);
+    // Act 0 is "before the dungeon exists" and act 4 (the Ending) is outside
+    // the S2 model. Neither may claim a bit -- an act_bit(0) of 1 would make
+    // every pre-run observation look like an act-1 boss.
+    EXPECT_EQ(sts::planner::act_bit(0), 0);
+    EXPECT_EQ(sts::planner::act_bit(4), 0);
+    EXPECT_EQ(sts::planner::act_bit(255), 0);
+
+    EXPECT_TRUE(sts::planner::act_bit_set(0x5, 1));
+    EXPECT_FALSE(sts::planner::act_bit_set(0x5, 2));
+    EXPECT_TRUE(sts::planner::act_bit_set(0x5, 3));
+    EXPECT_FALSE(sts::planner::act_bit_set(0xff, 0));
+    EXPECT_FALSE(sts::planner::act_bit_set(0xff, 4));
+}
+
+TEST(SeedScanActMask, BossReachedAgreesWithTheLegacyBool) {
+    // `boss_reached` is kept rather than redefined, so every pre-S2.42
+    // `--need-boss` filter still means what it meant. The two must not be able
+    // to disagree in a scanned run.
+    for (const char* seed : {"STS00100", "STS00101", "STS00102",
+                             "STS00103", "STS00104"}) {
+        for (PolicyKind p : {PolicyKind::RANDOM, PolicyKind::GREEDY_DAMAGE}) {
+            const ScanRow r = sts::planner::scan_case(
+                MakeCase(seed, p, 0), SmallLimits());
+            SCOPED_TRACE(std::string(seed));
+            EXPECT_EQ(r.boss_reached, r.boss_reached_acts != 0);
+        }
+    }
+}
+
+TEST(SeedScanActMask, AKillImpliesTheFightAndVictoryImpliesTheActThreeKill) {
+    // The two orderings a wrong probe would break. Checked on synthetic rows
+    // (the sim cannot reach act 2 until the S2.2x monster batches land, so a
+    // scanned act-2 witness does not exist yet) plus the real act-1 sweep
+    // below, which is the part that IS measurable today.
+    ScanRow r = DepthRow(3, /*reached=*/0x7, /*killed=*/0x3, /*victory=*/false);
+    EXPECT_TRUE(sts::planner::act_bit_set(r.boss_reached_acts, 1));
+    EXPECT_TRUE(sts::planner::act_bit_set(r.boss_killed_acts, 2));
+    EXPECT_FALSE(sts::planner::act_bit_set(r.boss_killed_acts, 3));
+
+    Filter victory_only;
+    victory_only.need_victory = true;
+    EXPECT_FALSE(sts::planner::row_hits(r, victory_only));
+    r.victory = true;
+    r.boss_killed_acts |= sts::planner::act_bit(3);
+    EXPECT_TRUE(sts::planner::row_hits(r, victory_only));
+
+    Filter kill3;
+    kill3.need_boss_killed_act = 3;
+    EXPECT_TRUE(sts::planner::row_hits(r, kill3))
+        << "--need-boss-kill-act 3 and --need-victory must be one clause";
+}
+
+TEST(SeedScanActDepth, ScannedRunsNeverClaimAKillTheyDidNotMake) {
+    // The invariant sweep, on real scanned runs: a kill implies the fight, and
+    // no run claims an act outside 1..3. Cheap limits are fine here -- this is
+    // the ORDERING claim, not the reach claim, and a truncated run can only
+    // ever have fewer observations, never an inconsistent pair.
+    for (int i = 200; i < 224; ++i) {
+        const std::string seed = "STS00" + std::to_string(i);
+        for (PolicyKind p : {PolicyKind::RANDOM, PolicyKind::GREEDY_DAMAGE}) {
+            const ScanRow r = sts::planner::scan_case(
+                MakeCase(seed, p, 0), SmallLimits());
+            SCOPED_TRACE(seed + "/" + sts::fuzz::policy_name(p));
+            for (unsigned act = 1; act <= 3; ++act) {
+                if (sts::planner::act_bit_set(r.boss_killed_acts, act)) {
+                    EXPECT_TRUE(
+                        sts::planner::act_bit_set(r.boss_reached_acts, act))
+                        << "act " << act << " killed without being reached";
+                }
+            }
+            EXPECT_LE(r.max_act, 3);
+            EXPECT_GE(r.max_act, 1) << "a scanned run is always in some act";
+        }
+    }
+}
+
+TEST(SeedScanActDepth, APinnedDeepCaseExercisesEveryProbe) {
+    // The non-vacuity witness the sweep above cannot cheaply be: a boss FIGHT,
+    // a boss KILL and an ACT CROSSING all in one scanned row.
+    //
+    // Act-1 boss reach is ~0.5-0.7 % per row for the E0 fuzz heuristics
+    // (measured over 3006 rows at the commit that added this test -- see
+    // docs/verification/s242-deep-reach.md), so a random sweep small enough to
+    // live in a unit test hits a boss essentially never. This case was found
+    // by a release-preset scan and is pinned so the three probes are proven by
+    // an ASSERTION rather than by a lottery.
+    //
+    // It also needs the FULL action budget: SmallLimits (600) truncates it into
+    // ACTION_CAP long before floor 16, which is the exact truncation artifact
+    // ScanLimits::max_actions was raised for.
+    const ScanRow r = sts::planner::scan_case(
+        MakeCase("STS00345", PolicyKind::GREEDY_DAMAGE, 0), ScanLimits{});
+    EXPECT_EQ(r.fail_kind, "none");
+    EXPECT_NE(r.end_reason, sts::fuzz::EndReason::ACTION_CAP)
+        << "the pinned deep case was truncated -- max_actions is too low again";
+
+    EXPECT_TRUE(r.boss_reached) << "the legacy bool must agree";
+    EXPECT_TRUE(sts::planner::act_bit_set(r.boss_reached_acts, 1));
+    EXPECT_TRUE(sts::planner::act_bit_set(r.boss_killed_acts, 1))
+        << "the act-1 boss chest is the act-1 kill probe";
+    EXPECT_FALSE(sts::planner::act_bit_set(r.boss_killed_acts, 2))
+        << "act 2 cannot be killed while its monsters are unimplemented";
+    EXPECT_FALSE(r.victory);
+
+    // The chest's proceed is a real act transition, so this row testifies
+    // about act 2's identity even though act 2 itself is unreachable content.
+    EXPECT_EQ(r.max_act, 2);
+    EXPECT_NE(r.boss_ids[0], 0);
+    EXPECT_NE(r.boss_ids[1], 0)
+        << "the act-2 boss is set at the act transition (run_advance.cpp:1601)";
+    const std::string ids = sts::planner::boss_ids_text(r.boss_ids);
+    EXPECT_NE(ids.find("act1="), std::string::npos) << ids;
+    EXPECT_NE(ids.find("act2="), std::string::npos) << ids;
+
+    // ... and it is exactly what a depth cohort is made of.
+    Filter kill1;
+    kill1.need_boss_killed_act = 1;
+    EXPECT_TRUE(sts::planner::row_hits(r, kill1));
+    Filter kill2;
+    kill2.need_boss_killed_act = 2;
+    EXPECT_FALSE(sts::planner::row_hits(r, kill2));
+}
+
+TEST(SeedScanActDepth, BossIdentityIsRecordedAndJoinsTheEncounterRegistry) {
+    const ScanRow r = sts::planner::scan_case(
+        MakeCase("STS00100", PolicyKind::RANDOM, 0), SmallLimits());
+    // The act-1 boss is set at run_begin (run_advance.cpp:1769), so every
+    // scanned run knows its act-1 boss even if it never gets near it.
+    ASSERT_NE(r.boss_ids[0], 0) << "act-1 boss identity was never observed";
+    const std::string_view name =
+        sts::planner::encounter_game_id_from_id(r.boss_ids[0]);
+    EXPECT_FALSE(name.empty())
+        << "boss encounter id " << r.boss_ids[0]
+        << " has no registry row -- that is a finding about encounters.yaml";
+    const std::string text = sts::planner::boss_ids_text(r.boss_ids);
+    EXPECT_NE(text.find("act1="), std::string::npos) << text;
+    EXPECT_NE(text.find(std::string(name)), std::string::npos) << text;
+    EXPECT_EQ(text.find('\t'), std::string::npos)
+        << "the boss_ids column must not contain a tab";
+
+    // Unknown / zero ids: zero is "unobserved" and drops out; a live id with
+    // no registry row is reported as a number rather than silently blanked.
+    const uint16_t none[sts::planner::kMaxActs] = {0, 0, 0};
+    EXPECT_EQ(sts::planner::boss_ids_text(none), "");
+    const uint16_t bogus[sts::planner::kMaxActs] = {0, 60000, 0};
+    EXPECT_EQ(sts::planner::boss_ids_text(bogus), "act2=#60000");
+    EXPECT_TRUE(sts::planner::encounter_game_id_from_id(0).empty());
+}
+
+TEST(SeedScanActDepth, FilterClausesAreIndependentAndAnd) {
+    const ScanRow r = DepthRow(2, /*reached=*/0x3, /*killed=*/0x1);
+    Filter f;
+    EXPECT_TRUE(sts::planner::row_hits(r, f)) << "an empty filter hits";
+
+    f.need_boss_reached_act = 2;
+    EXPECT_TRUE(sts::planner::row_hits(r, f));
+    f.need_boss_killed_act = 2;
+    EXPECT_FALSE(sts::planner::row_hits(r, f))
+        << "act 2 was reached but not killed -- the clauses must AND";
+    f.need_boss_killed_act = 1;
+    EXPECT_TRUE(sts::planner::row_hits(r, f));
+
+    f.min_act = 3;
+    EXPECT_FALSE(sts::planner::row_hits(r, f));
+    f.min_act = 2;
+    EXPECT_TRUE(sts::planner::row_hits(r, f));
+
+    EXPECT_TRUE(Filter{}.empty()) << "the default Filter must report empty";
+    Filter depth_only;
+    depth_only.need_boss_killed_act = 2;
+    EXPECT_FALSE(depth_only.empty())
+        << "a depth-only filter that reported empty would suppress the "
+           "'filter given but no list' warning and write nothing";
+}
+
+TEST(SeedScanActDepth, BossIdClauseIsAnyOf) {
+    ScanRow r = DepthRow(1, 0x1, 0x1);
+    r.boss_ids[0] = 7;
+    Filter f;
+    f.need_boss_ids = {9};
+    EXPECT_FALSE(sts::planner::row_hits(r, f));
+    f.need_boss_ids = {9, 7};
+    EXPECT_TRUE(sts::planner::row_hits(r, f)) << "clause must be any-of";
+    // An unobserved slot is 0 and must never satisfy a request for id 0.
+    Filter zero;
+    zero.need_boss_ids = {0};
+    EXPECT_FALSE(sts::planner::row_hits(r, zero));
+}
+
+TEST(SeedScanOutput, DepthColumnsAreAppendedAfterFailKind) {
+    // Column order is the documented contract: the S2.42 columns must be at
+    // the END so a pre-S2.42 `cut -f10` still selects `boss`.
+    const std::string header(sts::planner::tsv_header());
+    const std::string legacy =
+        "seed\tseed_int\tpolicy\tpolicy_seed\tascension\tend_reason\tactions\t"
+        "max_floor\ttreasure\tboss\tevent_flags\tevents\trelic_obs\t"
+        "final_hash\tfail_kind";
+    EXPECT_EQ(header.rfind(legacy, 0), 0u)
+        << "the S1 columns moved; every existing script reads by position";
+
+    ScanRow r = DepthRow(3, 0x7, 0x3, /*victory=*/false);
+    const std::string row = sts::planner::row_to_tsv(r);
+    EXPECT_EQ(CountTabs(header), CountTabs(row))
+        << "header: " << header << "\nrow:    " << row;
+    // ... 3 (max_act), 7 (reached mask), 3 (killed mask), 0 (victory), "" ids
+    EXPECT_NE(row.find("\tnone\t3\t7\t3\t0\t"), std::string::npos) << row;
+
+    const std::string j = sts::planner::row_to_jsonl(r);
+    EXPECT_NE(j.find("\"act\":3"), std::string::npos) << j;
+    EXPECT_NE(j.find("\"boss_reached\":[1,2,3]"), std::string::npos) << j;
+    EXPECT_NE(j.find("\"boss_killed\":[1,2]"), std::string::npos) << j;
+    EXPECT_NE(j.find("\"victory\":false"), std::string::npos) << j;
+    EXPECT_EQ(j.find('\n'), std::string::npos);
+}
+
+TEST(SeedScanCohort, TripleCarriesTheWholeCombinationAndNoVerdict) {
+    ScanRow r = DepthRow(2, 0x3, 0x1);
+    r.seed = MakeSeed("STS42013");
+    r.policy = PolicyKind::GREEDY_BLOCK;
+    r.policy_seed = 7;
+
+    const sts::planner::CohortTriple t = sts::planner::cohort_triple(r);
+    EXPECT_EQ(t.seed, "STS42013");
+    EXPECT_EQ(t.policy, PolicyKind::GREEDY_BLOCK);
+    EXPECT_EQ(t.policy_seed, 7u);
+
+    const std::string line = sts::planner::cohort_triple_to_tsv(t);
+    EXPECT_EQ(CountTabs(std::string(sts::planner::cohort_tsv_header())),
+              CountTabs(line))
+        << line;
+    EXPECT_EQ(line.rfind("STS42013\tgreedy_block\t7\t", 0), 0u) << line;
+    EXPECT_EQ(line.find('\n'), std::string::npos);
+    // The artifact must carry no pass/fail word: a consumer that has to parse
+    // a verdict is a consumer that can get the verdict wrong.
+    for (const char* verdict : {"qualif", "PASS", "FAIL"}) {
+        EXPECT_EQ(line.find(verdict), std::string::npos) << line;
+    }
+}
+
+TEST(SeedScanCohort, DepthCohortsAreSchedulableFromOneScan) {
+    // The Acceptance clause "the S2-G2 depth cohorts are demonstrably
+    // schedulable from the scan output", exercised end to end at unit scale:
+    // scan a small sweep, filter it for an act-1 boss KILL, and require that
+    // what comes out is a set of executable triples whose rows really carry
+    // the property. (Act-2/3 cohorts are structurally empty until the S2.2x
+    // monster batches land -- see docs/verification/s242-deep-reach.md.)
+    Filter kill1;
+    kill1.need_boss_killed_act = 1;
+
+    // The two seeds are the pinned deep cases (see the test above for why they
+    // are pinned rather than swept for); the rest of the sweep is there to
+    // prove the filter EXCLUDES as well as includes.
+    const struct { const char* seed; PolicyKind policy; uint64_t pseed; }
+    cases[] = {
+        {"STS00345", PolicyKind::GREEDY_DAMAGE, 0},
+        {"STS00384", PolicyKind::GREEDY_BLOCK, 0},
+        {"STS00100", PolicyKind::RANDOM, 0},
+        {"STS00101", PolicyKind::RANDOM, 0},
+        {"STS00102", PolicyKind::GREEDY_DAMAGE, 0},
+    };
+
+    std::vector<sts::planner::CohortTriple> cohort;
+    std::size_t scanned = 0;
+    for (const auto& c : cases) {
+        const ScanRow r = sts::planner::scan_case(
+            MakeCase(c.seed, c.policy, c.pseed), ScanLimits{});
+        ++scanned;
+        if (sts::planner::row_hits(r, kill1)) {
+            cohort.push_back(sts::planner::cohort_triple(r));
+        }
+    }
+    EXPECT_EQ(scanned, 5u);
+
+    // Two qualify and three do not -- a filter that admitted everything would
+    // schedule a "depth cohort" of runs that died on floor 3.
+    ASSERT_EQ(cohort.size(), 2u);
+    EXPECT_LT(cohort.size(), scanned) << "the filter excluded nothing";
+    for (const auto& t : cohort) {
+        EXPECT_TRUE(sts::planner::act_bit_set(t.boss_killed_acts, 1));
+        EXPECT_FALSE(t.seed.empty());
+        // Every column a scheduler needs is on the line, and nothing else.
+        const std::string line = sts::planner::cohort_triple_to_tsv(t);
+        EXPECT_NE(line.find(t.seed), std::string::npos) << line;
+        EXPECT_NE(line.find(sts::fuzz::policy_name(t.policy)),
+                  std::string::npos)
+            << line;
+    }
+    EXPECT_NE(cohort[0].seed, cohort[1].seed)
+        << "two triples over one seed is one cohort member, not two";
+}
+
+TEST(SeedScanOutput, SummaryCarriesPerActAndPerPolicyDepth) {
+    sts::planner::ScanSummary s;
+    s.seeds = 3;
+
+    ScanRow a = DepthRow(1, 0x1, 0x1);
+    a.policy = PolicyKind::RANDOM;
+    ScanRow b = DepthRow(1, 0x1, 0x0);
+    b.policy = PolicyKind::RANDOM;
+    b.end_reason = sts::fuzz::EndReason::ACTION_CAP;
+    ScanRow c = DepthRow(3, 0x7, 0x7, /*victory=*/true);
+    c.policy = PolicyKind::GREEDY_DAMAGE;
+    s.add(a);
+    s.add(b);
+    s.add(c);
+
+    EXPECT_EQ(s.depth.rows, 3u);
+    EXPECT_EQ(s.depth.boss_reached[0], 3u);
+    EXPECT_EQ(s.depth.boss_killed[0], 2u);
+    EXPECT_EQ(s.depth.boss_reached[2], 1u);
+    EXPECT_EQ(s.depth.victories, 1u);
+    EXPECT_EQ(s.depth.action_cap, 1u)
+        << "the truncation witness must be counted -- an unreported ACTION_CAP "
+           "reads as a policy failure that is really the tool's";
+
+    const auto& rnd = s.per_policy[static_cast<int>(PolicyKind::RANDOM)];
+    const auto& grd = s.per_policy[static_cast<int>(PolicyKind::GREEDY_DAMAGE)];
+    EXPECT_EQ(rnd.rows, 2u);
+    EXPECT_EQ(rnd.boss_killed[0], 1u);
+    EXPECT_EQ(rnd.victories, 0u);
+    EXPECT_EQ(grd.rows, 1u);
+    EXPECT_EQ(grd.victories, 1u);
+    EXPECT_EQ(s.per_policy[static_cast<int>(PolicyKind::HOARD_GOLD)].rows, 0u);
+
+    const std::string text = s.text();
+    EXPECT_NE(text.find("depth [all policies]"), std::string::npos) << text;
+    EXPECT_NE(text.find("depth [random]"), std::string::npos) << text;
+    EXPECT_NE(text.find("depth [greedy_damage]"), std::string::npos) << text;
+    EXPECT_EQ(text.find("depth [hoard_gold]"), std::string::npos)
+        << "an unscanned policy must not print an all-zero stanza";
+    EXPECT_NE(text.find("act boss FIGHT"), std::string::npos) << text;
+    EXPECT_NE(text.find("act boss KILL"), std::string::npos) << text;
+    EXPECT_NE(text.find("action_cap=1"), std::string::npos) << text;
+}
+
+TEST(SeedScanLimits, TheActionCapIsAThreeActBudget) {
+    // S2.42 raised the default from the Act-1-era 4000. The number itself is a
+    // judgement, but "it is not still the Act-1 number" is checkable, and a
+    // silent revert to 4000 is exactly the regression that would make a future
+    // Act-3 reach measurement read as a policy failure.
+    EXPECT_GE(ScanLimits{}.max_actions, 12000u);
+}
