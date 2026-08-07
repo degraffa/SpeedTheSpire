@@ -303,6 +303,11 @@ struct RunController {
     // consumption cursors. A monster room uses monster_list[monster_cursor], an
     // elite uses elite_list[elite_cursor], the boss uses boss_list[boss_cursor];
     // the cursor advances when the room is LEFT (nextRoomTransition remove(0)).
+    // The 4 bytes MonsterLists' 8-byte alignment (std::string_view) inserts
+    // here. Declared for the same reason as MonsterLists' own three pads -- see
+    // encounters.hpp; RunController is byte-hashed, and an undeclared gap is
+    // indeterminate, not zero.
+    uint8_t pad_lists_align[4]{};
     MonsterLists lists;
     uint8_t monster_cursor;
     uint8_t elite_cursor;

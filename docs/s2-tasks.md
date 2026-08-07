@@ -566,7 +566,35 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   halves of the precondition rather than a stream side effect.
 
   `check_stale_counts` + `check_doc_links` clean; design §11 v0.1.10 entry;
-  audit v4 entry. Six presets green.
+  **A third-occurrence padding defect, found by the `win-*` half of the preset
+  matrix and fixed in the follow-up commit.** The first pass of this task
+  reported "six presets green" having run only the three WSL ones; the skipped
+  half caught a real bug.
+  `ThreeActSim.ScriptedPolicyRunCompletesDeterministicallyTwiceWithIdenticalHashes`
+  failed on **`win-asan` only** -- two runs of one seed diverging at hash step 6.
+  Root cause: `MonsterLists`' three 7-byte alignment gaps and `RunController`'s
+  4-byte gap before `lists` were IMPLICIT padding inside a byte-hashed struct.
+  They had been NOTICED -- `byte_class.hpp` carried all four as `STS_BC_GAP`
+  rows -- and that is exactly why nothing caught them: a declared gap TILES as
+  well as a declared member and is still never WRITTEN. The injecting site is
+  `rc.lists = MonsterLists{}`: `MonsterLists{}` on an aggregate is
+  aggregate-initialisation ([dcl.init.list]/3), which initialises members and
+  leaves padding alone, and the trivially-copyable assignment then memcpys that
+  temporary's indeterminate padding into the hashed controller. This task did
+  NOT create the defect -- growing `sizeof(RunController)` merely moved the
+  stack frame enough that two calls stopped landing on identically-dirty memory,
+  which is why it had hidden on Linux (fresh pages read zero) since the gaps
+  were introduced. All four are now declared `pad_*` members; no offset, no
+  `sizeof`, no fixture and no `SCHEMA_VERSION` moved. Conventions section 8
+  gained the third-occurrence entry and the structural elimination
+  (`Tripwire.NoDeclaredGapsInByteHashedStructs` +
+  `Tripwire.EveryByteOfAByteHashedStructBelongsToAMember`), both confirmed RED
+  against the unfixed tree first -- the witness named `MonsterLists` byte 257,
+  the same offset the failing sim diverged at.
+
+  `check_stale_counts` + `check_doc_links` clean; design section 11 v0.1.10
+  entry; audit v4 entry. **All six presets green** -- debug / asan / release via
+  `wsl_run.sh`, win-debug / win-asan / win-release via clang-cl.
 
 - **S2.21** `[x]` ∥ City normals I — Chosen (27), Byrd (28), Shelled
   Parasite (29), Spheric Guardian (30); `powers.yaml` **Hex (93)** and

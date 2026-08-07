@@ -695,6 +695,42 @@ objects the runtime had handed over clean — a vacuous guard.
 > (`pad_monsters`, `pad_rng_align`, `pad_tail`); no offset, no `sizeof` and no
 > committed fixture moved, and `SCHEMA_VERSION` did not bump — the same terms as
 > the original elimination.
+>
+> **RECURRED A THIRD TIME 2026-08-07 (S2.2F), and the elimination is now
+> structural.** `MonsterLists` (three 7-byte gaps) and `RunController`'s 4-byte
+> gap before `lists` were still implicit. They had been *noticed* --
+> `byte_class.hpp` declared all four as `STS_BC_GAP` rows -- and that is exactly
+> why nothing caught them: **a declared gap tiles as well as a declared member
+> and is still never written.** The T0.5 tiling walk was satisfied; the bytes
+> stayed indeterminate.
+>
+> It surfaced as `ThreeActSim.ScriptedPolicyRunCompletesDeterministicallyTwiceWithIdenticalHashes`
+> failing on **`win-asan` only** -- two runs of one seed hashing differently at
+> step 6 -- after `kMonsterCap` 7 -> 23 grew `sizeof(RunController)` enough that
+> the two calls stopped landing on identically-dirty stack. Nothing about the
+> gaps changed. The injecting site is `rc.lists = MonsterLists{}`:
+> `MonsterLists{}` on an **aggregate** is aggregate-initialisation, which per
+> [dcl.init.list]/3 initialises MEMBERS and leaves padding alone, and the
+> trivially-copyable assignment then memcpys that temporary's indeterminate
+> padding straight into the hashed controller.
+>
+> **ELIMINATED 2026-08-07: `Tripwire.NoDeclaredGapsInByteHashedStructs`**
+> (`tests/tripwire_test.cpp`) walks `RunState`, `CombatState` and
+> `RunController` -- sub-tables included -- and fails on **any** `STS_BC_GAP`
+> row, naming each offending range and the fix. `STS_BC_GAP` is now documented at
+> its definition as forbidden for these three structs. Its companion
+> `Tripwire.EveryByteOfAByteHashedStructBelongsToAMember` is the runtime witness:
+> it aggregate-initialises each struct over storage pre-filled with 0xAA and with
+> 0x55 and requires the results to agree byte for byte, so a gap fails
+> deterministically **on every host** rather than only where the stack happens to
+> be dirty. Both were confirmed RED against the unfixed tree first (the witness
+> named `MonsterLists` byte 257 -- the same offset the failing sim diverged at).
+> The four gaps became declared `pad_*` members; no offset, no `sizeof`, no
+> fixture and no `SCHEMA_VERSION` moved.
+>
+> The lesson worth carrying: the first two eliminations checked *arithmetic*
+> (does the classification tile?), and this defect satisfies the arithmetic. The
+> check that works is on the **existence** of a non-member byte.
 
 **Hoisting a lookup out of a loop can be slower.** Moving a relic-array scan
 above a hand loop measured ~22% slower on `bench_advance`: the relic mirror is a

@@ -22,6 +22,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <memory>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -202,28 +205,142 @@ TEST(TripwireNegative, FiresOnOverlappingRows) {
     GTEST_LOG_(INFO) << "negative control fired: " << describe(f);
 }
 
-TEST(TripwireNegative, FiresWhenAGapIsDeclaredTooSmall) {
-    // The declared alignment gaps carry LITERAL byte counts precisely so they
-    // cannot re-fit themselves around a change. Shrinking one must be caught by
-    // the NEXT member's offsetof, not absorbed.
+TEST(TripwireNegative, FiresWhenAPaddingRowIsDeclaredTooSmall) {
+    // Padding rows carry LITERAL byte counts precisely so they cannot re-fit
+    // themselves around a change. Shrinking one must be caught by the NEXT
+    // member's offsetof, not absorbed.
+    //
+    // This used to shrink one of MonsterLists' declared GAPS. Those are gone --
+    // all four became real `pad_*` members when the ThreeActSim determinism
+    // failure showed that a gap tiles without ever being written -- so the
+    // control now shrinks the PADDING ROW that replaced one of them. The
+    // property under test is unchanged: a literal byte count that no longer
+    // matches the struct must fail loudly.
     std::vector<ClassRow> rows(
         kMonsterListsTable.rows,
         kMonsterListsTable.rows + kMonsterListsTable.row_count);
     bool shrunk = false;
     for (ClassRow& r : rows) {
-        if (r.offset == kDeclaredGap && r.size > 1) {
+        if (r.cls == ByteClass::PADDING && r.size > 1) {
             r.size -= 1;
             shrunk = true;
             break;
         }
     }
-    ASSERT_TRUE(shrunk) << "MonsterLists must still declare an alignment gap";
+    ASSERT_TRUE(shrunk) << "MonsterLists must still declare its alignment "
+                           "padding as a member";
 
     const ClassTable mutated{"MonsterLists(mutated)", sizeof(MonsterLists),
                              rows.data(), rows.size()};
     const TilingFault f = check_tiling(mutated, sizeof(MonsterLists));
-    EXPECT_FALSE(f.ok) << "a shrunken declared gap was absorbed silently";
+    EXPECT_FALSE(f.ok) << "a shrunken padding row was absorbed silently";
     GTEST_LOG_(INFO) << "negative control fired: " << describe(f);
+}
+
+// --- The elimination: no DECLARED GAPS in a byte-hashed struct ---------------
+//
+// Third occurrence of one trap (conventions section 7's rule of two, exceeded):
+// RunState 2026-07-28, CombatState/RunController 2026-08-03, and MonsterLists
+// here -- an implicit alignment gap inside a struct that is memcmp'd and
+// byte-hashed. Each time, value-initialisation left the gap INDETERMINATE while
+// every reader assumed zero; each time it passed on Linux, where fresh pages
+// read zero, and failed only on Windows.
+//
+// The tiling tripwire could not catch it, because a DECLARED GAP tiles exactly
+// as well as a declared member -- it simply never gets written. So the check has
+// to be on the gap's EXISTENCE, not on the arithmetic.
+//
+// This walks the three byte-hashed tables, sub-tables included, and requires
+// every byte to belong to a real MEMBER. A new alignment gap is now a failing
+// test that names its own fix, instead of a latent nondeterminism that surfaces
+// on one host months later.
+void collect_gaps(const ClassTable& t, std::vector<std::string>& out,
+                  const std::string& prefix) {
+    for (std::size_t i = 0; i < t.row_count; ++i) {
+        const ClassRow& r = t.rows[i];
+        if (r.offset == kDeclaredGap) {
+            out.push_back(prefix + t.struct_name + "::" + r.member + " (" +
+                          std::to_string(r.size) + " bytes)");
+        }
+        if (r.sub != nullptr) {
+            collect_gaps(*r.sub, out, prefix + t.struct_name + "::");
+        }
+    }
+}
+
+TEST(Tripwire, NoDeclaredGapsInByteHashedStructs) {
+    std::vector<std::string> gaps;
+    collect_gaps(kRunStateTable, gaps, "");
+    collect_gaps(kCombatStateTable, gaps, "");
+    collect_gaps(kRunControllerTable, gaps, "");
+
+    std::string joined;
+    for (const std::string& g : gaps) {
+        joined += "\n  " + g;
+    }
+    EXPECT_TRUE(gaps.empty())
+        << "these byte ranges belong to no member of a byte-hashed struct:"
+        << joined
+        << "\n\nA declared GAP tiles but is never WRITTEN, so it is "
+           "indeterminate -- value-init initialises members, not padding. It "
+           "reads zero on Linux (fresh pages) and garbage on Windows, which is "
+           "how this defect class has hidden three times. Fix: declare a "
+           "`uint8_t pad_*[N]{}` member in the struct and switch the row to "
+           "STS_BC_ROW. That changes no offset and no size.";
+}
+
+// Aggregate-initialise a T over storage pre-filled with `fill`. Any byte that
+// belongs to no MEMBER keeps `fill`.
+//
+// `T{}` on an aggregate is AGGREGATE-INITIALISATION, which initialises members
+// -- [dcl.init.list]/3 reaches the aggregate bullet before the empty-list
+// value-init bullet -- so it does NOT touch padding. That is not a technicality
+// here: it is the exact mechanism of the failure this guard exists for.
+// `rc.lists = MonsterLists{}` (run_advance.cpp) builds such a temporary on the
+// stack and copy-assigns it, and because these structs are trivially copyable
+// the assignment is a whole-object memcpy -- so the temporary's INDETERMINATE
+// padding is copied straight into the controller that then gets byte-hashed.
+//
+// Deliberately NOT `make_unique<T>()` and not `new (storage) T`: value-init
+// zero-initialises the whole object, padding included, so either would hide the
+// very defect under test. The first draft of this check used one and passed
+// against the live bug.
+template <typename T>
+void aggregate_init_over_fill(void* storage, unsigned char fill) {
+    std::memset(storage, fill, sizeof(T));
+    new (storage) T{};
+}
+
+template <typename T>
+::testing::AssertionResult EveryByteIsAMember(const char* name) {
+    alignas(T) static unsigned char a[sizeof(T)];
+    alignas(T) static unsigned char b[sizeof(T)];
+    aggregate_init_over_fill<T>(a, 0xAA);
+    aggregate_init_over_fill<T>(b, 0x55);
+    for (std::size_t i = 0; i < sizeof(T); ++i) {
+        if (a[i] != b[i]) {
+            return ::testing::AssertionFailure()
+                   << name << " byte " << i << " belongs to no member: it kept "
+                      "its fill (0xAA vs 0x55) through aggregate-initialisation. "
+                      "That byte is INDETERMINATE in every real use, and this "
+                      "struct is memcmp'd and byte-hashed -- so two runs of the "
+                      "same seed can disagree. Declare a `uint8_t pad_*[N]{}` "
+                      "member covering it (see "
+                      "NoDeclaredGapsInByteHashedStructs).";
+        }
+    }
+    return ::testing::AssertionSuccess();
+}
+
+TEST(Tripwire, EveryByteOfAByteHashedStructBelongsToAMember) {
+    // The invariant ThreeActSim's determinism check was implicitly relying on,
+    // pinned directly, deterministically, and on every host -- where the
+    // original failure was intermittent and Windows-only because it depended on
+    // whether a reused stack frame happened to be dirty.
+    EXPECT_TRUE(EveryByteIsAMember<RunController>("RunController"));
+    EXPECT_TRUE(EveryByteIsAMember<RunState>("RunState"));
+    EXPECT_TRUE(EveryByteIsAMember<CombatState>("CombatState"));
+    EXPECT_TRUE(EveryByteIsAMember<MonsterLists>("MonsterLists"));
 }
 
 }  // namespace

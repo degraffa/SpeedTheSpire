@@ -127,6 +127,16 @@ struct ClassTable {
     }
 
 // A declared implicit-alignment gap. `bytes` is a literal on purpose.
+//
+// DO NOT USE THIS FOR A BYTE-HASHED STRUCT. Declaring a gap satisfies the
+// TILING check without making anything WRITE those bytes, and for RunState /
+// CombatState / RunController -- all three memcmp'd and byte-hashed -- that is
+// precisely the defect conventions section 8 has now recorded three times.
+// Value-initialisation initialises members; padding is not a member and merely
+// TENDS to read zero. Declare a `pad_*` member in the struct instead and use
+// STS_BC_ROW; that changes no offset and no size.
+// `Tripwire.NoDeclaredGapsInByteHashedStructs` (tests/tripwire_test.cpp)
+// enforces this.
 #define STS_BC_GAP(name_, bytes_, note_)                                     \
     ClassRow { name_, kDeclaredGap, bytes_, ByteClass::PADDING, nullptr, note_ }
 
@@ -152,18 +162,21 @@ inline constexpr ClassRow kMonsterListsRows[] = {
     STS_BC_ROW(MonsterLists, monster_list_count, ByteClass::HIDDEN,
                "audit 8.7: a generated LENGTH is a property of the unrevealed "
                "suffix; the public counts are the cursors on RunController"),
-    STS_BC_GAP("(alignment gap after monster_list_count)", 7,
-               "std::string_view forces 8-byte alignment on the next array"),
+    STS_BC_ROW(MonsterLists, pad_after_monster_count, ByteClass::PADDING,
+               "std::string_view forces 8-byte alignment on the next array. A "
+               "DECLARED member since the ThreeActSim determinism failure -- as "
+               "a literal gap it tiled fine and was still never written"),
     STS_BC_ROW(MonsterLists, elite_list, ByteClass::MIXED, "as monster_list"),
     STS_BC_ROW(MonsterLists, elite_list_count, ByteClass::HIDDEN,
                "as monster_list_count"),
-    STS_BC_GAP("(alignment gap after elite_list_count)", 7, "as above"),
+    STS_BC_ROW(MonsterLists, pad_after_elite_count, ByteClass::PADDING,
+               "as above"),
     STS_BC_ROW(MonsterLists, boss_list, ByteClass::MIXED,
                "audit 8.7: boss_list[0] is public from the map screen from act "
                "start; the rest is the same suffix realization"),
     STS_BC_ROW(MonsterLists, boss_list_count, ByteClass::HIDDEN,
                "as monster_list_count"),
-    STS_BC_GAP("(tail alignment gap)", 7,
+    STS_BC_ROW(MonsterLists, pad_tail, ByteClass::PADDING,
                "rounds MonsterLists back to its 8-byte alignment"),
 };
 STS_BC_TABLE(kMonsterListsTable, MonsterLists, kMonsterListsRows);
@@ -410,7 +423,7 @@ inline constexpr ClassRow kRunControllerRows[] = {
                "audit 5: the entered room's kind"),
     STS_BC_ROW(RunController, combat_outcome, ByteClass::PUBLIC,
                "audit 5: how the last combat ended -- observed"),
-    STS_BC_GAP("(alignment gap before `lists`)", 4,
+    STS_BC_ROW(RunController, pad_lists_align, ByteClass::PADDING,
                "MonsterLists holds std::string_view, so it is 8-aligned"),
     STS_BC_SUB(RunController, lists, kMonsterListsTable, "audit 5 / 8.7"),
     STS_BC_ROW(RunController, monster_cursor, ByteClass::PUBLIC,

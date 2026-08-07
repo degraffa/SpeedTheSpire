@@ -142,10 +142,33 @@ static_assert(monster_list_len_for_act(1) <= kMaxMonsterList);
 struct MonsterLists {
     std::array<std::string_view, kMaxMonsterList> monster_list{};
     uint8_t monster_list_count = 0;
+    // The three alignment gaps std::string_view's 8-byte alignment inserts after
+    // each count. DECLARED, not implicit, for the reason conventions section 8
+    // records twice already (RunState 2026-07-28, CombatState/RunController
+    // 2026-08-03): this struct is embedded in RunController, which is memcmp'd
+    // and byte-HASHED (hash_controller_bytes in the act-transition suite,
+    // twin.cpp, resample_test.cpp). Value-initialisation initialises MEMBERS,
+    // and padding is not a member -- it merely TENDS to read as zero, because
+    // fresh stack frames and heap pages tend to be zero. Making each gap a
+    // member is what makes it written.
+    //
+    // That tendency is exactly what failed here. These three gaps were implicit,
+    // and the byte_class table declared them as literal GAPS rather than rows --
+    // which satisfies the tiling tripwire without making anything write them.
+    // On Linux the two runs of ThreeActSim's determinism check read zeros and
+    // agreed; on Windows, where the second call reuses a dirty stack frame, they
+    // diverged. Nothing about the gaps changed to cause it: growing
+    // sizeof(RunController) merely moved the frame layout enough to stop the two
+    // calls landing on identically-dirty memory.
+    //
+    // Adding these members changes no offset and no size.
+    uint8_t pad_after_monster_count[7]{};
     std::array<std::string_view, kMaxEliteList> elite_list{};
     uint8_t elite_list_count = 0;
+    uint8_t pad_after_elite_count[7]{};
     std::array<std::string_view, kMaxBossList> boss_list{};
     uint8_t boss_list_count = 0;
+    uint8_t pad_tail[7]{};
 };
 
 // Generate the act's monster lists from `monster_rng` (the run-scoped stream),
