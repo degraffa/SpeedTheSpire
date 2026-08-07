@@ -321,7 +321,38 @@ OPCODES = {
     # grant -- and it follows RegenerateMonsterPower's precedent of writing a
     # monster's HP directly (AbstractMonster.heal, AbstractMonster.java:384-399:
     # no relic pass, clamp to maxHealth, and nothing at all while isDying).
+    # (S2.22 has since ADDED that monster branch to op_heal; the inline write
+    # here is still exact, for the addToTop reason above.)
     "VAMPIRE_DAMAGE": 66,
+    # S2.22 (Act-2 city normals II). 67 is this task's whole opcode grant
+    # (stage-b-tasks.md "S2 Wave-2 allocations") and opens a fresh block, since
+    # 66 spent the last of Wave-C's relic tail.
+    #
+    # BLOCK_RANDOM_MONSTER is GainBlockRandomMonsterAction.update
+    # (GainBlockRandomMonsterAction.java:26-42), the Centurion's Protect
+    # (Centurion.java:93). It is an OPCODE and not a BLOCK step because BOTH the
+    # recipient AND whether any RNG is spent at all are EXECUTE-TIME facts:
+    #
+    #   validMonsters = every monster record that is NOT the source, does NOT
+    #                   telegraph Intent.ESCAPE, and is NOT isDying;
+    #   target        = validMonsters.isEmpty()
+    #                       ? source                       // ZERO aiRng draws
+    #                       : validMonsters.get(aiRng.random(size - 1));
+    #   target.addBlock(amount);
+    #
+    # Three details are load-bearing and none is expressible in a step list.
+    # (a) The escape filter reads the TELEGRAPHED INTENT, not isEscaping -- so a
+    # thief that has merely ANNOUNCED its exit is skipped while it is still in
+    # the fight, and one that has already gone is skipped by the same intent
+    # (both thieves re-telegraph ESCAPE, Looter.java:131 / Mugger.java:132).
+    # (b) An EMPTY valid list spends NO draw at all, which is exactly the
+    # difference between a solo Centurion and one with a live ally, measured on
+    # the shared ai_rng stream. (c) The walk visits DEAD records too (the game
+    # never removes them) and excludes them only through isDying.
+    #
+    # `amount` is the block; `src` is the acting monster -- both the exclusion
+    # key and the empty-list fallback recipient. No `extra` operand.
+    "BLOCK_RANDOM_MONSTER": 67,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional

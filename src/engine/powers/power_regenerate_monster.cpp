@@ -27,10 +27,13 @@ void power_native_regenerate_monster(CombatState& s, Hook hook,
     // at all, so this power's amount never decreases on its own.
     //
     // The heal is applied directly here -- no HEAL opcode (the Blood Potion /
-    // Burning Blood / REGEN precedent) -- which is also why op_heal's
-    // monster-target no-op comment (interp_damage.cpp) had to be updated to
-    // name this power as its exception: the exception is resolved through
-    // this native body, not through a case added to op_heal itself.
+    // Burning Blood / REGEN precedent). That was once ALSO the reason op_heal's
+    // monster target was a documented no-op; it is not any more. S2.22 gave
+    // op_heal a real monster branch (AbstractMonster.heal, interp_damage.cpp) for
+    // the Healer's per-member HealActions, so routing this power through the
+    // opcode would now WORK -- it is simply not what the Java does here. This
+    // power's deviation is the SYNCHRONOUS write (next paragraph), which is
+    // unchanged and unrelated.
     //
     // DOCUMENTED DEVIATION: MonsterRoomElite.applyEmeraldEliteBuff addToBot's
     // one HealAction per group member (MonsterRoomElite.java:60-64), so the

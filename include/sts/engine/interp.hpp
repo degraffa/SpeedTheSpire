@@ -629,7 +629,38 @@ enum class Opcode : uint16_t {
                               // (AbstractMonster.java:384-399) -- no relic pass,
                               // clamp to maxHealth, nothing at all while isDying
                               // -- the same direct-HP-write escape hatch
-                              // RegenerateMonsterPower already uses.
+                              // RegenerateMonsterPower already uses. (S2.22 has
+                              // since added op_heal's monster branch; the inline
+                              // write here still stands, for the addToTop reason
+                              // above.)
+    // --- S2.22 (Act-2 city normals II) ---
+    BLOCK_RANDOM_MONSTER = 67,  // GainBlockRandomMonsterAction.update
+                              // (GainBlockRandomMonsterAction.java:26-42): the
+                              // Centurion's Protect (Centurion.java:93). `src` is
+                              // the acting monster and `amount` the block; the
+                              // RECIPIENT is chosen at EXECUTE time.
+                              //
+                              //   valid = every monster record that is NOT src,
+                              //           does NOT telegraph Intent.ESCAPE, and
+                              //           is NOT isDying (hp <= 0);
+                              //   tgt   = valid.empty()
+                              //             ? src                 // ZERO draws
+                              //             : valid[ai_rng.random(size - 1)];
+                              //   tgt.addBlock(amount);
+                              //
+                              // Three things make it an opcode rather than a
+                              // BLOCK step. The escape filter reads the
+                              // TELEGRAPHED INTENT, not the escaped flag, so an
+                              // ally that has merely ANNOUNCED its exit is
+                              // already skipped. An empty valid list spends NO
+                              // ai_rng draw at all -- the observable difference
+                              // between a solo Centurion and one with a live
+                              // ally. And the walk visits DEAD records too,
+                              // excluding them only by hp.
+                              //
+                              // `tgt` on the queued item is IGNORED (the op
+                              // resolves its own); the authored step sets it to
+                              // src, which is also the fallback recipient.
 };
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------

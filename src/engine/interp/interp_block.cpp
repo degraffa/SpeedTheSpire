@@ -13,8 +13,10 @@
 #include "sts/engine/interp.hpp"        // Opcode, kBlockNoPowers, mathutils_floor
 #include "sts/engine/piles.hpp"         // exhaust_card
 #include "sts/engine/power_hooks.hpp"   // dispatch_on_gained_block
+#include "sts/engine/rng_stream.hpp"    // random (BLOCK_RANDOM_MONSTER's ai_rng pick)
 #include "sts/engine/types.hpp"
 #include "sts/registry/manifest.hpp"    // generated kPowersCount
+#include "sts/registry/monster_table.hpp"  // MonsterIntent (the ESCAPE telegraph)
 
 namespace sts::engine {
 
@@ -81,7 +83,14 @@ namespace {
     // (FlightPower.java:47-78) -- both read in full. Flight halves incoming
     // DAMAGE, which is interp_damage.cpp's third pass; it does not touch a block
     // gain, so the count moves here with no case.
-    static_assert(sts::registry::manifest::kPowersCount == 55,
+    // Checked for S2.22's one power, MALLEABLE (id 95): it overrides ONLY
+    // onAttacked, atEndOfTurn, atEndOfRound and stackPower (MalleablePower.java:
+    // 42-82, read in full) -- so neither block pass gains a case. It GRANTS block
+    // (a queued GainBlockAction from onAttacked), which is a producer, not a
+    // modifier; that block arrives here as an ordinary direct-add BLOCK item and
+    // is deliberately NOT scaled by the owner's own Dexterity/Frail, exactly as
+    // GainBlockAction never is.
+    static_assert(sts::registry::manifest::kPowersCount == 56,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "
@@ -222,6 +231,76 @@ void op_block_per_non_attack(CombatState& s, int block_per_card) noexcept {
         blk.flags = 0;  // card-style block: Dexterity/Frail apply per gain
         add_to_bottom(s, blk);
     }
+}
+
+// BLOCK_RANDOM_MONSTER (GainBlockRandomMonsterAction.update,
+// GainBlockRandomMonsterAction.java:26-42) -- the Centurion's Protect
+// (Centurion.java:93). The Java, minus the FlashAtkImgEffect:
+//
+//     ArrayList<AbstractMonster> valid = new ArrayList<>();
+//     for (AbstractMonster m : AbstractDungeon.getMonsters().monsters) {
+//         if (m == this.source || m.intent == Intent.ESCAPE || m.isDying)
+//             continue;
+//         valid.add(m);
+//     }
+//     this.target = !valid.isEmpty()
+//         ? valid.get(AbstractDungeon.aiRng.random(valid.size() - 1))
+//         : this.source;
+//     if (this.target != null) this.target.addBlock(this.amount);
+//
+// THREE DETAILS ARE LOAD-BEARING, and each is why this is an opcode rather than
+// a BLOCK step with a clever target.
+//
+// (1) THE ESCAPE FILTER READS THE TELEGRAPHED INTENT, NOT THE ESCAPED FLAG.
+//     `m.intent == Intent.ESCAPE` is the intent the ally is currently SHOWING,
+//     so an ally that has merely ANNOUNCED its exit -- a Looter or Mugger on its
+//     Smoke Bomb turn, which telegraphs ESCAPE for a turn it is still present and
+//     fighting -- is skipped while it is very much alive. It also covers the
+//     already-gone case for free, because both thieves RE-telegraph ESCAPE as
+//     they leave (Looter.java:131, Mugger.java:132). This does NOT test
+//     kMonsterFlagEscaped, and substituting monster_dead_or_escaped here would be
+//     wrong in exactly the announced-but-still-present window.
+//
+// (2) AN EMPTY VALID LIST SPENDS NO DRAW AT ALL. The ternary evaluates
+//     aiRng.random only on the non-empty arm, so a solo Centurion's Protect and
+//     one with a live ally move the shared ai_rng stream by DIFFERENT amounts --
+//     an observable, seed-level difference, not a cosmetic one.
+//
+// (3) THE WALK VISITS DEAD RECORDS. MonsterGroup never removes a dead monster
+//     (SuicideAction.java:29-34 / AbstractMonster.java:925-951), so the loop sees
+//     them and rejects them only through `isDying`, which this engine models as
+//     hp <= 0. An escaped-but-alive ally is rejected by (1), not by hp.
+//
+// The block itself is `target.addBlock(amount)` -- a DIRECT add, exactly like
+// GainBlockAction's, so neither modifyBlock pass runs. That is op_block's
+// kBlockNoPowers form, which is also how it picks up onGainedBlock.
+void op_block_random_monster(CombatState& s, uint8_t src, int amount) noexcept {
+    if (src >= kMonsterCap) {
+        return;  // the Java's source is always the acting monster
+    }
+    uint8_t valid[kMonsterCap];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < s.monster_count && i < kMonsterCap; ++i) {
+        if (i == src) {
+            continue;  // `m == this.source`
+        }
+        const MonsterState& m = s.monsters[i];
+        if (m.intent ==
+            static_cast<uint8_t>(sts::registry::MonsterIntent::ESCAPE)) {
+            continue;  // `m.intent == Intent.ESCAPE` -- the TELEGRAPH, see (1)
+        }
+        if (m.hp <= 0) {
+            continue;  // `m.isDying`
+        }
+        valid[n++] = i;
+    }
+    uint8_t tgt = src;  // the empty-list arm: `this.target = this.source`
+    if (n > 0) {
+        // ONE inclusive draw over 0..n-1, and ONLY here -- see (2).
+        const int32_t pick = random(s.ai_rng, static_cast<int32_t>(n) - 1);
+        tgt = valid[static_cast<uint8_t>(pick)];
+    }
+    op_block(s, tgt, amount, kBlockNoPowers);  // a direct addBlock
 }
 
 }  // namespace sts::engine

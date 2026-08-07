@@ -20,4 +20,9 @@ void op_double_block(CombatState& s, uint8_t tgt) noexcept;
 // BLOCK_PER_NON_ATTACK (Second Wind).
 void op_block_per_non_attack(CombatState& s, int block_per_card) noexcept;
 
+// BLOCK_RANDOM_MONSTER (the Centurion's Protect). `src` is the acting monster;
+// the recipient is chosen HERE, and the ai_rng draw happens ONLY when there is a
+// choice to make. See the definition for the three load-bearing details.
+void op_block_random_monster(CombatState& s, uint8_t src, int amount) noexcept;
+
 }  // namespace sts::engine

@@ -278,6 +278,17 @@ sts_add_test(looter_test FIXTURES)
 # spawn order fixes the group index the Sentry's opener is chosen from.
 sts_add_test(city_normals_i_test)
 
+# S2.22: Act-2 city normals II -- the Mugger, Snake Plant, Snecko, Centurion and
+# Healer, plus Malleable, the BLOCK_RANDOM_MONSTER opcode, op_heal's monster
+# branch, the MonsterDieFn death-edge seam, and the FAITHFUL per-steal
+# stolen-gold settlement. Stat/move tables are pinned at every ascension branch,
+# including two deliberate NON-differences (the Centurion's furyHits; the
+# Healer's A2 healAmt and A17 magicDmg). The draw-count assertions are the
+# bit-exactness surface: the Mugger's playSfx and playDeathSfx roll the SEEDED
+# aiRng where the Looter's identically-shaped methods roll unseeded MathUtils,
+# and Protect's recipient draw happens ONLY when a valid ally exists.
+sts_add_test(city_normals_ii_test)
+
 # A4.1: effect interpreter + damage pipeline (design doc §5.5, §6, §10 trap 1).
 # Table-driven Strength/Vulnerable/Weak stacking vs. hand-computed values, the
 # float-rounding trap 1 test, per-opcode direct checks, SHUFFLE_IN/ROLL_MOVE

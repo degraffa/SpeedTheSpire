@@ -11,20 +11,25 @@
 #include "interp/interp_powers.hpp"        // op_apply_power (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
 #include "sts/engine/monster_byrd.hpp"     // the Byrd: Flight + the airborne latch
+#include "sts/engine/monster_centurion.hpp"  // the Centurion: aliveCount-driven tree
 #include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
 #include "sts/engine/monster_gremlin_nob.hpp"  // gremlin_nob_init / _take_turn
 #include "sts/engine/monster_guardian.hpp" // The Guardian's mode state machine
+#include "sts/engine/monster_healer.hpp"   // the Healer: needToHeal + group fan-out
 #include "sts/engine/monster_hexaghost.hpp"  // Hexaghost orb-count cycle
 #include "sts/engine/monster_jaw_worm.hpp" // jaw_worm_init / jaw_worm_take_turn
 #include "sts/engine/monster_lagavulin.hpp" // Lagavulin sleep/wake machine
 #include "sts/engine/monster_looter.hpp"   // the Looter: steal + escape machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
+#include "sts/engine/monster_mugger.hpp"   // the Mugger: seeded sfx + steal + escape
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
 #include "sts/engine/monster_shelled_parasite.hpp"  // Plated Armor + the recursive roll
 #include "sts/engine/monster_slaver.hpp"   // the Blue and Red slavers
+#include "sts/engine/monster_snake_plant.hpp"  // the Snake Plant: Malleable + lastMoveBefore
+#include "sts/engine/monster_snecko.hpp"   // the Snecko: Confusion opener + gated Weak
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
@@ -32,6 +37,39 @@
 #include "sts/registry/manifest.hpp"           // generated kMonstersCount
 
 namespace sts::engine {
+
+void queue_monster_move_effect(CombatState& state, uint8_t mi,
+                               const sts::registry::MonsterDef& def,
+                               uint8_t move, uint8_t effect_index,
+                               uint8_t target_override) noexcept {
+    const sts::registry::MonsterMove* mv = def.move(move);
+    if (mv == nullptr || effect_index >= mv->effect_count) {
+        return;  // unknown/empty move id, or a step past the end (defensive)
+    }
+    const sts::registry::MonsterMoveEffect& e = mv->effects[effect_index];
+    ActionQueueItem it{};
+    // sts::registry::Opcode is pinned byte-equal to interp.hpp's Opcode
+    // (static_asserts in cards.hpp), so the raw cast dispatches correctly.
+    it.opcode = static_cast<uint16_t>(e.op);
+    it.src = mi;
+    it.tgt = (target_override != kMoveTargetFromStep)
+                 ? target_override
+                 : ((e.target == sts::registry::MonsterMoveTarget::SELF)
+                        ? mi
+                        : kActorPlayer);
+    it.amount = e.amount.at(kMonsterAscension);
+    it.flags = e.extra;  // APPLY_POWER: PowerId (make_apply_power_flags packing)
+    if (e.op == sts::registry::Opcode::MAKE_CARD) {
+        // Monster-authored MAKE_CARD uses the same generated packing as card
+        // programs. The interpreter expects CardPile in src and CardId in flags;
+        // tgt remains the player to avoid dynamic enemy fan-out -- an override
+        // cannot redirect a card into a monster, and is deliberately ignored
+        // here rather than silently producing a malformed item.
+        it.src = static_cast<uint8_t>((e.extra >> 16) & 0xFFu);
+        it.tgt = kActorPlayer;
+    }
+    add_to_bottom(state, it);
+}
 
 void queue_monster_move_effects(CombatState& state, uint8_t mi,
                                 const sts::registry::MonsterDef& def,
@@ -41,25 +79,7 @@ void queue_monster_move_effects(CombatState& state, uint8_t mi,
         return;  // unknown/empty move id: nothing decided yet (defensive)
     }
     for (uint8_t i = 0; i < mv->effect_count; ++i) {
-        const sts::registry::MonsterMoveEffect& e = mv->effects[i];
-        ActionQueueItem it{};
-        // sts::registry::Opcode is pinned byte-equal to interp.hpp's Opcode
-        // (static_asserts in cards.hpp), so the raw cast dispatches correctly.
-        it.opcode = static_cast<uint16_t>(e.op);
-        it.src = mi;
-        it.tgt = (e.target == sts::registry::MonsterMoveTarget::SELF)
-                     ? mi
-                     : kActorPlayer;
-        it.amount = e.amount.at(kMonsterAscension);
-        it.flags = e.extra;  // APPLY_POWER: PowerId (make_apply_power_flags packing)
-        if (e.op == sts::registry::Opcode::MAKE_CARD) {
-            // Monster-authored MAKE_CARD uses the same generated packing as card
-            // programs. The interpreter expects CardPile in src and CardId in
-            // flags; tgt remains the player to avoid dynamic enemy fan-out.
-            it.src = static_cast<uint8_t>((e.extra >> 16) & 0xFFu);
-            it.tgt = kActorPlayer;
-        }
-        add_to_bottom(state, it);
+        queue_monster_move_effect(state, mi, def, move, i, kMoveTargetFromStep);
     }
 }
 
@@ -142,6 +162,20 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             // The only init here that makes NO monster_hp_rng draw -- its Java
             // ctor never calls setHp (monster_spheric_guardian.hpp).
             return &spheric_guardian_init;
+        // S2.22 -- the five Act-2 city normals of the second batch. Registering
+        // these init fns is what un-parks "Snake Plant", "Snecko", "Centurion and
+        // Healer" and the second half of "2 Thieves" (whose Looter was already
+        // live), exactly as the Looter's did for its own two groups.
+        case MonsterId::MUGGER:
+            return &mugger_init;
+        case MonsterId::SNAKE_PLANT:
+            return &snake_plant_init;
+        case MonsterId::SNECKO:
+            return &snecko_init;
+        case MonsterId::CENTURION:
+            return &centurion_init;
+        case MonsterId::HEALER:
+            return &healer_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -209,6 +243,16 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &shelled_parasite_take_turn;
         case MonsterId::SPHERIC_GUARDIAN:
             return &spheric_guardian_take_turn;
+        case MonsterId::MUGGER:
+            return &mugger_take_turn;
+        case MonsterId::SNAKE_PLANT:
+            return &snake_plant_take_turn;
+        case MonsterId::SNECKO:
+            return &snecko_take_turn;
+        case MonsterId::CENTURION:
+            return &centurion_take_turn;
+        case MonsterId::HEALER:
+            return &healer_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -216,9 +260,23 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 29,
+    static_assert(sts::registry::manifest::kMonstersCount == 34,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
+    // Checked for S2.22's five, and they split FOUR-ONE. The Snake Plant, the
+    // Snecko, the Centurion and the Healer each end takeTurn in a RollMoveAction
+    // that sits AFTER the switch, so every move body reaches it
+    // (SnakePlant.java:114, Snecko.java:120, Centurion.java:107,
+    // Healer.java:124) -- all four register below, and all four getMove
+    // overrides READ the rolled num on at least one arm.
+    //
+    // The MUGGER registers NONE, for the Looter's reason: takeTurn
+    // (Mugger.java:86-136) has no trailing RollMoveAction at all -- every case
+    // decides the next move itself with a direct setMove or a queued
+    // SetMoveAction -- and getMove (:167-170) runs only from init's rollMove and
+    // discards its num. Its ai_rng draws come from playSfx, the talk gate and the
+    // Smoke-Bomb coin instead (monster_mugger.hpp), so it stays with the
+    // `default:` and a ROLL_MOVE item aimed at one would be a safe no-op.
     // Checked for The Guardian: it queues none. getMove (TheGuardian.java:
     // 226-232) runs only from init's rollMove; every later transition is a
     // direct setMove, so no ROLL_MOVE item ever targets it.
@@ -276,6 +334,20 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             return &shelled_parasite_roll_move;
         case MonsterId::SPHERIC_GUARDIAN:
             return &spheric_guardian_roll_move;
+        // S2.22: four of the five (see the note above; the Mugger queues none).
+        case MonsterId::SNAKE_PLANT:
+            return &snake_plant_roll_move;
+        case MonsterId::SNECKO:
+            return &snecko_roll_move;
+        case MonsterId::CENTURION:
+            // The one roll fn whose result depends on OTHER monsters' liveness
+            // (aliveCount, Centurion.java:134-138), so it takes the whole state
+            // rather than just its own record.
+            return &centurion_roll_move;
+        case MonsterId::HEALER:
+            // Likewise: needToHeal sums the group's missing HP
+            // (Healer.java:157-160).
+            return &healer_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -294,10 +366,18 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 29,
+    static_assert(sts::registry::manifest::kMonstersCount == 34,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
+    // Checked for S2.22's five city normals: NONE of them is mid-combat
+    // spawnable. Every Act-2 group that fields one builds it at spawn time
+    // (MonsterHelper.java's "2 Thieves" :462-464, "Snake Plant" :492-494,
+    // "Snecko" :495-497 and "Centurion and Healer" :498-500), and not one of the
+    // five classes declares a SpawnMonsterAction, a SplitPower or a summon list.
+    // The Mugger is the closest thing to a mid-combat arrival/departure and it is
+    // a DEPARTURE -- it ESCAPES, exactly as the Looter does, which removes a
+    // record from the fight rather than adding one.
     // Checked for S2.21's four city normals: NONE of them is mid-combat
     // spawnable. Every Act-2/3 group that fields one builds it at spawn time
     // (MonsterHelper.java's "Chosen" / "3 Byrds" / "Chosen and Byrds" /
@@ -416,7 +496,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 29,
+    static_assert(sts::registry::manifest::kMonstersCount == 34,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -503,17 +583,65 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         case MonsterId::SHELLED_PARASITE:
         case MonsterId::SPHERIC_GUARDIAN:
             return;
+
+        // S2.22. FOUR of the five DO override damage() and all four are empty
+        // here, for the Sentry's reason: SnakePlant.damage (SnakePlant.java:
+        // 85-91), Snecko.damage (:138-144), Centurion.damage (:163-170) and
+        // Healer.damage (:186-194) are each `super.damage(info)` followed ONLY by
+        // the "Hit" spine animation, gated on a non-THORNS hit with output > 0
+        // (the Centurion's and the Healer's add a time-scale line, which is also
+        // animation). Nothing there touches combat state or draws RNG, so an
+        // empty hook is the COMPLETE translation and hp_lost is deliberately
+        // unread. Spelled as cases so the omission is checkable.
+        //
+        // The MUGGER does NOT override damage() at all (Mugger.java declares
+        // usePreBattleAction, takeTurn, playSfx, playDeathSfx, die and getMove,
+        // and nothing else), so it stays with the `default:` -- the Looter's
+        // answer, for the Looter's reason. Its die() DOES carry state (a seeded
+        // aiRng draw), and that is the MonsterDieFn seam below, not this one.
+        //
+        // The SNAKE PLANT is the one of the five that visibly REACTS to being
+        // attacked, and -- like the Byrd -- that reaction is a POWER hook
+        // (MalleablePower.onAttacked, dispatched from op_damage), not a damage()
+        // override. Worth stating so the empty case is not read as a hole.
+        case MonsterId::SNAKE_PLANT:
+        case MonsterId::SNECKO:
+        case MonsterId::CENTURION:
+        case MonsterId::HEALER:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 29,
+    static_assert(sts::registry::manifest::kMonstersCount == 34,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
     switch (id) {
+        // S2.22. TWO of the five declare usePreBattleAction and three do not;
+        // all five are spelled out rather than left to the `default:`.
+        case MonsterId::MUGGER:
+            // ApplyPowerAction(this, this, ThieveryPower(this, goldAmt)) --
+            // 20 at A20 (Mugger.java:81-84, :61). The same marker power the
+            // Looter applies, from a separate class. No RNG.
+            return &mugger_use_pre_battle_action;
+        case MonsterId::SNAKE_PLANT:
+            // ApplyPowerAction(this, this, new MalleablePower(this)) -- the
+            // 1-ARG ctor, so amount 3 (SnakePlant.java:69-72;
+            // MalleablePower.java:22,24-26). No RNG.
+            return &snake_plant_use_pre_battle_action;
+        case MonsterId::SNECKO:
+        case MonsterId::CENTURION:
+        case MonsterId::HEALER:
+            // None of these three declares the method at all -- Snecko.java,
+            // Centurion.java and Healer.java each declare takeTurn / changeState
+            // / getMove / damage / die (plus their private sound helpers) and
+            // nothing else -- so they inherit AbstractMonster's empty body
+            // (AbstractMonster.java:953-954). Explicit nullptr, the Chosen's
+            // precedent.
+            return nullptr;
         // S2.21. THREE of the four override usePreBattleAction with real combat
         // content; the Chosen has no such method at all (Chosen.java declares
         // takeTurn, changeState, getMove, damage and die), which is why it gets
@@ -632,6 +760,56 @@ MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
     }
 }
 
+MonsterDieFn monster_die_fn(MonsterId id) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 34,
+                  "new monster: does its Java class override die()? Read the "
+                  "method. If everything before `super.die()` is presentation -- "
+                  "a sound on an UNSEEDED generator, a shake, a time-scale -- it "
+                  "needs no entry. If ANY of it draws a seeded stream or writes "
+                  "combat state, register it here; the Mugger's seeded "
+                  "playDeathSfx is why this table exists.");
+    // The full survey behind the single entry below, so the emptiness is a
+    // recorded reading rather than an assumption. TEN monsters in the roster
+    // override die(); every one of them except the Mugger is presentation only:
+    //
+    //   * Looter (:159-174)      playDeathSfx on UNSEEDED MathUtils, plus the
+    //                            stolen-gold return -- which is a READ of the
+    //                            surviving record by the reward layer
+    //                            (settle_stolen_gold, run_advance.cpp), not a
+    //                            combat-time write. The Mugger's twin of that
+    //                            same half is likewise handled there.
+    //   * Chosen / Byrd / the two slavers / Fungi Beast / Snecko / Healer
+    //                            a sound on MathUtils, and nothing else.
+    //   * Centurion (:172-176)   a time-scale and a shake. No sound at all.
+    //   * Slime Boss / the large slimes
+    //                            their split machinery runs from damage(), not
+    //                            die() (monster_slime_large.cpp).
+    //
+    // So the seam is real but sparse, which is expected: it exists because Acts
+    // 2-4 add more monsters whose die() carries content, and because a SEEDED
+    // draw at the death edge is invisible until something downstream desyncs.
+    switch (id) {
+        case MonsterId::MUGGER:
+            // playDeathSfx' aiRng.random(2) (Mugger.java:147-154, called at
+            // :158). SEEDED, unconditional, once per death.
+            return &mugger_die;
+        default:
+            return nullptr;  // die() is presentation only, or absent
+    }
+}
+
+void dispatch_monster_die(CombatState& state, uint8_t monster_index) noexcept {
+    if (monster_index >= kMonsterCap) {
+        return;
+    }
+    const MonsterId id =
+        static_cast<MonsterId>(state.monsters[monster_index].monster_id);
+    const MonsterDieFn fn = monster_die_fn(id);
+    if (fn != nullptr) {
+        fn(state, monster_index);
+    }
+}
+
 void dispatch_monster_turn(CombatState& state, uint8_t monster_index) noexcept {
     const MonsterId id =
         static_cast<MonsterId>(state.monsters[monster_index].monster_id);
@@ -639,10 +817,54 @@ void dispatch_monster_turn(CombatState& state, uint8_t monster_index) noexcept {
     fn(state, monster_index);
 }
 
+namespace {
+
+// THE CONSTRUCT-ALL-THEN-INIT-ALL PLACEHOLDER.
+//
+// The game builds a group in two passes: the encounter's `new MonsterGroup(new
+// AbstractMonster[]{ ... })` constructs EVERY member (MonsterGroup.java:31-33),
+// and MonsterRoom then calls `monsters.init()`, which loops the finished list
+// calling each member's init() (:62-66 -> AbstractMonster.init, :705-715). This
+// engine folds ctor and init into ONE MonsterInitFn per monster, which is
+// stream-equivalent -- monster_hp_rng still sees the HP rolls in spawn order and
+// ai_rng the rollMoves in spawn order -- but NOT state-equivalent for a getMove
+// that reads the GROUP rather than itself.
+//
+// Two S2.22 monsters do exactly that, and both are in the same encounter:
+// the Centurion's aliveCount (Centurion.java:134-138) and the Healer's
+// needToHeal (Healer.java:157-160). Without this pre-pass the Centurion at slot 0
+// would roll its opening move against a still-zeroed slot 1, see aliveCount == 1,
+// and be unable to open on PROTECT -- a wrong turn-1 telegraph in the live
+// "Centurion and Healer" group.
+//
+// The fix is to give every slot the state a freshly CONSTRUCTED monster has
+// before the init pass runs: present, alive, and at full health. hp == max_hp == 1
+// is enough for both readers (alive_count counts it; need_to_heal adds
+// max_hp - hp == 0) and is fully overwritten by that slot's own init, which
+// assigns every field of the record. Nothing else in the engine reads another
+// monster's record during init, so no existing monster's behaviour moves: the
+// twenty combat fixtures and every Act-1 spawn test are byte-unchanged.
+//
+// The real HP is NOT knowable here -- it is the init's own monster_hp_rng draw,
+// and drawing it early would reorder the stream. A placeholder is therefore the
+// exact available model, not a shortcut: the two readers ask only "is it there,
+// and is it whole", and at construction time the answer is yes to both.
+void mark_group_constructed(CombatState& state, uint8_t count) noexcept {
+    for (uint8_t i = 0; i < count && i < kMonsterCap; ++i) {
+        MonsterState& m = state.monsters[i];
+        m = MonsterState{};
+        m.hp = 1;
+        m.max_hp = 1;
+    }
+}
+
+}  // namespace
+
 void spawn_group(CombatState& state, std::span<const MonsterId> group) noexcept {
     assert(group.size() <= static_cast<std::size_t>(kMonsterCap) &&
            "spawn_group: group exceeds kMonsterCap");
     state.monster_count = static_cast<uint8_t>(group.size());
+    mark_group_constructed(state, state.monster_count);
     for (uint8_t i = 0; i < group.size(); ++i) {
         const MonsterInitFn init = monster_init_fn(group[i]);
         assert(init != nullptr &&
@@ -682,6 +904,18 @@ void spawn_group_trace(CombatState& state,
                        std::span<const MonsterId> constructed,
                        uint16_t kept_mask) noexcept {
     state.monster_count = 0;
+    // Same construct-all-then-init-all pre-pass as spawn_group (see
+    // mark_group_constructed): the KEPT members are the group the game built, and
+    // they occupy slots [0, kept). A discarded PICK candidate was constructed and
+    // dropped before the group existed, so it is never in that list and never
+    // gets a slot -- only its ctor draws are burned.
+    uint8_t kept = 0;
+    for (std::size_t i = 0; i < constructed.size(); ++i) {
+        if ((kept_mask & (1u << i)) != 0u) {
+            ++kept;
+        }
+    }
+    mark_group_constructed(state, kept);
     for (std::size_t i = 0; i < constructed.size(); ++i) {
         if ((kept_mask & (1u << i)) != 0u) {
             assert(state.monster_count < kMonsterCap &&

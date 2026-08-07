@@ -299,6 +299,42 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
                     static_cast<int16_t>(slots[i].counter + amount);
                 return;
             }
+            // AbstractPower.stackPower's FIRST line (AbstractPower.java:152-158):
+            //     if (this.amount == -1) { logger.info(name + " does not stack");
+            //                              return; }
+            // A live slot holding -1 refuses every re-application. CONFUSION is
+            // the only registered power that can REACH this branch holding -1:
+            // its ctor assigns no amount at all, so the applied object carries
+            // AbstractPower's field initializer (:65), which is what both its
+            // producers pass -- Snecko Eye's atPreBattle (relics_boss.cpp) and
+            // the Snecko's GLARE (monsters.yaml id 34) -- and those two CAN
+            // co-occur, which is what makes the guard reachable rather than
+            // theoretical. Barricade and Corruption also sit at -1 but never get
+            // here: apply_is_a_no_op_repeat intercepts them at the top of this
+            // function. Scoped to CONFUSION rather than written as a general
+            // `slots[i].amount == -1` test, because every OTHER power that could
+            // hold -1 OVERRIDES stackPower, and an override never consults the
+            // base class's guard.
+            if (id == PowerId::CONFUSION) {
+                return;
+            }
+            // MalleablePower.stackPower (MalleablePower.java:79-82) is one of the
+            // few overrides that touches BOTH numbers:
+            //     this.amount += stackAmount; this.basePower += stackAmount;
+            // basePower is PowerSlot.counter (power_malleable.hpp), so a
+            // re-application permanently raises the end-of-turn RESET TARGET as
+            // well as the live amount -- the opposite of Flight, whose
+            // storedAmount stays frozen at the first instance's value. Falls
+            // through to the ordinary additive `amount` update below rather than
+            // returning, because the amount half IS the default. Unreachable in
+            // S1/S2 (the Snake Plant is solo and applies it once,
+            // SnakePlant.java:69-72); written because its absence would be a
+            // silent wrong answer the day a second granter lands, not a missing
+            // feature anyone would notice.
+            if (id == PowerId::MALLEABLE) {
+                slots[i].counter =
+                    static_cast<int16_t>(slots[i].counter + amount);
+            }
             if (id == PowerId::COMBUST && tgt == kActorPlayer) {
                 uint32_t hp_loss =
                     (s.flags & kCombatFlagCombustHpLossMask) >> kCombatFlagCombustHpLossShift;
@@ -362,6 +398,16 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // authors no `counter:` operand.
         fresh.amount = kPanacheCardAmount;
         fresh.counter = static_cast<int16_t>(amount);
+    }
+    if (id == PowerId::MALLEABLE) {
+        // MalleablePower's ctor (MalleablePower.java:28-37) sets `basePower =
+        // amt` alongside `amount` itself -- a private field (:21) written at
+        // construction and thereafter only by stackPower (:81). PowerSlot.counter
+        // carries it, and atEndOfTurn resets `amount` to it every turn
+        // (power_malleable.cpp). Same NEW-SLOT placement as Flight and Panache
+        // above; unlike Flight's, the STACKING path also moves it (see the
+        // MALLEABLE case in the stacking branch).
+        fresh.counter = fresh.amount;
     }
     if (id == PowerId::FLIGHT) {
         // FlightPower's ctor (FlightPower.java:26-35) sets `storedAmount =
