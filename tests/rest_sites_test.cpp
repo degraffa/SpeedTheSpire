@@ -920,6 +920,36 @@ TEST(RestSites, RecallIsAppendedLastAndRecordsTheRubyKey) {
     EXPECT_EQ(rc.run.hp, hp_before) << "no rest heal rode along";
 }
 
+TEST(RestMenu, RecallIsOfferedInEveryActAndIsNeverVetoed) {
+    // S2.13's discharge of the "Recall option surface at Acts 2-3" deferred
+    // row, pinned as a NEGATIVE: there is no act gate to find.
+    // CampfireUI.initializeButtons (CampfireUI.java:81-107) was read in full;
+    // the append at :94-96 tests `Settings.isFinalActAvailable &&
+    // !Settings.hasRubyKey` and nothing else, and the only `id.equals` in the
+    // whole file is a flavour-text branch at :258. The row's real scope is
+    // therefore EVERY rest site in EVERY act -- Act 1 included -- which is
+    // broader than the deferring text assumed, and the engine has modelled it,
+    // grant included, since S1.
+    //
+    // Nothing in the campfire path reads actNum or the dungeon id, so this
+    // drives rs.act directly rather than walking a run to floor 34: the point
+    // is precisely that the act is not an input.
+    RunController rc = enter_floor_one_rest();
+    for (uint8_t act : {uint8_t{1}, uint8_t{2}, uint8_t{3}}) {
+        SCOPED_TRACE("act " + std::to_string(static_cast<int>(act)));
+        rc.run.act = act;
+        rc.run.floor = static_cast<uint16_t>((act - 1) * 17 + 14);
+        const RestMenu menu = build_rest_menu(rc.run);
+        ASSERT_EQ(menu.count, 3);
+        EXPECT_EQ(static_cast<RestOptionKind>(menu.entries[2].kind),
+                  RestOptionKind::RECALL)
+            << "Recall must be the third row in every act";
+        EXPECT_TRUE(menu.entries[2].usable)
+            << "appended after the veto sweep, so never vetoed";
+        EXPECT_TRUE(rest_menu_has_usable_option(menu));
+    }
+}
+
 TEST(RestSites, ARestSiteAfterTheRubyKeyOffersNoRecall) {
     RunController rc = enter_floor_one_rest();
     rc.run.keys |= kKeyRuby;

@@ -967,5 +967,564 @@ TEST(EventGridBottle, AnAllBottledPurgeableDeckClosesTheEventPurgeGates) {
     EXPECT_FALSE(any);
 }
 
+
+// =============================================================================
+// S2.13 -- ?-rooms across acts: the per-act list rebuild, the one-time pool's
+// cross-act depletion, the act-gated one-time draw filters, the three Act-2/3
+// event gates, and the two-word FIRED bitset.
+// =============================================================================
+
+// An Act-2 or Act-3 RunState with that act's pools freshly rebuilt, exactly as
+// act_transition leaves them. `floor` is the act's first playable room unless a
+// test moves it; gold/hp are deliberately mid-range so each gate's boundary has
+// to be set explicitly rather than passing by accident.
+RunState fresh_act_state(int act, int64_t seed = kSeed, uint8_t ascension = 20) {
+    RunState rs = fresh_run_state(seed, ascension);
+    rs.act = static_cast<uint8_t>(act);
+    rs.floor = static_cast<uint16_t>((act - 1) * 17 + 1);
+    reinit_act_event_pools(rs);
+    return rs;
+}
+
+// Is `id` in the act's filtered shrine draw list?
+bool special_offered(const RunState& rs, uint16_t id) {
+    uint16_t pool[kShrineListCount + kSpecialListCount];
+    const int n =
+        build_shrine_pool(rs, pool, kShrineListCount + kSpecialListCount);
+    for (int i = 0; i < n; ++i) {
+        if (pool[i] == id) return true;
+    }
+    return false;
+}
+
+// A state with only the one special under test left in the pool, so a gate's
+// verdict cannot be masked by a neighbour.
+RunState only_special(int act, uint16_t id) {
+    RunState rs = fresh_act_state(act);
+    rs.shrine_membership = 0;
+    rs.special_membership =
+        static_cast<uint16_t>(1u << (id - kSpecialListFirstId));
+    rs.gold = 0;
+    return rs;
+}
+
+bool event_offered(const RunState& rs, uint16_t id) {
+    uint16_t pool[kEventListMaxCount];
+    const int n = build_event_pool(rs, pool, kEventListMaxCount);
+    for (int i = 0; i < n; ++i) {
+        if (pool[i] == id) return true;
+    }
+    return false;
+}
+
+// --- A. the per-act list rebuild ---------------------------------------------
+
+TEST(S213ActPools, ActTwoEventPoolIsTheThirteenCityRows) {
+    // TheCity.initializeEventList (TheCity.java:185-198), hand-carried in add
+    // order: Addict, Back to Basics, Beggar, Colosseum, Cursed Tome, Drug
+    // Dealer, Forgotten Altar, Ghosts, Masked Bandits, Nest, The Library,
+    // The Mausoleum, Vampires == registry ids 32..44.
+    RunState rs = fresh_act_state(2);
+    rs.gold = 999;      // clears Beggar's gold >= 75
+    rs.floor = 17 + 9;  // row 8: clears Colosseum's row gate
+    uint16_t pool[kEventListMaxCount];
+    const int n = build_event_pool(rs, pool, kEventListMaxCount);
+    ASSERT_EQ(n, 13);
+    for (int i = 0; i < 13; ++i) {
+        EXPECT_EQ(pool[i], 32 + i) << "position " << i;
+    }
+    EXPECT_EQ(event_list_first_id(2), 32u);
+    EXPECT_EQ(event_list_count(2), 13);
+}
+
+TEST(S213ActPools, ActThreeEventPoolIsTheSevenBeyondRows) {
+    // TheBeyond.initializeEventList (TheBeyond.java:179-186): Falling,
+    // MindBloom, The Moai Head, Mysterious Sphere, SensoryStone, Tomb of Lord
+    // Red Mask, Winding Halls == ids 45..51.
+    RunState rs = fresh_act_state(3);
+    rs.hp = 10;  // clears Moai Head's <= 50 % HP arm
+    rs.max_hp = 75;
+    uint16_t pool[kEventListMaxCount];
+    const int n = build_event_pool(rs, pool, kEventListMaxCount);
+    ASSERT_EQ(n, 7);
+    for (int i = 0; i < 7; ++i) {
+        EXPECT_EQ(pool[i], 45 + i) << "position " << i;
+    }
+    EXPECT_EQ(event_list_first_id(3), 45u);
+    EXPECT_EQ(event_list_count(3), 7);
+}
+
+TEST(S213ActPools, ActTwoShrineDrawOrderPutsWheelOfChangeSecond) {
+    // THE S2.02 finding's engine-side twin. Exordium ends with Wheel of Change
+    // (Exordium.java:238-246); TheCity and TheBeyond -- byte-identical to each
+    // other -- put it SECOND (TheCity.java:210-218 == TheBeyond.java:198-206).
+    // Same six keys, two orders, and the draw index resolves against the order.
+    uint16_t pool[kShrineListCount + kSpecialListCount];
+    RunState a1 = fresh_act_state(1);
+    a1.gold = 0;                // no Woman in Blue
+    a1.special_membership = 0;  // shrines only, so the order is unambiguous
+    ASSERT_EQ(build_shrine_pool(a1, pool, 20), 6);
+    const uint16_t want_a1[6] = {12, 13, 14, 15, 16, 17};
+    for (int i = 0; i < 6; ++i) EXPECT_EQ(pool[i], want_a1[i]) << "i " << i;
+
+    for (int act : {2, 3}) {
+        SCOPED_TRACE("act " + std::to_string(act));
+        RunState rs = fresh_act_state(act);
+        rs.gold = 0;
+        rs.special_membership = 0;
+        ASSERT_EQ(build_shrine_pool(rs, pool, 20), 6);
+        const uint16_t want[6] = {12, 17, 13, 14, 15, 16};
+        for (int i = 0; i < 6; ++i) EXPECT_EQ(pool[i], want[i]) << "i " << i;
+    }
+}
+
+TEST(S213ActPools, ShrineBitMeaningIsActIndependent) {
+    // The deliberate split: `shrine_membership` bit i is EventId (12+i) in
+    // every act -- so the bitset stays byte-comparable across a crossing for
+    // the differ and PublicView, neither of which knows the act at compare
+    // time -- while only the DRAW POSITION moves. Clearing Wheel of Change's
+    // bit (bit 5) must remove id 17 from both acts' lists, at two different
+    // positions.
+    uint16_t pool[kShrineListCount + kSpecialListCount];
+
+    RunState a1 = fresh_act_state(1);
+    a1.gold = 0;
+    a1.special_membership = 0;
+    a1.shrine_membership =
+        static_cast<uint8_t>(a1.shrine_membership & ~(1u << 5));
+    ASSERT_EQ(build_shrine_pool(a1, pool, 20), 5);
+    const uint16_t want_a1[5] = {12, 13, 14, 15, 16};  // 17 was LAST
+    for (int i = 0; i < 5; ++i) EXPECT_EQ(pool[i], want_a1[i]) << "i " << i;
+
+    RunState a2 = fresh_act_state(2);
+    a2.gold = 0;
+    a2.special_membership = 0;
+    a2.shrine_membership =
+        static_cast<uint8_t>(a2.shrine_membership & ~(1u << 5));
+    ASSERT_EQ(build_shrine_pool(a2, pool, 20), 5);
+    const uint16_t want_a2[5] = {12, 13, 14, 15, 16};  // 17 was SECOND
+    for (int i = 0; i < 5; ++i) EXPECT_EQ(pool[i], want_a2[i]) << "i " << i;
+
+    // ... and the same bit in the other direction: keep ONLY Wheel of Change.
+    a2.shrine_membership = static_cast<uint8_t>(1u << 5);
+    ASSERT_EQ(build_shrine_pool(a2, pool, 20), 1);
+    EXPECT_EQ(pool[0], 17u);
+}
+
+TEST(S213ActPools, TheInitSplitLeavesTheOneTimePoolAlone) {
+    // reinit_act_event_pools is the act-crossing half; init_event_pools is the
+    // run_begin whole. The difference IS the deliverable.
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.special_membership = 0x21u;  // an arbitrary punched-out pattern
+    rs.event_membership = 0u;
+    rs.shrine_membership = 0u;
+    rs.act = 2;
+    reinit_act_event_pools(rs);
+    EXPECT_EQ(rs.special_membership, 0x21u) << "the special pool must not move";
+    EXPECT_EQ(rs.event_membership, (1u << 13) - 1u);
+    EXPECT_EQ(rs.shrine_membership, 0x3Fu);
+
+    // The run_begin path DOES refill it.
+    init_event_pools(rs);
+    EXPECT_NE(rs.special_membership, 0x21u);
+}
+
+TEST(S213ActPools, ReinitReadsTheCurrentActNotThePrevious) {
+    // The second failure mode the split invites: calling the rebuild BEFORE
+    // act_transition bumps rs.act installs the previous act's width. Pinned by
+    // showing the width tracks rs.act and nothing else.
+    RunState rs = fresh_run_state(kSeed, 20);
+    for (int act : {1, 2, 3}) {
+        rs.act = static_cast<uint8_t>(act);
+        reinit_act_event_pools(rs);
+        EXPECT_EQ(rs.event_membership, (1u << event_list_count(act)) - 1u)
+            << "act " << act;
+    }
+}
+
+// --- B. the act-gated one-time draw filters ----------------------------------
+
+TEST(S213DrawGates, Designer) {
+    // `(TheCity || TheBeyond) && gold >= 75` (AbstractDungeon.java:1894-1898).
+    for (int act : {2, 3}) {
+        SCOPED_TRACE("act " + std::to_string(act));
+        RunState rs = only_special(act, 20);
+        rs.gold = 74;
+        EXPECT_FALSE(special_offered(rs, 20)) << "gold 74 must skip";
+        rs.gold = 75;
+        EXPECT_TRUE(special_offered(rs, 20)) << "gold 75 is inclusive";
+    }
+    RunState a1 = only_special(1, 20);
+    a1.gold = 9999;
+    EXPECT_FALSE(special_offered(a1, 20)) << "Exordium is excluded at any gold";
+}
+
+TEST(S213DrawGates, Duplicator) {
+    // `TheCity || TheBeyond`, no second clause (:1899-1903).
+    EXPECT_FALSE(special_offered(only_special(1, 21), 21));
+    EXPECT_TRUE(special_offered(only_special(2, 21), 21));
+    EXPECT_TRUE(special_offered(only_special(3, 21), 21));
+}
+
+TEST(S213DrawGates, FaceTraderIsActsOneAndTwoAndNotActThree) {
+    // `TheCity || Exordium` (:1904-1908) -- the one row whose act set EXCLUDES
+    // Act 3 rather than including it, and the reason a blanket "acts 2-3"
+    // reading of the special gates is wrong.
+    EXPECT_TRUE(special_offered(only_special(1, 22), 22));
+    EXPECT_TRUE(special_offered(only_special(2, 22), 22));
+    EXPECT_FALSE(special_offered(only_special(3, 22), 22));
+}
+
+TEST(S213DrawGates, KnowingSkull) {
+    // `TheCity && currentHealth > 12` (:1909-1913) -- STRICT, so 12 is out.
+    RunState rs = only_special(2, 24);
+    rs.hp = 12;
+    EXPECT_FALSE(special_offered(rs, 24)) << "hp 12 is excluded (> 12, strict)";
+    rs.hp = 13;
+    EXPECT_TRUE(special_offered(rs, 24));
+    for (int act : {1, 3}) {
+        RunState other = only_special(act, 24);
+        other.hp = 60;
+        EXPECT_FALSE(special_offered(other, 24)) << "act " << act;
+    }
+}
+
+TEST(S213DrawGates, NlothIsActTwoOnlyDespiteTheDuplicatedTest) {
+    // `!id.equals("TheCity") && !id.equals("TheCity") || relics.size() < 2`
+    // (:1914-1918). The SAME test is written twice -- one test, not two -- so
+    // this is Act 2 only, NOT "any act but 2". S2.02's act_mask 0x2 agrees.
+    RunState rs = only_special(2, 26);
+    rs.relic_count = 1;
+    EXPECT_FALSE(special_offered(rs, 26)) << "one relic is short of 2";
+    rs.relic_count = 2;
+    EXPECT_TRUE(special_offered(rs, 26));
+    for (int act : {1, 3}) {
+        RunState other = only_special(act, 26);
+        other.relic_count = 5;
+        EXPECT_FALSE(special_offered(other, 26)) << "act " << act;
+    }
+}
+
+TEST(S213DrawGates, TheJoust) {
+    // `TheCity && gold >= 50` (:1919-1923).
+    RunState rs = only_special(2, 29);
+    rs.gold = 49;
+    EXPECT_FALSE(special_offered(rs, 29));
+    rs.gold = 50;
+    EXPECT_TRUE(special_offered(rs, 29));
+    for (int act : {1, 3}) {
+        RunState other = only_special(act, 29);
+        other.gold = 9999;
+        EXPECT_FALSE(special_offered(other, 29)) << "act " << act;
+    }
+}
+
+TEST(S213DrawGates, SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond) {
+    // Design trap 5. `playtime >= 800.0f && TheBeyond` (:1929-1933). The ACT
+    // HALF IS SATISFIED IN ACT 3, so from S2.13 on the `false` is carried
+    // SOLELY by the unmodelled wall-clock playtime -- a real behavioural
+    // deviation, not an act exclusion. This test exists so that anyone who
+    // "fixes" the act gate alone fails here rather than shipping a portal.
+    for (int act : {1, 2, 3}) {
+        RunState rs = only_special(act, 28);
+        rs.gold = 9999;
+        rs.hp = rs.max_hp;
+        rs.relic_count = 5;
+        EXPECT_FALSE(special_offered(rs, 28))
+            << "act " << act << ": SecretPortal must stay unreachable";
+    }
+}
+
+TEST(S213DrawGates, ActIndependentSpecialsAreOfferedInEveryAct) {
+    // The Woman in Blue (gold >= 50) and Fountain of Cleansing (isCursed) have
+    // NO act test (:1924-1928, :1889-1893); the ungated rows -- Accursed
+    // Blacksmith, Bonfire Elementals, Lab, WeMeetAgain -- fall to the
+    // unconditional add (:1935).
+    for (int act : {1, 2, 3}) {
+        SCOPED_TRACE("act " + std::to_string(act));
+        for (uint16_t id : {uint16_t{18}, uint16_t{19}, uint16_t{25},
+                            uint16_t{30}}) {
+            EXPECT_TRUE(special_offered(only_special(act, id), id))
+                << "ungated id " << id;
+        }
+        RunState blue = only_special(act, 31);
+        blue.gold = 49;
+        EXPECT_FALSE(special_offered(blue, 31));
+        blue.gold = 50;
+        EXPECT_TRUE(special_offered(blue, 31));
+
+        RunState fountain = only_special(act, 23);
+        EXPECT_FALSE(special_offered(fountain, 23)) << "uncursed";
+        add_card(fountain, CardId::CLUMSY);
+        EXPECT_TRUE(special_offered(fountain, 23)) << "cursed";
+    }
+}
+
+// --- C. the three Act-2/3 event gates ----------------------------------------
+
+TEST(S213EventGates, BeggarNeedsSeventyFiveGold) {
+    // `gold < 75 -> skip` (:1970-1973). s2-design 2.3 omitted this gate; S2.02
+    // authored the registry row from source and this is its engine twin.
+    RunState rs = fresh_act_state(2);
+    rs.gold = 74;
+    EXPECT_FALSE(event_offered(rs, 34));
+    rs.gold = 75;
+    EXPECT_TRUE(event_offered(rs, 34)) << "75 is inclusive";
+}
+
+TEST(S213EventGates, ColosseumNeedsRowEightOrDeeper) {
+    // `currMapNode == null || currMapNode.y <= map.size() / 2 -> skip`
+    // (:1975-1978). map.size() is the ROW COUNT (15), so the integer divide is
+    // 7 and the gate is row >= 8. currMapNode is set at :1783, BEFORE
+    // EventRoom.onPlayerEntry, so y is the ARRIVING node's row. In Act 2 the
+    // boundary is floor 25 vs 26 (act_floor_base(2) == 17).
+    RunState rs = fresh_act_state(2);
+    rs.gold = 999;
+    rs.floor = 17 + 8;  // row 7
+    EXPECT_EQ(event_map_row(rs), 7);
+    EXPECT_FALSE(event_offered(rs, 35)) << "row 7 is excluded (<= 7)";
+    rs.floor = 17 + 9;  // row 8
+    EXPECT_EQ(event_map_row(rs), 8);
+    EXPECT_TRUE(event_offered(rs, 35)) << "row 8 is the first eligible row";
+
+    // The `currMapNode == null` half: the pre-first-pick sentinel is row -1.
+    rs.floor = 17;
+    EXPECT_EQ(event_map_row(rs), -1);
+    EXPECT_FALSE(event_offered(rs, 35));
+}
+
+TEST(S213EventGates, EventMapRowAgreesWithRunCurRow) {
+    // event_map_row restates run_cur_row's arithmetic over RunState alone
+    // (run_advance.hpp includes event_framework.hpp, not the reverse). If the
+    // two ever drift, Colosseum's gate silently moves; pin them equal across
+    // every act and every floor either could see. S2.33 inherits this gate.
+    RunController rc{};
+    for (int act : {1, 2, 3}) {
+        rc.run.act = static_cast<uint8_t>(act);
+        for (int floor = 0; floor <= 55; ++floor) {
+            rc.run.floor = static_cast<uint16_t>(floor);
+            EXPECT_EQ(event_map_row(rc.run), run_cur_row(rc))
+                << "act " << act << " floor " << floor;
+        }
+    }
+}
+
+TEST(S213EventGates, MoaiHeadTakesTheIdolOrTheHalfHpArm) {
+    // `!hasRelic("Golden Idol") && (float)hp / (float)maxHp > 0.5f -> skip`
+    // (:1960-1963). A FLOAT divide against 0.5f, written as the Java writes it
+    // rather than as hp*2 <= maxHp (trap 19).
+    RunState rs = fresh_act_state(3);
+    rs.max_hp = 100;
+
+    rs.hp = 51;
+    EXPECT_FALSE(event_offered(rs, 47)) << "51 % without the idol";
+    rs.hp = 50;
+    EXPECT_TRUE(event_offered(rs, 47)) << "exactly 50 % passes (<= 0.5f)";
+
+    // The idol short-circuits the ratio entirely, at full HP.
+    rs.hp = 100;
+    EXPECT_FALSE(event_offered(rs, 47));
+    rs.relics[rs.relic_count].relic_id =
+        static_cast<uint16_t>(RelicId::GOLDEN_IDOL);
+    ++rs.relic_count;
+    EXPECT_TRUE(event_offered(rs, 47)) << "Golden Idol at full HP";
+}
+
+TEST(S213EventGates, ActOneEventGatesAreUnchanged) {
+    // The Act-1 half must be bit-for-bit what it was before S2.13: the same
+    // nine rows at floor 1 / gold 99, and none of the three new gates can
+    // reach an Exordium id.
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.floor = 1;
+    rs.gold = 99;
+    uint16_t pool[kEventListMaxCount];
+    const int n = build_event_pool(rs, pool, kEventListMaxCount);
+    ASSERT_EQ(n, 9);
+    const uint16_t want[9] = {1, 2, 4, 5, 6, 7, 8, 10, 11};
+    for (int i = 0; i < 9; ++i) EXPECT_EQ(pool[i], want[i]) << "i " << i;
+}
+
+// --- D. cross-act depletion, end to end --------------------------------------
+
+TEST(S213CrossAct, AnActOneSpecialDrawStaysRemovedInActTwo) {
+    // The Acceptance's named case (trap 7). specialOneTimeEventList is handed
+    // to the new dungeon by identity (CardCrawlGame.java:1102-1119), so a draw
+    // in Act 1 is gone for the rest of the run.
+    RunState rs = fresh_run_state(kSeed, 20);
+    // Empty the shrine AND event lists so Lab is the only reachable id down
+    // EITHER branch of the shrine/event split -- directly through getShrine,
+    // or through getEvent's empty-tmp fallback into it.
+    rs.shrine_membership = 0;
+    rs.event_membership = 0;
+    rs.special_membership =
+        static_cast<uint16_t>(1u << (25 - kSpecialListFirstId));
+    const uint16_t drawn = generate_event(rs);
+    ASSERT_EQ(drawn, 25u) << "Lab was the only thing in the pool";
+    EXPECT_EQ(rs.special_membership, 0u);
+    EXPECT_TRUE(event_flag_test(rs, 25));
+
+    // Cross to Act 2 the way act_transition does.
+    rs.act = 2;
+    reinit_act_event_pools(rs);
+    EXPECT_EQ(rs.special_membership, 0u) << "Lab must NOT come back";
+    EXPECT_FALSE(special_offered(rs, 25));
+    EXPECT_TRUE(event_flag_test(rs, 25)) << "and it is still recorded as fired";
+}
+
+TEST(S213CrossAct, AnActOneShrineDrawReturnsInActTwo) {
+    // The counterpart the ledger's "cross-act depletion" framing does NOT
+    // cover. shrineList.clear() (:2577) + initializeShrineList (:293) put all
+    // six back, every act.
+    RunState rs = fresh_run_state(kSeed, 20);
+    rs.special_membership = 0;
+    rs.event_membership = 0;  // so either branch of the split reaches getShrine
+    rs.shrine_membership =
+        static_cast<uint8_t>(1u << (14 - kShrineListFirstId));
+    const uint16_t drawn = generate_event(rs);
+    ASSERT_EQ(drawn, 14u) << "Transmogrifier was the only thing in the pool";
+    EXPECT_EQ(rs.shrine_membership, 0u);
+
+    rs.act = 2;
+    reinit_act_event_pools(rs);
+    EXPECT_EQ(rs.shrine_membership, 0x3Fu);
+    rs.special_membership = 0;
+    EXPECT_TRUE(special_offered(rs, 14)) << "the shrine is drawable again";
+}
+
+TEST(S213CrossAct, ActThreeEventPoolExhaustionFallsToGetShrine) {
+    // getEvent's empty-filtered-tmp fallback into getShrine (:1983-1985) -- a
+    // THIRD draw off the throwaway stream. Ordinary rather than exotic in Act
+    // 3, whose event list is only seven rows across ~15 map rows.
+    RunState rs = fresh_act_state(3);
+    rs.event_membership = 0;  // every Beyond event already drawn
+    rs.special_membership = 0;
+    rs.shrine_membership =
+        static_cast<uint8_t>(1u << (16 - kShrineListFirstId));
+    const RngStream before = rs.event_rng;
+
+    // Whichever branch the split draw takes, the only reachable id is 16 --
+    // through getShrine directly, or through getEvent's empty-tmp fallback.
+    const uint16_t drawn = generate_event(rs);
+    EXPECT_EQ(drawn, 16u);
+    EXPECT_TRUE(streams_equal(before, rs.event_rng))
+        << "the selection stream is a throwaway and must not commit";
+    EXPECT_EQ(rs.shrine_membership, 0u);
+}
+
+TEST(S213CrossAct, ARawNonemptyButFilteredEmptyShrinePoolReturnsZero) {
+    // The documented defensive deviation, now on a REACHABLE Act-3 state
+    // rather than a structurally impossible one: shrineList empty (all six
+    // drawn within Act 3 -- they are restored at every crossing, so this is
+    // an intra-act exhaustion) and every surviving special filtered out. The
+    // game would evaluate tmp.get(rng.random(-1)) (:1937) and crash after
+    // burning one counter tick; this port returns 0 without drawing.
+    RunState rs = fresh_act_state(3);
+    rs.event_membership = 0;
+    rs.shrine_membership = 0;
+    // FaceTrader (acts 1-2) and SecretPortal (pinned false) both survive in
+    // the RAW list and both filter out in Act 3.
+    const uint16_t raw =
+        static_cast<uint16_t>((1u << (22 - kSpecialListFirstId)) |
+                              (1u << (28 - kSpecialListFirstId)));
+    rs.special_membership = raw;
+    uint16_t pool[kShrineListCount + kSpecialListCount];
+    ASSERT_EQ(build_shrine_pool(rs, pool, 20), 0)
+        << "the FILTERED list must be empty while the RAW list is not";
+
+    const RngStream before = rs.event_rng;
+    EXPECT_EQ(generate_event(rs), 0u);
+    EXPECT_TRUE(streams_equal(before, rs.event_rng));
+    EXPECT_EQ(rs.special_membership, raw)
+        << "nothing may be removed on the no-draw path";
+}
+
+// --- E. the two-word FIRED bitset --------------------------------------------
+
+TEST(S213EventFlags, EveryIdOneToFiftyOneRoundTripsThroughItsOwnWord) {
+    for (uint16_t id = 1; id <= 51; ++id) {
+        SCOPED_TRACE("id " + std::to_string(id));
+        RunState rs{};
+        EXPECT_FALSE(event_flag_test(rs, id)) << "value-init must read clean";
+        event_flag_set(rs, id);
+        EXPECT_TRUE(event_flag_test(rs, id));
+        if (id <= 31) {
+            EXPECT_EQ(rs.event_flags, 1u << (id - 1u));
+            EXPECT_EQ(rs.event_flags_hi, 0u) << "ids 1..31 must not touch hi";
+        } else {
+            EXPECT_EQ(rs.event_flags_hi, 1u << (id - 33u));
+            EXPECT_EQ(rs.event_flags, 0u) << "ids 32..63 must not touch lo";
+        }
+        // ... and only that id reads set.
+        for (uint16_t other = 1; other <= 51; ++other) {
+            if (other == id) continue;
+            EXPECT_FALSE(event_flag_test(rs, other))
+                << "id " << id << "'s bit also read as " << other;
+        }
+    }
+}
+
+TEST(S213EventFlags, OutOfRangeIdsAreNoOpsRatherThanUbShifts) {
+    RunState rs{};
+    for (uint16_t id : {uint16_t{0}, uint16_t{64}, uint16_t{100},
+                        uint16_t{0xFFFF}}) {
+        event_flag_set(rs, id);
+        EXPECT_FALSE(event_flag_test(rs, id)) << "id " << id;
+    }
+    EXPECT_EQ(rs.event_flags, 0u);
+    EXPECT_EQ(rs.event_flags_hi, 0u);
+    // An all-ones pair still reports false for an id with no bit at all.
+    rs.event_flags = 0xFFFFFFFFu;
+    rs.event_flags_hi = 0xFFFFFFFFu;
+    EXPECT_FALSE(event_flag_test(rs, 0));
+    EXPECT_FALSE(event_flag_test(rs, 64));
+    // ids 52..63 are addressable-but-unallocated, which is the headroom a
+    // future registry id needs; 64 upward would need a THIRD word, not a
+    // wider shift.
+    EXPECT_TRUE(event_flag_test(rs, 52));
+}
+
+TEST(S213EventFlags, AnActTwoDrawSetsTheHiWordAndLeavesTheLoWordAlone) {
+    // The end-to-end reason the second word exists: before S2.13 an Act-2 draw
+    // would have written `1u << (id-1)` with id up to 44 -- unrepresentable in
+    // a uint32_t, and UB at id 32 and beyond.
+    RunState rs = fresh_act_state(2);
+    rs.shrine_membership = 0;
+    rs.special_membership = 0;
+    rs.gold = 999;
+    rs.event_membership =
+        static_cast<uint16_t>(1u << (41 - event_list_first_id(2)));
+    const uint16_t drawn = generate_event(rs);
+    ASSERT_EQ(drawn, 41u) << "Nest was the only thing in the pool";
+    EXPECT_EQ(rs.event_flags, 0u);
+    EXPECT_EQ(rs.event_flags_hi, 1u << (41u - 33u));
+    EXPECT_TRUE(event_flag_test(rs, 41));
+    EXPECT_EQ(rs.event_membership, 0u);
+}
+
+// --- F. the end state S2.31-S2.33 inherit -------------------------------------
+
+TEST(S213CrossAct, AnActTwoQuestionMarkRoomSelectsACityRowAndParks) {
+    // After S2.13 an Act-2 ? room that resolves to EVENT selects the RIGHT id,
+    // commits the right pool bit and the right flag word -- and then has no
+    // body, because all 20 Act-2/3 rows are S2.31-S2.33's. That park is the
+    // expected end state, not a gap.
+    RunState rs = fresh_act_state(2);
+    rs.gold = 999;
+    rs.floor = 17 + 9;
+    rs.special_membership = 0;
+    rs.shrine_membership = 0;
+
+    const uint16_t drawn = generate_event(rs);
+    ASSERT_NE(drawn, 0u);
+    EXPECT_GE(drawn, 32u);
+    EXPECT_LE(drawn, 44u) << "an Act-2 event draw must be a TheCity row";
+    EXPECT_TRUE(event_flag_test(rs, drawn));
+    const unsigned bit = static_cast<unsigned>(drawn - event_list_first_id(2));
+    EXPECT_EQ((static_cast<unsigned>(rs.event_membership) >> bit) & 1u, 0u)
+        << "the drawn row must leave the pool";
+    EXPECT_EQ(event_dialog_impl(drawn), nullptr)
+        << "no Act-2 body exists yet; S2.31-S2.33 own them";
+}
+
 }  // namespace
 }  // namespace sts::engine

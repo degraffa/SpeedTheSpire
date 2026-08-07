@@ -149,6 +149,10 @@ constexpr FieldSpan kFields[] = {
     STS_PV_FIELD(event),
     STS_PV_FIELD(neow),
     STS_PV_FIELD(action_mask),
+    // v3 (S2.13) tail append -- the FIRED bitset's second word. This table is
+    // scanned in ascending offset order by public_view_field_at, so a tail
+    // append belongs at the end here too.
+    STS_PV_FIELD(event_flags_hi),
 };
 
 #undef STS_PV_FIELD

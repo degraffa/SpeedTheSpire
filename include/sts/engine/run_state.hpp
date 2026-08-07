@@ -22,6 +22,7 @@
 // potionRng), the act-scoped mapRng, and the event-scoped neowRng -- the
 // 14th stream of design §2.5 #1/#2.
 
+#include <cstddef>  // offsetof (the S2.13 pad-carve proof below the struct)
 #include <cstdint>
 #include <type_traits>
 
@@ -221,13 +222,41 @@ struct RunState {
     uint16_t relic_pools[kRelicTierCount][kRelicPoolCap];
     uint8_t  relic_pool_count[kRelicTierCount];
     uint8_t  pad_relic_pools[3];      // pad kRelicTierCount(5) -> 8
-    uint8_t  pad_rng_align[6];        // explicit padding (see the PADDING note)
+
+    // The SECOND word of the one-shot event FIRED bitset, CARVED OUT OF THE
+    // SIX BYTES OF ALIGNMENT SLACK that used to be `pad_rng_align[6]` (S2.13).
+    // `event_flags` above is a uint32_t with bit (id-1), so it addresses ids
+    // 1..31 only, and S2.02 allocated ids 32..51 for the Act-2/3 events that
+    // S2.13 makes drawable. Widening `event_flags` in place would move
+    // `shop_flags` and everything after it (an unplanned SCHEMA_VERSION bump,
+    // stop-the-line under conventions.md §5) and is separately ILLEGAL in
+    // PublicView, whose contract forbids changing an existing field's width.
+    //
+    // So: two filler bytes, then a uint32_t in the remaining four. NO OFFSET
+    // MOVES, `sizeof(RunState)` is unchanged, and SCHEMA_VERSION stays put --
+    // the same terms as the CombatState carve-outs at combat_state.hpp:219,
+    // 263, 288. Those bytes were `ByteClass::PADDING` and were value-init
+    // zeroed on every path that produces a RunState, so no committed fixture
+    // or captured trace carries a nonzero byte here and every old record still
+    // reads back byte-identically with `event_flags_hi == 0`.
+    //
+    // The offset arithmetic is ASSERTED below rather than trusted: if the
+    // static_assert on `offsetof(RunState, event_flags_hi) % 4` ever fires,
+    // the carve does not fit and the answer is to surface a schema bump, not
+    // to reorder members.
+    //
+    // Bit assignment: id 32..63 -> bit (id - 33). Never open-code that shift --
+    // go through event_flag_set / event_flag_test (event_framework.hpp), which
+    // route an id to the right word.
+    uint8_t  pad_rng_align_lo[2];     // explicit padding (see the PADDING note)
+    uint32_t event_flags_hi;          // event FIRED bitset, ids 32..63
 
     // -- RNG: the 7 run-scoped streams (design doc §3.4) + the act-scoped mapRng
     //    (design doc §3.6). See the STREAM COUNT note at the top of this file.
     //    RngStream is 8-byte aligned, so RunState is 8-byte aligned; the six
-    //    bytes of alignment slack ahead of this block are `pad_rng_align`
-    //    rather than compiler padding, so they are actually initialised. --
+    //    bytes of alignment slack ahead of this block are `pad_rng_align_lo`
+    //    (2) + `event_flags_hi` (4) rather than compiler padding, so they are
+    //    actually initialised. Before S2.13 all six were padding. --
     RngStream monster_rng;            // encounter rolls
     RngStream event_rng;              // ?-room resolution, event rolls
     RngStream merchant_rng;           // shop stock/prices
@@ -247,6 +276,22 @@ static_assert(std::is_trivially_copyable_v<RunState>,
               "snapshot = memcpy)");
 static_assert(sizeof(RunState) <= 8192,
               "RunState exceeds its 8 KB budget (design doc §4.3)");
+
+// THE S2.13 PAD-CARVE PROOF. `event_flags_hi` was cut out of the six bytes of
+// alignment slack that `pad_rng_align[6]` declared, so it must land 4-aligned
+// inside that hole and leave the following RNG block exactly where it was. If
+// either assert fires, the carve does NOT fit: surface a SCHEMA_VERSION bump
+// (stop-the-line, conventions.md §5) rather than reordering members.
+static_assert(offsetof(RunState, event_flags_hi) % 4 == 0,
+              "event_flags_hi is not 4-aligned -- the S2.13 pad carve does not "
+              "fit; see the comment on the member");
+static_assert(offsetof(RunState, event_flags_hi) + sizeof(uint32_t) ==
+                  offsetof(RunState, monster_rng),
+              "event_flags_hi must exactly close the alignment hole ahead of "
+              "the RNG block -- no offset may move");
+static_assert(offsetof(RunState, pad_rng_align_lo) ==
+                  offsetof(RunState, pad_relic_pools) + 3,
+              "the carve must start where pad_relic_pools ended");
 
 // Bit assignment for RunState::keys. The game stores three independent
 // booleans (Settings.hasEmeraldKey / hasRubyKey / hasSapphireKey); the packing

@@ -302,6 +302,10 @@ void encode_always_block(const RunController& rc, PublicView& out) noexcept {
     out.event_pity_shop = rs.event_pity_shop;
     out.event_pity_treasure = rs.event_pity_treasure;
     out.event_flags = rs.event_flags;
+    // The v3 tail append (S2.13). Assigned beside its v2 sibling rather than
+    // next to action_mask because the two words are one field semantically;
+    // only the LAYOUT position had to go to the struct tail.
+    out.event_flags_hi = rs.event_flags_hi;
     out.shop_flags = rs.shop_flags;
     out.run_hp = rs.hp;
     out.run_max_hp = rs.max_hp;

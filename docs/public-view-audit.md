@@ -1,4 +1,4 @@
-# PublicView field audit — v2 (T0.1 + T0.2)
+# PublicView field audit — v3 (T0.1 + T0.2 + S2.13)
 
 The field-by-field completeness proof for `encode_public_view`
 ([../include/sts/engine/public_view.hpp](../include/sts/engine/public_view.hpp),
@@ -48,7 +48,8 @@ cell, so a disagreement between them is a documentation conflict
 
 **v1 status vocabulary:** `→ field` (encoded now), `reserved` (a zero-filled
 reserved field exists for it), `excluded` (deliberately not carried — the Notes
-say why). No `T0.2` cell remains: the column is complete as of v2.
+say why). No `T0.2` cell remains: the column is complete as of v2, and v3's
+single tail-appended field (`event_flags_hi`) has its own row.
 
 Companion pieces at the bottom: the **flags bit audits** (both `flags` words
 are carried whole, so every allocated bit is classified) and the
@@ -228,6 +229,7 @@ does.
 | `keys` | public | → `keys_reserved` | POPULATED from v2: the bits exist and have a live S1 writer (the campfire's Recall sets the ruby key). Zero in a v1 record already MEANS "no keys", so the reinterpretation is exact. |
 | `pad_keys` | padding | excluded | |
 | `event_flags` / `shop_flags` | public | → same names | One-shot *fired* bitsets — the fires were observed. |
+| `event_flags_hi` | public | → `event_flags_hi` | S2.13. The FIRED bitset's SECOND word (event ids 32..63 at bit id-33, the Act-2/3 events). Same classification and same reason as `event_flags`; it exists only because ids 32..51 do not fit one `uint32_t` and neither struct could widen the first word in place. Appended at the v3 tail, i.e. **after `action_mask`** — see the version log. |
 | `card_blizz_randomizer` / `blizzard_potion_mod` | public | → same names | Plan §1: pity counters are tracker state, encoded verbatim. |
 | `event_pity_monster` / `event_pity_shop` / `event_pity_treasure` | public | → same names | Same; carried as `float`, the storage width, so no rounding is introduced. |
 | `purge_cost` | public | → `purge_cost` | Displayed in every shop. |
@@ -237,7 +239,7 @@ does.
 | `pad_membership` | padding | excluded | |
 | `relic_pools[5][48]` | **hidden** (unrevealed window) | excluded | The remaining order/composition of each tier's `[0, count)` window is a shuffle realization. Resampled by T0.4 (with the pop-time canSpawn corner cases). Observed pops are public via `relics[]`. |
 | `relic_pool_count[5]` | derived | excluded | Initial tier size (public rule) minus observed pops. T0.2 declined the convenience copy: it is exactly re-derivable, and every carried byte is one the twin suite and the tripwire must keep honest. Surfacing it later remains an additive change. |
-| `pad_relic_pools[3]` / `pad_rng_align[6]` | padding | excluded | |
+| `pad_relic_pools[3]` / `pad_rng_align_lo[2]` | padding | excluded | `pad_rng_align` was 6 bytes through v2; S2.13 carved four of them into `event_flags_hi` (row above), which is why no `RunState` offset moved and `SCHEMA_VERSION` did not bump. |
 | `monster_rng` … `neow_rng` (9 streams) | hidden | excluded | Run-/act-/event-scoped stream states are realizations. Resampled fresh by T0.4. |
 
 ## 7. PublicView-only fields (no CombatState/RunController source)
@@ -538,3 +540,30 @@ lifecycle rule; no in-place reinterpretation exists):
     this schema. That is deliberate: a mask that grows is a public-view change
     and gets reviewed like one, which is why public_view.hpp pins the total
     size to a literal as well as to a formula.
+- v3 — S2.13: `event_flags_hi`, the one-shot FIRED bitset's second word
+  (event ids 32..63 at bit id-33). **ADDITIVE, case 2 (tail append).**
+  - *Why a second word rather than a wider `event_flags`.* S2.02 allocated
+    ids 32..51 for the Act-2/3 events and S2.13 made them drawable, so the
+    `uint32_t` ran out at id 31. Widening it in place is a **breaking**
+    change under the rule above — it changes an existing field's width, and
+    it would move `shop_flags` and everything after it — so the second word
+    is the only additive route. `RunState` did the same carve on its side,
+    out of declared padding, so the engine `SCHEMA_VERSION` did not move
+    either.
+  - *Why it sits AFTER `action_mask`.* Because the mask channel is a member,
+    the "tail" of this struct is past it. Putting the new word next to
+    `event_flags` would have shifted every field from `shop_flags` to the end
+    of the mask — not a tail append at all. The two words are one field
+    semantically and adjacent nowhere in memory; the encoder assigns them
+    together and the differ compares them together.
+    `PublicViewLayout.V2TailHasNoImplicitPadding` gained a row for it, and a
+    new `static_assert` pins `offsetof(PublicView, action_mask) ==
+    kPublicViewFixedBytes` so a future append cannot quietly move the mask.
+    `sizeof` grows 6032 → 6036; `PvMask` is 4-sized and 4-aligned, so the
+    word abuts it with no padding.
+  - *Declared "not present" value:* **zero**, and it is a truthful reading of
+    a v2 record — v2 predates ids 32..51 being drawable at all, so no v2
+    record could have had a fire to report there.
+  - `tests/golden/twin_fixtures/twins_v1.bin` was regenerated with its
+    checked-in generator: the fixture stamps both `PUBLIC_VIEW_VERSION` and
+    `sizeof(PublicView)`, and refuses on mismatch by design.

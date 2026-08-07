@@ -500,6 +500,11 @@ DiffReport diff_run_states(const RunState& e, const RunState& a) {
     }
     cmp_u(r, "keys", e.keys, a.keys);
     cmp_u(r, "event_flags", e.event_flags, a.event_flags);
+    // The FIRED bitset's second word (event ids 32..63, S2.13). It MUST be
+    // compared: the translator writes it from Act-2/3 captures, so a field the
+    // differ skipped would be a permanent false-green on exactly the campaigns
+    // that first exercise it.
+    cmp_u(r, "event_flags_hi", e.event_flags_hi, a.event_flags_hi);
     cmp_u(r, "shop_flags", e.shop_flags, a.shop_flags);
 
     // -- pity counters riding on the streams --

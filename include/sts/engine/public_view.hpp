@@ -98,7 +98,15 @@ namespace sts::engine {
 //             channel and the KnowledgeState projection, all appended at the
 //             tail (ADDITIVE), plus the declared population of keys_reserved
 //             and act_reserved.
-inline constexpr uint32_t PUBLIC_VIEW_VERSION = 2;
+// v3: S2.13 -- `event_flags_hi`, the FIRED bitset's second word (event ids
+//             32..63, the Act-2/3 events). APPENDED AFTER action_mask, i.e. at
+//             the true struct tail, because `event_flags` may not be widened in
+//             place: the contract above forbids changing an existing field's
+//             width. A v2 record reinterprets losslessly under the v3 reading
+//             with `event_flags_hi == 0`, which is exactly "no Act-2/3 event
+//             has fired" -- true of every v2 record, since v2 predates their
+//             being drawable at all. Additive case 2.
+inline constexpr uint32_t PUBLIC_VIEW_VERSION = 3;
 
 // --- PvCard -----------------------------------------------------------------
 
@@ -513,6 +521,18 @@ struct PublicView {
 
     // -- the legal-action mask channel (always live) --
     PvMask action_mask;
+
+    // ======================= v3 (S2.13) tail append =========================
+    // The FIRED bitset's second word: event ids 32..63 at bit (id-33), the
+    // Act-2/3 events S2.02 registered and S2.13 made drawable. It sits AFTER
+    // action_mask rather than beside `event_flags` because only a true tail
+    // append leaves every v2 offset -- the mask channel's included -- where it
+    // was. Zero means "none of ids 32..63 has fired", which is also what a v2
+    // record reads as. Public for the same reason `event_flags` is: each fire
+    // was an observed event.
+    //
+    // PvMask is asserted 4-aligned-and-4-sized above, so this needs no pad.
+    uint32_t event_flags_hi;
 };
 
 static_assert(std::is_trivially_copyable_v<PublicView>,
@@ -528,15 +548,21 @@ static_assert(std::is_trivially_copyable_v<PublicView>,
 //   part ends at 5656 and the mask channel closes the record.
 // The layout-walk static_asserts in tests/public_view_test.cpp prove there is
 // no implicit padding anywhere in this figure.
+// v3 tail: 4 (event_flags_hi), appended after the mask channel.
 inline constexpr std::size_t kPublicViewFixedBytes = 5656;
-static_assert(sizeof(PublicView) == kPublicViewFixedBytes + sizeof(PvMask),
+static_assert(sizeof(PublicView) ==
+                  kPublicViewFixedBytes + sizeof(PvMask) + sizeof(uint32_t),
               "PublicView size changed -- bump PUBLIC_VIEW_VERSION, update the "
               "audit table (docs/public-view-audit.md) and its schema-evolution "
               "note, and re-check the layout-walk asserts");
-static_assert(sizeof(PublicView) == 6032,
+static_assert(sizeof(PublicView) == 6036,
               "PublicView size changed -- see the assert above. This literal is "
               "pinned deliberately: a RunActionMask that grows is a public-view "
-              "schema change too, and must be reviewed like any other");
+              "schema change too, and must be reviewed like any other. It was "
+              "6032 through v2; v3 tail-appended event_flags_hi");
+static_assert(offsetof(PublicView, action_mask) == kPublicViewFixedBytes,
+              "the v1+v2 fixed part must still end exactly where it did -- a "
+              "tail append may not move the mask channel");
 
 // --- encode_public_view ------------------------------------------------------
 

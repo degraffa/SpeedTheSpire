@@ -95,9 +95,9 @@ static_assert(std::is_trivially_copyable_v<PublicView>);
 static_assert(sizeof(PvCard) == 6);
 static_assert(sizeof(PvPower) == 6);
 static_assert(sizeof(PvMonster) == 20 + 6 * kPowerCap);
-// v2's size; the v1 prefix's 3760 bytes are pinned by V2TailHasNoImplicitPadding
+// v3's size; the v1 prefix's 3760 bytes are pinned by V2TailHasNoImplicitPadding
 // asserting that offsetof(PublicView, gold) is still exactly 3760.
-static_assert(sizeof(PublicView) == 6032);
+static_assert(sizeof(PublicView) == 6036);  // 6032 through v2; S2.13 appended event_flags_hi
 
 // --- Layout walk (the header's promised "no implicit padding" proof) ---------
 
@@ -654,7 +654,7 @@ static_assert(sizeof(PvRelic) == 4);
 static_assert(sizeof(PvMapNode) == 2);
 static_assert(sizeof(PvShopSlot) == 6);
 static_assert(sizeof(PvEventBoardCard) == 6);
-static_assert(sizeof(PublicView) == 6032);
+static_assert(sizeof(PublicView) == 6036);  // 6032 through v2; S2.13 appended event_flags_hi
 
 // --- Layout walk over the v2 element types and the appended tail -------------
 
@@ -816,6 +816,10 @@ TEST(PublicViewLayout, V2TailHasNoImplicitPadding) {
         STS_MEMBER_SPAN(PublicView, event),
         STS_MEMBER_SPAN(PublicView, neow),
         STS_MEMBER_SPAN(PublicView, action_mask),
+        // v3 (S2.13) tail append -- the FIRED bitset's second word. PvMask is
+        // asserted 4-sized-and-4-aligned, so this abuts action_mask with no
+        // pad, and the walk below proves it rather than assuming it.
+        STS_MEMBER_SPAN(PublicView, event_flags_hi),
     };
     std::string holes;
     std::size_t cursor = offsetof(PublicView, gold);
@@ -911,7 +915,7 @@ TEST(PublicViewRun, AlwaysBlockScalarsRoundTrip) {
     PublicView pv{};
     encode_public_view(rc, pv);
 
-    EXPECT_EQ(pv.public_view_version, 2u);
+    EXPECT_EQ(pv.public_view_version, 3u);  // v3: S2.13's event_flags_hi
     EXPECT_EQ(pv.run_phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
     EXPECT_EQ(pv.combat_active, 0);
 

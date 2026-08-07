@@ -161,7 +161,21 @@ Wave-C; per-monster behavior is batch work.
 - **Shrines** (TheCity.java:210-218, TheBeyond.java:198-206): the same six
   rows S1 already carries (Match and Keep!, Wheel of Change, Golden Shrine,
   Transmorgrifier, Purifier, Upgrade Shrine) — list *membership per act* is
-  new; no new rows.
+  new; no new rows. *Added 2026-08-07 (S2.13): the ORDER above is TheCity's
+  and TheBeyond's, which are byte-identical to each other and **differ from
+  Exordium's** (Exordium.java:238-246 ends with Wheel of Change; the other
+  two put it second). The engine keeps `shrine_membership` bit i == EventId
+  12+i in every act — so the bitset stays byte-comparable across a crossing
+  for the differ and PublicView — and applies the per-act order only when
+  building the draw list.*
+- **The act crossing rebuilds two of the three lists.**
+  `dungeonTransitionSetup` clears `eventList` and `shrineList`
+  (AbstractDungeon.java:2576-2577) and the new dungeon's constructor rebuilds
+  both (:291, :293), so **all six shrines return to the pool at every act**
+  and the event list comes back at the new act's width. Only
+  `specialOneTimeEventList` depletes run-wide (next bullet). *Recorded
+  2026-08-07 (S2.13): the shrine half is the easy thing to get backwards,
+  because "cross-act depletion" describes only the one-time pool.*
 - **Shared one-time pool:** the S1 rows stand; what S2 adds is their real
   per-act draw gates (AbstractDungeon.java:1882-1942): Designer (City or
   Beyond, gold ≥ 75), Duplicator (City or Beyond), FaceTrader (City or
@@ -174,8 +188,17 @@ Wave-C; per-monster behavior is batch work.
   across acts (CardCrawlGame.java:1102-1119; only call site
   Exordium.java:54).
 - **Normal-event floor/state gates** live at AbstractDungeon.java:1944-1990;
-  new-to-S2: The Moai Head requires Golden Idol or hp ≤ 50 %; Colosseum
-  requires `currMapNode.y > map.size()/2` (top half of the Act-2 map).
+  new-to-S2: The Moai Head requires Golden Idol or hp ≤ 50 %; **Beggar
+  requires gold ≥ 75** (:1970-1973 — *added 2026-08-07, S2.13: this clause
+  was omitted when §2.3 was written, and S2.02 had already authored the
+  registry row from source. `getEvent` has exactly SIX cases and all six are
+  now listed here*); Colosseum requires `currMapNode.y > map.size()/2`
+  (:1975-1978 — `map` is the 15-**row** list, so the integer divide is 7 and
+  the gate is row ≥ 8; `currMapNode` is assigned at :1783, *before*
+  `EventRoom.onPlayerEntry`, so it is the arriving node's row, i.e.
+  `run_cur_row` = `floor − act_floor_base(act) − 1` and floor ≥ 26 in Act 2).
+  Dead Adventurer and Mushrooms (floor > 6) and The Cleric (gold ≥ 35) are
+  the three S1 cases.
 - **Combat-embedding events** (ProceedButton.java:115 list): Colosseum
   (Colosseum Slavers then Colosseum Nobs — Colosseum.java:53-76, rewards a
   RARE + an UNCOMMON pool relic :72-73), Masked Bandits
@@ -461,6 +484,24 @@ diverges on the menu surface; resolve before the rest-site task, and if the
 divergence is real, the S1 rest-menu model needs the row with the key grant
 stubbed as S3).
 
+> **RESOLVED 2026-08-07 (S2.13) — YES, present; ALREADY MODELLED; and (b)'s
+> scoping above is wrong in one direction.** `CampfireUI.initializeButtons`
+> (CampfireUI.java:94-96, read in full) appends the `RecallOption` under
+> `Settings.isFinalActAvailable && !Settings.hasRubyKey` and **no act test** —
+> the only `id.equals` in that file is a flavour-text branch at :258. So the
+> row is on screen at **every** rest site in **every** act, Act 1 included,
+> not only Acts 2–3. `Settings.isFinalActAvailable` (Settings.java:642) is
+> profile state, constant for a whole run; the engine pins it as
+> `kFinalActAvailable` (`rest_sites.hpp`). The append happens **after** the
+> relic veto sweep and **before** the `cannotProceed` auto-complete, so the
+> option can never be vetoed and a boss-relic-locked campfire stays open while
+> the key is on offer. All of that has been modelled since S1
+> (`RestOptionKind::RECALL`, `src/engine/rest_sites.cpp:193-205`), and the
+> take is **not** stubbed: the RECALL arm in `run_advance.cpp` sets
+> `keys |= kKeyRuby` (`CampfireRecallEffect.java:39-53` → `ObtainKeyEffect`).
+> What remains S3 is only what the key is *for* (the Door / SpireHeart), which
+> §1 already puts out of scope. Net engine work for S2.13: **zero**.
+
 ## 5. Bit-exactness trap list — S2 additions
 
 Each becomes a named test, continuing stage-b-design §10:
@@ -487,13 +528,25 @@ Each becomes a named test, continuing stage-b-design §10:
    Frozen S2 decision: the sim pins the gate FALSE (a sub-13-minute reach
    of Act 3 is not a supported oracle scenario) and the campaign driver
    must record playtime at capture so a violated assumption is detectable,
-   not silent. Revisit only with a reproducer.
+   not silent. Revisit only with a reproducer. *Sharpened 2026-08-07
+   (S2.13): the pin is now carried **solely** by the playtime model gap. In
+   Act 3 the gate's other half (`id.equals("TheBeyond")`) is satisfied, so
+   this is a real behavioural deviation on a reachable state, not an act
+   exclusion — pinned by `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`
+   so that anyone who "fixes" the act gate alone fails loudly.*
 6. **Mind Bloom consumes `miscRng.randomLong()`** for its boss shuffle
    (MindBloom.java:66-80) — floor-scoped stream, event-order-sensitive.
 7. **`specialOneTimeEventList` is cross-act state** (§2.3): a draw in Act 1
    removes the row for Acts 2–3. The one-time pool is already public
    perfect-memory state (training-plan §1); the sim's membership bitsets
-   just extend their lifetime semantics across acts.
+   just extend their lifetime semantics across acts. *Completed 2026-08-07
+   (S2.13): the trap is only half stated above, and the missing half is the
+   one that bites. `eventList` and `shrineList` are CLEARED at :2576-2577
+   and REBUILT by the constructor at :291/:293, so they do the opposite —
+   **every shrine returns to the pool at every act**, and a sim that carried
+   all three bitsets would be wrong in Acts 2–3 in two independent ways
+   (wrong membership AND wrong depletion). Only the one-time pool is handed
+   over by identity.*
 8. **3 Darklings self-exclusion** (TheBeyond.java:131-134): the same key in
    both pools means the weak→strong exclusion can fire on an
    *identical-name* adjacency — order the registry rows so the stable sort
@@ -639,3 +692,19 @@ not weakening the bar. The S2 ledger carries this as its own task
   span is 15 rows + boss + chest = 17, and the crossing adds no floor. No
   mechanic changed; the doc previously stated one number where the source
   has two, which is what the deferred-obligations row existed to catch.
+- 2026-08-07 — **§4.5(b)'s Recall `UNVERIFIED` WITHDRAWN by S2.13**, and its
+  scoping corrected: `CampfireUI.java:94-96` carries no act test at all, so
+  the option is on screen at every rest in *every* act (Act 1 included), and
+  the engine has modelled it — grant included — since S1. Zero engine work;
+  the resolution note is inline at §4.5.
+- 2026-08-07 — **§2.3 amended by S2.13**, three corrections, all from source
+  re-read in full. (1) **Beggar's `gold >= 75` gate was omitted**
+  (AbstractDungeon.java:1970-1973); S2.02 had already flagged it when it
+  authored the registry row, and `getEvent`'s six cases are now listed in
+  full. (2) The shrine list's **per-act ORDER divergence** is now stated:
+  Exordium ends with Wheel of Change, TheCity/TheBeyond put it second, and
+  the engine separates bit meaning (act-independent) from draw position
+  (per-act). (3) A new bullet records that the crossing **rebuilds** the
+  event and shrine lists while carrying only the one-time pool — §5 trap 7
+  stated only the carried half. No frozen mechanic changed; all three are
+  the doc catching up to the Java.

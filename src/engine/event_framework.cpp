@@ -217,11 +217,24 @@ EventRoomResult event_room_roll(RunState& rs, bool leaving_shop) noexcept {
 
 // --- Pool membership ---------------------------------------------------------
 
-void init_event_pools(RunState& rs) noexcept {
+void reinit_act_event_pools(RunState& rs) noexcept {
+    // initializeEventList (AbstractDungeon.java:291) / initializeShrineList
+    // (:293), run by EVERY dungeon constructor after dungeonTransitionSetup
+    // cleared both lists (:2576-2577). Both are draw-free. Deliberately does
+    // NOT touch special_membership: that list is carried by reference across
+    // the crossing (CardCrawlGame.java:1102-1119) -- see the header.
+    const int act = static_cast<int>(rs.act);
     rs.event_membership =
-        static_cast<uint16_t>((1u << kEventListCount) - 1u);        // bits 0..10
+        static_cast<uint16_t>((1u << event_list_count(act)) - 1u);
     rs.shrine_membership =
         static_cast<uint8_t>((1u << kShrineListCount) - 1u);        // bits 0..5
+}
+
+void init_event_pools(RunState& rs) noexcept {
+    // run_begin only. The event + shrine half is the same code the crossing
+    // runs, delegated so the two cannot drift; the special half is the
+    // Exordium-only initializeSpecialOneTimeEventList (Exordium.java:54).
+    reinit_act_event_pools(rs);
     uint16_t special = static_cast<uint16_t>((1u << kSpecialListCount) - 1u);
     if (!note_for_yourself_available(rs.ascension)) {
         // No placeholder slot: the add itself is guarded
@@ -231,6 +244,28 @@ void init_event_pools(RunState& rs) noexcept {
         special = static_cast<uint16_t>(special & ~(1u << kNoteForYourselfBit));
     }
     rs.special_membership = special;
+}
+
+// --- The one-shot FIRED bitset ------------------------------------------------
+
+void event_flag_set(RunState& rs, uint16_t id) noexcept {
+    if (id >= 1u && id <= 31u) {
+        rs.event_flags |= 1u << (id - 1u);
+    } else if (id >= 32u && id <= 63u) {
+        rs.event_flags_hi |= 1u << (id - 33u);
+    }
+    // Anything else (0 == EventId::NONE, or a future id past 63) is a no-op
+    // rather than a UB shift. A 64th id needs a third word, not a wider shift.
+}
+
+bool event_flag_test(const RunState& rs, uint16_t id) noexcept {
+    if (id >= 1u && id <= 31u) {
+        return (rs.event_flags & (1u << (id - 1u))) != 0u;
+    }
+    if (id >= 32u && id <= 63u) {
+        return (rs.event_flags_hi & (1u << (id - 33u))) != 0u;
+    }
+    return false;
 }
 
 bool event_player_is_cursed(const RunState& rs) noexcept {
@@ -257,16 +292,34 @@ bool event_player_is_cursed(const RunState& rs) noexcept {
     return false;
 }
 
+int event_map_row(const RunState& rs) noexcept {
+    // run_cur_row's arithmetic (run_advance.hpp), spelled over RunState alone
+    // so build_event_pool needs no RunController: the 0-based row of the node
+    // being ARRIVED at is `floor - act_floor_base(act) - 1`, saturating at -1
+    // for the pre-first-pick sentinel. act_floor_base is (act-1) * 17 (S2.12,
+    // kActFloorSpan) -- restated here rather than included because
+    // run_advance.hpp includes this header, not the other way round. The two
+    // spellings are pinned equal across every act x floor by
+    // S213EventGates.EventMapRowAgreesWithRunCurRow, which is the control that
+    // stops them drifting and silently moving Colosseum's gate.
+    const int base = (static_cast<int>(rs.act) - 1) * 17;
+    const int row = static_cast<int>(rs.floor) - base - 1;
+    return row < -1 ? -1 : row;
+}
+
 int build_event_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
-    // AbstractDungeon.getEvent's tmp build (:1946-1982) over eventList in
-    // canonical order. floorNum here is rs.floor -- the new floor, already
-    // incremented before onPlayerEntry runs.
+    // AbstractDungeon.getEvent's tmp build (:1946-1982) over THE ACT'S
+    // eventList in add order. floorNum here is rs.floor -- the new floor,
+    // already incremented before onPlayerEntry runs.
+    const int act = static_cast<int>(rs.act);
+    const uint16_t first_id = event_list_first_id(act);
+    const int count = event_list_count(act);
     int n = 0;
-    for (int i = 0; i < kEventListCount; ++i) {
+    for (int i = 0; i < count; ++i) {
         if ((rs.event_membership & (1u << i)) == 0u) {
             continue;
         }
-        const uint16_t id = static_cast<uint16_t>(kEventListFirstId + i);
+        const uint16_t id = static_cast<uint16_t>(first_id + i);
         bool eligible = true;
         switch (static_cast<EventId>(id)) {
             case EventId::DEAD_ADVENTURER:  // floorNum <= 6 -> skip (:1950-1953)
@@ -276,10 +329,37 @@ int build_event_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
             case EventId::THE_CLERIC:       // gold < 35 -> skip (:1965-1968)
                 eligible = rs.gold >= 35;
                 break;
+            case EventId::THE_MOAI_HEAD:
+                // `if (!hasRelic("Golden Idol") && (float)currentHealth /
+                //     (float)maxHealth > 0.5f) continue;` (:1960-1963).
+                // Written as the Java writes it: a FLOAT divide compared
+                // against 0.5f, not hp*2 <= maxHp (trap 19). max_hp is never 0
+                // on a live run, but guard the divide anyway.
+                eligible = has_relic(rs, RelicId::GOLDEN_IDOL) ||
+                           rs.max_hp <= 0 ||
+                           static_cast<float>(rs.hp) /
+                                   static_cast<float>(rs.max_hp) <= 0.5f;
+                break;
+            case EventId::BEGGAR:           // gold < 75 -> skip (:1970-1973)
+                // Real, and s2-design §2.3 omitted it -- recorded by S2.02
+                // when the registry row was authored from source.
+                eligible = rs.gold >= 75;
+                break;
+            case EventId::COLOSSEUM:
+                // `if (currMapNode == null || currMapNode.y <= map.size() / 2)
+                //     continue;` (:1975-1978). map is the ArrayList of 15 ROWS,
+                // so map.size() / 2 == 7 by integer divide and the gate is
+                // row >= 8. currMapNode is assigned at :1783, BEFORE
+                // EventRoom.onPlayerEntry, so `y` is the ARRIVING node's row.
+                // The `== null` half is the pre-first-pick sentinel, which
+                // event_map_row returns as -1 and which fails the same test.
+                eligible = event_map_row(rs) > 7;
+                break;
             default:
-                // The Moai Head / Beggar / Colosseum cases (:1960-1979) guard
-                // act-2/3 list keys Exordium's list never holds; the other 8
-                // Act-1 rows fall through to the unconditional add (:1981).
+                // Every other row in every act's list falls through to the
+                // unconditional add (:1981). getEvent has exactly six cases and
+                // all six are written above; do not read this arm as "act-1
+                // only" -- it stopped being that when Acts 2-3 started drawing.
                 break;
         }
         if (!eligible) {
@@ -294,14 +374,21 @@ int build_event_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
 }
 
 int build_shrine_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
+    const int act = static_cast<int>(rs.act);
     int n = 0;
-    // tmp.addAll(shrineList) (:1884) -- unconditional, canonical order.
-    for (int i = 0; i < kShrineListCount; ++i) {
-        if ((rs.shrine_membership & (1u << i)) == 0u) {
+    // tmp.addAll(shrineList) (:1884) -- unconditional, IN THE ACT'S LIST ORDER.
+    // The iteration is over DRAW POSITIONS, and each position's bit index is
+    // derived from the id it holds; Act 1's table is the identity so this loop
+    // emits exactly what it emitted before S2.13. (Header: bit meaning is
+    // act-independent, draw position is not.)
+    for (int pos = 0; pos < kShrineListCount; ++pos) {
+        const uint16_t id = shrine_draw_order_id(act, pos);
+        const int bit = static_cast<int>(id - kShrineListFirstId);
+        if ((rs.shrine_membership & (1u << bit)) == 0u) {
             continue;
         }
         if (n < cap) {
-            out[n] = static_cast<uint16_t>(kShrineListFirstId + i);
+            out[n] = id;
         }
         ++n;
     }
@@ -340,9 +427,24 @@ int build_shrine_pool(const RunState& rs, uint16_t* out, int cap) noexcept {
                 eligible = rs.gold >= 50;
                 break;
             case EventId::SECRET_PORTAL:          // :1929-1933
-                // playtime >= 800s && TheBeyond. Wall-clock playtime is not
-                // modelled; the act gate alone already excludes it from S1,
-                // so this stays false until the act-3 owner models playtime.
+                // `if (!(CardCrawlGame.playtime >= 800.0f) ||
+                //      !id.equals("TheBeyond")) continue;`
+                //
+                // PINNED FALSE IN EVERY ACT, and from S2.13 on the ACT HALF IS
+                // NO LONGER WHAT DOES THE WORK: in Act 3 `id.equals("TheBeyond")`
+                // is satisfied, so the `false` is carried SOLELY by the
+                // unmodelled wall-clock playtime. CardCrawlGame.playtime is
+                // real-time seconds since the run started (zeroed at
+                // AbstractDungeon.java:2600 in the Exordium floorNum <= 1
+                // block), and this engine has no clock at all.
+                //
+                // That makes this a REAL BEHAVIOURAL DEVIATION, not an act
+                // exclusion: any Act-3 run past 800 s of wall clock offers
+                // SecretPortal in the game and never here. It is deliberate --
+                // modelling a clock would make the simulator nondeterministic
+                // in (seed, actions), which is the one property everything
+                // else rests on. Whoever ever models playtime must delete this
+                // pin; see the deferred-obligations row.
                 eligible = false;
                 break;
             default:
@@ -396,15 +498,23 @@ namespace {
 // through to getShrine (:1983-1985, a further draw on the same throwaway
 // stream); otherwise one index draw + eventList removal (:1987).
 [[nodiscard]] uint16_t pick_event(RunState& rs, RngStream& rng) noexcept {
-    uint16_t tmp[kEventListCount];
-    const int n = build_event_pool(rs, tmp, kEventListCount);
+    uint16_t tmp[kEventListMaxCount];
+    const int n = build_event_pool(rs, tmp, kEventListMaxCount);
     if (n == 0) {
+        // The 3-draw path. Ordinary rather than exotic in Act 3, whose event
+        // list is only 7 entries across ~15 map rows -- and Moai Head's
+        // idol/HP gate can empty the filtered list earlier still. The extra
+        // draw is invisible in rs.event_rng (throwaway stream) but it changes
+        // WHICH id is selected, so it is pinned by test.
         return pick_shrine(rs, rng);
     }
     const int idx = random(rng, n - 1);
     const uint16_t id = tmp[idx];
+    // bit == id - the ACT's first id: each act's event ids are dense and in
+    // add order, so position and bit coincide (unlike shrines).
     rs.event_membership = static_cast<uint16_t>(
-        rs.event_membership & ~(1u << (id - kEventListFirstId)));
+        rs.event_membership &
+        ~(1u << (id - event_list_first_id(static_cast<int>(rs.act)))));
     return id;
 }
 
@@ -438,10 +548,11 @@ uint16_t generate_event(RunState& rs) noexcept {
     }
 
     if (id != 0) {
-        // The engine-side "fired" record (bit id-1; EventId 1..31 fits u32),
-        // mirroring the game's saveFileLastEventChoice write at
-        // EventHelper.getEvent (EventHelper.java:228).
-        rs.event_flags |= 1u << (id - 1u);
+        // The engine-side "fired" record, mirroring the game's
+        // saveFileLastEventChoice write at EventHelper.getEvent
+        // (EventHelper.java:228). Ids 1..31 go to event_flags, 32..63 to
+        // event_flags_hi -- routed by the accessor, never open-coded.
+        event_flag_set(rs, id);
     }
     return id;
 }

@@ -248,23 +248,63 @@ private:
     return eid;
 }
 
+// Set the FIRED bit for every set bit of `fired_bits` in a pool block whose
+// bit 0 is `first_id`. The FIRED bitset spans TWO RunState words --
+// `event_flags` (ids 1..31, bit id-1) and `event_flags_hi` (ids 32..63, bit
+// id-33) -- because S2.02's Act-2/3 ids do not fit one uint32_t and neither
+// RunState nor PublicView could widen the first word in place (run_state.hpp's
+// carve note). Routed one id at a time through the engine accessor so the split
+// is stated in exactly one place; the block shift this replaced,
+// `<< (first_id - 1)`, would be UB at TheCity's first_id of 32.
+void set_event_flag_block(eng::RunState& rs, uint16_t first_id, int count,
+                          uint32_t fired_bits) {
+    for (int bit = 0; bit < count; ++bit) {
+        if ((fired_bits & (1u << bit)) != 0u) {
+            eng::event_flag_set(rs, static_cast<uint16_t>(first_id + bit));
+        }
+    }
+}
+
 // Translate one of the three remaining-event arrays into its RunState
-// membership bitset. The game initializes each list in canonical Java order
-// and only ever removes elements, so every live dump must be a strictly
-// increasing subsequence of its registry-id block. Validating that property is
-// load-bearing: a bitset cannot represent a duplicate or an order mutation,
-// and silently accepting either would make later generate_event draws use a
-// different index order from the captured state.
+// membership bitset. The game initializes each list in the act's canonical
+// Java order and only ever removes elements, so every live dump must be a
+// subsequence of that order. Validating that property is load-bearing: a
+// bitset cannot represent a duplicate or an order mutation, and silently
+// accepting either would make later generate_event draws use a different index
+// order from the captured state.
+//
+// TWO ORDERS, NOT ONE (S2.13). The membership BIT is always `id - first_id`
+// (registry order, act-independent -- event_framework.hpp explains why the
+// bitset must stay byte-comparable across acts). The LIST ORDER an act's dump
+// arrives in is a separate question, and for shrines it diverges: Exordium ends
+// with Wheel of Change, TheCity and TheBeyond put it second
+// (Exordium.java:238-246 vs TheCity.java:210-218 == TheBeyond.java:198-206). So
+// the subsequence check runs against a POSITION table, and `order` supplies it;
+// a null `order` means "positions are ids", the dense-and-in-add-order case
+// that holds for every act's event list and for the special list.
 [[nodiscard]] uint32_t parse_event_membership(const json& arr,
                                               const std::string& path,
                                               Ctx& ctx, uint16_t first_id,
                                               int count,
-                                              const char* pool_name) {
+                                              const char* pool_name,
+                                              const uint16_t* order = nullptr) {
     if (!arr.is_array()) {
         throw TranslateError(loc(ctx) + " expected array at " + path);
     }
+    // position_of[bit] == where that bit's id sits in the act's list order.
+    const auto position_of = [&](int bit) {
+        if (order == nullptr) {
+            return bit;
+        }
+        for (int p = 0; p < count; ++p) {
+            if (order[p] == static_cast<uint16_t>(first_id + bit)) {
+                return p;
+            }
+        }
+        return -1;  // unreachable: the order table is a permutation of the block
+    };
     uint32_t bits = 0;
-    int previous_bit = -1;
+    int previous_position = -1;
     for (std::size_t i = 0; i < arr.size(); ++i) {
         const std::string at = path + "[" + std::to_string(i) + "]";
         const reg::EventId eid =
@@ -283,14 +323,15 @@ private:
                 " does not belong to oracle." + pool_name);
         }
         const int bit = static_cast<int>(id - first_id);
-        if (bit <= previous_bit) {
+        const int position = position_of(bit);
+        if (position <= previous_position) {
             throw TranslateError(
                 loc(ctx) + " " + path +
                 " is not a canonical-order subsequence (duplicate or "
                 "out-of-order event at index " + std::to_string(i) + ")");
         }
         bits |= 1u << bit;
-        previous_bit = bit;
+        previous_position = position;
     }
     return bits;
 }
@@ -703,27 +744,58 @@ struct OracleAnchors {
 
     // -- B4.10 un-deferral: remaining event/shrine/special lists (§2.5 #7).
     //    B4.3 added the storage; events.yaml now supplies the complete
-    //    fail-loud game_id join and pins ids in the three canonical Java list
+    //    fail-loud game_id join and pins ids in the canonical Java list
     //    orders. Each captured list is a removal-only subsequence, so mapping
-    //    validates that order before collapsing it to a bitset. --
+    //    validates that order before collapsing it to a bitset.
+    //
+    //    S2.13 made all three ACT-AWARE. `a.act` is this record's own oracle
+    //    anchor (parsed at the top of this function), so the widths and orders
+    //    come from the act the dump was taken in:
+    //      eventList  Exordium 1..11 / TheCity 32..44 / TheBeyond 45..51,
+    //                 each dense and in add order, so bit == position.
+    //      shrineList the same six ids in every act but in TWO DIFFERENT
+    //                 ORDERS -- hence the explicit order table, without which
+    //                 an Act-2 dump's `[Match and Keep!, Wheel of Change, ...]`
+    //                 would be rejected as "not a canonical-order subsequence".
+    //      specials   act-independent (never rebuilt; see below).
+    //
+    //    THE FIRED-FLAG DERIVATION IS ACT-LOCAL, AND FROM ACT 2 ON THAT IS A
+    //    KNOWN GAP, NOT A BUG HERE. It reconstructs "fired" as "initially in
+    //    the list and now absent", which is complete only while the list is
+    //    never refilled. dungeonTransitionSetup CLEARS eventList and shrineList
+    //    (AbstractDungeon.java:2576-2577) and the new dungeon's constructor
+    //    rebuilds them (:291, :293), so an Act-2 dump cannot witness an Act-1
+    //    event or shrine fire at all, while the simulator's `event_flags`
+    //    rightly still carries it. The one-time specials are the exception --
+    //    they are handed over by identity (CardCrawlGame.java:1102-1119) and
+    //    never rebuilt, so their half of the derivation stays complete for the
+    //    whole run. Closing the other half needs cross-record accumulation over
+    //    a capture that starts at floor 1; that is the capture campaign's call,
+    //    and it is a live deferred-obligations row (owner S2.43). --
+    const int rec_act = static_cast<int>(a.act);
     if (const json* events = fr.take("eventList")) {
+        const uint16_t first = eng::event_list_first_id(rec_act);
+        const int count = eng::event_list_count(rec_act);
         rs.event_membership = static_cast<uint16_t>(parse_event_membership(
-            *events, path + ".eventList", ctx, eng::kEventListFirstId,
-            eng::kEventListCount, "eventList"));
-        const uint32_t initial = (1u << eng::kEventListCount) - 1u;
-        rs.event_flags |=
-            (initial & ~static_cast<uint32_t>(rs.event_membership))
-            << (eng::kEventListFirstId - 1u);
+            *events, path + ".eventList", ctx, first, count, "eventList"));
+        const uint32_t initial = (1u << count) - 1u;
+        set_event_flag_block(rs, first, count,
+                             initial & ~static_cast<uint32_t>(rs.event_membership));
         fr.mapped();
     }
     if (const json* shrines = fr.take("shrineList")) {
+        // Position -> id for this act's list (event_framework.hpp); the BIT is
+        // still `id - kShrineListFirstId` in every act, which is why the
+        // bitset stays byte-comparable across a crossing.
+        const uint16_t* order = rec_act == 1
+                                    ? eng::kShrineDrawOrderExordium
+                                    : eng::kShrineDrawOrderCityBeyond;
         rs.shrine_membership = static_cast<uint8_t>(parse_event_membership(
             *shrines, path + ".shrineList", ctx, eng::kShrineListFirstId,
-            eng::kShrineListCount, "shrineList"));
+            eng::kShrineListCount, "shrineList", order));
         const uint32_t initial = (1u << eng::kShrineListCount) - 1u;
-        rs.event_flags |=
-            (initial & ~static_cast<uint32_t>(rs.shrine_membership))
-            << (eng::kShrineListFirstId - 1u);
+        set_event_flag_block(rs, eng::kShrineListFirstId, eng::kShrineListCount,
+                             initial & ~static_cast<uint32_t>(rs.shrine_membership));
         fr.mapped();
     }
     if (const json* specials = fr.take("specialOneTimeEventList")) {
@@ -735,9 +807,9 @@ struct OracleAnchors {
         if (!eng::note_for_yourself_available(rs.ascension)) {
             initial &= ~(1u << eng::kNoteForYourselfBit);
         }
-        rs.event_flags |=
-            (initial & ~static_cast<uint32_t>(rs.special_membership))
-            << (eng::kSpecialListFirstId - 1u);
+        set_event_flag_block(rs, eng::kSpecialListFirstId,
+                             eng::kSpecialListCount,
+                             initial & ~static_cast<uint32_t>(rs.special_membership));
         fr.mapped();
     }
     // B5.2 encounter-list oracle. These arrays live in RunController rather
