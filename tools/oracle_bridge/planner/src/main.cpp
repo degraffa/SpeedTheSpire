@@ -25,6 +25,7 @@
 
 #include "sts/engine/seed_string.hpp"
 #include "sts/planner/seed_scan.hpp"
+#include "sts/registry/encounter_table.hpp"
 #include "sts/registry/game_ids.hpp"
 
 namespace {
@@ -62,13 +63,26 @@ void usage() {
         "                            hoard_gold, always_event  (default: random)\n"
         "  --policy-seeds <n,n,...>  default: 0\n"
         "  --ascension <n>           default: 20\n"
-        "  --max-actions <n>         per run; default 4000\n"
+        "  --max-actions <n>         per run; default 12000 (S2.42 raised it\n"
+        "                            from the ACT-1-era 4000 -- a three-act run\n"
+        "                            is ~3x the actions and a truncated deep run\n"
+        "                            ends as ACTION_CAP, which reads as a policy\n"
+        "                            failure that is really the tool's)\n"
         "  --revisit-limit <n>       livelock cut-off; default 64\n"
         "\n"
         "OUTPUT\n"
         "  --out <path>              results file (default: stdout)\n"
         "  --format tsv|jsonl        default: tsv\n"
         "  --seed-list <path>        qualifying seeds, one per line, '#' header\n"
+        "  --cohort-list <path>      qualifying (seed, policy, policy_seed)\n"
+        "                            TRIPLES, TSV, '#' header. This is the\n"
+        "                            DEPTH artifact: a deep line is fragile, so\n"
+        "                            what qualifies is the exact combination,\n"
+        "                            not the seed. NOTE the policy column names\n"
+        "                            a SIM policy (fuzz::PolicyKind), which the\n"
+        "                            oracle campaign cannot literally run -- it\n"
+        "                            is provenance for the reachability claim.\n"
+        "                            See the README.\n"
         "  --summary <path>          aggregate report (default: stderr)\n"
         "  --progress                per-1000-row progress to stderr\n"
         "\n"
@@ -76,8 +90,22 @@ void usage() {
         "  --need-event <name>       repeatable; enum symbol (MATCH_AND_KEEP) or\n"
         "                            game id (\"Match and Keep!\"), case-insensitive\n"
         "  --need-treasure           a treasure room was entered\n"
-        "  --need-boss               the boss room was entered\n"
+        "  --need-boss               the boss room was entered (any act)\n"
         "  --min-floor <n>           max floor reached >= n\n"
+        "  --min-act <n>             highest act reached >= n\n"
+        "  --need-boss-act <n>       the act-<n> BOSS ROOM was entered\n"
+        "  --need-boss-kill-act <n>  the act-<n> boss was KILLED. Acts 1-2 are\n"
+        "                            witnessed by the post-boss chest (entered\n"
+        "                            only through the boss reward's proceed);\n"
+        "                            act 3 opens no chest, so its kill IS the\n"
+        "                            victory -- --need-boss-kill-act 3 and\n"
+        "                            --need-victory are the same clause.\n"
+        "  --need-victory            the run was won (run_is_victory)\n"
+        "  --need-boss-id <encounter game id>  repeatable; hits when ANY listed\n"
+        "                            boss encounter was this run's boss in some\n"
+        "                            act. This is how a cohort covers every\n"
+        "                            registry BOSS row / >= 2 distinct boss\n"
+        "                            identities (design 6 G2-3).\n"
         "  --need-relic-offered <game id>   repeatable; hits when ANY listed\n"
         "                            relic was OFFERED (a RELIC reward row or a\n"
         "                            merchant shelf slot). Relic clauses are\n"
@@ -97,9 +125,12 @@ void usage() {
         "  --track-relic <game id>   repeatable; observe a relic (adds the\n"
         "                            relic_obs column) without filtering on it\n"
         "  --min-hit-count <k>       a SEED qualifies when >= k of its scanned\n"
-        "                            combinations hit; default 1. Use >= 2: the\n"
-        "                            capture runs a different policy, so a target\n"
-        "                            found by one combination is not evidence.\n"
+        "                            combinations hit; default 1. Use >= 2 for a\n"
+        "                            CONTENT scan: the capture runs a different\n"
+        "                            policy, so a target found by one combination\n"
+        "                            is not evidence. This INVERTS for a DEPTH\n"
+        "                            cohort (--cohort-list), where the capture\n"
+        "                            replays the exact triple and 1 is correct.\n"
         "\n"
         "OTHER\n"
         "  --verify-determinism      scan every case twice and require the two\n"
@@ -240,6 +271,18 @@ const char* need_value(int argc, char** argv, int& i) {
     return argv[++i];
 }
 
+// An act number for a depth clause. Rejected out of range rather than clamped:
+// `--need-boss-kill-act 4` is a request the scan cannot answer, and silently
+// answering a different question is how a cohort ends up mislabelled.
+uint8_t parse_act(const char* flag, const char* value) {
+    const long v = std::strtol(value, nullptr, 10);
+    if (v < 1 || v > sts::planner::kMaxActs) {
+        die(std::string(flag) + ": act must be 1.." +
+            std::to_string(sts::planner::kMaxActs) + ", got '" + value + "'");
+    }
+    return static_cast<uint8_t>(v);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -252,6 +295,7 @@ int main(int argc, char** argv) {
     Format format = Format::TSV;
     std::string out_path;
     std::string seed_list_path;
+    std::string cohort_list_path;
     std::string summary_path;
     bool progress = false;
     bool verify_determinism = false;
@@ -352,6 +396,29 @@ int main(int argc, char** argv) {
             filter.need_treasure = true;
         } else if (a == "--need-boss") {
             filter.need_boss = true;
+        } else if (a == "--cohort-list") {
+            cohort_list_path = need_value(argc, argv, i);
+        } else if (a == "--need-victory") {
+            filter.need_victory = true;
+        } else if (a == "--min-act") {
+            filter.min_act = static_cast<uint32_t>(
+                std::strtoul(need_value(argc, argv, i), nullptr, 10));
+        } else if (a == "--need-boss-act") {
+            filter.need_boss_reached_act = parse_act("--need-boss-act",
+                                                     need_value(argc, argv, i));
+        } else if (a == "--need-boss-kill-act") {
+            filter.need_boss_killed_act = parse_act("--need-boss-kill-act",
+                                                    need_value(argc, argv, i));
+        } else if (a == "--need-boss-id") {
+            const char* name = need_value(argc, argv, i);
+            const sts::registry::EncounterDef* enc =
+                sts::registry::encounter_by_game_id(name);
+            if (enc == nullptr) {
+                die(std::string("--need-boss-id: unknown encounter game id '") +
+                    name + "' (names are the exact registry/encounters.yaml "
+                    "game_ids, e.g. \"Hexaghost\")");
+            }
+            filter.need_boss_ids.push_back(static_cast<uint16_t>(enc->id));
         } else if (a == "--min-floor") {
             filter.min_floor = static_cast<uint32_t>(
                 std::strtoul(need_value(argc, argv, i), nullptr, 10));
@@ -371,7 +438,18 @@ int main(int argc, char** argv) {
     if (policies.empty()) policies.push_back(sts::fuzz::PolicyKind::RANDOM);
     if (policy_seeds.empty()) policy_seeds.push_back(0);
     if (filter.min_hit_count == 0) filter.min_hit_count = 1;
-    if (seed_list_path.empty() && !filter.empty()) {
+    if (!cohort_list_path.empty() && filter.min_hit_count > 1) {
+        // Not fatal, but it is nearly always a mistake: --min-hit-count is a
+        // SEED-level robustness rule for content scans, and a cohort list is a
+        // per-TRIPLE artifact whose whole point is that the capture replays the
+        // exact combination. Raising it here throws deep triples away for a
+        // property their consumer does not need.
+        std::fputs("seed_scan: note: --cohort-list with --min-hit-count > 1 "
+                   "discards triples on a SEED-level rule the cohort consumer "
+                   "does not use; see the README's depth-cohort section.\n",
+                   stderr);
+    }
+    if (seed_list_path.empty() && cohort_list_path.empty() && !filter.empty()) {
         std::fputs("seed_scan: note: a filter was given but no --seed-list; the "
                    "qualifying seeds will only be counted.\n",
                    stderr);
@@ -393,6 +471,9 @@ int main(int argc, char** argv) {
     // Insertion order is the scan order, so the seed list comes out in the same
     // order the seeds were given rather than sorted by hash.
     std::vector<std::string> qualifying;
+    // Every ROW that hits, kept as a triple. Deliberately independent of the
+    // seed-level `qualifying` rule -- see the --cohort-list note above.
+    std::vector<sts::planner::CohortTriple> cohort;
     uint64_t rows_done = 0;
     uint64_t determinism_mismatches = 0;
     const uint64_t total_rows =
@@ -432,6 +513,10 @@ int main(int argc, char** argv) {
                 }
                 *out << text << '\n';
                 summary.add(row);
+                if (!cohort_list_path.empty() &&
+                    sts::planner::row_hits(row, filter)) {
+                    cohort.push_back(sts::planner::cohort_triple(row));
+                }
                 seed_rows.push_back(row);
                 ++rows_done;
                 if (progress && rows_done % 1000 == 0) {
@@ -492,9 +577,26 @@ int main(int argc, char** argv) {
             header += " shop_after_relic=\"" +
                       std::string(sts::registry::relic_game_id(id)) + "\"";
         }
+        for (uint16_t id : filter.need_boss_ids) {
+            header += " boss_id=\"" +
+                      std::string(sts::planner::encounter_game_id_from_id(id)) +
+                      "\"";
+        }
         if (filter.need_treasure) header += " treasure";
         if (filter.need_boss) header += " boss";
+        if (filter.need_victory) header += " victory";
         if (filter.min_floor) header += " min_floor=" + std::to_string(filter.min_floor);
+        if (filter.min_act) header += " min_act=" + std::to_string(filter.min_act);
+        if (filter.need_boss_reached_act) {
+            header += " boss_act=" +
+                      std::to_string(static_cast<unsigned>(
+                          filter.need_boss_reached_act));
+        }
+        if (filter.need_boss_killed_act) {
+            header += " boss_kill_act=" +
+                      std::to_string(static_cast<unsigned>(
+                          filter.need_boss_killed_act));
+        }
         header += " min_hit_count=" + std::to_string(filter.min_hit_count) + "\n";
         header += "# qualifying=" + std::to_string(qualifying.size()) + " of " +
                   std::to_string(seeds.size()) + " seeds\n";
@@ -506,6 +608,42 @@ int main(int argc, char** argv) {
         sl << header;
         for (const std::string& s : qualifying) sl << s << '\n';
         sl.flush();
+    }
+
+    // --- cohort list (triples) ----------------------------------------------
+
+    std::string cohort_header;
+    if (!cohort_list_path.empty()) {
+        // Distinct seeds among the qualifying triples: the number a scheduler
+        // cares about after the triple count, because N triples over one seed
+        // is one cohort member wearing N labels.
+        std::vector<std::string> distinct;
+        for (const auto& t : cohort) {
+            bool seen = false;
+            for (const std::string& s : distinct) {
+                if (s == t.seed) { seen = true; break; }
+            }
+            if (!seen) distinct.push_back(t.seed);
+        }
+        cohort_header = "# seed_scan cohort list (seed, policy, policy_seed)\n";
+        cohort_header +=
+            "# the policy column names a SIM policy (fuzz::PolicyKind); the\n"
+            "# oracle campaign runs its OWN policy family and cannot execute\n"
+            "# this one. The triple asserts that a scripted line of this shape\n"
+            "# reaches the target on this seed -- it is provenance for a\n"
+            "# reachability claim, not an instruction. See the README.\n";
+        cohort_header += header.substr(header.find('\n') + 1);
+        cohort_header += "# qualifying=" + std::to_string(cohort.size()) +
+                         " triples over " + std::to_string(distinct.size()) +
+                         " distinct seeds\n";
+        std::ofstream cl(cohort_list_path);
+        if (!cl) die("cannot write --cohort-list '" + cohort_list_path + "'");
+        cl << cohort_header;
+        cl << sts::planner::cohort_tsv_header() << '\n';
+        for (const auto& t : cohort) {
+            cl << sts::planner::cohort_triple_to_tsv(t) << '\n';
+        }
+        cl.flush();
     }
 
     // --- summary -------------------------------------------------------------
@@ -520,6 +658,7 @@ int main(int argc, char** argv) {
         report += buf;
     }
     report += header;
+    if (!cohort_header.empty()) report += cohort_header;
     if (verify_determinism) {
         report += "determinism_mismatches=" + std::to_string(determinism_mismatches) +
                   "\n";

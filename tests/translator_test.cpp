@@ -626,6 +626,90 @@ std::string with_event_screen(const std::string& line,
     return out;
 }
 
+std::string with_boss_reward_screen(const std::string& line,
+                                    const std::string& screen_state_json) {
+    const std::string anchor = "\"screen_type\":\"NONE\"";
+    std::string out = line;
+    const auto pos = out.find(anchor);
+    EXPECT_NE(pos, std::string::npos);
+    out.replace(pos, anchor.size(),
+                "\"screen_type\":\"BOSS_REWARD\",\"screen_state\":" +
+                    screen_state_json);
+    return out;
+}
+
+// --- S2.42: BOSS_REWARD.screen_state.relics, promoted I -> deferred ----------
+//
+// PROTOCOL.md 3.8 dispositioned this `I (S2 scope)` on the grounds that the run
+// terminated at the act-1 boss combat reward, before the chest. Capture driver
+// b1.7.0 plays through the chest, and an `I` field is never diffed -- so design
+// 6's S2-G2 item 2 (a ZERO-DIFF boss-relic pick) was unachievable while the row
+// said `I`. The STORAGE is S2.43's (see the comment at the translation site);
+// what S2.42 owns is the classification, and these two tests are what stop it
+// silently reverting.
+
+TEST(Translator, BossRewardRelicsAreDeferredNotIgnored) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+
+    const tr::TranslatedRun baseline = tr::translate_lines(
+        {lines[0], lines[1]}, "boss-reward-baseline");
+
+    // The control is a BOSS_REWARD screen with NO `relics` key, so the only
+    // thing between it and the case below is the key itself -- not the
+    // `screen_state` container, and not parse_relic's own per-relic accounting
+    // (each relic object ignores its localized `name`, so a POPULATED list
+    // moves `ignored` for a reason that has nothing to do with this row).
+    const tr::TranslatedRun no_key = tr::translate_lines(
+        {lines[0], with_boss_reward_screen(lines[1], "{}")},
+        "boss-reward-nokey");
+    const tr::TranslatedRun empty_list = tr::translate_lines(
+        {lines[0], with_boss_reward_screen(lines[1], "{\"relics\":[]}")},
+        "boss-reward-empty");
+
+    EXPECT_EQ(empty_list.stats.deferred, no_key.stats.deferred + 1u)
+        << "the `relics` key must count as a known S field awaiting storage "
+           "(S2.43) -- exactly one deferred key";
+    EXPECT_EQ(empty_list.stats.ignored, no_key.stats.ignored)
+        << "the `relics` key must NOT be ignored-with-reason: an `I` field is "
+           "never diffed, which is what made S2-G2 item 2 unachievable";
+    EXPECT_GE(no_key.stats.deferred, baseline.stats.deferred)
+        << "sanity: the tampered screen adds keys, never removes them";
+
+    // A populated list joins every offer, so the deferred count does not grow
+    // further with the list length -- one key, one deferral.
+    const tr::TranslatedRun populated = tr::translate_lines(
+        {lines[0], with_boss_reward_screen(
+                       lines[1],
+                       "{\"relics\":[{\"id\":\"Astrolabe\","
+                       "\"name\":\"Astrolabe\",\"counter\":-1},"
+                       "{\"id\":\"Sozu\",\"name\":\"Sozu\",\"counter\":-1},"
+                       "{\"id\":\"Runic Dome\",\"name\":\"Runic Dome\","
+                       "\"counter\":-1}]}")},
+        "boss-reward");
+    EXPECT_EQ(populated.stats.deferred, empty_list.stats.deferred);
+}
+
+TEST(Translator, BossRewardRelicsStillJoinTheRegistryAndFailLoud) {
+    // The half that already worked and must keep working: an unknown boss relic
+    // on this screen is schema drift, not a shrug -- so the gap S2.43 inherits
+    // is STORAGE only, never validation.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string tampered = with_boss_reward_screen(
+        lines[1],
+        "{\"relics\":[{\"id\":\"TotallyFakeBossRelic\","
+        "\"name\":\"TotallyFakeBossRelic\",\"counter\":-1}]}");
+    try {
+        (void)tr::translate_lines({lines[0], tampered}, "boss-reward-bogus");
+        FAIL() << "expected TranslateError for an unknown boss relic id";
+    } catch (const tr::TranslateError& e) {
+        EXPECT_NE(std::string(e.what()).find("TotallyFakeBossRelic"),
+                  std::string::npos)
+            << e.what();
+    }
+}
+
 TEST(Translator, EventScreenStateValidatesKnownIdsAndOptionTypes) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 2u);

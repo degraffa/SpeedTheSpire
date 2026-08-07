@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import glob
+import hashlib
 import io
 import json
 import os
@@ -1708,16 +1709,21 @@ class StrictCampaignValidationTest(unittest.TestCase):
                 "room_type": "MonsterRoomBoss",
                 "choice_list": ["gold"],
             })
-            outcome, actions = driver._claim_boss_reward(
+            # b1.7.0: the routine claims the row (`choose 0`) and then emits the
+            # `proceed` that opens the boss chest, handing control back to the
+            # main loop rather than terminating. So it costs TWO actions and
+            # reports no stop, and the TERMINAL record is the caller's.
+            state, actions, stop = driver._claim_boss_reward(
                 logger, timing, first, SEED, 0)
+            self.assertIsNone(stop)
+            self.assertEqual(2, actions)
+            logger.terminal("death", state.get("game_state") or {}, actions)
             logger.close()
             timing.close()
-            self.assertEqual(("act1_boss_reward", 1),
-                             (outcome, actions))
 
             done = _done()
             done.update({
-                "outcome": outcome,
+                "outcome": "death",
                 "actions": actions,
             })
             progress = _progress(campaign_id, done=[done])
@@ -3643,6 +3649,471 @@ class ExternalPolicyHookTest(unittest.TestCase):
                      "unit-test-launch-token"}):
                 driver2.run_seed(SEED, 1)
             self.assertFalse(driver2.last_run_boss_fight)
+
+
+class ActProfileTest(unittest.TestCase):
+    """b1.7.0 (S2.42): the per-act constant overlays.
+
+    Three properties, and the first is the one everything else rests on -- if
+    Act 1 is not the module constants, every measured b1.6.0 number silently
+    stops describing the policy that produced it.
+    """
+
+    def setUp(self):
+        self.table = greedy_policy.load_side_table(_SIDE_TABLE)
+        greedy_policy.CONFIG_PINNED.clear()
+
+    def tearDown(self):
+        greedy_policy.CONFIG_PINNED.clear()
+
+    def test_act1_profile_is_exactly_the_module_constants(self):
+        self.assertNotIn(1, greedy_policy.ACT_PROFILES,
+                         "an act-1 overlay would make the TE.1 evidence "
+                         "unreproducible: act 1 must BE the module constants")
+        overlaid = {name for overlay in greedy_policy.ACT_PROFILES.values()
+                    for name in overlay}
+        self.assertTrue(overlaid, "the profiles must overlay something")
+        for name in sorted(overlaid):
+            for state in ({"game_state": {"act": 1}}, {"game_state": {}}, {}):
+                self.assertEqual(
+                    getattr(greedy_policy, name),
+                    greedy_policy._const(name, state),
+                    f"{name} moved in act 1 (or in an act-less dump)")
+
+    def test_every_profiled_name_is_a_real_numeric_constant(self):
+        """A typo'd overlay key would be a silently dead tuning."""
+        for act, overlay in greedy_policy.ACT_PROFILES.items():
+            self.assertIn(act, (2, 3))
+            for name, value in overlay.items():
+                current = getattr(greedy_policy, name, None)
+                self.assertIsInstance(
+                    current, (int, float),
+                    f"ACT_PROFILES[{act}][{name!r}] names no numeric constant")
+                self.assertNotIsInstance(current, bool)
+                self.assertIsInstance(value, (int, float))
+                self.assertNotIsInstance(value, bool)
+
+    def test_act_of_defaults_to_one_and_ignores_junk(self):
+        self.assertEqual(1, greedy_policy.act_of({}))
+        self.assertEqual(1, greedy_policy.act_of({"game_state": {}}))
+        self.assertEqual(1, greedy_policy.act_of(
+            {"game_state": {"act": None}}))
+        self.assertEqual(1, greedy_policy.act_of(
+            {"game_state": {"act": True}}), "bool is not an act")
+        self.assertEqual(3, greedy_policy.act_of({"game_state": {"act": 3}}))
+
+    def test_the_deck_gate_widens_by_act(self):
+        cards = [{"id": "Heavy Blade", "type": "ATTACK", "upgrades": 0}]
+        # A deck that is CLOSED in act 1 (10 attacks) and OPEN in act 2.
+        deck = _deck(10, 4)
+        for act, expected in ((1, "skip"), (2, "choose 0"), (3, "choose 0")):
+            state = _screen("CARD_REWARD", ["heavy blade"],
+                            {"skip_available": True, "cards": cards},
+                            available=("choose", "skip"), deck=deck, act=act)
+            self.assertEqual(expected, _pick(state, self.table),
+                             f"act {act}")
+
+    def test_the_two_screens_can_never_disagree_in_any_act(self):
+        """R1's anti-2-cycle invariant, re-swept per act.
+
+        The act is a property of the same dump on both screens, so widening the
+        thresholds by act cannot separate the two decisions -- but that is an
+        argument, and this is the check.
+        """
+        cards = [{"id": "Anger", "type": "ATTACK", "upgrades": 0},
+                 {"id": "Impervious", "type": "SKILL", "upgrades": 0}]
+        for act in (1, 2, 3):
+            seen = set()
+            for attacks in range(0, 18):
+                for others in range(0, 20):
+                    deck = _deck(attacks, others) if attacks or others else None
+                    reward = _screen(
+                        "COMBAT_REWARD", ["gold", "card"],
+                        {"rewards": [{"reward_type": "GOLD", "gold": 30},
+                                     {"reward_type": "CARD"}]},
+                        available=("choose", "proceed"), deck=deck, act=act)
+                    screen = _screen(
+                        "CARD_REWARD", ["anger", "impervious"],
+                        {"skip_available": True, "cards": cards},
+                        available=("choose", "skip"), deck=deck, act=act)
+                    opens = (greedy_policy.score_action("choose 1", reward,
+                                                       self.table)
+                             > greedy_policy.score_action("proceed", reward,
+                                                          self.table))
+                    takes = (greedy_policy.score_action("choose 0", screen,
+                                                        self.table)
+                             > greedy_policy.score_action("skip", screen,
+                                                          self.table))
+                    self.assertEqual(
+                        opens, takes,
+                        f"act {act}, deck ({attacks} attack / {others} "
+                        f"other): opened={opens} but took={takes}")
+                    seen.add(opens)
+            self.assertEqual({True, False}, seen,
+                             f"act {act}: the sweep must cover both sides")
+
+    # -- A1: elite appetite ------------------------------------------------
+
+    @staticmethod
+    def _map(act, hp, max_hp=80):
+        return _screen(
+            "MAP", ["node", "node"],
+            {"next_nodes": [{"symbol": "M"}, {"symbol": "E"}]},
+            available=("choose",), act=act,
+            current_hp=hp, max_hp=max_hp)
+
+    def test_healthy_act2_and_act3_prefer_the_elite_over_a_normal_fight(self):
+        for act in (2, 3):
+            state = self._map(act, hp=80)
+            self.assertEqual("choose 1", _pick(state, self.table),
+                             f"act {act}: a healthy run should want the elite")
+
+    def test_act1_still_avoids_the_elite(self):
+        self.assertEqual("choose 0", _pick(self._map(1, hp=80), self.table))
+
+    def test_a_hurt_act3_run_falls_back_to_act1_elite_avoidance(self):
+        # 40/80 = 0.50 <= ELITE_APPETITE_HP_FRACTION (0.60)
+        state = self._map(3, hp=40)
+        self.assertEqual("choose 0", _pick(state, self.table))
+        self.assertEqual(greedy_policy.MAP_ELITE,
+                         greedy_policy.elite_map_value(state))
+
+    def test_elite_appetite_is_unchanged_when_hp_is_unknown(self):
+        """A dump with no max_hp must not silently lose the raised value."""
+        state = _screen("MAP", ["node", "node"],
+                        {"next_nodes": [{"symbol": "M"}, {"symbol": "E"}]},
+                        act=3)
+        state["game_state"].pop("max_hp", None)
+        state["game_state"].pop("current_hp", None)
+        self.assertEqual(greedy_policy.ACT_PROFILES[3]["MAP_ELITE"],
+                         greedy_policy.elite_map_value(state))
+
+    # -- A3: potion discipline by act --------------------------------------
+
+    def test_act3_spends_a_potion_in_a_normal_fight(self):
+        for act, expected in ((1, False), (2, False), (3, True)):
+            state = {"game_state": {"act": act, "room_type": "MonsterRoom",
+                                    "current_hp": 70, "max_hp": 80,
+                                    "potions": [_potion(), _EMPTY_SLOT]}}
+            self.assertEqual(
+                expected, greedy_policy.potion_worth_spending(state),
+                f"act {act}")
+
+    def test_the_low_hp_floor_rises_by_act(self):
+        # 44/80 = 0.55: below act 3's 0.60 floor, above act 1's 0.40.
+        for act, expected in ((1, False), (2, False), (3, True)):
+            state = {"game_state": {"act": act, "room_type": "RestRoom",
+                                    "current_hp": 44, "max_hp": 80,
+                                    "potions": [_potion(), _EMPTY_SLOT]}}
+            self.assertEqual(
+                expected, greedy_policy.potion_worth_spending(state),
+                f"act {act}")
+
+    # -- precedence --------------------------------------------------------
+
+    def test_a_cohort_config_beats_the_act_profile_in_every_act(self):
+        """The failure this prevents: a cohort labelled with a policy it did
+        not run. Without CONFIG_PINNED the overlay silently wins in acts 2/3
+        and the campaign identity is a lie."""
+        original = greedy_policy.MAP_ELITE
+        try:
+            survival_policy_cmd.apply_constants(
+                greedy_policy, {"MAP_ELITE": 111})
+            self.assertIn("MAP_ELITE", greedy_policy.CONFIG_PINNED)
+            for act in (1, 2, 3):
+                self.assertEqual(
+                    111,
+                    greedy_policy._const("MAP_ELITE",
+                                         {"game_state": {"act": act}}),
+                    f"act {act}: the act profile overrode the cohort config")
+        finally:
+            greedy_policy.MAP_ELITE = original
+            greedy_policy.CONFIG_PINNED.clear()
+
+    def test_an_unpinned_name_still_takes_the_act_profile(self):
+        original = greedy_policy.MAP_ELITE
+        try:
+            survival_policy_cmd.apply_constants(
+                greedy_policy, {"DECK_SIZE_CAP": 99})
+            self.assertEqual(
+                greedy_policy.ACT_PROFILES[2]["MAP_ELITE"],
+                greedy_policy._const("MAP_ELITE",
+                                     {"game_state": {"act": 2}}))
+        finally:
+            greedy_policy.MAP_ELITE = original
+            greedy_policy.DECK_SIZE_CAP = 20
+            greedy_policy.CONFIG_PINNED.clear()
+
+
+class BossRelicPickTest(unittest.TestCase):
+    """R4 (b1.7.0): the boss-chest pick, and its two SHA-pinned cohorts."""
+
+    def setUp(self):
+        self.table = greedy_policy.load_side_table(_SIDE_TABLE)
+        self._skip_mode = greedy_policy.BOSS_RELIC_SKIP_MODE
+        greedy_policy.CONFIG_PINNED.clear()
+
+    def tearDown(self):
+        greedy_policy.BOSS_RELIC_SKIP_MODE = self._skip_mode
+        greedy_policy.CONFIG_PINNED.clear()
+
+    @staticmethod
+    def _chest(relic_ids, act=2):
+        return _screen(
+            "BOSS_REWARD", list(relic_ids),
+            {"relics": [{"id": r, "name": r} for r in relic_ids]},
+            available=("choose", "skip"), act=act, floor=17,
+            room_type=campaign_driver.BOSS_CHEST_ROOM)
+
+    def test_take_cohort_takes_a_takeable_relic(self):
+        state = self._chest(["Sozu", "Philosopher's Stone", "Runic Dome"])
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_skip_cohort_skips_even_a_takeable_relic(self):
+        greedy_policy.BOSS_RELIC_SKIP_MODE = 1
+        state = self._chest(["Philosopher's Stone", "Black Star", "Astrolabe"])
+        self.assertEqual("skip", _pick(state, self.table))
+
+    def test_a_chest_of_nothing_but_never_take_relics_skips(self):
+        """The take cohort's `skip` sits BETWEEN takeable and never-take, so
+        this is a property of the bands, not a special case."""
+        state = self._chest(list(greedy_policy.BOSS_RELIC_NEVER_TAKE[:3]))
+        self.assertEqual("skip", _pick(state, self.table))
+
+    def test_every_never_take_name_is_a_registry_boss_relic(self):
+        """A typo'd name would be a rule that silently never fires."""
+        path = os.path.join(_REPO_ROOT, "registry", "relics.yaml")
+        with open(path, "r", encoding="utf-8") as fh:
+            text = fh.read()
+        for name in greedy_policy.BOSS_RELIC_NEVER_TAKE:
+            self.assertIn(f'game_id: "{name}"', text,
+                          f"{name!r} is not a registry relic game_id")
+
+    def test_the_choice_list_is_the_fallback_when_relics_are_absent(self):
+        state = _screen("BOSS_REWARD", ["Sozu", "Black Star"],
+                        available=("choose", "skip"), act=2)
+        self.assertEqual("choose 1", _pick(state, self.table))
+
+    def test_the_committed_cohort_configs_select_their_cohorts(self):
+        expected = {
+            "policy_survival_act.json": 0,
+            "policy_bossrelic_take.json": 0,
+            "policy_bossrelic_skip.json": 1,
+        }
+        for filename, mode in expected.items():
+            path = os.path.join(_DRIVER_DIR, filename)
+            self.assertTrue(os.path.exists(path), filename)
+            config = survival_policy_cmd.load_config(path)
+            try:
+                survival_policy_cmd.SurvivalPolicy(config)
+                self.assertEqual(
+                    mode, greedy_policy.BOSS_RELIC_SKIP_MODE, filename)
+            finally:
+                greedy_policy.BOSS_RELIC_SKIP_MODE = self._skip_mode
+                greedy_policy.CONFIG_PINNED.clear()
+
+    def test_the_three_cohort_configs_are_distinct_identities(self):
+        """A campaign's policy identity is the config's SHA-256; two cohorts
+        that hashed the same would be one cohort wearing two labels."""
+        digests = set()
+        for filename in ("policy_survival_act.json",
+                         "policy_bossrelic_take.json",
+                         "policy_bossrelic_skip.json"):
+            with open(os.path.join(_DRIVER_DIR, filename), "rb") as fh:
+                digests.add(hashlib.sha256(fh.read()).hexdigest())
+        self.assertEqual(3, len(digests))
+
+
+class BossChestSequencingTest(unittest.TestCase):
+    """The driver half of R4: one open per chest, and the act-aware terminal."""
+
+    @staticmethod
+    def _driver(policy="greedy"):
+        driver = campaign_driver.CampaignDriver.__new__(
+            campaign_driver.CampaignDriver)
+        driver.args = SimpleNamespace(policy=policy, policy_seed=0)
+        driver.rng = random.Random(0)
+        driver.card_table = greedy_policy.load_side_table(_SIDE_TABLE)
+        driver._current_seed = SEED
+        driver._reset_reach()
+        return driver
+
+    @staticmethod
+    def _closed_chest(act=2, floor=17):
+        return _screen("CHEST", ["open"], available=("choose", "proceed"),
+                       act=act, floor=floor,
+                       room_type=campaign_driver.BOSS_CHEST_ROOM)
+
+    def test_the_first_open_is_offered_and_the_second_is_not(self):
+        driver = self._driver()
+        state = self._closed_chest()
+        acts = campaign_driver.expand_legal_actions(state, driver.rng)
+        self.assertIn("choose 0", acts)
+
+        self.assertEqual("choose 0", driver._policy_command(state))
+        # ... the pick was skipped, so the game re-advertises `open`. The
+        # candidate set must no longer contain it, and `proceed` must survive.
+        filtered = driver._boss_chest_reopen_filter(state, list(acts))
+        self.assertNotIn("choose 0", filtered)
+        self.assertIn("proceed", filtered)
+        self.assertEqual("proceed", driver._policy_command(state))
+
+    def test_a_second_act_chest_is_a_fresh_open(self):
+        driver = self._driver()
+        self.assertEqual("choose 0",
+                         driver._policy_command(self._closed_chest(act=2)))
+        self.assertEqual("proceed",
+                         driver._policy_command(self._closed_chest(act=2)))
+        self.assertEqual("choose 0",
+                         driver._policy_command(self._closed_chest(act=3,
+                                                                   floor=34)),
+                         "act 3's chest must not inherit act 2's guard")
+
+    def test_an_ordinary_treasure_chest_is_never_filtered(self):
+        driver = self._driver()
+        state = _screen("CHEST", ["open"], available=("choose", "proceed"),
+                        act=1, floor=8, room_type="TreasureRoom")
+        self.assertEqual("choose 0", driver._policy_command(state))
+        self.assertEqual("choose 0", driver._policy_command(state),
+                         "the guard is the BOSS chest's, not every chest's")
+
+    def test_the_boss_reward_terminal_is_no_longer_act_gated(self):
+        for act in (1, 2, 3):
+            gs = {"act": act, "room_type": campaign_driver.BOSS_ROOM,
+                  "screen_type": "COMBAT_REWARD"}
+            self.assertTrue(campaign_driver.is_boss_combat_reward(gs),
+                            f"act {act}")
+        self.assertFalse(campaign_driver.is_boss_combat_reward(
+            {"act": 2, "room_type": "MonsterRoom",
+             "screen_type": "COMBAT_REWARD"}))
+
+    def test_boss_reward_claims_every_row_then_proceeds(self):
+        sent = []
+
+        class Stepper:
+            def __init__(self):
+                self.remaining = ["gold", "card"]
+
+            def step(self, command):
+                sent.append(command)
+                if command == "choose 0" and self.remaining:
+                    self.remaining.pop(0)
+                gs = {"act": 2, "floor": 34,
+                      "room_type": campaign_driver.BOSS_ROOM,
+                      "screen_type": "COMBAT_REWARD",
+                      "choice_list": list(self.remaining)}
+                return "ready", {"available_commands": ["choose", "proceed"],
+                                 "ready_for_command": True, "in_game": True,
+                                 "game_state": gs}
+
+        driver = self._driver()
+        driver.stepper = Stepper()
+        rl = mock.Mock()
+        timing = mock.Mock()
+        first = {"available_commands": ["choose", "proceed"],
+                 "ready_for_command": True, "in_game": True,
+                 "game_state": {"act": 2, "floor": 34,
+                                "room_type": campaign_driver.BOSS_ROOM,
+                                "screen_type": "COMBAT_REWARD",
+                                "choice_list": ["gold", "card"]}}
+        _state, actions, stop = driver._claim_boss_reward(
+            rl, timing, first, SEED, 0)
+        self.assertIsNone(stop)
+        self.assertEqual(["choose 0", "choose 0", "proceed"], sent)
+        self.assertEqual(3, actions)
+
+    def test_a_boss_reward_screen_that_never_clears_is_named_not_spun_on(self):
+        class StuckStepper:
+            def step(self, _command):
+                return "ready", {
+                    "available_commands": ["choose"],
+                    "ready_for_command": True, "in_game": True,
+                    "game_state": {"act": 1, "floor": 17,
+                                   "room_type": campaign_driver.BOSS_ROOM,
+                                   "screen_type": "COMBAT_REWARD",
+                                   "choice_list": ["gold"]}}
+
+        driver = self._driver()
+        driver.stepper = StuckStepper()
+        _state, actions, stop = driver._claim_boss_reward(
+            mock.Mock(), mock.Mock(), {
+                "game_state": {"act": 1, "floor": 17,
+                               "room_type": campaign_driver.BOSS_ROOM,
+                               "screen_type": "COMBAT_REWARD",
+                               "choice_list": ["gold"]}}, SEED, 0)
+        self.assertEqual("boss_reward_wedge", stop)
+        self.assertLess(actions, 100, "the guard must bound the spend")
+
+
+class PerActReachFieldsTest(unittest.TestCase):
+    """The `seeds_done` reach block the S2.42 report aggregates."""
+
+    @staticmethod
+    def _driver():
+        driver = campaign_driver.CampaignDriver.__new__(
+            campaign_driver.CampaignDriver)
+        driver._reset_reach()
+        return driver
+
+    def test_a_fresh_run_reports_nothing_reached(self):
+        self.assertEqual(
+            {"boss_fight_reached": False, "boss_fight_acts": [],
+             "boss_kill_acts": [], "boss_relic_acts": [], "max_act": 0,
+             "victory": False},
+            self._driver()._reach_fields())
+
+    def test_the_boss_chest_is_the_act_1_and_2_kill_probe(self):
+        driver = self._driver()
+        driver._observe_reach({"act": 1, "room_type": campaign_driver.BOSS_ROOM})
+        self.assertEqual([], driver._reach_fields()["boss_kill_acts"],
+                         "standing in the boss room is a FIGHT, not a kill")
+        driver._observe_reach({"act": 1,
+                               "room_type": campaign_driver.BOSS_CHEST_ROOM})
+        fields = driver._reach_fields()
+        self.assertEqual([1], fields["boss_fight_acts"])
+        self.assertEqual([1], fields["boss_kill_acts"])
+        self.assertTrue(fields["boss_fight_reached"])
+
+    def test_the_act_3_kill_is_the_victory_flag_not_a_chest(self):
+        driver = self._driver()
+        driver._observe_reach({"act": 3, "room_type": campaign_driver.BOSS_ROOM})
+        self.assertEqual([], driver._reach_fields()["boss_kill_acts"])
+        driver.last_run_victory = True
+        fields = driver._reach_fields()
+        self.assertEqual([3], fields["boss_kill_acts"])
+        self.assertTrue(fields["victory"])
+        self.assertEqual([3], fields["boss_fight_acts"])
+
+    def test_the_relic_screen_is_recorded_per_act(self):
+        driver = self._driver()
+        driver._observe_reach({"act": 2, "screen_type": "BOSS_REWARD"})
+        self.assertEqual([2], driver._reach_fields()["boss_relic_acts"])
+
+    def test_max_act_is_a_max_and_observation_is_idempotent(self):
+        driver = self._driver()
+        for act in (1, 2, 3, 2, 1):
+            driver._observe_reach({"act": act,
+                                   "room_type": campaign_driver.BOSS_ROOM})
+        fields = driver._reach_fields()
+        self.assertEqual(3, fields["max_act"])
+        self.assertEqual([1, 2, 3], fields["boss_fight_acts"])
+
+    def test_a_junk_act_is_ignored_rather_than_recorded(self):
+        driver = self._driver()
+        for act in (None, True, "2"):
+            driver._observe_reach({"act": act,
+                                   "room_type": campaign_driver.BOSS_ROOM})
+        fields = driver._reach_fields()
+        self.assertEqual([], fields["boss_fight_acts"])
+        self.assertEqual(0, fields["max_act"])
+        self.assertTrue(fields["boss_fight_reached"],
+                        "the act-less boss room is still a boss fight")
+
+    def test_the_reach_block_stays_outside_the_strict_key_set(self):
+        """b1.6.0's compatibility rule, re-checked for b1.7.0's fields: a
+        pre-b1.7.0 ledger must still validate."""
+        for key in self._driver()._reach_fields():
+            self.assertNotIn(key, validate_artifacts.STRICT_DONE_KEYS, key)
 
 
 class SurvivalPolicyCmdTest(unittest.TestCase):

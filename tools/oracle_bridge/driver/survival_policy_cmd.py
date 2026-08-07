@@ -63,6 +63,15 @@ def apply_constants(module, overrides: dict) -> dict:
     Returns {name: (old, new)} for logging. Only existing ALL-CAPS int/float
     constants are overridable; bool is excluded (it is an int subclass but no
     scoring constant is a flag).
+
+    PRECEDENCE (b1.7.0, S2.42). greedy_policy gained per-act overlays
+    (`ACT_PROFILES`), read through `_const`. An overlay consulted AFTER this
+    setattr would make every cohort config a silent no-op in Acts 2/3 -- a
+    cohort labelled with a policy it did not run, which is precisely what this
+    function's strict validation exists to prevent. So each configured name is
+    recorded in `module.CONFIG_PINNED`, and `_const` yields to it: the cohort
+    config wins, in every act. Modules without that set (a caller passing
+    something other than greedy_policy) are unaffected.
     """
     if not isinstance(overrides, dict):
         raise ConfigError("constants must be an object of {NAME: number}")
@@ -82,6 +91,9 @@ def apply_constants(module, overrides: dict) -> dict:
                               f"{value!r}")
         applied[name] = (current, value)
         setattr(module, name, value)
+        pinned = getattr(module, "CONFIG_PINNED", None)
+        if isinstance(pinned, set):
+            pinned.add(name)
     return applied
 
 

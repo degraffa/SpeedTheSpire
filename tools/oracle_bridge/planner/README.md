@@ -40,9 +40,79 @@ seed_scan --seeds STS00100-STS05099 \
 * `--seed-list` is the **artifact a campaign consumes**: nothing but seed
   strings, with a `#` header recording the scan that produced it. A campaign
   driver reading it never has to parse a verdict.
+* `--cohort-list` (S2.42) is the **depth** artifact — see below. It holds
+  (seed, policy, policy_seed) **triples**, not seeds.
 
 Artifacts belong under the non-repo data root (`docs/stage-b-design.md` §7.3),
 not in the tree.
+
+## Per-act depth (S2.42)
+
+Every design §6 S2-G2 depth bar is stated *per act*, and several are stated as
+**kills**. Standing in a boss room and walking out of it are different facts,
+and until S2.42 the scan could only see the first one.
+
+```bash
+seed_scan --seeds STS00100-STS05099 \
+          --policies random,greedy_damage,greedy_block --policy-seeds 0,1 \
+          --out scan.tsv --summary scan.txt \
+          --need-boss-kill-act 1 --cohort-list cohort_act1_kill.tsv
+```
+
+| Flag | Means |
+|---|---|
+| `--min-act <n>` | highest act reached ≥ n |
+| `--need-boss-act <n>` | the act-*n* **boss room** was entered |
+| `--need-boss-kill-act <n>` | the act-*n* boss was **killed** |
+| `--need-victory` | the run was won (`run_is_victory`) |
+| `--need-boss-id <encounter game id>` | any-of over the run's per-act boss identities — how a cohort covers every registry BOSS row, or ≥ 2 distinct identities |
+
+**The kill probe is exact, not inferred.** The post-boss chest is entered *only*
+through the boss reward's `proceed` (`ProceedButton.goToTreasureRoom`, a full
+room transition), and Acts 1 and 2 both end in one — while Act 3's boss opens no
+reward screen and no chest at all. So `RunPhase::BOSS_TREASURE` observed at act
+*N* **is** the act-*N* kill for N ∈ {1,2}, and act 3's kill is
+`run_is_victory()`. `--need-boss-kill-act 3` and `--need-victory` are therefore
+one clause. The live capture driver runs the same pair of probes against the
+protocol dump (`campaign_driver.py _observe_reach`), deliberately, so the two
+instruments agree.
+
+**Column order is append-only.** The five new TSV columns (`act`,
+`boss_reached_acts`, `boss_killed_acts`, `victory`, `boss_ids`) go **after**
+`fail_kind`, and `boss` keeps its old meaning (`boss_reached_acts != 0`), so a
+script that has been doing `cut -f10` since S1 still selects the boss column.
+
+**`--max-actions` defaults to 12000**, raised from the Act-1-era 4000. A
+three-act A20 run is roughly three times the actions, and a truncated deep run
+ends as `ACTION_CAP` — which in a depth scan reads as a *policy* failure while
+actually being the tool's own truncation. The summary prints the `ACTION_CAP`
+count next to the reach numbers so the artifact is visible rather than inferred.
+
+## `--min-hit-count` inverts for a depth cohort
+
+The rule above exists because the capture is driven by a **different** policy
+from the scan, so a seed found by one combination says *reachable*, not
+*reached*. **A depth cohort is the opposite case.** Design §6 sanctions "the sim
+pre-scan chooses (seed, policy, policy-seed) triples whose scripted line reaches
+the target" precisely because a deep line is **fragile**: the property is not
+"this seed can be won" but "this exact line wins this seed". A one-hit triple is
+a perfectly good cohort member, and raising `--min-hit-count` here would discard
+most of an Act-3 cohort for a robustness property its consumer does not use.
+`--cohort-list` therefore emits **every qualifying row**, and passing
+`--min-hit-count > 1` alongside it prints a note.
+
+### What the policy column does and does not mean
+
+`fuzz::PolicyKind` (the sim's five) and the driver's `--policy` family
+(`random-legal` / `greedy` / `script` / `external`+config) are **different
+families**. A triple naming `greedy_damage` names a *sim* policy; the oracle
+campaign cannot execute it. The triple asserts that **a scripted line of that
+shape reaches the target on that seed** — it is provenance for a reachability
+claim, and the capture then confirms with its own scripted policy. S2.42 adopted
+that reading deliberately rather than building a correspondence between the two
+families, which would have meant a new `PolicyKind` in the one file S2.41 is
+concurrently editing. The cohort file's own `#` header says so, so a consumer
+cannot pick it up without meeting the caveat.
 
 ## `--min-hit-count` is the whole point
 

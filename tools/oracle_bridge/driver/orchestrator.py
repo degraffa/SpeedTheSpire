@@ -12,14 +12,22 @@ Windows host (started by the operator), and:
      a system-Java upgrade killed a B1.1 launch, ledger B1.1 Log);
   3. watches the campaign progress + heartbeat files the driver maintains;
   4. relaunches the game after a crash, a hang, or a driver-requested restart
-     (boss-reward runs end mid-dungeon; the protocol cannot walk back to the
-     menu, so the seed after such a run resumes on a fresh launch) -- until the
-     driver marks the campaign complete;
+     (a run that ends somewhere the protocol cannot walk back to the menu from
+     -- an action cap, a wedge -- so the seed after it resumes on a fresh
+     launch) until the driver marks the campaign complete;
   5. optionally induces one deliberate mid-campaign game kill (`--kill-after-
      seeds`) to exercise crash-resume (the B1.4 acceptance bar).
 
 The driver owns per-run protocol + artifacts + the resume file; a crashed game
 costs one run, not the campaign (design 7.1(2)). Resume granularity is one seed.
+
+Note (S2.42): boss-reward runs used to be the common case for (4) -- driver
+<= b1.6.0 terminated every run at the Act-1 boss reward, mid-dungeon, so a deep
+seed cost a whole relaunch. Driver b1.7.0 plays on to GAME_OVER, which DOES
+return to the menu, so deep runs no longer force a relaunch. Nothing here
+needed changing: this script has always acted on the driver's durable request
+rather than on its own model of where a run ends, which is exactly why the
+driver's terminal could move without touching process lifecycle.
 
 Stdlib-only. Run it from anywhere on the Windows host with Python 3.
 """

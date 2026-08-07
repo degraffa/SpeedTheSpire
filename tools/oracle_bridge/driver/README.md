@@ -194,9 +194,18 @@ owns its stdio — see [Topology](#topology-protocolmd-1)). It is a strict
 **lock-step** stepper: it sends **one command per fresh `ready_for_command`**
 state and **never blind-resends** on silence (prolonged silence is a crash, per a
 wall-clock watchdog — the B0.2 contamination postmortem, ledger B1.1 Log). It
-plays seeded A20 Ironclad runs to a terminal state (death, Act-1 boss-reward
-claimed — design 1.1, so it stops *before* the boss chest — legal-action
-exhaustion, or an action cap), writing one JSONL artifact per run.
+plays seeded A20 Ironclad runs to a terminal state (death, **victory**,
+legal-action exhaustion, or an action cap), writing one JSONL artifact per run.
+
+> **Terminal moved in `b1.7.0` (S2.42).** Drivers up to `b1.6.0` stopped at the
+> **Act-1** boss combat reward and refused the `proceed` that opens the boss
+> chest, because the chest was out of S1 scope (design 1.1 "Out"). S2-G2 items
+> 2–3 are *about* the boss chest, so the terminal is now the game's own
+> GAME_OVER — the run plays all three acts. Two consequences worth knowing:
+> the `act1_boss_reward` outcome no longer occurs on new captures (old
+> artifacts carrying it stay valid and the pipeline still counts them), and
+> deep runs no longer force an orchestrator relaunch, because a GAME_OVER
+> screen *can* walk back to the menu.
 
 Because the game (not the orchestrator) is the driver's parent, the driver cannot
 own game launch/kill/relaunch — `orchestrator.py` does. The driver owns the
@@ -205,7 +214,9 @@ crashed game costs one run, not the campaign (design 7.1(2)). Resume granularity
 is **one seed** (the protocol exposes no mid-run save): an interrupted seed is
 re-run from `start` on the next launch (retry-once, then failed).
 
-**Current capture driver: `b1.5.3`.** A driver exit code is not visible to the
+**Current capture driver: `b1.7.0`** — `campaign_driver.DRIVER_VERSION` is
+authoritative; this line said `b1.5.3` against a `b1.6.0` tree until S2.42, so
+re-derive it rather than quoting it. A driver exit code is not visible to the
 orchestrator because the game owns the child process. The driver therefore
 publishes a durable, one-launch-token-bound restart request before every
 mid-dungeon or broken-pipe exit; the orchestrator sees it on its ordinary poll,
@@ -401,6 +412,68 @@ census matrix for exactly that property.
 Ties are broken with the run's own policy RNG (`Random(f"{policy_seed}:{seed}")`,
 one draw per decision), so a greedy campaign is reproducible from
 `(--policy-seed, seed)` exactly as the random-legal one is.
+
+#### Three-act survival: act profiles and the boss-relic pick (b1.7.0, S2.42)
+
+Every constant above was tuned against Act-1 evidence, because S1 runs ended at
+the Act-1 boss. `greedy_policy.ACT_PROFILES` is a per-act overlay over the same
+ALL-CAPS numeric constants, read through `_const(name, state)`:
+
+| Constant | Act 1 | Act 2 | Act 3 | Why it moves |
+|---|---|---|---|---|
+| `MAP_ELITE` | 200 | 450 | 500 | Skipping every elite is how a run reaches the Act-1 boss and how it reaches the Act-3 boss with no relics. Acts 2/3 put the elite above `MAP_MONSTER` (400) but still below `MAP_NON_COMBAT` (600) — **and only while HP > `ELITE_APPETITE_HP_FRACTION` (60 %)**, so a hurt run keeps the Act-1 avoidance. |
+| `DECK_ATTACK_TARGET` / `DECK_SIZE_CAP` | 10 / 20 | 12 / 28 | 14 / 35 | R1's gate. 10-in-20 is a floor-17 deck. Both move together so the gate keeps its shape. |
+| `POTION_LOW_HP_FRACTION` | 0.40 | 0.50 | 0.60 | R2's floor. Deeper acts kill from a higher HP fraction. |
+| `POTION_HIGH_STAKES_FROM_ACT` | — | — | 3 | A3: from Act 3 every *normal* combat room is high-stakes too. An Act-3 normal hits harder than an Act-1 elite, and R2's room-name gate was written when "normal room" meant Cultist. |
+
+Three properties, each with a test:
+
+- **Act 1 is byte-identical to `b1.6.0`.** `ACT_PROFILES` has no key `1`, and a
+  dump with no `act` resolves to 1, so `_const` returns the module constant.
+- **The cohort config still wins, in every act.** `apply_constants` records each
+  configured name in `greedy_policy.CONFIG_PINNED`, and `_const` yields to it.
+  Without that, a `{"constants": {"MAP_ELITE": …}}` cohort would be a silent
+  no-op in Acts 2/3 — a cohort labelled with a policy it did not run.
+- **R1's two-screens invariant survives**: `wants_card_reward` still reads the
+  deck alone, and the act cannot change between the `COMBAT_REWARD` row and the
+  `CARD_REWARD` screen that row opens.
+
+**R4 — the boss-relic pick (`BOSS_REWARD`).** The boss chest offers three
+BOSS-tier relics plus `skip`. S2-G2 item 2 needs **both** a take and a skip
+witnessed per Act-2 boss, so this is a *cohort selection*, not a coin flip:
+`BOSS_RELIC_SKIP_MODE` is an ordinary numeric constant, and the two configs
+below are two SHA-pinned campaign identities over one binary.
+
+| Config | Cohort |
+|---|---|
+| `policy_survival_act.json` | act-aware survival baseline, module defaults |
+| `policy_bossrelic_take.json` | takes a boss relic (`BOSS_RELIC_SKIP_MODE: 0`) |
+| `policy_bossrelic_skip.json` | skips every boss relic (`BOSS_RELIC_SKIP_MODE: 1`) |
+
+Five BOSS relics are **never** taken, and the criterion is checkable rather than
+a taste list: each one invalidates a rule `greedy_policy` itself owns, so taking
+it would leave the policy scoring a game it is no longer playing — **Sozu** (R2
+has no potions left to decide about), **Runic Dome** (no intents, so
+`attacker_count` and therefore R3's block weight read zero forever), **Snecko
+Eye** (randomised costs break the cheap-utility term and the side table's cost
+column), **Pandora's Box** (R1's deck-attack gate counts a deck that no longer
+exists), **Calling Bell** (a three-relic modal reward screen plus a curse; the
+driver already carries a b1.5.3 suppression path for that screen at Neow). In
+the take cohort `skip` sits *between* a takeable relic and a never-take one, so
+a chest offering three of those five leaves without picking rather than
+unseating a rule.
+
+**Skip is a reversible screen close** (`boss_chest.hpp`: `relicSkipLogic` →
+`chest.close()`, which does not clear the three offers, and
+`ChoiceScreenUtils.getChestRoomChoices` re-advertises `open` the instant
+`isOpen` goes false). A stateless policy that both opens chests and skips picks
+therefore has a legal open/skip 2-cycle alternating between two screens —
+invisible to the stuck detector, exactly the b5.2 GRID-cancel trap. The policy
+does *not* close that hole; `CampaignDriver._boss_chest_reopen_filter` does, by
+dropping the second and later `open` of one boss chest. That costs nothing: a
+reopened chest offers the same three relics, and `proceed` is always advertised
+in the room (`isConfirmButtonAvailable`, `CHEST` → true), so the candidate set
+can never be emptied.
 
 Regenerate the side table after any `registry/cards.yaml` change:
 

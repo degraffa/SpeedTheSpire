@@ -81,6 +81,8 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | **DISCHARGED** (2026-08-07, S2.12). The answer is a PAIR per act, and conflating its halves was the whole risk: **17/34 are the CONSTRUCTION floors** — what `dungeonTransitionSetup`, the constructor chain, `generateMap`, `setEmeraldElite` and the BGM draw observe, and what the un-reseeded floor-scoped five still carry (`seed+17` / `seed+34`) — while **18/35 are the first PLAYABLE rooms**. Span = 17 = 15 map rows + boss + boss chest; the crossing itself adds **no** floor, because `isDungeonBeaten = true` (ProceedButton.java:249-250) is exactly what makes `updateFading` skip `nextRoomTransition` (:2317-2326). Table in s2-design §4.2; engine constants `kActFloorSpan` / `act_floor_base`, with `run_cur_row = floor − base − 1` replacing the Act-1-only `floor − 1` |
 | `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | **DISCHARGED — UNREACHABLE, no body written** (2026-08-07, S2.12). Re-derived for Acts 2–3, which call `generateWeakEnemies(2)`: SUPPLY is weak + 1 first-strong + 12 strong = **15** (Act 1 = 16); DEMAND is at most **14** — one walked path visits 15 rooms, one per map row, of which the act-independent generator forces row 8 Treasure and row 14 Rest, leaving 13 `monsterList`-consuming rooms (a ? room that rolls MONSTER is one of those 13, not an extra) plus the one pop that leaving the boss room performs. Margin 2 in Act 1, **1** in Acts 2–3. The loud `assert` in `next_room_transition_impl` stays and now carries that arithmetic in full; writing untestable machinery for an unreachable arm would be worse than an assert that names why it cannot fire |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
+| `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | S2.43 | **Evidence:** PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`, which plays through the chest. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`, and **no S2 ledger row owned changing it**. S2.42 took the contained half: the row now reads `S`, the offers are registry-**joined** (an unknown boss relic fails translation loudly), and the field is `fr.defer`red — pinned by `Translator.BossRewardRelicsAreDeferredNotIgnored` and `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud`. What remains is **storage**, which is not contained: the three offers live in `RunController.boss_chest` (`BossChestState`, `boss_chest.hpp`), which is transient, while the translator emits `RunState`/`CombatState` and the differ compares those — so landing it needs new `RunState` storage **plus** a `SCHEMA_VERSION` bump, a trace-container change and an oracle-adapter change. A `SCHEMA_VERSION` bump outside the places the ledger plans for it is stop-the-line (conventions §5), so S2.42 declined it rather than improvising. **S2.43 needs this before it can claim G2-2 item 2.** |
+| Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
 
 ---
 
@@ -650,7 +652,7 @@ state".
   **Deps:** S2.11, S2.12 (runs incrementally as content lands)
   **Acceptance:** soak sweep with zero nondeterminism/asserts at
   S2-G1-scale volume; shard/resume paths proven.
-- **S2.42** `[ ]` ∥ **Deep-reach scripted drivers + sim pre-scan.** The
+- **S2.42** `[x]` ∥ **Deep-reach scripted drivers + sim pre-scan.** The
   design §6 driver-risk mitigation: extend the TE.1 external-policy
   family for three-act survival (act-aware heuristics; boss-relic pick
   rule; potion discipline), plus the sim pre-scan tooling that selects
@@ -662,6 +664,153 @@ state".
   report (per-act boss-fight and boss-kill rates per policy at scanned
   scale) committed; drivers replay deterministically; the S2-G2 depth
   cohorts are demonstrably schedulable from the scan output.
+  **Log:** 2026-08-07. Report:
+  [verification/s242-deep-reach.md](verification/s242-deep-reach.md).
+  Two instruments plus one report, in very different states of readiness —
+  and the report says so rather than averaging over the difference.
+
+  **Driver `b1.6.0` → `b1.7.0` (buildable AND measurable now — the driver
+  runs against the real game, which has all three acts).** The thing that
+  blocked it was the driver's own Act-1 terminal, not content:
+  `is_boss_combat_reward` gated on `act == 1` and `_claim_boss_reward`
+  deliberately refused the `proceed` that opens the boss chest (design §1.1
+  "Out", S1 scope). Both gates removed; a run's terminal is now the game's
+  own GAME_OVER, death or **victory**. Consequence worth knowing: a
+  GAME_OVER screen *can* walk back to the menu, so deep runs no longer force
+  an orchestrator relaunch — and `orchestrator.py` needed no change, because
+  it has always acted on the driver's durable request rather than on its own
+  model of where a run ends.
+
+  New rules, each with its evidence line in the R1/R2/R3 tradition.
+  **R4, the boss-relic pick** (`greedy_policy._score_boss_reward`): the
+  screen offers three BOSS relics plus `skip`, and G2-2 needs BOTH a take and
+  a skip witnessed — so it is a **cohort selection, not a coin flip**.
+  `BOSS_RELIC_SKIP_MODE` is a plain numeric constant, so
+  `policy_bossrelic_take.json` / `policy_bossrelic_skip.json` /
+  `policy_survival_act.json` are three SHA-pinned campaign identities over
+  one binary. Five BOSS relics are never taken on a **checkable** criterion —
+  each invalidates a rule this module owns (Sozu→R2, Runic Dome→R3 via
+  `attacker_count`, Snecko Eye→the cheap-utility term and the side table's
+  cost column, Pandora's Box→R1's deck-attack gate, Calling Bell→the b1.5.3
+  modal-screen path) — rather than "is a bad relic", which is not.
+  **`ACT_PROFILES`**: per-act overlays over the same ALL-CAPS constants
+  (`MAP_ELITE` raised in Acts 2/3 but gated on `ELITE_APPETITE_HP_FRACTION`
+  so it degrades to Act-1 avoidance when hurt; `DECK_ATTACK_TARGET`/
+  `DECK_SIZE_CAP` widened together so R1's gate keeps its shape;
+  `POTION_LOW_HP_FRACTION`; `POTION_HIGH_STAKES_FROM_ACT`). **Act 1 is
+  byte-identical to b1.6.0 by construction** — no key `1`, and an act-less
+  dump resolves to 1 — so TE.1's measured 31.0 % stays reproducible in
+  behaviour. Two traps closed on the way: (a) `apply_constants` now records
+  configured names in `greedy_policy.CONFIG_PINNED` and `_const` yields to
+  them, because an overlay consulted after the setattr would make every
+  cohort config a silent no-op in Acts 2/3 — a cohort labelled with a policy
+  it did not run, the exact failure the strict config validation exists to
+  prevent; (b) a skipped boss-relic pick is a REVERSIBLE screen close
+  (`relicSkipLogic` → `chest.close()`, which does not clear the offers) and
+  `getChestRoomChoices` re-advertises `open` the instant `isOpen` goes false,
+  so open/skip is a legal 2-cycle alternating between two screens — invisible
+  to the stuck detector, the same shape as the b5.2 GRID-cancel trap.
+  `_boss_chest_reopen_filter` drops the second and later open of one chest;
+  it costs nothing (a reopen offers the same three) and cannot empty the
+  candidate set (`proceed` is always advertised there). `seeds_done` gained
+  `boss_fight_acts` / `boss_kill_acts` / `boss_relic_acts` / `max_act` /
+  `victory`, all additive and all OUTSIDE
+  `validate_artifacts.STRICT_DONE_KEYS` on b1.6.0's terms; pipeline
+  `b5.3.0` → `b5.4.0` aggregates them. README's stale "Current capture
+  driver: `b1.5.3`" (against a `b1.6.0` tree) fixed.
+
+  **Planner (`seed_scan`).** The brief's premise that S2.11 had added a
+  `BOSS_TREASURE` arm to the planner was **false** — S2.11 added it to
+  `tools/fuzz/src/policy.cpp` and `replay/command_map.hpp`, never here; the
+  scan's whole vocabulary was Act-1-only (`boss_reached` one act-agnostic
+  bool, no kill observation, no act column, seed-list not triples). Added
+  `max_act`, `boss_reached_acts` / `boss_killed_acts` bitmasks, `victory`,
+  per-act `boss_ids[]`, the matching filters (`--min-act`,
+  `--need-boss-act`, `--need-boss-kill-act`, `--need-victory`,
+  `--need-boss-id`), per-act × per-policy `ScanSummary` tables, and
+  `--cohort-list`. **The kill probe is exact, not inferred**: the boss chest
+  is entered only through the boss reward's `proceed`, and Acts 1–2 both end
+  in one while Act 3 opens no chest — so `BOSS_TREASURE` at act N IS the
+  act-N kill for N ∈ {1,2}, and act 3's is `run_is_victory()`. The live
+  driver runs the same pair against the protocol dump, deliberately, so the
+  two instruments cannot disagree unattributably. Columns are appended AFTER
+  `fail_kind` and `boss` keeps its old meaning, so a pre-S2.42 `cut -f10`
+  still selects the boss column. `ScanLimits::max_actions` 4000 → **12000**:
+  4000 was an Act-1 budget, a truncated deep run ends as `ACTION_CAP`, and
+  that reads as a policy failure while being the tool's own truncation — so
+  the cap count is now printed next to the reach numbers.
+
+  **Measured (release preset, 5,000 seeds × 5 policies × 2 policy seeds =
+  50,000 rows, `--verify-determinism`, `determinism_mismatches=0`,
+  `failures=0`):** Act-1 boss FIGHT 2.81 % overall (`always_event` 12.03 %,
+  `greedy_damage` 1.01 %, `greedy_block` 0.61 %, `hoard_gold` 0.40 %,
+  `random` 0.01 %); Act-1 boss KILL **0.12 %** overall — a genuinely new
+  number, since TE.1 measured reach and nobody had measured sim-side kill.
+  The 23× gap between reach and kill is what the S2-G2 depth bars live on.
+  The three comparable E0 heuristics bracket TE.1's 0.80 % cross-check, no
+  drift finding. Cohort demo: `--need-boss-kill-act 1 --cohort-list` gave
+  **59 triples over 55 distinct seeds**, covering all three Act-1 registry
+  bosses (Slime Boss 29 / Hexaghost 25 / The Guardian 5); all three Act-2
+  boss IDENTITIES are already observable from the 59 act-2 crossings, so the
+  identity dimension of a G2-2 cohort is schedulable now even though the
+  reach dimension is not.
+
+  **Act-2/3 reach is 0 by construction and is recorded as pending content,
+  not estimated.** An Act-2/3 combat room parks at
+  `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced
+  Monster row, so no sim run can take one step into Act 2 until S2.23/S2.24
+  (and Act 3 until S2.27/S2.28); the 8 `room_unimplemented` rows in the
+  census are that wall, directly witnessed. Deferred-obligations row added.
+  Double-boss detection was deliberately **left unbuilt** rather than shipped
+  as an always-false column — a field hard-wired false under a comment naming
+  a future task is the shape conventions §8 calls a bug signal — and belongs
+  with whichever run-layer flag S2.28 lands.
+
+  **No new sim-side `PolicyKind`.** That would have edited
+  `tools/fuzz/include/sts/fuzz/policy.hpp`, the one file S2.41 is
+  concurrently editing. The cohort triple therefore names a SIM policy that
+  the oracle campaign cannot execute; S2.42 adopts the honest reading — the
+  triple is **provenance for a reachability claim**, not an instruction — and
+  says so in the cohort file's own `#` header, the planner README and the
+  report, because the gate bar's credibility rests on it. Relatedly,
+  `--min-hit-count` INVERTS for depth cohorts (a deep line is fragile, and
+  the capture replays the exact triple), which the README now states where a
+  reader will meet it, so nobody "fixes" a depth scan up to 2 and throws the
+  Act-3 cohort away.
+
+  **PROTOCOL.md §3.8 `BOSS_REWARD.screen_state.relics`, ownerless until now.**
+  It was dispositioned `I (S2 scope)` on a reason that b1.7.0 falsified, and
+  an `I` field is never diffed — so S2-G2 item 2's *zero-diff* boss-relic
+  pick was unachievable and no S2 row owned fixing it. S2.42 took the
+  **contained half**: promoted to `S`, `fr.ignore` → `fr.defer`, ids still
+  registry-joined so an unknown boss relic fails translation loudly, pinned
+  by two new translator tests. The **storage** half is not contained — the
+  offers live in transient `RunController.boss_chest` while the translator
+  emits `RunState`/`CombatState`, so it needs a `SCHEMA_VERSION` bump (which
+  is stop-the-line outside planned sites, conventions §5) plus trace-container
+  and oracle-adapter changes. Deferred-obligations row names **S2.43** with
+  that evidence.
+
+  **Escalation verdict: not yet decidable, and deliberately not pre-empted.**
+  The ledger row makes the sim-consulting driver conditional on a
+  measurement, and the number that decides it is the DRIVER-side Act-2/3
+  reach under b1.7.0 — S2.43's live capture. Sim reach alone demonstrably
+  cannot carry a depth cohort (0.12 % Act-1 kill; Acts 2–3 structurally 0),
+  so the depth cohorts will be scheduled from driver reach plus the scan's
+  identity/seed dimensions.
+
+  **Green:** all six presets (`debug`/`asan`/`release` under WSL-GCC,
+  `win-debug`/`win-asan`/`win-release` under clang-cl), zero failures.
+  Python driver + pipeline + report suites green (`oracle_campaign_python_test`,
+  `oracle_campaign_pipeline_python_test`, `verify_report_python_test`).
+  `check_stale_counts.sh` and `check_doc_links.sh` clean. New C++ tests:
+  `SeedScanActMask.*`, `SeedScanActDepth.*`, `SeedScanCohort.*`,
+  `SeedScanOutput.DepthColumnsAreAppendedAfterFailKind`,
+  `SeedScanOutput.SummaryCarriesPerActAndPerPolicyDepth`,
+  `SeedScanLimits.TheActionCapIsAThreeActBudget`,
+  `Translator.BossRewardRelics*`. New Python test classes:
+  `ActProfileTest`, `BossRelicPickTest`, `BossChestSequencingTest`,
+  `PerActReachFieldsTest`. Re-derive counts with `ctest -N | tail -1`.
 - **S2.43** `[ ]` **Oracle campaigns, breadth + depth.** The §6 S2-G2
   evidence: ≥ 2,000 distinct mixed-policy A20 attempts; Act-2 boss-reward
   + boss-relic-pick cohort; Act-3 kill + double-boss cohort

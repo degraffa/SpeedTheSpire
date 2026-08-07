@@ -42,6 +42,64 @@
 // touched. Combined with run_case's own pass-A/pass-B comparison, a ScanRow is
 // a pure function of its ScanCase, and scanning the same case twice is
 // byte-identical. `seed_scan --verify-determinism` asserts exactly that.
+//
+// ---------------------------------------------------------------------------
+// S2.42 -- PER-ACT DEPTH, AND WHY THE COHORT ARTIFACT IS A TRIPLE
+// ---------------------------------------------------------------------------
+//
+// The S1 vocabulary above is act-agnostic on purpose: nothing past Act 1
+// existed. `boss_reached` is one bool, there is no boss-KILL observation at
+// all, and the seed list holds seed strings. Every design 6 S2-G2 depth bar is
+// stated PER ACT and several are stated as KILLS, so S2.42 adds:
+//
+//   * `max_act`, `boss_reached_acts`, `boss_killed_acts` (bitmasks, bit act-1),
+//     `victory`, and `boss_ids[]` -- the act's boss ENCOUNTER identity, which
+//     is what "over >= 2 distinct first-boss identities" (G2-3) filters on.
+//   * `--cohort-list`, a third output file holding (seed, policy, policy_seed)
+//     TRIPLES rather than seeds.
+//
+// THE BOSS-KILL PROBE IS EXACT, NOT INFERRED. The boss chest is entered ONLY
+// through the boss reward's proceed (ProceedButton.goToTreasureRoom, a full
+// room transition), and Acts 1 and 2 both end in one, while Act 3's boss opens
+// no reward screen and no chest at all (run_advance.hpp:70-76). So:
+//
+//     act-N boss KILLED (N in 1,2)  <=>  RunPhase::BOSS_TREASURE seen at act N
+//     act-3 boss KILLED             <=>  run_is_victory(rc)
+//     act-N boss REACHED            <=>  RoomType::Boss seen at act N
+//
+// The PHASE is the probe rather than RoomType::TreasureBoss (which is never
+// written into a grid node and is only the resolved room type while the chest
+// is up, map_rooms.hpp:85-92), because the phase is what the fuzz MoveCat 28-31
+// buckets key off and the two instruments should agree. The live capture driver
+// uses the same pair of probes on the protocol dump
+// (campaign_driver.py `_observe_reach`), deliberately.
+//
+// `boss_reached` is KEPT and is exactly `boss_reached_acts != 0`. Redefining it
+// would silently change every `--need-boss` filter already in someone's shell
+// history; the new columns are APPENDED after `fail_kind` so a naive `cut -f10`
+// over an old script still selects the same column.
+//
+// WHY A TRIPLE, AND WHY `--min-hit-count` INVERTS FOR DEPTH. The hit-count rule
+// above exists because the capture is driven by a DIFFERENT policy from the
+// scan, so a one-hit seed is near-worthless. A DEPTH cohort is the opposite
+// case: the point of design 6's sanction ("the sim pre-scan chooses (seed,
+// policy, policy-seed) triples whose scripted line reaches the target") is that
+// a deep line is FRAGILE -- the property is not "this seed can be won" but
+// "this exact line wins this seed". A one-hit triple is therefore a perfectly
+// good cohort member, and raising --min-hit-count would throw most of an Act-3
+// cohort away. See the README section, which says so where a reader will meet
+// it.
+//
+// AND THE HONEST CAVEAT, WHICH THE REPORT MUST CARRY. `fuzz::PolicyKind` (the
+// sim's five) and the driver's policy names (`random-legal` / `greedy` /
+// `script` / `external`+config) are DIFFERENT FAMILIES. A triple naming
+// `greedy_damage` is a SIM policy; the oracle campaign cannot literally run it.
+// The triple selects a SEED that a scripted line of that shape reaches depth
+// on, and the policy/policy_seed columns are provenance for that claim -- they
+// are not an executable instruction to the capture. S2.42 adopts that reading
+// deliberately rather than building a correspondence between the two families
+// (which would mean a new PolicyKind, in the one file S2.41 is concurrently
+// editing).
 
 #include <cstdint>
 #include <string>
@@ -151,6 +209,38 @@ struct RelicObs {
     bool shop_while_owned = false;
 };
 
+// --- Act depth ---------------------------------------------------------------
+
+// Acts a run can be in. `run_advance.hpp` kFinalAct is 3; the fourth act (the
+// Ending) is out of the S2 model entirely, so three bits is the whole space and
+// a uint8_t mask is not a premature narrowing.
+inline constexpr int kMaxActs = 3;
+
+// Bit for one act in the `boss_reached_acts` / `boss_killed_acts` masks. Acts
+// are 1-based; act 0 (before the dungeon exists) has no bit and never sets one.
+[[nodiscard]] constexpr uint8_t act_bit(unsigned act) noexcept {
+    return (act >= 1u && act <= static_cast<unsigned>(kMaxActs))
+               ? static_cast<uint8_t>(1u << (act - 1u))
+               : uint8_t{0};
+}
+
+[[nodiscard]] constexpr bool act_bit_set(uint8_t mask, unsigned act) noexcept {
+    const uint8_t b = act_bit(act);
+    return b != 0 && (mask & b) != 0;
+}
+
+// '|'-joined "act<N>=<encounter game id>" for the acts whose boss identity was
+// observed, in ascending act order; "" when none was. The separator rationale
+// is the events column's (no encounter game id contains '|' or a tab).
+[[nodiscard]] std::string boss_ids_text(const uint16_t (&boss_ids)[kMaxActs]);
+
+// The registry `game_id` for an EncounterDef id, or "" for 0 / unknown. A
+// linear scan of the generated kEncounters table -- the generator emits no
+// id->name lookup for encounters (they have no enum, tools/registry_gen
+// vocab.py DOMAINS), and 61 rows scanned once per observed boss is not a cost
+// worth a second table to get wrong.
+[[nodiscard]] std::string_view encounter_game_id_from_id(uint16_t id);
+
 // --- Scanning ----------------------------------------------------------------
 
 struct ScanCase {
@@ -185,10 +275,27 @@ struct ScanRow {
     // other value is a fuzz finding that happens to have surfaced during a
     // scan, and is reported rather than swallowed.
     std::string fail_kind = "none";
+
+    // --- S2.42 per-act depth, appended after fail_kind in the TSV -----------
+    uint8_t max_act = 0;            // highest RunState::act observed
+    uint8_t boss_reached_acts = 0;  // bit (act-1) per act whose boss room was entered
+    uint8_t boss_killed_acts = 0;   // bit (act-1) per act whose boss was KILLED
+    bool victory = false;           // run_is_victory(rc): the act-3 kill
+    // The act's boss ENCOUNTER id (RunState::boss_ids), 0 where unobserved.
+    // G2-3's ">= 2 distinct first-boss identities" filters on this.
+    uint16_t boss_ids[kMaxActs]{};
 };
 
 struct ScanLimits {
-    uint32_t max_actions = 4000;
+    // S2.42 raised this from 4000. 4000 was an ACT-1 budget: the tool was
+    // written when no run could leave Act 1, and a run that hits the cap ends
+    // as EndReason::ACTION_CAP -- which in a DEPTH scan reads as a policy
+    // failure while actually being the tool's own truncation. A three-act A20
+    // run is roughly three times the actions, so 12000 restores the same
+    // headroom-per-act the S1 number had. `ScanSummary::text()` prints the
+    // ACTION_CAP count next to the reach numbers so a truncation artifact is
+    // visible rather than inferred.
+    uint32_t max_actions = 12000;
     uint32_t revisit_limit = 64;
 };
 
@@ -209,6 +316,18 @@ struct Filter {
     bool need_treasure = false;
     bool need_boss = false;
     uint32_t min_floor = 0;
+
+    // --- S2.42 depth clauses ------------------------------------------------
+    // 0 means "don't care" for the two act clauses; acts are 1-based, so 0 is
+    // not a legal act and cannot collide with a real request.
+    uint8_t need_boss_reached_act = 0;
+    uint8_t need_boss_killed_act = 0;
+    bool need_victory = false;
+    uint32_t min_act = 0;
+    // ANY-OF, like the relic clauses and for the same reason: the motivating
+    // query is "an Act-2 boss cohort covering EITHER of two identities", which
+    // an all-of reading could never satisfy (one run fights one boss per act).
+    std::vector<uint16_t> need_boss_ids;
 
     // Relic clauses. UNLIKE need_events, each list is an ANY-OF within its
     // clause: the motivating query is "an early source offered ANY of the
@@ -257,11 +376,45 @@ enum class Format : uint8_t { TSV = 0, JSONL = 1 };
 
 inline constexpr int kFloorHistogramBuckets = 12;  // 0..10, then "11+"
 
+// One qualifying (seed, policy, policy_seed) for the --cohort-list artifact.
+// See the header's note on why this is a triple and what the policy columns do
+// and do not mean.
+struct CohortTriple {
+    std::string seed;
+    fuzz::PolicyKind policy = fuzz::PolicyKind::RANDOM;
+    uint64_t policy_seed = 0;
+    uint8_t boss_reached_acts = 0;
+    uint8_t boss_killed_acts = 0;
+    uint16_t boss_ids[kMaxActs]{};
+};
+
+[[nodiscard]] CohortTriple cohort_triple(const ScanRow& row);
+// One TSV line: seed, policy, policy_seed, boss_reached_acts, boss_killed_acts,
+// boss_ids. No verdict -- a consumer must never have to parse one.
+[[nodiscard]] std::string cohort_triple_to_tsv(const CohortTriple& t);
+[[nodiscard]] std::string_view cohort_tsv_header();
+
+// Per-act depth counters, kept once for the whole scan and once per policy --
+// "per-act boss-fight and boss-kill rates PER POLICY at scanned scale" is the
+// S2.42 Acceptance sentence verbatim, and ScanSummary had no per-policy
+// dimension at all before it.
+struct ActDepth {
+    uint64_t rows = 0;
+    uint64_t boss_reached[kMaxActs]{};
+    uint64_t boss_killed[kMaxActs]{};
+    uint64_t victories = 0;
+    uint64_t action_cap = 0;  // the truncation witness -- see ScanLimits
+
+    void add(const ScanRow& row);
+};
+
 struct ScanSummary {
     uint64_t rows = 0;
     uint64_t seeds = 0;
     uint64_t treasure_rows = 0;
     uint64_t boss_rows = 0;
+    ActDepth depth;
+    ActDepth per_policy[static_cast<int>(fuzz::PolicyKind::COUNT)]{};
     uint64_t event_rows[32]{};  // index by EventId (1..31); [0] unused
     // Per tracked relic (find-or-insert on first sighting in add()): rows in
     // which it was offered / acquired / shop-while-owned.

@@ -29,7 +29,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-PIPELINE_VERSION = "b5.3.0"
+PIPELINE_VERSION = "b5.4.0"
 PARALLEL_GROUP_FORMAT = "STS-ORACLE-PARALLEL-GROUP v1"
 PARALLEL_REPORT_FORMAT = "STS-ORACLE-PARALLEL-REPORT v1"
 PARALLEL_ORCHESTRATION_VERSION = "parallel-oracle-v1"
@@ -1016,6 +1016,16 @@ def generate_report(campaign_id: str) -> dict:
             "boss_fight_reached": bool(
                 row.get("boss_fight_reached")
                 or row.get("outcome") == "act1_boss_reward"),
+            # S2.42 per-act reach: recorded by driver >= b1.7.0. Absent on
+            # older rows, where the empty list IS the honest answer -- a
+            # pre-b1.7.0 driver terminated the run at the Act-1 boss reward by
+            # construction, so it could not have reached past it. `max_act`
+            # stays None rather than 1 for the same reason: absent is not zero.
+            "boss_fight_acts": list(row.get("boss_fight_acts") or []),
+            "boss_kill_acts": list(row.get("boss_kill_acts") or []),
+            "boss_relic_acts": list(row.get("boss_relic_acts") or []),
+            "max_act": row.get("max_act"),
+            "victory": bool(row.get("victory")),
             "classification": classification,
             # Keep the original obtain-only field so existing report consumers
             # remain compatible. Strict evidence uses the all-family total.
@@ -1060,6 +1070,13 @@ def generate_report(campaign_id: str) -> dict:
     floor_counts = {}
     boss_fight_reached_count = 0
     boss_reward_claims = 0
+    # S2.42: the per-act reach table the reach report is built from. Keys are
+    # act numbers as STRINGS because this dict is serialised to JSON, where an
+    # int key would silently become one anyway.
+    boss_fight_by_act: dict = {}
+    boss_kill_by_act: dict = {}
+    boss_relic_by_act: dict = {}
+    victories = 0
     for result in results:
         outcome = str(result.get("outcome"))
         outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
@@ -1069,6 +1086,13 @@ def generate_report(campaign_id: str) -> dict:
             boss_fight_reached_count += 1
         if result.get("outcome") == "act1_boss_reward":
             boss_reward_claims += 1
+        if result.get("victory"):
+            victories += 1
+        for key, table in (("boss_fight_acts", boss_fight_by_act),
+                           ("boss_kill_acts", boss_kill_by_act),
+                           ("boss_relic_acts", boss_relic_by_act)):
+            for act in result.get(key) or []:
+                table[str(act)] = table.get(str(act), 0) + 1
     boss_fight_reach_fraction = (
         boss_fight_reached_count / len(results) if results else None)
     aggregate_rate = (
@@ -1109,6 +1133,13 @@ def generate_report(campaign_id: str) -> dict:
         "boss_fight_reached_count": boss_fight_reached_count,
         "boss_fight_reach_fraction": boss_fight_reach_fraction,
         "boss_reward_claims": boss_reward_claims,
+        # S2.42 acceptance metrics: per-act boss-FIGHT and boss-KILL rates,
+        # which are different facts (standing in the room vs. walking out of
+        # it) and which the S2-G2 depth bars are stated in.
+        "boss_fight_by_act": boss_fight_by_act,
+        "boss_kill_by_act": boss_kill_by_act,
+        "boss_relic_pick_by_act": boss_relic_by_act,
+        "victories": victories,
         "diff_counts": counts,
         "known_obtain_race_records":
             known_capture_race_records_by_kind.get("obtain-race", 0),
@@ -1148,6 +1179,15 @@ def generate_report(campaign_id: str) -> dict:
         + (f" ({100.0 * boss_fight_reach_fraction:.1f} %)"
            if boss_fight_reach_fraction is not None else "")
         + f"; boss-reward claims: {boss_reward_claims}",
+        # S2.42: fight vs kill per act, side by side, because the S2-G2 depth
+        # bars are stated per act and the gap between the two rows IS the
+        # thing the reach report exists to show.
+        f"- Boss fights by act: "
+        f"`{json.dumps(boss_fight_by_act, sort_keys=True)}`; "
+        f"kills by act: `{json.dumps(boss_kill_by_act, sort_keys=True)}`; "
+        f"boss-relic picks by act: "
+        f"`{json.dumps(boss_relic_by_act, sort_keys=True)}`; "
+        f"victories: {victories}",
         f"- Diff classifications: `{json.dumps(counts, sort_keys=True)}`",
         f"- Known capture-race records: {known_capture_race_records} "
         f"(`{json.dumps(known_capture_race_records_by_kind, sort_keys=True)}`)",

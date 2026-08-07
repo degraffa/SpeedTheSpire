@@ -38,6 +38,44 @@ seed cannot wedge the campaign).
 
 Dependency-free (Python 3 standard library only): it runs under the game's own
 Windows Python, outside the WSL build/CI world.
+
+b1.7.0 (S2.42) -- THE RUN NO LONGER STOPS AT THE ACT-1 BOSS.
+S1 terminated every run at the Act-1 boss combat reward and refused the
+`proceed` that opens the boss chest, because the chest and everything past it
+was out of S1 scope (design 1.1 "Out"). S2 needs Act-2 and Act-3 evidence
+(design 6, S2-G2 items 2-3), so the terminal is now the game's own: a run ends
+at GAME_OVER, death or victory. Three consequences, each handled below:
+
+  * `is_boss_combat_reward` no longer gates on `act == 1` and is no longer a
+    terminal -- `_claim_boss_reward` claims the rows and then PROCEEDS into the
+    boss chest, handing control back to the main loop.
+  * The boss chest is driven by the ordinary policy loop, with one guard:
+    `_boss_chest_reopen_filter`. A skipped boss-relic pick is a REVERSIBLE
+    screen close (boss_chest.hpp: relicSkipLogic -> chest.close(), which does
+    not clear the three offers), and ChoiceScreenUtils.getChestRoomChoices
+    re-advertises "open" the instant `isOpen` goes false -- so a policy that
+    can both open chests and skip picks has a legal open/skip 2-cycle whose
+    signature alternates between two screens, invisible to the stuck detector.
+    Exactly the b5.2 GRID-cancel trap, and closed the same way: after one open
+    of a given boss chest, the reopen leaves the candidate set.
+  * A run that reaches GAME_OVER can walk back to the menu, so boss-reward runs
+    no longer force an orchestrator relaunch. `menu_ok` now tells the truth for
+    them instead of being hard-coded False.
+
+`seeds_done` rows gain the per-act reach fields the S2.42 reach report is
+built from (`boss_fight_acts`, `boss_kill_acts`, `boss_relic_acts`, `max_act`,
+`victory`). All additive and all OUTSIDE validate_artifacts.STRICT_DONE_KEYS,
+on the same terms as b1.6.0's `boss_fight_reached`, so a pre-b1.7.0 ledger
+still validates.
+
+THE BOSS-KILL PROBE, AND WHY IT IS EXACT. The boss chest is entered only
+through the boss reward's `proceed` (ProceedButton.goToTreasureRoom -- a full
+room transition), and Acts 1 and 2 both end in one. So standing in
+`TreasureRoomBoss` at act N IS the act-N boss kill, for N in {1,2}. Act 3 opens
+no chest at all (AbstractRoom.java:286-297 is the last thing that happens), so
+its kill is the GAME_OVER victory flag. This is the same pair of probes the
+planner's `seed_scan` uses on the sim side (`RunPhase::BOSS_TREASURE` /
+`run_is_victory`), deliberately, so the two instruments agree.
 """
 
 from __future__ import annotations
@@ -65,7 +103,7 @@ from campaign_paths import (
     validate_seed_list,
 )
 
-DRIVER_VERSION = "b1.6.0"
+DRIVER_VERSION = "b1.7.0"
 SCHEMA_VERSION = 1
 
 # A temporarily empty legal-action expansion is normal while an animated
@@ -795,13 +833,40 @@ def cmd_args_ready(state: dict, cmd: str):
     return True, ""
 
 
+BOSS_CHEST_ROOM = "TreasureRoomBoss"
+BOSS_ROOM = "MonsterRoomBoss"
+# The last act. Acts 1 and 2 end in a boss chest; act 3's boss opens neither a
+# reward screen nor a chest, so its kill is the GAME_OVER victory flag (see the
+# module header's boss-kill probe note).
+FINAL_ACT = 3
+
+
 def is_boss_combat_reward(gs: dict) -> bool:
-    """Act-1 boss combat rewards up: the S1 terminal (design 1.1 -- stop BEFORE
-    the boss chest / boss-relic pick)."""
+    """A boss combat-reward screen is up, in ANY act.
+
+    b1.7.0 dropped the `act == 1` gate. This is no longer a terminal: design
+    1.1's "stop before the boss chest" was S1 scope, and S2-G2 items 2-3 need
+    the boss reward, the chest, the relic pick and the act transition after it.
+    `_claim_boss_reward` claims the rows and proceeds.
+    """
     return (
-        gs.get("act") == 1
-        and gs.get("room_type") == "MonsterRoomBoss"
+        gs.get("room_type") == BOSS_ROOM
         and gs.get("screen_type") in ("COMBAT_REWARD", "CARD_REWARD")
+    )
+
+
+def is_boss_chest_reopen(gs: dict) -> bool:
+    """The boss chest is up and closed -- i.e. `choose 0` would (re)open it.
+
+    A pure predicate on the dump; whether this particular open is the FIRST one
+    for this room is driver state (`CampaignDriver._boss_chest_opened`), because
+    the dump cannot tell an unopened chest from one closed again by a skipped
+    pick. See the module header.
+    """
+    return (
+        gs.get("room_type") == BOSS_CHEST_ROOM
+        and gs.get("screen_type") == "CHEST"
+        and bool(gs.get("choice_list"))
     )
 
 
@@ -1073,7 +1138,16 @@ class CampaignDriver:
     card_table: dict = {}
     external = None
     external_identity = None
+    # Class-level reach defaults, for the same reason card_table has one: a
+    # test that reaches one method through __new__ must not trip over a
+    # missing attribute. `_reset_reach()` replaces them per run.
     last_run_boss_fight = False
+    last_run_victory = False
+    last_run_max_act = 0
+    last_run_boss_fight_acts: set = frozenset()
+    last_run_boss_kill_acts: set = frozenset()
+    last_run_boss_relic_acts: set = frozenset()
+    _boss_chest_opened: set = frozenset()
 
     def __init__(self, args) -> None:
         self.args = args
@@ -1251,11 +1325,13 @@ class CampaignDriver:
         Returns (outcome, floor, actions, menu_returnable)."""
         validate_seed_list([seed])
         artifact = self.run_file(f"run_{seed}_a20_ironclad.jsonl")
-        # Boss-fight reach (TE.1): a per-run coverage fact the cohort reports
+        # Reach (TE.1 + S2.42): per-run coverage facts the cohort reports
         # aggregate. Set from the decision states below; read by run() when it
         # appends the seeds_done row. Instance state (not a return slot) so the
-        # long-stable 4-tuple contract of run_seed stays untouched.
-        self.last_run_boss_fight = False
+        # long-stable 4-tuple contract of run_seed stays untouched. Cleared
+        # here as well as at the top of the play loop so a seed that dies
+        # before the loop cannot inherit the previous seed's reach.
+        self._reset_reach()
         self._current_seed = seed
         # Per-seed policy RNG: a run's action sequence depends only on
         # (policy_seed, seed), not on the campaign's position, so any run is
@@ -1353,17 +1429,19 @@ class CampaignDriver:
         script_i = 0
         last_sig = None
         stuck = 0
+        self._reset_reach()
         try:
             while True:
                 gs = state.get("game_state") or {}
                 floor = gs.get("floor")
-                if gs.get("room_type") == "MonsterRoomBoss":
-                    self.last_run_boss_fight = True
+                self._observe_reach(gs)
                 self.progress.heartbeat(seed, floor, actions)
 
                 # ---- terminal checks (on the fresh decision state) ----
                 ov = game_over_outcome(gs)
                 if ov is not None:
+                    if ov == "victory":
+                        self.last_run_victory = True
                     rl.action("__terminal_observed__", state)
                     rl.terminal(ov, gs, actions)
                     # walk back to the menu so the next seed can `start`
@@ -1371,9 +1449,16 @@ class CampaignDriver:
                     return ov, floor, actions, menu_ok
 
                 if is_boss_combat_reward(gs):
-                    outcome, actions = self._claim_boss_reward(
+                    # b1.7.0: claim the rows and PROCEED into the boss chest,
+                    # then hand control back to this loop. Only a guard-limited
+                    # failure to make progress on that screen still terminates.
+                    state, actions, stop = self._claim_boss_reward(
                         rl, timing, state, seed, actions)
-                    return outcome, floor, actions, False
+                    if stop is not None:
+                        rl.terminal(stop, state.get("game_state") or {},
+                                    actions)
+                        return stop, floor, actions, False
+                    continue
 
                 if actions >= self.args.max_actions:
                     rl.terminal("action_cap", gs, actions)
@@ -1511,18 +1596,102 @@ class CampaignDriver:
             rl.close()
             timing.close()
 
+    # -- per-run reach observation (S2.42) -----------------------------------
+
+    def _reset_reach(self) -> None:
+        """Clear the per-run reach accumulators. Called once per `run_seed`."""
+        self.last_run_boss_fight = False
+        self.last_run_victory = False
+        self.last_run_max_act = 0
+        self.last_run_boss_fight_acts = set()
+        self.last_run_boss_kill_acts = set()
+        self.last_run_boss_relic_acts = set()
+        # (act, floor) of every boss chest this run has already opened -- the
+        # reopen guard's whole state. Keyed on the floor as well as the act so
+        # a second act's chest is a fresh open, not a suppressed one.
+        self._boss_chest_opened = set()
+
+    def _observe_reach(self, gs: dict) -> None:
+        """Latch the per-act reach facts from one decision state.
+
+        Idempotent (max / set-insert) because the same controller is observed
+        more than once per action. See the module header for why standing in
+        `TreasureRoomBoss` at act N IS the act-N boss kill for N in {1,2}, and
+        why act 3's kill is the victory flag instead.
+        """
+        act = gs.get("act")
+        if isinstance(act, bool) or not isinstance(act, int):
+            act = None
+        if act is not None and act > self.last_run_max_act:
+            self.last_run_max_act = act
+        room = gs.get("room_type")
+        if room == BOSS_ROOM:
+            self.last_run_boss_fight = True
+            if act is not None:
+                self.last_run_boss_fight_acts.add(act)
+        if room == BOSS_CHEST_ROOM and act is not None:
+            self.last_run_boss_kill_acts.add(act)
+        if gs.get("screen_type") == "BOSS_REWARD" and act is not None:
+            self.last_run_boss_relic_acts.add(act)
+
+    def _reach_fields(self) -> dict:
+        """The additive `seeds_done` reach block. Sorted lists, not sets, so the
+        value is JSON-serialisable and byte-stable across runs."""
+        kills = set(self.last_run_boss_kill_acts)
+        if self.last_run_victory:
+            kills.add(FINAL_ACT)
+        return {
+            "boss_fight_reached": bool(self.last_run_boss_fight),
+            "boss_fight_acts": sorted(self.last_run_boss_fight_acts),
+            "boss_kill_acts": sorted(kills),
+            "boss_relic_acts": sorted(self.last_run_boss_relic_acts),
+            "max_act": int(self.last_run_max_act),
+            "victory": bool(self.last_run_victory),
+        }
+
+    def _boss_chest_reopen_filter(self, state, acts):
+        """Drop the SECOND and later `open` of one boss chest.
+
+        boss_chest.hpp: a skipped boss-relic pick calls `chest.close()`, which
+        does not clear the three offers, and
+        ChoiceScreenUtils.getChestRoomChoices re-advertises "open" as soon as
+        `isOpen` is false -- so open/skip is a legal 2-cycle whose signature
+        alternates between the CHEST and BOSS_REWARD screens, which the stuck
+        detector (one repeating (floor, screen, cmd)) cannot see. The b5.2 GRID
+        cancel trap in `expand_legal_actions` is the same shape and this is the
+        same answer.
+
+        Dropping it costs the run nothing: a reopened chest offers THE SAME
+        three relics (BossRelicSelectScreen.open re-adds from the list it is
+        handed), so a second look decides nothing a first look did not.
+        `proceed` is always advertised in this room
+        (ChoiceScreenUtils.isConfirmButtonAvailable, CHEST -> true), so removing
+        the open can never empty the candidate set.
+        """
+        gs = state.get("game_state") or {}
+        if not is_boss_chest_reopen(gs):
+            return acts
+        if self._boss_chest_key(gs) not in self._boss_chest_opened:
+            return acts
+        return [a for a in acts if not a.startswith("choose ")]
+
+    @staticmethod
+    def _boss_chest_key(gs: dict):
+        return (gs.get("act"), gs.get("floor"))
+
     def _policy_command(self, state):
         # Both live policies draw from the SAME expansion of the game's own
         # available_commands, so both are legal by construction; they differ
         # only in how they choose among the candidates.
-        acts = expand_legal_actions(state, self.rng)
+        acts = self._boss_chest_reopen_filter(
+            state, expand_legal_actions(state, self.rng))
         if not acts:
             return None
         if self.args.policy == "greedy":
-            return greedy_policy.pick(acts, state, self.card_table, self.rng)
-        if self.args.policy == "external":
+            cmd = greedy_policy.pick(acts, state, self.card_table, self.rng)
+        elif self.args.policy == "external":
             try:
-                return self.external.decide(
+                cmd = self.external.decide(
                     self._current_seed, self.args.policy_seed, acts, state)
             except ExternalPolicyError as exc:
                 # A broken action source is an environment fault, not a seed
@@ -1530,13 +1699,45 @@ class CampaignDriver:
                 # stop the campaign durably instead of burning the list.
                 raise FatalEnvironmentDrift(
                     str(exc), kind="external_policy_error")
-        return self.rng.choice(acts)
+        else:
+            cmd = self.rng.choice(acts)
+        self._note_boss_chest_open(state, cmd)
+        return cmd
+
+    def _note_boss_chest_open(self, state, cmd) -> None:
+        """Latch that THIS boss chest has now been opened once.
+
+        Recorded here rather than after the send because `_policy_command`'s
+        return value is always the very next command injected; recording it at
+        the decision keeps the guard's state and the decision that arms it in
+        one place.
+        """
+        gs = state.get("game_state") or {}
+        if cmd and cmd.startswith("choose ") and is_boss_chest_reopen(gs):
+            self._boss_chest_opened.add(self._boss_chest_key(gs))
 
     def _claim_boss_reward(self, rl, timing, state, seed, actions):
-        """On the Act-1 boss combat-reward screen: claim every reward, then STOP
-        (do not `proceed` -- that opens the boss chest, which is S2/out of scope,
-        design 1.1). Returns ('act1_boss_reward', updated_action_count)."""
-        _log(f"seed {seed}: ACT-1 BOSS reward reached -- claiming, then stop")
+        """On a boss combat-reward screen (any act): claim every row, then go on.
+
+        b1.7.0. S1 stopped here on purpose -- `proceed` opens the boss chest,
+        which was out of S1 scope (design 1.1). S2-G2 items 2-3 are ABOUT the
+        boss chest, so the last step is now the `proceed` S1 refused, and
+        control returns to the main loop with the chest room live.
+
+        Claiming is still scripted rather than policy-driven, unchanged from
+        b1.5.x: the boss reward screen is a forced claim screen (its rows are
+        the run's only chance at them) and the sequencing is not a judgement
+        the policy has any evidence about. WHICH boss relic to take, one screen
+        later, IS a judgement -- and that one is the policy's (greedy_policy R4,
+        driven through the ordinary loop).
+
+        Returns `(state, actions, stop)`: `stop` is None on the normal path and
+        a terminal outcome name when the guard fired, which means the screen
+        stopped making progress and the run cannot continue honestly.
+        """
+        act = (state.get("game_state") or {}).get("act")
+        _log(f"seed {seed}: ACT-{act} BOSS reward reached -- claiming, "
+             f"then proceeding to the boss chest")
         guard = 0
         while True:
             gs = state.get("game_state") or {}
@@ -1544,8 +1745,12 @@ class CampaignDriver:
             choices = gs.get("choice_list") or []
             guard += 1
             if guard > 60:
-                rl.terminal("act1_boss_reward", gs, actions)
-                return "act1_boss_reward", actions
+                # 60 screen steps without clearing a reward screen is not a
+                # slow claim; it is a screen that has stopped advancing. Name
+                # it rather than spending the run's whole action budget here.
+                _log(f"seed {seed}: boss reward screen never cleared after "
+                     f"{guard} steps (screen={st}) -- ending the run")
+                return state, actions, "boss_reward_wedge"
             if st == "COMBAT_REWARD":
                 if choices:
                     rl.action("choose 0", state)
@@ -1553,10 +1758,12 @@ class CampaignDriver:
                     actions += 1
                     kind, state = self.stepper.step("choose 0")
                     continue
-                # all rewards claimed -> terminal, do NOT proceed to boss chest
-                rl.action("__terminal_observed__", state)
-                rl.terminal("act1_boss_reward", gs, actions)
-                return "act1_boss_reward", actions
+                # every row claimed -> the proceed that opens the boss chest
+                rl.action("proceed", state)
+                timing.mark(actions, "proceed", gs.get("floor"), st)
+                actions += 1
+                kind, state = self.stepper.step("proceed")
+                return state, actions, None
             if st == "CARD_REWARD":
                 cmd = "choose 0" if choices else "skip"
                 rl.action(cmd, state)
@@ -1564,8 +1771,12 @@ class CampaignDriver:
                 actions += 1
                 kind, state = self.stepper.step(cmd)
                 continue
-            # any other transient screen: settle
-            kind, state = self.stepper.step("state")
+            # Any other screen: the claim opened something this routine has no
+            # opinion about (a picked relic's onEquip GRID, an animation
+            # handing the room back). Hand it to the main loop, whose policy
+            # DOES score grids -- rather than settling blind here and
+            # re-deriving half the loop.
+            return state, actions, None
 
     def _return_to_menu_from_gameover(self):
         """Press proceed on the GAME_OVER screen to return to the main menu so
@@ -1676,11 +1887,12 @@ class CampaignDriver:
             self.progress.data["seeds_done"].append({
                 "seed": seed, "outcome": outcome, "floor": floor,
                 "actions": acts, "attempts": attempt,
-                # Additive (TE.1 cohort metric): whether this run ever stood
-                # in the Act-1 boss room. NOT in validate_artifacts.
-                # STRICT_DONE_KEYS, so pre-b1.6.0 ledgers still validate.
-                "boss_fight_reached": bool(
-                    getattr(self, "last_run_boss_fight", False)),
+                # Additive cohort metrics. `boss_fight_reached` is b1.6.0's
+                # (TE.1); b1.7.0 adds the per-act reach block the S2.42 report
+                # is built from. NONE of these are in
+                # validate_artifacts.STRICT_DONE_KEYS, so a pre-b1.6.0 or
+                # pre-b1.7.0 ledger still validates.
+                **self._reach_fields(),
                 "artifact": f"run_{seed}_a20_ironclad.jsonl"})
             self.progress.data["current_seed"] = None
             self.progress.data["current_seed_attempt"] = 0
