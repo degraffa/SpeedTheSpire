@@ -297,6 +297,38 @@ S2.12 fills it. Confusion's slot amount question (S1 wrote 1, Java holds -1,
 against the oracle before choosing, and corrects or re-justifies the comment
 in place.
 
+### S2 Wave-3 allocations — 2026-08-07 (shared framework S2.2F, then batches; granted from six scout dossiers)
+
+Maxima re-derived at grant time: `MonsterId` 36 (31 gap), `PowerId` 95, opcode
+67, `Hook` 14, `MonsterIntent` 13 (+14 reserve), type-scoped flag bits next 17,
+global bits next 25, `MONSTER_ROLL_TIMINGS` 1, fuzz `MoveCat` COUNT 32.
+**S2.2F (the shared-framework task, defined in the S2 ledger) lands FIRST and
+serially** — it owns the one CombatState schema bump (SCHEMA_VERSION 6→7,
+owner-approved 2026-08-07: `kMonsterCap` 7→24, a `MonsterState` position key,
+the OBTAIN_CARD accumulator, `kMonsterFlagHalfDead` = global bit 25; all 20
+combat fixtures regenerate exactly once there, the sanctioned exception) plus
+the death/turn/spawn surfaces. Unspent scarce values are RELEASED and reported.
+
+| Namespace | Grant |
+|---|---|
+| `MonsterId` | S2.23 **37–39**; S2.24 **40–44**; S2.25 **49–53**; S2.26 **54–57**; S2.27 **58–61**; S2.28 **62–65** (45–48, 66 unissued) |
+| `PowerId` | S2.23 **96** MINION, **97** PAINFUL_STABS; S2.24 **98** STASIS; S2.25 **99** REGROW (game_id "Life Link"), **100** EXPLOSIVE, **101** GENERIC_STRENGTH_UP; S2.26 **102** CONSTRICTED, **103** FADING, **104** SHIFTING, **105** REACTIVE (game_id "Compulsive"); S2.27 **106** SLOW, **107** INTANGIBLE_MONSTER (id-29 row is "IntangiblePlayer" — wrong class, do not reuse); S2.28 **108** CURIOSITY, **109** UNAWAKENED, **110** TIME_WARP, **111** DRAW_REDUCTION |
+| Opcode | S2.2F **68** OBTAIN_CARD (consumer S2.26), **69** CLEAR_CARD_QUEUE (S2.28), **70** END_PLAYER_TURN (S2.28 Time Warp); S2.24 **71** APPLY_STASIS, **72** contingency (release unspent) |
+| `Hook` | S2.2F **15** DURING_TURN, **16** ON_AFTER_USE_CARD, **17** ON_INFLICT_DAMAGE (`kHookCount` → 18; dispatch sites land in S2.2F, binders in batches) |
+| `MonsterIntent` | S2.28 **15** DEFEND_DEBUFF (14 stays the published reserve) |
+| `MonsterState.flags` | S2.2F **global bit 25** `kMonsterFlagHalfDead` (producers S2.25 Darkling, S2.28 Awakened One — ONE owner for the bit and the `monster_basically_dead` split, per the two-scout convergence) |
+| fuzz `MoveCat` | S2.28 **32** (double-boss transition; `COUNT` → 33; release unspent) |
+| `MONSTER_ROLL_TIMINGS` | S2.2F **2** `CONSTRUCTOR_BEFORE_HP` (consumers: Taskmaster S2.23, Orb Walker S2.25, SnakeDagger S2.27) |
+
+Adjudications with the grants: `MonsterDieFn` gains a bool veto + a new
+`MonsterDieAfterFn` slot (both death edges respect the veto); spawn-HP
+convention ratified as "module rolls at takeTurn into `amount`"; the spawn
+path runs the spawned monster's pre-battle fn; SUICIDE's triggerRelics arm is
+implemented in S2.2F; the a20.yaml id-20 double-boss route is REASSIGNED
+S2.12 → S2.28 (S2.12 landed without it; recorded here so the drift is
+explicit). Batch dependency order: S2.2F → {S2.23 ∥ S2.25 ∥ S2.26 ∥ S2.28} →
+{S2.24 ∥ S2.27} (both need S2.23's MINION row and its spawn pattern).
+
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
 Published here rather than only in the dispatching briefs, per the rule above.

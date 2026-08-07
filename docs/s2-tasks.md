@@ -346,6 +346,35 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 
 ## Phase S2.2 — Monster batches (each = YAML rows + engine bodies + tier-2, the B3.13–B3.22 pattern; ∥ across disjoint batches once S2.01 lands)
 
+- **S2.2F** `[ ]` **Shared monster framework (added 2026-08-07 from the six
+  batch scout dossiers; lands FIRST, serially — every remaining batch builds
+  on it).** The one CombatState schema bump (SCHEMA_VERSION 6→7,
+  owner-approved: `kMonsterCap` 7→24 with an explicit sizeof ceiling probe;
+  `MonsterState` position/draw_x key so spawn slots stop being hand-derived;
+  the OBTAIN_CARD in-combat master-deck accumulator drained by run_advance —
+  Omamori-safe by construction; `kMonsterFlagHalfDead` global bit 25) with
+  the 20 combat fixtures regenerated exactly once. Death edges:
+  `MonsterDieFn` → bool veto (Darkling/Awakened One suppress `super.die()`),
+  new `MonsterDieAfterFn` (Reptomancer/Automaton/Collector post-die bodies),
+  `monster_basically_dead` split from `monster_dead_or_escaped` with the
+  ~30 call sites classified (targeting counts halfDead dead;
+  combat-over/turn-queue counts it alive). Hooks 15–17 dispatch sites
+  (DURING_TURN at the action_queue stub; ON_AFTER_USE_CARD at the
+  interp_cards reserved seam; ON_INFLICT_DAMAGE on the attacker's powers
+  after wasHPLost). Opcodes 68–70 (OBTAIN_CARD, CLEAR_CARD_QUEUE,
+  END_PLAYER_TURN — the forced-turn-end verb). Spawn conventions ratified
+  (HP roll at takeTurn into `amount`; spawned monsters run pre-battle;
+  SUICIDE triggerRelics arm implemented; queue index remap verified with a
+  directed test — two scouts disagreed on whether it exists).
+  `MONSTER_ROLL_TIMINGS` 2 CONSTRUCTOR_BEFORE_HP. Full grant table:
+  [stage-b-tasks.md](stage-b-tasks.md) "S2 Wave-3 allocations".
+  **Deps:** — **Acceptance:** a directed test per new surface (hook
+  dispatch, cap growth past 7 live records, die veto both edges, basically-
+  dead split at a classified site of each kind, accumulator drain vs
+  Omamori, END_PLAYER_TURN mid-queue); fixture regeneration recorded; six
+  presets green; layout probes (`offsetof`/`sizeof`) not predictions.
+  **Log:** —
+
 - **S2.21** `[x]` ∥ City normals I — Chosen (27), Byrd (28), Shelled
   Parasite (29), Spheric Guardian (30); `powers.yaml` **Hex (93)** and
   **Flight (94)** — the only two NEW power rows the batch needed.
@@ -467,28 +496,28 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   spawnGremlin), Slavers (Taskmaster + S1 slavers), Book of Stabbing.
   **Inherited:** the stage-b Gremlin move-99 escape row (see Deferred
   obligations).
-  **Deps:** S2.01 **Acceptance:** as S2.21, plus escape-trigger tests and
+  **Deps:** S2.01, S2.2F **Acceptance:** as S2.21, plus escape-trigger tests and
   the stage-b row discharged in the same commit.
 - **S2.24** `[ ]` ∥ City bosses — Bronze Automaton (+ BronzeOrb, Stasis
   model), The Champ, The Collector (+ TorchHead). A2/3/4-A19 columns per
   boss.
-  **Deps:** S2.01 **Acceptance:** as S2.21, plus boss-flag typing
+  **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21, plus boss-flag typing
   (Pantograph-style consumers) and A13 gold tests.
 - **S2.25** `[ ]` ∥ Beyond normals I — Darkling (Regrow/revival), Orb
   Walker, Repulsor/Exploder/Spiker (3/4 Shapes, Sphere and 2 Shapes).
-  **Deps:** S2.01 **Acceptance:** as S2.21.
+  **Deps:** S2.01, S2.2F **Acceptance:** as S2.21.
 - **S2.26** `[ ]` ∥ Beyond normals II — Spire Growth, Transient, Maw, Jaw
   Worm Horde (variant-ctor deferred row), Writhing Mass (Reactive +
   master-deck Parasite).
-  **Deps:** S2.01 **Acceptance:** as S2.21, plus the master-deck Parasite
+  **Deps:** S2.01, S2.2F **Acceptance:** as S2.21, plus the master-deck Parasite
   fold-back test.
 - **S2.27** `[ ]` ∥ Beyond elites — Giant Head, Nemesis (Intangible +
   Burn), Reptomancer (+ SnakeDagger spawns).
-  **Deps:** S2.01 **Acceptance:** as S2.21.
+  **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21.
 - **S2.28** `[ ]` ∥ Beyond bosses — Awakened One (two phases, Curiosity/
   Unawakened, Void insertion, Cultist adds), Time Eater (TimeWarp/
   DrawReduction/Slimed), Donu and Deca.
-  **Deps:** S2.01 **Acceptance:** as S2.21, plus phase-transition and
+  **Deps:** S2.01, S2.2F **Acceptance:** as S2.21, plus phase-transition and
   TimeWarp turn-economy tests.
 
 ## Phase S2.3 — Events closure (B4.11–B4.13 pattern; ∥ across disjoint batches once S2.02 + S2.13 land)

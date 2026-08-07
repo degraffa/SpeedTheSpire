@@ -2160,6 +2160,11 @@ machinery; A4/A9/A19 columns cited.
 **Log:** Done 2026-07-24. Added append-only `MonsterId` 11 `SLIME_BOSS`
 and `MonsterIntent::STRONG_DEBUFF` 8 without opcode, schema, or state-layout
 renumbering. The A20 implementation has fixed 150 HP with no monsterHpRng draw,
+[CORRECTION 2026-08-07: the no-draw half of this sentence was wrong — setHp(int)
+delegates to setHp(hp,hp), which draws once even for a degenerate range
+(Random.java:58-61). Fixed engine-wide with Hexaghost and The Guardian in
+commit 79328ad; the fixed-150-HP half stands. Recorded here as a dated
+annotation rather than a silent rewrite of the archive.]
 one ignored opening aiRng roll, the deterministic Goop Spray → Preparing → Slam
 cycle, A19 five-Slimed discard insertion, and the exact-half split interrupt.
 The native split preserves the Java CannotLose → Suicide → current-HP Spike L +
