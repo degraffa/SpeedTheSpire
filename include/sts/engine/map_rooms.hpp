@@ -83,7 +83,25 @@ enum class RoomType : uint8_t {
     Shop = 5,      // "$"  ShopRoom
     Treasure = 6,  // "T"  TreasureRoom
     Boss = 7,      // "B"  MonsterRoomBoss (not placed on a grid node; reserved)
+    // TreasureRoomBoss -- the post-boss chest (TreasureRoomBoss.java:22-36).
+    // Like Boss it is NEVER written into a grid node: ProceedButton
+    // .goToTreasureRoom (ProceedButton.java:179-187) builds a synthetic
+    // MapRoomNode(-1, 15) for it, so no RoomTypeAssigner path can produce this
+    // value in RunState.map. It is the RESOLVED room kind the controller
+    // carries (RunController.room_type) while RunPhase::BOSS_TREASURE is up.
+    // Value 8 is the S2 Wave-2 allocation (docs/stage-b-tasks.md "S2 Wave-2
+    // allocations"); values are append-only and never renumbered.
+    TreasureBoss = 8,
 };
+
+// One past the last RoomType enumerator, for consumers that index an array by
+// room kind (tools/fuzz/include/sts/fuzz/coverage.hpp's kRoomTypeCount). It is
+// declared HERE, beside the enum, and static_asserted against it, so a new room
+// kind cannot silently leave a downstream array one short -- which is exactly
+// what the fuzz coverage table had no guard against before TreasureBoss landed.
+inline constexpr int kRoomTypeCount = 9;
+static_assert(static_cast<int>(RoomType::TreasureBoss) + 1 == kRoomTypeCount,
+              "kRoomTypeCount must be one past the last RoomType enumerator");
 
 // The game's mapSymbol for a room (RoomTypeAssigner dump / oracle golden).
 [[nodiscard]] constexpr char room_symbol(RoomType r) noexcept {
@@ -95,6 +113,13 @@ enum class RoomType : uint8_t {
         case RoomType::Shop:     return '$';
         case RoomType::Treasure: return 'T';
         case RoomType::Boss:     return 'B';
+        // TreasureRoomBoss's constructor (TreasureRoomBoss.java:31-36) never
+        // assigns `mapSymbol`, so the room carries AbstractRoom's default and
+        // no map dump can contain it -- the room is off-grid. 'T' is returned
+        // rather than '.' so a dump that somehow held one is readable as a
+        // chest; a map-generation test can never produce this case (the
+        // RoomTypeAssigner writes only values 1..6).
+        case RoomType::TreasureBoss: return 'T';
         case RoomType::None:     return '.';
     }
     return '.';

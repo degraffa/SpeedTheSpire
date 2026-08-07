@@ -126,7 +126,20 @@ enum class MoveCat : uint8_t {
     // needs to know it is reached -- and reached SEPARATELY from REST, whose
     // ordinal it can share a menu with.
     RECALL = 27,
-    COUNT = 28,
+    // The boss chest (RunPhase::BOSS_TREASURE). Four categories rather than one,
+    // because unlike the shop's or Neow's several screens these four moves have
+    // DIFFERENT and individually load-bearing reachability -- the whole point of
+    // trap 3 is that the three relics burn at room entry whether or not the
+    // chest is ever opened, so a soak must be able to say separately how often
+    // it opened, picked, skipped, and walked past. The S2 Wave-2 grant
+    // (docs/stage-b-tasks.md) allocated 28-31 for exactly this.
+    BOSS_CHEST_OPEN = 28,   // click the chest -> bossRelicScreen
+    BOSS_CHEST_PICK = 29,   // take one of the three (also the equip sub-screens:
+                            // a picked relic's onEquip grid / reward screen is
+                            // part of the same pick, not a fifth move kind)
+    BOSS_CHEST_SKIP = 30,   // the screen's cancel button -- REVERSIBLE
+    BOSS_CHEST_PROCEED = 31,  // leave the room (the noPick path when unpicked)
+    COUNT = 32,
 };
 
 [[nodiscard]] const char* move_cat_name(MoveCat c) noexcept;

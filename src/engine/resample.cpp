@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "sts/engine/boss_chest.hpp"        // BossChestState / kBossChestOfferCount
 #include "sts/engine/encounters.hpp"        // continue_monster_lists / condition_boss_list
 #include "sts/engine/knowledge.hpp"
 #include "sts/engine/map_rooms.hpp"         // RoomType (the consumed-prefix rule)
@@ -202,6 +203,50 @@ void resample_relic_pool_remainders(RunState& rs, SamplerRng& rng) noexcept {
     }
 }
 
+// --- Row: boss-chest offers (the head of the same hidden draw) ---------------
+//
+// Put an UNOPENED chest's three offers back on the FRONT of the BOSS pool, so
+// the pool row above permutes offers-and-remainder as the one window they came
+// from. See the call site in resample_hidden for why they cannot be resampled
+// independently of the pool.
+//
+// A Circlet offer is the EXHAUSTED-POOL fallback ("Red Circlet" ->
+// RelicLibrary's Circlet, relic_pools.cpp:386-389) and was never a pool member,
+// so putting it back would invent an entry. Those offers are left alone and the
+// redraw below reproduces them anyway: a pool that was empty stays empty.
+void restore_boss_chest_offers(RunState& rs, BossChestState& chest) noexcept {
+    constexpr int p = static_cast<int>(RelicPool::BOSS);
+    for (int i = kBossChestOfferCount - 1; i >= 0; --i) {
+        const auto id = static_cast<RelicId>(chest.relics[i]);
+        if (id == RelicId::NONE || id == RelicId::CIRCLET) {
+            continue;
+        }
+        if (rs.relic_pool_count[p] >= kRelicPoolCap) {
+            return;  // cannot restore without dropping an entry: leave as is
+        }
+        for (int k = rs.relic_pool_count[p]; k > 0; --k) {
+            rs.relic_pools[p][k] = rs.relic_pools[p][k - 1];
+        }
+        rs.relic_pools[p][0] = chest.relics[i];
+        ++rs.relic_pool_count[p];
+    }
+}
+
+// Re-run BossChest's constructor loop against the freshly permuted pool. Going
+// back through return_random_relic_key rather than reading three slots is what
+// keeps the particle's canSpawn behaviour faithful -- a rejected relic is still
+// popped and consumed (AbstractDungeon.java:804-806), so the particle's pool
+// cursor moves exactly as a real one would.
+void redraw_boss_chest_offers(RunState& rs, BossChestState& chest) noexcept {
+    for (int i = 0; i < kBossChestOfferCount; ++i) {
+        RelicSpawnContext ctx{};
+        ctx.floor = rs.floor;
+        fill_boss_spawn_gates(rs, ctx);
+        chest.relics[i] = static_cast<uint16_t>(
+            return_random_relic_key(rs, RelicTier::BOSS, ctx));
+    }
+}
+
 // --- Row: mid-event hidden state (Match & Keep board) ------------------------
 
 void resample_match_and_keep_board(EventDialogState& es,
@@ -350,8 +395,39 @@ void resample_hidden(RunController& rc, SamplerRng& rng) noexcept {
         resample_treasure_chest_contents(rc.treasure_chest, rng);
     }
 
+    // Row "Boss-chest offers", which must run BEFORE the pool row below.
+    //
+    // An UNOPENED boss chest has already front-popped three relics out of the
+    // BOSS pool (BossChest.java:35-39, at room entry) and the player has not
+    // seen them. So the offers are hidden state of exactly the same kind as the
+    // residual pool -- and they are the same DRAW: the three offers are the head
+    // of the pre-pop pool order, and the remainder is its tail. Resampling them
+    // separately would be incoherent (a particle could offer a relic its own
+    // pool still contains), so this puts the three back on the FRONT, lets the
+    // pool row below permute the whole window, and then re-runs the three pops
+    // through return_random_relic_key -- which is what keeps canSpawn rejection
+    // and its extra pop faithful in the particle instead of hand-rolled.
+    //
+    // The same CONTRACT COARSENING the pool row declares applies here, one step
+    // earlier: the multiset is treated as public and only its order is redrawn.
+    //
+    // An OPENED chest (`seen`) is a pure copy -- the offers are on screen, and
+    // PublicView carries them; a twin that redrew them would fail the invariance
+    // the whole T0.5 suite is built on.
+    const bool boss_chest_hidden =
+        rc.phase == static_cast<uint8_t>(RunPhase::BOSS_TREASURE) &&
+        rc.boss_chest.seen == 0 &&
+        rc.boss_chest.relics[0] != static_cast<uint16_t>(RelicId::NONE);
+    if (boss_chest_hidden) {
+        restore_boss_chest_offers(rs, rc.boss_chest);
+    }
+
     // Row "Relic-pool remainders".
     resample_relic_pool_remainders(rs, rng);
+
+    if (boss_chest_hidden) {
+        redraw_boss_chest_offers(rs, rc.boss_chest);
+    }
 
     // Rows that are PURE COPIES, listed so the table is visibly complete:
     // current-visit shop stock (rc.shop), Neow options (rc.neow), the act map

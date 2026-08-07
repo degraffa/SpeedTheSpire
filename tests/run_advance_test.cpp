@@ -3214,22 +3214,23 @@ TEST(FirstCombatEntry, NeowPayoutWalkOntoFloorOneLeavesALiveCombatMask) {
 }
 
 // =============================================================================
-// The Act-1 boss victory terminal (stage-b-design §1.1)
+// The victory terminal -- now the BOSS CHEST's proceed (S2.11)
 // =============================================================================
 //
-// "The run terminates when the act-1 boss's combat rewards are claimed"
-// (stage-b-design §1.1's S2+ boundary). In the game the boss reward's Proceed
-// never opens the map: at a COMBAT_REWARD in a MonsterRoomBoss it goes to the
-// boss chest (ProceedButton.update, ProceedButton.java:111-113 ->
-// goToTreasureRoom :179-187, a TreasureRoomBoss), and from there to the next
-// act -- both S2 content. So the sim's boss-reward Proceed is the run's
-// VICTORY terminal: RUN_OVER, with run_is_victory() telling it apart from a
-// death by (room_type == Boss, combat_outcome == KILLED).
+// In the game the boss reward's Proceed never opens the map: at a COMBAT_REWARD
+// in a MonsterRoomBoss it goes to the boss chest (ProceedButton.update,
+// ProceedButton.java:111-113 -> goToTreasureRoom :179-187, a TreasureRoomBoss).
+// Until S2.11 that room was unmodelled and the reward proceed WAS the terminal;
+// now it enters the chest, and the terminal moved to the chest's own proceed
+// (on_boss_chest_proceed, the seam S2.12 fills with the act transition).
+// run_is_victory() moved with it and reads room_type == TreasureBoss.
 //
 // The regression these tests pin was found by a 300-seed always_event fuzz
 // probe (seed 116): the proceed used to route to MAP_CHOICE, where the boss
 // column has no outgoing map edges, so the run advertised an EMPTY action
-// mask while claiming not to be terminal -- the soak's no_legal_moves.
+// mask while claiming not to be terminal -- the soak's no_legal_moves. The
+// property that matters is unchanged: the boss reward's proceed must never
+// leave the run non-terminal with nothing legal.
 
 RunController enter_boss_combat(int64_t seed) {
     RunController rc = run_begin(seed, kA20);
@@ -3252,7 +3253,7 @@ void weaken_all_monsters(RunController& rc) {
     }
 }
 
-TEST(BossVictory, BossRewardProceedIsTheRunOverVictoryTerminal) {
+TEST(BossVictory, BossRewardProceedEntersTheBossChestNotRunOver) {
     RunController rc = enter_boss_combat(kSeed);
     weaken_all_monsters(rc);
     play_out_combat(rc);
@@ -3260,6 +3261,7 @@ TEST(BossVictory, BossRewardProceedIsTheRunOverVictoryTerminal) {
     ASSERT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::KILLED));
     EXPECT_FALSE(run_is_victory(rc))
         << "the reward screen is still up -- not terminal yet";
+    const uint16_t boss_floor = rc.run.floor;
 
     RunActionMask m{};
     legal_actions(rc, m);
@@ -3267,16 +3269,18 @@ TEST(BossVictory, BossRewardProceedIsTheRunOverVictoryTerminal) {
     const StepResult res =
         step_with_result(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
 
-    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER))
-        << "the boss reward's proceed must END the run (stage-b-design §1.1), "
-           "not open a map the boss column has no edges into";
-    EXPECT_TRUE(run_is_victory(rc));
-    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
-    EXPECT_EQ(rc.combat_outcome, static_cast<uint8_t>(RunCombatOutcome::KILLED));
-    EXPECT_TRUE(res.terminal);
-    EXPECT_EQ(res.reward, 1.0f)
-        << "the run-level win is the +1 analogue of the DEFEAT path's -1";
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE))
+        << "the boss reward's proceed goes to the boss chest "
+           "(ProceedButton.java:111-113 -> :179-187), not to the map the boss "
+           "column has no edges into, and no longer straight to RUN_OVER";
+    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::TreasureBoss));
+    EXPECT_FALSE(run_is_victory(rc)) << "the chest room is not terminal";
+    EXPECT_FALSE(res.terminal);
+    EXPECT_EQ(res.reward, 0.0f) << "the win is paid at the chest's proceed";
     EXPECT_EQ(rc.rewards.count, 0) << "the screen cleared on the way out";
+    EXPECT_EQ(rc.run.floor, boss_floor + 1)
+        << "goToTreasureRoom runs the whole nextRoomTransition, so the chest "
+           "is its own floor (AbstractDungeon.java:2317-2325 -> :1687-1813)";
 }
 
 TEST(BossVictory, VictoryMaskIsEmptyBecauseRunOver) {
@@ -3284,6 +3288,9 @@ TEST(BossVictory, VictoryMaskIsEmptyBecauseRunOver) {
     weaken_all_monsters(rc);
     play_out_combat(rc);
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
+    // Walk straight past the chest: the act terminal is its proceed.
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
 

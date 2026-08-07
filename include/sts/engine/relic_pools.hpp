@@ -55,9 +55,11 @@ struct RelicSpawnContext {
     // fill_campfire_relic_count; a draw that does not fill it sees 0, which is
     // the fresh-run answer.
     uint8_t campfire_relic_count = 0;
-    // Ectoplasm.canSpawn (Ectoplasm.java:50-53): `actNum <= 1` -- the only
-    // act-gated canSpawn in the S1 relic set. Default 1 because S1 IS Act 1
-    // (design §6); RunState.act is the producer when a caller has one.
+    // Ectoplasm.canSpawn (Ectoplasm.java:54-57): `actNum <= 1` -- the only
+    // act-gated canSpawn in the S1 relic set, and the one trap 9 (s2-design §5)
+    // wakes up at the Act-2 boss chest. Default 1 because S1 IS Act 1
+    // (design §6); RunState.act is the producer when a caller has one --
+    // roll_boss_chest (boss_chest.hpp) is the S2 one.
     uint8_t act = 1;
     // BlackBlood.canSpawn (BlackBlood.java:33-36): hasRelic("Burning Blood").
     // Default TRUE, not false -- the Ironclad ALWAYS starts with Burning Blood
@@ -123,9 +125,10 @@ enum class RelicAcquireResult : uint8_t {
 //     fields that name the screen the call site must now present. The bodies
 //     therefore stay ignorant of WHO owns the screen: at Neow (the only S1
 //     producer -- the boss swap) the caller translates the request onto
-//     NeowState's existing GRID / ITEM_REWARD sub-screens, and a future Act-2
-//     boss-chest site translates the same request onto whatever screen state
-//     it owns. Re-homing is a call-site change, never a body change.
+//     NeowState's existing GRID / ITEM_REWARD sub-screens, and the BOSS CHEST
+//     (S2.11, boss_chest.hpp) translates the same requests onto the same
+//     NeowState fields under its own BossChestScreen. Re-homing was a call-site
+//     change and no body moved, exactly as this paragraph predicted.
 //   * FAIL-LOUD BY CONSTRUCTION: the plain 3-argument acquire_relic REFUSES
 //     (NEEDS_EQUIP_CONTEXT, nothing mutated) any id whose row lists this
 //     surface, so an acquisition path that cannot present screens -- claim,
@@ -133,9 +136,13 @@ enum class RelicAcquireResult : uint8_t {
 //     silently skip it. claim_reward already treats a non-ACQUIRED result as a
 //     refused claim, keeping the item on the screen.
 //   * Namespace cost: zero. The grid reuses NeowState (kNeowGridPickCap 2->3
-//     and one new NeowGridMode), so the Wave-C RunPhase 11-12 and MoveCat
-//     27-29 allocations stay unspent, and the fuzzer's mask-driven NEOW arm
-//     covers the new screens with no new MoveCat.
+//     and one new NeowGridMode), and the fuzzer's mask-driven NEOW arm covers
+//     the new screens with no new MoveCat. (This paragraph used to add "so the
+//     Wave-C RunPhase 11-12 and MoveCat 27-29 allocations stay unspent". They
+//     did stay unspent by Wave C -- but RunPhase 11 and MoveCat 28-31 were
+//     later re-granted to S2.11 and ARE spent now, on the boss chest. The claim
+//     that mattered, that the equip screens themselves cost no namespace value,
+//     still holds and held again at that second site.)
 enum class RelicEquipScreen : uint8_t {
     NONE = 0,                    // body completed synchronously; no screen
     GRID_REMOVE = 1,             // Empty Cage: `grid_picks`-pick purge grid

@@ -914,12 +914,32 @@ TEST(FuzzPolicy, OptionalChoiceEnumeratesTogglesAndAnImmediateEmptyConfirm) {
 // MoveCat::COUNT sizes the soak's coverage arrays, so an enumerator at or above
 // it is an out-of-bounds write, not a cosmetic slip.
 TEST(FuzzPolicy, MoveCatCountIsPastEveryEnumerator) {
-    EXPECT_GT(static_cast<int>(MoveCat::COUNT),
-              static_cast<int>(MoveCat::CHOICE_CONFIRM));
+    // This used to compare COUNT against CHOICE_CONFIRM BY NAME, on the
+    // assumption that CHOICE_CONFIRM was the last enumerator. It stopped being
+    // last twice over (SHOP, RECALL, then the four boss-chest categories) and
+    // nothing noticed, because the assertion stayed true while measuring
+    // nothing: a guard meant to catch a stale hand-written COUNT had quietly
+    // become a guard that 25 < 32.
+    //
+    // The fix is to find the real highest enumerator rather than naming one.
+    // Every value below COUNT must have a name, and COUNT itself -- and the
+    // value past it -- must not, which pins COUNT one past the last NAMED
+    // enumerator without this test having to know which that is.
+    // move_cat_name's switch is -Wswitch-checked, so a new enumerator with no
+    // name is a compile error there and a "?" here.
+    ASSERT_GT(static_cast<int>(MoveCat::COUNT), 0);
     for (int i = 0; i < static_cast<int>(MoveCat::COUNT); ++i) {
         EXPECT_STRNE(move_cat_name(static_cast<MoveCat>(i)), "?")
-            << "MoveCat " << i << " has no name";
+            << "MoveCat " << i << " has no name -- either COUNT reaches past a "
+               "gap, or an enumerator landed without a move_cat_name case";
     }
+    EXPECT_STREQ(move_cat_name(MoveCat::COUNT), "?")
+        << "COUNT itself must not be a named category";
+    EXPECT_STREQ(
+        move_cat_name(static_cast<MoveCat>(static_cast<int>(MoveCat::COUNT) + 1)),
+        "?")
+        << "an enumerator ABOVE COUNT is the out-of-bounds write this test "
+           "exists to catch";
 }
 
 TEST(FuzzPolicy, TreasureRoomEnumeratesDistinctOpenAndSkipActions) {

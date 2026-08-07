@@ -56,6 +56,22 @@ const RunPhase kWanted[] = {
     RunPhase::EVENT_DIALOG, RunPhase::SHOP,          RunPhase::RUN_OVER,
 };
 
+// RunPhase::BOSS_TREASURE (S2.11) is DELIBERATELY ABSENT, and this note is the
+// reason rather than an oversight. The boss chest carries the second
+// masked-contents trap -- an unopened chest's three offers are drawn at room
+// entry and hidden until the open action -- so it is exactly the shape this
+// gate exists for. But reaching it requires WINNING the act-1 boss at ascension
+// 20, and none of the four scripted policies above does that on any seed in the
+// sweep below; adding it to kWanted only makes the generator print "no case
+// harvested for phase 11" on every run, which is a stale warning, not coverage.
+//
+// The invariance it would have gated is covered DIRECTLY instead, by
+// tests/boss_chest_test.cpp's AnUnopenedChestsTwinEncodesIdentically and
+// AnOpenedChestsTwinKeepsTheOffers, which build the state by aiming
+// next_room_transition_boss_chest at it rather than by hoping a random policy
+// arrives. Put it back here the moment a boss-beating scripted policy exists
+// (the TE.1 survival-cohort seam is where one would land).
+
 }  // namespace
 
 int main() {

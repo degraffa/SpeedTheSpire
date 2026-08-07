@@ -37,6 +37,7 @@ namespace sts::replay {
 using sts::engine::Action;
 using sts::engine::ActionMask;
 using sts::engine::ActionVerb;
+using sts::engine::BossChestScreen;
 using sts::engine::CardPoolIndex;
 using sts::engine::EventGridKind;
 using sts::engine::kChooseBoss;
@@ -185,6 +186,7 @@ struct ScreenInfo {
         case RunPhase::TREASURE_ROOM: return "TREASURE_ROOM";
         case RunPhase::EVENT_DIALOG: return "EVENT_DIALOG";
         case RunPhase::SHOP: return "SHOP";
+        case RunPhase::BOSS_TREASURE: return "BOSS_TREASURE";
     }
     return "?";
 }
@@ -330,6 +332,14 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
             return rc.event.grid_kind != static_cast<uint8_t>(EventGridKind::NONE);
         case RunPhase::SHOP:
             return rc.shop.screen == static_cast<uint8_t>(ShopScreenKind::PURGE_GRID);
+        case RunPhase::BOSS_TREASURE:
+            // A picked boss relic's onEquip grid (Astrolabe / Empty Cage /
+            // the two confirmation grids). The boss chest re-homes those onto
+            // the SAME NeowState fields the Neow arm above reads
+            // (boss_chest.hpp), so the grid liveness test is the same one; what
+            // says the grid belongs to this room is BossChestScreen.
+            return rc.boss_chest.screen ==
+                   static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
         default:
             return false;
     }
@@ -337,8 +347,13 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
 
 [[nodiscard]] inline bool sim_choice_free_confirmation_grid(
     const RunController& rc) noexcept {
-    if (rc.phase != static_cast<uint8_t>(RunPhase::NEOW) ||
-        rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
+    const bool boss_chest_grid =
+        rc.phase == static_cast<uint8_t>(RunPhase::BOSS_TREASURE) &&
+        rc.boss_chest.screen ==
+            static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
+    if (!boss_chest_grid &&
+        (rc.phase != static_cast<uint8_t>(RunPhase::NEOW) ||
+         rc.neow.screen != static_cast<uint8_t>(NeowScreen::GRID))) {
         return false;
     }
     const auto mode = static_cast<NeowGridMode>(rc.neow.grid_mode);
@@ -386,6 +401,10 @@ inline void open_grid_session(const RunController& rc, GridSession& g) {
         case RunPhase::EVENT_DIALOG:
         case RunPhase::SHOP:
         case RunPhase::REST_SITE:
+        // The boss chest is a relic-pickup site by construction -- it exists to
+        // hand over one BOSS-tier relic, five of which have on_equip_screen
+        // bodies (boss_chest.hpp).
+        case RunPhase::BOSS_TREASURE:
             return true;
         case RunPhase::NONE:
         case RunPhase::COMBAT:

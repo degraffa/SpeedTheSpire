@@ -74,6 +74,10 @@ const char* move_cat_name(MoveCat c) noexcept {
         case MoveCat::CHOICE_CONFIRM: return "choice_confirm";
         case MoveCat::SHOP: return "shop";
         case MoveCat::RECALL: return "recall";
+        case MoveCat::BOSS_CHEST_OPEN: return "boss_chest_open";
+        case MoveCat::BOSS_CHEST_PICK: return "boss_chest_pick";
+        case MoveCat::BOSS_CHEST_SKIP: return "boss_chest_skip";
+        case MoveCat::BOSS_CHEST_PROCEED: return "boss_chest_proceed";
         case MoveCat::COUNT: break;
     }
     return "?";
@@ -423,6 +427,56 @@ size_t enumerate_moves(const RunController& rc, const RunActionMask& mask, Move*
                 s.add(make_action(ActionVerb::CHOOSE,
                                   engine::kChooseProceed),
                       MoveCat::TREASURE_SKIP);
+            }
+            break;
+
+        case RunPhase::BOSS_TREASURE:
+            // Mask-driven like every other arm; the screen only decides WHICH
+            // category a flag belongs to. The equip sub-screens a picked relic
+            // can open (master-deck grid / claimable reward screen) are folded
+            // into BOSS_CHEST_PICK -- they are the tail of one pick, and a
+            // separate bucket would have to be allocated rather than taken.
+            if (mask.can_open_chest) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseOpenChest),
+                      MoveCat::BOSS_CHEST_OPEN);
+            }
+            for (int i = 0; i < engine::kRewardItemCap; ++i) {
+                if (mask.can_claim_reward[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::BOSS_CHEST_PICK);
+                }
+            }
+            for (int i = 0; i < engine::kMasterDeckCap; ++i) {
+                if (mask.can_choose_master_deck[i]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(i)),
+                          MoveCat::BOSS_CHEST_PICK);
+                }
+            }
+            for (int j = 0; j < engine::kRewardCardCap; ++j) {
+                if (mask.can_take_card[j]) {
+                    s.add(make_action(ActionVerb::CHOOSE,
+                                      static_cast<uint8_t>(j)),
+                          MoveCat::BOSS_CHEST_PICK);
+                }
+            }
+            if (mask.can_skip_card) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseSkipCard),
+                      MoveCat::BOSS_CHEST_PICK);
+            }
+            if (mask.can_sing) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseSing),
+                      MoveCat::BOSS_CHEST_PICK);
+            }
+            if (mask.can_cancel_grid) {
+                s.add(make_action(ActionVerb::CHOOSE,
+                                  engine::kChooseCancelGrid),
+                      MoveCat::BOSS_CHEST_SKIP);
+            }
+            if (mask.can_proceed) {
+                s.add(make_action(ActionVerb::CHOOSE, engine::kChooseProceed),
+                      MoveCat::BOSS_CHEST_PROCEED);
             }
             break;
 

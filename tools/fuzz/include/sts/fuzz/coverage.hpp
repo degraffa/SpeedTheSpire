@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "sts/engine/map_rooms.hpp"  // RoomType / kRoomTypeCount
 #include "sts/fuzz/policy.hpp"
 #include "sts/registry/manifest.hpp"
 
@@ -58,7 +59,16 @@ enum class EndReason : uint8_t {
 
 [[nodiscard]] const char* end_reason_name(EndReason r) noexcept;
 
-inline constexpr int kRoomTypeCount = 8;      // map_rooms.hpp RoomType
+// map_rooms.hpp's RoomType count. DERIVED from the enum, not re-spelled: this
+// sizes room_entered[] / room_stalled[], which are indexed by rc.room_type, and
+// as a hand-written 8 with nothing checking it, it would have silently
+// under-covered the enum the moment a room kind was added. engine::
+// kRoomTypeCount carries its own static_assert against the last enumerator, so
+// the guard exists at both ends of the dependency.
+inline constexpr int kRoomTypeCount = engine::kRoomTypeCount;
+static_assert(
+    kRoomTypeCount == static_cast<int>(engine::RoomType::TreasureBoss) + 1,
+    "kRoomTypeCount must cover every RoomType enumerator");
 inline constexpr int kRewardKindCount = 5;    // combat_rewards.hpp RewardItemKind
 inline constexpr int kTurnBuckets = 8;        // 1,2,3,4,5-6,7-9,10-19,20+
 inline constexpr int kFloorBuckets = 16;      // floor 0..14, then 15+

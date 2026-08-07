@@ -102,6 +102,9 @@ add_library(sts_engine
     rest_sites.cpp
     # Treasure-room chest construction/opening + chest relic hooks.
     treasure_rooms.cpp
+    # The post-boss chest: the three entry-time BOSS-pool pops and the
+    # boss-relic screen's pure predicates (boss_chest.hpp).
+    boss_chest.cpp
     # Merchant stock generation, pricing, purchases and the purge service.
     shop.cpp
     # ?-room roll + event selection/pool bookkeeping + dialog dispatch.

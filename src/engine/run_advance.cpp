@@ -1109,6 +1109,31 @@ void on_player_entry_impl(RunController& rc, RoomType room, RoomType left_room,
             rc.treasure_chest = roll_treasure_chest(rc.run);
             rc.phase = static_cast<uint8_t>(RunPhase::TREASURE_ROOM);
             break;
+        case RoomType::TreasureBoss:
+            // TreasureRoomBoss.onPlayerEntry (TreasureRoomBoss.java:56-64). Its
+            // LAST statement (:63) is `this.chest = new BossChest()`, whose
+            // constructor front-pops three BOSS relics UNCONDITIONALLY
+            // (BossChest.java:35-39) -- trap 3's "the burn happens at room
+            // entry, not at open". The room's phase was already COMPLETE from
+            // the constructor (:33), so the proceed button is live from the
+            // first frame and leaving without ever touching the chest is a real,
+            // legal, and still-lossy action.
+            //
+            // Screen resets mirror the other room-entry arms: the reward screen
+            // and rest state are stale from the boss fight and must not leak
+            // into this room's masks. rc.neow is NOT reset -- its grid fields
+            // are this site's re-homed equip-screen storage (boss_chest.hpp),
+            // and they are (re)initialised by open_grid when a picked relic asks
+            // for one.
+            rc.combat = CombatState{};
+            reseed_floor_streams(rc.combat, seed, floor);
+            rc.rewards = RewardScreen{};
+            rc.rewards.open_card_item = kNoOpenCardReward;
+            rc.rest = RestSiteState{};
+            rc.treasure_chest = TreasureChest{};
+            rc.boss_chest = roll_boss_chest(rc.run);
+            rc.phase = static_cast<uint8_t>(RunPhase::BOSS_TREASURE);
+            break;
         case RoomType::Event: {
             // Relic.onEnterRoom already ran, above, against RoomType::Event --
             // the ORIGINAL EventRoom, before the game replaces it with the
@@ -1234,7 +1259,19 @@ bool enter_event_combat(RunController& rc, std::string_view encounter_key,
 
 // --- next_room_transition ----------------------------------------------------
 
-void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexcept {
+namespace {
+
+// Where a transition is going. MapNode reads rs.map; the other two are OFF-GRID
+// destinations the game builds as synthetic MapRoomNode(-1, 15) objects
+// (ProceedButton.java:181-183, :214-215) and therefore never look up.
+enum class TransitionTarget : uint8_t {
+    MapNode = 0,
+    Boss = 1,
+    BossChest = 2,
+};
+
+void next_room_transition_impl(RunController& rc, uint8_t dst_x,
+                               TransitionTarget target) noexcept {
     RunState& rs = rc.run;
 
     // (1) Remove the LEFT room's encounter from its list (AbstractDungeon.java:
@@ -1247,16 +1284,40 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
     //     still says Event. rc.room_type carries the resolved kind (set by
     //     every on_player_entry branch), so it is the correct source; reading
     //     rs.map here was a real bug once ? rooms resolve.
+    //
+    //     A BOSS ROOM COUNTS AS A MONSTER ROOM HERE. `MonsterRoomBoss extends
+    //     MonsterRoom` (MonsterRoomBoss.java:18-19), so the elite test at :1693
+    //     fails and the `instanceof MonsterRoom` test at :1700 SUCCEEDS when a
+    //     boss room is left -- monsterList.remove(0) fires. In S1 the boss room
+    //     was the last room of the run and nothing read the list again, so the
+    //     omission was unobservable; the boss-chest transition below is the
+    //     first edge that leaves a boss room with the run still going, which is
+    //     why S2.11 owns the correction (adjudicated at dispatch).
     const RoomType left_room = static_cast<RoomType>(rc.room_type);
     if (rs.floor >= 1 && rc.cur_x != kNeowColumn) {
-        if (left_room == RoomType::Monster) {
+        if (left_room == RoomType::Monster || left_room == RoomType::Boss) {
             ++rc.monster_cursor;
         } else if (left_room == RoomType::Elite) {
             ++rc.elite_cursor;
         }
     }
+    // The EMPTY-LIST arm of the same Java block (:1701-1706) calls
+    // generateStrongEnemies(12), which consumes the RUN-LIFETIME monsterRng and
+    // would therefore be observable in the next act. It is UNREACHABLE in S1+S2
+    // scope, and this assert is the loud guard that says so rather than a silent
+    // stall: an act's monster list holds kMaxMonsterList == 16 entries, while
+    // one walked path consumes at most 14 -- 15 map rows, of which row 8 is
+    // always Treasure and row 14 always Rest (map_rooms.hpp kTreasureRow /
+    // kRestRow), leaves 13 monsterList-consuming rooms, plus the one this block
+    // adds when the boss room is left. Elites and the boss draw other lists. If
+    // Acts 2-3 change that arithmetic, the docs/s2-tasks.md deferred-obligations
+    // row names S2.12 as the owner of the regeneration body.
+    assert(rc.monster_cursor <= rc.lists.monster_list_count &&
+           "monsterList exhausted -- AbstractDungeon.java:1701-1706's "
+           "generateStrongEnemies(12) regeneration is not modelled (S2.12)");
 
     // (2) ++floorNum (AbstractDungeon.java:1741) -- BEFORE the reseed (trap 7).
+    //     The BOSS CHEST gets one too; see next_room_transition_boss_chest.
     ++rs.floor;
 
     // (3) Reseed the 5 floor-scoped streams (AbstractDungeon.java:1747-1751).
@@ -1264,19 +1325,77 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
 
     // (4) Move to the destination node.
     RoomType room;
-    if (to_boss) {
-        rc.cur_x = static_cast<uint8_t>(kBossCol);
-        room = RoomType::Boss;
-    } else {
-        rc.cur_x = dst_x;
-        const int y = run_cur_row(rc);
-        room = static_cast<RoomType>(rs.map[run_state_map_index(dst_x, y)].room_type);
+    switch (target) {
+        case TransitionTarget::Boss:
+            rc.cur_x = static_cast<uint8_t>(kBossCol);
+            room = RoomType::Boss;
+            break;
+        case TransitionTarget::BossChest:
+            // MapRoomNode(-1, 15): off-grid, exactly like the boss node. cur_x
+            // stays at the boss column rather than taking a new sentinel --
+            // rc.room_type is what tells the two off-grid rooms apart, and cur_x
+            // is a public field whose encoding is not worth extending for a room
+            // with no outgoing map edges.
+            rc.cur_x = static_cast<uint8_t>(kBossCol);
+            room = RoomType::TreasureBoss;
+            break;
+        case TransitionTarget::MapNode:
+        default: {
+            rc.cur_x = dst_x;
+            const int y = run_cur_row(rc);
+            room = static_cast<RoomType>(
+                rs.map[run_state_map_index(dst_x, y)].room_type);
+            break;
+        }
     }
 
     // (5) onPlayerEntry (AbstractDungeon.java:1800), with the ?-roll block
     //     (:1763-1779) folded into the Event branch. `left_room` feeds the
     //     roll's leaving-a-shop gate (:128-130 of EventHelper.java).
     on_player_entry(rc, room, left_room);
+}
+
+}  // namespace
+
+void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexcept {
+    next_room_transition_impl(
+        rc, dst_x, to_boss ? TransitionTarget::Boss : TransitionTarget::MapNode);
+}
+
+// The full transition to the OFF-MAP boss chest -- see run_advance.hpp for the
+// ProceedButton.goToTreasureRoom -> nextRoomTransitionStart ->
+// AbstractDungeon.updateFading -> nextRoomTransition chain that makes this a
+// real room transition (floor++, trap-7 reseed, relic room-entry fan-outs)
+// rather than a screen change.
+void next_room_transition_boss_chest(RunController& rc) noexcept {
+    next_room_transition_impl(rc, 0, TransitionTarget::BossChest);
+}
+
+// --- the act terminal seam (S2.12 fills this) --------------------------------
+//
+// THE STUB, and exactly what S2.12 replaces. See run_advance.hpp for the full
+// contract; the short version is that this is called where the game calls
+// ProceedButton.goToNextDungeon, with the noPick bookkeeping already done and
+// `res` not yet filled.
+//
+// What it does today is the S1 victory terminal, MOVED ONE ROOM LATER: before
+// S2.11 the boss reward screen's proceed wrote RUN_OVER with reward 1.0f, and
+// that write now lives here, at the boss chest's proceed. Nothing else changed
+// about the terminal -- the same phase, the same reward, the same "the mask is
+// empty because the run is over" contract.
+//
+// run_is_victory() (run_advance.hpp) is defined against THIS body and must move
+// with it. The moment S2.12 makes this transition to Act 2, the Act-1 chest
+// stops being terminal and the predicate has to name the new terminal instead;
+// leaving it pointing at a state nothing produces would silently zero the fuzz
+// soak's `victories` counter, which is the failure this note exists to prevent.
+void on_boss_chest_proceed(RunController& rc, RunState& rs,
+                           StepResult& res) noexcept {
+    (void)rs;  // S2.12's dungeonTransitionSetup body is what needs it
+    rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+    fill_run_result(rc, res);
+    res.reward = 1.0f;  // the run-level win: the +1 analogue of the DEFEAT
+                        // path's -1 (finish_combat_after_action)
 }
 
 // --- run_begin ---------------------------------------------------------------
@@ -1561,6 +1680,93 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             out.can_proceed = true;  // TreasureRoom is COMPLETE on entry.
             break;
 
+        case RunPhase::BOSS_TREASURE: {
+            // The boss chest's four screens (boss_chest.hpp BossChestScreen).
+            // Every flag here is an EXISTING RunActionMask field read under this
+            // phase -- the same per-phase convention NEOW and REST_SITE use --
+            // so the hashed public serialization (PvMask) keeps its size and
+            // PUBLIC_VIEW_VERSION does not move.
+            const BossChestState& chest = rc.boss_chest;
+            switch (static_cast<BossChestScreen>(chest.screen)) {
+                case BossChestScreen::CLOSED:
+                    // The chest is clickable (AbstractChest.update:104-110) and
+                    // the proceed button is showing, because TreasureRoomBoss's
+                    // constructor set the room COMPLETE (:33). Both are true
+                    // again after a SKIP: relicSkipLogic closes the chest
+                    // (BossChest.close, :65-69, isOpen = false) without clearing
+                    // its relic list, and TreasureRoomBoss.update (:66-71) keeps
+                    // chest.update() live -- so the open action MUST stay legal
+                    // here or the sim would strand a reopenable chest.
+                    out.can_open_chest = boss_chest_open_legal(chest);
+                    out.can_proceed = true;
+                    break;
+                case BossChestScreen::RELIC_SELECT:
+                    // bossRelicScreen is up. The three relics are the clickable
+                    // rows (AbstractRelic.update's BOSS_REWARD arm, :352-370);
+                    // the cancel button (:349) is the skip. Proceed is NOT
+                    // offered: open() hides it (:354).
+                    for (uint8_t i = 0; i < kBossChestOfferCount; ++i) {
+                        out.can_claim_reward[i] =
+                            boss_chest_pick_legal(rc.run, chest, i);
+                    }
+                    out.can_cancel_grid = true;
+                    break;
+                case BossChestScreen::EQUIP_GRID: {
+                    // A picked relic's on_equip_screen body asked for a grid.
+                    // The two CONFIRM_* modes are choice-free display grids, so
+                    // they offer Proceed instead of rows -- exactly the shape
+                    // the NEOW arm uses, and the same handlers resolve them.
+                    const NeowState& n = rc.neow;
+                    const auto mode = static_cast<NeowGridMode>(n.grid_mode);
+                    if (mode == NeowGridMode::CONFIRM_PANDORA ||
+                        mode == NeowGridMode::CONFIRM_CALLING_BELL) {
+                        out.can_proceed = true;
+                    } else {
+                        for (uint16_t i = 0;
+                             i < rc.run.master_deck_count && i < kMasterDeckCap;
+                             ++i) {
+                            out.can_choose_master_deck[i] =
+                                neow_grid_card_legal(rc.run, n, i);
+                        }
+                    }
+                    break;
+                }
+                case BossChestScreen::EQUIP_ITEM_REWARD: {
+                    // Tiny House / Calling Bell assembled a claimable screen.
+                    const RewardScreen& s = rc.rewards;
+                    if (s.open_card_item != kNoOpenCardReward) {
+                        if (!reward_card_item_open_legal(s)) {
+                            break;
+                        }
+                        const RunRewardItem& item = s.items[s.open_card_item];
+                        for (uint8_t j = 0;
+                             j < item.card_count && j < kRewardCardCap; ++j) {
+                            out.can_take_card[j] =
+                                reward_take_card_legal(rc.run, s, j);
+                        }
+                        out.can_skip_card = true;
+                        out.can_sing =
+                            run_has_relic(rc.run, RelicId::SINGING_BOWL);
+                    } else {
+                        out.can_proceed = true;
+                        for (uint8_t i = 0; i < s.count && i < kRewardItemCap;
+                             ++i) {
+                            out.can_claim_reward[i] =
+                                reward_claim_legal(rc.run, s, i);
+                        }
+                    }
+                    break;
+                }
+                case BossChestScreen::DONE:
+                    // The relic is obtained and the proceed button is back
+                    // (AbstractRelic.update:345-347). This press is the ACT
+                    // TERMINAL (on_boss_chest_proceed).
+                    out.can_proceed = true;
+                    break;
+            }
+            break;
+        }
+
         case RunPhase::COMBAT_REWARD: {
             const RewardScreen& s = rc.rewards;
             if (s.open_card_item != kNoOpenCardReward) {
@@ -1764,6 +1970,17 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
             break;  // nothing legal (parked / terminal)
     }
 
+    // The out-of-combat potion ladder gates BY EXCLUSION, so a new phase becomes
+    // potion-legal by default. For BOSS_TREASURE that default is CORRECT and is
+    // asserted here rather than inherited silently: TopPanel.update's potion UI
+    // is live on the BOSS_REWARD screen (TopPanel.java:656, :729 both list it),
+    // so the belt really is usable while the boss-relic screen is up. The
+    // static_assert is what makes the next added phase re-read this paragraph --
+    // it names the highest enumerator the exclusion list was audited against.
+    static_assert(static_cast<int>(RunPhase::BOSS_TREASURE) == 11,
+                  "a new RunPhase landed: decide whether the out-of-combat "
+                  "potion ladder below should include it (it does by default) "
+                  "and re-pin this assert");
     const RunPhase phase = static_cast<RunPhase>(rc.phase);
     if (phase != RunPhase::COMBAT && phase != RunPhase::ROOM_UNIMPLEMENTED &&
         phase != RunPhase::RUN_OVER && phase != RunPhase::NONE) {
@@ -2036,6 +2253,119 @@ void apply_claim_equip_request(RunController& rc,
     }
 }
 
+// --- the boss chest ----------------------------------------------------------
+
+// Open the re-homed equip grid on the controller's NeowState (boss_chest.hpp's
+// re-homing note). Byte-for-byte the same field writes neow.cpp's file-local
+// open_grid makes; it is duplicated rather than exported because the two call
+// sites disagree about what `NeowState.screen` means afterwards -- at Neow it IS
+// the phase's screen, here it is only the grid's own liveness flag that
+// neow_grid_card_legal reads, with BossChestState.screen carrying the room.
+void open_boss_chest_grid(RunController& rc, NeowGridMode mode,
+                          uint8_t picks) noexcept {
+    NeowState& n = rc.neow;
+    n.screen = static_cast<uint8_t>(NeowScreen::GRID);
+    n.grid_mode = static_cast<uint8_t>(mode);
+    n.grid_needed = picks;
+    n.grid_done = 0;
+    for (int i = 0; i < kNeowGridPickCap; ++i) {
+        n.grid_picked[i] = 0;
+    }
+    rc.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::EQUIP_GRID);
+}
+
+// Translate an on_equip_screen request made by a relic picked AT THE BOSS CHEST.
+// This is the site relic_pools.hpp:126-128 named in advance ("a future Act-2
+// boss-chest site translates the same request onto whatever screen state it
+// owns. Re-homing is a call-site change, never a body change"), and it mirrors
+// spawn_relic_and_obtain's switch (neow.cpp:85-114) one-for-one.
+void apply_boss_chest_equip_request(RunController& rc,
+                                    const RelicEquipContext& ctx) noexcept {
+    switch (ctx.screen) {
+        case RelicEquipScreen::NONE:
+            // Synchronous body (or none at all): the room is finished.
+            rc.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
+            break;
+        case RelicEquipScreen::GRID_REMOVE:
+            open_boss_chest_grid(rc, NeowGridMode::REMOVE, ctx.grid_picks);
+            break;
+        case RelicEquipScreen::GRID_TRANSFORM_UPGRADE:
+            open_boss_chest_grid(rc, NeowGridMode::TRANSFORM_UPGRADE,
+                                 ctx.grid_picks);
+            break;
+        case RelicEquipScreen::GRID_CONFIRM_PANDORA:
+            open_boss_chest_grid(rc, NeowGridMode::CONFIRM_PANDORA, 0);
+            break;
+        case RelicEquipScreen::GRID_CONFIRM_CALLING_BELL:
+            open_boss_chest_grid(rc, NeowGridMode::CONFIRM_CALLING_BELL, 0);
+            break;
+        case RelicEquipScreen::ITEM_REWARD:
+            // Tiny House / Calling Bell assembled ctx.rewards (== rc.rewards).
+            rc.boss_chest.screen =
+                static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD);
+            break;
+        case RelicEquipScreen::GRID_BOTTLE:
+            // Structurally unreachable: the Bottled trio is UNCOMMON and this
+            // chest draws BOSS. Loud rather than a silent overlay, exactly as
+            // the symmetric case is at the Neow boss swap (neow.cpp:99-107).
+            assert(false && "a bottle grid request from the boss chest");
+            rc.boss_chest.screen = static_cast<uint8_t>(BossChestScreen::DONE);
+            break;
+    }
+}
+
+// BossChest.open(boolean) (BossChest.java:49-63). It FULLY OVERRIDES
+// AbstractChest.open with no super call, so this is the whole body: the
+// onChestOpen(true) fan-out with Matryoshka explicitly skipped, then
+// bossRelicScreen.open(this.relics). Everything AbstractChest.open would have
+// done -- randomizeReward's treasureRng draw, gold, the curse, addRelicToRewards,
+// the `isFinalActAvailable && !hasSapphireKey` SAPPHIRE-KEY append at :95-97,
+// onChestOpenAfter, combatRewardScreen.open -- is unreachable from here. That is
+// the answer to the s2-tasks.md deferred-obligations row: the boss chest never
+// appends a sapphire key.
+//
+// The hook fan-out is routed through the EXISTING seam with boss_chest = true
+// rather than skipped, so the "no relic bodies fire" claim is enforced by the
+// shared dispatcher instead of asserted here: Matryoshka is guarded (the Java
+// `continue`s past it, :53), CursedKey's own body guards !bossChest, and
+// NlothsMask is an onChestOpenAfter body that is never called. It cannot fail --
+// it mutates nothing and touches no stream -- but the return is checked so a
+// future body that DID have a boss arm could not be silently dropped.
+void open_boss_chest(RunController& rc) noexcept {
+    const bool hooks_ok = dispatch_relics_on_chest_open(rc.run, rc.rewards,
+                                                        /*boss_chest=*/true);
+    assert(hooks_ok && "the boss-chest hook pass is a no-op and cannot fail");
+    (void)hooks_ok;
+    rc.boss_chest.screen =
+        static_cast<uint8_t>(BossChestScreen::RELIC_SELECT);
+    rc.boss_chest.seen = 1;
+}
+
+// ProceedButton.update's TreasureRoomBoss branch (:159-164) -> goToNextDungeon
+// (:231-252). Two things happen, in this order:
+//   1. `if (!room.choseRelic) bossRelicScreen.noPick()` (:232-234). noPick's
+//      entire body (:240-248) builds a metrics map of the un-picked relic ids
+//      and appends it to CardCrawlGame.metricData -- NO run state, NO pool
+//      write. It is modelled as the deliberate no-op below rather than omitted,
+//      because "nothing happens here" is the fact the tests pin.
+//   2. fadeOut + isDungeonBeaten = true (:249-250), which is what makes
+//      AbstractDungeon.updateFading (:2317-2325) skip nextRoomTransition and
+//      hand the run to the act transition instead. That is the seam.
+void leave_boss_chest(RunController& rc, StepResult& res) noexcept {
+    // (1) noPick -- metrics only. Recorded, deliberately inert.
+    (void)rc.boss_chest.chose_relic;
+
+    // (2) the act terminal (S2.12 fills the seam; S2.11 stubs it to VICTORY).
+    on_boss_chest_proceed(rc, rc.run, res);
+
+    // The room is left: its transient screen state must not survive into
+    // whatever the seam moved to, the same discipline every other room's exit
+    // follows. rc.room_type stays TreasureBoss -- run_is_victory() reads it.
+    rc.boss_chest = BossChestState{};
+    rc.rewards = RewardScreen{};
+    rc.rewards.open_card_item = kNoOpenCardReward;
+}
+
 // The pending-bottle overlay's pick (run_advance.hpp). While the overlay is
 // up it is MODAL over the phase underneath -- the game parks the room at
 // RoomPhase.INCOMPLETE with no cancel and no confirm on the 1-pick grid
@@ -2238,25 +2568,24 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     s.open_card_item = kNoOpenCardReward;
                     rc.treasure_chest = TreasureChest{};
                     if (static_cast<RoomType>(rc.room_type) == RoomType::Boss) {
-                        // The Act-1 boss reward's Proceed is the S1 VICTORY
-                        // terminal. In the game this press never opens the
-                        // map: at a COMBAT_REWARD in a MonsterRoomBoss it
-                        // goes to the boss chest (ProceedButton.update,
-                        // ProceedButton.java:111-113 -> goToTreasureRoom
-                        // :179-187, a TreasureRoomBoss) and from there to the
-                        // next act -- both S2 content by the frozen scope
-                        // boundary (stage-b-design §1.1: "the run terminates
-                        // when the act-1 boss's combat rewards are claimed").
-                        // combat_outcome keeps KILLED and room_type keeps
-                        // Boss, which is exactly what run_is_victory() reads;
-                        // routing to MAP_CHOICE here was the probe-found
-                        // no_legal_moves dead end (the boss column has no
-                        // outgoing map edges).
-                        rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+                        // The boss reward screen's Proceed goes to the BOSS
+                        // CHEST, never to the map: ProceedButton.update's
+                        // COMBAT_REWARD arm is explicitly guarded `&&
+                        // !(getCurrRoom() instanceof TreasureRoomBoss)` and its
+                        // MonsterRoomBoss branch calls goToTreasureRoom
+                        // (ProceedButton.java:111-113 -> :179-187). That is a
+                        // FULL room transition -- floor++, the trap-7 reseed and
+                        // the relic room-entry fan-outs -- so it goes through
+                        // next_room_transition_boss_chest rather than a bare
+                        // phase write; the header on that function carries the
+                        // chain and the dossier correction.
+                        //
+                        // Until S2.11 this line was the S1 victory terminal
+                        // (RUN_OVER + reward 1.0f). The terminal moved one room
+                        // later, to on_boss_chest_proceed, and run_is_victory()
+                        // moved with it.
+                        next_room_transition_boss_chest(rc);
                         fill_run_result(rc, res);
-                        res.reward = 1.0f;  // the run-level win: the +1
-                                            // analogue of the DEFEAT path's
-                                            // -1 (finish_combat_after_action)
                         break;
                     }
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
@@ -2389,6 +2718,151 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     rc.rewards.open_card_item = kNoOpenCardReward;
                     rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
                 }
+            }
+            fill_run_result(rc, res);
+            break;
+        }
+
+        case RunPhase::BOSS_TREASURE: {
+            // The boss chest. Illegal choices are non-corrupting no-ops, the
+            // MAP_CHOICE contract, and every branch re-derives its own legality
+            // so a stale mask can never mutate anything.
+            if (action_verb(a) != ActionVerb::CHOOSE) {
+                fill_run_result(rc, res);
+                break;
+            }
+            BossChestState& chest = rc.boss_chest;
+            const uint8_t a0 = action_arg0(a);
+            switch (static_cast<BossChestScreen>(chest.screen)) {
+                case BossChestScreen::CLOSED:
+                    if (a0 == kChooseOpenChest && boss_chest_open_legal(chest)) {
+                        open_boss_chest(rc);
+                    } else if (a0 == kChooseProceed) {
+                        // ProceedButton.update's TreasureRoomBoss branch
+                        // (:159-164) -> goToNextDungeon (:231-252). The chest
+                        // was never opened, so choseRelic is false and
+                        // bossRelicScreen.noPick() runs (:232-234) -- a metrics
+                        // append and nothing else (:240-248). The three relics
+                        // stay burned; that happened at room entry.
+                        leave_boss_chest(rc, res);
+                        return;
+                    }
+                    break;
+
+                case BossChestScreen::RELIC_SELECT:
+                    if (a0 == kChooseCancelGrid) {
+                        // relicSkipLogic (:202-212): chest.close() sets isOpen
+                        // = false (BossChest.java:65-69) and the screen closes.
+                        // NOTHING else -- no pool write, no metrics, no relic.
+                        // The chest keeps its three relics and becomes clickable
+                        // again, which is why this returns to CLOSED rather than
+                        // DONE. `seen` stays 1: the player has looked inside.
+                        chest.screen =
+                            static_cast<uint8_t>(BossChestScreen::CLOSED);
+                    } else if (boss_chest_pick_legal(rc.run, chest, a0)) {
+                        // AbstractRelic.update's BOSS_REWARD arm (:352-370) ->
+                        // bossObtainLogic (:391-398) -> obtain(), then
+                        // relicObtainLogic (:181-200): choseRelic = true, the
+                        // screen finishes, and the two unpicked relics are
+                        // dropped for good (they are never put back in a pool).
+                        //
+                        // The pick goes through the SCREEN-CAPABLE acquire door,
+                        // because five of the 22 boss-pool relics have
+                        // on_equip_screen bodies and the plain 3-argument form
+                        // would refuse them with NEEDS_EQUIP_CONTEXT rather than
+                        // run them. `reward_room` is TreasureBoss: it feeds
+                        // CombatRewardScreen.open's setupItemReward card-row
+                        // gate for Tiny House / Calling Bell, whose Java reads
+                        // the CURRENT room, and this room is not one that adds
+                        // a card row.
+                        //
+                        // bossObtainLogic's four starter-swap relics (Black
+                        // Blood, Ring of the Serpent, FrozenCore, HolyWater)
+                        // skip obtain() and instantObtain(player, 0, true)
+                        // instead, replacing relics[0] -- that replacement lives
+                        // in the relics' own pickup bodies, reached through the
+                        // same door.
+                        const RelicId picked =
+                            static_cast<RelicId>(chest.relics[a0]);
+                        chest.chose_relic = 1;
+                        RelicEquipContext ectx{rc.combat.card_random_rng,
+                                               rc.rewards,
+                                               RoomType::TreasureBoss};
+                        (void)acquire_relic(rc.run, rc.combat.misc_rng, picked,
+                                            ectx);
+                        apply_boss_chest_equip_request(rc, ectx);
+                    }
+                    break;
+
+                case BossChestScreen::EQUIP_GRID: {
+                    NeowState& n = rc.neow;
+                    const auto mode = static_cast<NeowGridMode>(n.grid_mode);
+                    if (a0 == kChooseProceed &&
+                        mode == NeowGridMode::CONFIRM_PANDORA) {
+                        relic_confirm_pandoras_box(rc.run, rc.rewards);
+                        n.grid_mode = static_cast<uint8_t>(NeowGridMode::NONE);
+                        chest.screen =
+                            static_cast<uint8_t>(BossChestScreen::DONE);
+                    } else if (a0 == kChooseProceed &&
+                               mode == NeowGridMode::CONFIRM_CALLING_BELL) {
+                        // Calling Bell's confirmation obtains the curse and THEN
+                        // assembles its three-relic reward screen, so this grid
+                        // hands off to the item screen rather than finishing.
+                        relic_confirm_calling_bell(rc.run, rc.rewards,
+                                                   RoomType::TreasureBoss);
+                        n.grid_mode = static_cast<uint8_t>(NeowGridMode::NONE);
+                        chest.screen = static_cast<uint8_t>(
+                            BossChestScreen::EQUIP_ITEM_REWARD);
+                    } else if (neow_grid_pick(rc.run, n, rc.combat.misc_rng,
+                                              a0)) {
+                        // neow_grid_pick applies the effect only once the set is
+                        // complete, and marks that by moving its own screen off
+                        // GRID -- which is this room's "the grid is finished"
+                        // signal too.
+                        if (n.screen != static_cast<uint8_t>(NeowScreen::GRID)) {
+                            chest.screen =
+                                static_cast<uint8_t>(BossChestScreen::DONE);
+                        }
+                    }
+                    break;
+                }
+
+                case BossChestScreen::EQUIP_ITEM_REWARD: {
+                    RewardScreen& s = rc.rewards;
+                    if (s.open_card_item != kNoOpenCardReward) {
+                        if (reward_card_item_open_legal(s)) {
+                            if (a0 == kChooseSkipCard) {
+                                reward_skip_card(s);
+                            } else if (a0 == kChooseSing) {
+                                (void)reward_sing(rc.run, s);
+                            } else {
+                                (void)reward_take_card(rc.run, s, a0);
+                            }
+                        }
+                    } else if (a0 == kChooseProceed) {
+                        // Leaving the assembled screen abandons anything
+                        // unclaimed, exactly as a combat reward screen does.
+                        s = RewardScreen{};
+                        s.open_card_item = kNoOpenCardReward;
+                        chest.screen =
+                            static_cast<uint8_t>(BossChestScreen::DONE);
+                    } else {
+                        RelicEquipContext ectx{rc.combat.card_random_rng,
+                                               rc.rewards,
+                                               RoomType::TreasureBoss};
+                        (void)claim_reward(rc.run, rc.combat.misc_rng, s, a0,
+                                           ectx);
+                        apply_claim_equip_request(rc, ectx);
+                    }
+                    break;
+                }
+
+                case BossChestScreen::DONE:
+                    if (a0 == kChooseProceed) {
+                        leave_boss_chest(rc, res);
+                        return;
+                    }
+                    break;
             }
             fill_run_result(rc, res);
             break;

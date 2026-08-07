@@ -227,7 +227,9 @@ Wave-C; per-monster behavior is batch work.
   Bloom, plus FaceTrader's two unregistered faces (Cultist Mask, N'loth's
   Mask — Face of Cleric, Gremlin Mask and Ssserpent Head are S1 rows
   already; FaceTrader itself is Act-1-reachable). Two dormant S1 gates go
-  live: Ectoplasm's `canSpawn: actNum <= 1` (Ectoplasm.java:50-53) now
+  live: Ectoplasm's `canSpawn: actNum <= 1` (Ectoplasm.java:54-57 — the
+  `:50-53` this line carried is stale, corrected by S2.11 alongside the same
+  stale citation in `include/sts/engine/relic_pools.hpp`) now
   actually excludes it from Act-2/3 pops, and the ~20 relics with
   floor-gated `canSpawn` (`floorNum < 48` family — e.g.
   AncientTeaSet.java:84-85, Girya.java:47-50, Matryoshka.java:59-60 ≤ 40,
@@ -312,14 +314,46 @@ pop** of the pre-shuffled `bossRelicPool` — for BOSS tier *both*
 `returnRandomRelicKey` and `returnEndRandomRelicKey` are `remove(0)`
 (AbstractDungeon.java:792-798, 739-745), with the `canSpawn` re-check
 recursion at :804-807 and `Red Circlet` on empty. **No RNG is consumed by
-the pop itself.** Skip discards all three permanently — `relicSkipLogic`
-returns nothing to the pool (BossRelicSelectScreen.java:202-212); leaving
-without choosing triggers `noPick()`, metrics only (ProceedButton.java:
-231-234, BossRelicSelectScreen.java:240-248). This is the same pool Neow's
-category-3 swap front-pops in S1, so pool state composes across both
-consumers. `PublicView` already reserves the boss-relic screen fields
-(training-plan §2.1); T4.1 (training ledger) populates them once this
-lands.
+the pop itself.**
+
+**The burn is unconditional at room entry; SKIP is a reversible screen
+close.** (Amended by S2.11 — the original wording, "Skip discards all three
+permanently", conflated two different things and read as though skipping were
+the destructive act.) The three relics leave the pool when `new BossChest()`
+runs, whether or not the chest is ever opened, and they never return
+(`relicSkipLogic` puts nothing back, BossRelicSelectScreen.java:202-212) —
+that is the permanence, and it is trap 3's. What `relicSkipLogic` actually
+does is call `chest.close()`, which only sets `isOpen = false`
+(BossChest.java:65-69) and does **not** clear `BossChest.relics`;
+`TreasureRoomBoss.update` keeps `chest.update()` live (:66-71), so the chest
+is clickable again and **reopens with the same three relics**. A legal-action
+mask that retired the open action after a skip would strand a reopenable
+chest. Leaving without ever choosing triggers `noPick()`, which is
+**metrics-only** — its whole body appends a map to `CardCrawlGame.metricData`
+(ProceedButton.java:231-234, BossRelicSelectScreen.java:240-248).
+
+**Entering the chest is a FULL room transition, not a screen change.**
+(Recorded by S2.11 against a scout dossier that claimed the room was "off-map
+and floor-less".) `ProceedButton.goToTreasureRoom` (:179-187) builds a
+synthetic off-grid `MapRoomNode(-1, 15)` and calls `nextRoomTransitionStart()`,
+which fades out and reaches `AbstractDungeon.updateFading`'s
+`if (!isDungeonBeaten) this.nextRoomTransition()` (AbstractDungeon.java:
+2317-2325) — `isDungeonBeaten` is set only when *leaving* the chest (:249-250).
+So the chest gets `++floorNum`, the trap-7 five-stream reseed, and the relic
+`onEnterRoom` / `justEnteredRoom` fan-outs (Maw Bank pays its 12 gold here,
+MawBank.java:29-35). Off-map is true; floor-less is not. The exact floor
+numbers this implies (boss 16 / chest 17, so Act 2's first playable room is 18)
+belong to §4.2's act-boundary row and are S2.12's to pin.
+
+Leaving the boss room also pops `monsterList`: `MonsterRoomBoss extends
+MonsterRoom` (MonsterRoomBoss.java:18-19), so `nextRoomTransition`'s
+`instanceof MonsterRoom` arm (:1700-1707) fires. Unobservable in S1, where the
+boss room ended the run.
+
+This is the same pool Neow's category-3 swap front-pops in S1, so pool state
+composes across both consumers. `PublicView`'s reserved boss-relic screen
+fields (training-plan §2.1) are populated by S2.11 — masked until the chest is
+opened, on the same reveal rule as the ordinary chest's contents.
 
 ### 4.2 Act transition
 

@@ -396,6 +396,12 @@ sts_add_test(rest_sites_test)
 # grant/claim, and Matryoshka/Cursed Key/N'loth's Mask hook ordering + gates.
 sts_add_test(treasure_rooms_test)
 
+# S2.11: the post-boss chest. Entry-time BOSS-pool pops (trap 3), depletion
+# shared with the Neow boss swap, the reversible skip, trap 9's canSpawn
+# rejections, the sapphire-key negative, the re-homed on_equip_screen site, and
+# the act-terminal seam.
+sts_add_test(boss_chest_test)
+
 # B4.8: the merchant. The sixteen-draw merchantRng stock/price sequence pinned
 # by a beside-the-engine replay, the truncate/halve/round price pipeline with
 # its ascension and shop-relic discounts, the run-persistent purge ramp across

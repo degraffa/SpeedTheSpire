@@ -71,9 +71,10 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | Reachable in Act 2 via Gremlin Leader minions; land both halves together and mark the stage-b row DISCHARGED in the same commit |
 | `JawWorm(..., true)` constructor variant semantics | TE.2 scope pass | S2.26 | Jaw Worm Horde constructs the variant (MonsterHelper.java:549-551); UNVERIFIED — needs decompile check what the boolean changes (stats? starting Strength?) before the row's tier columns are trusted |
 | Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | UNVERIFIED — needs decompile check of CampfireUI/rest-option construction for a key-gated option; if present it is on-screen at every Act-2/3 rest and must be modeled as a visible row (grant stubbed to S3) or the oracle diverges on the menu |
-| Boss chest + sapphire-key row interaction | TE.2 scope pass (s2-design §4.5) | S2.11 | UNVERIFIED — needs decompile check whether BossChest ever routes the AbstractChest.java:95-96 key-append path (likely not — different open path); pin either way in tier-2 |
+| Boss chest + sapphire-key row interaction | TE.2 scope pass (s2-design §4.5) | S2.11 | **DISCHARGED — NO** (2026-08-07, S2.11). `BossChest.open(boolean)` (BossChest.java:49-63) FULLY OVERRIDES `AbstractChest.open` with **no `super` call**, so the `isFinalActAvailable && !hasSapphireKey` append at AbstractChest.java:95-97 is unreachable from the boss chest — and so are `randomizeReward`'s treasureRng roll, gold, the curse, `addRelicToRewards`, `onChestOpenAfter` and `combatRewardScreen.open`. Pinned by `BossChest.NeverAppendsTheSapphireKeyRow` and `BossChest.FiresNoRelicChestHooks` |
 | `Lab` in ProceedButton.java:115's combat-event list with no encounter | TE.2 scope pass (s2-design §2.3) | S2.33 | UNVERIFIED — needs decompile check why it is listed; suspected reward-screen plumbing only |
-| Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | floorNum is continuous (verified: no reset in dungeonTransitionSetup); the exact boundary floor values must come from map-flow reading, not memory |
+| Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | floorNum is continuous (verified: no reset in dungeonTransitionSetup); the exact boundary floor values must come from map-flow reading, not memory. **S2.11 evidence (not a discharge):** entering the boss chest runs a FULL `nextRoomTransition` — `goToTreasureRoom` (ProceedButton.java:179-187) → `nextRoomTransitionStart` → `AbstractDungeon.updateFading`'s `if (!isDungeonBeaten) nextRoomTransition()` (:2317-2325), with `isDungeonBeaten` set only on the way *out* (:249-250). So the chest is its own floor: boss 16 / chest 17, and Act 2's first playable room is 18. S2.12 pins the pair |
+| `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | `nextRoomTransition`'s empty-list arm (AbstractDungeon.java:1701-1706) consumes the RUN-LIFETIME `monsterRng` and would be observable in the next act. UNREACHABLE in Act 1 — 16 list entries against at most 14 consumers on one path (13 monsterList rooms + the boss exit) — so S2.11 left a loud `assert` in `next_room_transition_impl` rather than machinery. S2.12 re-derives the arithmetic for Acts 2–3 (`generateWeakEnemies(2)`, different row counts) and implements the body if it becomes reachable |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
 
 ---
@@ -192,19 +193,56 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   A13+ with no miscRng draw (MindBloom.java:73-77), ownership split
   S2.24/S2.28/S2.33. 6 tier-2 tests; six presets green; row count
   unchanged (20).
-- **S2.11** `[ ]` **Boss chest + boss-relic pick.** TreasureRoomBoss room
+- **S2.11** `[x]` **Boss chest + boss-relic pick.** TreasureRoomBoss room
   flow after Act-1/Act-2 boss rewards: chest construction at entry, 3
   front-pops of `bossRelicPool` with `canSpawn` recursion + Red Circlet
-  fallback, pick/skip semantics (skip burns all three; `noPick` on
-  leave), Neow-swap pool-state composition. Claims a `RunPhase` value (and
-  fuzz `MoveCat`) via the stage-b namespace table. Design §4.1 + §5 trap 3.
+  fallback, pick/skip semantics (the burn is at entry; skip is a reversible
+  screen close; `noPick` on leave), Neow-swap pool-state composition. Claims a
+  `RunPhase` value (and fuzz `MoveCat`) via the stage-b namespace table.
+  Design §4.1 + §5 trap 3.
   **Deps:** — (the boss pool is an S1 domain; S2.03's Necronomicon row is
   only needed if a directed test wants its on-equip curse, and that test
   belongs to S2.03 itself) **Acceptance:** unit tests for pop order,
   pool depletion across both consumers, skip, canSpawn rejection
   (Ectoplasm in Act 2 — trap 9), sapphire-key row question resolved and
   pinned (deferred-obligations row); fuzz soak reaches the new phase;
-  six presets green.
+  Stage-A combat fixtures + registry-generated tables byte-identical,
+  `tests/golden/twin_fixtures/twins_v1.bin` regenerated via its checked-in
+  generator; six presets green.
+  **Log:** 2026-08-07 — landed. `RunPhase` **11** BOSS_TREASURE, `RoomType`
+  **8** TreasureBoss, fuzz `MoveCat` **28–31** (`COUNT`→32) — the whole grant
+  spent, nothing released. **The scout dossier was wrong on the routing and
+  the correction is the biggest thing in this task:** `goToTreasureRoom`
+  (ProceedButton.java:179-187) → `nextRoomTransitionStart` →
+  `AbstractDungeon.updateFading`'s `if (!isDungeonBeaten) nextRoomTransition()`
+  (:2317-2325) means the chest entry is a **full room transition** — floor++,
+  the trap-7 five-stream reseed, and the relic `onEnterRoom` /
+  `justEnteredRoom` fan-outs (Maw Bank pays 12 gold at the chest, pinned).
+  Off-map, not floor-less. Two consequences recorded in the deferred table:
+  the boss/chest floor pair (16/17, Act-2 first room 18) as evidence for
+  S2.12's row, and the `monsterList` pop on boss exit — `MonsterRoomBoss
+  extends MonsterRoom`, so `nextRoomTransition`'s `instanceof MonsterRoom` arm
+  fires; fixed here, with the unreachable `generateStrongEnemies(12)` arm left
+  as a loud assert and a new S2.12 row. Three more findings: **all five**
+  `on_equip_screen` BOSS relics are pickable at this chest, so the pick goes
+  through the `RelicEquipContext` door and the request is re-homed onto the
+  controller's existing `NeowState` grid / `RewardScreen` — the call-site-only
+  change `relic_pools.hpp:126-128` predicted, costing **no** namespace value
+  (no new `ChoiceKind`, no new sentinel, no new `RunActionMask` or `PublicView`
+  field, `PUBLIC_VIEW_VERSION` unmoved). Skip semantics amended in design §4.1:
+  the burn is unconditional at entry, the skip is a *reversible* close and the
+  chest reopens with the same three, `noPick` is metrics-only. Sapphire-key row
+  **DISCHARGED — NO**. Also fixed in place: the stale `Ectoplasm.java:50-53`
+  citation in design §2.4 and `relic_pools.hpp:58`; the stale
+  `relic_pools.hpp:137-140` "Wave-C allocations stay unspent" claim; and
+  `fuzz_test.cpp`'s `MoveCatCountIsPastEveryEnumerator`, which had been
+  asserting `25 < 32` since SHOP landed instead of finding the real highest
+  enumerator. `kRoomTypeCount` moved to `map_rooms.hpp` beside the enum with a
+  `static_assert` at both ends (it had none, a silent OOB hazard).
+  `twins_v1.bin` regenerated (`sizeof(RunController)` moved); BOSS_TREASURE is
+  deliberately NOT in the generator's `kWanted[]` — no scripted policy wins the
+  act-1 boss, so it would only print a permanent warning, and the twin
+  invariance is pinned directly in `boss_chest_test.cpp` instead.
 - **S2.12** `[ ]` **Act transition + Acts 2–3 map generation.**
   `dungeonTransitionSetup` semantics in engine order (design §4.2):
   actNum, **cardRng counter snap** (trap 1), pity resets, list clears,

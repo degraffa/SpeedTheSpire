@@ -513,8 +513,38 @@ void encode_screens(const RunController& rc, PublicView& out) noexcept {
     if (phase == RunPhase::EVENT_DIALOG || unimplemented_event) {
         encode_event(rc.event, out);
     }
-    if (phase == RunPhase::NEOW) {
+    // NeowState is also the boss chest's re-homed equip-screen storage
+    // (boss_chest.hpp), so the grid the player is looking at there must reach
+    // the observation too -- and it is gated on the SCREEN being up, never on
+    // the struct being non-empty, exactly like every other section here (the
+    // blessing fields it also carries are stale floor-0 data by then, but they
+    // are public floor-0 data, so carrying them leaks nothing).
+    const bool boss_chest_equip_screen =
+        phase == RunPhase::BOSS_TREASURE &&
+        (rc.boss_chest.screen ==
+             static_cast<uint8_t>(BossChestScreen::EQUIP_GRID) ||
+         rc.boss_chest.screen ==
+             static_cast<uint8_t>(BossChestScreen::EQUIP_ITEM_REWARD));
+    if (phase == RunPhase::NEOW || boss_chest_equip_screen) {
         encode_neow(rc.neow, out);
+    }
+    // The boss chest (boss_chest.hpp). Two reserved v1 fields get their DECLARED
+    // meanings here -- the audit note's additive case 1, so no width, no offset
+    // and no PUBLIC_VIEW_VERSION moves:
+    //   boss_relic_choice_reserved[3] : the three offered relic ids, but ONLY
+    //       once the chest has been opened. Before that they are drawn-but-
+    //       unseen, the same masking trap the ordinary chest's contents are, and
+    //       a twin whose unopened offers differ must encode identically.
+    //   chest_opened                  : `seen`, not `screen == RELIC_SELECT` --
+    //       a SKIP closes the chest again but the player has still seen inside.
+    // chest_size stays 0: a BossChest has no size roll (no getRandomChest call).
+    if (phase == RunPhase::BOSS_TREASURE) {
+        out.chest_opened = rc.boss_chest.seen;
+        if (rc.boss_chest.seen != 0) {
+            for (int i = 0; i < kBossChestOfferCount; ++i) {
+                out.boss_relic_choice_reserved[i] = rc.boss_chest.relics[i];
+            }
+        }
     }
     if (phase == RunPhase::REST_SITE) {
         out.rest_screen = rc.rest.screen;

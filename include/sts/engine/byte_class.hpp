@@ -182,6 +182,25 @@ inline constexpr ClassRow kTreasureChestRows[] = {
 };
 STS_BC_TABLE(kTreasureChestTable, TreasureChest, kTreasureChestRows);
 
+inline constexpr ClassRow kBossChestRows[] = {
+    STS_BC_ROW(BossChestState, relics, ByteClass::HIDDEN,
+               "audit 8.4 (the same masking trap as TreasureChest, one room "
+               "later): BossChest's constructor pops all three at ROOM ENTRY "
+               "(BossChest.java:35-39) and the player sees them only by opening "
+               "the chest. Public once `seen` -- and it stays public after a "
+               "SKIP, which closes the chest but cannot unsee it"),
+    STS_BC_ROW(BossChestState, screen, ByteClass::PUBLIC,
+               "audit 8.4: which screen is up -- the player is looking at it"),
+    STS_BC_ROW(BossChestState, seen, ByteClass::PUBLIC,
+               "audit 8.4: the player performed the open action. This, not "
+               "`screen`, is the reveal flag the encoder gates `relics` on"),
+    STS_BC_ROW(BossChestState, chose_relic, ByteClass::PUBLIC,
+               "audit 8.4: TreasureRoomBoss.choseRelic -- the relic is on the "
+               "player's own relic bar"),
+    STS_BC_ROW(BossChestState, pad, ByteClass::PADDING, ""),
+};
+STS_BC_TABLE(kBossChestTable, BossChestState, kBossChestRows);
+
 inline constexpr ClassRow kEventDialogRows[] = {
     STS_BC_ROW(EventDialogState, event_id, ByteClass::PUBLIC,
                "audit 8.5: which event the room resolved to"),
@@ -399,6 +418,9 @@ inline constexpr ClassRow kRunControllerRows[] = {
                "audit 8.3: the whole current-visit stock is drawn with prices"),
     STS_BC_SUB(RunController, treasure_chest, kTreasureChestTable,
                "audit 8.4 -- the one masking trap plan 2.1 names"),
+    STS_BC_SUB(RunController, boss_chest, kBossChestTable,
+               "audit 8.4 -- the boss chest is the SECOND instance of the same "
+               "trap: contents drawn at entry, revealed by the open action"),
     STS_BC_SUB(RunController, event, kEventDialogTable, "audit 8.5"),
     STS_BC_ROW(RunController, neow, ByteClass::PUBLIC,
                "audit 8.6: the four rolled blessings ARE the screen"),

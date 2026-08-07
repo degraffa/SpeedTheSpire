@@ -53,10 +53,17 @@
 //     discount chain, and then bought through CHOOSE; the card-removal service
 //     runs off the run-persistent RunState.purge_cost and ramps it. A ? room
 //     that rolls SHOP enters the same phase as a map shop node.
-//   * the S1 VICTORY terminal: the Act-1 boss's reward-screen proceed ends the
-//     run (RunPhase::RUN_OVER, run_is_victory() true) in place of the game's
-//     boss chest / act transition, which are S2 content (stage-b-design §1.1:
-//     "the run terminates when the act-1 boss's combat rewards are claimed").
+//   * the BOSS CHEST (boss_chest.hpp): the boss reward screen's proceed enters
+//     a real TreasureRoomBoss through next_room_transition -- floor++, the
+//     trap-7 five-stream reseed and the relic room-entry fan-outs all included,
+//     because goToTreasureRoom really does run the full transition
+//     (ProceedButton.java:179-187 -> nextRoomTransitionStart ->
+//     AbstractDungeon.updateFading :2317-2325 -> nextRoomTransition). Entry pops
+//     three BOSS relics with no RNG; open / pick / skip / proceed are live, and
+//     a picked relic's on_equip_screen body is presented at this site.
+//   * the VICTORY terminal: the BOSS CHEST's proceed ends the run
+//     (RunPhase::RUN_OVER, run_is_victory() true) through the named
+//     on_boss_chest_proceed seam, which S2.12 replaces with the act transition.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
@@ -117,6 +124,7 @@
 #include <type_traits>
 
 #include "sts/engine/advance.hpp"       // ActionMask, StepResult, combat advance/legal_actions
+#include "sts/engine/boss_chest.hpp"    // BossChestState / the post-boss chest
 #include "sts/engine/combat_rewards.hpp"  // RewardScreen + the claim flow
 #include "sts/engine/combat_state.hpp"
 #include "sts/engine/encounters.hpp"    // MonsterLists
@@ -145,15 +153,16 @@ enum class RunPhase : uint8_t {
     COMBAT_REWARD = 4,     // post-combat reward screen (claim / pick / proceed).
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // terminal: the player died (combat DEFEAT, or an
-                           // event kill with outcome NONE), or the S1 VICTORY
-                           // -- the Act-1 boss's reward-screen proceed
-                           // (stage-b-design §1.1: "the run terminates when
-                           // the act-1 boss's combat rewards are claimed"; the
-                           // game instead goes to the boss chest,
-                           // ProceedButton.java:111-113 -> goToTreasureRoom
-                           // :179-187, which is S2 content). run_is_victory()
-                           // (below) tells the two apart; no separate phase
-                           // value is spent on the win.
+                           // event kill with outcome NONE), or the VICTORY.
+                           // S2.11 MOVED the victory terminal one room later:
+                           // it is now the BOSS CHEST's proceed, not the boss
+                           // reward screen's, because the reward screen's
+                           // proceed goes to the chest in the game
+                           // (ProceedButton.java:111-113 -> goToTreasureRoom
+                           // :179-187) and that room is now modelled. See
+                           // BOSS_TREASURE below and the on_boss_chest_proceed
+                           // seam. run_is_victory() (below) tells a win from a
+                           // death; no separate phase value is spent on it.
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
     TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
     EVENT_DIALOG = 9,      // a ?-room resolved to an event with a live dialog
@@ -172,6 +181,13 @@ enum class RunPhase : uint8_t {
                            // SHOP -- both build the same merchant. Value 10 is
                            // the ledger's reserved allocation (stage-b-tasks.md
                            // shared-namespace table).
+    BOSS_TREASURE = 11,    // the post-boss chest room (TreasureRoomBoss): the
+                           // three entry-popped boss relics, the pick/skip
+                           // screen, a picked relic's onEquip screens, and the
+                           // proceed that ends the act (boss_chest.hpp). Value
+                           // 11 is the S2 Wave-2 allocation (docs/
+                           // stage-b-tasks.md "S2 Wave-2 allocations"); values
+                           // are append-only and never renumbered.
 };
 
 // Why combat ended. AbstractRoom keeps two independent end-of-battle room
@@ -306,6 +322,13 @@ struct RunController {
     // RewardScreen; never added to the frozen RunState schema.
     TreasureChest treasure_chest;
 
+    // The post-boss chest while phase == BOSS_TREASURE: the three relics popped
+    // at room entry, which screen is up, and TreasureRoomBoss.choseRelic
+    // (boss_chest.hpp). Transient for the same reason as everything around it --
+    // the game rebuilds the chest from (seed, relic-pool state) on reload, and
+    // the pool state IS in RunState -- so the frozen schema stays untouched.
+    BossChestState boss_chest;
+
     // The live event dialog while phase == EVENT_DIALOG; also carries the
     // selected EventId while parked at ROOM_UNIMPLEMENTED for a
     // resolved-but-unimplemented event, so the selection is observable,
@@ -392,6 +415,22 @@ enum class EventCombatVariant : uint8_t {
 //                          DONE offers can_proceed, which opens the map.
 //   TREASURE_ROOM        : can_open_chest (CHOOSE kChooseOpenChest) and
 //                          can_proceed (CHOOSE kChooseProceed) to skip it.
+//   BOSS_TREASURE        : depends on rc.boss_chest.screen (boss_chest.hpp) --
+//                          CLOSED offers can_open_chest (CHOOSE
+//                          kChooseOpenChest) + can_proceed (leave without
+//                          picking, the noPick path); RELIC_SELECT offers
+//                          can_claim_reward[0..2] (CHOOSE i, one per offered
+//                          relic) + can_cancel_grid (CHOOSE kChooseCancelGrid,
+//                          the screen's cancel button = SKIP) and NOT
+//                          can_proceed, because bossRelicScreen.open hides the
+//                          proceed button (BossRelicSelectScreen.java:354);
+//                          EQUIP_GRID offers can_choose_master_deck[i] (or
+//                          can_proceed for the two choice-free confirmation
+//                          grids); EQUIP_ITEM_REWARD offers
+//                          can_claim_reward[i] + can_proceed; DONE offers
+//                          can_proceed, which is the ACT TERMINAL. NO new mask
+//                          field is spent -- the per-phase reading of these
+//                          flags is the same convention NEOW and REST_SITE use.
 //   COMBAT_REWARD        : with no card screen open -- can_proceed (CHOOSE
 //                          kChooseProceed) + can_claim_reward[i] (CHOOSE i);
 //                          with a CARD item open -- can_take_card[j] (CHOOSE j),
@@ -581,23 +620,73 @@ inline void run_advance(std::span<RunController> runs,
 // edge. Public for the trap-7 named test.
 void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexcept;
 
+// The same transition, to the OFF-MAP boss chest. ProceedButton.goToTreasureRoom
+// (ProceedButton.java:179-187) builds a synthetic MapRoomNode(-1, 15) holding a
+// TreasureRoomBoss and calls nextRoomTransitionStart(), which fades out and --
+// because isDungeonBeaten is still false, it is set only when LEAVING the chest
+// (:249-250) -- reaches AbstractDungeon.updateFading's `if (!isDungeonBeaten)
+// this.nextRoomTransition()` (AbstractDungeon.java:2317-2325). So this is a FULL
+// room transition, not a screen change: ++floorNum, the trap-7 five-stream
+// reseed, the relic onEnterRoom / justEnteredRoom fan-outs (Maw Bank pays its 12
+// gold HERE, MawBank.java:29-35) and then TreasureRoomBoss.onPlayerEntry's chest
+// construction. The only thing it does not do is read a map node, because the
+// destination is off-grid.
+//
+// THE S2 SCOUT DOSSIER SAID THE OPPOSITE ("no floor increment, no RNG, off-map
+// and floor-less") and was wrong; the chain above is what the decompiled game
+// does. The floor evidence -- boss at 16 / chest at 17, so Act 2's first
+// playable room is 18 -- is S2.12's to pin (s2-tasks.md deferred obligations,
+// "Exact Act-2/3 entry floors").
+void next_room_transition_boss_chest(RunController& rc) noexcept;
+
+// THE ACT TERMINAL SEAM (S2.12 fills this; S2.11 stubs it).
+//
+// CONTRACT. Called from step_one when the player presses Proceed on a boss
+// chest whose screen is CLOSED or DONE -- i.e. exactly where the game calls
+// ProceedButton.goToNextDungeon (ProceedButton.java:159-164, :231-252). On
+// entry:
+//   * rc.phase is BOSS_TREASURE and rc.room_type is RoomType::TreasureBoss;
+//   * rc.boss_chest still holds the three offers and `chose_relic`, and the
+//     caller has ALREADY run the noPick bookkeeping (metrics-only in the game,
+//     :232-234) -- so this function must not re-read it for state;
+//   * `rs` is rc.run, passed explicitly because the S2.12 body is RunState-heavy
+//     (dungeonTransitionSetup: ++actNum, the cardRng counter snap, the pity and
+//     list resets, blizzardPotionMod, the A5 heal);
+//   * `res` has NOT been filled yet.
+// On return it must have set rc.phase and filled `res` (fill_run_result plus any
+// reward), and rc.boss_chest is cleared by the caller afterwards.
+//
+// THE S2.11 STUB is the previous S1 victory terminal moved one room later: phase
+// RUN_OVER with res.reward = 1.0f, which run_is_victory() reads. S2.12 replaces
+// the body with the real act transition (CardCrawlGame.nextDungeon was already
+// fixed at the room's constructor, TreasureRoomBoss.java:32) and must move
+// run_is_victory()'s definition with it -- the Act-1 chest stops being terminal
+// at that moment, and the two must never disagree.
+void on_boss_chest_proceed(RunController& rc, RunState& rs,
+                           StepResult& res) noexcept;
+
 // The current grid row (floor-1) for a controller on the map, or -1 at Neow.
 [[nodiscard]] constexpr int run_cur_row(const RunController& rc) noexcept {
     return rc.run.floor == 0 ? -1 : static_cast<int>(rc.run.floor) - 1;
 }
 
-// Whether a terminal controller is the S1 VICTORY: the run ended at the Act-1
-// boss with its combat won. The victory terminal is produced by the boss
-// reward screen's proceed (see RUN_OVER above); a death shares the phase but
-// never this read -- a combat loss records combat_outcome DEFEAT, an event
-// kill leaves the room-entry NONE, and neither SMOKE_BOMB (SmokeBomb.canUse
-// rejects bosses) nor MUGGED (no Act-1 boss fields a thief) can produce a
-// boss KILLED it did not earn. One spelling for tests and tools; the mask for
-// this state is empty BECAUSE the run is over, exactly as for a loss.
+// Whether a terminal controller is the VICTORY: the run ended by pressing
+// Proceed on the BOSS CHEST. It is defined COHERENTLY WITH the
+// on_boss_chest_proceed stub and must move with it -- the stub is what produces
+// this state, so if S2.12 makes that seam transition to Act 2 instead, this
+// predicate follows it to whatever the new terminal is rather than being left
+// naming a state nothing reaches.
+//
+// The room-kind read is what keeps a death out: a death parks at RUN_OVER from
+// a combat, where room_type is Monster / Elite / Boss / Event, never
+// TreasureBoss -- no combat happens in the chest room at all, so unlike the
+// previous (Boss + KILLED) spelling this one does not need the outcome field to
+// exclude losses. `combat_outcome` is still KILLED here, carried over from the
+// boss fight, and the reward-screen proceed that entered the chest never
+// touched it.
 [[nodiscard]] constexpr bool run_is_victory(const RunController& rc) noexcept {
     return rc.phase == static_cast<uint8_t>(RunPhase::RUN_OVER) &&
-           rc.room_type == static_cast<uint8_t>(RoomType::Boss) &&
-           rc.combat_outcome == static_cast<uint8_t>(RunCombatOutcome::KILLED);
+           rc.room_type == static_cast<uint8_t>(RoomType::TreasureBoss);
 }
 
 }  // namespace sts::engine
