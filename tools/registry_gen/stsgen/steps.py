@@ -97,6 +97,12 @@ GENERAL_OPS = frozenset({
     # so it carries identically from any domain's queue helper. GENERAL_OPS,
     # not CARD_CONTEXT_OPS: nothing about the item depends on a played card.
     "RED_SKULL_ENTRY",
+    # S2.21 (the Shelled Parasite's Life Suck). VAMPIRE_DAMAGE carries `amount`
+    # (the base damage) and nothing else -- the heal is `target.lastDamageTaken`,
+    # read at EXECUTE time -- so it carries identically from any domain's queue
+    # helper. GENERAL_OPS, not CARD_CONTEXT_OPS: it is authored in a MONSTER move
+    # program, where there is no played card to stamp anything from.
+    "VAMPIRE_DAMAGE",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -186,9 +192,17 @@ POTION_DOMAIN = StepDomain(
 # are excluded: no monster move queues them, and the ones a monster move could
 # plausibly need land on an actor (DAMAGE/BLOCK/LOSE_HP) or a power slot
 # (APPLY_POWER/REMOVE_POWER/REDUCE_POWER).
+#
+# VAMPIRE_DAMAGE (S2.21) joins them because it is a MONSTER-ONLY verb: the game's
+# single VampireDamageAction caller is the Shelled Parasite's Life Suck
+# (ShelledParasite.java:132), and the opcode heals `src`, which this domain's
+# queue helper sets to the acting monster. It carries no extra operand -- the
+# heal amount is an execute-time read of what the hit actually removed -- so it
+# needs no branch in pack_extra either.
 MONSTER_MOVE_OPS = frozenset({
     "NOP", "DAMAGE", "BLOCK", "LOSE_HP",
     "APPLY_POWER", "REMOVE_POWER", "REDUCE_POWER", "MAKE_CARD",
+    "VAMPIRE_DAMAGE",
 })
 MONSTER_DOMAIN = StepDomain("monsters", "monsters.yaml", MONSTER_MOVE_OPS)
 

@@ -256,6 +256,11 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::VAMPIRE_DAMAGE_ALL:
             op_vampire_damage_all(s, item.amount);
             return;
+        case Opcode::VAMPIRE_DAMAGE:
+            // The Shelled Parasite's Life Suck: one target, and the ATTACKER
+            // (item.src) is healed by the HP the hit actually removed.
+            op_vampire_damage(s, item.src, item.tgt, item.amount);
+            return;
         case Opcode::HEAL:
             op_heal(s, item.tgt, item.amount);
             return;

@@ -438,6 +438,17 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "Looter.java -- no this.type assignment (ctor :59-81); NORMAL matters "
          "here because SmokeBomb.canUse's BOSS scan must not veto the potion "
          "against it (SmokeBomb.java:50-62)"},
+        {MonsterId::CHOSEN,             MonsterEnemyType::NORMAL,
+         "Chosen.java -- no this.type assignment (ctor :76-103)"},
+        {MonsterId::BYRD,               MonsterEnemyType::NORMAL,
+         "Byrd.java -- no this.type assignment (ctor :76-99)"},
+        {MonsterId::SHELLED_PARASITE,   MonsterEnemyType::NORMAL,
+         "ShelledParasite.java -- no this.type assignment (ctor :73-98)"},
+        {MonsterId::SPHERIC_GUARDIAN,   MonsterEnemyType::NORMAL,
+         "SphericGuardian.java -- no this.type assignment (ctor :66-75). NORMAL "
+         "despite the 20 HP / Barricade / 40 block sheet, which reads like a "
+         "boss mechanic: it is an ordinary Act-2 weak-pool enemy, and Pantograph "
+         "must NOT see this group as a boss fight (Pantograph.java:32-40)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

@@ -17,6 +17,11 @@ add_library(sts_engine
     monster_slaver.cpp
     monster_fungi_beast.cpp
     monster_looter.cpp
+    # S2.21 -- Act-2 city normals I.
+    monster_chosen.cpp
+    monster_byrd.cpp
+    monster_shelled_parasite.cpp
+    monster_spheric_guardian.cpp
     monster_dispatch.cpp
     encounters.cpp
     interp.cpp
@@ -48,8 +53,10 @@ add_library(sts_engine
     powers/power_duration_debuff.cpp
     powers/power_evolve.cpp
     powers/power_fire_breathing.cpp
+    powers/power_flight.cpp
     powers/power_flame_barrier.cpp
     powers/power_frail.cpp
+    powers/power_hex.cpp
     powers/power_lose_dexterity.cpp
     powers/power_lose_strength.cpp
     powers/power_magnetism.cpp

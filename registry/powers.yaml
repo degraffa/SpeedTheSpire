@@ -250,8 +250,9 @@
   native: true
   hooks:
     at_end_of_turn_pre_card: [] # native: gain `amount` block (GainBlockAction, direct -- no Dexterity)
-    was_hp_lost: []             # native: lose 1 stack on a real attack (not THORNS/HP_LOSS/self)
-  provenance: "PlatedArmorPower.atEndOfTurnPreEndTurnCards (PlatedArmorPower.java:70-73) -- GainBlockAction(owner, amount), the §5.4 pre-card phase (same slot as Metallicize); wasHPLost (:54-59) -- if info.owner != null && info.owner != owner && type != HP_LOSS && type != THORNS && damage>0: addToBot ReducePowerAction(owner, \"Plated Armor\", 1). Native (both hooks): queues a kBlockNoPowers BLOCK(=amount) at pre-card; at wasHPLost decrements the slot by 1 (removes at 0) unless the loss was thorns/HP-loss/self. POWER_ID \"Plated Armor\" (:20)."
+    was_hp_lost: []             # native: addToBot ReducePowerAction(1) on a real attack (not THORNS/HP_LOSS/self)
+    on_power_removed: []        # native: onRemove -> a MONSTER owner's ARMOR_BREAK (the Shelled Parasite's stun)
+  provenance: "PlatedArmorPower (PlatedArmorPower.java, 74 lines, read in full). POWER_ID \"Plated Armor\" (:20) -- WITH the space. atEndOfTurnPreEndTurnCards (:70-73) -- GainBlockAction(owner, amount) at the §5.4 pre-card phase (the same slot as Metallicize); a DIRECT GainBlockAction, so the block takes no Dexterity (kBlockNoPowers). wasHPLost (:54-59) -- `if (info.owner != null && info.owner != owner && type != HP_LOSS && type != THORNS && damageAmount > 0) addToBot(new ReducePowerAction(owner, owner, POWER_ID, 1))`. THE REDUCTION IS QUEUED, and the native body queues a REDUCE_POWER item accordingly: it used to decrement the slot and zero power_id IN PLACE, which was wrong in timing and, worse, never reached the removal choke point (remove_slot_at, interp/interp_powers.cpp), so the onRemove below could not fire at all. onRemove (:65-70) -- `if (!this.owner.isPlayer) addToBot(new ChangeStateAction((AbstractMonster)owner, \"ARMOR_BREAK\"))`: reached through Hook::ON_POWER_REMOVED, gated on a NON-PLAYER owner (a player whose Thread-and-Needle armour runs out sees nothing). Its one consumer is ShelledParasite.changeState(\"ARMOR_BREAK\") (ShelledParasite.java:151-159), whose combat content is setMove(STUNNED, Intent.STUN) + createIntent -- the hop animations and waits around it are presentation. The Java sends the action to any non-player owner and relies on the monster's own changeState ignoring an unknown key, which the native body reproduces by testing the owner's monster id. stackPower (:36-44) is the additive default plus a 999 clamp that no reachable application approaches."
 
 - id: 18
   name: REGEN
@@ -446,7 +447,16 @@
   # PRESENCE test made somewhere else: the start-of-turn block-decay guard
   # (GameActionManager.java:353) skips loseBlock() while the player has it, which
   # is a branch in the start-of-turn sequence (src/engine/action_queue.cpp), not a
-  # queued action. Checked against both count-guarded switch families: it
+  # queued action. THE MONSTER SIDE OF THAT PRESENCE TEST IS ALSO LIVE, and needed
+  # no new row and no hook: apply_pre_turn_logic (src/engine/action_queue.cpp)
+  # already skips a monster's loseBlock() while it carries this power -- the same
+  # bare presence test, from MonsterGroup.applyPreTurnLogic's own
+  # `hasPower("Barricade")` gate. This line used to describe the power as
+  # player-only. The Spheric Guardian (monsters.yaml id 30, S2.21) is its first
+  # monster owner and is what makes the other half worth stating: it applies
+  # Barricade to ITSELF pre-battle and so never loses its 40 starting block
+  # (SphericGuardian.java:78-82). Checked against both count-guarded switch
+  # families: it
   # overrides neither modifyBlock nor any atDamage* pass, so neither needed a case.
   # The slot amount is -1 (a marker, not a magnitude), so every presence test for
   # it must ask "is the slot there", never "is the amount positive".
@@ -754,3 +764,33 @@
     on_use_card: []       # native: replay ANY played, non-purge card; then --amount
     at_end_of_round: []   # native: ReducePowerAction(owner, 1); Remove at amount 0
   provenance: "DuplicationPower (DuplicationPower.java:19-72), read in full. POWER_ID \"DuplicationPower\" (:21) -- the oracle join key (the id STS01221's translation aborted on at record 105). The ctor (:24-31) sets no type -> the AbstractPower default BUFF (AbstractPower.java:67); loadRegion(\"doubleTap\") is presentation only. stackPower is not overridden -> additive merge. onUseCard (:38-62): `if (!card.purgeOnUse && this.amount > 0)` -- NO CardType filter, unlike DoubleTapPower's ATTACK gate (:44 there) -- makeSameInstanceOf the played card into limbo (:46-47), purgeOnUse = true (:55), calculateCardDamage(m) (:52-54, a preview repaint; the replay recomputes at resolve), then addCardQueueItem(new CardQueueItem(tmp, m, card.energyOnUse, true, true), true) (:56) -- the SAME synchronous front-of-queue autoplay replay Double Tap makes, expressed through the shared PLAY_CARD verb (op_play_card, kPlayCardCopy | kPlayCardPurge | kPlayCardQueueFront); then --amount (:57), and at zero addToBot RemoveSpecificPowerAction (:58-60). atEndOfRound (:65-71): `if (amount == 0) addToBot(Remove) else addToBot(new ReducePowerAction(owner, owner, POWER_ID, 1))` -- an UNSPENT charge survives the turn it was drunk and decays one per ROUND (the reduce of 1-from-1 removes, ReducePowerAction.java:45-51), unlike Double Tap's atEndOfTurn whole-power removal. Applied only by DuplicationPotion.use (DuplicationPotion.java:42-46): in RoomPhase.COMBAT, one addToBot ApplyPowerAction(player, player, DuplicationPower(player, potency), potency); getPotency (:48-51) is 1, Sacred Bark doubles POTENCY = the charge count (initializeData reads SacredBark only to pick a description string). Live witness: g6b STS01221 -- drunk at seq 103, amount 1 on seq 104's record, spent on NOTHING, decayed by the end-of-round reduce and absent from seq 105 on. Checked against both count-guarded switch families: DuplicationPower overrides ONLY updateDescription, onUseCard and atEndOfRound -- no atDamage* and no modifyBlock/modifyBlockLast -- so all five kPowersCount guards take the count move (reconciled to the union total at integration, alongside the regen sibling's row 91) and no case is added anywhere."
+
+# --- S2.21 (Act-2 city normals I): the two powers the batch's monsters apply ---
+# PowerId 93-94 are this task's grant (stage-b-tasks.md "S2 Wave-2 allocations");
+# both are spent, so the block leaves no gap. MALLEABLE (95) is S2.22's row, NOT
+# this task's -- the S2.21 ledger parenthetical that listed Malleable/PlatedArmor/
+# Barricade here was stale and is corrected in docs/s2-tasks.md in this commit.
+# Plated Armor (17) and Barricade (48) are ALREADY REGISTERED and needed no new
+# row: this batch only routes them (see the Barricade note at id 48 and the
+# removal-path reroute in src/engine/powers/power_plated_armor.cpp).
+
+- id: 93
+  name: HEX
+  game_id: "Hex"
+  type: DEBUFF
+  native: true
+  hooks:
+    on_use_card: []       # native: a NON-ATTACK play shuffles `amount` Dazed into the draw pile
+  provenance: "HexPower (HexPower.java, 44 lines, read in full). POWER_ID \"Hex\" (:21) -- the oracle join key. The ctor (:26-34) sets type = DEBUFF EXPLICITLY (:33), overrides neither priority (AbstractPower default 5, AbstractPower.java:66) nor stackPower (additive default), hence no `priority:` or `stack:` column. onUseCard (:36-42) is its ONLY combat override: `if (card.type != AbstractCard.CardType.ATTACK) { this.flash(); this.addToBot(new MakeTempCardInDrawPileAction(new Dazed(), this.amount, true, true)); }` -- so SKILLs, POWERs and, because the test is a bare != ATTACK, STATUS and CURSE plays all trigger it. NATIVE only for that card-type CONDITION (the Rage precedent, powers.yaml id 68 / power_rage.cpp): the EFFECT itself needs no new opcode and is exactly {op: MAKE_CARD, target: PLAYER, card: DAZED, pile: DRAW_RANDOM} -- CardPile::DRAW_RANDOM == 3 (interp.hpp:1205-1210) and op_make_card's DRAW_RANDOM branch (interp/interp_cards.cpp:673-690) already implements MakeTempCardInDrawPileAction's (cardsToPreview=true, randomSpot=true) shape. STREAM: CardGroup.addToRandomSpot (:463-469) draws ONE card_random_rng random(size-1) PER COPY, and ZERO when the draw pile is empty (the empty-group branch appends without drawing) -- op_make_card reproduces both, per copy, inside its `for (k < count)` loop. The OWNER IS THE PLAYER (Chosen.java:134 applies it to AbstractDungeon.player), so this rides the existing player-side ON_USE_CARD plumbing (Hook::ON_USE_CARD = 1, the UseCardAction.java:41-64 fan-out) with no new dispatch site. Applied only by the Chosen's HEX move (Chosen.java:130-135, HEX_AMT 1 at :68)."
+
+- id: 94
+  name: FLIGHT
+  game_id: "Flight"
+  type: BUFF
+  priority: 50
+  native: true
+  hooks:
+    at_start_of_turn: []      # native: amount = storedAmount (PowerSlot.counter) -- a full refresh
+    on_attacked: []           # native: a real, NON-LETHAL hit sheds one stack
+    on_power_removed: []      # native: onRemove -> the Byrd's GROUNDED (setMove STUN + isFlying=false)
+  provenance: "FlightPower (FlightPower.java, 79 lines, read in full). POWER_ID \"Flight\" (:20) -- the oracle join key. The ctor (:26-35) sets PRIORITY 50 (:34), which MUST be in the priority column: op_apply_power's sort_powers_like_the_game puts the slot between the priority-5/6 class and Frail's 10 / Intangible's 75 / Weak's 99, and slot order IS the atDamage* walk order, so a wrong priority here is a wrong damage number rather than a cosmetic field. Default type BUFF (AbstractPower.java:67, no assignment in the ctor); stackPower not overridden -> additive. The ctor also stores `storedAmount = amount` in a PRIVATE field set at construction and NEVER reassigned (:24,31) -- that lives in PowerSlot.counter, the slot's declared SECOND number. NATIVE on all three hooks. atStartOfTurn (:47-51): `this.amount = this.storedAmount;` -- a FULL REFRESH, not a decay, so every stack a Byrd shed to the player's attacks is back when its own turn starts; dispatched at dispatch_monster_at_start_of_turn (src/engine/action_queue.cpp apply_pre_turn_logic), of which Flight is the FIRST binder. atDamageFinalReceive (:53-63) -> calculateDamageTakenAmount: `if (type != HP_LOSS && type != THORNS) return damage / 2.0f; return damage;` -- a case in interp/interp_damage.cpp's at_damage_final_receive, where the type guard is already satisfied because that whole pass is DamageInfo.applyPowers and op_damage runs it only for NORMAL non-pure damage. onAttacked (:65-73): `willLive = calculateDamageTakenAmount(damageAmount, info.type) < owner.currentHealth; if (info.owner != null && type != HP_LOSS && type != THORNS && damageAmount > 0 && willLive) addToBot(new ReducePowerAction(owner, owner, POWER_ID, 1));` -- note that damageAmount is ALREADY halved by the atDamageFinalReceive pass, so the willLive test halves it a SECOND time; that is the game's arithmetic and is reproduced, not corrected. A KILLING BLOW SHEDS NO STACK (willLive false), which is what decides whether a dying Byrd queues a GROUNDED it will never act on. onRemove (:75-78): `addToBot(new ChangeStateAction((AbstractMonster)owner, \"GROUNDED\"))` -- reached through Hook::ON_POWER_REMOVED (= 14, this task's framework extension), dispatched from the removal choke point remove_slot_at (interp/interp_powers.cpp) so that BOTH ways the power can die -- the onAttacked reduce falling to zero, and a bare RemoveSpecificPowerAction -- reach it. Applied only by the Byrd: usePreBattleAction (Byrd.java:102-104) and the GO_AIRBORNE move (:126), both at flightAmt = 3, or 4 from A17 (:83)."

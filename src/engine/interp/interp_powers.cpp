@@ -114,9 +114,24 @@ namespace {
 
 // Drop slot `i` from a list, shifting the tail down and zeroing the vacated
 // row. Carries the three per-power side effects a destroyed instance has.
+//
+// THE REMOVAL CHOKE POINT. Every destruction in the engine reaches here --
+// op_remove_power (REMOVE_POWER, itself what REMOVE_DEBUFFS expands into) and
+// op_reduce_power's fall-to-zero -- which is what makes it the right place to
+// fire the power's own `onRemove`. The Java has no single such point; it has two
+// (AbstractCreature.removePower and RemoveSpecificPowerAction.update,
+// RemoveSpecificPowerAction.java:29-40), and BOTH call p.onRemove() before the
+// list drops the object. A native power body that decrements its own slot and
+// zeroes power_id in place therefore BYPASSES its own onRemove -- see the note in
+// power_plated_armor.cpp, which is exactly the bug that made this a choke point
+// rather than a coincidence.
 void remove_slot_at(CombatState& s, uint8_t tgt, PowerSlot* slots,
                     uint8_t* count, uint8_t i) noexcept {
     const PowerId id = static_cast<PowerId>(slots[i].power_id);
+    // p.onRemove() BEFORE the list drops it: the body can still read its own
+    // {amount, counter}, and it must not mutate the list (we are mid-compaction),
+    // so a body that needs another removal queues a REMOVE_POWER item.
+    dispatch_on_power_removed(s, tgt, slots[i], i);
     for (uint8_t j = static_cast<uint8_t>(i + 1); j < *count; ++j) {
         slots[j - 1] = slots[j];
     }
@@ -347,6 +362,24 @@ void op_apply_power(CombatState& s, uint8_t src, uint8_t tgt, PowerId id,
         // authors no `counter:` operand.
         fresh.amount = kPanacheCardAmount;
         fresh.counter = static_cast<int16_t>(amount);
+    }
+    if (id == PowerId::FLIGHT) {
+        // FlightPower's ctor (FlightPower.java:26-35) sets `storedAmount =
+        // amount` alongside `amount` itself -- a PRIVATE field written once at
+        // construction and never reassigned (:24,31). PowerSlot.counter carries
+        // it, and atStartOfTurn restores `amount` to it every turn
+        // (power_flight.cpp).
+        //
+        // ON THE NEW-SLOT PATH ONLY, exactly like Panache above and for the same
+        // reason: stackPower is not overridden, so a re-application returns from
+        // the stacking branch having added to the LIVE object's `amount` while
+        // its `storedAmount` keeps the value the ORIGINAL instance was built
+        // with. AbstractCreature.addPower hands the amount over and discards the
+        // freshly constructed power, ctor field and all
+        // (AbstractCreature.java:506-513). Writing the counter here too would
+        // let a second application RAISE the refresh target, which the game
+        // never does.
+        fresh.counter = fresh.amount;
     }
     // justApplied for the three DURATION debuffs (Vulnerable / Weak / Frail).
     // Their ctors set it (VulnerablePower.java:36-38, WeakPower.java:35-37,

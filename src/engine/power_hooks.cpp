@@ -347,6 +347,39 @@ void dispatch_on_death(CombatState& s, uint8_t actor) noexcept {
     dispatch_actor_powers(s, actor, Hook::ON_DEATH, HookContext{});
 }
 
+void dispatch_on_power_removed(CombatState& s, uint8_t owner,
+                               const PowerSlot& slot,
+                               uint8_t slot_index) noexcept {
+    // NOT dispatch_actor_powers: onRemove is a SELF-notification, so the one body
+    // that fires is the REMOVED power's own (AbstractCreature.removePower ->
+    // p.onRemove(), and RemoveSpecificPowerAction.java:29-40's identical pair).
+    // The slot is still in the list and still carries its {amount, counter} --
+    // remove_slot_at calls this before it compacts.
+    const PowerId pid = static_cast<PowerId>(slot.power_id);
+    if (pid == PowerId::NONE) {
+        return;
+    }
+    const PowerDef* def = power_def(pid);
+    if (def == nullptr || !def->native) {
+        // A DATA power cannot bind this hook: the generator rejects a non-native
+        // row carrying an empty program, and a real program here would queue
+        // against a list that is mid-compaction. Nothing to route.
+        return;
+    }
+    if (def->hook_binding(static_cast<sts::registry::Hook>(
+            Hook::ON_POWER_REMOVED)) == nullptr) {
+        return;  // this power does not respond to its own removal
+    }
+    HookContext ctx{};
+    ctx.owner = owner;
+    ctx.source = owner;
+    ctx.target = owner;
+    ctx.power_amount = slot.amount;
+    ctx.power_counter = slot.counter;
+    ctx.power_slot = slot_index;
+    dispatch_native_hook(s, Hook::ON_POWER_REMOVED, pid, ctx);
+}
+
 // --- APPLY_POWER interception ------------------------------------------------
 
 void dispatch_on_apply_power_source(CombatState& s, uint8_t source,

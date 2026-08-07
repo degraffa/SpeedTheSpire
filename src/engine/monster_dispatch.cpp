@@ -10,6 +10,8 @@
 
 #include "interp/interp_powers.hpp"        // op_apply_power (Philosopher's Stone)
 #include "sts/engine/action_queue.hpp"     // add_to_bottom, ActionQueueItem, kActorPlayer
+#include "sts/engine/monster_byrd.hpp"     // the Byrd: Flight + the airborne latch
+#include "sts/engine/monster_chosen.hpp"   // the Chosen: Hex opener + roll tree
 #include "sts/engine/monster_cultist.hpp"  // cultist_init / cultist_take_turn
 #include "sts/engine/monster_fungi_beast.hpp"  // Fungi Beast + its Spore Cloud
 #include "sts/engine/monster_gremlin.hpp"  // the five Act-1 gremlins
@@ -21,10 +23,12 @@
 #include "sts/engine/monster_looter.hpp"   // the Looter: steal + escape machine
 #include "sts/engine/monster_louse.hpp"    // louse_* init / take_turn / pre_battle
 #include "sts/engine/monster_sentry.hpp"   // sentry_* init / take_turn / pre_battle
+#include "sts/engine/monster_shelled_parasite.hpp"  // Plated Armor + the recursive roll
 #include "sts/engine/monster_slaver.hpp"   // the Blue and Red slavers
 #include "sts/engine/monster_slime.hpp"    // small/medium slime init + turns
 #include "sts/engine/monster_slime_large.hpp"  // large slimes + split framework
 #include "sts/engine/monster_slime_boss.hpp"   // Slime Boss native AI/split
+#include "sts/engine/monster_spheric_guardian.hpp"  // the zero-HP-draw Barricade sphere
 #include "sts/registry/manifest.hpp"           // generated kMonstersCount
 
 namespace sts::engine {
@@ -126,6 +130,18 @@ MonsterInitFn monster_init_fn(MonsterId id) noexcept {
             // "Looter" and "Exordium Thugs" encounters: the run layer's gate is
             // monster_init_fn(id) == nullptr, asked of this switch directly.
             return &looter_init;
+        // S2.21 -- the four Act-2 city normals. Registering these init fns is
+        // what un-parks their encounters, exactly as the Looter's did.
+        case MonsterId::CHOSEN:
+            return &chosen_init;
+        case MonsterId::BYRD:
+            return &byrd_init;
+        case MonsterId::SHELLED_PARASITE:
+            return &shelled_parasite_init;
+        case MonsterId::SPHERIC_GUARDIAN:
+            // The only init here that makes NO monster_hp_rng draw -- its Java
+            // ctor never calls setHp (monster_spheric_guardian.hpp).
+            return &spheric_guardian_init;
     }
     return nullptr;  // NONE, or an id no case label covers (see above)
 }
@@ -185,6 +201,14 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
             return &fungi_beast_take_turn;
         case MonsterId::LOOTER:
             return &looter_take_turn;
+        case MonsterId::CHOSEN:
+            return &chosen_take_turn;
+        case MonsterId::BYRD:
+            return &byrd_take_turn;
+        case MonsterId::SHELLED_PARASITE:
+            return &shelled_parasite_take_turn;
+        case MonsterId::SPHERIC_GUARDIAN:
+            return &spheric_guardian_take_turn;
     }
     // dispatch_monster_turn calls the result unconditionally, so this must be a
     // live no-op rather than nullptr.
@@ -192,7 +216,7 @@ MonsterTurnFn monster_turn_fn(MonsterId id) noexcept {
 }
 
 MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 25,
+    static_assert(sts::registry::manifest::kMonstersCount == 29,
                   "new monster: does its turn QUEUE a ROLL_MOVE item (rather "
                   "than rolling inline)? Only then does it register here.");
     // Checked for The Guardian: it queues none. getMove (TheGuardian.java:
@@ -233,6 +257,25 @@ MonsterRollMoveFn monster_roll_move_fn(MonsterId id) noexcept {
             return &slaver_red_roll_move;
         case MonsterId::FUNGI_BEAST:
             return &fungi_beast_roll_move;
+        // S2.21: ALL FOUR city normals end takeTurn in a RollMoveAction that
+        // sits AFTER the switch, so every move body reaches it (Chosen.java:137,
+        // Byrd.java:145, ShelledParasite.java:140, SphericGuardian.java:120) --
+        // with ONE exception that is a case in the turn body rather than here:
+        // the Byrd's HEADBUTT returns early (Byrd.java:121) and queues no roll at
+        // all, so a Byrd's turn sometimes spends no ai_rng draw. Three of the
+        // four getMove overrides READ the rolled num; the Spheric Guardian's does
+        // NOT (it is fully deterministic) and still registers, because the draw
+        // itself moves the shared stream.
+        case MonsterId::CHOSEN:
+            return &chosen_roll_move;
+        case MonsterId::BYRD:
+            return &byrd_roll_move;
+        case MonsterId::SHELLED_PARASITE:
+            // The one roll fn that can spend TWO draws: getMove recurses once
+            // with a fresh random(20, 99) (ShelledParasite.java:191).
+            return &shelled_parasite_roll_move;
+        case MonsterId::SPHERIC_GUARDIAN:
+            return &spheric_guardian_roll_move;
         default:
             return nullptr;  // rolls inline in its MonsterTurnFn; no queued rolls
     }
@@ -251,10 +294,19 @@ void roll_monster_move(CombatState& state, uint8_t monster_index) noexcept {
 }
 
 MonsterSpawnAtHpFn monster_spawn_at_hp_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 25,
+    static_assert(sts::registry::manifest::kMonstersCount == 29,
                   "new monster: can anything spawn it mid-combat (a split, a "
                   "summon)? Only then does it need a spawn-at-fixed-HP init "
                   "here; spawn_monster_at_slot hard-asserts without one.");
+    // Checked for S2.21's four city normals: NONE of them is mid-combat
+    // spawnable. Every Act-2/3 group that fields one builds it at spawn time
+    // (MonsterHelper.java's "Chosen" / "3 Byrds" / "Chosen and Byrds" /
+    // "Shell Parasite" / "Shelled Parasite and Fungi" / "Spheric Guardian" /
+    // "Sentry and Sphere" / "Cultist and Chosen" / "Sphere and 2 Shapes" cases),
+    // and not one of the four classes splits or summons: none declares a
+    // SpawnMonsterAction, a SplitPower or a summon list. The Byrd's GO_AIRBORNE
+    // is the closest thing to a "return", and it re-powers the SAME record
+    // rather than creating one.
     // Checked for the Looter: nothing spawns it mid-combat. Both encounters
     // that field one build it at spawn time ("Looter", MonsterHelper.java:
     // 400-402; Exordium Thugs' bottomGetStrongHumanoid, :816-829); it neither
@@ -364,7 +416,7 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
                         int32_t hp_lost) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 25,
+    static_assert(sts::registry::manifest::kMonstersCount == 29,
                   "new monster: does its Java class override damage()? Only "
                   "then does it register a post-damage hook here.");
     // Checked for the Looter: NO damage() override at all -- Looter.java
@@ -431,17 +483,55 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
         // nothing else), so both stay with the `default:`.
         case MonsterId::FUNGI_BEAST:
             return;
+
+        // S2.21. THREE of the four DO override damage() and all three are empty
+        // here, for the Sentry's reason: Chosen.damage (Chosen.java:199-207),
+        // ShelledParasite.damage (:163-170) and SphericGuardian.damage (:136-143)
+        // are each `super.damage(info)` followed ONLY by the "Hit" spine
+        // animation, gated on a non-THORNS hit with output > 0. Nothing there
+        // touches combat state or draws RNG, so an empty hook is the COMPLETE
+        // translation and hp_lost is deliberately unread. Spelled as cases rather
+        // than left to the `default:` so the omission is checkable.
+        //
+        // The Byrd does NOT override damage() at all (Byrd.java declares
+        // usePreBattleAction, takeTurn, playRandomBirdSFx, changeState, getMove
+        // and die, and nothing else), so it stays with the `default:` -- which is
+        // worth stating because the Byrd is the one of the four that visibly
+        // REACTS to being attacked. That reaction is FlightPower.onAttacked, a
+        // POWER hook dispatched from op_damage, not a monster damage() override.
+        case MonsterId::CHOSEN:
+        case MonsterId::SHELLED_PARASITE:
+        case MonsterId::SPHERIC_GUARDIAN:
+            return;
         default:
             return;  // no damage() override
     }
 }
 
 MonsterPreBattleFn monster_pre_battle_fn(MonsterId id) noexcept {
-    static_assert(sts::registry::manifest::kMonstersCount == 25,
+    static_assert(sts::registry::manifest::kMonstersCount == 29,
                   "new monster: does it override usePreBattleAction? Read the "
                   "method and either register it here or add an explicit "
                   "nullptr case recording why it needs no engine behaviour.");
     switch (id) {
+        // S2.21. THREE of the four override usePreBattleAction with real combat
+        // content; the Chosen has no such method at all (Chosen.java declares
+        // takeTurn, changeState, getMove, damage and die), which is why it gets
+        // an explicit nullptr case below rather than the `default:`.
+        case MonsterId::BYRD:
+            // ApplyPowerAction(self, self, FlightPower(flightAmt)) -- 4 at A20
+            // (Byrd.java:102-104,83). No RNG.
+            return &byrd_use_pre_battle_action;
+        case MonsterId::SHELLED_PARASITE:
+            // PlatedArmor(14) THEN a direct GainBlock(14), in that order
+            // (ShelledParasite.java:104-108). No RNG.
+            return &shelled_parasite_use_pre_battle_action;
+        case MonsterId::SPHERIC_GUARDIAN:
+            // Barricade, Artifact(3), GainBlock(40), in that order
+            // (SphericGuardian.java:77-82). No RNG.
+            return &spheric_guardian_use_pre_battle_action;
+        case MonsterId::CHOSEN:
+            return nullptr;  // no usePreBattleAction in the class at all
         case MonsterId::LOUSE_NORMAL:
         case MonsterId::LOUSE_DEFENSIVE:
             return &louse_use_pre_battle_action;  // curl-up roll (monster_hp_rng)

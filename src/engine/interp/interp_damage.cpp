@@ -97,7 +97,12 @@ namespace {
     // Checked for Duplication (DuplicationPower.java:19-72, read in full):
     // only updateDescription, onUseCard and atEndOfRound -- no atDamage* hook
     // anywhere -- so all three of this file's counts move again, caseless.
-    static_assert(sts::registry::manifest::kPowersCount == 53,
+    // Checked for S2.21's two powers, neither of which needs a case here: HEX
+    // overrides only onUseCard (HexPower.java:36-42) and FLIGHT only
+    // atStartOfTurn / atDamageFinalReceive / onAttacked / onRemove
+    // (FlightPower.java:47-78, read in full) -- Flight scales only damage it
+    // RECEIVES, which is the third pass below, never damage its owner gives.
+    static_assert(sts::registry::manifest::kPowersCount == 55,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -171,7 +176,14 @@ namespace {
     // Checked for Regenerate Monster: same answer as the pass above -- its only
     // override is atEndOfTurn (RegenerateMonsterPower.java:37-43), read in full.
     // Duplication: no atDamage* override either (see at_damage_give's note).
-    static_assert(sts::registry::manifest::kPowersCount == 53,
+    // Checked for S2.21's two powers, neither of which needs a case here: HEX
+    // overrides only onUseCard (HexPower.java:36-42). FLIGHT halves incoming
+    // damage, but it does so in atDamageFinalReceive (FlightPower.java:53-56),
+    // the pass BELOW -- it leaves atDamageReceive at AbstractPower's identity
+    // default, and the distinction is not cosmetic: the FINAL pass runs after
+    // Vulnerable's multiply, so a Vulnerable Byrd takes floor(base*1.5/2), not
+    // floor(base/2*1.5).
+    static_assert(sts::registry::manifest::kPowersCount == 55,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable does)? Add a case here if so. "
                   "Check atDamageFinalReceive below in the same pass -- it is "
@@ -239,12 +251,39 @@ namespace {
     // file's counts moved together with interp_block.cpp's, again.
     // file's counts moved together again -- and again for Duplication (see
     // at_damage_give's note).
-    static_assert(sts::registry::manifest::kPowersCount == 53,
+    // Checked for S2.21's two powers, and this is the ONE of this file's three
+    // passes that gained a case. HEX needs none: HexPower's only override is
+    // onUseCard (HexPower.java:36-42, read in full) -- it touches no damage
+    // number at all. FLIGHT DOES override atDamageFinalReceive
+    // (FlightPower.java:53-63) and has its case below; it overrides neither
+    // atDamageGive nor atDamageReceive nor modifyBlock/modifyBlockLast, so the
+    // other two counts here and interp_block.cpp's took the move caseless.
+    static_assert(sts::registry::manifest::kPowersCount == 55,
                   "new power: does it override atDamageFinalReceive (the last "
-                  "target-side pass, as Intangible does)? Add a case here if so.");
+                  "target-side pass, as Intangible and Flight do)? Add a case "
+                  "here if so.");
     switch (static_cast<PowerId>(p.power_id)) {
         case PowerId::INTANGIBLE:
             return dmg > 1.0f ? 1.0f : dmg;   // IntangiblePlayerPower.java:44-48
+        case PowerId::FLIGHT:
+            // FlightPower.atDamageFinalReceive -> calculateDamageTakenAmount
+            // (FlightPower.java:53-63): `damage / 2.0f` unless the type is
+            // HP_LOSS or THORNS, in which case it passes through.
+            //
+            // THE TYPE GUARD IS ALREADY SATISFIED AT THIS SITE and needs no
+            // parameter: this whole pass is DamageInfo.applyPowers, which
+            // op_damage runs only for NORMAL non-pure damage (see the ternary in
+            // op_damage below and the header note above this function). THORNS
+            // and HP_LOSS never reach here. Flight's OWN onAttacked body
+            // re-applies the halving for its willLive test, and there the type
+            // guard is live -- see power_flight.cpp, which is also where the
+            // double-halving that produces is explained.
+            //
+            // A float divide, not an integer shift: the single mathutils_floor at
+            // the end of compute_damage is what truncates, so 5 -> 2.5f -> 2 and
+            // a Weak attacker's 3.75f -> 1.875f -> 1. Halving with integers here
+            // would floor twice and lose the frozen FP contract.
+            return dmg / 2.0f;
         default:
             return dmg;
     }
@@ -819,6 +858,63 @@ void op_vampire_damage_all(CombatState& s, int base) noexcept {
     heal.tgt = kActorPlayer;
     heal.amount = healed;
     add_to_bottom(s, heal);  // addToBot HealAction(source, source, healAmount) (:72)
+}
+
+// VAMPIRE_DAMAGE (VampireDamageAction.update, VampireDamageAction.java:29-45):
+// the SINGLE-TARGET, monster-sourced sibling of the op above -- the Shelled
+// Parasite's Life Suck (ShelledParasite.java:132). Damage `tgt` for `base`
+// through the full pipeline, then heal the ATTACKER (`this.source`, which
+// setValues takes from info.owner) by `target.lastDamageTaken` -- the HP the hit
+// ACTUALLY removed, which block, Intangible and a lethal clamp all shrink.
+//
+// `before - after` IS lastDamageTaken. The Java computes
+// `Math.min(damageAmount, currentHealth)` (AbstractMonster.java:669 / the player's
+// twin) and this engine clamps the HP write at 0, so the observed drop equals that
+// minimum on every path, including an overkill.
+//
+// THE HEAL IS INLINE, AND THAT IS EXACT, NOT A SHORTCUT. The Java addToTop's the
+// HealAction (:38), putting it in FRONT of whatever target.damage() just queued at
+// the front -- a Thorns reflect is the live case -- and an inline write lands in
+// exactly that position. It is also the only form available: op_heal (39) is
+// player-only and its monster branch is S2.22's grant. The write itself is
+// AbstractMonster.heal (AbstractMonster.java:384-399): nothing at all while
+// isDying (modelled as hp <= 0), no relic pass (that loop is `if (!isPlayer)
+// continue`, AbstractCreature.java:393-396), no onHeal power hook with any
+// implementor in scope, and a clamp to maxHealth. Same direct-HP-write escape
+// hatch RegenerateMonsterPower uses.
+void op_vampire_damage(CombatState& s, uint8_t src, uint8_t tgt,
+                       int base) noexcept {
+    int16_t* thp = actor_hp(s, tgt);
+    if (thp == nullptr) {
+        return;
+    }
+    const int before = *thp;
+    op_damage(s, src, tgt, base);
+    const int healed = before - *thp;  // lastDamageTaken (:37)
+    if (healed <= 0) {
+        return;  // `if (target.lastDamageTaken > 0)` (:37)
+    }
+    if (src == kActorPlayer) {
+        // No player-sourced producer exists: the ONLY VampireDamageAction caller
+        // in the game is the Shelled Parasite. Routing a player source through
+        // heal_player_with_relics here would be inventing the onPlayerHeal pass
+        // for a call shape nothing makes, so this stays a documented no-heal
+        // rather than a guess. (Reaper, the player's lifesteal, is
+        // VAMPIRE_DAMAGE_ALL above and heals through the HEAL opcode.)
+        return;
+    }
+    if (src >= kMonsterCap) {
+        return;
+    }
+    MonsterState& m = s.monsters[src];
+    if (m.hp <= 0) {
+        return;  // `if (this.isDying) return;` (AbstractMonster.java:385)
+    }
+    int nhp = m.hp + healed;
+    if (nhp > m.max_hp) {
+        nhp = m.max_hp;  // clamp to maxHealth (:392-394)
+    }
+    m.hp = static_cast<int16_t>(nhp);
 }
 
 // HEAL (HealAction.update, HealAction.java:30-34 -> AbstractCreature.heal): the
