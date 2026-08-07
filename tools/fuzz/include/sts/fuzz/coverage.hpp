@@ -125,10 +125,16 @@ struct Coverage {
     uint64_t combats_killed = 0;
     uint64_t combats_smoked = 0;
     uint64_t deaths = 0;      // RUN_OVER terminals that were a death
-    uint64_t victories = 0;   // RUN_OVER terminals that were the S1 boss
-                              // victory (engine::run_is_victory) -- the two
-                              // share one phase and one EndReason, so the
-                              // split lives here, not in a new enumerator
+    uint64_t victories = 0;   // RUN_OVER terminals that were the run's WIN
+                              // (engine::run_is_victory) -- the two share one
+                              // phase and one EndReason, so the split lives
+                              // here, not in a new enumerator. The win moved
+                              // with its producer at S2.12: it is now the
+                              // ACT-3 BOSS kill, not the Act-1 boss chest's
+                              // proceed, so this reads 0 for every soak until
+                              // the Act-2/3 monster batches (S2.2x) make Act 3
+                              // walkable. A content gap, not a regression --
+                              // see FuzzGuard's seed-116 case.
     uint64_t reward_screens = 0;
     uint64_t cards_taken = 0;
     uint64_t cards_skipped = 0;

@@ -402,6 +402,17 @@ sts_add_test(treasure_rooms_test)
 # the act-terminal seam.
 sts_add_test(boss_chest_test)
 
+# S2.12: the act transition and Acts 2-3 map generation. Trap 1's cardRng
+# counter snap (the three strictly-open bands, and the setCounter advance being
+# raw next_long steps rather than a random(999) replay), the A5-vs-full
+# between-act heal with its onPlayerHeal pass, the reset-vs-carry ledger, the
+# per-act mapRng offsets and setEmeraldElite's draw per generated act, the
+# floor-continuity pair the deferred obligation asks for (17/34 construction,
+# 18/35 first room), the act-dependent weak draw count and the Act-3
+# self-exclusion, and a three-act sim run twice with identical per-step hash
+# chains.
+sts_add_test(act_transition_test)
+
 # B4.8: the merchant. The sixteen-draw merchantRng stock/price sequence pinned
 # by a beside-the-engine replay, the truncate/halve/round price pipeline with
 # its ascension and shop-relic discounts, the run-persistent purge ramp across

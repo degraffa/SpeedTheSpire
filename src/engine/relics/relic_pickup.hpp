@@ -142,17 +142,29 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
 //     for (AbstractPower p : powers)        amount = p.onHeal(amount);
 //     currentHealth += amount; if (currentHealth > maxHealth) currentHealth = maxHealth;
 //
-// TWO fan-outs are NAMED rather than written, and both are identity out here:
+// The onPlayerHeal fan-out has exactly TWO overrides in the whole game, and only
+// one of them can change anything out here:
 //
-//   * onPlayerHeal -- Magic Flower is the only S1 override and its whole body
-//     is gated on `getCurrRoom().phase == RoomPhase.COMBAT`
-//     (MagicFlower.java:30-37), so out of combat it returns the amount
-//     unchanged. A room-ENTRY heal is by construction not in a combat: the
-//     onEnterRoom fan-out runs at AbstractDungeon.java:1755-1757, before
-//     setCurrMapNode and before any room's onPlayerEntry. The in-combat seam is
-//     the separate one relic_hooks.hpp documents; nothing routes through both.
-//   * powers' onHeal -- no power survives a room boundary (powers.clear() runs
-//     in resetPlayer, AbstractDungeon.java:1671), so the list is empty.
+//   * Magic Flower -- IDENTITY out of combat. Its whole body is gated on
+//     `getCurrRoom().phase == RoomPhase.COMBAT` (MagicFlower.java:30-37), and
+//     nothing reaching this door is in a combat: a room-ENTRY heal runs the
+//     onEnterRoom fan-out at AbstractDungeon.java:1755-1757, before
+//     setCurrMapNode and before any room's onPlayerEntry, and the ACT-TRANSITION
+//     heal (AbstractDungeon.java:2582-2586) runs while currMapNode is the
+//     outgoing act's already-COMPLETE room. The in-combat seam is the separate
+//     one relic_hooks.hpp documents; nothing routes through both.
+//   * Mark of the Bloom -- an ABSOLUTE SUPPRESSOR, written below (S2.12).
+//     MarkOfTheBloom.onPlayerHeal (MarkOfTheBloom.java:25-29) ignores its
+//     argument entirely and `return 0`s, so it does not scale a heal, it CANCELS
+//     it: every rest heal, every out-of-combat relic/event heal, and the whole
+//     A5-or-full act-transition heal become no-ops while it is owned. Its
+//     GRANTING event body is S2.33's, so it is not obtainable yet -- but the
+//     seam is what has to be right rather than today's reachability (conventions
+//     §8: inert code justified by a missing prerequisite is a bug signal), and
+//     the relic's own registry row already states that every caller of this seam
+//     must handle a 0 return.
+//   * powers' onHeal -- NAMED, vacuously empty: no power survives a room
+//     boundary (powers.clear() in resetPlayer, AbstractDungeon.java:1671).
 //
 // AbstractCreature.heal also carries the NOT-BLOODIED cross at :404-408 (the
 // relics' onNotBloodied when the heal lifts the player back over half max HP).
@@ -179,7 +191,22 @@ inline void gain_gold(RunState& rs, int32_t amount) noexcept {
 inline void dispatch_relics_on_not_bloodied_out_of_combat(
     RunState& /*rs*/) noexcept {}
 
-inline void heal_out_of_combat(RunState& rs, int32_t amount) noexcept {
+// MarkOfTheBloom.onPlayerHeal (MarkOfTheBloom.java:25-29): `return 0`,
+// unconditional. Split out so the suppression is one named predicate rather than
+// a loop buried in the door, and so a test can address it directly.
+[[nodiscard]] inline int32_t apply_on_player_heal_out_of_combat(
+    const RunState& rs, int32_t amount) noexcept {
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        if (rs.relics[i].relic_id ==
+            static_cast<uint16_t>(RelicId::MARK_OF_THE_BLOOM)) {
+            return 0;
+        }
+    }
+    return amount;
+}
+
+inline void heal_out_of_combat(RunState& rs, int32_t amount_in) noexcept {
+    const int32_t amount = apply_on_player_heal_out_of_combat(rs, amount_in);
     int32_t hp = static_cast<int32_t>(rs.hp) + amount;
     if (hp > rs.max_hp) {
         hp = rs.max_hp;

@@ -101,9 +101,13 @@ void reseed_floor_streams(CombatState& s, int64_t seed, int32_t floor) noexcept 
 
 [[nodiscard]] bool map_edge_connects(const RunController& rc,
                                      uint8_t dst_x) noexcept {
-    if (rc.run.floor == 0 || dst_x >= kMapCols) {
+    if (dst_x >= kMapCols) {
         return false;
     }
+    // run_cur_row() < 0 covers BOTH the Neow start and every act boundary (the
+    // old `floor == 0` covered only the first), and it is the same guard the
+    // MAP_CHOICE mask uses: below row 0 there is no source node to read edges
+    // from, so no edge "connects" and the free first-row pick applies instead.
     const int y = run_cur_row(rc);
     if (y < 0 || y >= kMapRows) {
         return false;
@@ -1303,18 +1307,33 @@ void next_room_transition_impl(RunController& rc, uint8_t dst_x,
     }
     // The EMPTY-LIST arm of the same Java block (:1701-1706) calls
     // generateStrongEnemies(12), which consumes the RUN-LIFETIME monsterRng and
-    // would therefore be observable in the next act. It is UNREACHABLE in S1+S2
-    // scope, and this assert is the loud guard that says so rather than a silent
-    // stall: an act's monster list holds kMaxMonsterList == 16 entries, while
-    // one walked path consumes at most 14 -- 15 map rows, of which row 8 is
-    // always Treasure and row 14 always Rest (map_rooms.hpp kTreasureRow /
-    // kRestRow), leaves 13 monsterList-consuming rooms, plus the one this block
-    // adds when the boss room is left. Elites and the boss draw other lists. If
-    // Acts 2-3 change that arithmetic, the docs/s2-tasks.md deferred-obligations
-    // row names S2.12 as the owner of the regeneration body.
+    // would therefore be observable for the whole rest of the run. It is
+    // UNREACHABLE IN EVERY S2 ACT, and this assert is the loud guard that says
+    // so rather than a silent stall. S2.12 re-derived the arithmetic for Acts
+    // 2-3, which draw only TWO weak entries, and DISCHARGED the deferred row
+    // with a counting argument rather than machinery:
+    //
+    //   SUPPLY   monster_list_len_for_act (encounters.hpp) -- weak + 1
+    //            first-strong + 12 strong:  Act 1 = 16, Acts 2-3 = 15.
+    //   DEMAND   one walked path visits exactly 15 rooms, one per map row, and
+    //            three of those rows are FORCED to a non-monsterList kind by the
+    //            act-independent generator (map_rooms.hpp: row 0 Monster --
+    //            which DOES consume -- row 8 Treasure, row 14 Rest). So at most
+    //            1 + 12 = 13 rooms consume monsterList (a ? room that rolls
+    //            MONSTER is one of those 12, not an extra), and leaving the boss
+    //            room adds the one this block itself performs: 14.
+    //   MARGIN   Act 1: 16 - 14 = 2.  Acts 2-3: 15 - 14 = 1.
+    //
+    // Elites and bosses draw their own lists and never touch this one. The
+    // margin is thinner in Acts 2-3 but still positive, so the regeneration body
+    // is deliberately NOT written -- writing untestable machinery for an
+    // unreachable arm is worse than an assert that names the arithmetic. If a
+    // future act, a map-quota change or a new monsterList consumer moves any
+    // number above, this fires with the reason attached.
     assert(rc.monster_cursor <= rc.lists.monster_list_count &&
            "monsterList exhausted -- AbstractDungeon.java:1701-1706's "
-           "generateStrongEnemies(12) regeneration is not modelled (S2.12)");
+           "generateStrongEnemies(12) regeneration is unreachable by the "
+           "counting argument above and is not modelled");
 
     // (2) ++floorNum (AbstractDungeon.java:1741) -- BEFORE the reseed (trap 7).
     //     The BOSS CHEST gets one too; see next_room_transition_boss_chest.
@@ -1342,7 +1361,17 @@ void next_room_transition_impl(RunController& rc, uint8_t dst_x,
         case TransitionTarget::MapNode:
         default: {
             rc.cur_x = dst_x;
+            // The row the ++floor above just landed on. In every reachable
+            // state this is 0..kMapRows-1: the act's first transition moves
+            // floor from act_floor_base to act_floor_base + 1, i.e. row 0, and
+            // the row-14 node's only edge is the boss one, handled above. The
+            // assert exists because run_cur_row is now a function of BOTH floor
+            // and act, so a hand-built controller whose pair disagrees would
+            // otherwise index rs.map out of bounds instead of failing here.
             const int y = run_cur_row(rc);
+            assert(y >= 0 && y < kMapRows &&
+                   "map-node transition off the act's row range -- rc.run.act "
+                   "and rc.run.floor disagree (see act_floor_base)");
             room = static_cast<RoomType>(
                 rs.map[run_state_map_index(dst_x, y)].room_type);
             break;
@@ -1371,31 +1400,221 @@ void next_room_transition_boss_chest(RunController& rc) noexcept {
     next_room_transition_impl(rc, 0, TransitionTarget::BossChest);
 }
 
-// --- the act terminal seam (S2.12 fills this) --------------------------------
+// --- the act transition (S2.12) ----------------------------------------------
 //
-// THE STUB, and exactly what S2.12 replaces. See run_advance.hpp for the full
-// contract; the short version is that this is called where the game calls
-// ProceedButton.goToNextDungeon, with the noPick bookkeeping already done and
-// `res` not yet filled.
+// THE WHOLE CROSSING, in the game's order. Two halves, and the split is the
+// Java's own: `super(...)` runs the shared AbstractDungeon constructor
+// (:268-308), whose FIRST statement of substance is dungeonTransitionSetup
+// (:287); only then does the TheCity / TheBeyond constructor body run
+// (TheCity.java:37-51, TheBeyond.java:35-47). So every monsterRng draw precedes
+// every mapRng draw, and the BGM's miscRng draw comes after the map.
 //
-// What it does today is the S1 victory terminal, MOVED ONE ROOM LATER: before
-// S2.11 the boss reward screen's proceed wrote RUN_OVER with reward 1.0f, and
-// that write now lives here, at the boss chest's proceed. Nothing else changed
-// about the terminal -- the same phase, the same reward, the same "the mask is
-// empty because the run is over" contract.
-//
-// run_is_victory() (run_advance.hpp) is defined against THIS body and must move
-// with it. The moment S2.12 makes this transition to Act 2, the Act-1 chest
-// stops being terminal and the predicate has to name the new terminal instead;
-// leaving it pointing at a state nothing produces would silently zero the fuzz
-// soak's `victories` counter, which is the failure this note exists to prevent.
+// WHAT DOES *NOT* HAPPEN HERE, each verified rather than assumed:
+//   * NO floor increment. `isDungeonBeaten = true` (ProceedButton.java:249-250)
+//     is exactly the flag AbstractDungeon.updateFading tests before calling
+//     nextRoomTransition (:2317-2326), so the crossing skips it. The new act is
+//     built at the OLD act's chest floor (17 / 34) and the +1 comes back on the
+//     ordinary transition into the new act's first room (18 / 35).
+//   * NO floor-stream reseed. The five floor-scoped streams (monsterHpRng,
+//     aiRng, shuffleRng, cardRandomRng, miscRng) are reseeded ONLY at
+//     :1747-1751, inside the nextRoomTransition that did not run -- so they are
+//     still from_seed(seed + 17) / from_seed(seed + 34) throughout the
+//     construction below, which is what the BGM draw consumes.
+//   * NO relic-pool rebuild. initializeRelicList is called from Exordium's
+//     constructor only (Exordium.java:38), never from the shared chain, so the
+//     five pools carry over DEPLETED -- which is what makes the Act-2 boss chest
+//     pop from wherever the Act-1 chest and any Neow swap left the boss pool.
+//   * NO card-pool RNG. initializeCardPools (:294) is a pure rebuild from static
+//     libraries; this engine's pools are constexpr tables, so the rebuild is
+//     vacuously idempotent and the deliverable is the NEGATIVE -- the crossing
+//     touches no pool state and no stream on their account.
+//   * NO potion RNG (initializePotions, :298) and NO starter deck
+//     (initializeStarterDeck is gated `floorNum == 0`, :295-296).
+//   * NOT the A6/A10/A14 run-setup block (:2590-2602). It is gated
+//     `floorNum <= 1 && CardCrawlGame.dungeon instanceof Exordium` and BOTH
+//     halves are false at every act boundary. Pinned as a negative.
+//   * NO cardBlizzRandomizer reset. Nothing in :2562-2604 touches it; it is
+//     reset only by reset() and by a RARE reward roll (:1396/:1437), so it
+//     CARRIES across the boundary while the ?-room pity does not. The pair is
+//     the easiest thing here to get backwards, so both are pinned together.
+//   * NO specialOneTimeEventList rebuild. It is passed to the new dungeon BY
+//     IDENTITY (getDungeon :1102-1119 -> the ctor's `specialOneTimeEventList =
+//     newSpecialOneTimeEventList`, :280), so a draw in Act 1 stays removed for
+//     Acts 2-3 (trap 7). Carrying it is DOING NOTHING -- rs.special_membership
+//     is simply not touched.
+namespace {
+
+void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept {
+    assert(next_act >= 2 && next_act <= static_cast<int32_t>(kFinalAct) &&
+           "the only act crossings in S2 are 1->2 and 2->3");
+
+    // === dungeonTransitionSetup (AbstractDungeon.java:2562-2604) =============
+
+    // (1) ++actNum (:2563) -- FIRST, and before the subclass seeds mapRng, which
+    //     reads it (`Settings.seed + actNum * 100`).
+    rs.act = static_cast<uint8_t>(next_act);
+
+    // (2) THE cardRng COUNTER SNAP (:2564-2570, trap 1). Three strictly-open
+    //     bands; see card_rng_snap_target for why the boundaries matter. The
+    //     advance is setCounter's own -- randomBoolean() per step, i.e. exactly
+    //     (target - counter) raw next_long()s (advance_counter_to,
+    //     rng_stream.hpp). The S2 dossier claimed a random(999) replay would
+    //     land on the right counter and the WRONG state; it does not -- the
+    //     xorshift128+ advance depends only on the NUMBER of next_long calls --
+    //     so what actually has to be right here is the STEP COUNT, which is
+    //     what the named test discriminates on.
+    advance_counter_to(rs.card_rng, card_rng_snap_target(rs.card_rng.counter));
+
+    // (3) pathX/pathY clear (:2573-2574): the walked-path breadcrumb the map
+    //     screen draws. No engine storage -- rs.map is overwritten below and the
+    //     controller's cursor fields are reset with the lists.
+
+    // (4) EventHelper.resetProbabilities (:2575 -> EventHelper.java:189-195).
+    //     ?-room pity goes back to its BASE values -- reset, where
+    //     cardBlizzRandomizer carries.
+    //
+    //     ELITE_CHANCE = 0.0f is the one field with no engine storage, and that
+    //     is CORRECT rather than a gap: its only consumer is
+    //     `if (ModHelper.isModEnabled("DeadlyEvents")) eliteSize = (int)(ELITE_CHANCE * 100.0f)`
+    //     (EventHelper.java:190-192), and the corresponding ELITE fills at
+    //     :204-207 sit under the same gate. With no mods the value can never
+    //     reach the 100-slot table, so it is unobservable -- and note it resets
+    //     to 0.0f, NOT to the 0.1f the other three ramp from, so even a future
+    //     modded consumer could not reuse the monster row's shape.
+    rs.event_pity_monster = kEventBaseMonsterChance;
+    rs.event_pity_shop = kEventBaseShopChance;
+    rs.event_pity_treasure = kEventBaseTreasureChance;
+
+    // (5) eventList / shrineList / monsterList / eliteMonsterList / bossList
+    //     clears (:2576-2580). The monster trio is rebuilt at (8); the two EVENT
+    //     lists are S2.13's -- see the note at the end of this function.
+    rc.lists = MonsterLists{};
+    rc.monster_cursor = 0;
+    rc.elite_cursor = 0;
+    rc.boss_cursor = 0;
+
+    // (6) AbstractRoom.blizzardPotionMod = 0 (:2581). The potion-drop ratchet is
+    //     per-act; cardBlizzRandomizer, one line of engine state away, is not.
+    rs.blizzard_potion_mod = 0;
+
+    // (7) THE BETWEEN-ACT HEAL (:2582-2586). A5+ heals 75 % of MISSING HP
+    //     (MathUtils.round, half-up); below A5 it heals maxHealth, which the
+    //     clamp inside heal() turns into a full heal. Routed through the shared
+    //     out-of-combat door so the onPlayerHeal pass runs: Magic Flower is
+    //     phase-gated off outside combat and Mark of the Bloom zeroes the whole
+    //     thing (relics/relic_pickup.hpp).
+    heal_out_of_combat(rs, act_transition_heal_amount(
+                               static_cast<int>(rs.max_hp),
+                               static_cast<int>(rs.hp),
+                               static_cast<int>(rs.ascension)));
+
+    // (8) the floorNum <= 1 && Exordium block (:2590-2602) -- NOT REACHED. Both
+    //     halves are false at every act boundary (floor is 17 or 34, and the
+    //     dungeon being constructed is TheCity/TheBeyond). Deliberately not
+    //     written; pinned by a negative test.
+
+    // === the shared constructor chain (AbstractDungeon.java:288-298) =========
+
+    // (9) generateMonsters (:288) then initializeBoss (:289), both off the
+    //     RUN-LIFETIME monsterRng, which dungeonTransitionSetup never touches --
+    //     so the Act-2 lists continue the exact stream the Act-1 lists left.
+    //     Acts 2-3 draw TWO weak entries, not three (weak_segment_for_act), and
+    //     initializeBoss spends exactly one randomLong on the shuffle.
+    generate_monster_lists(next_act, rs.monster_rng, rc.lists);
+
+    // setBoss(bossList.get(0)) (:290) mirrored into save-parity state, the same
+    // registry join run_begin uses for Act 1.
+    if (rc.lists.boss_list_count > 0) {
+        const sts::registry::EncounterDef* boss =
+            sts::registry::encounter_by_game_id(rc.lists.boss_list[0]);
+        if (boss != nullptr && next_act <= static_cast<int32_t>(kBossIdCap)) {
+            rs.boss_ids[next_act - 1] = static_cast<uint16_t>(boss->id);
+        }
+    }
+
+    // (10) initializeEventList (:291) / initializeEventImg (:292) /
+    //      initializeShrineList (:293) -- ALL DRAW-FREE, and all S2.13's to make
+    //      act-aware. The membership bitsets are deliberately left ALONE here:
+    //      rewriting them to Act-1 membership would be worse than stale, and
+    //      inventing Act-2/3 membership is exactly S2.13's deliverable. Until it
+    //      lands, an Act-2/3 ? room that resolves to EVENT draws from the Act-1
+    //      list -- deterministic, wrong content, and named here so it cannot be
+    //      mistaken for a modelled behaviour.
+    //
+    // (11) initializeCardPools (:294) / initializePotions (:298) -- no RNG, no
+    //      engine state (see the block comment above).
+
+    // === the subclass constructor body (TheCity.java:44-50 / TheBeyond:42-46) =
+
+    // (12) initializeLevelSpecificChances: every constant is byte-identical
+    //      across the three dungeons EXCEPT cardUpgradedChance, which is read at
+    //      its use site from (act, ascension) -- card_upgraded_chance,
+    //      combat_rewards.hpp -- rather than mirrored into state here.
+
+    // (13) mapRng = new Random(seed + actNum * K) with K = 100 (TheCity.java:46)
+    //      / 200 (TheBeyond.java:44), then generateMap (:47 / :45) and, inside
+    //      it, setEmeraldElite's ONE mapRng draw (AbstractDungeon.java:539,
+    //      542-556) -- per GENERATED ACT now, not once per run. map_stream
+    //      already carries the act arithmetic (offsets +1 / +200 / +600) and is
+    //      golden-pinned, so nothing act-specific is spelled here.
+    //
+    //      RunState.map is single-act storage: the game throws the old
+    //      DungeonMap away with the old dungeon object, so overwriting in place
+    //      is the faithful model, not a shortcut.
+    const GeneratedMap g = generate_map(rs.run_seed, static_cast<int>(next_act));
+    const RoomAssignment ra =
+        assign_room_types(g, static_cast<int>(rs.ascension));
+    encode_paths_into_run_state(g, rs);
+    encode_rooms_into_run_state(ra, rs);
+    rc.emerald_x = ra.emerald_x < 0 ? kNoEmeraldNode
+                                    : static_cast<uint8_t>(ra.emerald_x);
+    rc.emerald_y = ra.emerald_y < 0 ? kNoEmeraldNode
+                                    : static_cast<uint8_t>(ra.emerald_y);
+
+    // (14) CardCrawlGame.music.changeBGM(id) (TheCity.java:48 / TheBeyond.java:46)
+    //      -- AFTER generateMap in both. changeBGM unconditionally constructs a
+    //      MainMusic (MusicMaster.java:126-128) whose getSong draws
+    //      miscRng.random(1) for TheCity and TheBeyond alike
+    //      (MainMusic.java:65-79). That is a REAL draw off the still-un-reseeded
+    //      floor-17 / floor-34 misc stream; which track plays is not run state,
+    //      so the value is discarded. Act 1's twin lives in run_begin, and the
+    //      reason it is easy to miss is the same one recorded there: STS00052.
+    (void)random(rc.combat.misc_rng, 1);
+
+    // (15) currMapNode. TheCity RESETS it to MapRoomNode(0, -1) with an EmptyRoom
+    //      (TheCity.java:49-50); TheBeyond DOES NOT (TheBeyond.java:35-47 has no
+    //      such lines), so Act 3 opens still holding Act 2's off-grid
+    //      TreasureRoomBoss node. That asymmetry is INERT -- the room is already
+    //      COMPLETE, its getCardRarity is the default, and the first thing that
+    //      happens is a first-row map pick which reads neither -- but it is real,
+    //      so it is modelled rather than smoothed over, and pinned as a negative.
+    //
+    //      What matters mechanically is only that neither node is a MonsterRoom:
+    //      the transition OUT of it (into the new act's row 0) must not pop
+    //      monsterList, and next_room_transition_impl keys that on rc.room_type.
+    if (next_act == 2) {
+        rc.cur_x = 0;
+        rc.room_type = static_cast<uint8_t>(RoomType::None);
+    }
+
+    // (16) screen = MAP / isScreenUp = true for every non-Exordium dungeon
+    //      (:300-306), and dungeonMapScreen.open(true) from
+    //      CardCrawlGame.update's transition arm (:698-714). The player's next
+    //      input is a first-row node pick, which run_cur_row() == -1 selects.
+}
+
+}  // namespace
+
 void on_boss_chest_proceed(RunController& rc, RunState& rs,
                            StepResult& res) noexcept {
-    (void)rs;  // S2.12's dungeonTransitionSetup body is what needs it
-    rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+    // ProceedButton.goToNextDungeon (:231-252) -> CardCrawlGame.update case 3
+    // (:716-725) -> getDungeon (:1102-1119) -> new TheCity/TheBeyond. A boss
+    // chest exists only after the Act-1 and Act-2 bosses, so this is always a
+    // transition and never a terminal (s2-design §1: the Act-3 boss opens no
+    // reward screen, hence no chest).
+    act_transition(rc, rs, static_cast<int32_t>(rs.act) + 1);
+    rc.phase = static_cast<uint8_t>(RunPhase::MAP_CHOICE);
     fill_run_result(rc, res);
-    res.reward = 1.0f;  // the run-level win: the +1 analogue of the DEFEAT
-                        // path's -1 (finish_combat_after_action)
 }
 
 // --- run_begin ---------------------------------------------------------------
@@ -1796,8 +2015,15 @@ void legal_actions(const RunController& rc, RunActionMask& out) noexcept {
         }
 
         case RunPhase::MAP_CHOICE: {
-            if (rc.run.floor == 0) {
-                // First pick: any connected row-0 node is a valid start.
+            if (run_cur_row(rc) < 0) {
+                // First pick of an ACT: any connected row-0 node is a valid
+                // start. S1 spelled this `floor == 0` because Act 1's base floor
+                // IS 0; from S2.12 the same state recurs at every act boundary
+                // (floor 17 in Act 2, 34 in Act 3), where the game's currMapNode
+                // is the off-row MapRoomNode(0, -1) TheCity installs -- or, in
+                // Act 3, the previous act's off-grid chest node it never
+                // replaces. run_cur_row's -1 is exactly "below row 0", so it is
+                // the act-general spelling of the same question.
                 for (int x = 0; x < kMapCols; ++x) {
                     if (rc.run.map[run_state_map_index(x, 0)].edges != 0) {
                         out.can_choose_node[x] = true;
@@ -2062,6 +2288,56 @@ void finish_combat_after_action(RunController& rc, StepResult& res) noexcept {
     } else if ((rc.combat.flags & kCombatFlagPlayerEscaped) != 0u) {
         outcome = RunCombatOutcome::SMOKE_BOMB;
     }
+
+    // THE RUN'S TERMINAL: the Act-3 boss (s2-design §1, frozen). Its
+    // battle-over block takes a DIFFERENT branch from every other room in the
+    // game -- AbstractRoom.java:327 reads
+    //
+    //   if (!(getCurrRoom() instanceof MonsterRoomBoss)
+    //       || !(dungeon instanceof TheBeyond) && !(dungeon instanceof TheEnding)
+    //       || Settings.isEndless)
+    //
+    // and on a non-endless TheBeyond boss that whole guard is FALSE, so
+    // dropReward(), addPotionToRewards() and combatRewardScreen.open() are all
+    // skipped. No reward screen means ProceedButton's chest branch (:111-113)
+    // can never fire either, because it requires `screen == COMBAT_REWARD` --
+    // hence no Act-3 boss chest, and hence on_boss_chest_proceed is only ever a
+    // transition. What survives the guard is the GOLD ADD at :286-297, which is
+    // ahead of it: one miscRng.random(-5, 5) draw, x0.75 rounded at A13+.
+    //
+    // That gold is added to the ROOM's unclaimed reward list (addGoldToRewards,
+    // :610-617) and, with no screen to claim it on, never reaches the purse. So
+    // the draw is consumed and the value discarded -- the same shape as the BGM
+    // draw, and for the same reason: modelling the stream, not the cosmetic.
+    //
+    // Routing to the VictoryRoom / the Door (goToVictoryRoomOrTheDoor,
+    // ProceedButton.java:199-208) is the S3 keys surface and deliberately out of
+    // scope; the run ends here.
+    // The guard is on ROOM and DUNGEON only -- no outcome clause -- so this
+    // branch deliberately does not read `outcome` either. Neither surviving
+    // alternative is reachable in a boss room anyway: Smoke Bomb's canUse
+    // refuses a MonsterRoomBoss, and no boss encounter holds a thief, so
+    // `outcome` is KILLED here in every reachable state and is carried through
+    // rather than overwritten.
+    if (static_cast<RoomType>(rc.room_type) == RoomType::Boss &&
+        rc.run.act >= kFinalAct) {
+        apply_meat_on_the_bone_pre_victory(rc.combat);
+        dispatch_relics_on_victory(rc.combat, rc.combat.relics,
+                                   rc.combat.relic_count);
+        fold_back_combat(rc);
+        (void)settle_stolen_gold(rc);
+        (void)roll_boss_gold(rc.combat.misc_rng,
+                             static_cast<int>(rc.run.ascension));
+        rc.combat_outcome = static_cast<uint8_t>(outcome);
+        rc.phase = static_cast<uint8_t>(RunPhase::RUN_OVER);
+        res = StepResult{};
+        res.terminal = true;
+        res.reward = 1.0f;  // the run-level win: the +1 analogue of the DEFEAT
+                            // path's -1 above. run_is_victory() reads exactly
+                            // the state this branch writes.
+        return;
+    }
+
     enter_combat_reward(rc, outcome, res);
 }
 
@@ -2355,12 +2631,14 @@ void leave_boss_chest(RunController& rc, StepResult& res) noexcept {
     // (1) noPick -- metrics only. Recorded, deliberately inert.
     (void)rc.boss_chest.chose_relic;
 
-    // (2) the act terminal (S2.12 fills the seam; S2.11 stubs it to VICTORY).
+    // (2) the ACT TRANSITION (the seam S2.12 filled).
     on_boss_chest_proceed(rc, rc.run, res);
 
     // The room is left: its transient screen state must not survive into
     // whatever the seam moved to, the same discipline every other room's exit
-    // follows. rc.room_type stays TreasureBoss -- run_is_victory() reads it.
+    // follows. rc.room_type is rewritten by the seam for Act 2 (TheCity installs
+    // an EmptyRoom currMapNode) and deliberately LEFT at TreasureBoss for Act 3
+    // (TheBeyond never replaces currMapNode) -- see act_transition step (15).
     rc.boss_chest = BossChestState{};
     rc.rewards = RewardScreen{};
     rc.rewards.open_card_item = kNoOpenCardReward;
@@ -2517,8 +2795,12 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                 if (a0 == kChooseBoss && m.can_choose_boss) {
                     next_room_transition(rc, 0, /*to_boss=*/true);
                 } else if (a0 < kMapCols && m.can_choose_node[a0]) {
-                    if (rc.run.floor > 0 &&
-                        !map_edge_connects(rc, a0)) {
+                    // A first-row pick of ANY act is free -- there is no source
+                    // node, so it cannot be the winged jump Wing Boots pays for.
+                    // `run_cur_row(rc) >= 0` is the act-general spelling of the
+                    // old `floor > 0`, which stopped being equivalent the moment
+                    // an act could open at floor 17.
+                    if (run_cur_row(rc) >= 0 && !map_edge_connects(rc, a0)) {
                         spend_wing_boots_charge(rc.run);
                     }
                     next_room_transition(rc, a0, /*to_boss=*/false);
@@ -2581,9 +2863,12 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                         // chain and the dossier correction.
                         //
                         // Until S2.11 this line was the S1 victory terminal
-                        // (RUN_OVER + reward 1.0f). The terminal moved one room
-                        // later, to on_boss_chest_proceed, and run_is_victory()
-                        // moved with it.
+                        // (RUN_OVER + reward 1.0f). It moved one room later to
+                        // on_boss_chest_proceed, and S2.12 moved it again to
+                        // its real place -- the ACT-3 boss, which never reaches
+                        // this branch at all because it opens no reward screen
+                        // (AbstractRoom.java:327, finish_combat_after_action).
+                        // run_is_victory() moved both times.
                         next_room_transition_boss_chest(rc);
                         fill_run_result(rc, res);
                         break;

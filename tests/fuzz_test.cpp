@@ -1307,10 +1307,20 @@ TEST(FuzzCoverage, ShopEntryCountsInTheRoomsTable) {
 }
 
 // The seed-116 always_event probe reproducer, as a named in-tree case: beat
-// the Act-1 boss, claim its rewards, press proceed -- and the case must END,
-// in the victory terminal, rather than fail no_legal_moves on an empty mask
-// the run layer advertised while claiming not to be terminal.
-TEST(FuzzGuard, Seed116AlwaysEventReachesTheVictoryTerminal) {
+// the Act-1 boss, claim its rewards, press proceed -- and the case must not
+// fail no_legal_moves on an empty mask the run layer advertised while claiming
+// not to be terminal.
+//
+// WHERE THAT PRESS LEADS MOVED AT S2.12. It used to be the run's VICTORY
+// terminal; it is now the ACT TRANSITION, so this trajectory crosses into Act 2
+// and then parks on the first Act-2 room, whose monsters are S2.2x's. The
+// property under test is unchanged -- the run ends CLEANLY at a named reason,
+// having offered a legal move at every non-terminal step -- and the expected
+// reason moves with the boundary. `victories` is 0 across the whole soak until
+// S2.28 lands the Act-3 bosses; that residue is recorded in the s2-tasks.md
+// S2.12 Log against that dependency, and the counter's coherence with
+// run_is_victory() is pinned directly in act_transition_test.cpp instead.
+TEST(FuzzGuard, Seed116AlwaysEventCrossesIntoActTwoAndEndsCleanly) {
     CaseId id;
     id.run_seed = 116;
     id.ascension = 20;
@@ -1318,13 +1328,26 @@ TEST(FuzzGuard, Seed116AlwaysEventReachesTheVictoryTerminal) {
     id.policy_seed = 12948172379672766026ull;
     Coverage cov;
     CaseResult r;
-    EXPECT_TRUE(run_case(id, limits(), &cov, r, /*verify_repro=*/true))
+    uint8_t max_act = 1;
+    StepObserver obs;
+    obs.ctx = &max_act;
+    obs.fn = [](const engine::RunController& rc, void* ctx) noexcept {
+        uint8_t& m = *static_cast<uint8_t*>(ctx);
+        if (rc.run.act > m) m = rc.run.act;
+    };
+    EXPECT_TRUE(run_case(id, limits(), &cov, r, /*verify_repro=*/true, Inject{},
+                         obs))
         << triage_text(id, r);
-    EXPECT_EQ(r.end_reason, EndReason::RUN_OVER);
-    EXPECT_EQ(cov.victories, 1u)
-        << "this trajectory beats the boss; a RUN_OVER here that is not a "
-           "victory means the terminal lost its outcome";
-    EXPECT_EQ(cov.deaths, 0u) << "a win must not be filed as a death";
+    EXPECT_NE(r.end_reason, EndReason::NO_LEGAL_MOVES)
+        << "the regression this case is named for: an empty mask in a "
+           "non-terminal phase";
+    EXPECT_EQ(r.end_reason, EndReason::ROOM_UNIMPLEMENTED)
+        << "the boss chest's proceed now opens Act 2, whose room content is "
+           "S2.2x's -- so the run parks there rather than ending";
+    EXPECT_EQ(max_act, 2u) << "the act transition really ran";
+    EXPECT_EQ(cov.deaths, 0u) << "parking is not a death";
+    EXPECT_EQ(cov.victories, 0u)
+        << "and it is not a win either -- the terminal is the Act-3 boss";
 }
 
 TEST(FuzzDriver, RejectsZeroWorkMalformedAndPartialCaseCli) {

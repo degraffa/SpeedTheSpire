@@ -3283,16 +3283,75 @@ TEST(BossVictory, BossRewardProceedEntersTheBossChestNotRunOver) {
            "is its own floor (AbstractDungeon.java:2317-2325 -> :1687-1813)";
 }
 
-TEST(BossVictory, VictoryMaskIsEmptyBecauseRunOver) {
+TEST(BossVictory, TheChestProceedOpensTheNextActRatherThanEndingTheRun) {
+    // S2.12 moved the terminal off this edge entirely: the chest's proceed is
+    // the ACT TRANSITION now, and only the Act-3 boss ends the run (s2-design
+    // §1). What has to keep holding is the seed-116 property this whole section
+    // exists for -- a non-terminal phase must never advertise an empty mask.
     RunController rc = enter_boss_combat(kSeed);
+    // The boss and chest floors have to be the real ones: run_cur_row() is a
+    // function of BOTH act and floor since S2.12, so an (act 2, floor 2)
+    // controller is not a state the game can be in.
+    rc.run.floor = static_cast<uint16_t>(kActFloorSpan - 1);
     weaken_all_monsters(rc);
     play_out_combat(rc);
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
-    // Walk straight past the chest: the act terminal is its proceed.
-    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
-    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    ASSERT_EQ(rc.run.floor, kActFloorSpan);
+    // Walk straight past the chest.
+    const StepResult res =
+        step_with_result(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(rc.run.act, 2);
+    EXPECT_FALSE(res.terminal);
+    EXPECT_FALSE(run_is_victory(rc));
+
+    RunActionMask m{};
+    legal_actions(rc, m);
+    bool any = m.can_choose_boss;
+    for (int x = 0; x < kMapCols; ++x) any = any || m.can_choose_node[x];
+    EXPECT_TRUE(any)
+        << "the boss column has no outgoing edges, so a proceed that did not "
+           "regenerate the map would advertise an empty non-terminal mask -- "
+           "the seed-116 no_legal_moves regression this section is named for";
+}
+
+TEST(BossVictory, TheActThreeBossIsTheTerminalAndItsMaskIsEmpty) {
+    // AbstractRoom.java:327: on a non-endless TheBeyond boss the whole
+    // dropReward / addPotionToRewards / combatRewardScreen.open block is
+    // skipped, so the kill IS the end of the run. The Act-3 boss ENCOUNTERS are
+    // S2.28's, so the room is reached here by aiming the public transition at an
+    // Act-1 boss encounter with the run already in Act 3 -- the combat content
+    // is irrelevant to the terminal, which keys on (act, room kind) alone.
+    RunController act3 = enter_boss_combat(kSeed);
+    act3.run.act = 3;
+    act3.run.floor = static_cast<uint16_t>(act_floor_base(3) + kActFloorSpan - 1);
+    weaken_all_monsters(act3);
+    // The Act-2 twin, identical but for the act -- the differential that pins
+    // "the gold DRAW still happens, the gold ITSELF never lands".
+    RunController act2 = act3;
+    act2.run.act = 2;
+    act2.run.floor = static_cast<uint16_t>(act_floor_base(2) + kActFloorSpan - 1);
+    const int32_t gold_before = act3.run.gold;
+
+    play_out_combat(act3);
+    play_out_combat(act2);
+    RunController& rc = act3;
+
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER))
+        << "no reward screen follows the Act-3 boss";
+    EXPECT_TRUE(run_is_victory(rc));
+    ASSERT_EQ(act2.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD))
+        << "the Act-2 boss still opens one -- the guard is act-specific";
+    EXPECT_EQ(rc.rewards.count, 0) << "dropReward() never ran";
+    EXPECT_GT(act2.rewards.count, 0);
+    EXPECT_EQ(rc.combat.misc_rng.counter, act2.combat.misc_rng.counter)
+        << "the gold add at AbstractRoom.java:286-297 is AHEAD of the :327 "
+           "guard, so its single miscRng draw fires in both acts";
+    EXPECT_EQ(rc.run.gold, gold_before)
+        << "and with no screen to claim it on, that gold never reaches the "
+           "purse (addGoldToRewards, AbstractRoom.java:610-617)";
 
     // The mask is empty BECAUSE the phase is terminal -- byte-identical to a
     // value-initialized mask but for the phase echo.
