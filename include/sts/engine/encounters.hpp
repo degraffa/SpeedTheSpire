@@ -89,11 +89,52 @@ struct ResolvedGroup {
 
 // --- Pool draw (monsterRng) -------------------------------------------------
 
-// Act-1 (Exordium) list-generation bounds. monster_list = 3 weak + 1 first-strong
-// + 12 strong = 16; elite_list = 10; boss_list = 3 (shuffled; [0] is the act boss).
+// List-generation bounds, sized on the WIDEST act. Act 1 (Exordium) is the
+// widest: monster_list = 3 weak + 1 first-strong + 12 strong = 16. Acts 2-3
+// draw only TWO weak entries (TheCity.java:88-92 / TheBeyond.java:85-89), so
+// their monster_list is 15 -- see weak_segment_for_act / monster_list_len_for_act
+// below. elite_list = 10 and boss_list = 3 in every act.
 inline constexpr int kMaxMonsterList = 16;
 inline constexpr int kMaxEliteList = 10;
 inline constexpr int kMaxBossList = 3;
+
+// generateMonsters' weak draw count, the ONE act-dependent number in list
+// generation: Exordium.generateMonsters calls generateWeakEnemies(3)
+// (Exordium.java:110-112) while TheCity (:88-92) and TheBeyond (:85-89) call
+// generateWeakEnemies(2). Everything else -- generateStrongEnemies(12),
+// generateElites(10), the one randomLong boss shuffle -- is identical.
+//
+// It is a shared constant rather than a literal at the generation site because
+// it also indexes the FIRST-STRONG slot: index `weak_segment_for_act(act)` is
+// where populateFirstStrongEnemy's exclusion-rejection loop runs, and the Markov
+// continuation (continue_monster_lists) has to land on exactly that index to
+// reproduce the run-start draw sequence.
+[[nodiscard]] constexpr uint8_t weak_segment_for_act(int32_t act) noexcept {
+    return act == 1 ? uint8_t{3} : uint8_t{2};
+}
+
+// generateStrongEnemies' count -- act-independent (12 in all three dungeons).
+inline constexpr int32_t kStrongSegment = 12;
+// generateElites' count -- act-independent (10 in all three dungeons).
+inline constexpr int32_t kEliteSegment = 10;
+
+// The generated monster_list length for an act: weak + 1 first-strong + 12
+// strong. 16 in Act 1, 15 in Acts 2-3.
+//
+// THIS NUMBER IS THE MARGIN THE EMPTY-LIST REGENERATION ARM DEPENDS ON.
+// nextRoomTransition's `if (monsterList.isEmpty()) generateStrongEnemies(12)`
+// (AbstractDungeon.java:1701-1706) consumes the RUN-LIFETIME monsterRng and
+// would be observable for the rest of the run, so its reachability is a
+// counting argument, re-derived per act -- see next_room_transition_impl's
+// assert in run_advance.cpp.
+[[nodiscard]] constexpr uint8_t monster_list_len_for_act(int32_t act) noexcept {
+    return static_cast<uint8_t>(weak_segment_for_act(act) + 1 +
+                                kStrongSegment);
+}
+static_assert(monster_list_len_for_act(1) == 16);
+static_assert(monster_list_len_for_act(2) == 15);
+static_assert(monster_list_len_for_act(3) == 15);
+static_assert(monster_list_len_for_act(1) <= kMaxMonsterList);
 
 // The run's generated monster lists (encounter KEYS, in walk order). `monster_list`
 // is the shared weak-then-strong combat list; `elite_list` the separate elite
@@ -107,11 +148,17 @@ struct MonsterLists {
     uint8_t boss_list_count = 0;
 };
 
-// Generate the act's monster lists from `monster_rng` (the run-scoped stream), in
-// the exact Exordium draw order: weak (3), first-strong (exclusion loop) + strong
-// (12), elites (10), then one randomLong() seeding the boss-list shuffle. `act`
-// selects the pool rows (only act 1 is populated). Pure over
-// `monster_rng` (advances it by the full draw sequence).
+// Generate the act's monster lists from `monster_rng` (the run-scoped stream),
+// in the exact generateMonsters draw order: weak (weak_segment_for_act(act)),
+// first-strong (exclusion loop) + strong (12), elites (10), then one
+// randomLong() seeding the boss-list shuffle. `act` selects the pool rows
+// (1 = Exordium, 2 = TheCity, 3 = TheBeyond). Pure over `monster_rng` (advances
+// it by the full draw sequence).
+//
+// Acts 2 and 3 run off the SAME continuing monsterRng the Act-1 lists consumed
+// -- it is a run-lifetime stream that dungeonTransitionSetup never touches
+// (s2-design §4.2) -- so the caller passes rs.monster_rng at whatever counter
+// the previous act left it.
 void generate_monster_lists(int32_t act, RngStream& monster_rng,
                             MonsterLists& out) noexcept;
 
@@ -124,10 +171,11 @@ void generate_monster_lists(int32_t act, RngStream& monster_rng,
 // `lists` past its first `monster_keep` / `elite_keep` entries with `rng`,
 // preserving the kept prefixes byte-for-byte and each list's original length,
 // and applying the SAME rules generate_monster_lists applies at each index:
-//   * indices [0,3)  -- WEAK pool, no immediate repeat, no A-B-A;
-//   * index 3        -- STRONG pool through the first-strong exclusion loop,
-//                       keyed on the third weak entry;
-//   * indices (3,16) -- STRONG pool, no immediate repeat, no A-B-A;
+//   * indices [0,W)  -- WEAK pool, no immediate repeat, no A-B-A, where
+//                       W == weak_segment_for_act(act) (3 in Act 1, 2 after);
+//   * index W        -- STRONG pool through the first-strong exclusion loop,
+//                       keyed on the LAST weak entry;
+//   * indices (W,N)  -- STRONG pool, no immediate repeat, no A-B-A;
 //   * elites         -- ELITE pool, no immediate repeat only.
 // Because the rejection rules read only the one or two entries before the
 // cursor, a continuation from `keep` is exactly the run-start generation

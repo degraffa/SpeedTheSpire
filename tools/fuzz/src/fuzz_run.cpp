@@ -271,9 +271,10 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                     ++cov->escapes;
                 }
             } else if (phase == RunPhase::RUN_OVER) {
-                // One terminal phase, two outcomes: the S1 boss victory
-                // (engine::run_is_victory) is not a death and must not be
-                // filed as one.
+                // One terminal phase, two outcomes: the run's WIN
+                // (engine::run_is_victory -- the ACT-3 boss kill since S2.12,
+                // not the Act-1 chest's proceed) is not a death and must not
+                // be filed as one.
                 if (engine::run_is_victory(rc)) {
                     ++cov->victories;
                 } else {

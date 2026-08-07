@@ -191,6 +191,35 @@ inline constexpr int kCardBlizzGrowth = 1;              // AbstractDungeon.java:
 inline constexpr int kCardBlizzMaxOffset = -40;         // AbstractDungeon.java:2775
 inline constexpr float kExordiumCardUpgradedChance = 0.0f;  // Exordium.java:107
 
+// AbstractDungeon.cardUpgradedChance -- the ONE per-act reward constant
+// (s2-design §2.5). initializeLevelSpecificChances is otherwise byte-identical
+// across the three dungeons: the shop/rest/treasure/event/elite quotas, the
+// 50/33/17 chest and relic tables and colorlessRareChance 0.3 are all shared
+// (Exordium.java:96-108, TheCity.java:70-85, TheBeyond.java:67-82).
+//
+//   Act 1 (Exordium.java:107)   0.0            -- unconditional
+//   Act 2 (TheCity.java:84)     A12+ ? 0.125 : 0.25
+//   Act 3 (TheBeyond.java:81)   A12+ ? 0.25  : 0.5
+//
+// The randomBoolean(chance) draw is consumed for every non-RARE reward card in
+// EVERY act, including Act 1 where the chance is 0.0 (trap 2,
+// AbstractDungeon.java:1469-1477) -- S1 already had the stream POSITION right,
+// so this function only makes the OUTCOME live. That is also what stops A12
+// being a no-op from S2 on (its a20.yaml freeze was act-scoped, s2-design §2.5).
+//
+// Act 4 (TheEnding) is out of S2 scope and deliberately falls through to Act 1's
+// 0.0f rather than guessing a value nothing here has read; S3 owns that row.
+[[nodiscard]] constexpr float card_upgraded_chance(int act,
+                                                   int ascension) noexcept {
+    if (act == 2) {
+        return ascension >= 12 ? 0.125f : 0.25f;
+    }
+    if (act == 3) {
+        return ascension >= 12 ? 0.25f : 0.5f;
+    }
+    return kExordiumCardUpgradedChance;
+}
+
 inline constexpr int kBaseRareCardChance = 3;           // AbstractRoom.java:108
 inline constexpr int kBaseUncommonCardChance = 37;      // AbstractRoom.java:109
 inline constexpr int kEliteRareCardChance = 10;         // MonsterRoomElite.java:34

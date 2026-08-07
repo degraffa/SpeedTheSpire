@@ -205,6 +205,35 @@ constexpr void commit(RngStream& s, const RandomXS128& r) noexcept {
     return s;
 }
 
+// setCounter(int) as the GAME'S OWN ADVANCE of a LIVE stream, not the
+// oracle-diffing helper above (Random.java:42-51). While `counter < target` the
+// game calls randomBoolean() -- so the advance is exactly (target - counter)
+// wrapper draws, each of which consumes ONE raw next_long()
+// (RandomXS128.nextBoolean -> `nextLong() & 1`, rng_xs128.hpp) and bumps
+// `counter` by one. A target at or below the current counter is the Java's
+// logged no-op (:48-50), which is why this loops on `<` rather than computing a
+// difference and trusting it to be positive.
+//
+// A REPLAY OF random(999) WOULD LAND ON THE SAME STATE, and it is worth saying
+// so once here because the S2 scout dossier asserted the opposite. It is the
+// same fact from_seed_counter / from_seed_set_counter above already record: the
+// xorshift128+ advance is a function of the NUMBER of next_long() calls alone,
+// never of the value consumed, and nextInt(n)'s rejection loop retries with
+// probability ~1e-16 per call. So the discriminating property of this function
+// is NOT which wrapper it calls -- it is that it takes exactly the right NUMBER
+// of steps, and that it stops rather than overshooting when the target is
+// already reached. randomBoolean is used because that is what
+// Random.setCounter writes.
+//
+// The only live consumer is the act transition's cardRng counter snap (trap 1;
+// AbstractDungeon.java:2564-2570, target from card_rng_snap_target in
+// run_advance.hpp).
+constexpr void advance_counter_to(RngStream& s, int32_t target) noexcept {
+    while (s.counter < target) {
+        (void)random_boolean(s);
+    }
+}
+
 // --- Floor / act stream derivation ----------------------------------------
 
 // Floor-scoped stream seed (design doc §3.4; AbstractDungeon.java:1747-1751).

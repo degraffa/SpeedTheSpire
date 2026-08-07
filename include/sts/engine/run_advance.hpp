@@ -61,9 +61,23 @@
 //     AbstractDungeon.updateFading :2317-2325 -> nextRoomTransition). Entry pops
 //     three BOSS relics with no RNG; open / pick / skip / proceed are live, and
 //     a picked relic's on_equip_screen body is presented at this site.
-//   * the VICTORY terminal: the BOSS CHEST's proceed ends the run
-//     (RunPhase::RUN_OVER, run_is_victory() true) through the named
-//     on_boss_chest_proceed seam, which S2.12 replaces with the act transition.
+//   * the ACT TRANSITION (S2.12): the boss chest's proceed runs
+//     dungeonTransitionSetup and constructs the next dungeon --
+//     ++act, the cardRng counter snap, the ?-room pity and blizzardPotionMod
+//     resets, the A5-or-full heal, then generateMonsters/initializeBoss off the
+//     continuing monsterRng, the per-act mapRng (seed + actNum*K), a fresh map
+//     with its own setEmeraldElite draw, and the act's BGM miscRng draw -- and
+//     lands at MAP_CHOICE on the new act's row 0. Floor numbering is continuous
+//     (Act 2 opens at floor 17, Act 3 at 34; see act_floor_base).
+//   * the VICTORY terminal: the ACT-3 BOSS kill (RunPhase::RUN_OVER,
+//     run_is_victory() true). It opens no reward screen and no chest
+//     (AbstractRoom.java:327), so the gold add at :286-297 is the last thing
+//     that happens.
+// What is only PARTLY live in Acts 2-3, because its content has not landed:
+//   * ROOM CONTENT. Act-2/3 monsters, elites and bosses are S2.2x, and the
+//     per-act event/shrine lists are S2.13 -- so an Act-2/3 combat or ? room
+//     parks at ROOM_UNIMPLEMENTED. The run-layer machinery around them (map,
+//     lists, streams, floors, rewards, rest/shop/treasure) is act-general.
 // What is DEFERRED (routed to an explicit ROOM_UNIMPLEMENTED / documented seam,
 // never faked):
 //   * the EMERALD_KEY reward item -- follows the emerald-flag scoping
@@ -154,15 +168,16 @@ enum class RunPhase : uint8_t {
     ROOM_UNIMPLEMENTED = 5,// entered a room kind / encounter not yet implemented.
     RUN_OVER = 6,          // terminal: the player died (combat DEFEAT, or an
                            // event kill with outcome NONE), or the VICTORY.
-                           // S2.11 MOVED the victory terminal one room later:
-                           // it is now the BOSS CHEST's proceed, not the boss
-                           // reward screen's, because the reward screen's
-                           // proceed goes to the chest in the game
-                           // (ProceedButton.java:111-113 -> goToTreasureRoom
-                           // :179-187) and that room is now modelled. See
-                           // BOSS_TREASURE below and the on_boss_chest_proceed
-                           // seam. run_is_victory() (below) tells a win from a
-                           // death; no separate phase value is spent on it.
+                           // The victory terminal has moved twice as the rooms
+                           // behind it were modelled: S1 put it at the Act-1
+                           // boss REWARD screen's proceed, S2.11 at the boss
+                           // CHEST's proceed, and S2.12 at its real place --
+                           // the ACT-3 BOSS kill, which opens no reward screen
+                           // at all (AbstractRoom.java:327, s2-design §1). The
+                           // Act-1/2 chest proceeds are now act TRANSITIONS,
+                           // not terminals. run_is_victory() (below) tells a
+                           // win from a death; no separate phase value is
+                           // spent on it.
     REST_SITE = 7,         // campfire menu / grid / Dream Catcher card pick.
     TREASURE_ROOM = 8,     // unopened Act-1 non-boss chest (open or skip).
     EVENT_DIALOG = 9,      // a ?-room resolved to an event with a live dialog
@@ -184,7 +199,9 @@ enum class RunPhase : uint8_t {
     BOSS_TREASURE = 11,    // the post-boss chest room (TreasureRoomBoss): the
                            // three entry-popped boss relics, the pick/skip
                            // screen, a picked relic's onEquip screens, and the
-                           // proceed that ends the act (boss_chest.hpp). Value
+                           // proceed that ends the act -- which since S2.12 is
+                           // the ACT TRANSITION, not the run's end
+                           // (boss_chest.hpp, on_boss_chest_proceed). Value
                            // 11 is the S2 Wave-2 allocation (docs/
                            // stage-b-tasks.md "S2 Wave-2 allocations"); values
                            // are append-only and never renumbered.
@@ -428,7 +445,9 @@ enum class EventCombatVariant : uint8_t {
 //                          can_proceed for the two choice-free confirmation
 //                          grids); EQUIP_ITEM_REWARD offers
 //                          can_claim_reward[i] + can_proceed; DONE offers
-//                          can_proceed, which is the ACT TERMINAL. NO new mask
+//                          can_proceed, which is the ACT TRANSITION (S2.12:
+//                          it opens the NEXT act's map, and only the Act-3
+//                          boss ends the run). NO new mask
 //                          field is spent -- the per-phase reading of these
 //                          flags is the same convention NEOW and REST_SITE use.
 //   COMBAT_REWARD        : with no card screen open -- can_proceed (CHOOSE
@@ -635,58 +654,168 @@ void next_room_transition(RunController& rc, uint8_t dst_x, bool to_boss) noexce
 // THE S2 SCOUT DOSSIER SAID THE OPPOSITE ("no floor increment, no RNG, off-map
 // and floor-less") and was wrong; the chain above is what the decompiled game
 // does. The floor evidence -- boss at 16 / chest at 17, so Act 2's first
-// playable room is 18 -- is S2.12's to pin (s2-tasks.md deferred obligations,
-// "Exact Act-2/3 entry floors").
+// playable room is 18 -- is DISCHARGED by S2.12: see kActFloorSpan /
+// act_floor_base below for the full pair and its three separately-verified
+// edges (s2-tasks.md deferred obligations, "Exact Act-2/3 entry floors").
 void next_room_transition_boss_chest(RunController& rc) noexcept;
 
-// THE ACT TERMINAL SEAM (S2.12 fills this; S2.11 stubs it).
+// --- The act boundary (S2.12) ------------------------------------------------
 //
-// CONTRACT. Called from step_one when the player presses Proceed on a boss
-// chest whose screen is CLOSED or DONE -- i.e. exactly where the game calls
-// ProceedButton.goToNextDungeon (ProceedButton.java:159-164, :231-252). On
-// entry:
+// FLOOR NUMBERING IS CONTINUOUS ACROSS ACTS. dungeonTransitionSetup
+// (AbstractDungeon.java:2562-2604) resets `floorNum` nowhere -- the only reset in
+// the class is `reset()` (:2610), which runs for a NEW RUN. So the act boundary
+// is a pure act change at an unchanged floor, and every act's rows sit at a
+// fixed OFFSET from the run's floor numbering.
+//
+// THE SPAN IS 17, and it is the sum of three separately-verified edges:
+//   * 15 map rows, one floor each (MAP_HEIGHT = 15, AbstractDungeon.java:210);
+//   * the BOSS is one more floor -- the row-14 node's only outgoing edge is the
+//     synthetic boss node (DungeonMap.java:68-87), taken through an ordinary
+//     nextRoomTransition, so ++floorNum fires (:1741);
+//   * the BOSS CHEST is one more floor still -- goToTreasureRoom
+//     (ProceedButton.java:179-187) runs a FULL nextRoomTransition because
+//     `isDungeonBeaten` is set only on the way OUT (:249-250), so
+//     AbstractDungeon.updateFading's `if (!isDungeonBeaten) nextRoomTransition()`
+//     (:2317-2325) fires. That edge is S2.11's finding and its correction of the
+//     scout dossier.
+// The CROSSING itself adds nothing: `isDungeonBeaten = true` (:249-250) is
+// exactly what makes updateFading skip nextRoomTransition (:2317-2326), so the
+// new act is constructed at the OLD act's chest floor, and the +1 comes back on
+// the ordinary MapRoomNode transition into the new act's first room.
+//
+// So, with the run starting at floor 0 (Neow):
+//   Act 1   rooms 1-15    boss 16   chest 17
+//   Act 2   rooms 18-32   boss 33   chest 34
+//   Act 3   rooms 35-49   boss 50   (no chest -- the Act-3 boss opens no reward
+//                                    screen at all, s2-design §1)
+// The 17/34 of the deferred-obligations row are therefore the floors at which
+// the NEXT act is CONSTRUCTED -- what dungeonTransitionSetup, the constructors,
+// generateMap, setEmeraldElite and the BGM draw all observe, and the floors the
+// un-reseeded floor streams still carry (miscRng == from_seed(seed + 17) /
+// from_seed(seed + 34)) -- while 18/35 are the first PLAYABLE rooms of Acts 2
+// and 3. Both halves of each pair are pinned by named tests; conflating them is
+// the mistake the row exists to prevent.
+inline constexpr int kActFloorSpan = 17;
+
+// The last act S2 models. Act 4 (TheEnding / the Heart) is S3 and is reached
+// only through the keys + the Door, which S2 does not grant (s2-design §1), so
+// the Act-3 boss is the run's terminal.
+inline constexpr uint8_t kFinalAct = 3;
+
+// The floor at which `act` was constructed == the floor BELOW its first playable
+// room. 0 / 17 / 34 for acts 1 / 2 / 3.
+[[nodiscard]] constexpr int act_floor_base(int act) noexcept {
+    return (act - 1) * kActFloorSpan;
+}
+static_assert(act_floor_base(1) == 0);
+static_assert(act_floor_base(2) == 17);
+static_assert(act_floor_base(3) == 34);
+
+// TRAP 1 -- the cardRng counter snap at dungeonTransitionSetup
+// (AbstractDungeon.java:2564-2570). Returns the counter the stream must be
+// ADVANCED to (via advance_counter_to, rng_stream.hpp), or `counter` itself when
+// no band applies.
+//
+// The three bands are STRICTLY OPEN on BOTH ends, and that is the whole trap:
+//
+//     if (counter > 0   && counter < 250) setCounter(250);
+//     else if (counter > 250 && counter < 500) setCounter(500);
+//     else if (counter > 500 && counter < 750) setCounter(750);
+//
+// so a counter of exactly 0, 250, 500 or 750 does NOT snap (0 is not > 0, and
+// each boundary fails its own band's `<` and the next band's `>`), and there is
+// NO fourth band -- anything >= 750 is left exactly where it is. A "round up to
+// the next multiple of 250" reading gets three of those four boundaries wrong
+// and reads as correct.
+[[nodiscard]] constexpr int32_t card_rng_snap_target(int32_t counter) noexcept {
+    if (counter > 0 && counter < 250) return 250;
+    if (counter > 250 && counter < 500) return 500;
+    if (counter > 500 && counter < 750) return 750;
+    return counter;
+}
+
+// The between-act heal (AbstractDungeon.java:2582-2586), as an AMOUNT so the
+// arithmetic can be pinned without walking a transition:
+//
+//     if (ascensionLevel >= 5) player.heal(MathUtils.round((maxHealth - currentHealth) * 0.75f), false);
+//     else                     player.heal(maxHealth, false);
+//
+// Below A5 the argument is maxHealth, which the += / clamp in
+// AbstractCreature.heal turns into a FULL heal regardless of how much is
+// missing; at A5+ it is 75 % of the MISSING HP, rounded by libGDX MathUtils.round
+// (mathutils_round: floor(v + 0.5) on the float widened to double, so exact .5
+// goes UP -- 1 missing HP heals 1, and 2 missing heals 2, not 1).
+//
+// This is the AMOUNT HANDED TO heal(), not the amount that lands: the relic
+// onPlayerHeal pass runs inside heal() and Mark of the Bloom zeroes it there
+// (relics/relic_pickup.hpp).
+[[nodiscard]] constexpr int act_transition_heal_amount(int max_hp, int hp,
+                                                       int ascension) noexcept {
+    return ascension >= 5
+               ? mathutils_round(static_cast<float>(max_hp - hp) * 0.75f)
+               : max_hp;
+}
+
+// THE ACT TERMINAL SEAM -- FILLED BY S2.12 (S2.11 stubbed it to the victory).
+//
+// CONTRACT (unchanged from S2.11's). Called from step_one when the player
+// presses Proceed on a boss chest whose screen is CLOSED or DONE -- i.e. exactly
+// where the game calls ProceedButton.goToNextDungeon (ProceedButton.java:159-164,
+// :231-252). On entry:
 //   * rc.phase is BOSS_TREASURE and rc.room_type is RoomType::TreasureBoss;
 //   * rc.boss_chest still holds the three offers and `chose_relic`, and the
 //     caller has ALREADY run the noPick bookkeeping (metrics-only in the game,
 //     :232-234) -- so this function must not re-read it for state;
-//   * `rs` is rc.run, passed explicitly because the S2.12 body is RunState-heavy
-//     (dungeonTransitionSetup: ++actNum, the cardRng counter snap, the pity and
-//     list resets, blizzardPotionMod, the A5 heal);
+//   * `rs` is rc.run, passed explicitly because the body is RunState-heavy;
 //   * `res` has NOT been filled yet.
-// On return it must have set rc.phase and filled `res` (fill_run_result plus any
-// reward), and rc.boss_chest is cleared by the caller afterwards.
+// On return it has set rc.phase and filled `res`, and rc.boss_chest is cleared
+// by the caller afterwards.
 //
-// THE S2.11 STUB is the previous S1 victory terminal moved one room later: phase
-// RUN_OVER with res.reward = 1.0f, which run_is_victory() reads. S2.12 replaces
-// the body with the real act transition (CardCrawlGame.nextDungeon was already
-// fixed at the room's constructor, TreasureRoomBoss.java:32) and must move
-// run_is_victory()'s definition with it -- the Act-1 chest stops being terminal
-// at that moment, and the two must never disagree.
+// WHAT IT NOW DOES: the whole act transition -- dungeonTransitionSetup plus the
+// next dungeon's constructor chain -- landing at RunPhase::MAP_CHOICE on the new
+// act's freshly generated map, with `res` non-terminal. A boss chest exists only
+// after the Act-1 and Act-2 bosses (the Act-3 boss opens no reward screen and so
+// never reaches a chest, s2-design §1), so this seam is never the run's end.
 void on_boss_chest_proceed(RunController& rc, RunState& rs,
                            StepResult& res) noexcept;
 
-// The current grid row (floor-1) for a controller on the map, or -1 at Neow.
+// The current grid row for a controller on the map, or -1 when it is standing
+// BELOW row 0 -- at Neow (floor 0), or on the act-boundary floor from which the
+// new act's first node is picked (floor 17 in Act 2, 34 in Act 3, whose
+// currMapNode the game sets to MapRoomNode(0, -1), TheCity.java:49).
+//
+// S1 could spell this `floor - 1` because Act 1's base is 0. From S2.12 it is
+// `floor - act_floor_base(act) - 1`, and the -1 sentinel is SATURATED rather
+// than allowed to run negative: an off-nominal (act, floor) pair built by a
+// directed test must not be able to index the map array below zero.
 [[nodiscard]] constexpr int run_cur_row(const RunController& rc) noexcept {
-    return rc.run.floor == 0 ? -1 : static_cast<int>(rc.run.floor) - 1;
+    const int row = static_cast<int>(rc.run.floor) -
+                    act_floor_base(static_cast<int>(rc.run.act)) - 1;
+    return row < 0 ? -1 : row;
 }
 
-// Whether a terminal controller is the VICTORY: the run ended by pressing
-// Proceed on the BOSS CHEST. It is defined COHERENTLY WITH the
-// on_boss_chest_proceed stub and must move with it -- the stub is what produces
-// this state, so if S2.12 makes that seam transition to Act 2 instead, this
-// predicate follows it to whatever the new terminal is rather than being left
-// naming a state nothing reaches.
+// Whether a terminal controller is the VICTORY rather than a death.
 //
-// The room-kind read is what keeps a death out: a death parks at RUN_OVER from
-// a combat, where room_type is Monster / Elite / Boss / Event, never
-// TreasureBoss -- no combat happens in the chest room at all, so unlike the
-// previous (Boss + KILLED) spelling this one does not need the outcome field to
-// exclude losses. `combat_outcome` is still KILLED here, carried over from the
-// boss fight, and the reward-screen proceed that entered the chest never
-// touched it.
+// IT MOVED WITH ITS PRODUCER, TWICE, and that coupling is the point. In S1 the
+// terminal was the Act-1 boss REWARD screen's proceed; S2.11 moved it one room
+// later to the boss CHEST's proceed; S2.12 moves it to the real one, because the
+// chest's proceed now starts Act 2. The run ends when the ACT-3 BOSS kill settles
+// its gold (s2-design §1, frozen): AbstractRoom.java:327 suppresses dropReward()
+// and combatRewardScreen.open() for a non-endless TheBeyond boss, so no reward
+// screen and no chest ever follow it, and ProceedButton's chest branch
+// (:111-113) requires screen == COMBAT_REWARD. The terminal surface is the gold
+// add of AbstractRoom.java:286-297 -- see the Act-3 arm of
+// finish_combat_after_action.
+//
+// The (act, room) read is what keeps a death out: a death parks at RUN_OVER with
+// whatever room it died in, and only a WON Act-3 boss room reaches this shape.
+// `combat_outcome == KILLED` is asserted too rather than inferred -- a defeat in
+// the Act-3 boss room has exactly the same act and room_type.
 [[nodiscard]] constexpr bool run_is_victory(const RunController& rc) noexcept {
     return rc.phase == static_cast<uint8_t>(RunPhase::RUN_OVER) &&
-           rc.room_type == static_cast<uint8_t>(RoomType::TreasureBoss);
+           rc.run.act == kFinalAct &&
+           rc.room_type == static_cast<uint8_t>(RoomType::Boss) &&
+           rc.combat_outcome == static_cast<uint8_t>(RunCombatOutcome::KILLED);
 }
 
 }  // namespace sts::engine

@@ -227,9 +227,12 @@ void populate_first_strong(std::span<std::string_view> list, uint8_t& count,
     list[count++] = m;
 }
 
-// The weak-pool segment length (generateWeakEnemies(3)); index 3 is the
-// first-strong slot and everything past it is the strong pass.
-constexpr uint8_t kWeakSegment = 3;
+// The weak-pool segment length is ACT-DEPENDENT (generateWeakEnemies(3) in
+// Exordium, (2) in TheCity/TheBeyond) and lives in encounters.hpp as
+// weak_segment_for_act, because the Markov continuation and the
+// regeneration-reachability arithmetic both read it. Index
+// weak_segment_for_act(act) is the first-strong slot; everything past it is the
+// strong pass.
 
 // The exclusion set generateExclusions keys on: the encounter sitting at
 // `list[index-1]` when the first-strong roll happens.
@@ -254,27 +257,36 @@ void generate_monster_lists(int32_t act, RngStream& mrng,
     out = MonsterLists{};
     std::array<PoolEntry, 16> pool{};
 
-    // generateWeakEnemies(3): populateMonsterList(3, elites=false).
+    // generateWeakEnemies(N): populateMonsterList(N, elites=false). N is 3 in
+    // Exordium (Exordium.java:110-112) and 2 in TheCity (:88-92) / TheBeyond
+    // (:85-89) -- the only act-dependent count in the whole sequence.
     const uint8_t nw = build_pool(act, EncounterPool::WEAK, pool);
     populate_monster_list(out.monster_list, out.monster_list_count,
-                          {pool.data(), nw}, 3, /*elites=*/false, mrng);
+                          {pool.data(), nw},
+                          static_cast<int32_t>(weak_segment_for_act(act)),
+                          /*elites=*/false, mrng);
 
-    // generateStrongEnemies(12): generateExclusions() keyed on the 3rd weak
-    // monster (monster_list.last()), then populateFirstStrongEnemy(exclusions),
-    // then populateMonsterList(12).
+    // generateStrongEnemies(12): generateExclusions() keyed on the LAST weak
+    // monster (monsterList.get(size-1)), then populateFirstStrongEnemy(
+    // exclusions), then populateMonsterList(12). In Act 3 that key can be
+    // "3 Darklings", which is in BOTH pools and excludes ITSELF
+    // (TheBeyond.java:131-134, trap 8) -- the registry's weak row (id 44) is the
+    // lower-id match encounter_by_game_id returns and it carries that exclusion.
     const uint8_t ns = build_pool(act, EncounterPool::STRONG, pool);
     const std::span<const std::string_view> excl =
         exclusions_from(out.monster_list, out.monster_list_count);
     populate_first_strong(out.monster_list, out.monster_list_count,
                           {pool.data(), ns}, excl, mrng);
     populate_monster_list(out.monster_list, out.monster_list_count,
-                          {pool.data(), ns}, 12, /*elites=*/false, mrng);
+                          {pool.data(), ns}, kStrongSegment, /*elites=*/false,
+                          mrng);
 
     // generateElites(10): populateMonsterList(10, elites=true) into the SEPARATE
     // elite list (no A-B-A rule).
     const uint8_t ne = build_pool(act, EncounterPool::ELITE, pool);
     populate_monster_list(out.elite_list, out.elite_list_count,
-                          {pool.data(), ne}, 10, /*elites=*/true, mrng);
+                          {pool.data(), ne}, kEliteSegment, /*elites=*/true,
+                          mrng);
 
     // initializeBoss (fully-unlocked else-branch): add the three bosses in id
     // order, then Collections.shuffle(new Random(monsterRng.randomLong())). The
@@ -315,7 +327,8 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
     // compares against the PRESERVED entries below the cursor, which is exactly
     // the conditioning the Markov continuation needs.
     const uint8_t nw = build_pool(act, EncounterPool::WEAK, pool);
-    const uint8_t weak_end = std::min(kWeakSegment, monster_target);
+    const uint8_t weak_seg = weak_segment_for_act(act);
+    const uint8_t weak_end = std::min(weak_seg, monster_target);
     if (lists.monster_list_count < weak_end) {
         populate_monster_list(
             lists.monster_list, lists.monster_list_count, {pool.data(), nw},
@@ -326,8 +339,7 @@ void continue_monster_lists(int32_t act, RngStream& rng, uint8_t monster_keep,
     const uint8_t ns = build_pool(act, EncounterPool::STRONG, pool);
     // First strong (index 3): the exclusion-rejection loop, keyed on the third
     // weak entry. Only runs when the cursor is standing exactly on that slot.
-    if (lists.monster_list_count == kWeakSegment &&
-        monster_target > kWeakSegment) {
+    if (lists.monster_list_count == weak_seg && monster_target > weak_seg) {
         populate_first_strong(
             lists.monster_list, lists.monster_list_count, {pool.data(), ns},
             exclusions_from(lists.monster_list, lists.monster_list_count), rng);

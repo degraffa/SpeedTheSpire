@@ -75,8 +75,8 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | UNVERIFIED — needs decompile check of CampfireUI/rest-option construction for a key-gated option; if present it is on-screen at every Act-2/3 rest and must be modeled as a visible row (grant stubbed to S3) or the oracle diverges on the menu |
 | Boss chest + sapphire-key row interaction | TE.2 scope pass (s2-design §4.5) | S2.11 | **DISCHARGED — NO** (2026-08-07, S2.11). `BossChest.open(boolean)` (BossChest.java:49-63) FULLY OVERRIDES `AbstractChest.open` with **no `super` call**, so the `isFinalActAvailable && !hasSapphireKey` append at AbstractChest.java:95-97 is unreachable from the boss chest — and so are `randomizeReward`'s treasureRng roll, gold, the curse, `addRelicToRewards`, `onChestOpenAfter` and `combatRewardScreen.open`. Pinned by `BossChest.NeverAppendsTheSapphireKeyRow` and `BossChest.FiresNoRelicChestHooks` |
 | `Lab` in ProceedButton.java:115's combat-event list with no encounter | TE.2 scope pass (s2-design §2.3) | S2.33 | UNVERIFIED — needs decompile check why it is listed; suspected reward-screen plumbing only |
-| Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | floorNum is continuous (verified: no reset in dungeonTransitionSetup); the exact boundary floor values must come from map-flow reading, not memory. **S2.11 evidence (not a discharge):** entering the boss chest runs a FULL `nextRoomTransition` — `goToTreasureRoom` (ProceedButton.java:179-187) → `nextRoomTransitionStart` → `AbstractDungeon.updateFading`'s `if (!isDungeonBeaten) nextRoomTransition()` (:2317-2325), with `isDungeonBeaten` set only on the way *out* (:249-250). So the chest is its own floor: boss 16 / chest 17, and Act 2's first playable room is 18. S2.12 pins the pair |
-| `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | `nextRoomTransition`'s empty-list arm (AbstractDungeon.java:1701-1706) consumes the RUN-LIFETIME `monsterRng` and would be observable in the next act. UNREACHABLE in Act 1 — 16 list entries against at most 14 consumers on one path (13 monsterList rooms + the boss exit) — so S2.11 left a loud `assert` in `next_room_transition_impl` rather than machinery. S2.12 re-derives the arithmetic for Acts 2–3 (`generateWeakEnemies(2)`, different row counts) and implements the body if it becomes reachable |
+| Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | **DISCHARGED** (2026-08-07, S2.12). The answer is a PAIR per act, and conflating its halves was the whole risk: **17/34 are the CONSTRUCTION floors** — what `dungeonTransitionSetup`, the constructor chain, `generateMap`, `setEmeraldElite` and the BGM draw observe, and what the un-reseeded floor-scoped five still carry (`seed+17` / `seed+34`) — while **18/35 are the first PLAYABLE rooms**. Span = 17 = 15 map rows + boss + boss chest; the crossing itself adds **no** floor, because `isDungeonBeaten = true` (ProceedButton.java:249-250) is exactly what makes `updateFading` skip `nextRoomTransition` (:2317-2326). Table in s2-design §4.2; engine constants `kActFloorSpan` / `act_floor_base`, with `run_cur_row = floor − base − 1` replacing the Act-1-only `floor − 1` |
+| `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | **DISCHARGED — UNREACHABLE, no body written** (2026-08-07, S2.12). Re-derived for Acts 2–3, which call `generateWeakEnemies(2)`: SUPPLY is weak + 1 first-strong + 12 strong = **15** (Act 1 = 16); DEMAND is at most **14** — one walked path visits 15 rooms, one per map row, of which the act-independent generator forces row 8 Treasure and row 14 Rest, leaving 13 `monsterList`-consuming rooms (a ? room that rolls MONSTER is one of those 13, not an extra) plus the one pop that leaving the boss room performs. Margin 2 in Act 1, **1** in Acts 2–3. The loud `assert` in `next_room_transition_impl` stays and now carries that arithmetic in full; writing untestable machinery for an unreachable arm would be worse than an assert that names why it cannot fire |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
 
 ---
@@ -245,7 +245,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   deliberately NOT in the generator's `kWanted[]` — no scripted policy wins the
   act-1 boss, so it would only print a permanent warning, and the twin
   invariance is pinned directly in `boss_chest_test.cpp` instead.
-- **S2.12** `[ ]` **Act transition + Acts 2–3 map generation.**
+- **S2.12** `[x]` **Act transition + Acts 2–3 map generation.**
   `dungeonTransitionSetup` semantics in engine order (design §4.2):
   actNum, **cardRng counter snap** (trap 1), pity resets, list clears,
   `blizzardPotionMod` reset, A5 heal vs full heal; constructor-chain
@@ -260,6 +260,80 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   cardBlizz carry; mapRng offsets per act); a three-act sim run under a
   scripted policy completes deterministically twice with identical
   hashes; six presets green.
+  **Log:** 2026-08-07 — landed. **No namespace value spent** (none was
+  granted and none was needed): no new `RunPhase`, `RoomType`, `MoveCat`,
+  `ChoiceKind`, mask field or `RunState` field, so `SCHEMA_VERSION`,
+  `PUBLIC_VIEW_VERSION`, every struct `sizeof`/offset and
+  `twins_v1.bin` are all unmoved and the Stage-A fixtures are
+  byte-identical. **The victory terminal moved to its real place.** S1 put
+  it at the Act-1 boss reward proceed, S2.11 at the boss chest's proceed;
+  the chest's proceed is now the ACT TRANSITION, so `run_is_victory()`
+  moved with its producer to the **Act-3 boss kill** — which opens no
+  reward screen and no chest at all, because `AbstractRoom.java:327`'s
+  guard is false for a non-endless `TheBeyond` boss, and `ProceedButton`'s
+  chest branch (:111-113) needs `screen == COMBAT_REWARD`. What survives
+  that guard is the gold add at :286-297, ahead of it: **one `miscRng`
+  draw whose gold never reaches the purse** (it goes to an unclaimed
+  room reward list), pinned differentially against an Act-2 twin.
+  **RESIDUE, and it is the honest one:** the fuzz soak's `victories`
+  counter now reads **0 for every soak until S2.28** lands the Act-3
+  bosses, because no run can walk into an Act-2/3 room while its monsters
+  are unimplemented. That is a content gap, not a regression; the
+  seed-116 guard was retargeted to the property it was really written for
+  (a non-terminal phase must never advertise an empty mask) and now
+  asserts the crossing happened and the run parked cleanly. For the same
+  reason the **three-act sim reaches Act 3 by driving the two boss-chest
+  crossings through the public `next_room_transition_boss_chest` edge**
+  rather than by walking Act-2 combats; every state it does visit is
+  stepped through the real `advance()`/`legal_actions()` API, both passes
+  hash identically at every step, and the run reaches floor 35. When
+  S2.2x lands, the placement can be deleted and the same driver becomes a
+  pure policy walk.
+  **Dossier correction (trap 1).** The S2 scout dossier claimed a
+  `random(999)` replay of the counter snap "gives the right counter and
+  the wrong state". It does not — and `rng_stream.hpp`'s own
+  `from_seed_counter`/`from_seed_set_counter` pair already said so: the
+  xorshift128+ advance is a function of the NUMBER of `nextLong()` calls
+  alone, never of the value consumed, and `nextInt(1000)`'s rejection loop
+  retries with probability ~1e-16 per call, so the two replays coincide.
+  `advance_counter_to` uses `randomBoolean` because that is what
+  `Random.setCounter` writes, not because the alternative diverges; the
+  test asserts the coincidence explicitly and discriminates against an
+  off-by-one STEP COUNT instead, which is the mistake that can actually be
+  made. Other findings: **`run_cur_row` was Act-1-only** —
+  `floor − 1` is right only because Act 1's base is 0, and it is now
+  `floor − act_floor_base(act) − 1` with a saturating −1, which is also
+  the act-general spelling of the two `floor == 0` "first pick of the act"
+  guards in the map mask and the Wing Boots charge test. **`TheBeyond`
+  never replaces `currMapNode`** (TheCity.java:49-50 vs
+  TheBeyond.java:35-47), so Act 3 opens still holding Act 2's off-grid
+  `TreasureRoomBoss` node — inert (neither it nor an `EmptyRoom` is a
+  `MonsterRoom`, so no `monsterList` pop) but modelled and pinned as a
+  negative. **`ELITE_CHANCE`'s reset to 0.0f is unrepresentable and that
+  is correct**: its only consumer sits under a `DeadlyEvents` mod gate
+  (EventHelper.java:190-192, :204-207), and note it resets to 0.0f, not to
+  the 0.1f the monster row ramps from. Fixed in passing:
+  `heal_out_of_combat` did not run the `onPlayerHeal` fan-out at all, so
+  **Mark of the Bloom** — whose registry row already says every caller of
+  that seam must handle a 0 return — would have been silently ignored by
+  the rest heal as well as this one; the suppressor is now written and
+  tested (its granting event body stays S2.33's).
+  **A12 stopped being a no-op** — `cardUpgradedChance` is now keyed on
+  (act, ascension) at its use site (`card_upgraded_chance`,
+  combat_rewards.hpp; 0.0 / A12? 0.125 : 0.25 / A12? 0.25 : 0.5), so the
+  Act-1 draw keeps its stream position and Acts 2–3 get the outcome. The
+  matching **`a20.yaml` A12 status flip was deliberately NOT made here** —
+  this task's Acceptance says *registry untouched*, and S2.04's Log put
+  the row's status under its engine owner. It is a one-row status edit
+  plus its tier-2 expectation, and it should ride with whichever S2.2x
+  task first makes an Act-2 card reward observable end-to-end.
+  **Left for S2.13, deliberately and loudly:** the per-act event/shrine
+  list rebuild. `initializeEventList`/`initializeShrineList` are draw-free,
+  so the crossing touches neither membership bitset — inventing Act-2/3
+  membership is S2.13's deliverable and rewriting Act-1 membership would
+  be worse than stale. Until it lands, an Act-2/3 ? room that resolves to
+  EVENT draws from the Act-1 list: deterministic, wrong content, named at
+  the call site and pinned by a test that moves with S2.13.
 - **S2.13** `[ ]` **?-rooms, one-time pool, and rest sites across acts.**
   Per-act event/shrine list rebuild + the one-time pool's cross-act
   depletion semantics; the act-gated one-time draw filters

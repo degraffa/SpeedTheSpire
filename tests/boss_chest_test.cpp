@@ -53,20 +53,27 @@ StepResult step_with_result(RunController& rc, Action a) {
 
 // A run parked in the boss chest, WITHOUT walking a whole act: the chest room is
 // reached by the public transition helper, which is exactly the edge the boss
-// reward's proceed takes. The controller is left at floor 1 rather than 17 --
-// nothing in this room reads the floor except the reseed, and the tests that
-// care about the floor drive the real reward-screen proceed instead.
+// reward's proceed takes.
+//
+// The floor is placed on the Act-1 BOSS floor first (S2.12). It used to be left
+// at 1, on the grounds that nothing in this room reads the floor except the
+// reseed -- true while the chest's proceed was the run's end, and false the
+// moment it became an act transition, because run_cur_row() is now a function of
+// BOTH floor and act and an (act 2, floor 2) controller is not a state the game
+// can be in.
 RunController at_boss_chest(int64_t seed = kSeed, uint8_t ascension = kA20) {
     RunController rc = run_begin(seed, ascension);
     rc.neow.screen = static_cast<uint8_t>(NeowScreen::DONE);
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
     // Pretend the boss room was just left, which is what the chest transition
     // always follows.
+    rc.run.floor = static_cast<uint16_t>(kActFloorSpan - 1);  // the Act-1 boss
     rc.room_type = static_cast<uint8_t>(RoomType::Boss);
     rc.cur_x = static_cast<uint8_t>(kBossCol);
     rc.combat_outcome = static_cast<uint8_t>(RunCombatOutcome::KILLED);
     next_room_transition_boss_chest(rc);
     EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
+    EXPECT_EQ(rc.run.floor, kActFloorSpan);  // 17 -- see act_floor_base
     return rc;
 }
 
@@ -319,8 +326,10 @@ TEST(BossChest, ProceedWithoutEverOpeningStillBurnedThreeRelics) {
     EXPECT_EQ(rc.run.relic_pool_count[kBossPool], at_entry)
         << "the burn already happened at entry; leaving costs nothing MORE";
     EXPECT_EQ(rc.run.relic_count, relics_before) << "noPick grants nothing";
-    EXPECT_TRUE(res.terminal);
-    EXPECT_TRUE(run_is_victory(rc));
+    // S2.12: the proceed is the ACT TRANSITION, not the run's end.
+    EXPECT_FALSE(res.terminal);
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(rc.run.act, 2);
 }
 
 TEST(BossChest, ProceedAfterSkipRecordsNoPickAndMutatesNothing) {
@@ -332,8 +341,21 @@ TEST(BossChest, ProceedAfterSkipRecordsNoPickAndMutatesNothing) {
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
 
     // noPick's whole body is a metrics append (BossRelicSelectScreen.java:
-    // 240-248). Byte-compare the persistent state: nothing at all.
-    EXPECT_EQ(std::memcmp(&before, &rc.run, sizeof before), 0);
+    // 240-248): no relic, no pool write, no deck write. Since S2.12 the same
+    // press also runs the act transition, so a whole-RunState byte compare is
+    // no longer the right instrument -- it would be asserting that the crossing
+    // does nothing. What noPick itself owns is pinned exactly:
+    EXPECT_EQ(rc.run.relic_count, before.relic_count);
+    for (int t = 0; t < kRelicTierCount; ++t) {
+        EXPECT_EQ(rc.run.relic_pool_count[t], before.relic_pool_count[t])
+            << "pool tier " << t;
+        EXPECT_EQ(std::memcmp(rc.run.relic_pools[t], before.relic_pools[t],
+                              sizeof before.relic_pools[t]),
+                  0)
+            << "pool tier " << t;
+    }
+    EXPECT_EQ(rc.run.master_deck_count, before.master_deck_count);
+    EXPECT_EQ(rc.run.gold, before.gold);
 }
 
 // =============================================================================
@@ -744,26 +766,36 @@ TEST(BossChest, ProceedIsTheActTerminalSeam) {
     const StepResult res =
         step_with_result(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
 
-    // The S2.11 STUB of on_boss_chest_proceed. S2.12 replaces this body with
-    // the act transition, and run_is_victory() moves with it.
-    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
-    EXPECT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::TreasureBoss));
-    EXPECT_TRUE(run_is_victory(rc));
-    EXPECT_TRUE(res.terminal);
-    EXPECT_EQ(res.reward, 1.0f);
+    // S2.12 filled the seam: the chest's proceed runs dungeonTransitionSetup and
+    // constructs the next dungeon, landing on ITS map. The chest is a boundary,
+    // not a terminal -- only the Act-3 boss ends the run (s2-design §1), and
+    // run_is_victory() moved there with it. The transition's own semantics are
+    // pinned in act_transition_test.cpp; what this test owns is the SEAM's
+    // contract -- the room's state cleared, the phase set, `res` filled.
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    EXPECT_EQ(rc.run.act, 2);
+    EXPECT_FALSE(run_is_victory(rc));
+    EXPECT_FALSE(res.terminal);
+    EXPECT_EQ(res.reward, 0.0f);
     EXPECT_EQ(rc.boss_chest.relics[0], 0) << "the room's state was cleared";
+    EXPECT_EQ(rc.rewards.count, 0) << "and so was any equip reward screen";
 }
 
-TEST(BossChest, TheTerminalMaskIsEmpty) {
+TEST(BossChest, TheProceedOpensTheNextActsMapRatherThanAnEmptyMask) {
+    // The property the old terminal test guarded, restated for the transition:
+    // the boss column has no outgoing map edges, so a proceed that landed at
+    // MAP_CHOICE without regenerating the map would advertise an EMPTY mask
+    // while claiming not to be terminal -- the soak's no_legal_moves. That is
+    // the seed-116 regression, and it stays guarded here.
     RunController rc = at_boss_chest();
     step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
-    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::RUN_OVER));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
 
     RunActionMask m{};
     legal_actions(rc, m);
-    RunActionMask none{};
-    none.phase = rc.phase;
-    EXPECT_EQ(std::memcmp(&m, &none, sizeof m), 0);
+    bool any = m.can_choose_boss;
+    for (int x = 0; x < kMapCols; ++x) any = any || m.can_choose_node[x];
+    EXPECT_TRUE(any) << "a non-terminal phase must offer something";
 }
 
 TEST(BossChest, IllegalChoicesAreNonCorruptingNoOps) {

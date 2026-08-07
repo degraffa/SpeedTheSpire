@@ -171,15 +171,20 @@ void roll_card_reward_item(RunState& rs, RoomType room,
     }
 
     // The upgrade pass (AbstractDungeon.java:1469-1477): `c.rarity != RARE &&
-    // cardRng.randomBoolean(cardUpgradedChance) && c.canUpgrade()`. Act 1's
-    // chance is 0.0f (Exordium.java:107) so the branch never fires, but the
-    // randomBoolean draw itself is real for every non-RARE card -- ONE cardRng
-    // advance each -- and only `rarity != RARE` short-circuits it. canUpgrade()
-    // is vacuously true here: the red reward pools hold no STATUS/CURSE row and
-    // every offer is at upgrade 0.
+    // cardRng.randomBoolean(cardUpgradedChance) && c.canUpgrade()`. The
+    // randomBoolean draw is real for every non-RARE card in EVERY act -- ONE
+    // cardRng advance each -- and only `rarity != RARE` short-circuits it;
+    // Act 1's 0.0f chance makes the branch never FIRE without making the draw
+    // disappear (trap 2). S2.12 makes the outcome live for Acts 2-3 by keying
+    // the chance on (act, ascension) -- card_upgraded_chance, combat_rewards.hpp
+    // -- rather than on the Act-1 constant it used to read unconditionally.
+    // canUpgrade() is vacuously true here: the red reward pools hold no
+    // STATUS/CURSE row and every offer is at upgrade 0.
+    const float upgrade_chance = card_upgraded_chance(
+        static_cast<int>(rs.act), static_cast<int>(rs.ascension));
     for (int i = 0; i < num; ++i) {
         if (rarities[i] != RewardCardRarity::RARE &&
-            random_boolean(rs.card_rng, kExordiumCardUpgradedChance)) {
+            random_boolean(rs.card_rng, upgrade_chance)) {
             item.card_upgrades[i] = 1;
         }
     }

@@ -343,7 +343,7 @@ So the chest gets `++floorNum`, the trap-7 five-stream reseed, and the relic
 `onEnterRoom` / `justEnteredRoom` fan-outs (Maw Bank pays its 12 gold here,
 MawBank.java:29-35). Off-map is true; floor-less is not. The exact floor
 numbers this implies (boss 16 / chest 17, so Act 2's first playable room is 18)
-belong to §4.2's act-boundary row and are S2.12's to pin.
+belong to §4.2's act-boundary row, where S2.12 pinned them.
 
 Leaving the boss room also pops `monsterList`: `MonsterRoomBoss extends
 MonsterRoom` (MonsterRoomBoss.java:18-19), so `nextRoomTransition`'s
@@ -367,9 +367,31 @@ EventHelper.java:189-195); event/shrine/monster/elite/boss lists cleared;
 full heal (:2582-2586). The A6/A10/A14 block at :2590-2602 is gated
 `floorNum <= 1 && dungeon instanceof Exordium` — **run-start only, not
 per-act** (the S1 rows are already correct; tier-2 pins the negative).
-`floorNum` is never reset — numbering is continuous (floor 17 opens Act 2,
-34 opens Act 3, both `UNVERIFIED — needs decompile check` as exact values;
-what is verified is only that no reset exists in :2562-2604).
+`floorNum` is never reset — numbering is continuous. **VERIFIED (S2.12,
+2026-08-07)**, and the answer is a *pair* per act, not one number:
+
+| | Act 1 | Act 2 | Act 3 |
+|---|---|---|---|
+| rooms | 1–15 | 18–32 | 35–49 |
+| boss | 16 | 33 | 50 |
+| boss chest | 17 | 34 | — (none: §1) |
+| next act **constructed at** | 17 | 34 | — |
+| first **playable** room | 1 | 18 | 35 |
+
+The span is 17 = 15 map rows (`MAP_HEIGHT`, AbstractDungeon.java:210) + the
+boss (the row-14 node's only outgoing edge, DungeonMap.java:68-87, taken
+through an ordinary `nextRoomTransition`) + the boss chest (a **full**
+`nextRoomTransition` — §4.1's S2.11 correction). **The crossing itself adds
+no floor:** `isDungeonBeaten = true` (ProceedButton.java:249-250) is exactly
+what makes `updateFading` skip `nextRoomTransition` (:2317-2326), so the new
+act is constructed at the *old* act's chest floor and the +1 comes back on
+the ordinary `MapRoomNode` transition into its first room. Everything the
+construction observes — `dungeonTransitionSetup`, the constructor chain,
+`generateMap`, `setEmeraldElite`, the BGM draw — therefore sees 17/34, and
+the floor-scoped five are still `seed + 17` / `seed + 34` throughout it
+(they reseed only at :1747-1751, inside the transition that did not run).
+Conflating the two halves of a pair is the mistake the row existed to
+prevent, so both are separately tier-2 pinned.
 
 Then the fresh dungeon's constructor chain runs in a **frozen order**
 (AbstractDungeon.java:268-308): `dungeonTransitionSetup` →
@@ -605,3 +627,15 @@ not weakening the bar. The S2 ledger carries this as its own task
   extraction pass; see the TE.2 Log in
   [training-tasks.md](training-tasks.md) for the exercise's provenance
   notes and the UNVERIFIED list.
+- 2026-08-07 — **§4.1 amended by S2.11**: the boss chest is a full room
+  transition, not a screen change (`goToTreasureRoom` →
+  `nextRoomTransitionStart` → `updateFading`'s `!isDungeonBeaten` arm), and
+  the skip is a *reversible* close rather than a discard. Recorded here
+  retroactively — the amendment landed in §4.1's prose without a change-log
+  entry.
+- 2026-08-07 — **§4.2's floor row VERIFIED by S2.12** and replaced with the
+  per-act table. `UNVERIFIED — needs decompile check` is withdrawn: 17/34
+  are the act-CONSTRUCTION floors and 18/35 the first playable rooms, the
+  span is 15 rows + boss + chest = 17, and the crossing adds no floor. No
+  mechanic changed; the doc previously stated one number where the source
+  has two, which is what the deferred-obligations row existed to catch.
