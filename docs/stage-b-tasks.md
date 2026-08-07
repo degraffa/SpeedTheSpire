@@ -268,6 +268,35 @@ Zero discrepancies against the tracks' stage reports.
 | `PowerId` | **91** `REGENERATE_MONSTER` (branch `add-regenerate-monster`) — arm 3 of the emerald-elite entry roll (`MonsterRoomElite.java:60-64`), game_id `"Regenerate"`, DISTINCT from `REGEN`/"Regeneration" (id 18). **92** `DUPLICATION` (branch `fix-discovery-duplication`) — the Duplication Potion's power, game_id `"DuplicationPower"`, the id STS01221's translation aborted on. 89–90 stay permanent gaps (see the corrected permanent-gap paragraph above). Both branches independently moved the six `kPowersCount` guard sites to 52; the integrator reconciled the union to **53** (`kTotalCount` 452) per the re-derive rule |
 
 
+### S2 Wave-2 allocations — 2026-08-07, two serial tracks (run layer S2.11→S2.12; monsters S2.21→S2.22)
+
+Granted by the orchestrator at dispatch, maxima re-derived from the tree the
+same day (`RunPhase` max 10, `MoveCat` max 27/`COUNT` 28, opcode max 65,
+`PowerId` max 92, `MonsterId` max 26, `MonsterIntent` max 13+14 reserved).
+Scarce namespaces: unspent values are RELEASED and must be reported; registry
+ids gap as usual. The S2 ledger records only which task holds which block —
+this table is the authority.
+
+| Namespace | S2.11 | S2.12 | S2.21 | S2.22 |
+|---|---|---|---|---|
+| `RunPhase` | **11** `BOSS_TREASURE` | — | — | — |
+| fuzz `MoveCat` | **28–31** (open/pick/skip/proceed; `COUNT` → 32; release unspent) | — | — | — |
+| `RoomType` (`map_rooms.hpp` — frozen `MapNode.room_type` encoding, added to this section by this wave) | **8** `TreasureBoss` (+ `kRoomTypeCount` 8→9 in fuzz coverage, landed with a new `static_assert` tying count to enum) | — | — | — |
+| Opcode | — | — | **66** `VAMPIRE_DAMAGE` | **67** `BLOCK_RANDOM_MONSTER`; also extends `HEAL` (39) with the monster branch (orchestrator-adjudicated: extend, rewrite the `interp_damage.cpp:824-834` comment in the same commit) |
+| `PowerId` | — | — | **93** `HEX`, **94** `FLIGHT` | **95** `MALLEABLE` (row owned by S2.22, NOT S2.21 — both scouts confirmed the S2.21 ledger parenthetical is stale) |
+| `MonsterId` | — | — | **27–30** (Chosen, Byrd, Shelled Parasite, Spheric Guardian; **31** reserve, gap if unused) | **32–36** (Mugger, Snake Plant, Snecko, Centurion, Healer) |
+| power-hook enum | — | — | **`Hook::ON_POWER_REMOVED = 14`** (dispatched from `remove_slot_at`) | — |
+| monster dispatch table | — | — | — | new **`MonsterDieFn`** slot (option (a) adjudicated: a real death-edge dispatch fn, needed again in Acts 2/3) |
+
+Adjudications recorded with the grants: the two-thieves stolen-gold model goes
+**faithful per-steal clamp** (the S1 sum-then-clamp deviation's header names
+this task as the owner). S2.11 lands before S2.12 and leaves the named seam
+`on_boss_chest_proceed(rc, rs)` stubbed to the current RUN_OVER behaviour;
+S2.12 fills it. Confusion's slot amount question (S1 wrote 1, Java holds -1,
+`relics_boss.cpp:66-76` comment is wrong about the Java): S2.22 verifies
+against the oracle before choosing, and corrects or re-justifies the comment
+in place.
+
 ### Wave-A allocations — 2026-07-26, three concurrent worktrees
 
 Published here rather than only in the dispatching briefs, per the rule above.

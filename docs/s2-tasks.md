@@ -54,6 +54,14 @@ from `registry/*.yaml` before extending):
 | `monsters.yaml` | 27–48 (Act 2), 49–66 (Act 3) | S2.2x batches, sub-blocks at dispatch |
 | `powers.yaml` | 93–135 | S2.2x batches, sub-blocks at dispatch |
 
+Wave-2 sub-blocks (granted 2026-08-07; full table incl. RunPhase/MoveCat/
+RoomType/opcode/hook claims and adjudications is in
+[stage-b-tasks.md](stage-b-tasks.md) "S2 Wave-2 allocations"):
+`monsters.yaml` S2.21 = 27–30 (+31 reserve), S2.22 = 32–36;
+`powers.yaml` S2.21 = 93–94 (HEX, FLIGHT), S2.22 = 95 (MALLEABLE — row
+ownership corrected from the S2.21 block text, which stale-listed Malleable/
+PlatedArmor/Barricade; the design doc wins).
+
 ## Deferred obligations
 
 Same semantics as the Stage B table (live carrier; discharge in place).
