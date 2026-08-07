@@ -72,7 +72,10 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 |---|---|---|---|
 | Gremlin move-99 escape (`EscapeAction` body + `deathReact`/`escapeNext` trigger) | B3.16 (stage-b table: "UNASSIGNED — Act-2 owner") | S2.23 | Reachable in Act 2 via Gremlin Leader minions; land both halves together and mark the stage-b row DISCHARGED in the same commit |
 | `JawWorm(..., true)` constructor variant semantics | TE.2 scope pass | S2.26 | Jaw Worm Horde constructs the variant (MonsterHelper.java:549-551); UNVERIFIED — needs decompile check what the boolean changes (stats? starting Strength?) before the row's tier columns are trusted |
-| Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | UNVERIFIED — needs decompile check of CampfireUI/rest-option construction for a key-gated option; if present it is on-screen at every Act-2/3 rest and must be modeled as a visible row (grant stubbed to S3) or the oracle diverges on the menu |
+| Rest-site Recall option surface at Acts 2–3 (`isFinalActAvailable`, ruby key) | TE.2 scope pass (s2-design §4.5) | S2.13 | **DISCHARGED — YES, present; already modelled; zero engine work** (2026-08-07, S2.13). `CampfireUI.initializeButtons` (CampfireUI.java:94-96, read in full) appends the `RecallOption` under `Settings.isFinalActAvailable && !Settings.hasRubyKey` and **no act test whatsoever** — the only `id.equals` in that file is a flavour-text branch at :258 — so the row's real scope is *every* rest site in *every* act, Act 1 included, and this row's "Act-2/3" framing was wrong about the scope while right about the consequence. `Settings.isFinalActAvailable` (Settings.java:642) is profile state, constant for a run. The append lands **after** the relic veto sweep and **before** the `cannotProceed` auto-complete, so it can never be vetoed and a boss-relic-locked campfire stays open while the key is on offer. All of it has been live since S1 — `RestOptionKind::RECALL` (`rest_sites.hpp`), `kFinalActAvailable`, the post-sweep append (`rest_sites.cpp:193-205`) — and the grant is **not** "stubbed to S3": the RECALL arm sets `keys \|= kKeyRuby` (`CampfireRecallEffect.java:39-53` → `ObtainKeyEffect`). What is still S3 is only what the key is *for*. Pinned by `RestMenu.RecallIsOfferedInEveryActAndIsNeverVetoed`; s2-design §4.5 carries the withdrawal |
+| Translator's `event_flags` FIRED derivation is act-local | S2.13 | S2.43 | The translator reconstructs "fired" as "initially in the list and now absent" (`translate.cpp`, the `eventList`/`shrineList` blocks), which is complete only while a list is never refilled. From Act 2 on it is not: `dungeonTransitionSetup` clears both (AbstractDungeon.java:2576-2577) and the constructor rebuilds them (:291, :293), so an Act-2 dump **cannot witness an Act-1 event or shrine fire** while the simulator's `event_flags` rightly still carries it — a differ false-RED on the first Act-2/3 differential capture that draws a shrine. The one-time specials are unaffected (carried by identity, never rebuilt), and so is all of Act 1, which is why nothing is red today. Closing it needs cross-record accumulation over a capture that starts at floor 1 — the capture campaign's call; the alternative is a narrow differ recognizer in the `b14` RACE mould. Decide before the first Act-2 shrine capture is scored |
+| SecretPortal's `false` pin rests solely on unmodelled wall-clock playtime | S2.13 | S2.33 | `build_shrine_pool` pins SecretPortal `eligible = false` in every act. Through S1 that was over-determined — the act gate excluded it anyway — but in Act 3 the act half (`id.equals("TheBeyond")`) is satisfied, so the `false` now rests **only** on `CardCrawlGame.playtime >= 800.0f` (AbstractDungeon.java:1929-1933) having no engine representation. That is a real behavioural deviation on a reachable state, not an act exclusion. It is deliberate: a wall clock would make the sim nondeterministic in (seed, actions), which everything else rests on. If any task ever models playtime, this pin and its comment go with it. Pinned by `SecretPortalIsPinnedFalseInEveryActIncludingTheBeyond`; s2-design §5 trap 5 carries the sharpened wording |
+| `seed_scan`'s planner-side event-flag decode is still one word | S2.13 | S2.42 | S2.13 split the FIRED bitset into `RunState::event_flags` (ids 1..31) + `event_flags_hi` (ids 32..63) and mirrored it into the engine accessors, `PublicView` (v3), `twin.cpp`, the differ and the translator. `tools/oracle_bridge/planner` was **OFF LIMITS to S2.13** (S2.42 held the file concurrently), so `event_flag_set` / `decode_event_flags` / `event_flags_text` / `SeedRow::event_flags` there still take a single `uint32_t` and the accumulator at `seed_scan.cpp:199` ORs only the low word. Consequence is **under-reporting in an offline analysis tool, not a false green**: no Act-2/3 event ever appears in a seed-scan row, and `tests/seed_scan_test.cpp`'s "ids > 31 read false" guard is still literally true of the planner helper. Fix = take both words (or a `uint64_t`) through those four signatures and widen the guard. Not urgent until seed-scan is pointed at Act 2 |
 | Boss chest + sapphire-key row interaction | TE.2 scope pass (s2-design §4.5) | S2.11 | **DISCHARGED — NO** (2026-08-07, S2.11). `BossChest.open(boolean)` (BossChest.java:49-63) FULLY OVERRIDES `AbstractChest.open` with **no `super` call**, so the `isFinalActAvailable && !hasSapphireKey` append at AbstractChest.java:95-97 is unreachable from the boss chest — and so are `randomizeReward`'s treasureRng roll, gold, the curse, `addRelicToRewards`, `onChestOpenAfter` and `combatRewardScreen.open`. Pinned by `BossChest.NeverAppendsTheSapphireKeyRow` and `BossChest.FiresNoRelicChestHooks` |
 | `Lab` in ProceedButton.java:115's combat-event list with no encounter | TE.2 scope pass (s2-design §2.3) | S2.33 | UNVERIFIED — needs decompile check why it is listed; suspected reward-screen plumbing only |
 | Exact Act-2/3 entry floors (17/34 assumption) | TE.2 scope pass (s2-design §4.2) | S2.12 | **DISCHARGED** (2026-08-07, S2.12). The answer is a PAIR per act, and conflating its halves was the whole risk: **17/34 are the CONSTRUCTION floors** — what `dungeonTransitionSetup`, the constructor chain, `generateMap`, `setEmeraldElite` and the BGM draw observe, and what the un-reseeded floor-scoped five still carry (`seed+17` / `seed+34`) — while **18/35 are the first PLAYABLE rooms**. Span = 17 = 15 map rows + boss + boss chest; the crossing itself adds **no** floor, because `isDungeonBeaten = true` (ProceedButton.java:249-250) is exactly what makes `updateFading` skip `nextRoomTransition` (:2317-2326). Table in s2-design §4.2; engine constants `kActFloorSpan` / `act_floor_base`, with `run_cur_row = floor − base − 1` replacing the Act-1-only `floor − 1` |
@@ -333,8 +336,11 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   membership is S2.13's deliverable and rewriting Act-1 membership would
   be worse than stale. Until it lands, an Act-2/3 ? room that resolves to
   EVENT draws from the Act-1 list: deterministic, wrong content, named at
-  the call site and pinned by a test that moves with S2.13.
-- **S2.13** `[ ]` **?-rooms, one-time pool, and rest sites across acts.**
+  the call site and pinned by a test that moves with S2.13. *(Closed
+  2026-08-07 by S2.13: `reinit_act_event_pools` now runs at step (10), and
+  `TheOneTimeEventPoolCarriesByReference`'s two forward-looking expectations
+  moved with it.)*
+- **S2.13** `[x]` **?-rooms, one-time pool, and rest sites across acts.**
   Per-act event/shrine list rebuild + the one-time pool's cross-act
   depletion semantics; the act-gated one-time draw filters
   (design §2.3); EventHelper pity reset wiring; the Recall-option probe
@@ -343,6 +349,93 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   (Designer/Duplicator/FaceTrader/Knowing Skull/N'loth/Joust/
   SecretPortal-pinned-false per trap 5); cross-act depletion test (Act-1
   draw removes for Act 2); six presets green.
+  **Log:** 2026-08-07 — landed. **The crossing is asymmetric in three
+  different directions, and the ledger's "cross-act depletion" framing names
+  only one of them.** `dungeonTransitionSetup` CLEARS `eventList` and
+  `shrineList` (AbstractDungeon.java:2576-2577) and the new dungeon's
+  constructor REBUILDS both (:291, :293), while `specialOneTimeEventList` is
+  absent from that clear list and is handed over BY IDENTITY
+  (CardCrawlGame.java:1102-1119; the only `initializeSpecialOneTimeEventList`
+  call site is Exordium.java:54). So: the event list returns at the new act's
+  width, **all six shrines return to the pool at every act** — a shrine drawn
+  in Act 1 is drawable twice more — and only the one-time pool depletes
+  run-wide. `init_event_pools` is therefore **split**: `reinit_act_event_pools`
+  (act crossing, event + shrine only) and `init_event_pools` (run_begin,
+  delegating the shared half so the two cannot drift). Both failure modes the
+  split invites are pinned negatively:
+  `TheCrossingDoesNotRerunTheRunStartSpecialInit` and
+  `ReinitReadsTheCurrentActNotThePrevious`.
+  **`event_flags` was widened by carving declared padding, NOT by a schema
+  bump.** `RunState::pad_rng_align[6]` became `pad_rng_align_lo[2]` +
+  `uint32_t event_flags_hi` (ids 32..63 at bit id-33): no offset moved, no
+  `sizeof`, `SCHEMA_VERSION` stays 6, every Stage-A fixture is byte-identical,
+  and the arithmetic is `static_assert`ed rather than trusted (`offsetof %
+  4 == 0` and "closes the hole ahead of the RNG block"). Widening
+  `event_flags` in place was not available: `PublicView`'s contract forbids
+  changing an existing field's width, and the differ + translator both consume
+  it. `PublicView` took a legal **v3 tail append** of the same word, placed
+  AFTER `action_mask` so no v2 offset — the mask channel's included — moved;
+  6032 → 6036 bytes, `twins_v1.bin` regenerated via its checked-in generator
+  (the fixture stamps `PUBLIC_VIEW_VERSION` and `sizeof(PublicView)`). All
+  access goes through `event_flag_set`/`event_flag_test`; no call site
+  open-codes the shift, and ids outside [1,63] are no-ops rather than UB.
+  **Bit meaning and draw position are deliberately different mappings.** For
+  the event pool they coincide (each act's ids are dense and in add order).
+  For shrines they do not: Exordium ends with Wheel of Change
+  (Exordium.java:238-246), TheCity and TheBeyond — byte-identical to each
+  other — put it SECOND (TheCity.java:210-218 == TheBeyond.java:198-206).
+  `shrine_membership` bit i keeps its registry meaning (EventId 12+i) in every
+  act, and the divergence lives in a 6-entry order table used only when
+  appending to the draw list. That way round because the bitset is
+  byte-compared by the differ and mirrored into `PublicView`, and neither
+  knows the act at compare time; it also leaves Act 1 bit-for-bit unchanged.
+  This is S2.02's `ShrineListOrderDivergesBetweenActOneAndActsTwoThree`
+  discharged on the engine side.
+  **Verification-only, confirmed and not re-implemented:** the EventHelper
+  pity reset (one call site in the whole tree, AbstractDungeon.java:2575;
+  already wired at `act_transition` step (4) and pinned) — and the second,
+  literal-valued pity write near `run_advance.cpp:1734` is inside `run_begin`,
+  a different function, so it is not a duplicate; the six `build_shrine_pool`
+  act gates, which S1 had already written correctly against :1889-1933,
+  including N'loth's same-test-written-twice (`!id.equals("TheCity") &&
+  !id.equals("TheCity")` — one test, Act 2 only, NOT "any act but 2").
+  **Genuinely new gates:** Beggar (`gold >= 75`, :1970-1973 — s2-design §2.3
+  had omitted it), Colosseum (`currMapNode.y > map.size()/2`; `map` is the
+  15-ROW list so the divide is 7 and the gate is row >= 8, derived from
+  RunState via a new `event_map_row` pinned equal to `run_cur_row` across
+  every act × floor — **S2.33 inherits this, it does not re-derive it**), and
+  The Moai Head (`hasRelic("Golden Idol") || (float)hp/(float)maxHp <= 0.5f`,
+  written as a float divide per trap 19).
+  **Two comments that had become lies are rewritten rather than extended:**
+  `build_event_pool`'s `default:` arm no longer claims Moai Head / Beggar /
+  Colosseum "guard act-2/3 keys Exordium never holds", and the
+  raw-nonempty-but-filtered-empty shrine deviation no longer claims structural
+  unreachability — that argument DIES IN ACT 3, where FaceTrader is
+  act-excluded and SecretPortal is pinned false, so the state is constructible
+  and the deviation is real (the game would evaluate `tmp.get(rng.random(-1))`
+  at :1937 and crash after burning one counter tick). Pinned by
+  `ARawNonemptyButFilteredEmptyShrinePoolReturnsZero`.
+  **Deferred rows:** the Recall probe is **DISCHARGED — YES, already modelled,
+  zero engine work**, and its premise was wrong about scope
+  (CampfireUI.java:94-96 has no act test at all, so the button is on every
+  Act-1 rest too, and the ruby-key grant is live, not stubbed). **Three new
+  rows opened**: the translator's act-local FIRED derivation (S2.43 — a
+  differ false-RED waiting on the first Act-2 shrine capture, because an
+  Act-2 dump cannot witness an Act-1 shrine fire while the sim rightly
+  carries it); SecretPortal's pin now resting solely on unmodelled playtime
+  (S2.33); and `seed_scan`'s planner-side one-word decode (S2.42 —
+  `tools/oracle_bridge/planner` was off limits here, so it under-reports
+  Act-2/3 fires; the `tests/seed_scan_test.cpp` guard stays true and its
+  comment now points at the row instead of at S2.13).
+  **For S2.31–S2.33:** an Act-2/3 `?` room now selects the right id, commits
+  the right pool bit and the right flag word, and parks at
+  `ROOM_UNIMPLEMENTED` — each body only has to fill `event_dialog_impl` and
+  flip `implemented: true`. **No S2.3x task should re-touch
+  `build_event_pool` / `build_shrine_pool` / the membership masks.** And
+  `ActOneUnreachableSpecialsAreExactlyTheUnimplementedOnes`
+  (`act_event_lists_test.cpp`) is **S2.3x's to retire**: it still holds today
+  because S2.13 lands no bodies, and it will go red the moment
+  Designer/Duplicator/Knowing Skull/N'loth/Joust get one.
 
 ## Phase S2.2 — Monster batches (each = YAML rows + engine bodies + tier-2, the B3.13–B3.22 pattern; ∥ across disjoint batches once S2.01 lands)
 

@@ -1556,8 +1556,11 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     rs.event_pity_treasure = kEventBaseTreasureChance;
 
     // (5) eventList / shrineList / monsterList / eliteMonsterList / bossList
-    //     clears (:2576-2580). The monster trio is rebuilt at (8); the two EVENT
-    //     lists are S2.13's -- see the note at the end of this function.
+    //     clears (:2576-2580). The monster trio is rebuilt at (9); the two
+    //     EVENT lists are cleared here and REBUILT at (10) -- one call, because
+    //     clearing then refilling a bitset has no observable intermediate.
+    //     specialOneTimeEventList is NOT in this clear list and is deliberately
+    //     not touched anywhere in this function; see (10).
     rc.lists = MonsterLists{};
     rc.monster_cursor = 0;
     rc.elite_cursor = 0;
@@ -1603,13 +1606,20 @@ void act_transition(RunController& rc, RunState& rs, int32_t next_act) noexcept 
     }
 
     // (10) initializeEventList (:291) / initializeEventImg (:292) /
-    //      initializeShrineList (:293) -- ALL DRAW-FREE, and all S2.13's to make
-    //      act-aware. The membership bitsets are deliberately left ALONE here:
-    //      rewriting them to Act-1 membership would be worse than stale, and
-    //      inventing Act-2/3 membership is exactly S2.13's deliverable. Until it
-    //      lands, an Act-2/3 ? room that resolves to EVENT draws from the Act-1
-    //      list -- deterministic, wrong content, and named here so it cannot be
-    //      mistaken for a modelled behaviour.
+    //      initializeShrineList (:293) -- ALL DRAW-FREE (S2.13). The event
+    //      membership is refilled to the NEW act's width (11 / 13 / 7) and all
+    //      six shrines RETURN TO THE POOL, because the constructor rebuilds
+    //      both lists that :2576-2577 cleared. initializeEventImg is a texture
+    //      load with no state.
+    //
+    //      THE ONE-TIME POOL IS NOT REBUILT, and that asymmetry is the point:
+    //      specialOneTimeEventList is handed to the new dungeon by identity
+    //      (CardCrawlGame.java:1102-1119) and initializeSpecialOneTimeEventList
+    //      runs only in Exordium.<init> (Exordium.java:54), so a special drawn
+    //      in Act 1 stays gone for Acts 2-3. reinit_act_event_pools exists as a
+    //      separate function from init_event_pools precisely so this call site
+    //      cannot restore it by accident. It must run AFTER (1)'s rs.act bump.
+    reinit_act_event_pools(rs);
     //
     // (11) initializeCardPools (:294) / initializePotions (:298) -- no RNG, no
     //      engine state (see the block comment above).

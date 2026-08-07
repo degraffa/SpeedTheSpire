@@ -364,6 +364,95 @@ TEST(Translator, RemovedEventMembershipDerivesCumulativeFiredFlags) {
     EXPECT_EQ(run.records[0].run.event_flags & (1u << (27u - 1u)), 0u);
 }
 
+// --- S2.13: the pool parsers are act-aware ------------------------------------
+//
+// Two orders are in play and only one of them is act-dependent. The membership
+// BIT is always `id - first_id` (registry order), so `shrine_membership` stays
+// byte-comparable across an act crossing for the differ and PublicView. The
+// LIST ORDER a dump arrives in is the act's own: Exordium ends with Wheel of
+// Change (Exordium.java:238-246) while TheCity and TheBeyond -- byte-identical
+// to each other -- put it second (TheCity.java:210-218 ==
+// TheBeyond.java:198-206). Before S2.13 the subsequence check compared bit
+// indices, so an Act-2 dump would have been rejected as "not a canonical-order
+// subsequence"; it now compares POSITIONS in the act's order table.
+
+// Retarget an Act-1 capture at another act: `act` appears at the stock top
+// level and again in the oracle anchors, and the two are cross-checked.
+std::string retarget_act(std::string line, int act) {
+    const std::string from = "\"act\":1";
+    const std::string to = "\"act\":" + std::to_string(act);
+    for (std::size_t pos = line.find(from); pos != std::string::npos;
+         pos = line.find(from, pos + to.size())) {
+        line.replace(pos, from.size(), to);
+    }
+    return line;
+}
+
+TEST(Translator, ActTwoPoolsParseWithTheCityWidthsAndOrder) {
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    std::string changed = retarget_act(lines[1], 2);
+    // TheCity's eventList, minus Beggar (id 34) -- so exactly one Act-2 fire.
+    changed = replace_oracle_array(
+        std::move(changed), "eventList",
+        R"(["Addict","Back to Basics","Colosseum","Cursed Tome","Drug Dealer",)"
+        R"("Forgotten Altar","Ghosts","Masked Bandits","Nest","The Library",)"
+        R"("The Mausoleum","Vampires"])");
+    // TheCity's shrineList ORDER -- Wheel of Change SECOND -- minus Purifier.
+    changed = replace_oracle_array(
+        std::move(changed), "shrineList",
+        R"(["Match and Keep!","Wheel of Change","Golden Shrine",)"
+        R"("Transmorgrifier","Upgrade Shrine"])");
+
+    tr::TranslatedRun run = tr::translate_lines({lines[0], changed}, "act-two");
+    ASSERT_EQ(run.records.size(), 1u);
+    const auto& rs = run.records[0].run;
+
+    // eventList: 13 bits wide, bit i == id (32 + i); Beggar is bit 2.
+    EXPECT_EQ(rs.event_membership,
+              static_cast<uint16_t>(((1u << 13) - 1u) & ~(1u << 2)));
+    // shrineList: bit i == id (12 + i) REGARDLESS of the arrival order, so
+    // Purifier (id 15) is bit 3 -- not the position it occupied in the dump.
+    EXPECT_EQ(rs.shrine_membership, static_cast<uint8_t>(0x3Fu & ~(1u << 3)));
+
+    // The FIRED derivation routes Beggar (id 34) to the HI word -- the old
+    // `<< (first_id - 1)` block shift would have been UB at first_id 32.
+    EXPECT_EQ(rs.event_flags_hi, 1u << (34u - 33u)) << "Beggar (id 34)";
+    // Shrine ids are act-independent, so Purifier stays a lo-word id.
+    EXPECT_EQ(rs.event_flags & (1u << (15u - 1u)), 1u << (15u - 1u))
+        << "Purifier (id 15)";
+}
+
+TEST(Translator, AnExordiumOrderedShrineListIsRefusedInActTwo) {
+    // The negative that gives the order table its teeth: the SAME six keys in
+    // Exordium's order are not a subsequence of TheCity's order, and silently
+    // accepting them would put a captured state's draw index out of step with
+    // the simulator's.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    std::string changed = retarget_act(lines[1], 2);
+    changed = replace_oracle_array(
+        std::move(changed), "eventList",
+        R"(["Addict","Back to Basics","Beggar","Colosseum","Cursed Tome",)"
+        R"("Drug Dealer","Forgotten Altar","Ghosts","Masked Bandits","Nest",)"
+        R"("The Library","The Mausoleum","Vampires"])");
+    // shrineList is left in Exordium's order -- Wheel of Change LAST.
+    EXPECT_THROW(tr::translate_lines({lines[0], changed}, "act-two-bad-order"),
+                 tr::TranslateError);
+}
+
+TEST(Translator, AnActOneEventListIsRefusedInActTwo) {
+    // The width half of the same guard: Exordium's ids sit outside TheCity's
+    // block, so an act/list mismatch is a named refusal rather than a bitset
+    // whose bits quietly mean the wrong events.
+    std::vector<std::string> lines = read_lines(sample_path());
+    ASSERT_GE(lines.size(), 2u);
+    const std::string changed = retarget_act(lines[1], 2);
+    EXPECT_THROW(
+        tr::translate_lines({lines[0], changed}, "act-two-act-one-list"),
+        tr::TranslateError);
+}
+
 TEST(Translator, UnknownEventInMembershipListIsRefused) {
     std::vector<std::string> lines = read_lines(sample_path());
     ASSERT_GE(lines.size(), 2u);

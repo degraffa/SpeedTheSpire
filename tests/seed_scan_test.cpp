@@ -156,10 +156,19 @@ TEST(SeedScanEventFlags, BitIsIdMinusOne) {
     }
     // EventId::NONE never fires and has no bit; a shift by -1 would be UB.
     EXPECT_FALSE(sts::planner::event_flag_set(0xFFFFFFFFu, EventId::NONE));
-    // S2.02's Act-2/3 ids 32..51 are past the end of the word. They read false
-    // for EVERY flags value -- including all-ones -- rather than shifting out
-    // of range. That is a live guard, not a formality: S2.13 makes those ids
-    // drawable and has to widen the storage (or split it per act) first.
+    // S2.02's Act-2/3 ids 32..51 are past the end of THIS word. They read
+    // false for EVERY flags value -- including all-ones -- rather than
+    // shifting out of range.
+    //
+    // S2.13 made those ids drawable and split the ENGINE-side storage into two
+    // words (RunState::event_flags + event_flags_hi, bit id-1 / bit id-33,
+    // reached through event_flag_set/event_flag_test). It did NOT widen this
+    // PLANNER-side helper: `tools/oracle_bridge/planner` was off limits to it
+    // (held concurrently by S2.42). So the guard below is still literally true
+    // of `sts::planner::event_flag_set`, and its consequence is that a
+    // seed-scan row under-reports Act-2/3 fires -- an offline reporting gap,
+    // not a false green. Widening it is a live deferred-obligations row
+    // (owner S2.42); when that lands, this loop inverts.
     for (const auto& e : sts::planner::event_names()) {
         if (has_bit(e.id)) continue;
         SCOPED_TRACE(std::string(e.symbol));

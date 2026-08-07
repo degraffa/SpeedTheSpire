@@ -243,7 +243,12 @@ TEST(StateLayout, RunStateHasNoImplicitPadding) {
         STS_MEMBER_SPAN(RunState, relic_pools),
         STS_MEMBER_SPAN(RunState, relic_pool_count),
         STS_MEMBER_SPAN(RunState, pad_relic_pools),
-        STS_MEMBER_SPAN(RunState, pad_rng_align),
+        // S2.13 split the old 6-byte pad_rng_align into 2 bytes of padding plus
+        // event_flags_hi. The walk below proves the pair still tiles the same
+        // span, which is the whole reason no offset moved and SCHEMA_VERSION
+        // did not bump.
+        STS_MEMBER_SPAN(RunState, pad_rng_align_lo),
+        STS_MEMBER_SPAN(RunState, event_flags_hi),
         STS_MEMBER_SPAN(RunState, monster_rng),
         STS_MEMBER_SPAN(RunState, event_rng),
         STS_MEMBER_SPAN(RunState, merchant_rng),

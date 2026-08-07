@@ -51,6 +51,16 @@
 //     isNoteForYourselfAvailable          AbstractDungeon.java:1340-1379
 //   * Exordium.initializeEventList / initializeShrineList
 //                                         Exordium.java:223-246
+//   * TheCity.initializeEventList / initializeShrineList
+//                                         TheCity.java:184-198, 209-217
+//   * TheBeyond.initializeEventList / initializeShrineList
+//                                         TheBeyond.java:178-187, 197-205
+//   * AbstractDungeon.dungeonTransitionSetup (the eventList/shrineList clears)
+//                                         AbstractDungeon.java:2562-2604
+//   * AbstractDungeon.<init> (the rebuild order)
+//                                         AbstractDungeon.java:268-300
+//   * CardCrawlGame.getDungeon (specialOneTimeEventList by identity)
+//                                         CardCrawlGame.java:1102-1119
 //   * Random(Long,int) counter replay     Random.java:28-33
 //   * TinyChest                           TinyChest.java:19-42
 //   * SsserpentHead.onEnterRoom           SsserpentHead.java:29-35
@@ -66,8 +76,10 @@
 // RunState, exactly like RestSiteState (rationale at run_advance.hpp:13-21);
 // dialog options are rebuilt from scratch on every legal_actions call, never
 // cached. The membership bitsets / pity floats / event_flags are save-parity
-// and already exist in RunState (run_state.hpp:135,160-162,181-184) -- no
-// schema bump.
+// and already exist in RunState -- no schema bump. S2.13 added a SECOND flags
+// word (event_flags_hi) for ids 32..51 by carving it out of declared padding,
+// which is also not a schema bump: no offset and no sizeof moved (the proof
+// static_asserts live beside the member in run_state.hpp).
 
 #include <cstdint>
 #include <type_traits>
@@ -188,11 +200,63 @@ void dispatch_on_enter_room_relics(RunState& rs, RoomType room) noexcept;
 // --- Pool membership ---------------------------------------------------------
 
 // Bit index <-> EventId mapping for the three RunState membership bitsets
-// (run_state.hpp:181-184): bit i of a pool's bitset is the entry at position i
-// of the act's canonical (NFY-PRESENT) init list == registry order.
-// EventId is the identity; only the RUNTIME index of the filtered draw list
-// shifts (the draw index is over the filtered list built at draw time, never
-// over bit positions).
+// (run_state.hpp): bit i of a pool's bitset is a fixed EventId, act-independent
+// and defined by REGISTRY ORDER. Only the RUNTIME index of the filtered draw
+// list shifts (the draw index is over the filtered list built at draw time,
+// never over bit positions).
+//
+// BIT MEANING AND DRAW POSITION ARE TWO DIFFERENT MAPPINGS, and S2.13 had to
+// separate them deliberately:
+//
+//  * For the EVENT pool the two COINCIDE. Each act's event ids are dense and
+//    laid out in Java add order (Exordium 1..11, TheCity 32..44, TheBeyond
+//    45..51 -- registry/events.yaml, authored from Exordium.java:223-236 /
+//    TheCity.java:184-198 / TheBeyond.java:178-187), so bit i IS
+//    `event_list_first_id(act) + i` and IS draw position i. Nothing else is
+//    needed. Do not generalise this to shrines.
+//
+//  * For the SHRINE pool they DIVERGE. Exordium's list ends with Wheel of
+//    Change (Exordium.java:238-246) while TheCity's and TheBeyond's -- which
+//    are byte-identical to each other -- put it SECOND
+//    (TheCity.java:210-218 == TheBeyond.java:198-206). Same six keys, two
+//    orders. `shrine_membership`'s bit i therefore keeps its EXORDIUM/registry
+//    meaning (bit i == EventId 12 + i) in EVERY act, and the per-act order
+//    lives in kShrineDrawOrder* below, consulted ONLY when appending to the
+//    draw list. That way round because the bitset is save-parity state: it is
+//    byte-compared by the diff harness and mirrored into PublicView, and
+//    NOTHING in either path knows the act at compare time, so a bit whose
+//    meaning changed at floor 17 would make those comparisons silently
+//    act-dependent. It also leaves Act 1 bit-for-bit unchanged (Act 1's order
+//    table is the identity).
+//
+// The per-act EVENT list. Acts 2 and 3 are S2.02's registry ids; the counts are
+// the Java list lengths, re-read in full at those lines. `act` is 1..3
+// (kFinalAct == 3, run_advance.hpp) and anything else falls to Act 1 -- Act 4 /
+// TheEnding is out of S2 scope (s2-design §1) and has no eventList of its own.
+[[nodiscard]] constexpr uint16_t event_list_first_id(int act) noexcept {
+    return act == 2 ? 32 : (act == 3 ? 45 : 1);
+}
+[[nodiscard]] constexpr int event_list_count(int act) noexcept {
+    return act == 2 ? 13 : (act == 3 ? 7 : 11);
+}
+// The widest event list (Act 2's 13) bounds every `tmp[]` and every
+// `event_membership` mask. uint16_t event_membership covers it with room.
+inline constexpr int kEventListMaxCount = 13;
+static_assert(event_list_count(1) == 11 && event_list_count(2) == 13 &&
+                  event_list_count(3) == 7,
+              "per-act event list lengths (Exordium/TheCity/TheBeyond)");
+static_assert(event_list_count(1) <= kEventListMaxCount &&
+              event_list_count(2) <= kEventListMaxCount &&
+              event_list_count(3) <= kEventListMaxCount);
+static_assert(kEventListMaxCount <= 16, "event_membership is a uint16_t");
+// The last id of each act's list, so a renumber in events.yaml cannot silently
+// shift a pool: 11 / 44 / 51.
+static_assert(event_list_first_id(1) + event_list_count(1) - 1 == 11);
+static_assert(event_list_first_id(2) + event_list_count(2) - 1 == 44);
+static_assert(event_list_first_id(3) + event_list_count(3) - 1 == 51);
+
+// Retained Act-1 spellings: the ONE canonical Act-1 list, still named because
+// run_begin, the translator and several tier-2 tests speak Act 1 directly.
 inline constexpr uint16_t kEventListFirstId = 1;    // EventId 1..11 <-> bits 0..10
 inline constexpr int kEventListCount = 11;          // Exordium.java:223-236
 inline constexpr uint16_t kShrineListFirstId = 12;  // EventId 12..17 <-> bits 0..5
@@ -200,6 +264,36 @@ inline constexpr int kShrineListCount = 6;          // Exordium.java:238-246
 inline constexpr uint16_t kSpecialListFirstId = 18; // EventId 18..31 <-> bits 0..13
 inline constexpr int kSpecialListCount = 14;        // AbstractDungeon.java:1340-1358
 inline constexpr int kNoteForYourselfBit = 9;       // canonical NFY-present position
+static_assert(event_list_first_id(1) == kEventListFirstId);
+static_assert(event_list_count(1) == kEventListCount);
+
+// Shrine DRAW ORDER: position -> EventId, per act. Act 1 is the identity;
+// Acts 2-3 move Wheel of Change from position 5 to position 1 and shift the
+// middle four down one. Both lists read in full at the cited lines.
+inline constexpr uint16_t kShrineDrawOrderExordium[kShrineListCount] = {
+    12,  // Match and Keep!      Exordium.java:240
+    13,  // Golden Shrine        :241
+    14,  // Transmorgrifier      :242
+    15,  // Purifier             :243
+    16,  // Upgrade Shrine       :244
+    17,  // Wheel of Change      :245
+};
+inline constexpr uint16_t kShrineDrawOrderCityBeyond[kShrineListCount] = {
+    12,  // Match and Keep!      TheCity.java:212 == TheBeyond.java:200
+    17,  // Wheel of Change      :213 == :201   <-- the divergence
+    13,  // Golden Shrine        :214 == :202
+    14,  // Transmorgrifier      :215 == :203
+    15,  // Purifier             :216 == :204
+    16,  // Upgrade Shrine       :217 == :205
+};
+
+// Position -> EventId for the act's shrine draw list. Bit index for the same
+// EventId is always `id - kShrineListFirstId`, whatever this returns.
+[[nodiscard]] constexpr uint16_t shrine_draw_order_id(int act,
+                                                      int position) noexcept {
+    return act == 1 ? kShrineDrawOrderExordium[position]
+                    : kShrineDrawOrderCityBeyond[position];
+}
 
 // isNoteForYourselfAvailable (AbstractDungeon.java:1360-1379), FOUR branches:
 // daily run -> false (never modelled); ascensionLevel >= 15 -> false;
@@ -214,11 +308,48 @@ inline constexpr int kNoteForYourselfBit = 9;       // canonical NFY-present pos
     return ascension < 15;
 }
 
-// Populate the three membership bitsets with the full Act-1 canonical lists
-// (initializeEventList / initializeShrineList / the NFY-conditional
-// initializeSpecialOneTimeEventList). Called from run_begin; the RunState
-// storage already existed, so this is population only -- no schema change.
+// THE ACT-CROSSING ASYMMETRY, and why there are two init functions.
+//
+// dungeonTransitionSetup CLEARS eventList and shrineList
+// (AbstractDungeon.java:2576-2577) and the new dungeon's constructor then
+// REBUILDS both (initializeEventList :291, initializeShrineList :293).
+// specialOneTimeEventList is ABSENT from that clear list: it is handed to the
+// new dungeon BY IDENTITY -- `getDungeon` passes
+// `AbstractDungeon.specialOneTimeEventList` to the TheCity / TheBeyond /
+// TheEnding constructors (CardCrawlGame.java:1102-1119), and
+// initializeSpecialOneTimeEventList has exactly one call site,
+// Exordium.<init> (Exordium.java:54). So, per act crossing:
+//
+//   eventList   cleared + rebuilt -> FULL membership again, with the NEW act's ids
+//   shrineList  cleared + rebuilt -> ALL SIX SHRINES RETURN TO THE POOL
+//   specialList carried by reference -> an Act-1 draw stays removed for Acts 2-3
+//
+// The last row is the "one-time pool cross-act depletion" everyone expects.
+// The middle row is the one that is easy to get backwards: a shrine drawn in
+// Act 1 is drawable again in Act 2 and again in Act 3.
+//
+// Hence the split. init_event_pools is the run_begin path and fills all three;
+// reinit_act_event_pools is the act-crossing path and MUST NOT TOUCH
+// special_membership. init_event_pools delegates the shared half so the two
+// cannot drift. The NFY conditional is meaningful only for the special list,
+// which is a second reason it appears in the run_begin path alone.
 void init_event_pools(RunState& rs) noexcept;
+
+// The act-crossing rebuild: event + shrine membership ONLY, sized/shaped by
+// rs.act. Call it AFTER rs.act has been advanced (act_transition step (1)) --
+// calling it before would install the previous act's list width.
+void reinit_act_event_pools(RunState& rs) noexcept;
+
+// --- The one-shot FIRED bitset (ids 1..63 across two words) -------------------
+
+// RunState::event_flags holds ids 1..31 at bit (id-1); RunState::event_flags_hi
+// holds ids 32..63 at bit (id-33). The split exists because widening the first
+// word in place is illegal in PublicView and would be an unplanned
+// SCHEMA_VERSION bump in RunState (run_state.hpp's carve note). ALWAYS go
+// through these two; no call site may open-code the shift. An id outside
+// [1, 63] is a no-op / false rather than a UB shift.
+void event_flag_set(RunState& rs, uint16_t id) noexcept;
+[[nodiscard]] bool event_flag_test(const RunState& rs, uint16_t id) noexcept;
 
 // AbstractPlayer.isCursed (AbstractPlayer.java:741-748): any master-deck card
 // of type CURSE EXCEPT Necronomicurse, CurseOfTheBell and AscendersBane.
@@ -229,18 +360,47 @@ void init_event_pools(RunState& rs) noexcept;
 
 // The filtered draw lists, rebuilt at draw time exactly as the game builds its
 // `tmp` ArrayLists. Returns the entry count; writes at most `cap` EventId
-// values (as uint16_t) into `out`, in list order.
-//   * build_event_pool: eventList in canonical order with the Act-1 gates of
-//     AbstractDungeon.getEvent (:1949-1982): Dead Adventurer and Mushrooms
-//     need floorNum > 6, The Cleric needs gold >= 35; the other 8 rows are
-//     unconditional. (The Moai Head / Beggar / Colosseum cases guard act-2/3
-//     list keys that Exordium's list never holds.)
-//   * build_shrine_pool: shrineList unconditionally (:1884), then
-//     specialOneTimeEventList with the per-key gates of getShrine
-//     (:1886-1936): Fountain of Cleansing needs isCursed; The Woman in Blue
-//     needs gold >= 50; FaceTrader is act 1/2; Designer, Duplicator, Knowing
-//     Skull, N'loth, The Joust and SecretPortal are act-2/3-gated (SecretPortal
-//     additionally needs playtime >= 800s -- unmodelled, act-gated out of S1).
+// values (as uint16_t) into `out`, in the ACT'S list order. Size `out` for
+// build_event_pool to kEventListMaxCount and for build_shrine_pool to
+// kShrineListCount + kSpecialListCount.
+//
+//   * build_event_pool: the act's eventList in add order with ALL SIX gates of
+//     AbstractDungeon.getEvent (:1946-1982), every one of which is now live
+//     because Acts 2-3 draw:
+//       Dead Adventurer  floorNum > 6            :1950-1953   (act 1)
+//       Mushrooms        floorNum > 6            :1955-1958   (act 1)
+//       The Cleric       gold >= 35              :1965-1968   (act 1)
+//       The Moai Head    hasRelic("Golden Idol") || (float)hp/(float)maxHp
+//                        <= 0.5f                 :1960-1963   (act 3)
+//       Beggar           gold >= 75              :1970-1973   (act 2)
+//       Colosseum        currMapNode != null && currMapNode.y > map.size()/2
+//                                                :1975-1978   (act 2)
+//     Every other row falls through to the unconditional add (:1981).
+//     Moai Head's ratio IS a float divide compared against 0.5f, written that
+//     way rather than as `hp*2 <= maxHp` (trap 19 float discipline).
+//     Colosseum's `map.size()` is the ROW COUNT, 15, so the integer divide is
+//     7 and the gate is row >= 8; the row is `run_cur_row`'s arithmetic
+//     (floor - act_floor_base(act) - 1, S2.12) derived here from RunState
+//     alone -- `currMapNode` is assigned at :1783, BEFORE EventRoom
+//     .onPlayerEntry runs, so it is the ARRIVING node. S2.33 (Colosseum's
+//     body) inherits this gate rather than re-deriving it.
+//
+//   * build_shrine_pool: shrineList in THE ACT'S DRAW ORDER
+//     (shrine_draw_order_id, :1884 over a list whose order the act's
+//     initializeShrineList decided), then specialOneTimeEventList with the
+//     per-key gates of getShrine (:1886-1936): Fountain of Cleansing needs
+//     isCursed and The Woman in Blue gold >= 50 (both act-independent);
+//     FaceTrader is acts 1-2 (NOT act 3); Designer and Duplicator are acts
+//     2-3; Knowing Skull, N'loth and The Joust are act 2 ONLY -- N'loth's
+//     test is literally written twice against "TheCity" (:1915), which is one
+//     test, not two, so it is Act 2 and not "any act but 2". SecretPortal is
+//     pinned false in every act; see below.
+// Colosseum's row, derived from RunState alone. Identical arithmetic to
+// run_cur_row (run_advance.hpp) -- `floor - act_floor_base(act) - 1`, saturated
+// at the -1 pre-first-pick sentinel -- restated here because run_advance.hpp
+// includes THIS header. Pinned equal to run_cur_row by tier-2 test.
+[[nodiscard]] int event_map_row(const RunState& rs) noexcept;
+
 [[nodiscard]] int build_event_pool(const RunState& rs, uint16_t* out,
                                    int cap) noexcept;
 [[nodiscard]] int build_shrine_pool(const RunState& rs, uint16_t* out,
@@ -257,16 +417,32 @@ void init_event_pools(RunState& rs) noexcept;
 //
 // COMMITS (even though the stream does not): the selected id's pool bit
 // (getShrine removes from BOTH shrineList and specialOneTimeEventList,
-// :1938-1939; getEvent from eventList, :1987) and the matching
-// RunState.event_flags bit (id-1) -- the engine-side "fired" record mirroring
-// the game's saveFileLastEventChoice write (EventHelper.java:228).
+// :1938-1939; getEvent from eventList, :1987) and the matching FIRED bit via
+// event_flag_set -- the engine-side record mirroring the game's
+// saveFileLastEventChoice write (EventHelper.java:228). Ids 32..51 land in
+// event_flags_hi; see the accessors above.
 //
 // Returns the selected EventId as uint16_t, or 0 when every pool is empty
 // (the game logs "No events or shrines left" and returns null, :1872-1873).
-// A raw-nonempty-but-filtered-empty shrine pool would make the game index
-// tmp.get(rng.random(-1)) and throw (:1937); this port returns 0 without
-// drawing instead -- a documented defensive deviation on a state the Act-1
-// pool depths cannot reach through this API.
+//
+// THE RAW-NONEMPTY / FILTERED-EMPTY SHRINE STATE. generate_event's shrine
+// branch tests the RAW lists (:1866); getShrine then filters. When the filter
+// empties `tmp` the game evaluates `tmp.get(rng.random(-1))` (:1937), and
+// `Random.random(int)` increments its counter and then calls nextInt(0), which
+// libgdx's RandomXS128 rejects -- i.e. THE GAME CRASHES, after burning one
+// counter tick. This port returns 0 without drawing instead: a documented
+// defensive deviation.
+//
+// That state used to be justified as structurally unreachable ("the Act-1 pool
+// depths cannot reach it"). THAT JUSTIFICATION DIES IN ACT 3 and the honest
+// statement is now this: reaching it needs shrineList empty (all six shrines
+// drawn WITHIN the current act -- they are restored at every crossing) AND
+// every surviving special filtered out. In Act 3 the filter is at its
+// strongest (FaceTrader is act-excluded, Knowing Skull / N'loth / The Joust
+// are act-2 only, SecretPortal is pinned false), so the state is constructible
+// rather than impossible -- low probability, not zero. The deviation is
+// therefore a real behavioural difference from the game on a reachable state,
+// not a formality, and it is pinned by test rather than argued away.
 [[nodiscard]] uint16_t generate_event(RunState& rs) noexcept;
 
 // --- The dialog framework ----------------------------------------------------

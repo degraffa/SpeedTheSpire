@@ -356,11 +356,57 @@ TEST(ActTransition, TheOneTimeEventPoolCarriesByReference) {
     rc.run.shrine_membership = 0x3u;
     cross_act(rc);
     EXPECT_EQ(rc.run.special_membership, 0x2u);
-    // The per-act event/shrine list REBUILD is S2.13's; the crossing must not
-    // silently invent one, so the bitsets are pinned untouched here too. When
-    // S2.13 lands, these two expectations move with it.
-    EXPECT_EQ(rc.run.event_membership, 0x5u);
-    EXPECT_EQ(rc.run.shrine_membership, 0x3u);
+    // S2.13: the OTHER two lists do the OPPOSITE, which is what makes this
+    // test's name load-bearing rather than decorative. dungeonTransitionSetup
+    // CLEARS eventList and shrineList (AbstractDungeon.java:2576-2577) and the
+    // new dungeon's constructor REBUILDS both (:291, :293), so the punched-out
+    // pattern is erased: the event mask returns at the NEW act's width
+    // (TheCity's 13 rows) and every shrine returns to the pool. Only the
+    // one-time pool carries, because only it is passed by identity.
+    EXPECT_EQ(rc.run.event_membership, (1u << 13) - 1u);
+    EXPECT_EQ(rc.run.shrine_membership, 0x3Fu);
+}
+
+TEST(ActTransition, ShrinesReturnToThePoolAtEveryCrossing) {
+    // The counterpart nobody expects, and the single easiest thing in S2.13 to
+    // get backwards. A shrine drawn in Act 1 is drawable AGAIN in Act 2 and
+    // again in Act 3: shrineList.clear() (:2577) + initializeShrineList (:293)
+    // restore all six, every time. Only specialOneTimeEventList depletes
+    // run-wide (CardCrawlGame.java:1102-1119 hands the same object over).
+    RunController rc = at_act1_boss_chest();
+    rc.run.shrine_membership = 0u;   // every shrine drawn during Act 1
+    rc.run.special_membership = 0u;  // every special drawn during Act 1
+    cross_act(rc);
+    EXPECT_EQ(rc.run.shrine_membership, 0x3Fu) << "shrines must come back";
+    EXPECT_EQ(rc.run.special_membership, 0u) << "specials must NOT come back";
+    // Act 2's event list is TheCity's thirteen rows (TheCity.java:185-198).
+    EXPECT_EQ(rc.run.event_membership, (1u << 13) - 1u);
+
+    // ... and it happens AGAIN into Act 3, on a state whose Act-2 shrines were
+    // all drawn. The 2->3 crossing is driven directly rather than through a
+    // second boss chest: cross_act needs a BOSS_TREASURE phase, and rebuilding
+    // one here would test the chest, not the pools.
+    rc.run.shrine_membership = 0u;
+    StepResult res{};
+    on_boss_chest_proceed(rc, rc.run, res);
+    EXPECT_EQ(rc.run.act, 3u);
+    EXPECT_EQ(rc.run.shrine_membership, 0x3Fu);
+    EXPECT_EQ(rc.run.special_membership, 0u);
+    // Act 3's event list is TheBeyond's seven rows (TheBeyond.java:178-187).
+    EXPECT_EQ(rc.run.event_membership, (1u << 7) - 1u);
+}
+
+TEST(ActTransition, TheCrossingDoesNotRerunTheRunStartSpecialInit) {
+    // The negative that keeps the init split honest. If act_transition ever
+    // called init_event_pools instead of reinit_act_event_pools, the one-time
+    // pool would be REFILLED at every act -- and at A15+ the Note For Yourself
+    // bit, which the run-start path deliberately never sets, would appear.
+    RunController rc = at_act1_boss_chest();
+    rc.run.ascension = 15;  // note_for_yourself_available(15) == false
+    rc.run.special_membership = 0u;
+    cross_act(rc);
+    EXPECT_EQ(rc.run.special_membership, 0u)
+        << "the crossing refilled the one-time pool";
 }
 
 TEST(ActTransition, CardPoolsAreUnchangedAndConsumeNoRng) {

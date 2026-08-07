@@ -251,7 +251,8 @@ inline constexpr ClassRow kRunStateRows[] = {
     STS_BC_ROW(RunState, keys, ByteClass::PUBLIC, "audit 6"),
     STS_BC_ROW(RunState, pad_keys, ByteClass::PADDING, ""),
     STS_BC_ROW(RunState, event_flags, ByteClass::PUBLIC,
-               "one-shot FIRED bitset; the fires were observed"),
+               "one-shot FIRED bitset (ids 1..31; ids 32..63 are in "
+               "event_flags_hi below); the fires were observed"),
     STS_BC_ROW(RunState, shop_flags, ByteClass::PUBLIC, "as event_flags"),
     STS_BC_ROW(RunState, card_blizz_randomizer, ByteClass::PUBLIC,
                "plan 1: pity counters are perfect-memory tracker state"),
@@ -276,7 +277,11 @@ inline constexpr ClassRow kRunStateRows[] = {
     STS_BC_ROW(RunState, relic_pool_count, ByteClass::DERIVED,
                "audit 6: initial tier size (a public rule) minus observed pops"),
     STS_BC_ROW(RunState, pad_relic_pools, ByteClass::PADDING, ""),
-    STS_BC_ROW(RunState, pad_rng_align, ByteClass::PADDING, ""),
+    STS_BC_ROW(RunState, pad_rng_align_lo, ByteClass::PADDING,
+               "narrowed 6 -> 2 by S2.13; the other 4 bytes became "
+               "event_flags_hi, which is why no offset moved"),
+    STS_BC_ROW(RunState, event_flags_hi, ByteClass::PUBLIC,
+               "as event_flags: the FIRED bitset's second word, ids 32..63"),
     STS_BC_ROW(RunState, monster_rng, ByteClass::HIDDEN,
                "audit 6: run-/act-/event-scoped stream states are realizations"),
     STS_BC_ROW(RunState, event_rng, ByteClass::HIDDEN, "as above"),

@@ -632,10 +632,15 @@ TEST(TwinDiagnostics, PublicViewFieldTableIsOrderedAndReachesTheEnd) {
             << "' -- every failure message after it would name the wrong field";
     }
     // The last entry must be the last member, so no byte falls off the table.
+    // v3 (S2.13) tail-appended event_flags_hi AFTER the mask channel, so the
+    // table's last row moved with it -- which is exactly what this assertion
+    // exists to force.
     EXPECT_EQ(public_view_field(n - 1).offset,
-              offsetof(PublicView, action_mask))
+              offsetof(PublicView, event_flags_hi))
         << "a PublicView member was appended without a diagnostic-table row";
-    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "action_mask");
+    EXPECT_STREQ(public_view_field_at(sizeof(PublicView) - 1), "event_flags_hi");
+    EXPECT_STREQ(public_view_field_at(offsetof(PublicView, action_mask)),
+                 "action_mask");
     EXPECT_STREQ(public_view_field_at(sizeof(PublicView)), "<out of range>");
 }
 
