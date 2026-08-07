@@ -28,7 +28,10 @@
 #                          range columns. The native module consumes the data.
 #       - name: <SYMBOL>
 #         stream: MONSTER_HP
-#         timing: CONSTRUCTOR_AFTER_HP | PRE_BATTLE
+#         timing: CONSTRUCTOR_BEFORE_HP | CONSTRUCTOR_AFTER_HP | PRE_BATTLE
+#                          BEFORE == a draw in the `super(...)` argument list,
+#                          which Java evaluates before the ctor body, so it
+#                          precedes the setHp draw (OrbWalker.java:53-58)
 #         range: {base: {min: , max: }, a<N>: {min: , max: }}
 #     moves:               move list; each move an intent + effect program in
 #                          takeTurn addToBottom order (effects as data, §4.2)

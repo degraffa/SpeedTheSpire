@@ -345,7 +345,10 @@ inline constexpr ClassRow kCombatStateRows[] = {
                "audit 2: per MonsterState member. All public/public-cond except "
                "pad0, which can hold an unrevealed construction roll (the Louse "
                "bite damage) and is excluded wholesale; revealed rolls arrive "
-               "through the KnowledgeState projection"),
+               "through the KnowledgeState projection. draw_x (schema v7, in "
+               "what was pad1) is DERIVED -- a per-encounter constant fixed by "
+               "the monster's identity and spawn slot, both public -- so it is "
+               "recoverable and needs no PvMonster field of its own"),
     STS_BC_ROW(CombatState, action_queue, ByteClass::DERIVED,
                "audit 1: resolution transients, deterministic from the observed "
                "action history. They legitimately MOVE THE MASK, which is why "
@@ -375,7 +378,14 @@ inline constexpr ClassRow kCombatStateRows[] = {
                "audit 1: the combat relic mirror is what the screen shows while "
                "a combat is live"),
     STS_BC_ROW(CombatState, relic_count, ByteClass::PUBLIC, ""),
-    STS_BC_ROW(CombatState, pad_relics, ByteClass::PADDING, ""),
+    STS_BC_ROW(CombatState, pending_obtain_count, ByteClass::PUBLIC,
+               "audit 1: an in-combat master-deck obtain is announced on screen "
+               "as it happens. Not separately encoded in PublicView because the "
+               "run layer DRAINS it into master_deck (which IS encoded) within "
+               "the same pump step, so no PublicView a caller can observe is "
+               "ever taken while it is non-zero. These two took over what was "
+               "pad_relics[7] in schema v7"),
+    STS_BC_ROW(CombatState, pending_obtain, ByteClass::PUBLIC, "as above"),
     STS_BC_ROW(CombatState, pad_rng_align, ByteClass::PADDING,
                "declared by T0.5 after this tripwire found it implicit -- see "
                "combat_state.hpp and conventions section 8"),

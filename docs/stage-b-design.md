@@ -1352,3 +1352,44 @@ Continuing stage-a §10's numbering:
   simulator-replay soak, complete tier-2/A20 coverage, Tier-4 suite, and
   throughput floors are unchanged. No artifact, engine schema, registry id, or
   opcode changes.
+
+- v0.1.10 (2026-08-07) — S2.2F, the shared Act-2/3 monster framework:
+  **`SCHEMA_VERSION` 6 → 7** and **`PUBLIC_VIEW_VERSION` 3 → 4**, both
+  owner-approved, with the 20 combat fixtures and the twin fixtures regenerated
+  exactly once. The engine bump is three edits that ride one struct change:
+  `kMonsterCap` 7 → 23 (the only one that costs bytes; `sizeof(CombatState)`
+  4696 → 8088), `MonsterState.draw_x` and `CombatState.pending_obtain[3]` +
+  `pending_obtain_count`, which reuse the former `pad1[2]` and `pad_relics[7]`
+  and so move no offset. The fixture regeneration is proven a pure array
+  extension — every pre-existing byte preserved in order, the only difference a
+  3392-byte zero run at the old `monsters[]` end.
+
+  **The cap is 23, not the 24 the Wave-3 allocation granted.** 24 measures
+  8304 against the frozen 8192 B ceiling (§4.2, raised 4096 → 8192 by the owner
+  at v0.1.x); the grant was estimated against pre-v6 struct sizes, before the
+  `PowerSlot` widening took `MonsterState` to 212 B. Raising the ceiling again
+  and splitting `kPowerCap` into a smaller per-monster power cap were both
+  considered and both recorded, unspent, in `combat_state.hpp`. 23 is a budget
+  pick with a hard assert behind it, not a derived bound: the three Act-2/3
+  spawners it exists for (Gremlin Leader, The Collector, Reptomancer) all grow
+  their record count without limit as a fight lasts.
+
+  **The public-view bump is the first BREAKING one**, and it is a consequence
+  of the cap rather than a separate decision: `PublicView` embeds
+  `PvMonster monsters[kMonsterCap]`, two `kMonsterCap`-sized roll arrays, and —
+  through the embedded mask channel — `RunActionMask`'s per-(card, monster) and
+  per-(potion, monster) target grids. The monster block is mid-record, so every
+  later offset moves and no in-place reinterpretation of a v1–v3 record exists.
+  Classified against the audit's existing "any capacity change" case, which
+  already named `kMonsterCap`.
+
+  Also landed, none of it layout-visible: the `halfDead` global flag bit (25)
+  and the `monster_basically_dead` / `monster_dead_or_escaped` split, with all
+  ~26 call sites classified; `MonsterDieFn` gaining a bool veto plus a new
+  `MonsterDieAfterFn` slot; `SUICIDE`'s `triggerRelics` arm; hooks 15–17
+  (`DURING_TURN`, `ON_AFTER_USE_CARD`, `ON_INFLICT_DAMAGE`, `kHookCount` → 18);
+  opcodes 68–70 (`OBTAIN_CARD`, `CLEAR_CARD_QUEUE`, `END_PLAYER_TURN`);
+  `MONSTER_ROLL_TIMINGS` 2 `CONSTRUCTOR_BEFORE_HP`; and the spawn conventions
+  (the `draw_x` position key, `smart_position_for`, and an opt-in
+  pre-battle-on-spawn arm). Every surface lands with no producer, each with a
+  directed test driving it through a synthetic fixture.

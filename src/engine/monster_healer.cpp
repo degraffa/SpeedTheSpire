@@ -41,7 +41,7 @@ constexpr uint8_t kTemplateStep = 0;
     int32_t total = 0;
     for (uint8_t i = 0; i < s.monster_count && i < kMonsterCap; ++i) {
         const MonsterState& m = s.monsters[i];
-        if (monster_dead_or_escaped(m)) {
+        if (monster_basically_dead(m)) {
             continue;
         }
         total += static_cast<int32_t>(m.max_hp) - static_cast<int32_t>(m.hp);
@@ -99,7 +99,7 @@ namespace {
 // isDying guard, AbstractMonster.java:385-387).
 void fan_out_over_live_group(CombatState& s, uint8_t mi, uint8_t move) noexcept {
     for (uint8_t i = 0; i < s.monster_count && i < kMonsterCap; ++i) {
-        if (monster_dead_or_escaped(s.monsters[i])) {
+        if (monster_basically_dead(s.monsters[i])) {
             continue;  // `if (m.isDying || m.isEscaping) continue;`
         }
         queue_monster_move_effect(s, mi, sts::registry::kHealer, move,

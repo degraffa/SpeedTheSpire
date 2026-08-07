@@ -561,6 +561,39 @@ lifecycle rule; no in-place reinterpretation exists):
     kPublicViewFixedBytes` so a future append cannot quietly move the mask.
     `sizeof` grows 6032 → 6036; `PvMask` is 4-sized and 4-aligned, so the
     word abuts it with no padding.
+- v4 — S2.2F: `kMonsterCap` 7 → 23 (engine `SCHEMA_VERSION` 6 → 7).
+  **BREAKING, case 2 (capacity change).** The first breaking bump this view has
+  taken, and the enumerated case for it already existed — "any capacity change
+  … array strides shift every downstream offset", with `kMonsterCap` named.
+  - *What moves.* Three things inside this record are sized by the cap:
+    `monsters[kMonsterCap]` (16 more `PvMonster`, +2624 B), the
+    `monster_roll_known` / `monster_roll` pair (+32 B), and — inside the
+    embedded mask channel — `RunActionMask`'s per-(card, monster) and
+    per-(potion, monster) target grids (`sizeof(PvMask)` 376 → 616). The
+    monster block sits in the MIDDLE of the record, so `kPublicViewFixedBytes`
+    goes 5656 → 8312 and `sizeof(PublicView)` 6036 → 8932. All measured, not
+    derived.
+  - *Why no in-place reinterpretation exists.* A v3 record's `gold` sits at
+    3760 and a v4 record's at 6384; every field after the monster block is at a
+    different offset, and the mask channel — which the v2 note deliberately
+    made part of this schema, precisely so a growing mask would be reviewed —
+    changed size too. Per plan §4.1 the correct response is reanalyze-or-
+    quarantine, not a migration rule. `PublicViewLayout.V2TailHasNoImplicitPadding`
+    keeps its assert with the new boundary, so it still catches an
+    *accidental* move.
+  - *Why the engine needed it.* Three Act-2/3 mid-combat spawners (Gremlin
+    Leader, The Collector, Reptomancer) grow their record count without bound
+    as a fight lasts, and the game never removes a dead record. 23 is the
+    largest cap the 8192 B `CombatState` ceiling admits — 24 measures 8304.
+    The full table and the rejected alternatives are in `combat_state.hpp`.
+  - *Nothing was re-classified.* `MonsterState.draw_x` (new, in what was
+    `pad1`) is DERIVED — a per-encounter constant fixed by the monster's
+    identity and spawn slot, both public — so it is recoverable and gets no
+    `PvMonster` field. `CombatState.pending_obtain` (new, in what was
+    `pad_relics`) is PUBLIC but is not separately encoded: the run layer drains
+    it into `master_deck`, which IS encoded, within the same pump step, so no
+    observable `PublicView` is ever taken while it is non-zero. Both carry
+    `byte_class.hpp` rows saying so.
   - *Declared "not present" value:* **zero**, and it is a truthful reading of
     a v2 record — v2 predates ids 32..51 being drawable at all, so no v2
     record could have had a fire to report there.

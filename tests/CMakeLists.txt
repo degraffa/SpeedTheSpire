@@ -196,6 +196,16 @@ sts_add_test(large_slime_test FIXTURES)
 # wizard's charge cycle.
 sts_add_test(gremlin_test FIXTURES)
 
+# S2.2F: the shared Act-2/3 monster framework. One directed case per surface,
+# each driven through a synthetic fixture because every surface lands before its
+# first producer: the schema-v7 cap/layout pins, the halfDead liveness split
+# (targeting vs in-the-fight, and the Feed/Greed terms it makes live), the die
+# veto + post-super phase, SUICIDE's triggerRelics arm, hooks 15-17 as no-ops
+# until something binds them, opcodes 68-70, smart positioning off the new draw_x
+# key, the spawn queue-remap answer (monster_queue yes, action_queue no), the
+# opt-in pre-battle-on-spawn arm, and the CONSTRUCTOR_BEFORE_HP burn ordering.
+sts_add_test(monster_framework_test)
+
 # B3.20: Slime Boss native AI, corrected Slimed-discard Goop Spray, exact
 # split threshold/current-HP large children, full large->medium descendant
 # chain positioning, boss terminal gate, and a public advance() directed script.

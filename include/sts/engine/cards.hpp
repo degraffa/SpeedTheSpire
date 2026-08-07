@@ -372,7 +372,13 @@ static_assert(
         static_cast<uint16_t>(sts::registry::Opcode::VAMPIRE_DAMAGE) ==
             static_cast<uint16_t>(Opcode::VAMPIRE_DAMAGE) &&
         static_cast<uint16_t>(sts::registry::Opcode::BLOCK_RANDOM_MONSTER) ==
-            static_cast<uint16_t>(Opcode::BLOCK_RANDOM_MONSTER),
+            static_cast<uint16_t>(Opcode::BLOCK_RANDOM_MONSTER) &&
+        static_cast<uint16_t>(sts::registry::Opcode::OBTAIN_CARD) ==
+            static_cast<uint16_t>(Opcode::OBTAIN_CARD) &&
+        static_cast<uint16_t>(sts::registry::Opcode::CLEAR_CARD_QUEUE) ==
+            static_cast<uint16_t>(Opcode::CLEAR_CARD_QUEUE) &&
+        static_cast<uint16_t>(sts::registry::Opcode::END_PLAYER_TURN) ==
+            static_cast<uint16_t>(Opcode::END_PLAYER_TURN),
     "generated sts::registry::Opcode must stay byte-equal to interp.hpp's "
     "Opcode (design doc §6 numbering; append-only)");
 

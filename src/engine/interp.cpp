@@ -264,6 +264,73 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::HEAL:
             op_heal(s, item.tgt, item.amount);
             return;
+        case Opcode::OBTAIN_CARD: {
+            // AddCardToDeckAction.update (:83-88) -> ShowCardAndObtainEffect ->
+            // (after its VFX timer) relics.onObtainCard, souls.obtain, and
+            // finally the append to player.masterDeck.
+            //
+            // NOTHING IS WRITTEN HERE. The combat layer has no RunState, so the
+            // card is ACCRUED and the run layer drains it (run_advance.cpp)
+            // through the one add_card_to_master_deck door each pump step --
+            // which is what makes the Omamori curse gate and the onObtainCard /
+            // onMasterDeckChange relic fan-outs apply without a second
+            // implementation. Draining per STEP rather than at the combat
+            // fold-back keeps Omamori's counter decrement in its Java order:
+            // deferred to the fold it would be clobbered by the fold's own
+            // relic-counter copy.
+            //
+            // The step's `extra` (the CardId) reaches the queued item as
+            // `flags`, the same route MAKE_CARD's packed payload takes
+            // (card_play.cpp queue_effect_step). Saturates rather than
+            // overflowing: the only producer is once-per-combat, so a full
+            // accumulator is unreachable, and dropping a card beats corrupting
+            // the struct.
+            if (s.pending_obtain_count >= kPendingObtainCap) {
+                return;
+            }
+            s.pending_obtain[s.pending_obtain_count] =
+                static_cast<uint16_t>(item.flags & 0xFFFFu);
+            ++s.pending_obtain_count;
+            return;
+        }
+        case Opcode::CLEAR_CARD_QUEUE: {
+            // ClearCardQueueAction. The Java body is
+            //     for (item : cardQueue)
+            //         if (player.limbo.contains(item.card)) { exhaust; limbo.remove; }
+            //     cardQueue.clear();
+            //
+            // ONLY THE SECOND LINE APPLIES HERE, and that is a reading, not a
+            // shortcut. The Java's `player.limbo` is the AUTOPLAY holding group;
+            // `AbstractPlayer.cardInUse` is a SEPARATE field, and it is
+            // cardInUse that this engine models as its `limbo` pile
+            // (interp.hpp). So the cards the Java's loop exhausts are queued
+            // autoplay cards -- which this engine does not model at all -- while
+            // the engine's limbo holds the ONE card currently resolving. Porting
+            // the loop literally would exhaust the card the player just played.
+            //
+            // Clearing the pending plays is the whole modelled effect.
+            s.card_queue_count = 0;
+            return;
+        }
+        case Opcode::END_PLAYER_TURN: {
+            // GameActionManager.callEndTurnEarlySequence (:379-392). Four steps
+            // in the Java; the modelled residue is the last:
+            //   1. re-queue every AUTOPLAY card still in cardQueue -- no autoplay
+            //      model here, and nothing in Acts 1-3 reaches it;
+            //   2. cardQueue.clear() -- done below, and it must happen BEFORE the
+            //      sentinel so the sentinel is the next thing the pump sees;
+            //   3. exhaust everything in player.limbo -- the CLEAR_CARD_QUEUE
+            //      trap above, verbatim: that is the autoplay group, not this
+            //      engine's cardInUse limbo, so it is deliberately not ported;
+            //   4. endTurnQueued -> the turn ends once the queue drains.
+            // Step 4 is the end-turn sentinel, which until now only the player's
+            // own END_TURN verb could produce (advance.cpp). "Once the queue
+            // drains" needs no modelling: the pump already runs the action queue
+            // (step 1) ahead of the card queue (step 3).
+            s.card_queue_count = 0;
+            add_card_to_queue_bottom(s, make_end_turn_sentinel());
+            return;
+        }
         case Opcode::BLOCK_RANDOM_MONSTER:
             // The Centurion's Protect: `item.tgt` is deliberately NOT passed --
             // the op picks its own recipient from the live group (and spends the
@@ -342,18 +409,41 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
         case Opcode::SUICIDE: {
             // SuicideAction.update (SuicideAction.java:29-36): gold = 0 (no
             // per-monster gold field), currentHealth = 0, die(relicTrigger).
-            // The split passes triggerRelics == false (flags bit0 clear): no
-            // power onDeath / relic onMonsterDeath dispatch. That is now a REAL
-            // difference rather than a formality -- Spore Cloud binds ON_DEATH
-            // (powers/power_spore_cloud.cpp) and Gremlin Horn binds
-            // onMonsterDeath -- and both are correctly silent here, exactly as
-            // AbstractMonster.die(false) skips both loops (AbstractMonster.java:
-            // 925-937). Block is NOT cleared -- SuicideAction bypasses damage()'s
-            // block-break.
+            //
+            // `flags` bit 0 IS the triggerRelics selector, and BOTH arms are now
+            // live. The large-slime split passes false (bit clear): no power
+            // onDeath / relic onMonsterDeath, exactly as
+            // AbstractMonster.die(false) skips both loops (:925-937) -- and that
+            // is a real difference, not a formality, because Spore Cloud binds
+            // ON_DEATH and Gremlin Horn binds onMonsterDeath.
+            //
+            // The bit-SET arm is the 1-ARG `SuicideAction(m)` ctor, which
+            // defaults relicTrigger to TRUE (SuicideAction.java:17-19). Its
+            // producers are all Act-2/3: Fading (Transient), Explosive
+            // (Exploder), and the post-`super.die()` suicide sweeps of
+            // Reptomancer / Bronze Automaton / The Collector. It runs the SAME
+            // death edge as ordinary damage, in the same order -- the dying
+            // monster's own die() body (with its veto), then its powers'
+            // onDeath, then the player's relics' onMonsterDeath, then the
+            // post-super body.
+            //
+            // Block is NOT cleared in either arm -- SuicideAction bypasses
+            // damage()'s block-break.
             if (item.tgt >= kMonsterCap) {
                 return;
             }
+            const bool was_alive = s.monsters[item.tgt].hp > 0;
             s.monsters[item.tgt].hp = 0;
+            if ((item.flags & 1u) == 0u || !was_alive) {
+                return;  // die(false), or already dead: no fan-out
+            }
+            if (!dispatch_monster_die(s, item.tgt)) {
+                dispatch_on_death(s, item.tgt);
+                const RelicView rv = player_relics(s);
+                dispatch_relics_on_monster_death(s, rv.relics, rv.count,
+                                                 item.tgt);
+                dispatch_monster_die_after(s, item.tgt);
+            }
             return;
         }
         case Opcode::SPAWN_MONSTER:
@@ -362,7 +452,8 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             // init() aiRng roll at RESOLVE time (monster_dispatch.cpp).
             spawn_monster_at_slot(
                 s, item.tgt, static_cast<MonsterId>(item.flags & 0xFFFFu),
-                static_cast<int16_t>(item.amount));
+                static_cast<int16_t>(item.amount),
+                (item.flags & kSpawnRunPreBattle) != 0u);
             return;
         case Opcode::SET_MOVE: {
             // SetMoveAction.update (SetMoveAction.java:52-56) -> setMove:

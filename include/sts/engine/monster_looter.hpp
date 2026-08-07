@@ -66,7 +66,7 @@
 //     set synchronously inside takeTurn (:128 -> kCombatFlagMugged), the
 //     EscapeAction is queued (:130 -> the ESCAPE opcode, which sets
 //     kMonsterFlagEscaped at resolve time), and the pump's liveness predicate
-//     (monster_dead_or_escaped) then ends the battle if nobody is left in the
+//     (monster_basically_dead) then ends the battle if nobody is left in the
 //     fight. The stolen gold's two fates stay distinct in the terminal state:
 //     KILLED -- hp <= 0, die() returns stolenGold via the reward screen
 //     (addStolenGoldToRewards, :170-172, BEFORE super.die()'s power/relic

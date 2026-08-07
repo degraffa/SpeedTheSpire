@@ -30,8 +30,8 @@
 //     and can never choose PROTECT -- it furies instead, every time either arm
 //     asks. That is the whole behavioural point of the pair encounter: kill the
 //     Healer and the Centurion stops blocking and starts hitting three times.
-//     The predicate is `isDying || isEscaping` (NOT hp alone), which is
-//     monster_dead_or_escaped.
+//     The predicate is `isDying || isEscaping` (NOT hp alone, and NOT the
+//     halfDead-bearing targeting predicate), which is monster_basically_dead.
 //
 // (2) AI-RNG ACCOUNTING, AND IT IS NOT CONSTANT PER TURN. One
 //     ai_rng.random(99) at init() -- READ, not discarded, so the opening move is

@@ -64,14 +64,16 @@ namespace sts::diff {
 // MonsterState.flags widening (uint16_t -> uint32_t) grew sizeof(CombatState)
 // again and kTraceFormatV2 follows to 5. The schema-v6 PowerSlot widening
 // (a `counter` second number, 4 -> 8 bytes per slot) grows sizeof(CombatState)
-// once more and kTraceFormatV2 follows to 6. The v2 CONTAINER format
+// once more and kTraceFormatV2 follows to 6. The schema-v7 Act-2/3 monster
+// framework (kMonsterCap 7 -> 23) grows sizeof(CombatState) again and
+// kTraceFormatV2 follows to 7. The v2 CONTAINER format
 // (state_kind + both struct sizes in the header) is unchanged; a stale-sized
 // CombatState/RunState trace is refused both by the stamped version and by the
 // header's size checks. No v2/RUN goldens are committed, so nothing on disk
 // needs regeneration; the 20 v1 combat fixtures ARE regenerated (they stamp
 // kTraceFormatV1, unaffected by this tag, but carry the new state_size).
 inline constexpr uint32_t kTraceFormatV1 = 1;
-inline constexpr uint32_t kTraceFormatV2 = 6;
+inline constexpr uint32_t kTraceFormatV2 = 7;
 static_assert(kTraceFormatV2 == engine::SCHEMA_VERSION,
               "v2 trace format tag must equal the current engine::SCHEMA_VERSION");
 

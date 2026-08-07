@@ -69,7 +69,53 @@ inline constexpr int kLimboCap = 8;
 // sizeof(CombatState) went 3672 -> 3896, inside the then-4 KB ceiling; that was
 // schema bump 3 -> 4. (The flags widening later grew MonsterState to 116 B and
 // CombatState to 3928 B -- schema bump 4 -> 5, see the static_asserts below.)
-inline constexpr int kMonsterCap = 7;
+//
+// It then grew 7 -> 23 for the Act-2/3 monster wave (schema v7). Three
+// mid-combat spawners can each exceed 7 records, and NONE of them has a bound
+// that can be DERIVED -- every one grows with fight length, because the game
+// never removes a dead record:
+//   * Gremlin Leader -- 3 initial + 2 per RALLY, and RALLY is re-chosen
+//     whenever numAliveGremlins() < 2 (GremlinLeader.java:144-189). Two rallies
+//     already reach 7.
+//   * The Collector -- 1 boss + 2 initial TorchHeads, +2 per REVIVE, and REVIVE
+//     has NO once-per-combat latch (TheCollector.java:180-203).
+//   * Reptomancer -- respawns daggers whenever canSpawn() allows, and the
+//     daggers self-destruct on their second turn (Reptomancer.java:117-146), so
+//     records accumulate for as long as the fight lasts.
+// So 23 is a BUDGET pick with a hard assert behind it, not a proof. It is the
+// LARGEST value the 8192 B CombatState ceiling admits, MEASURED (compiler
+// probe over a patched copy of this header), not predicted:
+//
+//   cap | MonsterState | CombatState | headroom to 8192
+//    7  |     212      |    4696     |   +3496   (before)
+//   20  |     212      |    7456     |    +736
+//   23  |     212      |    8088     |    +104   <-- chosen
+//   24  |     212      |    8304     |    -112   (the Wave-3 grant; does NOT fit)
+//   25  |     212      |    8512     |    -320
+//
+// The Wave-3 allocation granted 24. It does not fit, and WHY the grant was one
+// too many is worth recording: the scouting estimate was made against
+// MonsterState = 116 B / CombatState = 3928 B, which are PRE-schema-v6 numbers.
+// The v6 PowerSlot widening (4 -> 8 B, over kPowerCap = 24 slots per monster)
+// took MonsterState to 212 B and made every slot nearly twice as expensive.
+// Note 24 measures 8304, not the naive 8300: the slot-count parity moves the
+// implicit tail padding by 4 B, which is exactly why these are probe results
+// and not arithmetic.
+//
+// Two options were considered and NOT taken, recorded so the next reader does
+// not re-derive them:
+//   * raising the 8192 ceiling -- it was raised 4096 -> 8192 by the project
+//     owner (design §11) and is not a number a framework task may move;
+//   * splitting kPowerCap into a smaller per-MONSTER power cap -- measured, and
+//     it does work (at cap 24, a 20-slot monster power cap gives CombatState
+//     7504; a 16-slot one, 6704), but it is a new capacity constant carrying a
+//     truncation risk on any monster that stacks many powers. Recorded for S3
+//     if capacity pressure returns.
+//
+// 23 vs 24 costs nothing real: no consumer above has a derived safe bound, so
+// both numbers are the same kind of guess, and the hard assert in
+// spawn_monster_at_slot is what actually protects the invariant.
+inline constexpr int kMonsterCap = 23;
 inline constexpr int kActionQueueCap = 64;
 inline constexpr int kCardQueueCap = 16;
 inline constexpr int kMonsterQueueCap = 5;
@@ -81,6 +127,10 @@ inline constexpr int kMonsterQueueCap = 5;
 // the ceiling was raised from 4096 on 2026-07-24). Sized to match the main
 // action ring's element type/idiom rather than trimmed to a tight bound.
 inline constexpr int kPreTurnActionQueueCap = 16;
+// In-combat master-deck obtain accumulator depth (schema v7; see the field's
+// comment on CombatState.pending_obtain). Sized to exactly consume the 7 bytes
+// that were `pad_relics`, so the accumulator costs nothing.
+inline constexpr int kPendingObtainCap = 3;
 
 // CombatState.flags BIT 0 IS RETIRED -- deliberately left unallocated.
 //
@@ -433,9 +483,11 @@ static_assert(sizeof(MonsterQueueItem) == 2);
 //     code that does not know which monster it is looking at. Each global bit
 //     is unique forever; there are only 8, by design. A candidate belongs here
 //     ONLY if some reader genuinely cannot check `monster_id` first. Today
-//     there is exactly one: ESCAPED (bit 24), read by monster_dead_or_escaped()
+//     there are exactly two: ESCAPED (bit 24), read by monster_dead_or_escaped()
 //     below from the pump, interpreter, targeting, damage and power-walk
-//     layers.
+//     layers; and HALF_DEAD (bit 25, schema v7), read by
+//     monster_basically_dead() from the pump's turn gate, the monster-queue
+//     population, applyPreTurnLogic and the combat-over test.
 //
 // The next allocator's rule: take type-scoped bits from 0-23, reusing where
 // the types provably cannot co-occur; a global bit is a design decision to be
@@ -521,9 +573,36 @@ struct MonsterState {
     uint8_t intent;                   // telegraphed next move id
     uint8_t power_count;              // live length of powers[]
     uint8_t pad0;                     // monster-type-scoped scratch byte (see above)
-    uint8_t pad1[2];                  // explicit padding (uint32_t flags makes the
-                                      // struct 4-aligned; keeps powers[] placement
-                                      // explicit and value-init-zeroed)
+    // The monster's HORIZONTAL POSITION KEY -- the `offsetX` its Java ctor was
+    // given (AbstractMonster.java:139-152). It occupies what was `pad1[2]`, so
+    // it costs ZERO bytes and moves no offset (the combat_gold-into-pad_piles
+    // precedent below).
+    //
+    // WHY IT IS STORED rather than hand-derived. `SpawnMonsterAction`'s smart
+    // positioning inserts a spawned record at
+    //     position = (count of leading records with mo.drawX < m.drawX)
+    // (SpawnMonsterAction.java:50-56), walking ALL records, dead included, and
+    // `drawX = Settings.WIDTH * 0.75f + offsetX * Settings.xScale`
+    // (AbstractMonster.java:152) is a strictly monotone affine function of
+    // `offsetX` (xScale > 0). So the insertion slot is decidable from this one
+    // integer, and comparing `offsetX` gives the SAME order as comparing the
+    // float drawX -- which is why no float belongs in CombatState.
+    //
+    // Before this field every spawner hand-derived its slots from the Java
+    // coordinates (monster_slime_boss.cpp's `spike_slot = mi` / `acid_slot =
+    // mi + 2`, whose own comment admits the boss layout "must recompute indices
+    // ... instead of reusing p/p+2 blindly"). The Act-2/3 wave lands four
+    // dagger positions, two orb positions, two torch-head positions and three
+    // gremlin positions at once; hand-derivation across all of them is the kind
+    // of thing that is got wrong silently. With the key stored, smart
+    // positioning is `smart_position_for()` below and needs no per-monster
+    // arithmetic at all.
+    //
+    // int16_t is ample: every `offsetX` in the game is a small signed constant
+    // (the widest in Acts 1-3 are Reptomancer's POSX {210, -220, 180, -250} and
+    // the Gremlin Leader's {-366, -170, -532}). It is a PURE ORDERING KEY --
+    // nothing reads it as a distance, so its units never matter.
+    int16_t draw_x;
     PowerSlot powers[kPowerCap];
 };
 
@@ -641,8 +720,9 @@ inline constexpr uint32_t kMonsterFlagByrdFlying = 0x8000u;
 // which the init/roll split does not distinguish for free.
 inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
 
-// ESCAPED -- the first (and today only) GLOBAL flag bit, bit 24, the bottom of
-// the 24-31 global region: the monster left the fight ALIVE.
+// ESCAPED -- the FIRST global flag bit, bit 24, the bottom of the 24-31 global
+// region: the monster left the fight ALIVE. (HALF_DEAD, bit 25, is the second;
+// it is declared just below.)
 // AbstractMonster.escape (AbstractMonster.java:915-919) sets `isEscaping`; the
 // escape animation then latches `escaped` (updateEscapeAnimation, :894-906).
 // This engine has no animation clock, so the two Java booleans collapse into
@@ -652,8 +732,8 @@ inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
 // caller) and stays unmodelled.
 //
 // An escaped monster keeps its positive hp -- it is NOT dying -- so every
-// liveness read that means "in the fight" must test monster_dead_or_escaped()
-// below rather than hp alone. Being global, this bit is read without checking
+// liveness read that means "in the fight" must test one of the two liveness
+// predicates below rather than hp alone. Being global, this bit is read without checking
 // monster_id, unlike every type-scoped bit above -- which is exactly why it
 // lives in the global region and must never be reused.
 //
@@ -662,24 +742,69 @@ inline constexpr uint32_t kMonsterFlagSphericSecondMove = 0x10000u;
 // widening moved it to bit 24 so the region boundary is honest.)
 inline constexpr uint32_t kMonsterFlagEscaped = 1u << 24;
 
+// HALF_DEAD -- the SECOND global flag bit, bit 25: `AbstractMonster.halfDead`.
+// A monster at 0 HP that the fight is NOT over with, and that STILL TAKES ITS
+// TURN. Two producers, both Act-2/3:
+//   * the Darkling (Darkling.java:200-243): `damage()` sets halfDead at hp <= 0
+//     while the room is `cannotLose`, telegraphs move 4 (COUNT), and a later
+//     REINCARNATE heals it back;
+//   * the Awakened One (AwakenedOne.java:281-320): the same shape, driving the
+//     phase-1 -> phase-2 REBIRTH.
+//
+// WHY GLOBAL rather than type-scoped, argued rather than defaulted (the policy
+// above requires the argument): the readers are the pump's step-5 turn gate,
+// the step-4 monster-queue population, applyPreTurnLogic and the combat-over
+// test. Every one of them asks "is this record still in the fight" WITHOUT
+// knowing which monster it is looking at -- exactly the test that put ESCAPED
+// in the global region. A type-scoped bit would force each of those to check
+// `monster_id == DARKLING || monster_id == AWAKENED_ONE` first, which is the
+// ambiguity the two-region policy exists to prevent, and it would have to grow
+// a term per future producer.
+inline constexpr uint32_t kMonsterFlagHalfDead = 1u << 25;
+
 // --- Liveness predicates ------------------------------------------------------
-// The game's monster liveness is NOT `hp > 0`: it is `isDying || isEscaping`
-// (MonsterGroup.areMonstersBasicallyDead, MonsterGroup.java:90-95) or
-// isDeadOrEscaped (AbstractCreature.java:780-790) depending on the site. This
-// engine models isDying as hp <= 0 (die() and SuicideAction both zero HP) and
-// isEscaping/escaped as kMonsterFlagEscaped, so "dead or escaped" is one shared
-// predicate. halfDead has no S1 producer (no Awakened One / Darklings), so the
-// Java's halfDead terms are constant-false here.
+// The game's monster liveness is NOT `hp > 0`, and it is NOT ONE predicate --
+// it is two, and they DISAGREE on halfDead. That disagreement is the whole
+// mechanism behind the Darkling's REINCARNATE and the Awakened One's REBIRTH:
+//
+//   AbstractCreature.isDeadOrEscaped   (:780-790) = isDying || halfDead || isEscaping
+//   MonsterGroup.areMonstersBasicallyDead (:90-95) = isDying ||             isEscaping
+//
+// A halfDead monster is therefore OUT for targeting and IN for the fight: it
+// cannot be hit or chosen at random, yet it is queued, takes its turn, loses
+// block and runs start-of-turn powers -- which is how it ever reaches the turn
+// that revives it.
+//
+// This engine models isDying as hp <= 0 (die() and SuicideAction both zero HP),
+// isEscaping/escaped as kMonsterFlagEscaped, and halfDead as
+// kMonsterFlagHalfDead. halfDead IMPLIES hp == 0 (the Java only ever sets it on
+// the hp <= 0 branch), which is the pleasant part: it makes
+// monster_dead_or_escaped ALREADY EXACT for isDeadOrEscaped with no edit, so
+// every targeting caller stayed correct when the split landed. Only the
+// basically-dead sense needed a new predicate.
 [[nodiscard]] inline bool monster_escaped(const MonsterState& m) noexcept {
     return (m.flags & kMonsterFlagEscaped) != 0u;
 }
+[[nodiscard]] inline bool monster_half_dead(const MonsterState& m) noexcept {
+    return (m.flags & kMonsterFlagHalfDead) != 0u;
+}
+// AbstractCreature.isDeadOrEscaped (:780-790). The TARGETING sense: a halfDead
+// monster counts as DEAD. Use for anything that picks or aims at a monster --
+// the target reticle, RANDOM_ENEMY, AoE fan-outs, apply-power guards.
 [[nodiscard]] inline bool monster_dead_or_escaped(const MonsterState& m) noexcept {
     return m.hp <= 0 || monster_escaped(m);
+}
+// MonsterGroup.areMonstersBasicallyDead (:90-95). The IN-THE-FIGHT sense: a
+// halfDead monster counts as ALIVE. Use for combat-over, the monster turn
+// queue, applyPreTurnLogic, and the end-of-round power walks.
+[[nodiscard]] inline bool monster_basically_dead(const MonsterState& m) noexcept {
+    return (m.hp <= 0 && !monster_half_dead(m)) || monster_escaped(m);
 }
 
 static_assert(std::is_trivially_copyable_v<MonsterState>);
 // 20 = 8 (id/hp/max_hp/block) + 4 (flags u32) + 3 (move_history) + 1 (intent)
-// + 1 (power_count) + 1 (pad0) + 2 (pad1). Was 16 + 4*kPowerCap before the
+// + 1 (power_count) + 1 (pad0) + 2 (draw_x, schema v7 -- it took over the two
+// bytes that were pad1, so this figure did NOT move). Was 16 + 4*kPowerCap before the
 // flags widening (schema v5) and 20 + 4*kPowerCap before the PowerSlot counter
 // widening (schema v6, sizeof(PowerSlot) 4 -> 8).
 static_assert(sizeof(MonsterState) == 20 + 8 * kPowerCap,
@@ -815,7 +940,48 @@ struct CombatState {
     //    20 combat fixtures carry a zeroed mirror (dispatch stays a no-op there). --
     RelicSlot relics[kRelicCap];
     uint8_t relic_count;
-    uint8_t pad_relics[7];            // explicit padding (rounds the mirror out)
+    // -- the in-combat MASTER-DECK obtain accumulator (schema v7) --
+    //
+    // Cards a monster made the player OBTAIN mid-combat, held here until the
+    // run layer drains them. The Writhing Mass's MEGA_DEBUFF
+    // (WrithingMass.java:118, `AddCardToDeckAction(CardLibrary.getCard(
+    // "Parasite").makeCopy())`) is the first and only in-combat master-deck
+    // writer in Acts 1-3 -- every other obtain path is a run-layer event or a
+    // relic pickup.
+    //
+    // WHY AN ACCUMULATOR and not a direct write: the combat layer cannot reach
+    // RunState. `execute_opcode` and the whole interp/action_queue layer take
+    // `CombatState&` only, and `advance.hpp`'s standalone entry point takes no
+    // RunState at all -- that boundary is deliberate (see combat_gold above,
+    // which solves the identical problem for Hand of Greed's in-combat gold).
+    // The OBTAIN_CARD opcode writes here; run_advance drains it through the
+    // single `add_card_to_master_deck` door, which is what makes the OMAMORI
+    // gate apply for free rather than being re-implemented.
+    //
+    // WHY DRAINED PER PUMP STEP rather than at the combat fold-back: Omamori's
+    // counter decrement happens the instant the action resolves in the Java
+    // (ShowCardAndObtainEffect's constructor, :30-45). Deferring the drain to
+    // fold_back_combat would slide that decrement past the relic-counter copy
+    // that the fold performs, which would silently CLOBBER it. Draining each
+    // step keeps the ordering honest and the timing effectively immediate.
+    //
+    // A COMBAT-ONLY replay (no run layer) simply accrues and never drains:
+    // nothing in the combat layer reads it back, so no combat behaviour depends
+    // on it -- the same property combat_gold has.
+    //
+    // Capacity 3 is generous: the only producer is once-per-combat (the Mass's
+    // `usedMegaDebuff` latch), the drain runs every pump step so the slots are
+    // reclaimed almost immediately, and the count SATURATES rather than
+    // overflowing (dropping a fourth same-step obtain is strictly better than
+    // corrupting the struct, and it is unreachable).
+    //
+    // The two fields exactly consume what was `pad_relics[7]`: 1 byte of count
+    // + 3 * 2 bytes of ids == 7. So they cost ZERO bytes, move NO offset, and
+    // `monster_hp_rng` stays exactly where it was -- the combat_gold-into-
+    // pad_piles precedent. `pending_obtain` lands 2-aligned because
+    // `relic_count` sits at an even offset (RelicSlot is 4-aligned).
+    uint8_t pending_obtain_count;                // live length of pending_obtain[]
+    uint16_t pending_obtain[kPendingObtainCap];  // CardId per pending obtain
     // The 6 further bytes RngStream's 8-byte alignment inserts before the
     // stream block. `pad_relics` above rounds the relic mirror to 8 bytes but
     // does NOT reach the stream block, so these were implicit until the T0.5
@@ -864,7 +1030,26 @@ static_assert(std::is_trivially_copyable_v<CombatState>,
 // 192 rows, MonsterState 116 -> 212 B) grew it to 4696 B -- +768, still inside
 // the budget with ~3.4 KB to spare. The combat-gold accumulator added in the
 // same bump costs nothing: it reuses the former pad_piles[2].
+//
+// SCHEMA V7 SPENT NEARLY ALL OF THE REMAINING HEADROOM. kMonsterCap 7 -> 23
+// grew it 4696 -> 8088, leaving 104 B. The other two v7 additions cost nothing
+// by construction (MonsterState.draw_x reuses pad1[2]; the pending-obtain
+// accumulator reuses pad_relics[7]). See the kMonsterCap comment at the top of
+// this file for the measured cap/size table and for why 23 rather than the
+// granted 24 -- and note what the 104 B means in practice: ONE more monster
+// slot costs 212 B, so the cap cannot rise again without either moving the
+// ceiling (an owner decision) or splitting kPowerCap into a smaller
+// per-monster power cap.
 static_assert(sizeof(CombatState) <= 8192,
               "CombatState exceeds its 8 KB budget (design doc §4.2)");
+// Pinned deliberately, the PublicView precedent: this is a byte-hashed,
+// byte-compared, fixture-serialized struct, so a size change is a schema event
+// and must be reviewed as one rather than noticed later through a fixture
+// mismatch. 4696 through v6; v7 is kMonsterCap 7 -> 23.
+static_assert(sizeof(CombatState) == 8088,
+              "sizeof(CombatState) moved -- this is a SCHEMA CHANGE: bump "
+              "SCHEMA_VERSION, add a schema.hpp version-log entry, regenerate "
+              "the 20 combat fixtures via tools/fixture_gen, and re-check "
+              "byte_class.hpp's tiling table");
 
 }  // namespace sts::engine

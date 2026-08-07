@@ -106,7 +106,21 @@ namespace sts::engine {
 //             with `event_flags_hi == 0`, which is exactly "no Act-2/3 event
 //             has fired" -- true of every v2 record, since v2 predates their
 //             being drawable at all. Additive case 2.
-inline constexpr uint32_t PUBLIC_VIEW_VERSION = 3;
+// v4: S2.2F -- kMonsterCap 7 -> 23 (engine schema v7). THE FIRST BREAKING
+//             CHANGE: this is NOT a tail append. Three things inside this
+//             record are sized by kMonsterCap -- `monsters[kMonsterCap]`,
+//             the `monster_roll_known` / `monster_roll` pair, and (inside the
+//             embedded mask channel) RunActionMask's per-(card, monster) and
+//             per-(potion, monster) target grids. The monster block sits in the
+//             MIDDLE of the record, so every offset after it MOVES, the mask
+//             channel included: kPublicViewFixedBytes 5656 -> 8312,
+//             sizeof(PvMask) 376 -> 616, sizeof(PublicView) 6036 -> 8932.
+//             A v3 record therefore CANNOT be reinterpreted as v4 -- neither
+//             additive case applies, and a consumer holding v3 observations
+//             must re-encode rather than reread. This is the case the audit's
+//             schema-evolution note calls breaking, and the version stamp is
+//             what makes it detectable rather than silent.
+inline constexpr uint32_t PUBLIC_VIEW_VERSION = 4;
 
 // --- PvCard -----------------------------------------------------------------
 
@@ -549,20 +563,28 @@ static_assert(std::is_trivially_copyable_v<PublicView>,
 // The layout-walk static_asserts in tests/public_view_test.cpp prove there is
 // no implicit padding anywhere in this figure.
 // v3 tail: 4 (event_flags_hi), appended after the mask channel.
-inline constexpr std::size_t kPublicViewFixedBytes = 5656;
+// v4 (S2.2F): kMonsterCap 7 -> 23 moves this. The monster block grows
+// 7 -> 23 PvMonster (164 B each, +2624) and the two kMonsterCap-sized roll
+// arrays grow +32, so the fixed part goes 5656 -> 8312. Measured, not derived.
+inline constexpr std::size_t kPublicViewFixedBytes = 8312;
 static_assert(sizeof(PublicView) ==
                   kPublicViewFixedBytes + sizeof(PvMask) + sizeof(uint32_t),
               "PublicView size changed -- bump PUBLIC_VIEW_VERSION, update the "
               "audit table (docs/public-view-audit.md) and its schema-evolution "
               "note, and re-check the layout-walk asserts");
-static_assert(sizeof(PublicView) == 6036,
+static_assert(sizeof(PublicView) == 8932,
               "PublicView size changed -- see the assert above. This literal is "
               "pinned deliberately: a RunActionMask that grows is a public-view "
               "schema change too, and must be reviewed like any other. It was "
-              "6032 through v2; v3 tail-appended event_flags_hi");
+              "6032 through v2; v3 tail-appended event_flags_hi (6036); v4 "
+              "grew kMonsterCap 7 -> 23, which moves the monster block, the "
+              "roll arrays AND the mask channel's target grids (8932)");
 static_assert(offsetof(PublicView, action_mask) == kPublicViewFixedBytes,
-              "the v1+v2 fixed part must still end exactly where it did -- a "
-              "tail append may not move the mask channel");
+              "the fixed part must end exactly where kPublicViewFixedBytes "
+              "says. A TAIL APPEND may never move the mask channel; a "
+              "kMonsterCap change moves it by construction, which is precisely "
+              "why that is a BREAKING public-view version bump and not an "
+              "additive one");
 
 // --- encode_public_view ------------------------------------------------------
 

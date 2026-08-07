@@ -26,7 +26,7 @@ namespace {
 // exactly this predicate, so the two collapse into one walk.
 [[nodiscard]] bool battle_is_ending(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (!monster_dead_or_escaped(s.monsters[i])) {
+        if (!monster_basically_dead(s.monsters[i])) {
             return false;
         }
     }

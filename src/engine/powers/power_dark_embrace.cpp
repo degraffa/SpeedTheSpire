@@ -18,9 +18,19 @@ void power_native_dark_embrace(CombatState& s, Hook hook,
     if (hook != Hook::ON_EXHAUST) {
         return;
     }
+    // This walk was `hp > 0`, which did NOT match the comment above it and was
+    // a real divergence -- found while classifying the liveness call sites for
+    // the halfDead split, not by a failing test. `areMonstersBasicallyDead` is
+    // `isDying || isEscaping` per monster, so an ESCAPED monster (positive hp,
+    // gone from the fight) made the old test answer "still fighting" and Dark
+    // Embrace kept drawing after a Looter left. Two neighbouring sites --
+    // relics_rare.cpp's Dead Branch and power_magnetism.cpp -- both cite Dark
+    // Embrace as using "the same gate"; that was false until now.
+    // monster_basically_dead is the shared predicate, and it gets the halfDead
+    // term right for free.
     bool any_live = false;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        any_live = any_live || s.monsters[i].hp > 0;
+        any_live = any_live || !monster_basically_dead(s.monsters[i]);
     }
     if (!any_live) {
         return;

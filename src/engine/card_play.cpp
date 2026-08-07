@@ -342,7 +342,7 @@ void queue_cancelled_autoplay_filing(CombatState& s,
 
 [[nodiscard]] bool monsters_basically_dead(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (!monster_dead_or_escaped(s.monsters[i])) {
+        if (!monster_basically_dead(s.monsters[i])) {
             return false;
         }
     }
@@ -409,8 +409,11 @@ uint8_t roll_random_target(CombatState& s) noexcept {
     // pick uniformly among the monsters still IN the fight via one cardRandomRng
     // draw over [0, aliveCount-1] (inclusive). The Java's aliveOnly filter skips
     // `halfDead || isDying || isEscaping` (:164), so an escaped monster is not
-    // in the candidate list -- monster_dead_or_escaped is that exact test here
-    // (halfDead has no S1 producer).
+    // in the candidate list -- monster_dead_or_escaped is that exact test here.
+    // It KEEPS the targeting predicate now that halfDead is live: halfDead
+    // implies hp == 0, so a half-dead monster is already excluded, which is
+    // right -- it cannot be picked as a random target even though it is still
+    // in the fight.
     uint8_t alive[kMonsterCap];
     int n = 0;
     for (uint8_t i = 0; i < s.monster_count; ++i) {

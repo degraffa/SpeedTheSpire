@@ -77,9 +77,14 @@ enum class Hook : uint8_t {
     ON_DEATH = 13,                  // actor death
     ON_POWER_REMOVED = 14,          // a power's own onRemove, at the removal
                                     // choke point (remove_slot_at)
+    DURING_TURN = 15,               // applyTurnPowers, right after a monster's
+                                    // takeTurn
+    ON_AFTER_USE_CARD = 16,         // UseCardAction.update -- NOT the ctor
+                                    // fan-out that ON_USE_CARD models
+    ON_INFLICT_DAMAGE = 17,         // the ATTACKER's powers, after wasHPLost
 };
 
-inline constexpr int kHookCount = 15;
+inline constexpr int kHookCount = 18;
 
 // --- HookContext ------------------------------------------------------------
 //
@@ -114,13 +119,15 @@ struct HookContext {
                                          // damage_type above it is a transient
                                          // dispatch field, in NO serialized struct, so
                                          // it has no fixture impact.
-    uint8_t damage_type = 0;             // for on_attacked / was_hp_lost: the incoming
+    uint8_t damage_type = 0;             // for on_attacked / was_hp_lost /
+                                         // on_inflict_damage: the incoming
                                          // DamageInfo.DamageType (interp.hpp DamageType;
                                          // 0 == NORMAL). Plated Armor's wasHPLost reads
                                          // it (no decrement on THORNS/HP_LOSS). Transient
                                          // dispatch field -- NOT part of any serialized
                                          // struct, so no fixture impact.
-    bool source_null = false;            // for on_attacked / was_hp_lost: the incoming
+    bool source_null = false;            // for on_attacked / was_hp_lost /
+                                         // on_inflict_damage: the incoming
                                          // DamageInfo had a NULL owner (interp.hpp
                                          // kDamageNullSource -- Explosive Potion's
                                          // matrix). `source` still reads the queue
@@ -275,6 +282,74 @@ void dispatch_on_death(CombatState& state, uint8_t actor) noexcept;
 void dispatch_on_power_removed(CombatState& state, uint8_t owner,
                                const PowerSlot& slot,
                                uint8_t slot_index) noexcept;
+
+// --- The three S2.2F Act-2/3 framework hooks ---------------------------------
+//
+// All three land as DISPATCH SITES with no binder. That is the point of the
+// task: four monster batches run in parallel behind this, and each needs one of
+// these fired from a place only the framework can decide. A hook with no binder
+// is a genuine no-op -- dispatch_actor_powers skips any power with no binding
+// for it -- so every landed fixture is byte-identical.
+
+// duringTurn (AbstractCreature.applyTurnPowers, :535-539), invoked from
+// GameActionManager.java:322-323 as `m.takeTurn(); m.applyTurnPowers();`.
+// SYNCHRONOUS and immediately after the monster's turn body, so anything a body
+// queues here lands BEHIND everything takeTurn queued -- the trailing
+// RollMoveAction included. Walks the ACTING monster's own powers, in slot order;
+// no other actor participates.
+//
+// The two binders coming are ExplosivePower (the Exploder's 3-turn countdown,
+// then SuicideAction + 30 THORNS to the player) and FadingPower (the
+// Transient's). Both are countdown-then-self-destruct, which is why the "after
+// takeTurn" half matters: the monster attacks on the turn it dies.
+//
+// No-op unless a power on the acting monster binds DURING_TURN.
+void dispatch_during_turn(CombatState& state, uint8_t monster_index) noexcept;
+
+// onAfterUseCard (UseCardAction.update, UseCardAction.java:79-88).
+//
+// DISTINCT FROM ON_USE_CARD (1) IN BOTH RESPECTS, and conflating them is the
+// mistake this comment exists to prevent. ON_USE_CARD is the UseCardAction
+// CONSTRUCTOR fan-out (:20-45) -- it runs BEFORE the played card's own actions
+// are queued, and it walks player powers -> player relics -> hand/discard/draw
+// cards -> monster powers. This one runs from update(), AFTER the card's program
+// has resolved, and it walks PLAYER POWERS then MONSTER POWERS only: no relics,
+// no card-level stages. A counter bound to the wrong one counts at the wrong
+// moment and in the wrong order.
+//
+// Binders coming: SlowPower (Giant Head -- one stack per card played) and
+// TimeWarpPower (Time Eater -- the 12th card ends the player's turn).
+//
+// No-op unless a power binds ON_AFTER_USE_CARD.
+void dispatch_on_after_use_card(CombatState& state, uint8_t played_pool_index,
+                                uint16_t card_id) noexcept;
+
+// onInflictDamage (AbstractPower.onInflictDamage), fired from
+// AbstractPlayer.damage (:1449-1453) over `info.owner.powers` -- the ATTACKER's
+// list, which is what separates it from WAS_HP_LOST (12), whose walk is the
+// VICTIM's. Folding one into the other would use the wrong power list and lose
+// the ordering guarantee below.
+//
+// POSITION IS LOAD-BEARING. It sits inside the `damageAmount > 0` block, after
+// the victim's powers' and relics' wasHPLost and before the currentHealth write:
+//     powers->onLoseHp, relics->onLoseHp,
+//     powers->wasHPLost, relics->wasHPLost,
+//     info.owner.powers->onInflictDamage,      <-- here
+//     currentHealth -= damageAmount
+// This engine writes HP before dispatching wasHPLost (it follows AbstractCreature
+// ordering), so the equivalent position is immediately after dispatch_was_hp_lost.
+//
+// `amount` is the Java's `damageAmount` -- the post-block, post-relic-modifier
+// damage, NOT the clamped HP delta wasHPLost uses. Player-victim only: the Java
+// has this call in AbstractPlayer.damage and nowhere else.
+//
+// Binder coming: PainfulStabsPower (Book of Stabbing -- one Wound per hit).
+//
+// No-op unless a power on the attacker binds ON_INFLICT_DAMAGE.
+void dispatch_on_inflict_damage(CombatState& state, uint8_t attacker,
+                                uint8_t victim, int32_t amount,
+                                uint8_t damage_type = 0,
+                                bool source_null = false) noexcept;
 
 // --- APPLY_POWER interception (opposite sides of the opcode) -----------------
 

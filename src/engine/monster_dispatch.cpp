@@ -443,11 +443,28 @@ void dispatch_on_spawn_monster_relics(CombatState& state,
 
 }  // namespace
 
+uint8_t smart_position_for(const CombatState& state, int16_t draw_x) noexcept {
+    uint8_t position = 0;
+    for (uint8_t i = 0; i < state.monster_count; ++i) {
+        // `if (!(m.drawX > mo.drawX)) break;` -- strict, and it BREAKS rather
+        // than continuing, so an out-of-order list stops the walk early exactly
+        // as the Java's does.
+        if (!(draw_x > state.monsters[i].draw_x)) {
+            break;
+        }
+        ++position;
+    }
+    return position;
+}
+
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
-                           int16_t hp) noexcept {
+                           int16_t hp, bool run_pre_battle) noexcept {
     assert(state.monster_count < kMonsterCap &&
-           "spawn_monster_at_slot: monster record overflow (kMonsterCap sized "
-           "for the fully-split Slime Boss, combat_state.hpp)");
+           "spawn_monster_at_slot: monster record overflow. kMonsterCap is 23 "
+           "-- the largest the CombatState size ceiling admits, NOT a derived "
+           "bound: Gremlin Leader, The Collector and Reptomancer all grow their "
+           "record count without limit as a fight lasts. See the kMonsterCap "
+           "comment in combat_state.hpp before raising it.");
     if (slot > state.monster_count) {
         slot = state.monster_count;  // defensive clamp (addMonster clamps < 0)
     }
@@ -492,6 +509,18 @@ void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
     //     computed when the move's effects are queued at take-turn time
     //     (queue_monster_move_effects above), which is strictly after this.
     dispatch_on_spawn_monster_relics(state, slot);
+
+    // SummonGremlinAction.update runs the child's usePreBattleAction at isDone
+    // (a summoned Gremlin Warrior's Angry power); SpawnMonsterAction does not.
+    // Opt-in for that reason -- see the header. It runs AFTER the relic fan-out
+    // above for the same forced-and-equivalent reason the fan-out runs after
+    // init: the record must exist and be fully written first.
+    if (run_pre_battle) {
+        const MonsterPreBattleFn pre = monster_pre_battle_fn(id);
+        if (pre != nullptr) {
+            pre(state, slot);
+        }
+    }
 }
 
 void on_monster_damaged(CombatState& state, uint8_t monster_index,
@@ -798,13 +827,47 @@ MonsterDieFn monster_die_fn(MonsterId id) noexcept {
     }
 }
 
-void dispatch_monster_die(CombatState& state, uint8_t monster_index) noexcept {
+// The POST-`super.die()` half. EMPTY TODAY, and that is a recorded reading, not
+// an oversight: no Act-1 monster has content on that side of the line. Every
+// consumer named in the header's survey -- Reptomancer, Bronze Automaton, The
+// Collector, Awakened One -- is Act-2/3 content that has not landed yet. The
+// slot exists now because the four batches that need it run in parallel and
+// must not each invent their own.
+MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept {
+    static_assert(sts::registry::manifest::kMonstersCount == 34,
+                  "new monster: does its Java die() override do anything AFTER "
+                  "`super.die()`? Read the method. Content before super.die() "
+                  "belongs in monster_die_fn; content after it belongs here, "
+                  "and the difference is load-bearing -- Reptomancer's post-super "
+                  "suicide sweep skips itself only because super.die() has "
+                  "already set isDying.");
+    switch (id) {
+        default:
+            return nullptr;  // no post-super content (or no die() at all)
+    }
+}
+
+bool dispatch_monster_die(CombatState& state, uint8_t monster_index) noexcept {
+    if (monster_index >= kMonsterCap) {
+        return false;
+    }
+    const MonsterId id =
+        static_cast<MonsterId>(state.monsters[monster_index].monster_id);
+    const MonsterDieFn fn = monster_die_fn(id);
+    if (fn == nullptr) {
+        return false;  // presentation-only die(), or none: never a veto
+    }
+    return fn(state, monster_index);
+}
+
+void dispatch_monster_die_after(CombatState& state,
+                                uint8_t monster_index) noexcept {
     if (monster_index >= kMonsterCap) {
         return;
     }
     const MonsterId id =
         static_cast<MonsterId>(state.monsters[monster_index].monster_id);
-    const MonsterDieFn fn = monster_die_fn(id);
+    const MonsterDieAfterFn fn = monster_die_after_fn(id);
     if (fn != nullptr) {
         fn(state, monster_index);
     }
@@ -882,22 +945,35 @@ void burn_unspawned_ctor_rolls(CombatState& state, MonsterId id) noexcept {
     if (def == nullptr) {
         return;
     }
-    // setHp: one inclusive draw over the A7 column at the skeleton A20 --
-    // identical bounds to the roll the candidate would have kept.
+    // THREE PHASES, IN THE JAVA'S ORDER. This is a two-pass walk around the
+    // setHp draw rather than one filtered loop, because the roll timings are
+    // ordered and the stream position is the entire product of this function.
+    //
+    // A CONSTRUCTOR_BEFORE_HP roll lives in the `super(...)` ARGUMENT LIST,
+    // which Java evaluates before the constructor body -- so it draws BEFORE
+    // setHp does (OrbWalker.java:53-58). Filtering it in with the AFTER rolls
+    // would burn the same NUMBER of draws in the WRONG ORDER, which is
+    // invisible in a solo encounter and wrong in every group one.
+    const auto burn = [&](sts::registry::MonsterRollTiming when) {
+        for (uint8_t i = 0; i < def->roll_count; ++i) {
+            const sts::registry::MonsterRollDef& r = def->rolls[i];
+            if (r.timing == when &&
+                r.stream == sts::registry::MonsterRollStream::MONSTER_HP) {
+                (void)random(state.monster_hp_rng, r.min(kMonsterAscension),
+                             r.max(kMonsterAscension));
+            }
+        }
+    };
+    // 1. super-argument draws, ahead of the ctor body.
+    burn(sts::registry::MonsterRollTiming::CONSTRUCTOR_BEFORE_HP);
+    // 2. setHp: one inclusive draw over the A7 column at the skeleton A20 --
+    //    identical bounds to the roll the candidate would have kept.
     (void)random(state.monster_hp_rng, def->hp_min(kMonsterAscension),
                  def->hp_max(kMonsterAscension));
-    // Constructor-time extras on the same stream (Louse biteDamage,
-    // LouseNormal.java:60 / LouseDefensive.java:63). PRE_BATTLE rolls are not
-    // ctor draws and never fire for a discarded candidate.
-    for (uint8_t i = 0; i < def->roll_count; ++i) {
-        const sts::registry::MonsterRollDef& r = def->rolls[i];
-        if (r.timing ==
-                sts::registry::MonsterRollTiming::CONSTRUCTOR_AFTER_HP &&
-            r.stream == sts::registry::MonsterRollStream::MONSTER_HP) {
-            (void)random(state.monster_hp_rng, r.min(kMonsterAscension),
-                         r.max(kMonsterAscension));
-        }
-    }
+    // 3. constructor-body extras on the same stream (Louse biteDamage,
+    //    LouseNormal.java:60 / LouseDefensive.java:63). PRE_BATTLE rolls are not
+    //    ctor draws and never fire for a discarded candidate.
+    burn(sts::registry::MonsterRollTiming::CONSTRUCTOR_AFTER_HP);
 }
 
 void spawn_group_trace(CombatState& state,

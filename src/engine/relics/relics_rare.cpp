@@ -283,7 +283,7 @@ void relic_native_dead_branch(CombatState& s, RelicHook hook,
     }
     bool any_live = false;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        any_live = any_live || !monster_dead_or_escaped(s.monsters[i]);
+        any_live = any_live || !monster_basically_dead(s.monsters[i]);
     }
     if (!any_live) {
         return;

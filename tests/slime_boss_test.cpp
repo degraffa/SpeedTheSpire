@@ -289,13 +289,19 @@ TEST(SlimeBossSplit, DescendantChainEndsOnlyAfterAllFourMediumsDie) {
     execute_opcode(s, damage_item(4, 20));
     drain_actions(s);
     ASSERT_FALSE(pump_selected_monster(s, 4));
-    ASSERT_EQ(s.monster_count, kMonsterCap);
-    const MonsterId expected[kMonsterCap] = {
+    // 7 == the fully-split Slime Boss's RECORD COUNT (1 boss + 2 Large + 4
+    // Medium), a property of this fight and not of the array bound. It was
+    // written as kMonsterCap while the two happened to coincide; the schema-v7
+    // growth to 23 separated them, and the literal is the honest number -- the
+    // split chain produces exactly these 7 records at any cap.
+    constexpr uint8_t kFullySplitBossRecords = 7;
+    ASSERT_EQ(s.monster_count, kFullySplitBossRecords);
+    const MonsterId expected[kFullySplitBossRecords] = {
         MonsterId::SPIKE_SLIME_MEDIUM, MonsterId::SPIKE_SLIME_LARGE,
         MonsterId::SPIKE_SLIME_MEDIUM, MonsterId::ACID_SLIME_MEDIUM,
         MonsterId::SLIME_BOSS, MonsterId::ACID_SLIME_LARGE,
         MonsterId::ACID_SLIME_MEDIUM};
-    for (uint8_t i = 0; i < kMonsterCap; ++i) {
+    for (uint8_t i = 0; i < kFullySplitBossRecords; ++i) {
         EXPECT_EQ(s.monsters[i].monster_id,
                   static_cast<uint16_t>(expected[i]))
             << "slot " << static_cast<int>(i);

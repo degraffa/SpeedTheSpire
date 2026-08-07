@@ -213,6 +213,15 @@ enum class Opcode : uint16_t {
                               // slime ctor takes newHealth directly -- NO
                               // monster_hp_rng draw, AcidSlime_M.java:65-66 /
                               // AbstractMonster.java:139,150).
+                              //
+                              // `flags` bit 16 (kSpawnRunPreBattle) additionally
+                              // runs the spawned monster's usePreBattleAction.
+                              // It is a BIT and not the default because the two
+                              // Java spawn actions genuinely differ:
+                              // SpawnMonsterAction does NOT call it, while
+                              // SummonGremlinAction.update DOES, at isDone --
+                              // which is how a summoned Gremlin Warrior gets its
+                              // Angry power and a Bronze Orb does not.
     SET_MOVE = 29,            // set monsters[tgt]'s decided move to `amount` with
                               // intent flags low8 -- pushes move history exactly
                               // like a direct setMove (SetMoveAction.java:52-56 ->
@@ -289,7 +298,7 @@ enum class Opcode : uint16_t {
                               // Java's isEscaping + the animation's `escaped`
                               // latch (updateEscapeAnimation:894-906) collapse
                               // into the one bit; the pump's liveness predicate
-                              // (monster_dead_or_escaped) then ends the battle
+                              // (monster_basically_dead) then ends the battle
                               // when nobody is left in the fight, exactly as
                               // :902-904's areMonstersDead-and-!cannotLose check
                               // does. Emitted natively (monster_looter.cpp);
@@ -467,10 +476,9 @@ enum class Opcode : uint16_t {
                               // The Java gate is
                               //   !(!isDying && currentHealth > 0 || halfDead ||
                               //     hasPower("Minion"))
-                              // (:37). Both of the last two terms are
-                              // STRUCTURALLY constant-false in S1 and are
-                              // documented at the site rather than invented as
-                              // state -- see op_damage_greed.
+                              // (:37). halfDead is LIVE (kMonsterFlagHalfDead);
+                              // the Minion term is still inert -- there is no
+                              // Minion power row yet. See op_damage_greed.
     // Wave-C track 1, relic-tail stage. 63-64 out of the 63-66 block that stage
     // owns; 65-66 are RELEASED unspent, and 60-62 stay the potions stage's.
     REMOVE_DEBUFFS = 63,      // Orange Pellets / RemoveDebuffsAction.update
@@ -661,7 +669,46 @@ enum class Opcode : uint16_t {
                               // `tgt` on the queued item is IGNORED (the op
                               // resolves its own); the authored step sets it to
                               // src, which is also the fallback recipient.
+
+    // --- S2.2F (the shared Act-2/3 monster framework) ---
+    // 68-70 are this task's whole grant; 71-72 are S2.24's and stay unissued.
+    // All three land with NO producer -- they exist so the four monster batches
+    // behind this framework do not each invent their own.
+    OBTAIN_CARD = 68,         // AddCardToDeckAction (:83-88): put a card into the
+                              // MASTER DECK, mid-combat. `extra` = CardId; no
+                              // amount, no target.
+                              //
+                              // The body does NOT write the deck -- it cannot:
+                              // the combat layer has no RunState. It appends to
+                              // CombatState.pending_obtain and the run layer
+                              // drains that each pump step through the single
+                              // add_card_to_master_deck door, which is what makes
+                              // the Omamori curse gate apply without being
+                              // re-implemented. Consumer: the Writhing Mass's
+                              // MEGA_DEBUFF Parasite (S2.26).
+    CLEAR_CARD_QUEUE = 69,    // ClearCardQueueAction: drop every PENDING card
+                              // play. The Awakened One addToTop's it at its
+                              // phase transition (AwakenedOne.java:301) so the
+                              // cards queued behind the killing blow never
+                              // resolve. No operands.
+                              //
+                              // The Java body ALSO exhausts queued cards sitting
+                              // in `player.limbo` -- a field this engine does NOT
+                              // model as its limbo pile (that is cardInUse). See
+                              // the body; a literal port destroys the card being
+                              // played.
+    END_PLAYER_TURN = 70,     // callEndTurnEarlySequence (:379-392): end the
+                              // player's turn from inside a power. Before this
+                              // the ONLY producer of the end-turn sentinel was
+                              // the player's own END_TURN verb. No operands.
+                              // Consumer: Time Warp's 12th card (S2.28).
 };
+
+// --- SPAWN_MONSTER field encoding --------------------------------------------
+// `flags` low 16 bits carry the MonsterId. Bit 16 asks the spawn to run the
+// spawned monster's usePreBattleAction after its init (SummonGremlinAction's
+// behaviour; SpawnMonsterAction's is to leave it alone).
+inline constexpr uint32_t kSpawnRunPreBattle = 1u << 16;
 
 // --- CONDITIONAL_DRAW field encoding -----------------------------------------
 // `amount` is the number of cards to draw; `flags` low byte carries the

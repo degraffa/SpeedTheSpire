@@ -971,10 +971,10 @@ void op_play_card(CombatState& s, uint8_t target, int source_index,
 // (Anger's copy) or the exhaust pile (Fiend Fire's hand exhausts), and the
 // Strange Spoon boolean sits AFTER the program's cardRandomRng draws in the
 // stream. In update() order:
-//   :79-88   onAfterUseCard fan-out -- NO S1 binder exists (the only binders in
-//            the game are BeatOfDeath / Rebound / Slow / TimeMaze / TimeWarp,
-//            all out of S1 scope), so the seam is this comment; a future binder
-//            dispatches here, between the program's actions and the filing.
+//   :79-88   onAfterUseCard fan-out -- dispatch_on_after_use_card, between the
+//            program's actions and the filing. PLAYER powers then MONSTER
+//            powers, no relics (that participant list is what makes it a
+//            different hook from ON_USE_CARD, not just a different moment).
 //   :89-94   purgeOnUse: the instance poofs -- leaves limbo, lands in NO pile.
 //   :95-108  POWER: hand.empower -- likewise lands in NO pile.
 //   :109-113 Strange Spoon: an exhausting non-POWER play rolls ONE
@@ -1010,6 +1010,13 @@ void op_use_card(CombatState& s, const ActionQueueItem& item) noexcept {
     // exhaustOnUseOnce below, which :132 clears only on the filing path.
     s.card_pool[pi].flags = static_cast<uint16_t>(
         s.card_pool[pi].flags & ~card_flag_bit(CardFlag::FREE_TO_PLAY_ONCE));
+    // :79-88 onAfterUseCard -- the seam the comment above reserved. The "NO S1
+    // binder exists" paragraph is DELETED rather than amended: the prerequisite
+    // arrived (conventions section 8), and Slow and Time Warp are the binders it
+    // named. It dispatches HERE, between the program's actions (already resolved
+    // -- useCard addToBottom'd this item last) and the purge / POWER / Strange
+    // Spoon / filing decisions below, which is exactly the Java's order.
+    dispatch_on_after_use_card(s, pi, s.card_pool[pi].card_id);
     bool to_exhaust =
         has_card_flag(s.card_pool[pi].flags, CardFlag::EXHAUST) ||
         exhaust_once;

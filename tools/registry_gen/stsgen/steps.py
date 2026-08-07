@@ -110,6 +110,11 @@ GENERAL_OPS = frozenset({
     # domain's queue helper. GENERAL_OPS, not CARD_CONTEXT_OPS: it is authored in
     # a MONSTER move program, where there is no played card to stamp from.
     "BLOCK_RANDOM_MONSTER",
+    # S2.2F. Authored in a monster move program (the Writhing Mass's
+    # MEGA_DEBUFF), and its only operand is a CardId in `extra` -- there is no
+    # pile to split and nothing to stamp from a played card, so GENERAL_OPS
+    # rather than CARD_CONTEXT_OPS, exactly as BLOCK_RANDOM_MONSTER above.
+    "OBTAIN_CARD",
 })
 
 # CARD_CONTEXT_OPS: the queued item is COMPLETED from the played card's instance
@@ -142,6 +147,12 @@ ENGINE_EMITTED_OPS = frozenset({
     # USE_CARD's operand is the played card's runtime pool index; emitted only
     # by resolve_card_play (card_play.cpp) as the queued UseCardAction.update.
     "USE_CARD",
+    # S2.2F. CLEAR_CARD_QUEUE and END_PLAYER_TURN are emitted only from native
+    # bodies (the Awakened One's damage() override and Time Warp's
+    # onAfterUseCard); neither has operands a row could author, and neither is a
+    # verb any registry program should be able to reach.
+    "CLEAR_CARD_QUEUE",
+    "END_PLAYER_TURN",
 })
 
 # Every opcode must land in exactly one group: a new opcode is then a DELIBERATE
@@ -220,7 +231,7 @@ MONSTER_MOVE_OPS = frozenset({
     "NOP", "DAMAGE", "BLOCK", "LOSE_HP",
     "APPLY_POWER", "REMOVE_POWER", "REDUCE_POWER", "MAKE_CARD",
     "VAMPIRE_DAMAGE",
-    "BLOCK_RANDOM_MONSTER", "HEAL",
+    "BLOCK_RANDOM_MONSTER", "HEAL", "OBTAIN_CARD",
 })
 MONSTER_DOMAIN = StepDomain("monsters", "monsters.yaml", MONSTER_MOVE_OPS)
 
@@ -386,6 +397,17 @@ def pack_extra(domain: StepDomain, owner: str, op: str, step: dict,
             raise fail(f"{owner} CHOOSE_CARD 'card_type' is only meaningful for "
                        f"choose: draw_to_hand")
         return extra
+
+    if op == "OBTAIN_CARD":
+        # `extra` = CardId, and nothing else. Unlike MAKE_CARD there is no pile
+        # (the card goes to the MASTER DECK, not to a combat pile) and no
+        # upgraded-copy bit (AddCardToDeckAction takes the card it was handed;
+        # the Writhing Mass hands it a base `CardLibrary.getCard("Parasite")
+        # .makeCopy()`).
+        csym = step.get("card")
+        if csym not in cards:
+            raise fail(f"{owner} OBTAIN_CARD references unknown card {csym!r}")
+        return cards[csym]
 
     if op == "MAKE_CARD":
         # `extra` = CardId | (CardPile << 16) | (upgraded-copy << 24).

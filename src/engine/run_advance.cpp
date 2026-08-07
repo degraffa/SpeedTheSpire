@@ -301,7 +301,7 @@ bool combat_potion_legal(const RunController& rc, uint8_t slot,
     bool any_in_fight = false;
     for (uint8_t m = 0; m < rc.combat.monster_count; ++m) {
         any_in_fight =
-            any_in_fight || !monster_dead_or_escaped(rc.combat.monsters[m]);
+            any_in_fight || !monster_basically_dead(rc.combat.monsters[m]);
     }
     if (!any_in_fight) {
         return false;
@@ -466,7 +466,7 @@ void dispatch_run_relics_on_use_potion(RunController& rc) noexcept {
     }
 }
 
-// Mirrors advance.cpp's fill_result: "in the fight" is monster_dead_or_escaped
+// Mirrors advance.cpp's fill_result: "in the fight" is monster_basically_dead
 // (an escaped monster keeps positive hp but ends the battle like a dead one),
 // and a player escape is terminal without being a loss.
 void fill_combat_result(const CombatState& s, StepResult& r) noexcept {
@@ -474,7 +474,7 @@ void fill_combat_result(const CombatState& s, StepResult& r) noexcept {
     const bool player_escaped = (s.flags & kCombatFlagPlayerEscaped) != 0u;
     bool any_in_fight = false;
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        any_in_fight = any_in_fight || !monster_dead_or_escaped(s.monsters[m]);
+        any_in_fight = any_in_fight || !monster_basically_dead(s.monsters[m]);
     }
     r = StepResult{};
     r.terminal = player_dead || player_escaped || !any_in_fight;
@@ -690,6 +690,31 @@ void enter_combat_reward(RunController& rc, RunCombatOutcome outcome,
 }
 
 void finish_combat_after_action(RunController& rc, StepResult& res) noexcept;
+
+// Drain CombatState.pending_obtain into the master deck.
+//
+// The OBTAIN_CARD opcode (AddCardToDeckAction) cannot write the deck itself:
+// the combat layer takes CombatState& and never sees a RunState. So it accrues,
+// and this is the other half -- run every accrued card through
+// add_card_to_master_deck, the single acquisition door, which is what applies
+// the Omamori curse gate and the onObtainCard / onMasterDeckChange relic
+// fan-outs without a second implementation of any of them.
+//
+// CALLED AFTER EVERY COMBAT-PHASE STEP, not at the combat fold-back, and the
+// difference is not cosmetic. Omamori's counter decrement happens in the Java at
+// the moment the action resolves (ShowCardAndObtainEffect's constructor,
+// :30-45). Deferred to fold_back_combat it would land AFTER the fold's
+// relic-counter copy (combat mirror -> run), which would silently clobber it.
+//
+// Draining per step also keeps the accumulator's depth requirement at "one
+// step's worth", which is why kPendingObtainCap == 3 is ample.
+void drain_pending_obtains(RunController& rc) noexcept {
+    for (uint8_t i = 0; i < rc.combat.pending_obtain_count; ++i) {
+        (void)add_card_to_master_deck(
+            rc.run, static_cast<CardId>(rc.combat.pending_obtain[i]));
+    }
+    rc.combat.pending_obtain_count = 0;
+}
 
 // Build the live combat for `enc_key` and set rc.phase accordingly. Returns true
 // iff a real combat was entered; false parks the run at ROOM_UNIMPLEMENTED
@@ -2527,6 +2552,7 @@ bool step_potion(RunController& rc, Action a, StepResult& res) noexcept {
 
     if (rc.phase == static_cast<uint8_t>(RunPhase::COMBAT)) {
         fill_combat_result(rc.combat, res);
+        drain_pending_obtains(rc);  // this path pumps outside advance()
         finish_combat_after_action(rc, res);
     } else {
         fill_run_result(rc, res);
@@ -2901,6 +2927,10 @@ void step_one(RunController& rc, Action a, StepResult& res) noexcept {
                     std::span<const Action>(acts, 1),
                     std::span<StepResult>(srs, 1));
             res = srs[0];
+            // Before finish_combat_after_action, which may fold the combat back
+            // and end it: an obtain that happened during this step must reach
+            // the deck while the run layer still has the combat in hand.
+            drain_pending_obtains(rc);
             finish_combat_after_action(rc, res);
             break;
         }

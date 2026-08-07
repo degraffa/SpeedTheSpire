@@ -97,7 +97,7 @@ static_assert(sizeof(PvPower) == 6);
 static_assert(sizeof(PvMonster) == 20 + 6 * kPowerCap);
 // v3's size; the v1 prefix's 3760 bytes are pinned by V2TailHasNoImplicitPadding
 // asserting that offsetof(PublicView, gold) is still exactly 3760.
-static_assert(sizeof(PublicView) == 6036);  // 6032 through v2; S2.13 appended event_flags_hi
+static_assert(sizeof(PublicView) == 8932);  // v4: kMonsterCap 7 -> 23 moved the monster block and the mask channel
 
 // --- Layout walk (the header's promised "no implicit padding" proof) ---------
 
@@ -654,7 +654,7 @@ static_assert(sizeof(PvRelic) == 4);
 static_assert(sizeof(PvMapNode) == 2);
 static_assert(sizeof(PvShopSlot) == 6);
 static_assert(sizeof(PvEventBoardCard) == 6);
-static_assert(sizeof(PublicView) == 6036);  // 6032 through v2; S2.13 appended event_flags_hi
+static_assert(sizeof(PublicView) == 8932);  // v4: kMonsterCap 7 -> 23 moved the monster block and the mask channel
 
 // --- Layout walk over the v2 element types and the appended tail -------------
 
@@ -756,10 +756,18 @@ TEST(PublicViewLayout, V2ElementTypesHaveNoImplicitPadding) {
 }
 
 TEST(PublicViewLayout, V2TailHasNoImplicitPadding) {
-    // The walk starts where the v1 layout ended -- the v1 prefix is proved
-    // hole-free by PublicViewHasNoImplicitPadding above, and the ASSERT here is
-    // the additive-append promise: no v1 offset moved.
-    ASSERT_EQ(offsetof(PublicView, gold), 3760u)
+    // The walk starts where the v1 layout ends -- the v1 prefix is proved
+    // hole-free by PublicViewHasNoImplicitPadding above, and the ASSERT here
+    // pins that boundary so an ACCIDENTAL move is caught.
+    //
+    // It was 3760 through v3, where it doubled as the additive-append promise
+    // ("no v1 offset moved"). v4 moved it DELIBERATELY: kMonsterCap 7 -> 23
+    // grows the v1 prefix's monster block by 16 * sizeof(PvMonster) == 2624,
+    // so the boundary is 3760 + 2624 == 6384. That is exactly why v4 is
+    // recorded as the first BREAKING public-view bump rather than an additive
+    // one (public_view.hpp's version log). The assert keeps its job: any
+    // FURTHER move must be a deliberate, version-bumped decision.
+    ASSERT_EQ(offsetof(PublicView, gold), 6384u)
         << "the v2 tail no longer starts where the v1 layout ended -- this is "
            "a BREAKING schema change, not an additive one";
 
@@ -915,7 +923,7 @@ TEST(PublicViewRun, AlwaysBlockScalarsRoundTrip) {
     PublicView pv{};
     encode_public_view(rc, pv);
 
-    EXPECT_EQ(pv.public_view_version, 3u);  // v3: S2.13's event_flags_hi
+    EXPECT_EQ(pv.public_view_version, 4u);  // v4: kMonsterCap 7 -> 23 (breaking)
     EXPECT_EQ(pv.run_phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
     EXPECT_EQ(pv.combat_active, 0);
 

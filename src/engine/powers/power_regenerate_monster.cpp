@@ -15,10 +15,16 @@ void power_native_regenerate_monster(CombatState& s, Hook hook,
     // RegenerateMonsterPower.atEndOfTurn -> HealAction(owner, owner, amount)
     // (RegenerateMonsterPower.java:37-43; HealAction.java:29-35): heal
     // `amount`, clamped to max HP, only if currentHealth>0. The owner is
-    // always a monster (nothing constructs this power on the player) and its
-    // halfDead/isDying/isDead guard is already covered by the AT_END_OF_TURN
-    // dispatch walk skipping dead-or-escaped monsters before it ever reaches
-    // this hook (power_hooks.cpp) -- halfDead has no S1 producer.
+    // always a monster (nothing constructs this power on the player).
+    //
+    // Its halfDead/isDying/isDead guard (RegenerateMonsterPower.java:38-42) is
+    // NOT covered by the dispatch walk, and used to be: the AT_END_OF_TURN walk
+    // now skips only monster_basically_dead, so a HALF-DEAD monster does reach
+    // this hook -- which is faithful, because the Java's applyEndOfTurnPowers
+    // walk skips only isDying/isEscaping too, and is exactly why the power
+    // carries its own halfDead guard. The `hp <= 0` early-out below IS that
+    // guard: halfDead implies hp == 0 in this engine, so a half-dead Awakened
+    // One does not regenerate, matching the Java.
     //
     // DELIBERATELY NO DECREMENT: this is the entire distinction from
     // PowerId::REGEN (id 18) -- RegenPower.atEndOfTurn queues a RegenAction,

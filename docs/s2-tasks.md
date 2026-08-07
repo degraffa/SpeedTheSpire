@@ -441,7 +441,7 @@ are the "first registry authoring wave" the TE.2 acceptance names.
 
 ## Phase S2.2 — Monster batches (each = YAML rows + engine bodies + tier-2, the B3.13–B3.22 pattern; ∥ across disjoint batches once S2.01 lands)
 
-- **S2.2F** `[ ]` **Shared monster framework (added 2026-08-07 from the six
+- **S2.2F** `[x]` **Shared monster framework (added 2026-08-07 from the six
   batch scout dossiers; lands FIRST, serially — every remaining batch builds
   on it).** The one CombatState schema bump (SCHEMA_VERSION 6→7,
   owner-approved: `kMonsterCap` 7→24 with an explicit sizeof ceiling probe;
@@ -468,7 +468,105 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   dead split at a classified site of each kind, accumulator drain vs
   Omamori, END_PLAYER_TURN mid-queue); fixture regeneration recorded; six
   presets green; layout probes (`offsetof`/`sizeof`) not predictions.
-  **Log:** —
+  **Log:** **`kMonsterCap` is 23, not the granted 24** — the one deviation, and
+  it is arithmetic, not judgement. 24 measures `sizeof(CombatState)` **8304**
+  against the frozen 8192 B ceiling; 23 measures **8088** (headroom 104). The
+  grant was estimated against `MonsterState` 116 B / `CombatState` 3928 B,
+  which are PRE-schema-v6 numbers — the v6 `PowerSlot` widening (4 → 8 B over
+  24 slots) took `MonsterState` to 212 B and nearly doubled the per-slot cost.
+  Owner-adjudicated at 23 with no ceiling change. The measured cap/size table,
+  and the two rejected alternatives (raise the ceiling; split `kPowerCap` into
+  a smaller per-MONSTER power cap, which does fit 24 at 7504 B), are recorded
+  in `combat_state.hpp` so nobody re-derives them. Note 24 measures 8304 and
+  not the naive 8300: slot-count parity moves the implicit tail padding by 4 B,
+  which is why these are probe results and not arithmetic. 23 vs 24 costs
+  nothing real — none of the three consumers has a derived safe bound, so both
+  are budget picks and the hard assert is what protects the invariant.
+
+  **The bump was NOT CombatState-side, contrary to the dispatch brief.**
+  `PublicView` embeds `PvMonster monsters[kMonsterCap]`, the
+  `monster_roll_known`/`monster_roll` pair, and — through the embedded mask
+  channel — `RunActionMask`'s per-(card, monster) and per-(potion, monster)
+  target grids. The monster block is MID-RECORD, so `kPublicViewFixedBytes`
+  moved 5656 → 8312, `sizeof(PvMask)` 376 → 616, `sizeof(PublicView)`
+  6036 → 8932 and `OmniscientObsBuffer` 240 → 656. That makes
+  **`PUBLIC_VIEW_VERSION` 3 → 4 the first BREAKING public-view bump**: no
+  in-place reinterpretation of a v1–v3 record exists, so v1–v3 shards are
+  reanalyze-or-quarantine. Classified against the audit's already-enumerated
+  "any capacity change" case, which named `kMonsterCap`. Twins regenerated.
+  Found by probing, not predicted — the brief expected twins not to move.
+
+  **Fixture regeneration proven, not asserted.** All 20 combat fixtures are a
+  pure ARRAY EXTENSION: per record, bytes `[0, 3388)` identical, a 3392-byte
+  (16 × `MonsterState`) run of ZEROS inserted at the old `monsters[]` end, and
+  the remainder identical — verified byte-for-byte against `HEAD` for every
+  record of every file. Headers differ only in `state_size`; the on-disk tag
+  stays `kTraceFormatV1` (=1), so **the B1.6 v1 compatibility read is
+  RETAINED** and only `state_size` moves. `kTraceFormatV2` follows to 7.
+
+  **The queue-remap disagreement was never a disagreement.** `spawn_monster_at_slot`
+  DOES remap `monster_queue` indices ≥ slot and does NOT remap pending
+  `action_queue` items. The two scouts were describing different queues and
+  both were right; the header already documented both halves. Pinned with one
+  directed test asserting both directions at once.
+
+  Other surfaces, all landing with NO producer and each with a directed test
+  driving it through a synthetic fixture: `kMonsterFlagHalfDead` (global bit
+  25) and the `monster_basically_dead` split, with every one of the ~26
+  `monster_dead_or_escaped` call sites classified (19 moved to the
+  basically-dead sense, 7 stayed targeting) and every stale "halfDead has no S1
+  producer" comment rewritten per conventions §8 — including the two that had
+  become *wrong*: `power_regenerate_monster.cpp`'s guard is now load-bearing
+  (the end-of-round walk no longer filters half-dead monsters out for it), and
+  the Feed / Hand-of-Greed `|| halfDead` terms are now implemented rather than
+  documented-inert. `MonsterDieFn` gains a **bool veto** (`true` == suppress
+  `super.die()`, for the Darkling's and Awakened One's `if (!cannotLose)`
+  overrides) and a new **`MonsterDieAfterFn`** slot for the post-`super.die()`
+  bodies (Reptomancer, Bronze Automaton, The Collector, Awakened One) — two
+  slots rather than a phase argument, so each keeps its ordering claim
+  literally true. `SUICIDE`'s `triggerRelics` arm implemented (it read
+  `flags` bit 0 nowhere before). Hooks **15 `DURING_TURN`** (at the
+  `applyTurnPowers` stub, whose "no monster powers with a turn hook" comment
+  was DELETED — the prerequisite arrived), **16 `ON_AFTER_USE_CARD`** (at the
+  reserved `interp_cards.cpp` seam, likewise deleted rather than amended) and
+  **17 `ON_INFLICT_DAMAGE`** (the ATTACKER's power list, after `wasHPLost`);
+  `kHookCount` → 18, and the `powers.hpp` byte-equal chain gained the three
+  plus **`ON_POWER_REMOVED` (14), which had been missing since it landed**.
+  Opcodes **68 `OBTAIN_CARD`** (accrues into the new zero-cost `CombatState`
+  accumulator; drained by `run_advance` EVERY PUMP STEP, not at the fold-back,
+  because deferring it would let the fold's relic-counter copy clobber
+  Omamori's decrement), **69 `CLEAR_CARD_QUEUE`** and **70 `END_PLAYER_TURN`**
+  — the last two carrying the `limbo` trap explicitly: the Java's
+  `player.limbo` is the autoplay group, this engine's `limbo` is `cardInUse`,
+  and a literal port would exhaust the card being played, so only the
+  queue-clear half is modelled. `MONSTER_ROLL_TIMINGS` **2
+  `CONSTRUCTOR_BEFORE_HP`**, which forced `burn_unspawned_ctor_rolls` into a
+  genuine TWO-PASS walk around the `setHp` draw — same draw count, different
+  order, and the order is the entire product of that function. Spawn
+  conventions ratified: `MonsterState.draw_x` (free, in what was `pad1[2]`) +
+  `smart_position_for`, which reproduces `getSmartPosition`'s **break**
+  semantics rather than a count, and an OPT-IN pre-battle-on-spawn arm
+  (`SPAWN_MONSTER` flags bit 16) because `SpawnMonsterAction` does not run it
+  and `SummonGremlinAction` does.
+
+  **One latent defect found and fixed in passing.** `power_dark_embrace.cpp`
+  walked `hp > 0` under a comment that said `areMonstersBasicallyDead` — so
+  Dark Embrace kept drawing after a Looter ESCAPED. Two neighbouring sites
+  (Dead Branch, Magnetism) cite Dark Embrace as using "the same gate"; that was
+  false until now. Found by classifying the call sites, not by a failing test.
+
+  **Named residue, not stubbed.** The attacker-side cancel
+  (`DamageAction.java:69-73`, `info.owner.isDying || info.owner.halfDead`
+  cancels a queued multi-hit attack's remaining hits) is unmodelled in BOTH
+  terms; the `isDying` half is a pre-existing divergence whose fix would move
+  landed Act-1 behaviour and committed fixtures. A comment at `op_damage` names
+  it and asks whichever batch lands the first halfDead producer to implement
+  both terms together. Also: no monster is yet both mid-combat spawnable and
+  pre-battle-bearing, so the pre-battle arm's test drives the wiring and both
+  halves of the precondition rather than a stream side effect.
+
+  `check_stale_counts` + `check_doc_links` clean; design §11 v0.1.10 entry;
+  audit v4 entry. Six presets green.
 
 - **S2.21** `[x]` ∥ City normals I — Chosen (27), Byrd (28), Shelled
   Parasite (29), Spheric Guardian (30); `powers.yaml` **Hex (93)** and

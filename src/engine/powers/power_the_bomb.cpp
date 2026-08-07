@@ -62,7 +62,7 @@ void power_native_the_bomb(CombatState& s, Hook hook,
     // (combat_state.hpp) -- an ESCAPED Looter counts as gone even at full HP.
     bool any_in_fight = false;
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (!monster_dead_or_escaped(s.monsters[i])) {
+        if (!monster_basically_dead(s.monsters[i])) {
             any_in_fight = true;
             break;
         }

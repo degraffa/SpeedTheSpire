@@ -382,7 +382,7 @@ void fill_result(const CombatState& s, StepResult& r) noexcept {
     // reads hp <= 0, and kCombatFlagMugged marks the room.
     bool any_monster_in_fight = false;
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        if (!monster_dead_or_escaped(s.monsters[m])) {
+        if (!monster_basically_dead(s.monsters[m])) {
             any_monster_in_fight = true;
             break;
         }

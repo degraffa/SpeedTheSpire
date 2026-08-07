@@ -34,7 +34,7 @@ constexpr uint8_t kFury = sts::registry::kCenturionMoveFury;        // 3
 [[nodiscard]] uint8_t alive_count(const CombatState& s) noexcept {
     uint8_t n = 0;
     for (uint8_t i = 0; i < s.monster_count && i < kMonsterCap; ++i) {
-        if (!monster_dead_or_escaped(s.monsters[i])) {
+        if (!monster_basically_dead(s.monsters[i])) {
             ++n;
         }
     }

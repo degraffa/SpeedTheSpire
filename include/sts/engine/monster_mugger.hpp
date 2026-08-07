@@ -114,6 +114,9 @@ void mugger_take_turn(CombatState& state, uint8_t monster_index) noexcept;
 // (addStolenGoldToRewards, :161-163) is NOT here -- it is a READ of the surviving
 // record by the reward layer (settle_stolen_gold, run_advance.cpp), exactly as
 // the Looter's is.
-void mugger_die(CombatState& state, uint8_t monster_index) noexcept;
+//
+// Returns false -- no veto. Mugger.java:164 calls `super.die()` unconditionally,
+// so the power/relic death fan-outs run normally (MonsterDieFn's contract).
+bool mugger_die(CombatState& state, uint8_t monster_index) noexcept;
 
 }  // namespace sts::engine

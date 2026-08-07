@@ -184,7 +184,7 @@ void mugger_take_turn(CombatState& s, uint8_t mi) noexcept {
     }
 }
 
-void mugger_die(CombatState& s, uint8_t /*mi*/) noexcept {
+bool mugger_die(CombatState& s, uint8_t /*mi*/) noexcept {
     // die() (Mugger.java:156-165) runs playDeathSfx FIRST, and playDeathSfx
     // (:147-154) is `int roll = AbstractDungeon.aiRng.random(2);` -- SEEDED. One
     // draw, unconditionally, on every Mugger death. The shake and time-scale
@@ -193,6 +193,9 @@ void mugger_die(CombatState& s, uint8_t /*mi*/) noexcept {
     // (:164) is the power/relic fan-out the death edge already dispatches right
     // after this.
     (void)random(s.ai_rng, 2);
+    // No veto: the Mugger's die() calls super.die() unconditionally (:164), so
+    // the power/relic death fan-outs must run exactly as before.
+    return false;
 }
 
 }  // namespace sts::engine

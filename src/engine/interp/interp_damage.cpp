@@ -588,6 +588,25 @@ void cards_took_player_damage(CombatState& s) noexcept {
 // first (decrementBlock: block soaks up to its value), remainder hits hp,
 // currentHealth clamped >= 0. (Death/onDeath handling is not yet modeled; the
 // pump's hp<=0 check drives the COMBAT_OVER transition.)
+//
+// KNOWN GAP -- the ATTACKER-SIDE CANCEL is not modelled, in either of its two
+// terms. DamageAction.update (DamageAction.java:69-73) begins
+//     if (info.type != THORNS && (info.owner.isDying || info.owner.halfDead))
+//         { isDone = true; return; }
+// so a monster that dies -- or goes HALF-dead -- partway through its own
+// multi-hit attack has its REMAINING QUEUED HITS cancelled. This engine has no
+// attacker guard at all: every queued DAMAGE item lands regardless of what
+// became of its source.
+//
+// Named here rather than fixed here, deliberately. The `isDying` half is a
+// PRE-EXISTING divergence that predates the halfDead work; fixing it would
+// change landed Act-1 behaviour (any monster killed mid-attack) and move
+// committed fixtures, which is out of scope for a framework task. The
+// `halfDead` half has no producer until the Darkling (S2.25) and the Awakened
+// One (S2.28) land. Whichever batch lands the first halfDead producer should
+// implement BOTH terms together -- they are one `if` -- and carry the fixture
+// churn alongside the content that makes it reachable. The note sits at the
+// site so the next reader meets it before writing a monster multi-hit body.
 void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
                int strength_mult,
                DamageType type, bool pure, bool source_null) noexcept {
@@ -687,6 +706,16 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
     const int hp_lost = old_hp - new_hp;
     dispatch_was_hp_lost(s, tgt, src, hp_lost, static_cast<uint8_t>(type),
                          source_null);
+    // onInflictDamage over the ATTACKER's powers (AbstractPlayer.damage:
+    // 1449-1453) -- immediately after the wasHPLost fan-outs, which is where the
+    // Java puts it. Player-victim only: the call exists in AbstractPlayer.damage
+    // and nowhere else. It passes `dmg` (the Java's `damageAmount`), NOT
+    // `hp_lost`: the two differ when the hit overkills, and the Java reads the
+    // former.
+    if (tgt == kActorPlayer) {
+        dispatch_on_inflict_damage(s, src, tgt, dmg, static_cast<uint8_t>(type),
+                                   source_null);
+    }
     if (tgt == kActorPlayer && hp_lost > 0) {
         cards_took_player_damage(s);
     }
@@ -712,10 +741,22 @@ void op_damage(CombatState& s, uint8_t src, uint8_t tgt, int base,
         // is the first content this seam carries (monster_dispatch.hpp
         // MonsterDieFn); it is a no-op for every monster whose die() is
         // presentation.
-        dispatch_monster_die(s, tgt);
-        dispatch_on_death(s, tgt);
-        const RelicView rv = player_relics(s);
-        dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
+        //
+        // THE RETURN VALUE IS A VETO. A die() override that calls `super.die()`
+        // only conditionally (Darkling.java:239-243 and AwakenedOne.java:356-375,
+        // both `if (!cannotLose)`) suppresses it -- and super.die() is exactly
+        // what the two fan-outs below model, so when the veto fires NEITHER may
+        // run. The half-dead monster's own damage() override re-fires them by
+        // hand, once; without the veto they would fire twice per half-death.
+        if (!dispatch_monster_die(s, tgt)) {
+            dispatch_on_death(s, tgt);
+            const RelicView rv = player_relics(s);
+            dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
+            // The POST-`super.die()` half of the override, after both fan-outs
+            // (monster_dispatch.hpp MonsterDieAfterFn). Skipped under the veto
+            // for the same reason: super.die() did not happen.
+            dispatch_monster_die_after(s, tgt);
+        }
     }
     // Monster damage() override seam: the large slimes' split interrupt
     // wraps super.damage() and runs AFTER it, for EVERY DamageInfo type
@@ -776,10 +817,22 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
         // is the first content this seam carries (monster_dispatch.hpp
         // MonsterDieFn); it is a no-op for every monster whose die() is
         // presentation.
-        dispatch_monster_die(s, tgt);
-        dispatch_on_death(s, tgt);
-        const RelicView rv = player_relics(s);
-        dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
+        //
+        // THE RETURN VALUE IS A VETO. A die() override that calls `super.die()`
+        // only conditionally (Darkling.java:239-243 and AwakenedOne.java:356-375,
+        // both `if (!cannotLose)`) suppresses it -- and super.die() is exactly
+        // what the two fan-outs below model, so when the veto fires NEITHER may
+        // run. The half-dead monster's own damage() override re-fires them by
+        // hand, once; without the veto they would fire twice per half-death.
+        if (!dispatch_monster_die(s, tgt)) {
+            dispatch_on_death(s, tgt);
+            const RelicView rv = player_relics(s);
+            dispatch_relics_on_monster_death(s, rv.relics, rv.count, tgt);
+            // The POST-`super.die()` half of the override, after both fan-outs
+            // (monster_dispatch.hpp MonsterDieAfterFn). Skipped under the veto
+            // for the same reason: super.die() did not happen.
+            dispatch_monster_die_after(s, tgt);
+        }
     }
     // LoseHPAction also routes through creature.damage() (LoseHPAction.java:41),
     // so the monster damage() override seam fires here too. LOSE_HP bypasses
@@ -794,9 +847,13 @@ void op_lose_hp(CombatState& s, uint8_t tgt, int amount) noexcept {
 // increaseMaxHp(amount, false). The Java condition is
 //     !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
 // i.e. gain when the target is dying-or-at-zero and is neither halfDead nor a
-// Minion. Neither halfDead nor MinionPower has an S1 Act-1 producer (no monster
-// sets halfDead and there is no Minion power row), so those two terms are
-// constant-false here and the test is "did this hit take it to zero".
+// Minion.
+//
+// The halfDead term is now LIVE (kMonsterFlagHalfDead, combat_state.hpp): a hit
+// that leaves a Darkling or an Awakened One half-dead grants NO max HP, because
+// it did not actually kill anything. The Minion term is still inert -- there is
+// no Minion power row yet -- and this remains the site that must gain that test
+// when one lands.
 // increaseMaxHp (AbstractCreature.java:199-208) is maxHealth += amount FOLLOWED BY
 // heal(amount, true), so the heal runs the onPlayerHeal relic pass -- it goes
 // through heal_player_with_relics, never a raw HP write. The heal is SYNCHRONOUS
@@ -807,7 +864,10 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
         return;
     }
     op_damage(s, src, tgt, base);
-    if (s.monsters[tgt].hp > 0 || max_hp_gain <= 0) {
+    // `|| halfDead` -- a hit that leaves the target HALF-dead killed nothing,
+    // so Feed pays no max HP (FeedAction.java:38).
+    if (s.monsters[tgt].hp > 0 || monster_half_dead(s.monsters[tgt]) ||
+        max_hp_gain <= 0) {
         return;
     }
     s.player_max_hp = static_cast<int16_t>(s.player_max_hp + max_hp_gain);
@@ -824,13 +884,10 @@ void op_damage_feed(CombatState& s, uint8_t src, uint8_t tgt, int base,
 // The Java gate (:37), read literally, is
 //     !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
 // i.e. pay out when the target is dying-or-at-zero AND is neither halfDead nor a
-// Minion. Both of those exclusions are STRUCTURALLY constant-false in S1 and are
-// recorded here rather than modelled as state that nothing can set:
-//   * halfDead -- no Act-1 monster is half-dead-capable (the game's only
-//     producers are Awakened One and the Darklings, both out of scope), which is
-//     exactly the reading combat_state.hpp's liveness-predicate comment already
-//     records for every other halfDead term in the engine. There is no halfDead
-//     field to consult, and inventing one would be state with no writer.
+// Minion.
+//   * halfDead is now LIVE -- kMonsterFlagHalfDead (combat_state.hpp) has two
+//     producers, the Darkling and the Awakened One. Hand of Greed pays NOTHING
+//     for a hit that merely leaves one half-dead, because nothing died.
 //   * hasPower("Minion") -- registry/powers.yaml has NO Minion row (searched
 //     before writing this, not assumed), so no creature in the registry can carry
 //     it. When a Minion power lands, this is the site that must gain the test.
@@ -849,7 +906,10 @@ void op_damage_greed(CombatState& s, uint8_t src, uint8_t tgt, int base,
         return;
     }
     op_damage(s, src, tgt, base);
-    if (s.monsters[tgt].hp > 0 || gold <= 0) {
+    // `|| halfDead` -- nothing died, so Hand of Greed pays nothing
+    // (GreedAction.java:37).
+    if (s.monsters[tgt].hp > 0 || monster_half_dead(s.monsters[tgt]) ||
+        gold <= 0) {
         return;
     }
     int32_t total = static_cast<int32_t>(s.combat_gold) + gold;

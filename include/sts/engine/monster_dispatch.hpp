@@ -158,8 +158,53 @@ using MonsterSpawnAtHpFn = void (*)(CombatState& state, uint8_t monster_index,
 // pre-compute its post-insertion slot (see monster_slime_large.cpp's trailing
 // ROLL_MOVE). The insertion slot itself is pre-computed at QUEUE time from the
 // smart-positioning drawX rule (monster_slime_large.hpp).
+//
+// WHO SETS `draw_x`: the spawned monster's OWN spawn-at-hp init fn, not this
+// function. The position key is a per-type, per-slot constant out of the Java
+// class's POSX table (Reptomancer's {210,-220,180,-250}, the Gremlin Leader's
+// {-366,-170,-532}, and so on), so the module that owns the class owns the
+// table. This function deliberately takes no draw_x argument: the SPAWN_MONSTER
+// item has no field wide enough for a signed position, and threading one would
+// duplicate a constant the module already has.
+//
+// Until a batch populates it, `draw_x` is uniformly 0 across every landed
+// monster, so smart_position_for is unused by landed content and the slime split
+// keeps its hand-derived slots -- no existing spawn changes.
+//
+// `run_pre_battle` runs the spawned monster's usePreBattleAction after its init,
+// which is SummonGremlinAction's behaviour and NOT SpawnMonsterAction's -- the
+// two Java actions differ here, so it is a parameter rather than a policy. It is
+// what gives a summoned Gremlin Warrior its Angry power. The Java runs it at
+// `isDone`, i.e. after the MinionPower the spawn itself queues, so a caller that
+// needs both orders them that way.
 void spawn_monster_at_slot(CombatState& state, uint8_t slot, MonsterId id,
-                           int16_t hp) noexcept;
+                           int16_t hp, bool run_pre_battle = false) noexcept;
+
+// SpawnMonsterAction's SMART POSITIONING (SpawnMonsterAction.java:50-56), and
+// GremlinLeader's identical getSmartPosition (SummonGremlinAction.java):
+//
+//     int position = 0;
+//     for (AbstractMonster mo : getCurrRoom().monsters.monsters) {
+//         if (!(this.m.drawX > mo.drawX)) break;
+//         ++position;
+//     }
+//
+// Note it BREAKS at the first record that fails the test -- it does not count
+// matches across the whole list -- so this reproduces the break, not a count.
+// The two differ whenever the list is not sorted by drawX, which initial groups
+// need not be (MonsterHelper constructs in its own order).
+//
+// The comparison is `>` and therefore STRICT: a newcomer with the SAME x as an
+// existing record stops there and is inserted BEFORE it. That happens whenever a
+// position is recycled, which every one of the Act-2/3 spawners does.
+//
+// `draw_x` is a monotone stand-in for the Java's float drawX (see
+// MonsterState::draw_x): drawX = WIDTH*0.75 + offsetX*xScale with xScale > 0, so
+// comparing the stored offsetX gives the identical order. DEAD RECORDS COUNT --
+// the Java walks the whole group list, and this engine retains dead records in
+// place precisely so that stays true.
+[[nodiscard]] uint8_t smart_position_for(const CombatState& state,
+                                         int16_t draw_x) noexcept;
 
 // Post-damage monster hook -- the AbstractMonster.damage() override seam, run
 // AFTER a hit fully lands (op_damage / op_lose_hp, ANY damage type: the Java
@@ -207,17 +252,76 @@ void on_monster_damaged(CombatState& state, uint8_t monster_index,
 // Acts 2-4 have more overrides with real content, which is why this is a general
 // slot and not a Mugger branch.
 //
-// nullptr == this monster's die() is presentation only (or absent). Spell an
-// explicit nullptr case rather than leaning on the `default:` when the class DOES
-// declare die(), so the reading is checkable.
-using MonsterDieFn = void (*)(CombatState& state, uint8_t monster_index);
+// THE RETURN VALUE IS A VETO: true == "SUPPRESS super.die()". Two Act-2/3
+// monsters override die() to call `super.die()` CONDITIONALLY and skip it
+// entirely the rest of the time:
+//
+//     public void die() { if (!getCurrRoom().cannotLose) super.die(); }
+//                                              (Darkling.java:239-243)
+//     // AwakenedOne.die():356-375 has the same !cannotLose guard
+//
+// When the guard suppresses `super.die()`, NONE of what super.die() does may
+// run: not the dying monster's powers' onDeath, not the player's relics'
+// onMonsterDeath, not isDying. The Darkling's damage() override then re-fires
+// those two fan-outs BY HAND exactly once, which is the whole reason the veto
+// exists -- without it they would fire twice per half-death.
+//
+// A body that returns false leaves the edge exactly as it was, so the Mugger
+// (the only pre-existing entry) is unchanged.
+//
+// nullptr == this monster's die() is presentation only (or absent), which is
+// equivalent to a body returning false. Spell an explicit nullptr case rather
+// than leaning on the `default:` when the class DOES declare die(), so the
+// reading is checkable.
+using MonsterDieFn = bool (*)(CombatState& state, uint8_t monster_index);
 [[nodiscard]] MonsterDieFn monster_die_fn(MonsterId id) noexcept;
+
+// The POST-`super.die()` half of a die() override.
+//
+// MonsterDieFn above models the part a subclass runs BEFORE `super.die()`. That
+// is the Mugger's shape, and it is the WRONG side of the line for most of the
+// Act-2/3 overrides, which call `super.die()` FIRST and then do their work:
+//
+//   * Reptomancer (:157-165)  super.die(), then SuicideAction every surviving
+//                             monster. The ordering is what makes
+//                             `!m.isDead && !m.isDying` skip the Reptomancer
+//                             ITSELF -- super.die() set isDying first. Run this
+//                             body on the pre-super side and the Reptomancer
+//                             suicides itself in an infinite regress.
+//   * BronzeAutomaton (:176-190) / TheCollector (:227-242)
+//                             super.die(), onBossVictoryLogic, then the same
+//                             suicide sweep.
+//   * AwakenedOne (:356-375)  super.die(), then EscapeAction every surviving
+//                             Cultist.
+//
+// So this is a SECOND slot rather than a phase argument: each slot's ordering
+// claim stays literally true, and a body lands on exactly one side.
+//
+// NOT RUN WHEN THE VETO FIRED. If MonsterDieFn returned true then `super.die()`
+// did not happen, and a post-super body is by definition part of what did not
+// happen. (Neither of today's veto users has a post-super body, so this costs
+// nothing today; it is written down because the combination is what a future
+// reader will get wrong.)
+//
+// nullptr == no post-super content.
+using MonsterDieAfterFn = void (*)(CombatState& state, uint8_t monster_index);
+[[nodiscard]] MonsterDieAfterFn monster_die_after_fn(MonsterId id) noexcept;
 
 // The death-edge hook: run the dying monster's own die() body. Called from the
 // monster-death edge in interp/interp_damage.cpp (both op_damage's and
-// op_lose_hp's), immediately before dispatch_on_death. Safe no-op for a monster
-// with no die() body of its own.
-void dispatch_monster_die(CombatState& state, uint8_t monster_index) noexcept;
+// op_lose_hp's), immediately before dispatch_on_death.
+//
+// Returns the VETO: true == the caller must SKIP dispatch_on_death and the
+// relic onMonsterDeath fan-out, because `super.die()` was suppressed. Safe
+// no-op returning false for a monster with no die() body of its own.
+[[nodiscard]] bool dispatch_monster_die(CombatState& state,
+                                        uint8_t monster_index) noexcept;
+
+// Run the dying monster's POST-`super.die()` body, if it has one. The caller
+// invokes this only when the veto did NOT fire, immediately after the power and
+// relic death fan-outs. Safe no-op otherwise.
+void dispatch_monster_die_after(CombatState& state,
+                                uint8_t monster_index) noexcept;
 
 // The init function for a monster id; nullptr only for NONE / an id outside the
 // enum (see the exhaustiveness note at the top of this file).

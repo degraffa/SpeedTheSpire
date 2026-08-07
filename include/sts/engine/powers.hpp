@@ -83,7 +83,18 @@ static_assert(
         static_cast<uint8_t>(sts::registry::Hook::WAS_HP_LOST) ==
             static_cast<uint8_t>(Hook::WAS_HP_LOST) &&
         static_cast<uint8_t>(sts::registry::Hook::ON_DEATH) ==
-            static_cast<uint8_t>(Hook::ON_DEATH),
+            static_cast<uint8_t>(Hook::ON_DEATH) &&
+        // ON_POWER_REMOVED (14) was missing from this chain when it landed --
+        // the chain is hand-maintained, so a new enumerator is only covered if
+        // someone adds it. Closed here alongside the three S2.2F hooks.
+        static_cast<uint8_t>(sts::registry::Hook::ON_POWER_REMOVED) ==
+            static_cast<uint8_t>(Hook::ON_POWER_REMOVED) &&
+        static_cast<uint8_t>(sts::registry::Hook::DURING_TURN) ==
+            static_cast<uint8_t>(Hook::DURING_TURN) &&
+        static_cast<uint8_t>(sts::registry::Hook::ON_AFTER_USE_CARD) ==
+            static_cast<uint8_t>(Hook::ON_AFTER_USE_CARD) &&
+        static_cast<uint8_t>(sts::registry::Hook::ON_INFLICT_DAMAGE) ==
+            static_cast<uint8_t>(Hook::ON_INFLICT_DAMAGE),
     "generated sts::registry::Hook must stay byte-equal to power_hooks.hpp's "
     "Hook (design doc §4.4; append-only)");
 

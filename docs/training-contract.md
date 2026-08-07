@@ -28,8 +28,13 @@ that §2.7 draws, restated once because everything here follows from it:
 
 ## 1. `PUBLIC_VIEW_VERSION` and the stamps you must record
 
-`PUBLIC_VIEW_VERSION` is **2**
+`PUBLIC_VIEW_VERSION` is **4**
 ([../include/sts/engine/public_view.hpp](../include/sts/engine/public_view.hpp)).
+(It read **2** here until S2.2F: S2.13's v3 bump did not update this line. The
+number lives in the header; this file quotes it, and a quoted number goes stale
+exactly the way conventions §8 describes. v4 is the first BREAKING bump — see
+the audit's version log — so shards and checkpoints stamped v1-v3 are
+reanalyze-or-quarantine, not forward-readable.)
 It is a real field of every `PublicView` instance (`public_view_version`), not
 just a compile-time constant, so a stored record carries its own schema
 identity and a loader can refuse without out-of-band metadata.

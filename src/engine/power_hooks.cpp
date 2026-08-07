@@ -247,12 +247,12 @@ void dispatch_at_end_of_round(CombatState& s) noexcept {
     //       atEndOfRound is a no-op; guarded in the native body).
     //   (3) each LIVE monster: its powers atEndOfRound -- the Cultist Ritual
     //       Strength ramp fires here.
-    // "live" == !monster_dead_or_escaped: both walks skip `isDying ||
+    // "live" == !monster_basically_dead: both walks skip `isDying ||
     // isEscaping` in the Java (MonsterGroup.applyEndOfTurnPowers:292,299), so an
     // ESCAPED monster's powers stop firing the moment it leaves the fight. No-op
     // unless a power binds these hooks -> jaw-worm fixtures unchanged.
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        if (monster_dead_or_escaped(s.monsters[m])) {
+        if (monster_basically_dead(s.monsters[m])) {
             continue;
         }
         dispatch_actor_powers(s, m, Hook::AT_END_OF_TURN_PRE_CARD, HookContext{});
@@ -260,7 +260,7 @@ void dispatch_at_end_of_round(CombatState& s) noexcept {
     }
     dispatch_actor_powers(s, kActorPlayer, Hook::AT_END_OF_ROUND, HookContext{});
     for (uint8_t m = 0; m < s.monster_count; ++m) {
-        if (monster_dead_or_escaped(s.monsters[m])) {
+        if (monster_basically_dead(s.monsters[m])) {
             continue;
         }
         dispatch_actor_powers(s, m, Hook::AT_END_OF_ROUND, HookContext{});
@@ -378,6 +378,60 @@ void dispatch_on_power_removed(CombatState& s, uint8_t owner,
     ctx.power_counter = slot.counter;
     ctx.power_slot = slot_index;
     dispatch_native_hook(s, Hook::ON_POWER_REMOVED, pid, ctx);
+}
+
+// --- The three S2.2F Act-2/3 framework hooks ---------------------------------
+
+void dispatch_during_turn(CombatState& s, uint8_t monster_index) noexcept {
+    // GameActionManager.java:322-323 -- `m.takeTurn(); m.applyTurnPowers();`.
+    // applyTurnPowers (AbstractCreature.java:535-539) walks the creature's OWN
+    // powers in list order and nothing else. Bounds-checked like
+    // dispatch_monster_at_start_of_turn, its nearest sibling.
+    if (monster_index >= s.monster_count) {
+        return;
+    }
+    dispatch_actor_powers(s, monster_index, Hook::DURING_TURN, HookContext{});
+}
+
+void dispatch_on_after_use_card(CombatState& s, uint8_t played_pool_index,
+                                uint16_t card_id) noexcept {
+    HookContext ctx{};
+    ctx.card_id = card_id;
+    ctx.card_pool_index = played_pool_index;
+    // UseCardAction.java:79-88 -- PLAYER POWERS then MONSTER POWERS, and that is
+    // the whole list. No relic pass and no hand/discard/draw card stages, unlike
+    // the ON_USE_CARD constructor fan-out above; the two participant lists
+    // genuinely differ and the difference is the reason this is its own hook.
+    dispatch_actor_powers(s, kActorPlayer, Hook::ON_AFTER_USE_CARD, ctx);
+    for (uint8_t m = 0; m < s.monster_count; ++m) {
+        dispatch_actor_powers(s, m, Hook::ON_AFTER_USE_CARD, ctx);
+    }
+}
+
+void dispatch_on_inflict_damage(CombatState& s, uint8_t attacker,
+                                uint8_t victim, int32_t amount,
+                                uint8_t damage_type, bool source_null) noexcept {
+    // AbstractPlayer.damage:1449-1453 sits inside the `damageAmount > 0` block,
+    // so a fully-blocked hit dispatches nothing -- the same gate
+    // dispatch_was_hp_lost carries.
+    if (amount <= 0) {
+        return;
+    }
+    // `info.owner.powers` -- a null owner would NPE in the Java, so a
+    // null-source DamageInfo (Explosive Potion's matrix) has no attacker list to
+    // walk at all.
+    if (source_null) {
+        return;
+    }
+    HookContext ctx{};
+    ctx.source = attacker;
+    ctx.target = victim;
+    ctx.amount = amount;
+    ctx.damage_type = damage_type;
+    ctx.source_null = source_null;
+    // The ATTACKER's power list -- not the victim's. dispatch_actor_powers
+    // fills ctx.owner per power, so a body always knows whose power it is.
+    dispatch_actor_powers(s, attacker, Hook::ON_INFLICT_DAMAGE, ctx);
 }
 
 // --- APPLY_POWER interception ------------------------------------------------

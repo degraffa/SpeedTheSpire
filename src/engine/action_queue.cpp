@@ -167,12 +167,19 @@ void resolve_pending_post_combat_actions_at_terminal(CombatState& s) noexcept {
 
 // !areMonstersBasicallyDead() (MonsterGroup.java:90-95): a monster is in the
 // fight unless `isDying || isEscaping`. The engine models isDying as hp <= 0
-// and isEscaping as kMonsterFlagEscaped (monster_dead_or_escaped,
-// combat_state.hpp) -- an escaped monster is ALIVE and OUT of the fight, so a
-// bare hp test would keep a mugged battle open forever after the Looter leaves.
+// and isEscaping as kMonsterFlagEscaped -- an escaped monster is ALIVE and OUT
+// of the fight, so a bare hp test would keep a mugged battle open forever after
+// the Looter leaves.
+//
+// This is monster_basically_dead, NOT monster_dead_or_escaped: the Java
+// predicate here has no halfDead term, so a HALF-DEAD monster is still IN the
+// fight and keeps the combat open. That is what gives the Darkling its
+// REINCARNATE turn and the Awakened One its REBIRTH -- with the targeting
+// predicate the combat would end the moment the last record hit 0 HP and the
+// revival could never happen.
 [[nodiscard]] bool any_monster_alive(const CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (!monster_dead_or_escaped(s.monsters[i])) {
+        if (!monster_basically_dead(s.monsters[i])) {
             return true;
         }
     }
@@ -213,11 +220,13 @@ void resolve_pending_post_combat_actions_at_terminal(CombatState& s) noexcept {
 // partial retention on the monster side. The single gate is
 // `hasPower("Barricade")`, a bare presence test as on the player path in
 // start_of_turn. There is no BackAttack or intent gate: beyond isDying/isEscaping
-// the walk is unconditional.
+// the walk is unconditional -- and, in particular, no halfDead term, so a
+// half-dead monster DOES lose its block and DOES run its start-of-turn powers
+// (monster_basically_dead, not monster_dead_or_escaped).
 void apply_pre_turn_logic(CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
         MonsterState& m = s.monsters[i];
-        if (monster_dead_or_escaped(m)) {
+        if (monster_basically_dead(m)) {
             continue;
         }
         bool has_barricade = false;
@@ -245,11 +254,14 @@ void apply_pre_turn_logic(CombatState& s) noexcept {
 
 // queueMonsters equivalent (GameActionManager.java:306 ->
 // MonsterGroup.queueMonsters, MonsterGroup.java:117-122): enqueue every live
-// monster, in slot order. The Java guard is `isDeadOrEscaped() && !halfDead`;
-// halfDead has no S1 producer, so the skip is exactly monster_dead_or_escaped.
+// monster, in slot order. The Java guard is `isDeadOrEscaped() && !halfDead`,
+// i.e. skip only those that are dead-or-escaped AND NOT half-dead -- which is
+// exactly the complement of monster_basically_dead. The `&& !halfDead` term is
+// the whole point: a half-dead monster IS queued and DOES take its turn, which
+// is the turn on which the Darkling reincarnates and the Awakened One is reborn.
 void queue_monsters(CombatState& s) noexcept {
     for (uint8_t i = 0; i < s.monster_count; ++i) {
-        if (!monster_dead_or_escaped(s.monsters[i])) {
+        if (!monster_basically_dead(s.monsters[i])) {
             assert(s.monster_queue_count < kMonsterQueueCap &&
                    "monster_queue overflow (design doc §4.1: hard assert)");
             s.monster_queue[s.monster_queue_count].monster_index = i;
@@ -876,10 +888,20 @@ PumpStepResult pump_step(CombatState& s, MonsterTurnFn take_turn) noexcept {
         monster_queue_pop_front(s);
         // Step-5 liveness gate (GameActionManager.java:310): `!isDeadOrEscaped()
         // || halfDead` -- a monster that died OR ESCAPED while queued behind a
-        // sibling forfeits its turn (halfDead has no S1 producer).
-        if (mi < s.monster_count && !monster_dead_or_escaped(s.monsters[mi])) {
+        // sibling forfeits its turn. The `|| halfDead` disjunct makes that whole
+        // condition the complement of monster_basically_dead, and it is exactly
+        // the REBIRTH/REINCARNATE turn: a half-dead monster sits at 0 HP and
+        // still acts.
+        if (mi < s.monster_count && !monster_basically_dead(s.monsters[mi])) {
             take_turn(s, mi);            // m.takeTurn()
-            // m.applyTurnPowers() -- stub (no monster powers with a turn hook).
+            // m.applyTurnPowers() (GameActionManager.java:322-323). This was a
+            // stub reading "no monster powers with a turn hook" -- that
+            // prerequisite has ARRIVED (conventions section 8: a comment
+            // justifying inert code by a missing prerequisite is a bug signal,
+            // so it is replaced rather than amended). Explosive and Fading both
+            // bind DURING_TURN, and both rely on firing AFTER the turn body: the
+            // monster attacks on the turn it self-destructs.
+            dispatch_during_turn(s, mi);
         }
         r.monster_index = mi;
         r.outcome = PumpOutcome::RAN_MONSTER;

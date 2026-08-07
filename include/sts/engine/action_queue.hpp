@@ -240,8 +240,8 @@ enum class PumpOutcome : uint8_t {
     WAITING_ON_USER,     // step 7: control returns to the player (terminal)
     COMBAT_OVER,         // terminal: player dead, player escaped (Smoke Bomb's
                          // kCombatFlagPlayerEscaped), or every monster dead or
-                         // escaped (monster_dead_or_escaped -- the
-                         // areMonstersBasicallyDead complement)
+                         // escaped (monster_basically_dead -- the
+                         // areMonstersBasicallyDead predicate itself)
 };
 
 struct PumpStepResult {

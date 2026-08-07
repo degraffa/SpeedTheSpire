@@ -119,6 +119,48 @@ namespace sts::engine {
 //   byte zero. The fixtures stamp the DECOUPLED on-disk tag kTraceFormatV1 (=1)
 //   as before; only their state_size field moves. kTraceFormatV2 follows this
 //   constant to 6.
-inline constexpr uint32_t SCHEMA_VERSION = 6;
+// v7 (=7): the Act-2/3 shared monster framework (owner-approved 2026-08-07; the
+//   allocation is recorded in the ledger's "S2 Wave-3 allocations" block).
+//   THREE changes ride one bump because they are one struct edit, and only the
+//   first of them costs a byte:
+//     (a) `kMonsterCap` 7 -> 23 (combat_state.hpp). Three Act-2/3 mid-combat
+//         spawners -- Gremlin Leader, The Collector, Reptomancer -- each grow
+//         their RECORD count without bound as a fight lasts, because the game
+//         never removes a dead record. 23 is the largest value the 8192 B
+//         CombatState ceiling admits (measured: 24 gives 8304, over by 112).
+//         The GRANTED value was 24; the grant was estimated against pre-v6
+//         struct sizes. The measured cap/size table and the two rejected
+//         alternatives are in the kMonsterCap comment in combat_state.hpp.
+//     (b) `MonsterState.draw_x` (int16), the horizontal POSITION KEY that turns
+//         SpawnMonsterAction's smart positioning into a shared helper instead
+//         of per-spawner hand-derived slot arithmetic. It reuses the former
+//         `pad1[2]`, so it moves NO offset and costs NO bytes.
+//     (c) `CombatState.pending_obtain[3]` + `pending_obtain_count`, the
+//         in-combat master-deck obtain accumulator the OBTAIN_CARD opcode
+//         writes and run_advance drains each pump step -- the combat_gold
+//         precedent, for the same layer-boundary reason (combat cannot reach
+//         RunState). It reuses the former `pad_relics[7]`: also zero bytes.
+//   `kMonsterFlagHalfDead` (global flag bit 25) rides along and costs nothing:
+//   `flags` is already uint32_t with bits 25-31 free, so it is a stored-VALUE
+//   addition only, and no committed trace carries it set.
+//   sizeof(MonsterState) is UNCHANGED at 212; sizeof(CombatState) 4696 -> 8088,
+//   so per §8 this is a schema bump. The 20 combat fixtures are REGENERATED via
+//   the checked-in generator (tools/fixture_gen/gen_combat_fixtures.cpp) under
+//   the established byte-level zero-diff-in-meaning discipline: this change is a
+//   pure ARRAY EXTENSION, so every pre-existing byte is preserved in order and
+//   the only difference is a zero run appended at the old monsters[]-array end
+//   -- the same mechanical shape as the v4 kMonsterCap 5 -> 7 bump. The fixtures
+//   stamp the DECOUPLED on-disk tag kTraceFormatV1 (=1) as before, so their
+//   header schema_version is unchanged and the v1 compatibility read is
+//   RETAINED; only their state_size field moves. kTraceFormatV2 follows this
+//   constant to 7.
+//   NOTE this bump is NOT confined to CombatState, unlike every earlier one.
+//   PublicView embeds `PvMonster monsters[kMonsterCap]` plus two kMonsterCap-
+//   sized roll arrays, and RunActionMask embeds per-(card, monster) and
+//   per-(potion, monster) target grids, so the observation record moves too:
+//   PUBLIC_VIEW_VERSION 3 -> 4, twin fixtures regenerated. That is a MID-RECORD
+//   move, not a tail append, so v3 records are NOT readable as v4 -- see the
+//   schema-evolution note in docs/public-view-audit.md.
+inline constexpr uint32_t SCHEMA_VERSION = 7;
 
 }  // namespace sts::engine

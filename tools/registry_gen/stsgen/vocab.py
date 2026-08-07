@@ -221,8 +221,9 @@ OPCODES = {
     # unlike the pure-damage matrices Panache and The Bomb queue -- followed by
     # `extra` gold IF AND ONLY IF the hit left the target dead. The gold gate is
     #   !(!isDying && currentHealth > 0 || halfDead || hasPower("Minion"))
-    # (:37); the halfDead and Minion terms have no S1 producer and are
-    # documented-inert at the opcode body, never invented as state. The gold
+    # (:37); halfDead is LIVE (kMonsterFlagHalfDead, schema v7) and is tested at
+    # the opcode body, while the Minion term stays documented-inert until a
+    # Minion power row lands. The gold
     # accrues in CombatState.combat_gold and reaches RunState only at the run
     # layer's combat fold-back, through the single gain_gold door -- so a
     # combat-only replay never touches a run purse. `extra` carries the gold, the
@@ -353,6 +354,45 @@ OPCODES = {
     # `amount` is the block; `src` is the acting monster -- both the exclusion
     # key and the empty-list fallback recipient. No `extra` operand.
     "BLOCK_RANDOM_MONSTER": 67,
+    # S2.2F (the shared Act-2/3 monster framework). 68-70 are this task's whole
+    # opcode grant (stage-b-tasks.md "S2 Wave-3 allocations"); 71-72 belong to
+    # S2.24 and stay UNISSUED here. All three land as bodies with no producer --
+    # the consumers are the content batches this framework unblocks.
+    #
+    # AddCardToDeckAction (AddCardToDeckAction.java:83-88): an in-combat write to
+    # the MASTER DECK. The Writhing Mass's MEGA_DEBUFF is the only producer in
+    # Acts 1-3 (WrithingMass.java:118, a Parasite), and it is the only in-combat
+    # master-deck writer in the game's first three acts -- every other obtain is
+    # a run-layer event or a relic pickup.
+    #
+    # It is an OPCODE rather than a step sequence because the combat layer cannot
+    # reach RunState: the whole interp/action_queue layer takes CombatState& and
+    # advance.hpp's standalone entry point has no RunState at all. So the body
+    # accrues into CombatState.pending_obtain and the run layer drains it through
+    # the single add_card_to_master_deck door each pump step -- which is also what
+    # makes the OMAMORI gate apply for free (ShowCardAndObtainEffect's ctor,
+    # :30-45, spends an Omamori counter to block a CURSE, and Parasite is one)
+    # rather than being re-implemented at a second site.
+    #
+    # `extra` carries the CardId. No amount, no target.
+    "OBTAIN_CARD": 68,
+    # ClearCardQueueAction. Empties the pending card-play queue; the Awakened
+    # One's phase transition addToTop's it (AwakenedOne.java:301) so the cards
+    # the player queued behind the killing blow never resolve.
+    #
+    # TRAP, and the reason this is an opcode and not two lines inline: the Java's
+    # body also exhausts every queued card that sits in `player.limbo`, and
+    # `player.limbo` is NOT this engine's limbo pile. The engine models
+    # AbstractPlayer.cardInUse as `limbo` (interp.hpp), i.e. the ONE card
+    # currently resolving. A literal port would exhaust the card being played.
+    # See the body for the full reading.
+    "CLEAR_CARD_QUEUE": 69,
+    # GameActionManager.callEndTurnEarlySequence (:379-392) -- a FORCED turn end
+    # driven from inside a power, which nothing in the engine could do before:
+    # the only producer of the end-turn sentinel was the player's own END_TURN
+    # verb. Time Warp's 12th card is the consumer (TimeWarpPower.java:52-70).
+    # No operands.
+    "END_PLAYER_TURN": 70,
 }
 # CHOOSE_CARD manipulation kind -- MIRROR of interp.hpp ChoiceKind (Stage B B3.4).
 # A CHOOSE_CARD effect step in cards.yaml carries `choose: <kind>` (+ optional
@@ -585,6 +625,34 @@ HOOKS = {
     # against a list that is mid-compaction. Flight is the first binder
     # (FlightPower.onRemove, FlightPower.java:75-78 -> the Byrd's GROUNDED).
     "on_power_removed": 14,
+    # S2.2F (the shared Act-2/3 monster framework). Three DISPATCH SITES land
+    # with the framework; the first BINDERS are content-batch rows, which is why
+    # every one of these is unbound today.
+    #
+    # AbstractCreature.applyTurnPowers -> AbstractPower.duringTurn, fired from
+    # GameActionManager.java:322-323 as `m.takeTurn(); m.applyTurnPowers();` --
+    # i.e. SYNCHRONOUSLY after the monster's turn body, so whatever it queues
+    # lands AFTER everything takeTurn queued, the trailing RollMoveAction
+    # included. Only three classes override duringTurn in the whole tree:
+    # AbstractPower (empty base), ExplosivePower (the Exploder's countdown and
+    # self-destruct) and FadingPower (the Transient's).
+    "during_turn": 15,
+    # AbstractPower.onAfterUseCard, fired from UseCardAction.UPDATE (:79-88).
+    # This is NOT on_use_card (1), which is the CONSTRUCTOR fan-out (:20-45):
+    # different trigger point -- after the played card's own actions have been
+    # queued rather than before -- and a different participant list, PLAYER
+    # POWERS then MONSTER POWERS only, with no relics and no card-level stages.
+    # Binding a counter to the wrong one of the two counts cards at the wrong
+    # moment and in the wrong order. Binders: Slow (Giant Head) and Time Warp
+    # (Time Eater).
+    "on_after_use_card": 16,
+    # AbstractPower.onInflictDamage, fired from AbstractPlayer.damage
+    # (:1449-1453) over the ATTACKER's power list -- `info.owner.powers`, not the
+    # victim's, which is what makes it a different hook from was_hp_lost (12).
+    # Its position in that method is load-bearing: inside the `damageAmount > 0`
+    # block, AFTER the wasHPLost power+relic fan-outs. Binder: Painful Stabs
+    # (Book of Stabbing).
+    "on_inflict_damage": 17,
 }
 # Power type (AbstractPower.PowerType): the APPLY_POWER interception (Artifact /
 # Sadistic) reads this. Pinned/append-only (fixtures never store it, but the
@@ -719,6 +787,22 @@ MONSTER_ROLL_STREAMS = {'MONSTER_HP': 0}
 MONSTER_ROLL_TIMINGS = {
     'CONSTRUCTOR_AFTER_HP': 0,
     'PRE_BATTLE': 1,
+    # S2.2F. A ctor draw that happens BEFORE the setHp draw, because it sits in
+    # the `super(...)` ARGUMENT LIST and Java evaluates arguments before the
+    # constructor body runs:
+    #     super(NAME, ID, AbstractDungeon.monsterHpRng.random(90, 96), ...);
+    #     if (asc >= 7) setHp(92, 102); else setHp(90, 96);
+    #                                             (OrbWalker.java:53-58)
+    # The first draw's VALUE is then thrown away by setHp -- but it MOVED THE
+    # STREAM, so every later roll on that floor shifts. Nothing in Act 1 does
+    # this, which is why the timing did not exist; the Act-2/3 roster has seven
+    # (Orb Walker, Reptomancer, SnakeDagger, BronzeOrb, TorchHead, Taskmaster,
+    # ApologySlime).
+    #
+    # The ORDER is the whole point of the enumerator: a BEFORE roll must burn
+    # ahead of the setHp draw, not after it, which is why the engine's
+    # burn_unspawned_ctor_rolls is a two-pass walk rather than one filter.
+    'CONSTRUCTOR_BEFORE_HP': 2,
 }
 
 # Encounter pool (generated EncounterPool) -- which Exordium.generateXxx list an

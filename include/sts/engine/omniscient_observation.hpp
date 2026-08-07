@@ -159,12 +159,16 @@ struct OmniscientObsBuffer {
 
 static_assert(std::is_trivially_copyable_v<OmniscientObsBuffer>,
               "OmniscientObsBuffer must be trivially copyable (POD observation record)");
-static_assert(sizeof(OmniscientObsBuffer) == 240,
+static_assert(sizeof(OmniscientObsBuffer) == 656,
               "OmniscientObsBuffer size changed -- update the layout comment and, if this "
               "reflects a CombatState field change, SCHEMA_VERSION");
 // 188 -> 240 when kMonsterCap grew: kObsMonsterCap tracks it (5 -> 7), so the
 // per-monster ObsMonster block grew by 2 slots (2 * 26 B). This mirrors the
 // CombatState kMonsterCap growth (SCHEMA_VERSION 3 -> 4).
+// 240 -> 656 for the same reason at SCHEMA_VERSION 6 -> 7: kMonsterCap 7 -> 23
+// adds 16 more ObsMonster slots (16 * 26 B). This buffer is the OMNISCIENT
+// observation, so unlike PublicView it carries no version stamp of its own --
+// the SCHEMA_VERSION bump is its stamp.
 
 // --- omniscient_encode_observation -----------------------------------------------------
 
