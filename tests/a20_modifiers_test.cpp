@@ -42,6 +42,7 @@
 
 #include <gtest/gtest.h>
 
+#include "sts/engine/combat_rewards.hpp"  // card_upgraded_chance (the A12 arm)
 #include "sts/engine/map_rooms.hpp"   // compute_room_quota (the A1 elite quota)
 #include "sts/engine/potions.hpp"     // potion_slot_count
 #include "sts/engine/relics.hpp"      // RelicId
@@ -453,17 +454,22 @@ TEST(A20Negative, TheFrozenNoSuchModifierStatementsAreStillInTheRegistry) {
 }
 
 // §6: "A12 (upgraded-card chance) is a no-op in Act 1 (Exordium pins
-// cardUpgradedChance = 0.0f, Exordium.java:107)". S1 is Act 1, so no A12 modifier
-// may exist in the sim; its row must stay marked N/A-for-S1 with that reason.
+// cardUpgradedChance = 0.0f, Exordium.java:107)". The row's status flipped to
+// IMPLEMENTED when its engine owner landed (S2.12's (act, ascension) keying,
+// observable end-to-end since S2.24), but the Act-1 frozen negative it records
+// must survive the flip -- the row-20 discipline. Behaviourally, the Act-1 arm
+// still returns 0.0f at every ascension.
 TEST(A20Negative, A12UpgradedCardChanceStaysANoOpInActOne) {
     const std::vector<A20Row> rows = parse_a20_rows(a20_yaml_text());
     const auto it = std::find_if(rows.begin(), rows.end(),
                                  [](const A20Row& r) { return r.level == 12; });
     ASSERT_NE(it, rows.end());
-    EXPECT_EQ(it->notes.rfind("N/A-FOR-S1", 0), std::size_t{0}) << it->notes;
+    EXPECT_EQ(it->notes.rfind("IMPLEMENTED", 0), std::size_t{0}) << it->notes;
     EXPECT_NE(it->provenance.find("Exordium.java:107"), std::string::npos);
     EXPECT_NE(it->notes.find("no-such-modifier"), std::string::npos)
-        << "the row must still say the modifier does not exist for S1";
+        << "the S1 frozen negative must survive the status flip";
+    EXPECT_FLOAT_EQ(card_upgraded_chance(1, 12), 0.0f);
+    EXPECT_FLOAT_EQ(card_upgraded_chance(1, 20), 0.0f);
 }
 
 // §6: "A20's double boss is Act-3-only (ProceedButton.java:102,
@@ -504,7 +510,10 @@ TEST(A20Negative, LevelTwentyAddsNothingToAnActOneRun) {
 // LANDED (S2.28's double-boss route), so its prefix is IMPLEMENTED now; row
 // 13 flipped to IMPLEMENTED when S2.24 landed its reward-assembly share (the
 // Act-3 draw-and-discard half was S2.28's; the pin moved with the row, the
-// same discipline as row 20's flip). These tests pin the citations by
+// same discipline as row 20's flip). Rows 5 and 12 flipped last, at the
+// S2-G1 gate sweep (2026-08-09): their owner S2.12 had landed the engine
+// share on 2026-08-07 but deferred each row's one-line status edit to a
+// successor that never carried it. These tests pin the citations by
 // substring, the same discipline the frozen no-such-modifier block already
 // uses.
 TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
@@ -514,9 +523,11 @@ TEST(A20S204, AffectedRowsKeepTheirS1StatusPrefix) {
                                 [&](const A20Row& r) { return r.level == level; });
         return *it;
     };
-    EXPECT_EQ(row(5).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(5).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
+        << "S2.12 landed the between-act heal; the gate sweep flipped the row";
     EXPECT_EQ(row(6).notes.rfind("IMPLEMENTED", 0), std::size_t{0});
-    EXPECT_EQ(row(12).notes.rfind("N/A-FOR-S1", 0), std::size_t{0});
+    EXPECT_EQ(row(12).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
+        << "S2.12 keyed the chance per act; the gate sweep flipped the row";
     EXPECT_EQ(row(13).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
         << "S2.24 landed the claimable Act-2 share, closing the row";
     EXPECT_EQ(row(20).notes.rfind("IMPLEMENTED", 0), std::size_t{0})
