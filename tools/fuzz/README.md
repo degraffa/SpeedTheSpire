@@ -55,6 +55,47 @@ overflowing shards and propagates any shard failure:
 fuzz_soak --merge shard0_summary.kv shard1_summary.kv
 ```
 
+### Resuming an interrupted sweep
+
+There is no checkpoint file, and there should not be one: a **shard is the
+restartable unit**. A shard is a pure function of the sweep options and its own
+index — not of the worker-thread count, not of what the other shards did, and
+not of anything a previous attempt left on disk — so an interrupted sweep is
+resumed by re-running the shards that did not finish. Re-running one shard
+reproduces its `*_summary_s*.kv` byte for byte (`--threads` may differ), and the
+merged report of an N-way split is byte-identical to the same sweep run in one
+process. Both properties are tests, not conventions:
+`FuzzDriver.AnInterruptedShardResumesToAByteIdenticalSummary` and
+`FuzzDriver.ShardedSweepMergesToExactlyTheUnshardedSweep`.
+
+A `*_inflight_*.txt` journal that survives a shard is the opposite signal: it
+means a worker died mid-case, and the file is the crash reproducer. A clean
+shard deletes its own.
+
+## Per-act coverage
+
+The report carries a **per-act** block — cases that stood in each act, boss
+fights and boss kills per act, and the act-split of the rooms table (it is a
+partition of the act-blind one, so the rows sum). It exists because the S2-G1
+gate soak claims *three-act A20 runs*, and without it a sweep that died on
+floor 6 every time and a sweep that walked three acts printed the same
+`max_floor`-shaped evidence.
+
+Read the zeros. `act never entered by any case: N` and `act N was entered but
+its BOSS was never fought` are printed in the NEVER REACHED block, and
+`act_boss_kills[3]` and `victories` are two independent probes of the same
+event (the combat outcome vs `run_is_victory`) — the report shouts if they
+disagree.
+
+**What a soak's own numbers say about depth.** The E0 heuristics here are
+coverage generators, not agents: measured over 100,000 cases (S2.41,
+`build/release`, 20,000 seeds × 5 policies, A20), 3.2 % of cases reached the
+Act-1 boss, 0.11 % crossed into Act 2, **no** case reached the Act-2 boss, and
+`victories` was 0. Volume alone does not fix that. A soak is the right
+instrument for *breadth* and for the determinism guard; a **directed cohort**
+(`tools/oracle_bridge/planner/seed_scan --cohort-list`) or the live driver is
+the right instrument for Act-2/3 *depth*.
+
 ### Merging an ARCHIVED campaign
 
 Summaries written before the `victories` counter landed (pre-`6d7efc4`) do not

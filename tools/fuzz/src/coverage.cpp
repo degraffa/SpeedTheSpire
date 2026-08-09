@@ -96,6 +96,18 @@ void visit_scalars(C& c, F&& f) {
     for (int i = 0; i < kRewardKindCount; ++i) {
         f(std::string("reward_claimed.") + reward_kind_name(i), c.reward_claimed[i]);
     }
+    // Per-act (S2.41). Index 0 is the unused sentinel and is emitted anyway:
+    // the kv form is a mechanical projection of the field set, and a table with
+    // a hole in it is a table whose parser has to know where the hole is.
+    for (int a = 0; a < kActBuckets; ++a) {
+        const std::string act = std::to_string(a);
+        f("act_cases." + act, c.act_cases[a]);
+        f("act_boss_fights." + act, c.act_boss_fights[a]);
+        f("act_boss_kills." + act, c.act_boss_kills[a]);
+        for (int i = 0; i < kRoomTypeCount; ++i) {
+            f("act_room." + act + "." + room_name(i), c.act_rooms[a][i]);
+        }
+    }
     f("combats_entered", c.combats_entered);
     f("combats_killed", c.combats_killed);
     f("combats_smoked", c.combats_smoked);
@@ -121,6 +133,7 @@ void visit_maxima(C& c, F&& f) {
     f("max_turn", c.max_turn);
     f("max_floor", c.max_floor);
     f("max_actions_in_case", c.max_actions_in_case);
+    f("max_act", c.max_act);
 }
 
 }  // namespace
@@ -137,10 +150,14 @@ void Coverage::merge(const Coverage& o) noexcept {
     for (size_t i = 0; i < dst.size() && i < src.size(); ++i) {
         *dst[i] += *src[i];
     }
-    if (o.max_turn > max_turn) max_turn = o.max_turn;
-    if (o.max_floor > max_floor) max_floor = o.max_floor;
-    if (o.max_actions_in_case > max_actions_in_case) {
-        max_actions_in_case = o.max_actions_in_case;
+    // Same two-cursor shape for the maxima, over visit_maxima's order, so a
+    // maximum added there merges without a second edit here.
+    std::vector<uint32_t*> mdst;
+    visit_maxima(*this, [&](const std::string&, uint32_t& v) { mdst.push_back(&v); });
+    std::vector<const uint32_t*> msrc;
+    visit_maxima(o, [&](const std::string&, const uint32_t& v) { msrc.push_back(&v); });
+    for (size_t i = 0; i < mdst.size() && i < msrc.size(); ++i) {
+        if (*msrc[i] > *mdst[i]) *mdst[i] = *msrc[i];
     }
     cards_played.merge(o.cards_played);
     monsters_fought.merge(o.monsters_fought);
@@ -215,10 +232,14 @@ bool parse_kv(const std::string& text, Coverage& out,
         keys.push_back(k);
         slots.push_back(&v);
     });
+    std::vector<std::string> max_keys;
+    std::vector<uint32_t*> max_slots;
+    visit_maxima(c, [&](const std::string& k, uint32_t& v) {
+        max_keys.push_back(k);
+        max_slots.push_back(&v);
+    });
     std::unordered_set<std::string> expected(keys.begin(), keys.end());
-    expected.insert("max_turn");
-    expected.insert("max_floor");
-    expected.insert("max_actions_in_case");
+    expected.insert(max_keys.begin(), max_keys.end());
     expected.insert("set.cards_played");
     expected.insert("set.monsters_fought");
     expected.insert("set.relics_owned");
@@ -278,19 +299,22 @@ bool parse_kv(const std::string& text, Coverage& out,
             if (ls >> extra) return false;
             continue;
         }
-        if (key == "max_turn" || key == "max_floor" || key == "max_actions_in_case") {
-            std::string token;
-            uint64_t v = 0;
-            if (!(ls >> token) || !parse_u64(token, 10, v) || v > UINT32_MAX) {
-                return false;
+        {
+            uint32_t* max_slot = nullptr;
+            for (size_t i = 0; i < max_keys.size(); ++i) {
+                if (max_keys[i] == key) { max_slot = max_slots[i]; break; }
             }
-            std::string extra;
-            if (ls >> extra) return false;
-            const auto v32 = static_cast<uint32_t>(v);
-            if (key == "max_turn") c.max_turn = v32;
-            else if (key == "max_floor") c.max_floor = v32;
-            else c.max_actions_in_case = v32;
-            continue;
+            if (max_slot != nullptr) {
+                std::string token;
+                uint64_t v = 0;
+                if (!(ls >> token) || !parse_u64(token, 10, v) || v > UINT32_MAX) {
+                    return false;
+                }
+                std::string extra;
+                if (ls >> extra) return false;
+                *max_slot = static_cast<uint32_t>(v);
+                continue;
+            }
         }
         uint64_t* slot = find_slot(key);
         if (slot == nullptr) return false;
@@ -450,6 +474,52 @@ std::string Coverage::report(double elapsed_s) const {
         os << buf;
     }
 
+    // The three-act claim, witnessed (S2.41). This block is printed BEFORE the
+    // depth histograms because it is the question the S2-G1 gate asks of the
+    // soak, and because a zero here reframes everything under it.
+    os << "\n-- per act (cases that stood in the act, and what they met) --\n";
+    os << "  act   cases  (of all)      boss fights   boss kills   rooms entered\n";
+    for (int a = 1; a < kActBuckets; ++a) {
+        uint64_t rooms = 0;
+        for (int i = 1; i < kRoomTypeCount; ++i) rooms += act_rooms[a][i];
+        const double pct = cases > 0 ? 100.0 * static_cast<double>(act_cases[a]) /
+                                            static_cast<double>(cases)
+                                     : 0.0;
+        std::snprintf(buf, sizeof(buf),
+                      "  %3d %10llu  (%6.2f%%) %12llu %12llu %15llu\n", a,
+                      static_cast<unsigned long long>(act_cases[a]), pct,
+                      static_cast<unsigned long long>(act_boss_fights[a]),
+                      static_cast<unsigned long long>(act_boss_kills[a]),
+                      static_cast<unsigned long long>(rooms));
+        os << buf;
+    }
+    std::snprintf(buf, sizeof(buf), "  deepest act seen       %14u\n", max_act);
+    os << buf;
+    // The per-act room split, printed only for acts a case actually stood in --
+    // four identical all-zero tables would bury the one that carries data.
+    for (int a = 1; a < kActBuckets; ++a) {
+        if (act_cases[a] == 0) continue;
+        os << "  act " << a << " rooms:";
+        for (int i = 1; i < kRoomTypeCount; ++i) {
+            os << "  " << room_name(i) << "=" << act_rooms[a][i];
+        }
+        os << "\n";
+    }
+    // act_boss_kills[kFinalAct] and `victories` count the same event from two
+    // sides (the combat outcome vs run_is_victory). They can differ ONLY if one
+    // of the two probes is wrong, so the disagreement is printed rather than
+    // left for a reader to notice by comparing two tables.
+    if (act_boss_kills[engine::kFinalAct] != victories) {
+        std::snprintf(buf, sizeof(buf),
+                      "  !! act-%d boss kills (%llu) != victories (%llu) -- the "
+                      "two probes for the same event disagree\n",
+                      static_cast<int>(engine::kFinalAct),
+                      static_cast<unsigned long long>(
+                          act_boss_kills[engine::kFinalAct]),
+                      static_cast<unsigned long long>(victories));
+        os << buf;
+    }
+
     os << "\n-- combat depth (max turn reached, per fight) --\n";
     uint64_t fights = 0;
     for (int i = 0; i < kTurnBuckets; ++i) fights += turn_bucket[i];
@@ -479,20 +549,35 @@ std::string Coverage::report(double elapsed_s) const {
         os << buf;
     }
 
+    // FOUR calls, not one. As a single format string this overran `buf` at
+    // large counter widths and the report silently LOST its last field -- the
+    // 300-seed S2.41 probe printed "relics  reward claims by kind:", with the
+    // relic total and the newline both gone. GCC says so (-Wformat-truncation),
+    // and a report that drops a number under load is worse than one that never
+    // had it. One line per call keeps every line inside the buffer by
+    // construction.
     os << "\n-- run-layer events --\n";
     std::snprintf(buf, sizeof(buf),
-                  "  combats entered %12llu   killed %12llu   smoke-bomb escapes %8llu\n"
-                  "  deaths          %12llu   victories %10llu   reward screens %6llu\n"
-                  "  cards taken     %12llu   cards skipped %7llu\n"
-                  "  potions used    %12llu   relics held (sum) %10llu\n",
+                  "  combats entered %12llu   killed %12llu   "
+                  "smoke-bomb escapes %8llu\n",
                   static_cast<unsigned long long>(combats_entered),
                   static_cast<unsigned long long>(combats_killed),
-                  static_cast<unsigned long long>(combats_smoked),
+                  static_cast<unsigned long long>(combats_smoked));
+    os << buf;
+    std::snprintf(buf, sizeof(buf),
+                  "  deaths          %12llu   victories %10llu   "
+                  "reward screens %6llu\n",
                   static_cast<unsigned long long>(deaths),
                   static_cast<unsigned long long>(victories),
-                  static_cast<unsigned long long>(reward_screens),
+                  static_cast<unsigned long long>(reward_screens));
+    os << buf;
+    std::snprintf(buf, sizeof(buf),
+                  "  cards taken     %12llu   cards skipped %7llu\n",
                   static_cast<unsigned long long>(cards_taken),
-                  static_cast<unsigned long long>(cards_skipped),
+                  static_cast<unsigned long long>(cards_skipped));
+    os << buf;
+    std::snprintf(buf, sizeof(buf),
+                  "  potions used    %12llu   relics held (sum) %10llu\n",
                   static_cast<unsigned long long>(potions_used),
                   static_cast<unsigned long long>(relics_gained));
     os << buf;
@@ -520,6 +605,20 @@ std::string Coverage::report(double elapsed_s) const {
     });
 
     os << "\n-- NEVER REACHED (stated, not inferred) --\n";
+    // Acts first: this is the S2-G1 claim, and an unreached act makes every
+    // "never seen" line under it a consequence rather than a finding.
+    for (int a = 1; a <= engine::kFinalAct; ++a) {
+        if (act_cases[a] == 0) {
+            os << "  act never entered by any case: " << a << "\n";
+            continue;
+        }
+        if (act_boss_fights[a] == 0) {
+            os << "  act " << a << " was entered but its BOSS was never fought\n";
+        } else if (act_boss_kills[a] == 0) {
+            os << "  act " << a << " boss was fought but never KILLED\n";
+        }
+    }
+    if (victories == 0) os << "  the run was never WON (no act-3 boss kill)\n";
     for (int i = 1; i < kRoomTypeCount; ++i) {
         if (room_entered[i] == 0) os << "  room type never entered: " << room_name(i) << "\n";
     }

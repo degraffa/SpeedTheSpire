@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "sts/engine/map_rooms.hpp"  // RoomType / kRoomTypeCount
+#include "sts/engine/run_advance.hpp"  // kFinalAct (the per-act bucket count)
 #include "sts/fuzz/policy.hpp"
 #include "sts/registry/manifest.hpp"
 
@@ -73,6 +74,18 @@ inline constexpr int kRewardKindCount = 5;    // combat_rewards.hpp RewardItemKi
 inline constexpr int kTurnBuckets = 8;        // 1,2,3,4,5-6,7-9,10-19,20+
 inline constexpr int kFloorBuckets = 16;      // floor 0..14, then 15+
 
+// PER-ACT BUCKETS, indexed by RunState::act DIRECTLY (1-based), so index 0 is a
+// slot that can never be written and every table below reads act N at [N].
+//
+// It is sized from engine::kFinalAct plus one rather than the literal 4, and it
+// keeps a slot for act 4 on purpose: `RunState::act` is documented 1..4, the
+// Ending act is unmodelled today, and a bucket array that silently DROPPED an
+// act it was handed would turn "we never got there" and "we got there and did
+// not count it" into the same zero -- which is the exact confusion the shop
+// entry hole (fuzz_run.cpp) already cost this tool once.
+inline constexpr int kActBuckets = engine::kFinalAct + 2;  // 0 unused, 1..4
+static_assert(kActBuckets == 5, "acts are 1..4; index 0 is the unused sentinel");
+
 // A fixed-capacity "which registry rows did we ever see" bitset. Sized from the
 // generated manifest so it cannot silently under-cover a growing registry.
 template <std::size_t N>
@@ -121,6 +134,37 @@ struct Coverage {
     uint64_t move_taken[static_cast<int>(MoveCat::COUNT)]{};
     uint64_t reward_claimed[kRewardKindCount]{};
 
+    // --- PER-ACT structural coverage (S2.41) -------------------------------
+    //
+    // WHY THESE EXIST. The S2-G1 gate soak claims "three-act A20 runs". Before
+    // this block the report could not tell a sweep that walked all three acts
+    // from one that died on floor 6 every time: `max_floor` is a single number
+    // one lucky case can carry, and the rooms table is act-blind. These four
+    // tables make the claim a witness -- and, just as importantly, make its
+    // ABSENCE a printed line rather than something a reader has to notice is
+    // missing (report()'s NEVER REACHED block names every act that no case
+    // stood in, and every act whose boss was never fought or never killed).
+    //
+    // The unit differs per table, deliberately:
+    //   act_cases    -- CASES (idempotent per case: a run that spends 40 steps
+    //                   in Act 2 counts once, so this reads as "how many runs
+    //                   got there", which is the reach question).
+    //   act_rooms    -- ROOM ENTRIES, the same event room_entered[] counts,
+    //                   split by the act it happened in (they sum to it).
+    //   act_boss_*   -- FIGHTS and KILLS, per act. A kill is the act's boss
+    //                   combat leaving COMBAT with RunCombatOutcome::KILLED,
+    //                   which is exact for all three acts -- the Act-3 boss
+    //                   opens no reward screen and no chest at all
+    //                   (run_advance.hpp), so a BOSS_TREASURE-based probe (the
+    //                   one seed_scan uses for Acts 1-2) would read 0 there
+    //                   forever. `victories` is the independent cross-check:
+    //                   act_boss_kills[3] and victories count the same event
+    //                   from two different sides.
+    uint64_t act_cases[kActBuckets]{};
+    uint64_t act_rooms[kActBuckets][kRoomTypeCount]{};
+    uint64_t act_boss_fights[kActBuckets]{};
+    uint64_t act_boss_kills[kActBuckets]{};
+
     uint64_t combats_entered = 0;
     uint64_t combats_killed = 0;
     uint64_t combats_smoked = 0;
@@ -131,10 +175,19 @@ struct Coverage {
                               // here, not in a new enumerator. The win moved
                               // with its producer at S2.12: it is now the
                               // ACT-3 BOSS kill, not the Act-1 boss chest's
-                              // proceed, so this reads 0 for every soak until
-                              // the Act-2/3 monster batches (S2.2x) make Act 3
-                              // walkable. A content gap, not a regression --
-                              // see FuzzGuard's seed-116 case.
+                              // proceed.
+                              //
+                              // S2.41 re-measured this once the S2.2x/S2.3x
+                              // content landed and the structural 0 was gone.
+                              // It is no longer a content gap; what remains is
+                              // a REACH result, and the honest reading is that
+                              // the E0 heuristics of policy.hpp win a run so
+                              // rarely that a soak can be large and still show
+                              // 0 here. The per-act tables below are what say
+                              // WHICH act a sweep actually got to, so a 0 in
+                              // this field is attributable instead of merely
+                              // disappointing. Cross-check: act_boss_kills[3]
+                              // counts the same event from the combat side.
     uint64_t reward_screens = 0;
     uint64_t cards_taken = 0;
     uint64_t cards_skipped = 0;
@@ -147,6 +200,7 @@ struct Coverage {
     uint32_t max_turn = 0;
     uint32_t max_floor = 0;
     uint32_t max_actions_in_case = 0;
+    uint32_t max_act = 0;   // merges by max, like the three above
 
     // --- registry-row sightings (the §7.4 "to-fuzz list" in miniature) ---
     // Sized from the generated manifest plus headroom: registry ids are

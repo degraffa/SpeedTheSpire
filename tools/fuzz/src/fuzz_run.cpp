@@ -221,6 +221,15 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
 
     uint8_t prev_phase = 0xFF;
     uint32_t combat_max_turn = 0;
+    // Per-act accounting (S2.41). `acts_seen` is filed ONCE per case at the
+    // end, so act_cases[] counts runs that reached an act rather than steps
+    // spent in it. `boss_combat_act` remembers which act's boss fight is open,
+    // because the kill has to be filed when the run LEAVES the combat -- and
+    // for the act-3 boss it leaves straight into RUN_OVER with no reward
+    // screen and no chest at all (run_advance.hpp), so nothing downstream of
+    // the fight can be used as the probe.
+    bool acts_seen[kActBuckets]{};
+    uint8_t boss_combat_act = 0;
     // Livelock detection over a sliding window of recent controller hashes.
     uint64_t recent[kRevisitWindow]{};
     uint32_t recent_n = 0;
@@ -245,6 +254,16 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
             observer->fn(rc, observer->ctx);
         }
 
+        // --- per-act accounting ----------------------------------------------
+        // Sampled every step, not only on a transition: an act is entered by an
+        // act TRANSITION (the boss chest's proceed), which is a phase change
+        // whose new phase may equal the old one.
+        const uint8_t act_now = rc.run.act;
+        if (cov != nullptr && act_now < kActBuckets) {
+            acts_seen[act_now] = true;
+            if (act_now > cov->max_act) cov->max_act = act_now;
+        }
+
         // --- phase-transition accounting -------------------------------------
         if (cov != nullptr && rc.phase != prev_phase) {
             // Leaving a combat: file the fight's depth. Combats are the unit
@@ -255,9 +274,26 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                 ++cov->turn_bucket[turn_bucket_of(combat_max_turn)];
                 combat_max_turn = 0;
             }
+            // Leaving a BOSS combat: file the kill against the act the fight
+            // started in. Acts 1-2 leave into BOSS_TREASURE and act 3 into
+            // RUN_OVER, and this arm is blind to which -- the outcome is the
+            // probe, not the destination.
+            if (prev_phase == static_cast<uint8_t>(RunPhase::COMBAT) &&
+                boss_combat_act != 0) {
+                if (rc.combat_outcome ==
+                    static_cast<uint8_t>(engine::RunCombatOutcome::KILLED)) {
+                    ++cov->act_boss_kills[boss_combat_act];
+                }
+                boss_combat_act = 0;
+            }
             if (phase == RunPhase::COMBAT) {
                 ++cov->combats_entered;
                 combat_max_turn = 0;
+                if (rc.room_type == static_cast<uint8_t>(engine::RoomType::Boss) &&
+                    act_now < kActBuckets) {
+                    ++cov->act_boss_fights[act_now];
+                    boss_combat_act = act_now;
+                }
                 for (int m = 0; m < rc.combat.monster_count; ++m) {
                     cov->monsters_fought.set(rc.combat.monsters[m].monster_id);
                 }
@@ -297,6 +333,9 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
                  phase == RunPhase::SHOP ||
                  phase == RunPhase::ROOM_UNIMPLEMENTED)) {
                 ++cov->room_entered[rc.room_type];
+                if (act_now < kActBuckets) {
+                    ++cov->act_rooms[act_now][rc.room_type];
+                }
             }
             prev_phase = rc.phase;
         }
@@ -526,6 +565,15 @@ void execute(const CaseId& id, const RunLimits& lim, Coverage* cov, Pass& p,
         // file; the leaving-combat branch above never fired for it.
         if (combat_max_turn > 0) {
             ++cov->turn_bucket[turn_bucket_of(combat_max_turn)];
+        }
+        // The terminal act, which the loop's own sampling misses when the run
+        // ends on the very step that crossed into it.
+        if (rc.run.act < kActBuckets) {
+            acts_seen[rc.run.act] = true;
+            if (rc.run.act > cov->max_act) cov->max_act = rc.run.act;
+        }
+        for (int a = 0; a < kActBuckets; ++a) {
+            if (acts_seen[a]) ++cov->act_cases[a];
         }
         const uint32_t fl = rc.run.floor;
         ++cov->floor_bucket[fl < kFloorBuckets ? fl : kFloorBuckets - 1];

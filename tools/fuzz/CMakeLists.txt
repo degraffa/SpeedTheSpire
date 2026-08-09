@@ -38,7 +38,7 @@ else()
     set(STS_FUZZ_SANITIZER_ID "none")
 endif()
 target_compile_definitions(fuzz_soak PRIVATE
-    STS_FUZZ_BUILD_ID="${CMAKE_BUILD_TYPE}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}-${STS_FUZZ_SANITIZER_ID}-schema5-b51fix2-cardgate1-rest1-treasure1-eventgrid1-g7fix1")
+    STS_FUZZ_BUILD_ID="${CMAKE_BUILD_TYPE}-${CMAKE_CXX_COMPILER_ID}-${CMAKE_CXX_COMPILER_VERSION}-${STS_FUZZ_SANITIZER_ID}-schema5-b51fix2-cardgate1-rest1-treasure1-eventgrid1-g7fix1-s241act1")
 sts_set_warnings(fuzz_soak)
 sts_enable_sanitizers(fuzz_soak)
 find_package(Threads REQUIRED)

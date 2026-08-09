@@ -84,7 +84,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | S2.43 | **Evidence:** PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`, which plays through the chest. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`, and **no S2 ledger row owned changing it**. S2.42 took the contained half: the row now reads `S`, the offers are registry-**joined** (an unknown boss relic fails translation loudly), and the field is `fr.defer`red — pinned by `Translator.BossRewardRelicsAreDeferredNotIgnored` and `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud`. What remains is **storage**, which is not contained: the three offers live in `RunController.boss_chest` (`BossChestState`, `boss_chest.hpp`), which is transient, while the translator emits `RunState`/`CombatState` and the differ compares those — so landing it needs new `RunState` storage **plus** a `SCHEMA_VERSION` bump, a trace-container change and an oracle-adapter change. A `SCHEMA_VERSION` bump outside the places the ledger plans for it is stop-the-line (conventions §5), so S2.42 declined it rather than improvising. **S2.43 needs this before it can claim G2-2 item 2.** |
 | S2.31 payout relics/cards are now REACHABLE with their bodies still deferred | S2.03 (landed them acquisition-only, naming S2.31 as body owner) / S2.31 (granted the acquisition, declined the bodies) | **S2.34** (opened 2026-08-09, satisfying this row's "body task before the gate" demand) | S2.31's acceptance is the ledger's: *option/gate/A15 audit + payout rows **acquisition**-tested*. It grants six relics and three cards whose non-acquisition bodies S2.03 had pencilled onto S2.31, and it deliberately does **not** write them — but they stop being unreachable the moment these events land, so the deferral is recorded here rather than left implied. Open, each with the event that now grants it: **Bloody Idol** `onGainGold` heal 5 (Forgotten Altar) — the only RUN-layer one, and the reason it is not a one-liner is that `AbstractPlayer.gainGold`'s fan-out fires in combat too, where `heal` takes the Magic Flower / phase-gated path that `gain_gold` (relics/relic_pickup.hpp) does not model; **Enchiridion** `atPreBattle`, **Nilry's Codex** `onPlayerEndTurn`/`CodexAction`, **Necronomicon** `onUseCard`/`atTurnStart` (its `onEquip` was already live) and **Necronomicurse** `triggerOnExhaust` (all four from Cursed Tome's book reward); **Mutagenic Strength** `atBattleStart` (Drug Dealer); **Ritual Dagger**'s effect program, still deliberately EMPTY pending its bespoke `misc`-growth opcode (Nest). Every one of those registry rows had its `owner S2.31` string amended in place to point here, so no row now claims a landed task will write it. Each is pinned inert by the existing tier-2 suite, which is what makes this a loud deferral: the cards visibly do nothing and the relics bind no hook |
 | Mind Bloom boss re-fight **directed capture** (the oracle half of S2.33's acceptance) | S2.33 (sim half landed + pinned; no capture seat) | S2.43 | S2.33's acceptance reads "Mind Bloom's Act-1-boss re-fight replays zero-diff in a directed capture". The SIM half is landed and pinned against the decompile (beyond_events_test.cpp: the one-randomLong JDK shuffle twin, the fixed 25/50 gold row, the RARE `returnRandomRelic` pop, the EventRoom-not-boss combat flags, and the victory→reward→map walk), but the bridge never runs from a task worktree and two sibling event batches held the game install concurrently, so **no live capture was run** — deferred, not skipped. S2.43 (the next capture campaign) owes: a directed Act-3 capture that draws MindBloom, takes "I am War", plays the re-fight to the reward claim, and scores zero-diff through the differ; the seed/policy triple can come from `seed_scan --need-boss-id` once Act-3 reach is live (see the reach row above). Watch two rows while scoring it: the translator's act-local FIRED derivation (row above — an Act-2/3 event capture is exactly where it false-REDs) and trap-5's requirement that the driver record playtime |
-| Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **The Act-2 gate is now OPEN** — S2.24 landed the last Act-2 batch (2026-08-09), so the Act-2 cells are measurable the next time S2.41/S2.43 re-runs the scan; Act 3 still waits on S2.27. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
+| Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **RE-RUN HALF DISCHARGED by S2.41 (2026-08-09)**: with every S2.2x/S2.3x batch landed, §1's command was re-run verbatim (50,000 rows, release, `determinism_mismatches=0`) and the Act-2/3 cells are now **measured, at 0** — Act-1 reproduced to the row, `room_unimplemented` went 8 → 0, and the fuzz soak's new per-act coverage agrees over 100,000 independent cases (act 2 entered by 0.11 % of cases, act-2 boss fought 0 times, act 3 never). What is left of this row is therefore **not a content obligation**: sim-side depth is bounded by the E0 policies (~×30 loss per act), so a three-act sim number needs a different policy or the driver, not a later re-run. S2.43's live driver numbers are the remaining half. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
 
 ---
 
@@ -1866,13 +1866,90 @@ state".
 
 ## Phase S2.4 — Verification campaigns + S2 exit
 
-- **S2.41** `[ ]` ∥ **Three-act fuzz soak extension.** B5.1 machinery over
+- **S2.41** `[x]` ∥ **Three-act fuzz soak extension.** B5.1 machinery over
   Acts 1–3: new MoveCats claimed for the boss-relic phase, coverage
   report extended per act; the S2-G1 soak is this task's tooling run at
   gate time.
   **Deps:** S2.11, S2.12 (runs incrementally as content lands)
   **Acceptance:** soak sweep with zero nondeterminism/asserts at
   S2-G1-scale volume; shard/resume paths proven.
+  **Log:** 2026-08-09 — landed. **No namespace claimed:** S2.11's MoveCat
+  28–31 grant already covers the boss-relic phase end to end, and the audit
+  that checked it found the real gap — S2.11 spent the four values and
+  enumerated the moves, but `move_score` never grew an arm for them, so all
+  four fell through its final `return 0` and the whole room was one uniform
+  tie-break for every heuristic. A 300-seed probe read `boss_chest_open`
+  legal twice / **taken zero**, with `pick` and `skip` never legal at all —
+  content that looks unreachable when what is missing is a preference. (GCC
+  said so as `-Wswitch`; the project promotes only the conversion pair to
+  errors.) Fixed with per-policy weights: the depth policies open then pick,
+  `hoard_gold` walks past *without* opening (trap 3's live case — the three
+  relics burn at room entry either way), and `greedy_block` scores SKIP
+  *equal* to PICK, never above, because skip is a reversible screen close
+  that re-advertises `open` and a stateless policy scoring it higher parks in
+  that 2-cycle forever. Equal is bounded, not hopeful: 3 picks against 1
+  skip, so 4/3 opens per chest in expectation. Post-fix soak: open 111 /
+  pick 199 / skip 3 / proceed 132 — all four categories taken.
+
+  **Per-act coverage** (`act_cases` / `act_rooms` / `act_boss_fights` /
+  `act_boss_kills` / `max_act`, merged, kv-round-tripped, printed as its own
+  report block ahead of the depth histograms). The room split is a
+  *partition* of the act-blind table, asserted to sum; `act_boss_kills[3]`
+  and `victories` are two independent probes of one event (combat outcome vs
+  `run_is_victory`) and the report shouts if they disagree. The kill probe is
+  the combat OUTCOME, not `BOSS_TREASURE`, because the act-3 boss opens no
+  chest at all. NEVER REACHED now names unentered acts and unfought/unkilled
+  act bosses first, so an absence is a printed line rather than an inference.
+  Also fixed while in there: the run-layer events block overran its 256-byte
+  buffer at soak-scale counter widths and silently lost its last field —
+  the probe printed `relics  reward claims by kind:` with the relic total and
+  the newline gone.
+
+  **Soak (release preset, 4 shards + merge): 100,000 cases / 200,391 engine
+  runs / 9,246,766 counted actions (18,527,368 stepped), failures 0** —
+  0 `no_legal_moves`, 0 `no_progress`, 0 `livelock`, 0 `room_unimplemented`,
+  0 reproducers, 0 surviving in-flight journals. Replay-twice hashing on
+  every case, pass C sampled. Per act: act 1 100,000 cases / 3,155 boss
+  fights / 108 kills; **act 2 108 cases (0.11 %) / 0 boss fights**; act 3
+  **0 cases**; `victories` **0**. Shard/resume proven as file comparisons,
+  not spot checks: a 3-way split's merged report is byte-identical to the
+  same sweep in one process, and a re-run shard reproduces its summary byte
+  for byte across different `--threads` (a shard is the restartable unit;
+  there is no checkpoint file and there should not be one).
+
+  **The `victories`-reads-0 residue is DISCHARGED as a content question and
+  reopened as a policy one, with the number that decides it.** Nothing parks
+  any more — the wall S2.42 recorded is gone — but the E0 heuristics lose
+  roughly ×30 per act (3.2 % reach the act-1 boss, 0.11 % kill it, 0 of those
+  108 crossings reach the act-2 boss), so an act-2 kill needs order 10^7
+  cases and a victory order 10^9, against a gate soak sized at 10^7 *actions*.
+  **No practical soak volume witnesses a three-act run with these policies**,
+  and S2-G1's soak bar should be read as breadth + determinism accordingly —
+  the per-act block is what makes that statement checkable instead of
+  assumed. Depth stays the driver's job (S2.42 §8's verdict, now measured on
+  both sides of the act boundary). Escalating to a deeper sim policy was
+  deliberately NOT done: the ledger routes that through a measurement, and
+  this is the measurement, not the decision.
+
+  **Deferred obligation "Act-2 / Act-3 measured sim-side reach numbers":
+  re-run half discharged.** `seed_scan`'s §1 command re-run verbatim, release
+  preset, 50,000 rows, `determinism_mismatches=0`, `failures=0`: Act-1
+  reproduced to the row (1,406 fights / 59 kills / 59 cohort triples over 55
+  seeds — the control proving it is the same experiment), Act-2/3 cells now
+  **measured 0** rather than *pending content*, `room_unimplemented` 8 → 0,
+  and four City events appear in the census. Recorded in
+  [verification/s242-deep-reach.md](verification/s242-deep-reach.md) §11 with
+  the fuzz soak's per-act numbers as an independent cross-check (different
+  tool, different seed range, different probe; they agree). Double-boss
+  detection remains unbuilt, as §10.2 says.
+
+  7 tests added (per-act partition/invariants over a 200-case sweep, the
+  seed-116 crossing read through the per-act tables, the report's act
+  witness + NEVER REACHED lines, per-act kv round-trip and `max_act`
+  strictness, the boss-chest preference, shard equivalence, shard resume).
+  `fuzz_soak` build id gains `-s241act1` so pre-S2.41 summaries cannot merge
+  with post-S2.41 ones. Six presets green;
+  `check_stale_counts.sh` / `check_doc_links.sh` clean.
 - **S2.42** `[x]` ∥ **Deep-reach scripted drivers + sim pre-scan.** The
   design §6 driver-risk mitigation: extend the TE.1 external-policy
   family for three-act survival (act-aware heuristics; boss-relic pick

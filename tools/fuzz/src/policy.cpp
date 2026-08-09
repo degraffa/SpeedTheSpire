@@ -755,6 +755,47 @@ struct CardScore {
             // walked through -- but the Proceed that leaves shares the bucket,
             // so an unaffordable shop still exits on the first pick.
             return kind == PolicyKind::HOARD_GOLD ? 10 : 100;
+        // THE BOSS CHEST (S2.11 enumerated it; S2.41 gave it weights).
+        //
+        // Every one of these four fell through `move_score`'s final `return 0`
+        // before this arm existed, which made the whole room ONE uniform
+        // tie-break for every policy including the four heuristics. A 300-seed
+        // probe showed the consequence exactly: `boss_chest_open` legal twice,
+        // TAKEN zero times, and `boss_chest_pick` / `boss_chest_skip` never
+        // legal at all -- i.e. the three MoveCats S2.11 spent namespace on were
+        // being reported as unreachable content when what was actually missing
+        // was a preference.
+        //
+        // The weights are split by policy so all FOUR categories get taken
+        // across the mix, which is the whole reason they are four categories:
+        //   - the depth policies open, then pick (a boss relic is a real
+        //     upgrade, and picking is the path that also drives the equip
+        //     sub-screens folded into BOSS_CHEST_PICK);
+        //   - hoard_gold walks past WITHOUT opening, which is trap 3's live
+        //     case: the three relics burn at room ENTRY whether or not the
+        //     chest is ever opened;
+        //   - greedy_block scores SKIP *equal* to PICK, which is the only way
+        //     BOSS_CHEST_SKIP is reachable at all in practice. Skip is a
+        //     REVERSIBLE screen close that re-advertises `open` (boss_chest.hpp,
+        //     s242-deep-reach §7), so scoring it ABOVE pick would park a
+        //     stateless policy in an open/skip 2-cycle forever. Equal is safe
+        //     for a bounded reason and not a hopeful one: the screen offers
+        //     three picks against one skip, so each visit leaves with
+        //     probability 3/4 and the expected number of opens per chest is
+        //     4/3. The first S2.41 soak measured skip legal 108 times and taken
+        //     ZERO -- the boss chests a soak reaches all belong to the policies
+        //     that always pick -- which is what this arm exists to fix.
+        case MoveCat::BOSS_CHEST_OPEN:
+            return kind == PolicyKind::HOARD_GOLD ? 10 : 100;
+        case MoveCat::BOSS_CHEST_PICK:
+            return 100;
+        case MoveCat::BOSS_CHEST_SKIP:
+            return kind == PolicyKind::GREEDY_BLOCK ? 100 : 20;
+        case MoveCat::BOSS_CHEST_PROCEED:
+            // Below OPEN for the depth policies (so the chest is opened before
+            // the room is left) and above it for hoard_gold (so the no-pick
+            // path is exercised on purpose rather than by lottery).
+            return kind == PolicyKind::HOARD_GOLD ? 100 : 5;
         case MoveCat::RECALL:
             // Below the rest/smith weights: taking the key forfeits the whole
             // campfire, so a soak should mostly camp -- but the branch (and the

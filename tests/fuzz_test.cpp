@@ -1466,3 +1466,354 @@ TEST(FuzzRunner, SanitizerPercentageUsesCeilingDivision) {
     EXPECT_NE(text.find("--seed-start 102"), std::string::npos) << text;
     std::remove(log.c_str());
 }
+
+// --- 5. per-act coverage, and the boss chest's weights (S2.41) ---------------
+//
+// The S2-G1 gate soak's claim is "three-act A20 runs". Before S2.41 the report
+// could not distinguish a sweep that walked three acts from one that died on
+// floor 6 every time, so these tests hold the per-act tables to the invariants
+// that make them a witness rather than four more numbers.
+
+TEST(FuzzCoverage, PerActTablesAgreeWithTheActBlindOnesOverASweep) {
+    Coverage cov;
+    for (int64_t seed = 1; seed <= 40; ++seed) {
+        for (uint8_t p = 0; p < static_cast<uint8_t>(PolicyKind::COUNT); ++p) {
+            CaseId id;
+            id.run_seed = seed;
+            id.ascension = 20;
+            id.policy = static_cast<PolicyKind>(p);
+            id.policy_seed = 0xC0FFEEull;
+            CaseResult r;
+            (void)run_case(id, limits(), &cov, r, false);
+        }
+    }
+    ASSERT_GT(cov.cases, 0u);
+
+    // Every run begins in act 1 and no run can skip an act, so this is an
+    // identity rather than a threshold: if it ever fails, the per-act sampling
+    // missed steps, not the runs.
+    EXPECT_EQ(cov.act_cases[1], cov.cases);
+    EXPECT_GE(cov.max_act, 1u);
+
+    // The split is a PARTITION of the act-blind rooms table: the same events,
+    // filed by act. A row that did not sum would mean an entry counted in one
+    // table and not the other -- the shape of the shop-entry hole.
+    for (int r = 1; r < kRoomTypeCount; ++r) {
+        uint64_t summed = 0;
+        for (int a = 0; a < kActBuckets; ++a) summed += cov.act_rooms[a][r];
+        EXPECT_EQ(summed, cov.room_entered[r]) << "room type " << r;
+    }
+
+    for (int a = 2; a < kActBuckets; ++a) {
+        EXPECT_LE(cov.act_boss_kills[a], cov.act_boss_fights[a])
+            << "act " << a << ": a kill was counted without its fight";
+        if (cov.act_boss_fights[a] > 0) {
+            EXPECT_GT(cov.act_cases[a], 0u)
+                << "act " << a << ": a boss was fought in an act no case entered";
+        }
+        if (cov.act_cases[a] > 0) {
+            EXPECT_GE(cov.max_act, static_cast<uint32_t>(a));
+            EXPECT_GT(cov.act_cases[a - 1], 0u)
+                << "act " << a << " was entered without its predecessor";
+        }
+    }
+    EXPECT_LE(cov.act_boss_kills[1], cov.act_boss_fights[1]);
+
+    // The two independent probes for the same event. `victories` is
+    // run_is_victory() at the terminal; act_boss_kills[3] is the act-3 boss
+    // combat leaving COMBAT with KILLED. They cannot disagree.
+    EXPECT_EQ(cov.act_boss_kills[engine::kFinalAct], cov.victories);
+
+    // Act 2 is a REACH result and a 200-case sweep is not guaranteed to contain
+    // one, so the assertion is on the machinery -- the act-1 boss chest is the
+    // only door into act 2 -- rather than on luck.
+    if (cov.act_cases[2] > 0) {
+        EXPECT_GT(cov.act_boss_kills[1], 0u)
+            << "act 2 was entered without an act-1 boss kill";
+    }
+}
+
+TEST(FuzzCoverage, PerActTablesWitnessTheSeed116ActTwoCrossing) {
+    // The same pinned crossing FuzzGuard's seed-116 case uses, read through the
+    // per-act tables: what that test asserts with its own StepObserver, the
+    // coverage instrument must report on its own.
+    CaseId id;
+    id.run_seed = 116;
+    id.ascension = 20;
+    id.policy = PolicyKind::ALWAYS_EVENT;
+    id.policy_seed = 12948172379672766026ull;
+    Coverage cov;
+    CaseResult r;
+    ASSERT_TRUE(run_case(id, limits(), &cov, r, false)) << triage_text(id, r);
+
+    EXPECT_EQ(cov.act_cases[1], 1u);
+    EXPECT_EQ(cov.act_cases[2], 1u) << "the act transition really ran";
+    EXPECT_GE(cov.max_act, 2u);
+    EXPECT_GT(cov.act_boss_fights[1], 0u);
+    EXPECT_GT(cov.act_boss_kills[1], 0u);
+    EXPECT_EQ(cov.act_boss_kills[engine::kFinalAct], cov.victories);
+}
+
+TEST(FuzzCoverage, ReportWitnessesActsAndNamesTheUnreachedOnes) {
+    Coverage cov;
+    CaseResult r;
+    ASSERT_TRUE(run_case(make_case(PolicyKind::GREEDY_DAMAGE), limits(), &cov, r,
+                         false));
+    const std::string text = cov.report(1.0);
+    EXPECT_NE(text.find("-- per act ("), std::string::npos);
+    EXPECT_NE(text.find("deepest act seen"), std::string::npos);
+    // A single Act-1 case must SAY that it never left act 1, in the same
+    // NEVER REACHED block that names an unused move category.
+    if (cov.act_cases[3] == 0) {
+        EXPECT_NE(text.find("act never entered by any case: 3"),
+                  std::string::npos)
+            << text;
+    }
+    if (cov.victories == 0) {
+        EXPECT_NE(text.find("the run was never WON"), std::string::npos) << text;
+    }
+}
+
+TEST(FuzzCoverage, PerActCountersRoundTripThroughTheKvForm) {
+    // The kv form is what a shard merge carries; a per-act counter that did not
+    // survive it would silently understate the campaign total.
+    Coverage a;
+    a.cases = 1;
+    a.act_cases[1] = 7;
+    a.act_cases[3] = 2;
+    a.act_boss_fights[2] = 5;
+    a.act_boss_kills[2] = 4;
+    a.act_rooms[3][static_cast<int>(engine::RoomType::Elite)] = 11;
+    a.max_act = 3;
+
+    Coverage back;
+    ASSERT_TRUE(coverage_from_kv(a.kv(), back));
+    EXPECT_EQ(back.act_cases[1], 7u);
+    EXPECT_EQ(back.act_cases[3], 2u);
+    EXPECT_EQ(back.act_boss_fights[2], 5u);
+    EXPECT_EQ(back.act_boss_kills[2], 4u);
+    EXPECT_EQ(back.act_rooms[3][static_cast<int>(engine::RoomType::Elite)], 11u);
+    EXPECT_EQ(back.max_act, 3u);
+
+    Coverage sum = a;
+    sum.merge(back);
+    EXPECT_EQ(sum.act_cases[1], 14u);   // additive
+    EXPECT_EQ(sum.max_act, 3u);         // max, not sum
+
+    // max_act joins the maxima through the same visitor the other three use, so
+    // a summary missing it is drift, not vintage.
+    std::string text = a.kv();
+    const std::size_t at = text.find("\nmax_act ");
+    ASSERT_NE(at, std::string::npos);
+    const std::size_t eol = text.find('\n', at + 1);
+    ASSERT_NE(eol, std::string::npos);
+    const std::string mangled = text.substr(0, at) + text.substr(eol);
+    Coverage out;
+    std::vector<std::string> defaulted;
+    EXPECT_FALSE(coverage_from_kv(mangled, out));
+    EXPECT_FALSE(coverage_from_kv_legacy(mangled, out, defaulted));
+}
+
+// REGRESSION (S2.41 probe, 2026-08-09): S2.11 spent four MoveCat values on the
+// boss chest and enumerated all four moves, but `move_score` never grew an arm
+// for them -- so every one fell through its final `return 0` and the whole room
+// was a single uniform tie-break for all four heuristics. The 300-seed probe
+// read `boss_chest_open` legal twice and TAKEN zero times, with `pick` and
+// `skip` never legal at all, which looks exactly like unreachable content and
+// was in fact a missing preference. (GCC said so, as a -Wswitch warning; this
+// project promotes only the conversion pair to errors, so nothing failed.)
+//
+// `move_score` is internal, so the preference is pinned where it is observable:
+// policy_pick over a synthesized two-move set. Neither category reads the
+// controller, so a fresh run_begin is a sufficient context.
+TEST(FuzzPolicy, BossChestPreferenceIsScoredRatherThanLeftToTheTieBreak) {
+    engine::RunController rc = engine::run_begin(7, 20);
+    const auto pick_between = [&](PolicyKind kind, MoveCat lo, MoveCat hi,
+                                  uint64_t pseed) {
+        Move moves[2];
+        moves[0].cat = lo;
+        moves[0].action = engine::Action{1};
+        moves[1].cat = hi;
+        moves[1].action = engine::Action{2};
+        PolicyRng rng(pseed);
+        return moves[policy_pick(kind, rc, moves, 2, rng)].cat;
+    };
+
+    for (uint64_t pseed = 1; pseed <= 8; ++pseed) {
+        for (PolicyKind kind : {PolicyKind::GREEDY_DAMAGE, PolicyKind::GREEDY_BLOCK,
+                                PolicyKind::ALWAYS_EVENT}) {
+            // The depth policies OPEN the chest rather than walking past it.
+            EXPECT_EQ(pick_between(kind, MoveCat::BOSS_CHEST_PROCEED,
+                                   MoveCat::BOSS_CHEST_OPEN, pseed),
+                      MoveCat::BOSS_CHEST_OPEN)
+                << policy_name(kind);
+        }
+        // hoard_gold walks past WITHOUT opening -- trap 3's live case, where the
+        // three relics burn at room entry and the chest is never touched.
+        EXPECT_EQ(pick_between(PolicyKind::HOARD_GOLD, MoveCat::BOSS_CHEST_PROCEED,
+                               MoveCat::BOSS_CHEST_OPEN, pseed),
+                  MoveCat::BOSS_CHEST_PROCEED);
+        // Once open, every heuristic but one PICKS. Skip is a reversible screen
+        // close that re-advertises `open`, so a policy scoring it ABOVE pick
+        // would sit in the open/skip 2-cycle (s242-deep-reach §7).
+        for (uint8_t p = 1; p < static_cast<uint8_t>(PolicyKind::COUNT); ++p) {
+            const auto kind = static_cast<PolicyKind>(p);
+            if (kind == PolicyKind::GREEDY_BLOCK) continue;
+            EXPECT_EQ(pick_between(kind, MoveCat::BOSS_CHEST_SKIP,
+                                   MoveCat::BOSS_CHEST_PICK, pseed),
+                      MoveCat::BOSS_CHEST_PICK)
+                << policy_name(kind);
+        }
+    }
+
+    // greedy_block scores skip EQUAL to pick, which is what makes
+    // BOSS_CHEST_SKIP reachable at soak scale at all: the chests a soak reaches
+    // belong to the policies that always pick, so without one policy on the
+    // tie-break the category reads "never taken" forever. Equal, never above --
+    // above is the 2-cycle.
+    {
+        bool block_skipped = false;
+        bool block_picked = false;
+        for (uint64_t pseed = 1; pseed <= 32; ++pseed) {
+            const MoveCat got =
+                pick_between(PolicyKind::GREEDY_BLOCK, MoveCat::BOSS_CHEST_SKIP,
+                             MoveCat::BOSS_CHEST_PICK, pseed);
+            block_skipped |= got == MoveCat::BOSS_CHEST_SKIP;
+            block_picked |= got == MoveCat::BOSS_CHEST_PICK;
+        }
+        EXPECT_TRUE(block_skipped && block_picked);
+    }
+
+    // ... and `random` reaches both sides of that choice, which is what keeps
+    // BOSS_CHEST_SKIP from being permanently unreachable in a soak.
+    bool saw_skip = false;
+    bool saw_pick = false;
+    for (uint64_t pseed = 1; pseed <= 32; ++pseed) {
+        const MoveCat got = pick_between(PolicyKind::RANDOM, MoveCat::BOSS_CHEST_SKIP,
+                                         MoveCat::BOSS_CHEST_PICK, pseed);
+        saw_skip |= got == MoveCat::BOSS_CHEST_SKIP;
+        saw_pick |= got == MoveCat::BOSS_CHEST_PICK;
+    }
+    EXPECT_TRUE(saw_skip && saw_pick);
+}
+
+// --- 6. sharding and resume, over three-act volume (S2.41) -------------------
+//
+// The B5.1 acceptance says "shard/resume paths proven". The soak has no
+// checkpoint file and does not want one: a SHARD is the restartable unit, and
+// what has to be true is (a) the shards PARTITION the sweep -- their merged
+// report equals the unsharded one exactly, not approximately -- and (b) a shard
+// re-run after an interruption reproduces itself BYTE FOR BYTE, including under
+// a different worker-thread count, so a resumed sweep cannot double-count or
+// lose a case. Both are stated here as file comparisons rather than as a
+// handful of spot-checked counters.
+
+TEST(FuzzDriver, ShardedSweepMergesToExactlyTheUnshardedSweep) {
+    const std::string whole_label = "shard_whole";
+    const std::string split_label = "shard_split";
+    const std::string log = scratch("shard_equiv.log");
+    const std::string whole_report = scratch("shard_whole_merged.txt");
+    const std::string split_report = scratch("shard_split_merged.txt");
+    const std::string sweep =
+        " --seed-start 501 --seeds 4 --policies random,greedy_damage,always_event"
+        " --max-actions 1500 --verify-repro-every 3 --out " +
+        shell_quote(STS_FUZZ_SCRATCH);
+
+    // One process, the whole sweep.
+    ASSERT_EQ(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + sweep + " --label " +
+                        whole_label + " --threads 1 --shard 0/1 --quiet >" +
+                        shell_quote(log) + " 2>&1"),
+              0)
+        << read_text(log);
+    // The same sweep cut three ways, each a separate process, and two of them
+    // with a different thread count -- a shard's identity must not depend on
+    // how many workers happened to be free when it ran.
+    for (int i = 0; i < 3; ++i) {
+        const std::string threads = i == 1 ? " --threads 3" : " --threads 2";
+        ASSERT_EQ(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + sweep + " --label " +
+                            split_label + threads + " --shard " +
+                            std::to_string(i) + "/3 --quiet >>" +
+                            shell_quote(log) + " 2>&1"),
+                  0)
+            << read_text(log);
+    }
+
+    const std::string whole_kv = scratch(whole_label + "_summary_s0.kv");
+    ASSERT_EQ(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + " --merge " +
+                        shell_quote(whole_kv) + " >" +
+                        shell_quote(whole_report) + " 2>&1"),
+              0)
+        << read_text(whole_report);
+    std::string merge = shell_quote(STS_FUZZ_SOAK_BIN) + " --merge";
+    for (int i = 0; i < 3; ++i) {
+        merge += " " + shell_quote(scratch(split_label + "_summary_s" +
+                                           std::to_string(i) + ".kv"));
+    }
+    ASSERT_EQ(run_shell(merge + " >" + shell_quote(split_report) + " 2>&1"), 0)
+        << read_text(split_report);
+
+    // Both merge paths call report(0.0), so there is no elapsed line and no
+    // wall-clock term anywhere in either text: this is an EXACT comparison.
+    const std::string whole_text = read_text(whole_report);
+    const std::string split_text = read_text(split_report);
+    ASSERT_FALSE(whole_text.empty());
+    EXPECT_EQ(whole_text, split_text)
+        << "a 3-way shard split did not reproduce the unsharded sweep";
+    // ... and it is not vacuously equal on an empty sweep.
+    EXPECT_NE(whole_text.find("cases (seed x policy x policy-seed) : 12"),
+              std::string::npos)
+        << whole_text.substr(0, 200);
+    EXPECT_NE(whole_text.find("-- per act ("), std::string::npos);
+
+    for (const std::string& p : {log, whole_report, split_report, whole_kv}) {
+        std::remove(p.c_str());
+    }
+    for (int i = 0; i < 3; ++i) {
+        std::remove(scratch(split_label + "_summary_s" + std::to_string(i) + ".kv")
+                        .c_str());
+        std::remove(scratch(split_label + "_report_s" + std::to_string(i) + ".txt")
+                        .c_str());
+    }
+    std::remove(scratch(whole_label + "_report_s0.txt").c_str());
+}
+
+TEST(FuzzDriver, AnInterruptedShardResumesToAByteIdenticalSummary) {
+    // "Resume" here means: re-run the shard. The property that makes that safe
+    // is that a shard is a pure function of (sweep options, shard index) -- not
+    // of the thread count, not of what the other shards did, and not of what a
+    // previous attempt left on disk.
+    const std::string label = "shard_resume";
+    const std::string log = scratch("shard_resume.log");
+    const std::string kv = scratch(label + "_summary_s1.kv");
+    const std::string sweep =
+        " --seed-start 733 --seeds 3 --policies greedy_block,always_event"
+        " --max-actions 1500 --out " + shell_quote(STS_FUZZ_SCRATCH) +
+        " --label " + label + " --shard 1/3 --quiet";
+
+    ASSERT_EQ(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + sweep + " --threads 1 >" +
+                        shell_quote(log) + " 2>&1"),
+              0)
+        << read_text(log);
+    const std::string first = read_text(kv);
+    ASSERT_NE(first.find("STSFUZZ_SUMMARY v1\n"), std::string::npos);
+    ASSERT_NE(first.find("shard 1\n"), std::string::npos);
+
+    // The interruption: the artifact is gone and the shard runs again, this
+    // time with more workers.
+    std::remove(kv.c_str());
+    ASSERT_EQ(run_shell(shell_quote(STS_FUZZ_SOAK_BIN) + sweep + " --threads 2 >>" +
+                        shell_quote(log) + " 2>&1"),
+              0)
+        << read_text(log);
+    EXPECT_EQ(read_text(kv), first)
+        << "a re-run shard did not reproduce itself byte for byte";
+
+    // A clean shard leaves no in-flight journal behind -- that file is the
+    // crash reproducer, and a stale one would be read as a dead worker.
+    EXPECT_FALSE(std::filesystem::exists(
+        scratch(label + "_inflight_s1_t0.txt")));
+
+    std::remove(log.c_str());
+    std::remove(kv.c_str());
+    std::remove(scratch(label + "_report_s1.txt").c_str());
+}
