@@ -673,9 +673,9 @@ enum class Opcode : uint16_t {
                               // src, which is also the fallback recipient.
 
     // --- S2.2F (the shared Act-2/3 monster framework) ---
-    // 68-70 are this task's whole grant; 71-72 are S2.24's and stay unissued.
-    // All three land with NO producer -- they exist so the four monster batches
-    // behind this framework do not each invent their own.
+    // 68-70 are this task's whole grant; 71-72 are S2.24's (spent below).
+    // All three landed with NO producer -- they exist so the four monster
+    // batches behind this framework do not each invent their own.
     OBTAIN_CARD = 68,         // AddCardToDeckAction (:83-88): put a card into the
                               // MASTER DECK, mid-combat. `extra` = CardId; no
                               // amount, no target.
@@ -704,6 +704,64 @@ enum class Opcode : uint16_t {
                               // the ONLY producer of the end-turn sentinel was
                               // the player's own END_TURN verb. No operands.
                               // Consumer: Time Warp's 12th card (S2.28).
+    // --- S2.24 (City bosses) --- 71-72 are that task's whole opcode grant
+    // (71 APPLY_STASIS as allocated; 72 was the contingency, spent as the
+    // return half -- reported in the S2.24 Log).
+    APPLY_STASIS = 71,        // ApplyStasisAction.update (ApplyStasisAction.
+                              // java:32-80), the Bronze Orb's card theft
+                              // (BronzeOrb.java:73). `src` is the acting orb
+                              // -- the future power owner -- and EVERYTHING
+                              // else is an execute-time fact:
+                              //   * draw AND discard both empty -> done, ZERO
+                              //     draws, NO power applied (:34-37);
+                              //   * source pile: the DRAW pile unless it is
+                              //     empty, then the DISCARD (:39,:51);
+                              //   * the pick: getRandomCard(cardRandomRng,
+                              //     RARE), then UNCOMMON, then COMMON, then
+                              //     the unfiltered overload (:40-49/:52-61).
+                              //     Each NON-EMPTY rarity-filtered view costs
+                              //     ONE card_random_rng random(size-1) over
+                              //     its Collections.sort()ed membership
+                              //     (cardID compare -- game_id strings, a
+                              //     STABLE sort, so equal ids keep pile
+                              //     order; CardGroup.java:526-538,
+                              //     AbstractCard.java:2583-2584); an EMPTY
+                              //     view returns null WITHOUT drawing. The
+                              //     unfiltered fallback (CardGroup.java:
+                              //     498-500) indexes the pile IN PILE ORDER,
+                              //     unsorted. Rarity is the LIVE CardRarity
+                              //     (card_rarity table): a BASIC Strike never
+                              //     matches a filter, a status is COMMON.
+                              //   * the stolen instance leaves its pile for
+                              //     LIMBO (:64 player.limbo.addToBottom) --
+                              //     the ORIGINAL pool row moves, preserving
+                              //     upgrade/misc/cost -- with the knowledge
+                              //     chain told (knowledge_on_remove_known;
+                              //     the theft is player-visible via
+                              //     ShowCardAction);
+                              //   * then addToTop(ApplyPowerAction(owner,
+                              //     owner, StasisPower(owner, card))) (:77)
+                              //     -- queued add_to_top here, amount -1,
+                              //     with the pool index + 1 riding the
+                              //     APPLY_POWER counter operand into the
+                              //     slot's `counter` (powers.yaml id 98).
+                              //     The addToTop'd ShowCardAction (:78) is
+                              //     presentation.
+    STASIS_RETURN = 72,       // StasisPower.onDeath (StasisPower.java:38-44):
+                              // give the stolen card back when the orb dies.
+                              // `amount` = the stolen card's pool index;
+                              // `flags` bit 0 = the QUEUE-TIME destination
+                              // choice (`player.hand.size() != 10` at the
+                              // onDeath moment -- set means HAND). The HAND
+                              // arm re-checks the cap at RESOLVE and spills
+                              // to the discard (MakeTempCardInHandAction.
+                              // update:71-77) -- two reads at two times, and
+                              // both are the Java's. The card moves OUT of
+                              // limbo into the destination pile; a card no
+                              // longer in limbo (defensive) is a no-op.
+                              // ENGINE_EMITTED_OPS: the pool index is a
+                              // runtime handle (the power slot's counter),
+                              // queued only by power_stasis.cpp.
 };
 
 // --- SPAWN_MONSTER field encoding --------------------------------------------
@@ -719,10 +777,28 @@ inline constexpr uint32_t kSpawnRunPreBattle = 1u << 16;
 // power list ends up [Minion, Angry] and not the other way round.
 //
 // A BIT rather than a policy, for the same reason bit 16 is: the two Java spawn
-// actions differ. SpawnMonsterAction (the slime split) applies NO Minion; every
-// SUMMONER does -- SummonGremlinAction here, and Reptomancer's daggers, the
-// Collector's torch heads and the Bronze Automaton's orbs in the batches that
-// follow. Setting both bits together IS the summon pattern.
+// actions differ. SpawnMonsterAction with isMinion=false (the slime split)
+// applies NO Minion; SummonGremlinAction addToBot's one BEFORE the pre-battle
+// action. Setting both bits together IS that summon pattern.
+//
+// AMENDED BY S2.24 -- this paragraph previously said "every summoner" uses this
+// bit, naming the Collector's torch heads and the Automaton's orbs. They do
+// not, and the Java is why: SpawnMonsterAction with isMinion=TRUE (their
+// spawner, SpawnMonsterAction.java:67-69) applies its Minion **addToTop at the
+// spawn's own resolve** -- ahead of everything else in the queue -- where this
+// bit queues **addToBottom, behind it**. S2.24's two summoners (the Automaton's
+// orbs, the Collector's torch heads) therefore leave the bit CLEAR and queue an
+// explicit APPLY_POWER item immediately AFTER each spawn item at take-turn
+// time, which resolves in exactly the addToTop position (the spawn's
+// resolution queues nothing ahead of it, so "next item" and "top of queue at
+// resolve" are the same slot). S2.27's Reptomancer translates the SAME Java
+// fact the other admissible way: it sets this bit together with
+// kSpawnMinionAtTop (bit 31 below), which applies the Minion at the spawn's
+// own resolve. The two spellings produce the same resolution order --
+// spawn, its Minion, the next spawn, its Minion -- and both are pinned by
+// their batches' spawn-order tests; neither is "the" canonical one yet, and
+// unifying them is a behaviour-preserving refactor that wants its own test
+// run, not a change made in passing.
 inline constexpr uint32_t kSpawnApplyMinion = 1u << 17;
 // Bit 31 puts that Minion application at the queue TOP instead of the bottom.
 //
@@ -732,11 +808,14 @@ inline constexpr uint32_t kSpawnApplyMinion = 1u << 17;
 //     SpawnMonsterAction.java:68     addToTop(new ApplyPowerAction(m, m, Minion))
 // -- literally addToBot versus addToTop, in two actions that are otherwise the
 // same shape. The Gremlin Leader is the bottom form; every SpawnMonsterAction
-// summoner (Reptomancer's daggers, and the Bronze Automaton's orbs and the
-// Collector's torch heads that follow) is the top form. Deriving the placement
-// from bit 16 instead -- "run_pre_battle means SummonGremlinAction means bottom"
-// -- would be correct today by coincidence and would encode a class identity in
-// a bit that names a behaviour.
+// summoner (Reptomancer's daggers, the Bronze Automaton's orbs, the
+// Collector's torch heads) is the top form IN THE JAVA. In the engine only the
+// Reptomancer spells it with this bit -- S2.24's two summoners reached the same
+// resolution order with an explicitly interleaved APPLY_POWER item instead; see
+// the bit-17 paragraph above for why both spellings are exact. Deriving the
+// placement from bit 16 instead -- "run_pre_battle means SummonGremlinAction
+// means bottom" -- would be correct today by coincidence and would encode a
+// class identity in a bit that names a behaviour.
 //
 // It is bit 31 because the word was full: bits 0-15 are the MonsterId, 16 and 17
 // are the two behaviour bits, and `draw_x` held 18..31. Rather than widen the
@@ -1538,6 +1617,22 @@ inline constexpr uint32_t kPowerInstanceCounterMask = 0xFFu << kPowerInstanceCou
 }
 [[nodiscard]] constexpr int damage_greed_gold_from_flags(uint32_t flags) noexcept {
     return static_cast<int>(flags);
+}
+
+// --- STASIS_RETURN field encoding ---------------------------------------------
+// `amount` is the stolen card's pool index (from the dying orb's Stasis slot
+// counter, minus the +1 bias); `flags` bit 0 is the QUEUE-TIME destination
+// decision StasisPower.onDeath makes -- set == HAND (`player.hand.size() != 10`,
+// StasisPower.java:39), clear == DISCARD. The HAND arm still spills to the
+// discard at RESOLVE if the hand has filled in between (MakeTempCardInHand-
+// Action.update:71-77) -- the two reads happen at two different times and both
+// are modelled.
+inline constexpr uint32_t kStasisReturnToHandBit = 1u << 0;
+[[nodiscard]] constexpr uint32_t make_stasis_return_flags(bool to_hand) noexcept {
+    return to_hand ? kStasisReturnToHandBit : 0u;
+}
+[[nodiscard]] constexpr bool stasis_return_to_hand(uint32_t flags) noexcept {
+    return (flags & kStasisReturnToHandBit) != 0u;
 }
 
 // --- DAMAGE damage-type encoding ---------------------------------------------

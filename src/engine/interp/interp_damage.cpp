@@ -130,7 +130,12 @@ namespace {
     // INTANGIBLE_MONSTER's only damage override is atDamageFinalReceive
     // (IntangiblePower.java:42-47), likewise victim-side. So this count moves
     // caseless, as does interp_block.cpp's.
-    static_assert(sts::registry::manifest::kPowersCount == 71,
+    // Checked for S2.24's one power, STASIS (id 98, StasisPower.java:16-45,
+    // read in full): its only overrides are updateDescription and onDeath --
+    // a queued give-back of the stolen card, touching no damage number in
+    // any pass, giving or receiving. All three of this file's counts move
+    // again, caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 72,
                   "new power: does it override atDamageGive (attacker-side "
                   "damage scaling, as Strength and Weak do)? Add a case here if "
                   "so. Check atDamageFinalGive below in the same pass -- it is "
@@ -243,7 +248,12 @@ namespace {
     // is atDamageFinalReceive (IntangiblePower.java:42-47), the pass below --
     // the same split Flight already demonstrates, and it is not cosmetic,
     // because the FINAL pass runs after Vulnerable's and Slow's multiplies.
-    static_assert(sts::registry::manifest::kPowersCount == 71,
+    // Checked for S2.24's one power, STASIS (id 98, StasisPower.java:16-45,
+    // read in full): its only overrides are updateDescription and onDeath --
+    // a queued give-back of the stolen card, touching no damage number in
+    // any pass, giving or receiving. All three of this file's counts move
+    // again, caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 72,
                   "new power: does it override atDamageReceive (target-side "
                   "damage scaling, as Vulnerable and Slow do)? Add a case here "
                   "if so. Check atDamageFinalReceive below in the same pass -- "
@@ -369,7 +379,12 @@ namespace {
     // (IntangiblePower.java:42-47 vs IntangiblePlayerPower.java:43-49). Two
     // classes, two rows, two cases; see powers.yaml 107 for why they cannot be
     // one row.
-    static_assert(sts::registry::manifest::kPowersCount == 71,
+    // Checked for S2.24's one power, STASIS (id 98, StasisPower.java:16-45,
+    // read in full): its only overrides are updateDescription and onDeath --
+    // a queued give-back of the stolen card, touching no damage number in
+    // any pass, giving or receiving. All three of this file's counts move
+    // again, caseless, and interp_block.cpp's with them.
+    static_assert(sts::registry::manifest::kPowersCount == 72,
                   "new power: does it override atDamageFinalReceive (the last "
                   "target-side pass, as both Intangible rows and Flight do)? "
                   "Add a case here if so.");

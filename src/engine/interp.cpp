@@ -331,6 +331,20 @@ void execute_opcode(CombatState& s, const ActionQueueItem& item) noexcept {
             add_card_to_queue_bottom(s, make_end_turn_sentinel());
             return;
         }
+        case Opcode::APPLY_STASIS:
+            // The Bronze Orb's card theft (ApplyStasisAction.update): `src` is
+            // the acting orb, the future power owner. Everything else -- pile
+            // choice, rarity cascade, the move into limbo, the addToTop'd
+            // Stasis apply -- is decided inside the body at execute time.
+            op_apply_stasis(s, item.src);
+            return;
+        case Opcode::STASIS_RETURN:
+            // StasisPower.onDeath's give-back: the stolen card (pool index in
+            // `amount`) leaves limbo for the queue-time destination in `flags`,
+            // spilling HAND -> DISCARD at resolve when the hand filled in
+            // between. Engine-emitted only (power_stasis.cpp).
+            op_stasis_return(s, item);
+            return;
         case Opcode::BLOCK_RANDOM_MONSTER:
             // The Centurion's Protect: `item.tgt` is deliberately NOT passed --
             // the op picks its own recipient from the live group (and spends the

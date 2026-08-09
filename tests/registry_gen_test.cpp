@@ -518,11 +518,14 @@ TEST(RegistryGen, ManifestCounts) {
                                       // joins any generated pool.
     // Counts are ROW counts, not max ids: ids are append-only and may be sparse,
     // so a reserved-but-unused id (powers 47, monsters 14) contributes no row.
-    EXPECT_EQ(m::kPowersCount, 71u);  // + S2.27's SLOW (106) and
+    EXPECT_EQ(m::kPowersCount, 72u);  // + S2.27's SLOW (106) and
                                       // INTANGIBLE_MONSTER (107, game_id
                                       // "Intangible" -- the MONSTER class, NOT
                                       // id 29 "IntangiblePlayer"), the 106-107
                                       // block spent exactly.
+                                      // + S2.24's STASIS (98) -- the 96-98
+                                      // block is now fully spent; no PowerId
+                                      // gaps remain below 99.
                                       // + S2.23's MINION (96) and PAINFUL_STABS
                                       // (97) -- the Gremlin Leader's minion
                                       // marker (which un-parks the Feed and
@@ -536,14 +539,13 @@ TEST(RegistryGen, ManifestCounts) {
                                       // CONSTRICTED (102), FADING (103),
                                       // SHIFTING (104) and REACTIVE (105,
                                       // game_id "Compulsive"), the 102-105
-                                      // block spent exactly. 98 is S2.24's
-                                      // row, not a gap.
+                                      // block spent exactly.
                                       // + S2.28's CURIOSITY (108), UNAWAKENED
                                       // (109), TIME_WARP (110) and
                                       // DRAW_REDUCTION (111), the 102-105 and
                                       // 108-111 blocks both spent exactly;
-                                      // 106-107 are S2.24/S2.27's rows, not
-                                      // gaps.
+                                      // 106-107 are S2.27's rows, not gaps
+                                      // (S2.24's 98 is spent above).
                                       // + S2.22's MALLEABLE (95), the Snake
                                       // Plant's escalating retaliation shield;
                                       // that batch's whole PowerId grant, spent
@@ -607,11 +609,16 @@ TEST(RegistryGen, ManifestCounts) {
                                       // The block 93-94 is spent exactly; 95
                                       // (Malleable) is the NEXT city batch's row,
                                       // not this one's
-    EXPECT_EQ(m::kMonstersCount, 54u); // + S2.27's three Act-3 beyond ELITES
+    EXPECT_EQ(m::kMonstersCount, 59u); // + S2.27's three Act-3 beyond ELITES
                                        // and the dagger: Giant Head (58),
                                        // Nemesis (59), Reptomancer (60) and
                                        // SnakeDagger (61, game_id "Dagger"),
                                        // the 58-61 block spent exactly.
+                                       // + S2.24's five City bosses: Bronze
+                                       // Automaton (40), Bronze Orb (41), Champ
+                                       // (42), The Collector (43), Torch Head
+                                       // (44) -- the 40-44 block spent exactly;
+                                       // 45-48 stay UNISSUED.
                                        // + S2.23's three Act-2 city ELITES:
                                        // Gremlin Leader (37), Taskmaster (38,
                                        // game_id "SlaverBoss") and Book of
@@ -620,8 +627,7 @@ TEST(RegistryGen, ManifestCounts) {
                                        // beyond normals: Darkling (49), Orb
                                        // Walker (50), Repulsor (51), Exploder
                                        // (52), Spiker (53), the 49-53 block
-                                       // spent exactly. 40-44 are S2.24's and
-                                       // 45-48 stay UNISSUED --
+                                       // spent exactly --
                                        // and S2.26's four Act-3 "Beyond"
                                        // normals: Spire Growth (54, game_id
                                        // "Serpent"), Transient (55), Maw (56),
@@ -694,7 +700,7 @@ TEST(RegistryGen, ManifestCounts) {
     // DERIVED, and therefore a count-guard site of BOTH the kCardsCount and the
     // kPowersCount families even though it names neither: any batch that moves
     // either constant has to move this sum too.
-    EXPECT_EQ(m::kTotalCount, 572u);  // 132 + 71 + 54 + 150 + 33 + 51 + 61 + 20
+    EXPECT_EQ(m::kTotalCount, 578u);  // 132 + 72 + 59 + 150 + 33 + 51 + 61 + 20
 }
 
 // --- 6. B2.2 skeleton migration: no dual system ------------------------------
@@ -1336,6 +1342,11 @@ TEST(RegistryGen, UpgradedBlockAndFlagsEmitDistinctRow) {
         std::ofstream cards(reg / "cards.yaml", std::ios::app);
         cards << "\n- id: 901\n  name: SYNTH_XCOST\n  game_id: \"SynthX\"\n"
                  "  type: ATTACK\n  cost: -1\n  target: ALL_ENEMY\n"
+                 // rarity became a VALIDATED, generated column in S2.24 (the
+                 // card_rarity table behind APPLY_STASIS's cascade), so the
+                 // synthetic row must carry a legal spelling like every real
+                 // row already did.
+                 "  rarity: SPECIAL\n"
                  "  flags: [exhaust]\n"
                  "  provenance: \"synthetic B3.1 upgrade/flags codegen test\"\n"
                  "  effects:\n"

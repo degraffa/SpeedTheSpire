@@ -279,6 +279,24 @@ TEST(RewardGold, BossBelowA13SkipsTheRound) {
     EXPECT_EQ(misc.counter, 1);
 }
 
+// The A13 boundary itself (a20.yaml row 13; S2.24's share -- the Act-2 boss is
+// the first fight whose gold both scales AND reaches a claimable screen). The
+// branch is `ascensionLevel >= 13` (AbstractRoom.java:291-296): 12 pays the
+// raw draw, 13 pays MathUtils.round(tmp * 0.75f), and the miscRng draw is one
+// on BOTH sides -- the level moves the payout, never the stream.
+TEST(RewardGold, BossGoldQuartersExactlyAtA13NotA12) {
+    for (int64_t seed = 1; seed <= 32; ++seed) {
+        RngStream at12 = from_seed(seed);
+        RngStream at13 = from_seed(seed);
+        RngStream copy = from_seed(seed);
+        const int tmp = 100 + static_cast<int>(random(copy, -5, 5));
+        EXPECT_EQ(roll_boss_gold(at12, 12), tmp);
+        EXPECT_EQ(roll_boss_gold(at13, 13),
+                  mathutils_round(static_cast<float>(tmp) * 0.75f));
+        EXPECT_EQ(at12.counter, at13.counter);
+    }
+}
+
 TEST(RewardGold, GoldenIdolAddsRoundedQuarterAtAssemblyAndClaim) {
     RunState rs = make_run(77);
     give_relics(rs, {RelicId::GOLDEN_IDOL});

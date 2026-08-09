@@ -1891,6 +1891,315 @@
                # including the init rollMove -- grows the next STAB by one hit.
                # No ai table has a write side. See monster_book_of_stabbing.cpp.
 
+# --- S2.24 (Act-2 City BOSSES): Bronze Automaton (+ Bronze Orb), The Champ, ---
+# --- The Collector (+ Torch Head). MonsterId 40-44 are this task's grant ------
+# --- (stage-b-tasks.md "S2 Wave-3 allocations"); all five are spent, so the ---
+# --- block leaves no gap. 45-48 stay UNISSUED, not this batch's to backfill. --
+#
+# The three bosses are enemy_type: BOSS (each ctor assigns this.type =
+# EnemyType.BOSS -- BronzeAutomaton.java:75, Champ.java:96, TheCollector.java:88)
+# and that column is LIVE data, not documentation: Pantograph's atBattleStart
+# heal keys on `m.type == EnemyType.BOSS` over the GROUP (Pantograph.java:32-40,
+# relic_native_pantograph), and MonsterDef::is_boss() is its registry read. The
+# two minions assign no type and stay NORMAL (AbstractMonster.java:99's field
+# initializer) -- a Bronze Orb in the group must NOT satisfy Pantograph, the
+# boss record does.
+#
+# The three boss encounters ("Automaton" 38, "Collector" 39, "Champ" 40,
+# TheCity.initializeBoss, TheCity.java:168-170) were all landed by S2.01 and are
+# unchanged here: each is a single EMIT that resolves its game-id at spawn time,
+# so registering the init fns un-parks all three (the S2.23 precedent). The two
+# minions appear in NO encounter at all -- they are mid-combat spawns only
+# (SpawnMonsterAction(m, true), BronzeAutomaton.java:116,122 /
+# TheCollector.java:130,168), which is why both carry MonsterSpawnAtHpFn
+# entries and their ctor draws burn at the SPAWNER'S queue time.
+
+- id: 40
+  name: BRONZE_AUTOMATON
+  game_id: "BronzeAutomaton"
+  provenance: "BronzeAutomaton (BronzeAutomaton.java, 191 lines, read in full). ID (:43); type = BOSS (:75). ctor (:70-96): super HP argument is a LITERAL 300 -- no draw -- then setHp(320) at ascension >= 9 else setHp(300) (:78-84), the single-arg overload, i.e. setHp(hp, hp) (AbstractMonster.java:777-779): ONE DEGENERATE monster_hp_rng draw (the Hexaghost reading). blockAmt 12/9 rides the SAME >= 9 branch (:80,:83); flailDmg/beamDmg/strAmt 8/50/4 at >= 4 else 7/45/3 (:85-93); damage list [flail, beam] (:94-95). Move ids FLAIL=1, HYPER_BEAM=2, STUNNED=3, SPAWN_ORBS=4, BOOST=5 (:49-53). usePreBattleAction (:99-105): BGM presentation, then ONE queued ApplyPowerAction(this, this, new ArtifactPower(this, 3)) -- the 3 is a FLAT literal at every ascension (:103; the S2.24 dispatch brief guessed a branch here and the source says no). takeTurn (:108-146): case 4 constructs BronzeOrb(-300,200,0) and BronzeOrb(200,130,1) as SpawnMonsterAction ctor arguments -- BOTH orbs' two monster_hp_rng draws happen at QUEUE time -- with isMinion=true, so each spawn addToTop's the Minion apply at ITS resolve (SpawnMonsterAction.java:67-69); the SFXAction coins are UNSEEDED MathUtils (:111-121). case 1 is TWO DamageActions of damage.get(0) (:127-128); case 5 GainBlock(blockAmt) + Strength(strAmt) (:132-133); case 2 one DamageAction of damage.get(1) (:138); case 3 a TextAboveCreatureAction only (:142). RollMoveAction (:145) sits OUTSIDE the switch -- every case reaches it, the STUNNED turn included. getMove (:149-174): firstTurn -> SPAWN_ORBS/UNKNOWN consumed at the init roll (:150-154, the Snecko firstTurn precedent -- no storage); numTurns == 4 -> HYPER_BEAM + reset (:155-159); lastMove(HYPER_BEAM) -> BOOST/DEFEND_BUFF at ascension >= 19 else STUNNED/STUN (:160-167); lastMove(3)||lastMove(5)||lastMove(4) -> FLAIL else BOOST (:168-172); ++numTurns (:173) is reached ONLY by those last two arms -- the firstTurn, HYPER_BEAM and post-beam arms all return above it. numTurns lives in MonsterState.pad0. die (:177-190): presentation, super.die(), onBossVictoryLogic (not sim-visible), then the addToTop suicide sweep over every !isDead && !isDying record (:182-187) -- STRICTLY POST-super, so it registers in monster_die_after_fn (the Reptomancer shape); each SuicideAction(m) is the 1-arg ctor, relicTrigger TRUE, so a swept Bronze Orb's Stasis onDeath DOES fire and the stolen card comes back."
+  enemy_type: BOSS     # BronzeAutomaton.java:75
+  hp:
+    # setHp(320) at >= 9 else setHp(300) (:78-84). Degenerate ranges: the value
+    # is fixed, the monster_hp_rng draw still happens.
+    base: {min: 300, max: 300}  # BronzeAutomaton.java:83
+    a9:   {min: 320, max: 320}  # BronzeAutomaton.java:79
+  rolls: []
+  moves:
+    - name: FLAIL
+      move_id: 1               # BronzeAutomaton.java:49
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0].base, 2, true) (:169)
+      effects:
+        # TWO separate DamageActions of damage.get(0) (:127-128), not one
+        # doubled hit. flailDmg 7, 8 from A4 (:85-93).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a4: 8}}
+        - {op: DAMAGE, target: PLAYER, amount: {base: 7, a4: 8}}
+    - name: HYPER_BEAM
+      move_id: 2               # BronzeAutomaton.java:50
+      intent: ATTACK           # setMove(BEAM_NAME, 2, ATTACK, dmg[1].base) (:156)
+      effects:
+        # ONE DamageAction of damage.get(1) (:138). beamDmg 45, 50 from A4
+        # (:85-93) -- the SAME >= 4 branch as flailDmg/strAmt, not a beam-only
+        # tier.
+        - {op: DAMAGE, target: PLAYER, amount: {base: 45, a4: 50}}
+    - name: STUNNED
+      move_id: 3               # BronzeAutomaton.java:51
+      intent: STUN             # setMove(3, Intent.STUN) (:165) -- BELOW A19 only
+      effects:
+        # takeTurn case 3 (:141-143) queues a TextAboveCreatureAction and
+        # nothing else -- presentation. The trailing RollMoveAction still runs
+        # (it sits outside the switch), so a STUNNED turn still costs one
+        # ai_rng draw. NOP placeholder (the Gremlin Leader RALLY precedent).
+        - {op: NOP, target: SELF, amount: 0}
+    - name: SPAWN_ORBS
+      move_id: 4               # BronzeAutomaton.java:52
+      intent: UNKNOWN          # setMove((byte)4, Intent.UNKNOWN) (:151)
+      effects:
+        # THE WHOLE BODY IS NATIVE (monster_bronze_automaton.cpp): two
+        # SpawnMonsterAction(new BronzeOrb(...), true) items (:116,:122), each
+        # orb's TWO monster_hp_rng draws (super-arg + setHp) at QUEUE time
+        # because the ctor runs in the action's argument list, each orb's ONE
+        # ai_rng init roll at RESOLVE time, and the Minion apply addToTop'd at
+        # each spawn's resolve (SpawnMonsterAction.java:67-69 -- NOT
+        # SummonGremlinAction's addToBot order). None of that is expressible
+        # as an effect program. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: BOOST
+      move_id: 5               # BronzeAutomaton.java:53
+      intent: DEFEND_BUFF      # setMove(5, Intent.DEFEND_BUFF) (:162,:171)
+      effects:
+        # GainBlockAction(blockAmt) then ApplyPowerAction(Strength, strAmt)
+        # (:132-133). blockAmt rides the HP's >= 9 branch (9/12, :80,:83);
+        # strAmt rides the damage >= 4 branch (3/4, :88,:92) -- TWO DIFFERENT
+        # tier boundaries in one move, each column pinned at its own.
+        - {op: BLOCK, target: SELF, amount: {base: 9, a9: 12}}
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a4: 4}, power: STRENGTH}
+  ai: native   # getMove (:149-174) reads a consumed-at-init firstTurn latch, a
+               # per-instance numTurns counter that only TWO of its five arms
+               # increment, move history on three ids, and an A19 branch that
+               # swaps the post-beam recovery turn (STUNNED below, BOOST at
+               # A19+). See monster_bronze_automaton.cpp.
+
+- id: 41
+  name: BRONZE_ORB
+  game_id: "BronzeOrb"
+  provenance: "BronzeOrb (BronzeOrb.java, 103 lines, read in full). ID (:31); assigns NO type -> NORMAL (AbstractMonster.java:99). ctor (:47-56): the super(...) HP argument is monsterHpRng.random(52, 58) (:48) -- a REAL draw whose value is thrown away by the setHp under it -- then setHp(54, 60) at ascension >= 9 else setHp(52, 58) (:49-53): TWO monster_hp_rng draws per orb, the first flat at every ascension (row SUPER_ARG_HP, timing CONSTRUCTOR_BEFORE_HP, the Taskmaster/Orb Walker shape). `count` (:54) feeds only the update() bobbing animation -- presentation, no storage. damage list [8] (:55). Move ids BEAM=1, SUPPORT_BEAM=2, STASIS=3 (:41-43). takeTurn (:59-77): case 1 one DamageAction(damage.get(0)) (:65); case 2 GainBlockAction(getMonsters().getMonster(\"BronzeAutomaton\"), this, 12) (:69) -- the recipient is THE BOSS found by id over the whole group, dead records included (MonsterGroup.java:108-115), so the step is authored SELF and retargeted natively; case 3 ApplyStasisAction(this) (:73) -- opcode APPLY_STASIS, see vocab.py 71. RollMoveAction (:76) sits outside the switch. getMove (:86-101): !usedStasis && num >= 25 -> STASIS and usedStasis = true AT DECISION TIME (:87-91) -- a once-per-combat latch read by every later roll (monster flag bit, kMonsterFlagBronzeOrbUsedStasis); num >= 70 && !lastTwoMoves(2) -> SUPPORT_BEAM (:92-95); !lastTwoMoves(1) -> BEAM (:96-99); else SUPPORT_BEAM (:100). Spawned ONLY by the Automaton's SPAWN_ORBS (isMinion=true -> the Minion power addToTop at spawn resolve, SpawnMonsterAction.java:67-69); appears in no encounter. No usePreBattleAction, no die() override."
+  hp:
+    base: {min: 52, max: 58}    # BronzeOrb.java:52 (ascension < 9)
+    a9:   {min: 54, max: 60}    # BronzeOrb.java:50 (ascension >= 9)
+  rolls:
+    # The super(...) ARGUMENT draw (BronzeOrb.java:48). Its VALUE is thrown
+    # away by the setHp below it; its POSITION in the monster_hp_rng sequence
+    # is the point (timing CONSTRUCTOR_BEFORE_HP, S2.2F). NO tier columns: the
+    # argument is the flat literal random(52, 58) at every ascension -- only
+    # the setHp under it moves.
+    - name: SUPER_ARG_HP
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_BEFORE_HP
+      range:
+        base: {min: 52, max: 58}  # BronzeOrb.java:48 -- literal, unbranched
+  moves:
+    - name: BEAM
+      move_id: 1               # BronzeOrb.java:41
+      intent: ATTACK           # setMove(1, ATTACK, 8) (:97)
+      effects:
+        # damage.get(0) == BEAM_DMG 8 (:39,:55), flat at every ascension.
+        - {op: DAMAGE, target: PLAYER, amount: 8}
+    - name: SUPPORT_BEAM
+      move_id: 2               # BronzeOrb.java:42
+      intent: DEFEND           # setMove(2, Intent.DEFEND) (:93,:100)
+      effects:
+        # ONE AUTHORED TEMPLATE STEP, RETARGETED NATIVELY at the BOSS: the
+        # GainBlockAction's recipient is getMonster("BronzeAutomaton") -- the
+        # first record with that id, LIVENESS UNTESTED (MonsterGroup.java:
+        # 108-115) -- and a monster move step can only spell SELF or PLAYER,
+        # so the module (monster_bronze_orb.cpp) retargets this step at the
+        # boss's slot (the Healer fan-out precedent, narrowed to one
+        # recipient). BLOCK_AMT 12 (:40,:69), flat. A dead boss cannot be the
+        # recipient in practice -- its die() sweep suicides every orb -- and
+        # op_block's isDying recipient read (S2.28) covers the gap anyway.
+        - {op: BLOCK, target: SELF, amount: 12}
+    - name: STASIS
+      move_id: 3               # BronzeOrb.java:43
+      intent: STRONG_DEBUFF    # setMove(3, Intent.STRONG_DEBUFF) (:88)
+      effects:
+        # ApplyStasisAction(this) (:73) -- the whole theft is opcode 71
+        # APPLY_STASIS (vocab.py): pile choice, rarity cascade, pick, the move
+        # into limbo and the addToTop'd Stasis apply are ALL execute-time
+        # facts. `src` (the acting orb, the future power owner) is the only
+        # operand and the queue helper stamps it.
+        - {op: APPLY_STASIS, target: SELF, amount: 0}
+  ai: native   # getMove (:86-101) reads and WRITES the once-per-combat
+               # usedStasis latch at decision time and reads lastTwoMoves on
+               # two ids. See monster_bronze_orb.cpp.
+
+- id: 42
+  name: CHAMP
+  game_id: "Champ"
+  provenance: "Champ (Champ.java, 319 lines, read in full). ID (:49); type = BOSS (:96). ctor (:94-140): super HP argument is a LITERAL 420 -- no draw -- then setHp(440) at ascension >= 9 else setHp(420) (:103-107), single-arg overload: ONE DEGENERATE monster_hp_rng draw. The stat ladder is a FOUR-way if/else-if chain (:108-136): A19+ 18/10/14 str 4 forge 7 block 20; A9-18 18/10/14 str 3 forge 6 block 18; A4-8 18/10/14 str 3 forge 5 block 15; base 16/10/12 str 2 forge 5 block 15 -- so slashDmg/slapDmg tier at >= 4, strAmt at >= 4 AND >= 19, forgeAmt/blockAmt at >= 9 AND >= 19, executeDmg NEVER. damage list [slash, execute, slap] (:137-139). Move ids HEAVY_SLASH=1, DEFENSIVE_STANCE=2, EXECUTE=3, FACE_SLAP=4, GLOAT=5, TAUNT=6, ANGER=7 (:56-62). usePreBattleAction (:143-148) is BGM + UnlockTracker -- nothing sim-visible, so NO pre-battle fn. takeTurn (:151-215): the firstTurn Champion Belt TalkAction (:156-161) is presentation (the latch gates only a talk -- no storage); case 7 ANGER is RemoveDebuffsAction(this), RemoveSpecificPowerAction(this,this,\"Shackled\"), ApplyPowerAction(Strength, strAmt*3) in that order (:169-171); case 1 one DamageAction(damage.get(0)) (:178); case 2 GainBlock(blockAmt) + Metallicize(forgeAmt) (:182-183); case 3 TWO DamageActions of damage.get(1) (:190,:192); case 4 DamageAction(damage.get(2)) + Frail(2) + Vulnerable(2) (:198-200); case 5 Strength(strAmt) (:204); case 6 Weak(2) + Vulnerable(2) (:210-211). The getTaunt/getLimitBreak/getDeathQuote pickers are UNSEEDED MathUtils (:243,:250,:257). RollMoveAction (:214) sits outside the switch. getMove (:261-302): ++numTurns FIRST, on EVERY call (:262 -- contrast the Automaton, whose ++ only two arms reach); hp < maxHealth/2 && !thresholdReached -> thresholdReached = true, ANGER/BUFF (:263-267); !lastMove(3) && !lastMoveBefore(3) && thresholdReached -> a presentation TalkAction addToTop then EXECUTE/ATTACK 2 hits (:268-272); numTurns == 4 && !thresholdReached -> TAUNT/DEBUFF + numTurns = 0 (:273-277); the forge arm's roll bound is num <= 30 at ascension >= 19 else num <= 15, gated on !lastMove(2) && forgeTimes < forgeThreshold(2), ++forgeTimes at DECISION time (:278-288); !lastMove(5) && !lastMove(2) && num <= 30 -> GLOAT/BUFF (:289-292); !lastMove(4) && num <= 55 -> FACE_SLAP (:293-296); !lastMove(1) -> HEAVY_SLASH else FACE_SLAP (:297-301). numTurns and forgeTimes pack into MonsterState.pad0 nibbles; thresholdReached is a monster flag bit. die (:305-318): super.die() first, then an UNSEEDED MathUtils sound coin and onBossVictoryLogic -- NO sim-visible content on either side of super.die(), so explicit nullptr in BOTH die slots."
+  enemy_type: BOSS     # Champ.java:96
+  hp:
+    base: {min: 420, max: 420}  # Champ.java:106
+    a9:   {min: 440, max: 440}  # Champ.java:104
+  rolls: []
+  moves:
+    - name: HEAVY_SLASH
+      move_id: 1               # Champ.java:56
+      intent: ATTACK           # setMove(1, ATTACK, dmg[0].base) (:298)
+      effects:
+        # damage.get(0) == slashDmg: 16, 18 from A4 (:108-136; the A9/A19 rungs
+        # keep 18, pinned in the tier-boundary test).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 16, a4: 18}}
+    - name: DEFENSIVE_STANCE
+      move_id: 2               # Champ.java:57
+      intent: DEFEND_BUFF      # setMove(STANCE_NAME, 2, DEFEND_BUFF) (:281,:286)
+      effects:
+        # GainBlock(blockAmt) then Metallicize(forgeAmt) (:182-183). blockAmt
+        # 15/18/20 and forgeAmt 5/6/7 both tier at >= 9 and >= 19 -- NOT at the
+        # damage ladder's >= 4 (the A4-8 rung keeps 15/5).
+        - {op: BLOCK, target: SELF, amount: {base: 15, a9: 18, a19: 20}}
+        - {op: APPLY_POWER, target: SELF, amount: {base: 5, a9: 6, a19: 7}, power: METALLICIZE}
+    - name: EXECUTE
+      move_id: 3               # Champ.java:58
+      intent: ATTACK           # setMove(EXECUTE_NAME, 3, ATTACK, dmg[1].base, 2, true) (:270)
+      effects:
+        # TWO separate DamageActions of damage.get(1) (:190,:192). executeDmg
+        # is 10 on EVERY rung of the ladder (:108-136) -- the flat column is
+        # the pinned non-change.
+        - {op: DAMAGE, target: PLAYER, amount: 10}
+        - {op: DAMAGE, target: PLAYER, amount: 10}
+    - name: FACE_SLAP
+      move_id: 4               # Champ.java:59
+      intent: ATTACK_DEBUFF    # setMove(SLAP_NAME, 4, ATTACK_DEBUFF, dmg[2].base) (:294,:300)
+      effects:
+        # DamageAction(damage.get(2)), then Frail 2, then Vulnerable 2 -- both
+        # debuffs isSourceMonster=true (:198-200). slapDmg 12, 14 from A4;
+        # DEBUFF_AMT 2 is a flat literal (:75).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 12, a4: 14}}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: FRAIL}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+    - name: GLOAT
+      move_id: 5               # Champ.java:60
+      intent: BUFF             # setMove(5, Intent.BUFF) (:290)
+      effects:
+        # ApplyPowerAction(Strength, strAmt) (:204). strAmt 2/3/3/4 -- tiers at
+        # >= 4 and >= 19, and the A9 rung KEEPS 3 (the pinned non-change).
+        - {op: APPLY_POWER, target: SELF, amount: {base: 2, a4: 3, a19: 4}, power: STRENGTH}
+    - name: TAUNT
+      move_id: 6               # Champ.java:61
+      intent: DEBUFF           # setMove(6, Intent.DEBUFF) (:274)
+      effects:
+        # Weak 2 then Vulnerable 2 (:210-211), flat.
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: WEAK}
+        - {op: APPLY_POWER, target: PLAYER, amount: 2, power: VULNERABLE}
+    - name: ANGER
+      move_id: 7               # Champ.java:62
+      intent: BUFF             # setMove(7, Intent.BUFF) (:265)
+      effects:
+        # takeTurn case 7 order (:169-171): RemoveDebuffsAction(this), then the
+        # REDUNDANT Shackled remove (Shackled IS a DEBUFF, so the first action
+        # already took it; authored because the Java queues it and it costs
+        # nothing -- the Time Eater HASTE precedent), then Strength strAmt*3:
+        # 6/9/9/12 on the strAmt ladder.
+        - {op: REMOVE_DEBUFFS, target: SELF, amount: 0}
+        - {op: REMOVE_POWER, target: SELF, amount: 0, power: SHACKLED}
+        - {op: APPLY_POWER, target: SELF, amount: {base: 6, a4: 9, a19: 12}, power: STRENGTH}
+  ai: native   # getMove (:261-302) increments numTurns on EVERY call, latches
+               # thresholdReached off an HP read, counts forgeTimes toward a
+               # threshold of 2 with an A19-widened roll bound, and reads
+               # lastMoveBefore -- none of it expressible as a table. See
+               # monster_champ.cpp.
+
+- id: 43
+  name: THE_COLLECTOR
+  game_id: "TheCollector"
+  provenance: "TheCollector (TheCollector.java, 243 lines, read in full). ID (:53); type = BOSS (:88). ctor (:84-113): super HP argument is a LITERAL 282 -- no draw -- then setHp(300) at ascension >= 9 else setHp(282) (:89-95), single-arg overload: ONE DEGENERATE monster_hp_rng draw. blockAmt 18/15 rides that SAME >= 9 branch (:91,:94); rakeDmg/strAmt/megaDebuffAmt are a three-way chain (:96-108): A19+ 21/5/5, A4-18 21/4/3, base 18/3/3. damage list [rake] (:109). Move ids SPAWN=1, FIREBALL=2, BUFF=3, MEGA_DEBUFF=4, REVIVE=5 (:78-82). usePreBattleAction (:116-121) is BGM + UnlockTracker -- nothing sim-visible, NO pre-battle fn. takeTurn (:124-178): case 1 constructs TorchHead(spawnX + -185*i, MathUtils.random(-5,25)) for i in {1,2} INSIDE the loop -- each torch head's TWO monster_hp_rng draws (super-arg + setHp) at QUEUE time, the y coin UNSEEDED -- and queues SpawnMonsterAction(m, true) each (isMinion -> Minion addToTop at spawn resolve); enemySlots.put(i, m) and initialSpawn = false are takeTurn-time writes (:127-134). case 2 one DamageAction(damage.get(0)) (:137). case 3 GainBlock(blockAmt + 5) at ascension >= 19 else GainBlock(blockAmt) (:141-145), then ApplyPowerAction(m, this, Strength(strAmt)) over EVERY record that is !isDead && !isDying && !isEscaping -- INCLUDING ITSELF (:146-149), the Healer one-template fan-out shape. case 4 TalkAction/SFX/VFX presentation then Weak, Vulnerable, Frail each megaDebuffAmt on the player (:153-158); ultUsed = true is a takeTurn-time write (:159). case 5 walks enemySlots.entrySet() -- HashMap<Integer> keys 1,2 iterate in bucket order 1 then 2 -- and for each entry whose value isDying constructs a NEW TorchHead at that slot's x (queue-time draws again) and queues SpawnMonsterAction(m, true) (:162-169). ++turnsTaken then RollMoveAction, both OUTSIDE the switch (:176-177). getMove (:181-203): initialSpawn -> SPAWN/UNKNOWN (:182-185); turnsTaken >= 3 && !ultUsed -> MEGA_DEBUFF/STRONG_DEBUFF (:186-189); num <= 25 && isMinionDead() && !lastMove(5) -> REVIVE/UNKNOWN (:190-193), where isMinionDead() is ANY enemySlots value isDying (:205-211) -- derivable as 'no live record at that slot key's x', the Gremlin Leader draw_x derivation; num <= 70 && !lastTwoMoves(2) -> FIREBALL (:194-197); !lastMove(3) -> BUFF else FIREBALL (:198-202). initialSpawn/ultUsed are monster flag bits (cleared/set in takeTurn, not getMove, so both need storage); turnsTaken lives in pad0 and saturates. die (:228-242): presentation, super.die(), onBossVictoryLogic, then the SAME addToTop suicide sweep as the Automaton's (:234-239) -- post-super, monster_die_after_fn, relicTrigger TRUE."
+  enemy_type: BOSS     # TheCollector.java:88
+  hp:
+    base: {min: 282, max: 282}  # TheCollector.java:93
+    a9:   {min: 300, max: 300}  # TheCollector.java:90
+  rolls: []
+  moves:
+    - name: SPAWN
+      move_id: 1               # TheCollector.java:78
+      intent: UNKNOWN          # setMove(1, Intent.UNKNOWN) (:183)
+      effects:
+        # NATIVE (monster_collector.cpp): two TorchHead ctors at QUEUE time
+        # (two monster_hp_rng draws each), two SpawnMonsterAction(m, true)
+        # items, Minion addToTop at each resolve. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+    - name: FIREBALL
+      move_id: 2               # TheCollector.java:79
+      intent: ATTACK           # setMove(2, ATTACK, dmg[0].base) (:195,:201)
+      effects:
+        # damage.get(0) == rakeDmg (the Java field name; the move is the
+        # fireball): 18, 21 from A4 (:96-108).
+        - {op: DAMAGE, target: PLAYER, amount: {base: 18, a4: 21}}
+    - name: BUFF
+      move_id: 3               # TheCollector.java:80
+      intent: DEFEND_BUFF      # setMove(3, Intent.DEFEND_BUFF) (:199)
+      effects:
+        # GainBlock first (:141-145): blockAmt 15, 18 from A9, and the A19 arm
+        # adds a takeTurn-time +5 on top of the A9 value -> 23. The COMPOSED
+        # column is authored (the Spiker A17 thorns precedent).
+        - {op: BLOCK, target: SELF, amount: {base: 15, a9: 18, a19: 23}}
+        # ONE AUTHORED TEMPLATE STEP, FANNED OUT NATIVELY (the Healer shape):
+        # Strength(strAmt) on every !isDead && !isDying && !isEscaping record
+        # INCLUDING the Collector itself (:146-149), in slot order. strAmt 3,
+        # 4 from A4, 5 from A19.
+        - {op: APPLY_POWER, target: SELF, amount: {base: 3, a4: 4, a19: 5}, power: STRENGTH}
+    - name: MEGA_DEBUFF
+      move_id: 4               # TheCollector.java:81
+      intent: STRONG_DEBUFF    # setMove(4, Intent.STRONG_DEBUFF) (:187)
+      effects:
+        # Weak, Vulnerable, Frail, in that order (:156-158), each
+        # megaDebuffAmt: 3, STILL 3 at A4 (the pinned non-change -- only
+        # rakeDmg and strAmt move on that rung), 5 from A19.
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 3, a4: 3, a19: 5}, power: WEAK}
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 3, a4: 3, a19: 5}, power: VULNERABLE}
+        - {op: APPLY_POWER, target: PLAYER, amount: {base: 3, a4: 3, a19: 5}, power: FRAIL}
+    - name: REVIVE
+      move_id: 5               # TheCollector.java:82
+      intent: UNKNOWN          # setMove(5, Intent.UNKNOWN) (:191)
+      effects:
+        # NATIVE (monster_collector.cpp): one fresh TorchHead per DYING slot
+        # key, in HashMap iteration order 1 then 2 -- ctor draws at queue
+        # time, spawn + Minion at resolve, exactly the SPAWN shape filtered to
+        # dead slots. NOP placeholder.
+        - {op: NOP, target: SELF, amount: 0}
+  ai: native   # getMove (:181-203) reads two takeTurn-written latches
+               # (initialSpawn, ultUsed), a turnsTaken counter, isMinionDead()
+               # -- a GROUP-shaped predicate over the revive slots -- and move
+               # history on three ids. See monster_collector.cpp.
+
+- id: 44
+  name: TORCH_HEAD
+  game_id: "TorchHead"
+  provenance: "TorchHead (TorchHead.java, 85 lines, read in full). ID (:29); assigns NO type -> NORMAL. ctor (:43-55): the super(...) HP argument is monsterHpRng.random(38, 40) (:44) -- thrown away by the setHp under it (row SUPER_ARG_HP, CONSTRUCTOR_BEFORE_HP) -- then setMove((byte)1, ATTACK, 7) IN THE CTOR (:45), which pushes move history BEFORE init()'s rollMove pushes it again, then setHp(40, 45) at ascension >= 9 else setHp(38, 40) (:50-54): TWO monster_hp_rng draws per torch head. damage list [7] (:46). One move id TACKLE=1 (:39). takeTurn (:58-66): one DamageAction(damage.get(0)) then a queued SetMoveAction(this, 1, ATTACK, 7) -- NO trailing RollMoveAction, so a Torch Head costs ZERO ai_rng draws per turn; its one draw is init()'s rollMove, whose getMove (:81-83) ignores num and re-sets move 1. Spawned ONLY by The Collector (SPAWN/REVIVE, isMinion=true); appears in no encounter. No usePreBattleAction, no die() override, no getMove state."
+  hp:
+    base: {min: 38, max: 40}    # TorchHead.java:53 (ascension < 9)
+    a9:   {min: 40, max: 45}    # TorchHead.java:51 (ascension >= 9)
+  rolls:
+    # The super(...) ARGUMENT draw (TorchHead.java:44): flat literal
+    # random(38, 40) at every ascension; only the setHp under it moves.
+    - name: SUPER_ARG_HP
+      stream: MONSTER_HP
+      timing: CONSTRUCTOR_BEFORE_HP
+      range:
+        base: {min: 38, max: 40}  # TorchHead.java:44 -- literal, unbranched
+  moves:
+    - name: TACKLE
+      move_id: 1               # TorchHead.java:39
+      intent: ATTACK           # setMove(1, ATTACK, 7) (:45,:63,:82)
+      effects:
+        # damage.get(0) == ATTACK_DMG 7 (:38,:46), flat. The queued
+        # SetMoveAction after it (:63) is native (SET_MOVE is engine-emitted).
+        - {op: DAMAGE, target: PLAYER, amount: 7}
+  ai: native   # getMove (:81-83) ignores num entirely and re-sets move 1 --
+               # but it is called ONLY at init (takeTurn queues a SetMoveAction
+               # instead of a RollMoveAction, :63), so a Torch Head spends ONE
+               # ai_rng draw in its whole life. See monster_torch_head.cpp.
+
 # --- S2.25 (Act-3 beyond normals I): Darkling, Orb Walker, Repulsor, ---------
 # --- Exploder, Spiker. MonsterId 49-53 are this task's grant ------------------
 # --- (stage-b-tasks.md "S2 Wave-3 allocations"); all five are spent, so the ---

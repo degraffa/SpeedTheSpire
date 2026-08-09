@@ -538,6 +538,21 @@ TEST(MonsterRegistryEnemyType, EveryRowCarriesTheJavaEnemyType) {
          "Deca.java:64 -- this.type = EnemyType.BOSS; note BOTH halves of the "
          "pair are BOSS-typed, so the group reads as a boss fight on either "
          "member -- Pantograph's scan stops at the first hit"},
+        // S2.24's three Act-2 City bosses and their two minions. The minion
+        // rows are the interesting half: a Bronze Orb / Torch Head record
+        // shares the GROUP with a BOSS-typed member, so Pantograph still sees
+        // a boss fight -- through the boss's record, never the minion's.
+        {MonsterId::BRONZE_AUTOMATON,    MonsterEnemyType::BOSS,
+         "BronzeAutomaton.java:75 -- this.type = EnemyType.BOSS"},
+        {MonsterId::BRONZE_ORB,          MonsterEnemyType::NORMAL,
+         "BronzeOrb.java -- no this.type assignment (ctor :47-56); a summoned "
+         "minion, and NORMAL despite living only inside a boss fight"},
+        {MonsterId::CHAMP,               MonsterEnemyType::BOSS,
+         "Champ.java:96 -- this.type = EnemyType.BOSS"},
+        {MonsterId::THE_COLLECTOR,       MonsterEnemyType::BOSS,
+         "TheCollector.java:88 -- this.type = EnemyType.BOSS"},
+        {MonsterId::TORCH_HEAD,          MonsterEnemyType::NORMAL,
+         "TorchHead.java -- no this.type assignment (ctor :43-55)"},
     };
     for (const Row& row : kRows) {
         const sts::registry::MonsterDef* def = sts::registry::monster_def(row.id);

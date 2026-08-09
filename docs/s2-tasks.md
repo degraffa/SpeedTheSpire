@@ -82,7 +82,7 @@ Same semantics as the Stage B table (live carrier; discharge in place).
 | `generateStrongEnemies(12)` regeneration on an exhausted `monsterList` | S2.11 (the boss-exit pop it added) | S2.12 | **DISCHARGED — UNREACHABLE, no body written** (2026-08-07, S2.12). Re-derived for Acts 2–3, which call `generateWeakEnemies(2)`: SUPPLY is weak + 1 first-strong + 12 strong = **15** (Act 1 = 16); DEMAND is at most **14** — one walked path visits 15 rooms, one per map row, of which the act-independent generator forces row 8 Treasure and row 14 Rest, leaving 13 `monsterList`-consuming rooms (a ? room that rolls MONSTER is one of those 13, not an extra) plus the one pop that leaving the boss room performs. Margin 2 in Act 1, **1** in Acts 2–3. The loud `assert` in `next_room_transition_impl` stays and now carries that arithmetic in full; writing untestable machinery for an unreachable arm would be worse than an assert that names why it cannot fire |
 | Fork redeploy + bottle-taking capture (stage-b table row, "next capture-campaign owner") | wave-runlayer S3 (stage-b) | S2.43 | S2.43 is the next capture campaign; validate the `in_bottle_*` boundary end-to-end and mark the stage-b row DISCHARGED there |
 | `BOSS_REWARD.screen_state.relics` — schema **storage** for the boss-relic offers | S2.42 (which promoted the disposition but not the storage) | S2.43 | **Evidence:** PROTOCOL.md §3.8 dispositioned this `I (S2 scope)` because "the run terminates at act-1 boss combat rewards, before the boss chest" — no longer true at capture driver `b1.7.0`, which plays through the chest. An `I` field is **never diffed**, so design §6 S2-G2 item 2 (a *zero-diff* boss-chest boss-relic pick) was unachievable while the row said `I`, and **no S2 ledger row owned changing it**. S2.42 took the contained half: the row now reads `S`, the offers are registry-**joined** (an unknown boss relic fails translation loudly), and the field is `fr.defer`red — pinned by `Translator.BossRewardRelicsAreDeferredNotIgnored` and `Translator.BossRewardRelicsStillJoinTheRegistryAndFailLoud`. What remains is **storage**, which is not contained: the three offers live in `RunController.boss_chest` (`BossChestState`, `boss_chest.hpp`), which is transient, while the translator emits `RunState`/`CombatState` and the differ compares those — so landing it needs new `RunState` storage **plus** a `SCHEMA_VERSION` bump, a trace-container change and an oracle-adapter change. A `SCHEMA_VERSION` bump outside the places the ledger plans for it is stop-the-line (conventions §5), so S2.42 declined it rather than improvising. **S2.43 needs this before it can claim G2-2 item 2.** |
-| Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
+| Act-2 / Act-3 **measured** sim-side reach numbers | S2.42 (instrument built; measurement structurally impossible) | S2.41 (re-runs as content lands) / S2.43 | An Act-2/3 combat room parks at `RunPhase::ROOM_UNIMPLEMENTED` and the first row of every act is a forced Monster row, so sim-side Act-2/3 reach is **0 by construction** until S2.23/S2.24 (Act 2) and S2.27/S2.28 (Act 3). **The Act-2 gate is now OPEN** — S2.24 landed the last Act-2 batch (2026-08-09), so the Act-2 cells are measurable the next time S2.41/S2.43 re-runs the scan; Act 3 still waits on S2.27. [s242-deep-reach.md](verification/s242-deep-reach.md) records those cells as *pending content* rather than estimating them; re-run its §1 command as those batches land, the report format does not change. Double-boss detection (design §6 G2-3) is deliberately **unbuilt** rather than shipped as an always-false column — a field hard-wired false under a comment naming a future task is the shape conventions §8 calls a bug signal — and should use whichever run-layer flag S2.28 lands |
 
 ---
 
@@ -845,11 +845,136 @@ are the "first registry authoring wave" the TE.2 acceptance names.
   `A_2_*` constant in this batch names a branch that is not `>= 2` — the
   columns follow the branch, and `a3`/`a8` parse with no schema change.
   All six presets green.
-- **S2.24** `[ ]` ∥ City bosses — Bronze Automaton (+ BronzeOrb, Stasis
+- **S2.24** `[x]` ∥ City bosses — Bronze Automaton (+ BronzeOrb, Stasis
   model), The Champ, The Collector (+ TorchHead). A2/3/4-A19 columns per
   boss.
   **Deps:** S2.01, S2.2F, S2.23 (MINION row + spawn pattern) **Acceptance:** as S2.21, plus boss-flag typing
   (Pantograph-style consumers) and A13 gold tests.
+  **Log:** 2026-08-09. `MonsterId` **40–44** all spent (BRONZE_AUTOMATON,
+  BRONZE_ORB, CHAMP, THE_COLLECTOR, TORCH_HEAD — the block exact; 45–48
+  stay UNISSUED, not this batch's to backfill) and `PowerId` **98 STASIS**
+  spent. Opcode **71 APPLY_STASIS** spent as allocated and **72 — the
+  contingency the grant said to release — SPENT instead, as
+  `STASIS_RETURN`**: the give-back is a queued action with a runtime
+  pool-index operand and a queue-time destination bit, which no existing
+  opcode carries (`MAKE_CARD` builds a fresh library copy and would drop
+  the stolen instance's upgrade/misc/permanent-cost state that
+  `makeSameInstanceOf` preserves — the engine moves the ORIGINAL pool row
+  out of limbo instead). Zero new `MonsterState.flags` bits (the four
+  type-scoped latches — Champ `thresholdReached`, Orb `usedStasis`,
+  Collector `initialSpawn`/`ultUsed` — REUSE the Hexaghost/S2.28 four
+  0x0800–0x4000, now a THREE-way share: one boss encounter per combat, so
+  an Act-2 boss record can co-occur with neither owner), zero new intents,
+  zero new hooks, no schema bump and no `PUBLIC_VIEW_VERSION` bump — the
+  stolen card parks in the LIMBO pile, which the view already projects in
+  engine order, and the pool index rides the Stasis slot's schema-6
+  `counter` (+1-biased) through the existing APPLY_POWER counter operand.
+  `kMonstersCount` 50 → 55, `kPowersCount` 69 → 70, `kTotalCount` 566 →
+  572; every count-guard site moved together, all four power guards
+  caseless (StasisPower overrides only updateDescription + onDeath).
+
+  **Encounters needed ZERO edits** (the S2.23 precedent, one act later):
+  "Automaton" 38 / "Collector" 39 / "Champ" 40 were S2.01's rows, and
+  registering the three boss init fns un-parked the Act-2 boss ROOM —
+  `BossVictory.TheActTwoBossRoomEntersARealCombatAndPaysA13ScaledGold`
+  drives the real act transition and pins both the un-park and the batch's
+  A13 share: the Act-2 boss reward's gold item is the FIRST x0.75-scaled
+  payout a player can actually claim, so **a20.yaml row 13 flipped to
+  IMPLEMENTED** (the Act-3 draw-and-discard half was S2.28's; the
+  a20_modifiers_test prefix pin moved with the row) and the >= 13 / < 13
+  boundary is pinned per-seed in combat_rewards_test. Boss-flag typing:
+  `enemy_type: BOSS` on exactly the three bosses — the two minions stay
+  NORMAL, and the Pantograph test pins that the heal keys on the BOSS
+  record found past a NORMAL minion, never on the minion.
+
+  **The Minion apply is NOT the S2.23 spawn bit, and the shared-header
+  claim that said it would be was amended in place.** SpawnMonsterAction
+  with isMinion=true (both summoners' spawner, SpawnMonsterAction.java:
+  67-69) applies its MinionPower **addToTop at the spawn's own resolve**,
+  where `kSpawnApplyMinion` queues addToBottom (SummonGremlinAction's
+  order). Both modules therefore leave the bit CLEAR and queue an explicit
+  APPLY_POWER item immediately BEHIND each spawn item — the spawn's
+  resolution queues nothing ahead of itself, so "next item" IS the
+  addToTop position — and interp.hpp's bit-17 paragraph, which named the
+  orbs and torch heads as future users, now says why they are not
+  (conventions §8: the claim was corrected where it lives). The brief's
+  other guess died the same way: the Automaton's Artifact is a FLAT 3 at
+  every ascension (BronzeAutomaton.java:103 — no branch), while HYPER_BEAM
+  does tier (45/50 at >= 4, the same ladder as FLAIL/strAmt, not a
+  beam-only one), and BOOST is the roster's first move whose two steps
+  tier on DIFFERENT boundaries (block >= 9, Strength >= 4) — both pinned.
+
+  **A SPAWN turn's stream order is the Gremlin Leader's, minus the pool
+  picks**: both minion ctors run in the SpawnMonsterAction ARGUMENT LIST
+  at addToBottom time, so monster_hp_rng sees super-arg (flat, the
+  registry `SUPER_ARG_HP` rows — S2.2F's CONSTRUCTOR_BEFORE_HP timing,
+  read from the same rows `burn_unspawned_ctor_rolls` walks) then tiered
+  setHp, per minion, in spawn order, ALL at queue time; each spawn's ONE
+  ai_rng init roll lands at resolve and the summoner's own trailing
+  RollMoveAction THIRD, at a pre-computed post-insertion index (the
+  queue_rally local-simulation shape, one copy per summoner — smart
+  positioning reads only `draw_x`, which nothing in the window mutates).
+  Layouts fall out of the POSX tables: `[orb(-300), boss(-50), orb(200)]`
+  and `[torch2(-470), torch1(-285), collector(60)]`, spawn-order-pinned.
+
+  **The Collector's revive map is the Gremlin Leader derivation, re-run.**
+  `enemySlots` is a HashMap<Integer,·> whose keys 1,2 iterate in bucket
+  order 1 then 2 (Integer.hashCode == value, 16 buckets) — so REVIVE
+  constructs slot 1's replacement before slot 2's — and the map itself
+  derives from `draw_x`: slot k spawned-at-least-once == any TORCH_HEAD
+  record at x_k, its newest occupant dying == no LIVE record at x_k
+  (exact because a slot is only re-filled when its occupant died and dead
+  records never revive). The replacement inserts BEFORE the corpse it
+  replaces — strict `>` stops at an equal draw_x — pinned. REVIVE has no
+  once-per-combat latch; `kMonsterCap` 23 absorbs the growth (S2.2F's
+  budget note named this boss). `initialSpawn`/`ultUsed` are
+  takeTurn-time writes (:133,:159), NOT decision-time ones — the reason
+  they hold real bits while the Automaton's `firstTurn` is consumed on
+  the init roll (the Snecko precedent, no storage) and the Orb's
+  `usedStasis` latches inside getMove at DECISION time.
+
+  **Stasis end to end.** APPLY_STASIS is authored in the orb's move row
+  (the BLOCK_RANDOM_MONSTER shape — `src` is the only operand) and its
+  body is all execute-time: both piles empty → done before ANY draw and
+  before the power exists; the DRAW pile is preferred and the DISCARD
+  used only when it is empty; the pick is the RARE → UNCOMMON → COMMON →
+  unfiltered cascade of `getRandomCard(cardRandomRng, rarity)`, each
+  NON-EMPTY filtered view costing ONE draw over its Collections.sort()ed
+  membership — **cardID compare, a STABLE sort, so two Strikes keep pile
+  order** — and each empty view returning null for FREE; the unfiltered
+  fallback indexes PILE ORDER, unsorted. That cascade forced rarity out
+  of documentation: the rows' `rarity:` column is now a GENERATED,
+  loader-validated `card_rarity(CardId)` table (vocab CARD_RARITIES, the
+  full Java enum — a BASIC Strike matches no pass, every status is
+  COMMON, Ascender's Bane is SPECIAL and only the fallback can take it).
+  The theft calls `knowledge_on_remove_known` — the identity is
+  player-visible (ShowCardAction) and an exact-prefix position excludes
+  the stolen card having sat inside it, so the existing removal semantics
+  are exactly sound. The give-back models BOTH hand reads: onDeath picks
+  HAND vs DISCARD at QUEUE time (`hand.size() != 10`) and the HAND arm
+  re-checks the cap at RESOLVE (MakeTempCardInHandAction's spill), each
+  with a named test. Both summoners' die() sweeps are post-super
+  (`monster_die_after_fn`, the Reptomancer shape) with the 1-arg
+  SuicideAction's relicTrigger TRUE — so killing the Automaton runs each
+  orb's full death edge and every stolen card comes home while the
+  victory queue drains, pinned. The Champ registers explicit nullptrs in
+  BOTH die slots (unseeded sound coin + achievements on the post-super
+  side). If an orb survives the combat the card is simply lost with the
+  combat copies — the master deck never held the instance.
+
+  **Storage spent:** Automaton `numTurns` in pad0 (only TWO of five
+  getMove arms increment it — the ++ sits below three returns); Champ
+  `numTurns`/`forgeTimes` as pad0 nibbles (++ on EVERY call including
+  the init roll — the opposite counter discipline, both pinned) with the
+  A19-widened forge bound (30 vs 15) and the roster's first boss
+  `lastMoveBefore` read (EXECUTE every third decision, not every other);
+  Collector `turnsTaken` in pad0 (increments outside the switch). Torch
+  Head is the roster's only CTOR-telegraphing monster: its history reads
+  [TACKLE, TACKLE] after spawn (ctor setMove + init's re-push), it spends
+  ONE ai_rng draw in its whole life, and its turn re-telegraphs through a
+  queued SET_MOVE — no roll fn, the Transient's registration shape.
+  All six presets green (`ctest -N` for the current suite size);
+  `check_stale_counts` + `check_doc_links` clean.
 - **S2.25** `[x]` ∥ Beyond normals I — Darkling (Regrow/revival), Orb
   Walker, Repulsor/Exploder/Spiker (3/4 Shapes, Sphere and 2 Shapes).
   **Deps:** S2.01, S2.2F **Acceptance:** as S2.21.

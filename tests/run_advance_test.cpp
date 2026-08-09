@@ -3319,6 +3319,65 @@ TEST(BossVictory, TheChestProceedOpensTheNextActRatherThanEndingTheRun) {
            "the seed-116 no_legal_moves regression this section is named for";
 }
 
+// S2.24 un-parked the Act-2 boss rooms: registering the three boss init fns is
+// what turned "Automaton" / "Collector" / "Champ" (encounters.yaml 38-40, all
+// landed by S2.01) from ROOM_UNIMPLEMENTED parks into real combats -- the
+// S2.23 shape, one act later. And because Acts 1-2 boss kills DO open a reward
+// screen, this is the first fight whose A13-scaled gold actually reaches a
+// claimable item (a20.yaml row 13's S2.24 share; the Act-3 draw-and-discard
+// half was S2.28's).
+TEST(BossVictory, TheActTwoBossRoomEntersARealCombatAndPaysA13ScaledGold) {
+    RunController rc = enter_boss_combat(kSeed);  // run_begin(seed, kA20)
+    rc.run.floor = static_cast<uint16_t>(kActFloorSpan - 1);
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD));
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::MAP_CHOICE));
+    ASSERT_EQ(rc.run.act, 2);
+
+    // Aim the transition straight at the Act-2 boss room.
+    next_room_transition(rc, 0, /*to_boss=*/true);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT))
+        << "the Act-2 boss room must be a REAL combat now, not a "
+           "ROOM_UNIMPLEMENTED park";
+    ASSERT_EQ(rc.room_type, static_cast<uint8_t>(RoomType::Boss));
+    ASSERT_GE(rc.combat.monster_count, 1);
+    const uint16_t boss_id = rc.combat.monsters[0].monster_id;
+    EXPECT_TRUE(boss_id == static_cast<uint16_t>(MonsterId::BRONZE_AUTOMATON) ||
+                boss_id == static_cast<uint16_t>(MonsterId::CHAMP) ||
+                boss_id == static_cast<uint16_t>(MonsterId::THE_COLLECTOR))
+        << boss_id << " is not an Act-2 registry boss";
+    EXPECT_TRUE(sts::registry::monster_def(static_cast<MonsterId>(boss_id))
+                    ->is_boss())
+        << "the enemy_type column is what Pantograph-style consumers read";
+
+    weaken_all_monsters(rc);
+    play_out_combat(rc);
+    ASSERT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::COMBAT_REWARD))
+        << "an Act-2 boss kill opens a reward screen -- the :327 guard is "
+           "TheBeyond-only";
+    // The gold item is the A13 branch's: round(0.75 * (100 + d)) with d in
+    // [-5, 5] gives [71, 79] -- disjoint from the unscaled [95, 105], so the
+    // band alone proves the x0.75 applied on a REAL Act-2 boss payout.
+    int gold = -1;
+    for (uint8_t i = 0; i < rc.rewards.count; ++i) {
+        if (rc.rewards.items[i].kind ==
+            static_cast<uint8_t>(RewardItemKind::GOLD)) {
+            gold = rc.rewards.items[i].gold;
+        }
+    }
+    ASSERT_GE(gold, 0) << "no gold item on the Act-2 boss reward screen";
+    EXPECT_GE(gold, 71);
+    EXPECT_LE(gold, 79);
+
+    // And past the reward screen the ordinary chest -> act-3 route stands.
+    step(rc, make_action(ActionVerb::CHOOSE, kChooseProceed));
+    EXPECT_EQ(rc.phase, static_cast<uint8_t>(RunPhase::BOSS_TREASURE));
+}
+
 TEST(BossVictory, TheActThreeBossIsTheTerminalAndItsMaskIsEmpty) {
     // AbstractRoom.java:327: on a non-endless TheBeyond boss the whole
     // dropReward / addPotionToRewards / combatRewardScreen.open block is

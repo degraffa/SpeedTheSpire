@@ -104,7 +104,10 @@ namespace {
     // (SlowPower.java, read in full) and INTANGIBLE_MONSTER overrides
     // atDamageFinalReceive and atEndOfTurn (IntangiblePower.java, read in full).
     // Both count moves here are caseless.
-    static_assert(sts::registry::manifest::kPowersCount == 71,
+    // Checked for S2.24's one power, STASIS (id 98): it overrides ONLY
+    // updateDescription and onDeath (StasisPower.java:32-44, read in full) --
+    // neither block pass gains a case.
+    static_assert(sts::registry::manifest::kPowersCount == 72,
                   "new power: does it override modifyBlock (block-gain scaling, "
                   "as Dexterity and Frail do)? Add a case here if so. This guard "
                   "covers BOTH block passes -- check modifyBlockLast in "

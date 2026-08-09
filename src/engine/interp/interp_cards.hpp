@@ -123,4 +123,19 @@ void randomize_card_cost(CombatState& s, CardPoolIndex pi,
 // over every hand slot in hand order, freeToPlayOnce untouched. No operand.
 void op_randomize_hand_cost(CombatState& s) noexcept;
 
+// APPLY_STASIS (the Bronze Orb's card theft, ApplyStasisAction.update:32-80):
+// steal one card from the draw pile (or the discard when the draw is empty)
+// through the RARE -> UNCOMMON -> COMMON -> unfiltered card_random_rng cascade,
+// park it in the limbo pile, and add_to_top the APPLY_POWER that gives `owner`
+// the Stasis power holding it (counter = pool index + 1). Both piles empty ==
+// zero draws, no power. See interp.hpp Opcode::APPLY_STASIS.
+void op_apply_stasis(CombatState& s, uint8_t owner) noexcept;
+
+// STASIS_RETURN (StasisPower.onDeath:38-44): move the stolen card (pool index
+// in item.amount) OUT of limbo into the queue-time destination in item.flags
+// (kStasisReturnToHandBit), spilling HAND -> DISCARD at resolve when the hand
+// has filled in between (MakeTempCardInHandAction.update:71-77). A card no
+// longer in limbo is a defensive no-op.
+void op_stasis_return(CombatState& s, const ActionQueueItem& item) noexcept;
+
 }  // namespace sts::engine
