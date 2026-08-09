@@ -216,6 +216,67 @@ void roll_setup_item_card_reward(RunState& rs, RoomType room,
     roll_card_reward_item(rs, room, s);
 }
 
+void roll_colorless_card_reward_item(RunState& rs, RewardScreen& s) noexcept {
+    // numCards = 3, then every relic's changeNumberOfCardsInReward in
+    // acquisition order (AbstractDungeon.java:1383-1386) -- the same two S1
+    // overrides as roll_card_reward_item: Question Card +1, Busted Crown -2.
+    int num = kCardRewardBaseCount;
+    for (uint8_t i = 0; i < rs.relic_count; ++i) {
+        const auto id = static_cast<RelicId>(rs.relics[i].relic_id);
+        if (id == RelicId::QUESTION_CARD) {
+            num += 1;
+        } else if (id == RelicId::BUSTED_CROWN) {
+            num -= 2;
+        }
+    }
+    if (num <= 0) {
+        return;
+    }
+    assert(num <= kRewardCardCap);
+    if (num > kRewardCardCap) {
+        num = kRewardCardCap;
+    }
+
+    RunRewardItem item{};
+    item.kind = static_cast<uint8_t>(RewardItemKind::CARDS);
+
+    for (int i = 0; i < num; ++i) {
+        // rollRareOrUncommon(colorlessRareChance) (AbstractDungeon.java:
+        // 1621-1626): ONE cardRng.randomBoolean(0.3f). No random(99), no
+        // cardBlizzRandomizer READ -- this is not rollRarity.
+        const RewardCardRarity rarity =
+            random_boolean(rs.card_rng, kColorlessRareChance)
+                ? RewardCardRarity::RARE
+                : RewardCardRarity::UNCOMMON;
+        // ... but a RARE result still RESETS the red pity counter
+        // (:1395-1396), so a lucky Sensory Stone shifts the next red reward's
+        // rarity band exactly as a rare combat card would.
+        if (rarity == RewardCardRarity::RARE) {
+            rs.card_blizz_randomizer =
+                static_cast<int16_t>(kCardBlizzStartOffset);
+        }
+        // The no-dupe re-roll loop (:1407-1412): one cardRng draw per attempt,
+        // redrawn FROM THE SAME rarity, compared against everything already in
+        // this item. Cross-rarity collisions cannot happen (the two views are
+        // disjoint id sets), so the id compare is the instance compare.
+        CardId id;
+        bool dupe;
+        do {
+            id = draw_colorless_card_from_pool(rs.card_rng, rarity);
+            dupe = false;
+            for (int j = 0; j < i; ++j) {
+                dupe = dupe || item.card_ids[j] == static_cast<uint16_t>(id);
+            }
+        } while (dupe);
+        item.card_ids[i] = static_cast<uint16_t>(id);
+    }
+
+    // NO upgrade pass: getColorlessRewardCards (:1381-1421) has no
+    // cardUpgradedChance block in any act.
+    item.card_count = static_cast<uint8_t>(num);
+    push_item(s) = item;
+}
+
 bool remove_first_card_reward_item(RewardScreen& s) noexcept {
     for (uint8_t i = 0; i < s.count; ++i) {
         if (s.items[i].kind == static_cast<uint8_t>(RewardItemKind::CARDS)) {

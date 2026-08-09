@@ -11,10 +11,14 @@
 //   * the ORDER DIVERGENCE between Exordium's shrineList and the Act-2/3 one
 //   * the generator's refusal of every malformed conditions block
 // It pins no BODY behaviour: ids 32-51 were authored as identity rows, and
-// their option trees / A15 branches belong to S2.31-S2.33 -- which is why the
-// Act-2 loop below now asserts the native/implemented/screen_count INVARIANT
-// instead of "nothing is implemented yet" (S2.31 landed eight of the thirteen
-// bodies; the by-name pin moved to city_events_i_test.cpp with them). The
+// their option trees / A15 branches belong to S2.31-S2.33. The Act-2 loop
+// below asserts the native/implemented/screen_count INVARIANT instead of
+// "nothing is implemented yet" (S2.31 landed eight of the thirteen City
+// bodies; the by-name pin moved to city_events_i_test.cpp with them), and ids
+// 45-51 flipped implemented with S2.33 (bodies in beyond_events.cpp,
+// behaviour pinned in beyond_events_test.cpp -- this file keeps only the
+// registry metadata expectations for them). S2.32's five combat-embed City
+// rows are the remainder. The
 // per-act list REBUILD and the draw itself belong to S2.13; nothing here calls
 // build_event_pool or generate_event, because in this commit those still know
 // only Act 1 and saying otherwise would be a test of a plan, not of the engine.
@@ -304,10 +308,27 @@ TEST(ActEventLists, BeyondEventListIsSevenRowsInJavaAddOrder) {
         EXPECT_FALSE(r::event_in_act(id, 1));
         EXPECT_FALSE(r::event_in_act(id, 2));
         EXPECT_TRUE(def->native) << kBeyondEventList[i];
-        EXPECT_FALSE(def->implemented) << kBeyondEventList[i];
-        EXPECT_EQ(def->screen_count, 0) << kBeyondEventList[i];
-        EXPECT_EQ(def->a15_change_count, 0) << kBeyondEventList[i];
+        // S2.33 landed all seven bodies (src/engine/events/beyond_events.cpp).
+        EXPECT_TRUE(def->implemented) << kBeyondEventList[i];
+        EXPECT_GE(def->screen_count, 2) << kBeyondEventList[i];
     }
+    namespace reg = sts::registry;
+    // The two A15 branches in the Act-3 list, and ONLY those two: the Moai
+    // Head's max-HP-loss percent (MoaiHead.java:35) and Winding Halls' paired
+    // damage/heal percents (WindingHalls.java:47-54). Every other class has no
+    // ascension branch (each read in full; Mind Bloom's 25/50 gold split is
+    // A13 boss-gold economy, a20.yaml row 13, not an A15 event branch).
+    const auto a15_count = [](reg::EventId id) {
+        const reg::EventDef* def = reg::event_def(id);
+        return def == nullptr ? -1 : static_cast<int>(def->a15_change_count);
+    };
+    EXPECT_EQ(a15_count(reg::EventId::FALLING), 0);
+    EXPECT_EQ(a15_count(reg::EventId::MIND_BLOOM), 0);
+    EXPECT_EQ(a15_count(reg::EventId::THE_MOAI_HEAD), 1);
+    EXPECT_EQ(a15_count(reg::EventId::MYSTERIOUS_SPHERE), 0);
+    EXPECT_EQ(a15_count(reg::EventId::SENSORY_STONE), 0);
+    EXPECT_EQ(a15_count(reg::EventId::TOMB_OF_LORD_RED_MASK), 0);
+    EXPECT_EQ(a15_count(reg::EventId::WINDING_HALLS), 2);
 }
 
 // The three eventLists partition the EVENT pool: every EVENT-pool row belongs to
